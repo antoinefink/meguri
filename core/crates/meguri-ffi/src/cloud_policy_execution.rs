@@ -219,6 +219,20 @@ impl CloudPolicyExecution {
     // A terminal reply keeps its original command when policy has moved on.
     // Let Driver retire that command's read; validate new admission separately
     // so an FFI generation check cannot bypass cleanup of the original owner.
+    pub(crate) fn validate_asset_read_activity_compact(&self, sdk: &str) -> Result<(), CoreError> {
+        let policy = self.policy();
+        if !std::ptr::eq(policy.as_ref(), Arc::as_ptr(&self.command.owner)) {
+            return Err(failure(CloudPolicyFailure::WrongOwner));
+        }
+        if self.command.command.action.guard.generation != policy.generation {
+            return Err(failure(CloudPolicyFailure::GenerationChanged));
+        }
+        self.policy()
+            .driver()?
+            .validate_native_sdk(&self.command.command, sdk)
+            .map_err(execution_error)
+    }
+
     pub(crate) fn asset_read_driver(&self) -> Result<(&p::Driver, &p::Command), CoreError> {
         Ok((self.policy().driver()?, &self.command.command))
     }

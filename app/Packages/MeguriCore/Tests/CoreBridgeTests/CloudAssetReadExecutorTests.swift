@@ -118,10 +118,14 @@ extension EventTests {
             let admitted = Mutex<MeguriCoreBindings.JobHandle?>(nil)
             let pass = CoreCloudAssetReadPass(raw, track: { handle in
                 let job = try Jobs.track(handle)
-                admitted.withLock { $0 = handle }
+                let first = admitted.withLock { value in
+                    guard value == nil else { return false }
+                    value = handle
+                    return true
+                }
                 // Cancels the awaiting Swift executor after real next admission.
                 // Core remains uncancelled and must return its actual selection.
-                running.withLock { $0 }?.cancel()
+                if first { running.withLock { $0 }?.cancel() }
                 return job
             })
             let transport = AssetExecutorTransport(failPreparation: true)

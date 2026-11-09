@@ -84,8 +84,11 @@ final class AssetExecutorOperation: CloudPreparedOwnOperation, Sendable {
     private let outcome: Mutex<Result<CloudOwnTransportReply, any Error>?>
     private let cancellations: AsyncStream<Void>
     private let didCancel: AsyncStream<Void>.Continuation
+    private let acceptedBeforeReturn: @Sendable () -> Void
 
-    init(accept: Bool = true, outcome: Result<CloudOwnTransportReply, any Error>) {
+    init(accept: Bool = true, outcome: Result<CloudOwnTransportReply, any Error>,
+         acceptedBeforeReturn: @escaping @Sendable () -> Void = {}) {
+        self.acceptedBeforeReturn = acceptedBeforeReturn
         self.accept = accept
         self.outcome = Mutex(outcome)
         (cancellations, didCancel) = AsyncStream.makeStream(bufferingPolicy: .unbounded)
@@ -93,7 +96,9 @@ final class AssetExecutorOperation: CloudPreparedOwnOperation, Sendable {
 
     func enqueue() -> Bool {
         enqueueCalls.withLock { $0 += 1 }
-        return accept && !cancelled.withLock { $0 }
+        let accepted = accept && !cancelled.withLock { $0 }
+        if accepted { acceptedBeforeReturn() }
+        return accepted
     }
     func cancel() {
         cancelled.withLock { $0 = true }

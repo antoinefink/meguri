@@ -46,6 +46,18 @@ impl AssetReadActivityGuard {
 }
 
 impl Runtime {
+    #[cfg(feature = "test-hooks")]
+    pub fn asset_read_resource_body_for_testing(&self, stage: super::super::testing::IncomingStage) {
+        self.incoming_hooks.hit(stage);
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub fn capture_asset_submit_reader_for_testing(&self) {
+        self.incoming_hooks
+            .capture_asset_submit_reader
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
     pub fn asset_read_activity_guard(&self, pass: &AssetReadPass) -> Result<AssetReadActivityGuard, RuntimeError> {
         let s = self.state();
         Self::sdk_locked(&s, &pass.sdk)?;
@@ -406,7 +418,7 @@ impl Runtime {
         }
     }
 
-    pub(crate) fn retire_asset_read(&self, request: &AssetReadRequest) {
+    pub fn retire_asset_read(&self, request: &AssetReadRequest) {
         let mut s = self.state();
         if s.incoming
             .asset_reads
@@ -439,8 +451,47 @@ impl Runtime {
         request: &AssetReadRequest,
         enqueue: impl FnOnce() -> bool,
     ) -> Result<bool, RuntimeError> {
+        let mut rejection = None;
+        let result = self.submit_asset_read_queue_with_work(
+            collection,
+            request,
+            &mut crate::cloud::policy::PolicyWork::default(),
+            || {
+                if let Err(error) = self.validate_asset_read_enqueue(collection, request) {
+                    rejection = Some(error);
+                    return false;
+                }
+                enqueue()
+            },
+        );
+        match rejection {
+            Some(error) => Err(error),
+            None => result,
+        }
+    }
+
+    pub fn validate_asset_read_enqueue(
+        &self,
+        collection: &Collection,
+        request: &AssetReadRequest,
+    ) -> Result<(), RuntimeError> {
+        if !collection.is_current() {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        self.native_authority().validate_sdk(&request.sdk)
+    }
+
+    pub fn submit_asset_read_queue_with_work(
+        &self,
+        collection: &Collection,
+        request: &AssetReadRequest,
+        work: &mut crate::cloud::policy::PolicyWork,
+        enqueue: impl FnOnce() -> bool,
+    ) -> Result<bool, RuntimeError> {
         let completion = (|| {
-            let _lease = collection.reader(ReaderRole::Cloud)?;
+            work.check()?;
+            let lease = collection.reader(ReaderRole::Cloud)?;
+            work.check()?;
             let guard = self
                 .state()
                 .incoming
@@ -450,6 +501,7 @@ impl Runtime {
                 .map(|r| r.guard.clone())
                 .ok_or(RuntimeError::StaleIncarnation)?;
             self.with_scan(&guard, collection, |s| {
+                work.check()?;
                 Self::sdk_locked(s, &request.sdk)?;
                 if s.actions.handler.is_some() || s.tracking_stopped {
                     return Err(Error::InvalidData.into());
@@ -471,6 +523,7 @@ impl Runtime {
                 {
                     return Err(RuntimeError::StaleIncarnation);
                 }
+                work.effect()?;
                 s.incoming
                     .asset_reads
                     .get_mut(&request.id)
@@ -478,7 +531,37 @@ impl Runtime {
                     .phase = ReadPhase::Enqueueing;
                 Ok(())
             })?;
-            let accepted = enqueue();
+            #[cfg(feature = "test-hooks")]
+            self.incoming_hooks
+                .hit(super::super::testing::IncomingStage::AssetReadSubmitEdge);
+            #[cfg(feature = "test-hooks")]
+            let lease = {
+                let mut lease = lease;
+                if self
+                    .incoming_hooks
+                    .capture_asset_submit_reader
+                    .swap(false, std::sync::atomic::Ordering::SeqCst)
+                {
+                    let (snapshot, hold) = lease.capture_cloud(collection, vec![])?;
+                    drop(snapshot);
+                    drop(hold);
+                }
+                lease
+            };
+            let mut _pin = None;
+            let mut _refused_lease = None;
+            let mut transfer_error = None;
+            match lease.into_lifetime_pin() {
+                Ok(value) => _pin = Some(value),
+                Err((lease, error)) => {
+                    _refused_lease = Some(lease);
+                    transfer_error = Some(error);
+                }
+            }
+            let accepted = transfer_error.is_none() && enqueue();
+            #[cfg(feature = "test-hooks")]
+            self.incoming_hooks
+                .hit(super::super::testing::IncomingStage::AssetReadSubmitAccounting);
             {
                 let mut s = self.state();
                 let Some(read) = s
@@ -491,7 +574,10 @@ impl Runtime {
                 };
                 if !accepted {
                     s.incoming.asset_reads.remove(&request.id);
-                    return Ok(false);
+                    return match transfer_error {
+                        Some(error) => Err(error.into()),
+                        None => Ok(false),
+                    };
                 }
                 read.phase = ReadPhase::Started;
                 // Record the admission obligation before checking storage again.
@@ -543,6 +629,35 @@ impl Runtime {
         request: &AssetReadRequest,
         result: Option<&FetchedRecord>,
     ) -> Result<bool, RuntimeError> {
+        self.asset_read_result_with_work(
+            sdk,
+            collection,
+            request,
+            result,
+            &mut crate::cloud::policy::PolicyWork::default(),
+        )
+    }
+
+    pub fn asset_read_result_with_work(
+        &self,
+        sdk: &str,
+        collection: &Collection,
+        request: &AssetReadRequest,
+        result: Option<&FetchedRecord>,
+        work: &mut crate::cloud::policy::PolicyWork,
+    ) -> Result<bool, RuntimeError> {
+        self.asset_read_result_checked(sdk, collection, request, result, work, || Ok(()))
+    }
+
+    pub(crate) fn asset_read_result_checked(
+        &self,
+        sdk: &str,
+        collection: &Collection,
+        request: &AssetReadRequest,
+        result: Option<&FetchedRecord>,
+        work: &mut crate::cloud::policy::PolicyWork,
+        mut check_command: impl FnMut() -> Result<(), RuntimeError>,
+    ) -> Result<bool, RuntimeError> {
         let selection = {
             let s = self.state();
             s.incoming
@@ -554,6 +669,8 @@ impl Runtime {
         let completion = (|| {
             let guard = {
                 let s = self.state();
+                work.check()?;
+                check_command()?;
                 Self::sdk_locked(&s, sdk)?;
                 let Some((guard, _)) = selection.as_ref() else {
                     return Ok(false);
@@ -561,6 +678,8 @@ impl Runtime {
                 guard.clone()
             };
             let snapshot = self.with_scan(&guard, collection, |s| {
+                work.check()?;
+                check_command()?;
                 Self::sdk_locked(s, sdk)?;
                 if s.actions.handler.is_some() || s.tracking_stopped {
                     return Err(Error::InvalidData.into());
@@ -582,6 +701,7 @@ impl Runtime {
                     .ok_or(Error::Database)?
                     .asset_read_current(guard.binding, &expected)?
                 {
+                    work.effect()?;
                     s.incoming.asset_reads.remove(&request.id);
                     return Ok(None);
                 }
@@ -600,7 +720,7 @@ impl Runtime {
             };
             // Release runtime and tracking access for decoding and file creation.
             // Retire the request after validating and recording the intake result.
-            let prepare = || -> Result<_, RuntimeError> {
+            let mut prepare = || -> Result<_, RuntimeError> {
                 let Some(result) = result else { return Ok(None) };
                 if result.record.name != request.name {
                     return Ok(None);
@@ -637,6 +757,8 @@ impl Runtime {
                 // Higher supported versions use canonical intake and its persisted
                 // origin refusal, exactly as ordinary fetched records do.
                 let at = self.adapter_now()?;
+                check_command()?;
+                work.effect()?;
                 let intake = super::super::payload_asset::intake(
                     &self.directory,
                     guard.binding,
@@ -646,11 +768,14 @@ impl Runtime {
                 )?;
                 Ok(Some((intake, same)))
             };
+            work.check()?;
             let prepared = prepare()?;
             #[cfg(feature = "test-hooks")]
             self.incoming_hooks
                 .hit(super::super::testing::IncomingStage::AssetReadPrepared);
             let intake_outcome = self.with_scan(&guard, collection, |s| {
+                work.check()?;
+                check_command()?;
                 Self::sdk_locked(s, sdk)?;
                 if s.actions.handler.is_some() || s.tracking_stopped {
                     return Err(Error::InvalidData.into());
@@ -661,6 +786,7 @@ impl Runtime {
                 if read.request != *request || read.sdk != sdk || read.guard != guard || read.entry != expected {
                     return Ok((false, None));
                 }
+                work.effect()?;
                 if !s
                     .store
                     .as_ref()

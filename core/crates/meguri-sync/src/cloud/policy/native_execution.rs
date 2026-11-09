@@ -89,7 +89,18 @@ impl Driver {
         request: &AssetReadRequest,
         enqueue: impl FnOnce() -> bool,
     ) -> Result<bool, DriverError> {
-        if let Err(error) = self.validate(command) {
+        self.submit_native_asset_read_queue_with_work(command, collection, request, &mut PolicyWork::default(), enqueue)
+    }
+
+    pub fn submit_native_asset_read_queue_with_work(
+        &self,
+        command: &Command,
+        collection: &Collection,
+        request: &AssetReadRequest,
+        work: &mut PolicyWork,
+        enqueue: impl FnOnce() -> bool,
+    ) -> Result<bool, DriverError> {
+        if let Err(error) = self.validate_with_work(command, work) {
             if self.runtime.asset_request_command(request, command) {
                 self.runtime.cancel_asset_read(request);
             }
@@ -99,15 +110,17 @@ impl Driver {
             return Err(DriverError::StaleCommand);
         }
         let mut command_error = None;
-        let admission = self.runtime.submit_asset_read_queue(collection, request, || {
-            // Validate the command after Runtime checks the file and reader.
-            // Policy changes during preparation must be reflected at admission.
-            if let Err(error) = self.validate(command) {
-                command_error = Some(error);
-                return false;
-            }
-            enqueue()
-        });
+        let admission = self
+            .runtime
+            .submit_asset_read_queue_with_work(collection, request, work, || {
+                // Validate the command after Runtime checks the file and reader.
+                // Policy changes during preparation must be reflected at admission.
+                if let Err(error) = self.validate_native_sdk(command, request.sdk_instance()) {
+                    command_error = Some(error);
+                    return false;
+                }
+                enqueue()
+            });
         if let Some(error) = command_error {
             return Err(error);
         }
@@ -121,7 +134,18 @@ impl Driver {
         request: &AssetReadRequest,
         result: Option<&crate::cloud::workflow::FetchedRecord>,
     ) -> Result<bool, DriverError> {
-        if let Err(error) = self.validate(command) {
+        self.native_asset_read_result_with_work(command, collection, request, result, &mut PolicyWork::default())
+    }
+
+    pub fn native_asset_read_result_with_work(
+        &self,
+        command: &Command,
+        collection: &Collection,
+        request: &AssetReadRequest,
+        result: Option<&crate::cloud::workflow::FetchedRecord>,
+        work: &mut PolicyWork,
+    ) -> Result<bool, DriverError> {
+        if let Err(error) = self.validate_with_work(command, work) {
             if self.runtime.asset_request_command(request, command) {
                 self.runtime.retire_asset_read(request);
             }
@@ -130,9 +154,21 @@ impl Driver {
         if !self.runtime.asset_request_command(request, command) {
             return Err(DriverError::StaleCommand);
         }
-        Ok(self
-            .runtime
-            .asset_read_result(request.sdk_instance(), collection, request, result)?)
+        let mut command_error = None;
+        let value =
+            self.runtime
+                .asset_read_result_checked(request.sdk_instance(), collection, request, result, work, || {
+                    self.committed_native_validation()
+                        .validate_policy(command)
+                        .map_err(|error| {
+                            command_error = Some(error);
+                            RuntimeError::StaleIncarnation
+                        })
+                });
+        if let Some(error) = command_error {
+            return Err(error);
+        }
+        Ok(value?)
     }
 }
 
@@ -246,24 +282,27 @@ impl Driver {
         collection: &Collection,
         guard: &crate::cloud::runtime::AssetReadActivityGuard,
     ) -> Result<(), DriverError> {
-        // Full file/provider validation happens outside Driver authority.
-        self.runtime.validate_asset_read_activity(collection, guard)?;
-        let mut owned = self.lock_owned();
-        self.runtime.validate_sdk(guard.sdk_instance())?;
-        Self::cancel_activity(
-            &mut owned,
-            Operation {
-                zone: Zone::Collection,
-                kind: OperationKind::Read,
-            },
-        );
-        Ok(())
+        self.cancel_original_asset_read_activity_with_work(collection, guard, &mut PolicyWork::default())
     }
 
-    fn cancel_activity(owned: &mut Owned, operation: Operation) {
+    pub fn cancel_original_asset_read_activity_with_work(
+        &self,
+        collection: &Collection,
+        guard: &crate::cloud::runtime::AssetReadActivityGuard,
+        work: &mut PolicyWork,
+    ) -> Result<(), DriverError> {
+        self.runtime.validate_asset_read_activity(collection, guard)?;
+        let mut owned = self.lock_for_work(work)?;
+        self.runtime.validate_sdk(guard.sdk_instance())?;
+        let operation = Operation {
+            zone: Zone::Collection,
+            kind: OperationKind::Read,
+        };
         if let Some(cycle) = owned.state.cycles.get_mut(&operation) {
+            work.effect()?;
             cycle.active = false;
         }
+        Ok(())
     }
 
     pub fn native_origin(&self, command: &Command) -> Result<Option<String>, DriverError> {

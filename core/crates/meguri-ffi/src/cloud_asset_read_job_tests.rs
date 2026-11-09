@@ -847,3 +847,6 @@ fn native_admission_jobs_asset_pass_active_close_drains_worker_before_original_r
 
 #[path = "cloud_asset_next_job_tests.rs"]
 mod next;
+
+#[path = "cloud_asset_lifecycle_job_tests.rs"]
+mod lifecycle;

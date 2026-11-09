@@ -428,6 +428,16 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let cloudAssetReadPassNext = BridgeCall("CloudAssetReadPass.next")
     public static let cloudAssetReadPassStartNext = BridgeCall("CloudAssetReadPass.start_next")
     public static let cloudAssetReadNextResult = BridgeCall("CloudAssetReadNextResult.result")
+    public static let cloudAssetReadPassStartSubmit = BridgeCall("CloudAssetReadPass.start_submit")
+    public static let cloudAssetReadSubmitResult = BridgeCall("CloudAssetReadSubmitResult.result")
+    public static let cloudAssetReadPassStartComplete = BridgeCall("CloudAssetReadPass.start_complete")
+    public static let cloudAssetReadCompleteResult = BridgeCall("CloudAssetReadCompleteResult.result")
+    public static let cloudAssetReadPassStartCancel = BridgeCall("CloudAssetReadPass.start_cancel")
+    public static let cloudAssetReadCancelResult = BridgeCall("CloudAssetReadCancelResult.result")
+    public static let cloudAssetReadPassStartFinish = BridgeCall("CloudAssetReadPass.start_finish")
+    public static let cloudAssetReadFinishResult = BridgeCall("CloudAssetReadFinishResult.result")
+    public static let cloudAssetReadPassStartOperationActivity = BridgeCall("CloudAssetReadPass.start_operation_activity")
+    public static let cloudAssetReadActivityResult = BridgeCall("CloudAssetReadActivityResult.result")
     public static let cloudAssetReadPassSubmit = BridgeCall("CloudAssetReadPass.submit")
     public static let cloudAssetReadPassComplete = BridgeCall("CloudAssetReadPass.complete")
     public static let cloudAssetReadPassCancel = BridgeCall("CloudAssetReadPass.cancel")
@@ -524,6 +534,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         testCloudZoneDeletionFixture, testCloudZoneDeletionRows,
         cloudPolicyExecutionBeginCleanupPass, cloudCleanupPassSubmitInventory, cloudCleanupPassCompleteInventory, cloudCleanupPassFinish,
         cloudPolicyExecutionBeginZoneDeletionPass, cloudZoneDeletionPassActiveTarget, cloudZoneDeletionPassSubmitRead, cloudZoneDeletionPassCompleteRead, cloudZoneDeletionPassSubmitDeletion, cloudZoneDeletionPassCompleteDeletion, cloudZoneDeletionPassFinish,
+        cloudAssetReadPassStartSubmit, cloudAssetReadSubmitResult, cloudAssetReadPassStartComplete, cloudAssetReadCompleteResult, cloudAssetReadPassStartCancel, cloudAssetReadCancelResult, cloudAssetReadPassStartFinish, cloudAssetReadFinishResult, cloudAssetReadPassStartOperationActivity, cloudAssetReadActivityResult,
         cloudWorkflowBeginFirstAssetReadPass, cloudPolicyExecutionBeginAssetReadPass, cloudAssetReadPassNext, cloudAssetReadPassStartNext, cloudAssetReadNextResult, cloudAssetReadPassSubmit, cloudAssetReadPassComplete, cloudAssetReadPassCancel, cloudAssetReadPassFinish, cloudAssetReadPassOperationActivity,
         cloudWorkflowMedia, cloudWorkflowSubmitMediaBatch, cloudMediaDownloadsBlocked, cloudPolicyExecutionBeginMedia, cloudPolicyExecutionContinueMediaAfterSend, cloudMediaNextWork, cloudMediaStartNextWork, cloudMediaNextWorkResult, cloudMediaSubmitRead, cloudMediaQueueUpload, cloudMediaReply,
         cloudPolicyExecutionStartRegisterSdk, cloudPolicyExecutionStartRetireOriginal, cloudPolicyRegistrationResult, cloudPolicyRetirementResult,

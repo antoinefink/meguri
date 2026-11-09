@@ -1,16 +1,19 @@
 //! Native record-ID reads retain the original Host, Runtime and core selection.
 //! Metadata is descriptive; no frontend id/token can create or rebind authority.
+use crate::cloud_policy::policy_jobs::{Cell, RequiredCompletion};
 use crate::{
     CoreError, callback,
     cloud_policy::{CloudPolicy, CloudPolicyExecution, CloudPolicyOutput, operation_error_class},
     sync::{CloudRecord, CloudWorkflow, cloud_error},
 };
+use meguri_engine::EngineError;
+use meguri_engine::jobs::registry::{ResourceAuthority, ResourceMode};
 use meguri_sync::cloud::{
     incoming as i, policy as p,
     runtime::{Runtime, RuntimeError},
     workflow::FetchedRecord,
 };
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum CloudAssetReadKind {
@@ -96,6 +99,45 @@ pub struct CloudAssetReadNextJob {
     pub handle: crate::jobs::JobHandle,
     pub result: Arc<CloudAssetReadNextResult>,
 }
+
+macro_rules! asset_job {
+    ($result:ident, $job:ident, $value:ty) => {
+        #[derive(uniffi::Object)]
+        pub struct $result {
+            cell: Arc<Cell<$value>>,
+        }
+        #[uniffi::export]
+        impl $result {
+            pub fn result(&self) -> Result<Option<$value>, CoreError> {
+                callback::enter(concat!(stringify!($result), ".result"));
+                self.cell
+                    .0
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .clone()
+                    .transpose()
+            }
+        }
+        #[derive(Clone, uniffi::Record)]
+        pub struct $job {
+            pub handle: crate::jobs::JobHandle,
+            pub result: Arc<$result>,
+        }
+    };
+}
+asset_job!(CloudAssetReadSubmitResult, CloudAssetReadSubmitJob, bool);
+asset_job!(
+    CloudAssetReadCompleteResult,
+    CloudAssetReadCompleteJob,
+    CloudAssetReadCompletion
+);
+asset_job!(CloudAssetReadCancelResult, CloudAssetReadCancelJob, bool);
+asset_job!(CloudAssetReadFinishResult, CloudAssetReadFinishJob, bool);
+asset_job!(
+    CloudAssetReadActivityResult,
+    CloudAssetReadActivityJob,
+    Vec<CloudPolicyOutput>
+);
 
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct CloudAssetReadCompletion {
@@ -300,28 +342,68 @@ impl CloudAssetReadPass {
         }
         Ok(())
     }
-    fn result(&self, work: &CloudAssetReadWork, result: Option<&FetchedRecord>) -> Result<bool, CoreError> {
+    fn result_with_work(
+        &self,
+        work: &CloudAssetReadWork,
+        result: Option<&FetchedRecord>,
+        authority: &mut p::PolicyWork,
+    ) -> Result<bool, CoreError> {
         if let Some(execution) = &self.execution {
             let (driver, command) = execution.asset_read_driver()?;
             driver
-                .native_asset_read_result(command, &self.collection, &work.request, result)
+                .native_asset_read_result_with_work(command, &self.collection, &work.request, result, authority)
                 .map_err(cloud_error)
         } else {
             self.core
-                .asset_read_result(&self.sdk, &self.collection, &work.request, result)
+                .asset_read_result_with_work(&self.sdk, &self.collection, &work.request, result, authority)
                 .map_err(cloud_error)
         }
     }
 }
 
-#[uniffi::export]
 impl CloudAssetReadPass {
     /// Activity belongs to this actual pass, including after finish. An empty
     /// pass reports nothing. All raw errors precede the ONE ended round; cancel
     /// clears active state without resetting or incrementing failing cycles.
-    pub fn operation_activity(&self, facts: CloudAssetReadActivityFacts) -> Result<Vec<CloudPolicyOutput>, CoreError> {
-        use meguri_sync::cloud::policy as p;
-        callback::enter("CloudAssetReadPass.operation_activity");
+    fn activity_with_work(
+        &self,
+        facts: CloudAssetReadActivityFacts,
+        work: &mut p::PolicyWork,
+    ) -> Result<Vec<CloudPolicyOutput>, CoreError> {
+        let original = self.host.original_resource_authority(&self.collection);
+        let execution = self.execution.clone();
+        let sdk = self.sdk.clone();
+        let error = Arc::new(Mutex::new(None));
+        let sampled = error.clone();
+        let mut checked = work.clone().with_compact_owner_check(Arc::new(move || {
+            let result = if !original.is_live() {
+                Err(CoreError::CloudPolicy {
+                    failure: crate::cloud_policy::CloudPolicyFailure::Closed,
+                })
+            } else if let Some(execution) = &execution {
+                execution.validate_asset_read_activity_compact(&sdk)
+            } else {
+                Ok(())
+            };
+            result.map_err(|error| {
+                *sampled.lock().unwrap_or_else(PoisonError::into_inner) = Some(error.clone());
+                EngineError::from(error)
+            })
+        }));
+        let value = self.activity_checked(facts, &mut checked);
+        let rejected = error.lock().unwrap_or_else(PoisonError::into_inner).take();
+        match rejected {
+            Some(error) => Err(error),
+            None => value,
+        }
+    }
+
+    fn activity_checked(
+        &self,
+        facts: CloudAssetReadActivityFacts,
+        work: &mut p::PolicyWork,
+    ) -> Result<Vec<CloudPolicyOutput>, CoreError> {
+        work.check().map_err(creation_error)?;
         let current = self.host.cloud_connection_collection()?;
         if current.generation() != self.collection.generation() || !self.collection.is_current() {
             return Err(cloud_error("stale asset read activity host"));
@@ -342,45 +424,53 @@ impl CloudAssetReadPass {
             if code == 20 {
                 continue;
             }
-            outputs.push(
-                self.policy
-                    .output(self.host.cloud_policy_input(p::DeviceEvent::OperationError {
-                        instance: self.sdk.clone(),
-                        operation,
-                        class: operation_error_class(code),
-                        code,
-                        retry_after_ms: failure.retry_after_ms,
-                    }))?,
-            );
+            outputs.push(self.policy.output(self.host.cloud_policy_input_with_work(
+                p::DeviceEvent::OperationError {
+                    instance: self.sdk.clone(),
+                    operation,
+                    class: operation_error_class(code),
+                    code,
+                    retry_after_ms: failure.retry_after_ms,
+                },
+                work,
+            ))?);
         }
         if !facts.started && (facts.app_cancelled || facts.failures.iter().any(|f| f.code == Some(20))) {
             self.host
                 .cloud_policy_driver()
                 .ok_or_else(|| cloud_error("asset activity driver closed"))?
-                .cancel_original_asset_read_activity(&self.collection, &self.activity)
+                .cancel_original_asset_read_activity_with_work(&self.collection, &self.activity, work)
                 .map_err(cloud_error)?;
         } else {
-            outputs.push(
-                self.policy
-                    .output(self.host.cloud_policy_input(p::DeviceEvent::Operation {
-                        instance: self.sdk.clone(),
-                        operation,
-                        phase: if facts.started {
-                            p::Activity::Started
-                        } else {
-                            p::Activity::Ended {
-                                outcome: if facts.failed || facts.failures.iter().any(|f| f.code != Some(20)) {
-                                    p::Outcome::Failed
-                                } else {
-                                    p::Outcome::Ok
-                                },
-                                saved: 0,
-                            }
-                        },
-                    }))?,
-            );
+            outputs.push(self.policy.output(self.host.cloud_policy_input_with_work(
+                p::DeviceEvent::Operation {
+                    instance: self.sdk.clone(),
+                    operation,
+                    phase: if facts.started {
+                        p::Activity::Started
+                    } else {
+                        p::Activity::Ended {
+                            outcome: if facts.failed || facts.failures.iter().any(|f| f.code != Some(20)) {
+                                p::Outcome::Failed
+                            } else {
+                                p::Outcome::Ok
+                            },
+                            saved: 0,
+                        }
+                    },
+                },
+                work,
+            ))?);
         }
         Ok(outputs)
+    }
+}
+
+#[uniffi::export]
+impl CloudAssetReadPass {
+    pub fn operation_activity(&self, facts: CloudAssetReadActivityFacts) -> Result<Vec<CloudPolicyOutput>, CoreError> {
+        callback::enter("CloudAssetReadPass.operation_activity");
+        self.activity_checked(facts, &mut p::PolicyWork::default())
     }
 
     pub fn start_next(self: Arc<Self>) -> Result<CloudAssetReadNextJob, CoreError> {
@@ -441,6 +531,17 @@ impl CloudAssetReadPass {
         record: Option<CloudRecord>,
     ) -> Result<CloudAssetReadCompletion, CoreError> {
         callback::enter("CloudAssetReadPass.complete");
+        self.complete_with_work(work, record, &mut p::PolicyWork::default())
+    }
+}
+
+impl CloudAssetReadPass {
+    fn complete_with_work(
+        &self,
+        work: Arc<CloudAssetReadWork>,
+        record: Option<CloudRecord>,
+        authority: &mut p::PolicyWork,
+    ) -> Result<CloudAssetReadCompletion, CoreError> {
         self.owns(&work)?;
         if record.as_ref().is_some_and(|record| {
             record.name != work.request.record_name()
@@ -449,11 +550,11 @@ impl CloudAssetReadPass {
         }) {
             // Rejecting metadata must still release the selected read's owner.
             // Record fields cannot select another entry for terminal cleanup.
-            self.result(&work, None)?;
+            self.result_with_work(&work, None, authority)?;
             return Err(cloud_error("unsupported asset read record metadata"));
         }
         let fetched = record.map(CloudRecord::fetched);
-        let intake_accepted = self.result(&work, fetched.as_ref())?;
+        let intake_accepted = self.result_with_work(&work, fetched.as_ref(), authority)?;
         if intake_accepted {
             // Same Host-owned normal writer/WAL drive as CloudWorkflow.fetched.
             // No Driver/Runtime/tracking guard spans this writer admission.
@@ -470,7 +571,10 @@ impl CloudAssetReadPass {
         }
         Ok(CloudAssetReadCompletion { intake_accepted })
     }
+}
 
+#[uniffi::export]
+impl CloudAssetReadPass {
     /// Cancels only an unstarted selection. False requires retaining/joining
     /// the actual accepted SDK operation and completing its original work.
     pub fn cancel(&self, work: Arc<CloudAssetReadWork>) -> Result<bool, CoreError> {
@@ -485,5 +589,242 @@ impl CloudAssetReadPass {
         callback::enter("CloudAssetReadPass.finish");
         self.core.cancel_asset_read_pass(&self.pass);
         Ok(())
+    }
+}
+
+fn cannot_apply() -> CoreError {
+    CoreError::Unavailable {
+        reason: "The result cannot be applied.".into(),
+    }
+}
+
+impl CloudAssetReadPass {
+    fn start_resource<T: Send + 'static>(
+        self: Arc<Self>,
+        name: &'static str,
+        body: impl FnOnce(Arc<Self>, ResourceAuthority) -> Result<T, CoreError> + Send + 'static,
+    ) -> (crate::jobs::JobHandle, Arc<Cell<T>>) {
+        let cell = Arc::new(Cell(Mutex::new(None)));
+        let completion = RequiredCompletion(cell.clone());
+        let engine = self.host.engine().clone();
+        let original = self.host.original_resource_authority(&self.collection);
+        let handle = engine
+            .jobs()
+            .start_original_resource(name, original, move |_, authority| {
+                completion.finish(body(self, authority))
+            });
+        (crate::jobs::wrap(handle), cell)
+    }
+
+    fn submit_with_work(
+        &self,
+        issued: Arc<CloudAssetReadWork>,
+        queue: Arc<dyn CloudAssetReadQueue>,
+        work: &mut p::PolicyWork,
+        cancel: &meguri_engine::CancelToken,
+    ) -> Result<bool, CoreError> {
+        self.owns(&issued)?;
+        let original = self.host.original_resource_authority(&self.collection);
+        let mut rejection = None;
+        let mut enqueue = || {
+            let check = cancel.check().map_err(CoreError::from).and_then(|()| {
+                if original.is_live() {
+                    Ok(())
+                } else {
+                    Err(CoreError::CloudPolicy {
+                        failure: crate::cloud_policy::CloudPolicyFailure::Closed,
+                    })
+                }
+            });
+            if let Err(error) = check {
+                rejection = Some(error);
+                return false;
+            }
+            callback::invoke("CloudAssetReadQueue.enqueue", || queue.enqueue())
+        };
+        let result = if let Some(execution) = &self.execution {
+            let (driver, command) = execution.asset_read_driver()?;
+            driver
+                .submit_native_asset_read_queue_with_work(command, &self.collection, &issued.request, work, enqueue)
+                .map_err(|error| match error {
+                    p::DriverError::Runtime(error) => creation_error(error),
+                    error => cloud_error(error),
+                })
+        } else {
+            let mut sdk_error = None;
+            let result = self
+                .core
+                .submit_asset_read_queue_with_work(&self.collection, &issued.request, work, || {
+                    if let Err(error) = self.core.validate_asset_read_enqueue(&self.collection, &issued.request) {
+                        sdk_error = Some(creation_error(error));
+                        return false;
+                    }
+                    enqueue()
+                })
+                .map_err(creation_error);
+            match sdk_error {
+                Some(error) => Err(error),
+                None => result,
+            }
+        };
+        match rejection {
+            Some(error) => Err(error),
+            None => result,
+        }
+    }
+}
+
+#[uniffi::export]
+impl CloudAssetReadPass {
+    pub fn start_submit(
+        self: Arc<Self>,
+        work: Arc<CloudAssetReadWork>,
+        queue: Arc<dyn CloudAssetReadQueue>,
+    ) -> Result<CloudAssetReadSubmitJob, CoreError> {
+        callback::enter("CloudAssetReadPass.start_submit");
+        self.owns(&work)?;
+        // Retain the actual cancel token beyond PolicyWork's effect latch.
+        let engine = self.host.engine().clone();
+        let cell = Arc::new(Cell(Mutex::new(None)));
+        let completion = crate::cloud_policy::policy_jobs::Completion(cell.clone());
+        let generation = self.collection.generation();
+        let original = self.host.original_resource_authority(&self.collection);
+        let handle = engine
+            .jobs()
+            .start("CloudAssetReadPass.submit", generation, None, move |job| {
+                let owner_error = Arc::new(Mutex::new(None));
+                let rejected = owner_error.clone();
+                let mut authority = p::PolicyWork::new(&job.cancel).with_compact_owner_check(Arc::new(move || {
+                    if original.is_live() {
+                        Ok(())
+                    } else {
+                        let error = CoreError::CloudPolicy {
+                            failure: crate::cloud_policy::CloudPolicyFailure::Closed,
+                        };
+                        *rejected.lock().unwrap_or_else(PoisonError::into_inner) = Some(error.clone());
+                        Err(EngineError::from(error))
+                    }
+                }));
+                let value = self.submit_with_work(work, queue, &mut authority, &job.cancel);
+                let value = match owner_error.lock().unwrap_or_else(PoisonError::into_inner).take() {
+                    Some(error) => Err(error),
+                    None => value,
+                };
+                completion.finish(value)
+            });
+        Ok(CloudAssetReadSubmitJob {
+            handle: crate::jobs::wrap(handle),
+            result: Arc::new(CloudAssetReadSubmitResult { cell }),
+        })
+    }
+
+    pub fn start_complete(
+        self: Arc<Self>,
+        work: Arc<CloudAssetReadWork>,
+        record: Option<CloudRecord>,
+    ) -> Result<CloudAssetReadCompleteJob, CoreError> {
+        callback::enter("CloudAssetReadPass.start_complete");
+        self.owns(&work)?;
+        let (handle, cell) = self.start_resource("CloudAssetReadPass.complete", move |owner, mut resource| {
+            #[cfg(feature = "test-hooks")]
+            owner.core.asset_read_resource_body_for_testing(
+                meguri_sync::cloud::testing::IncomingStage::AssetReadCompleteBody,
+            );
+            if resource.recheck() == ResourceMode::DisposalOnly {
+                owner.core.retire_asset_read(&work.request);
+                return Err(cannot_apply());
+            }
+            let resource = Arc::new(Mutex::new(resource));
+            let checked = resource.clone();
+            let downgraded = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let rejected = downgraded.clone();
+            // Required bodies ignore queued cancellation; only original liveness
+            // can downgrade them before an effect.
+            let mut authority = p::PolicyWork::default().with_compact_owner_check(Arc::new(move || {
+                if checked.lock().unwrap_or_else(PoisonError::into_inner).recheck() == ResourceMode::Full {
+                    Ok(())
+                } else {
+                    rejected.store(true, std::sync::atomic::Ordering::SeqCst);
+                    Err(EngineError::from(cannot_apply()))
+                }
+            }));
+            let value = owner.complete_with_work(work.clone(), record, &mut authority);
+            if downgraded.load(std::sync::atomic::Ordering::SeqCst) {
+                owner.core.retire_asset_read(&work.request);
+                Err(cannot_apply())
+            } else {
+                value
+            }
+        });
+        Ok(CloudAssetReadCompleteJob {
+            handle,
+            result: Arc::new(CloudAssetReadCompleteResult { cell }),
+        })
+    }
+
+    pub fn start_cancel(self: Arc<Self>, work: Arc<CloudAssetReadWork>) -> Result<CloudAssetReadCancelJob, CoreError> {
+        callback::enter("CloudAssetReadPass.start_cancel");
+        self.owns(&work)?;
+        let (handle, cell) = self.start_resource("CloudAssetReadPass.cancel", move |owner, mut resource| {
+            #[cfg(feature = "test-hooks")]
+            owner
+                .core
+                .asset_read_resource_body_for_testing(meguri_sync::cloud::testing::IncomingStage::AssetReadCancelBody);
+            resource.recheck();
+            Ok(owner.core.cancel_asset_read(&work.request))
+        });
+        Ok(CloudAssetReadCancelJob {
+            handle,
+            result: Arc::new(CloudAssetReadCancelResult { cell }),
+        })
+    }
+
+    pub fn start_finish(self: Arc<Self>) -> Result<CloudAssetReadFinishJob, CoreError> {
+        callback::enter("CloudAssetReadPass.start_finish");
+        let (handle, cell) = self.start_resource("CloudAssetReadPass.finish", |owner, mut resource| {
+            #[cfg(feature = "test-hooks")]
+            owner
+                .core
+                .asset_read_resource_body_for_testing(meguri_sync::cloud::testing::IncomingStage::AssetReadFinishBody);
+            resource.recheck();
+            owner.core.cancel_asset_read_pass(&owner.pass);
+            Ok(true)
+        });
+        Ok(CloudAssetReadFinishJob {
+            handle,
+            result: Arc::new(CloudAssetReadFinishResult { cell }),
+        })
+    }
+
+    pub fn start_operation_activity(
+        self: Arc<Self>,
+        facts: CloudAssetReadActivityFacts,
+    ) -> Result<CloudAssetReadActivityJob, CoreError> {
+        callback::enter("CloudAssetReadPass.start_operation_activity");
+        let (handle, cell) = if facts.started {
+            self.policy
+                .clone()
+                .start_policy("CloudAssetReadPass.operation_activity", move |_, work| {
+                    self.activity_with_work(facts, work)
+                })?
+        } else {
+            let cell = Arc::new(Cell(Mutex::new(None)));
+            let completion = RequiredCompletion(cell.clone());
+            let engine = self.host.engine().clone();
+            let generation = self.collection.generation();
+            let handle = engine.jobs().start_required_completion(
+                "CloudAssetReadPass.operation_activity",
+                generation,
+                move |job| {
+                    let mut work = p::PolicyWork::required_completion(&job.cancel);
+                    completion.finish(self.activity_with_work(facts, &mut work))
+                },
+            );
+            (crate::jobs::wrap(handle), cell)
+        };
+        Ok(CloudAssetReadActivityJob {
+            handle,
+            result: Arc::new(CloudAssetReadActivityResult { cell }),
+        })
     }
 }

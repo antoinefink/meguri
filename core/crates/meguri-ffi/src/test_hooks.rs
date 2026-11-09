@@ -120,6 +120,41 @@ pub fn test_cloud_hold_adoption_reply() -> Result<Arc<CloudConnectionReplyGate>,
     Ok(gate)
 }
 
+/// Hold an actual original-resource pool body before it touches Runtime state.
+#[uniffi::export]
+pub fn test_cloud_hold_asset_read_body(finish: bool) -> Result<Arc<CloudConnectionReplyGate>, CoreError> {
+    callback::enter("test_cloud_hold_asset_read_body");
+    let host = runtime::host()?;
+    let cloud = host.cloud_runtime().ok_or_else(|| CoreError::Internal {
+        message: "missing cloud runtime".into(),
+    })?;
+    let gate = Arc::new(CloudConnectionReplyGate {
+        state: std::sync::Mutex::new((false, false)),
+        changed: std::sync::Condvar::new(),
+    });
+    let held = gate.clone();
+    let target = if finish {
+        meguri_sync::cloud::testing::IncomingStage::AssetReadFinishBody
+    } else {
+        meguri_sync::cloud::testing::IncomingStage::AssetReadCompleteBody
+    };
+    let called = std::sync::atomic::AtomicBool::new(false);
+    cloud.set_incoming_stage_hook_for_testing(move |stage| {
+        if stage != target || called.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        let mut state = held.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.0 = true;
+        held.changed.notify_all();
+        let (state, _) = held
+            .changed
+            .wait_timeout_while(state, Duration::from_secs(20), |state| !state.1)
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert!(state.1, "asset resource body was not released");
+    });
+    Ok(gate)
+}
+
 /// Returns `error`, so Swift can check how each error crosses the bridge.
 #[uniffi::export]
 pub fn test_return_error(error: CoreError) -> Result<(), CoreError> {

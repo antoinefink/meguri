@@ -106,6 +106,11 @@ pub enum IncomingStage {
     // After State/tracking release, before FFI stores the actual result.
     AssetReadNextReturned,
     AdoptionIsolationPublished,
+    AssetReadSubmitEdge,
+    AssetReadSubmitAccounting,
+    AssetReadCompleteBody,
+    AssetReadCancelBody,
+    AssetReadFinishBody,
     AssetReadPrepared,
     AssetReadFinishing,
     FetchBeforeInbox,
@@ -142,6 +147,7 @@ pub enum TrackingFault {
 pub(super) type StageHook = Arc<dyn Fn(IncomingStage) + Send + Sync>;
 #[derive(Default)]
 pub(super) struct Hooks {
+    pub(super) capture_asset_submit_reader: std::sync::atomic::AtomicBool,
     pub(super) retire_readback_failure: std::sync::atomic::AtomicBool,
     pub(super) stage: Mutex<Option<StageHook>>,
     pub(super) interruption: Mutex<Option<ApplyInterruption>>,

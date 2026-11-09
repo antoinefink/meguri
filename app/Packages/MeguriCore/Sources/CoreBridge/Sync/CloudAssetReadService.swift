@@ -110,10 +110,14 @@ public struct CoreCloudAssetReadPass: Sendable {
 
     func reportActivity(started: Bool, failures: [CloudAssetReadFailureFacts] = [], failed: Bool = false, appCancelled: Bool = false) async throws -> [CloudPolicyOutput] {
         let raw = self.raw
-        return try await MaintenanceLane.shared.call(.cloudAssetReadPassOperationActivity) {
-            try raw.operationActivity(facts: .init(started: started,
+        return try await CoreCloudPolicyService.runOrdered(
+            .cloudAssetReadPassStartOperationActivity, result: .cloudAssetReadActivityResult,
+            track: track, requiredCompletion: !started
+        ) {
+            let job = try raw.startOperationActivity(facts: .init(started: started,
                 failures: failures.map { .init(code: $0.code, retryAfterMs: $0.retryAfterMilliseconds) },
-                failed: failed, appCancelled: appCancelled)).map(CloudPolicyOutput.init)
+                failed: failed, appCancelled: appCancelled))
+            return CloudPolicyJobValue(handle: job.handle, read: { try job.result.result()?.map(CloudPolicyOutput.init) })
         }
     }
 
@@ -134,17 +138,26 @@ public struct CoreCloudAssetReadPass: Sendable {
     /// original work. This bridge never cancels or drops accepted operations.
     public func submit(_ work: CloudAssetReadWork, queue: any CloudAssetReadQueue) async throws -> Bool {
         let raw = self.raw
-        return try await MaintenanceLane.shared.call(.cloudAssetReadPassSubmit) {
-            try raw.submit(work: work.raw, queue: ForeignAssetReadQueue(queue))
+        return try await CoreCloudPolicyService.runOrdered(
+            .cloudAssetReadPassStartSubmit, result: .cloudAssetReadSubmitResult,
+            track: track, retainResourceResultOnTrackingFailure: true
+        ) {
+            let job = try raw.startSubmit(work: work.raw, queue: ForeignAssetReadQueue(queue))
+            return CloudPolicyJobValue(handle: job.handle, read: { try job.result.result() })
         }
     }
 
     public func complete(_ work: CloudAssetReadWork, result: CloudAssetReadResult) async throws -> CloudAssetReadCompletion {
         let raw = self.raw
         return try await result.withRaw { record in
-            try await MaintenanceLane.shared.call(.cloudAssetReadPassComplete) {
-                CloudAssetReadCompletion(try raw.complete(work: work.raw, record: record))
+            let value: MeguriCoreBindings.CloudAssetReadCompletion = try await CoreCloudPolicyService.runOrdered(
+                .cloudAssetReadPassStartComplete, result: .cloudAssetReadCompleteResult,
+                track: track, requiredCompletion: true
+            ) {
+                let job = try raw.startComplete(work: work.raw, record: record)
+                return CloudPolicyJobValue(handle: job.handle, read: { try job.result.result() })
             }
+            return CloudAssetReadCompletion(value)
         }
     }
 
@@ -152,14 +165,24 @@ public struct CoreCloudAssetReadPass: Sendable {
     /// original work; only an unstarted selection can be cancelled here.
     public func cancel(_ work: CloudAssetReadWork) async throws -> Bool {
         let raw = self.raw
-        return try await MaintenanceLane.shared.call(.cloudAssetReadPassCancel) {
-            try raw.cancel(work: work.raw)
+        return try await CoreCloudPolicyService.runOrdered(
+            .cloudAssetReadPassStartCancel, result: .cloudAssetReadCancelResult,
+            track: track, requiredCompletion: true
+        ) {
+            let job = try raw.startCancel(work: work.raw)
+            return CloudPolicyJobValue(handle: job.handle, read: { try job.result.result() })
         }
     }
 
     /// Stops selection. Rust preserves accepted operations and retry accounting.
     public func finish() async throws {
         let raw = self.raw
-        try await MaintenanceLane.shared.call(.cloudAssetReadPassFinish) { try raw.finish() }
+        let _: Bool = try await CoreCloudPolicyService.runOrdered(
+            .cloudAssetReadPassStartFinish, result: .cloudAssetReadFinishResult,
+            track: track, requiredCompletion: true
+        ) {
+            let job = try raw.startFinish()
+            return CloudPolicyJobValue(handle: job.handle, read: { try job.result.result() })
+        }
     }
 }

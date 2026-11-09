@@ -149,3 +149,8 @@ threads-required = "num-test-threads"
 [[profile.default.overrides]]
 filter = '(package(meguri-engine) or package(meguri-host)) and test(/resource_jobs_/)'
 threads-required = "num-test-threads"
+
+# Asset lifecycle tests use actual callback, accounting and teardown barriers.
+[[profile.default.overrides]]
+filter = 'package(meguri-ffi) and test(/asset_lifecycle_jobs_/)'
+threads-required = "num-test-threads"

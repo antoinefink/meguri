@@ -46,11 +46,20 @@ enum CloudAssetReadObservation: Sendable {
 /// replacement pass. Rust retains selection, retry and writer/WAL authority.
 public actor CloudAssetReadExecutor {
     private let transport: any CloudOwnTransport
+    private let onCloseAdmission: @Sendable () -> Void
     private var active: (id: UUID, task: Task<CloudAssetReadPassResult, any Error>)?
     private var prepared: (any CloudPreparedOwnOperation)?
     private var closed = false
 
-    public init(transport: any CloudOwnTransport) { self.transport = transport }
+    public init(transport: any CloudOwnTransport) {
+        self.transport = transport
+        onCloseAdmission = {}
+    }
+
+    init(transport: any CloudOwnTransport, onCloseAdmission: @escaping @Sendable () -> Void) {
+        self.transport = transport
+        self.onCloseAdmission = onCloseAdmission
+    }
 
     @discardableResult
     public func run(_ pass: CoreCloudAssetReadPass) async throws -> CloudAssetReadPassResult {
@@ -119,6 +128,8 @@ public actor CloudAssetReadExecutor {
                 }
             } catch { submissionError = error }
 
+            // submit drains its admitted Core job even if tracking fails. The
+            // receipt's transient .calling value cannot prove refusal.
             guard receipt.accepted else {
                 operation.cancel()
                 _ = try await pass.cancel(work.handle)
@@ -158,6 +169,7 @@ public actor CloudAssetReadExecutor {
     /// its accepted terminal and core completion drain before any close returns.
     public func close() async {
         closed = true
+        onCloseAdmission()
         await interruptAndDrain()
     }
 

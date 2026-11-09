@@ -323,6 +323,17 @@ impl Collection {
             .submit_maintenance(def, declared, self.generation, self.privilege, work)
     }
 
+    #[cfg(feature = "test-hooks")]
+    pub fn observe_cloud_reader_wait_for_testing(&self, sender: std::sync::mpsc::Sender<()>) {
+        self.core.readers.observe_cloud_wait_for_testing(sender);
+    }
+
+    /// Probe the actual Cloud slot mutex, without taking a reader.
+    #[cfg(feature = "test-hooks")]
+    pub fn cloud_reader_slot_for_testing(&self) -> Option<bool> {
+        self.core.readers.cloud_slot_for_testing()
+    }
+
     /// The reader of `role` (the first of its kind for search and server
     /// readers), held until the lease drops.
     pub fn reader(&self, role: ReaderRole) -> Result<ReaderLease<'_>, EngineError> {

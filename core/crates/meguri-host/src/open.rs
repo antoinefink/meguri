@@ -288,6 +288,12 @@ impl CoreHost {
             .original_resource_authority(collection, self.original_liveness.clone())
     }
 
+    #[cfg(feature = "test-hooks")]
+    pub fn with_close_state_held_for_testing<T>(&self, body: impl FnOnce() -> T) -> T {
+        let _state = self.closed.lock().unwrap_or_else(PoisonError::into_inner);
+        body()
+    }
+
     pub(crate) fn media_space_provider(&self) -> &dyn meguri_storage::space::SpaceProvider {
         self.backup_inputs.space.as_ref()
     }

@@ -29,9 +29,9 @@ impl<T> Drop for Completion<T> {
 }
 // Required completions have no destructor placeholder: no body, panic or drop
 // without a normal return must remain distinguishable from actual Cancelled.
-struct RequiredCompletion<T>(Arc<Cell<T>>);
+pub(crate) struct RequiredCompletion<T>(pub(crate) Arc<Cell<T>>);
 impl<T> RequiredCompletion<T> {
-    fn finish(self, value: Result<T, CoreError>) -> Result<(), EngineError> {
+    pub(crate) fn finish(self, value: Result<T, CoreError>) -> Result<(), EngineError> {
         let terminal = value
             .as_ref()
             .map(|_| ())

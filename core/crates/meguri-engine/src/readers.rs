@@ -22,6 +22,8 @@ pub const SERVER_READERS: usize = 2;
 pub(crate) struct Readers {
     factory: Mutex<Option<ReaderFactory>>,
     slots: Vec<Slot>,
+    #[cfg(feature = "test-hooks")]
+    cloud_wait: Mutex<Option<std::sync::mpsc::Sender<()>>>,
 }
 
 struct Slot {
@@ -79,7 +81,29 @@ impl Readers {
         Readers {
             factory: Mutex::new(Some(factory)),
             slots,
+            #[cfg(feature = "test-hooks")]
+            cloud_wait: Mutex::new(None),
         }
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fn observe_cloud_wait_for_testing(&self, sender: std::sync::mpsc::Sender<()>) {
+        *self.cloud_wait.lock().unwrap_or_else(PoisonError::into_inner) = Some(sender);
+    }
+
+    #[cfg(feature = "test-hooks")]
+    fn cloud_wait_for_testing(&self, role: ReaderRole) {
+        if role == ReaderRole::Cloud
+            && let Some(sender) = self.cloud_wait.lock().unwrap_or_else(PoisonError::into_inner).as_ref()
+        {
+            let _ = sender.send(());
+        }
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fn cloud_slot_for_testing(&self) -> Option<bool> {
+        let slot = self.slots.iter().find(|slot| slot.role == ReaderRole::Cloud)?;
+        slot.reader.try_lock().ok().map(|state| state.transferred)
     }
 
     /// The reader of `role` number `index`, opened if it is not yet, once
@@ -101,6 +125,8 @@ impl Readers {
             })?;
         let mut reader = slot.reader.lock().unwrap_or_else(PoisonError::into_inner);
         while reader.transferred {
+            #[cfg(feature = "test-hooks")]
+            self.cloud_wait_for_testing(slot.role);
             #[cfg(test)]
             tests::waiting();
             reader = slot.returned.wait(reader).unwrap_or_else(PoisonError::into_inner);
@@ -133,6 +159,8 @@ impl Readers {
         for slot in &self.slots {
             let mut reader = slot.reader.lock().unwrap_or_else(PoisonError::into_inner);
             while reader.transferred {
+                #[cfg(feature = "test-hooks")]
+                self.cloud_wait_for_testing(slot.role);
                 #[cfg(test)]
                 tests::waiting();
                 reader = slot.returned.wait(reader).unwrap_or_else(PoisonError::into_inner);
@@ -162,6 +190,8 @@ impl Readers {
                     }
                 };
                 while reader.transferred {
+                    #[cfg(feature = "test-hooks")]
+                    self.cloud_wait_for_testing(slot.role);
                     let now = crate::monotonic::now();
                     if now >= deadline {
                         return Err(EngineError::SuspendDeadline {
