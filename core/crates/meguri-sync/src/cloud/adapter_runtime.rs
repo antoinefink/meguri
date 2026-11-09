@@ -699,11 +699,21 @@ impl Runtime {
         Ok(())
     }
     pub fn adapter_begin_fetch(&self, sdk: &str, zones: Vec<String>) -> Result<u64, RuntimeError> {
+        self.adapter_begin_fetch_with_work(sdk, zones, &mut PolicyWork::default())
+    }
+    pub(crate) fn adapter_begin_fetch_with_work(
+        &self,
+        sdk: &str,
+        zones: Vec<String>,
+        work: &mut PolicyWork,
+    ) -> Result<u64, RuntimeError> {
         let mut s = self.state();
+        work.check()?;
         Self::sdk_locked(&s, sdk)?;
         if s.adapter.fetch.is_some() {
             return Err(Error::InvalidData.into());
         }
+        work.effect()?;
         s.adapter.next_fetch += 1;
         let id = s.adapter.next_fetch;
         let boundary = s.adapter.scheduled.take();
@@ -715,6 +725,9 @@ impl Runtime {
             boundary,
             ..Default::default()
         });
+        #[cfg(feature = "test-hooks")]
+        self.incoming_hooks
+            .hit(crate::cloud::testing::IncomingStage::PolicyFetchBegun);
         Ok(id)
     }
     pub fn adapter_will_fetch(&self, sdk: &str, group: String, manual: bool) -> Result<(), RuntimeError> {

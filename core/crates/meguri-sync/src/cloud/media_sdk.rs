@@ -457,36 +457,50 @@ impl Runtime {
         Ok(())
     }
 
-    pub(crate) fn policy_begin_media(
+    pub(crate) fn policy_begin_media_with_work(
         &self,
         guard: &crate::cloud::adapter::Guard,
         sdk: Option<&str>,
         action: &crate::cloud::policy::ActionKind,
+        work: &mut PolicyWork,
     ) -> Result<bool, RuntimeError> {
         let _ = self.adapter_now();
         if let Some(sdk) = sdk {
-            self.prepare_cloud_media_sdk(sdk)?;
+            self.prepare_cloud_media_sdk_with_work(sdk, work)?;
+            #[cfg(feature = "test-hooks")]
+            self.incoming_hooks
+                .hit(crate::cloud::testing::IncomingStage::PolicyMediaPrepared);
         }
         let mut s = self.state();
+        work.check()?;
         if Self::adapter_guard_locked(&s) != *guard {
             return Err(RuntimeError::StaleIncarnation);
         }
         match action {
             crate::cloud::policy::ActionKind::PauseMedia => {
+                work.effect()?;
                 s.media.paused = true;
                 s.media.epoch = s.media.epoch.checked_add(1).ok_or(Error::InvalidData)?;
                 s.media.pending = None;
                 s.media.metadata_pending = None;
                 self.emit_pending_locked(&mut s, workflow::UpdateKind::Full, BTreeSet::new())?;
+                #[cfg(feature = "test-hooks")]
+                self.incoming_hooks
+                    .hit(crate::cloud::testing::IncomingStage::PolicyMediaSelected);
                 Ok(false)
             }
             crate::cloud::policy::ActionKind::PrioritizeMedia { names } => {
+                work.effect()?;
                 s.media.visible = names.iter().map(|name| name.to_lowercase()).collect();
+                #[cfg(feature = "test-hooks")]
+                self.incoming_hooks
+                    .hit(crate::cloud::testing::IncomingStage::PolicyMediaSelected);
                 Ok(false)
             }
             crate::cloud::policy::ActionKind::ResumeMedia | crate::cloud::policy::ActionKind::ReadBlobs { .. } => {
                 Self::sdk_locked(&s, sdk.ok_or(RuntimeError::StaleIncarnation)?)?;
                 Self::gate_locked(&s)?;
+                work.effect()?;
                 s.media.paused = false;
                 s.media.round_reads.clear();
                 s.media.attempted.clear();
@@ -516,6 +530,9 @@ impl Runtime {
                     }
                     _ => unreachable!(),
                 }
+                #[cfg(feature = "test-hooks")]
+                self.incoming_hooks
+                    .hit(crate::cloud::testing::IncomingStage::PolicyMediaSelected);
                 Ok(true)
             }
             _ => Err(Error::InvalidData.into()),

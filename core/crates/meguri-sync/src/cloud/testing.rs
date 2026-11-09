@@ -84,6 +84,12 @@ pub enum IncomingStage {
     AccountIsolationPublished,
     SDKIsolationPublished,
     SDKRetireBeforeReacquisition,
+    PolicyMediaPrepared,
+    PolicyPendingUpdated,
+    // These effect witnesses run under State; token/atomic observation only.
+    PolicyMediaSelected,
+    PolicyFetchBegun,
+    PolicySendRetryCleared,
     AdoptionIsolationPublished,
     AssetReadPrepared,
     AssetReadFinishing,

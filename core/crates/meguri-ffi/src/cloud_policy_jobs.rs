@@ -81,6 +81,13 @@ typed_result!(
     crate::sync::CloudEngineRegistration
 );
 typed_result!(CloudPolicyRetirementResult, CloudPolicyRetirementJob, bool);
+typed_result!(CloudPolicyMediaResult, CloudPolicyMediaJob, bool);
+typed_result!(CloudPolicyFetchResult, CloudPolicyFetchJob, u64);
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct CloudPolicySendCall {
+    pub call: Option<u64>,
+}
+typed_result!(CloudPolicySendResult, CloudPolicySendJob, CloudPolicySendCall);
 
 impl CloudPolicy {
     pub(super) fn start_policy<T: Send + 'static>(
@@ -135,6 +142,48 @@ impl CloudPolicy {
 
 #[uniffi::export]
 impl CloudPolicyExecution {
+    pub fn start_begin_media(self: Arc<Self>) -> Result<CloudPolicyMediaJob, CoreError> {
+        callback::enter("CloudPolicyExecution.start_begin_media");
+        self.policy().owns(&self.command)?;
+        let (handle, cell) = self
+            .policy()
+            .clone()
+            .start_policy("CloudPolicyExecution.begin_media", move |_, work| {
+                self.begin_media_with_work(work)
+            })?;
+        Ok(CloudPolicyMediaJob {
+            handle,
+            result: Arc::new(CloudPolicyMediaResult { cell }),
+        })
+    }
+    pub fn start_begin_fetch(self: Arc<Self>, zones: Vec<String>) -> Result<CloudPolicyFetchJob, CoreError> {
+        callback::enter("CloudPolicyExecution.start_begin_fetch");
+        self.policy().owns(&self.command)?;
+        let (handle, cell) = self
+            .policy()
+            .clone()
+            .start_policy("CloudPolicyExecution.begin_fetch", move |_, work| {
+                self.begin_fetch_with_work(zones, work)
+            })?;
+        Ok(CloudPolicyFetchJob {
+            handle,
+            result: Arc::new(CloudPolicyFetchResult { cell }),
+        })
+    }
+    pub fn start_begin_send(self: Arc<Self>) -> Result<CloudPolicySendJob, CoreError> {
+        callback::enter("CloudPolicyExecution.start_begin_send");
+        self.policy().owns(&self.command)?;
+        let (handle, cell) = self
+            .policy()
+            .clone()
+            .start_policy("CloudPolicyExecution.begin_send", move |_, work| {
+                self.begin_send_with_work(work).map(|call| CloudPolicySendCall { call })
+            })?;
+        Ok(CloudPolicySendJob {
+            handle,
+            result: Arc::new(CloudPolicySendResult { cell }),
+        })
+    }
     pub fn start_register_sdk(self: Arc<Self>) -> Result<CloudPolicyRegistrationJob, CoreError> {
         callback::enter("CloudPolicyExecution.start_register_sdk");
         self.policy().owns(&self.command)?;

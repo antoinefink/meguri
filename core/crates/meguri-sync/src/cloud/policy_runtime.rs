@@ -264,6 +264,10 @@ impl Runtime {
             },
             BTreeSet::new(),
         )?;
+        drop(s);
+        #[cfg(feature = "test-hooks")]
+        self.incoming_hooks
+            .hit(crate::cloud::testing::IncomingStage::PolicyPendingUpdated);
         Ok(())
     }
     pub(crate) fn policy_tracking_failed_with_work(&self, work: &mut PolicyWork) -> Result<(), RuntimeError> {

@@ -2256,13 +2256,26 @@ impl Runtime {
         s.actions.automatic || s.actions.exchange.is_some() || Self::publication_automatic_locked(&s)
     }
     pub fn start_send_call(&self, instance: &str) -> Result<Option<SendCall>, RuntimeError> {
-        self.start_send_call_mode(instance, false)
+        self.start_send_call_mode(instance, false, &mut PolicyWork::default())
     }
     pub fn start_manual_send_call(&self, instance: &str) -> Result<Option<SendCall>, RuntimeError> {
-        self.start_send_call_mode(instance, true)
+        self.start_manual_send_call_with_work(instance, &mut PolicyWork::default())
     }
-    fn start_send_call_mode(&self, instance: &str, manual: bool) -> Result<Option<SendCall>, RuntimeError> {
+    pub(crate) fn start_manual_send_call_with_work(
+        &self,
+        instance: &str,
+        work: &mut PolicyWork,
+    ) -> Result<Option<SendCall>, RuntimeError> {
+        self.start_send_call_mode(instance, true, work)
+    }
+    fn start_send_call_mode(
+        &self,
+        instance: &str,
+        manual: bool,
+        work: &mut PolicyWork,
+    ) -> Result<Option<SendCall>, RuntimeError> {
         let mut s = self.state();
+        work.check()?;
         Self::caller_locked(&s, instance)?;
         if Self::gate_locked(&s).is_err()
             || s.actions.exchange_phase.is_some()
@@ -2274,7 +2287,11 @@ impl Runtime {
         {
             return Ok(None);
         }
+        work.effect()?;
         s.adapter.sdk_retrying = false;
+        #[cfg(feature = "test-hooks")]
+        self.incoming_hooks
+            .hit(crate::cloud::testing::IncomingStage::PolicySendRetryCleared);
         let exchange = s.actions.exchange.as_ref().map(|(id, _)| *id);
         if let Some(id) = exchange
             && s.actions.calls.iter().filter(|c| c.exchange == Some(id)).count() >= 8
@@ -2290,6 +2307,10 @@ impl Runtime {
         };
         s.actions.calls.push(call.clone());
         Ok(Some(call))
+    }
+    #[cfg(feature = "test-hooks")]
+    pub fn sdk_retrying_for_testing(&self) -> bool {
+        self.state().adapter.sdk_retrying
     }
     pub fn send_call_request(&self, instance: &str, id: u64, request: u64) -> Result<(), RuntimeError> {
         let mut s = self.state();

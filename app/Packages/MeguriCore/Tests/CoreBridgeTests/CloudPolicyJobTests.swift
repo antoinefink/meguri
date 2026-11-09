@@ -11,6 +11,20 @@ private func rawJobPolicy() async throws -> MeguriCoreBindings.CloudPolicy {
     return try await MaintenanceLane.shared.call(.cloudWorkflowPolicy) { try workflow.policy() }
 }
 
+private func retainCompletedPolicyResource<Value: Sendable>(
+    _ startName: BridgeCall, result resultName: BridgeCall,
+    attempted: @escaping @Sendable (UInt64) -> Void, message: String,
+    _ started: CloudPolicyJobValue<Value>
+) async throws -> Value {
+    try await CoreCloudPolicyService.runOrdered(
+        startName, result: resultName,
+        track: { handle in
+            attempted(handle.id)
+            throw BridgeError.invalidArgument(message)
+        }, retainResourceResultOnTrackingFailure: true
+    ) { started }
+}
+
 extension EventTests {
     @Test func policyOriginalOwnerMetadataSurvivesSuspendAndKeepsOrdinaryJobsCancelled() async throws {
         try await withCloudConnection { fixture in
@@ -133,15 +147,11 @@ extension EventTests {
             })
             try await fixture.core.validateSDK(installed.instanceId)
             let attempted = Mutex<UInt64?>(nil)
-            let retained: MeguriCoreBindings.CloudEngineRegistration = try await CoreCloudPolicyService.runOrdered(
+            let retained: MeguriCoreBindings.CloudEngineRegistration = try await retainCompletedPolicyResource(
                 .cloudPolicyExecutionStartRegisterSdk, result: .cloudPolicyRegistrationResult,
-                track: { handle in
-                    attempted.withLock { $0 = handle.id }
-                    throw BridgeError.invalidArgument("registration listener setup")
-                }, retainResourceResultOnTrackingFailure: true
-            ) {
+                attempted: { id in attempted.withLock { $0 = id } }, message: "registration listener setup",
                 CloudPolicyJobValue(handle: started.handle, read: { try started.result.result() })
-            }
+            )
             #expect(attempted.withLock { $0 } == started.handle.id)
             #expect(try await CoreBridge.CancelToken(raw: started.handle.cancel).isCancelled())
             #expect(retained.instanceId == installed.instanceId)
@@ -164,6 +174,80 @@ extension EventTests {
             try await fixture.core.validateSDK(successor.instanceID)
             try await fixture.core.retireSDK(successor.instanceID, policyStop: false)
             try await fixture.core.releaseSDK(successor.instanceID)
+        }
+    }
+
+    @Test func policyFetchAndSendListenerFailureRetainsCallIdentityAndCompletedNoCall() async throws {
+        try await withNativePolicyFixture { fixture in
+            let (policy, _) = try await nativePolicy(fixture)
+            guard case .commands(let commands) = try await policy.input(.syncNowRequested(.command)) else {
+                throw BridgeError.internal("Expected exchange commands")
+            }
+            let command = try #require(commands.first { if case .runExchange = $0.action { true } else { false } })
+            let execution = try #require(try await policy.prepareExecution(command))
+            let sdk = try #require(try await execution.originalSDK())
+            let raw = execution.raw
+            try await CoreEventStream.shared.start()
+            let fetch = try await MaintenanceLane.shared.call(.cloudPolicyExecutionStartBeginFetch) {
+                try raw.startBeginFetch(zones: ["meguri-root", fixture.zone])
+            }
+            for await event in CoreEventStream.shared.events {
+                if case .jobFinished(let id, _) = event.kind, id.rawValue == fetch.handle.id { break }
+            }
+            let fetchID = try #require(try await MaintenanceLane.shared.call(.cloudPolicyFetchResult) { try fetch.result.result() })
+            let attemptedFetch = Mutex<UInt64?>(nil)
+            let retainedFetch: UInt64 = try await retainCompletedPolicyResource(
+                .cloudPolicyExecutionStartBeginFetch, result: .cloudPolicyFetchResult,
+                attempted: { id in attemptedFetch.withLock { $0 = id } }, message: "fetch listener setup",
+                CloudPolicyJobValue(handle: fetch.handle, read: { try fetch.result.result() })
+            )
+            #expect(attemptedFetch.withLock { $0 } == fetch.handle.id)
+            #expect(try await CoreBridge.CancelToken(raw: fetch.handle.cancel).isCancelled())
+            #expect(retainedFetch == fetchID && fetchID > 0)
+            try await fixture.core.willFetch(sdk: sdk, group: "meguri-\(retainedFetch)", manual: true)
+            try await fixture.core.didFetch(sdk: sdk, group: "meguri-\(retainedFetch)", manual: true)
+            _ = try await fixture.core.finishFetch(sdk: sdk, id: retainedFetch)
+
+            let send = try await MaintenanceLane.shared.call(.cloudPolicyExecutionStartBeginSend) { try raw.startBeginSend() }
+            for await event in CoreEventStream.shared.events {
+                if case .jobFinished(let id, _) = event.kind, id.rawValue == send.handle.id { break }
+            }
+            let sent = try #require(try await MaintenanceLane.shared.call(.cloudPolicySendResult) { try send.result.result() })
+            let sendID = try #require(sent.call)
+            let attemptedSend = Mutex<UInt64?>(nil)
+            let retainedSend: MeguriCoreBindings.CloudPolicySendCall = try await retainCompletedPolicyResource(
+                .cloudPolicyExecutionStartBeginSend, result: .cloudPolicySendResult,
+                attempted: { id in attemptedSend.withLock { $0 = id } }, message: "send listener setup",
+                CloudPolicyJobValue(handle: send.handle, read: { try send.result.result() })
+            )
+            #expect(attemptedSend.withLock { $0 } == send.handle.id)
+            #expect(try await CoreBridge.CancelToken(raw: send.handle.cancel).isCancelled())
+            #expect(retainedSend.call == sendID && sendID > 0)
+            try await fixture.core.finishSend(sdk: sdk, id: sendID, pending: [:])
+
+            _ = try await policy.captureExchange(command)
+            let noCall = try await MaintenanceLane.shared.call(.cloudPolicyExecutionStartBeginSend) { try raw.startBeginSend() }
+            for await event in CoreEventStream.shared.events {
+                if case .jobFinished(let id, _) = event.kind, id.rawValue == noCall.handle.id { break }
+            }
+            let attemptedNoCall = Mutex<UInt64?>(nil)
+            let retainedNoCall: MeguriCoreBindings.CloudPolicySendCall = try await retainCompletedPolicyResource(
+                .cloudPolicyExecutionStartBeginSend, result: .cloudPolicySendResult,
+                attempted: { id in attemptedNoCall.withLock { $0 = id } }, message: "no-call listener setup",
+                CloudPolicyJobValue(handle: noCall.handle, read: { try noCall.result.result() })
+            )
+            #expect(attemptedNoCall.withLock { $0 } == noCall.handle.id)
+            #expect(try await CoreBridge.CancelToken(raw: noCall.handle.cancel).isCancelled())
+            #expect(retainedNoCall.call == nil)
+            #expect(try await execution.beginSend() == nil)
+            _ = try await policy.status()
+            try await execution.validate()
+            try await fixture.adapter.stop()
+            try await fixture.collection.close()
+            #expect(try await MaintenanceLane.shared.call(.cloudPolicyFetchResult) { try fetch.result.result() } == retainedFetch)
+            let rereadSend = try #require(try await MaintenanceLane.shared.call(.cloudPolicySendResult) { try send.result.result() })
+            let rereadNoCall = try #require(try await MaintenanceLane.shared.call(.cloudPolicySendResult) { try noCall.result.result() })
+            #expect(rereadSend.call == retainedSend.call && rereadNoCall.call == nil)
         }
     }
 

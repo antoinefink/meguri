@@ -103,3 +103,18 @@ held-factory readiness and six stale final-admission cases.
 
 This closes the reviewed two-call component. The unfinished unit, media,
 full invocation-boundary and batch-gate requirements above remain open.
+
+## Bounded producer observation
+
+Normal signed Mac run `16664` stays hidden for 300 seconds, then quits.
+It proves process liveness only; it exports no source-file or SDK status.
+The global host lease serializes this run with physical phone driving.
+Phone attempt `21544` is refused at preservation admission before any runner
+starts. Normal signed preparation `22022` restores trusted device evidence.
+Status drive `23883` completes five steps but retains ten hierarchy issues.
+
+Across the window and phone reopen, the waiting count moves from 2,869 to
+2,863; the 2,397 missing-device-and-cloud count and displayed last-sync time
+stay unchanged. This does not isolate the cause or prove complete media
+exchange. Stop this experiment; do not repeat arbitrary producer windows.
+No extra answer, manual Sync Now request or replacement is performed.

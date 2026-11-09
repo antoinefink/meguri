@@ -63,8 +63,12 @@ fn settings(automatic: bool, paused: bool) -> CloudPolicyEvent {
     }
 }
 fn start() -> (Fixture, Arc<CloudPolicy>, Arc<CloudPolicyExecution>) {
+    let (fixture, policy, execution, _) = start_with_root();
+    (fixture, policy, execution)
+}
+fn start_with_root() -> (Fixture, Arc<CloudPolicy>, Arc<CloudPolicyExecution>, CloudRecord) {
     let fixture = fixture();
-    let (sdk, _, _) = fixture.baseline();
+    let (sdk, root, _) = fixture.baseline();
     fixture.workflow.retire_sdk(sdk.instance_id.clone(), false).unwrap();
     fixture.workflow.release_sdk(sdk.instance_id).unwrap();
     let policy = fixture.workflow.policy().unwrap();
@@ -82,7 +86,7 @@ fn start() -> (Fixture, Arc<CloudPolicy>, Arc<CloudPolicyExecution>) {
         .find(|c| matches!(c.action, CloudPolicyAction::StartEngine { .. }))
         .expect("real StartEngine");
     let execution = policy.clone().prepare_execution(command.handle).unwrap().unwrap();
-    (fixture, policy, execution)
+    (fixture, policy, execution, root)
 }
 
 #[test]

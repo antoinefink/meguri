@@ -83,6 +83,27 @@ impl CloudPolicyExecution {
         }
         Ok(())
     }
+    pub(super) fn begin_media_with_work(&self, work: &mut p::PolicyWork) -> Result<bool, CoreError> {
+        self.policy().owns(&self.command)?;
+        self.policy()
+            .driver()?
+            .begin_native_media_with_work(&self.command.command, self.original_sdk.as_deref(), work)
+            .map_err(execution_error)
+    }
+    pub(super) fn begin_fetch_with_work(&self, zones: Vec<String>, work: &mut p::PolicyWork) -> Result<u64, CoreError> {
+        self.policy().owns(&self.command)?;
+        self.policy()
+            .driver()?
+            .begin_native_fetch_with_work(&self.command.command, &self.sdk()?, zones, work)
+            .map_err(execution_error)
+    }
+    pub(super) fn begin_send_with_work(&self, work: &mut p::PolicyWork) -> Result<Option<u64>, CoreError> {
+        self.policy().owns(&self.command)?;
+        self.policy()
+            .driver()?
+            .begin_native_send_with_work(&self.command.command, &self.sdk()?, work)
+            .map_err(execution_error)
+    }
     // A terminal reply keeps its original command when policy has moved on.
     // Let Driver retire that command's read; validate new admission separately
     // so an FFI generation check cannot bypass cleanup of the original owner.
@@ -269,20 +290,12 @@ impl CloudPolicyExecution {
 
     pub fn begin_media(&self) -> Result<bool, CoreError> {
         callback::enter("CloudPolicyExecution.begin_media");
-        self.policy().owns(&self.command)?;
-        self.policy()
-            .driver()?
-            .begin_native_media(&self.command.command, self.original_sdk.as_deref())
-            .map_err(execution_error)
+        self.begin_media_with_work(&mut p::PolicyWork::default())
     }
 
     pub fn begin_fetch(&self, zones: Vec<String>) -> Result<u64, CoreError> {
         callback::enter("CloudPolicyExecution.begin_fetch");
-        self.policy().owns(&self.command)?;
-        self.policy()
-            .driver()?
-            .begin_native_fetch(&self.command.command, &self.sdk()?, zones)
-            .map_err(execution_error)
+        self.begin_fetch_with_work(zones, &mut p::PolicyWork::default())
     }
     pub fn validate_control(&self) -> Result<(), CoreError> {
         callback::enter("CloudPolicyExecution.validate_control");
@@ -304,11 +317,7 @@ impl CloudPolicyExecution {
     }
     pub fn begin_send(&self) -> Result<Option<u64>, CoreError> {
         callback::enter("CloudPolicyExecution.begin_send");
-        self.policy().owns(&self.command)?;
-        self.policy()
-            .driver()?
-            .begin_native_send(&self.command.command, &self.sdk()?)
-            .map_err(execution_error)
+        self.begin_send_with_work(&mut p::PolicyWork::default())
     }
 }
 

@@ -307,8 +307,18 @@ impl Driver {
     }
 
     pub fn begin_native_fetch(&self, command: &Command, sdk: &str, zones: Vec<String>) -> Result<u64, DriverError> {
-        let owned = self.lock_owned();
+        self.begin_native_fetch_with_work(command, sdk, zones, &mut PolicyWork::default())
+    }
+    pub fn begin_native_fetch_with_work(
+        &self,
+        command: &Command,
+        sdk: &str,
+        zones: Vec<String>,
+        work: &mut PolicyWork,
+    ) -> Result<u64, DriverError> {
+        let owned = self.lock_for_work(work)?;
         self.validate_locked(&owned, command)?;
+        work.check()?;
         let requested = match &command.action.kind {
             ActionKind::RequestFetch { zones } => zones.clone(),
             ActionKind::RunExchange { .. } | ActionKind::StartEngine { .. } | ActionKind::ConfigureAutomatic { .. } => {
@@ -316,15 +326,26 @@ impl Driver {
             }
             _ => return Err(DriverError::NotCoreAction),
         };
-        if self.runtime.policy_fetch_scope(&command.backend_guard, &requested)? != zones {
+        let scope = self.runtime.policy_fetch_scope(&command.backend_guard, &requested)?;
+        work.check()?;
+        if scope != zones {
             return Err(DriverError::StaleCommand);
         }
-        Ok(self.runtime.adapter_begin_fetch(sdk, zones)?)
+        Ok(self.runtime.adapter_begin_fetch_with_work(sdk, zones, work)?)
     }
 
     pub fn begin_native_send(&self, command: &Command, sdk: &str) -> Result<Option<u64>, DriverError> {
-        let owned = self.lock_owned();
+        self.begin_native_send_with_work(command, sdk, &mut PolicyWork::default())
+    }
+    pub fn begin_native_send_with_work(
+        &self,
+        command: &Command,
+        sdk: &str,
+        work: &mut PolicyWork,
+    ) -> Result<Option<u64>, DriverError> {
+        let owned = self.lock_for_work(work)?;
         self.validate_locked(&owned, command)?;
+        work.check()?;
         match &command.action.kind {
             ActionKind::RequestSend { zones } if zones == &[Zone::Collection] => {}
             ActionKind::RequestSend { zones }
@@ -337,21 +358,34 @@ impl Driver {
             _ => return Err(DriverError::NotCoreAction),
         }
         self.runtime.validate_sdk(sdk)?;
+        work.check()?;
         if matches!(
             command.action.kind,
             ActionKind::ResumeMedia | ActionKind::ReadBlobs { .. }
         ) {
             self.runtime
-                .policy_update_pending(&command.backend_guard, Update::Full)?;
+                .policy_update_pending_with_work(&command.backend_guard, Update::Full, work)?;
         }
-        Ok(self.runtime.start_manual_send_call(sdk)?.map(|call| call.id))
+        Ok(self
+            .runtime
+            .start_manual_send_call_with_work(sdk, work)?
+            .map(|call| call.id))
     }
 }
 
 impl Driver {
     pub fn begin_native_media(&self, command: &Command, sdk: Option<&str>) -> Result<bool, DriverError> {
-        let owned = self.lock_owned();
+        self.begin_native_media_with_work(command, sdk, &mut PolicyWork::default())
+    }
+    pub fn begin_native_media_with_work(
+        &self,
+        command: &Command,
+        sdk: Option<&str>,
+        work: &mut PolicyWork,
+    ) -> Result<bool, DriverError> {
+        let owned = self.lock_for_work(work)?;
         self.validate_locked(&owned, command)?;
+        work.check()?;
         match command.action.kind {
             ActionKind::ResumeMedia if owned.state.settings.media && owned.state.gate_open() => {}
             ActionKind::ReadBlobs { .. }
@@ -361,7 +395,7 @@ impl Driver {
         }
         Ok(self
             .runtime
-            .policy_begin_media(&command.backend_guard, sdk, &command.action.kind)?)
+            .policy_begin_media_with_work(&command.backend_guard, sdk, &command.action.kind, work)?)
     }
 }
 

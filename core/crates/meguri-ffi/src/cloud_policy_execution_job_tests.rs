@@ -15,170 +15,300 @@ impl Drop for Release {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+enum AdmissionKind {
+    Register,
+    Retire,
+    Media,
+    Fetch,
+    Send,
+    NoCall,
+}
+const ADMISSIONS: [AdmissionKind; 6] = [
+    AdmissionKind::Register,
+    AdmissionKind::Retire,
+    AdmissionKind::Media,
+    AdmissionKind::Fetch,
+    AdmissionKind::Send,
+    AdmissionKind::NoCall,
+];
+#[derive(Debug, PartialEq, Eq)]
+enum AdmissionValue {
+    Done,
+    Media(bool),
+    Fetch(u64),
+    Send(Option<u64>),
+}
 enum AdmissionJob {
     Register(CloudPolicyRegistrationJob),
     Retire(CloudPolicyRetirementJob),
+    Media(CloudPolicyMediaJob),
+    Fetch(CloudPolicyFetchJob),
+    Send(CloudPolicySendJob),
 }
 impl AdmissionJob {
     fn handle(&self) -> &crate::jobs::JobHandle {
         match self {
             Self::Register(job) => &job.handle,
             Self::Retire(job) => &job.handle,
+            Self::Media(job) => &job.handle,
+            Self::Fetch(job) => &job.handle,
+            Self::Send(job) => &job.handle,
+        }
+    }
+    fn value(&self) -> Result<Option<AdmissionValue>, CoreError> {
+        match self {
+            Self::Register(job) => job.result.result().map(|value| value.map(|_| AdmissionValue::Done)),
+            Self::Retire(job) => job.result.result().map(|value| value.map(|_| AdmissionValue::Done)),
+            Self::Media(job) => job.result.result().map(|value| value.map(AdmissionValue::Media)),
+            Self::Fetch(job) => job.result.result().map(|value| value.map(AdmissionValue::Fetch)),
+            Self::Send(job) => job
+                .result
+                .result()
+                .map(|value| value.map(|value| AdmissionValue::Send(value.call))),
         }
     }
     fn result(&self) -> Result<Option<()>, CoreError> {
-        match self {
-            Self::Register(job) => job.result.result().map(|value| value.map(|_| ())),
-            Self::Retire(job) => job.result.result().map(|value| value.map(|_| ())),
-        }
+        self.value().map(|value| value.map(|_| ()))
     }
 }
-fn admit(execution: Arc<CloudPolicyExecution>, retire: bool) -> Result<AdmissionJob, CoreError> {
-    if retire {
-        execution.start_retire_original().map(AdmissionJob::Retire)
-    } else {
-        execution.start_register_sdk().map(AdmissionJob::Register)
+fn expected_value(kind: AdmissionKind) -> AdmissionValue {
+    match kind {
+        AdmissionKind::Register | AdmissionKind::Retire => AdmissionValue::Done,
+        AdmissionKind::Media => AdmissionValue::Media(false),
+        AdmissionKind::Fetch => AdmissionValue::Fetch(1),
+        AdmissionKind::Send => AdmissionValue::Send(Some(1)),
+        AdmissionKind::NoCall => AdmissionValue::Send(None),
     }
 }
-fn admission_fixture(retire: bool) -> (Fixture, Arc<CloudPolicy>, Arc<CloudPolicyExecution>, Option<String>) {
-    let (fixture, policy, execution) = start();
-    if !retire {
-        return (fixture, policy, execution, None);
+#[derive(Clone)]
+struct AdmissionTarget {
+    execution: Arc<CloudPolicyExecution>,
+    zones: Vec<String>,
+}
+fn admit(target: AdmissionTarget, kind: AdmissionKind) -> Result<AdmissionJob, CoreError> {
+    let execution = target.execution;
+    match kind {
+        AdmissionKind::Register => execution.start_register_sdk().map(AdmissionJob::Register),
+        AdmissionKind::Retire => execution.start_retire_original().map(AdmissionJob::Retire),
+        AdmissionKind::Media => execution.start_begin_media().map(AdmissionJob::Media),
+        AdmissionKind::Fetch => execution.start_begin_fetch(target.zones).map(AdmissionJob::Fetch),
+        AdmissionKind::Send | AdmissionKind::NoCall => execution.start_begin_send().map(AdmissionJob::Send),
+    }
+}
+fn admission_fixture(kind: AdmissionKind) -> (Fixture, Arc<CloudPolicy>, AdmissionTarget, Option<String>) {
+    let (fixture, policy, execution, root) = start_with_root();
+    if matches!(kind, AdmissionKind::Register) {
+        return (
+            fixture,
+            policy,
+            AdmissionTarget {
+                execution,
+                zones: Vec::new(),
+            },
+            None,
+        );
     }
     let original = execution.register_sdk().unwrap();
+    if matches!(kind, AdmissionKind::Send | AdmissionKind::NoCall) {
+        fixture
+            .workflow
+            .core
+            .accept_root_fetch(&original.instance_id, Some(&root.saved()), true, 1)
+            .unwrap();
+    }
     policy
         .clone()
         .input(CloudPolicyEvent::Refresh {
             cause: CloudPolicyChangeCause::Cloud,
         })
         .unwrap();
-    let command = commands(policy.clone().input(settings(true, false)).unwrap())
+    let command = if matches!(kind, AdmissionKind::Retire) {
+        commands(policy.clone().input(settings(true, false)).unwrap())
+            .into_iter()
+            .find(|c| matches!(c.action, CloudPolicyAction::ConfigureAutomatic { on: true }))
+            .unwrap()
+    } else if matches!(kind, AdmissionKind::Media) {
+        policy
+            .clone()
+            .input(CloudPolicyEvent::Settings {
+                settings: CloudPolicyDeviceSettings {
+                    enabled: true,
+                    paused: false,
+                    automatic: false,
+                    media: true,
+                },
+            })
+            .unwrap();
+        commands(
+            policy
+                .clone()
+                .input(CloudPolicyEvent::VisibleMedia {
+                    names: vec!["VISIBLE.PNG".into()],
+                })
+                .unwrap(),
+        )
         .into_iter()
-        .find(|c| matches!(c.action, CloudPolicyAction::ConfigureAutomatic { on: true }))
-        .unwrap();
+        .find(|c| matches!(c.action, CloudPolicyAction::PrioritizeMedia { .. }))
+        .unwrap()
+    } else {
+        commands(
+            policy
+                .clone()
+                .input(CloudPolicyEvent::SyncNowRequested {
+                    source: CloudPolicySource::Command,
+                })
+                .unwrap(),
+        )
+        .into_iter()
+        .find(|c| matches!(c.action, CloudPolicyAction::RunExchange { .. }))
+        .unwrap()
+    };
+    if matches!(kind, AdmissionKind::NoCall) {
+        policy.clone().capture_exchange(command.handle.clone()).unwrap();
+    }
     let execution = policy.clone().prepare_execution(command.handle).unwrap().unwrap();
-    (fixture, policy, execution, Some(original.instance_id))
+    let target = AdmissionTarget {
+        execution,
+        zones: vec!["meguri-root".into(), original.collection_zone],
+    };
+    (fixture, policy, target, Some(original.instance_id))
 }
 
 #[test]
 fn native_admission_jobs_start_without_slot_while_driver_projection_and_review_run() {
-    for retire in [false, true] {
-        let (fixture, policy, execution, _) = admission_fixture(retire);
-        meguri_engine::sched::fsrs_policy::enable_fsrs(
-            &fixture.workflow.host.collection().unwrap(),
-            &Default::default(),
-        )
-        .unwrap();
-        let engine = fixture.workflow.host.engine();
-        let events = engine.stream().subscribe();
-        let driver = fixture.workflow.host.cloud_policy_driver().unwrap();
-        let (entered, reached) = mpsc::channel();
-        let (release, resume) = mpsc::channel();
-        let projection_state = Arc::new(Mutex::new((false, false)));
-        let held_state = projection_state.clone();
-        driver.set_projection_hook_for_testing(move || {
-            *held_state.lock().unwrap() = (true, false);
-            let _ = entered.send(());
-            let watchdog_released = resume.recv_timeout(Duration::from_secs(10)).is_err();
-            *held_state.lock().unwrap() = (false, watchdog_released);
-        });
-        let (entry, admitted, registered, pending, slot, review, at_review_completion, projection, starter) =
-            std::thread::scope(|scope| {
-                let release = Release(release);
-                let held = scope.spawn(move || policy.input(CloudPolicyEvent::Foreground));
-                let entry = reached.recv_timeout(Duration::from_secs(5));
-                let (sent, received) = mpsc::channel();
-                let starter = scope.spawn(move || {
-                    let _ = sent.send(admit(execution, retire));
+    for kind in ADMISSIONS {
+        for runtime_hold in [false, true] {
+            let (fixture, policy, execution, _) = admission_fixture(kind);
+            meguri_engine::sched::fsrs_policy::enable_fsrs(
+                &fixture.workflow.host.collection().unwrap(),
+                &Default::default(),
+            )
+            .unwrap();
+            let engine = fixture.workflow.host.engine();
+            let events = engine.stream().subscribe();
+            let driver = fixture.workflow.host.cloud_policy_driver().unwrap();
+            let (entered, reached) = mpsc::channel();
+            let (release, resume) = mpsc::channel();
+            let projection_state = Arc::new(Mutex::new((false, false)));
+            let held_state = projection_state.clone();
+            let runtime = fixture.workflow.core.clone();
+            let hold = move || {
+                *held_state.lock().unwrap() = (true, false);
+                let _ = entered.send(());
+                let watchdog_released = resume.recv_timeout(Duration::from_secs(10)).is_err();
+                *held_state.lock().unwrap() = (false, watchdog_released);
+            };
+            let (entry, admitted, registered, pending, slot, review, at_review_completion, projection, starter) =
+                std::thread::scope(|scope| {
+                    let release = Release(release);
+                    let held = if runtime_hold {
+                        scope.spawn(move || {
+                            runtime.with_state_held_for_testing(hold);
+                            Ok(CloudPolicyOutput::Commands { commands: Vec::new() })
+                        })
+                    } else {
+                        driver.set_projection_hook_for_testing(hold);
+                        scope.spawn(move || policy.input(CloudPolicyEvent::Foreground))
+                    };
+                    let entry = reached.recv_timeout(Duration::from_secs(5));
+                    let (sent, received) = mpsc::channel();
+                    let starter = scope.spawn(move || {
+                        let _ = sent.send(admit(execution, kind));
+                    });
+                    let admitted = received.recv_timeout(Duration::from_secs(5));
+                    let mut registered = false;
+                    let mut pending = false;
+                    if let Ok(Ok(job)) = &admitted {
+                        registered = engine
+                            .jobs()
+                            .running()
+                            .iter()
+                            .any(|running| running.id.0 == job.handle().id);
+                        pending = matches!(job.result(), Ok(None));
+                    }
+                    let slot = engine.slot_holder();
+                    let host = fixture.workflow.host.clone();
+                    let (sent, received) = mpsc::channel();
+                    let review = engine.start_job(JobKind::BulkOp, move |job| {
+                        let result = host
+                            .review()
+                            .start_controlled(
+                                meguri_model::ids::DeckId(1),
+                                None,
+                                job.cancel.clone(),
+                                job.progress.clone(),
+                            )
+                            .and_then(|result| {
+                                if let meguri_engine::session::StartResult::Started { session_id, .. } = result {
+                                    host.review().end_controlled(
+                                        session_id,
+                                        job.cancel.clone(),
+                                        job.progress.clone(),
+                                    )?;
+                                    Ok(true)
+                                } else {
+                                    Ok(false)
+                                }
+                            });
+                        let _ = sent.send(result);
+                        Ok(())
+                    });
+                    let review = (review, received.recv_timeout(Duration::from_secs(5)));
+                    let at_review_completion = *projection_state.lock().unwrap();
+                    drop(release);
+                    let projection = held.join();
+                    let starter = starter.join();
+                    (
+                        entry,
+                        admitted,
+                        registered,
+                        pending,
+                        slot,
+                        review,
+                        at_review_completion,
+                        projection,
+                        starter,
+                    )
                 });
-                let admitted = received.recv_timeout(Duration::from_secs(5));
-                let mut registered = false;
-                let mut pending = false;
-                if let Ok(Ok(job)) = &admitted {
-                    registered = engine
-                        .jobs()
-                        .running()
-                        .iter()
-                        .any(|running| running.id.0 == job.handle().id);
-                    pending = matches!(job.result(), Ok(None));
-                }
-                let slot = engine.slot_holder();
-                let host = fixture.workflow.host.clone();
-                let (sent, received) = mpsc::channel();
-                let review = engine.start_job(JobKind::BulkOp, move |job| {
-                    let result = host
-                        .review()
-                        .start_controlled(
-                            meguri_model::ids::DeckId(1),
-                            None,
-                            job.cancel.clone(),
-                            job.progress.clone(),
-                        )
-                        .and_then(|result| {
-                            if let meguri_engine::session::StartResult::Started { session_id, .. } = result {
-                                host.review()
-                                    .end_controlled(session_id, job.cancel.clone(), job.progress.clone())?;
-                                Ok(true)
-                            } else {
-                                Ok(false)
-                            }
-                        });
-                    let _ = sent.send(result);
-                    Ok(())
-                });
-                let review = (review, received.recv_timeout(Duration::from_secs(5)));
-                let at_review_completion = *projection_state.lock().unwrap();
-                drop(release);
-                let projection = held.join();
-                let starter = starter.join();
-                (
-                    entry,
-                    admitted,
-                    registered,
-                    pending,
-                    slot,
-                    review,
-                    at_review_completion,
-                    projection,
-                    starter,
-                )
-            });
-        // Release and join both scoped threads before inspecting any assertion.
-        let job = admitted.expect("bounded native job start").unwrap();
-        let outcome = finished(&events, job.handle().id);
-        let value = job.result();
-        fixture.workflow.host.close().unwrap();
-        assert_eq!(
-            at_review_completion,
-            (true, false),
-            "projection remained held without watchdog release through review completion"
-        );
-        assert!(
-            !projection_state.lock().unwrap().1,
-            "projection watchdog did not release the hook"
-        );
-        entry.expect("real projection owns Driver");
-        starter.unwrap();
-        projection.unwrap().unwrap();
-        review.0.unwrap();
-        assert!(
-            review
-                .1
-                .expect("review start/end completed before projection release")
-                .unwrap()
-        );
-        assert!(registered && pending);
-        assert!(slot.is_none());
-        assert_eq!(outcome, JobOutcome::Succeeded);
-        assert_eq!(value, Ok(Some(())));
+            // Release and join both scoped threads before inspecting any assertion.
+            let job = admitted.expect("bounded native job start").unwrap();
+            let outcome = finished(&events, job.handle().id);
+            let value = job.result();
+            fixture.workflow.host.close().unwrap();
+            assert_eq!(
+                at_review_completion,
+                (true, false),
+                "projection remained held without watchdog release through review completion"
+            );
+            assert!(
+                !projection_state.lock().unwrap().1,
+                "projection watchdog did not release the hook"
+            );
+            entry.expect("real projection owns Driver");
+            starter.unwrap();
+            projection.unwrap().unwrap();
+            review.0.unwrap();
+            assert!(
+                review
+                    .1
+                    .expect("review start/end completed before projection release")
+                    .unwrap()
+            );
+            assert!(registered && pending);
+            assert!(slot.is_none());
+            assert_eq!(outcome, JobOutcome::Succeeded);
+            assert_eq!(value, Ok(Some(())));
+            assert_eq!(job.value(), Ok(Some(expected_value(kind))));
+        }
     }
 }
 
 #[test]
 fn native_admission_jobs_cancel_after_real_driver_and_runtime_contention_before_effects() {
-    for retire in [false, true] {
+    for kind in ADMISSIONS {
         for runtime_hold in [false, true] {
-            let (fixture, policy, execution, original) = admission_fixture(retire);
+            let (fixture, policy, execution, original) = admission_fixture(kind);
             let engine = fixture.workflow.host.engine();
             let events = engine.stream().subscribe();
             let driver = fixture.workflow.host.cloud_policy_driver().unwrap();
@@ -187,6 +317,8 @@ fn native_admission_jobs_cancel_after_real_driver_and_runtime_contention_before_
             let (entered, reached) = mpsc::channel();
             let (release, resume) = mpsc::channel();
             let (contended, observed) = mpsc::channel();
+            let hold_state = Arc::new(Mutex::new((false, false)));
+            let state = hold_state.clone();
             let (entry, contention, admitted, cancellation, held, starter) = std::thread::scope(|scope| {
                 let release = Release(release);
                 let held = if runtime_hold {
@@ -194,16 +326,20 @@ fn native_admission_jobs_cancel_after_real_driver_and_runtime_contention_before_
                     let runtime = runtime.clone();
                     scope.spawn(move || {
                         runtime.with_state_held_for_testing(|| {
+                            *state.lock().unwrap() = (true, false);
                             let _ = entered.send(());
-                            let _ = resume.recv_timeout(Duration::from_secs(10));
+                            let timed_out = resume.recv_timeout(Duration::from_secs(10)).is_err();
+                            *state.lock().unwrap() = (false, timed_out);
                         });
                         Ok(())
                     })
                 } else {
                     driver.observe_contention_for_testing(contended);
                     driver.set_projection_hook_for_testing(move || {
+                        *state.lock().unwrap() = (true, false);
                         let _ = entered.send(());
-                        let _ = resume.recv_timeout(Duration::from_secs(10));
+                        let timed_out = resume.recv_timeout(Duration::from_secs(10)).is_err();
+                        *state.lock().unwrap() = (false, timed_out);
                     });
                     scope.spawn(move || policy.input(CloudPolicyEvent::Foreground).map(|_| ()))
                 };
@@ -211,12 +347,13 @@ fn native_admission_jobs_cancel_after_real_driver_and_runtime_contention_before_
                 let (sent, received) = mpsc::channel();
                 let selected = execution.clone();
                 let starter = scope.spawn(move || {
-                    let _ = sent.send(admit(selected, retire));
+                    let _ = sent.send(admit(selected, kind));
                 });
                 let admitted = received.recv_timeout(Duration::from_secs(5));
                 // A positive failed try_lock proves this is an executing worker,
                 // rather than cancellation of a closure still queued in the pool.
                 let contention = observed.recv_timeout(Duration::from_secs(5));
+                let held_at_contention = *hold_state.lock().unwrap();
                 let cancellation = admitted
                     .as_ref()
                     .ok()
@@ -225,7 +362,14 @@ fn native_admission_jobs_cancel_after_real_driver_and_runtime_contention_before_
                 drop(release);
                 let held = held.join();
                 let starter = starter.join();
-                (entry, contention, admitted, cancellation, held, starter)
+                (
+                    entry,
+                    contention.map(|()| held_at_contention),
+                    admitted,
+                    cancellation,
+                    held,
+                    starter,
+                )
             });
             let job = admitted.expect("start returned before lock release").unwrap();
             let outcome = finished(&events, job.handle().id);
@@ -233,11 +377,15 @@ fn native_admission_jobs_cancel_after_real_driver_and_runtime_contention_before_
             let after = runtime.adapter_guard();
             let original_valid = original.as_ref().map(|sdk| runtime.validate_sdk(sdk));
             // Retrying the same capability must still reach its original effect.
-            let retry = admit(execution, retire).unwrap();
+            let retry = admit(execution, kind).unwrap();
             let retried = finished(&events, retry.handle().id);
             fixture.workflow.host.close().unwrap();
             entry.expect("real lock held");
-            contention.expect("worker reached held lock");
+            assert_eq!(contention.expect("worker reached held lock"), (true, false));
+            assert!(
+                !hold_state.lock().unwrap().1,
+                "lock watchdog did not release the worker"
+            );
             cancellation.unwrap().unwrap();
             held.unwrap().unwrap();
             starter.unwrap();
@@ -249,14 +397,15 @@ fn native_admission_jobs_cancel_after_real_driver_and_runtime_contention_before_
             }
             assert_eq!(retried, JobOutcome::Succeeded);
             assert_eq!(retry.result(), Ok(Some(())));
+            assert_eq!(retry.value(), Ok(Some(expected_value(kind))));
         }
     }
 }
 
 #[test]
 fn native_admission_jobs_replacement_after_entry_flush_rejects_waiting_generation() {
-    for retire in [false, true] {
-        let (fixture, _, execution, original) = admission_fixture(retire);
+    for kind in ADMISSIONS {
+        let (fixture, _, execution, original) = admission_fixture(kind);
         let engine = fixture.workflow.host.engine();
         let events = engine.stream().subscribe();
         let runtime = fixture.workflow.core.clone();
@@ -312,7 +461,7 @@ fn native_admission_jobs_replacement_after_entry_flush_rejects_waiting_generatio
             let entry = reached.recv_timeout(Duration::from_secs(5));
             let (sent, received) = mpsc::channel();
             let starter = scope.spawn(move || {
-                let _ = sent.send(admit(execution, retire));
+                let _ = sent.send(admit(execution, kind));
             });
             let admitted = received.recv_timeout(Duration::from_secs(5));
             // Only the worker can reach Runtime here; replacement has not begun.
@@ -384,14 +533,14 @@ fn native_admission_jobs_replacement_after_entry_flush_rejects_waiting_generatio
 
 #[test]
 fn native_admission_jobs_queued_cancel_and_generation_change_keep_original_typed_results() {
-    for retire in [false, true] {
+    for kind in ADMISSIONS {
         for replace in [false, true] {
-            let (fixture, _, execution, _) = admission_fixture(retire);
+            let (fixture, _, execution, _) = admission_fixture(kind);
             let engine = fixture.workflow.host.engine();
             let events = engine.stream().subscribe();
             let pool = hold_pool(&fixture);
             let slot = engine.acquire_slot(meguri_engine::LongOp::Restore).unwrap();
-            let job = admit(execution.clone(), retire).unwrap();
+            let job = admit(execution.clone(), kind).unwrap();
             let pending = job.result();
             if replace {
                 let mut exclusive = slot.enter_exclusive(true).unwrap();
@@ -402,11 +551,18 @@ fn native_admission_jobs_queued_cancel_and_generation_change_keep_original_typed
             drop(slot);
             drop(pool);
             let outcome = finished(&events, job.handle().id);
+            let retry = if replace {
+                None
+            } else {
+                let retry = admit(execution.clone(), kind).unwrap();
+                let outcome = finished(&events, retry.handle().id);
+                Some((outcome, retry.value()))
+            };
             fixture.workflow.host.close().unwrap();
             // A later owner never substitutes Closed for the original result.
             let replacement = super::fixture();
             let value = job.result();
-            let closed_start = admit(execution, retire);
+            let closed_start = admit(execution, kind);
             replacement.workflow.host.close().unwrap();
             assert_eq!(pending, Ok(None));
             assert!(matches!(
@@ -421,6 +577,7 @@ fn native_admission_jobs_queued_cancel_and_generation_change_keep_original_typed
             } else {
                 assert_eq!(outcome, JobOutcome::Cancelled);
                 assert_eq!(value, Err(CoreError::Cancelled));
+                assert_eq!(retry, Some((JobOutcome::Succeeded, Ok(Some(expected_value(kind))))));
             }
         }
     }
@@ -428,12 +585,12 @@ fn native_admission_jobs_queued_cancel_and_generation_change_keep_original_typed
 
 #[test]
 fn native_admission_jobs_original_close_cancels_and_drains_queued_work() {
-    for retire in [false, true] {
-        let (fixture, _, execution, _) = admission_fixture(retire);
+    for kind in ADMISSIONS {
+        let (fixture, _, execution, _) = admission_fixture(kind);
         let engine = fixture.workflow.host.engine();
         let events = engine.stream().subscribe();
         let pool = hold_pool(&fixture);
-        let job = admit(execution, retire).unwrap();
+        let job = admit(execution, kind).unwrap();
         let (cancelled, closed) = std::thread::scope(|scope| {
             let host = fixture.workflow.host.clone();
             let closing = scope.spawn(move || host.close());
@@ -460,7 +617,8 @@ fn native_admission_jobs_original_close_cancels_and_drains_queued_work() {
 
 #[test]
 fn native_admission_jobs_register_once_and_retire_original_without_touching_successor() {
-    let (fixture, _, execution, original) = admission_fixture(true);
+    let (fixture, _, target, original) = admission_fixture(AdmissionKind::Retire);
+    let execution = target.execution;
     let events = fixture.workflow.host.engine().stream().subscribe();
     let retired = execution.clone().start_retire_original().unwrap();
     assert_eq!(finished(&events, retired.handle.id), JobOutcome::Succeeded);
@@ -678,5 +836,214 @@ fn native_admission_job_absent_epoch_isolation_retains_terminal_facts() {
             assert_eq!(outcome, JobOutcome::Succeeded);
             assert_eq!(value, Ok(Some(true)));
         }
+    }
+}
+
+#[test]
+fn native_admission_jobs_post_effect_cancel_keeps_media_fetch_and_send_values_after_close() {
+    use c::testing::IncomingStage as Stage;
+    for (kind, stage) in [
+        (AdmissionKind::Media, Stage::PolicyMediaPrepared),
+        (AdmissionKind::Media, Stage::PolicyMediaSelected),
+        (AdmissionKind::Fetch, Stage::PolicyFetchBegun),
+        (AdmissionKind::Send, Stage::PolicySendRetryCleared),
+    ] {
+        let (fixture, _, target, original) = admission_fixture(kind);
+        let runtime = fixture.workflow.core.clone();
+        if stage == Stage::PolicyMediaSelected {
+            runtime.prepare_cloud_media_sdk(original.as_deref().unwrap()).unwrap();
+        }
+        let events = fixture.workflow.host.engine().stream().subscribe();
+        let pool = hold_pool(&fixture);
+        let cancel = Arc::new(Mutex::new(None::<Arc<crate::cancel::CancelToken>>));
+        let observed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let token = cancel.clone();
+        let saw = observed.clone();
+        runtime.set_incoming_stage_hook_for_testing(move |hit| {
+            if hit == stage {
+                saw.store(true, std::sync::atomic::Ordering::SeqCst);
+                token.lock().unwrap().as_ref().unwrap().trigger();
+            }
+        });
+        let job = admit(target, kind).unwrap();
+        *cancel.lock().unwrap() = Some(job.handle().cancel.clone());
+        drop(pool);
+        let outcome = finished(&events, job.handle().id);
+        runtime.set_incoming_stage_hook_for_testing(|_| {});
+        fixture.workflow.host.close().unwrap();
+        let replacement = super::fixture();
+        let value = job.value();
+        replacement.workflow.host.close().unwrap();
+        assert!(observed.load(std::sync::atomic::Ordering::SeqCst) && job.handle().cancel.requested());
+        assert_eq!(outcome, JobOutcome::Succeeded);
+        assert_eq!(value, Ok(Some(expected_value(kind))));
+    }
+}
+
+#[test]
+fn native_admission_job_media_preparation_retains_actual_guard_error_after_cancel_and_close() {
+    let (fixture, _, target, _) = admission_fixture(AdmissionKind::Media);
+    let runtime = fixture.workflow.core.clone();
+    let events = fixture.workflow.host.engine().stream().subscribe();
+    let pool = hold_pool(&fixture);
+    let cancel = Arc::new(Mutex::new(None::<Arc<crate::cancel::CancelToken>>));
+    let token = cancel.clone();
+    let observed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let saw = observed.clone();
+    let changed = runtime.clone();
+    runtime.set_incoming_stage_hook_for_testing(move |stage| {
+        if stage == c::testing::IncomingStage::PolicyMediaPrepared {
+            token.lock().unwrap().as_ref().unwrap().trigger();
+            // Preparation has released State; change the actual backend guard.
+            changed.adapter_pause(true).unwrap();
+            saw.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    });
+    let job = admit(target, AdmissionKind::Media).unwrap();
+    *cancel.lock().unwrap() = Some(job.handle().cancel.clone());
+    drop(pool);
+    let outcome = finished(&events, job.handle().id);
+    runtime.set_incoming_stage_hook_for_testing(|_| {});
+    fixture.workflow.host.close().unwrap();
+    let replacement = super::fixture();
+    let value = job.result();
+    replacement.workflow.host.close().unwrap();
+    assert!(observed.load(std::sync::atomic::Ordering::SeqCst) && job.handle().cancel.requested());
+    assert!(matches!(outcome, JobOutcome::Failed { .. }));
+    assert_eq!(
+        value,
+        Err(CoreError::CloudConnection {
+            failure: crate::cloud_connection::CloudConnectionFailure::AuthorityChanged,
+        })
+    );
+}
+
+#[test]
+fn native_admission_job_send_limit_clears_retrying_and_retains_completed_no_call() {
+    let (fixture, _, target, original) = admission_fixture(AdmissionKind::NoCall);
+    let runtime = fixture.workflow.core.clone();
+    let sdk = original.unwrap();
+    let seen = runtime
+        .adapter_snapshot()
+        .unwrap()
+        .entities
+        .into_iter()
+        .map(|entity| entity.name)
+        .collect();
+    runtime
+        .exchange_fetch_completed(&sdk, w::FetchPhase::BeforeSend, &seen)
+        .unwrap();
+    let issued: Vec<_> = (0..8)
+        .map(|_| runtime.start_manual_send_call(&sdk).unwrap().unwrap().id)
+        .collect();
+    runtime.adapter_sdk_retrying(&sdk, true).unwrap();
+    let was_retrying = runtime.sdk_retrying_for_testing();
+    let events = fixture.workflow.host.engine().stream().subscribe();
+    let pool = hold_pool(&fixture);
+    let cancel = Arc::new(Mutex::new(None::<Arc<crate::cancel::CancelToken>>));
+    let token = cancel.clone();
+    let observed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let saw = observed.clone();
+    runtime.set_incoming_stage_hook_for_testing(move |stage| {
+        if stage == c::testing::IncomingStage::PolicySendRetryCleared {
+            saw.store(true, std::sync::atomic::Ordering::SeqCst);
+            token.lock().unwrap().as_ref().unwrap().trigger();
+        }
+    });
+    let job = admit(target, AdmissionKind::NoCall).unwrap();
+    let pending = job.value();
+    *cancel.lock().unwrap() = Some(job.handle().cancel.clone());
+    drop(pool);
+    let outcome = finished(&events, job.handle().id);
+    let retrying = runtime.sdk_retrying_for_testing();
+    runtime.set_incoming_stage_hook_for_testing(|_| {});
+    fixture.workflow.host.close().unwrap();
+    assert_eq!(issued, (1..=8).collect::<Vec<_>>());
+    assert_eq!(pending, Ok(None));
+    assert!(was_retrying && !retrying && observed.load(std::sync::atomic::Ordering::SeqCst));
+    assert!(job.handle().cancel.requested());
+    assert_eq!(outcome, JobOutcome::Succeeded);
+    assert_eq!(job.value(), Ok(Some(AdmissionValue::Send(None))));
+}
+
+#[test]
+fn native_admission_job_resume_media_send_retains_pending_effect_through_later_state_acquisition() {
+    let (fixture, policy, _, original) = admission_fixture(AdmissionKind::Send);
+    let sdk = original.unwrap();
+    let command = commands(
+        policy
+            .clone()
+            .input(CloudPolicyEvent::Settings {
+                settings: CloudPolicyDeviceSettings {
+                    enabled: true,
+                    paused: false,
+                    automatic: true,
+                    media: true,
+                },
+            })
+            .unwrap(),
+    )
+    .into_iter()
+    .find(|command| matches!(command.action, CloudPolicyAction::ResumeMedia))
+    .unwrap();
+    let execution = policy.prepare_execution(command.handle).unwrap().unwrap();
+    let runtime = fixture.workflow.core.clone();
+    let events = fixture.workflow.host.engine().stream().subscribe();
+    let media = execution.clone().start_begin_media().unwrap();
+    let media_outcome = finished(&events, media.handle.id);
+    let _ = fixture.workflow.take_pending_updates(sdk.clone()).unwrap();
+    let pool = hold_pool(&fixture);
+    let cancel = Arc::new(Mutex::new(None::<Arc<crate::cancel::CancelToken>>));
+    let token = cancel.clone();
+    let observed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let saw = observed.clone();
+    runtime.set_incoming_stage_hook_for_testing(move |stage| {
+        if stage == c::testing::IncomingStage::PolicyPendingUpdated {
+            saw.store(true, std::sync::atomic::Ordering::SeqCst);
+            token.lock().unwrap().as_ref().unwrap().trigger();
+        }
+    });
+    let send = execution.start_begin_send().unwrap();
+    *cancel.lock().unwrap() = Some(send.handle.cancel.clone());
+    drop(pool);
+    let send_outcome = finished(&events, send.handle.id);
+    runtime.set_incoming_stage_hook_for_testing(|_| {});
+    let pending = fixture.workflow.take_pending_updates(sdk).unwrap();
+    fixture.workflow.host.close().unwrap();
+    assert_eq!(media_outcome, JobOutcome::Succeeded);
+    assert_eq!(media.result.result(), Ok(Some(true)));
+    assert!(observed.load(std::sync::atomic::Ordering::SeqCst) && send.handle.cancel.requested());
+    assert!(!pending.is_empty());
+    assert_eq!(send_outcome, JobOutcome::Succeeded);
+    assert_eq!(send.result.result(), Ok(Some(CloudPolicySendCall { call: Some(1) })));
+}
+
+#[test]
+fn native_admission_jobs_keep_exact_action_and_scope_errors_after_close() {
+    for kind in [AdmissionKind::Media, AdmissionKind::Fetch, AdmissionKind::Send] {
+        let (fixture, _, execution) = start();
+        execution.register_sdk().unwrap();
+        let expected = match kind {
+            AdmissionKind::Media => execution.begin_media().unwrap_err(),
+            AdmissionKind::Fetch => execution.begin_fetch(Vec::new()).unwrap_err(),
+            AdmissionKind::Send => execution.begin_send().unwrap_err(),
+            _ => unreachable!(),
+        };
+        let events = fixture.workflow.host.engine().stream().subscribe();
+        let job = admit(
+            AdmissionTarget {
+                execution,
+                zones: Vec::new(),
+            },
+            kind,
+        )
+        .unwrap();
+        let outcome = finished(&events, job.handle().id);
+        fixture.workflow.host.close().unwrap();
+        let replacement = super::fixture();
+        let value = job.result();
+        replacement.workflow.host.close().unwrap();
+        assert!(matches!(outcome, JobOutcome::Failed { .. }));
+        assert_eq!(value, Err(expected));
     }
 }

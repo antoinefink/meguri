@@ -74,11 +74,23 @@ struct CoreCloudPolicyExecution: Sendable {
     }
     func beginMedia() async throws -> Bool {
         let raw = self.raw
-        return try await CoreCloudPolicyService.call(.cloudPolicyExecutionBeginMedia) { try raw.beginMedia() }
+        return try await CoreCloudPolicyService.runOrdered(
+            .cloudPolicyExecutionStartBeginMedia, result: .cloudPolicyMediaResult,
+            retainResourceResultOnTrackingFailure: true
+        ) { [raw] in
+            let started = try raw.startBeginMedia()
+            return CloudPolicyJobValue(handle: started.handle, read: { try started.result.result() })
+        }
     }
     func beginFetch(zones: [String]) async throws -> UInt64 {
         let raw = self.raw
-        return try await CoreCloudPolicyService.call(.cloudPolicyExecutionBeginFetch) { [raw] in try raw.beginFetch(zones: zones) }
+        return try await CoreCloudPolicyService.runOrdered(
+            .cloudPolicyExecutionStartBeginFetch, result: .cloudPolicyFetchResult,
+            retainResourceResultOnTrackingFailure: true
+        ) { [raw] in
+            let started = try raw.startBeginFetch(zones: zones)
+            return CloudPolicyJobValue(handle: started.handle, read: { try started.result.result() })
+        }
     }
     func validateControl() async throws {
         let raw = self.raw
@@ -90,7 +102,14 @@ struct CoreCloudPolicyExecution: Sendable {
     }
     func beginSend() async throws -> UInt64? {
         let raw = self.raw
-        return try await CoreCloudPolicyService.call(.cloudPolicyExecutionBeginSend) { [raw] in try raw.beginSend() }
+        let value: MeguriCoreBindings.CloudPolicySendCall = try await CoreCloudPolicyService.runOrdered(
+            .cloudPolicyExecutionStartBeginSend, result: .cloudPolicySendResult,
+            retainResourceResultOnTrackingFailure: true
+        ) { [raw] in
+            let started = try raw.startBeginSend()
+            return CloudPolicyJobValue(handle: started.handle, read: { try started.result.result() })
+        }
+        return value.call
     }
 }
 
