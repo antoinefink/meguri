@@ -298,6 +298,14 @@ extension EventTests {
             let (_, execution) = try await requiredCompletionExecution(fixture)
             _ = try await execution.reportInvocation(zones: [.collection], kind: .fetch)
             let raw = execution.raw
+            let endedFacts = MeguriCoreBindings.CloudPolicyOperationFacts(zones: [.collection], kind: .fetch,
+                started: false, failed: false, code: nil, retryAfterMs: nil, saved: 0, appCancelled: false)
+            let baseline = try await MaintenanceLane.shared.call(.cloudPolicyExecutionOperationActivity) {
+                try raw.operationActivity(facts: endedFacts)
+            }
+            let baselineActions = try policyJobActions(baseline)
+            try #require(baselineActions == [])
+            _ = try await execution.reportInvocation(zones: [.collection], kind: .fetch)
             let rawPolicy = try await rawJobPolicy()
             var holders: [CoreJob] = []
             do {
@@ -327,8 +335,7 @@ extension EventTests {
                         return try Jobs.track(admitted)
                     }, requiredCompletion: true
                 ) {
-                    let job = try raw.startReportCompletion(facts: .init(zones: [.collection], kind: .fetch,
-                        started: false, failed: false, code: nil, retryAfterMs: nil, saved: 0, appCancelled: false))
+                    let job = try raw.startReportCompletion(facts: endedFacts)
                     return CloudPolicyJobValue(handle: job.handle, read: {
                         read.withLock { $0 = true }
                         return try job.result.result()
@@ -355,7 +362,7 @@ extension EventTests {
                 let admitted = try #require(handle.withLock { $0 })
                 #expect(try await CoreBridge.CancelToken(raw: admitted.cancel).isCancelled() == listenerFailure)
                 #expect(read.withLock { $0 } && returned.withLock { $0 })
-                #expect(!(try policyJobActions(output)).isEmpty)
+                #expect(try policyJobActions(output) == baselineActions)
                 // A third acquisition detects an unreleased final permit.
                 _ = try await successor.status()
             } catch {

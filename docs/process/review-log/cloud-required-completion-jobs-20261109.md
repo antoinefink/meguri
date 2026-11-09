@@ -45,3 +45,12 @@ nonempty commands from quiet Ended while automatic sync is off. Source review
 confirms Commands([]) is the exact original result. A strict synchronous
 baseline and rearmed Started proof will correct that expectation, preserving
 every drain, cancellation and ordering check. The native failure is retained.
+
+Filtered export `85843` makes only that fixture correction. Independent Swift
+review finds no P0–P2 issues. Native `88001` passes all five selected tests,
+including both listener cases of the corrected order proof and the ordinary
+maintenance and connection failure-precedence checks. The other passing
+checks from `74919` remain applicable: production source is unchanged.
+Core lint `86723` passes all four checks. Privacy `90219` passes both files;
+similarity `89847` passes all 21 in-scope files, with three excluded files and
+no allowlist use. The full original batch gate remains pending.
