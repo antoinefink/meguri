@@ -18,3 +18,7 @@ The new replay-specific selftests also remain to be run.
 Independent reports cover the initial proof and both repair deltas. Native
 identifier mapping is unverified. The old package failure stays enabled until
 equivalent native proof passes. No unit, integration or release acceptance is claimed.
+
+Selftest `89436`: twelve checks passed. Reviewed export `88808` adds
+`import AppModel`. Build `90816` stopped at test line 93; native execution
+remains pending. Run `90227` could not reach Docker. Failures are retained.

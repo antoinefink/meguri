@@ -1407,7 +1407,7 @@ EOF
   called "^fake xcodebuild-test mac frames=unset -only-testing:MeguriUITests/AgentDriverTests/testResizeKeepsTheRunningAppAndItsState\$"
   mg mac-ui --suite resize
   [ "$status" -eq 2 ]
-  [[ "$(field '.failures[0].message')" == *"(test-hooks, agent-driver, a11y, drive:<script>)"* ]]
+  [[ "$(field '.failures[0].message')" == *"(test-hooks, agent-driver, a11y, replay-native, drive:<script>)"* ]]
 }
 
 @test "too few frames for a marked Mac step is an error" {

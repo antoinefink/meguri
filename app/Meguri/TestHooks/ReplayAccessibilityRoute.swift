@@ -1,4 +1,5 @@
 #if DEBUG && MEGURI_TEST_HOOKS && os(macOS)
+import AppModel
 import CardRendering
 import CoreBridge
 import Foundation
