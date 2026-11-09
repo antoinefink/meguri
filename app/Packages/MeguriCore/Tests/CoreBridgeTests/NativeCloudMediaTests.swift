@@ -403,6 +403,62 @@ private final class NativeMediaReadFailure: Error {}
 #if DEBUG
 private final class NativeMediaPendingUpdateFailure: Error {}
 
+private struct NativeMediaPreparationProbe: CloudMediaTransport {
+    let native: NativeCloudMediaTransport
+    let observe: @Sendable () -> Void
+    func prepare(_ request: CloudMediaRequest) throws -> any CloudPreparedMediaRead {
+        observe()
+        return try native.prepare(request)
+    }
+}
+
+// Retain only work and bytes issued by the real Core. An original collection
+// record in the durable inbox requests the now-present blob for download.
+private func prepareDebugMediaDownload(_ fixture: CloudKitBridgeFixture,
+                                      policy: CoreCloudPolicyService,
+                                      media: CoreCloudMediaService, sdk: String) async throws {
+    guard case .commands(let commands) = try await policy.input(.settings(.init(
+        enabled: true, paused: false, automatic: true, media: true))) else {
+        throw CloudMediaFailure.missingReply
+    }
+    let resume = try #require(commands.first { if case .resumeMedia = $0.action { true } else { false } })
+    let permit = try #require(try await policy.prepareExecution(resume))
+    try #require(try await permit.beginMedia())
+    let root = try #require(try await media.nextWork(sdk: sdk))
+    try #require(root.request == .root)
+    try await media.reply(root.handle, result: .record(name: "root", recordType: "MGMediaRoot",
+        envelope: Data([0x08, 0x01, 0x12, 0x20]) + Data(repeating: 47, count: 32), asset: nil))
+
+    let before = Set(try await fixture.core.trackingSendables().keys)
+    _ = try await CoreMediaService().addMedia(name: "pending.asset", bytes: [7, 1, 5, 3, 9])
+    let read = try #require(try await media.nextWork(sdk: sdk))
+    switch read.request {
+    case .read:
+        try await media.reply(read.handle, result: .unknownItem)
+    case .reads(let names):
+        try #require(names.count == 1)
+        try await media.reply(read.handle, result: .blobReads(names.map { .unknownItem(name: $0) }))
+    default: throw CloudMediaFailure.missingReply
+    }
+    let upload = try #require(try await media.nextWork(sdk: sdk))
+    guard case .upload(let blob, _, _) = upload.request else { throw CloudMediaFailure.missingReply }
+    try await media.queueUpload(upload.handle)
+    for update in try await fixture.core.takePendingUpdates(sdk: sdk) {
+        try await fixture.core.updateApplied(sdk: sdk, id: update.id, added: Array(update.adds.keys))
+    }
+    let batch = try #require(try await fixture.core.buildBatch(sdk: sdk, zone: "meguri-media", pending: [blob: .save]))
+    try #require(batch.saves.count == 1 && batch.saves.first?.name == blob)
+    _ = try await fixture.core.sent(sdk: sdk, batchID: batch.id, saved: batch.saves,
+        failed: [], deleted: [], failedDeletes: [], batchCount: 1)
+    try await fixture.core.handlerReturned(sdk: sdk)
+
+    let pending = try await fixture.core.trackingSendables().filter { !before.contains($0.key) && $0.key != blob }
+    try #require(pending.count == 1)
+    let collection = try #require(try await fixture.core.buildBatch(sdk: sdk, zone: fixture.zone, pending: pending))
+    try #require(collection.saves.count == 1)
+    try await fixture.core.fetched(sdk: sdk, zone: fixture.zone, records: collection.saves, deleted: [])
+}
+
 private struct NativeEventWaitDelegate: CloudKitEngineDelegate {
     var returnedGate: CloudCallbackGate?
     init(returnedGate: CloudCallbackGate? = nil) { self.returnedGate = returnedGate }
@@ -1223,6 +1279,58 @@ extension EventTests {
                 #expect(diagnostics.latestValue == "mediaRequest=next mediaStage=coreNext mediaCategory=coreRejected")
                 #expect(queue.operations.withLock { $0.isEmpty })
                 #expect(await fixture.factory.engines().isEmpty)
+            }
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func debugMediaDownloadsBlockedRejectionHasFixedEvidenceWithoutSDKCalls(download: Bool) async throws {
+        let diagnostics = DebugCloudDiagnostics.Recorder()
+        try await DebugCloudDiagnostics.$mediaRecorder.withValue(diagnostics) {
+            try await withNativePolicyFixture { fixture in
+                let (policy, _) = try await nativePolicy(fixture)
+                let engine = try await fixture.engine()
+                let sdk = engine.instanceID
+                let calls = engine.acceptedNetworkCalls.value
+                let media = try await fixture.core.media()
+                if download { try await prepareDebugMediaDownload(fixture, policy: policy, media: media, sdk: sdk) }
+
+                let queue = NativeOwnCapturingQueue()
+                let prepared = Mutex(false)
+                let selectedOnce = Mutex(false)
+                let staging = try CloudMediaStaging(directory: fixture.directory.appendingPathComponent("debug-core"), available: { UInt64.max })
+                let transport = NativeMediaPreparationProbe(native: NativeCloudMediaTransport(queue: queue, staging: staging),
+                    observe: { prepared.withLock { $0 = true } })
+                let executor = CloudMediaExecutor(core: media, sdk: sdk, transport: transport, nextWorkForTesting: {
+                    let work = try await media.nextWork(sdk: sdk)
+                    if download {
+                        let selected = try #require(work)
+                        guard case .download = selected.request else { throw CloudMediaFailure.missingReply }
+                    } else { try #require(work == nil) }
+                    try #require(selectedOnce.withLock { let previous = $0; $0 = true; return !previous })
+                    try await fixture.core.retireSDK(sdk, policyStop: false)
+                    return work
+                })
+                // Replace stale evidence as well as populating an empty recorder.
+                if download {
+                    diagnostics.retainMedia(.init(request: .reads, stage: .recordCallback, category: .duplicateCallback))
+                }
+                var propagated: BridgeError?
+                do { _ = try await executor.runNext(); Issue.record("Core accepted a retired SDK") }
+                catch { propagated = try #require(error as? BridgeError) }
+                let failure = try #require(propagated)
+                // downloads_blocked maps CoreError.Unavailable to this exact
+                // BridgeError, including its reason; it is not CloudPolicy.
+                guard case .unavailable = failure else { Issue.record("Core error mapping changed"); return }
+                do { _ = try await media.downloadsBlocked(sdk: sdk); Issue.record("Direct Core call accepted a retired SDK") }
+                catch { #expect(error as? BridgeError == failure) }
+                let kind = download ? "download" : "next"
+                #expect(diagnostics.latestValue == "mediaRequest=\(kind) mediaStage=coreAdmission mediaCategory=coreRejected")
+                #expect(selectedOnce.withLock { $0 })
+                #expect(!prepared.withLock { $0 })
+                #expect(queue.operations.withLock { $0.isEmpty })
+                #expect(engine.acceptedNetworkCalls.value == calls)
+                #expect(await fixture.factory.engines().count == 1)
             }
         }
     }

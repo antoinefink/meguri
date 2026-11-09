@@ -209,11 +209,21 @@ public actor CloudMediaExecutor {
     private var prepared: (any CloudPreparedMediaRead)?
     private var stopping = false
     private var queued: Set<String> = []
+    #if DEBUG
+    private var nextWorkForTesting: (@Sendable () async throws -> CloudMediaIssuedWork?)?
+    #endif
     public func beginRound() { queued.removeAll() }
 
     public init(core: CoreCloudMediaService, sdk: String, transport: any CloudMediaTransport) {
         self.core = core; self.sdk = sdk; self.transport = transport
     }
+    #if DEBUG
+    init(core: CoreCloudMediaService, sdk: String, transport: any CloudMediaTransport,
+         nextWorkForTesting: @escaping @Sendable () async throws -> CloudMediaIssuedWork?) {
+        self.core = core; self.sdk = sdk; self.transport = transport
+        self.nextWorkForTesting = nextWorkForTesting
+    }
+    #endif
     public func runNext(metadataOnly: Bool = false) async throws -> CloudMediaProgress {
         guard !stopping else { throw CloudMediaFailure.closed }
         guard active == nil else { throw CloudMediaFailure.busy }
@@ -233,7 +243,12 @@ public actor CloudMediaExecutor {
     private func execute(metadataOnly: Bool) async throws -> CloudMediaProgress {
         let selected: CloudMediaIssuedWork?
         do {
+            #if DEBUG
+            if let nextWorkForTesting { selected = try await nextWorkForTesting() }
+            else { selected = try await core.nextWork(sdk: sdk) }
+            #else
             selected = try await core.nextWork(sdk: sdk)
+            #endif
         } catch let error as BridgeError where error == .cancelled && Task.isCancelled {
             // Core has explicitly cancelled and drained before effects. Keep
             // the executor's existing caller/owned cancellation classification.
@@ -246,7 +261,13 @@ public actor CloudMediaExecutor {
         }
         guard let work = selected else {
             if metadataOnly { return .idle }
-            return try await core.downloadsBlocked(sdk: sdk) ? .waitingForCollectionDrain : .idle
+            do { return try await core.downloadsBlocked(sdk: sdk) ? .waitingForCollectionDrain : .idle }
+            catch {
+                #if DEBUG
+                DebugCloudDiagnostics.recordMedia(stage: .coreAdmission, category: .local(error))
+                #endif
+                throw error
+            }
         }
         try Task.checkCancellation()
         guard !stopping else { throw CloudMediaFailure.closed }
@@ -275,7 +296,15 @@ public actor CloudMediaExecutor {
             }
             return .engineSendRequired
         }
-        if case .download = work.request, try await core.downloadsBlocked(sdk: sdk) { return .waitingForCollectionDrain }
+        if case .download = work.request {
+            do { if try await core.downloadsBlocked(sdk: sdk) { return .waitingForCollectionDrain } }
+            catch {
+                #if DEBUG
+                DebugCloudDiagnostics.recordMedia(work.request, stage: .coreAdmission, category: .local(error))
+                #endif
+                throw error
+            }
+        }
         let operation: any CloudPreparedMediaRead
         do { operation = try transport.prepare(work.request) }
         catch {

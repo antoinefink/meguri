@@ -15,3 +15,9 @@ two downloadsBlocked awaits can fail without a tuple after nextWork returns.
 Both need Core-admission evidence and a focused rejection proof. Other reviewed
 privacy, callback, staging and result behavior has no P0-P2 finding. Patch
 privacy passes. No phone build or sync acceptance is claimed here.
+
+Export `43366` records both download-block failures. Independent review closes
+the P2 without another source finding. Native `48676` compiles and runs four
+selected checks: three pass. The new no-work case passes; its download case
+stops in setup because the original media batch is absent. A test-fixture
+repair is pending. No failing result is accepted or retried unchanged.
