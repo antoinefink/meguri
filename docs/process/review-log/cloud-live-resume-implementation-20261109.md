@@ -106,3 +106,14 @@ validation, assertions and deadlines are unchanged. Focused core check
 with the seven unchanged passing cases in `87740`, all eight Rust resume cases
 have passing focused evidence. Native checks and the original batch gate remain
 pending; this is not unit acceptance.
+
+## Native integration
+
+AppModel check `20261109T183616Z-98370` stopped at a file-only test helper.
+Filtered fixer `20261109T183827Z-857` exposes the existing receipt helper only
+within AppModelTests; its parser, callers and assertions are unchanged.
+Independent review: `build/cloud-live-resume-swift-access-review-20261109.md`.
+Native check `20261109T184031Z-2720` passes all 12 selected checks with no skips.
+These cover rendered media references, review head updates, settings replay,
+active and completed-suspend resume, held SDK results and the retained retry case.
+The coherent integration gate and real signed device exchange remain pending.

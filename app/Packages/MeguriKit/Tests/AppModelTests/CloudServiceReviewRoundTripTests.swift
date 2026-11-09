@@ -186,7 +186,7 @@ private nonisolated func serviceIDKey(_ id: Int64) -> Data {
     let bits = UInt64(bitPattern: id)
     return Data((0..<8).reversed().map { UInt8(truncatingIfNeeded: bits >> ($0 * 8)) })
 }
-private extension ServiceSavedReceipt {
+extension ServiceSavedReceipt {
     // K5.1 canonical prefix only: format=1, kind, canonical key. This labels
     // actual server receipts; row equality comes solely from the reader above.
     func matchesEntity(kind: UInt8, key: Data) -> Bool {
