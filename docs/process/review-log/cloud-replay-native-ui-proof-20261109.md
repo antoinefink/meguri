@@ -25,3 +25,9 @@ remains pending. Run `90227` could not reach Docker. Failures are retained.
 
 Export `92467` renames the stage-local dictionary to `stageReport`.
 Assertions and timing limits are unchanged; native execution is pending.
+
+Run `20261109T205036Z-93192` builds without warnings and executes one native
+test, which fails. Four links have the expected labels and nonempty frames;
+each native identifier is empty. The checker reports four missing identifiers.
+Later stages did not execute. Independent review confirms the mapping gap.
+Keep both native checks enabled; no acceptance or permission failure is inferred.
