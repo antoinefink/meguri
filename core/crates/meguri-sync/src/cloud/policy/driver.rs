@@ -221,6 +221,7 @@ pub struct PolicyWork {
     effected: Arc<std::sync::atomic::AtomicBool>,
     rejected: Arc<std::sync::atomic::AtomicBool>,
     owner_check: Option<Arc<dyn Fn() -> Result<(), meguri_engine::EngineError> + Send + Sync>>,
+    compact_owner_check: Option<Arc<dyn Fn() -> Result<(), meguri_engine::EngineError> + Send + Sync>>,
 }
 impl PolicyWork {
     pub fn new(cancel: &meguri_engine::CancelToken) -> Self {
@@ -252,6 +253,15 @@ impl PolicyWork {
         self.owner_check = Some(check);
         self
     }
+    /// Only bounded original facts: no Host lock, provider, I/O or callback to
+    /// native. Unlike owner_check, this may run beneath Runtime/tracking.
+    pub fn with_compact_owner_check(
+        mut self,
+        check: Arc<dyn Fn() -> Result<(), meguri_engine::EngineError> + Send + Sync>,
+    ) -> Self {
+        self.compact_owner_check = Some(check);
+        self
+    }
     fn after_driver_acquisition(&self) -> Result<(), RuntimeError> {
         self.check()?;
         if !self.effected.load(std::sync::atomic::Ordering::SeqCst)
@@ -274,6 +284,9 @@ impl PolicyWork {
                 self.generation_rejected
                     .store(true, std::sync::atomic::Ordering::SeqCst);
                 return Err(RuntimeError::StaleIncarnation);
+            }
+            if let Some(check) = &self.compact_owner_check {
+                check()?;
             }
         }
         Ok(())

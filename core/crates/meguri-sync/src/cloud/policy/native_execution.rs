@@ -46,6 +46,39 @@ impl Driver {
         Ok(self.runtime.next_asset_read(collection, pass)?)
     }
 
+    pub fn next_native_asset_read_with_work(
+        &self,
+        command: &Command,
+        collection: &Collection,
+        pass: &AssetReadPass,
+        work: &mut PolicyWork,
+    ) -> Result<Option<AssetReadRequest>, DriverError> {
+        self.validate_with_work(command, work)?;
+        let mut command_error = None;
+        let result = self
+            .runtime
+            .next_asset_read_checked(collection, pass, work, |retained| {
+                // validate_with_work checked all command/Runtime facts before the
+                // wait. with_scan rechecks the original guard and SDK under State.
+                // For RetryAssetEntries there is no automatic-setting or quiet
+                // proof: the committed policy guard completes the same proof here.
+                // Never call validate_native_execution (or take Driver) under State.
+                let check = if retained != Some(command) {
+                    Err(DriverError::StaleCommand)
+                } else {
+                    self.committed_native_validation().validate_policy(command)
+                };
+                check.map_err(|error| {
+                    command_error = Some(error);
+                    RuntimeError::StaleIncarnation
+                })
+            });
+        if let Some(error) = command_error {
+            return Err(error);
+        }
+        Ok(result?)
+    }
+
     /// Same synchronous queue contract as native control admission. Validation
     /// releases Driver authority before Runtime checks the exact selection and
     /// invokes foreign enqueue. Neither lock spans that callback or reply wait.

@@ -114,7 +114,7 @@ typed_result!(
 );
 
 impl CloudPolicy {
-    pub(super) fn start_policy<T: Send + 'static>(
+    pub(crate) fn start_policy<T: Send + 'static>(
         self: Arc<Self>,
         name: &'static str,
         work: impl FnOnce(Arc<Self>, &mut p::PolicyWork) -> Result<T, CoreError> + Send + 'static,

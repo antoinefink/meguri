@@ -95,6 +95,16 @@ pub enum IncomingStage {
     // Outside State/tracking ownership, before FFI activity-guard acquisition.
     AssetReadPassCreated,
     AssetReadPassTrackingContended,
+    // After the original pass guard is retained, outside State/tracking.
+    AssetReadNextGuarded,
+    AssetReadNextTrackingContended,
+    // Selection boundaries under State/tracking: atomics/barriers only.
+    AssetReadNextScan,
+    AssetReadNextScanned,
+    AssetReadNextEffect,
+    AssetReadNextSelected,
+    // After State/tracking release, before FFI stores the actual result.
+    AssetReadNextReturned,
     AdoptionIsolationPublished,
     AssetReadPrepared,
     AssetReadFinishing,

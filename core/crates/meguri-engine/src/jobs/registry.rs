@@ -87,7 +87,9 @@ impl OriginalResourceAuthority {
 
     // Only bounded atomic loads of original facts, including at registration
     // under the registry mutex. No owner resolution or executor admission lock.
-    fn is_live(&self) -> bool {
+    /// Bounded original Host/collection facts, also for ordinary asset selection.
+    /// This grants no resource mode or registry admission.
+    pub fn is_live(&self) -> bool {
         self.same_collection
             && self.host.is_active()
             && self.collection.generation() == self.collection.current_generation()

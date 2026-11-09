@@ -203,26 +203,53 @@ impl Runtime {
         collection: &Collection,
         pass: &AssetReadPass,
     ) -> Result<Option<AssetReadRequest>, RuntimeError> {
-        let guard = self
-            .state()
-            .incoming
-            .asset_passes
-            .get(&pass.id)
-            .filter(|p| p.pass == *pass)
-            .map(|p| p.guard.clone())
-            .ok_or(RuntimeError::StaleIncarnation)?;
-        self.with_scan(&guard, collection, |s| {
+        self.next_asset_read_with_work(collection, pass, &mut crate::cloud::policy::PolicyWork::default())
+    }
+
+    pub fn next_asset_read_with_work(
+        &self,
+        collection: &Collection,
+        pass: &AssetReadPass,
+        work: &mut crate::cloud::policy::PolicyWork,
+    ) -> Result<Option<AssetReadRequest>, RuntimeError> {
+        self.next_asset_read_checked(collection, pass, work, |_| Ok(()))
+    }
+
+    // The extra check compares only committed policy facts and the exact pass
+    // command. Never acquire Driver, Host or provider ownership in this closure.
+    pub(crate) fn next_asset_read_checked(
+        &self,
+        collection: &Collection,
+        pass: &AssetReadPass,
+        work: &mut crate::cloud::policy::PolicyWork,
+        mut check_command: impl FnMut(Option<&crate::cloud::policy::Command>) -> Result<(), RuntimeError>,
+    ) -> Result<Option<AssetReadRequest>, RuntimeError> {
+        let guard = {
+            let s = self.state();
+            work.check()?;
+            let p = s.incoming.asset_passes.get(&pass.id).filter(|p| p.pass == *pass);
+            check_command(p.and_then(|p| p.command.as_ref()))?;
+            let p = p.ok_or(RuntimeError::StaleIncarnation)?;
+            p.guard.clone()
+        };
+        #[cfg(feature = "test-hooks")]
+        self.incoming_hooks
+            .hit(super::super::testing::IncomingStage::AssetReadNextGuarded);
+        #[cfg(feature = "test-hooks")]
+        if matches!(TRACKING_ACCESS.try_lock(), Err(std::sync::TryLockError::WouldBlock)) {
+            self.incoming_hooks
+                .hit(super::super::testing::IncomingStage::AssetReadNextTrackingContended);
+        }
+        let result = self.with_scan(&guard, collection, |s| {
+            work.check()?;
             Self::sdk_locked(s, &pass.sdk)?;
             if s.actions.handler.is_some() || s.tracking_stopped {
                 return Err(Error::InvalidData.into());
             }
             Self::asset_read_accounting_clear(s, &guard)?;
-            let p = s
-                .incoming
-                .asset_passes
-                .get(&pass.id)
-                .filter(|p| p.pass == *pass)
-                .ok_or(RuntimeError::StaleIncarnation)?;
+            let p = s.incoming.asset_passes.get(&pass.id).filter(|p| p.pass == *pass);
+            check_command(p.and_then(|p| p.command.as_ref()))?;
+            let p = p.ok_or(RuntimeError::StaleIncarnation)?;
             if s.incoming.asset_reads.values().any(|r| r.pass == pass.id) {
                 return Err(Error::InvalidData.into());
             }
@@ -233,6 +260,9 @@ impl Runtime {
                 .filter(|r| r.sdk == pass.sdk && r.guard == guard)
                 .map(|r| r.entry.id)
                 .collect();
+            #[cfg(feature = "test-hooks")]
+            self.incoming_hooks
+                .hit(super::super::testing::IncomingStage::AssetReadNextScan);
             let entry = s.store.as_ref().ok_or(Error::Database)?.select_asset_read(
                 guard.binding,
                 pass.kind,
@@ -240,21 +270,33 @@ impl Runtime {
                 &p.members,
                 &excluded,
             )?;
+            #[cfg(feature = "test-hooks")]
+            self.incoming_hooks
+                .hit(super::super::testing::IncomingStage::AssetReadNextScanned);
+            work.check()?;
+            check_command(p.command.as_ref())?;
             let Some(entry) = entry else {
                 let through = p.members.last_key_value().map_or(0, |(id, _)| *id);
-                s.incoming
-                    .asset_passes
-                    .get_mut(&pass.id)
-                    .ok_or(Error::InvalidData)?
-                    .after = through;
+                if p.after != through {
+                    work.effect()?;
+                    s.incoming
+                        .asset_passes
+                        .get_mut(&pass.id)
+                        .ok_or(Error::InvalidData)?
+                        .after = through;
+                }
                 return Ok(None);
             };
             let command = p.command.clone();
+            work.effect()?;
             s.incoming
                 .asset_passes
                 .get_mut(&pass.id)
                 .ok_or(Error::InvalidData)?
                 .after = entry.id;
+            #[cfg(feature = "test-hooks")]
+            self.incoming_hooks
+                .hit(super::super::testing::IncomingStage::AssetReadNextEffect);
             let zone = collection_zone(
                 s.bound
                     .as_ref()
@@ -283,8 +325,20 @@ impl Runtime {
                     phase: ReadPhase::Selected,
                 },
             );
+            #[cfg(feature = "test-hooks")]
+            self.incoming_hooks
+                .hit(super::super::testing::IncomingStage::AssetReadNextSelected);
             Ok(Some(request))
-        })
+        });
+        #[cfg(feature = "test-hooks")]
+        self.incoming_hooks
+            .hit(super::super::testing::IncomingStage::AssetReadNextReturned);
+        result
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub fn exhaust_asset_read_counter_for_testing(&self) {
+        self.state().incoming.asset_read_next = u64::MAX;
     }
 
     fn asset_read_accounting_clear(s: &State, guard: &ScanGuard) -> Result<(), RuntimeError> {

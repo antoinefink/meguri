@@ -129,7 +129,7 @@ threads-required = "num-test-threads"
 
 # Retained native admission proofs hold real Driver/Runtime locks and bound starts.
 [[profile.default.overrides]]
-filter = 'package(meguri-ffi) and test(/native_admission_job/)'
+filter = 'package(meguri-ffi) and (test(/native_admission_job/) or test(/asset_next_/))'
 threads-required = "num-test-threads"
 
 # Required original-SDK completion witnesses retain the existing real-lock and

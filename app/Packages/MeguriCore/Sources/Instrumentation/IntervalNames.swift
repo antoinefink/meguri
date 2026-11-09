@@ -426,6 +426,8 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let cloudZoneDeletionPassCompleteDeletion = BridgeCall("CloudZoneDeletionPass.complete_deletion")
     public static let cloudZoneDeletionPassFinish = BridgeCall("CloudZoneDeletionPass.finish")
     public static let cloudAssetReadPassNext = BridgeCall("CloudAssetReadPass.next")
+    public static let cloudAssetReadPassStartNext = BridgeCall("CloudAssetReadPass.start_next")
+    public static let cloudAssetReadNextResult = BridgeCall("CloudAssetReadNextResult.result")
     public static let cloudAssetReadPassSubmit = BridgeCall("CloudAssetReadPass.submit")
     public static let cloudAssetReadPassComplete = BridgeCall("CloudAssetReadPass.complete")
     public static let cloudAssetReadPassCancel = BridgeCall("CloudAssetReadPass.cancel")
@@ -522,7 +524,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         testCloudZoneDeletionFixture, testCloudZoneDeletionRows,
         cloudPolicyExecutionBeginCleanupPass, cloudCleanupPassSubmitInventory, cloudCleanupPassCompleteInventory, cloudCleanupPassFinish,
         cloudPolicyExecutionBeginZoneDeletionPass, cloudZoneDeletionPassActiveTarget, cloudZoneDeletionPassSubmitRead, cloudZoneDeletionPassCompleteRead, cloudZoneDeletionPassSubmitDeletion, cloudZoneDeletionPassCompleteDeletion, cloudZoneDeletionPassFinish,
-        cloudWorkflowBeginFirstAssetReadPass, cloudPolicyExecutionBeginAssetReadPass, cloudAssetReadPassNext, cloudAssetReadPassSubmit, cloudAssetReadPassComplete, cloudAssetReadPassCancel, cloudAssetReadPassFinish, cloudAssetReadPassOperationActivity,
+        cloudWorkflowBeginFirstAssetReadPass, cloudPolicyExecutionBeginAssetReadPass, cloudAssetReadPassNext, cloudAssetReadPassStartNext, cloudAssetReadNextResult, cloudAssetReadPassSubmit, cloudAssetReadPassComplete, cloudAssetReadPassCancel, cloudAssetReadPassFinish, cloudAssetReadPassOperationActivity,
         cloudWorkflowMedia, cloudWorkflowSubmitMediaBatch, cloudMediaDownloadsBlocked, cloudPolicyExecutionBeginMedia, cloudPolicyExecutionContinueMediaAfterSend, cloudMediaNextWork, cloudMediaStartNextWork, cloudMediaNextWorkResult, cloudMediaSubmitRead, cloudMediaQueueUpload, cloudMediaReply,
         cloudPolicyExecutionStartRegisterSdk, cloudPolicyExecutionStartRetireOriginal, cloudPolicyRegistrationResult, cloudPolicyRetirementResult,
         cloudPolicyExecutionStartReportInvocation, cloudPolicyExecutionStartReportStarted, cloudPolicyExecutionStartReportCompletion, cloudPolicyExecutionStartBeginMedia, cloudPolicyMediaResult, cloudPolicyExecutionStartBeginFetch, cloudPolicyFetchResult, cloudPolicyExecutionStartBeginSend, cloudPolicySendResult,

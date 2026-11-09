@@ -102,7 +102,11 @@ final class ForeignAssetReadQueue: MeguriCoreBindings.CloudAssetReadQueue {
 /// Every terminal call uses this exact handle, including after host replacement.
 public struct CoreCloudAssetReadPass: Sendable {
     private let raw: MeguriCoreBindings.CloudAssetReadPass
-    init(_ raw: MeguriCoreBindings.CloudAssetReadPass) { self.raw = raw }
+    private let track: @Sendable (MeguriCoreBindings.JobHandle) throws -> CoreJob
+    init(_ raw: MeguriCoreBindings.CloudAssetReadPass,
+         track: @escaping @Sendable (MeguriCoreBindings.JobHandle) throws -> CoreJob = { try Jobs.track($0) }) {
+        self.raw = raw; self.track = track
+    }
 
     func reportActivity(started: Bool, failures: [CloudAssetReadFailureFacts] = [], failed: Bool = false, appCancelled: Bool = false) async throws -> [CloudPolicyOutput] {
         let raw = self.raw
@@ -115,9 +119,14 @@ public struct CoreCloudAssetReadPass: Sendable {
 
     public func next() async throws -> CloudAssetReadIssuedWork? {
         let raw = self.raw
-        return try await MaintenanceLane.shared.call(.cloudAssetReadPassNext) {
-            try raw.next().map(CloudAssetReadIssuedWork.init)
+        let value: MeguriCoreBindings.CloudAssetReadNextValue = try await CoreCloudPolicyService.runOrdered(
+            .cloudAssetReadPassStartNext, result: .cloudAssetReadNextResult,
+            track: track, retainResourceResultOnTrackingFailure: true
+        ) {
+            let started = try raw.startNext()
+            return CloudPolicyJobValue(handle: started.handle, read: { try started.result.result() })
         }
+        return value.work.map(CloudAssetReadIssuedWork.init)
     }
 
     /// False means no SDK reply exists. An error can follow accepted enqueue:

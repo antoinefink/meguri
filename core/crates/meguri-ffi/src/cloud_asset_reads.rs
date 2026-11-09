@@ -69,6 +69,34 @@ pub struct CloudAssetReadIssuedWork {
     pub kind: CloudAssetReadKind,
 }
 
+/// A stored empty value is exhaustion; a missing body result remains None.
+#[derive(Clone, uniffi::Record)]
+pub struct CloudAssetReadNextValue {
+    pub work: Option<CloudAssetReadIssuedWork>,
+}
+
+#[derive(uniffi::Object)]
+pub struct CloudAssetReadNextResult {
+    cell: Arc<crate::cloud_policy::policy_jobs::Cell<CloudAssetReadNextValue>>,
+}
+#[uniffi::export]
+impl CloudAssetReadNextResult {
+    pub fn result(&self) -> Result<Option<CloudAssetReadNextValue>, CoreError> {
+        callback::enter("CloudAssetReadNextResult.result");
+        self.cell
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .transpose()
+    }
+}
+#[derive(Clone, uniffi::Record)]
+pub struct CloudAssetReadNextJob {
+    pub handle: crate::jobs::JobHandle,
+    pub result: Arc<CloudAssetReadNextResult>,
+}
+
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct CloudAssetReadCompletion {
     /// Intake acceptance only. Ready work is driven through the normal incoming
@@ -130,11 +158,8 @@ impl CloudPolicyExecution {
     }
 }
 
-// Only the work-aware creation path uses this mapping. Driver validation,
-// sdk_locked and tracking/member queries cannot return Engine::Cancelled;
-// NativeFiles returns FileIdentityUnavailable and publication has its own error.
-// Thus this variant here is the sampled PolicyWork rejection, never a fresh
-// token read over a later failure. Legacy synchronous refusals keep cloud_error.
+// Map only the sampled PolicyWork cancellation, never a fresh token read over
+// a later failure. Legacy synchronous refusals keep cloud_error.
 fn creation_error(error: RuntimeError) -> CoreError {
     match error {
         RuntimeError::Engine(meguri_engine::EngineError::Cancelled) => CoreError::Cancelled,
@@ -215,6 +240,60 @@ impl CloudAssetReadPass {
 }
 
 impl CloudAssetReadPass {
+    fn issued(self: Arc<Self>, request: Option<i::AssetReadRequest>) -> CloudAssetReadNextValue {
+        CloudAssetReadNextValue {
+            work: request.map(|request| CloudAssetReadIssuedWork {
+                name: request.record_name().to_owned(),
+                zone: request.zone().to_owned(),
+                kind: request.kind().into(),
+                handle: Arc::new(CloudAssetReadWork { owner: self, request }),
+            }),
+        }
+    }
+
+    fn next_with_work(self: Arc<Self>, work: &mut p::PolicyWork) -> Result<CloudAssetReadNextValue, CoreError> {
+        // Reuse the original resource's bounded facts without selecting a
+        // cleanup mode. This is ordinary work, never DisposalOnly admission.
+        let original = self.host.original_resource_authority(&self.collection);
+        let compact_error = Arc::new(std::sync::Mutex::new(None));
+        let rejected = compact_error.clone();
+        let mut selection = work.clone().with_compact_owner_check(Arc::new(move || {
+            if original.is_live() {
+                return Ok(());
+            }
+            let error = CoreError::CloudPolicy {
+                failure: crate::cloud_policy::CloudPolicyFailure::Closed,
+            };
+            *rejected.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error.clone());
+            Err(meguri_engine::EngineError::from(error))
+        }));
+        let request = if let Some(execution) = &self.execution {
+            let (driver, command) = execution.asset_read_driver()?;
+            driver
+                .next_native_asset_read_with_work(command, &self.collection, &self.pass, &mut selection)
+                .map_err(|error| match error {
+                    p::DriverError::Runtime(RuntimeError::Engine(meguri_engine::EngineError::Cancelled)) => {
+                        CoreError::Cancelled
+                    }
+                    error => cloud_error(error),
+                })
+        } else {
+            self.core
+                .next_asset_read_with_work(&self.collection, &self.pass, &mut selection)
+                .map_err(creation_error)
+        };
+        // Only a sampled pre-effect rejection can supply this error. Never
+        // check a fresh owner/token over a selected handle or later failure.
+        if let Some(error) = compact_error
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+        {
+            return Err(error);
+        }
+        Ok(self.issued(request?))
+    }
+
     fn owns(&self, work: &CloudAssetReadWork) -> Result<(), CoreError> {
         if !std::ptr::eq(self, Arc::as_ptr(&work.owner)) {
             return Err(cloud_error("wrong asset read owner"));
@@ -304,6 +383,18 @@ impl CloudAssetReadPass {
         Ok(outputs)
     }
 
+    pub fn start_next(self: Arc<Self>) -> Result<CloudAssetReadNextJob, CoreError> {
+        callback::enter("CloudAssetReadPass.start_next");
+        let (handle, cell) = self
+            .policy
+            .clone()
+            .start_policy("CloudAssetReadPass.next", move |_, work| self.next_with_work(work))?;
+        Ok(CloudAssetReadNextJob {
+            handle,
+            result: Arc::new(CloudAssetReadNextResult { cell }),
+        })
+    }
+
     pub fn next(self: Arc<Self>) -> Result<Option<CloudAssetReadIssuedWork>, CoreError> {
         callback::enter("CloudAssetReadPass.next");
         let request = if let Some(execution) = &self.execution {
@@ -316,12 +407,7 @@ impl CloudAssetReadPass {
                 .next_asset_read(&self.collection, &self.pass)
                 .map_err(cloud_error)?
         };
-        Ok(request.map(|request| CloudAssetReadIssuedWork {
-            name: request.record_name().to_owned(),
-            zone: request.zone().to_owned(),
-            kind: request.kind().into(),
-            handle: Arc::new(CloudAssetReadWork { owner: self, request }),
-        }))
+        Ok(self.issued(request).work)
     }
 
     /// False means no SDK reply exists. Err may follow accepted enqueue: retain

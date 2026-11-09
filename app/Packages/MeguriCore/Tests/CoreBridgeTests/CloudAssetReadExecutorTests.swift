@@ -105,6 +105,60 @@ extension EventTests {
         }
     }
 
+    @Test func assetExecutorCancellationAfterNextAdmissionDisposesOriginalIssuedWork() async throws {
+        try await withNativePolicyFixture { fixture in
+            let policy = try await assetExecutorPolicy(fixture)
+            let remote = try await AssetExecutorRemote.make(1)
+            let execution = try await assetExecutorRetryExecution(fixture, policy: policy, records: [remote])
+            let rawExecution = execution.raw
+            let raw = try await MaintenanceLane.shared.call(.cloudPolicyExecutionBeginAssetReadPass) {
+                try rawExecution.beginAssetReadPass()
+            }
+            let running = Mutex<Task<CloudAssetReadPassResult, any Error>?>(nil)
+            let admitted = Mutex<MeguriCoreBindings.JobHandle?>(nil)
+            let pass = CoreCloudAssetReadPass(raw, track: { handle in
+                let job = try Jobs.track(handle)
+                admitted.withLock { $0 = handle }
+                // Cancels the awaiting Swift executor after real next admission.
+                // Core remains uncancelled and must return its actual selection.
+                running.withLock { $0 }?.cancel()
+                return job
+            })
+            let transport = AssetExecutorTransport(failPreparation: true)
+            let executor = CloudAssetReadExecutor(transport: transport)
+            let entry = CloudCallbackGate()
+            let task = Task {
+                await entry.enter()
+                return try await executor.run(pass)
+            }
+            running.withLock { $0 = task }
+            try await entry.waitForArrival()
+            await entry.open()
+            let result = await task.result
+            if case .failure(let error) = result { #expect(error is CancellationError) }
+            else { Issue.record("Cancelled executor returned success") }
+            let handle = try #require(admitted.withLock { $0 })
+            #expect(try await CoreBridge.CancelToken(raw: handle.cancel).isCancelled() == false)
+            for await event in CoreEventStream.shared.events {
+                if case .jobFinished(let id, let outcome) = event.kind, id.rawValue == handle.id {
+                    #expect(outcome == .succeeded)
+                    break
+                }
+            }
+            #expect(transport.preparedNames.withLock { $0 }.isEmpty)
+            let unchanged = try await remote.observe()
+            #expect(unchanged.retryCount == 0 && unchanged.ownedCount == 0 && unchanged.rowFields == nil)
+            // Executor finished the original pass after cancelling its actual
+            // Selected handle. A fresh retry still owns the unchanged entry.
+            let later = try await assetExecutorRetryPass(fixture, policy: policy, records: [])
+            let selected = try #require(try await later.next())
+            #expect(selected.name == remote.record.name)
+            #expect(try await later.cancel(selected.handle))
+            try await later.finish()
+            await executor.close()
+        }
+    }
+
     @Test func assetExecutorFalseQueueOwesNoReplyAndChargesNoAttempt() async throws {
         try await withNativePolicyFixture { fixture in
             let policy = try await assetExecutorPolicy(fixture)

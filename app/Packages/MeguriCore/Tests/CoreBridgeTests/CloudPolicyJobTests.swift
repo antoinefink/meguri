@@ -549,6 +549,101 @@ extension EventTests {
         }
     }
 
+    @Test(arguments: [false, true])
+    func policyAssetNextListenerFailureRetainsExactWorkAndCellAfterClose(reopen: Bool) async throws {
+        try await withNativePolicyFixture { fixture in
+            let policy = try await assetExecutorPolicy(fixture)
+            let remote = try await AssetExecutorRemote.make(1)
+            let execution = try await assetExecutorRetryExecution(fixture, policy: policy, records: [remote])
+            let rawExecution = execution.raw
+            let raw = try await MaintenanceLane.shared.call(.cloudPolicyExecutionBeginAssetReadPass) {
+                try rawExecution.beginAssetReadPass()
+            }
+            let original = CoreCloudAssetReadPass(raw)
+            try await CoreEventStream.shared.start()
+            let started = try await MaintenanceLane.shared.call(.cloudAssetReadPassStartNext) { try raw.startNext() }
+            for await event in CoreEventStream.shared.events {
+                if case .jobFinished(let id, _) = event.kind, id.rawValue == started.handle.id { break }
+            }
+            let actual = try #require(try await MaintenanceLane.shared.call(.cloudAssetReadNextResult) {
+                try started.result.result()
+            })
+            let selected = try #require(actual.work)
+            let attempted = Mutex<UInt64?>(nil)
+            do {
+                let recovered: MeguriCoreBindings.CloudAssetReadNextValue = try await retainCompletedPolicyResource(
+                    .cloudAssetReadPassStartNext, result: .cloudAssetReadNextResult,
+                    attempted: { id in attempted.withLock { $0 = id } }, message: "asset next listener setup",
+                    CloudPolicyJobValue(handle: started.handle, read: { try started.result.result() })
+                )
+                let work = try #require(recovered.work)
+                let sdk = try await fixture.engine().instanceID
+                let other = try await fixture.core.beginFirstAssetReadPass(sdk: sdk)
+                let foreign = await Task { try await other.cancel(.init(raw: work.handle)) }.result
+                try await other.finish()
+                #expect(try await original.cancel(.init(raw: work.handle)))
+                try await original.finish()
+                let observed = try await remote.observe()
+                #expect(observed.retryCount == 0 && observed.ownedCount == 0 && observed.rowFields == nil)
+                #expect(work.name == selected.name && work.name == remote.record.name)
+                #expect(work.zone == selected.zone && work.kind == .retry)
+                if case .failure(let error) = foreign {
+                    #expect(error as? BridgeError == .unavailable(reason: "wrong asset read owner"))
+                } else { Issue.record("Foreign pass accepted selected work") }
+                _ = try await policy.status() // failure drain released ordering
+                try await fixture.adapter.stop()
+                try await fixture.collection.close()
+                if reopen {
+                    let location = CollectionLocation(collectionDirectory: fixture.directory.appending(path: "collection"),
+                        backupsDirectory: fixture.directory.appending(path: "backups"),
+                        appGroupSnapshot: fixture.directory.appending(path: "widget.snapshot"))
+                    try await fixture.collection.open(location, randomSeed: 115)
+                }
+                let retained = try #require(try await MaintenanceLane.shared.call(.cloudAssetReadNextResult) {
+                    try started.result.result()
+                })
+                let retainedWork = try #require(retained.work)
+                #expect(retainedWork.name == selected.name && retainedWork.zone == selected.zone)
+                #expect(try await original.cancel(.init(raw: retainedWork.handle)) == false)
+                #expect(attempted.withLock { $0 } == started.handle.id)
+                #expect(try await CoreBridge.CancelToken(raw: started.handle.cancel).isCancelled())
+                if reopen { try await fixture.collection.close() }
+            } catch {
+                try? await original.finish()
+                throw error
+            }
+        }
+    }
+
+    @Test func policyAssetNextListenerFailureKeepsInitiallyEmptyFirstPassExhaustion() async throws {
+        try await withCloudKitFixture { fixture in
+            let sdk = try await fixture.engine().instanceID
+            let workflow = try await MaintenanceLane.shared.call(.cloudWorkflowNew) { try MeguriCoreBindings.CloudWorkflow() }
+            let raw = try await MaintenanceLane.shared.call(.cloudWorkflowBeginFirstAssetReadPass) {
+                try workflow.beginFirstAssetReadPass(sdk: sdk)
+            }
+            let original = CoreCloudAssetReadPass(raw)
+            try await CoreEventStream.shared.start()
+            let started = try await MaintenanceLane.shared.call(.cloudAssetReadPassStartNext) { try raw.startNext() }
+            for await event in CoreEventStream.shared.events {
+                if case .jobFinished(let id, _) = event.kind, id.rawValue == started.handle.id { break }
+            }
+            let retained: MeguriCoreBindings.CloudAssetReadNextValue = try await retainCompletedPolicyResource(
+                .cloudAssetReadPassStartNext, result: .cloudAssetReadNextResult,
+                attempted: { _ in }, message: "empty next listener setup",
+                CloudPolicyJobValue(handle: started.handle, read: { try started.result.result() })
+            )
+            #expect(retained.work == nil)
+            try await original.finish()
+            try await fixture.adapter.stop()
+            try await fixture.collection.close()
+            let reread = try #require(try await MaintenanceLane.shared.call(.cloudAssetReadNextResult) {
+                try started.result.result()
+            })
+            #expect(reread.work == nil)
+        }
+    }
+
     @Test func policyOriginalOwnerMetadataSurvivesSuspendAndKeepsOrdinaryJobsCancelled() async throws {
         try await withCloudConnection { fixture in
             let policy = try await fixture.workflow.policy()
