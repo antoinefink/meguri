@@ -968,6 +968,9 @@ extension EventTests {
             let prepared: CloudKitNetworkEnqueue
             if send { prepared = try await engine.prepareSend(zones: [fixture.zone]) }
             else { prepared = try await engine.prepareFetch(options: .init(zones: ["meguri-root", fixture.zone], priorityZones: [], groupID: "held-started")) }
+            let pendingBefore = try await policy.status().pending
+            let added = try await CoreDeckService().addDeck(name: "Started preparation pending deck \(send)-\(transition)")
+            try await fixture.core.awaitTracking(generation: added.summary.generation, seq: added.summary.seq)
             let held = CloudCallbackGate()
             let outputs = CloudPolicyInvocationOutputs()
             let zones: [CloudPolicyZone] = send ? [.collection] : [.root, .collection]
@@ -1028,6 +1031,9 @@ extension EventTests {
                 #expect(retained.count == 1)
                 let output = try #require(retained.first)
                 #expect(try !policyCommands(output).isEmpty)
+                #expect(try policyCommands(output).contains { command in
+                    if case .statusChanged(let status) = command.action { status.pending == pendingBefore + 1 } else { false }
+                })
             }
             if transition == "cancel" {
                 #expect(observed.withLock { $0 is CancellationError })

@@ -58,3 +58,32 @@ synchronous baseline nonempty-command assertion; its projection returns an
 empty command list. The fixture is under diagnosis. The failed receipt is kept;
 no assertion has been removed or relaxed. Native compilation and independent
 checks are in progress. This WIP remains unaccepted.
+
+## Fixture repair and independent review
+
+Export `41442` closes the returned-work proof gap with an existing gate.
+Export `45563` stages a real deck commit and waits for its tracking capture in
+three test bodies. Started must emit StatusChanged with pending count increased
+by exactly one. All original nonempty, payload, parity and timing assertions
+remain. Rust and Swift source reviews find no material issue in this repair.
+
+Privacy rejects only three new explanatory comments in `45563`; integration
+omits those comments. Code and assertions are unchanged. The derived patch
+passes privacy. No exception is added to the guard.
+
+Native `43707` builds and passes all 25 selected lifetime, callback rejoin,
+instrumentation, stale-entry and existing retry/finalization checks. The two
+new output-retention proofs await the repaired-fixture run; the failed Rust
+receipt remains recorded above.
+
+## Verification completion
+
+Core `47662` passes all 124 focused policy/adoption checks. Native `47934`
+passes both repaired output-retention proofs and their ten send/fetch cases.
+Native `43707` covers the other selected checks. All component checks pass.
+Lint `49619` and similarity `49615` pass. Source privacy passes. No required
+review finding remains in this component.
+
+The Started-only component is complete. Ended and other retained-execution
+calls, the original batch gate, physical media evidence and remaining parent
+unit requirements stay open. No Unit trailer or release acceptance is added.

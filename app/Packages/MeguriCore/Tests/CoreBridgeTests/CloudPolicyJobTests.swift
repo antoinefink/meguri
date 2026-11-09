@@ -259,6 +259,9 @@ extension EventTests {
             }
             let command = try #require(commands.first { if case .runExchange = $0.action { true } else { false } })
             let execution = try #require(try await policy.prepareExecution(command))
+            let pendingBefore = try await policy.status().pending
+            let added = try await CoreDeckService().addDeck(name: "Started listener pending deck")
+            try await fixture.core.awaitTracking(generation: added.summary.generation, seq: added.summary.seq)
             let raw = execution.raw
             try await CoreEventStream.shared.start()
             let started = try await MaintenanceLane.shared.call(.cloudPolicyExecutionStartReportInvocation) {
@@ -268,6 +271,12 @@ extension EventTests {
                 if case .jobFinished(let id, _) = event.kind, id.rawValue == started.handle.id { break }
             }
             let actual = try #require(try await MaintenanceLane.shared.call(.cloudPolicyOutputResult) { try started.result.result() })
+            guard case .commands(let startedCommands) = actual else {
+                throw BridgeError.internal("Expected Started outputs")
+            }
+            #expect(startedCommands.contains { command in
+                if case .statusChanged(let status) = command.action { status.pending == pendingBefore + 1 } else { false }
+            })
             let attempted = Mutex<UInt64?>(nil)
             let retained: MeguriCoreBindings.CloudPolicyOutput = try await retainCompletedPolicyResource(
                 .cloudPolicyExecutionStartReportInvocation, result: .cloudPolicyOutputResult,

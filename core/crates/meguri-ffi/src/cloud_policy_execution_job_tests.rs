@@ -1118,6 +1118,13 @@ fn native_admission_jobs_started_multizone_keeps_exact_outputs_and_typed_error_a
         for asynchronous in [false, true] {
             let (fixture, _, target, sdk) = admission_fixture(AdmissionKind::Invocation);
             let driver = fixture.workflow.host.cloud_policy_driver().unwrap();
+            let pending_before = driver.state().status().pending;
+            let collection = fixture.workflow.host.collection().unwrap();
+            let added = meguri_engine::decks::add(&collection, "Started multizone pending deck".into()).unwrap();
+            fixture
+                .workflow
+                .await_tracking(collection.generation().0, added.seq.0)
+                .unwrap();
             let engine = fixture.workflow.host.engine();
             let events = engine.stream().subscribe();
             let pool = hold_pool(&fixture);
@@ -1176,6 +1183,15 @@ fn native_admission_jobs_started_multizone_keeps_exact_outputs_and_typed_error_a
             };
             let cycles = driver.state().cycles;
             fixture.workflow.host.close().unwrap();
+            if !retire {
+                let CloudPolicyOutput::Commands { commands } = output.as_ref().expect("Started outputs") else {
+                    panic!("expected actual policy commands")
+                };
+                assert!(commands.iter().any(|command| matches!(
+                    &command.action,
+                    CloudPolicyAction::StatusChanged { status } if status.pending == pending_before + 1
+                )));
+            }
             let snapshot = invocation_snapshot(output);
             assert!(saw.load(std::sync::atomic::Ordering::SeqCst));
             if retire {
