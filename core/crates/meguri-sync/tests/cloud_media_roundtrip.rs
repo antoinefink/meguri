@@ -1431,7 +1431,15 @@ decks:
         host.close().unwrap();
     }
     let receiver_dir = generated(root.path(), "receiver");
-    let mut service = Service::open(root.path(), Config::default(), SeededRandom::new(811)).unwrap();
+    let mut service = Service::open(
+        root.path(),
+        Config {
+            page_size: 32,
+            ..Config::default()
+        },
+        SeededRandom::new(811),
+    )
+    .unwrap();
     let mut sender = online(&sender_dir, true);
     sender.driver().put_media("photo.jpg", REMOTE).unwrap();
     publish(&mut sender, &mut service);
