@@ -110,13 +110,14 @@ extension WebKitSuites.CardRuntimeSuites {
             var windows = 0, roots = 0, nodes = 0, roles = 0, links = 0
             var expectedNativeIDs = 0, localizedLabels = 0
             var repeatedNodes = 0, nodeTruncations = 0, depthTruncations = 0
+            var possibleArrayTruncations = 0
             var deadlineReached = false
             var typeMismatches = 0, missingValues = 0
             var errors: [String: Int] = [:]
 
             var counts: String {
                 let codes = errors.sorted { $0.key < $1.key }.map { "\($0.key):\($0.value)" }.joined(separator: ",")
-                return "trusted=\(trusted) windows=\(windows) roots=\(roots) nodes=\(nodes) roles=\(roles) links=\(links) expectedNativeIDs=\(expectedNativeIDs) localizedLabels=\(localizedLabels) repeatedNodes=\(repeatedNodes) nodeTruncations=\(nodeTruncations) depthTruncations=\(depthTruncations) deadlineReached=\(deadlineReached) typeMismatches=\(typeMismatches) missingValues=\(missingValues) AXErrors[operation/code:count]=[\(codes)]"
+                return "trusted=\(trusted) windows=\(windows) roots=\(roots) nodes=\(nodes) roles=\(roles) links=\(links) expectedNativeIDs=\(expectedNativeIDs) localizedLabels=\(localizedLabels) repeatedNodes=\(repeatedNodes) nodeTruncations=\(nodeTruncations) depthTruncations=\(depthTruncations) possibleArrayTruncations=\(possibleArrayTruncations) deadlineReached=\(deadlineReached) typeMismatches=\(typeMismatches) missingValues=\(missingValues) AXErrors[operation/code:count]=[\(codes)]"
             }
         }
 
@@ -148,20 +149,28 @@ extension WebKitSuites.CardRuntimeSuites {
                 }
                 return string
             }
-            func readChildren(_ node: AXUIElement, _ attribute: String) -> [AXUIElement] {
+            func readChildren(_ node: AXUIElement, _ attribute: String, nodeBudget: Int = 255) -> [AXUIElement] {
+                let limit = min(256, nodeBudget)
+                guard limit > 0 else { facts.nodeTruncations += 1; return [] }
                 guard prepare(node) else { return [] }
                 var count: CFIndex = 0
-                guard record(AXUIElementGetAttributeValueCount(node, attribute as CFString, &count), operation: "\(attribute).count") else { return [] }
-                guard count > 0 else { return [] }
-                if count > 256 { facts.nodeTruncations += 1 }
+                let countError = AXUIElementGetAttributeValueCount(node, attribute as CFString, &count)
+                let countKnown = record(countError, operation: "\(attribute).count")
+                guard countKnown || countError == .notImplemented else { return [] }
+                if countKnown && count <= 0 { return [] }
+                if countKnown && count > limit { facts.nodeTruncations += 1 }
+                let requested = countKnown ? min(count, limit) : limit
                 guard prepare(node) else { return [] }
                 var value: CFArray?
-                guard record(AXUIElementCopyAttributeValues(node, attribute as CFString, 0, min(count, 256), &value), operation: attribute) else { return [] }
+                guard record(AXUIElementCopyAttributeValues(node, attribute as CFString, 0, requested, &value), operation: "\(attribute).values") else { return [] }
                 guard let value else { facts.missingValues += 1; return [] }
                 let array: CFTypeRef = value
-                guard let values = array as? [AnyObject] else { facts.typeMismatches += 1; return [] }
+                guard CFGetTypeID(array) == CFArrayGetTypeID(), let values = array as? [AnyObject] else {
+                    facts.typeMismatches += 1; return []
+                }
+                if !countKnown && values.count >= requested { facts.possibleArrayTruncations += 1 }
                 var children: [AXUIElement] = []
-                for child in values.prefix(256) {
+                for child in values.prefix(requested) {
                     guard CFGetTypeID(child) == AXUIElementGetTypeID() else {
                         facts.typeMismatches += 1; continue
                     }
@@ -207,7 +216,7 @@ extension WebKitSuites.CardRuntimeSuites {
                     enqueue(windows, depth: 1)
                     enqueue(roots, depth: 1)
                 } else {
-                    enqueue(readChildren(node, kAXChildrenAttribute), depth: depth + 1)
+                    enqueue(readChildren(node, kAXChildrenAttribute, nodeBudget: 256 - seen.count - pending.count), depth: depth + 1)
                 }
             }
             return facts

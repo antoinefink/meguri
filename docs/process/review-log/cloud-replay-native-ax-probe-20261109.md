@@ -21,3 +21,12 @@ The final compiler correction changes only one public role constant; root checke
 byte equality apart from that replacement. No signature or consent was changed.
 The next step is one bounded value-copy check, then the proper native UI harness
 if this package process cannot expose its tree. No longer wait is planned.
+
+Focused `20261109T192012Z-49480` adds a single bounded values read when counts
+are unsupported. Both window and child values also return -25208; no native
+roots are observed. No permission cause is inferred. Independent fallback review
+is clear. The package-process reader cannot currently prove the native contract.
+A separate spec review confirms D4/D12 require native identifiers, localized names
+and exact activation, without prescribing the raw macOS AXIdentifier getter.
+The next implementation must use the proper native UI boundary and keep those
+proof obligations. The failing case stays enabled until equivalent proof passes.

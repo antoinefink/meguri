@@ -12,18 +12,32 @@ import Testing
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 700),
             styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        defer { window.contentView = nil; window.close() }
-        for _ in 0..<2 {
-            let host = NSHostingView(rootView: MacSettingsView(collection: collection, present: { _ in }))
-            window.contentView = host
+        let controllers = (0..<2).map { _ in
+            NSHostingController(rootView: MacSettingsView(collection: collection, present: { _ in }))
+        }
+        defer {
+            window.contentViewController = nil
+            window.close()
+            withExtendedLifetime(controllers) {}
+        }
+        for controller in controllers {
+            window.contentViewController = controller
+            window.setContentSize(NSSize(width: 900, height: 700))
+            let host = controller.view
             window.orderFront(nil)
             window.layoutIfNeeded()
             host.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
             let fields = searchFields(in: host)
             try #require(fields.count == 1)
             let field = try #require(fields.first)
-            try recordSearchGeometryDiagnostic(window: window, field: field, host: host)
-            try #require(!field.visibleRect.isEmpty, "Search field must have visible geometry before AX traversal")
+            let fieldVisibleRect = field.visibleRect
+            let hasVisibleGeometry = !fieldVisibleRect.isEmpty
+            let geometryDiagnostic = "Search field must have visible geometry before AX traversal"
+                + " capturedVisibleRect=\(fieldVisibleRect) hasVisibleGeometry=\(hasVisibleGeometry)"
+            try #require(hasVisibleGeometry, "\(geometryDiagnostic)")
+            try recordSearchGeometryDiagnostic(window: window, field: field, host: host,
+                fieldVisibleRect: fieldVisibleRect)
             #expect((field as any NSAccessibilityProtocol).accessibilityIdentifier() == "settings.root.search")
             let cell = try #require(field.cell as? NSSearchFieldCell)
             let searchLabel = try #require(cell.searchButtonCell?.accessibilityLabel())
@@ -34,7 +48,7 @@ import Testing
                 accessibilityString(in: $0, selector: #selector(NSAccessibilityProtocol.accessibilityLabel)) == searchLabel
             }
             try recordSearchAccessibilityDiagnostic(window: window, field: field, cell: cell,
-                expectedLabel: searchLabel, matchCount: matches.count)
+                expectedLabel: searchLabel, matchCount: matches.count, fieldVisibleRect: fieldVisibleRect)
             try #require(matches.count == 1)
             let search = try #require(matches.first)
             #expect(accessibilityString(in: search,
@@ -48,7 +62,7 @@ import Testing
             #expect(field.stringValue == "iCloud")
             // A remount must identify the new native elements, without relying
             // on a retained field, timer or global window lookup.
-            window.contentView = nil
+            window.contentViewController = nil
         }
     }
 
@@ -58,7 +72,7 @@ import Testing
     }
 
     private func recordSearchGeometryDiagnostic(window: NSWindow, field: NSSearchField,
-        host: NSView) throws {
+        host: NSView, fieldVisibleRect: NSRect) throws {
         let maxNodes = 16
         var chain: [NSView] = []
         var identities: Set<ObjectIdentifier> = []
@@ -92,7 +106,7 @@ import Testing
             let identity = view === field ? "field" : view === host ? "ownedHost" : "ancestor"
             let publicClass = view === host ? "NSHostingView"
                 : publicClasses.first { type(of: view) == $0.0 }?.1 ?? "other"
-            let visibleRect = view.visibleRect
+            let visibleRect = view === field ? fieldVisibleRect : view.visibleRect
             let visibleIntersection = view.bounds.intersection(visibleRect)
             print("settingsSearchGeometry index=\(index) identity=\(identity) class=\(publicClass)"
                 + " frame=\(view.frame) bounds=\(view.bounds) visibleRect=\(visibleRect)"
@@ -113,12 +127,12 @@ import Testing
     // Diagnostic only: never emit UI strings or
     // runtime class names outside this exact public-AppKit allowlist.
     private func recordSearchAccessibilityDiagnostic(window: NSWindow, field: NSSearchField,
-        cell: NSSearchFieldCell, expectedLabel: String, matchCount: Int) throws {
+        cell: NSSearchFieldCell, expectedLabel: String, matchCount: Int, fieldVisibleRect: NSRect) throws {
         print("settingsSearchAX windowContentAttached=\(window.contentView != nil)"
             + " windowVisible=\(window.isVisible) windowMiniaturized=\(window.isMiniaturized)"
             + " fieldAttached=\(field.window === window) fieldHidden=\(field.isHidden)"
             + " fieldHiddenBySelfOrAncestor=\(field.isHiddenOrHasHiddenAncestor)"
-            + " fieldVisibleRectEmpty=\(field.visibleRect.isEmpty)"
+            + " capturedFieldVisibleRectEmpty=\(fieldVisibleRect.isEmpty)"
             + " cellAttached=\(cell.controlView === field) matches=\(matchCount)")
 
         let publicClasses: [(AnyClass, String)] = [
