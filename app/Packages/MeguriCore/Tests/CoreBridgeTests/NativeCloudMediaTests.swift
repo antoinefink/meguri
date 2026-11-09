@@ -474,7 +474,15 @@ private func prepareDebugMediaDownload(_ fixture: CloudKitBridgeFixture,
     try #require(collection.saves.map(\.name) == [manifestName] && collection.deletes.isEmpty)
     let manifest = try #require(collection.saves.first)
     try #require(manifest.recordType == "MGEntity")
-    _ = try await fixture.core.sent(sdk: sdk, batchID: collection.id, saved: collection.saves,
+    let originalManifestFields = manifest.systemFields
+    // Mirror the fake SDK's returned receipt without changing the creation DTO.
+    let savedManifest = CloudRecord(name: manifest.name, envelope: manifest.envelope,
+        systemFields: Data("sdk-fields-\(collection.id)-\(manifest.name)".utf8),
+        recordType: manifest.recordType, zone: manifest.zone)
+    try #require(savedManifest.name == manifest.name && savedManifest.recordType == manifest.recordType
+        && savedManifest.zone == manifest.zone && savedManifest.envelope == manifest.envelope)
+    try #require(savedManifest.systemFields?.isEmpty == false)
+    _ = try await fixture.core.sent(sdk: sdk, batchID: collection.id, saved: [savedManifest],
         failed: [], deleted: [], failedDeletes: [], batchCount: 1)
     try await fixture.core.handlerReturned(sdk: sdk)
     let manifestFacts = try #require(try await fixture.core.entityFacts(name: manifestName))
@@ -485,7 +493,11 @@ private func prepareDebugMediaDownload(_ fixture: CloudKitBridgeFixture,
     try #require(mediaPending == [blob: .save])
     let batch = try #require(try await fixture.core.buildBatch(sdk: sdk, zone: "meguri-media", pending: mediaPending))
     try #require(batch.saves.count == 1 && batch.saves.first?.name == blob)
-    _ = try await fixture.core.sent(sdk: sdk, batchID: batch.id, saved: batch.saves,
+    let savedBlobs = batch.saves.map {
+        CloudRecord(name: $0.name, envelope: $0.envelope,
+            systemFields: Data("sdk-fields-\(batch.id)-\($0.name)".utf8), recordType: $0.recordType, zone: $0.zone)
+    }
+    _ = try await fixture.core.sent(sdk: sdk, batchID: batch.id, saved: savedBlobs,
         failed: [], deleted: [], failedDeletes: [], batchCount: 1)
     try await fixture.core.handlerReturned(sdk: sdk)
 
@@ -508,7 +520,8 @@ private func prepareDebugMediaDownload(_ fixture: CloudKitBridgeFixture,
     try #require(!FileManager.default.fileExists(atPath: file.path))
 
     try #require(manifest.name == manifestName && collection.saves == [manifest])
-    try await fixture.core.fetched(sdk: sdk, zone: fixture.zone, records: [manifest], deleted: [])
+    try #require(manifest.systemFields == originalManifestFields)
+    try await fixture.core.fetched(sdk: sdk, zone: fixture.zone, records: [savedManifest], deleted: [])
     // Upload Saved marks the blob attempted in the old round. The retained
     // command permit starts a fresh round through normal native validation.
     try #require(try await permit.beginMedia())

@@ -38,3 +38,32 @@ production source is reviewed; the broader 48 selected checks passed in
 `41559`. This preview neither accepts the new fixture nor waives any test or
 gate. The actual device observation takes priority over more fixture work;
 source diagnosis of the fixture continues separately.
+
+## Focused completion
+
+Export `59777` supplies standard fake-SDK Saved system fields while preserving
+the actual handed records and batch IDs. Retained fetch uses the returned
+manifest receipt. Independent review has no P0-P2 finding. Native `64993`
+passes both parameter cases on the same production source as `48676`. The
+broader initial-marker checks passed in `41559`; final combined focused
+verification is pending after the two catch-path additions. Earlier failed
+receipts remain.
+
+Signed normal phone preparation `58165` passes. Device drives `60171`, `61614`
+and `63208` complete all requested steps; their overall results still fail
+identifier checks. One normal Sync Now plus a later observation advances the
+sync timestamp and reports 2776 waiting media files and 2389 missing names.
+There is no fresh media failure tuple. The retained taskCancelled diagnostic
+is not evidence of a new media transfer failure.
+
+The missing-name counter uses known remote Deleted state, distinct from
+unprobed blobs. It does not prove matching bytes are absent under every other
+local name, or that an import is the only remedy. No live-source loss is
+inferred. Required completion implementation remains prepared separately;
+unit, integration, physical identifier and full sync acceptance remain open.
+
+Final combined native `66959` passes all 49 selected checks on the complete
+source. Final similarity passes all seven changed source files. Privacy
+checks pass. The diagnostic component and its fixture repairs are complete;
+original failed receipts remain retained. The prepared completion changes and
+full batch gate are not covered by these results and remain open.
