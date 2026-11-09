@@ -746,6 +746,129 @@ whole-lane/soak cell or Q13 first-sync/release acceptance. Required full-lane
 and trial evidence remains outstanding, not a prerequisite for this first
 SDK execution. Missing inspection or operation code is `implementation_missing`.
 
+### J3.2 Selected two-device `sync_now` program
+
+For header selection `sync_now`, use exactly one Mac source and one iPhone peer,
+both on `acct1`. Both headers admit the same direct Q4.2 `small` generation under
+J2.3, with separate device/run-owned data. Keep J2's actual Debug product,
+development-container/environment and protected fresh account checks. This adds
+no account setup, cleanup or remote-replacement permission. J3.1's smoke grammar
+and ten positions remain unchanged. No new header field or protocol version is
+needed. Missing implementation for this selection is `implementation_missing`.
+
+Each device accepts only its following positions, with the exact argument keys,
+types and literals shown. Both account fields are `acct1`. Labels are local to
+the admitted run and device; `p1` never denotes the other device's preview.
+
+| Position | Mac action and exact arguments | iPhone action and exact arguments |
+|---|---|---|
+| 1 | `launch` `{}` | `launch` `{}` |
+| 2 | `connect` `{"preview":"p1"}` | `connect` `{"preview":"p1"}` |
+| 3 | `publish` `{"preview":"p1"}` | `adopt` `{"preview":"p1"}` |
+| 4 | `edit` `{"note":"n1","field":"Q"}` | `sync_now` `{}` |
+| 5 | `sync_now` `{}` | `observe` `{"note":"n1"}` |
+| 6 | `close` `{}` | `close` `{}` |
+
+The coordinator first completes Mac positions 1–3, then iPhone positions 1–3,
+then Mac positions 4–5, then iPhone positions 4–5. It compares the actual source
+and peer observations before delivering either close. It delivers no successor
+after failure. Reject other actions, arguments, positions, devices and account
+labels before execution; commands supply no content, native IDs, paths, expected
+digests, pass flags or replacement overrides.
+
+#### Bootstrap and fixed edit
+
+`launch` has J3.1's startup/local-integrity obligations. On the Mac, `connect` and
+`publish` have J3.1's absent-active-epoch, actual preview and first-publication
+obligations. An existing remote epoch or concurrent publisher fails this program;
+never clear or replace remote data to make it proceed.
+
+The iPhone's `connect` must observe that completed publication through its actual
+account-bound root/epoch reads and ready preview. Its generated local collection
+uses V13.3's existing-collection adoption choice. `adopt` consumes that exact
+offered preview through the normal confirmation, backup, staging and activation
+path. Prove the safety backup and actual completed adoption, with usable binding,
+required scan and normal engine admission; do not seed binding/cursor/ACK rows or
+publish a second epoch. Preserve product recovery ownership and media behavior.
+For each device, derive canonical digests of the root and epoch payloads from
+the records that its real publication or adoption used. Require the coordinator
+to compare those observations and each agent to check the corresponding binding
+against that epoch in process. Together these checks identify the source epoch
+created in this run; matching requested labels are insufficient.
+
+Resolve `n1` privately from the immutable original base admitted under J2.3:
+read its note rows and choose the lowest original note ID. Retain its complete
+baseline payload, note-type identity and card/deck relations as one unique
+original-role witness. No manifest order or ID list is assumed. Both devices
+derive that witness independently from their verified original copy of the same
+generation. After adoption, the peer maps that original role to the actual
+adopted note and verifies its identity and unchanged relations; only the planned
+`Q` edit may differ from the baseline. Never choose the lowest current row,
+accept a caller's native ID or reuse smoke's added note. Missing, ambiguous or
+inconsistent original-role evidence fails. `edit` replaces
+only its `Q` field with the internally generated text `M-sync-now-n1-Q`, where
+`M` is the admitted base marker. Retain the other fields, tags, type and card
+relations. Use the ordinary note-edit operation once, flush, and read back its
+real committed effect. Record its operation provenance, current revision and
+canonical note digest, plus changed-field and unchanged-remainder checks; export
+neither text nor native IDs. Require an actual change from the admitted baseline.
+
+#### Original exchanges and peer evidence
+
+Each `sync_now` invokes the existing coordinator manual exchange once, outside a
+review session, and follows that exact issued exchange to its terminal
+`RecordExchange`. No source mutation is required on the receiving iPhone. Neither
+an old result nor smoke's four-entity ACK predicate substitutes for this result.
+The Mac must report actual `succeeded` accounting and revision-specific durable
+acknowledgement of the edited note. An earlier automatic acknowledgement may
+satisfy that revision only with its original event/operation proof; do not
+attribute it to the manual exchange. Report actual pending/paused/missing media
+separately on both devices, without turning collection success into media success.
+Do not issue another exchange to obtain a requested outcome.
+
+The iPhone must perform its eligible fetch and normal durable intake/apply.
+`observe` reads the adopted note through the actual current owned Host at a safe
+barrier after that work. It returns the real canonical note digest, structural
+relations and durable apply/row evidence under `n1`. This is a fixed read-only
+inspection, not a script, query language or caller-provided expected observation.
+The coordinator compares it with the Mac's actual edited payload and requires
+the intended field change with preserved remainder. Local source ACK, peer fetch
+return, inbox presence or a peer memory cache cannot prove the peer holds the edit.
+Missing durable observation fails; it does not trigger mutation or exchange replay.
+`close` retains J3.1's coherent final integrity and joined-shutdown requirements.
+
+#### Fresh runtime and interruption
+
+Before any successor executes in a fresh app/runtime, validate the exact J2/J3
+bindings and coordinator-retained journal prefix. Reopen the same run-owned
+collection/tracking without installation, fresh publication or repeated adoption.
+Re-establish account authority in J2 order and reconstruct only the mappings and
+phase supported by actual durable operation/row/progress evidence. Completed
+commands are not rerun, old sessions are not recreated, and journal phase alone
+does not prove that a referenced entity or operation exists. Missing or changed
+required progress fails before successor database/SDK work. This restoration is
+internal to delivery/relaunch, not an extra command or an alternate launch position.
+
+For intentional interruption in this slice, require `recovery_check` equal to
+`sync_now.edit` on Mac position 4, and `sync_now.exchange` on either `sync_now`.
+It is absent elsewhere; this slice grants no intentional interruption of bootstrap
+or close. Apply J5 to any incomplete command. `sync_now.edit` must identify the
+original committed operation and its once-only durable effect; expected payload
+equality alone is insufficient. `sync_now.exchange` must identify that original
+exchange's actual result and durable accounting, not run a new exchange. Both
+require relaunch integrity and the same account/owner checks. An uncommitted
+required edit, indeterminate exchange, missing recovery inspector or other
+unproved interrupted outcome fails without replay or successor. Only proven
+original completion permits `done` linked by `recovered_from`. A new runtime
+after a completed command must also retain these no-repeat guarantees.
+
+J4–J6 and Q5 apply throughout. Keep original callbacks and failure cancellation/
+join ordering. Protocol/fake tests establish no signed execution. The selected
+program needs both devices' real network and durable observations, cross-device
+comparison and required ledger/check evidence before claiming the Q7.5 leg.
+Unimplemented checks remain missing. This adds no other signed leg, full-lane,
+soak, Q13 first-sync or owner-approval claim.
+
 ## J4. Durable content-free journal
 
 `steps.jsonl` is an append-only UTF-8 JSON Lines file owned by the agent. Each complete line is one record. J5 permits repair of an incomplete final line only. The agent durably writes `started` before the command's first effect. It durably writes `done` or `failed` before reporting a terminal result. A durable append includes the storage flush needed for survival of an app kill. The directory entry must also survive the initial creation.
