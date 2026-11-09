@@ -60,3 +60,32 @@ change. Final privacy passes. The guard is unchanged.
 Actual signed phone verification is pending. The separate final-enqueue RED
 `53422`, required batch/milestone gates and U113/U114/U151 acceptance remain
 open. These focused passes do not complete the sync workflow.
+
+## Signed phone observations
+
+On `3007ad0e`, normal preparation `14563` passes. Drive `17094` completes
+all ten functional steps: a real deck starts a review and reveals its answer.
+Drive `18766` submits one Good and returns to the overview. Normal restart
+`21615` passes; drive `23380` confirms the same scheduling counts after
+reopen. Counts change from 20/0/19 to 19/1/19, with one answer retained.
+These are real collection actions, with no fixture or reset.
+
+The drive receipts remain failed: generated replay controls lack identifiers;
+one capture also reports overlapping ruby bounds. Neither failure is waived.
+A broken image remains visible. Audio playback has not been proved.
+
+Drive `30182` requests Sync Now once. Read-only follow-up `32673` shows a
+completed sync and a generic sync error. Missing media changes from 2,398 to
+2,397 and pending media from 2,923 to 2,922. This is progress, not complete
+media delivery. The earlier unavailable-action text belongs to a disabled
+details button; it does not prove that Sync Now was refused.
+
+Filtered export `34824` adds only a DEBUG accessibility value on the existing
+status row, using the existing content-free diagnostic recorder. Labels,
+actions, policy and Release behavior stay unchanged. This permits reading
+its last diagnostic without entering a replacement flow. It is not a live
+error history or proof that its last value describes the current attempt.
+
+Diagnostic review of export `34824` has no P0–P2 findings. Swift `35887`
+passes all 19 diagnostic tests; privacy `37253` passes. The actual status
+capture remains pending until the updated signed build is installed.

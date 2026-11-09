@@ -38,6 +38,9 @@ struct SyncStatusRows: View {
             }
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("settings.accountSync.status")
+            #if DEBUG
+            .accessibilityValue(DebugCloudDiagnostics.latestValue ?? "")
+            #endif
             if let status = sync.status {
                 ForEach(Array(SyncStatusCopy.lines(status, now: clock.now()).enumerated()), id: \.offset) { _, line in
                     Text(line)
