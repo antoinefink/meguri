@@ -256,14 +256,14 @@ mg_doctor() {
       "Xcode > Settings > Components: get the iOS 27 simulator runtime (or run 'xcodebuild -downloadPlatform iOS' yourself)."
   fi
 
-  # Xcode account for the team (read-only preference lookup)
+  # Legacy preferences can confirm a team, but their absence cannot prove logout.
   if { defaults read com.apple.dt.Xcode IDEProvisioningTeamByIdentifier 2>/dev/null
     defaults read com.apple.dt.Xcode IDEProvisioningTeams 2>/dev/null; } | grep -q "$MG_DOCTOR_TEAM"; then
     mg__doctor_check xcode-account pass "team $MG_DOCTOR_TEAM is in Xcode's accounts"
   else
-    mg__doctor_check xcode-account warn "no Xcode account for team $MG_DOCTOR_TEAM: Mac builds are ad-hoc signed, device builds are blocked"
-    mg_user_step xcode-account missing true "Add the Apple account for team $MG_DOCTOR_TEAM to Xcode" \
-      "Xcode > Settings > Accounts > + > Apple Account: sign in with the account of team $MG_DOCTOR_TEAM."
+    mg__doctor_check xcode-account warn "legacy Xcode preferences do not verify team $MG_DOCTOR_TEAM; check Accounts and development signing"
+    mg_user_step xcode-account unverified true "Verify the Apple account for team $MG_DOCTOR_TEAM in Xcode" \
+      "Check Xcode > Settings > Accounts for team $MG_DOCTOR_TEAM. A team-signed build verifies current development signing; these preferences may omit a configured account."
   fi
 
   # Docker

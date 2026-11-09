@@ -23,7 +23,7 @@ Install the iOS 27 simulator runtime: Xcode › Settings › Components, or `xco
 
 ### `xcode-account`
 
-Add the Apple account for team DNQ34W43XX: Xcode › Settings › Accounts › + › Apple Account. Until then, Mac builds are ad-hoc signed (no App Group) and device builds are blocked. Doctor warns.
+Add the Apple account for team DNQ34W43XX: Xcode › Settings › Accounts › + › Apple Account. Doctor reads legacy team preferences. If they do not list the team, it warns and leaves account setup unverified. Verify the account in Xcode; a team-signed build checks current signing and provisioning for its destination.
 
 Physical development builds also need current account agreements and App Group
 `group.com.antoinefink.meguri.dev` assigned to both App IDs

@@ -478,18 +478,19 @@ failure_ids() { jq -r '[.failures[].id] | sort | join("\n")' "$result"; }
 
 # --- doctor (host commands stubbed) ----------------------------------------
 
-@test "doctor without an Xcode account warns, lists the account step and only reads host state" {
+@test "doctor with absent legacy team metadata warns, leaves the account unverified and only reads host state" {
   make_stubs
   export STUB_ACCOUNT=0
   mg doctor
   [ "$status" -eq 0 ]
   [ "$(field .status)" = warn ]
-  jq -e '.user_steps[] | select(.id == "xcode-account" and .state == "missing" and .required == true)' "$result"
+  jq -e '.user_steps[] | select(.id == "xcode-account" and .state == "unverified" and .required == true)' "$result"
   jq -e '.details.checks[] | select(.id == "xcode-account" and .status == "warn")' "$result"
   [ "$(field '[.details.checks[] | select(.status == "fail")] | length')" = 0 ]
   [ "$(field .details.environment.xcode_version)" = 27.0 ]
   [ "$(field .details.environment.xcode_build)" = 27A266a ]
   [[ "$stderr" == *"xcode-account"* ]]
+  [[ "$stderr" != *"device builds are blocked"* ]]
   assert_read_only_calls
   validate "$result"
 }
