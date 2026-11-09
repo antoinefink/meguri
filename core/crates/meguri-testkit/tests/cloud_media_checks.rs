@@ -1,22 +1,40 @@
 //! Real generated collections and production media writes; observations only.
 use meguri_host::CoreHost;
+use meguri_model::rng::SeededRandom;
 use meguri_sync::cloud::{
     self as production,
-    runtime::{CloudInputs, IdentityProvider, IdentityStatus},
+    entity_codec::{Kind, Payload},
+    runtime::{CloudInputs, IdentityProvider, IdentityStatus, KeyByteSource, KeySourceError},
 };
 use meguri_testkit::{
     cloud::{
-        devices::options,
+        Caller, Config as ServiceConfig, Field, Operation, Reply, RequestedFields, Scope, Service,
+        coordinator::PublicationRig,
+        devices::{IdentityReads, NativeFiles, options},
         media_observation::{
             FileObservation, MAX_FILE_BYTES, MediaObserver, Missing, NameObservation, Observation, READ_BUFFER_BYTES,
             Refusal, ScopeObservation,
         },
     },
-    generate::cloud_small::{self, Request},
+    generate::{
+        cloud_small::{self, Request},
+        recipe::{Recipe, generate_recipe},
+    },
 };
 use sha1::{Digest as _, Sha1};
 use sha2::{Digest, Sha256};
-use std::{fs, io::Write, os::unix::fs::symlink, path::PathBuf, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    io::Write,
+    os::unix::fs::symlink,
+    path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 
 const SEED: u64 = 0x4d45_4449;
 fn fixture() -> (tempfile::TempDir, PathBuf, CoreHost) {
@@ -259,4 +277,275 @@ fn unbound_runtime_is_distinct_from_absent_runtime_and_empty_missing_list() {
     assert!(!output.contains("synthetic-container"));
     drop(observer);
     host.close().unwrap();
+}
+
+struct PublicationKeys(AtomicUsize);
+impl KeyByteSource for PublicationKeys {
+    fn draw_key(&self) -> Result<[u8; 32], KeySourceError> {
+        let call = self.0.fetch_add(1, Ordering::SeqCst);
+        if call >= 2 {
+            return Err(KeySourceError::Unavailable);
+        }
+        Ok(std::array::from_fn(|index| {
+            (index as u8).wrapping_mul(17).wrapping_add(31 + 93 * call as u8)
+        }))
+    }
+}
+
+#[test]
+fn published_and_adopted_bound_runtime_pages_preserve_actual_media_facts() {
+    const STEPS: usize = 10_000;
+    // The production Runtime query currently returns 250 entities per page.
+    const FILES: usize = 251;
+    let root = tempfile::tempdir().unwrap();
+    let sender_dir = root.path().join("sender");
+    let receiver_dir = root.path().join("receiver");
+    let recipe = Recipe::parse("recipe: bound-media-observation\ndescription: Public synthetic media witness\nnow: \"2025-01-01T00:00:00Z\"\ndecks:\n  - name: Generic::Media\n    notetype: basic\n    new: 1\n    fields: [\"generated front {n}\", \"generated back {n}\"]\n").unwrap();
+    generate_recipe(&recipe, SEED + 1, &sender_dir).unwrap();
+    generate_recipe(&recipe, SEED + 2, &receiver_dir).unwrap();
+    let scope = Scope {
+        container: "synthetic-container".into(),
+        environment: "development".into(),
+        account: "synthetic-account".into(),
+    };
+    let mut service = Service::open(
+        root.path(),
+        ServiceConfig {
+            page_size: 32,
+            ..ServiceConfig::default()
+        },
+        SeededRandom::new(SEED + 3),
+    )
+    .unwrap();
+    let open = |directory: &Path, seed| {
+        PublicationRig::open(
+            directory,
+            &scope,
+            IdentityReads::Available(scope.account.clone()),
+            false,
+            cloud_small::NOW_MS,
+            seed,
+            Arc::new(PublicationKeys(AtomicUsize::new(0))),
+        )
+        .unwrap()
+    };
+    let mut sender = open(&sender_dir, SEED + 4);
+    assert!(sender.facts().unwrap().current.is_none());
+    let preview = sender.preview(&mut service, STEPS).unwrap();
+    sender.confirm_publication(&preview).unwrap();
+    sender.drive_ready(&mut service, STEPS).unwrap();
+    assert!(sender.facts().unwrap().recovery_ops.is_empty());
+    let mut expected = BTreeMap::new();
+    for index in 0..FILES {
+        let desired = format!("bound-{index:04}.bin");
+        // Four distinct tiny blobs, with many real names referring to each.
+        let bytes = vec![(index % 4) as u8; 4];
+        let stored = sender.driver().put_media(&desired, &bytes).unwrap();
+        assert_eq!(stored, desired);
+        assert!(expected.insert(stored, bytes).is_none());
+    }
+    sender.sync_now_and_drain(&mut service, STEPS).unwrap();
+    assert!(sender.take_fetch_errors().is_empty());
+    assert!(sender.sdk_pending().is_empty());
+    let published = sender.facts().unwrap();
+    assert!(published.root_acked && published.recovery_ops.is_empty());
+    let published_binding = published.current.unwrap();
+
+    let mut receiver = open(&receiver_dir, SEED + 5);
+    assert!(receiver.facts().unwrap().current.is_none());
+    let preview = receiver.preview(&mut service, STEPS).unwrap();
+    receiver.adopt_cloud(&preview).unwrap();
+    receiver.drive_ready(&mut service, STEPS).unwrap();
+    assert!(receiver.take_fetch_errors().is_empty());
+    assert!(receiver.sdk_pending().is_empty());
+    let adopted = receiver.facts().unwrap();
+    assert!(adopted.recovery_ops.is_empty());
+    let adopted_binding = adopted.current.unwrap();
+    assert!(adopted_binding.id != published_binding.id);
+    assert!(adopted_binding.facts.epoch == published_binding.facts.epoch);
+    receiver.close_clean().unwrap();
+    sender.close_clean().unwrap();
+
+    let expected_names: BTreeSet<_> = expected.keys().map(hash).collect();
+    let expected_hash_counts = expected.values().fold(BTreeMap::new(), |mut counts, bytes| {
+        *counts.entry(hash(bytes)).or_insert(0_usize) += 1;
+        counts
+    });
+    assert_eq!(expected_hash_counts.len(), 4);
+    let mut previous_files = None;
+    for (directory, seed, binding) in [
+        (&sender_dir, SEED + 4, published_binding),
+        (&receiver_dir, SEED + 5, adopted_binding),
+    ] {
+        // Reopen only after the actual child has closed its writer and Runtime.
+        let mut config = options(directory, cloud_small::NOW_MS, seed);
+        config.cloud = Some(CloudInputs {
+            scope: production::BuildScope {
+                container: production::ContainerId::new(scope.container.clone()).unwrap(),
+                environment: production::Environment::Development,
+            },
+            identity: Arc::new(SyntheticIdentity),
+            files: Arc::new(NativeFiles),
+        });
+        let host = CoreHost::open(config).unwrap();
+        let runtime = host.cloud_runtime().unwrap();
+        runtime.refresh_identity().unwrap();
+        let collection = host.collection().unwrap();
+        let media = host.media().unwrap();
+        runtime
+            .reconcile_binding(&collection, &media, Duration::from_secs(30))
+            .unwrap();
+        let before = runtime.status().unwrap();
+        assert!(before.binding.as_ref() == Some(&binding));
+        assert_eq!(before.generation, Some(collection.generation()));
+        assert!(before.stored_usable && before.identity_verified && before.scan_drained);
+        assert!(!before.scan_required && !before.scan_running && !before.tracking_stopped);
+        assert_eq!(binding.facts.state, production::BindingState::Active);
+        let journal_before = media.store().entries().unwrap();
+        let tracked_before = media.tracked_names().unwrap();
+
+        // Query the actual Runtime, including its real continuation and EOF.
+        let mut entities = runtime.entity_facts_page(Kind::MediaName, None).unwrap();
+        assert_eq!(entities.len(), 250);
+        let next = runtime
+            .entity_facts_page(Kind::MediaName, Some(&entities.last().unwrap().key))
+            .unwrap();
+        assert_eq!(next.len(), 1);
+        assert!(entities.last().unwrap().key < next[0].key);
+        entities.extend(next);
+        assert!(
+            runtime
+                .entity_facts_page(Kind::MediaName, Some(&entities.last().unwrap().key))
+                .unwrap()
+                .is_empty()
+        );
+        for entity in &entities {
+            assert_eq!(entity.local_rev, entity.acked_rev);
+            assert!(entity.server_erev > 0 && entity.mark.is_none() && entity.in_flight.is_empty());
+            assert!(entity.acked_payload.as_ref() == Some(&entity.payload));
+            // Compare opaque ACK evidence with an ordinary actual Service read.
+            let response = service
+                .request(
+                    &scope,
+                    Caller::default(),
+                    Operation::Read {
+                        zone: production::adapter::collection_zone(binding.facts.epoch),
+                        name: entity.name.clone(),
+                        fields: RequestedFields::All,
+                    },
+                )
+                .unwrap();
+            assert!(response.request_id > 0);
+            let Ok(Reply::Record(record)) = response.result else {
+                panic!("actual published media entity receipt required");
+            };
+            assert_eq!(record.record_type, "MGEntity");
+            assert_eq!(record.name, entity.name);
+            assert!(record.fields.get("e") == Some(&Field::EncryptedBytes(entity.acked_envelope.0.clone())));
+            assert_eq!(record.system_fields.bytes(), entity.acked_system_fields);
+        }
+
+        let observer = MediaObserver::new(&host).unwrap();
+        let observation = observer.observe().unwrap();
+        assert_eq!(observation.generation, collection.generation().0);
+        assert_eq!(
+            observation.scope,
+            ScopeObservation::Bound {
+                scope_sha256: hash(serde_json::to_vec(&binding.scope).unwrap()),
+                account_sha256: hash(&binding.facts.account.0),
+                binding_sha256: hash(binding.id.0),
+                epoch_sha256: hash(binding.facts.epoch.0),
+                state: production::BindingState::Active,
+                stored_usable: true,
+                identity_verified: true,
+                scan_required: false,
+                scan_running: false,
+                scan_drained: true,
+                tracking_stopped: false,
+            }
+        );
+        assert_eq!(observation.names.len(), FILES);
+        assert_eq!(observation.entities.len(), FILES);
+        assert_eq!(
+            observation.names.iter().map(|row| row.name_sha256).collect::<BTreeSet<_>>(),
+            expected_names
+        );
+        assert_eq!(
+            observation.entities.iter().map(|row| row.name_sha256).collect::<BTreeSet<_>>(),
+            expected_names
+        );
+        let mut actual_hash_counts = BTreeMap::new();
+        for (row, entity) in observation.entities.iter().zip(&entities) {
+            let Payload::MediaName(payload) = &entity.payload else {
+                panic!("actual media payload required");
+            };
+            assert_eq!(row.name_sha256, hash(&payload.name));
+            assert_eq!(row.case_key_sha256, hash(&entity.key));
+            assert_eq!(
+                (row.sha256, row.sha1, row.size),
+                (payload.sha256, payload.sha1, payload.size)
+            );
+            assert_eq!((row.local_rev, row.acked_rev), (entity.local_rev, entity.acked_rev));
+            assert!(entity.tombstone_at.is_none());
+            assert!(!row.tombstone && !row.has_dirty_mark && row.in_flight == 0);
+            let file = &observation.names.iter().find(|name| name.name_sha256 == row.name_sha256).unwrap().file;
+            let FileObservation::Present(actual) = file else {
+                panic!("actual file for runtime entity required");
+            };
+            assert_eq!((row.sha256, row.sha1, row.size), (actual.sha256, actual.sha1, actual.size));
+            *actual_hash_counts.entry(row.sha256).or_insert(0_usize) += 1;
+        }
+        assert_eq!(actual_hash_counts, expected_hash_counts);
+        for (stored, bytes) in &expected {
+            let row = name(&observation, stored);
+            let FileObservation::Present(actual) = &row.file else {
+                panic!("actual regular media file required");
+            };
+            let expected_sha1: [u8; 20] = Sha1::digest(bytes).into();
+            assert_eq!(actual.sha256, hash(bytes));
+            assert_eq!(actual.sha1, expected_sha1);
+            assert_eq!(actual.size, bytes.len() as u64);
+            assert_eq!(actual.read_calls, 2);
+            assert_eq!(actual.largest_read, bytes.len());
+            assert!(actual.largest_read <= READ_BUFFER_BYTES);
+            assert_eq!(row.stored_name_sha256, Some(hash(stored)));
+            assert_eq!(row.case_key_sha256, hash(stored.to_lowercase()));
+            let journal = row.journal.as_ref().unwrap();
+            assert!(journal.tracked && journal.live);
+            assert_eq!((journal.sha1, journal.size), (Some(expected_sha1), actual.size));
+        }
+        let files: BTreeMap<_, _> = observation
+            .names
+            .iter()
+            .map(|row| (row.name_sha256, row.file.clone()))
+            .collect();
+        if let Some(previous) = &previous_files {
+            assert_eq!(&files, previous);
+        }
+        previous_files = Some(files);
+        assert_eq!(
+            observation.missing,
+            [
+                Missing::RuntimeMissingNameList,
+                Missing::RuntimeMediaNameDisposition,
+                Missing::InstallAndTrashHistory,
+                Missing::OriginalRootPinnedRead,
+            ]
+        );
+        assert_eq!(observer.observe().unwrap(), observation);
+        let after = runtime.status().unwrap();
+        assert!(after.binding == before.binding);
+        assert_eq!(after.generation, before.generation);
+        assert_eq!(after.change_counter, before.change_counter);
+        assert_eq!(media.store().entries().unwrap(), journal_before);
+        assert_eq!(media.tracked_names().unwrap(), tracked_before);
+        drop(observer);
+        host.close().unwrap();
+    }
+}
+
+// Subprocess IPC entry required by PublicationRig; no product assertion.
+#[test]
+fn cloud_child_entry() {
+    meguri_testkit::cloud::child_driver::child_entry().unwrap();
 }
