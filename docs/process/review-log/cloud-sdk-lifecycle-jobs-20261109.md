@@ -88,3 +88,18 @@ No executable line, assertion or limit changes. Final privacy `4712`, lint
 Native bridge build/tests, full invocation-boundary work, the remaining native
 admission calls, media evidence and the original batch gate remain pending.
 No Unit trailer or acceptance is added.
+
+## Native completion of this component
+
+Swift `6229` builds all three Debug Rust slices and matching bindings, then
+stops at a Swift compiler error: the shared helper's tracking closure needs
+an escaping annotation. No tests run in that failed receipt.
+
+Filtered export `8550` adds only that annotation. Independent review finds
+no P0–P2 issue; privacy passes. Swift `9299` reuses the built Rust products
+and passes all 15 selected checks, including the real installed-identity
+listener-failure proof, old listener/order/drain checks, instrumentation,
+held-factory readiness and six stale final-admission cases.
+
+This closes the reviewed two-call component. The unfinished unit, media,
+full invocation-boundary and batch-gate requirements above remain open.

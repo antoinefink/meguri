@@ -68,7 +68,7 @@ public actor CoreCloudPolicyService {
         _ startName: BridgeCall, result resultName: BridgeCall,
         beforeJobStart: @Sendable (BridgeCall) async -> Void = { _ in },
         onJobQueued: @Sendable () -> Void = {},
-        track: @Sendable (MeguriCoreBindings.JobHandle) throws -> CoreJob = { try Jobs.track($0) },
+        track: @escaping @Sendable (MeguriCoreBindings.JobHandle) throws -> CoreJob = { try Jobs.track($0) },
         retainResourceResultOnTrackingFailure: Bool = false,
         _ start: @escaping @Sendable () throws -> CloudPolicyJobValue<Value>
     ) async throws -> Value {
