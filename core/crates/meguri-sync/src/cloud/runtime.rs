@@ -31,6 +31,8 @@ pub use asset_read_impl::AssetReadActivityGuard;
 mod conflict_cleanup_impl;
 #[path = "incoming_runtime.rs"]
 mod incoming_impl;
+#[path = "live_resume_runtime.rs"]
+mod live_resume_impl;
 #[path = "media_runtime.rs"]
 mod media_impl;
 #[path = "policy_runtime.rs"]
@@ -404,6 +406,7 @@ pub struct RuntimeStatus {
     pub incomplete: Incomplete,
 }
 
+#[derive(Clone, PartialEq, Eq)]
 struct Bound {
     binding: Binding,
     evidence: OpenEvidence,
@@ -423,6 +426,7 @@ struct State {
     store: Option<TrackingStore>,
     bound: Option<Bound>,
     suspended_adoption_cleanup: Option<adoption_impl::SuspendedAdoptionCleanup>,
+    connection_lifecycle: live_resume_impl::ConnectionLifecycle,
     scan_required: bool,
     scan_running: bool,
     tracking_stopped: bool,
@@ -789,6 +793,7 @@ impl Runtime {
         }
         let mut state = self.state();
         state.suspended_adoption_cleanup = None;
+        state.connection_lifecycle = live_resume_impl::ConnectionLifecycle::Active;
         Self::adapter_close_exchange_locked(&mut state);
         state.incarnation = state.incarnation.checked_add(1).ok_or(Error::InvalidData)?;
         state.publish_authority();
@@ -1707,6 +1712,7 @@ impl SuspendParticipant for Runtime {
         state.scan_required = true;
         state.scan_running = false;
         state.note_scan = None;
+        state.connection_lifecycle = live_resume_impl::ConnectionLifecycle::Suspended;
         Ok(())
     }
     fn release_connections_until(&self, _deadline: Duration) -> Result<(), EngineError> {
@@ -1714,10 +1720,23 @@ impl SuspendParticipant for Runtime {
         with_tracking_access(|| {
             state.store.take();
         });
+        if state.connection_lifecycle == live_resume_impl::ConnectionLifecycle::Suspended {
+            state.connection_lifecycle = live_resume_impl::ConnectionLifecycle::Released;
+        }
         Ok(())
     }
     fn resume_with_collection(&self, collection: &Collection) -> Result<(), EngineError> {
-        OpenStep::run(self, collection)
+        let released = {
+            let state = self.state();
+            state.connection_lifecycle == live_resume_impl::ConnectionLifecycle::Released
+                && state.store.is_none()
+                && state.bound.is_none()
+        };
+        if released {
+            return OpenStep::run(self, collection);
+        }
+        let _ = self.retain_live_resume(collection);
+        Ok(())
     }
 }
 impl Drop for Runtime {

@@ -124,7 +124,7 @@ threads-required = "num-test-threads"
 
 # Runtime authority edge tests retain positive five-second completion bounds.
 [[profile.default.overrides]]
-filter = 'package(meguri-host) and test(/^native_authority_/)'
+filter = 'package(meguri-host) and (test(/^native_authority_/) or test(/^live_resume::/))'
 threads-required = "num-test-threads"
 
 # Retained native admission proofs hold real Driver/Runtime locks and bound starts.

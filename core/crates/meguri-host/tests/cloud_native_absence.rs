@@ -2949,3 +2949,6 @@ fn epoch_loss_commit_error_reopen(zone_missing: bool, kind: std::io::ErrorKind) 
     // If saved-state callbacks request no epoch read, there is no owned
     // FetchRead available for another attempt. Leave loss, isolation and SDK state unchanged.
 }
+
+#[path = "cloud_native_absence/live_resume.rs"]
+mod live_resume;

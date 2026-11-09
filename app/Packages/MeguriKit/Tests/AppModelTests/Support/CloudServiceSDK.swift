@@ -3,12 +3,23 @@
 import Foundation
 import Testing
 
+nonisolated struct ServiceSentBatch: Sendable {
+    let zone: String
+    let id: UInt64
+}
+
 actor ServiceSDKFactory: CloudKitEngineFactory {
     let wire: ServiceWorkflowWire
     private(set) var engines: [ServiceSDK] = []
     init(wire: ServiceWorkflowWire) { self.wire = wire }
+    private var nextAccountRead: (@Sendable () async -> Void)?
+    private(set) var accountReadCount = 0
+    func holdNextAccountRead(_ hold: @escaping @Sendable () async -> Void) { nextAccountRead = hold }
     func resolveAccount() async throws -> CloudResolvedAccount? {
-        .init(status: .available, identity: Data("synthetic-initial-account".utf8))
+        accountReadCount += 1
+        let hold = nextAccountRead; nextAccountRead = nil
+        await hold?()
+        return .init(status: .available, identity: Data("synthetic-initial-account".utf8))
     }
     func makeEngine(configuration: CloudEngineConfiguration, delegate: any CloudKitEngineDelegate) async throws -> any CloudKitEngine {
         let engine = try ServiceSDK(configuration: configuration, delegate: delegate, wire: wire)
@@ -36,6 +47,16 @@ actor ServiceSDK: CloudKitEngine {
     private var bookkeepingWaiters: [CheckedContinuation<Void, Never>] = []
     private var cancelled = false
     private var released = false
+    private var nextSentResult: (zone: String?, hold: @Sendable () async -> Void)?
+    private(set) var deliveredSentBatches: [ServiceSentBatch] = []
+    private(set) var heldSentBatchID: UInt64?
+    private(set) var heldSentZone: String?
+    private(set) var heldSavedNames: [String] = []
+    // Holds an actual Service response within the original admitted SDK network
+    // call, before its original result handler/ACK. It never replaces a result.
+    func holdNextSentResult(zone: String?, _ hold: @escaping @Sendable () async -> Void) {
+        nextSentResult = (zone, hold)
+    }
     init(configuration: CloudEngineConfiguration, delegate: any CloudKitEngineDelegate, wire: ServiceWorkflowWire) throws {
         instanceID = configuration.instanceID; self.delegate = delegate; self.wire = wire
         serialization = try configuration.serialization.map { try JSONDecoder().decode(Serialization.self, from: $0) } ?? Serialization()
@@ -156,7 +177,15 @@ actor ServiceSDK: CloudKitEngine {
                     } else { throw ServiceWorkflowFailure.wire }
                 }
                 try await wire.recordReceipts(original, zone: zone)
+                if let held = nextSentResult, held.zone == nil || held.zone == zone {
+                    nextSentResult = nil
+                    heldSentBatchID = batch.id
+                    heldSentZone = zone
+                    heldSavedNames = saved.map(\.name)
+                    await held.hold()
+                }
                 try await deliver(.sent(batchID: batch.id, saved: saved, failed: failed, deleted: deleted), removing: saved.map(\.name) + deleted)
+                deliveredSentBatches.append(.init(zone: zone, id: batch.id))
             }
             try await deliver(.didSend(zone: zone))
         }
