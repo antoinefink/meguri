@@ -43,6 +43,71 @@ public enum DebugCloudDiagnostics {
         }
     }
 
+    // Tests use a fresh recorder; native callbacks capture it at preparation.
+    @TaskLocal static var mediaRecorder: Recorder?
+    @TaskLocal static var mediaAssetStaging = false
+    @TaskLocal static var mediaRequestKind: MediaRequestKind?
+    static var currentMediaRecorder: Recorder { mediaRecorder ?? recorder }
+
+    enum MediaRequestKind: String, Sendable {
+        case next, root, read, reads, download, upload, delete
+        init(_ request: CloudMediaRequest?) {
+            switch request {
+            case nil: self = .next
+            case .some(.root): self = .root
+            case .some(.read): self = .read
+            case .some(.reads): self = .reads
+            case .some(.download): self = .download
+            case .some(.upload): self = .upload
+            case .some(.delete): self = .delete
+            }
+        }
+    }
+    enum MediaStage: String, Sendable {
+        case recordValidation, assetStaging, recordCallback, terminalCallback
+        case prepare, coreNext, coreAdmission, transportReply, coreReply
+    }
+    enum MediaCategory: String, Sendable {
+        case invalidRecord, missingAsset, duplicateCallback, missingCallback, invalidReply
+        case cloudKit, nonCloudKit, cancelled, queueRejected, metadataScope, coreRejected
+        case invalidAsset, assetTooLarge, noSpace, stagingLimit, other
+        case sourceUnavailable, sourceShortRead, sourceShape, sourceSize
+        static func local(_ error: any Error) -> Self {
+            if error is CancellationError { return .cancelled }
+            if let error = error as? CloudMediaSourceFailure {
+                switch error {
+                case .unavailable: return .sourceUnavailable
+                case .shortRead: return .sourceShortRead
+                case .invalidShape: return .sourceShape
+                case .invalidSize: return .sourceSize
+                }
+            }
+            if error is BridgeError { return .coreRejected }
+            guard let error = error as? CloudMediaFailure else { return .other }
+            switch error {
+            case .queueRejected: return .queueRejected
+            case .metadataScope: return .metadataScope
+            case .invalidAsset: return .invalidAsset
+            case .assetTooLarge: return .assetTooLarge
+            case .noSpace: return .noSpace
+            case .stagingLimit: return .stagingLimit
+            case .missingReply: return .missingCallback
+            default: return .other
+            }
+        }
+    }
+    struct MediaValue: Sendable, Equatable {
+        let request: MediaRequestKind
+        let stage: MediaStage
+        let category: MediaCategory
+        var formatted: String {
+            "mediaRequest=\(request.rawValue) mediaStage=\(stage.rawValue) mediaCategory=\(category.rawValue)"
+        }
+    }
+    static func recordMedia(_ request: CloudMediaRequest? = nil, stage: MediaStage, category: MediaCategory) {
+        currentMediaRecorder.retainMedia(.init(request: mediaRequestKind ?? .init(request), stage: stage, category: category))
+    }
+
     /// The only value passed to the log sink. Construction discards all payloads.
     struct Value: Sendable, Equatable {
         let boundary: Boundary
@@ -115,9 +180,17 @@ public enum DebugCloudDiagnostics {
 
     /// A fresh instance lets tests check the same cap without consuming process logs.
     final class Recorder: Sendable {
-        private let state = Mutex<(count: Int, latest: String?, lastStatus: Value?)>((0, nil, nil))
+        private let state = Mutex<(count: Int, latest: String?, lastStatus: Value?, media: MediaValue?)>((0, nil, nil, nil))
 
-        var latestValue: String? { state.withLock { $0.latest } }
+        var latestValue: String? {
+            state.withLock { state in
+                let values = [state.latest, state.media?.formatted].compactMap { $0 }
+                return values.isEmpty ? nil : values.joined(separator: " ")
+            }
+        }
+
+        // One retained tuple, no history and no additional log sink/cap.
+        func retainMedia(_ value: MediaValue) { state.withLock { $0.media = value } }
 
         func emit(_ value: Value, using sink: (Value) -> Void) {
             emit(value, status: false, using: sink)

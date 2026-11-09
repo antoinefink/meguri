@@ -20,6 +20,102 @@ private final class NativeMediaTerminalCapture: Sendable {
 struct NativeCloudMediaTests {
     let name = "baaaaaaaaaaaaaaaaaaaaaaaaaa"
 
+    #if DEBUG
+    enum FailureScenario: CaseIterable, Sendable {
+        case cloudKit, nonCloudKit, missingAsset, missingSource, invalidRecord
+        case foreignCallback, duplicateCallback, missingCallback, unknownItem, zoneMissing
+    }
+
+    @Test(arguments: FailureScenario.allCases, [false, true])
+    func debugMediaFailureKeepsOnlyFixedEvidence(scenario: FailureScenario, batch: Bool) async throws {
+        let recorder = DebugCloudDiagnostics.Recorder()
+        try await DebugCloudDiagnostics.$mediaRecorder.withValue(recorder) {
+            let sentinel = "SYNTHETIC_PRIVATE_SENTINEL"
+            let queue = NativeOwnCapturingQueue()
+            let terminal = NativeMediaTerminalCapture()
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let transport = NativeCloudMediaTransport(queue: queue,
+                staging: try .init(directory: root, available: { UInt64.max }),
+                terminalHandlerInstalled: { terminal.installed($0) })
+            let download = scenario == .missingAsset || scenario == .missingSource
+            if batch && download { return }
+            let request: CloudMediaRequest = download ? .download(name: name) : batch ? .reads(names: [name]) : .read(name: name)
+            let prepared = try transport.prepare(request)
+            #expect(prepared.enqueue())
+            let operation = try #require(queue.operations.withLock { $0.first } as? CKFetchRecordsOperation)
+            let id = try #require(operation.recordIDs?.first)
+            let record = CKRecord(recordType: "MGBlob", recordID: id)
+            record.encryptedValues["e"] = Data([1]) as CKRecordValue
+            let expected: String?
+            switch scenario {
+            case .cloudKit:
+                operation.perRecordResultBlock?(id, .failure(CKError(.serviceUnavailable,
+                    userInfo: [NSLocalizedDescriptionKey: sentinel, CKErrorRetryAfterKey: 45.0])))
+                expected = "mediaRequest=read mediaStage=recordCallback mediaCategory=cloudKit"
+            case .nonCloudKit:
+                operation.perRecordResultBlock?(id, .failure(NSError(domain: sentinel, code: 987,
+                    userInfo: [NSLocalizedDescriptionKey: sentinel, NSFilePathErrorKey: sentinel])))
+                expected = "mediaRequest=read mediaStage=recordCallback mediaCategory=nonCloudKit"
+            case .missingAsset:
+                operation.perRecordResultBlock?(id, .success(record))
+                expected = "mediaRequest=download mediaStage=recordValidation mediaCategory=missingAsset"
+            case .missingSource:
+                record["a"] = CKAsset(fileURL: root.appendingPathComponent(sentinel))
+                operation.perRecordResultBlock?(id, .success(record))
+                expected = "mediaRequest=download mediaStage=assetStaging mediaCategory=sourceUnavailable"
+            case .invalidRecord:
+                record.encryptedValues["e"] = nil
+                operation.perRecordResultBlock?(id, .success(record))
+                expected = "mediaRequest=read mediaStage=recordValidation mediaCategory=invalidRecord"
+            case .foreignCallback:
+                operation.perRecordResultBlock?(.init(recordName: sentinel, zoneID: id.zoneID), .success(record))
+                expected = "mediaRequest=read mediaStage=recordCallback mediaCategory=invalidRecord"
+            case .duplicateCallback:
+                operation.perRecordResultBlock?(id, .success(record))
+                operation.perRecordResultBlock?(id, .success(record))
+                expected = "mediaRequest=read mediaStage=recordCallback mediaCategory=duplicateCallback"
+            case .missingCallback:
+                expected = "mediaRequest=read mediaStage=terminalCallback mediaCategory=missingCallback"
+            case .unknownItem:
+                operation.perRecordResultBlock?(id, .failure(CKError(.unknownItem)))
+                expected = nil
+            case .zoneMissing:
+                operation.perRecordResultBlock?(id, .failure(CKError(.zoneNotFound)))
+                expected = nil
+            }
+            try terminal.complete(.success(()))
+            let reply = try await prepared.reply()
+            let expectedTuple = batch ? expected?.replacingOccurrences(of: "mediaRequest=read ", with: "mediaRequest=reads ") : expected
+            #expect(recorder.latestValue == expectedTuple)
+            #expect(!(recorder.latestValue ?? "").contains(sentinel))
+            switch scenario {
+            case .unknownItem:
+                if batch {
+                    guard case .blobReads(let results) = reply.result, let first = results.first, case .unknownItem = first else { Issue.record("absence changed"); return }
+                } else {
+                    guard case .unknownItem = reply.result else { Issue.record("absence changed"); return }
+                }
+                #expect(reply.failure() == nil)
+            case .zoneMissing:
+                if batch {
+                    guard case .blobReads(let results) = reply.result, let first = results.first, case .zoneMissing = first else { Issue.record("absence changed"); return }
+                } else {
+                    guard case .zoneMissing = reply.result else { Issue.record("absence changed"); return }
+                }
+                #expect(reply.failure() == nil)
+            case .cloudKit:
+                #expect(reply.failure()?.code == Int64(CKError.Code.serviceUnavailable.rawValue))
+                #expect(reply.failure()?.retryAfterMilliseconds == 45_000)
+            default: #expect(reply.failure()?.code == 0)
+            }
+            let status = DebugCloudDiagnostics.Value.status(.other, zone: .media, kind: .read, code: 0)
+            recorder.emitStatus(status) { _ in }
+            #expect(recorder.latestValue == [status.formatted, expectedTuple].compactMap { $0 }.joined(separator: " "))
+        }
+    }
+    #endif
+
     @Test func recordIDReadsNameExactlyTheRequiredFields() throws {
         for request in [CloudMediaRequest.root, .read(name: name), .download(name: name)] {
             let queue = NativeOwnCapturingQueue()
@@ -1063,6 +1159,74 @@ extension EventTests {
             }
         }
     }
+
+    #if DEBUG
+    @Test func debugMalformedMediaCallbackKeepsPolicyZeroWithoutSDKCalls() async throws {
+        let diagnostics = DebugCloudDiagnostics.Recorder()
+        try await DebugCloudDiagnostics.$mediaRecorder.withValue(diagnostics) {
+            try await withNativePolicyFixture { fixture in
+                let queue = HeldNativeMediaQueue()
+                let staging = try CloudMediaStaging(directory: fixture.directory.appendingPathComponent("media-errors"), available: { UInt64.max })
+                let (policy, setup) = try await nativePolicy(fixture)
+                try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: setup)
+                let runner = NativeCloudPolicyExecutor(policy: policy, adapter: fixture.adapter,
+                    mediaService: try await fixture.core.media(), mediaTransport: NativeCloudMediaTransport(queue: queue, staging: staging))
+                let enabled = try await policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: true)))
+                guard case .commands(let commands) = enabled else { throw CloudMediaFailure.missingReply }
+                let command = try #require(commands.first { if case .resumeMedia = $0.action { true } else { false } })
+                let engine = try await fixture.engine()
+                let calls = engine.acceptedNetworkCalls.value
+                let running = Task { await runner.execute(command) }
+                var reads = queue.issued.makeAsyncIterator()
+                let operation = try #require(await reads.next())
+                operation.fetchRecordsResultBlock?(.success(()))
+                let result = await running.value
+                queue.finish()
+                let failure = try #require(result.error as? CloudKitSDKOperationFailure)
+                #expect(failure.code == 0)
+                #expect(failure.retryAfterMilliseconds == nil)
+                #expect(!result.mediaCancellation && !(result.error is CancellationError))
+                let status = try await policy.status()
+                let detail = try #require(status.error)
+                #expect(detail.code == failure.code && detail.retryAfterMilliseconds == nil)
+                #expect(detail.error == .other)
+                #expect(detail.operation.zone == .media && detail.operation.kind == .read)
+                let beforeStatus = try #require(diagnostics.latestValue)
+                diagnostics.emitStatus(.status(detail.error, zone: detail.operation.zone, kind: detail.operation.kind, code: detail.code)) { _ in }
+                #expect(diagnostics.latestValue == "boundary=policyStatus action=none failure=other zone=media kind=read code=0 \(beforeStatus)")
+                #expect(beforeStatus.contains("mediaStage=terminalCallback mediaCategory=missingCallback"))
+                #expect(engine.acceptedNetworkCalls.value == calls)
+                let refreshed = try await policy.input(.refresh(.cloud))
+                guard case .commands(let followups) = refreshed else { throw CloudMediaFailure.missingReply }
+                for followup in followups {
+                    switch followup.action {
+                    case .readBlobs, .resumeMedia, .requestSend: Issue.record("read failure immediately scheduled more media work")
+                    default: break
+                    }
+                }
+            }
+        }
+    }
+    #endif
+
+    #if DEBUG
+    @Test func debugMediaCoreNextRejectionHasFixedEvidenceWithoutSDKCalls() async throws {
+        let diagnostics = DebugCloudDiagnostics.Recorder()
+        try await DebugCloudDiagnostics.$mediaRecorder.withValue(diagnostics) {
+            try await withNativePolicyFixture { fixture in
+                let queue = NativeOwnCapturingQueue()
+                let staging = try CloudMediaStaging(directory: fixture.directory.appendingPathComponent("debug-core"), available: { UInt64.max })
+                let executor = CloudMediaExecutor(core: try await fixture.core.media(), sdk: "synthetic-unowned-sdk",
+                    transport: NativeCloudMediaTransport(queue: queue, staging: staging))
+                do { _ = try await executor.runNext(); Issue.record("Core accepted an unowned SDK") }
+                catch { #expect(error is BridgeError) }
+                #expect(diagnostics.latestValue == "mediaRequest=next mediaStage=coreNext mediaCategory=coreRejected")
+                #expect(queue.operations.withLock { $0.isEmpty })
+                #expect(await fixture.factory.engines().isEmpty)
+            }
+        }
+    }
+    #endif
 
     @Test func nativeMediaSDKCancellationWrapperRemainsUnqualifiedWithCoreCancellation() async throws {
         try await withNativePolicyFixture { fixture in

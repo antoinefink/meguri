@@ -77,9 +77,16 @@ public final class CloudMediaStaging: Sendable {
     func copy(_ source: URL, cancelled: @Sendable () -> Bool, retainedAssetLimit: Int = 2) throws -> CloudMediaStagedAsset {
         do {
             return try copyPayload(source, cancelled: cancelled, retainedAssetLimit: retainedAssetLimit)
-        } catch let error as CloudMediaSourceFailure {
+        } catch {
+            #if DEBUG
+            if DebugCloudDiagnostics.mediaAssetStaging {
+                DebugCloudDiagnostics.currentMediaRecorder.retainMedia(.init(
+                    request: .download, stage: .assetStaging, category: .local(error)))
+            }
+            #endif
+            guard let sourceFailure = error as? CloudMediaSourceFailure else { throw error }
             // Existing media callers retain their validation and raw I/O errors.
-            switch error {
+            switch sourceFailure {
             case .unavailable(let underlying): throw underlying
             case .invalidShape, .shortRead: throw CloudMediaFailure.invalidAsset
             case .invalidSize: throw CloudMediaFailure.assetTooLarge

@@ -369,6 +369,31 @@ struct DebugCloudDiagnosticsTests {
         #expect(received.withLock { $0.count } == 64)
     }
 
+    @Test func mediaTupleSurvivesPolicyZeroAndTheExistingSinkCap() {
+        let recorder = DebugCloudDiagnostics.Recorder()
+        let tuple = DebugCloudDiagnostics.MediaValue(request: .download, stage: .assetStaging, category: .sourceUnavailable)
+        let old = Value(.policyExecute, error: HostileError())
+        var calls = 0
+        recorder.emit(old) { _ in calls += 1 }
+        recorder.retainMedia(tuple)
+        #expect(recorder.latestValue == "\(old.formatted) \(tuple.formatted)")
+        let status = Value.status(.other, zone: .media, kind: .read, code: 0)
+        recorder.emitStatus(status) { _ in calls += 1 }
+        #expect(status.code == 0)
+        #expect(recorder.latestValue == "boundary=policyStatus action=none failure=other zone=media kind=read code=0 \(tuple.formatted)")
+        for _ in 0..<100 { recorder.emit(old) { _ in calls += 1 } }
+        #expect(calls == 64)
+        recorder.emitStatus(status) { _ in calls += 1 }
+        recorder.emitStatus(nil) { _ in calls += 1 }
+        #expect(calls == 64)
+        #expect(recorder.latestValue == "\(status.formatted) \(tuple.formatted)")
+        let replacement = DebugCloudDiagnostics.MediaValue(request: .reads, stage: .recordCallback, category: .duplicateCallback)
+        recorder.retainMedia(replacement)
+        #expect(recorder.latestValue == "\(status.formatted) \(replacement.formatted)")
+        #expect(DebugCloudDiagnostics.Recorder().latestValue == nil)
+        #expect(DebugCloudDiagnostics.MediaCategory.local(HostileError()) == .other)
+    }
+
     private func expectFailure(_ error: any Error, _ expected: String) {
         let value = Value(.policyExecute, error: error)
         #expect(value.failure == expected)

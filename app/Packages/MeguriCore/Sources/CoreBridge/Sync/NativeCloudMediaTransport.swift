@@ -14,30 +14,62 @@ enum NativeCloudMediaRecords {
         return bytes.count == 27 && bytes.first == 98 && bytes.dropFirst().allSatisfy { (97...122).contains($0) || (50...55).contains($0) }
     }
     static func read(_ record: CKRecord, request: CloudMediaRequest, staging: CloudMediaStaging, cancelled: @Sendable () -> Bool) throws -> CloudMediaReadResult {
-        try NativeCloudKitIdentityValidation.requireCurrentOwner(record.recordID.zoneID)
-        let type: String
-        switch request { case .root: type = "MGMediaRoot"; case .read, .download: type = "MGBlob"; case .upload, .delete: throw CloudMediaFailure.requiresSyncEngine; case .reads: throw NativeCloudKitFailure.unsupportedRecord }
-        guard record.recordID == (try id(request)), record.recordType == type,
-              record["pa"] == nil, record["ma"] == nil,
-              let envelope = record.encryptedValues["e"] as? Data,
-              envelope.count <= 1_000_000 else { throw NativeCloudKitFailure.unsupportedRecord }
-        guard !record.allKeys().contains(where: { $0 != "a" && record[$0] is CKAsset }) else { throw NativeCloudKitFailure.unsupportedAsset }
-        let asset: CloudMediaStagedAsset?
-        if request.downloadsAsset {
-            guard let file = (record["a"] as? CKAsset)?.fileURL else { throw NativeCloudKitFailure.unsupportedAsset }
-            // CKAsset's URL is valid only during this original SDK callback.
-            asset = try staging.copy(file, cancelled: cancelled)
-        } else {
-            guard record["a"] == nil else { throw NativeCloudKitFailure.unsupportedAsset }
-            asset = nil
+        #if DEBUG
+        var stage = DebugCloudDiagnostics.MediaStage.recordValidation
+        var category = DebugCloudDiagnostics.MediaCategory.invalidRecord
+        #endif
+        do {
+            try NativeCloudKitIdentityValidation.requireCurrentOwner(record.recordID.zoneID)
+            let type: String
+            switch request { case .root: type = "MGMediaRoot"; case .read, .download: type = "MGBlob"; case .upload, .delete: throw CloudMediaFailure.requiresSyncEngine; case .reads: throw NativeCloudKitFailure.unsupportedRecord }
+            guard record.recordID == (try id(request)), record.recordType == type,
+                  record["pa"] == nil, record["ma"] == nil,
+                  let envelope = record.encryptedValues["e"] as? Data,
+                  envelope.count <= 1_000_000 else { throw NativeCloudKitFailure.unsupportedRecord }
+            guard !record.allKeys().contains(where: { $0 != "a" && record[$0] is CKAsset }) else { throw NativeCloudKitFailure.unsupportedAsset }
+            let asset: CloudMediaStagedAsset?
+            if request.downloadsAsset {
+                #if DEBUG
+                category = .missingAsset
+                #endif
+                guard let file = (record["a"] as? CKAsset)?.fileURL else { throw NativeCloudKitFailure.unsupportedAsset }
+                // CKAsset's URL is valid only during this original SDK callback.
+                #if DEBUG
+                stage = .assetStaging
+                asset = try DebugCloudDiagnostics.$mediaAssetStaging.withValue(true) {
+                    try staging.copy(file, cancelled: cancelled)
+                }
+                #else
+                asset = try staging.copy(file, cancelled: cancelled)
+                #endif
+            } else {
+                guard record["a"] == nil else { throw NativeCloudKitFailure.unsupportedAsset }
+                asset = nil
+            }
+            return .record(name: record.recordID.recordName, recordType: type, envelope: envelope, asset: asset)
+        } catch {
+            #if DEBUG
+            if stage != .assetStaging {
+                DebugCloudDiagnostics.recordMedia(request, stage: stage, category: category)
+            }
+            #endif
+            throw error
         }
-        return .record(name: record.recordID.recordName, recordType: type, envelope: envelope, asset: asset)
     }
+
     static func missingItem(_ id: CKRecord.ID, terminal: Result<Void, any Error>) -> CloudMediaTransportReply {
-        guard case .failure(let error) = terminal else { return .init(result: .failed(code: 0)) }
+        guard case .failure(let error) = terminal else {
+            #if DEBUG
+            DebugCloudDiagnostics.recordMedia(stage: .terminalCallback, category: .missingCallback)
+            #endif
+            return .init(result: .failed(code: 0))
+        }
         let native = error as NSError
         let entries = native.userInfo[CKPartialErrorsByItemIDKey] as? [AnyHashable: Any]
         let item = entries?[AnyHashable(id)] as? any Error
+        #if DEBUG
+        observeSDKFailure(item ?? error, request: .root, stage: .terminalCallback)
+        #endif
         let reply = failure(item ?? error)
         return .init(result: reply.result, retryAfterMilliseconds: NativeCloudOwnRecords.maximumDelay(
             reply.retryAfterMilliseconds, NativeCloudOwnRecords.retryDuration(error)))
@@ -46,8 +78,20 @@ enum NativeCloudMediaRecords {
         guard case .failure(let error) = terminal else { return nil }
         let native = error as NSError
         if native.domain == CKErrorDomain && native.code == CKError.Code.partialFailure.rawValue { return nil }
+        #if DEBUG
+        observeSDKFailure(error, request: .root, stage: .terminalCallback)
+        #endif
         return failure(error).result.failureCode
     }
+    #if DEBUG
+    static func observeSDKFailure(_ error: any Error, request: CloudMediaRequest, stage: DebugCloudDiagnostics.MediaStage) {
+        let native = error as NSError
+        if native.domain == CKErrorDomain,
+           native.code == CKError.Code.unknownItem.rawValue || native.code == CKError.Code.zoneNotFound.rawValue { return }
+        DebugCloudDiagnostics.recordMedia(request, stage: stage,
+            category: native.domain == CKErrorDomain ? .cloudKit : .nonCloudKit)
+    }
+    #endif
     static func failure(_ error: any Error) -> CloudMediaTransportReply {
         let native = error as NSError
         let result: CloudMediaReadResult
@@ -127,19 +171,31 @@ public struct NativeCloudMediaTransport: CloudMediaTransport {
         let prepared = NativePreparedMediaRead(operation: operation, queue: queue)
         let state = Mutex<CloudMediaTransportReply?>(nil)
         let staging = self.staging
-        operation.perRecordResultBlock = { [weak prepared] actual, result in
+        let recordHandler: @Sendable (CKRecord.ID, Result<CKRecord, any Error>) -> Void = { [weak prepared] actual, result in
             guard let prepared else { return }
             let reply: CloudMediaTransportReply
             do {
-                guard actual == id else { throw NativeCloudKitFailure.unsupportedRecord }
+                guard actual == id else {
+                    #if DEBUG
+                    DebugCloudDiagnostics.recordMedia(request, stage: .recordCallback, category: .invalidRecord)
+                    #endif
+                    throw NativeCloudKitFailure.unsupportedRecord
+                }
                 switch result {
                 case .success(let record): reply = .init(result: try NativeCloudMediaRecords.read(record, request: request, staging: staging, cancelled: { prepared.cancelled }))
-                case .failure(let error): reply = NativeCloudMediaRecords.failure(error)
+                case .failure(let error):
+                    #if DEBUG
+                    NativeCloudMediaRecords.observeSDKFailure(error, request: request, stage: .recordCallback)
+                    #endif
+                    reply = NativeCloudMediaRecords.failure(error)
                 }
             } catch { reply = NativeCloudMediaRecords.failure(error) }
             state.withLock { value in
                 // Two callbacks for one requested ID are never an empty/saved
                 // receipt; replacing releases only this run's native staging.
+                #if DEBUG
+                if value != nil { DebugCloudDiagnostics.recordMedia(request, stage: .recordCallback, category: .duplicateCallback) }
+                #endif
                 value = value == nil ? reply : .init(result: .failed(code: 0))
             }
         }
@@ -155,11 +211,32 @@ public struct NativeCloudMediaTransport: CloudMediaTransport {
                                       operationFailureCode: NativeCloudMediaRecords.unresolvedOperationCode(terminal)))
             } else { prepared.finish(NativeCloudMediaRecords.missingItem(id, terminal: terminal)) }
         }
+        #if DEBUG
+        let diagnostics = DebugCloudDiagnostics.currentMediaRecorder
+        let requestKind = DebugCloudDiagnostics.MediaRequestKind(request)
+        operation.perRecordResultBlock = { id, result in
+            DebugCloudDiagnostics.$mediaRecorder.withValue(diagnostics) {
+                DebugCloudDiagnostics.$mediaRequestKind.withValue(requestKind) { recordHandler(id, result) }
+            }
+        }
+        let observedTerminal: @Sendable (Result<Void, any Error>) -> Void = { result in
+            DebugCloudDiagnostics.$mediaRecorder.withValue(diagnostics) {
+                DebugCloudDiagnostics.$mediaRequestKind.withValue(requestKind) { terminalHandler(result) }
+            }
+        }
+        terminalHandlerInstalled?(observedTerminal)
+        operation.fetchRecordsResultBlock = observedTerminal
+        #else
+        operation.perRecordResultBlock = recordHandler
         terminalHandlerInstalled?(terminalHandler)
         operation.fetchRecordsResultBlock = terminalHandler
+        #endif
         return prepared
     }
     private func prepareBlobReads(_ names: [String]) throws -> any CloudPreparedMediaRead {
+        #if DEBUG
+        let request = CloudMediaRequest.reads(names: names)
+        #endif
         guard !names.isEmpty, names.count <= 200, Set(names).count == names.count,
               names.allSatisfy(NativeCloudMediaRecords.isBlobName) else { throw NativeCloudKitFailure.unsupportedRecord }
         let ids = try names.map { try NativeCloudMediaRecords.id(.read(name: $0)) }
@@ -170,18 +247,32 @@ public struct NativeCloudMediaTransport: CloudMediaTransport {
         let results = Mutex<[String: CloudMediaTransportReply]>([:])
         let invalid = Mutex(false)
         let staging = self.staging
-        operation.perRecordResultBlock = { [weak prepared] id, result in
+        let recordHandler: @Sendable (CKRecord.ID, Result<CKRecord, any Error>) -> Void = { [weak prepared] id, result in
             guard let prepared else { return }
             let reply: CloudMediaTransportReply
             do {
-                guard expected.contains(id) else { invalid.withLock { $0 = true }; throw NativeCloudKitFailure.unsupportedRecord }
+                guard expected.contains(id) else {
+                    #if DEBUG
+                    DebugCloudDiagnostics.recordMedia(request, stage: .recordCallback, category: .invalidRecord)
+                    #endif
+                    invalid.withLock { $0 = true }; throw NativeCloudKitFailure.unsupportedRecord
+                }
                 switch result {
                 case .success(let record): reply = .init(result: try NativeCloudMediaRecords.read(record, request: .read(name: id.recordName), staging: staging, cancelled: { prepared.cancelled }))
-                case .failure(let error): reply = NativeCloudMediaRecords.failure(error)
+                case .failure(let error):
+                    #if DEBUG
+                    NativeCloudMediaRecords.observeSDKFailure(error, request: request, stage: .recordCallback)
+                    #endif
+                    reply = NativeCloudMediaRecords.failure(error)
                 }
             } catch { reply = NativeCloudMediaRecords.failure(error) }
             results.withLock { values in
-                if values[id.recordName] != nil { invalid.withLock { $0 = true } }
+                if values[id.recordName] != nil {
+                    #if DEBUG
+                    DebugCloudDiagnostics.recordMedia(request, stage: .recordCallback, category: .duplicateCallback)
+                    #endif
+                    invalid.withLock { $0 = true }
+                }
                 values[id.recordName] = values[id.recordName] == nil ? reply : .init(result: .failed(code: 0))
             }
         }
@@ -197,13 +288,36 @@ public struct NativeCloudMediaTransport: CloudMediaTransport {
                 else { reply = NativeCloudMediaRecords.missingItem(ids[replies.count], terminal: terminal) }
                 retry = NativeCloudOwnRecords.maximumDelay(retry, reply.retryAfterMilliseconds)
                 do { replies.append(try .init(name: name, result: reply.result)) }
-                catch { replies.append(.failed(name: name, code: 0)) }
+                catch {
+                    #if DEBUG
+                    DebugCloudDiagnostics.recordMedia(request, stage: .terminalCallback, category: .invalidReply)
+                    #endif
+                    replies.append(.failed(name: name, code: 0))
+                }
             }
             prepared.finish(.init(result: .blobReads(replies), retryAfterMilliseconds: retry,
                                   operationFailureCode: NativeCloudMediaRecords.unresolvedOperationCode(terminal)))
         }
+        #if DEBUG
+        let diagnostics = DebugCloudDiagnostics.currentMediaRecorder
+        let requestKind = DebugCloudDiagnostics.MediaRequestKind(request)
+        operation.perRecordResultBlock = { id, result in
+            DebugCloudDiagnostics.$mediaRecorder.withValue(diagnostics) {
+                DebugCloudDiagnostics.$mediaRequestKind.withValue(requestKind) { recordHandler(id, result) }
+            }
+        }
+        let observedTerminal: @Sendable (Result<Void, any Error>) -> Void = { result in
+            DebugCloudDiagnostics.$mediaRecorder.withValue(diagnostics) {
+                DebugCloudDiagnostics.$mediaRequestKind.withValue(requestKind) { terminalHandler(result) }
+            }
+        }
+        terminalHandlerInstalled?(observedTerminal)
+        operation.fetchRecordsResultBlock = observedTerminal
+        #else
+        operation.perRecordResultBlock = recordHandler
         terminalHandlerInstalled?(terminalHandler)
         operation.fetchRecordsResultBlock = terminalHandler
+        #endif
         return prepared
     }
 }

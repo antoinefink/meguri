@@ -238,6 +238,11 @@ public actor CloudMediaExecutor {
             // Core has explicitly cancelled and drained before effects. Keep
             // the executor's existing caller/owned cancellation classification.
             throw CancellationError()
+        } catch {
+            #if DEBUG
+            DebugCloudDiagnostics.recordMedia(stage: .coreNext, category: .local(error))
+            #endif
+            throw error
         }
         guard let work = selected else {
             if metadataOnly { return .idle }
@@ -248,7 +253,11 @@ public actor CloudMediaExecutor {
         if metadataOnly {
             switch work.request {
             case .read, .reads: break
-            default: throw CloudMediaFailure.metadataScope
+            default:
+                #if DEBUG
+                DebugCloudDiagnostics.recordMedia(work.request, stage: .coreAdmission, category: .metadataScope)
+                #endif
+                throw CloudMediaFailure.metadataScope
             }
         }
         if case .delete(let name) = work.request {
@@ -257,11 +266,24 @@ public actor CloudMediaExecutor {
         }
         if case .upload(let name, _, _) = work.request {
             guard queued.insert(name).inserted else { return .idle }
-            try await core.queueUpload(work.handle)
+            do { try await core.queueUpload(work.handle) }
+            catch {
+                #if DEBUG
+                DebugCloudDiagnostics.recordMedia(work.request, stage: .coreAdmission, category: .local(error))
+                #endif
+                throw error
+            }
             return .engineSendRequired
         }
         if case .download = work.request, try await core.downloadsBlocked(sdk: sdk) { return .waitingForCollectionDrain }
-        let operation = try transport.prepare(work.request)
+        let operation: any CloudPreparedMediaRead
+        do { operation = try transport.prepare(work.request) }
+        catch {
+            #if DEBUG
+            DebugCloudDiagnostics.recordMedia(work.request, stage: .prepare, category: .local(error))
+            #endif
+            throw error
+        }
         prepared = operation
         do {
             guard try await core.submitRead(work.handle, queue: operation) else {
@@ -270,6 +292,9 @@ public actor CloudMediaExecutor {
                 throw CloudMediaFailure.queueRejected
             }
         } catch {
+            #if DEBUG
+            DebugCloudDiagnostics.recordMedia(work.request, stage: .coreAdmission, category: .local(error))
+            #endif
             CloudMediaCancellationContext.current?.observe(error)
             operation.cancel(); throw error
         }
@@ -277,6 +302,9 @@ public actor CloudMediaExecutor {
         do {
             reply = try await withTaskCancellationHandler { try await operation.reply() } onCancel: { operation.cancel() }
         } catch {
+            #if DEBUG
+            DebugCloudDiagnostics.recordMedia(work.request, stage: .transportReply, category: .local(error))
+            #endif
             CloudMediaCancellationContext.current?.observe(error)
             throw error
         }
@@ -287,6 +315,13 @@ public actor CloudMediaExecutor {
         try Task.checkCancellation()
         do { try await core.reply(work.handle, result: reply.result) }
         catch {
+            #if DEBUG
+            // A normalized failed read already has its native origin. Core's
+            // rejection of that reply must not erase the earlier evidence.
+            if replyFailure == nil {
+                DebugCloudDiagnostics.recordMedia(work.request, stage: .coreReply, category: .local(error))
+            }
+            #endif
             CloudMediaCancellationContext.current?.observe(error)
             if let failure = reply.failure(underlying: error) { throw failure }
             throw error
