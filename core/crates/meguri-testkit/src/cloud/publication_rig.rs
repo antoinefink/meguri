@@ -31,6 +31,7 @@ pub enum Point {
     BoundAfterDecision,
     BeforeScan,
     ScanCommitted,
+    BeforeCompleteEpochSave,
     BeforeEpochRead,
     BeforeActiveSave,
     /// Before dispatch of the real reset-owned root read.
@@ -775,7 +776,12 @@ impl PublicationRig {
         };
         if !matches!(
             self.held,
-            Some(Point::BeforeActiveSave | Point::BeforeResetMediaRootRead | Point::BeforeMediaRootSave)
+            Some(
+                Point::BeforeCompleteEpochSave
+                    | Point::BeforeActiveSave
+                    | Point::BeforeResetMediaRootRead
+                    | Point::BeforeMediaRootSave
+            )
         ) {
             return Err(failure());
         }
@@ -913,6 +919,7 @@ impl PublicationRig {
                 } => Some(Point::BoundBeforeDecision),
                 PublicationWork::Own(r) => match r.kind {
                     OwnKind::CreateZones => Some(Point::BoundAfterDecision),
+                    OwnKind::SaveCompleteEpoch => Some(Point::BeforeCompleteEpochSave),
                     OwnKind::ReadOwnEpoch => Some(Point::BeforeEpochRead),
                     OwnKind::SaveActive => Some(Point::BeforeActiveSave),
                     OwnKind::ReadResetMediaRoot => Some(Point::BeforeResetMediaRootRead),

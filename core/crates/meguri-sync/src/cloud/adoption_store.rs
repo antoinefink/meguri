@@ -36,6 +36,23 @@ impl TrackingStore {
             .optional()?;
         text.map(|t| decode(&t)).transpose()
     }
+    #[cfg(feature = "test-hooks")]
+    pub(super) fn selected_adoption_authority(
+        &self,
+        binding: BindingId,
+    ) -> Result<Option<(AdoptOp, Option<runtime::NativeFileIdentity>)>, Error> {
+        self.binding(binding)?.ok_or(Error::BindingNotFound)?;
+        let row: Option<(String, Option<String>)> = self
+            .connection
+            .query_row(
+                "SELECT controls,activated_file FROM cloud_adoption_authority WHERE binding=?1",
+                [binding.0.as_slice()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        row.map(|(controls, file)| Ok((decode(&controls)?, file.map(|s| decode(&s)).transpose()?)))
+            .transpose()
+    }
     pub(super) fn record_adoption(&mut self, op: &AdoptOp) -> Result<(), Error> {
         if self.adoption_op()?.is_some() || self.publication_op()?.is_some() {
             return Err(Error::Constraint);

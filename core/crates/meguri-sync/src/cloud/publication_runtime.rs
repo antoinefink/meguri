@@ -1048,6 +1048,14 @@ impl Runtime {
             return Ok(());
         }
         let mut accepted = false;
+        #[cfg(feature = "test-hooks")]
+        let selected_origin = match &result {
+            OwnResult::Saved(_) => Some(selected_observation::ReplyOrigin::Saved),
+            OwnResult::Conflict(_) => Some(selected_observation::ReplyOrigin::Conflict),
+            _ => None,
+        };
+        #[cfg(feature = "test-hooks")]
+        let mut selected_complete = None;
         match (request.kind, result) {
             (OwnKind::CreateZones, OwnResult::ZonesCreated) if op.step == PublishStep::Bound => {
                 s.publication.zones_created = true;
@@ -1116,6 +1124,12 @@ impl Runtime {
                         }
                         accepted = true;
                     } else if expected_state == EpochState::Complete && op.step == PublishStep::Sent {
+                        #[cfg(feature = "test-hooks")]
+                        {
+                            selected_complete = selected_origin.and_then(|origin| {
+                                selected_observation::AcceptedPublication::new(&op, request, &record, origin, &s)
+                            });
+                        }
                         op.complete_system_fields = Some(record.system_fields);
                         op.step = PublishStep::Complete;
                         accepted = true;
@@ -1166,6 +1180,12 @@ impl Runtime {
                                 .ok_or(Error::Database)?
                                 .publication_done(&op, &record, open, now)
                         })?;
+                        #[cfg(feature = "test-hooks")]
+                        if let Some(receipt) = &mut s.selected_publication
+                            && let Some(origin) = selected_origin
+                        {
+                            receipt.mark_done(&op, request, &record, origin);
+                        }
                         s.root_confirmed = true;
                         s.adapter.durable.active = Some(crate::cloud::workflow::Saved {
                             name: "active".into(),
@@ -1190,6 +1210,10 @@ impl Runtime {
             {
                 s.publication.reset_root_missing = None;
                 return Err(error.into());
+            }
+            #[cfg(feature = "test-hooks")]
+            if request.kind == OwnKind::SaveCompleteEpoch {
+                s.selected_publication = selected_complete;
             }
         } else {
             s.publication.waiting = true;

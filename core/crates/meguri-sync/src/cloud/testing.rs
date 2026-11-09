@@ -209,6 +209,7 @@ pub fn arm_tracking_fault(name: &str, fault: TrackingFault) -> Result<(), Error>
             | "cloud.tracking.commit.engine_state"
             | "cloud.tracking.commit.intent"
             | "cloud.tracking.commit.rollback"
+            | "cloud.publication.ack_control"
     ) {
         return Err(Error::InvalidData);
     }

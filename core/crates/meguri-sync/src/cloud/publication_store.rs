@@ -423,6 +423,8 @@ impl TrackingStore {
             }
         }
         put_op(&tx, &self.scope, op)?;
+        #[cfg(feature = "test-hooks")]
+        super::testing::tracking_commit(&tx, "cloud.publication.ack_control")?;
         tx.commit()?;
         Ok(())
     }

@@ -444,6 +444,8 @@ pub(crate) enum Input {
     PublicationFacts,
     AuthorityStatus,
     PublicationControl,
+    SelectedControl,
+    PublicationReplyEvents,
     CollectionRows,
     MediaRows,
     CollectionHeader,
@@ -1350,6 +1352,8 @@ impl ChildDriver {
             Input::PublicationFacts => "PublicationFacts",
             Input::AuthorityStatus => "AuthorityStatus",
             Input::PublicationControl => "PublicationControl",
+            Input::PublicationReplyEvents => "PublicationReplyEvents",
+            Input::SelectedControl => "SelectedControl",
             Input::PreviewBegin => "PreviewBegin",
             Input::PreviewActive(..) => "PreviewActive",
             Input::PreviewEpoch(..) => "PreviewEpoch",
@@ -1534,6 +1538,17 @@ impl ChildDriver {
     }
     pub fn qualify_without_root(&mut self, instance: String) -> Result<()> {
         self.call(Input::Qualify(instance))
+    }
+    pub fn publication_reply_events(
+        &mut self,
+    ) -> Result<(
+        Option<core::selected_observation::PublicationEvent>,
+        Option<core::selected_observation::PublicationEvent>,
+    )> {
+        self.call(Input::PublicationReplyEvents)
+    }
+    pub fn selected_control(&mut self) -> Result<core::selected_observation::SelectedControlObservation> {
+        self.call(Input::SelectedControl)
     }
     pub fn stored_runtime_state(&mut self) -> Result<runtime::StoredRuntimeState> {
         self.call(Input::StoredState)
@@ -1858,6 +1873,10 @@ struct Device {
     rollovers: Vec<RolloverObservation>,
     last_fetch_engine_state: Arc<Mutex<Option<Vec<u8>>>>,
     incoming_submission: Arc<Mutex<Option<super::coordinator::HeldRequest>>>,
+    publication_reply_events: (
+        Option<core::selected_observation::PublicationEvent>,
+        Option<core::selected_observation::PublicationEvent>,
+    ),
 }
 impl Device {
     fn new(b: Boot, stream: &UnixStream) -> Result<Self> {
@@ -1907,6 +1926,7 @@ impl Device {
             rollovers: Vec::new(),
             last_fetch_engine_state: Arc::new(Mutex::new(None)),
             incoming_submission: Arc::new(Mutex::new(None)),
+            publication_reply_events: (None, None),
         })
     }
     fn runtime(&self) -> Result<&runtime::Runtime> {
@@ -2034,6 +2054,8 @@ impl Device {
                 value(())
             }
             Input::PublicationControl => value(self.runtime()?.publication_control_for_testing()?),
+            Input::PublicationReplyEvents => value(self.publication_reply_events.clone()),
+            Input::SelectedControl => value(self.runtime()?.selected_control_for_testing(&self.host.collection()?)?),
             Input::PayloadMemoryReset => {
                 use crate::bench::peak_alloc::PeakAlloc;
                 if !PeakAlloc::is_installed() {
@@ -3171,6 +3193,13 @@ fn handle_transport_command(device: &mut Device, input: Input, stream: &mut Unix
                 &collection,
                 &mut ChildTransport { device, stream },
             )?;
+            if let Some(event) = core::selected_observation::PublicationEvent::from_reply(&request, &result) {
+                match event.kind {
+                    core::publication::OwnKind::SaveCompleteEpoch => device.publication_reply_events.0 = Some(event),
+                    core::publication::OwnKind::SaveActive => device.publication_reply_events.1 = Some(event),
+                    _ => {}
+                }
+            }
             runtime.publication_result(&request, result, &collection)?;
             Ok(serde_json::to_value(responses)?)
         }

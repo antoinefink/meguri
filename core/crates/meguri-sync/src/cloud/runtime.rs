@@ -42,6 +42,9 @@ mod publication_impl;
 #[path = "resume_runtime.rs"]
 mod resume_impl;
 #[cfg(feature = "test-hooks")]
+#[path = "selected_observation.rs"]
+pub mod selected_observation;
+#[cfg(feature = "test-hooks")]
 #[path = "smoke_runtime.rs"]
 mod smoke_impl;
 #[path = "workflow_runtime.rs"]
@@ -449,6 +452,8 @@ struct State {
     media: super::media::Process,
     #[cfg(feature = "test-hooks")]
     drop_capture: Option<i64>,
+    #[cfg(feature = "test-hooks")]
+    selected_publication: Option<selected_observation::AcceptedPublication>,
     #[cfg(feature = "test-hooks")]
     last_capture_body_reads: usize,
     #[cfg(feature = "test-hooks")]

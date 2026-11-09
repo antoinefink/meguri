@@ -26,6 +26,8 @@ pub mod publication;
 mod publication_store;
 pub mod row_payload;
 pub mod runtime;
+#[cfg(feature = "test-hooks")]
+pub use runtime::selected_observation;
 pub mod workflow;
 mod workflow_store;
 pub mod zone_deletion;
