@@ -802,16 +802,20 @@ baseline payload, note-type identity and card/deck relations as one unique
 original-role witness. No manifest order or ID list is assumed. Both devices
 derive that witness independently from their verified original copy of the same
 generation. After adoption, the peer maps that original role to the actual
-adopted note and verifies its identity and unchanged relations; only the planned
-`Q` edit may differ from the baseline. Never choose the lowest current row,
+adopted note and verifies its identity and preserved content/relations below.
+Never choose the lowest current row,
 accept a caller's native ID or reuse smoke's added note. Missing, ambiguous or
-inconsistent original-role evidence fails. `edit` replaces
-only its `Q` field with the internally generated text `M-sync-now-n1-Q`, where
-`M` is the admitted base marker. Retain the other fields, tags, type and card
-relations. Use the ordinary note-edit operation once, flush, and read back its
-real committed effect. Record its operation provenance, current revision and
-canonical note digest, plus changed-field and unchanged-remainder checks; export
-neither text nor native IDs. Require an actual change from the admitted baseline.
+inconsistent original-role evidence fails. Execute `edit` once through the normal
+note updater. Generate `M-sync-now-n1-Q` inside the agent, using the admitted
+marker's value for `M`, and write it to `Q`. Require different content from the
+original base. Keep GUID, type, tags, every other field's bytes, flags/data and
+the existing card/deck relations. Follow `notes/note-records` N2/U3 and
+`storage/ids-usn-mtime` S3/S5 for normalization, sort text, checksum and stamps.
+Check those computed values and stamps against their documented rules; baseline
+row equality is not required for that metadata, and no override is permitted.
+Flush the update and inspect its committed row. Retain the actual operation
+provenance, revision, canonical digest and checks for both the changed field and
+preserved content/relations. Export no field text or native identifier.
 
 #### Original exchanges and peer evidence
 
@@ -831,8 +835,10 @@ The iPhone must perform its eligible fetch and normal durable intake/apply.
 barrier after that work. It returns the real canonical note digest, structural
 relations and durable apply/row evidence under `n1`. This is a fixed read-only
 inspection, not a script, query language or caller-provided expected observation.
-The coordinator compares it with the Mac's actual edited payload and requires
-the intended field change with preserved remainder. Local source ACK, peer fetch
+The coordinator compares the complete canonical payload with the Mac's actual
+committed payload, including the metadata that canonical projection represents;
+do not mask metadata differences. It also requires the intended field change
+and preserved content/relations above, with normal local metadata checks. Local source ACK, peer fetch
 return, inbox presence or a peer memory cache cannot prove the peer holds the edit.
 Missing durable observation fails; it does not trigger mutation or exchange replay.
 `close` retains J3.1's coherent final integrity and joined-shutdown requirements.

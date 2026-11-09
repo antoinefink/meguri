@@ -56,3 +56,9 @@ before restoration. Independent delta review is clear. Focused `48370` passes
 build `20261109T213312Z-50735` passes. No app or CloudKit operation was launched.
 Privacy `49889` passes the rewritten source and notes. Live J3.2 remains
 incomplete at the recorded inspection methods; no signed result is claimed.
+
+J3.2 now distinguishes Q-only content changes from normal derived metadata
+and stamps under N2/U3 and S3/S5. The complete canonical source/peer comparison
+remains required. Independent contract review is clear; the rewritten region
+passes privacy without a guard change. No implementation or acceptance follows
+from this clarification.
