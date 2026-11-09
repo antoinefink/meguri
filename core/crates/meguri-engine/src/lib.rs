@@ -73,7 +73,7 @@ pub use lifecycle::{
 pub use meguri_model::changes::{ChangeKind, ChangeSet, OpSource};
 pub use ports::{ChangeObserver, GenerationListener, OpenStep, PortKind, Ports, SuspendParticipant};
 pub use progress::{Progress, ProgressListener, ProgressPhase, ProgressSink};
-pub use readers::{ReaderLease, Snapshot};
+pub use readers::{ReaderLease, ReaderLifetimePin, Snapshot};
 pub use sched::{DayCache, DayClock, DayQuery, DayReport, day_query};
 pub use schema_gate::{SchemaReason, mark_schema_change};
 pub use threads::{Qos, RegisteredThread, ThreadInfo, ThreadRegistry};

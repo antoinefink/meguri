@@ -307,3 +307,32 @@ fn cloud_capture_pins_its_own_role_and_rejects_sync_without_consuming_it() {
             .is_some()
     );
 }
+
+#[test]
+fn lifetime_pin_refuses_non_cloud_and_owned_sync_capture_without_consuming_the_lease() {
+    let h = Harness::open();
+    let lease = h.collection.reader(ReaderRole::Sync).unwrap();
+    let identity = lease.native_identity();
+    let (lease, error) = lease.into_lifetime_pin().err().expect("non-Cloud refused");
+    assert!(matches!(error, EngineError::InvalidArgument { .. }));
+    assert_eq!(lease.role(), ReaderRole::Sync);
+    assert_eq!(lease.native_identity(), identity);
+    assert_eq!(lease.snapshot().unwrap().generation(), h.collection.generation());
+    drop(lease);
+
+    let mut cloud = h.collection.reader(ReaderRole::Cloud).unwrap();
+    let (snapshot, _hold) = cloud.capture_sync(&h.collection).unwrap();
+    let (mut cloud, error) = cloud.into_lifetime_pin().err().expect("captured Cloud refused");
+    assert!(matches!(error, EngineError::InvalidArgument { .. }));
+    assert!(
+        cloud.capture_sync(&h.collection).is_err(),
+        "the original lease remains empty"
+    );
+    assert!(snapshot.col().is_ok(), "the owned snapshot stays usable");
+    drop(snapshot);
+    drop(cloud);
+    assert_eq!(
+        h.collection.reader(ReaderRole::Cloud).unwrap().role(),
+        ReaderRole::Cloud
+    );
+}

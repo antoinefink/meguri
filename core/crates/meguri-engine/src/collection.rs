@@ -524,4 +524,77 @@ mod tests {
             })
         );
     }
+
+    #[test]
+    fn a_transferred_reader_waiter_rechecks_generation_after_replacement() {
+        let (_dir, engine, old) = crate::readers::tests::open();
+        let lease = old.reader(ReaderRole::Cloud).unwrap();
+        let pin = lease
+            .into_lifetime_pin()
+            .unwrap_or_else(|(_, error)| panic!("{error:?}"));
+        let (waiting, reached) = mpsc::channel();
+        let (woken, paused) = mpsc::channel();
+        let (release, resume) = mpsc::channel();
+        let current = old.clone();
+        let requester = thread::spawn(move || {
+            crate::readers::tests::on_waiting(move || waiting.send(()).unwrap());
+            // Hold the actual transferred waiter after its condvar wake,
+            // outside the slot mutex, until replacement has finished.
+            crate::readers::tests::on_woken(move || {
+                woken.send(()).unwrap();
+                resume.recv_timeout(Duration::from_secs(5)).unwrap();
+            });
+            current.reader(ReaderRole::Cloud).map(|_| ())
+        });
+        reached.recv_timeout(Duration::from_secs(5)).unwrap();
+        drop(pin);
+        paused.recv_timeout(Duration::from_secs(5)).unwrap();
+        let replacement = old.path().with_file_name("replacement.anki2");
+        std::fs::copy(fixture(), &replacement).unwrap();
+        let slot = engine.acquire_slot(LongOp::Restore).unwrap();
+        let mut exclusive = slot.enter_exclusive(false).unwrap();
+        exclusive
+            .replace(move |live| {
+                std::fs::rename(&replacement, live).map_err(|error| EngineError::internal(error.to_string()))
+            })
+            .unwrap();
+        drop(exclusive);
+        drop(slot);
+        release.send(()).unwrap();
+        assert_eq!(
+            requester.join().unwrap(),
+            Err(EngineError::StaleGeneration {
+                planned: Generation(1),
+                current: Generation(2),
+            })
+        );
+        engine.close().unwrap();
+    }
+
+    #[test]
+    fn a_transferred_operation_reader_waiter_rechecks_admission_after_wake() {
+        let (_dir, engine, collection) = crate::readers::tests::open();
+        let lease = collection.reader(ReaderRole::Cloud).unwrap();
+        let pin = lease
+            .into_lifetime_pin()
+            .unwrap_or_else(|(_, error)| panic!("{error:?}"));
+        let (waiting, reached) = mpsc::channel();
+        let current = collection.clone();
+        let requester = thread::spawn(move || {
+            crate::readers::tests::on_waiting(move || waiting.send(()).unwrap());
+            current.operation_reader(ReaderRole::Cloud).map(|_| ())
+        });
+        reached.recv_timeout(Duration::from_secs(5)).unwrap();
+        let slot = engine.acquire_slot(LongOp::Restore).unwrap();
+        let exclusive = slot.enter_exclusive(false).unwrap();
+        drop(pin);
+        assert!(matches!(
+            requester.join().unwrap(),
+            Err(EngineError::CollectionUnavailable { .. })
+        ));
+        drop(exclusive);
+        drop(slot);
+        assert!(collection.operation_reader(ReaderRole::Cloud).is_ok());
+        engine.close().unwrap();
+    }
 }

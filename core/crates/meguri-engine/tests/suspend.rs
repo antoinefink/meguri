@@ -972,3 +972,36 @@ fn ordinary_suspend_flushes_participants_before_waiting_for_registered_jobs() {
     assert!(h.engine.jobs().running().is_empty());
     h.engine.close().unwrap();
 }
+
+#[test]
+fn cloud_lifetime_pin_deadline_reports_reader_leases_and_release_retry_recovers() {
+    use meguri_engine::{EngineError, monotonic};
+    use meguri_storage::ReaderRole;
+    let h = common::Harness::open();
+    let lease = h.collection.reader(ReaderRole::Cloud).unwrap();
+    let identity = lease.native_identity();
+    let generation = h.collection.generation();
+    let pin = lease
+        .into_lifetime_pin()
+        .unwrap_or_else(|(_, error)| panic!("{error:?}"));
+    let start = monotonic::now();
+    assert_eq!(
+        h.engine.suspend(Duration::from_millis(30)),
+        Err(EngineError::SuspendDeadline {
+            phase: "reader leases".into()
+        })
+    );
+    assert!(monotonic::now() - start < Duration::from_millis(200));
+    assert_eq!(pin.wal_identity().native_file(), identity);
+    assert_eq!(h.engine.generation(), generation);
+    assert!(h.path.with_file_name("collection.anki2-wal").exists());
+    drop(pin);
+    h.engine.suspend(Duration::from_secs(2)).unwrap();
+    h.engine.resume().unwrap();
+    assert_eq!(h.engine.generation(), generation);
+    let lease = h.collection.reader(ReaderRole::Cloud).unwrap();
+    assert_eq!(lease.native_identity(), identity);
+    assert!(lease.col().is_ok());
+    drop(lease);
+    h.engine.close().unwrap();
+}

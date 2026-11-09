@@ -376,3 +376,149 @@ fn a_corrupt_collection_refuses_ops_and_lets_only_restore_and_one_way_sync_take_
         "no swap: still corrupt"
     );
 }
+
+#[test]
+fn cloud_lifetime_pin_and_refused_leases_block_real_replacement() {
+    use meguri_engine::ExclusivePhase;
+    use std::sync::mpsc;
+    // Successful transfer, refused owned Cloud capture, refused non-Cloud.
+    for mode in 0..3 {
+        let h = Harness::open();
+        let role = if mode == 2 { ReaderRole::Sync } else { ReaderRole::Cloud };
+        let mut lease = h.collection.reader(role).unwrap();
+        let snapshot = if mode == 1 {
+            Some(lease.capture_sync(&h.collection).unwrap().0)
+        } else {
+            None
+        };
+        let (pin, refused) = match lease.into_lifetime_pin() {
+            Ok(pin) => {
+                assert_eq!(mode, 0);
+                (Some(pin), None)
+            }
+            Err((lease, error)) => {
+                assert_ne!(mode, 0);
+                assert!(matches!(error, EngineError::InvalidArgument { .. }));
+                (None, Some(lease))
+            }
+        };
+        let generation = h.engine.generation();
+        let replacement = h.dir.path().join("replacement.anki2");
+        std::fs::copy(common::fixture("schema-18.anki2"), &replacement).unwrap();
+        let slot = h.engine.acquire_slot(LongOp::Restore).unwrap();
+        let mut exclusive = slot.enter_exclusive(false).unwrap();
+        let privileged = exclusive.collection().clone();
+        let subscription = h.engine.stream().subscribe();
+        let (swapped, swap_seen) = mpsc::channel();
+        let (done, finished) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let result = exclusive.replace(move |live| {
+                swapped.send(()).unwrap();
+                std::fs::rename(&replacement, live).map_err(|e| EngineError::internal(e.to_string()))
+            });
+            drop(exclusive);
+            drop(slot);
+            done.send(result.map(|c| c.generation())).unwrap();
+        });
+        let deadline = meguri_engine::monotonic::now() + Duration::from_secs(5);
+        loop {
+            let remaining = deadline.saturating_sub(meguri_engine::monotonic::now());
+            let event = subscription
+                .recv_timeout(remaining)
+                .expect("replacement reaches reader close");
+            if matches!(
+                event.kind,
+                EventKind::Lifecycle(LifecycleState::ExclusiveBusy {
+                    phase: ExclusivePhase::Replacing,
+                    ..
+                })
+            ) {
+                break;
+            }
+        }
+        assert!(matches!(
+            swap_seen.recv_timeout(Duration::from_millis(50)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        assert!(matches!(finished.try_recv(), Err(mpsc::TryRecvError::Empty)));
+        assert_eq!(h.engine.generation(), generation);
+        // The real writer still owns SQLite while readers are being drained.
+        privileged
+            .run(
+                OpSpec::named("reader_barrier_writer_probe", OpSource::Rollover),
+                |ctx| Ok(ctx.scope().col()?),
+            )
+            .unwrap();
+        if let Some(snapshot) = snapshot {
+            assert!(snapshot.col().is_ok());
+            drop(snapshot);
+            // Capture returned an OWNED snapshot. Dropping it must not release
+            // the refused lease's independent replacement barrier.
+            assert!(matches!(
+                swap_seen.recv_timeout(Duration::from_millis(50)),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            ));
+            assert_eq!(h.engine.generation(), generation);
+        }
+        drop((pin, refused));
+        swap_seen.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(
+            finished.recv_timeout(Duration::from_secs(5)).unwrap().unwrap(),
+            Generation(generation.0 + 1)
+        );
+        worker.join().unwrap();
+        h.engine.close().unwrap();
+    }
+}
+
+#[test]
+fn cloud_lifetime_pin_blocks_real_close_before_connection_release() {
+    use meguri_engine::SuspendParticipant;
+    use std::sync::mpsc;
+    struct Participant {
+        quiesced: mpsc::Sender<()>,
+        released: mpsc::Sender<()>,
+    }
+    impl SuspendParticipant for Participant {
+        fn name(&self) -> &str {
+            "reader close witness"
+        }
+        fn flush(&self) -> Result<(), EngineError> {
+            Ok(())
+        }
+        fn suspend(&self) -> Result<(), EngineError> {
+            self.quiesced.send(()).unwrap();
+            Ok(())
+        }
+        fn release_connections_until(&self, _: Duration) -> Result<(), EngineError> {
+            self.released.send(()).unwrap();
+            Ok(())
+        }
+    }
+    let (quiesced, reached) = mpsc::channel();
+    let (released, release_seen) = mpsc::channel();
+    let h = Harness::open_with(Ports::new().suspend_participant(Arc::new(Participant { quiesced, released })));
+    let lease = h.collection.reader(ReaderRole::Cloud).unwrap();
+    let pin = lease
+        .into_lifetime_pin()
+        .unwrap_or_else(|(_, error)| panic!("{error:?}"));
+    let generation = h.engine.generation();
+    let engine = h.engine.clone();
+    let (done, finished) = mpsc::channel();
+    let closer = std::thread::spawn(move || done.send(engine.close()).unwrap());
+    reached.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(matches!(
+        release_seen.recv_timeout(Duration::from_millis(50)),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    ));
+    assert!(matches!(finished.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    assert_eq!(h.engine.generation(), generation);
+    assert!(h.path.with_file_name("collection.anki2-wal").exists());
+    drop(pin);
+    release_seen.recv_timeout(Duration::from_secs(5)).unwrap();
+    finished.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
+    closer.join().unwrap();
+    assert_eq!(h.engine.state(), LifecycleState::NoCollection);
+    assert!(!h.path.with_file_name("collection.anki2-wal").exists());
+    assert!(h.collection.reader(ReaderRole::Cloud).is_err());
+}

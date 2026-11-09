@@ -137,3 +137,9 @@ threads-required = "num-test-threads"
 [[profile.default.overrides]]
 filter = '(package(meguri-ffi) or package(meguri-engine)) and test(/required_sdk_completion_/)'
 threads-required = "num-test-threads"
+
+# Cloud reader-transfer witnesses use bounded barriers, real replacement/close
+# waits and the unchanged suspend budget. Reserve an idle runner.
+[[profile.default.overrides]]
+filter = 'package(meguri-engine) and (test(/cloud_lifetime_pin_/) or test(/a_transferred_.*reader_waiter_/))'
+threads-required = "num-test-threads"
