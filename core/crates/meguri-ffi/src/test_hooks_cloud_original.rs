@@ -13,13 +13,44 @@ use std::{
     sync::{Arc, Mutex, PoisonError},
 };
 
+#[track_caller]
 fn invalid() -> CoreError {
     CoreError::Internal {
-        message: "original role invalid".into(),
+        message: format!(
+            "original role invalid: validation line {}",
+            std::panic::Location::caller().line()
+        ),
     }
 }
+#[track_caller]
 fn checked<T, E>(r: Result<T, E>) -> Result<T, CoreError> {
-    r.map_err(|_| invalid())
+    let line = std::panic::Location::caller().line();
+    r.map_err(|_| CoreError::Internal {
+        message: format!("original role invalid: validation line {line}"),
+    })
+}
+fn invalid_category(category: &'static str) -> CoreError {
+    CoreError::Internal {
+        message: format!("original role invalid: {category}"),
+    }
+}
+// Only locally classified capture/compare errors enter here, never raw errors.
+fn at_stage<T>(stage: &'static str, result: Result<T, CoreError>) -> Result<T, CoreError> {
+    result.map_err(|error| match error {
+        CoreError::Internal { message } => CoreError::Internal {
+            message: format!("original role invalid: {stage}: {message}"),
+        },
+        other => other,
+    })
+}
+fn invalid_mask(category: &'static str, fields: &[(&'static str, bool)]) -> CoreError {
+    let mask: Vec<_> = fields
+        .iter()
+        .map(|(field, mismatch)| format!("{field}={mismatch}"))
+        .collect();
+    CoreError::Internal {
+        message: format!("original role invalid: {category}: {}", mask.join(",")),
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
@@ -131,20 +162,20 @@ fn capture(rows: &impl ReadRows, id: NoteId) -> Result<Baseline, CoreError> {
         || layout.templates.len() != 1
         || sort >= layout.fields.len()
     {
-        return Err(invalid());
+        return Err(invalid_category("capture.structure.layout"));
     }
     let mut names = BTreeSet::new();
     for (i, field) in layout.fields.iter().enumerate() {
         if field.ord != i as i64 || !names.insert(field.name.clone()) || std::str::from_utf8(&field.name).is_err() {
-            return Err(invalid());
+            return Err(invalid_category("capture.structure.fields"));
         }
     }
     if !names.contains(b"A".as_slice()) {
-        return Err(invalid());
+        return Err(invalid_category("capture.structure.answer_missing"));
     }
     for (i, template) in layout.templates.iter().enumerate() {
         if template.ord != i as i64 {
-            return Err(invalid());
+            return Err(invalid_category("capture.ordinal.template"));
         }
     }
     let q = layout.fields.iter().position(|f| f.name == b"Q").ok_or_else(invalid)?;
@@ -157,14 +188,14 @@ fn capture(rows: &impl ReadRows, id: NoteId) -> Result<Baseline, CoreError> {
         }))
     };
     let c::Payload::Note(note) = project(c::Kind::Note, &raw)? else {
-        return Err(invalid());
+        return Err(invalid_category("capture.note.payload_kind"));
     };
     if note.id != id.0
         || note.guid.is_empty()
         || note.flds.split(|b| *b == 31).count() != layout.fields.len()
         || std::str::from_utf8(&note.flds).is_err()
     {
-        return Err(invalid());
+        return Err(invalid_category("capture.note.shape"));
     }
     // A duplicate native identity is ambiguous even when its primary key differs.
     let mut after = None;
@@ -177,12 +208,12 @@ fn capture(rows: &impl ReadRows, id: NoteId) -> Result<Baseline, CoreError> {
         }
         for n in page {
             if after.is_some_and(|a| n.id <= a) {
-                return Err(invalid());
+                return Err(invalid_category("capture.note.scan_order"));
             }
             after = Some(n.id);
             scanned += 1;
             if scanned > 1_000_000 {
-                return Err(invalid());
+                return Err(invalid_category("capture.note.scan_budget"));
             }
             if n.guid.as_bytes() == note.guid {
                 matches += 1;
@@ -190,14 +221,14 @@ fn capture(rows: &impl ReadRows, id: NoteId) -> Result<Baseline, CoreError> {
         }
     }
     if matches != 1 {
-        return Err(invalid());
+        return Err(invalid_category("capture.note.guid_ambiguous"));
     }
     let mut cards = Vec::new();
     let mut ords = BTreeSet::new();
     for card in checked(rows.cards_of_note(id))? {
         let raw = checked(view.row(Table::Cards, &RowKey::Id(card.id.0)))?.ok_or_else(invalid)?;
         let c::Payload::Card(card) = project(c::Kind::Card, &raw)? else {
-            return Err(invalid());
+            return Err(invalid_category("capture.card.payload_kind"));
         };
         if card.nid != id.0
             || card.ord < 0
@@ -205,27 +236,27 @@ fn capture(rows: &impl ReadRows, id: NoteId) -> Result<Baseline, CoreError> {
             || !ords.insert(card.ord)
             || card.odid != 0
         {
-            return Err(invalid());
+            return Err(invalid_category("capture.card.shape"));
         }
         cards.push(card);
     }
     cards.sort_by_key(|c| c.id);
     if cards.is_empty() || cards.len() != layout.templates.len() {
-        return Err(invalid());
+        return Err(invalid_category("capture.card.count"));
     }
     let deck_rows = checked(rows.deck_rows())?;
     if deck_rows.len() != 2 {
-        return Err(invalid());
+        return Err(invalid_category("capture.deck.count"));
     }
     let mut decks = Vec::new();
     for row in deck_rows {
         let typed = checked(rows.deck(row.id))?.ok_or_else(invalid)?;
         if !matches!(typed.kind.kind, meguri_model::proto::deck::DeckKind::Normal(_)) {
-            return Err(invalid());
+            return Err(invalid_category("capture.deck.kind"));
         }
         let raw = checked(view.row(Table::Decks, &RowKey::Id(row.id.0)))?.ok_or_else(invalid)?;
         let c::Payload::Deck(deck) = project(c::Kind::Deck, &raw)? else {
-            return Err(invalid());
+            return Err(invalid_category("capture.deck.payload_kind"));
         };
         decks.push(deck);
     }
@@ -247,7 +278,7 @@ fn capture(rows: &impl ReadRows, id: NoteId) -> Result<Baseline, CoreError> {
         || children[0].name != child_name.as_bytes()
         || !cards.iter().all(|c| decks.iter().any(|d| d.id == c.did))
     {
-        return Err(invalid());
+        return Err(invalid_category("capture.deck.graph"));
     }
     Ok(Baseline {
         note,
@@ -293,17 +324,27 @@ impl Baseline {
             || self.sort != current.sort
             || self.marker != current.marker
         {
-            return Err(invalid());
+            return Err(invalid_mask(
+                "compare",
+                &[
+                    ("structure", self.layout != current.layout),
+                    ("card", self.cards != current.cards),
+                    ("deck", self.decks != current.decks),
+                    ("q_ordinal", self.q != current.q),
+                    ("sort_ordinal", self.sort != current.sort),
+                    ("marker", self.marker != current.marker),
+                ],
+            ));
         }
         if self.note == current.note {
             return Ok(false);
         }
         let mut expected = self.note.clone();
-        let fields = std::str::from_utf8(&expected.flds).map_err(|_| invalid())?;
+        let fields = std::str::from_utf8(&expected.flds).map_err(|_| invalid_category("compare.note.flds_utf8"))?;
         let mut fields: Vec<String> = fields.split('\u{1f}').map(str::to_owned).collect();
         let edit = format!("{}-sync-now-n1-Q", self.marker);
         if fields[self.q] == edit {
-            return Err(invalid());
+            return Err(invalid_category("compare.note.already_edited"));
         }
         fields[self.q] = edit;
         expected.flds = fields.join("\u{1f}").into_bytes();
@@ -312,11 +353,26 @@ impl Baseline {
         // Q4.2 fields contain their marked text, so their derived sort value is TEXT.
         expected.sfld = c::Stored::Text(sort.into_bytes());
         if current.note.modified < expected.modified {
-            return Err(invalid());
+            return Err(invalid_category("compare.note.modified_regressed"));
         }
         expected.modified = current.note.modified;
         if expected != current.note {
-            return Err(invalid());
+            return Err(invalid_mask(
+                "compare.note",
+                &[
+                    ("id", expected.id != current.note.id),
+                    ("guid", expected.guid != current.note.guid),
+                    ("mid", expected.mid != current.note.mid),
+                    ("modified", expected.modified != current.note.modified),
+                    ("tags", expected.tags != current.note.tags),
+                    ("flds", expected.flds != current.note.flds),
+                    ("sfld", expected.sfld != current.note.sfld),
+                    ("csum", expected.csum != current.note.csum),
+                    ("flags", expected.flags != current.note.flags),
+                    ("data", expected.data != current.note.data),
+                    ("nt_struct_gen", expected.nt_struct_gen != current.note.nt_struct_gen),
+                ],
+            ));
         }
         Ok(true)
     }
@@ -356,9 +412,11 @@ impl CloudOriginalRole {
         let generation = collection.generation();
         {
             let owner = self.owner.lock().unwrap_or_else(PoisonError::into_inner);
-            let (bound, bound_generation) = owner.as_ref().ok_or_else(invalid)?;
+            let (bound, bound_generation) = owner
+                .as_ref()
+                .ok_or_else(|| invalid_category("binding.owner_missing"))?;
             if *bound_generation != generation || !bound.upgrade().is_some_and(|h| Arc::ptr_eq(&h, &host)) {
-                return Err(invalid());
+                return Err(invalid_category("binding.owner_or_generation"));
             }
         }
         // A fresh handle cannot recover an interrupted command from matching
@@ -366,7 +424,7 @@ impl CloudOriginalRole {
         {
             let mut state = self.edit.lock().unwrap_or_else(PoisonError::into_inner);
             if state.attempted {
-                return Err(invalid());
+                return Err(invalid_category("pre_write.already_attempted"));
             }
             state.attempted = true;
         }
@@ -388,23 +446,30 @@ impl CloudOriginalRole {
                 let result = collection.run(spec, move |ctx| {
                     let actual = runtime::host().map_err(meguri_engine::EngineError::from)?;
                     if !Arc::ptr_eq(&actual, &owner) {
-                        return Err(meguri_engine::EngineError::from(invalid()));
+                        return Err(meguri_engine::EngineError::from(invalid_category("pre_write.owner")));
                     }
                     let now = ctx.now().0;
                     let scope = ctx.scope();
                     // Read and validate inside the real write boundary: a
                     // concurrent edit cannot be overwritten by prepared fields.
-                    let current = capture(scope, NoteId(baseline.note.id)).map_err(meguri_engine::EngineError::from)?;
-                    if baseline.compare(&current).map_err(meguri_engine::EngineError::from)? {
-                        return Err(meguri_engine::EngineError::from(invalid()));
+                    let current = at_stage("pre_write.capture", capture(scope, NoteId(baseline.note.id)))
+                        .map_err(meguri_engine::EngineError::from)?;
+                    if at_stage("pre_write.compare", baseline.compare(&current))
+                        .map_err(meguri_engine::EngineError::from)?
+                    {
+                        return Err(meguri_engine::EngineError::from(invalid_category(
+                            "pre_write.compare.changed",
+                        )));
                     }
                     let note = scope
                         .note(NoteId(baseline.note.id))?
-                        .ok_or_else(|| meguri_engine::EngineError::from(invalid()))?;
+                        .ok_or_else(|| meguri_engine::EngineError::from(invalid_category("pre_write.note_missing")))?;
                     let mut fields: Vec<String> = note.field_values().map(str::to_owned).collect();
                     let edit = format!("{}-sync-now-n1-Q", baseline.marker);
                     if fields[baseline.q] == edit {
-                        return Err(meguri_engine::EngineError::from(invalid()));
+                        return Err(meguri_engine::EngineError::from(invalid_category(
+                            "pre_write.already_edited",
+                        )));
                     }
                     fields[baseline.q] = edit;
                     let updated = meguri_engine::notes::update_in(
@@ -415,9 +480,19 @@ impl CloudOriginalRole {
                             tags: meguri_engine::tags::split_text(&note.tags).map(str::to_owned).collect(),
                         },
                     )?;
-                    let after = capture(scope, note.id).map_err(meguri_engine::EngineError::from)?;
-                    if !updated.written || !baseline.compare(&after).map_err(meguri_engine::EngineError::from)? {
-                        return Err(meguri_engine::EngineError::from(invalid()));
+                    let after = at_stage("post_updater.capture", capture(scope, note.id))
+                        .map_err(meguri_engine::EngineError::from)?;
+                    if !updated.written
+                        || !at_stage("post_updater.compare", baseline.compare(&after))
+                            .map_err(meguri_engine::EngineError::from)?
+                    {
+                        return Err(meguri_engine::EngineError::from(invalid_category(
+                            if !updated.written {
+                                "post_updater.not_written"
+                            } else {
+                                "post_updater.compare.unchanged"
+                            },
+                        )));
                     }
                     Ok((updated, now))
                 })?;
@@ -434,49 +509,85 @@ impl CloudOriginalRole {
                 collection.flush_wal(durability_wait)?;
                 let actual = runtime::host()?;
                 if !Arc::ptr_eq(&actual, &retained) || retained.cloud_connection_generation()? != generation {
-                    return Err(invalid());
+                    return Err(invalid_category("postcommit.binding.owner_or_generation"));
                 }
                 let reader = collection.reader(ReaderRole::Query)?;
                 let snapshot = reader.snapshot()?;
-                let current = capture(&*snapshot, NoteId(self.baseline.note.id))?;
-                let note = snapshot.note(NoteId(self.baseline.note.id))?.ok_or_else(invalid)?;
-                if !self.baseline.compare(&current)?
-                    || snapshot.generation() != generation
-                    || snapshot.seq() < seq
-                    || note.mtime.0 != now.div_euclid(1000)
-                    || note.usn.0 != -1
-                    || snapshot.col()?.modified.0 != now
-                    || summary.changes.source != crate::changes::OpSource::UserUndoable
-                    || summary.changes.notes.len() != 1
-                    || summary.changes.notes[0].id != self.baseline.note.id
-                    || summary.changes.notes[0].kind != crate::changes::ChangeKind::Updated
-                    || !summary.changes.cards.is_empty()
-                {
-                    return Err(invalid());
+                let current = at_stage("postcommit.capture", capture(&*snapshot, NoteId(self.baseline.note.id)))?;
+                let note = snapshot
+                    .note(NoteId(self.baseline.note.id))?
+                    .ok_or_else(|| invalid_category("postcommit.note_missing"))?;
+                if !at_stage("postcommit.compare", self.baseline.compare(&current))? {
+                    return Err(invalid_category("postcommit.compare.unchanged"));
+                }
+                if snapshot.generation() != generation {
+                    return Err(invalid_category("postcommit.metadata.generation"));
+                }
+                if snapshot.seq() < seq {
+                    return Err(invalid_category("postcommit.metadata.seq"));
+                }
+                if note.mtime.0 != now.div_euclid(1000) {
+                    return Err(invalid_category("postcommit.metadata.mtime"));
+                }
+                if note.usn.0 != -1 {
+                    return Err(invalid_category("postcommit.metadata.usn"));
+                }
+                if snapshot.col()?.modified.0 != now {
+                    return Err(invalid_category("postcommit.metadata.collection_modified"));
+                }
+                if summary.changes.source != crate::changes::OpSource::UserUndoable {
+                    return Err(invalid_category("postcommit.metadata.source"));
+                }
+                if summary.changes.notes.len() != 1 {
+                    return Err(invalid_category("postcommit.metadata.note_count"));
+                }
+                if summary.changes.notes[0].id != self.baseline.note.id {
+                    return Err(invalid_category("postcommit.metadata.note_identity"));
+                }
+                if summary.changes.notes[0].kind != crate::changes::ChangeKind::Updated {
+                    return Err(invalid_category("postcommit.metadata.note_kind"));
+                }
+                if !summary.changes.cards.is_empty() {
+                    return Err(invalid_category("postcommit.metadata.cards"));
                 }
                 let identity = snapshot.wal_identity();
                 match collection.wait_wal_covered(identity, seq, durability_wait)? {
                     meguri_engine::WalCoverage::Covered(receipt)
                         if receipt.identity() == identity && receipt.through() >= seq => {}
-                    _ => return Err(invalid()),
+                    meguri_engine::WalCoverage::Covered(receipt) => {
+                        return Err(invalid_category(if receipt.identity() != identity {
+                            "wal.coverage.identity"
+                        } else {
+                            "wal.coverage.through"
+                        }));
+                    }
+                    _ => return Err(invalid_category("wal.coverage.not_covered")),
                 }
                 let digest = checked(c::Payload::Note(current.note).payload_digest())?;
                 let local_revision = if let Some(core) = retained.cloud_runtime() {
                     let status = checked(core.status())?;
-                    let binding = status.binding.ok_or_else(invalid)?;
+                    let binding = status.binding.ok_or_else(|| invalid_category("binding.missing"))?;
                     let name = checked(c::entity_name(
                         &binding.facts.record_key.0,
                         c::Kind::Note,
                         &c::id_key(self.baseline.note.id),
                     ))?;
-                    let entity = checked(core.entity_facts(&name))?.ok_or_else(invalid)?;
-                    if entity.local_rev == 0
-                        || entity.tombstone_at.is_some()
-                        || entity.observed_generation != generation.0
-                        || entity.observed_seq != seq.0
-                        || checked(entity.payload.payload_digest())? != digest
-                    {
-                        return Err(invalid());
+                    let entity =
+                        checked(core.entity_facts(&name))?.ok_or_else(|| invalid_category("binding.entity_missing"))?;
+                    if entity.local_rev == 0 {
+                        return Err(invalid_category("revision.zero"));
+                    }
+                    if entity.tombstone_at.is_some() {
+                        return Err(invalid_category("revision.tombstone"));
+                    }
+                    if entity.observed_generation != generation.0 {
+                        return Err(invalid_category("revision.generation"));
+                    }
+                    if entity.observed_seq != seq.0 {
+                        return Err(invalid_category("revision.seq"));
+                    }
+                    if checked(entity.payload.payload_digest())? != digest {
+                        return Err(invalid_category("revision.payload_mismatch"));
                     }
                     Some(entity.local_rev)
                 } else {
