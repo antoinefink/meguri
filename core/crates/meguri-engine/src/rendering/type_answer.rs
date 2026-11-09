@@ -48,5 +48,12 @@ pub(super) fn apply(
         (Some(d), None) => type_answer::answer_with_comparison(&sides.answer, d, type_answer::ANSWER_SLOT),
         _ => type_answer::answer(&sides.answer, descriptor.as_ref(), observation.unwrap_or_default()),
     };
-    Ok((DisplaySides { question, answer }, descriptor))
+    Ok((
+        DisplaySides {
+            question,
+            answer,
+            ..sides
+        },
+        descriptor,
+    ))
 }

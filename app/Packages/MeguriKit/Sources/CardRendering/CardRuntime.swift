@@ -73,6 +73,11 @@ public nonisolated enum CardRuntime {
         return classes.joined(separator: " ")
     }
 
+    /// Meguri-owned replay copy; card-authored controls keep their own names.
+    public static var replayLabel: String {
+        String(localized: "card.replay.play", table: "CardBehavior", bundle: .module)
+    }
+
     // MARK: The page document
 
     /// The page document (C2.1): the skeleton with its classes, the base
@@ -80,13 +85,15 @@ public nonisolated enum CardRuntime {
     /// base stylesheet and the runtime, and `reviewExtra` after `#qa`
     /// (C2.3). `reviewExtra` is HTML and goes in as it is.
     public static func pageDocument(
-        platform: Platform, appearance: Appearance, mediaRoot: URL, reviewExtra: String = ""
+        platform: Platform, appearance: Appearance, mediaRoot: URL, reviewExtra: String = "",
+        replayLabel: String = CardRuntime.replayLabel
     ) -> String {
         let replacements = [
             "{{html-classes}}": htmlClasses(platform: platform, appearance: appearance),
             "{{theme}}": appearance.rawValue,
             "{{base}}": attributeEscaped(mediaRoot.absoluteString),
             "{{platform}}": platform.rawValue,
+            "{{replay-label}}": attributeEscaped(replayLabel),
             "{{body-classes}}": bodyClasses(platform: platform, appearance: appearance),
         ]
         var document = Resources.text("page.html")

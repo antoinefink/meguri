@@ -81,6 +81,7 @@
   const elementQueryAll = Element.prototype.querySelectorAll;
   const byTagName = Element.prototype.getElementsByTagName;
   const getAttribute = Element.prototype.getAttribute;
+  const replayLabel = document.currentScript ? apply(getAttribute, document.currentScript, ["data-replay-label"]) || "Play audio" : "Play audio";
   const setAttribute = Element.prototype.setAttribute;
   const removeAttribute = Element.prototype.removeAttribute;
   const hasAttribute = Element.prototype.hasAttribute;
@@ -1106,6 +1107,7 @@
       // 5. Insert.
       held = [];
       call(innerHTMLSetter, qa, StringCtor(update.html));
+      labelGeneratedReplays(qa, update.replayIDs);
       // 6. Script walk.
       await walkScripts(qa);
       // 7. Update hooks.
@@ -1144,10 +1146,28 @@
     }
   }
 
-  function _showQuestion(q, a, bodyclass) {
+  // D4: the host passes IDs emitted by the display transform, never IDs
+  // inferred from a class, prefix or data marker in card-authored markup.
+  function labelGeneratedReplays(qa, ids) {
+    if (!ids) return;
+    const anchors = call(elementQueryAll, qa, "a[id]");
+    for (let i = 0; i < ids.length; i++) {
+      let target = null;
+      for (let j = 0; j < anchors.length; j++) {
+        if (call(getAttribute, anchors[j], "id") !== ids[i]) continue;
+        // Ambiguous markup cannot establish transform ownership.
+        if (target) { target = null; break; }
+        target = anchors[j];
+      }
+      if (target) call(setAttribute, target, "aria-label", replayLabel);
+    }
+  }
+
+  function _showQuestion(q, a, bodyclass, replayIDs) {
     enqueue({
       side: "question",
       html: q,
+      replayIDs: replayIDs,
       onUpdate: function () {
         call(scrollToFn, win, 0, 0);
         setBodyClass(bodyclass);
@@ -1162,10 +1182,11 @@
     });
   }
 
-  function _showAnswer(a, bodyclass) {
+  function _showAnswer(a, bodyclass, replayIDs) {
     enqueue({
       side: "answer",
       html: a,
+      replayIDs: replayIDs,
       onUpdate: function () {
         if (typeof bodyclass === "string" && bodyclass !== "") setBodyClass(bodyclass);
         afterImages(function () {

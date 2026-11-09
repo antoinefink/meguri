@@ -196,17 +196,18 @@ public final class CardPage: NSObject, WKNavigationDelegate {
                                arguments: identityArguments, world: Self.world)
             guard !self.closed, self.update == update else { throw Failure.superseded }
             var entry: [String: Any] = ["flag": self.payload?.flag ?? 0, "mark": self.payload?.marked ?? false]
+            entry["replayIDs"] = update.side == .question ? self.payload?.questionReplayIDs ?? [] : self.payload?.answerReplayIDs ?? []
             let bodyStyle = CardRuntime.bodyClasses(platform: self.platform, appearance: self.appearance, cardOrdinal: self.payload?.ordinal)
             if update.side == .question {
                 self.questionAppearance = self.appearance
                 entry["q"] = html
                 entry["a"] = answer ?? ""
                 entry["classes"] = bodyStyle
-                try await self.run("_showQuestion(q, a, classes); _drawFlag(flag); _drawMark(mark);", arguments: entry)
+                try await self.run("_showQuestion(q, a, classes, replayIDs); _drawFlag(flag); _drawMark(mark);", arguments: entry)
             } else {
                 entry["a"] = html
                 entry["classes"] = reconstruction ? bodyStyle : ""
-                try await self.run("_showAnswer(a, classes); _drawFlag(flag); _drawMark(mark);", arguments: entry)
+                try await self.run("_showAnswer(a, classes, replayIDs); _drawFlag(flag); _drawMark(mark);", arguments: entry)
             }
         }
         operations = rendering

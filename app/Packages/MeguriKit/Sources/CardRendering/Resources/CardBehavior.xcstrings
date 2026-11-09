@@ -4,6 +4,7 @@
     "card.dialog.cancel" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Cancel" } } } },
     "card.dialog.ok" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "OK" } } } },
     "card.dialog.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Card" } } } },
+    "card.replay.play" : { "comment" : "Accessible name of a Meguri-generated audio replay control on a study card.", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Play audio" } } } },
     "card.scheme.allow" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Allow" } } } },
     "card.scheme.confirm %@" : { "comment" : "The placeholder is a URL scheme, never a URL or card text.", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Allow cards to open links with the %@ scheme in another app?" } } } }
   },

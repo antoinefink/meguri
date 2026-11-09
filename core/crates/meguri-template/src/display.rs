@@ -15,13 +15,16 @@ pub struct RenderHost {
     pub platform: Platform,
     pub hide_play_buttons: bool,
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DisplaySides {
     pub question: String,
     pub answer: String,
+    /// Positive transform ownership, separate from authored HTML attributes.
+    pub question_replay_ids: Vec<String>,
+    pub answer_replay_ids: Vec<String>,
 }
 
-fn button(command: &str, platform: Platform) -> String {
+fn button(command: &str, platform: Platform, id: &str) -> String {
     // Original Meguri graphic, compact as D4 requires. The command
     // comes only from a q/a marker followed by ASCII digits, never HTML.
     let action = match platform {
@@ -29,11 +32,50 @@ fn button(command: &str, platform: Platform) -> String {
         Platform::Ios => format!("window.webkit.messageHandlers.meguri.postMessage('{command}')"),
     };
     format!(
-        r##"<a class="replay-button soundLink" href=# onclick="{action}; return false;" draggable="false"><svg class="playImage" viewBox="0 0 48 48" version="1.1"><rect x="3" y="3" width="42" height="42" rx="12" fill="none" stroke="currentColor" stroke-width="2" /><path d="M18 14L34 24L18 34Z" fill="currentColor" /></svg></a>"##
+        r##"<a class="replay-button soundLink" id="{id}" data-meguri-replay="true" aria-label="Play audio" href=# onclick="{action}; return false;" draggable="false"><svg class="playImage" aria-hidden="true" focusable="false" viewBox="0 0 48 48" version="1.1"><rect x="3" y="3" width="42" height="42" rx="12" fill="none" stroke="currentColor" stroke-width="2" /><path d="M18 14L34 24L18 34Z" fill="currentColor" /></svg></a>"##
     )
 }
 
 pub fn markers(text: &str, question: &[AvTag], answer: &[AvTag], host: RenderHost) -> String {
+    markers_for_document(text, question, answer, host, 'q').0
+}
+
+fn markers_for_document(
+    text: &str,
+    question: &[AvTag],
+    answer: &[AvTag],
+    host: RenderHost,
+    side: char,
+) -> (String, Vec<String>) {
+    // Resolve TTS first for reservation only: its authored markup can also
+    // occupy IDs. The output pass still substitutes each original marker once.
+    let mut has_replay = false;
+    let authored = replace_markers(text, question, answer, |_| {
+        has_replay = true;
+        String::new()
+    });
+    if host.hide_play_buttons || !has_replay {
+        return (authored, Vec::new());
+    }
+    let mut occupied = meguri_text::description::element_ids(&authored);
+    let mut ordinal = 0;
+    let mut ids = Vec::new();
+    let html = replace_markers(text, question, answer, |command| {
+        let id = loop {
+            let candidate = format!("review.card.replay.{side}{ordinal}");
+            ordinal += 1;
+            if occupied.insert(candidate.clone()) {
+                break candidate;
+            }
+        };
+        let html = button(command, host.platform, &id);
+        ids.push(id);
+        html
+    });
+    (html, ids)
+}
+
+fn replace_markers(text: &str, question: &[AvTag], answer: &[AvTag], mut replay: impl FnMut(&str) -> String) -> String {
     let mut out = String::with_capacity(text.len());
     let mut at = 0;
     while let Some(relative) = text[at..].find('[') {
@@ -52,8 +94,8 @@ pub fn markers(text: &str, question: &[AvTag], answer: &[AvTag], host: RenderHos
                 let entry = tail[13..end].parse::<usize>().ok().and_then(|index| entries.get(index));
                 if let Some(AvTag::Tts { content, .. }) = entry {
                     out.push_str(&crate::media_display::encode_for_display(content));
-                } else if !host.hide_play_buttons {
-                    out.push_str(&button(&tail[6..end], host.platform));
+                } else {
+                    out.push_str(&replay(&tail[6..end]));
                 }
                 at = start + end + 1;
                 continue;
@@ -113,24 +155,31 @@ pub fn compose(card: &CardRender, css: &str, ord: u32, host: RenderHost) -> Disp
         return DisplaySides {
             question: html.clone(),
             answer: html,
+            ..DisplaySides::default()
         };
     }
-    let transform = |text: &str| {
+    let transform = |text: &str, side| {
         let whole = wrap(css, text);
-        markers(
+        markers_for_document(
             &crate::media_display::encode_for_display(&whole),
             &card.question_av,
             &card.answer_av,
             host,
+            side,
         )
     };
-    let mut question = transform(card.question.as_deref().unwrap_or_default());
-    let answer = if let Outcome::Blank(kind) = card.outcome {
+    let (mut question, question_replay_ids) = transform(card.question.as_deref().unwrap_or_default(), 'q');
+    let (answer, answer_replay_ids) = if let Outcome::Blank(kind) = card.outcome {
         let notice = blank_notice(kind, ord);
         question.push_str(&notice);
-        transform(&notice)
+        transform(&notice, 'a')
     } else {
-        transform(card.answer.as_deref().unwrap_or_default())
+        transform(card.answer.as_deref().unwrap_or_default(), 'a')
     };
-    DisplaySides { question, answer }
+    DisplaySides {
+        question,
+        answer,
+        question_replay_ids,
+        answer_replay_ids,
+    }
 }

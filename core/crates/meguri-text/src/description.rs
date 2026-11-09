@@ -8,6 +8,23 @@ use pulldown_cmark::{Options, Parser, html};
 
 use fragment::{Fragment, HTML_NAMESPACE, NodeData, NodeId};
 
+/// IDs in a display fragment, decoded by the HTML5 parser without rewriting
+/// its source. Replay allocation (render/display-transform D4) reserves these
+/// before emitting any controls; authored lookalikes never become ownership.
+pub fn element_ids(html: &str) -> std::collections::BTreeSet<String> {
+    Fragment::parse(html)
+        .nodes
+        .into_iter()
+        .filter_map(|node| match node.data {
+            NodeData::Element { attrs, .. } => attrs
+                .into_iter()
+                .find(|attr| attr.name.local.as_ref() == "id")
+                .map(|attr| attr.value.to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
 /// D3.1: elements dropped together with everything inside them.
 const REMOVED_WITH_CONTENT: [&str; 37] = [
     "script", "style", "template", "iframe", "frame", "frameset", "object", "embed", "applet", "noscript", "noembed",

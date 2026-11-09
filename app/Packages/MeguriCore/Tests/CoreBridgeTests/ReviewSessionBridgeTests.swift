@@ -223,11 +223,13 @@ extension EventTests {
     }
 
     @Test func renderedMediaRefsSurviveAlongsideHTMLAudioAndTypeIn() {
-        let raw = MeguriCoreBindings.RenderedCard(cardId: -41, ordinal: 2, mode: .review, question: "<img src=\"q.png\">", answer: "<span data-meguri-type-answer></span>", questionAv: [.sound(name: "q.mp3")], answerAv: [.tts(language: "en", content: "answer")], outcome: .rendered, css: ".card {}", hidePlayButtons: true, reviewExtra: "extra", flag: 7, marked: true, typeIn: .init(expected: "answer", mode: .nc, caseInsensitive: true, font: "Serif", size: 22), mediaRefs: ["q.png", "q.mp3", "a.woff2"])
+        let raw = MeguriCoreBindings.RenderedCard(cardId: -41, ordinal: 2, mode: .review, question: "<img src=\"q.png\">", answer: "<span data-meguri-type-answer></span>", questionReplayIds: ["review.card.replay.q0", "review.card.replay.q2"], answerReplayIds: ["review.card.replay.a1"], questionAv: [.sound(name: "q.mp3")], answerAv: [.tts(language: "en", content: "answer")], outcome: .rendered, css: ".card {}", hidePlayButtons: true, reviewExtra: "extra", flag: 7, marked: true, typeIn: .init(expected: "answer", mode: .nc, caseInsensitive: true, font: "Serif", size: 22), mediaRefs: ["q.png", "q.mp3", "a.woff2"])
         let mapped = CoreBridge.RenderedCard(raw)
         #expect(mapped.mediaRefs == ["q.png", "q.mp3", "a.woff2"])
         #expect(mapped.cardID == -41 && mapped.ordinal == 2 && mapped.mode == .review)
         #expect(mapped.question == "<img src=\"q.png\">" && mapped.answer == "<span data-meguri-type-answer></span>")
+        #expect(mapped.questionReplayIDs == ["review.card.replay.q0", "review.card.replay.q2"])
+        #expect(mapped.answerReplayIDs == ["review.card.replay.a1"])
         #expect(mapped.questionAudio == [.sound(name: "q.mp3")] && mapped.answerAudio == [.tts(language: "en", content: "answer")])
         #expect(mapped.outcome == .rendered && mapped.css == ".card {}" && mapped.hidePlayButtons && mapped.reviewExtra == "extra")
         #expect(mapped.flag == 7 && mapped.marked)

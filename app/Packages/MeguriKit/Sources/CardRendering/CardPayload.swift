@@ -25,6 +25,8 @@ public nonisolated struct CardPayload: Sendable {
     public let templateDescriptor: String?
     public let question: String
     public let answer: String
+    public let questionReplayIDs: [String]
+    public let answerReplayIDs: [String]
     public let questionAudio: [CardAudio]
     public let answerAudio: [CardAudio]
     public let typeIn: TypeAnswerDescriptor?
@@ -35,12 +37,14 @@ public nonisolated struct CardPayload: Sendable {
     public init(_ rendered: RenderedCard, audioPolicy: CardAudioPolicy, templateDescriptor: String? = nil) {
         self.init(cardID: rendered.cardID, ordinal: Int(rendered.ordinal), templateDescriptor: templateDescriptor,
                   question: rendered.question ?? "", answer: rendered.answer ?? "",
+                  questionReplayIDs: rendered.questionReplayIDs, answerReplayIDs: rendered.answerReplayIDs,
                   questionAudio: rendered.questionAudio, answerAudio: rendered.answerAudio,
                   typeIn: rendered.typeIn, flag: rendered.flag, marked: rendered.marked, audioPolicy: audioPolicy)
     }
 
     /// Also permits synthetic render output and previews without opening a core.
     public init(cardID: Int64, ordinal: Int = 0, templateDescriptor: String? = nil, question: String, answer: String,
+                questionReplayIDs: [String] = [], answerReplayIDs: [String] = [],
                 questionAudio: [CardAudio] = [], answerAudio: [CardAudio] = [],
                 typeIn: TypeAnswerDescriptor? = nil, flag: UInt8 = 0, marked: Bool = false,
                 audioPolicy: CardAudioPolicy = .init()) {
@@ -50,6 +54,8 @@ public nonisolated struct CardPayload: Sendable {
         self.templateDescriptor = templateDescriptor.map { String($0.prefix(240)) }
         self.question = question
         self.answer = answer
+        self.questionReplayIDs = questionReplayIDs
+        self.answerReplayIDs = answerReplayIDs
         self.questionAudio = questionAudio
         self.answerAudio = answerAudio
         self.typeIn = typeIn

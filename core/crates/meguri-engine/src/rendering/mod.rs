@@ -24,6 +24,8 @@ pub struct RenderedCard {
     pub mode: RenderMode,
     pub question: Option<String>,
     pub answer: Option<String>,
+    pub question_replay_ids: Vec<String>,
+    pub answer_replay_ids: Vec<String>,
     /// K4/K5 before display, including the AV lists and typed outcome.
     pub comparable: CardRender,
     pub css: String,
@@ -66,6 +68,8 @@ pub fn review_html(collection: &Collection, id: CardId, typed: &str) -> Result<d
     Ok(display::DisplaySides {
         question: result.question.unwrap_or_default(),
         answer: result.answer.unwrap_or_default(),
+        question_replay_ids: result.question_replay_ids,
+        answer_replay_ids: result.answer_replay_ids,
     })
 }
 
@@ -99,37 +103,51 @@ pub(crate) fn render_captured(
     let platform = capture.platform;
     let hide_play_buttons = capture.hide_play_buttons;
     let (comparable, question) = render_with_fields(collection, &capture.fields(), kind, &capture.template, mode);
-    let (question, answer, type_in) = if mode == RenderMode::Browser || comparable_only {
-        (comparable.question.clone(), comparable.answer.clone(), None)
-    } else {
-        let sides = if observation.is_some() {
-            display::DisplaySides {
-                question: format!(
-                    "<style>{}</style>{}",
-                    kind.config.css,
-                    comparable.question.as_deref().unwrap_or_default()
-                ),
-                answer: format!(
-                    "<style>{}</style>{}",
-                    kind.config.css,
-                    comparable.answer.as_deref().unwrap_or_default()
-                ),
-            }
+    let (question, answer, type_in, question_replay_ids, answer_replay_ids) =
+        if mode == RenderMode::Browser || comparable_only {
+            (
+                comparable.question.clone(),
+                comparable.answer.clone(),
+                None,
+                Vec::new(),
+                Vec::new(),
+            )
         } else {
-            display::compose(
-                &comparable,
-                &kind.config.css,
-                u32::from(card.ord),
-                RenderHost {
-                    platform,
-                    hide_play_buttons,
-                },
+            let sides = if observation.is_some() {
+                display::DisplaySides {
+                    question: format!(
+                        "<style>{}</style>{}",
+                        kind.config.css,
+                        comparable.question.as_deref().unwrap_or_default()
+                    ),
+                    answer: format!(
+                        "<style>{}</style>{}",
+                        kind.config.css,
+                        comparable.answer.as_deref().unwrap_or_default()
+                    ),
+                    ..display::DisplaySides::default()
+                }
+            } else {
+                display::compose(
+                    &comparable,
+                    &kind.config.css,
+                    u32::from(card.ord),
+                    RenderHost {
+                        platform,
+                        hide_play_buttons,
+                    },
+                )
+            };
+            let (sides, descriptor) =
+                type_answer::apply(sides, &question, note, kind, u32::from(card.ord) + 1, observation)?;
+            (
+                Some(sides.question),
+                Some(sides.answer),
+                descriptor,
+                sides.question_replay_ids,
+                sides.answer_replay_ids,
             )
         };
-        let (sides, descriptor) =
-            type_answer::apply(sides, &question, note, kind, u32::from(card.ord) + 1, observation)?;
-        (Some(sides.question), Some(sides.answer), descriptor)
-    };
     let mut media_refs = std::collections::BTreeSet::new();
     for html in [&question, &answer].into_iter().flatten() {
         media_refs.extend(meguri_text::media_refs::local_references(html));
@@ -149,6 +167,8 @@ pub(crate) fn render_captured(
         question,
         answer,
         comparable,
+        question_replay_ids,
+        answer_replay_ids,
         css: kind.config.css.clone(),
         hide_play_buttons,
         review_extra: capture.review_extra.clone(),

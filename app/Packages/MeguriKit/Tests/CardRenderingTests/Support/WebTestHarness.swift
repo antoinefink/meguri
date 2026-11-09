@@ -51,12 +51,12 @@ final class WebTestHarness {
     /// frames itself (`TestPage.frameStamps()`).
     init(
         platform: CardRuntime.Platform = .mac, appearance: CardRuntime.Appearance = .light, reviewExtra: String = "",
-        runtime: Bool = true, frameClock: Bool = false
+        runtime: Bool = true, frameClock: Bool = false, replayLabel: String = CardRuntime.replayLabel
     ) {
         self.platform = platform
         self.appearance = appearance
         var document = CardRuntime.pageDocument(
-            platform: platform, appearance: appearance, mediaRoot: Self.mediaRoot, reviewExtra: reviewExtra)
+            platform: platform, appearance: appearance, mediaRoot: Self.mediaRoot, reviewExtra: reviewExtra, replayLabel: replayLabel)
         if !runtime {
             document = document.split(separator: "\n", omittingEmptySubsequences: false)
                 .filter { !$0.hasPrefix("<script src=\"/_anki/") }

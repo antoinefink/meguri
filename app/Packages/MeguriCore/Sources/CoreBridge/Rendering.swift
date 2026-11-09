@@ -23,6 +23,8 @@ public struct RenderedCard: Sendable, Hashable {
     public let mode: CardRenderMode
     public let question: String?
     public let answer: String?
+    public let questionReplayIDs: [String]
+    public let answerReplayIDs: [String]
     public let questionAudio: [CardAudio]
     public let answerAudio: [CardAudio]
     public let outcome: CardRenderOutcome
@@ -40,6 +42,8 @@ public struct RenderedCard: Sendable, Hashable {
         mode = switch value.mode { case .review: .review; case .preview: .preview; case .browser: .browser }
         question = value.question
         answer = value.answer
+        questionReplayIDs = value.questionReplayIds
+        answerReplayIDs = value.answerReplayIds
         func audio(_ tag: MeguriCoreBindings.RenderAv) -> CardAudio {
             switch tag {
             case .sound(let name): .sound(name: name)
