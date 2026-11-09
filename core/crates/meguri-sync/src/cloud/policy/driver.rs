@@ -1274,7 +1274,7 @@ mod native_validation_tests {
     fn actual_owned_publishes_effective_automatic_and_partial_error_before_unlock() {
         let inner = Mutex::new(Owned::default());
         let validation = Mutex::new(NativeValidation::from(&State::default()));
-        let result = (|| -> Result<(), DriverError> {
+        let result: Result<(), DriverError> = {
             let mut owned = ActualOwned {
                 owned: inner.lock().unwrap(),
                 validation: &validation,
@@ -1294,7 +1294,7 @@ mod native_validation_tests {
             // The old committed view stays available during actual mutation.
             assert_eq!(*validation.lock().unwrap(), NativeValidation::from(&State::default()));
             Err(DriverError::StaleCommand)
-        })();
+        };
         assert!(matches!(result, Err(DriverError::StaleCommand)));
         let owned = inner.try_lock().expect("Driver authority released on error");
         assert_eq!(*validation.lock().unwrap(), NativeValidation::from(&owned.state));

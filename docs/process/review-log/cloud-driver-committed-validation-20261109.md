@@ -64,3 +64,9 @@ Correction: Core lint `44852` fails clippy on the new test's immediately
 invoked closure. Formatting and layering pass. The earlier pass claim was
 recorded before checking the complete receipt. The syntax repair and lint
 remain pending; no full gate is run over the known enqueue gaps.
+
+Filtered syntax fix `46484` is independently clear. It changes only the new
+test's invoked closure to a typed scoped Result block; guard lifetime and all
+assertions remain. Lint `47519` now passes every check. Core `48133` passes
+the adjusted test. Follow-up similarity passes. The failed lint `44852`
+remains retained, with its inaccurate initial description corrected above.
