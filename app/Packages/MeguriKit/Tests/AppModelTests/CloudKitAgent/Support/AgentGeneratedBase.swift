@@ -20,7 +20,7 @@ import Foundation
         guard try store.read(.header) == headerBytes else { throw AgentFailure.binding }
         let commands = AgentJSON.lines(try store.read(.commands))
         guard let launchBytes = commands.complete.first else { throw AgentFailure.journal }
-        let launch = try AgentCommand.read(launchBytes, header: AgentJSON.hash(headerBytes), sequence: 1)
+        let launch = try AgentCommand.read(launchBytes, header: AgentJSON.hash(headerBytes), sequence: 1, program: header.program)
         let journal = AgentJSON.lines(try store.read(.journal))
         guard launch.action == .launch, journal.suffix.isEmpty, let first = journal.complete.first else { throw AgentFailure.journal }
         let started = try AgentRecord.read(first)

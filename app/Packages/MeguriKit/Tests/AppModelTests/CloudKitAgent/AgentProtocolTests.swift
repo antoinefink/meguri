@@ -630,6 +630,9 @@ import Darwin
         lookups += 1
         guard accountMatches else { throw AgentFailure.wrongContainer }
     }
+    // Legacy transport tests only. Fresh-object durable reconstruction is
+    // exercised separately by CloudKitAgentSelectedProgramTests.
+    func restore(_ state: AgentRestoration) async throws {}
     func execute(_ command: AgentCommand, observe: @escaping (AgentFact) throws -> Void) async throws -> [AgentCheck] {
         executions += 1; callback = observe
         (store as? AgentMemoryStorage)?.events.append("bootstrap")

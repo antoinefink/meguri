@@ -12,6 +12,7 @@ import Foundation
     private var runDigest = ""
     private var acceptedLines: [Data] = []
     private var commands: [AgentCommand] = []
+    private var admittedRuntime = false
 
     init(storage: any AgentStorage, runtime: any AgentRuntime, instance: String) throws {
         guard AgentJSON.label(instance) else { throw AgentFailure.shape }
@@ -20,18 +21,23 @@ import Foundation
     static func requiredChecks(_ action: AgentCommand.Action) -> Set<AgentCheck.Name> {
         switch action {
         case .launch: [.integrity]
-        case .addNote, .startSession, .answer, .endSession, .addMedia: [.localDurability]
+        case .addNote, .startSession, .answer, .endSession, .addMedia, .edit: [.localDurability]
         case .close: [.integrity, .localDurability]
-        case .connect, .publish: [.coordinatorResult]
+        case .connect, .publish, .adopt: [.coordinatorResult]
         case .syncNow: [.coordinatorResult]
+        case .observe: [.localDurability]
         }
     }
     static func smokeCompleted(_ records: [AgentRecord]) -> Bool {
+        programCompleted(records, program: .smoke)
+    }
+    static func programCompleted(_ records: [AgentRecord], program: AgentProgram) -> Bool {
         guard !records.contains(where: { $0.kind == .failed }) else { return false }
         let starts = records.filter { $0.kind == .started }
         let done = records.filter { $0.kind == .done }
-        guard starts.map(\.action) == AgentCommand.smokeProgram.map(Optional.some),
-              starts.map(\.command_seq) == Array(1...10), done.map(\.command_seq) == Array(1...10),
+        let positions = Array(1...program.actions.count)
+        guard starts.map(\.action) == program.actions.map(Optional.some),
+              starts.map(\.command_seq) == positions, done.map(\.command_seq) == positions,
               let close = done.last else { return false }
         return close.checks.contains { $0.name == .integrity && $0.outcome == .pass && $0.facts.contains { $0.name == .integrity } }
             && close.checks.contains { $0.name == .localDurability && $0.outcome == .pass && $0.facts.contains { $0.name == .ownedWorkJoined } }
@@ -142,13 +148,14 @@ import Foundation
         defer { delivering = false }
         try await finishUncertainJournal()
         let header = try AgentHeader.read(bytes)
+        let program = try header.program
         let candidateHash = AgentJSON.hash(bytes)
         let acceptedHeader = try storage.read(.header)
         guard acceptedHeader.isEmpty || acceptedHeader == bytes else { throw AgentFailure.binding }
         let split = AgentJSON.lines(delivered)
         let candidateBytes = split.complete
         let candidateCommands = try candidateBytes.enumerated().map {
-            try AgentCommand.read($0.element, header: candidateHash, sequence: $0.offset + 1)
+            try AgentCommand.read($0.element, header: candidateHash, sequence: $0.offset + 1, program: program)
         }
         if let close = candidateCommands.first(where: { $0.action == .close }), close.command_seq != candidateCommands.count { throw AgentFailure.sequence }
         let accepted = try storage.read(.commands)
@@ -184,7 +191,28 @@ import Foundation
             try await cancelOwnedWork()
             return try storage.read(.journal)
         }
+        // A completed delivery needs no fresh runtime. Keep admission deferred
+        // so an appended successor must still verify the account and restore.
         if completedEntries.count == commands.count { return try storage.read(.journal) }
+        if !admittedRuntime {
+            do {
+                if !candidateEntries.isEmpty {
+                    try await runtime.verifyAccount(header)
+                    try await runtime.restore(.init(header: header, commands: commands, records: candidateEntries))
+                }
+                admittedRuntime = true
+            } catch {
+                // Only an already-started command can own a failed terminal.
+                // Do not start a successor merely to report failed restoration.
+                if completedEntries.count < commands.count,
+                   journalEntries.contains(where: { $0.kind == .started && $0.command_seq == commands[completedEntries.count].command_seq }) {
+                    try await fail(commands[completedEntries.count], error)
+                    return try storage.read(.journal)
+                }
+                try await cancelOwnedWork()
+                throw error
+            }
+        }
         let command = commands[completedEntries.count]
         if let startedEntry = journalEntries.first(where: { $0.kind == .started && $0.command_seq == command.command_seq }) {
             do {

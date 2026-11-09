@@ -97,11 +97,44 @@ nonisolated struct AgentHeader: Codable, Equatable {
               ["mac", "iphone", "ipad"].contains(header.device_kind),
               !header.os_build.isEmpty, !header.app_build.isEmpty, !header.container.isEmpty,
               header.account_labels == ["acct1"] else { throw AgentFailure.shape }
-        guard header.selection == "smoke" else { throw AgentFailure.unsupported }
+        _ = try header.program
         try header.build_receipt.validate()
         try header.deployment_receipt.validate()
         try header.fixture_delivery.validate()
         return header
+    }
+    var program: AgentProgram { get throws { try .init(selection: selection, deviceKind: device_kind) } }
+}
+
+// Selection is bound by the validated immutable header, never by command text.
+nonisolated enum AgentProgram: Equatable {
+    case smoke, syncNowMac, syncNowPhone
+
+    init(selection: String, deviceKind: String) throws {
+        switch (selection, deviceKind) {
+        case ("smoke", "mac"), ("smoke", "iphone"), ("smoke", "ipad"): self = .smoke
+        case ("sync_now", "mac"): self = .syncNowMac
+        case ("sync_now", "iphone"): self = .syncNowPhone
+        default: throw AgentFailure.unsupported
+        }
+    }
+    var selection: String { self == .smoke ? "smoke" : "sync_now" }
+    var actions: [AgentCommand.Action] {
+        switch self {
+        case .smoke: AgentCommand.smokeProgram
+        case .syncNowMac: [.launch, .connect, .publish, .edit, .syncNow, .close]
+        case .syncNowPhone: [.launch, .connect, .adopt, .syncNow, .observe, .close]
+        }
+    }
+    func requirePosition(_ command: AgentCommand) throws {
+        if self == .smoke { try command.requireSmokePosition(); return }
+        guard actions.indices.contains(command.command_seq - 1),
+              actions[command.command_seq - 1] == command.action else { throw AgentFailure.sequence }
+        if let recovery = command.recovery_check {
+            let permitted: String? = command.action == .syncNow ? "sync_now.exchange"
+                : self == .syncNowMac && command.action == .edit ? "sync_now.edit" : nil
+            guard recovery == permitted else { throw AgentFailure.unsupported }
+        }
     }
 }
 
@@ -109,10 +142,13 @@ nonisolated struct AgentCommand: Codable {
     enum Action: String, Codable, CaseIterable {
         case launch, connect, publish, addNote = "add_note", startSession = "start_session"
         case answer, endSession = "end_session", addMedia = "add_media", syncNow = "sync_now", close
+        case adopt, edit, observe
         var arguments: [String: String] {
             switch self {
             case .launch, .syncNow, .close: [:]
-            case .connect, .publish: ["preview": "p1"]
+            case .connect, .publish, .adopt: ["preview": "p1"]
+            case .edit: ["note": "n1", "field": "Q"]
+            case .observe: ["note": "n1"]
             case .addNote: ["note": "n1", "deck": "D2"]
             case .startSession: ["session": "s1", "deck": "D2", "card": "c1"]
             case .answer: ["session": "s1", "card": "c1", "rating": "good"]
@@ -137,14 +173,19 @@ nonisolated struct AgentCommand: Codable {
     let account_after: String
     let recovery_check: String?
 
-    static func read(_ bytes: Data, header: String, sequence: Int) throws -> Self {
+    static func read(_ bytes: Data, header: String, sequence: Int, program: AgentProgram = .smoke) throws -> Self {
         _ = try AgentJSON.parse(bytes).object(required: ["header_sha256", "command_seq", "leg", "action", "arguments", "account_before", "account_after"], optional: ["recovery_check"])
         let command = try AgentJSON.decode(Self.self, bytes)
         guard command.header_sha256 == header else { throw AgentFailure.binding }
         guard command.command_seq == sequence else { throw AgentFailure.sequence }
-        guard command.leg == "smoke", command.account_before == "acct1", command.account_after == "acct1" else { throw AgentFailure.unsupported }
+        guard command.leg == program.selection, command.account_before == "acct1", command.account_after == "acct1" else { throw AgentFailure.unsupported }
         guard command.arguments == command.action.arguments else { throw AgentFailure.shape }
-        if let check = command.recovery_check, check != "smoke-durable-state" { throw AgentFailure.unsupported }
+        if program == .smoke {
+            // Preserve the transport-double grammar, but never admit J3.2
+            // actions into smoke. The signed wrapper still enforces all ten positions.
+            guard smokeProgram.contains(command.action) else { throw AgentFailure.unsupported }
+            if let check = command.recovery_check, check != "smoke-durable-state" { throw AgentFailure.unsupported }
+        } else { try program.requirePosition(command) }
         guard sequence == 1 ? command.action == .launch : command.action != .launch else { throw AgentFailure.sequence }
         return command
     }
@@ -242,9 +283,25 @@ nonisolated struct AgentRecord: Codable {
     func verifyProduct(_ header: AgentHeader) throws
     // Compare a current account observation with the protected run scope.
     func verifyAccount(_ header: AgentHeader) async throws
+    // Called once for a fresh runtime, after exact prefix/product/account
+    // admission, before any successor or interrupted-operation inspection.
+    // Records select what must be proved; they are not proof of Core progress.
+    func restore(_ state: AgentRestoration) async throws
     func execute(_ command: AgentCommand, observe: @escaping (AgentFact) throws -> Void) async throws -> [AgentCheck]
     func recover(_ command: AgentCommand, started: AgentRecord, observe: @escaping (AgentFact) throws -> Void) async throws -> [AgentCheck]
     func cancelAndJoin() async throws
+}
+
+nonisolated struct AgentRestoration {
+    let header: AgentHeader
+    let commands: [AgentCommand]
+    let records: [AgentRecord]
+}
+
+extension AgentRuntime {
+    func restore(_ state: AgentRestoration) async throws {
+        throw AgentFailure.implementationMissing
+    }
 }
 
 // The held iterator must resume when execution fails, even without a record.

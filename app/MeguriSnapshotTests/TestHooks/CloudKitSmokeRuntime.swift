@@ -14,8 +14,17 @@ import Foundation
         case generatedBase = "verified-generated-small-base"
         case integrityInspector = "smoke-integrity-inspector"
         case recoveryInspector = "durable-smoke-recovery-inspector"
+        case originalRoleInspector = "verified-original-small-role-inspector"
+        case epochInspector = "original-root-epoch-payload-inspector"
+        case adoptionInspector = "original-adoption-backup-activation-inspector"
+        case peerApplyInspector = "durable-selected-note-apply-inspector"
+        case selectedRecoveryInspector = "durable-selected-operation-recovery-inspector"
     }
-    let missing: [Dependency] = [.recoveryInspector]
+    var missing: [Dependency] {
+        let selected = program ?? (try? AgentHeader.read(originalHeaderBytes).program)
+        return selected == .smoke || selected == nil ? [.recoveryInspector]
+            : [.originalRoleInspector, .epochInspector, .adoptionInspector, .peerApplyInspector, .selectedRecoveryInspector]
+    }
     private(set) var userSteps: [String] = []
     private let admittedRun: AgentRunDirectory
     private let directory: URL
@@ -41,6 +50,7 @@ import Foundation
     private var mediaName: String?
     private var mediaBytes: Data?
     private var nextCommand = 1
+    private var program: AgentProgram?
 
     init(admittedRun: AgentRunDirectory) {
         self.admittedRun = admittedRun
@@ -59,6 +69,7 @@ import Foundation
                 productCheck: { try self.checkActualProduct(header) },
                 applicationSupportRoot: { try self.admittedRun.retainedApplicationSupportRoot() })
         }
+        program = try header.program
     }
     private func checkActualProduct(_ header: AgentHeader) throws {
         if let runningProduct {
@@ -123,7 +134,8 @@ import Foundation
             .requireInstalled(at: directory.appendingPathComponent("data", isDirectory: true))
     }
     func execute(_ command: AgentCommand, observe: @escaping (AgentFact) throws -> Void) async throws -> [AgentCheck] {
-        try command.requireSmokePosition()
+        guard let program else { throw AgentFailure.binding }
+        try program.requirePosition(command)
         guard command.command_seq == nextCommand else { throw AgentFailure.sequence }
         // A failed operation never advances this program.
         do {
@@ -216,12 +228,18 @@ import Foundation
             try await owner.prepareCloudConnectionPreview()
             await owner.sync.waitForConnectionPreview()
             guard !owner.sync.operationFailed, case .ready(let current, let summary) = owner.sync.preview else { throw AgentFailure.execution }
-            try requireInitialPreview(summary)
+            if program == .syncNowPhone { try CloudKitSelectedSyncProof.requireReceiverPreview(summary) }
+            else { try requireInitialPreview(summary) }
             preview = current
             let fact = AgentFact(name: .applied, count: summary.localCounts[.note], operation: "p1")
             try observe(fact)
             return [.init(name: .coordinatorResult, outcome: .pass, facts: [fact])]
         case .publish:
+            // The selected program additionally requires canonical control
+            // payloads from the original publication. Existing smoke proof
+            // exposes completion, not these payloads. Refuse before publishing
+            // until that observation is available, retaining the real preview.
+            if program != .smoke { throw AgentFailure.implementationMissing }
             guard let owner, let backend, let preview,
                   case .ready(let current, let summary) = owner.sync.preview,
                   CoreSmokeInspection.samePreview(preview, current) else { throw AgentFailure.execution }
@@ -383,14 +401,10 @@ import Foundation
             for fact in facts { try observe(fact) }
             return [.init(name: .localDurability, outcome: .pass, facts: facts)]
         case .syncNow:
+            if program != .smoke { return try await selectedExchange(observe: observe) }
             guard let owner, let backend, let mutation, let head, let reviewRowID, let mediaName,
                   owner.review == nil, retainedEntities.count == 4 else { throw AgentFailure.execution }
-            try backend.prepareForSyncNow()
-            guard owner.requestSyncNow() else { throw AgentFailure.execution }
-            await owner.sync.waitForInputs()
-            guard owner.sync.syncNowUnavailable == nil, !owner.sync.operationFailed else { throw AgentFailure.execution }
-            let exchange = try await backend.requestedExchangeResult()
-            await owner.sync.waitForInputs()
+            let exchange = try await originalExchange(owner: owner, backend: backend)
             guard !owner.sync.operationFailed,
                   case .succeeded(_, let held, let newer, let incoming, let media) = exchange.outcome,
                   held == 0, newer == 0, incoming == 0 else { throw AgentFailure.execution }
@@ -412,6 +426,9 @@ import Foundation
             try observe(result); facts.append(result)
             return [.init(name: .coordinatorResult, outcome: .pass, facts: facts)]
         case .close:
+            // Smoke's joined proof below also proves its held review images.
+            // It cannot be used to certify a program without that review.
+            if program != .smoke { throw AgentFailure.implementationMissing }
             guard let owner, owner.review == nil, await owner.sync.cancelAndDrain() else { throw AgentFailure.execution }
             let integrity = try await integrityCheck(owner)
             guard await owner.close() else { throw AgentFailure.execution }
@@ -423,7 +440,32 @@ import Foundation
             try observe(joined)
             return [integrity, .init(name: .coordinatorResult, outcome: .pass, facts: proof),
                     .init(name: .localDurability, outcome: .pass, facts: [joined])]
+        case .adopt, .edit, .observe:
+            // Do not adopt without the immutable original role and actual
+            // backup/activation/epoch evidence; do not guess n1 from live rows.
+            // Likewise no edit or readback can claim the missing role/apply
+            // provenance. These typed gaps are not user-owned setup steps.
+            throw AgentFailure.implementationMissing
         }
+    }
+    private func originalExchange(owner: ReviewCollection, backend: CloudKitSmokeBackend) async throws -> CloudPolicyExchangeRecord {
+        guard owner.review == nil else { throw AgentFailure.execution }
+        return try await AgentManualExchange.run(prepare: { try backend.prepareForSyncNow() },
+            request: { owner.requestSyncNow() }, afterRequest: {
+                await owner.sync.waitForInputs()
+                guard owner.sync.syncNowUnavailable == nil, !owner.sync.operationFailed else { throw AgentFailure.execution }
+            }, exactResult: { try await backend.requestedExchangeResult() }, afterResult: {
+                await owner.sync.waitForInputs()
+                guard !owner.sync.operationFailed else { throw AgentFailure.execution }
+            })
+    }
+    private func selectedExchange(observe: @escaping (AgentFact) throws -> Void) async throws -> [AgentCheck] {
+        guard let owner, let backend, owner.review == nil else { throw AgentFailure.execution }
+        // Receiving requires no local n1/c1/r1/m1 mutation. The selected wrapper
+        // still needs its own durable note/epoch evidence before a done record.
+        let exchange = try await originalExchange(owner: owner, backend: backend)
+        for fact in try CloudKitSelectedSyncProof.exchangeFacts(exchange) { try observe(fact) }
+        throw AgentFailure.implementationMissing
     }
     private func requireInitialPreview(_ summary: CloudConnectionSummary) throws {
         guard summary.localCollectionPresent, !summary.initialAdoptionRequired, !summary.localEmpty,
@@ -477,6 +519,15 @@ import Foundation
         _ = try retainedAdmission()
         // No guessed reconstruction of an operation from a payload digest, and
         // no reissued mutation. A durable receipt/row inspector is still needed.
+        throw AgentFailure.implementationMissing
+    }
+    func restore(_ state: AgentRestoration) async throws {
+        _ = try retainedAdmission()
+        guard try state.header.program == program, owner == nil else { throw AgentFailure.binding }
+        // No reinstall, publication, adoption or replay. Before opening Core
+        // (which can resume owned work), the missing durable operation inspector
+        // must prove the original role, epoch and progress. Journal phase and
+        // payload equality cannot safely reconstruct those authorities.
         throw AgentFailure.implementationMissing
     }
     func cancelAndJoin() async throws {
