@@ -27,6 +27,19 @@ impl<T> Drop for Completion<T> {
         }
     }
 }
+// Required completions have no destructor placeholder: no body, panic or drop
+// without a normal return must remain distinguishable from actual Cancelled.
+struct RequiredCompletion<T>(Arc<Cell<T>>);
+impl<T> RequiredCompletion<T> {
+    fn finish(self, value: Result<T, CoreError>) -> Result<(), EngineError> {
+        let terminal = value
+            .as_ref()
+            .map(|_| ())
+            .map_err(|error| EngineError::from(error.clone()));
+        *self.0.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(value);
+        terminal
+    }
+}
 macro_rules! typed_result {
     ($result:ident, $start:ident, $value:ty) => {
         #[derive(uniffi::Object)]
@@ -213,7 +226,7 @@ impl CloudPolicyExecution {
             result: Arc::new(CloudPolicyOutputResult { cell }),
         })
     }
-    /// Started facts are constructed here; terminal accounting stays synchronous.
+    /// Started facts are constructed here; this ordinary job keeps queued cancellation.
     pub fn start_report_invocation(
         self: Arc<Self>,
         zones: Vec<CloudPolicyZone>,
@@ -241,6 +254,54 @@ impl CloudPolicyExecution {
                 })?;
         Ok(CloudPolicyOutputJob {
             handle,
+            result: Arc::new(CloudPolicyOutputResult { cell }),
+        })
+    }
+    /// Actual Ended facts for this original execution only. This starts no SDK
+    /// work and retains normal typed returns even when cancellation is requested.
+    pub fn start_report_completion(
+        self: Arc<Self>,
+        facts: CloudPolicyOperationFacts,
+    ) -> Result<CloudPolicyOutputJob, CoreError> {
+        callback::enter("CloudPolicyExecution.start_report_completion");
+        self.policy().owns(&self.command)?;
+        if facts.started {
+            return Err(CoreError::InvalidArgument {
+                message: "completion requires Ended facts".into(),
+            });
+        }
+        let cell = Arc::new(Cell(Mutex::new(None)));
+        let completion = RequiredCompletion(cell.clone());
+        let engine = self.policy().host.engine();
+        let original_engine = engine.downgrade();
+        let generation = Generation(self.policy().generation);
+        let handle =
+            engine
+                .jobs()
+                .start_required_completion("CloudPolicyExecution.report_completion", generation, move |job| {
+                    let owner_error = Arc::new(Mutex::new(None));
+                    let rejected_owner = owner_error.clone();
+                    let owner = self.policy().clone();
+                    let mut work = p::PolicyWork::required_completion(&job.cancel)
+                        .with_generation(original_engine, generation)
+                        .with_owner_check(Arc::new(move || {
+                            owner.validate_owner().map_err(|error| {
+                                *rejected_owner.lock().unwrap_or_else(PoisonError::into_inner) = Some(error.clone());
+                                EngineError::from(error)
+                            })
+                        }));
+                    let value = self.operation_activity_with_work(facts, &mut work);
+                    // Use the rejection sampled at the actual authority boundary,
+                    // never a fresh lookup over the operation's returned outcome.
+                    let value = match owner_error.lock().unwrap_or_else(PoisonError::into_inner).take() {
+                        Some(error) => Err(error),
+                        None if work.generation_was_rejected() => Err(failure(CloudPolicyFailure::GenerationChanged)),
+                        None => value,
+                    };
+                    completion.finish(value)
+                });
+        Ok(CloudPolicyOutputJob {
+            handle: crate::jobs::wrap(handle),
             result: Arc::new(CloudPolicyOutputResult { cell }),
         })
     }
@@ -498,5 +559,95 @@ mod tests {
             let result = CloudPolicyOutputResult { cell };
             assert!(matches!(result.result(), Err(error) if error == expected));
         }
+    }
+
+    #[test]
+    fn required_sdk_completion_actual_cancelled_and_panic_have_distinct_stored_results() {
+        use meguri_engine::{ChangeStream, EventKind, JobOutcome, JobRegistry, ThreadRegistry};
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let threads = ThreadRegistry::new();
+        let stream = ChangeStream::new();
+        let events = stream.subscribe();
+        let registry = JobRegistry::new(&threads, stream, 1).unwrap();
+        let (entered, reached) = mpsc::channel();
+        let (release, resume) = mpsc::channel();
+        registry.start("hold existing pool", Generation(0), None, move |_| {
+            entered.send(()).unwrap();
+            resume.recv_timeout(Duration::from_secs(10)).unwrap();
+            Ok(())
+        });
+        reached.recv_timeout(Duration::from_secs(5)).unwrap();
+        let mut cases = Vec::new();
+        let called = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        for (name, value) in [
+            ("actual Ok", Ok(73_u64)),
+            ("actual Cancelled", Err(CoreError::Cancelled)),
+            ("actual typed error", Err(failure(CloudPolicyFailure::WrongOwner))),
+        ] {
+            let cell = Arc::new(Cell(Mutex::new(None)));
+            let completion = RequiredCompletion(cell.clone());
+            let expected = value.clone();
+            let body_called = called.clone();
+            let job = registry.start_required_completion(name, Generation(0), move |context| {
+                body_called.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                assert!(context.cancel.is_cancelled());
+                assert!(context.slot().is_none());
+                completion.finish(value)
+            });
+            job.cancel.cancel(); // Models cancellation after listener setup failure.
+            assert!(cell.0.lock().unwrap().is_none());
+            cases.push((job, cell, Some(expected)));
+        }
+        let cell = Arc::new(Cell::<u64>(Mutex::new(None)));
+        let completion = RequiredCompletion(cell.clone());
+        let panicked = registry.start_required_completion("panic", Generation(0), move |_| {
+            let _completion = completion;
+            panic!("required completion panic")
+        });
+        cases.push((panicked, cell, None));
+        release.send(()).unwrap();
+        let mut outcomes = std::collections::BTreeMap::new();
+        // A FIFO fence bounds collection and detects duplicate terminal events.
+        let fence = registry.start("fence", Generation(0), None, |_| Ok(()));
+        loop {
+            let event = events.recv_timeout(Duration::from_secs(5)).unwrap();
+            if let EventKind::JobFinished { id, outcome } = &event.kind {
+                assert!(outcomes.insert(*id, outcome.clone()).is_none());
+                if *id == fence.id {
+                    break;
+                }
+            }
+        }
+        for (job, cell, expected) in cases {
+            assert_eq!(*cell.0.lock().unwrap(), expected);
+            match expected {
+                Some(Ok(_)) => assert_eq!(outcomes[&job.id], JobOutcome::Succeeded),
+                Some(Err(CoreError::Cancelled)) => assert_eq!(outcomes[&job.id], JobOutcome::Cancelled),
+                Some(Err(_)) => assert!(matches!(outcomes[&job.id], JobOutcome::Failed { .. })),
+                None => assert!(matches!(
+                    &outcomes[&job.id],
+                    JobOutcome::Failed { error: EngineError::Internal { message } }
+                        if message.contains("required completion panic")
+                )),
+            }
+        }
+        assert_eq!(called.load(std::sync::atomic::Ordering::SeqCst), 3);
+        assert_eq!(outcomes.len(), 6); // blocker, three returns, panic, fence.
+        assert_eq!(
+            threads
+                .threads()
+                .iter()
+                .filter(|thread| thread.name.starts_with("meguri-job-"))
+                .count(),
+            1
+        );
+        let required = Arc::new(Cell::<u64>(Mutex::new(None)));
+        drop(RequiredCompletion(required.clone()));
+        assert!(required.0.lock().unwrap().is_none());
+        let ordinary = Arc::new(Cell::<u64>(Mutex::new(None)));
+        drop(Completion(ordinary.clone()));
+        assert_eq!(*ordinary.0.lock().unwrap(), Some(Err(CoreError::Cancelled)));
     }
 }

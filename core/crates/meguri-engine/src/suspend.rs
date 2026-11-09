@@ -174,8 +174,8 @@ impl Engine {
             self.update_availability(&mut state);
         }
         exec.wait_idle_until(deadline)?;
-        // Only the two transfer-reply jobs need Runtime authority until their
-        // terminal result. Flush stays first; unrelated jobs keep S1 ordering.
+        // Required SDK completions and transfer replies need Runtime authority
+        // until their terminal result. Flush stays first; other jobs keep S1 ordering.
         self.jobs().wait_connection_replies_until(deadline)?;
         for participant in self.ports().suspend_participants {
             participant.suspend_until(deadline)?;

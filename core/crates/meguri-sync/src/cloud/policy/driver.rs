@@ -215,6 +215,7 @@ impl Owned {
 #[derive(Clone, Default)]
 pub struct PolicyWork {
     cancel: Option<meguri_engine::CancelToken>,
+    required_completion: bool,
     generation: Option<(meguri_engine::WeakEngine, meguri_engine::Generation)>,
     generation_rejected: Arc<std::sync::atomic::AtomicBool>,
     effected: Arc<std::sync::atomic::AtomicBool>,
@@ -226,6 +227,14 @@ impl PolicyWork {
         Self {
             cancel: Some(cancel.clone()),
             ..Self::default()
+        }
+    }
+    /// Accepted original-SDK Ended work ignores cancellation independently of
+    /// the effect latch. All original authority checks still precede effects.
+    pub fn required_completion(cancel: &meguri_engine::CancelToken) -> Self {
+        Self {
+            required_completion: true,
+            ..Self::new(cancel)
         }
     }
     /// A pure atomic generation check for retained connection jobs. This
@@ -254,7 +263,9 @@ impl PolicyWork {
     }
     pub fn check(&self) -> Result<(), RuntimeError> {
         if !self.effected.load(std::sync::atomic::Ordering::SeqCst) {
-            if let Some(cancel) = &self.cancel {
+            if !self.required_completion
+                && let Some(cancel) = &self.cancel
+            {
                 cancel.check()?;
             }
             if let Some((engine, generation)) = &self.generation

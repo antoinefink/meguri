@@ -72,7 +72,7 @@ impl CloudPolicyExecution {
             if !started && (app_cancelled || code == Some(20)) {
                 self.policy()
                     .driver()?
-                    .cancel_native_activity(&self.command.command, &sdk, operation)
+                    .cancel_native_activity_with_work(&self.command.command, &sdk, operation, work)
                     .map_err(execution_error)?;
                 continue;
             }

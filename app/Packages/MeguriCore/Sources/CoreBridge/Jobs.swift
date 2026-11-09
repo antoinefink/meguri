@@ -65,6 +65,13 @@ public final class CoreJob: Sendable {
     }
 }
 
+/// Tracking failure is reported only after the accepted job has drained. The
+/// terminal matters when a required completion has no stored body return.
+enum DrainedJobTracking: Sendable {
+    case tracked(CoreJob)
+    case drained(setupError: BridgeError, terminal: JobOutcome)
+}
+
 enum Jobs {
     /// Starts a job with a short `start_*` export on the maintenance lane and
     /// returns it at once. The event stream is started first, so the job's
@@ -85,15 +92,24 @@ enum Jobs {
         _ handle: MeguriCoreBindings.JobHandle,
         setup: @escaping @Sendable (MeguriCoreBindings.JobHandle) throws -> CoreJob = { try Jobs.track($0) }
     ) async throws(BridgeError) -> CoreJob {
+        switch await trackRetainingDrain(handle, setup: setup) {
+        case .tracked(let job): return job
+        case .drained(let error, _): throw error
+        }
+    }
+    static func trackRetainingDrain(
+        _ handle: MeguriCoreBindings.JobHandle,
+        setup: @escaping @Sendable (MeguriCoreBindings.JobHandle) throws -> CoreJob = { try Jobs.track($0) }
+    ) async -> DrainedJobTracking {
         do throws(BridgeError) {
-            return try await MaintenanceLane.shared.call(.jobProgressSetListener) { try setup(handle) }
+            return .tracked(try await MaintenanceLane.shared.call(.jobProgressSetListener) { try setup(handle) })
         } catch {
             let (_, continuation) = AsyncStream.makeStream(of: CoreProgress.self)
             let completion = JobCompletion(progress: continuation)
             JobRegistry.shared.register(JobID(rawValue: handle.id), completion)
             try? await CancelToken(raw: handle.cancel).cancel()
-            _ = await completion.wait()
-            throw error
+            let terminal = await completion.wait()
+            return .drained(setupError: error, terminal: terminal)
         }
     }
     /// Called on MaintenanceLane after the event stream has subscribed.

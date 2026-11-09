@@ -131,3 +131,9 @@ threads-required = "num-test-threads"
 [[profile.default.overrides]]
 filter = 'package(meguri-ffi) and test(/native_admission_job/)'
 threads-required = "num-test-threads"
+
+# Required original-SDK completion witnesses retain the existing real-lock and
+# suspend budgets, including deadline failure and writer-held replacement.
+[[profile.default.overrides]]
+filter = '(package(meguri-ffi) or package(meguri-engine)) and test(/required_sdk_completion_/)'
+threads-required = "num-test-threads"

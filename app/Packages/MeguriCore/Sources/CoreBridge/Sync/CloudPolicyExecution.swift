@@ -56,11 +56,22 @@ struct CoreCloudPolicyExecution: Sendable {
     }
     func report(zones: [CloudPolicyZone], kind: CloudPolicyOperationKind, started: Bool, error: (any Error)? = nil, saved: UInt64 = 0) async throws -> CloudPolicyOutput {
         let raw = self.raw
-        let facts = error as? CloudKitSDKOperationFailure
+        let failure = error as? CloudKitSDKOperationFailure
+        let facts = MeguriCoreBindings.CloudPolicyOperationFacts(zones: zones.map(\.raw), kind: kind.raw,
+            started: started, failed: error != nil, code: failure?.code,
+            retryAfterMs: failure?.retryAfterMilliseconds, saved: saved, appCancelled: error is CancellationError)
+        if !started {
+            let value: MeguriCoreBindings.CloudPolicyOutput = try await CoreCloudPolicyService.runOrdered(
+                .cloudPolicyExecutionStartReportCompletion, result: .cloudPolicyOutputResult,
+                requiredCompletion: true
+            ) { [raw] in
+                let job = try raw.startReportCompletion(facts: facts)
+                return CloudPolicyJobValue(handle: job.handle, read: { try job.result.result() })
+            }
+            return CloudPolicyOutput(value)
+        }
         return try await CoreCloudPolicyService.call(.cloudPolicyExecutionOperationActivity) {
-            CloudPolicyOutput(try raw.operationActivity(facts: .init(zones: zones.map(\.raw), kind: kind.raw,
-                started: started, failed: error != nil, code: facts?.code,
-                retryAfterMs: facts?.retryAfterMilliseconds, saved: saved, appCancelled: error is CancellationError)))
+            CloudPolicyOutput(try raw.operationActivity(facts: facts))
         }
     }
     /// Started preparation belongs to the retained operation task. Final

@@ -186,10 +186,23 @@ impl Driver {
         sdk: &str,
         operation: Operation,
     ) -> Result<(), DriverError> {
-        let mut owned = self.lock_owned();
+        self.cancel_native_activity_with_work(command, sdk, operation, &mut PolicyWork::default())
+    }
+
+    pub fn cancel_native_activity_with_work(
+        &self,
+        command: &Command,
+        sdk: &str,
+        operation: Operation,
+        work: &mut PolicyWork,
+    ) -> Result<(), DriverError> {
+        let mut owned = self.lock_for_work(work)?;
         self.validate_locked(&owned, command)?;
         self.runtime.validate_sdk(sdk)?;
-        Self::cancel_activity(&mut owned, operation);
+        if let Some(cycle) = owned.state.cycles.get_mut(&operation) {
+            work.effect()?;
+            cycle.active = false;
+        }
         Ok(())
     }
 

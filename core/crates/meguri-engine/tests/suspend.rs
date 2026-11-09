@@ -4,6 +4,139 @@ use meguri_model::changes::OpSource;
 use meguri_storage::ReadRows;
 use std::time::Duration;
 
+// J2.1.1/S1/S4: the category, rather than a job-name convention, joins both
+// early drains. The participant stands at Runtime suspend/connection release.
+#[test]
+fn required_sdk_completion_early_drain_precedes_runtime_and_host_teardown() {
+    use meguri_engine::{EngineError, Ports, SuspendParticipant};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    };
+    struct Participant(Arc<AtomicBool>);
+    impl SuspendParticipant for Participant {
+        fn name(&self) -> &str {
+            "required completion resources"
+        }
+        fn flush(&self) -> Result<(), EngineError> {
+            Ok(())
+        }
+        fn suspend(&self) -> Result<(), EngineError> {
+            assert!(self.0.load(Ordering::SeqCst), "Runtime retired before required result");
+            Ok(())
+        }
+        fn release_connections_until(&self, _: Duration) -> Result<(), EngineError> {
+            assert!(
+                self.0.load(Ordering::SeqCst),
+                "connections released before required result"
+            );
+            Ok(())
+        }
+    }
+    for close in [false, true] {
+        let completed = Arc::new(AtomicBool::new(false));
+        let h = common::Harness::open_with(Ports::new().suspend_participant(Arc::new(Participant(completed.clone()))));
+        let (entered, reached) = mpsc::channel();
+        let (release, resume) = mpsc::channel();
+        let actual = completed.clone();
+        let job =
+            h.engine
+                .jobs()
+                .start_required_completion("unrelated diagnostic name", h.engine.generation(), move |job| {
+                    assert!(job.slot().is_none());
+                    entered.send(()).unwrap();
+                    resume.recv_timeout(Duration::from_secs(10)).unwrap();
+                    assert!(job.cancel.is_cancelled());
+                    actual.store(true, Ordering::SeqCst);
+                    Ok(())
+                });
+        reached.recv_timeout(Duration::from_secs(5)).unwrap();
+        std::thread::scope(|scope| {
+            let teardown = scope.spawn(|| {
+                if close {
+                    h.engine.close_with_host_cleanup(|_| {
+                        assert!(
+                            completed.load(Ordering::SeqCst),
+                            "Host cleanup preceded required result"
+                        );
+                        Ok(())
+                    })
+                } else {
+                    h.engine.suspend(Duration::from_secs(5)).map(|_| ())
+                }
+            });
+            let deadline = meguri_engine::monotonic::now() + Duration::from_secs(5);
+            while !job.cancel.is_cancelled() && meguri_engine::monotonic::now() < deadline {
+                std::thread::yield_now();
+            }
+            release.send(()).unwrap();
+            assert!(job.cancel.is_cancelled());
+            teardown.join().unwrap().unwrap();
+        });
+        assert!(completed.load(Ordering::SeqCst));
+        assert!(h.engine.jobs().running().is_empty());
+        h.engine.close().unwrap();
+    }
+}
+
+#[test]
+fn required_sdk_completion_early_drain_deadline_keeps_resources_for_retry() {
+    use meguri_engine::{EngineError, Ports, SuspendParticipant};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    };
+    struct Participant(Arc<AtomicBool>);
+    impl SuspendParticipant for Participant {
+        fn name(&self) -> &str {
+            "required completion deadline"
+        }
+        fn flush(&self) -> Result<(), EngineError> {
+            Ok(())
+        }
+        fn suspend(&self) -> Result<(), EngineError> {
+            self.0.store(true, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+    for close in [false, true] {
+        let retired = Arc::new(AtomicBool::new(false));
+        let cleaned = AtomicBool::new(false);
+        let h = common::Harness::open_with(Ports::new().suspend_participant(Arc::new(Participant(retired.clone()))));
+        let (entered, reached) = mpsc::channel();
+        let (release, resume) = mpsc::channel();
+        let job = h
+            .engine
+            .jobs()
+            .start_required_completion("required held result", h.engine.generation(), move |_| {
+                entered.send(()).unwrap();
+                resume.recv_timeout(Duration::from_secs(10)).unwrap();
+                Ok(())
+            });
+        reached.recv_timeout(Duration::from_secs(5)).unwrap();
+        let failed = if close {
+            // Exercise S4's unchanged five-second Host cleanup budget.
+            h.engine.close_with_host_cleanup(|_| {
+                cleaned.store(true, Ordering::SeqCst);
+                Ok(())
+            })
+        } else {
+            h.engine.suspend(Duration::from_millis(100)).map(|_| ())
+        };
+        let retired_before_release = retired.load(Ordering::SeqCst);
+        let retained = h.engine.jobs().running().iter().any(|running| running.id == job.id);
+        release.send(()).unwrap();
+        assert_eq!(failed, Err(EngineError::SuspendDeadline { phase: "jobs".into() }));
+        assert!(!retired_before_release && !cleaned.load(Ordering::SeqCst));
+        assert!(retained);
+        assert!(h.collection.is_current());
+        h.engine.close().unwrap();
+        assert!(retired.load(Ordering::SeqCst));
+    }
+}
+
 #[test]
 fn suspend_closes_connections_and_resume_keeps_undo() {
     let h = common::Harness::open();

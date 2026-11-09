@@ -24,6 +24,13 @@ pub struct RunningJob {
     pub name: String,
     pub cancel: Arc<CancelToken>,
     pub continued_processing: bool,
+    completion: CompletionMode,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CompletionMode {
+    Ordinary,
+    Required,
 }
 
 /// The registry. Clones share it.
@@ -92,6 +99,28 @@ impl JobRegistry {
         slot: Option<SlotGuard>,
         work: impl FnOnce(&JobContext) -> Result<(), EngineError> + Send + 'static,
     ) -> JobHandle {
+        self.start_selected(name, generation, slot, CompletionMode::Ordinary, work)
+    }
+
+    /// Original-SDK Ended accounting on the existing pool. Accepted work runs
+    /// despite cancellation; paused admission still drops its body. No slot.
+    pub fn start_required_completion(
+        &self,
+        name: &str,
+        generation: Generation,
+        work: impl FnOnce(&JobContext) -> Result<(), EngineError> + Send + 'static,
+    ) -> JobHandle {
+        self.start_selected(name, generation, None, CompletionMode::Required, work)
+    }
+
+    fn start_selected(
+        &self,
+        name: &str,
+        generation: Generation,
+        slot: Option<SlotGuard>,
+        completion: CompletionMode,
+        work: impl FnOnce(&JobContext) -> Result<(), EngineError> + Send + 'static,
+    ) -> JobHandle {
         let id = JobId(self.inner.next_id.fetch_add(1, Ordering::SeqCst));
         let cancel = CancelToken::new();
         let progress = ProgressSink::new();
@@ -118,6 +147,7 @@ impl JobRegistry {
                 name: name.to_owned(),
                 cancel: Arc::clone(&cancel),
                 continued_processing: false,
+                completion,
             },
         );
         drop(state);
@@ -129,7 +159,7 @@ impl JobRegistry {
         };
         let registry = self.clone();
         self.inner.pool.run(move || {
-            let outcome = if context.cancel.is_cancelled() {
+            let outcome = if completion == CompletionMode::Ordinary && context.cancel.is_cancelled() {
                 drop(work);
                 JobOutcome::Cancelled
             } else {
@@ -174,21 +204,23 @@ impl JobRegistry {
 
     pub(crate) fn wait_connection_replies_until(&self, deadline: std::time::Duration) -> Result<(), EngineError> {
         self.wait_until(deadline, |job| {
-            matches!(
-                job.name.as_str(),
-                "CloudConnection.next_publication_work" | "CloudConnection.adoption_result"
-            )
+            job.completion == CompletionMode::Required
+                || matches!(
+                    job.name.as_str(),
+                    "CloudConnection.next_publication_work" | "CloudConnection.adoption_result"
+                )
         })
     }
 
-    /// Only these existing workers can retain adoption/reply resources that
+    /// Required SDK completions and adoption/reply workers retain resources
     /// Host cleanup is about to release. Other jobs may need participant flush.
     pub(crate) fn wait_host_recovery_until(&self, deadline: std::time::Duration) -> Result<(), EngineError> {
         self.wait_until(deadline, |job| {
-            matches!(
-                job.name.as_str(),
-                "CloudConnection.next_publication_work" | "CloudConnection.adoption_result" | "iCloud adoption"
-            )
+            job.completion == CompletionMode::Required
+                || matches!(
+                    job.name.as_str(),
+                    "CloudConnection.next_publication_work" | "CloudConnection.adoption_result" | "iCloud adoption"
+                )
         })
     }
 

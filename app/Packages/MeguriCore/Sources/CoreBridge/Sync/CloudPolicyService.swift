@@ -70,6 +70,7 @@ public actor CoreCloudPolicyService {
         onJobQueued: @Sendable () -> Void = {},
         track: @escaping @Sendable (MeguriCoreBindings.JobHandle) throws -> CoreJob = { try Jobs.track($0) },
         retainResourceResultOnTrackingFailure: Bool = false,
+        requiredCompletion: Bool = false,
         _ start: @escaping @Sendable () throws -> CloudPolicyJobValue<Value>
     ) async throws -> Value {
         await order.acquire(queued: onJobQueued)
@@ -79,28 +80,44 @@ public actor CoreCloudPolicyService {
             await beforeJobStart(startName)
             try await CoreEventStream.shared.start()
             let started = try await Self.call(startName, start)
-            let job: CoreJob
-            do {
-                job = try await Jobs.trackDraining(started.handle, setup: track)
-            } catch {
-                guard retainResourceResultOnTrackingFailure else { throw error }
-                let setupError = error
-                // Keep the actual resource result after drain.
+            let outcome: JobOutcome
+            var trackingError: BridgeError?
+            if requiredCompletion {
+                switch await Jobs.trackRetainingDrain(started.handle, setup: track) {
+                case .tracked(let job): outcome = await job.outcome()
+                case .drained(let error, let terminal):
+                    trackingError = error
+                    outcome = terminal
+                }
+            } else {
+                let job: CoreJob
                 do {
-                    if let value = try await Self.call(resultName, started.read) {
-                        await Self.order.release()
-                        return value
+                    job = try await Jobs.trackDraining(started.handle, setup: track)
+                } catch {
+                    guard retainResourceResultOnTrackingFailure else { throw error }
+                    let setupError = error
+                    // Ordinary resource cells may contain a queued-cancel
+                    // placeholder. Keep their existing setup-error precedence.
+                    do {
+                        if let value = try await Self.call(resultName, started.read) {
+                            await Self.order.release()
+                            return value
+                        }
+                    } catch BridgeError.cancelled {
+                        throw setupError
                     }
-                } catch BridgeError.cancelled {
                     throw setupError
                 }
-                throw setupError
+                outcome = await job.outcome()
             }
-            let outcome = await job.outcome()
             // Inspect the exact FFI error before lossy JobFinished conversion.
             // Result reads never consult the current collection owner.
             let value = try await Self.call(resultName, started.read)
             if let value { await Self.order.release(); return value }
+            if let trackingError {
+                if case .failed(let error) = outcome { throw error }
+                throw trackingError
+            }
             switch outcome {
             case .cancelled: throw BridgeError.cancelled
             case .failed(let error): throw error

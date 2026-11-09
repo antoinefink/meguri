@@ -30,7 +30,360 @@ private func policyJobActions(_ value: MeguriCoreBindings.CloudPolicyOutput) thr
     return commands.map { String(describing: $0.action) }
 }
 
+private func requiredCompletionExecution(_ fixture: CloudKitBridgeFixture) async throws -> (CoreCloudPolicyService, CoreCloudPolicyExecution) {
+    let (policy, _) = try await nativePolicy(fixture)
+    guard case .commands(let commands) = try await policy.input(.syncNowRequested(.command)) else {
+        throw BridgeError.internal("Expected exchange commands")
+    }
+    let command = try #require(commands.first { if case .runExchange = $0.action { true } else { false } })
+    return (policy, try #require(try await policy.prepareExecution(command)))
+}
+
+private func drainPolicyPoolHolders(_ jobs: [CoreJob]) async {
+    for job in jobs { try? await job.cancel() }
+    for job in jobs { _ = await job.outcome() }
+}
+
+#if DEBUG
+private enum PolicySuspendProofError: Error { case deadline }
+
 extension EventTests {
+    @Test(.timeLimit(.minutes(1)))
+    func policyRequiredCompletionActiveSendFreezesBeforeCoreSuspend() async throws {
+        try await withNativePolicyFixture { fixture in
+            let (policy, executor) = try await nativePolicy(fixture)
+            try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: executor)
+            guard case .commands(let commands) = try await policy.input(.flushTimerFired) else {
+                throw BridgeError.internal("Expected send commands")
+            }
+            let send = try #require(commands.first { if case .requestSend(let zones) = $0.action { zones == [.collection] } else { false } })
+            let engine = try await fixture.engine()
+            let originalGuard = try await fixture.core.currentGuard()
+            let held = CloudCallbackGate()
+            await engine.pauseAfterBatch(held)
+            let finalized = Mutex(false)
+            let freezeReturned = Mutex(false)
+            let pauseStarted = Mutex(false)
+            await fixture.adapter.setSendCallObserver { sdk, _, finished in
+                #expect(sdk == engine.instanceID)
+                if finished { finalized.withLock { $0 = true } }
+            }
+            let results = AsyncStream<CloudPolicyNativeResult>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let freezing = Mutex<Task<Void, any Error>?>(nil)
+            let completed = CloudPolicyReadinessDecision()
+            let limit = ContinuousClock.now + .seconds(10)
+            let watchdog = Task {
+                do { try await Task.sleep(for: .seconds(10)) } catch { return }
+                if completed.expire() {
+                    await held.abort(PolicySuspendProofError.deadline)
+                    results.continuation.finish()
+                    freezing.withLock { $0 }?.cancel()
+                }
+            }
+            do {
+                try await withCloudTask(gates: [held], operation: {
+                    defer { results.continuation.finish() }
+                    results.continuation.yield(await executor.execute(send))
+                }, whileRunning: {
+                    try await held.waitForArrival()
+                    try #require(try await policy.status().state == .syncingCollection)
+                    let calls = engine.acceptedNetworkCalls.value
+                    let freeze = Task {
+                        try await fixture.adapter.freezeForSuspend()
+                        freezeReturned.withLock { $0 = true }
+                        // finishSend follows the awaited required report.
+                        try #require(finalized.withLock { $0 })
+                        var returned = results.stream.makeAsyncIterator()
+                        let result = try #require(await returned.next())
+                        try #require(result.error == nil && !result.deferred)
+                        let actions = try result.outputs.flatMap { output -> [CoreBridge.CloudPolicyCommand] in
+                            guard case .commands(let values) = output else { throw BridgeError.internal("Expected send outputs") }
+                            return values
+                        }
+                        let states = actions.compactMap { command -> CoreBridge.CloudPolicyStatus? in
+                            if case .statusChanged(let status) = command.action { status } else { nil }
+                        }
+                        let started = try #require(states.firstIndex { $0.state == .syncingCollection })
+                        let ended = try #require(states.indices.first { $0 > started && states[$0].state != .syncingCollection })
+                        #expect(states[ended].error == nil)
+                        try #require(try await policy.status().state != .syncingCollection)
+                        try await fixture.core.validateSDK(engine.instanceID)
+                        #expect(try await fixture.core.currentGuard() == originalGuard)
+                        #expect(await fixture.adapter.retainedInstanceIDs() == [engine.instanceID])
+                        #expect(!(await engine.recordedTrace()).contains(.released))
+                        pauseStarted.withLock { $0 = true }
+                        try #require(try await fixture.collection.suspend(timeoutMilliseconds: 1_500) == .suspended)
+                    }
+                    freezing.withLock { $0 = freeze }
+                    do {
+                        // Observe freeze's actual admission barrier without
+                        // starting another SDK operation.
+                        while await fixture.adapter.resumeDeliveries() {
+                            guard ContinuousClock.now < limit else { throw PolicySuspendProofError.deadline }
+                            try Task.checkCancellation()
+                            await Task.yield()
+                        }
+                        try #require(!freezeReturned.withLock { $0 })
+                        try #require(!pauseStarted.withLock { $0 })
+                        try #require(!finalized.withLock { $0 })
+                        try await fixture.core.validateSDK(engine.instanceID)
+                        #expect(try await fixture.core.currentGuard() == originalGuard)
+                        #expect(await fixture.adapter.retainedInstanceIDs() == [engine.instanceID])
+                        let trace = await engine.recordedTrace()
+                        #expect(trace.contains { if case .handed = $0 { true } else { false } })
+                        #expect(!trace.contains { if case .sendReturned = $0 { true } else { false } })
+                        #expect(!trace.contains(.released))
+                        await held.open()
+                        try await freeze.value
+                        #expect(engine.acceptedNetworkCalls.value == calls)
+                    } catch {
+                        await held.abort(error)
+                        freeze.cancel()
+                        _ = try? await freeze.value
+                        throw error
+                    }
+                })
+                try #require(completed.observeReady())
+            } catch {
+                await held.abort(error)
+                results.continuation.finish()
+                freezing.withLock { $0 }?.cancel()
+                watchdog.cancel()
+                await watchdog.value
+                throw error
+            }
+            watchdog.cancel()
+            await watchdog.value
+            #expect(freezeReturned.withLock { $0 } && pauseStarted.withLock { $0 })
+            _ = try await fixture.collection.resume()
+        }
+    }
+}
+#endif
+
+extension EventTests {
+    @Test(arguments: [false, true])
+    func policyRequiredCompletionListenerFailureRetainsErrorBeforeEndedOutputsAfterClose(reopen: Bool) async throws {
+        try await withNativePolicyFixture { fixture in
+            let (policy, execution) = try await requiredCompletionExecution(fixture)
+            _ = try await execution.reportInvocation(zones: [.root, .collection], kind: .fetch)
+            let raw = execution.raw
+            try await CoreEventStream.shared.start()
+            let started = try await MaintenanceLane.shared.call(.cloudPolicyExecutionStartReportCompletion) {
+                try raw.startReportCompletion(facts: .init(zones: [.root, .collection], kind: .fetch,
+                    started: false, failed: true, code: 4, retryAfterMs: 4_321, saved: 17, appCancelled: false))
+            }
+            for await event in CoreEventStream.shared.events {
+                if case .jobFinished(let id, _) = event.kind, id.rawValue == started.handle.id { break }
+            }
+            let actual = try #require(try await MaintenanceLane.shared.call(.cloudPolicyOutputResult) { try started.result.result() })
+            let expected = try policyJobActions(actual)
+            guard case .commands(let commands) = actual else { throw BridgeError.internal("Expected Ended outputs") }
+            // EngineError must be projected before Ended. Match its complete
+            // numeric facts and both zones, rather than just an output count.
+            for zone in [MeguriCoreBindings.CloudPolicyZone.root, .collection] {
+                #expect(commands.contains { command in
+                    if case .statusChanged(let status) = command.action {
+                        status.error?.code == 4 && status.error?.retryAfterMs == 4_321 &&
+                            status.error?.operation.zone == zone && status.error?.operation.kind == .fetch
+                    } else { false }
+                })
+            }
+            _ = try await policy.status()
+            try await fixture.adapter.stop()
+            try await fixture.collection.close()
+            if reopen {
+                let location = CollectionLocation(collectionDirectory: fixture.directory.appending(path: "collection"),
+                    backupsDirectory: fixture.directory.appending(path: "backups"),
+                    appGroupSnapshot: fixture.directory.appending(path: "widget.snapshot"))
+                try await fixture.collection.open(location, randomSeed: 115)
+            }
+            let attempted = Mutex<UInt64?>(nil)
+            let retained: MeguriCoreBindings.CloudPolicyOutput = try await CoreCloudPolicyService.runOrdered(
+                .cloudPolicyExecutionStartReportCompletion, result: .cloudPolicyOutputResult,
+                track: { handle in
+                    attempted.withLock { $0 = handle.id }
+                    throw BridgeError.invalidArgument("Ended listener setup")
+                }, requiredCompletion: true
+            ) { CloudPolicyJobValue(handle: started.handle, read: { try started.result.result() }) }
+            let recovered = try policyJobActions(retained)
+            #expect(attempted.withLock { $0 } == started.handle.id)
+            #expect(try await CoreBridge.CancelToken(raw: started.handle.cancel).isCancelled())
+            #expect(!expected.isEmpty && recovered == expected)
+            // No owner validation or new projection may replace the old cell.
+            let reread = try #require(try await MaintenanceLane.shared.call(.cloudPolicyOutputResult) { try started.result.result() })
+            #expect(try policyJobActions(reread) == expected)
+            if reopen { try await fixture.collection.close() }
+        }
+    }
+
+    @Test func policyRequiredCompletionReportKeepsSDKErrorAndAppCancellationFacts() async throws {
+        try await withNativePolicyFixture { fixture in
+            let (policy, execution) = try await requiredCompletionExecution(fixture)
+            _ = try await execution.report(zones: [.collection], kind: .fetch, started: true)
+            _ = try await execution.report(zones: [.collection], kind: .fetch, started: false, error: CancellationError())
+            #expect(try await policy.status().error == nil, "App cancellation must not become a failing cycle")
+            _ = try await execution.report(zones: [.collection], kind: .fetch, started: true)
+            let sdkFailure = CloudKitSDKOperationFailure(underlying: NSError(domain: "synthetic-sdk", code: 4),
+                code: 4, retryAfterMilliseconds: 9_876)
+            _ = try await execution.report(zones: [.collection], kind: .fetch, started: false, error: sdkFailure, saved: 23)
+            let detail = try #require(try await policy.status().error)
+            #expect(detail.code == 4 && detail.retryAfterMilliseconds == 9_876)
+            #expect(detail.operation.zone == .collection && detail.operation.kind == .fetch)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func policyRequiredCompletionReadSeamDistinguishesTypedCancelledFromNone(empty: Bool) async throws {
+        try await withNativePolicyFixture { fixture in
+            let (policy, execution) = try await requiredCompletionExecution(fixture)
+            _ = try await execution.reportInvocation(zones: [.collection], kind: .fetch)
+            let raw = execution.raw
+            let setupError = BridgeError.invalidArgument("required result listener")
+            let attempted = Mutex<MeguriCoreBindings.JobHandle?>(nil)
+            await #expect(throws: empty ? setupError : BridgeError.cancelled) {
+                let _: MeguriCoreBindings.CloudPolicyOutput = try await CoreCloudPolicyService.runOrdered(
+                    .cloudPolicyExecutionStartReportCompletion, result: .cloudPolicyOutputResult,
+                    track: { handle in
+                        attempted.withLock { $0 = handle }
+                        throw setupError
+                    }, requiredCompletion: true
+                ) {
+                    let job = try raw.startReportCompletion(facts: .init(zones: [.collection], kind: .fetch,
+                        started: false, failed: false, code: nil, retryAfterMs: nil, saved: 0, appCancelled: false))
+                    return CloudPolicyJobValue(handle: job.handle, read: {
+                        // Exercise Swift's read-error/None precedence seam on
+                        // a real required job; Rust owns the actual cell and
+                        // panic/no-body witnesses in its parallel suite.
+                        guard try job.result.result() != nil else {
+                            throw BridgeError.internal("Required job did not store its return")
+                        }
+                        if empty { return nil }
+                        try testReturnError(error: .Cancelled)
+                        throw BridgeError.internal("testReturnError did not throw")
+                    })
+                }
+            }
+            let handle = try #require(attempted.withLock { $0 })
+            #expect(try await CoreBridge.CancelToken(raw: handle.cancel).isCancelled())
+            _ = try await policy.status() // Both throwing paths release ordering.
+        }
+    }
+
+    @Test func policyRequiredCompletionEmptyCellKeepsTerminalFailureAheadOfSetup() async throws {
+        try await withCloudConnection { _ in
+            try await CoreEventStream.shared.start()
+            // Existing Core-job seam supplies the same Failed/Internal
+            // terminal used for a panic, with no invented Host or capability.
+            let handle = try await MaintenanceLane.shared.call("test.startJob") {
+                try testStartJob(durationMs: 0, reportsPerSecond: 1, failWith: .Internal(message: "required body failed"))
+            }
+            for await event in CoreEventStream.shared.events {
+                if case .jobFinished(let id, _) = event.kind, id.rawValue == handle.id { break }
+            }
+            await #expect(throws: BridgeError.internal("required body failed")) {
+                let _: Bool = try await CoreCloudPolicyService.runOrdered(
+                    .cloudPolicyExecutionStartReportCompletion, result: .cloudPolicyOutputResult,
+                    track: { _ in throw BridgeError.invalidArgument("no-body listener") }, requiredCompletion: true
+                ) { CloudPolicyJobValue(handle: handle, read: { nil }) }
+            }
+            #expect(try await CoreBridge.CancelToken(raw: handle.cancel).isCancelled())
+            _ = try await CoreCloudPolicyService(try await rawJobPolicy()).status()
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func policyRequiredCompletionKeepsOrderUntilAcceptedJobDrains(listenerFailure: Bool) async throws {
+        try await withNativePolicyFixture { fixture in
+            let (_, execution) = try await requiredCompletionExecution(fixture)
+            _ = try await execution.reportInvocation(zones: [.collection], kind: .fetch)
+            let raw = execution.raw
+            let rawPolicy = try await rawJobPolicy()
+            var holders: [CoreJob] = []
+            do {
+                for _ in 0..<4 {
+                    let job = try await Jobs.start("test.startJob") { try testStartJob(durationMs: 60_000, reportsPerSecond: 100, failWith: nil) }
+                    holders.append(job)
+                    var progress = job.progress.makeAsyncIterator()
+                    try #require(await progress.next() != nil, "positive entry into each existing pool worker")
+                }
+            } catch {
+                await drainPolicyPoolHolders(holders)
+                throw error
+            }
+            let accepted = AsyncStream<Void>.makeStream()
+            let queued = AsyncStream<Void>.makeStream()
+            let handle = Mutex<MeguriCoreBindings.JobHandle?>(nil)
+            let read = Mutex(false)
+            let returned = Mutex(false)
+            let completed = Task {
+                defer { returned.withLock { $0 = true }; accepted.continuation.finish() }
+                return try await CoreCloudPolicyService.runOrdered(
+                    .cloudPolicyExecutionStartReportCompletion, result: .cloudPolicyOutputResult,
+                    track: { admitted in
+                        handle.withLock { $0 = admitted }
+                        accepted.continuation.yield(())
+                        if listenerFailure { throw BridgeError.invalidArgument("queued Ended listener") }
+                        return try Jobs.track(admitted)
+                    }, requiredCompletion: true
+                ) {
+                    let job = try raw.startReportCompletion(facts: .init(zones: [.collection], kind: .fetch,
+                        started: false, failed: false, code: nil, retryAfterMs: nil, saved: 0, appCancelled: false))
+                    return CloudPolicyJobValue(handle: job.handle, read: {
+                        read.withLock { $0 = true }
+                        return try job.result.result()
+                    })
+                }
+            }
+            var following: Task<CoreBridge.CloudPolicyStatus, any Error>?
+            do {
+                var arrivals = accepted.stream.makeAsyncIterator()
+                try #require(await arrivals.next() != nil)
+                let successor = CoreCloudPolicyService(rawPolicy, onJobQueued: { queued.continuation.yield(()) })
+                let next = Task {
+                    defer { queued.continuation.finish() }
+                    return try await successor.status()
+                }
+                following = next
+                var waiting = queued.stream.makeAsyncIterator()
+                try #require(await waiting.next() != nil, "following facade bypassed required completion drain")
+                completed.cancel(); next.cancel()
+                #expect(!read.withLock { $0 } && !returned.withLock { $0 })
+                await drainPolicyPoolHolders(holders)
+                let output = try await completed.value
+                _ = try await next.value
+                let admitted = try #require(handle.withLock { $0 })
+                #expect(try await CoreBridge.CancelToken(raw: admitted.cancel).isCancelled() == listenerFailure)
+                #expect(read.withLock { $0 } && returned.withLock { $0 })
+                #expect(!(try policyJobActions(output)).isEmpty)
+                // A third acquisition detects an unreleased final permit.
+                _ = try await successor.status()
+            } catch {
+                await drainPolicyPoolHolders(holders)
+                _ = try? await completed.value
+                _ = try? await following?.value
+                throw error
+            }
+        }
+    }
+
+    @Test func policyOrdinaryResourceCancelledPlaceholderStillKeepsSetupError() async throws {
+        try await withCloudConnection { fixture in
+            let raw = try await rawJobPolicy()
+            try #require(try await fixture.collection.suspend(timeoutMilliseconds: 1_500) == .suspended)
+            let setupError = BridgeError.invalidArgument("ordinary resource listener")
+            await #expect(throws: setupError) {
+                let _: MeguriCoreBindings.CloudPolicyStatus = try await CoreCloudPolicyService.runOrdered(
+                    .cloudPolicyStartStatus, result: .cloudPolicyStatusResult,
+                    track: { _ in throw setupError }, retainResourceResultOnTrackingFailure: true
+                ) {
+                    let job = try raw.startStatus()
+                    return CloudPolicyJobValue(handle: job.handle, read: { try job.result.result() })
+                }
+            }
+        }
+    }
+
     @Test(arguments: [false, true])
     func policyAssetReadPassListenerFailureRetainsOriginalWorkAuthorityAfterClose(reopen: Bool) async throws {
         try await withNativePolicyFixture { fixture in

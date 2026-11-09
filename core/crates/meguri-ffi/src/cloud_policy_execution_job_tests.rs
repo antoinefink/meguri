@@ -1,4 +1,6 @@
 //! J2.1.1: retained native admission on the original registered pool.
+#[path = "cloud_policy_completion_job_tests.rs"]
+mod completion_jobs;
 use super::super::policy::policy_job_tests::{finished, hold_pool};
 use super::*;
 use meguri_engine::{JobKind, JobOutcome};
