@@ -19,3 +19,5 @@
 
 - Stage fetched envelopes in one parent spool per callback and each asset in its own file. Keep command files until its final reply even if work pauses, is suspended or loses its SDK. Resume with the original command and paths. Only normal child intake creates durable inbox files.
 - Hydrate callback sources inside its failure boundary, before core intake. Source errors must complete the original exchange as failed; an early return can leave it active after the parent has released it.
+
+- For production adoption, set the fixture Service page_size to at most 32, matching native fetch resultsLimit. The generic Service default is 200; do not relax core validation or slice a delivered page.

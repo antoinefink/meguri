@@ -341,6 +341,7 @@ pub(crate) enum Input {
     LatchRelease(IncomingStage),
     ContinueWork,
     Payloads,
+    CheckObservation,
     Entity(String),
     AllEntities,
     Poll(String),
@@ -681,6 +682,9 @@ pub struct ChildDriver {
     asset_commands: BTreeMap<Vec<u8>, Vec<u8>>,
 }
 impl ChildDriver {
+    pub(crate) fn check_observation(&mut self) -> Result<super::checks::Observation> {
+        self.call(Input::CheckObservation)
+    }
     pub fn fault_next_fetched_envelope_for_testing(&mut self, fault: FetchedEnvelopeFault) {
         self.fetched_envelope_fault = Some(fault);
         self.fetched_envelope_fault_observation = None;
@@ -2492,6 +2496,7 @@ impl Device {
                 })
             }
             Input::Payloads => value(self.payloads()?),
+            Input::CheckObservation => value(super::checks::observe_host(&self.host)?),
             Input::Entity(n) => value(self.runtime()?.entity_facts(&n)?.ok_or_else(failure)?),
             Input::AllEntities => value(self.all_facts()?),
             Input::Poll(i) => {

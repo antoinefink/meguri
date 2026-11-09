@@ -22,6 +22,7 @@ pub use service::{Service, record_non_asset_bytes};
 pub use types::*;
 
 pub mod adapter;
+pub mod checks;
 pub mod child_driver;
 pub mod coordinator;
 pub mod devices;
