@@ -74,7 +74,13 @@ struct CoreCloudPolicyExecution: Sendable {
     func continueMediaAfterSend(_ error: any Error) async throws -> Bool {
         let raw = self.raw
         let code = (error as? CloudKitSDKOperationFailure)?.code
-        return try await CoreCloudPolicyService.call(.cloudPolicyExecutionContinueMediaAfterSend) { try raw.continueMediaAfterSend(code: code) }
+        return try await CoreCloudPolicyService.runOrdered(
+            .cloudPolicyExecutionStartContinueMediaAfterSend, result: .cloudPolicyMediaContinuationResult,
+            retainResourceResultOnTrackingFailure: true
+        ) { [raw] in
+            let started = try raw.startContinueMediaAfterSend(code: code)
+            return CloudPolicyJobValue(handle: started.handle, read: { try started.result.result() })
+        }
     }
     func beginMedia() async throws -> Bool {
         let raw = self.raw
@@ -98,11 +104,24 @@ struct CoreCloudPolicyExecution: Sendable {
     }
     func validateControl() async throws {
         let raw = self.raw
-        try await CoreCloudPolicyService.call(.cloudPolicyExecutionValidateControl) { try raw.validateControl() }
+        let _: Bool = try await CoreCloudPolicyService.runOrdered(
+            .cloudPolicyExecutionStartValidateControl, result: .cloudPolicyControlResult,
+            retainResourceResultOnTrackingFailure: true
+        ) { [raw] in
+            let started = try raw.startValidateControl()
+            return CloudPolicyJobValue(handle: started.handle, read: { try started.result.result() })
+        }
     }
     func prepareFlush() async throws -> CloudPolicyOutput {
         let raw = self.raw
-        return try await CoreCloudPolicyService.call(.cloudPolicyExecutionPrepareFlush) { CloudPolicyOutput(try raw.prepareFlush()) }
+        let value: MeguriCoreBindings.CloudPolicyOutput = try await CoreCloudPolicyService.runOrdered(
+            .cloudPolicyExecutionStartPrepareFlush, result: .cloudPolicyOutputResult,
+            retainResourceResultOnTrackingFailure: true
+        ) { [raw] in
+            let started = try raw.startPrepareFlush()
+            return CloudPolicyJobValue(handle: started.handle, read: { try started.result.result() })
+        }
+        return CloudPolicyOutput(value)
     }
     func beginSend() async throws -> UInt64? {
         let raw = self.raw

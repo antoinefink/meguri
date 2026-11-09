@@ -561,10 +561,11 @@ impl Runtime {
 }
 
 impl Runtime {
-    pub(crate) fn policy_media_quota(
+    pub(crate) fn policy_media_quota_with_work(
         &self,
         guard: &crate::cloud::adapter::Guard,
         sdk: &str,
+        work: &mut PolicyWork,
     ) -> Result<(), RuntimeError> {
         let _ = self.adapter_now();
         let mut s = self.state();
@@ -572,6 +573,7 @@ impl Runtime {
             return Err(RuntimeError::StaleIncarnation);
         }
         Self::sdk_locked(&s, sdk)?;
+        work.effect()?;
         s.media.suppress_uploads = true;
         if let Some((_, work)) = &s.actions.media_upload
             && let Request::Upload { name, .. } = &work.request
@@ -580,6 +582,10 @@ impl Runtime {
             s.policy.parked.insert(name);
         }
         self.emit_pending_locked(&mut s, workflow::UpdateKind::Changes, BTreeSet::new())?;
+        drop(s);
+        #[cfg(feature = "test-hooks")]
+        self.incoming_hooks
+            .hit(crate::cloud::testing::IncomingStage::PolicyPendingUpdated);
         Ok(())
     }
 }

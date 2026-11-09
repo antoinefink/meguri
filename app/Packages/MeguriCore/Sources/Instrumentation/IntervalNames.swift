@@ -377,6 +377,11 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let cloudPolicyFetchResult = BridgeCall("CloudPolicyFetchResult.result")
     public static let cloudPolicyExecutionStartBeginSend = BridgeCall("CloudPolicyExecution.start_begin_send")
     public static let cloudPolicySendResult = BridgeCall("CloudPolicySendResult.result")
+    public static let cloudPolicyExecutionStartValidateControl = BridgeCall("CloudPolicyExecution.start_validate_control")
+    public static let cloudPolicyControlResult = BridgeCall("CloudPolicyControlResult.result")
+    public static let cloudPolicyExecutionStartContinueMediaAfterSend = BridgeCall("CloudPolicyExecution.start_continue_media_after_send")
+    public static let cloudPolicyMediaContinuationResult = BridgeCall("CloudPolicyMediaContinuationResult.result")
+    public static let cloudPolicyExecutionStartPrepareFlush = BridgeCall("CloudPolicyExecution.start_prepare_flush")
     public static let cloudPolicyInput = BridgeCall("CloudPolicy.input")
     public static let cloudPolicyRefreshAccount = BridgeCall("CloudPolicy.refresh_account")
     public static let cloudPolicyProjectIdentityRead = BridgeCall("CloudPolicy.project_identity_read")
@@ -516,6 +521,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         cloudWorkflowMedia, cloudWorkflowSubmitMediaBatch, cloudMediaDownloadsBlocked, cloudPolicyExecutionBeginMedia, cloudPolicyExecutionContinueMediaAfterSend, cloudMediaNextWork, cloudMediaStartNextWork, cloudMediaNextWorkResult, cloudMediaSubmitRead, cloudMediaQueueUpload, cloudMediaReply,
         cloudPolicyExecutionStartRegisterSdk, cloudPolicyExecutionStartRetireOriginal, cloudPolicyRegistrationResult, cloudPolicyRetirementResult,
         cloudPolicyExecutionStartReportInvocation, cloudPolicyExecutionStartBeginMedia, cloudPolicyMediaResult, cloudPolicyExecutionStartBeginFetch, cloudPolicyFetchResult, cloudPolicyExecutionStartBeginSend, cloudPolicySendResult,
+        cloudPolicyExecutionStartValidateControl, cloudPolicyControlResult, cloudPolicyExecutionStartContinueMediaAfterSend, cloudPolicyMediaContinuationResult, cloudPolicyExecutionStartPrepareFlush,
         cloudPolicyStartInput, cloudPolicyStartRefreshAccount, cloudPolicyStartProjectIdentityRead, cloudPolicyStartStatus, cloudPolicyStartExecuteCore, cloudPolicyStartSubmitNative, cloudPolicyStartCaptureExchange, cloudPolicyStartCompleteExchange, cloudPolicyStartEndBeforeCapture, cloudPolicyStartExchangeReadiness, cloudPolicyStartPrepareExecution, cloudPolicyOutputResult, cloudPolicyStatusResult, cloudPolicyAdmissionResult, cloudPolicyCaptureResult, cloudPolicyReadinessResult, cloudPolicyExecutionResult,
         cloudWorkflowPolicy, cloudPolicyValidateOriginalOwner, cloudPolicyInput, cloudPolicyRefreshAccount, cloudPolicyProjectIdentityRead, cloudPolicyStatus, cloudPolicyExecuteCore, cloudPolicySubmitNative, cloudPolicyCaptureExchange, cloudPolicyCompleteExchange, cloudPolicyEndBeforeCapture,
         cloudPolicyExecutionValidateControl, cloudPolicyExecutionPrepareFlush, cloudPolicyExchangeReadiness, cloudPolicyPrepareExecution, cloudPolicyExecutionOriginalSdk, cloudPolicyExecutionValidateExecution, cloudPolicyExecutionRegisterSdk, cloudPolicyExecutionRetireOriginal, cloudPolicyExecutionBeginFetch, cloudPolicyExecutionBeginSend, cloudPolicyExecutionOperationActivity,

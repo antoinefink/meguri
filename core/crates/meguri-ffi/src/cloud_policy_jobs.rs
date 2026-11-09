@@ -82,6 +82,12 @@ typed_result!(
 );
 typed_result!(CloudPolicyRetirementResult, CloudPolicyRetirementJob, bool);
 typed_result!(CloudPolicyMediaResult, CloudPolicyMediaJob, bool);
+typed_result!(CloudPolicyControlResult, CloudPolicyControlJob, bool);
+typed_result!(
+    CloudPolicyMediaContinuationResult,
+    CloudPolicyMediaContinuationJob,
+    bool
+);
 typed_result!(CloudPolicyFetchResult, CloudPolicyFetchJob, u64);
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct CloudPolicySendCall {
@@ -142,6 +148,52 @@ impl CloudPolicy {
 
 #[uniffi::export]
 impl CloudPolicyExecution {
+    pub fn start_validate_control(self: Arc<Self>) -> Result<CloudPolicyControlJob, CoreError> {
+        callback::enter("CloudPolicyExecution.start_validate_control");
+        self.policy().owns(&self.command)?;
+        let (handle, cell) =
+            self.policy()
+                .clone()
+                .start_policy("CloudPolicyExecution.validate_control", move |_, work| {
+                    self.validate_control_with_work(work)?;
+                    Ok(true)
+                })?;
+        Ok(CloudPolicyControlJob {
+            handle,
+            result: Arc::new(CloudPolicyControlResult { cell }),
+        })
+    }
+    pub fn start_continue_media_after_send(
+        self: Arc<Self>,
+        code: Option<i64>,
+    ) -> Result<CloudPolicyMediaContinuationJob, CoreError> {
+        callback::enter("CloudPolicyExecution.start_continue_media_after_send");
+        self.policy().owns(&self.command)?;
+        let (handle, cell) = self
+            .policy()
+            .clone()
+            .start_policy("CloudPolicyExecution.continue_media_after_send", move |_, work| {
+                self.continue_media_after_send_with_work(code, work)
+            })?;
+        Ok(CloudPolicyMediaContinuationJob {
+            handle,
+            result: Arc::new(CloudPolicyMediaContinuationResult { cell }),
+        })
+    }
+    pub fn start_prepare_flush(self: Arc<Self>) -> Result<CloudPolicyOutputJob, CoreError> {
+        callback::enter("CloudPolicyExecution.start_prepare_flush");
+        self.policy().owns(&self.command)?;
+        let (handle, cell) = self
+            .policy()
+            .clone()
+            .start_policy("CloudPolicyExecution.prepare_flush", move |_, work| {
+                self.prepare_flush_with_work(work)
+            })?;
+        Ok(CloudPolicyOutputJob {
+            handle,
+            result: Arc::new(CloudPolicyOutputResult { cell }),
+        })
+    }
     /// Started facts are constructed here; terminal accounting stays synchronous.
     pub fn start_report_invocation(
         self: Arc<Self>,

@@ -25,6 +25,11 @@ private func retainCompletedPolicyResource<Value: Sendable>(
     ) { started }
 }
 
+private func policyJobActions(_ value: MeguriCoreBindings.CloudPolicyOutput) throws -> [String] {
+    guard case .commands(let commands) = value else { throw BridgeError.internal("Expected policy outputs") }
+    return commands.map { String(describing: $0.action) }
+}
+
 extension EventTests {
     @Test func policyOriginalOwnerMetadataSurvivesSuspendAndKeepsOrdinaryJobsCancelled() async throws {
         try await withCloudConnection { fixture in
@@ -287,19 +292,15 @@ extension EventTests {
             #expect(try await CoreBridge.CancelToken(raw: started.handle.cancel).isCancelled())
             // Compare full action payloads (not just command counts) from the
             // exact retained cell. No new projection is sampled as expected data.
-            func actions(_ value: MeguriCoreBindings.CloudPolicyOutput) throws -> [String] {
-                guard case .commands(let commands) = value else { throw BridgeError.internal("Expected Started outputs") }
-                return commands.map { String(describing: $0.action) }
-            }
-            let expected = try actions(actual)
-            let recovered = try actions(retained)
+            let expected = try policyJobActions(actual)
+            let recovered = try policyJobActions(retained)
             #expect(!expected.isEmpty && recovered == expected)
             _ = try await policy.status() // The listener-failure drain released ordering.
             _ = try await execution.report(zones: [.root, .collection], kind: .fetch, started: false, error: CancellationError())
             try await fixture.adapter.stop()
             try await fixture.collection.close()
             let reread = try #require(try await MaintenanceLane.shared.call(.cloudPolicyOutputResult) { try started.result.result() })
-            #expect(try actions(reread) == expected)
+            #expect(try policyJobActions(reread) == expected)
         }
     }
 
@@ -309,6 +310,147 @@ extension EventTests {
             await #expect(throws: BridgeError.cloudPolicy(.staleCommand)) {
                 _ = try await policy.projectIdentityRead(UInt64.max)
             }
+        }
+    }
+}
+
+
+extension EventTests {
+    @Test func policyControlListenerFailureRetainsValidationAndExactMediaBooleansAfterClose() async throws {
+        try await withNativePolicyFixture { fixture in
+            let (policy, _) = try await nativePolicy(fixture)
+            guard case .commands(let commands) = try await policy.input(.syncNowRequested(.command)) else {
+                throw BridgeError.internal("Expected exchange commands")
+            }
+            let command = try #require(commands.first { if case .runExchange = $0.action { true } else { false } })
+            let execution = try #require(try await policy.prepareExecution(command))
+            let raw = execution.raw
+            try await CoreEventStream.shared.start()
+            let validated = try await MaintenanceLane.shared.call(.cloudPolicyExecutionStartValidateControl) { try raw.startValidateControl() }
+            for await event in CoreEventStream.shared.events {
+                if case .jobFinished(let id, _) = event.kind, id.rawValue == validated.handle.id { break }
+            }
+            let validationAttempt = Mutex<UInt64?>(nil)
+            let validation: Bool = try await retainCompletedPolicyResource(
+                .cloudPolicyExecutionStartValidateControl, result: .cloudPolicyControlResult,
+                attempted: { id in validationAttempt.withLock { $0 = id } }, message: "control listener setup",
+                CloudPolicyJobValue(handle: validated.handle, read: { try validated.result.result() })
+            )
+            #expect(validation && validationAttempt.withLock { $0 } == validated.handle.id)
+            #expect(try await CoreBridge.CancelToken(raw: validated.handle.cancel).isCancelled())
+            _ = try await policy.status()
+            let stopped = try await MaintenanceLane.shared.call(.cloudPolicyExecutionStartContinueMediaAfterSend) { try raw.startContinueMediaAfterSend(code: 25) }
+            for await event in CoreEventStream.shared.events {
+                if case .jobFinished(let id, _) = event.kind, id.rawValue == stopped.handle.id { break }
+            }
+            let mediaAttempt = Mutex<UInt64?>(nil)
+            let continued: Bool = try await retainCompletedPolicyResource(
+                .cloudPolicyExecutionStartContinueMediaAfterSend, result: .cloudPolicyMediaContinuationResult,
+                attempted: { id in mediaAttempt.withLock { $0 = id } }, message: "media continuation listener setup",
+                CloudPolicyJobValue(handle: stopped.handle, read: { try stopped.result.result() })
+            )
+            #expect(!continued && mediaAttempt.withLock { $0 } == stopped.handle.id)
+            #expect(try await CoreBridge.CancelToken(raw: stopped.handle.cancel).isCancelled())
+            _ = try await policy.status()
+            // The same issued validation retains its precise stale error,
+            // including recovery after a listener setup failure.
+            _ = try await policy.input(.settings(.init(enabled: true, paused: true, automatic: false, media: false)))
+            let stale = try await MaintenanceLane.shared.call(.cloudPolicyExecutionStartValidateControl) { try raw.startValidateControl() }
+            for await event in CoreEventStream.shared.events {
+                if case .jobFinished(let id, _) = event.kind, id.rawValue == stale.handle.id { break }
+            }
+            let staleAttempt = Mutex<UInt64?>(nil)
+            await #expect(throws: BridgeError.cloudPolicy(.staleCommand)) {
+                let _: Bool = try await retainCompletedPolicyResource(
+                    .cloudPolicyExecutionStartValidateControl, result: .cloudPolicyControlResult,
+                    attempted: { id in staleAttempt.withLock { $0 = id } }, message: "stale control listener setup",
+                    CloudPolicyJobValue(handle: stale.handle, read: { try stale.result.result() })
+                )
+            }
+            #expect(staleAttempt.withLock { $0 } == stale.handle.id)
+            #expect(try await CoreBridge.CancelToken(raw: stale.handle.cancel).isCancelled())
+            _ = try await policy.status()
+            try await fixture.adapter.stop()
+            try await fixture.collection.close()
+            #expect(try await MaintenanceLane.shared.call(.cloudPolicyControlResult) { try validated.result.result() } == true)
+            #expect(try await MaintenanceLane.shared.call(.cloudPolicyMediaContinuationResult) { try stopped.result.result() } == false)
+            await #expect(throws: BridgeError.cloudPolicy(.staleCommand)) {
+                _ = try await CoreCloudPolicyService.call(.cloudPolicyControlResult) { try stale.result.result() }
+            }
+        }
+    }
+
+    @Test func policyMediaContinuationListenerFailureRetainsActualTrueAfterClose() async throws {
+        try await withNativePolicyFixture { fixture in
+            let (policy, _) = try await nativePolicy(fixture)
+            guard case .commands(let commands) = try await policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: true))) else {
+                throw BridgeError.internal("Expected media commands")
+            }
+            let command = try #require(commands.first { if case .resumeMedia = $0.action { true } else { false } })
+            let execution = try #require(try await policy.prepareExecution(command))
+            let sdk = try #require(try await execution.originalSDK())
+            _ = try await policy.input(.operationError(instance: sdk, operation: .init(zone: .media, kind: .send),
+                error: .quotaFull, code: 25, retryAfterMilliseconds: nil))
+            let raw = execution.raw
+            try await CoreEventStream.shared.start()
+            let started = try await MaintenanceLane.shared.call(.cloudPolicyExecutionStartContinueMediaAfterSend) { try raw.startContinueMediaAfterSend(code: 25) }
+            for await event in CoreEventStream.shared.events {
+                if case .jobFinished(let id, _) = event.kind, id.rawValue == started.handle.id { break }
+            }
+            let attempted = Mutex<UInt64?>(nil)
+            let continued: Bool = try await retainCompletedPolicyResource(
+                .cloudPolicyExecutionStartContinueMediaAfterSend, result: .cloudPolicyMediaContinuationResult,
+                attempted: { id in attempted.withLock { $0 = id } }, message: "quota continuation listener setup",
+                CloudPolicyJobValue(handle: started.handle, read: { try started.result.result() })
+            )
+            #expect(continued && attempted.withLock { $0 } == started.handle.id)
+            #expect(try await CoreBridge.CancelToken(raw: started.handle.cancel).isCancelled())
+            _ = try await policy.status()
+            try await fixture.adapter.stop()
+            try await fixture.collection.close()
+            #expect(try await MaintenanceLane.shared.call(.cloudPolicyMediaContinuationResult) { try started.result.result() } == true)
+        }
+    }
+
+    @Test func policyFlushListenerFailureRetainsActualRefreshOutputsAfterClose() async throws {
+        try await withNativePolicyFixture { fixture in
+            let (policy, _) = try await nativePolicy(fixture)
+            _ = try await policy.input(.syncNowRequested(.command))
+            guard case .commands(let commands) = try await policy.input(.background(deadlineMilliseconds: 1_900_000_000_000)) else {
+                throw BridgeError.internal("Expected flush commands")
+            }
+            let command = try #require(commands.first { if case .backgroundFlush = $0.action { true } else { false } })
+            let execution = try #require(try await policy.prepareExecution(command))
+            let pendingBefore = try await policy.status().pending
+            let added = try await CoreDeckService().addDeck(name: "Flush listener pending deck")
+            try await fixture.core.awaitTracking(generation: added.summary.generation, seq: added.summary.seq)
+            let raw = execution.raw
+            try await CoreEventStream.shared.start()
+            let started = try await MaintenanceLane.shared.call(.cloudPolicyExecutionStartPrepareFlush) { try raw.startPrepareFlush() }
+            for await event in CoreEventStream.shared.events {
+                if case .jobFinished(let id, _) = event.kind, id.rawValue == started.handle.id { break }
+            }
+            let actual = try #require(try await MaintenanceLane.shared.call(.cloudPolicyOutputResult) { try started.result.result() })
+            guard case .commands(let refreshed) = actual else { throw BridgeError.internal("Expected flush Refresh outputs") }
+            #expect(refreshed.contains { command in
+                if case .statusChanged(let status) = command.action { status.pending == pendingBefore + 1 } else { false }
+            })
+            let attempted = Mutex<UInt64?>(nil)
+            let retained: MeguriCoreBindings.CloudPolicyOutput = try await retainCompletedPolicyResource(
+                .cloudPolicyExecutionStartPrepareFlush, result: .cloudPolicyOutputResult,
+                attempted: { id in attempted.withLock { $0 = id } }, message: "flush listener setup",
+                CloudPolicyJobValue(handle: started.handle, read: { try started.result.result() })
+            )
+            #expect(attempted.withLock { $0 } == started.handle.id)
+            #expect(try await CoreBridge.CancelToken(raw: started.handle.cancel).isCancelled())
+            let expected = try policyJobActions(actual)
+            let recovered = try policyJobActions(retained)
+            #expect(!expected.isEmpty && recovered == expected)
+            _ = try await policy.status()
+            try await fixture.adapter.stop()
+            try await fixture.collection.close()
+            let reread = try #require(try await MaintenanceLane.shared.call(.cloudPolicyOutputResult) { try started.result.result() })
+            #expect(try policyJobActions(reread) == expected)
         }
     }
 }

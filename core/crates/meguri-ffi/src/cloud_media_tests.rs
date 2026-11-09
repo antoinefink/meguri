@@ -2955,3 +2955,93 @@ fn other_owner_copy_is_rechecked_by_real_cleanup_builder_and_final_queue_admissi
         );
     }
 }
+
+#[test]
+fn native_admission_jobs_quota_continuation_retains_actual_upload_parking_and_pending_after_cancel_close() {
+    use super::policy::policy_job_tests::{finished, hold_pool};
+    use crate::cloud_policy::*;
+    use meguri_engine::JobOutcome;
+    for code in [None, Some(24), Some(25)] {
+        let (fixture, sdk) = published();
+        let media = fixture.workflow.media().unwrap();
+        let policy = media_policy(&fixture);
+        let execution = foreground_media_permit(&fixture, &sdk, &policy);
+        let began = execution.begin_media().unwrap();
+        accept_root(&media, &sdk);
+        fixture
+            .workflow
+            .host
+            .media()
+            .unwrap()
+            .store()
+            .add("quota-job.asset", b"real queued upload")
+            .unwrap();
+        reply_absent(
+            &media,
+            media.clone().next_work(sdk.instance_id.clone()).unwrap().unwrap(),
+        );
+        let upload = media.clone().next_work(sdk.instance_id.clone()).unwrap().unwrap();
+        let CloudMediaRequest::Upload { name, staged_path, .. } = &upload.request else {
+            panic!("real upload required")
+        };
+        let bytes_before = std::fs::read(staged_path).unwrap();
+        media.queue_upload(upload.handle.clone()).unwrap();
+        policy
+            .input(CloudPolicyEvent::OperationError {
+                instance: sdk.instance_id.clone(),
+                operation: CloudPolicyOperation {
+                    zone: CloudPolicyZone::Media,
+                    kind: CloudPolicyOperationKind::Send,
+                },
+                class: CloudPolicyOperationError::QuotaFull,
+                code: 25,
+                retry_after_ms: None,
+            })
+            .unwrap();
+        let _ = fixture.workflow.take_pending_updates(sdk.instance_id.clone()).unwrap();
+        let runtime = fixture.workflow.core.clone();
+        let events = fixture.workflow.host.engine().stream().subscribe();
+        let pool = hold_pool(&fixture);
+        let cancel = Arc::new(Mutex::new(None::<Arc<crate::cancel::CancelToken>>));
+        let token = cancel.clone();
+        let saw = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let observed = saw.clone();
+        runtime.set_incoming_stage_hook_for_testing(move |stage| {
+            if stage == c::testing::IncomingStage::PolicyPendingUpdated {
+                observed.store(true, Ordering::SeqCst);
+                token.lock().unwrap().as_ref().unwrap().trigger();
+            }
+        });
+        let job = execution.start_continue_media_after_send(code).unwrap();
+        *cancel.lock().unwrap() = Some(job.handle.cancel.clone());
+        drop(pool);
+        let outcome = finished(&events, job.handle.id);
+        runtime.set_incoming_stage_hook_for_testing(|_| {});
+        let updates = fixture.workflow.take_pending_updates(sdk.instance_id.clone()).unwrap();
+        let sendables = fixture.workflow.tracking_sendables().unwrap();
+        let bytes_after = std::fs::read(staged_path).unwrap();
+        fixture.workflow.host.close().unwrap();
+        let continued = code == Some(25);
+        assert!(began);
+        assert_eq!(outcome, JobOutcome::Succeeded);
+        assert_eq!(job.result.result(), Ok(Some(continued)));
+        assert_eq!(saw.load(Ordering::SeqCst), continued);
+        assert_eq!(job.handle.cancel.requested(), continued);
+        assert_eq!(
+            !sendables.contains_key(name),
+            continued,
+            "the exact upload leaves pending only for code 25"
+        );
+        assert_eq!(bytes_after, bytes_before);
+        if continued {
+            assert!(updates.iter().any(|update| update.removes.contains(name)));
+            assert!(updates.iter().all(|update| !update.adds.contains_key(name)));
+        } else {
+            assert!(updates.is_empty());
+        }
+        let replacement = Fixture::new(Keys::new([Some(vec![31; 32]), Some(vec![47; 32])]));
+        let retained = job.result.result();
+        replacement.workflow.host.close().unwrap();
+        assert_eq!(retained, Ok(Some(continued)));
+    }
+}

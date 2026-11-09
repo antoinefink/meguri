@@ -551,7 +551,7 @@ fn new_deck_real_service_saved_ack_and_next_edit_keep_origin_revision_and_base()
     fixture.workflow.host.close().unwrap();
 }
 
-fn rig() -> (Fixture, CloudEngineRegistration, CloudRecord) {
+pub(super) fn rig() -> (Fixture, CloudEngineRegistration, CloudRecord) {
     rig_with_provider(Arc::new(Account))
 }
 fn rig_with_provider(identity: Arc<dyn r::IdentityProvider>) -> (Fixture, CloudEngineRegistration, CloudRecord) {

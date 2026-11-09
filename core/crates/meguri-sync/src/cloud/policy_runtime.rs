@@ -234,13 +234,6 @@ impl Runtime {
             backend_guard: Self::adapter_guard_locked(&s),
         })
     }
-    pub(crate) fn policy_update_pending(
-        &self,
-        guard: &crate::cloud::adapter::Guard,
-        update: Update,
-    ) -> Result<(), RuntimeError> {
-        self.policy_update_pending_with_work(guard, update, &mut PolicyWork::default())
-    }
     pub(crate) fn policy_update_pending_with_work(
         &self,
         guard: &crate::cloud::adapter::Guard,
@@ -415,15 +408,6 @@ impl Runtime {
         }
         Ok(result?)
     }
-    pub(crate) fn policy_apply_ready(
-        &self,
-        collection: &Collection,
-        guard: &crate::cloud::adapter::Guard,
-        retry_failed: bool,
-        timeout: Duration,
-    ) -> Result<crate::cloud::incoming::IncomingDisposition, RuntimeError> {
-        self.policy_apply_ready_with_work(collection, guard, retry_failed, timeout, &mut PolicyWork::default())
-    }
     pub(crate) fn policy_apply_ready_with_work(
         &self,
         collection: &Collection,
@@ -446,7 +430,13 @@ impl Runtime {
             sdk
         };
         let authority = work.clone();
-        collection.check_rollover_with_boundary(move || authority.engine_effect())?;
+        #[cfg(feature = "test-hooks")]
+        let hooks = self.incoming_hooks.clone();
+        collection.check_rollover_with_boundary(move || {
+            #[cfg(feature = "test-hooks")]
+            hooks.hit(crate::cloud::testing::IncomingStage::PolicyApplyWriterAdmission);
+            authority.engine_effect()
+        })?;
         work.check()?;
         self.drain_native_incoming_with_work(collection, &sdk, timeout, work)
     }

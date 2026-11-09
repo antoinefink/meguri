@@ -185,6 +185,37 @@ impl CloudPolicyExecution {
             .begin_native_send_with_work(&self.command.command, &self.sdk()?, work)
             .map_err(execution_error)
     }
+    pub(super) fn validate_control_with_work(&self, work: &mut p::PolicyWork) -> Result<(), CoreError> {
+        self.policy().owns(&self.command)?;
+        self.policy()
+            .driver()?
+            .validate_with_work(&self.command.command, work)
+            .map_err(execution_error)
+    }
+    pub(super) fn continue_media_after_send_with_work(
+        &self,
+        code: Option<i64>,
+        work: &mut p::PolicyWork,
+    ) -> Result<bool, CoreError> {
+        self.policy().owns(&self.command)?;
+        self.policy()
+            .driver()?
+            .continue_native_media_after_send_with_work(&self.command.command, &self.sdk()?, code, work)
+            .map_err(execution_error)
+    }
+    pub(super) fn prepare_flush_with_work(&self, work: &mut p::PolicyWork) -> Result<CloudPolicyOutput, CoreError> {
+        self.policy().owns(&self.command)?;
+        let collection = self.policy().collection()?;
+        self.policy()
+            .driver()?
+            .prepare_native_flush_with_work(&self.command.command, &collection, work)
+            .map_err(execution_error)?;
+        self.policy().output(
+            self.policy()
+                .host
+                .cloud_policy_input_with_work(p::DeviceEvent::Refresh(p::ChangeCause::Cloud), work),
+        )
+    }
     // A terminal reply keeps its original command when policy has moved on.
     // Let Driver retire that command's read; validate new admission separately
     // so an FFI generation check cannot bypass cleanup of the original owner.
@@ -214,13 +245,6 @@ impl CloudPolicyExecution {
     }
     pub(crate) fn policy(&self) -> &Arc<CloudPolicy> {
         &self.command.owner
-    }
-    fn check(&self) -> Result<(), CoreError> {
-        self.policy().owns(&self.command)?;
-        self.policy()
-            .driver()?
-            .validate(&self.command.command)
-            .map_err(execution_error)
     }
     fn sdk(&self) -> Result<String, CoreError> {
         self.registration
@@ -297,11 +321,7 @@ impl CloudPolicyExecution {
 
     pub fn continue_media_after_send(&self, code: Option<i64>) -> Result<bool, CoreError> {
         callback::enter("CloudPolicyExecution.continue_media_after_send");
-        self.policy().owns(&self.command)?;
-        self.policy()
-            .driver()?
-            .continue_native_media_after_send(&self.command.command, &self.sdk()?, code)
-            .map_err(execution_error)
+        self.continue_media_after_send_with_work(code, &mut p::PolicyWork::default())
     }
 
     pub fn begin_media(&self) -> Result<bool, CoreError> {
@@ -315,21 +335,11 @@ impl CloudPolicyExecution {
     }
     pub fn validate_control(&self) -> Result<(), CoreError> {
         callback::enter("CloudPolicyExecution.validate_control");
-        self.check()
+        self.validate_control_with_work(&mut p::PolicyWork::default())
     }
     pub fn prepare_flush(&self) -> Result<CloudPolicyOutput, CoreError> {
         callback::enter("CloudPolicyExecution.prepare_flush");
-        self.policy().owns(&self.command)?;
-        let collection = self.policy().collection()?;
-        self.policy()
-            .driver()?
-            .prepare_native_flush(&self.command.command, &collection)
-            .map_err(execution_error)?;
-        self.policy().output(
-            self.policy()
-                .host
-                .cloud_policy_input(p::DeviceEvent::Refresh(p::ChangeCause::Cloud)),
-        )
+        self.prepare_flush_with_work(&mut p::PolicyWork::default())
     }
     pub fn begin_send(&self) -> Result<Option<u64>, CoreError> {
         callback::enter("CloudPolicyExecution.begin_send");

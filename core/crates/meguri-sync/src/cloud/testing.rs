@@ -86,6 +86,7 @@ pub enum IncomingStage {
     SDKRetireBeforeReacquisition,
     PolicyMediaPrepared,
     PolicyPendingUpdated,
+    PolicyApplyWriterAdmission,
     // These effect witnesses run under State; token/atomic observation only.
     PolicyMediaSelected,
     PolicyFetchBegun,

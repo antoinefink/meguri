@@ -24,8 +24,12 @@ enum AdmissionKind {
     Send,
     NoCall,
     Invocation,
+    Validate,
+    ContinueFalse,
+    ContinueQuota,
+    Flush,
 }
-const ADMISSIONS: [AdmissionKind; 7] = [
+const ADMISSIONS: [AdmissionKind; 11] = [
     AdmissionKind::Register,
     AdmissionKind::Retire,
     AdmissionKind::Media,
@@ -33,11 +37,17 @@ const ADMISSIONS: [AdmissionKind; 7] = [
     AdmissionKind::Send,
     AdmissionKind::NoCall,
     AdmissionKind::Invocation,
+    AdmissionKind::Validate,
+    AdmissionKind::ContinueFalse,
+    AdmissionKind::ContinueQuota,
+    AdmissionKind::Flush,
 ];
 #[derive(Debug, PartialEq, Eq)]
 enum AdmissionValue {
     Done,
     Media(bool),
+    Control(bool),
+    Continuation(bool),
     Fetch(u64),
     Send(Option<u64>),
 }
@@ -48,6 +58,9 @@ enum AdmissionJob {
     Fetch(CloudPolicyFetchJob),
     Send(CloudPolicySendJob),
     Invocation(CloudPolicyOutputJob),
+    Control(CloudPolicyControlJob),
+    Continuation(CloudPolicyMediaContinuationJob),
+    Flush(CloudPolicyOutputJob),
 }
 impl AdmissionJob {
     fn handle(&self) -> &crate::jobs::JobHandle {
@@ -57,7 +70,9 @@ impl AdmissionJob {
             Self::Media(job) => &job.handle,
             Self::Fetch(job) => &job.handle,
             Self::Send(job) => &job.handle,
-            Self::Invocation(job) => &job.handle,
+            Self::Invocation(job) | Self::Flush(job) => &job.handle,
+            Self::Control(job) => &job.handle,
+            Self::Continuation(job) => &job.handle,
         }
     }
     fn value(&self) -> Result<Option<AdmissionValue>, CoreError> {
@@ -66,7 +81,9 @@ impl AdmissionJob {
             Self::Retire(job) => job.result.result().map(|value| value.map(|_| AdmissionValue::Done)),
             Self::Media(job) => job.result.result().map(|value| value.map(AdmissionValue::Media)),
             Self::Fetch(job) => job.result.result().map(|value| value.map(AdmissionValue::Fetch)),
-            Self::Invocation(job) => job.result.result().map(|value| {
+            Self::Control(job) => job.result.result().map(|value| value.map(AdmissionValue::Control)),
+            Self::Continuation(job) => job.result.result().map(|value| value.map(AdmissionValue::Continuation)),
+            Self::Invocation(job) | Self::Flush(job) => job.result.result().map(|value| {
                 value.map(|output| {
                     let _ = commands(output); // Preserve the actual projection shape.
                     AdmissionValue::Done
@@ -84,7 +101,12 @@ impl AdmissionJob {
 }
 fn expected_value(kind: AdmissionKind) -> AdmissionValue {
     match kind {
-        AdmissionKind::Register | AdmissionKind::Retire | AdmissionKind::Invocation => AdmissionValue::Done,
+        AdmissionKind::Register | AdmissionKind::Retire | AdmissionKind::Invocation | AdmissionKind::Flush => {
+            AdmissionValue::Done
+        }
+        AdmissionKind::Validate => AdmissionValue::Control(true),
+        AdmissionKind::ContinueFalse => AdmissionValue::Continuation(false),
+        AdmissionKind::ContinueQuota => AdmissionValue::Continuation(true),
         AdmissionKind::Media => AdmissionValue::Media(false),
         AdmissionKind::Fetch => AdmissionValue::Fetch(1),
         AdmissionKind::Send => AdmissionValue::Send(Some(1)),
@@ -99,6 +121,11 @@ struct AdmissionTarget {
 fn admit(target: AdmissionTarget, kind: AdmissionKind) -> Result<AdmissionJob, CoreError> {
     let execution = target.execution;
     match kind {
+        AdmissionKind::Validate => execution.start_validate_control().map(AdmissionJob::Control),
+        AdmissionKind::ContinueFalse | AdmissionKind::ContinueQuota => execution
+            .start_continue_media_after_send(Some(25))
+            .map(AdmissionJob::Continuation),
+        AdmissionKind::Flush => execution.start_prepare_flush().map(AdmissionJob::Flush),
         AdmissionKind::Invocation => execution
             .start_report_invocation(
                 vec![CloudPolicyZone::Root, CloudPolicyZone::Collection],
@@ -139,7 +166,38 @@ fn admission_fixture(kind: AdmissionKind) -> (Fixture, Arc<CloudPolicy>, Admissi
             cause: CloudPolicyChangeCause::Cloud,
         })
         .unwrap();
-    let command = if matches!(kind, AdmissionKind::Retire) {
+    let command = if matches!(kind, AdmissionKind::ContinueQuota) {
+        let command = commands(
+            policy
+                .clone()
+                .input(CloudPolicyEvent::Settings {
+                    settings: CloudPolicyDeviceSettings {
+                        enabled: true,
+                        paused: false,
+                        automatic: true,
+                        media: true,
+                    },
+                })
+                .unwrap(),
+        )
+        .into_iter()
+        .find(|c| matches!(c.action, CloudPolicyAction::ResumeMedia))
+        .unwrap();
+        policy
+            .clone()
+            .input(CloudPolicyEvent::OperationError {
+                instance: original.instance_id.clone(),
+                operation: CloudPolicyOperation {
+                    zone: CloudPolicyZone::Media,
+                    kind: CloudPolicyOperationKind::Send,
+                },
+                class: CloudPolicyOperationError::QuotaFull,
+                code: 25,
+                retry_after_ms: None,
+            })
+            .unwrap();
+        command
+    } else if matches!(kind, AdmissionKind::Retire) {
         commands(policy.clone().input(settings(true, false)).unwrap())
             .into_iter()
             .find(|c| matches!(c.action, CloudPolicyAction::ConfigureAutomatic { on: true }))
@@ -179,6 +237,21 @@ fn admission_fixture(kind: AdmissionKind) -> (Fixture, Arc<CloudPolicy>, Admissi
         .into_iter()
         .find(|c| matches!(c.action, CloudPolicyAction::RunExchange { .. }))
         .unwrap()
+    };
+    let command = if matches!(kind, AdmissionKind::Flush) {
+        commands(
+            policy
+                .clone()
+                .input(CloudPolicyEvent::Background {
+                    deadline_ms: NOW + 60_000,
+                })
+                .unwrap(),
+        )
+        .into_iter()
+        .find(|c| matches!(c.action, CloudPolicyAction::BackgroundFlush { .. }))
+        .unwrap()
+    } else {
+        command
     };
     if matches!(kind, AdmissionKind::NoCall) {
         policy.clone().capture_exchange(command.handle.clone()).unwrap();
@@ -1227,4 +1300,307 @@ fn native_admission_jobs_started_multizone_keeps_exact_outputs_and_typed_error_a
             }
         }
     }
+}
+
+#[test]
+fn native_admission_jobs_control_validation_keeps_success_and_exact_stale_error_after_close() {
+    for stale in [false, true] {
+        let (fixture, policy, target, _) = admission_fixture(AdmissionKind::Validate);
+        if stale {
+            policy.input(settings(false, true)).unwrap();
+        }
+        let expected = target.execution.validate_control().map(|()| true);
+        let events = fixture.workflow.host.engine().stream().subscribe();
+        let job = target.execution.start_validate_control().unwrap();
+        let outcome = finished(&events, job.handle.id);
+        fixture.workflow.host.close().unwrap();
+        let replacement = super::fixture();
+        let actual = job.result.result();
+        replacement.workflow.host.close().unwrap();
+        if stale {
+            assert_eq!(expected, Err(policy_failure(CloudPolicyFailure::StaleCommand)));
+            assert!(matches!(outcome, JobOutcome::Failed { .. }));
+        } else {
+            assert_eq!(expected, Ok(true));
+            assert_eq!(outcome, JobOutcome::Succeeded);
+        }
+        assert_eq!(actual, expected.map(Some));
+    }
+}
+
+#[test]
+fn native_admission_jobs_flush_deadline_expires_in_original_pool_queue() {
+    let (fixture, _, target, sdk) = admission_fixture(AdmissionKind::Flush);
+    let runtime = fixture.workflow.core.clone();
+    let sdk = sdk.unwrap();
+    let _ = fixture.workflow.take_pending_updates(sdk.clone()).unwrap();
+    let before = runtime.adapter_guard();
+    let events = fixture.workflow.host.engine().stream().subscribe();
+    let pool = hold_pool(&fixture);
+    let job = target.execution.clone().start_prepare_flush().unwrap();
+    let pending = job.result.result();
+    fixture.clock.set_now_ms(NOW + 25_000);
+    let expected = match target.execution.prepare_flush() {
+        Err(error) => error,
+        Ok(_) => panic!("unexpected success"),
+    };
+    drop(pool);
+    let outcome = finished(&events, job.handle.id);
+    let updates = fixture.workflow.take_pending_updates(sdk).unwrap();
+    let after = runtime.adapter_guard();
+    fixture.workflow.host.close().unwrap();
+    assert!(matches!(pending, Ok(None)));
+    assert_eq!(expected, CoreError::Cancelled);
+    assert_eq!(outcome, JobOutcome::Cancelled);
+    assert!(updates.is_empty());
+    assert_eq!(after, before);
+    assert!(matches!(job.result.result(), Err(CoreError::Cancelled)));
+}
+
+fn incoming_flush_fixture() -> (Fixture, Arc<CloudPolicyExecution>, String) {
+    let (fixture, sdk, incoming) = super::super::policy::rig();
+    let policy = fixture.workflow.policy().unwrap();
+    policy
+        .clone()
+        .input(CloudPolicyEvent::SyncNowRequested {
+            source: CloudPolicySource::Command,
+        })
+        .unwrap();
+    let command = commands(
+        policy
+            .clone()
+            .input(CloudPolicyEvent::Background {
+                deadline_ms: NOW + 60_000,
+            })
+            .unwrap(),
+    )
+    .into_iter()
+    .find(|command| matches!(command.action, CloudPolicyAction::BackgroundFlush { .. }))
+    .unwrap();
+    let execution = policy.prepare_execution(command.handle).unwrap().unwrap();
+    fixture
+        .workflow
+        .core
+        .adapter_fetched(
+            &sdk.instance_id,
+            &sdk.collection_zone,
+            &[w::Saved {
+                name: incoming.name,
+                envelope: incoming.envelope,
+                system_fields: incoming.system_fields.unwrap(),
+            }],
+            &[],
+        )
+        .unwrap();
+    (fixture, execution, sdk.instance_id)
+}
+
+#[test]
+fn native_admission_jobs_flush_retains_apply_deferred_and_exact_outputs_after_effect_cancel_close() {
+    use meguri_sync::cloud::testing::{ApplyInterruption, IncomingStage};
+    for interruption in [None, Some(ApplyInterruption::Cancel), Some(ApplyInterruption::Error)] {
+        for stage in [IncomingStage::ApplyAfterFlush, IncomingStage::PolicyPendingUpdated] {
+            let mut baseline = None;
+            for asynchronous in [false, true] {
+                let (fixture, execution, sdk) = incoming_flush_fixture();
+                let runtime = fixture.workflow.core.clone();
+                let collection = fixture.workflow.host.collection().unwrap();
+                let added = meguri_engine::decks::add(&collection, "Flush actual pending deck".into()).unwrap();
+                fixture
+                    .workflow
+                    .await_tracking(collection.generation().0, added.seq.0)
+                    .unwrap();
+                let _ = fixture.workflow.take_pending_updates(sdk.clone()).unwrap();
+                if let Some(interruption) = interruption {
+                    runtime.interrupt_next_incoming_for_testing(interruption);
+                }
+                let events = fixture.workflow.host.engine().stream().subscribe();
+                let pool = hold_pool(&fixture);
+                let cancel = Arc::new(Mutex::new(None::<Arc<crate::cancel::CancelToken>>));
+                let token = cancel.clone();
+                let saw = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                let observed = saw.clone();
+                runtime.set_incoming_stage_hook_for_testing(move |at| {
+                    // Interrupted applies reach neither completion stage. The
+                    // intent is already an effect and must retain Deferred.
+                    if at == stage || interruption.is_some() && at == IncomingStage::ApplyAfterIntent {
+                        observed.store(true, std::sync::atomic::Ordering::SeqCst);
+                        if let Some(token) = token.lock().unwrap().as_ref() {
+                            token.trigger();
+                        }
+                    }
+                });
+                let (job, output, outcome) = if asynchronous {
+                    let job = execution.start_prepare_flush().unwrap();
+                    *cancel.lock().unwrap() = Some(job.handle.cancel.clone());
+                    drop(pool);
+                    let outcome = finished(&events, job.handle.id);
+                    let output = job.result.result().map(|value| value.unwrap());
+                    (Some(job), output, Some(outcome))
+                } else {
+                    drop(pool);
+                    (None, execution.prepare_flush(), None)
+                };
+                runtime.set_incoming_stage_hook_for_testing(|_| {});
+                let applied = fixture.incoming_value();
+                let updates = fixture.workflow.take_pending_updates(sdk).unwrap();
+                let snapshot = invocation_snapshot(output);
+                fixture.workflow.host.close().unwrap();
+                assert!(saw.load(std::sync::atomic::Ordering::SeqCst));
+                if interruption.is_some() {
+                    // Keep the synchronous facade's existing ApplyDeferred
+                    // error mapping, never replace it with job cancellation.
+                    assert_eq!(snapshot, Err(policy_failure(CloudPolicyFailure::StaleCommand)));
+                    assert!(applied.is_none());
+                } else {
+                    assert!(applied.is_some());
+                    assert!(!updates.is_empty());
+                    assert!(snapshot.as_ref().is_ok_and(|commands| !commands.is_empty()));
+                    // The pending deck was staged before Refresh and no
+                    // intervening policy projection consumed its status change.
+                    assert!(
+                        snapshot
+                            .as_ref()
+                            .unwrap()
+                            .iter()
+                            .any(|action| action.starts_with("StatusChanged"))
+                    );
+                }
+                let update_snapshot: Vec<_> = updates
+                    .into_iter()
+                    .map(|update| {
+                        let mut adds: Vec<_> = update
+                            .adds
+                            .into_iter()
+                            .map(|(name, change)| (name, format!("{change:?}")))
+                            .collect();
+                        adds.sort();
+                        (update.id, format!("{:?}", update.kind), adds, update.removes)
+                    })
+                    .collect();
+                if let Some(job) = job {
+                    assert!(job.handle.cancel.requested());
+                    if interruption.is_some() {
+                        assert!(matches!(outcome, Some(JobOutcome::Failed { .. })));
+                    } else {
+                        assert_eq!(outcome, Some(JobOutcome::Succeeded));
+                    }
+                    let replacement = super::fixture();
+                    let reread = invocation_snapshot(job.result.result().map(|value| value.unwrap()));
+                    replacement.workflow.host.close().unwrap();
+                    assert_eq!(reread, snapshot);
+                    assert_eq!(baseline.as_ref().unwrap(), &(snapshot, applied, update_snapshot));
+                } else {
+                    baseline = Some((snapshot, applied, update_snapshot));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn native_admission_jobs_flush_retains_refresh_followups_after_pending_effect_and_cancel() {
+    let mut baseline = None;
+    for asynchronous in [false, true] {
+        let (fixture, _, target, sdk) = admission_fixture(AdmissionKind::Flush);
+        let sdk = sdk.unwrap();
+        let runtime = fixture.workflow.core.clone();
+        let driver = fixture.workflow.host.cloud_policy_driver().unwrap();
+        let engine = fixture.workflow.host.engine();
+        let events = engine.stream().subscribe();
+        let pool = hold_pool(&fixture);
+        let cancel = Arc::new(Mutex::new(None::<Arc<crate::cancel::CancelToken>>));
+        let token = cancel.clone();
+        let observed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let saw = observed.clone();
+        let host = fixture.workflow.host.clone();
+        let original = runtime.clone();
+        runtime.set_incoming_stage_hook_for_testing(move |stage| {
+            if stage == c::testing::IncomingStage::PolicyPendingUpdated {
+                let token = token.clone();
+                let saw = saw.clone();
+                let original = original.clone();
+                let sdk = sdk.clone();
+                host.cloud_policy_driver()
+                    .unwrap()
+                    .set_projection_hook_for_testing(move || {
+                        saw.store(true, std::sync::atomic::Ordering::SeqCst);
+                        if let Some(token) = token.lock().unwrap().as_ref() {
+                            token.trigger();
+                        }
+                        original.retire_sdk(&sdk, false).unwrap();
+                    });
+            }
+        });
+        let (job, output, outcome) = if asynchronous {
+            let job = target.execution.start_prepare_flush().unwrap();
+            *cancel.lock().unwrap() = Some(job.handle.cancel.clone());
+            drop(pool);
+            let outcome = finished(&events, job.handle.id);
+            let output = job.result.result().map(|value| value.unwrap());
+            (Some(job), output, Some(outcome))
+        } else {
+            drop(pool);
+            (None, target.execution.prepare_flush(), None)
+        };
+        runtime.set_incoming_stage_hook_for_testing(|_| {});
+        let after = driver.state();
+        let snapshot = invocation_snapshot(output);
+        fixture.workflow.host.close().unwrap();
+        assert!(observed.load(std::sync::atomic::Ordering::SeqCst));
+        if let Some(job) = job {
+            assert!(job.handle.cancel.requested());
+            assert_ne!(outcome, Some(JobOutcome::Cancelled));
+            assert_eq!(
+                invocation_snapshot(job.result.result().map(|value| value.unwrap())),
+                snapshot
+            );
+            assert_eq!(baseline.as_ref().unwrap(), &(snapshot, after));
+        } else {
+            baseline = Some((snapshot, after));
+        }
+    }
+}
+
+#[test]
+fn native_admission_jobs_flush_cancel_at_original_writer_admission_prevents_first_effect() {
+    let (fixture, _, target, sdk) = admission_fixture(AdmissionKind::Flush);
+    let sdk = sdk.unwrap();
+    let runtime = fixture.workflow.core.clone();
+    let engine = fixture.workflow.host.engine();
+    let events = engine.stream().subscribe();
+    let pool = hold_pool(&fixture);
+    let _ = fixture.workflow.take_pending_updates(sdk.clone()).unwrap();
+    let before = runtime.adapter_guard();
+    // The original Host clock invalidates the cached day without moving the
+    // absolute flush deadline. The real rollover must acquire its writer.
+    fixture.clock.set_utc_offset(UtcOffset::from_seconds(3_600).unwrap());
+    let cancel = Arc::new(Mutex::new(None::<Arc<crate::cancel::CancelToken>>));
+    let token = cancel.clone();
+    let observed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let saw = observed.clone();
+    runtime.set_incoming_stage_hook_for_testing(move |stage| {
+        if stage == c::testing::IncomingStage::PolicyApplyWriterAdmission {
+            saw.store(true, std::sync::atomic::Ordering::SeqCst);
+            // Rust-owned token only, on the writer immediately before its
+            // first-effect boundary; no Host lookup or foreign callback.
+            token.lock().unwrap().as_ref().unwrap().trigger();
+        }
+    });
+    let job = target.execution.start_prepare_flush().unwrap();
+    *cancel.lock().unwrap() = Some(job.handle.cancel.clone());
+    drop(pool);
+    let outcome = finished(&events, job.handle.id);
+    runtime.set_incoming_stage_hook_for_testing(|_| {});
+    let after = runtime.adapter_guard();
+    let pending = fixture.workflow.take_pending_updates(sdk.clone()).unwrap();
+    let original = fixture.workflow.validate_sdk(sdk);
+    fixture.workflow.host.close().unwrap();
+    assert!(observed.load(std::sync::atomic::Ordering::SeqCst));
+    assert!(job.handle.cancel.requested());
+    assert_eq!(outcome, JobOutcome::Cancelled);
+    assert_eq!(after, before);
+    assert!(pending.is_empty());
+    original.unwrap();
+    assert!(matches!(job.result.result(), Err(CoreError::Cancelled)));
 }

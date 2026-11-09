@@ -406,8 +406,18 @@ impl Driver {
         sdk: &str,
         code: Option<i64>,
     ) -> Result<bool, DriverError> {
-        let owned = self.lock_owned();
+        self.continue_native_media_after_send_with_work(command, sdk, code, &mut PolicyWork::default())
+    }
+    pub fn continue_native_media_after_send_with_work(
+        &self,
+        command: &Command,
+        sdk: &str,
+        code: Option<i64>,
+        work: &mut PolicyWork,
+    ) -> Result<bool, DriverError> {
+        let owned = self.lock_for_work(work)?;
         self.validate_locked(&owned, command)?;
+        work.check()?;
         if code != Some(25)
             || !owned.state.quota_full
             || !owned.state.settings.media
@@ -419,15 +429,25 @@ impl Driver {
         {
             return Ok(false);
         }
-        self.runtime.policy_media_quota(&command.backend_guard, sdk)?;
+        self.runtime
+            .policy_media_quota_with_work(&command.backend_guard, sdk, work)?;
         Ok(true)
     }
 }
 
 impl Driver {
     pub fn prepare_native_flush(&self, command: &Command, collection: &Collection) -> Result<(), DriverError> {
-        let owned = self.lock_owned();
+        self.prepare_native_flush_with_work(command, collection, &mut PolicyWork::default())
+    }
+    pub fn prepare_native_flush_with_work(
+        &self,
+        command: &Command,
+        collection: &Collection,
+        work: &mut PolicyWork,
+    ) -> Result<(), DriverError> {
+        let owned = self.lock_for_work(work)?;
         self.validate_locked(&owned, command)?;
+        work.check()?;
         let until_ms = match command.action.kind {
             ActionKind::BackgroundFlush { until_ms } | ActionKind::QuitFlush { until_ms } => until_ms,
             _ => return Err(DriverError::NotCoreAction),
@@ -437,14 +457,14 @@ impl Driver {
             return Err(meguri_engine::EngineError::Cancelled.into());
         }
         let timeout = Duration::from_millis(remaining as u64);
-        if let crate::cloud::incoming::IncomingDisposition::Deferred(error) =
-            self.runtime
-                .policy_apply_ready(collection, &command.backend_guard, false, timeout)?
+        if let crate::cloud::incoming::IncomingDisposition::Deferred(error) = self
+            .runtime
+            .policy_apply_ready_with_work(collection, &command.backend_guard, false, timeout, work)?
         {
             return Err(DriverError::ApplyDeferred(error));
         }
         self.runtime
-            .policy_update_pending(&command.backend_guard, Update::Full)?;
+            .policy_update_pending_with_work(&command.backend_guard, Update::Full, work)?;
         Ok(())
     }
 }
