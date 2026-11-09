@@ -206,6 +206,7 @@ extension ReviewCollectionStartupTests {
                 await a.sync.waitForInputs()
                 let control = try await SelectedCloudControlInspection().current()
                 if matching {
+                    print("selected-publication-conflict operationFailed=\(a.sync.operationFailed) controlProven=\(control.status == .proven) completePresent=\(control.publicationComplete != nil) donePresent=\(control.publicationDoneActive != nil)")
                     try #require(!a.sync.operationFailed && control.status == .proven)
                     try #require(control.provenance == .runtimeAcceptedPublication)
                     let complete = try #require(control.publicationComplete)
@@ -402,6 +403,9 @@ private nonisolated final class SelectedConflictOperation: CloudPreparedOwnOpera
     let noteID: Int64
     do {
         try await collection.open(location, randomSeed: 329)
+        let allExisting = try await CoreDeckService().allDeckNames().decks.map(\.id)
+        let deletion = try await CoreDeckService().startDeleteDecks(ids: allExisting)
+        _ = try await deletion.value()
         _ = try await CoreDeckService().renameDeck(id: 1, name: "Generated-D1")
         let deck = try await CoreDeckService().addDeck(name: "Generated-D1::Generated-D2")
         let type = try await CoreNotetypeService().addNotetype(.init(name: "QA", cloze: false, fields: ["Q", "A"],
@@ -412,7 +416,9 @@ private nonisolated final class SelectedConflictOperation: CloudPreparedOwnOpera
         try await collection.flushForBackground()
         try await collection.close()
     } catch { try? await collection.close(); throw error }
-    return (try Data(contentsOf: source.appending(path: "collection.anki2")), noteID)
+    let bytes = try Data(contentsOf: source.appending(path: "collection.anki2"))
+    _ = try await OriginalCloudRoleInspection.inspect(main: bytes, wal: nil)
+    return (bytes, noteID)
 }
 
 private nonisolated final class SelectedBootstrapReplies: Sendable {

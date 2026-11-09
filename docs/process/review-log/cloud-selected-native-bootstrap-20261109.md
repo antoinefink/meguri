@@ -37,3 +37,21 @@ its original commit/correlation join. Smoke stays strict. Off-feature core-test
 53524 passes its projection case. Debug core-test 52445 passes projection and
 held-scan cases; its fixed-edit case fails, so the run is not accepted. New
 native composition and ledger cases are authored and remain unrun.
+
+Recorded fixer; supplied clean base `d0cb17ce`; original batch base unchanged.
+The initial publication and selected cases already share selectedBootstrapSource.
+Immediately after open it now enumerates all deck IDs, awaits normal deletion,
+then retains the existing default rename, child/QA/note creation and close.
+Strict original-role inspection of the closed bytes confirms actual minimum-note
+admission before returning; no role/parser, WAL or preservation check is relaxed.
+The original-owner rejection reports only command/current owner emptiness,
+using the same single owner read after the unchanged policy guard. Matching
+conflict publication prints four outcome booleans before its original assertion.
+Dispatch, validation order, guards and result conditions remain unchanged.
+One source consistency check only; no git, build, tests, network or Cloud calls.
+Root owns native verification and boundary diagnosis; no acceptance claim.
+
+Native run 3004 executes all four cases after fixture repair. Layout admission
+passes; all four now reach publication and fail the original-owner check.
+The retained trace reports nonempty original and current owners. No guard was
+relaxed. The next repair must enforce the approved core-action phase ordering.

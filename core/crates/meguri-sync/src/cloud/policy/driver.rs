@@ -883,9 +883,14 @@ impl Driver {
             );
             return Err(DriverError::StaleCommand);
         }
-        if command.owner != owner() {
+        let current_owner = owner();
+        if command.owner != current_owner {
             #[cfg(feature = "test-hooks")]
-            eprintln!("cloud-policy-rejection stage=validate.original-owner");
+            eprintln!(
+                "cloud-policy-rejection stage=validate.original-owner command_owner_empty={} current_owner_empty={}",
+                command.owner.is_empty(),
+                current_owner.is_empty(),
+            );
             return Err(DriverError::StaleCommand);
         }
         if runtime != &command.backend_guard {
