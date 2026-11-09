@@ -159,7 +159,7 @@ struct Keys(ChaCha20Random);
 impl KeyByteSource for Keys {
     fn draw_key(&self) -> std::result::Result<[u8; 32], KeySourceError> {
         let mut bytes = [0; 32];
-        for part in bytes.chunks_exact_mut(8) {
+        for part in bytes.as_chunks_mut::<8>().0 {
             part.copy_from_slice(&self.0.next_u64().to_le_bytes());
         }
         Ok(bytes)
@@ -290,10 +290,10 @@ impl Runner {
     fn candidates(&self, refresh: bool) -> Vec<(DeviceId, ActionKey)> {
         let mut ready = BTreeSet::new();
         for (&id, m) in &self.members {
-            if let Some(step) = m.program.front() {
-                if !matches!(step, Step::Sync) || m.rig.ordinary_idle() {
-                    ready.insert((id, ActionKey::Program(step.kind())));
-                }
+            if let Some(step) = m.program.front()
+                && (!matches!(step, Step::Sync) || m.rig.ordinary_idle())
+            {
+                ready.insert((id, ActionKey::Program(step.kind())));
             }
             if let Some(action) = m.rig.ordinary_action() {
                 if !(m.hold_sent && matches!(action, OrdinaryAction::Sent | OrdinaryAction::ReturnSent))

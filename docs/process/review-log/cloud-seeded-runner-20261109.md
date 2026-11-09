@@ -19,3 +19,16 @@ paginated fetches and seeded replay are exercised. No positive drain is claimed.
 
 Lint `45271` finds two style issues; repair is pending. Similarity checks pass.
 The original failed integration gate and native UI failure remain open.
+
+Bounded fixer follow-up from supplied main base `a8c1099d`: changed the two
+`45271` style sites to a let-chain and `as_chunks_mut::<8>().0`. Predicates,
+little-endian bytes, RNG draws and test bodies are unchanged. No suppression,
+dependency or version changes. No builds or tests ran in this filtered fixer;
+root owns verification and review. The original batch and open gates remain.
+
+Final lint `20261109T213243Z-49946` passes all four checks. Independent
+review confirms the two style changes preserve behavior and RNG draw order;
+focused `42917` remains valid. The affected regression run `46750` passes 62
+and fails nine at an oversized fixture page. Fixture-only repair `47474` and
+focused `50441` pass those nine; the other 62 use unchanged setup. Keep the
+original failed result. Full integration and whole Q4.4/Q5 remain open.
