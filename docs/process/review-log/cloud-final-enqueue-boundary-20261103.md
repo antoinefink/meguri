@@ -63,3 +63,33 @@ committed Driver view repair. The historical RED `53422` remains retained.
 Runtime lock responsiveness and synchronous Started projection are still
 unresolved; this does not prove the complete SDK enqueue path. See
 `cloud-driver-committed-validation-20261109.md` for scope and review.
+
+## Task ownership and cancellation correction, 2026-11-09
+
+The five native admission selectors now use retained jobs; their focused
+Rust/native receipts are in the two November 9 admission review logs.
+Runtime and Driver compact validation components are verified separately.
+The synchronous full Started call remains open.
+
+A source trace finds manual send/fetch Started and Ended in the same retained
+operation task/iteration. Automatic SDK delegate events do not separately
+produce that activity in the current path. Read rounds have separate owners.
+The generic public policy input can still supply ordinary activity facts.
+Execution/SDK/zone/kind do not identify a single invocation; a receipt must
+identify the specific attempt and protect another attempt from old cleanup.
+
+The baseline already allows Started followed by Task cancellation before the
+SDK API: enqueue checks cancellation after its validation closure returns.
+The existing cancellation helper clears active only. P15 does not require
+restoring prior error or drained snapshots. Independent contract review
+withdraws the earlier stronger restoration concern. Do not build a rollback
+framework on that assumption.
+
+Async full Started inside the actual retained operation task is a viable
+next direction, with projection/persistence failures still before SDK entry.
+It must rejoin actual event bookkeeping after the new await and retain the
+same captured SDK, guards, outputs and typed errors. Opaque per-attempt cleanup
+must preserve stale-fact rejection and cannot clear a newer engine or attempt.
+This is a design finding, not implemented or accepted boundary evidence.
+Keep all existing admission, ordering, cancellation, callback, lifecycle and
+latency checks and limits. Review the concrete design before implementation.

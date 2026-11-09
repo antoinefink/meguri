@@ -39,3 +39,15 @@ Core `25368` passes all 122 focused checks. Format `25013`, privacy `25675`,
 lint `26614` and similarity `26898` pass. Native build/tests and the original
 batch gate still need their receipts. U113/U114/U151 remain unaccepted;
 no Unit trailer.
+
+## Native verification
+
+Swift `29474` builds matching Debug products for device, simulator and Mac,
+then passes all 18 selected checks. They include real fetch/send identities,
+completed NoCall after listener failure and owner close, the prior registration
+proof, order/drain, instrumentation, held-factory readiness, six stale-entry
+cases, and both media cancellation/pending-update finalization regressions.
+
+The reviewed admission component is complete. Full synchronous Started work,
+other pending unit requirements, media evidence and the original integration
+gate remain open. These receipts do not accept U113/U114/U151.
