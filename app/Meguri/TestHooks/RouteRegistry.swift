@@ -52,6 +52,9 @@ extension TestHooks {
             ShellRoutes.register(in: &registry)
             SpikeRoutes.register(in: &registry)
             CardBehaviorRoutes.register(in: &registry)
+            #if DEBUG && os(macOS)
+            ReplayAccessibilityRoute.register(in: &registry)
+            #endif
             CollectionEntryRoutes.register(in: &registry)
             return registry
         }

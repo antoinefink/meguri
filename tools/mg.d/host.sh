@@ -33,7 +33,7 @@
 # MEGURI_MAC_UI_INTERVAL_MINUTES.
 
 mg_job mac-ui host mg_mac_ui \
-  "Mac UI-driving suites in the macOS test VM, unthrottled (docs/process/mac-ui-vm.md): [--suite test-hooks|agent-driver|a11y|drive:<script>]... (default: TestHooksTests, the agent driver's resize test, the accessibility suites (U10) and every example drive script for the Mac; scripts that mark a transition are recorded); without the VM they are queued (warn, user step mac-vm), or with MEGURI_MAC_UI_ALLOW_HOST=1 run on this Mac through the hourly gate"
+  "Mac UI-driving suites in the macOS test VM, unthrottled (docs/process/mac-ui-vm.md): [--suite test-hooks|agent-driver|a11y|replay-native|drive:<script>]... (default: TestHooksTests, the agent driver's resize test, accessibility suites, native replay proof and every Mac example drive script); without the VM they queue (warn, mac-vm); replay-native always requires the VM, other suites permit the existing owner host override"
 
 # ---------------------------------------------------------------------------
 # Exit actions: a job runs in its own subshell; these run once when it ends,
@@ -429,26 +429,31 @@ mg_mac_ui_gate() {
 
 mg_mac_ui() {
   local suites=() s
+  local MEGURI_MAC_UI_ALLOW_HOST="${MEGURI_MAC_UI_ALLOW_HOST:-}"
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --suite)
-        [ "$#" -ge 2 ] || { mg_failure usage "--suite needs test-hooks, agent-driver, a11y or drive:<script>"; mg_status error; return 0; }
+        [ "$#" -ge 2 ] || { mg_failure usage "--suite needs test-hooks, agent-driver, a11y, replay-native or drive:<script>"; mg_status error; return 0; }
         case "$2" in
-          test-hooks | agent-driver | a11y | drive:?*) suites[${#suites[@]}]="$2" ;;
-          *) mg_failure usage "unknown suite '$2' (test-hooks, agent-driver, a11y, drive:<script>)"; mg_status error; return 0 ;;
+          test-hooks | agent-driver | a11y | replay-native | drive:?*) suites[${#suites[@]}]="$2" ;;
+          *) mg_failure usage "unknown suite '$2' (test-hooks, agent-driver, a11y, replay-native, drive:<script>)"; mg_status error; return 0 ;;
         esac
         shift 2
         ;;
-      *) mg_failure usage "usage: tools/mg mac-ui [--suite test-hooks|agent-driver|a11y|drive:<script>]..."; mg_status error; return 0 ;;
+      *) mg_failure usage "usage: tools/mg mac-ui [--suite test-hooks|agent-driver|a11y|replay-native|drive:<script>]..."; mg_status error; return 0 ;;
     esac
   done
   if [ "${#suites[@]}" -eq 0 ]; then
-    suites=(test-hooks agent-driver a11y)
+    suites=(test-hooks agent-driver a11y replay-native)
     for s in tools/drive-scripts/examples/*.json; do
       [ -f "$s" ] || continue
       jq -e '(.platforms // ["ios", "mac"]) | index("mac")' "$s" >/dev/null 2>&1 && suites[${#suites[@]}]="drive:$s"
     done
   fi
+  for s in "${suites[@]}"; do
+    # The replay proof never uses the workstation, even with the owner override.
+    [ "$s" != replay-native ] || MEGURI_MAC_UI_ALLOW_HOST=0
+  done
   mg_detail suites "$(mg_json_array "${suites[@]}")"
   mg_mac_ui_begin || return 0
   mg_app_build mac Debug || return 0
@@ -475,12 +480,13 @@ mg_mac_ui() {
     # A suite the VM cannot take is queued under its own name.
     MG_VM_PART="$name"
     case "$s" in
-      test-hooks | agent-driver | a11y)
+      test-hooks | agent-driver | a11y | replay-native)
         since="$(mg_app_log_now)"
         case "$s" in
           test-hooks) only=TestHooksTests ;;
           agent-driver) only=AgentDriverTests/testResizeKeepsTheRunningAppAndItsState ;;
           a11y) only="$MG_A11Y_SUITES" ;;
+          replay-native) only=MacReplayAccessibilityTests/testGeneratedReplaysKeepNativeIdentityLocalizationAndExactCommands ;;
         esac
         # shellcheck disable=SC2046 # one test class per word
         mg_app_xcodebuild_test "$MG_RUN_DIR/$name" mac "platform=macOS,arch=arm64" Debug \
@@ -491,6 +497,10 @@ mg_mac_ui() {
         # where the drop does not explain it (mg_app_mac_input_result).
         if [ "$result" -le 1 ] && mg_app_mac_input_refused "$since" "$name"; then
           mg_app_mac_input_result "$MG_RUN_DIR/$name.xcresult" "$result" "$name"
+          result=$?
+        fi
+        if [ "$s" = replay-native ] && [ "$result" -le 1 ]; then
+          mg_mac_replay_native_report "$MG_RUN_DIR/$name" "$result"
           result=$?
         fi
         ;;

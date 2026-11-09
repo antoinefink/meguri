@@ -135,6 +135,70 @@ esac'
 # test list and per-test activities from. Paths are logged as the VM sees
 # them (without the fake file system's prefix).
 vm_stubs() {
+  cat >"$FAKE_VM_BIN/replay-native-fixture" <<'EOF'
+#!/bin/bash
+set -e
+bundle="$1" rc="$2" mode="${FAKE_VM_REPLAY_RESULT:-}"
+att="$bundle/attachments"
+mkdir -p "$att"
+jq -n --argjson failed "$([ "$rc" = 0 ] && echo 0 || echo 1)" '
+  {result: (if $failed == 0 then "Passed" else "Failed" end),
+   passedTests: (1 - $failed), failedTests: $failed, skippedTests: 0}
+' >"$bundle/summary.json"
+case "$mode" in
+  zero-tests) filter='.passedTests = 0' ;;
+  skipped) filter='.skippedTests = 1' ;;
+  extra-pass) filter='.passedTests = 2' ;;
+  *) filter='.' ;;
+esac
+jq "$filter" "$bundle/summary.json" >"$bundle/summary.tmp"
+mv "$bundle/summary.tmp" "$bundle/summary.json"
+jq -n --arg outcome "$([ "$rc" = 0 ] && echo Passed || echo Failed)" '
+  {testNodes: [{nodeType: "Test Suite", name: "MacReplayAccessibilityTests", children: [
+    {nodeType: "Test Case", result: $outcome,
+     nodeIdentifier: "MacReplayAccessibilityTests/testGeneratedReplaysKeepNativeIdentityLocalizationAndExactCommands"}
+  ]}]}
+' >"$bundle/tests.json"
+for stage in 0 1 2 3; do
+  jq -n --argjson stage "$stage" '
+    def node($type; $id; $label; $frame; $children):
+      {type: $type, identifier: $id, label: $label, value: null, frame: $frame,
+       hit_point: {x: ($frame.x + $frame.width / 2), y: ($frame.y + $frame.height / 2)},
+       enabled: true, selected: false, focused: false, children: $children};
+    {x: 0, y: 0, width: 800, height: 600} as $window |
+    ($stage % 2 == 0) as $question |
+    [range(if $question then 3 else 7 end) |
+      node("link"; "review.card.replay." + (if $question then "q\(. + 1)" else "a\(.)" end);
+           "Play audio"; {x: 40, y: (100 + . * 60), width: 100, height: 44}; [])] as $generated |
+    (if $question then [node("link"; "review.card.replay.q0"; "Author & 猫";
+                            {x: 40, y: 40, width: 100, height: 44}; [])] else [] end) as $authored |
+    {schema: 1, platform: "mac", captured_at: 0, window: $window,
+     screenshot: {origin: {x: 0, y: 0}, scale: 2},
+     root: node("application"; ""; "Meguri"; $window;
+       [node("window"; "main"; "Meguri"; $window;
+         [node("webView"; ""; ""; $window; ($authored + $generated))])])}
+  ' >"$att/replay-native-$stage.json"
+done
+case "$mode" in
+  missing-stage) rm "$att/replay-native-3.json" ;;
+  missing-identifier)
+    jq '.root.children[0].children[0].children[1].identifier = ""' \
+      "$att/replay-native-0.json" >"$att/changed.tmp"
+    mv "$att/changed.tmp" "$att/replay-native-0.json" ;;
+  invalid-hierarchy) printf '{}\n' >"$att/replay-native-0.json" ;;
+esac
+find "$att" -name 'replay-native-*.json' -type f -exec basename {} \; |
+  sort | jq -R '{suggestedHumanReadableName: ., exportedFileName: .}' |
+  jq -s '[{attachments: .}]' >"$bundle/manifest.tmp"
+case "$mode" in
+  empty-manifest) printf '[]\n' >"$bundle/manifest.tmp" ;;
+  duplicate-stage)
+    jq '.[0].attachments += [.[0].attachments[0]]' "$bundle/manifest.tmp" >"$bundle/duplicate.tmp"
+    mv "$bundle/duplicate.tmp" "$bundle/manifest.tmp" ;;
+esac
+mv "$bundle/manifest.tmp" "$att/manifest.json"
+EOF
+  chmod +x "$FAKE_VM_BIN/replay-native-fixture"
   stub "$FAKE_VM_BIN/sudo" 'exec "$@"'
   # The process check jobs make before they start work there (U19c).
   ln -s "$REPO_ROOT/tools/tests/mac_vm_fake_procs.sh" "$FAKE_VM_BIN/sysctl"
@@ -215,6 +279,10 @@ mkdir -p "$bundle"
 jq -n --argjson f "$([ "$rc" = 0 ] && echo 0 || echo 1)" \
   "{result: (if \$f == 0 then \"Passed\" else \"Failed\" end), passedTests: 11, failedTests: \$f, skippedTests: 1}" >"$bundle/summary.json"
 [ "$rc" = 0 ] || [ -z "${FAKE_VM_RESULTS:-}" ] || cp "$FAKE_VM_RESULTS/tests.json" "$FAKE_VM_RESULTS/activities.json" "$bundle/"
+case " $what " in
+  *" -only-testing:MeguriUITests/MacReplayAccessibilityTests/testGeneratedReplaysKeepNativeIdentityLocalizationAndExactCommands "*)
+    "$FAKE_VM_BIN/replay-native-fixture" "$bundle" "$rc" || exit 70 ;;
+esac
 if [ -n "${TEST_RUNNER_MEGURI_RECIPE_FIXTURES:-}" ]; then
   lease="$(dirname "$MEGURI_HOST_LEASE_DIR")/mac-vm.${FAKE_VM##*/}.lock/holder.json"
   echo "vm-recipe-lease $(jq -r .job "$lease")" >>"$STUB_LOG"
@@ -277,13 +345,20 @@ mg_app_build() {
 fx_host() { case "$1" in /work/*) printf '%s\n' "$MG_ROOT/${1#/work/}" ;; *) printf '%s\n' "$1" ;; esac; }
 mg_image_tools() {
   echo "fake image-tools $*" >>"$STUB_LOG"
-  local script="$2" report="" out="" input="" files=() name
+  local script="$2" report="" out="" input="" files=() host_files=() name file
   shift 2
   case "$script" in
     */hierarchy_check.py)
       while [ "$#" -gt 0 ]; do
         case "$1" in --report) report="$2" && shift 2 ;; *) files[${#files[@]}]="$1" && shift ;; esac
       done
+      case "${files[0]:-}" in
+        */replay-native-[0-3].json)
+          for file in "${files[@]}"; do host_files[${#host_files[@]}]="$(fx_host "$file")"; done
+          python3 "$MG_ROOT/tools/scripts/hierarchy-check/hierarchy_check.py" \
+            --report "$(fx_host "$report")" "${host_files[@]}"
+          return $? ;;
+      esac
       printf '%s\n' "${files[@]}" | jq -R . | jq -s '{files: map({path: ., issues: []}), counts: {files: length, issues: 0}}' >"$(fx_host "$report")"
       ;;
     */contact_sheet.py)
@@ -766,24 +841,98 @@ exec '"$(command -v tar)"' "$@"'
 }
 
 # bats test_tags=gate
-@test "mac-ui with 4 suites passed and 3 blocked by mac-input is queued naming the 3; with 1 failed and 2 blocked it fails (U19b)" {
+@test "mac-ui with 5 suites passed and 3 blocked by mac-input is queued naming the 3; with 1 failed and 2 blocked it fails (U19b)" {
   FAKE_VM_INPUT_DROPPED_RE='TestHooksTests|open-sample-sheet|sample-transition' mg mac-ui
   [ "$status" -eq 0 ]
   [ "$(field .status)" = warn ]
   [ "$(field .details.queued)" = true ]
-  [ "$(field '.summary | "\(.total) \(.passed) \(.failed) \(.queued) \(.errors)"')" = "7 4 0 3 0" ]
+  [ "$(field '.summary | "\(.total) \(.passed) \(.failed) \(.queued) \(.errors)"')" = "8 5 0 3 0" ]
+  [ "$(field '.details.suites | map(select(. == "replay-native")) | length')" = 1 ]
+  [ "$(field .details.replay_native_hierarchies)" = 4 ]
+  called "^vm-xcodebuild .* -only-testing:MeguriUITests/MacReplayAccessibilityTests/testGeneratedReplaysKeepNativeIdentityLocalizationAndExactCommands\$"
   [ "$(field '[.details.queued_parts[] | .part] | join(" ")')" = "test-hooks drive-open-sample-sheet drive-sample-transition" ]
   [ "$(field '[.details.queued_parts[] | .user_step] | unique | join(" ")')" = mac-input ]
   [ "$(field '.failures | length')" = 0 ]
-  [[ "$(field .message)" == *"4 passed"*"3 of 7 suite(s) queued"*"test-hooks, drive-open-sample-sheet, drive-sample-transition"* ]]
+  [[ "$(field .message)" == *"5 passed"*"3 of 8 suite(s) queued"*"test-hooks, drive-open-sample-sheet, drive-sample-transition"* ]]
 
   FAKE_VM_INPUT_DROPPED_RE='open-sample-sheet|sample-transition' FAKE_VM_FAIL_RE='TestHooksTests' mg mac-ui
   [ "$status" -eq 1 ]
   [ "$(field .status)" = fail ]
   [ "$(field .details.queued)" = false ]
-  [ "$(field '.summary | "\(.total) \(.passed) \(.failed) \(.queued)"')" = "7 4 1 2" ]
+  [ "$(field '.summary | "\(.total) \(.passed) \(.failed) \(.queued)"')" = "8 5 1 2" ]
   [ "$(field '[.failures[].id] | join(" ")')" = "suite/test-hooks" ]
   [ "$(field '[.details.queued_parts[] | .part] | join(" ")')" = "drive-open-sample-sheet drive-sample-transition" ]
+}
+
+# bats test_tags=gate
+@test "replay-native exports one executed pass and four native hierarchies through the unchanged checker" {
+  mg mac-ui --suite replay-native
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(field .details.mac_runner)" = vm ]
+  [ "$(field '.summary | "\(.total) \(.passed) \(.failed) \(.queued) \(.errors)"')" = "1 1 0 0 0" ]
+  [ "$(field '.details.replay_native_tests | "\(.outcome) \(.passed) \(.failed) \(.skipped)"')" = "Passed 1 0 0" ]
+  [ "$(field .details.replay_native_hierarchies)" = 4 ]
+  [ "$(field '[.artifacts[] | select(.kind == "hierarchy")] | length')" = 4 ]
+  called "^vm-xcodebuild .* -only-testing:MeguriUITests/MacReplayAccessibilityTests/testGeneratedReplaysKeepNativeIdentityLocalizationAndExactCommands\$"
+  not_called "^host-xcodebuild"
+  local proof="$(dirname "$result")/replay-native-proof" stage
+  jq -e '.testNodes[0].children | length == 1 and
+    .[0].nodeType == "Test Case" and .[0].result == "Passed" and
+    .[0].nodeIdentifier == "MacReplayAccessibilityTests/testGeneratedReplaysKeepNativeIdentityLocalizationAndExactCommands"' "$proof/test-cases.json"
+  jq -e '.counts.files == 4 and .counts.issues == 0 and (.files | length) == 4' "$proof/hierarchy-check.json"
+  for stage in 0 1 2 3; do
+    cmp "$proof/attachments/replay-native-$stage.json" "$proof/replay-native-$stage.json"
+    jq -e --argjson stage "$stage" '.schema == 1 and .platform == "mac" and
+      (.root.children[0].children[0].children |
+        length == (if $stage % 2 == 0 then 4 else 7 end) and
+        all(.[]; .type == "link" and (.identifier | startswith("review.card.replay.")) and
+            .enabled == true and .hit_point != null and .frame.width > 0 and .frame.height > 0))' "$proof/replay-native-$stage.json"
+  done
+  validate "$result"
+}
+
+# bats test_tags=gate
+@test "replay-native rejects zero tests, skips and extra passes without rewriting the counts" {
+  local mode proof
+  for mode in zero-tests skipped extra-pass; do
+    FAKE_VM_REPLAY_RESULT="$mode" mg mac-ui --suite replay-native
+    [ "$status" -eq 1 ]
+    [ "$(field .status)" = fail ]
+    [ "$(field '[.failures[] | select(.id == "replay-native-results")] | length')" = 1 ]
+    [ "$(field .details.replay_native_hierarchies)" = 4 ]
+    proof="$(dirname "$result")/replay-native-proof"
+    jq -e --argjson counts "$(field .details.replay_native_tests)" '
+      .passed == $counts.passed and .failed == $counts.failed and .skipped == $counts.skipped
+    ' "$proof/test-summary.json"
+  done
+}
+
+# bats test_tags=gate
+@test "replay-native rejects empty, incomplete and duplicate hierarchy manifests" {
+  local mode
+  for mode in empty-manifest missing-stage duplicate-stage; do
+    FAKE_VM_REPLAY_RESULT="$mode" mg mac-ui --suite replay-native
+    [ "$status" -eq 1 ]
+    [ "$(field .status)" = fail ]
+    [ "$(field '[.failures[] | select(.id == "replay-native-export")] | length')" -ge 1 ]
+    [ "$(field '.summary | "\(.passed) \(.failed)"')" = "0 1" ]
+  done
+}
+
+# bats test_tags=gate
+@test "replay-native retains native checker findings and rejects malformed hierarchies" {
+  FAKE_VM_REPLAY_RESULT=missing-identifier mg mac-ui --suite replay-native
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field '[.failures[] | select(.id == "replay-native-hierarchy")] | length')" = 1 ]
+  jq -e '.counts.files == 4 and .counts["missing-identifier"] == 1 and .counts.issues == 1' \
+    "$(dirname "$result")/replay-native-proof/hierarchy-check.json"
+
+  FAKE_VM_REPLAY_RESULT=invalid-hierarchy mg mac-ui --suite replay-native
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  [ "$(field '[.failures[] | select(.id == "replay-native-hierarchy")] | length')" = 1 ]
 }
 
 # test_results <dir> <class> <case>...: what a failed run of <class> holds,
@@ -948,6 +1097,33 @@ test_results() {
   [ "$(field .status)" = warn ]
   [ "$(field .details.queued)" = true ]
   [[ "$(field .message)" == *"queued by the hourly Mac UI gate"* ]]
+}
+
+# bats test_tags=gate
+@test "replay-native refuses the host override for focused and default selections without a VM" {
+  rm -f "$MEGURI_MAC_VM_CONFIG"
+  MEGURI_MAC_UI_ALLOW_HOST=1 mg mac-ui --suite replay-native
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field .details.mac_vm.reason)" = "no macOS test VM is configured ($MEGURI_MAC_VM_CONFIG is missing)" ]
+  [ "$(field '.user_steps[] | select(.id == "mac-vm") | "\(.state) \(.required)"')" = "missing true" ]
+  [ "$(field '.details.queued_parts == [{user_step: "mac-vm", part: "the Mac UI suites", reason: .details.mac_vm.reason}]')" = true ]
+  [ "$(field '.summary | "\(.total) \(.passed) \(.failed) \(.skipped)"')" = "0 0 0 0" ]
+  [ "$(field '.details.suites | join(",")')" = replay-native ]
+
+  MEGURI_MAC_UI_ALLOW_HOST=1 mg mac-ui
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field .details.mac_vm.reason)" = "no macOS test VM is configured ($MEGURI_MAC_VM_CONFIG is missing)" ]
+  [ "$(field '.user_steps[] | select(.id == "mac-vm") | "\(.state) \(.required)"')" = "missing true" ]
+  [ "$(field '.details.queued_parts == [{user_step: "mac-vm", part: "the Mac UI suites", reason: .details.mac_vm.reason}]')" = true ]
+  [ "$(field '.summary | "\(.total) \(.passed) \(.failed) \(.skipped)"')" = "0 0 0 0" ]
+  [ "$(field '.details.suites | length')" = 8 ]
+  not_called "^fake build"
+  not_called "^host-xcodebuild"
+  not_called "^vm-xcodebuild"
 }
 
 @test "with the VM available, MEGURI_MAC_UI_ALLOW_HOST=1 still runs in the VM" {

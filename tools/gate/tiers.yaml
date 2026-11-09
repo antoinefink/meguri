@@ -384,7 +384,8 @@ runs:
     placement: vm
     needs: [mac-ui]
     class: ui
-    triggers: [app/, tools/drive-scripts/, tools/mg.d/mac-vm.sh, tools/mg.d/drive.sh]
+    # Default suites include replay-native; it cannot use the host override.
+    triggers: [app/, tools/drive-scripts/, tools/mg.d/mac-vm.sh, tools/mg.d/drive.sh, tools/mg.d/host.sh, tools/mg.d/replay-native-ui.sh]
     budget_s: 3600
   - id: critic
     job: critic
