@@ -15,9 +15,53 @@ import Foundation
     func requireInstalled(at destination: URL, beforeCopy: (() throws -> Void)? = nil,
                           afterCopy: (() throws -> Void)? = nil) throws {
         guard destination.isFileURL, destination.path == root.path + "/data" else { throw AgentFailure.binding }
+        let admitted = try admitOriginal()
+        let authority = admitted.authority, originals = admitted.originals, files = admitted.files, binding = admitted.binding
+        let stateExists = try authority.exists("fixture-install")
+        if stateExists {
+            _ = try authority.directory("fixture-install")
+            let state = try AgentFileStorage(directory: root.appendingPathComponent("fixture-install", isDirectory: true))
+            let lines = AgentJSON.lines(try state.read(.journal))
+            guard lines.suffix.isEmpty, lines.complete.count == 2 else { throw AgentFailure.recovery }
+            let intent = try AgentJSON.parseEvidence(lines.complete[0]).record("binding state")
+            let done = try AgentJSON.parseEvidence(lines.complete[1]).record("binding state device inode")
+            guard try intent.text("binding") == binding, try intent.text("state") == "intent",
+                  try done.text("binding") == binding, try done.text("state") == "complete" else { throw AgentFailure.binding }
+            let data = try authority.directory("data")
+            guard try done.integer("device") == UInt64(data.st_dev), try done.integer("inode") == UInt64(data.st_ino) else { throw AgentFailure.binding }
+            // No original digest comparison against live rows, media or tracking.
+            try authority.liveTree()
+            try authority.revalidate()
+            return
+        }
+        try authority.absent("data")
+        try authority.makeDirectory("fixture-install")
+        let state = try AgentFileStorage(directory: root.appendingPathComponent("fixture-install", isDirectory: true))
+        let intentBytes = try Self.line(["binding": binding, "state": "intent"])
+        try state.appendJournal(intentBytes)
+        try beforeCopy?()
+        try authority.revalidate()
+        try authority.absent("data")
+        try authority.makeDirectory("data")
+        try authority.makeDirectory("data/collection.media")
+        for path in files.keys.sorted() { try authority.writeExclusive("data/" + path, bytes: originals[path]!) }
+        try afterCopy?()
+        _ = try authority.tree("data", files: files)
+        try authority.revalidate()
+        let data = try authority.directory("data")
+        guard try state.read(.journal) == intentBytes else { throw AgentFailure.recovery }
+        let completionBytes = try Self.line(["binding": binding, "state": "complete", "device": UInt64(data.st_dev), "inode": UInt64(data.st_ino)])
+        try state.appendJournal(completionBytes)
+        guard try state.read(.journal) == intentBytes + completionBytes else { throw AgentFailure.recovery }
+        try authority.revalidate()
+    }
+
+    // One admission boundary for both installation and original inspection.
+    // It never inspects or reinstalls live data.
+    private func admitOriginal() throws -> AdmittedOriginal {
         let authority = try GeneratedBaseAuthority(root: root)
         let store = try AgentFileStorage(directory: root)
-        guard try store.read(.header) == headerBytes else { throw AgentFailure.binding }
+        guard try authority.file(AgentFile.header.rawValue) == headerBytes, try store.read(.header) == headerBytes else { throw AgentFailure.binding }
         let commands = AgentJSON.lines(try store.read(.commands))
         guard let launchBytes = commands.complete.first else { throw AgentFailure.journal }
         let launch = try AgentCommand.read(launchBytes, header: AgentJSON.hash(headerBytes), sequence: 1, program: header.program)
@@ -71,46 +115,51 @@ import Foundation
         let binding = AgentJSON.hash(Data([headerBytes, frozenBytes, receiptBytes, generationBytes]
             .map(AgentJSON.hash).joined().utf8))
         try authority.revalidate()
-        let stateExists = try authority.exists("fixture-install")
-        if stateExists {
-            _ = try authority.directory("fixture-install")
-            let state = try AgentFileStorage(directory: root.appendingPathComponent("fixture-install", isDirectory: true))
-            let lines = AgentJSON.lines(try state.read(.journal))
-            guard lines.suffix.isEmpty, lines.complete.count == 2 else { throw AgentFailure.recovery }
-            let intent = try AgentJSON.parseEvidence(lines.complete[0]).record("binding state")
-            let done = try AgentJSON.parseEvidence(lines.complete[1]).record("binding state device inode")
-            guard try intent.text("binding") == binding, try intent.text("state") == "intent",
-                  try done.text("binding") == binding, try done.text("state") == "complete" else { throw AgentFailure.binding }
-            let data = try authority.directory("data")
-            guard try done.integer("device") == UInt64(data.st_dev), try done.integer("inode") == UInt64(data.st_ino) else { throw AgentFailure.binding }
-            // No original digest comparison against live rows, media or tracking.
-            try authority.liveTree()
-            try authority.revalidate()
-            return
-        }
-        try authority.absent("data")
-        try authority.makeDirectory("fixture-install")
-        let state = try AgentFileStorage(directory: root.appendingPathComponent("fixture-install", isDirectory: true))
-        let intentBytes = try Self.line(["binding": binding, "state": "intent"])
-        try state.appendJournal(intentBytes)
-        try beforeCopy?()
-        try authority.revalidate()
-        try authority.absent("data")
-        try authority.makeDirectory("data")
-        try authority.makeDirectory("data/collection.media")
-        for path in files.keys.sorted() { try authority.writeExclusive("data/" + path, bytes: originals[path]!) }
-        try afterCopy?()
-        _ = try authority.tree("data", files: files)
-        try authority.revalidate()
-        let data = try authority.directory("data")
-        guard try state.read(.journal) == intentBytes else { throw AgentFailure.recovery }
-        let completionBytes = try Self.line(["binding": binding, "state": "complete", "device": UInt64(data.st_dev), "inode": UInt64(data.st_ino)])
-        try state.appendJournal(completionBytes)
-        guard try state.read(.journal) == intentBytes + completionBytes else { throw AgentFailure.recovery }
-        try authority.revalidate()
+        return AdmittedOriginal(authority: authority, originals: originals, files: files, binding: binding)
+    }
+    private struct AdmittedOriginal {
+        let authority: GeneratedBaseAuthority
+        let originals: [String: Data]
+        let files: [String: Identity]
+        let binding: String
     }
 
-    private struct Identity: Equatable { let sha256: String, bytes: UInt64 }
+    func verifiedOriginalSnapshot() throws -> VerifiedOriginalSnapshot {
+        let admitted = try admitOriginal()
+        return VerifiedOriginalSnapshot(authority: admitted.authority,
+            main: admitted.originals["collection.anki2"]!, wal: admitted.originals["collection.anki2-wal"])
+    }
+
+    // No public initializer, paths, expected payload or verdict. Bytes and
+    // descriptor authority stay together across a suspended inspection.
+    @MainActor final class VerifiedOriginalSnapshot: CustomStringConvertible, CustomDebugStringConvertible {
+        private let authority: GeneratedBaseAuthority
+        private let main: Data, wal: Data?
+        private let mainHash: String, walHash: String?
+        fileprivate init(authority: GeneratedBaseAuthority, main: Data, wal: Data?) {
+            self.authority = authority; self.main = main; self.wal = wal
+            mainHash = AgentJSON.hash(main); walHash = wal.map(AgentJSON.hash)
+        }
+        nonisolated var description: String { "VerifiedOriginalSnapshot" }
+        nonisolated var debugDescription: String { description }
+        func revalidate() throws {
+            try authority.revalidate()
+            guard AgentJSON.hash(main) == mainHash, wal.map(AgentJSON.hash) == walHash else { throw AgentFailure.binding }
+        }
+        func inspect<T: Sendable>(_ read: @MainActor (Data, Data?) async throws -> T) async throws -> T {
+            try revalidate()
+            do {
+                let result = try await read(main, wal)
+                try revalidate()
+                return result
+            } catch {
+                try revalidate()
+                throw error
+            }
+        }
+    }
+
+    fileprivate struct Identity: Equatable { let sha256: String, bytes: UInt64 }
     private static func map(_ value: AgentJSON.Value) throws -> [String: Identity] {
         let raw = try value.dictionary()
         guard (7...8).contains(raw.count) else { throw AgentFailure.shape }
@@ -166,7 +215,7 @@ import Foundation
 
     // Confined to these fixed roles and the validated small file map. Product
     // evidence authority deliberately keeps its own four-role allowlist.
-    @MainActor private final class GeneratedBaseAuthority {
+    @MainActor fileprivate final class GeneratedBaseAuthority {
         private nonisolated final class FD {
             let value: Int32
             init(_ value: Int32) throws { guard value >= 0 else { throw AgentFailure.storage }; self.value = value }

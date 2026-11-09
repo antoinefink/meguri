@@ -23,7 +23,7 @@ import Foundation
     var missing: [Dependency] {
         let selected = program ?? (try? AgentHeader.read(originalHeaderBytes).program)
         return selected == .smoke || selected == nil ? [.recoveryInspector]
-            : [.originalRoleInspector, .epochInspector, .adoptionInspector, .peerApplyInspector, .selectedRecoveryInspector]
+            : [.epochInspector, .adoptionInspector, .peerApplyInspector, .selectedRecoveryInspector]
     }
     private(set) var userSteps: [String] = []
     private let admittedRun: AgentRunDirectory
@@ -51,6 +51,7 @@ import Foundation
     private var mediaBytes: Data?
     private var nextCommand = 1
     private var program: AgentProgram?
+    private var originalRole: CloudKitSelectedOriginalRole?
 
     init(admittedRun: AgentRunDirectory) {
         self.admittedRun = admittedRun
@@ -154,11 +155,17 @@ import Foundation
         if command.action != .close {
             try await freshAccount()
             _ = try retainedAdmission()
+            try originalRole?.revalidate()
         }
         switch command.action {
         case .launch:
             guard owner == nil, let configuration = CloudBuildConfiguration.fromBundle, configuration.schemaConfigured else { throw AgentFailure.execution }
             try requireVerifiedGeneratedBase()
+            if program != .smoke {
+                originalRole = try await CloudKitSelectedOriginalRole.prepare(base:
+                    AgentGeneratedBase(admittedRunDirectory: directory, originalHeaderBytes: originalHeaderBytes))
+                _ = try retainedAdmission()
+            }
             // The host must install an authenticated generated small base in
             // this run's data directory. Never substitute a user's collection.
             let data = directory.appendingPathComponent("data", isDirectory: true)
@@ -220,6 +227,12 @@ import Foundation
             guard local.publicationID == nil, !local.bindingUsable, local.engine == nil else { throw AgentFailure.execution }
             try evidence.setGeneration(collection.generation)
             try await resolveGeneratedRoles(collection)
+            if program != .smoke {
+                guard let originalRole else { throw AgentFailure.implementationMissing }
+                let role = try await originalRole.validateOwned(generation: collection.generation)
+                _ = try retainedAdmission()
+                guard !role.qChanged else { throw AgentFailure.execution }
+            }
             try observe(.init(name: .coreOpened, count: collection.generation))
             try backend.checkFailure()
             return [try await integrityCheck(collection)]
@@ -441,8 +454,8 @@ import Foundation
             return [integrity, .init(name: .coordinatorResult, outcome: .pass, facts: proof),
                     .init(name: .localDurability, outcome: .pass, facts: [joined])]
         case .adopt, .edit, .observe:
-            // Do not adopt without the immutable original role and actual
-            // backup/activation/epoch evidence; do not guess n1 from live rows.
+            // The original role is prepared at launch. Adoption still requires
+            // actual backup/activation/epoch evidence.
             // Likewise no edit or readback can claim the missing role/apply
             // provenance. These typed gaps are not user-owned setup steps.
             throw AgentFailure.implementationMissing
@@ -526,7 +539,7 @@ import Foundation
         guard try state.header.program == program, owner == nil else { throw AgentFailure.binding }
         // No reinstall, publication, adoption or replay. Before opening Core
         // (which can resume owned work), the missing durable operation inspector
-        // must prove the original role, epoch and progress. Journal phase and
+        // must prove the epoch and progress as well as revalidate the original role. Journal phase and
         // payload equality cannot safely reconstruct those authorities.
         throw AgentFailure.implementationMissing
     }

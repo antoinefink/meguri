@@ -923,3 +923,26 @@ pub fn test_cloud_smoke_observation(
     callback::enter("test_cloud_smoke_observation");
     cloud_smoke::observe(note_id, card_id, revlog_id, media_name)
 }
+
+#[path = "test_hooks_cloud_original.rs"]
+mod cloud_original;
+pub use cloud_original::{CloudOriginalOwnedFacts, CloudOriginalRole, CloudOriginalRoleFacts};
+
+/// Inspect only admitted, bounded original snapshot bytes. No native ID, path,
+/// SQL, expected observation or caller-provided success flag.
+#[uniffi::export]
+pub fn test_cloud_original_role(main: Vec<u8>, wal: Option<Vec<u8>>) -> Result<Arc<CloudOriginalRole>, CoreError> {
+    callback::enter("test_cloud_original_role");
+    cloud_original::inspect(main, wal)
+}
+#[uniffi::export]
+impl CloudOriginalRole {
+    pub fn facts(&self) -> Result<CloudOriginalRoleFacts, CoreError> {
+        callback::enter("CloudOriginalRole.facts");
+        Ok(self.facts_inner())
+    }
+    pub fn validate_owned(&self) -> Result<CloudOriginalOwnedFacts, CoreError> {
+        callback::enter("CloudOriginalRole.validate_owned");
+        self.validate_owned_inner()
+    }
+}

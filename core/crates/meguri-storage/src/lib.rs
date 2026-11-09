@@ -66,3 +66,6 @@ pub use schema::expected_objects::{ExpectedObjects, SchemaObject};
 pub use snapshot::ReadSnapshot;
 pub use stamp::StampMode;
 pub use write_scope::{CollectionBuilder, Committed, Savepoint, WriteScope, Written};
+
+#[cfg(feature = "test-hooks")]
+mod original_role;
