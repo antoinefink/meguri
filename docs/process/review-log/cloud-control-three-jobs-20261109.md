@@ -37,7 +37,25 @@ original batch gate remain open.
 Native `61008` builds and passes all 11 selected checks, including the three
 new control-call result proofs, background flush and expiry cancellation.
 Core `60724` passes 206 of 207. The new full-state flush parity test compares
-two independent fixtures. Their generated binding and SDK identities differ;
-all other state/output text matches after mapping only those identities.
+two independent fixtures. Only their generated SDK instance differs; binding IDs and all other
+state/output fields match. The initial broader identity description was
+incorrect; independent diagnosis isolates exactly the SDK instance field.
 Independent diagnosis and an assertion-preserving fixture repair are pending.
 No actual failure is accepted as a pass. No Unit trailer is added.
+
+The focused fixture repair will first assert each State retains its own
+original SDK, then translate only that baseline instance for full State/output
+parity. No other field is excluded or mapped. Production code stays unchanged.
+
+## Verification completion
+
+Export `66106` preserves original SDK assertions after Host teardown, translates
+only the expected fixture instance, and retains full State/output equality.
+Independent review has no remaining finding. Core `67270` passes all 207
+focused checks. Native `61008` passes all 11 selected checks; the final repair
+changes only a Rust test body, so its native product coverage remains valid.
+Lint `68251` and similarity `68527` pass. Privacy checks pass without exceptions.
+
+The three-call component is complete. Parent units, asset-read-pass work,
+completion reporting, physical sync/media evidence and the original full batch
+gate remain open. No Unit trailer or release acceptance is added.

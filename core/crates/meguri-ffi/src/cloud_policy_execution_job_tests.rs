@@ -1500,10 +1500,11 @@ fn native_admission_jobs_flush_retains_apply_deferred_and_exact_outputs_after_ef
 
 #[test]
 fn native_admission_jobs_flush_retains_refresh_followups_after_pending_effect_and_cancel() {
-    let mut baseline = None;
+    let mut baseline = None::<(_, meguri_sync::cloud::policy::State, String)>;
     for asynchronous in [false, true] {
         let (fixture, _, target, sdk) = admission_fixture(AdmissionKind::Flush);
         let sdk = sdk.unwrap();
+        let original_sdk = sdk.clone();
         let runtime = fixture.workflow.core.clone();
         let driver = fixture.workflow.host.cloud_policy_driver().unwrap();
         let engine = fixture.workflow.host.engine();
@@ -1547,6 +1548,7 @@ fn native_admission_jobs_flush_retains_refresh_followups_after_pending_effect_an
         let after = driver.state();
         let snapshot = invocation_snapshot(output);
         fixture.workflow.host.close().unwrap();
+        assert_eq!(after.engine.as_ref().unwrap().instance, original_sdk);
         assert!(observed.load(std::sync::atomic::Ordering::SeqCst));
         if let Some(job) = job {
             assert!(job.handle.cancel.requested());
@@ -1555,9 +1557,15 @@ fn native_admission_jobs_flush_retains_refresh_followups_after_pending_effect_an
                 invocation_snapshot(job.result.result().map(|value| value.unwrap())),
                 snapshot
             );
-            assert_eq!(baseline.as_ref().unwrap(), &(snapshot, after));
+            let (baseline_snapshot, baseline_state, baseline_sdk) = baseline.as_ref().unwrap();
+            assert_eq!(&baseline_state.engine.as_ref().unwrap().instance, baseline_sdk);
+            // Each Host fixture owns its original SDK identity; preserve all other state.
+            let mut expected = baseline_state.clone();
+            expected.engine.as_mut().unwrap().instance = original_sdk;
+            assert_eq!(expected, after);
+            assert_eq!(baseline_snapshot, &snapshot);
         } else {
-            baseline = Some((snapshot, after));
+            baseline = Some((snapshot, after, original_sdk));
         }
     }
 }
