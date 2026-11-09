@@ -1744,8 +1744,8 @@ private actor InitialCloudSDK: CloudKitEngine {
     func removePendingDatabaseChanges() async {}
     func prepareSend(zones: [String]) async throws -> CloudKitNetworkEnqueue { throw CloudOwnTransportFailure.unexpectedReply }
     func prepareFetch(options: CloudFetchOptions) async throws -> CloudKitNetworkEnqueue {
-        CloudKitNetworkEnqueue { validate in
-            let original = Task { try validate(); try await self.fetchChanges(options: options) }
+        CloudKitNetworkEnqueue { prepare, validate in
+            let original = Task { try await prepare(); try validate(); try await self.fetchChanges(options: options) }
             return CloudKitNetworkOperation(completion: { try await original.value })
         }
     }

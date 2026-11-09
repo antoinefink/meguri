@@ -702,6 +702,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             generation = next
             if !opening {
                 state = .ready
+                if let review { review.onVisibleMediaChanged?(review.visibleMediaNames) }
                 if !wasReady && foreground { Task { await day?.checkNow() } }
             }
         case .opening, .upgrading: invalidateDeckActions(); state = .loading
@@ -1041,6 +1042,17 @@ public final class ReviewCollection: ChangeFanoutSink {
     func presentReview(_ model: ReviewCoordinator) {
         reviewVisible = true
         review = model
+        let expected = generation
+        model.onVisibleMediaChanged = { [weak self, weak model] names in
+            guard let self, let model, !self.closed, !self.closing,
+                  self.generation == expected, self.review === model else { return }
+            if !names.isEmpty {
+                guard case .ready(let current) = self.lifecycle, current == expected else { return }
+            }
+            self.sync.visibleMedia(names, generation: expected)
+        }
+        // Go to Deck can start the session before publishing its presentation.
+        sync.visibleMedia(model.visibleMediaNames, generation: expected)
         navigation.startReview(ReviewPresentation(deck: DeckID(rawValue: model.record.deckID), session: model))
     }
     public func finishReview() async {

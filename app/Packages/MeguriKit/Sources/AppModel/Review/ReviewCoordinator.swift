@@ -24,6 +24,9 @@ public final class ReviewCoordinator {
     public var onPolicyRefusal: (() -> Void)?
     // Named attachments for U154/U177; no fake summary/sync/backup providers.
     public var onRecordChanged: ((ReviewRecord) -> Void)?
+    /// Collection-owned routing; pages retain only render metadata, never sync ownership.
+    public var onVisibleMediaChanged: (([String]) -> Void)?
+    public private(set) var visibleMediaNames: [String] = []
     private let client: any ReviewSessionClient
     private let store: ReviewRecordStore
     private let clock: AppClock
@@ -393,6 +396,7 @@ public final class ReviewCoordinator {
             studyState = nil; waitingUntil = nil
             try await surface.render(sessionID: sessionID, items: head.items)
             guard self.sessionID == sessionID else { throw BridgeError.unavailable(reason: "Session ended during rendering") }
+            publishVisibleMedia()
             let needsPresentation = question || previous?.cardId != item.cardId || presentedKey != item.renderKey
             if needsPresentation {
                 preload?.cancel(); await preload?.value; preload = nil
@@ -400,6 +404,7 @@ public final class ReviewCoordinator {
                 try await surface.present(item: item, inputTime: inputTime ?? uptime())
                 guard self.sessionID == sessionID else { throw BridgeError.unavailable(reason: "Session ended during presentation") }
                 presentedKey = item.renderKey
+                publishVisibleMedia()
                 sideIsAnswer = false
                 timer.start(at: uptime())
                 if paused { timer.pause(at: uptime()) }
@@ -412,6 +417,7 @@ public final class ReviewCoordinator {
                 preload = Task { try? await surface.preload(item: next) }
             }
         case .waitingUntil, .finished:
+            clearVisibleMedia()
             preload?.cancel(); await preload?.value; preload = nil
             timer.pause(at: uptime()); activeTime.pause(at: uptime()); surface.pair?.pauseAudio()
             studyState = nil
@@ -506,6 +512,23 @@ public final class ReviewCoordinator {
         phase = .error
     }
 
+    private func publishVisibleMedia() {
+        // An event delivered while rendering awaits already requires a newer
+        // head. Do not publish that obsolete head; the next apply covers cache hits too.
+        guard sessionID != nil, phase != .ended, !refreshPending,
+              let pages = surface as? ReviewPages else { return }
+        setVisibleMedia(pages.visibleMediaNames)
+    }
+    private func setVisibleMedia(_ names: [String]) {
+        guard names != visibleMediaNames else { return }
+        visibleMediaNames = names
+        onVisibleMediaChanged?(names)
+    }
+    private func clearVisibleMedia() {
+        (surface as? ReviewPages)?.clearVisibleMedia()
+        setVisibleMedia([])
+    }
+
     /// Idempotent across Close, sidebar navigation, window close and app quit.
     @discardableResult public func end() async -> Bool {
         if let endTask { return await endTask.value }
@@ -520,6 +543,7 @@ public final class ReviewCoordinator {
                 record.endedAt = clock.now()
                 try await persist()
                 sessionID = nil; phase = .ended; surface.close()
+                clearVisibleMedia()
                 mediaArrivals = ReviewMediaArrivals()
                 return true
             } catch { fail(error); return false }
@@ -533,6 +557,7 @@ public final class ReviewCoordinator {
         summaryTask?.cancel()
         paused = true; deadlineTimer?.invalidate(); preload?.cancel()
         sessionID = nil; phase = .ended; surface.close()
+        clearVisibleMedia()
         mediaArrivals = ReviewMediaArrivals()
     }
     private func persist() async throws {

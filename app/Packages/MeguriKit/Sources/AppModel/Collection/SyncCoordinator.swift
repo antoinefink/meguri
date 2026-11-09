@@ -145,6 +145,8 @@ public final class SyncCoordinator {
 
     private enum Input {
         case policy(CloudPolicyEvent)
+        case visibleMedia([String], generation: UInt64)
+        case replayVisibleMedia
         case core(CoreEvent)
         case lifecycle(CollectionLifecycle)
         case replaced(UInt64)
@@ -198,6 +200,9 @@ public final class SyncCoordinator {
     private var pendingPreviewCancellation = false
     private var pendingExpiry = false
     private var pendingLocalRefresh = false
+    private var desiredVisibleMedia: (generation: UInt64, names: [String])?
+    private var deliveredVisibleMedia: (revision: UInt64, names: [String])?
+    private var mediaEnabledRevision: UInt64?
     private var reachable: Bool?
     private var quitCompletion: (@MainActor () -> Void)?
     private var accountTask: Task<Void, Never>?
@@ -310,6 +315,7 @@ public final class SyncCoordinator {
         hostRevision &+= 1
         let revision = hostRevision
         self.generation = generation
+        if desiredVisibleMedia?.generation != generation { desiredVisibleMedia = nil }
         let task = Task { [self] in
             defer { attachmentTask = nil }
             do {
@@ -334,6 +340,7 @@ public final class SyncCoordinator {
                       revision == hostRevision, generation == self.generation else { return }
                 attachRetainedRecovery(retained, backend: value, generation: generation, revision: revision)
                 enqueue(.policy(.settings(settings)))
+                enqueue(.replayVisibleMedia)
                 enqueue(.policy(.refresh(.cloud)))
                 enqueue(.account(false))
                 if observeSignals { observePlatformSignals() }
@@ -457,7 +464,10 @@ public final class SyncCoordinator {
         reportAvailableSpace(); receive(.syncNowRequested(source))
     }
     public func cancelSyncNow(exchange: UInt64) { receive(.syncNowCancelled(exchange: exchange)) }
-    public func visibleMedia(_ names: [String]) { receive(.visibleMedia(names: names)) }
+    public func visibleMedia(_ names: [String]) { visibleMedia(names, generation: generation) }
+    func visibleMedia(_ names: [String], generation: UInt64) {
+        if !closing { enqueue(.visibleMedia(names, generation: generation)) }
+    }
     /// Discovery is read-only. Only Rust's explicit no-file directive transfers
     /// the ready authority to a separate, app-owned adoption operation.
     public func beginConnectionPreview() {
@@ -821,6 +831,10 @@ public final class SyncCoordinator {
         let needsProof = suspended || awaitingResumeProof
         await backend?.resumeAfterCoreResume()
         guard !closing, !replacing, expected == generation, revision == hostRevision else { return }
+        // Core rebinds media even when Swift's background flush or freeze failed.
+        // Reapply settings before delivering the retained screen references.
+        deliveredVisibleMedia = nil
+        mediaEnabledRevision = nil
         awaitingResumeProof = needsProof
         suspended = false
         if pendingPreviewCancellation { pendingPreviewCancellation = false; await cancelConnectionPreview() }
@@ -836,6 +850,7 @@ public final class SyncCoordinator {
         awaitingResumeProof = false
         if !settings.paused { initialOwnAdmission.setOpen(true) }
         receive(.settings(settings))
+        enqueue(.replayVisibleMedia)
         if let reachable { receive(.network(reachable: reachable)) }
         if pendingExpiry { pendingExpiry = false; receive(.backgroundExpiring) }
         if pendingLocalRefresh { pendingLocalRefresh = false; receive(.refresh(.local)) }
@@ -907,6 +922,11 @@ public final class SyncCoordinator {
     private func reduce(_ input: Input) async {
         switch input {
         case .barrier(let continuation): continuation.resume()
+        case .visibleMedia(let names, let expected):
+            guard !closing, expected >= generation else { return }
+            desiredVisibleMedia = (expected, Set(names).sorted())
+            await replayVisibleMedia()
+        case .replayVisibleMedia: await replayVisibleMedia()
         case .completeAccount(let read, let original, let expected, let revision, let complete, let acknowledged):
             guard !closing, !suspended, !replacing, accountTask?.isCancelled == false,
                   expected == generation, revision == hostRevision, backend === original else {
@@ -991,6 +1011,8 @@ public final class SyncCoordinator {
             acknowledged?.resume()
         case .replaced(let next):
             guard next > generation || (next == generation && setupState == .failed) else { return }
+            if desiredVisibleMedia?.generation != next { desiredVisibleMedia = nil }
+            deliveredVisibleMedia = nil
             generation = next; status = nil; preview = nil; recovery = nil
             retainedRecoveryStart = nil
             hasDeferredNativeWork = false
@@ -1011,6 +1033,8 @@ public final class SyncCoordinator {
             if case .ready(let next) = lifecycle, next != generation {
                 await reduce(.replaced(next))
             } else { await policy(.refresh(.cloud)) }
+        case .policy(.visibleMedia(let names)):
+            await reduce(.visibleMedia(names, generation: generation))
         case .policy(let event): await policy(event)
         case .core(let event):
             guard event.generation == generation else { return }
@@ -1049,6 +1073,13 @@ public final class SyncCoordinator {
             }
         }
     }
+    private func replayVisibleMedia() async {
+        guard let desired = desiredVisibleMedia, desired.generation == generation,
+              mediaEnabledRevision == hostRevision,
+              !closing, !suspended, !replacing, !backendRetired, backend != nil else { return }
+        guard deliveredVisibleMedia?.revision != hostRevision || deliveredVisibleMedia?.names != desired.names else { return }
+        await policy(.visibleMedia(names: desired.names))
+    }
     private func policy(_ event: CloudPolicyEvent) async {
         guard !closing else { return }
         if case .network(let value) = event { reachable = value }
@@ -1071,7 +1102,13 @@ public final class SyncCoordinator {
         do {
             let output = try await backend.input(event)
             guard expected == generation, revision == hostRevision, !replacing else { return }
+            if case .settings(let value) = event {
+                mediaEnabledRevision = value.media ? revision : nil
+                if !value.media { deliveredVisibleMedia = nil }
+            }
+            if case .visibleMedia(let names) = event { deliveredVisibleMedia = (revision, names) }
             consume(output, generation: expected)
+            if case .settings(let value) = event, value.media { await replayVisibleMedia() }
         } catch {
             guard expected == generation, revision == hostRevision, !replacing else { return }
             if case BridgeError.cloudPolicy(.generationChanged) = error {
@@ -1248,6 +1285,7 @@ public final class SyncCoordinator {
                 replacing = false
                 attachRetainedRecovery(retained, backend: successor, generation: expected, revision: revision)
                 enqueue(.policy(.settings(settings)))
+                enqueue(.replayVisibleMedia)
                 enqueue(.policy(.refresh(.cloud)))
                 if let reachable { enqueue(.policy(.network(reachable: reachable))) }
                 enqueue(.account(false))
@@ -1314,7 +1352,8 @@ public final class SyncCoordinator {
     func waitForInputs() async {
         await withCheckedContinuation { enqueue(.barrier($0)) }
     }
-    private func drainOperations() async {
+    // Internal so real-command fixtures can join execution and result ACKs.
+    func drainOperations() async {
         repeat {
             let originals = Array(operationTasks.values)
             for task in originals { await task.value }
@@ -1371,6 +1410,7 @@ public final class SyncCoordinator {
                 try await backend?.close()
                 backendRetired = true
                 backend = nil; suspended = false; awaitingResumeProof = false; networkMonitor = nil; status = nil; preview = nil; recovery = nil
+                desiredVisibleMedia = nil; deliveredVisibleMedia = nil
                 hasDeferredNativeWork = false
                 hostRevision &+= 1; drained = true; platformPrepared = false
                 return true

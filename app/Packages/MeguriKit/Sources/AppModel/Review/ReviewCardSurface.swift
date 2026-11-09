@@ -66,6 +66,11 @@ public final class ReviewPages: ReviewCardSurface {
     private var prepared: (ReviewRenderKey, CardUpdate)?
     private var mediaRevision: UInt64 = 0
     private var cards: [ReviewRenderKey: CardPayload] = [:]
+    private var renderRevision: UInt64 = 0
+    private var closed = false
+    private var priorityHead: [ReviewRenderKey] = []
+    private var currentMediaRefs: [String] = []
+    private(set) var visibleMediaNames: [String] = []
     // Internal render-provider seam for offscreen page tests without a core host.
     var renderHead: (UInt64, [ReviewRenderKey], CardRenderPlatform) async throws -> [CardPayload] = { session, keys, platform in
         try await Core.renderSessionHead(sessionID: session, keys: keys, platform: platform)
@@ -116,6 +121,9 @@ public final class ReviewPages: ReviewCardSurface {
         return result
     }
     public func render(sessionID: UInt64, items: [ReviewHeadItem]) async throws {
+        guard !closed else { throw CancellationError() }
+        renderRevision &+= 1
+        let revision = renderRevision
         let missing = items.filter { cards[$0.renderKey] == nil }
         #if os(macOS)
         let platform: CardRenderPlatform = .mac
@@ -124,10 +132,17 @@ public final class ReviewPages: ReviewCardSurface {
         #endif
         if !missing.isEmpty {
             let values = try await renderHead(sessionID, missing.map(\.renderKey), platform)
+            try Task.checkCancellation()
+            guard !closed, revision == renderRevision else { throw CancellationError() }
             guard values.count == missing.count else { throw BridgeError.internal("Incomplete rendered head") }
             for (item, card) in zip(missing, values) { cards[item.renderKey] = card }
         }
+        try Task.checkCancellation()
+        guard !closed, revision == renderRevision else { throw CancellationError() }
         cards = cards.filter { key, _ in items.contains { $0.renderKey == key } }
+        priorityHead = items.prefix(3).map(\.renderKey)
+        if items.isEmpty { currentMediaRefs = [] }
+        updateVisibleMedia()
     }
     public func present(item: ReviewHeadItem, inputTime: TimeInterval) async throws {
         guard let pair else { throw BridgeError.internal("Missing review pages") }
@@ -135,11 +150,15 @@ public final class ReviewPages: ReviewCardSurface {
         let update: CardUpdate
         if let prepared, prepared.0 == item.renderKey { update = prepared.1 }
         else { update = try await pair.prepare(payload(rendered, item: item)) }
+        try Task.checkCancellation()
+        guard !closed else { throw CancellationError() }
         prepared = nil; editing = false; domEditable = false; composing = false
         pair.ownsKeyboardFocus = inputActive && ReviewInputOwnership.cardFocused(in: pair.current.webView)
         CATransaction.begin()
         defer { CATransaction.commit() }
         _ = try pair.present(update, inputTime: inputTime)
+        currentMediaRefs = rendered.mediaRefs
+        updateVisibleMedia()
         if !inputActive { pair.pauseAudio() }
     }
     public func preload(item: ReviewHeadItem) async throws {
@@ -172,5 +191,15 @@ public final class ReviewPages: ReviewCardSurface {
     }
     public func suspend() async { pair?.ownsKeyboardFocus = false; await pair?.suspend() }
     public func resume() async { await pair?.resume() }
-    public func close() { mediaRevision &+= 1; prepared = nil; committedMediaUpdate = nil; pair?.close() }
+    private func updateVisibleMedia() {
+        visibleMediaNames = Set(currentMediaRefs + priorityHead.flatMap { cards[$0]?.mediaRefs ?? [] }).sorted()
+    }
+    func clearVisibleMedia() {
+        renderRevision &+= 1
+        priorityHead = []; currentMediaRefs = []; visibleMediaNames = []
+    }
+    public func close() {
+        closed = true; clearVisibleMedia()
+        mediaRevision &+= 1; prepared = nil; committedMediaUpdate = nil; pair?.close()
+    }
 }

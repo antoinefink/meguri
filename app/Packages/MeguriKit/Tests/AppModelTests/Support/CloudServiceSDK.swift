@@ -75,13 +75,17 @@ actor ServiceSDK: CloudKitEngine {
         try await waitForEventBookkeeping()
         cancelled = false
         let lifetime = lifetime, generation = lifetime.authority()
-        return CloudKitNetworkEnqueue { validate in
+        return CloudKitNetworkEnqueue { prepare, validate in
             try lifetime.admit(cancelSDK: { await self.cancelSDKCalls() }) {
-                try await self.invokeSend(zones: zones, generation: generation, validate: validate)
+                try await self.invokeSend(zones: zones, generation: generation, prepare: prepare, validate: validate)
             }
         }
     }
-    private func invokeSend(zones: [String], generation: UInt64, validate: @Sendable () throws -> Void) async throws {
+    private func invokeSend(zones: [String], generation: UInt64, prepare: @Sendable () async throws -> Void,
+                            validate: @Sendable () throws -> Void) async throws {
+        repeat { try await waitForEventBookkeeping() } while eventActive
+        try await prepare()
+        repeat { try await waitForEventBookkeeping() } while eventActive
         try lifetime.enqueue(generation: generation, validate: validate, begin: {})
         try await sendChanges(zones: zones)
     }
@@ -89,13 +93,17 @@ actor ServiceSDK: CloudKitEngine {
         try await waitForEventBookkeeping()
         cancelled = false
         let lifetime = lifetime, generation = lifetime.authority()
-        return CloudKitNetworkEnqueue { validate in
+        return CloudKitNetworkEnqueue { prepare, validate in
             try lifetime.admit(cancelSDK: { await self.cancelSDKCalls() }) {
-                try await self.invokeFetch(options: options, generation: generation, validate: validate)
+                try await self.invokeFetch(options: options, generation: generation, prepare: prepare, validate: validate)
             }
         }
     }
-    private func invokeFetch(options: CloudFetchOptions, generation: UInt64, validate: @Sendable () throws -> Void) async throws {
+    private func invokeFetch(options: CloudFetchOptions, generation: UInt64, prepare: @Sendable () async throws -> Void,
+                             validate: @Sendable () throws -> Void) async throws {
+        repeat { try await waitForEventBookkeeping() } while eventActive
+        try await prepare()
+        repeat { try await waitForEventBookkeeping() } while eventActive
         try lifetime.enqueue(generation: generation, validate: validate, begin: {})
         try await fetchChanges(options: options)
     }

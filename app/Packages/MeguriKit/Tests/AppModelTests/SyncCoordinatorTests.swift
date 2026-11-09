@@ -5,6 +5,83 @@ import Testing
 
 @MainActor
 struct SyncCoordinatorTests {
+    @Test func visibleMediaReplaysOnRetriedBackendWithoutAnotherScreenUpdate() async {
+        let original = SyncOwnerFake(), successor = SyncOwnerFake()
+        var factories = 0
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in
+            factories += 1
+            return factories == 1 ? original : successor
+        }, defaults: nil)
+        await sync.preparePlatform(); await sync.completeOpenedHost(generation: 3)
+        sync.visibleMedia(["current.png"], generation: 3)
+        await sync.waitForInputs()
+        #expect(original.visibleNames == [["current.png"]])
+        original.onClose = { throw BridgeError.internal("synthetic close failure") }
+        sync.collectionReplaced(4)
+        sync.visibleMedia(["next.png"], generation: 4)
+        await sync.waitForInputs(); await sync.waitForReplacement()
+        #expect(sync.setupState == .failed && successor.visibleNames.isEmpty)
+        original.onClose = nil
+        // Retry the same collection generation, without another visible-set input.
+        sync.collectionReplaced(4)
+        await sync.waitForInputs(); await sync.waitForReplacement(); await sync.waitForInputs()
+        #expect(successor.visibleNames == [["next.png"]])
+        #expect(original.visibleNames == [["current.png"]])
+        #expect(await sync.cancelAndDrain())
+    }
+
+    @Test func visibleMediaWaitsForBackendDeduplicatesAndReplaysAfterSuspend() async {
+        let backend = SyncOwnerFake()
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: nil)
+        sync.visibleMedia(["question.png", "answer.mp3", "question.png"], generation: 4)
+        await sync.waitForInputs()
+        #expect(backend.visibleNames.isEmpty)
+        await sync.preparePlatform()
+        await sync.completeOpenedHost(generation: 4)
+        await sync.waitForInputs()
+        #expect(backend.visibleNames == [["answer.mp3", "question.png"]])
+        sync.visibleMedia(["question.png", "answer.mp3"], generation: 4)
+        await sync.waitForInputs()
+        #expect(backend.visibleNames.count == 1)
+        #expect(await sync.backgroundAfterLocalFlush(deadlineMilliseconds: nil))
+        sync.visibleMedia(["next.png"], generation: 4)
+        await sync.waitForInputs()
+        #expect(backend.visibleNames.count == 1)
+        await sync.foregroundAfterLocalResume()
+        await sync.prepareConnectionAuthority()
+        #expect(backend.visibleNames == [["answer.mp3", "question.png"], ["next.png"]])
+        #expect(await sync.cancelAndDrain())
+    }
+
+    @Test func visibleMediaSurvivesFailedAttachmentButNeverCrossesCollectionGeneration() async {
+        let backend = SyncOwnerFake(), successor = SyncOwnerFake()
+        var attempts = 0
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in
+            attempts += 1
+            if attempts == 1 { throw BridgeError.internal("synthetic attachment failure") }
+            return attempts == 2 ? backend : successor
+        }, defaults: nil)
+        await sync.preparePlatform()
+        sync.visibleMedia(["review.png"], generation: 7)
+        await sync.completeOpenedHost(generation: 7)
+        #expect(sync.setupState == .failed)
+        await sync.completeOpenedHost(generation: 7)
+        await sync.waitForInputs()
+        #expect(backend.visibleNames == [["review.png"]])
+        sync.collectionReplaced(8)
+        await sync.waitForInputs(); await sync.waitForReplacement()
+        await sync.waitForInputs()
+        #expect(successor.visibleNames.isEmpty)
+        sync.visibleMedia(["stale.png"], generation: 7)
+        sync.visibleMedia(["fresh.png"], generation: 8)
+        await sync.waitForInputs()
+        #expect(successor.visibleNames == [["fresh.png"]])
+        sync.visibleMedia([], generation: 8)
+        await sync.waitForInputs()
+        #expect(successor.visibleNames == [["fresh.png"], []])
+        #expect(await sync.cancelAndDrain())
+    }
+
     @Test func missingConfigurationTracksLocalGenerationsWithoutConstructingCloudOwner() async {
         let backend = SyncOwnerFake()
         var factories = 0
@@ -513,9 +590,180 @@ struct SyncCoordinatorTests {
     }
 }
 
+extension ReviewCollectionStartupTests {
+    @Test func visibleMediaOffToOnReplaysLatestNamesThroughRealPolicy() async throws {
+        let files = FileManager.default
+        let root = files.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? files.removeItem(at: root) }
+        let source = try #require(Bundle.module.url(forResource: "schema-18", withExtension: "anki2"))
+        try files.createDirectory(at: root, withIntermediateDirectories: true)
+        try files.copyItem(at: source, to: root.appending(path: "collection.anki2"))
+        let backend = SyncOwnerFake()
+        var policyTimeline: [String] = []
+        var issuedMediaSets: [[String]] = []
+        let sync = SyncCoordinator(bootstrap: {
+            try await CoreCloudWorkflowService.configurePlatform(container: "synthetic-visible-media", environment: .development,
+                status: .available, identity: Data("synthetic-visible-account".utf8))
+        }, makeBackend: { _ in
+            let policyDriver = try await CoreCloudWorkflowService().policy()
+            backend.routeInput = { incoming in
+                switch incoming {
+                case .settings(let choice): policyTimeline.append(choice.media ? "media:on" : "media:off")
+                case .visibleMedia(let references): policyTimeline.append("visible:\(references.joined(separator: ","))")
+                default: break
+                }
+                let policyReply = try await policyDriver.input(incoming)
+                if case .commands(let issuedBatch) = policyReply {
+                    for issued in issuedBatch {
+                        if case .prioritizeMedia(let references) = issued.action { issuedMediaSets.append(references) }
+                    }
+                } else { Issue.record("Expected a command batch from the policy input") }
+                return policyReply
+            }
+            return backend
+        }, defaults: nil)
+        var configuration = LaunchConfiguration()
+        configuration.collectionLocation = AppModel.CollectionLocation(directory: root)
+        configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600))
+        configuration.timeZone = TimeZone(secondsFromGMT: 0)
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync)
+        sync.setDeviceSettings(paused: false, automatic: true, media: false)
+        do {
+            await owner.start()
+            try #require(owner.state == .ready && sync.setupState == .attached)
+            await sync.waitForInputs()
+            // Disabled media accepts this input without scheduling priority work.
+            _ = try await backend.input(.visibleMedia(names: ["ignored.png"]))
+            #expect(issuedMediaSets.isEmpty)
+            policyTimeline.removeAll()
+            let generation = owner.generation
+            try #require(generation > 0)
+            sync.visibleMedia(["stale.png"], generation: generation)
+            sync.visibleMedia(["head.png", "answer.mp3"], generation: generation)
+            sync.visibleMedia(["old-collection.png"], generation: generation - 1)
+            await sync.waitForInputs()
+            #expect(policyTimeline.isEmpty && issuedMediaSets.isEmpty)
+            // The setting alone must deliver the latest retained references.
+            sync.setDeviceSettings(paused: false, automatic: true, media: true)
+            await sync.waitForInputs()
+            #expect(policyTimeline == ["media:on", "visible:answer.mp3,head.png"])
+            #expect(issuedMediaSets == [["answer.mp3", "head.png"]])
+            // Repeat the toggle without supplying any additional screen data.
+            sync.setDeviceSettings(paused: false, automatic: true, media: false)
+            sync.setDeviceSettings(paused: false, automatic: true, media: true)
+            await sync.waitForInputs()
+            #expect(Array(policyTimeline.suffix(3)) == ["media:off", "media:on", "visible:answer.mp3,head.png"])
+            #expect(issuedMediaSets == [["answer.mp3", "head.png"], ["answer.mp3", "head.png"]])
+            #expect(!sync.operationFailed)
+            #expect(await owner.close())
+        } catch {
+            _ = await owner.close()
+            throw error
+        }
+    }
+
+    #if os(macOS)
+    @Test(arguments: [true, false])
+    func unchangedScreenMediaIsIssuedAgainAfterCoreRuntimeRebind(completeSuspend: Bool) async throws {
+        let seed = try InitialCloudFixture.load()
+        let scratch = FileManager.default.temporaryDirectory.appending(path: "synthetic-media-resume-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let serviceHome = scratch.appending(path: "service")
+        try FileManager.default.createDirectory(at: serviceHome, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        let serviceProcess = try await CloudServiceProcess.open(stateDirectory: serviceHome, transport: .binaryAssetsV1)
+        var retainedApp: ServiceAppHarness?
+        var commandDrains: [Task<Void, Never>] = []
+        do {
+            let serviceWire = try ServiceWorkflowWire(process: serviceProcess, directory: scratch.appending(path: "transport"))
+            let app = try ServiceAppHarness(root: scratch.appending(path: "collection"), wire: serviceWire)
+            retainedApp = app
+            defer { app.defaults.removePersistentDomain(forName: app.suite) }
+            try await serviceWire.seed(seed)
+            try await app.adopt()
+            let adoptedBackendCount = app.backends.count
+            let retainedNativeOwner = try app.backend
+            func waitForCommandDrain(stage: String) async throws {
+                let drained = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+                defer { drained.continuation.finish() }
+                let observation = Task { @MainActor in
+                    await app.sync.drainOperations()
+                    drained.continuation.yield(true)
+                    drained.continuation.finish()
+                }
+                commandDrains.append(observation)
+                try #require(try await serviceAppSignal(drained.stream, stage: stage))
+                await observation.value
+            }
+            var issuedReferences: [[String]] = []
+            retainedNativeOwner.onCommands = { issuedBatch in
+                for issued in issuedBatch {
+                    if case .prioritizeMedia(let references) = issued.action { issuedReferences.append(references) }
+                }
+            }
+            defer { retainedNativeOwner.onCommands = nil }
+            let retainedReferences = ["retained-current.png", "retained-head.mp3"]
+            let openedGeneration = app.owner.generation
+            app.sync.visibleMedia(retainedReferences, generation: openedGeneration)
+            await app.sync.waitForInputs()
+            try #require(issuedReferences == [retainedReferences])
+            app.sync.visibleMedia(retainedReferences, generation: openedGeneration)
+            await app.sync.waitForInputs()
+            #expect(issuedReferences.count == 1)
+            // Input reduction alone does not join the original command ACKs.
+            try await waitForCommandDrain(stage: "original media commands and acknowledgements before Core rebind")
+            try #require(!app.sync.operationFailed)
+
+            // Exercise completed suspension and Core resume while still active,
+            // as when the owner's background flush or freeze did not complete.
+            let coreControl = CoreCollectionService()
+            if completeSuspend {
+                try await coreControl.flushForBackground()
+                try #require(await app.sync.backgroundAfterLocalFlush(deadlineMilliseconds: nil))
+                try #require(try await coreControl.suspend(timeoutMilliseconds: 1_500) == .suspended)
+            } else {
+                try #require(try await coreControl.lifecycle() == .ready(generation: openedGeneration))
+            }
+            #expect(issuedReferences == [retainedReferences])
+            _ = try await coreControl.resume()
+            try #require(try await coreControl.lifecycle() == .ready(generation: openedGeneration))
+            await app.sync.foregroundAfterLocalResume()
+            await app.sync.prepareConnectionAuthority()
+            try await waitForCommandDrain(stage: "post-resume media commands and acknowledgements")
+
+            // No replacement screen input occurs between the two commands.
+            #expect(issuedReferences == [retainedReferences, retainedReferences])
+            #expect(app.backends.count == adoptedBackendCount)
+            let resumedNativeOwner = try app.backend
+            #expect(resumedNativeOwner === retainedNativeOwner)
+            #expect(app.owner.generation == openedGeneration)
+            app.sync.visibleMedia(retainedReferences, generation: openedGeneration)
+            await app.sync.waitForInputs()
+            try await waitForCommandDrain(stage: "duplicate media input commands and acknowledgements")
+            #expect(issuedReferences.count == 2)
+            #expect(!app.sync.operationFailed)
+            try #require(await app.owner.close())
+            let shutdown = await serviceProcess.close()
+            try #require(shutdown.status == 0 && shutdown.joined && !shutdown.unexpectedOutput && !shutdown.ioFailed)
+            try #require(shutdown.diagnostics.isEmpty && !shutdown.diagnosticLimitExceeded)
+            for observation in commandDrains { await observation.value }
+        } catch {
+            if let retainedApp { await retainedApp.cleanupAfterServiceFailure() }
+            else {
+                let shutdown = await serviceProcess.cancel()
+                #expect(shutdown.joined, "Join the service owned by the media resume fixture")
+            }
+            for observation in commandDrains { await observation.value }
+            throw error
+        }
+    }
+    #endif
+}
+
 @MainActor
 final class SyncOwnerFake: SyncCoordinatorBackend {
     var events: [String] = []
+    var visibleNames: [[String]] = []
     var refreshCauses: [CloudPolicyChangeCause] = []
     private var localRefreshWaiter: CheckedContinuation<Void, Never>?
     var localRefreshCount = 0
@@ -528,6 +776,7 @@ final class SyncOwnerFake: SyncCoordinatorBackend {
     var closeCount = 0
     var persistedReads = 0
     var inputError: (any Error)?
+    var routeInput: (@MainActor (CloudPolicyEvent) async throws -> CloudPolicyOutput)?
     var nextCommands: [CloudPolicyCommand] = []
     var executeCommand: (@MainActor (CloudPolicyCommand) async -> SyncCommandResult)?
     private let executions = AsyncStream<Void>.makeStream()
@@ -545,7 +794,9 @@ final class SyncOwnerFake: SyncCoordinatorBackend {
     func takeAccountReadRequest() async -> Bool { persistedReads += 1; return false }
     func input(_ event: CloudPolicyEvent) async throws -> CloudPolicyOutput {
         if let inputError { throw inputError }
+        if let routeInput { return try await routeInput(event) }
         switch event {
+        case .visibleMedia(let names): visibleNames.append(names)
         case .foreground: events.append("foreground")
         case .background: events.append("background")
         case .backgroundExpiring: events.append("expired")

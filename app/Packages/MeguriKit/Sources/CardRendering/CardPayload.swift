@@ -29,6 +29,8 @@ public nonisolated struct CardPayload: Sendable {
     public let answerReplayIDs: [String]
     public let questionAudio: [CardAudio]
     public let answerAudio: [CardAudio]
+    /// Core's local reference names, retained independently of HTML and audio policy.
+    public let mediaRefs: [String]
     public let typeIn: TypeAnswerDescriptor?
     public var flag: UInt8
     public var marked: Bool
@@ -39,6 +41,7 @@ public nonisolated struct CardPayload: Sendable {
                   question: rendered.question ?? "", answer: rendered.answer ?? "",
                   questionReplayIDs: rendered.questionReplayIDs, answerReplayIDs: rendered.answerReplayIDs,
                   questionAudio: rendered.questionAudio, answerAudio: rendered.answerAudio,
+                  mediaRefs: rendered.mediaRefs,
                   typeIn: rendered.typeIn, flag: rendered.flag, marked: rendered.marked, audioPolicy: audioPolicy)
     }
 
@@ -46,6 +49,7 @@ public nonisolated struct CardPayload: Sendable {
     public init(cardID: Int64, ordinal: Int = 0, templateDescriptor: String? = nil, question: String, answer: String,
                 questionReplayIDs: [String] = [], answerReplayIDs: [String] = [],
                 questionAudio: [CardAudio] = [], answerAudio: [CardAudio] = [],
+                mediaRefs: [String] = [],
                 typeIn: TypeAnswerDescriptor? = nil, flag: UInt8 = 0, marked: Bool = false,
                 audioPolicy: CardAudioPolicy = .init()) {
         precondition(cardID >= -9_007_199_254_740_991 && cardID <= 9_007_199_254_740_991 && ordinal >= 0 && ordinal < Int.max)
@@ -58,6 +62,7 @@ public nonisolated struct CardPayload: Sendable {
         self.answerReplayIDs = answerReplayIDs
         self.questionAudio = questionAudio
         self.answerAudio = answerAudio
+        self.mediaRefs = mediaRefs
         self.typeIn = typeIn
         self.flag = flag
         self.marked = marked

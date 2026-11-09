@@ -7,6 +7,100 @@ import WebKit
 
 extension WebKitSuites {
     @Suite(.timeLimit(.minutes(2))) struct ReviewPagesMediaTests {
+        @Test(arguments: [false, true])
+        func renderedHeadPriorityRoutesThroughItsCollectionIncludingCacheHits(emptyFirst: Bool) async throws {
+            let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let root = directory.appending(path: "collection.media", directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            let backend = PriorityBackend()
+            let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: nil)
+            var launch = LaunchConfiguration()
+            launch.collectionLocation = CollectionLocation(directory: directory)
+            let owner = ReviewCollection(configuration: launch, navigation: AppNavigation(), sync: sync)
+            owner.receiveLifecycle(.ready(generation: 0))
+            owner.loadMediaIndex = { MediaNameSnapshot(generation: 0, root: root, names: []) }
+            let resolver = try #require(await owner.mediaResolverForReview())
+            let pair = CardPagePair(configuration: CardWebConfiguration(store: .nonPersistent()), resolver: resolver)
+            let pages = ReviewPages(pair: pair)
+            let window = SpikeWindow(pair.container)
+            defer { pages.close(); window.close() }
+            var renders = 0
+            pages.renderHead = { _, keys, _ in
+                renders += 1
+                return try keys.map { key in
+                    let id = try #require((1...4).first { Self.item(Int64($0)).renderKey == key })
+                    // Metadata, rather than HTML extraction, supplies priority.
+                    return CardPayload(cardID: Int64(id), question: "<p>Question</p>", answer: "Answer",
+                        mediaRefs: ["card\(id).png", "shared.mp3", "shared.mp3"])
+                }
+            }
+            let client = HeadClient(item: Self.item(1))
+            client.items = (1...4).map { Self.item(Int64($0)) }
+            let model = ReviewCoordinator(deckID: 1, surface: pages,
+                store: ReviewRecordStore(file: directory.appending(path: "session.json")),
+                clock: .fixed(Date(timeIntervalSince1970: 1_800_000_000)), client: client)
+            owner.presentReview(model)
+            await model.start()
+            #expect(model.phase == .question)
+            // The actual owner callback ran before a backend was available.
+            #expect(backend.visibleNames.isEmpty)
+            await sync.preparePlatform(); await sync.completeOpenedHost(generation: 0)
+            await sync.waitForInputs()
+            #expect(backend.visibleNames == [["card1.png", "card2.png", "card3.png", "shared.mp3"]])
+            model.requestRefresh(); await model.settled(); await sync.waitForInputs()
+            #expect(renders == 1 && backend.visibleNames.count == 1)
+            client.items = (2...4).map { Self.item(Int64($0)) }
+            model.requestRefresh(); await model.settled(); await sync.waitForInputs()
+            #expect(renders == 1, "Advancing an already rendered head must use its cached payloads")
+            #expect(backend.visibleNames == [
+                ["card1.png", "card2.png", "card3.png", "shared.mp3"],
+                ["card1.png", "card2.png", "card3.png", "card4.png", "shared.mp3"],
+                ["card2.png", "card3.png", "card4.png", "shared.mp3"],
+            ], "Keep the outgoing card's media in the set until its successor appears")
+            if emptyFirst {
+                client.items = []; client.terminal = .finished
+                model.requestRefresh(); await model.settled(); await sync.waitForInputs()
+                #expect(backend.visibleNames.last == [])
+            }
+            await owner.finishReview(); await sync.waitForInputs()
+            #expect(owner.review == nil && backend.visibleNames.last == [])
+            #expect(backend.visibleNames.count == 4)
+            // A closed coordinator must neither retain nor overwrite a new owner.
+            model.requestRefresh(); await model.settled(); await sync.waitForInputs()
+            #expect(backend.visibleNames.count == 4)
+            #expect(await sync.cancelAndDrain())
+        }
+
+        @Test(arguments: [false, true, nil] as [Bool?])
+        func lateHeadRenderCannotRestoreObsoletePriority(close: Bool?) async throws {
+            let fixture = MediaFixture()
+            let pair = CardPagePair(configuration: CardWebConfiguration(store: .nonPersistent()), resolver: try await fixture.resolved())
+            let pages = ReviewPages(pair: pair)
+            defer { pages.close() }
+            let held = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingOldest(1))
+            let release = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingOldest(1))
+            defer { held.continuation.finish(); release.continuation.finish() }
+            pages.renderHead = { _, keys, _ in
+                if keys == [Self.item(1).renderKey] {
+                    held.continuation.yield(())
+                    for await _ in release.stream { break }
+                    return [CardPayload(cardID: 1, question: "Old", answer: "Answer", mediaRefs: ["old.png"])]
+                }
+                return [CardPayload(cardID: 2, question: "Fresh", answer: "Answer", mediaRefs: ["fresh.png"])]
+            }
+            let old = Task { try await pages.render(sessionID: 5, items: [Self.item(1)]) }
+            defer { old.cancel() }
+            try await Self.receipt(held.stream, "old head render held")
+            if close == true { pages.close() }
+            else if close == false { old.cancel() }
+            else { try await pages.render(sessionID: 5, items: [Self.item(2)]) }
+            release.continuation.yield(())
+            do { try await old.value; Issue.record("Obsolete render was admitted") }
+            catch is CancellationError {}
+            #expect(pages.visibleMediaNames == (close == nil ? ["fresh.png"] : []))
+        }
+
         // Real owner -> coordinator -> ReviewPages -> CardPagePair delivery.
         // Only core rendering/scheduling are synthetic; no FFI host is opened.
         @Test(arguments: [false, true])
@@ -171,12 +265,14 @@ extension WebKitSuites {
 
         private final class HeadClient: ReviewSessionClient {
             var item: ReviewHeadItem
+            var items: [ReviewHeadItem]?
+            var terminal: ReviewTerminalState = .active
             init(item: ReviewHeadItem) { self.item = item }
             func start(deckID: Int64) async throws -> ReviewStartResult {
                 .started(sessionId: 5, generation: 0, head: currentHead, timeLim: 0)
             }
             var currentHead: ReviewHead {
-                ReviewHead(items: [item], counts: .init(new: 1, learning: 0, review: 0), validUntil: Int64.max, terminalState: .active)
+                ReviewHead(items: items ?? [item], counts: .init(new: 1, learning: 0, review: 0), validUntil: Int64.max, terminalState: terminal)
             }
             func head(sessionID: UInt64) async throws -> ReviewHead { currentHead }
             func undoStatus(sessionID: UInt64, redo: Bool) async throws -> ReviewUndoStatus { .unavailable(reason: .none) }
@@ -190,6 +286,25 @@ extension WebKitSuites {
             func studyState(deckID: Int64) async throws -> ReviewDeckStudyState {
                 throw BridgeError.internal("Summary is outside the media attachment fixture")
             }
+        }
+
+        private final class PriorityBackend: SyncCoordinatorBackend {
+            var visibleNames: [[String]] = []
+            var connection: CoreCloudConnectionService? { nil }
+            var own: CloudOwnExecutor? { nil }
+            func input(_ event: CloudPolicyEvent) async throws -> CloudPolicyOutput {
+                if case .visibleMedia(let names) = event { visibleNames.append(names) }
+                return .commands([])
+            }
+            func execute(_ command: CloudPolicyCommand) async -> SyncCommandResult {
+                .init(outputs: [], error: nil, deferred: false)
+            }
+            func beginAccountRead(transition: Bool) async throws -> UInt64 { 1 }
+            func readAccount(_ read: UInt64) async -> SyncCommandResult {
+                .init(outputs: [], error: nil, deferred: false, accountVerified: true)
+            }
+            func quiesce() async throws {}
+            func close() async throws {}
         }
 
         private static func item(_ id: Int64) -> ReviewHeadItem {

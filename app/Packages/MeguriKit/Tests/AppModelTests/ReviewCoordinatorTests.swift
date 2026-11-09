@@ -8,6 +8,50 @@ import Observation
 import Synchronization
 #endif
 
+extension ReviewCollectionStartupTests {
+    @Test func nativeRenderedCardPayloadPreservesMediaReferences() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var configuration = LaunchConfiguration()
+        configuration.collectionLocation = CollectionLocation(directory: directory)
+        configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600))
+        configuration.timeZone = TimeZone(secondsFromGMT: 0)
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in SyncOwnerFake() }, defaults: nil)
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync)
+        owner.makeReviewSurface = { _ in ReviewCoordinatorTests.Surface() }
+        do {
+            await owner.start()
+            let source = try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg"))
+            owner.entry.present(); owner.entry.inspect(source); await owner.entry.waitForCompletion()
+            try #require(owner.entry.preview != nil)
+            owner.entry.confirm(); await owner.entry.waitForCompletion()
+            try #require(owner.state == .ready)
+            if owner.policy != .ok { await owner.enableFsrs() }
+            func flatten(_ nodes: [CountedDeckNode]) -> [CountedDeckNode] { nodes.flatMap { [$0] + flatten($0.children) } }
+            let deck = try #require(flatten(owner.decks).first { !$0.filtered && $0.counts.new > 0 })
+            await owner.startStudy(deckID: deck.id)
+            let item = try #require(owner.review?.item)
+            await owner.finishReview()
+            let notes = CoreNoteService()
+            let note = try await notes.readNote(id: item.noteId)
+            let fields = note.fields.map { $0 + "<img src=\"question.png\"><img src=\"answer.png\">[sound:spoken.mp3]" }
+            _ = try await notes.updateNote(.init(id: note.id, fields: fields, tags: note.tags))
+            #if os(macOS)
+            let platform: CardRenderPlatform = .mac
+            #else
+            let platform: CardRenderPlatform = .ios
+            #endif
+            let rendered = try await Core.renderCard(id: item.cardId, platform: platform)
+            #expect(Set(rendered.mediaRefs).isSuperset(of: ["question.png", "answer.png", "spoken.mp3"]))
+            let payload = CardPayload(rendered, audioPolicy: .init(autoplay: false))
+            #expect(payload.mediaRefs == rendered.mediaRefs)
+            #expect(payload.question == rendered.question && payload.answer == rendered.answer)
+            #expect(CardPayload(cardID: 1, question: "Offline", answer: "Answer").mediaRefs.isEmpty)
+            #expect(await owner.close())
+        } catch { _ = await owner.close(); throw error }
+    }
+}
+
 @MainActor
 @Suite struct ReviewCoordinatorTests {
     #if DEBUG
