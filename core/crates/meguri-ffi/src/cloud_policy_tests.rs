@@ -1882,6 +1882,14 @@ fn failed_durable_evidence_returns_original_stop_followups_as_typed_output() {
         let CloudPolicyOutput::CoreActionFailed { error, commands } = output else {
             panic!("failure followups lost")
         };
+        assert!(
+            fixture
+                .workflow
+                .host
+                .cloud_policy_driver()
+                .unwrap()
+                .native_validation_matches_state_for_testing()
+        );
         assert!(matches!(
             error,
             CoreError::CloudConnection {
@@ -2074,6 +2082,11 @@ fn actual_quiet_candidate_superseded_by_local_work_is_observation_only_until_a_n
     assert_eq!(stamped, Some(NOW));
     fixture.clock.step_ms(1_000);
     let candidate = fetch();
+    assert!(matches!(
+        driver.validate_native_sdk(&candidate, &sdk.instance_id),
+        Err(p::DriverError::UnqualifiedCompletion)
+    ));
+    driver.validate(&candidate).unwrap();
     let quiet_serial = driver.state().quiet_serial;
     let mut nonissued = candidate.clone();
     let p::ActionKind::RecordQuietPoint { at_ms } = &mut nonissued.action.kind else {

@@ -172,7 +172,7 @@ impl Driver {
         sdk: &str,
         operation: Operation,
     ) -> Result<(), DriverError> {
-        let mut owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut owned = self.lock_owned();
         self.validate_locked(&owned, command)?;
         self.runtime.validate_sdk(sdk)?;
         Self::cancel_activity(&mut owned, operation);
@@ -188,7 +188,7 @@ impl Driver {
     ) -> Result<(), DriverError> {
         // Full file/provider validation happens outside Driver authority.
         self.runtime.validate_asset_read_activity(collection, guard)?;
-        let mut owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut owned = self.lock_owned();
         self.runtime.validate_sdk(guard.sdk_instance())?;
         Self::cancel_activity(
             &mut owned,
@@ -222,7 +222,7 @@ impl Driver {
     }
 
     pub fn register_native_sdk(&self, command: &Command) -> Result<(String, Option<Vec<u8>>, String), DriverError> {
-        let owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let owned = self.lock_owned();
         self.validate_locked(&owned, command)?;
         let automatic = match command.action.kind {
             ActionKind::StartEngine { automatic, .. } => automatic,
@@ -235,13 +235,41 @@ impl Driver {
     }
 
     pub fn validate_native_sdk(&self, command: &Command, sdk: &str) -> Result<(), DriverError> {
-        let owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
-        self.validate_locked(&owned, command)?;
-        Ok(self.runtime.validate_sdk(sdk)?)
+        self.validate_native_execution(command, Some(sdk))
+    }
+
+    /// Final validation of the original issued command and pinned SDK only.
+    /// Each compact read releases its mutex before any Runtime access. Preserve
+    /// policy-stale precedence even if Runtime failed while policy committed.
+    pub fn validate_native_execution(&self, command: &Command, sdk: Option<&str>) -> Result<(), DriverError> {
+        let view = self.committed_native_validation();
+        view.validate_policy(command)?;
+        let result = (|| {
+            self.validate_view(&view, command)?;
+            // Quiet completion is qualified Core work, never native authority.
+            if command.quiet_proof.is_some() || matches!(command.action.kind, ActionKind::RecordQuietPoint { .. }) {
+                return Err(DriverError::UnqualifiedCompletion);
+            }
+            let sdk = sdk.ok_or(DriverError::StaleCommand)?;
+            Ok(self.runtime.validate_sdk(sdk)?)
+        })();
+        #[cfg(feature = "test-hooks")]
+        {
+            let hook = self
+                .native_validation_hook
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take();
+            if let Some(hook) = hook {
+                hook();
+            }
+        }
+        self.committed_native_validation().validate_policy(command)?;
+        result
     }
 
     pub fn retire_native_sdk(&self, command: &Command, sdk: &str) -> Result<(), DriverError> {
-        let owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let owned = self.lock_owned();
         self.validate_locked(&owned, command)?;
         if !matches!(
             command.action.kind,
@@ -257,7 +285,7 @@ impl Driver {
     }
 
     pub fn begin_native_fetch(&self, command: &Command, sdk: &str, zones: Vec<String>) -> Result<u64, DriverError> {
-        let owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let owned = self.lock_owned();
         self.validate_locked(&owned, command)?;
         let requested = match &command.action.kind {
             ActionKind::RequestFetch { zones } => zones.clone(),
@@ -273,7 +301,7 @@ impl Driver {
     }
 
     pub fn begin_native_send(&self, command: &Command, sdk: &str) -> Result<Option<u64>, DriverError> {
-        let owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let owned = self.lock_owned();
         self.validate_locked(&owned, command)?;
         match &command.action.kind {
             ActionKind::RequestSend { zones } if zones == &[Zone::Collection] => {}
@@ -300,7 +328,7 @@ impl Driver {
 
 impl Driver {
     pub fn begin_native_media(&self, command: &Command, sdk: Option<&str>) -> Result<bool, DriverError> {
-        let owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let owned = self.lock_owned();
         self.validate_locked(&owned, command)?;
         match command.action.kind {
             ActionKind::ResumeMedia if owned.state.settings.media && owned.state.gate_open() => {}
@@ -322,7 +350,7 @@ impl Driver {
         sdk: &str,
         code: Option<i64>,
     ) -> Result<bool, DriverError> {
-        let owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let owned = self.lock_owned();
         self.validate_locked(&owned, command)?;
         if code != Some(25)
             || !owned.state.quota_full
@@ -342,7 +370,7 @@ impl Driver {
 
 impl Driver {
     pub fn prepare_native_flush(&self, command: &Command, collection: &Collection) -> Result<(), DriverError> {
-        let owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let owned = self.lock_owned();
         self.validate_locked(&owned, command)?;
         let until_ms = match command.action.kind {
             ActionKind::BackgroundFlush { until_ms } | ActionKind::QuitFlush { until_ms } => until_ms,

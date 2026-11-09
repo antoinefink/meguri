@@ -54,3 +54,12 @@ before implementing a change to this final boundary.
 Export `cleanroom/20261103T171225Z-12087` is restored unchanged, including its full nextest reservation. Focused `core-test/20261108T221600Z-53422` compiles and reproduces the intended before-release failure: final execution validation waits for Driver. Workers join and Host closes before the assertion. No assertion, timing limit or production boundary changed. This enabled regression remains RED and blocks technical acceptance.
 
 Two bounded source reviews identify concrete existing-pool reservation/cancellation/wake and original-SDK callback ordering work. Those are feasibility findings only. The separate R2066 contract approval and implementation/verification remain pending; no new queue, SDK permission or production repair is introduced here. Phone opening/review recovery retains priority.
+
+
+## Driver contention follow-up, 2026-11-09
+
+The unchanged validation-only test passes in Core `43955` after the compact
+committed Driver view repair. The historical RED `53422` remains retained.
+Runtime lock responsiveness and synchronous Started projection are still
+unresolved; this does not prove the complete SDK enqueue path. See
+`cloud-driver-committed-validation-20261109.md` for scope and review.

@@ -9,7 +9,7 @@ use meguri_engine::{Collection, Generation, LifecycleState};
 use meguri_model::clock::Clock;
 use std::{
     collections::BTreeMap,
-    sync::{Arc, Mutex, PoisonError},
+    sync::{Arc, Mutex, MutexGuard, PoisonError},
     time::Duration,
 };
 
@@ -144,6 +144,57 @@ struct Owned {
     recorded_quiet_ordinal: Option<u64>,
     issued_cleanup: Option<Command>,
 }
+/// Only committed policy inputs needed by final native validation. This is not
+/// a projection and carries no Runtime or SDK authority.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct NativeValidation {
+    guard: Guard,
+    automatic: bool,
+}
+impl From<&State> for NativeValidation {
+    fn from(state: &State) -> Self {
+        Self {
+            guard: state.guard(),
+            automatic: state.automatic(),
+        }
+    }
+}
+impl NativeValidation {
+    fn validate_policy(&self, command: &Command) -> Result<(), DriverError> {
+        let automatic = match command.action.kind {
+            ActionKind::StartEngine { automatic, .. } => Some(automatic),
+            ActionKind::ConfigureAutomatic { on } => Some(on),
+            _ => None,
+        };
+        if self.guard != command.action.guard || automatic.is_some_and(|value| value != self.automatic) {
+            return Err(DriverError::StaleCommand);
+        }
+        Ok(())
+    }
+}
+/// Only actual Owned values use this guard. Prepared clones stay private until
+/// assignment into actual Owned. Publish on every exit, including partial errors,
+/// while the actual Driver lock still excludes a subsequent writer.
+struct ActualOwned<'a> {
+    owned: MutexGuard<'a, Owned>,
+    validation: &'a Mutex<NativeValidation>,
+}
+impl std::ops::Deref for ActualOwned<'_> {
+    type Target = Owned;
+    fn deref(&self) -> &Owned {
+        &self.owned
+    }
+}
+impl std::ops::DerefMut for ActualOwned<'_> {
+    fn deref_mut(&mut self) -> &mut Owned {
+        &mut self.owned
+    }
+}
+impl Drop for ActualOwned<'_> {
+    fn drop(&mut self) {
+        *self.validation.lock().unwrap_or_else(PoisonError::into_inner) = NativeValidation::from(&self.owned.state);
+    }
+}
 impl Owned {
     fn issue_quiet(&mut self, guard: Guard, at_ms: i64) -> Result<QuietProof, DriverError> {
         let ordinal = self.next_quiet_ordinal;
@@ -244,10 +295,13 @@ pub struct Driver {
     runtime: Arc<Runtime>,
     clock: Arc<dyn Clock>,
     inner: Mutex<Owned>,
+    native_validation: Mutex<NativeValidation>,
     #[cfg(feature = "test-hooks")]
     contention: Mutex<Option<std::sync::mpsc::Sender<()>>>,
     #[cfg(feature = "test-hooks")]
     projection_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    #[cfg(feature = "test-hooks")]
+    native_validation_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     pub(super) zone_deletion: Mutex<std::sync::Weak<crate::cloud::zone_deletion::Pass>>,
 }
 #[cfg(feature = "test-hooks")]
@@ -261,7 +315,7 @@ impl Driver {
     /// Retained opening/generation only: completed commands may have old tokens.
     #[cfg(feature = "test-hooks")]
     pub fn exchange_observation_for_testing(&self, command: &Command) -> Result<ExchangeObservation, DriverError> {
-        let owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let owned = self.lock_owned();
         let ActionKind::RunExchange { exchange, .. } = command.action.kind else {
             return Err(DriverError::NotCoreAction);
         };
@@ -284,10 +338,13 @@ impl Driver {
             runtime,
             clock,
             inner: Mutex::new(Owned::default()),
+            native_validation: Mutex::new(NativeValidation::from(&State::default())),
             #[cfg(feature = "test-hooks")]
             contention: Mutex::new(None),
             #[cfg(feature = "test-hooks")]
             projection_hook: Mutex::new(None),
+            #[cfg(feature = "test-hooks")]
+            native_validation_hook: Mutex::new(None),
             zone_deletion: Mutex::new(std::sync::Weak::new()),
         }
     }
@@ -303,7 +360,32 @@ impl Driver {
     pub fn set_projection_hook_for_testing(&self, hook: impl FnOnce() + Send + 'static) {
         *self.projection_hook.lock().unwrap_or_else(PoisonError::into_inner) = Some(Box::new(hook));
     }
-    fn lock_for_work(&self, work: &PolicyWork) -> Result<std::sync::MutexGuard<'_, Owned>, DriverError> {
+    fn lock_owned(&self) -> ActualOwned<'_> {
+        ActualOwned {
+            owned: self.inner.lock().unwrap_or_else(PoisonError::into_inner),
+            validation: &self.native_validation,
+        }
+    }
+    fn committed_native_validation(&self) -> NativeValidation {
+        self.native_validation
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+    /// One-shot Rust-only seam between Runtime checks and the final policy read.
+    #[cfg(feature = "test-hooks")]
+    pub fn set_native_validation_hook_for_testing(&self, hook: impl FnOnce() + Send + 'static) {
+        *self
+            .native_validation_hook
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(Box::new(hook));
+    }
+    #[cfg(feature = "test-hooks")]
+    pub fn native_validation_matches_state_for_testing(&self) -> bool {
+        let owned = self.lock_owned();
+        self.committed_native_validation() == NativeValidation::from(&owned.state)
+    }
+    fn lock_for_work(&self, work: &PolicyWork) -> Result<ActualOwned<'_>, DriverError> {
         #[cfg(feature = "test-hooks")]
         let owned = match self.inner.try_lock() {
             Ok(owned) => owned,
@@ -317,6 +399,10 @@ impl Driver {
         };
         #[cfg(not(feature = "test-hooks"))]
         let owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let owned = ActualOwned {
+            owned,
+            validation: &self.native_validation,
+        };
         work.after_driver_acquisition()?;
         Ok(owned)
     }
@@ -324,10 +410,10 @@ impl Driver {
         Ok(self.lock_for_work(work)?.state.status())
     }
     pub fn status(&self) -> Status {
-        self.inner.lock().unwrap_or_else(PoisonError::into_inner).state.status()
+        self.lock_owned().state.status()
     }
     pub fn state(&self) -> State {
-        self.inner.lock().unwrap_or_else(PoisonError::into_inner).state.clone()
+        self.lock_owned().state.clone()
     }
     pub fn handle(
         &self,
@@ -673,7 +759,7 @@ impl Driver {
         collection: &Collection,
     ) -> Result<(), DriverError> {
         let (receipt, sdk) = {
-            let mut owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut owned = self.lock_owned();
             self.validate_locked(&owned, command)?;
             if owned.issued_cleanup.as_ref() != Some(command) || command.action.kind != ActionKind::RunCleanup {
                 return Err(DriverError::UnqualifiedCompletion);
@@ -688,7 +774,7 @@ impl Driver {
         // retain the Driver mutex across those foreign callbacks either.
         self.runtime
             .compute_policy_local_cleanup(&command.backend_guard, &sdk, collection, &receipt)?;
-        let mut owned = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut owned = self.lock_owned();
         self.validate_locked(&owned, command)?;
         owned.state.last_cleanup_ms = Some(receipt.2);
         Ok(())
@@ -743,14 +829,17 @@ impl Driver {
         Ok(NativeDisposition::Enqueue)
     }
     fn validate_locked(&self, owned: &Owned, command: &Command) -> Result<(), DriverError> {
+        self.validate_view(&NativeValidation::from(&owned.state), command)
+    }
+    fn validate_view(&self, view: &NativeValidation, command: &Command) -> Result<(), DriverError> {
         let runtime = self.runtime.adapter_guard();
-        if owned.state.guard() != command.action.guard {
+        if view.guard != command.action.guard {
             #[cfg(feature = "test-hooks")]
             eprintln!(
                 "cloud-policy-rejection stage=validate.policy-guard generation_matches={} binding_matches={} token_matches={}",
-                owned.state.guard().generation == command.action.guard.generation,
-                owned.state.guard().binding == command.action.guard.binding,
-                owned.state.guard().token == command.action.guard.token,
+                view.guard.generation == command.action.guard.generation,
+                view.guard.binding == command.action.guard.binding,
+                view.guard.token == command.action.guard.token,
             );
             return Err(DriverError::StaleCommand);
         }
@@ -776,7 +865,7 @@ impl Driver {
             ActionKind::ConfigureAutomatic { on } => Some(on),
             _ => None,
         };
-        if automatic.is_some_and(|value| value != owned.state.automatic()) {
+        if automatic.is_some_and(|value| value != view.automatic) {
             #[cfg(feature = "test-hooks")]
             eprintln!("cloud-policy-rejection stage=validate.automatic-setting");
             return Err(DriverError::StaleCommand);
@@ -1174,5 +1263,41 @@ mod quiet_proof_tests {
             assert_eq!(owned.next_quiet_ordinal, u64::MAX);
         }
         assert_eq!(proof.0.ordinal, u64::MAX - 1);
+    }
+}
+
+#[cfg(test)]
+mod native_validation_tests {
+    use super::*;
+
+    #[test]
+    fn actual_owned_publishes_effective_automatic_and_partial_error_before_unlock() {
+        let inner = Mutex::new(Owned::default());
+        let validation = Mutex::new(NativeValidation::from(&State::default()));
+        let result = (|| -> Result<(), DriverError> {
+            let mut owned = ActualOwned {
+                owned: inner.lock().unwrap(),
+                validation: &validation,
+            };
+            owned.state.facts.generation = 7;
+            owned.state.token = 9;
+            owned.state.facts.binding = Some(BindingView {
+                id: BindingId([3; 16]),
+                state: BindingState::Active,
+                account: OpaqueBytes(b"synthetic-account".to_vec()),
+                usable: true,
+                verified: true,
+                publish_step: Some(PublishStep::Zones),
+            });
+            assert!(!owned.state.settings.automatic);
+            assert!(owned.state.automatic());
+            // The old committed view stays available during actual mutation.
+            assert_eq!(*validation.lock().unwrap(), NativeValidation::from(&State::default()));
+            Err(DriverError::StaleCommand)
+        })();
+        assert!(matches!(result, Err(DriverError::StaleCommand)));
+        let owned = inner.try_lock().expect("Driver authority released on error");
+        assert_eq!(*validation.lock().unwrap(), NativeValidation::from(&owned.state));
+        assert!(validation.lock().unwrap().automatic);
     }
 }

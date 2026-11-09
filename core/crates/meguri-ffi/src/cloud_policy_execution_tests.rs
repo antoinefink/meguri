@@ -661,3 +661,116 @@ fn cursorless_auto_off_ffi_capture_maps_before_first_root_fetch() {
     assert_eq!(cancelled.id, id);
     assert!(!workflow.core.adapter_exchange_active());
 }
+
+// A real Settings commit changes automatic scheduling without changing either
+// policy or backend guard. It must invalidate the original native selection.
+#[test]
+fn final_validation_rechecks_automatic_after_runtime_checks_without_guard_change() {
+    for configure in [false, true] {
+        for invalid_sdk in [false, true] {
+            let (fixture, policy, start) = start();
+            let registration = start.register_sdk().unwrap();
+            let execution = if configure {
+                policy.clone().input(CloudPolicyEvent::Foreground).unwrap();
+                let command = commands(policy.clone().input(settings(true, false)).unwrap())
+                    .into_iter()
+                    .find(|c| matches!(c.action, CloudPolicyAction::ConfigureAutomatic { on: true }))
+                    .unwrap();
+                policy.clone().prepare_execution(command.handle).unwrap().unwrap()
+            } else {
+                start
+            };
+            execution.validate_execution().unwrap();
+            let driver = fixture.workflow.host.cloud_policy_driver().unwrap();
+            assert!(driver.native_validation_matches_state_for_testing());
+            let (_, command) = execution.asset_read_driver().unwrap();
+            let sdk = if invalid_sdk {
+                "unissued-sdk"
+            } else {
+                &registration.instance_id
+            };
+            if invalid_sdk {
+                assert!(matches!(
+                    driver.validate_native_sdk(command, sdk),
+                    Err(p::DriverError::Runtime(r::RuntimeError::StaleIncarnation))
+                ));
+            }
+            let before = driver.state();
+            let backend = fixture.workflow.core.adapter_guard();
+            let committed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let observed = committed.clone();
+            let changed_policy = policy.clone();
+            let runtime = fixture.workflow.core.clone();
+            let host = fixture.workflow.host.clone();
+            driver.set_native_validation_hook_for_testing(move || {
+                changed_policy.clone().input(settings(!configure, false)).unwrap();
+                let driver = host.cloud_policy_driver().unwrap();
+                let after = driver.state();
+                assert_eq!(after.guard(), before.guard());
+                assert_ne!(after.automatic(), before.automatic());
+                assert_eq!(runtime.adapter_guard(), backend);
+                assert!(driver.native_validation_matches_state_for_testing());
+                observed.store(true, std::sync::atomic::Ordering::SeqCst);
+            });
+            // Cover both the facade and preservation of stale-policy precedence
+            // over an actual Runtime SDK error from the original check.
+            if invalid_sdk {
+                assert!(matches!(
+                    driver.validate_native_sdk(command, sdk),
+                    Err(p::DriverError::StaleCommand)
+                ));
+            } else {
+                assert!(matches!(
+                    execution.validate_execution(),
+                    Err(CoreError::CloudPolicy {
+                        failure: CloudPolicyFailure::StaleCommand
+                    })
+                ));
+            }
+            assert!(committed.load(std::sync::atomic::Ordering::SeqCst));
+            fixture.workflow.host.close().unwrap();
+        }
+    }
+}
+
+#[test]
+fn committed_validation_tracks_accepted_identity_and_discards_superseded_preparation() {
+    for superseded in [false, true] {
+        let (fixture, policy, execution) = start();
+        execution.register_sdk().unwrap();
+        policy.clone().input(CloudPolicyEvent::Foreground).unwrap();
+        let driver = fixture.workflow.host.cloud_policy_driver().unwrap();
+        assert!(driver.native_validation_matches_state_for_testing());
+        let before = driver.state();
+        let request = fixture.workflow.begin_identity_read(false, None).unwrap();
+        assert!(
+            fixture
+                .workflow
+                .complete_identity_read(request, CloudAccountStatus::NoAccount, None)
+                .unwrap()
+        );
+        if superseded {
+            let runtime = fixture.workflow.core.clone();
+            driver.set_projection_hook_for_testing(move || {
+                runtime.adapter_begin_identity_read(false, None).unwrap();
+            });
+        }
+        let result = policy.clone().project_identity_read(request);
+        assert!(driver.native_validation_matches_state_for_testing());
+        if superseded {
+            assert!(matches!(
+                result,
+                Err(CoreError::CloudPolicy {
+                    failure: CloudPolicyFailure::StaleCommand
+                })
+            ));
+            assert_eq!(driver.state(), before, "private prepared state reached actual Owned");
+        } else {
+            result.unwrap();
+            let after = driver.state();
+            assert_ne!(after.account, before.account);
+            assert_ne!(after.guard(), before.guard());
+        }
+        fixture.workflow.host.close().unwrap();
+    }
+}

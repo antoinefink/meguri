@@ -122,10 +122,13 @@ impl CloudPolicyExecution {
     }
     pub fn validate_execution(&self) -> Result<(), CoreError> {
         callback::enter("CloudPolicyExecution.validate_execution");
-        self.check()?;
+        self.policy().owns(&self.command)?;
+        // Missing pinned SDK remains stale, after the original policy/Runtime
+        // checks. Never resample Runtime's current SDK to fill this selection.
+        let sdk = self.sdk().ok();
         self.policy()
             .driver()?
-            .validate_native_sdk(&self.command.command, &self.sdk()?)
+            .validate_native_execution(&self.command.command, sdk.as_deref())
             .map_err(execution_error)
     }
     pub fn register_sdk(&self) -> Result<CloudEngineRegistration, CoreError> {
