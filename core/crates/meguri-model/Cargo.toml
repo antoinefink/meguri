@@ -9,9 +9,11 @@ publish.workspace = true
 [features]
 # Test-only hooks (KTD18): fault points that fire and the steppable clock.
 # Never on by default or in Release; meguri-testkit turns it on.
-test-hooks = []
+test-hooks = ["dep:rand", "dep:rand_chacha"]
 
 [dependencies]
+rand = { workspace = true, optional = true }
+rand_chacha = { workspace = true, optional = true }
 ryu.workspace = true
 serde.workspace = true
 # raw_value keeps untyped JSON values as their exact text

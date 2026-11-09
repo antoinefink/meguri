@@ -44,6 +44,7 @@ struct FetchWork {
     seen: BTreeSet<String>,
     active: Option<Saved>,
     page: Option<FetchPage>,
+    grant: FetchGrant,
 }
 struct FetchPage {
     callback: Option<FetchedCallback>,
@@ -52,6 +53,72 @@ struct FetchPage {
     request_id: u64,
 }
 
+/// Fixed labels only. Each grant executes one SDK event, request, or core work item.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum OrdinaryAction {
+    Sync,
+    BeginFetch,
+    WillFetch,
+    ZoneWill,
+    FetchRequest,
+    Fetched,
+    ZoneDid,
+    DidFetch,
+    FinishFetch,
+    ApplyFetch,
+    CompleteFetch,
+    Poll,
+    PendingUpdate,
+    BatchRequest,
+    BatchSave,
+    Sent,
+    ReturnSent,
+    SendsFinished,
+    MediaSelect,
+    MediaRequest,
+    MediaReply,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FetchGrant {
+    Will,
+    ZoneWill,
+    Request,
+    Callback,
+    ZoneDid,
+    Did,
+    Finish,
+    Apply,
+    Complete,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OrdinaryState {
+    Idle,
+    Sync,
+    Fetch,
+    Poll,
+    Updates,
+    Batch,
+    Finish,
+    Media,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FetchScope {
+    Root,
+    Collection,
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OrdinaryReceipt {
+    /// Real Service receipt, including pages and own media reads.
+    pub request: Option<u64>,
+    pub callback_requests: Vec<u64>,
+    pub read_started: Option<FetchScope>,
+    pub drained: Option<FetchScope>,
+    pub changed: bool,
+}
+struct OrdinaryMedia {
+    work: cloud::media::Work,
+    responses: Vec<Response>,
+}
 pub use workflow::{Observation, PendingChange, PendingSnapshot, PendingUpdate, UpdateKind};
 #[derive(Clone, Debug)]
 pub struct BatchAttempt {
@@ -98,6 +165,11 @@ pub struct SDKRig {
     exchange: Option<u64>,
     fetch_errors: Vec<Box<dyn std::error::Error + Send + Sync>>,
     building: Option<BTreeSet<String>>,
+    ordinary: OrdinaryState,
+    ordinary_updates: std::collections::VecDeque<PendingUpdate>,
+    ordinary_media: Option<OrdinaryMedia>,
+    ordinary_built: Option<(BuiltBatch, Vec<Mutation>)>,
+    ordinary_media_reply: Option<(cloud::media::Reply, Option<tempfile::NamedTempFile>)>,
 }
 impl SDKRig {
     /// Reopen actual adopted files without supplying a binding or baseline.
@@ -165,6 +237,11 @@ impl SDKRig {
             exchange: None,
             fetch_errors: Vec::new(),
             building: None,
+            ordinary: OrdinaryState::Idle,
+            ordinary_updates: Default::default(),
+            ordinary_media: None,
+            ordinary_built: None,
+            ordinary_media_reply: None,
         }
     }
     pub(crate) fn install_instance(&mut self, instance: String, zone: String) {
@@ -230,21 +307,25 @@ impl SDKRig {
         let updates: Vec<PendingUpdate> = self.driver.call(Input::Updates(self.instance.clone()))?;
         let changed = updates.iter().any(|u| !u.adds.is_empty() || !u.removes.is_empty());
         for u in updates {
-            for name in &u.removes {
-                self.pending.remove(name);
-            }
-            let mut added = Vec::new();
-            for (name, change) in &u.adds {
-                if self.pending.insert(name.clone(), *change) != Some(*change) {
-                    added.push(name.clone());
-                }
-            }
-            self.driver
-                .call::<()>(Input::AppliedUpdate(self.instance.clone(), u.id, added))?;
-            self.applied.push(u);
+            self.apply_update(u)?;
         }
         self.refresh()?;
         Ok(changed)
+    }
+    fn apply_update(&mut self, u: PendingUpdate) -> Result<()> {
+        for name in &u.removes {
+            self.pending.remove(name);
+        }
+        let mut added = Vec::new();
+        for (name, change) in &u.adds {
+            if self.pending.insert(name.clone(), *change) != Some(*change) {
+                added.push(name.clone());
+            }
+        }
+        self.driver
+            .call::<()>(Input::AppliedUpdate(self.instance.clone(), u.id, added))?;
+        self.applied.push(u);
+        Ok(())
     }
     pub(crate) fn caller(&self) -> Caller {
         Caller {
@@ -325,6 +406,7 @@ impl SDKRig {
                     seen: BTreeSet::new(),
                     active: None,
                     page: None,
+                    grant: FetchGrant::Will,
                 }
             }
         };
@@ -530,118 +612,556 @@ impl SDKRig {
                     }
                     fetch.zone_started = true;
                 }
-                // A resumed page may outlive its SDK or account. Check the
-                // original authority before another actual Service enqueue.
-                if fetch.call.is_some() {
-                    self.driver.call::<()>(Input::FetchValidate(fetch.instance.clone()))?;
-                } else {
-                    self.driver.call::<()>(Input::Validate(fetch.instance.clone()))?;
-                }
-                let response = service.request(
-                    &fetch.scope,
-                    Caller {
-                        instance: Some(fetch.instance.clone()),
-                        ..self.caller()
-                    },
-                    Operation::FetchZone {
-                        zone: zone.clone(),
-                        token: fetch.token.clone(),
-                    },
-                )?;
-                let page = match response.result {
-                    Ok(Reply::ZoneChanges(page)) => page,
-                    Ok(_) => {
-                        return Err(Box::new(std::io::Error::other(if fetch.root_zone {
-                            "root fetch: Service reply shape"
-                        } else {
-                            "collection fetch: Service reply shape"
-                        })));
-                    }
-                    Err(_) => {
-                        return Err(Box::new(std::io::Error::other(if fetch.root_zone {
-                            "root fetch: Service error reply"
-                        } else {
-                            "collection fetch: Service error reply"
-                        })));
-                    }
-                };
-                let mut entities = Vec::new();
-                for change in page.changes {
-                    match change {
-                        RecordChange::Saved(record)
-                            if fetch.root_zone && record.name == "active" && record.record_type == "MGActive" =>
-                        {
-                            let Some(Field::EncryptedBytes(e)) = record.fields.get("e") else {
-                                return Err(Box::new(std::io::Error::other("root fetch: envelope shape")));
-                            };
-                            fetch.active = Some(Saved {
-                                name: record.name.clone(),
-                                envelope: e.clone(),
-                                system_fields: record.system_fields.bytes().to_vec(),
-                            });
-                        }
-                        RecordChange::Saved(record) if !fetch.root_zone && record.record_type == "MGEntity" => {
-                            if !matches!(record.fields.get("e"), Some(Field::EncryptedBytes(_))) {
-                                return Err(Box::new(std::io::Error::other("collection fetch: envelope shape")));
-                            }
-                            fetch.seen.insert(record.name.clone());
-                            entities.push(record);
-                        }
-                        RecordChange::Saved(record) if !fetch.root_zone && record.record_type == "MGEpoch" => {}
-                        _ => {
-                            return Err(Box::new(std::io::Error::other(if fetch.root_zone {
-                                "root fetch: change shape"
-                            } else {
-                                "collection fetch: change shape"
-                            })));
-                        }
-                    }
-                }
-                // Retain the original page and callback command across a child
-                // pause. Neither Service nor the receive handler is resubmitted.
-                let callback = if fetch.root_zone {
-                    None
-                } else {
-                    Some(self.fetched_callback(fetch, entities, &page.token)?)
-                };
-                fetch.page = Some(FetchPage {
-                    callback,
-                    token: page.token,
-                    more: page.more,
-                    request_id: response.request_id,
-                });
+                self.request_fetch_page(service, fetch)?;
             }
-            let page = fetch
-                .page
-                .as_ref()
-                .ok_or_else(|| std::io::Error::other("fetch pages: missing page"))?;
-            if fetch.root_zone {
-                if !page.more {
-                    self.driver.call::<bool>(Input::RootFetch(
-                        fetch.instance.clone(),
-                        Some(
-                            fetch
-                                .active
-                                .clone()
-                                .ok_or_else(|| std::io::Error::other("root fetch: missing active"))?,
-                        ),
-                        true,
-                        page.request_id,
-                    ))?;
-                }
-            } else {
-                let input = Input::Fetched(
-                    page.callback
-                        .as_ref()
-                        .ok_or_else(|| std::io::Error::other("collection fetch: missing callback"))?
-                        .clone(),
-                );
-                self.driver.call::<()>(input)?;
-            }
+            self.deliver_fetch_page(fetch)?;
             if self.consume_fetch_page(fetch)? {
                 return self.complete_fetch(fetch);
             }
         }
+    }
+    // One Service request, retaining its callback spool and source files.
+    fn request_fetch_page(&mut self, service: &mut Service<SeededRandom>, fetch: &mut FetchWork) -> Result<u64> {
+        let zone = Self::fetch_zone(fetch);
+        // A resumed page may outlive its SDK or account. Check the
+        // original authority before another actual Service enqueue.
+        if fetch.call.is_some() {
+            self.driver.call::<()>(Input::FetchValidate(fetch.instance.clone()))?;
+        } else {
+            self.driver.call::<()>(Input::Validate(fetch.instance.clone()))?;
+        }
+        let response = service.request(
+            &fetch.scope,
+            Caller {
+                instance: Some(fetch.instance.clone()),
+                ..self.caller()
+            },
+            Operation::FetchZone {
+                zone: zone.clone(),
+                token: fetch.token.clone(),
+            },
+        )?;
+        let page = match response.result {
+            Ok(Reply::ZoneChanges(page)) => page,
+            Ok(_) => {
+                return Err(Box::new(std::io::Error::other(if fetch.root_zone {
+                    "root fetch: Service reply shape"
+                } else {
+                    "collection fetch: Service reply shape"
+                })));
+            }
+            Err(_) => {
+                return Err(Box::new(std::io::Error::other(if fetch.root_zone {
+                    "root fetch: Service error reply"
+                } else {
+                    "collection fetch: Service error reply"
+                })));
+            }
+        };
+        let mut entities = Vec::new();
+        for change in page.changes {
+            match change {
+                RecordChange::Saved(record)
+                    if fetch.root_zone && record.name == "active" && record.record_type == "MGActive" =>
+                {
+                    let Some(Field::EncryptedBytes(e)) = record.fields.get("e") else {
+                        return Err(Box::new(std::io::Error::other("root fetch: envelope shape")));
+                    };
+                    fetch.active = Some(Saved {
+                        name: record.name.clone(),
+                        envelope: e.clone(),
+                        system_fields: record.system_fields.bytes().to_vec(),
+                    });
+                }
+                RecordChange::Saved(record) if !fetch.root_zone && record.record_type == "MGEntity" => {
+                    if !matches!(record.fields.get("e"), Some(Field::EncryptedBytes(_))) {
+                        return Err(Box::new(std::io::Error::other("collection fetch: envelope shape")));
+                    }
+                    fetch.seen.insert(record.name.clone());
+                    entities.push(record);
+                }
+                RecordChange::Saved(record) if !fetch.root_zone && record.record_type == "MGEpoch" => {}
+                _ => {
+                    return Err(Box::new(std::io::Error::other(if fetch.root_zone {
+                        "root fetch: change shape"
+                    } else {
+                        "collection fetch: change shape"
+                    })));
+                }
+            }
+        }
+        // Retain the original page and callback command across a child
+        // pause. Neither Service nor the receive handler is resubmitted.
+        let callback = if fetch.root_zone {
+            None
+        } else {
+            Some(self.fetched_callback(fetch, entities, &page.token)?)
+        };
+        fetch.page = Some(FetchPage {
+            callback,
+            token: page.token,
+            more: page.more,
+            request_id: response.request_id,
+        });
+        Ok(fetch.page.as_ref().ok_or_else(failure)?.request_id)
+    }
+    fn deliver_fetch_page(&mut self, fetch: &FetchWork) -> Result<()> {
+        let page = fetch
+            .page
+            .as_ref()
+            .ok_or_else(|| std::io::Error::other("fetch pages: missing page"))?;
+        if fetch.root_zone {
+            if !page.more {
+                self.driver.call::<bool>(Input::RootFetch(
+                    fetch.instance.clone(),
+                    Some(
+                        fetch
+                            .active
+                            .clone()
+                            .ok_or_else(|| std::io::Error::other("root fetch: missing active"))?,
+                    ),
+                    true,
+                    page.request_id,
+                ))?;
+            }
+        } else {
+            let input = Input::Fetched(
+                page.callback
+                    .as_ref()
+                    .ok_or_else(|| std::io::Error::other("collection fetch: missing callback"))?
+                    .clone(),
+            );
+            self.driver.call::<()>(input)?;
+        }
+        Ok(())
+    }
+    pub(crate) fn ordinary_start(&mut self) -> Result<()> {
+        if self.ordinary != OrdinaryState::Idle
+            || self.fetch.is_some()
+            || self.waiting.is_some()
+            || self.handler.is_some()
+        {
+            return Err(failure());
+        }
+        self.ordinary = OrdinaryState::Sync;
+        Ok(())
+    }
+    pub(crate) fn ordinary_callback_scope(&self) -> Option<FetchScope> {
+        self.fetch.as_ref().filter(|f| f.page.is_some()).map(|f| {
+            if f.root_zone {
+                FetchScope::Root
+            } else {
+                FetchScope::Collection
+            }
+        })
+    }
+    pub(crate) fn ordinary_idle(&self) -> bool {
+        self.ordinary == OrdinaryState::Idle
+    }
+    pub(crate) fn ordinary_held_callback(&self) -> bool {
+        self.waiting.is_some()
+            || self.handler.is_some()
+            || self.fetch.as_ref().is_some_and(|f| f.page.is_some())
+            || self.ordinary_media.as_ref().is_some_and(|m| !m.responses.is_empty())
+    }
+    pub(crate) fn ordinary_action(&self) -> Option<OrdinaryAction> {
+        use OrdinaryAction as A;
+        if self.handler.is_some() {
+            return Some(A::ReturnSent);
+        }
+        if self.ordinary_built.is_some() {
+            return Some(A::BatchSave);
+        }
+        if self.waiting.is_some() {
+            return Some(A::Sent);
+        }
+        if let Some(fetch) = &self.fetch {
+            return Some(match fetch.grant {
+                FetchGrant::Will => A::WillFetch,
+                FetchGrant::ZoneWill => A::ZoneWill,
+                FetchGrant::Request => A::FetchRequest,
+                FetchGrant::Callback => A::Fetched,
+                FetchGrant::ZoneDid => A::ZoneDid,
+                FetchGrant::Did => A::DidFetch,
+                FetchGrant::Finish => A::FinishFetch,
+                FetchGrant::Apply => A::ApplyFetch,
+                FetchGrant::Complete => A::CompleteFetch,
+            });
+        }
+        match self.ordinary {
+            OrdinaryState::Idle => None,
+            OrdinaryState::Sync => Some(A::Sync),
+            OrdinaryState::Fetch => Some(A::BeginFetch),
+            OrdinaryState::Poll => Some(A::Poll),
+            OrdinaryState::Updates => Some(A::PendingUpdate),
+            OrdinaryState::Batch => Some(A::BatchRequest),
+            OrdinaryState::Finish => Some(A::SendsFinished),
+            OrdinaryState::Media => Some(self.ordinary_media_action()),
+        }
+    }
+    /// Yield is a successful retained transition, never budget exhaustion or a
+    /// failed exchange. Only this method advances the scheduler-owned fetch.
+    pub(crate) fn ordinary_step(&mut self, service: &mut Service<SeededRandom>) -> Result<OrdinaryReceipt> {
+        use OrdinaryAction as A;
+        let action = self.ordinary_action().ok_or_else(failure)?;
+        let mut receipt = OrdinaryReceipt::default();
+        match action {
+            A::Sync => {
+                let id = self.driver.call(Input::SyncNow(self.instance.clone()))?;
+                self.exchange = Some(id);
+                self.ordinary = OrdinaryState::Fetch;
+            }
+            A::BeginFetch => {
+                let phase: Option<FetchPhase> = self.driver.call(Input::FetchDue)?;
+                if let Some(phase) = phase {
+                    let call = self.driver.call(Input::FetchBegin(
+                        self.instance.clone(),
+                        vec!["meguri-root".into(), self.files.collection_zone.clone()],
+                    ))?;
+                    self.fetch = Some(FetchWork {
+                        phase,
+                        instance: self.instance.clone(),
+                        scope: self.files.scope.clone(),
+                        collection_zone: self.files.collection_zone.clone(),
+                        exchange: self.exchange,
+                        call,
+                        group: format!("testkit-fetch-{}", call.unwrap_or(0)),
+                        manual: self.exchange.is_some(),
+                        zone_started: false,
+                        lifecycle_finished: false,
+                        applying: false,
+                        root_zone: true,
+                        token: None,
+                        seen: BTreeSet::new(),
+                        active: None,
+                        page: None,
+                        grant: FetchGrant::Will,
+                    });
+                } else {
+                    self.ordinary = OrdinaryState::Poll;
+                }
+            }
+            A::WillFetch
+            | A::ZoneWill
+            | A::FetchRequest
+            | A::Fetched
+            | A::ZoneDid
+            | A::DidFetch
+            | A::FinishFetch
+            | A::ApplyFetch
+            | A::CompleteFetch => {
+                let mut fetch = self.fetch.take().ok_or_else(failure)?;
+                let result = (|| -> Result<bool> {
+                    let scope = if fetch.root_zone {
+                        FetchScope::Root
+                    } else {
+                        FetchScope::Collection
+                    };
+                    let zone = Self::fetch_zone(&fetch);
+                    match action {
+                        A::WillFetch => {
+                            if fetch.call.is_some() {
+                                self.driver.call::<()>(Input::FetchWill(
+                                    fetch.instance.clone(),
+                                    fetch.group.clone(),
+                                    fetch.manual,
+                                ))?;
+                            }
+                            fetch.grant = FetchGrant::ZoneWill;
+                        }
+                        A::ZoneWill => {
+                            if fetch.call.is_some() {
+                                self.driver
+                                    .call::<()>(Input::FetchZone(fetch.instance.clone(), zone, true, false))?;
+                            }
+                            fetch.zone_started = true;
+                            fetch.grant = FetchGrant::Request;
+                        }
+                        A::FetchRequest => {
+                            if fetch.token.is_none() {
+                                receipt.read_started = Some(scope);
+                            }
+                            receipt.request = Some(self.request_fetch_page(service, &mut fetch)?);
+                            fetch.grant = FetchGrant::Callback;
+                        }
+                        A::Fetched => {
+                            receipt
+                                .callback_requests
+                                .push(fetch.page.as_ref().ok_or_else(failure)?.request_id);
+                            self.deliver_fetch_page(&fetch)?;
+                            let page = fetch.page.as_ref().ok_or_else(failure)?;
+                            fetch.grant = if page.more {
+                                FetchGrant::Request
+                            } else {
+                                FetchGrant::ZoneDid
+                            };
+                            if page.more {
+                                fetch.token = Some(page.token.clone());
+                                fetch.page = None;
+                            }
+                        }
+                        A::ZoneDid => {
+                            let last = self.consume_fetch_page(&mut fetch)?;
+                            receipt.drained = Some(scope);
+                            fetch.grant = if last { FetchGrant::Did } else { FetchGrant::ZoneWill };
+                        }
+                        A::DidFetch => {
+                            if fetch.call.is_some() {
+                                self.driver.call::<()>(Input::FetchDid(
+                                    fetch.instance.clone(),
+                                    fetch.group.clone(),
+                                    fetch.manual,
+                                ))?;
+                            }
+                            fetch.grant = FetchGrant::Finish;
+                        }
+                        A::FinishFetch => {
+                            if let Some(id) = fetch.call {
+                                let complete: bool =
+                                    self.driver.call(Input::FetchFinish(fetch.instance.clone(), id))?;
+                                if !complete {
+                                    return Err(failure());
+                                }
+                            }
+                            fetch.lifecycle_finished = true;
+                            fetch.grant = FetchGrant::Apply;
+                        }
+                        A::ApplyFetch => {
+                            fetch.applying = true;
+                            if fetch.call.is_some() {
+                                self.driver
+                                    .call::<()>(Input::FetchApply(fetch.instance.clone(), fetch.exchange))?;
+                            }
+                            fetch.applying = false;
+                            fetch.grant = FetchGrant::Complete;
+                        }
+                        A::CompleteFetch => {
+                            self.driver.call::<()>(Input::FetchCompleted(
+                                fetch.instance.clone(),
+                                fetch.phase,
+                                fetch.seen.clone(),
+                            ))?;
+                            if fetch.phase == FetchPhase::AfterSend {
+                                self.exchange = None;
+                            }
+                            self.ordinary = OrdinaryState::Poll;
+                            return Ok(true);
+                        }
+                        _ => return Err(failure()),
+                    }
+                    Ok(false)
+                })();
+                match result {
+                    Ok(false) => self.fetch = Some(fetch),
+                    Ok(true) => (),
+                    Err(error) if super::child_driver::is_work_paused(error.as_ref()) => {
+                        self.fetch = Some(fetch);
+                        return Err(error);
+                    }
+                    Err(error) => {
+                        self.fail_fetch(&fetch);
+                        self.exchange = None;
+                        return Err(error);
+                    }
+                }
+            }
+            A::Poll => {
+                if self.driver.call::<Option<FetchPhase>>(Input::FetchDue)?.is_some() {
+                    self.ordinary = OrdinaryState::Fetch;
+                    return Ok(receipt);
+                }
+                self.driver.call::<()>(Input::Poll(self.instance.clone()))?;
+                self.ordinary_updates.extend(
+                    self.driver
+                        .call::<Vec<PendingUpdate>>(Input::Updates(self.instance.clone()))?,
+                );
+                self.ordinary = OrdinaryState::Updates;
+            }
+            A::PendingUpdate => {
+                if let Some(u) = self.ordinary_updates.pop_front() {
+                    self.apply_update(u)?;
+                } else {
+                    self.ordinary = OrdinaryState::Batch;
+                }
+            }
+            A::BatchRequest => {
+                let wants: bool = self.driver.call(Input::WantsSend)?;
+                if !wants {
+                    self.ordinary = OrdinaryState::Media;
+                } else {
+                    // This is one native batch callback, which can contain many
+                    // records. Preserve production build and transport ownership.
+                    let (built, mutations) = self.build_inner(false)?;
+                    if mutations.is_empty() {
+                        self.ordinary = OrdinaryState::Finish;
+                    } else {
+                        self.ordinary_built = Some((built, mutations));
+                    }
+                }
+            }
+            A::BatchSave => {
+                let (built, mutations) = self.ordinary_built.take().ok_or_else(failure)?;
+                receipt.request = Some(
+                    self.submit_built_response(service, built, mutations)?
+                        .response
+                        .request_id,
+                );
+                receipt.changed = true;
+            }
+            A::Sent => {
+                let response = self
+                    .sent
+                    .get(&self.waiting.ok_or_else(failure)?)
+                    .ok_or_else(failure)?
+                    .response
+                    .clone();
+                self.deliver_sent_event(&response)?;
+                receipt.request = Some(response.request_id);
+            }
+            A::ReturnSent => {
+                self.return_handler(false)?;
+                self.ordinary = OrdinaryState::Poll;
+            }
+            A::SendsFinished => {
+                self.driver.call::<()>(Input::SendsFinished(self.instance.clone()))?;
+                self.ordinary = OrdinaryState::Fetch;
+            }
+            A::MediaSelect | A::MediaRequest | A::MediaReply => {
+                receipt = self.ordinary_media_step(service)?;
+            }
+        }
+        Ok(receipt)
+    }
+    fn ordinary_media_action(&self) -> OrdinaryAction {
+        match &self.ordinary_media {
+            None => OrdinaryAction::MediaSelect,
+            Some(m) => {
+                let count = match &m.work.request {
+                    cloud::media::Request::Reads { names } => names.len(),
+                    _ => 1,
+                };
+                if m.responses.len() < count {
+                    OrdinaryAction::MediaRequest
+                } else {
+                    OrdinaryAction::MediaReply
+                }
+            }
+        }
+    }
+    fn ordinary_media_step(&mut self, service: &mut Service<SeededRandom>) -> Result<OrdinaryReceipt> {
+        use cloud::media::{Reply as R, Request as M};
+        let mut receipt = OrdinaryReceipt::default();
+        match self.ordinary_media_action() {
+            OrdinaryAction::MediaSelect => {
+                let updates: Vec<PendingUpdate> = self.driver.call(Input::Updates(self.instance.clone()))?;
+                if !updates.is_empty() {
+                    self.ordinary_updates.extend(updates);
+                    self.ordinary = OrdinaryState::Updates;
+                    return Ok(receipt);
+                }
+                let selected: Option<(u64, cloud::media::Work)> =
+                    self.driver.call(Input::MediaBuild(self.pending.clone()))?;
+                if let Some(selected) = selected {
+                    let b = self.request_selected_media_response(service, selected)?;
+                    receipt.request = Some(b.response.request_id);
+                    receipt.changed = true;
+                    return Ok(receipt);
+                }
+                let work: Option<cloud::media::Work> = self.driver.call(Input::MediaWork)?;
+                if let Some(work) = work {
+                    if matches!(work.request, M::Upload { .. })
+                        && self.driver.call::<bool>(Input::MediaQueue(work.clone()))?
+                    {
+                        return Ok(receipt);
+                    }
+                    if matches!(work.request, M::Delete { .. }) {
+                        return Err(failure());
+                    }
+                    if matches!(&work.request, M::Reads { names } if names.is_empty() || names.len() > 200) {
+                        return Err(failure());
+                    }
+                    self.ordinary_media = Some(OrdinaryMedia {
+                        work,
+                        responses: Vec::new(),
+                    });
+                } else {
+                    self.ordinary = OrdinaryState::Idle;
+                }
+            }
+            OrdinaryAction::MediaRequest => {
+                let m = self.ordinary_media.as_mut().ok_or_else(failure)?;
+                self.driver.call::<()>(Input::MediaValidate(m.work.clone()))?;
+                let operation = match &m.work.request {
+                    M::Reads { names } => Operation::Read {
+                        zone: "meguri-media".into(),
+                        name: names[m.responses.len()].clone(),
+                        fields: RequestedFields::Named(vec!["e".into()]),
+                    },
+                    _ => Self::ordinary_media_operation(&m.work)?,
+                };
+                let changed = matches!(operation, Operation::Modify { .. });
+                let response = service.request(
+                    &self.files.scope,
+                    Caller {
+                        own_operation: Some("media-runtime".into()),
+                        ..Default::default()
+                    },
+                    operation,
+                )?;
+                receipt.request = Some(response.request_id);
+                receipt.changed = changed;
+                m.responses.push(response);
+            }
+            OrdinaryAction::MediaReply => {
+                let m = self.ordinary_media.as_ref().ok_or_else(failure)?;
+                if self.ordinary_media_reply.is_none() {
+                    let retained = match &m.work.request {
+                        M::Reads { names } => {
+                            let mut results = Vec::new();
+                            for (name, response) in names.iter().zip(&m.responses) {
+                                let result = match &response.result {
+                                    Ok(Reply::Record(record)) => {
+                                        let Some(Field::EncryptedBytes(envelope)) = record.fields.get("e") else {
+                                            return Err(failure());
+                                        };
+                                        if record.name != *name
+                                            || record.record_type != "MGBlob"
+                                            || record.fields.contains_key("a")
+                                        {
+                                            return Err(failure());
+                                        }
+                                        cloud::media::BlobReadResult::Present {
+                                            envelope: envelope.clone(),
+                                        }
+                                    }
+                                    Err(error) => match error.code {
+                                        ErrorCode::UnknownItem => cloud::media::BlobReadResult::UnknownItem,
+                                        ErrorCode::ZoneNotFound => cloud::media::BlobReadResult::ZoneMissing,
+                                        code => cloud::media::BlobReadResult::Failed { code: code as i64 },
+                                    },
+                                    _ => return Err(failure()),
+                                };
+                                results.push(cloud::media::BlobRead {
+                                    name: name.clone(),
+                                    result,
+                                });
+                            }
+                            (R::BlobReads { results }, None)
+                        }
+                        _ => Self::ordinary_media_reply(m.responses.first().ok_or_else(failure)?.clone())?,
+                    };
+                    self.ordinary_media_reply = Some(retained);
+                }
+                receipt.callback_requests = m.responses.iter().map(|r| r.request_id).collect();
+                let (reply, _) = self.ordinary_media_reply.as_ref().ok_or_else(failure)?;
+                self.driver
+                    .call::<()>(Input::MediaReply(m.work.clone(), reply.clone()))?;
+                self.ordinary_media_reply = None;
+                self.ordinary_media = None;
+            }
+            _ => return Err(failure()),
+        }
+        Ok(receipt)
     }
     pub fn reconcile_and_confirm_root(&mut self, service: &mut Service<SeededRandom>, steps: usize) -> Result<()> {
         if steps < 4 {
@@ -702,8 +1222,13 @@ impl SDKRig {
         self.root.clone().ok_or_else(failure)
     }
     fn build(&mut self) -> Result<(BuiltBatch, Vec<Mutation>)> {
-        self.driver.call::<()>(Input::Poll(self.instance.clone()))?;
-        self.updates()?;
+        self.build_inner(true)
+    }
+    fn build_inner(&mut self, apply_updates: bool) -> Result<(BuiltBatch, Vec<Mutation>)> {
+        if apply_updates {
+            self.driver.call::<()>(Input::Poll(self.instance.clone()))?;
+            self.updates()?;
+        }
         let requested = self
             .building
             .get_or_insert_with(|| {
@@ -735,7 +1260,9 @@ impl SDKRig {
         // Building can emit removals for held/deferred images even when it
         // returns no saves. Apply the real ordered updates after handler return
         // before reporting SDK pending state or selecting another batch.
-        self.updates()?;
+        if apply_updates {
+            self.updates()?;
+        }
         Ok((b, mutations))
     }
     fn send(
@@ -867,6 +1394,14 @@ impl SDKRig {
         if mutations.is_empty() {
             return Err(failure());
         }
+        self.submit_built_response(service, built, mutations)
+    }
+    fn submit_built_response(
+        &mut self,
+        service: &mut Service<SeededRandom>,
+        built: BuiltBatch,
+        mutations: Vec<Mutation>,
+    ) -> Result<ResponseBatch> {
         let call: Option<SendCall> = self.driver.call(Input::StartCall(self.instance.clone()))?;
         let call = call.ok_or_else(failure)?;
         let batch = self.send(service, &built, mutations)?;
@@ -1176,6 +1711,9 @@ impl SDKRig {
         self.refresh()
     }
     pub fn return_sent_handler(&mut self) -> Result<()> {
+        self.return_handler(true)
+    }
+    fn return_handler(&mut self, apply_updates: bool) -> Result<()> {
         let id = self.handler.ok_or_else(failure)?;
         let instance = self
             .sent
@@ -1204,7 +1742,9 @@ impl SDKRig {
         if self.waiting == Some(id) {
             self.waiting = None;
         }
-        self.updates()?;
+        if apply_updates {
+            self.updates()?;
+        }
         if let Some(call) = self.calls.remove(&id) {
             self.driver.call::<()>(Input::FinishCall(instance, call))?;
         }

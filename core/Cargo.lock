@@ -1811,6 +1811,8 @@ name = "meguri-model"
 version = "0.0.0"
 dependencies = [
  "meguri-testkit",
+ "rand 0.9.4",
+ "rand_chacha",
  "ryu",
  "serde",
  "serde_json",

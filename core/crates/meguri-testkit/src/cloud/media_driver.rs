@@ -93,39 +93,7 @@ impl SDKRig {
                     }
                     continue;
                 }
-                MediaRequest::Root => Operation::Read {
-                    zone: "meguri-media".into(),
-                    name: "root".into(),
-                    fields: RequestedFields::Named(vec!["e".into()]),
-                },
-                MediaRequest::Read { name } => Operation::Read {
-                    zone: "meguri-media".into(),
-                    name: name.clone(),
-                    fields: RequestedFields::Named(vec!["e".into()]),
-                },
-                MediaRequest::Download { name } => Operation::Read {
-                    zone: "meguri-media".into(),
-                    name: name.clone(),
-                    fields: RequestedFields::Named(vec!["e".into(), "a".into()]),
-                },
-                MediaRequest::Upload { name, envelope, staged } => {
-                    let file = std::fs::File::open(staged)?;
-                    let mut bytes = Vec::new();
-                    file.take(cloud::media::MAX_ASSET_BYTES + 1).read_to_end(&mut bytes)?;
-                    if bytes.len() as u64 > cloud::media::MAX_ASSET_BYTES {
-                        return Err(failure());
-                    }
-                    let mut record = RecordInput::encrypted(name, "MGBlob", envelope.clone());
-                    record.fields.insert("a".into(), Field::Asset(Asset::synthetic(bytes)));
-                    Operation::Modify {
-                        zone: "meguri-media".into(),
-                        atomic: false,
-                        changes: vec![Mutation::Save {
-                            record,
-                            if_unchanged: None,
-                        }],
-                    }
-                }
+                _ => Self::ordinary_media_operation(&work)?,
             };
             let response = service.request(
                 &self.files.scope,
@@ -135,42 +103,7 @@ impl SDKRig {
                 },
                 operation,
             )?;
-            let mut asset_owner = None;
-            let reply = match response.result {
-                Ok(Reply::Record(record)) => {
-                    let asset = if let Some(Field::Asset(asset)) = record.fields.get("a") {
-                        let mut file = tempfile::NamedTempFile::new()?;
-                        file.write_all(asset.bytes())?;
-                        file.as_file().sync_all()?;
-                        let path = file.path().to_path_buf();
-                        asset_owner = Some(file);
-                        Some(path)
-                    } else {
-                        None
-                    };
-                    let Some(Field::EncryptedBytes(envelope)) = record.fields.get("e") else {
-                        return Err(failure());
-                    };
-                    MediaReply::Record {
-                        name: record.name,
-                        record_type: record.record_type,
-                        envelope: envelope.clone(),
-                        asset,
-                    }
-                }
-                Ok(Reply::Modified(mut results)) if results.len() == 1 => match results.remove(0).result {
-                    Ok(MutationSuccess::Saved(record)) => saved(record)?,
-                    Err(ServiceError {
-                        code: ErrorCode::ServerRecordChanged,
-                        server_record: Some(record),
-                        ..
-                    }) => saved(*record)?,
-                    Err(error) => failed(error),
-                    _ => return Err(failure()),
-                },
-                Err(error) => failed(error),
-                _ => return Err(failure()),
-            };
+            let (reply, asset_owner) = Self::ordinary_media_reply(response)?;
             self.driver.call::<()>(Input::MediaReply(work, reply))?;
             drop(asset_owner);
             if self.updates()? {
@@ -180,6 +113,90 @@ impl SDKRig {
         Err(failure())
     }
 }
+impl SDKRig {
+    pub(in crate::cloud) fn ordinary_media_operation(work: &MediaWork) -> Result<Operation> {
+        Ok(match &work.request {
+            MediaRequest::Root => Operation::Read {
+                zone: "meguri-media".into(),
+                name: "root".into(),
+                fields: RequestedFields::Named(vec!["e".into()]),
+            },
+            MediaRequest::Read { name } => Operation::Read {
+                zone: "meguri-media".into(),
+                name: name.clone(),
+                fields: RequestedFields::Named(vec!["e".into()]),
+            },
+            MediaRequest::Download { name } => Operation::Read {
+                zone: "meguri-media".into(),
+                name: name.clone(),
+                fields: RequestedFields::Named(vec!["e".into(), "a".into()]),
+            },
+            MediaRequest::Upload { name, envelope, staged } => {
+                let file = std::fs::File::open(staged)?;
+                let mut bytes = Vec::new();
+                file.take(cloud::media::MAX_ASSET_BYTES + 1).read_to_end(&mut bytes)?;
+                if bytes.len() as u64 > cloud::media::MAX_ASSET_BYTES {
+                    return Err(failure());
+                }
+                let mut record = RecordInput::encrypted(name, "MGBlob", envelope.clone());
+                record.fields.insert("a".into(), Field::Asset(Asset::synthetic(bytes)));
+                Operation::Modify {
+                    zone: "meguri-media".into(),
+                    atomic: false,
+                    changes: vec![Mutation::Save {
+                        record,
+                        if_unchanged: None,
+                    }],
+                }
+            }
+
+            _ => return Err(failure()),
+        })
+    }
+    pub(in crate::cloud) fn ordinary_media_reply(
+        response: Response,
+    ) -> Result<(MediaReply, Option<tempfile::NamedTempFile>)> {
+        let mut asset_owner = None;
+        let reply = match response.result {
+            Ok(Reply::Record(record)) => {
+                let asset = if let Some(Field::Asset(asset)) = record.fields.get("a") {
+                    let mut file = tempfile::NamedTempFile::new()?;
+                    file.write_all(asset.bytes())?;
+                    file.as_file().sync_all()?;
+                    let path = file.path().to_path_buf();
+                    asset_owner = Some(file);
+                    Some(path)
+                } else {
+                    None
+                };
+                let Some(Field::EncryptedBytes(envelope)) = record.fields.get("e") else {
+                    return Err(failure());
+                };
+                MediaReply::Record {
+                    name: record.name,
+                    record_type: record.record_type,
+                    envelope: envelope.clone(),
+                    asset,
+                }
+            }
+            Ok(Reply::Modified(mut results)) if results.len() == 1 => match results.remove(0).result {
+                Ok(MutationSuccess::Saved(record)) => saved(record)?,
+                Err(ServiceError {
+                    code: ErrorCode::ServerRecordChanged,
+                    server_record: Some(record),
+                    ..
+                }) => saved(*record)?,
+                Err(error) => failed(error),
+                _ => return Err(failure()),
+            },
+            Err(error) => failed(error),
+            _ => return Err(failure()),
+        };
+
+        Ok((reply, asset_owner))
+    }
+}
+
 impl PublicationRig {
     /// Injection reaches the next owned staged-file read. Releasing a latch
     /// resumes the original work, whose real intent survives that I/O failure.

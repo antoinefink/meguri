@@ -1086,6 +1086,51 @@ impl PublicationRig {
         self.sdk.get_mut().deliver_sent_event(response)?;
         self.sdk.get_mut().return_sent_handler()
     }
+    /// The seeded ordinary runner starts only after actual publication/adoption.
+    /// Recovery/account/lifecycle programs require their own future grants.
+    pub(crate) fn begin_ordinary(&mut self) -> Result<()> {
+        let control = self.control()?;
+        if self.held.is_some()
+            || self.work.is_some()
+            || !control.recovery_ops.is_empty()
+            || !control
+                .current
+                .as_ref()
+                .is_some_and(|b| b.facts.state == cloud::BindingState::Active)
+            || self.needs_no_state_listing
+            || self.started_host_instance.is_none()
+        {
+            return Err(failure());
+        }
+        self.sdk.get_mut().ordinary_start()
+    }
+    pub(crate) fn ordinary_action(&self) -> Option<adapter::OrdinaryAction> {
+        self.sdk.borrow().ordinary_action()
+    }
+    pub(crate) fn ordinary_step(&mut self, service: &mut Service<SeededRandom>) -> Result<adapter::OrdinaryReceipt> {
+        self.sdk.get_mut().ordinary_step(service)
+    }
+    pub(crate) fn ordinary_callback_scope(&self) -> Option<adapter::FetchScope> {
+        self.sdk.borrow().ordinary_callback_scope()
+    }
+    pub(crate) fn ordinary_idle(&self) -> bool {
+        self.sdk.borrow().ordinary_idle()
+    }
+    pub(crate) fn ordinary_has_callback(&self) -> bool {
+        self.sdk.borrow().ordinary_held_callback()
+    }
+    pub(crate) fn ordinary_counts(&mut self) -> Result<(usize, usize, usize)> {
+        let entities: Vec<cloud::workflow::EntityFacts> = self.sdk.get_mut().driver.call(Input::AllEntities)?;
+        let pending = entities
+            .iter()
+            .filter(|e| e.mark.is_some() || e.local_rev > e.acked_rev)
+            .count();
+        let flights = entities.iter().map(|e| e.in_flight.len()).sum();
+        let control = self.control()?;
+        let binding = control.current.ok_or_else(failure)?;
+        let inbox = self.sdk.get_mut().driver.inbox_entries(binding.id)?.len();
+        Ok((pending, flights, inbox))
+    }
     pub fn advance_clock_ms(&mut self, ms: i64) -> Result<()> {
         self.sdk.get_mut().advance_clock_ms(ms)
     }

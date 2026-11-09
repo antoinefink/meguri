@@ -21,3 +21,5 @@
 - Hydrate callback sources inside its failure boundary, before core intake. Source errors must complete the original exchange as failed; an early return can leave it active after the parent has released it.
 
 - For production adoption, set the fixture Service page_size to at most 32, matching native fetch resultsLimit. The generic Service default is 200; do not relax core validation or slice a delivered page.
+
+- `schedule::Runner` owns Service and real published/adopted rigs. Ordinary grants retain original fetch spools, cursors, SDK batches and media sources; never call `drive_ready(1)` to step. Record drain freshness at each scope's first read, before any subsequent global revision. Missing online/gate/held/peer-media/own-operation facts keep Q4.4 unproved; `scan_drained` is a clean-stop fact, never active quiescence.

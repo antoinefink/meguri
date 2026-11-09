@@ -46,3 +46,30 @@ impl RandomSource for SeededRandom {
         z ^ (z >> 31)
     }
 }
+
+/// Q3.6 scheduler stream. Test-only; leaves the legacy SplitMix sequence intact.
+#[cfg(feature = "test-hooks")]
+pub struct ChaCha20Random(std::sync::Mutex<rand_chacha::ChaCha20Rng>);
+#[cfg(feature = "test-hooks")]
+impl ChaCha20Random {
+    pub fn new(seed: u64) -> Self {
+        use rand::SeedableRng;
+        Self(std::sync::Mutex::new(rand_chacha::ChaCha20Rng::seed_from_u64(seed)))
+    }
+}
+#[cfg(feature = "test-hooks")]
+impl fmt::Debug for ChaCha20Random {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ChaCha20Random")
+    }
+}
+#[cfg(feature = "test-hooks")]
+impl RandomSource for ChaCha20Random {
+    fn next_u64(&self) -> u64 {
+        use rand::RngCore;
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .next_u64()
+    }
+}
