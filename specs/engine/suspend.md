@@ -30,6 +30,40 @@ Resource registration takes the same registry mutex. Before marking the cutoff, 
 
 `resume()` reopens SQLite if suspended and durably marks the sidecar unclean, then performs external-change checks and rollover, in that order, before admitting public ops. It returns ResumeReport { external_change, rolled_over, next_day_at } (epoch seconds). It invokes no sync, queue rebuild or widget work: U151 schedules those. Already-active resume still checks the writer data_version and rollover. Participants resume after the core checks; U26 can then rebuild invalidated indexes. A failed resume never admits writes.
 
+### S2.1 Retained native CloudKit authority
+
+Technical review on 2026-11-09 covers this native lifecycle distinction. The review does not approve an implementation or represent an owner decision. Account handling, publication and recovery still follow their CloudKit contracts.
+
+After actual drained suspension, the unbound Runtime with released connections takes the existing reopen/bind path. Missing bound/store alone does not prove drain. An already-active Runtime must not bind merely because the preservation check below fails.
+
+Preserve exact unchanged active authority before Engine publishes `Available`, only when all hold:
+
+- Runtime still holds the same store and binding. The binding is active and usable, with verification accepted in this process. Since that authority was established, there has been no invalidation, replacement, release, stop or pause.
+- The privileged current Collection's complete `OpenEvidence` equals the bound evidence: generation, prior-clean flag, opened mod/scm, native pair and descriptor-derived cloud evidence. Descriptor evidence must be present and valid; two absent values never prove equality. Its complete native tuple and the path provider's `NativeFileIdentity` equal the bound identity, including device, inode and both birthtime components. Durable reopen equality cannot replace this live comparison.
+- Publication proof: identity equality with the bound record; `Clear` decision; no replacement intent; `Connected` account/container/environment equality against both binding facts and Runtime scope. Adoption/publication operations in storage and in this process must all be settled.
+- After external reads, a final state check retains the same original store/bound, incarnation, open counter, binding facts, verification, invalidation and adapter guard. Perform providers, descriptor/sidecar reads and callbacks outside Runtime state/tracking locks. The final check performs no I/O, callbacks or waits; a concurrent authority change defeats it.
+- The retained SDK passes current `NativeAuthority::validate_sdk`: its original id is current, it is not stopping, its issued guard equals the current adapter guard, and the binding remains active/usable/verified. Two newly sampled stable guards cannot validate a stale original SDK.
+
+Preserve the actual store, bound, incarnation, verification, adapter token, SDK, media process/epoch, root/scan facts and outstanding original work. Do not reconstruct authority or erase observer changes. Core still performs S2/S3 and every participant check. This path neither reads the account nor drains, cancels or waits for SDK/network work. Keep the normal foreground account read.
+
+Active nonmatches have distinct outcomes:
+
+| State | Required outcome before local success |
+|---|---|
+| Already invalidated, unverified, refused, paused, stopping or carrying a stale SDK | Preserve existing refusal and original resources. No bind, incarnation rotation, media reset or proof repair. |
+| Positively established file/publication/fence mismatch | Invalidate current authority, set scan-required/tracking-stopped, mark bound unusable/unverified and publish refusal before later tracking work. Preserve original resources. |
+| Authority observation fails, or required evidence cannot be obtained | Report the bounded cloud error and deny authority. Keep the resources already held. That failure proves no mismatch and supplies no reason for persisted isolation. |
+
+Change process state only; retain normal recovery ownership and order. Keep accepted original-resource cleanup, reject stale SDK batches/results, and preserve S3 invalidation.
+
+### S2.2 Required implementation witnesses
+
+- Hold actual original SDK network/media work after authority is issued. Already-active resume and a local review must complete while it stays held. Release it and prove the original result/ACK drains once under unchanged SDK/media authority, with the same backend/generation and no Core account read, extra SDK or operation failure. Retain unchanged-name replay/deduplication checks.
+- Deliver settings/visible-media work at `Available`, before Swift's foreground account proof completes. Hold the account read explicitly. Original live authority must stay valid throughout that window.
+- Retain actual drained suspension/rebind coverage. Cover active missing/unverified state, a stale original SDK with stable newly sampled guards, full-native mismatch, publication/fence change, absent descriptor evidence, read failure and concurrent authority change. Assert the specified refusal, retained original cleanup, no active bind/reset/proof repair, and no fabricated durable reason.
+- Exercise an external same-file edit and rollover on already-active resume. Preserve the report, observer invalidation, required reconciliation and stale-guard refusal.
+- Retain R11's explicit stopped-binding ConfirmResume proof reuse: ready preview on the same backend, accepted matching process reads and available account status. `accountMatchesBinding` alone is insufficient. Keep exact SDK counts, original completion/ACK ownership, cleanup joins and timing limits.
+
 ## S3. External change
 
 On change, reset undo/redo with ChangedExternally, discard cached day values and optimistic touched-table assumptions, invalidate U26's entire derived store, and publish a ChangeSet marked whole_collection. Notify in-core observers with the same set before publishing. This is a conservative invalidation, not a generation change. Open uses the prior sidecar mod/scm; before-write checks run after BEGIN IMMEDIATE, so a foreign commit cannot slip between the check and an op's transaction. An op planned before an external change must replan (Stale) rather than overwrite values planned from stale caches. The next op may run against current rows.
