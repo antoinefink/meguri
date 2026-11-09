@@ -22,3 +22,14 @@ The original privileged writer probe, real replacement and owned-snapshot
 checks remain. A bounded handoff and failure cleanup release protection before
 joining. Independent re-review clears P0-P2; all limits and assertions remain.
 Compilation and focused execution still await this corrected source.
+
+Core `10185` compiles and runs 274 checks: 271 pass. Three new owned-snapshot
+fixtures fail because storage permits pin_sync only on the Sync reader. The
+failure is retained. Filtered test-only export `17172` uses valid Sync leases,
+keeps the owned snapshot and all original guard/replacement assertions, and
+adds real Cloud capture/drop followed by intact empty-lease refusal. Independent
+re-review clears P0-P2. Focused Core `18975` passes all three corrected tests.
+The other 271 passing results remain applicable; production source is unchanged.
+Privacy `19313` passes the final fixture files. Similarity `22390` passes all
+12 source files across both slices, with three excluded files and no allowlist
+use. Lint remains required; the original batch gate remains pending.

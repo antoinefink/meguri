@@ -606,9 +606,9 @@ pub(crate) mod tests {
     #[test]
     fn lifetime_pin_refusal_retains_the_actual_slot_guard() {
         let (_dir, engine, collection) = open();
-        for role in [ReaderRole::Sync, ReaderRole::Cloud] {
-            let mut lease = collection.reader(role).unwrap();
-            let snapshot = if role == ReaderRole::Cloud {
+        for capture in [false, true] {
+            let mut lease = collection.reader(ReaderRole::Sync).unwrap();
+            let snapshot = if capture {
                 Some(lease.capture_sync(&collection).unwrap().0)
             } else {
                 None

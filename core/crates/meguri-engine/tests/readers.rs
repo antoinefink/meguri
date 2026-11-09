@@ -320,16 +320,29 @@ fn lifetime_pin_refuses_non_cloud_and_owned_sync_capture_without_consuming_the_l
     assert_eq!(lease.snapshot().unwrap().generation(), h.collection.generation());
     drop(lease);
 
-    let mut cloud = h.collection.reader(ReaderRole::Cloud).unwrap();
-    let (snapshot, _hold) = cloud.capture_sync(&h.collection).unwrap();
-    let (mut cloud, error) = cloud.into_lifetime_pin().err().expect("captured Cloud refused");
+    let mut sync = h.collection.reader(ReaderRole::Sync).unwrap();
+    let (snapshot, _hold) = sync.capture_sync(&h.collection).unwrap();
+    let (mut sync, error) = sync.into_lifetime_pin().err().expect("captured Sync refused");
     assert!(matches!(error, EngineError::InvalidArgument { .. }));
     assert!(
-        cloud.capture_sync(&h.collection).is_err(),
+        sync.capture_sync(&h.collection).is_err(),
         "the original lease remains empty"
     );
     assert!(snapshot.col().is_ok(), "the owned snapshot stays usable");
     drop(snapshot);
+    drop(sync);
+    assert_eq!(h.collection.reader(ReaderRole::Sync).unwrap().role(), ReaderRole::Sync);
+
+    let mut cloud = h.collection.reader(ReaderRole::Cloud).unwrap();
+    let (snapshot, _hold) = cloud.capture_cloud(&h.collection, Vec::new()).unwrap();
+    assert!(snapshot.col().is_ok());
+    drop(snapshot);
+    let (mut cloud, error) = cloud.into_lifetime_pin().err().expect("captured Cloud refused");
+    assert!(matches!(error, EngineError::InvalidArgument { .. }));
+    assert!(
+        cloud.capture_cloud(&h.collection, Vec::new()).is_err(),
+        "the original Cloud lease remains empty after its borrowed snapshot drops"
+    );
     drop(cloud);
     assert_eq!(
         h.collection.reader(ReaderRole::Cloud).unwrap().role(),

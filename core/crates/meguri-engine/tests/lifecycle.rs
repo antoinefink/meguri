@@ -381,10 +381,10 @@ fn a_corrupt_collection_refuses_ops_and_lets_only_restore_and_one_way_sync_take_
 fn cloud_lifetime_pin_and_refused_leases_block_real_replacement() {
     use meguri_engine::ExclusivePhase;
     use std::sync::mpsc;
-    // Successful transfer, refused owned Cloud capture, refused non-Cloud.
+    // Successful transfer, refused owned Sync capture, refused non-Cloud.
     for mode in 0..3 {
         let h = Harness::open();
-        let role = if mode == 2 { ReaderRole::Sync } else { ReaderRole::Cloud };
+        let role = if mode == 0 { ReaderRole::Cloud } else { ReaderRole::Sync };
         let mut lease = h.collection.reader(role).unwrap();
         let mut snapshot = if mode == 1 {
             Some(lease.capture_sync(&h.collection).unwrap().0)
