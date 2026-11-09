@@ -26,3 +26,4 @@ pub mod checks;
 pub mod child_driver;
 pub mod coordinator;
 pub mod devices;
+pub mod media_observation;
