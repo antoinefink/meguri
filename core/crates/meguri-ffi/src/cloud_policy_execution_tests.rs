@@ -163,6 +163,72 @@ fn registered_execution_final_validation_completes_while_real_driver_projection_
 }
 
 #[test]
+fn registered_execution_final_validation_completes_while_real_runtime_state_is_held() {
+    use std::sync::mpsc;
+
+    struct ReleaseState(mpsc::Sender<()>);
+    impl Drop for ReleaseState {
+        fn drop(&mut self) {
+            let _ = self.0.send(());
+        }
+    }
+
+    let (fixture, _policy, execution) = start();
+    let registration = execution.register_sdk().unwrap();
+    execution.validate_execution().unwrap();
+    fixture.workflow.validate_sdk(registration.instance_id).unwrap();
+    let runtime = fixture.workflow.core.clone();
+    let (entered, reached) = mpsc::channel();
+    let (release, resume) = mpsc::channel();
+    let (released, did_release) = mpsc::channel();
+    let (entry, before_release, released, held, validation) = std::thread::scope(|scope| {
+        // This must drop inside the closure, before automatic scope joining.
+        let release = ReleaseState(release);
+        let held = scope.spawn(move || {
+            // Rust-only hold of the original Runtime mutex; no provider callback.
+            runtime.with_state_held_for_testing(|| {
+                entered.send(()).unwrap();
+                resume.recv_timeout(Duration::from_secs(10)).expect("State release");
+            });
+            released.send(()).unwrap();
+        });
+        let entry = reached.recv_timeout(Duration::from_secs(5));
+        let (validated, completed) = mpsc::channel();
+        // Never exercise the check without positively observing State ownership.
+        let validation = if entry.is_ok() {
+            Some(scope.spawn(move || {
+                let _ = validated.send(execution.validate_execution());
+            }))
+        } else {
+            None
+        };
+        let before_release = validation
+            .as_ref()
+            .map(|_| completed.recv_timeout(Duration::from_secs(5)));
+        drop(release);
+        let released = did_release.recv_timeout(Duration::from_secs(5));
+        // Capture both joins before inspecting either outcome, including panics.
+        let held = held.join();
+        let validation = validation.map(|worker| worker.join());
+        (entry, before_release, released, held, validation)
+    });
+    // Complete real Host teardown before the expected RED assertion can unwind.
+    let closed = fixture.workflow.host.close();
+    closed.unwrap();
+    entry.expect("original Runtime owns State");
+    released.expect("State released");
+    held.expect("State holder panicked");
+    validation
+        .expect("validation worker started")
+        .expect("validation worker panicked");
+    // This isolates mutex contention, not actual Swift SDK enqueue/Started proof.
+    before_release
+        .expect("validation started after State entry")
+        .expect("final execution validation waited for Runtime State")
+        .unwrap();
+}
+
+#[test]
 fn issued_start_cannot_register_after_pause_account_generation_or_close() {
     for transition in 0..4 {
         let (fixture, policy, execution) = start();
