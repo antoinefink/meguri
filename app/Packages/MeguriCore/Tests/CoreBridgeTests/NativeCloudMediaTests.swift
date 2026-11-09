@@ -412,8 +412,8 @@ private struct NativeMediaPreparationProbe: CloudMediaTransport {
     }
 }
 
-// Retain only work and bytes issued by the real Core. An original collection
-// record in the durable inbox requests the now-present blob for download.
+// Retain only work and records issued by the real Core. Replay the acknowledged
+// manifest after removing its fixture-owned bytes, then begin a fresh media round.
 private func prepareDebugMediaDownload(_ fixture: CloudKitBridgeFixture,
                                       policy: CoreCloudPolicyService,
                                       media: CoreCloudMediaService, sdk: String) async throws {
@@ -446,7 +446,10 @@ private func prepareDebugMediaDownload(_ fixture: CloudKitBridgeFixture,
     }
     let before = Set(try await fixture.core.trackingSendables().keys)
     try #require(selectedNames.isDisjoint(with: before))
-    _ = try await CoreMediaService().addMedia(name: "pending.asset", bytes: [7, 1, 5, 3, 9])
+    let files = CoreMediaService()
+    let bytes: [UInt8] = [7, 1, 5, 3, 9]
+    let name = try await files.addMedia(name: "pending.asset", bytes: bytes)
+    try #require(name == "pending.asset")
     let read = try #require(try await media.nextWork(sdk: sdk))
     switch read.request {
     case .read:
@@ -462,6 +465,22 @@ private func prepareDebugMediaDownload(_ fixture: CloudKitBridgeFixture,
     for update in try await fixture.core.takePendingUpdates(sdk: sdk) {
         try await fixture.core.updateApplied(sdk: sdk, id: update.id, added: Array(update.adds.keys))
     }
+    // Native media admission requires the generated collection manifest's Saved ack.
+    let pending = try await fixture.core.trackingSendables().filter { !before.contains($0.key) && $0.key != blob }
+    try #require(pending.count == 1)
+    let manifestName = try #require(pending.keys.first)
+    try #require(manifestName.hasPrefix("e") && pending == [manifestName: .save])
+    let collection = try #require(try await fixture.core.buildBatch(sdk: sdk, zone: fixture.zone, pending: pending))
+    try #require(collection.saves.map(\.name) == [manifestName] && collection.deletes.isEmpty)
+    let manifest = try #require(collection.saves.first)
+    try #require(manifest.recordType == "MGEntity")
+    _ = try await fixture.core.sent(sdk: sdk, batchID: collection.id, saved: collection.saves,
+        failed: [], deleted: [], failedDeletes: [], batchCount: 1)
+    try await fixture.core.handlerReturned(sdk: sdk)
+    let manifestFacts = try #require(try await fixture.core.entityFacts(name: manifestName))
+    try #require(manifestFacts.ackedRev == manifestFacts.localRev && manifestFacts.mark == nil)
+    try #require(!(try await fixture.core.trackingSendables()).keys.contains(manifestName))
+
     let mediaPending = try await fixture.core.trackingSendables()
     try #require(mediaPending == [blob: .save])
     let batch = try #require(try await fixture.core.buildBatch(sdk: sdk, zone: "meguri-media", pending: mediaPending))
@@ -470,11 +489,33 @@ private func prepareDebugMediaDownload(_ fixture: CloudKitBridgeFixture,
         failed: [], deleted: [], failedDeletes: [], batchCount: 1)
     try await fixture.core.handlerReturned(sdk: sdk)
 
-    let pending = try await fixture.core.trackingSendables().filter { !before.contains($0.key) && $0.key != blob }
-    try #require(pending.count == 1)
-    let collection = try #require(try await fixture.core.buildBatch(sdk: sdk, zone: fixture.zone, pending: pending))
-    try #require(collection.saves.count == 1)
-    try await fixture.core.fetched(sdk: sdk, zone: fixture.zone, records: collection.saves, deleted: [])
+    // Model external absence, preserving the logical name and remote metadata.
+    // Resolve ownership before removing exactly the known synthetic file.
+    let tracked = try await files.trackedNames()
+    try #require(tracked.names.contains { $0.name == name })
+    let temporaryRoot = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().standardizedFileURL
+    let fixtureRoot = fixture.directory.resolvingSymlinksInPath().standardizedFileURL
+    try #require(fixtureRoot.deletingLastPathComponent() == temporaryRoot)
+    let mediaRoot = tracked.root.resolvingSymlinksInPath().standardizedFileURL
+    try #require(mediaRoot.path.hasPrefix(fixtureRoot.path + "/"))
+    let file = tracked.root.appendingPathComponent(name).standardizedFileURL
+    try #require(file.lastPathComponent == "pending.asset")
+    try #require(file.resolvingSymlinksInPath().deletingLastPathComponent() == mediaRoot)
+    let attributes = try file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+    try #require(attributes.isRegularFile == true && attributes.isSymbolicLink == false)
+    try #require(try Data(contentsOf: file) == Data(bytes))
+    try FileManager.default.removeItem(at: file)
+    try #require(!FileManager.default.fileExists(atPath: file.path))
+
+    try #require(manifest.name == manifestName && collection.saves == [manifest])
+    try await fixture.core.fetched(sdk: sdk, zone: fixture.zone, records: [manifest], deleted: [])
+    // Upload Saved marks the blob attempted in the old round. The retained
+    // command permit starts a fresh round through normal native validation.
+    try #require(try await permit.beginMedia())
+    let nextRoot = try #require(try await media.nextWork(sdk: sdk))
+    try #require(nextRoot.request == .root)
+    try await media.reply(nextRoot.handle, result: .record(name: "root", recordType: "MGMediaRoot",
+        envelope: Data([0x08, 0x01, 0x12, 0x20]) + Data(repeating: 47, count: 32), asset: nil))
 }
 
 private struct NativeEventWaitDelegate: CloudKitEngineDelegate {

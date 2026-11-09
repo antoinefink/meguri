@@ -27,3 +27,14 @@ revision checks. Native `52068` reaches the next fixture phase: newly created
 manifest work is still pending alongside the blob. The original guard remains
 in force. The fixture must follow the native collection-before-media sequence;
 source diagnosis continues before a further test-only change.
+
+Source review of `54907` has no P0-P2 finding. It keeps the original download
+selection check. Native `56029` compiles: the
+no-work case passes; the download fixture throws a tracking error in setup.
+That enabled failure remains open.
+
+A diagnostic device preview proceeds within this still-open batch. Its marker
+production source is reviewed; the broader 48 selected checks passed in
+`41559`. This preview neither accepts the new fixture nor waives any test or
+gate. The actual device observation takes priority over more fixture work;
+source diagnosis of the fixture continues separately.
