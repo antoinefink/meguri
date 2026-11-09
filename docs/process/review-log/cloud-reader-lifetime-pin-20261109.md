@@ -32,4 +32,7 @@ re-review clears P0-P2. Focused Core `18975` passes all three corrected tests.
 The other 271 passing results remain applicable; production source is unchanged.
 Privacy `19313` passes the final fixture files. Similarity `22390` passes all
 12 source files across both slices, with three excluded files and no allowlist
-use. Lint remains required; the original batch gate remains pending.
+use. Lint `23388` passes all four checks. Apple framework `25277` builds Debug
+for device, Mac and simulator. Native bridge `29868` passes all 49 selected
+checks. The original batch gate remains pending. No production pin caller or
+resource-category/submission conversion is included in this prerequisite.

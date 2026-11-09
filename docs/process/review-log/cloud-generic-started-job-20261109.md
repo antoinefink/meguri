@@ -23,3 +23,12 @@ input facts and native calls remain. Independent re-review clears P0-P2.
 Shared Core `10185` compiles and runs 274 checks: 271 pass; three reader fixture
 failures are retained separately. The generic Started checks pass. Native
 execution, lint and final source guards remain required.
+
+Final native bridge `29868` passes all 49 selected checks, including generic
+Started parity and setup/drain cases, required Ended, ordinary error precedence,
+media and asset lifecycle checks, and the interval registry. Framework `25277`
+builds Debug for device, Mac and simulator. Core lint `23388` passes all four
+checks; similarity `22390` passes all 12 source files across both slices, with
+three excluded files and no allowlist use. Final fixture privacy `19313` passes.
+Production and test corrections remain independently clear of P0-P2 findings.
+The original batch gate and U113/U114/U151 acceptance remain pending.

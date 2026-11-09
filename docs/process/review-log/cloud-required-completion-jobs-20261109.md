@@ -54,3 +54,9 @@ checks from `74919` remain applicable: production source is unchanged.
 Core lint `86723` passes all four checks. Privacy `90219` passes both files;
 similarity `89847` passes all 21 in-scope files, with three excluded files and
 no allowlist use. The full original batch gate remains pending.
+
+Native `29868` rechecks required completion alongside the later reader and
+generic Started changes: all 49 selected checks pass, including the real active
+SDK producer freeze proof and both listener cases. This supplies a passing
+combined native run after the earlier test correction. No unit or batch-gate
+acceptance is inferred from these focused checks.
