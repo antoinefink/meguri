@@ -12,6 +12,13 @@ enum Port {
     First(Arc<CloudWorkflow>, String),
 }
 impl Port {
+    fn begin(&self) -> Result<Arc<CloudAssetReadPass>, CoreError> {
+        match self {
+            Self::Retry(execution) => execution.clone().begin_asset_read_pass(),
+            Self::First(workflow, sdk) => workflow.begin_first_asset_read_pass(sdk.clone()),
+        }
+    }
+
     fn start(&self) -> Result<CloudPolicyAssetReadPassJob, CoreError> {
         match self {
             Self::Retry(execution) => execution.clone().start_begin_asset_read_pass(),
@@ -125,16 +132,26 @@ fn native_admission_jobs_asset_passes_queue_cancel_replace_and_close_without_reb
             fixture.workflow.host.close().unwrap();
             let replacement = published().0;
             let retained = outcome(&job);
-            let refused = port.start();
+            let refused = port.start().err();
+            let legacy = port.begin().err();
             replacement.workflow.host.close().unwrap();
             assert_eq!(pending, Ok(None));
             assert_eq!(retained, value);
-            assert!(matches!(
-                refused,
-                Err(CoreError::CloudPolicy {
-                    failure: CloudPolicyFailure::Closed
-                })
-            ));
+            match &port {
+                Port::Retry(_) => assert_eq!(
+                    refused,
+                    Some(CoreError::CloudPolicy {
+                        failure: CloudPolicyFailure::Closed
+                    })
+                ),
+                Port::First(_, _) => assert_eq!(
+                    refused,
+                    Some(CoreError::Unavailable {
+                        reason: "cloud connection host closed".into()
+                    })
+                ),
+            }
+            assert_eq!(refused, legacy);
             if let Some((unchanged, original, retried, actual_name, actual_kind)) = retry {
                 cancellation.unwrap().unwrap();
                 assert!(unchanged);

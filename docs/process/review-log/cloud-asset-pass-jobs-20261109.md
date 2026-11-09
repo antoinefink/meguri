@@ -43,3 +43,34 @@ sync or media observation.
 Core `12246` does not reach tests: the new conflict fixture stores a boxed
 record in an unboxed field. A test-only type correction is pending. The
 original compilation failure is retained; it is not a passing check.
+
+## Exact legacy error parity
+
+Core `16651` runs 217 checks: 216 pass. One new assertion incorrectly expects
+CloudPolicy Closed from both resource ports. Independent source review confirms
+the first workflow preserves its existing Unavailable error, while retry keeps
+CloudPolicy Closed. Export `19781` checks each exact error and adds parity with
+the same retained synchronous port after close. Other assertions, cleanup and
+deadlines remain. Production source is unchanged by this repair.
+
+## Physical automation
+
+Phone `23389` completes all five drive steps after authorization. Its overall
+result still fails identifier checks. Sync status shows media work pending;
+it is not evidence of a complete sync. A normal Sync Now observation follows.
+
+Core `28434` passes the corrected test. The other 216 checks passed in `16651`
+on the same production source; the only later Rust edits are the reviewed new
+test assertion and fixture type repairs. The failed receipt remains retained.
+Similarity `29914` passes. Native focused verification and lint are pending.
+
+Phone `26433` completes four normal Sync Now drive steps, with identifier
+findings still failing its overall result. The status diagnostic identifies a
+media/read failure with code 0. It is not a root-cause trace or sync acceptance.
+
+Lint `30174` passes. Native `28884` builds and runs 25 checks: 24 pass.
+The new retry result test has four wrong stale-error expectations across its
+two parameter cases. Existing Runtime errors remain Unavailable, whereas the
+new assertions expect CloudPolicy StaleCommand. Independent diagnosis and an
+exact legacy-parity test correction are pending. The failed native receipt is
+retained; no unit or batch acceptance is added.

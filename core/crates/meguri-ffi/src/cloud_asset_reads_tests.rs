@@ -835,7 +835,7 @@ fn first_conflict() -> FirstConflict {
         sdk,
         id,
         original,
-        server,
+        server: *server,
         local_front,
         remote_back,
         bytes,
