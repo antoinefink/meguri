@@ -269,10 +269,10 @@ pub(crate) fn observe_host(host: &CoreHost) -> Result<Observation> {
                     if entities.insert(name, digest).is_some() {
                         return Err(failure());
                     }
-                    if let codec::Payload::Revlog(review) = payload {
-                        if reviews.insert(review.id, digest).is_some() {
-                            return Err(failure());
-                        }
+                    if let codec::Payload::Revlog(review) = payload
+                        && reviews.insert(review.id, digest).is_some()
+                    {
+                        return Err(failure());
                     }
                 }
             }

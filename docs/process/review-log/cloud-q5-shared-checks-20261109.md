@@ -68,3 +68,8 @@ Privacy `20261109T202036Z-80845` passes six files. Similarity
 Lint `20261109T202043Z-81170` passes three checks and reports one collapsible
 conditional. That style repair and the original batch gate remain pending.
 No whole Q5 or unit acceptance follows from these focused receipts.
+
+Filtered `81686` applies only the compiler-equivalent let-chain. Independent
+review confirms identical short-circuit and insertion behavior. Final focused lint
+`20261109T202803Z-83747` passes all four checks. Whole-lane proof and the original
+integration gate remain pending; no Unit trailer is added.
