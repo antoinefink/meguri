@@ -37,7 +37,9 @@ impl std::ops::Deref for IncomingGuard {
 struct Running(Arc<Mutex<State>>, Arc<std::sync::Condvar>);
 impl Drop for Running {
     fn drop(&mut self) {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner).incoming.running = false;
+        StateGuard::new(self.0.lock().unwrap_or_else(PoisonError::into_inner))
+            .incoming
+            .running = false;
         self.1.notify_all();
     }
 }
@@ -62,7 +64,7 @@ impl Runtime {
     pub(super) fn wait_incoming_idle(&self) {
         let mut s = self.state();
         while s.incoming.running {
-            s = self.incoming_idle.wait(s).unwrap_or_else(PoisonError::into_inner);
+            s = s.wait(&self.incoming_idle);
         }
     }
     pub(super) fn settle_before_transition(
@@ -681,7 +683,7 @@ impl Runtime {
                     mapped
                 };
                 let applied = {
-                    let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
+                    let mut s = StateGuard::new(shared.lock().unwrap_or_else(PoisonError::into_inner));
                     with_tracking_access(|| {
                         Self::check_incoming_locked(&s, &writer_guard)?;
                         if rekey {
@@ -705,7 +707,7 @@ impl Runtime {
                     }
                 }
                 // A callback may have invalidated the opening while paused.
-                let s = shared.lock().unwrap_or_else(PoisonError::into_inner);
+                let s = StateGuard::new(shared.lock().unwrap_or_else(PoisonError::into_inner));
                 with_tracking_access(|| Self::check_incoming_locked(&s, &writer_guard)).map_err(capture)?;
                 let targets: BTreeSet<_> = ctx
                     .scope()

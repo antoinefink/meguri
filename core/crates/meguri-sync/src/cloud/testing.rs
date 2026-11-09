@@ -81,6 +81,9 @@ pub fn saved_ack_body_reads() -> Option<usize> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum IncomingStage {
+    AccountIsolationPublished,
+    SDKIsolationPublished,
+    AdoptionIsolationPublished,
     AssetReadPrepared,
     AssetReadFinishing,
     FetchBeforeInbox,
@@ -117,6 +120,7 @@ pub enum TrackingFault {
 pub(super) type StageHook = Arc<dyn Fn(IncomingStage) + Send + Sync>;
 #[derive(Default)]
 pub(super) struct Hooks {
+    pub(super) retire_readback_failure: std::sync::atomic::AtomicBool,
     pub(super) stage: Mutex<Option<StageHook>>,
     pub(super) interruption: Mutex<Option<ApplyInterruption>>,
 }

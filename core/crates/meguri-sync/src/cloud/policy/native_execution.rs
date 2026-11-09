@@ -245,13 +245,16 @@ impl Driver {
         let view = self.committed_native_validation();
         view.validate_policy(command)?;
         let result = (|| {
-            self.validate_view(&view, command)?;
+            let runtime = self.runtime.native_authority();
+            self.validate_runtime_facts(&view, command, &runtime.guard, || {
+                runtime.instance.clone().unwrap_or_default()
+            })?;
             // Quiet completion is qualified Core work, never native authority.
             if command.quiet_proof.is_some() || matches!(command.action.kind, ActionKind::RecordQuietPoint { .. }) {
                 return Err(DriverError::UnqualifiedCompletion);
             }
             let sdk = sdk.ok_or(DriverError::StaleCommand)?;
-            Ok(self.runtime.validate_sdk(sdk)?)
+            Ok(runtime.validate_sdk(sdk)?)
         })();
         #[cfg(feature = "test-hooks")]
         {

@@ -1938,6 +1938,10 @@ impl Runtime {
             if let Some(bound) = &mut s.bound {
                 bound.usable = false;
             }
+            s.publish_authority();
+            #[cfg(feature = "test-hooks")]
+            self.incoming_hooks
+                .hit(super::super::testing::IncomingStage::AdoptionIsolationPublished);
             Ok(())
         })?;
         owner.set_next(AdoptionTask::RecheckActive);

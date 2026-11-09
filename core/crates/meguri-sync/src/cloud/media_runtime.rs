@@ -1823,7 +1823,7 @@ impl Runtime {
                     k.after_payload = Some(after.clone());
                     crate::cloud::row_payload::stage_payload(ctx.scope(), &after).map_err(engine_error)?;
                 }
-                let mut s = shared.lock().unwrap_or_else(PoisonError::into_inner);
+                let mut s = StateGuard::new(shared.lock().unwrap_or_else(PoisonError::into_inner));
                 Self::check_media_recovery_locked(&s, &authority).map_err(engine_error)?;
                 with_tracking_access(|| s.store.as_mut().ok_or(Error::Database)?.update_media_intent(&planned))
                     .map_err(engine_error)?;
@@ -2628,7 +2628,9 @@ impl meguri_engine::media::MediaFeedConsumer for Runtime {
 struct MediaRunning(Arc<Mutex<State>>, Arc<std::sync::Condvar>);
 impl Drop for MediaRunning {
     fn drop(&mut self) {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner).incoming.running = false;
+        StateGuard::new(self.0.lock().unwrap_or_else(PoisonError::into_inner))
+            .incoming
+            .running = false;
         self.1.notify_all();
     }
 }

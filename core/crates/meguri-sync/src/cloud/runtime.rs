@@ -416,6 +416,7 @@ struct Bound {
 }
 #[derive(Default)]
 struct State {
+    native_authority: Arc<Mutex<NativeAuthority>>,
     incarnation: u64,
     invalidation: u64,
     invalidation_exhausted: bool,
@@ -450,6 +451,92 @@ struct State {
     fail_capture_after: Option<usize>,
 }
 
+// Exact, bounded authority facts for final native validation only. This owns no
+// tracking state and is never acquired while reading a provider or store.
+#[derive(Clone, Default)]
+pub(crate) struct NativeAuthority {
+    pub(crate) guard: super::adapter::Guard,
+    pub(crate) instance: Option<String>,
+    sdk: Option<super::adapter::SDKAuthority>,
+    usable: bool,
+    verified: bool,
+    active: bool,
+}
+impl NativeAuthority {
+    fn from_state(s: &State) -> Self {
+        Self {
+            guard: Runtime::adapter_guard_locked(s),
+            instance: Runtime::instance_locked(s).ok(),
+            sdk: s.adapter.sdk.clone(),
+            usable: s.bound.as_ref().is_some_and(|b| b.usable),
+            verified: s.bound.as_ref().is_some_and(|b| b.verified),
+            active: s
+                .bound
+                .as_ref()
+                .is_some_and(|b| b.binding.facts.state == BindingState::Active),
+        }
+    }
+    fn caller(&self, instance: &str) -> Result<(), RuntimeError> {
+        let host = self.instance.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+        if !self.sdk_matches(instance) && host != instance {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        if !self.usable || !self.verified || !self.active {
+            return Err(RuntimeError::IdentityUnverified);
+        }
+        Ok(())
+    }
+    fn sdk_matches(&self, id: &str) -> bool {
+        self.sdk
+            .as_ref()
+            .is_some_and(|s| s.id == id && !s.stopping && s.guard == self.guard)
+    }
+    pub(crate) fn validate_sdk(&self, sdk: &str) -> Result<(), RuntimeError> {
+        if !self.sdk_matches(sdk) {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        self.caller(sdk)
+    }
+}
+impl State {
+    fn publish_authority(&self) {
+        let facts = NativeAuthority::from_state(self);
+        *self.native_authority.lock().unwrap_or_else(PoisonError::into_inner) = facts;
+    }
+}
+
+// Only actual State guards publish. Prepared State values do not. Keep the
+// underlying guard for Condvar::wait so checking and sleeping remain atomic.
+struct StateGuard<'a>(Option<MutexGuard<'a, State>>);
+impl<'a> StateGuard<'a> {
+    fn new(guard: MutexGuard<'a, State>) -> Self {
+        Self(Some(guard))
+    }
+    fn wait(mut self, idle: &std::sync::Condvar) -> Self {
+        self.publish_authority();
+        let guard = self.0.take().expect("actual state guard");
+        Self::new(idle.wait(guard).unwrap_or_else(PoisonError::into_inner))
+    }
+}
+impl std::ops::Deref for StateGuard<'_> {
+    type Target = State;
+    fn deref(&self) -> &State {
+        self.0.as_deref().expect("actual state guard")
+    }
+}
+impl std::ops::DerefMut for StateGuard<'_> {
+    fn deref_mut(&mut self) -> &mut State {
+        self.0.as_deref_mut().expect("actual state guard")
+    }
+}
+impl Drop for StateGuard<'_> {
+    fn drop(&mut self) {
+        if let Some(state) = self.0.as_ref() {
+            state.publish_authority();
+        }
+    }
+}
+
 #[cfg(feature = "test-hooks")]
 type CloudCaptureHook = Box<dyn FnOnce(&Runtime) + Send>;
 
@@ -469,6 +556,7 @@ pub struct Runtime {
     pending_clock: std::sync::atomic::AtomicI64,
     no_collection_identity_owner: Mutex<Option<NoCollectionIdentityOwner>>,
     state: Arc<Mutex<State>>,
+    native_authority: Arc<Mutex<NativeAuthority>>,
     #[cfg(feature = "test-hooks")]
     state_contention: Mutex<Option<std::sync::mpsc::Sender<()>>>,
     #[cfg(feature = "test-hooks")]
@@ -540,6 +628,12 @@ impl Runtime {
     /// Construction performs no account/provider call. Tracking opens under
     /// its serialization gate in the pre-admission OpenStep.
     pub fn new(directory: PathBuf, inputs: CloudInputs) -> Self {
+        let state = State {
+            scan_required: true,
+            actions: super::workflow::Actions::new(),
+            ..State::default()
+        };
+        let native_authority = state.native_authority.clone();
         Self {
             directory,
             inputs,
@@ -557,11 +651,8 @@ impl Runtime {
             incoming_idle: Arc::new(std::sync::Condvar::new()),
             #[cfg(feature = "test-hooks")]
             incoming_hooks: Arc::new(super::testing::Hooks::default()),
-            state: Arc::new(Mutex::new(State {
-                scan_required: true,
-                actions: super::workflow::Actions::new(),
-                ..State::default()
-            })),
+            state: Arc::new(Mutex::new(state)),
+            native_authority,
             #[cfg(feature = "test-hooks")]
             scan_pause: Mutex::new(None),
             #[cfg(feature = "test-hooks")]
@@ -612,11 +703,17 @@ impl Runtime {
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = Some(Box::new(hook));
     }
-    fn state(&self) -> MutexGuard<'_, State> {
+    pub(crate) fn native_authority(&self) -> NativeAuthority {
+        self.native_authority
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+    fn state(&self) -> StateGuard<'_> {
         #[cfg(feature = "test-hooks")]
         match self.state.try_lock() {
-            Ok(state) => return state,
-            Err(std::sync::TryLockError::Poisoned(error)) => return error.into_inner(),
+            Ok(state) => return StateGuard::new(state),
+            Err(std::sync::TryLockError::Poisoned(error)) => return StateGuard::new(error.into_inner()),
             Err(std::sync::TryLockError::WouldBlock) => {
                 if let Some(sender) = self
                     .state_contention
@@ -628,13 +725,18 @@ impl Runtime {
                 }
             }
         }
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+        StateGuard::new(self.state.lock().unwrap_or_else(PoisonError::into_inner))
     }
     fn invalidate_locked(state: &mut State) {
-        with_tracking_access(|| Self::invalidate_tracking_locked(state));
+        Self::invalidate_authority_locked(state);
+        with_tracking_access(|| Self::invalidate_drain_locked(state));
     }
     // Caller holds both runtime state and tracking access.
     fn invalidate_tracking_locked(state: &mut State) {
+        Self::invalidate_authority_locked(state);
+        Self::invalidate_drain_locked(state);
+    }
+    fn invalidate_authority_locked(state: &mut State) {
         state.publication.reset_root_missing = None;
         state.publication.reset_root_read_guard = None;
         match state.invalidation.checked_add(1) {
@@ -644,6 +746,9 @@ impl Runtime {
         state.scan_required = true;
         state.whole_complete = false;
         state.tracking_stopped = true;
+        state.publish_authority();
+    }
+    fn invalidate_drain_locked(state: &mut State) {
         if let Some(id) = state.bound.as_ref().map(|b| b.binding.id) {
             let _ = state
                 .store
@@ -686,6 +791,7 @@ impl Runtime {
         state.suspended_adoption_cleanup = None;
         Self::adapter_close_exchange_locked(&mut state);
         state.incarnation = state.incarnation.checked_add(1).ok_or(Error::InvalidData)?;
+        state.publish_authority();
         if state.cloud.generation != Some(evidence.generation) || state.cloud.native_file != Some(file) {
             state.cloud = super::workflow::CloudFrontier {
                 generation: Some(evidence.generation),
@@ -706,6 +812,7 @@ impl Runtime {
             state.cloud.handed_images.clear();
         }
         state.bound = None;
+        state.publish_authority();
         state.scan_required = true;
         state.scan_running = false;
         state.tracking_stopped = state.invalidation_exhausted;
@@ -929,31 +1036,44 @@ impl Runtime {
             state.publication.reset_root_missing = None;
             state.publication.reset_root_read_guard = None;
             state.adapter.token = state.adapter.token.checked_add(1).ok_or(Error::InvalidData)?;
+            state.publish_authority();
         }
         let result = with_tracking_access(|| -> Result<(), RuntimeError> {
             work.effect()?;
-            let State { bound, store, .. } = &mut *state;
-            let bound = bound.as_mut().ok_or(RuntimeError::StaleIncarnation)?;
+            state.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
             match result {
-                IdentityStatus::Available(identity) if identity == bound.binding.facts.account => {
+                IdentityStatus::Available(identity)
+                    if state
+                        .bound
+                        .as_ref()
+                        .is_some_and(|b| identity == b.binding.facts.account) =>
+                {
+                    let bound = state.bound.as_mut().ok_or(RuntimeError::StaleIncarnation)?;
                     bound.verified = bound.usable;
                 }
                 IdentityStatus::Available(_) | IdentityStatus::SignedOut | IdentityStatus::SwitchedAccounts => {
-                    // Close the gate before attempting the isolation commit.
+                    let bound = state.bound.as_mut().ok_or(RuntimeError::StaleIncarnation)?;
                     bound.verified = false;
                     bound.usable = false;
+                    let id = bound.binding.id;
                     let reason = if signed_out {
                         IsolationReason::SignedOut
                     } else {
                         IsolationReason::AccountChanged
                     };
-                    let store = store.as_mut().ok_or(Error::Database)?;
-                    store.isolate_runtime_binding(bound.binding.id, reason)?;
-                    bound.binding = store.binding(bound.binding.id)?.ok_or(Error::BindingNotFound)?;
+                    state.publish_authority();
+                    #[cfg(feature = "test-hooks")]
+                    self.incoming_hooks
+                        .hit(super::super::testing::IncomingStage::AccountIsolationPublished);
+                    let store = state.store.as_mut().ok_or(Error::Database)?;
+                    store.isolate_runtime_binding(id, reason)?;
+                    let binding = store.binding(id)?.ok_or(Error::BindingNotFound)?;
+                    state.bound.as_mut().ok_or(RuntimeError::StaleIncarnation)?.binding = binding;
                 }
                 IdentityStatus::ReadFailed => {} // V9.1: a later failed read keeps verification.
-                _ => bound.verified = false,
+                _ => state.bound.as_mut().ok_or(RuntimeError::StaleIncarnation)?.verified = false,
             }
+            state.publish_authority();
             Ok(())
         });
         if work.was_rejected() {
@@ -1473,6 +1593,7 @@ impl OpenStep for Runtime {
             state.scan_required = true;
             state.tracking_stopped = true;
             state.bound = None;
+            state.publish_authority();
         }
         Ok(())
     }
@@ -1494,6 +1615,7 @@ impl GenerationListener for Runtime {
             .is_some_and(|bound| bound.evidence.generation != new)
         {
             state.bound = None;
+            state.publish_authority();
         }
         state.scan_required = true;
     }
@@ -1571,6 +1693,7 @@ impl SuspendParticipant for Runtime {
             .incarnation
             .checked_add(1)
             .ok_or_else(|| engine_error("incarnation exhausted"))?;
+        state.publish_authority();
         if state.adapter.retain_inspection && state.bound.is_some() {
             state.adapter.closed_snapshot = Some(Self::adapter_snapshot_locked(&state).map_err(engine_error)?);
         }
@@ -1580,6 +1703,7 @@ impl SuspendParticipant for Runtime {
             incarnation: state.incarnation,
         });
         state.bound = None;
+        state.publish_authority();
         state.scan_required = true;
         state.scan_running = false;
         state.note_scan = None;
@@ -1644,6 +1768,35 @@ pub(super) fn note_image(row: &[Cell], nt_struct_gen: u64) -> Result<codec::Note
 
 #[cfg(feature = "test-hooks")]
 impl Runtime {
+    /// Stable-State equivalence, including the original caller/SDK error order.
+    pub fn native_authority_matches_state_for_testing(&self, candidates: &[&str]) -> bool {
+        fn same(a: Result<(), RuntimeError>, b: Result<(), RuntimeError>) -> bool {
+            match (a, b) {
+                (Ok(()), Ok(())) => true,
+                (Err(a), Err(b)) => std::mem::discriminant(&a) == std::mem::discriminant(&b),
+                _ => false,
+            }
+        }
+        let state = self.state();
+        let view = self.native_authority();
+        view.guard == Self::adapter_guard_locked(&state)
+            && view.instance == Self::instance_locked(&state).ok()
+            && candidates.iter().all(|id| {
+                same(view.caller(id), Self::caller_locked(&state, id))
+                    && same(view.validate_sdk(id), Self::sdk_locked(&state, id))
+            })
+    }
+    pub fn validate_native_sdk_for_testing(&self, sdk: &str) -> Result<(), RuntimeError> {
+        self.native_authority().validate_sdk(sdk)
+    }
+    pub fn validate_native_caller_for_testing(&self, caller: &str) -> Result<(), RuntimeError> {
+        self.native_authority().caller(caller)
+    }
+    pub fn fail_retire_readback_for_testing(&self) {
+        self.incoming_hooks
+            .retire_readback_failure
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
     pub fn set_incoming_stage_hook_for_testing(
         &self,
         hook: impl Fn(super::testing::IncomingStage) + Send + Sync + 'static,

@@ -363,6 +363,7 @@ impl Runtime {
             }
             s.root_confirmed = false;
             s.adapter.token = s.adapter.token.checked_add(1).ok_or(Error::InvalidData)?;
+            s.publish_authority();
             Ok(())
         })
     }

@@ -329,6 +329,7 @@ impl Runtime {
             if let Some(sdk) = s.adapter.sdk.as_mut() {
                 sdk.stopping = true;
             }
+            s.publish_authority();
             s.adapter.identity_read = None;
             s.adapter.accepted_identity_read = None;
             s.adapter.fetch = None;

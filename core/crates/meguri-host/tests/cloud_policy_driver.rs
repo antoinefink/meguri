@@ -1331,3 +1331,232 @@ fn first_manual_capture_cannot_send_after_changed_or_deleted_root() {
         rig.host.close().unwrap();
     }
 }
+
+#[test]
+fn native_authority_matches_actual_runtime_lifecycle_sdk_and_noops() {
+    for transition in 0..6 {
+        let rig = rig();
+        let runtime = rig.host.cloud_runtime().unwrap();
+        let owner = runtime.instance().unwrap();
+        let check = || {
+            assert!(runtime.native_authority_matches_state_for_testing(&[&owner, &rig.sdk, "unknown", ""]));
+        };
+        check();
+        runtime.retire_sdk("unknown", true).unwrap();
+        runtime.release_sdk("unknown").unwrap();
+        runtime.adapter_pause(false).unwrap();
+        runtime
+            .adapter_account(
+                Some(&rig.sdk),
+                IdentityStatus::Available(OpaqueBytes(b"synthetic-account-A".to_vec())),
+            )
+            .unwrap();
+        check();
+        runtime.validate_native_sdk_for_testing(&rig.sdk).unwrap();
+        match transition {
+            0 => {
+                rig.host.engine().suspend(Duration::from_secs(10)).unwrap();
+                check();
+                assert!(matches!(
+                    runtime.validate_native_sdk_for_testing(&rig.sdk),
+                    Err(RuntimeError::StaleIncarnation)
+                ));
+                rig.host.engine().resume().unwrap();
+                check();
+                runtime
+                    .adapter_account(
+                        Some(&rig.sdk),
+                        IdentityStatus::Available(OpaqueBytes(b"synthetic-account-A".to_vec())),
+                    )
+                    .unwrap();
+                check();
+                runtime.validate_native_sdk_for_testing(&rig.sdk).unwrap();
+            }
+            1 => {
+                runtime.retire_sdk(&rig.sdk, false).unwrap();
+                check();
+                runtime.release_sdk(&rig.sdk).unwrap();
+                check();
+                let replacement = runtime.register_sdk(true).unwrap().0;
+                assert!(runtime.native_authority_matches_state_for_testing(&[
+                    &owner,
+                    &rig.sdk,
+                    &replacement,
+                    "unknown"
+                ]));
+                assert!(runtime.validate_native_sdk_for_testing(&rig.sdk).is_err());
+                runtime.validate_native_sdk_for_testing(&replacement).unwrap();
+                runtime.retire_sdk(&replacement, false).unwrap();
+                runtime.release_sdk(&replacement).unwrap();
+            }
+            2 => {
+                runtime.adapter_pause(true).unwrap();
+                check();
+                runtime.adapter_pause(false).unwrap();
+                check();
+            }
+            3 => {
+                runtime
+                    .adapter_account(None, IdentityStatus::TemporarilyUnavailable)
+                    .unwrap();
+                check();
+                assert!(matches!(
+                    runtime.validate_native_caller_for_testing(&owner),
+                    Err(RuntimeError::IdentityUnverified)
+                ));
+                // SDK guard mismatch precedes the unverified binding error.
+                assert!(matches!(
+                    runtime.validate_native_sdk_for_testing(&rig.sdk),
+                    Err(RuntimeError::StaleIncarnation)
+                ));
+                runtime
+                    .adapter_account(
+                        None,
+                        IdentityStatus::Available(OpaqueBytes(b"synthetic-account-A".to_vec())),
+                    )
+                    .unwrap();
+                check();
+            }
+            4 => {
+                runtime.adapter_tracking_failure(&rig.sdk).unwrap();
+                check();
+            }
+            5 => {
+                runtime.adapter_stop_syncing().unwrap();
+                check();
+            }
+            _ => unreachable!(),
+        }
+        runtime.retire_sdk(&rig.sdk, false).unwrap();
+        runtime.release_sdk(&rig.sdk).unwrap();
+        rig.host.close().unwrap();
+        check();
+    }
+}
+
+#[path = "common/native_authority.rs"]
+mod native_authority;
+use native_authority::hold_native_authority_edge;
+
+#[test]
+fn native_authority_refuses_original_command_while_account_isolation_is_held() {
+    let rig = rig();
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let command = command(
+        rig.host
+            .cloud_policy_input(DeviceEvent::SyncNowRequested(Source::Command))
+            .unwrap(),
+        |kind| matches!(kind, ActionKind::RunExchange { .. }),
+    );
+    let driver = rig.host.cloud_policy_driver().unwrap();
+    driver.validate_native_sdk(&command, &rig.sdk).unwrap();
+    let (observed, validation, result, released) = hold_native_authority_edge(
+        runtime,
+        IncomingStage::AccountIsolationPublished,
+        || runtime.adapter_account(Some(&rig.sdk), IdentityStatus::SignedOut),
+        || driver.validate_native_sdk(&command, &rig.sdk),
+    );
+    assert!(runtime.native_authority_matches_state_for_testing(&[&rig.sdk]));
+    runtime.retire_sdk(&rig.sdk, false).unwrap();
+    runtime.release_sdk(&rig.sdk).unwrap();
+    rig.host.close().unwrap();
+    assert!(observed && released);
+    result.unwrap().unwrap();
+    assert!(matches!(validation.unwrap().unwrap(), Err(DriverError::StaleCommand)));
+}
+
+#[test]
+fn native_authority_retire_isolation_precedes_held_readback_and_survives_failure() {
+    for fail_readback in [false, true] {
+        let rig = rig();
+        let runtime = rig.host.cloud_runtime().unwrap();
+        let collection = rig.host.collection().unwrap();
+        // An actual same-account reset makes the next owned epoch read due.
+        runtime
+            .adapter_account(
+                Some(&rig.sdk),
+                IdentityStatus::Available(OpaqueBytes(b"synthetic-account-A".to_vec())),
+            )
+            .unwrap();
+        let fetch = runtime.adapter_begin_fetch(&rig.sdk, vec![rig.zone.clone()]).unwrap();
+        let group = format!("meguri-{fetch}");
+        runtime.adapter_will_fetch(&rig.sdk, group.clone(), true).unwrap();
+        runtime.adapter_did_fetch(&rig.sdk, &group, true).unwrap();
+        let mut reads = runtime.adapter_fetch_reads(&rig.sdk, fetch, &collection).unwrap();
+        assert_eq!(reads.len(), 1);
+        let read = reads.remove(0);
+        assert!(!read.is_active());
+        let followup = runtime
+            .adapter_complete_fetch_read(
+                &read,
+                &collection,
+                meguri_sync::cloud::publication::RecordRead::Missing,
+                false,
+                None,
+                None,
+            )
+            .unwrap()
+            .unwrap();
+        assert!(followup.is_active());
+        runtime.validate_sdk(&rig.sdk).unwrap();
+        runtime.validate_native_sdk_for_testing(&rig.sdk).unwrap();
+        if fail_readback {
+            runtime.fail_retire_readback_for_testing();
+        }
+        let (observed, validation, result, released) = hold_native_authority_edge(
+            runtime,
+            IncomingStage::SDKIsolationPublished,
+            || runtime.retire_sdk(&rig.sdk, false),
+            || runtime.validate_native_sdk_for_testing(&rig.sdk),
+        );
+        let same = runtime.native_authority_matches_state_for_testing(&[&rig.sdk]);
+        let unusable = !runtime.status().unwrap().stored_usable && !runtime.status().unwrap().identity_verified;
+        let after_failure = runtime.validate_native_sdk_for_testing(&rig.sdk);
+        // Readback failure leaves stopping untouched; the successfully isolated
+        // binding alone must reject the still-installed original SDK.
+        runtime.retire_sdk(&rig.sdk, false).unwrap();
+        runtime.release_sdk(&rig.sdk).unwrap();
+        rig.host.close().unwrap();
+        assert!(observed && released && same && unusable);
+        assert!(matches!(
+            validation.unwrap().unwrap(),
+            Err(RuntimeError::IdentityUnverified)
+        ));
+        let result = result.unwrap();
+        if fail_readback {
+            assert!(matches!(
+                result,
+                Err(RuntimeError::Tracking(meguri_sync::cloud::Error::Database))
+            ));
+            assert!(matches!(after_failure, Err(RuntimeError::IdentityUnverified)));
+        } else {
+            result.unwrap();
+            assert!(matches!(after_failure, Err(RuntimeError::StaleIncarnation)));
+        }
+    }
+}
+
+#[test]
+fn native_authority_unbound_preserves_original_stale_error_precedence() {
+    let root = tempfile::tempdir().unwrap();
+    let runtime = meguri_sync::cloud::runtime::Runtime::new(
+        root.path().to_owned(),
+        CloudInputs {
+            scope: BuildScope {
+                container: ContainerId::new("synthetic-u114").unwrap(),
+                environment: Environment::Development,
+            },
+            identity: Arc::new(Account),
+            files: Arc::new(NativeFiles),
+        },
+    );
+    assert!(runtime.native_authority_matches_state_for_testing(&["", "unknown"]));
+    assert!(matches!(
+        runtime.validate_native_sdk_for_testing(""),
+        Err(RuntimeError::StaleIncarnation)
+    ));
+    assert!(matches!(
+        runtime.validate_native_caller_for_testing(""),
+        Err(RuntimeError::StaleIncarnation)
+    ));
+}

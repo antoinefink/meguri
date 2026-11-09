@@ -998,6 +998,7 @@ impl Runtime {
             b.usable = false;
             b.verified = false;
             b.binding = binding;
+            s.publish_authority();
             if read.is_some_and(|read| read.lost_collection) {
                 s.adapter.pending_collection_loss = None;
             }

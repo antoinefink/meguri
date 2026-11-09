@@ -17,3 +17,6 @@
 - GC checks only blob IDs freed by this write in its binding. Header and own-flight intent refs can keep them live. Check that small list again when an intent ends. Digest-only own-save intents still need real writer and WAL proof.
 
 - Workflow V2 pairs `cloud_rekey_intents` with `cloud_apply_intents`. Persist and settle both together; the server inbox remains ready after the move.
+
+- Final native validation alone reads `NativeAuthority`. Actual State guards publish before unlock; direct shared-State aliases must use `StateGuard`, including Condvar wait/reacquisition. Prepared State never publishes.
+- Publish actual authority changes before later tracking/I/O/waits. Compact authority locks never span another lock acquisition, provider, store operation or callback; SDK isolation readback failure retains committed unusability.

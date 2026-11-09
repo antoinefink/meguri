@@ -209,8 +209,28 @@ impl Runtime {
                     // local rows and clear absence state. Never overwrite a
                     // stronger current reason with this service fallback.
                     let (binding, durable) = with_tracking_access(|| {
-                        let store = s.store.as_mut().ok_or(Error::Database)?;
-                        store.isolate_runtime_binding(scan.binding, IsolationReason::ZoneMissing)?;
+                        s.store
+                            .as_mut()
+                            .ok_or(Error::Database)?
+                            .isolate_runtime_binding(scan.binding, IsolationReason::ZoneMissing)?;
+                        // Isolation has committed. Failed readback cannot restore
+                        // authority to this already isolated binding.
+                        let b = s.bound.as_mut().ok_or(Error::BindingNotFound)?;
+                        b.usable = false;
+                        b.verified = false;
+                        s.publish_authority();
+                        #[cfg(feature = "test-hooks")]
+                        self.incoming_hooks
+                            .hit(super::super::testing::IncomingStage::SDKIsolationPublished);
+                        #[cfg(feature = "test-hooks")]
+                        if self
+                            .incoming_hooks
+                            .retire_readback_failure
+                            .swap(false, std::sync::atomic::Ordering::SeqCst)
+                        {
+                            return Err(Error::Database);
+                        }
+                        let store = s.store.as_ref().ok_or(Error::Database)?;
                         Ok::<_, Error>((
                             store.binding(scan.binding)?.ok_or(Error::BindingNotFound)?,
                             store.adapter_durable(scan.binding)?,
@@ -233,9 +253,11 @@ impl Runtime {
             .filter(|a| a.id == sdk)
             .ok_or(RuntimeError::StaleIncarnation)?;
         authority.stopping = true;
+        s.publish_authority();
         s.policy.flights.retain(|(owner, _), _| owner != sdk);
         if policy_stop {
             s.adapter.token = s.adapter.token.checked_add(1).ok_or(Error::InvalidData)?;
+            s.publish_authority();
         }
         Ok(())
     }
@@ -265,6 +287,7 @@ impl Runtime {
         if s.adapter.paused != paused {
             s.adapter.paused = paused;
             s.adapter.token = s.adapter.token.checked_add(1).ok_or(Error::InvalidData)?;
+            s.publish_authority();
         }
         Ok(())
     }
@@ -272,6 +295,7 @@ impl Runtime {
         let mut s = self.state();
         let id = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
         s.adapter.token = s.adapter.token.checked_add(1).ok_or(Error::InvalidData)?;
+        s.publish_authority();
         with_tracking_access(|| {
             s.store
                 .as_mut()
@@ -318,6 +342,7 @@ impl Runtime {
             }
             s.publication.preview = None;
             s.adapter.token = s.adapter.token.checked_add(1).ok_or(Error::InvalidData)?;
+            s.publish_authority();
             return Ok(());
         }
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
@@ -332,6 +357,7 @@ impl Runtime {
                     .is_some_and(|sdk| !sdk.stopping && sdk.guard == Self::adapter_guard_locked(s)));
         if !same {
             s.adapter.token = s.adapter.token.checked_add(1).ok_or(Error::InvalidData)?;
+            s.publish_authority();
         }
         let b = s.bound.as_mut().ok_or(RuntimeError::StaleIncarnation)?;
         let isolation = match identity {
@@ -352,6 +378,10 @@ impl Runtime {
             b.usable = false;
             b.binding.facts.state = BindingState::Isolated(reason);
             let id = b.binding.id;
+            s.publish_authority();
+            #[cfg(feature = "test-hooks")]
+            self.incoming_hooks
+                .hit(super::super::testing::IncomingStage::AccountIsolationPublished);
             with_tracking_access(|| {
                 s.store
                     .as_mut()
@@ -359,6 +389,7 @@ impl Runtime {
                     .isolate_runtime_binding(id, reason)
             })?;
         }
+        s.publish_authority();
         if same && sdk_event {
             s.adapter.no_state = true;
             s.adapter.no_state_creation = false;
@@ -624,6 +655,7 @@ impl Runtime {
         if s.adapter.durable.active_deleted {
             s.root_confirmed = false;
             s.adapter.token = s.adapter.token.checked_add(1).ok_or(Error::InvalidData)?;
+            s.publish_authority();
             if let Some(b) = s.bound.as_mut() {
                 b.verified = false;
                 b.usable = false;

@@ -121,3 +121,8 @@ threads-required = "num-test-threads"
 [[profile.default.overrides]]
 filter = 'package(meguri-ffi) and test(/media_next_job_/)'
 threads-required = "num-test-threads"
+
+# Runtime authority edge tests retain positive five-second completion bounds.
+[[profile.default.overrides]]
+filter = 'package(meguri-host) and test(/^native_authority_/)'
+threads-required = "num-test-threads"

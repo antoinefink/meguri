@@ -1849,3 +1849,104 @@ fn initial_adoption_malformed_sidecar_is_an_error_and_is_preserved() {
     assert_eq!(process.engine().slot_holder(), None);
     assert_eq!(backup.0.load(Ordering::SeqCst), 0);
 }
+
+#[path = "common/native_authority.rs"]
+mod native_authority;
+
+#[test]
+fn native_authority_ready_adoption_refuses_original_sdk_before_next_work() {
+    use cloud::{
+        adoption::AdoptionTask,
+        publication::{PreviewWork, PublicationWork},
+        runtime::RuntimeError,
+        testing::IncomingStage,
+    };
+    use std::time::Duration;
+    let mut pair = Pair::published();
+    // Publish a real successor from the other device. Reopen the old device
+    // without a fetch so its original binding is still usable until adoption.
+    let successor_dir = generated(pair._root.path(), "successor", 1802);
+    let mut successor = PublicationRig::open(
+        &successor_dir,
+        &scope(),
+        IdentityReads::Available(scope().account),
+        false,
+        NOW,
+        1809,
+        Arc::new(Keys(AtomicUsize::new(0))),
+    )
+    .unwrap();
+    let preview = successor.preview(&mut pair.service, STEPS).unwrap();
+    successor.confirm_publication(&preview).unwrap();
+    successor.drive_ready(&mut pair.service, STEPS).unwrap();
+    pair.sender.close_clean().unwrap();
+    let directory = pair._root.path().join("sender");
+    let (mut config, _, _) = initial_config(&directory);
+    config.publication_binding = AccountBinding::Connected {
+        account: scope().account,
+        configuration: scope().container,
+        environment: scope().environment,
+    };
+    let host = meguri_host::CoreHost::open(config).unwrap();
+    let runtime = host.cloud_runtime().unwrap();
+    runtime.refresh_identity().unwrap();
+    let media = host.media().unwrap();
+    media.store().register_full(|_, _| true).unwrap();
+    runtime
+        .reconcile_binding(&host.collection().unwrap(), &media, Duration::from_secs(10))
+        .unwrap();
+    let sdk = runtime.register_sdk(false).unwrap().0;
+    runtime.validate_native_sdk_for_testing(&sdk).unwrap();
+    let PreviewWork::ReadActive { id } = host.begin_cloud_connection_preview().unwrap() else {
+        panic!("active");
+    };
+    let PreviewWork::ReadEpoch { epoch, .. } = runtime
+        .connection_active_read(id, initial_read(&mut pair.service, "meguri-root", "active"))
+        .unwrap()
+    else {
+        panic!("epoch");
+    };
+    let PreviewWork::Ready(preview) = runtime
+        .connection_epoch_read(
+            id,
+            initial_read(&mut pair.service, &cloud::adapter::collection_zone(epoch), "epoch"),
+        )
+        .unwrap()
+    else {
+        panic!("preview");
+    };
+    let adoption = host.confirm_cloud_adoption(&preview).unwrap();
+    let work = loop {
+        let PublicationWork::Adoption(work) = host.next_cloud_publication_work().unwrap() else {
+            panic!("adoption");
+        };
+        if work.task == AdoptionTask::Validate {
+            break work;
+        }
+        let op = runtime.adoption_op().unwrap().unwrap();
+        host.cloud_adoption_reply(&work, initial_reply(&mut pair.service, op.epoch, &work.task))
+            .unwrap();
+    };
+    runtime.validate_native_sdk_for_testing(&sdk).unwrap();
+    let (observed, validation, result, released) = native_authority::hold_native_authority_edge(
+        runtime,
+        IncomingStage::AdoptionIsolationPublished,
+        || host.perform_cloud_adoption_local(&work),
+        || runtime.validate_native_sdk_for_testing(&sdk),
+    );
+    let same = runtime.native_authority_matches_state_for_testing(&[&sdk]);
+    let ready = runtime.adoption_op().unwrap().unwrap().step;
+    runtime.retire_sdk(&sdk, false).unwrap();
+    runtime.release_sdk(&sdk).unwrap();
+    host.cancel_cloud_adoption(adoption).unwrap();
+    host.close().unwrap();
+    successor.close_clean().unwrap();
+    pair.receiver.close_clean().unwrap();
+    assert!(observed && released && same);
+    result.unwrap().unwrap();
+    assert_eq!(ready, AdoptStep::Ready);
+    assert!(matches!(
+        validation.unwrap().unwrap(),
+        Err(RuntimeError::IdentityUnverified)
+    ));
+}

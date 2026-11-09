@@ -1146,6 +1146,7 @@ impl Runtime {
                     b.binding.facts.state = BindingState::Isolated(IsolationReason::ZoneMissing);
                     b.usable = false;
                     b.verified = false;
+                    s.publish_authority();
                 }
                 _ => {}
             },

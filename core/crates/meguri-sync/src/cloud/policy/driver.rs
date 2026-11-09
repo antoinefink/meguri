@@ -833,6 +833,15 @@ impl Driver {
     }
     fn validate_view(&self, view: &NativeValidation, command: &Command) -> Result<(), DriverError> {
         let runtime = self.runtime.adapter_guard();
+        self.validate_runtime_facts(view, command, &runtime, || self.runtime.instance().unwrap_or_default())
+    }
+    fn validate_runtime_facts(
+        &self,
+        view: &NativeValidation,
+        command: &Command,
+        runtime: &crate::cloud::adapter::Guard,
+        owner: impl FnOnce() -> String,
+    ) -> Result<(), DriverError> {
         if view.guard != command.action.guard {
             #[cfg(feature = "test-hooks")]
             eprintln!(
@@ -843,12 +852,12 @@ impl Driver {
             );
             return Err(DriverError::StaleCommand);
         }
-        if command.owner != self.runtime.instance().unwrap_or_default() {
+        if command.owner != owner() {
             #[cfg(feature = "test-hooks")]
             eprintln!("cloud-policy-rejection stage=validate.original-owner");
             return Err(DriverError::StaleCommand);
         }
-        if runtime != command.backend_guard {
+        if runtime != &command.backend_guard {
             #[cfg(feature = "test-hooks")]
             eprintln!(
                 "cloud-policy-rejection stage=validate.backend-guard generation_matches={} binding_matches={}",
