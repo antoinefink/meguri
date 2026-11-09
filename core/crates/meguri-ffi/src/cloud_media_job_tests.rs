@@ -81,6 +81,8 @@ fn arm_scan() -> (ScanHold, mpsc::Receiver<()>) {
 #[test]
 fn media_next_job_scan_hold_admits_and_completes_real_review_before_release() {
     let (fixture, sdk) = published();
+    let collection = fixture.workflow.host.collection().unwrap();
+    meguri_engine::sched::fsrs_policy::enable_fsrs(&collection, &Default::default()).unwrap();
     let media = fixture.workflow.media().unwrap();
     // Establish the original SDK before arming, so the hold is in the actual
     // next-work feed dependency, rather than an SDK setup test double.
@@ -178,6 +180,45 @@ fn media_next_job_scan_hold_admits_and_completes_real_review_before_release() {
     );
     assert_eq!(review_terminal.unwrap().unwrap(), JobOutcome::Succeeded);
     assert_eq!(terminal.unwrap().unwrap(), JobOutcome::Succeeded);
+}
+
+#[test]
+fn media_next_job_scan_hold_sdk_replacement_rejects_original_after_local_capture() {
+    let (fixture, sdk) = published();
+    let media = fixture.workflow.media().unwrap();
+    fixture.workflow.core.prepare_cloud_media_sdk(&sdk.instance_id).unwrap();
+    let service = fixture.workflow.host.media().unwrap();
+    std::fs::write(
+        service.store().media_dir().join("sdk-replaced.asset"),
+        b"changed folder",
+    )
+    .unwrap();
+    let guard = fixture.workflow.core.adapter_guard();
+    let events = fixture.workflow.host.engine().stream().subscribe();
+    let (hold, reached) = arm_scan();
+    let started = media.clone().start_next_work(sdk.instance_id.clone()).unwrap();
+    let entry = reached.recv_timeout(Duration::from_secs(5));
+    let replacement = (|| {
+        fixture.workflow.retire_sdk(sdk.instance_id.clone(), false)?;
+        fixture.workflow.release_sdk(sdk.instance_id.clone())?;
+        fixture.workflow.register_sdk(false)
+    })();
+    let successor_guard = fixture.workflow.core.adapter_guard();
+    let still_held = !SCAN_RELEASED.load(Ordering::SeqCst);
+    drop(hold);
+    let terminal = terminal(&events, started.handle.id);
+    let value = started.result.result();
+    let closed = fixture.workflow.host.close();
+    // No journal-unchanged requirement: local capture remains permitted.
+    closed.unwrap();
+    entry.expect("positive entry into media.scan.after_cutoff");
+    assert!(still_held, "SDK replacement completed only after scan release");
+    assert_ne!(replacement.unwrap().instance_id, sdk.instance_id);
+    assert_eq!(successor_guard, guard);
+    assert!(matches!(terminal.unwrap(), JobOutcome::Failed { .. }));
+    let expected = crate::sync::cloud_error(meguri_sync::cloud::runtime::RuntimeError::StaleIncarnation);
+    assert!(matches!(value, Err(error) if error == expected));
+    assert!(matches!(started.result.result(), Err(error) if error == expected));
 }
 
 #[test]

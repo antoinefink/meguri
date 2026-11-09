@@ -258,9 +258,12 @@ impl CloudMedia {
     }
     pub fn next_work(self: Arc<Self>, sdk: String) -> Result<Option<CloudMediaIssuedWork>, CoreError> {
         callback::enter("CloudMedia.next_work");
-        self.collection()?;
-        self.runtime()?.prepare_cloud_media_sdk(&sdk).map_err(cloud_error)?;
-        let Some(work) = self.host.next_cloud_media_work().map_err(cloud_error)? else {
+        let collection = self.collection()?;
+        let Some(work) = self
+            .host
+            .next_cloud_media_work_with_work(&collection, &sdk, &mut PolicyWork::default())
+            .map_err(cloud_error)?
+        else {
             return Ok(None);
         };
         let request = (&work.request).into();

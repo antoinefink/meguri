@@ -615,18 +615,22 @@ impl Runtime {
         collection: &Collection,
         media: &MediaService,
     ) -> Result<Option<Work>, RuntimeError> {
-        self.cloud_media_work_with_work(collection, media, &mut PolicyWork::default())
+        self.cloud_media_work_with_work(collection, media, None, &mut PolicyWork::default())
     }
     fn cloud_media_work_with_work(
         &self,
         collection: &Collection,
         media: &MediaService,
+        sdk: Option<&str>,
         work: &mut PolicyWork,
     ) -> Result<Option<Work>, RuntimeError> {
         self.consume_media_feed_with_work(collection, media, work)?;
         let a = self.media_authority(collection, true)?;
         {
             let mut s = self.state();
+            if let Some(sdk) = sdk {
+                Self::sdk_locked(&s, sdk)?;
+            }
             if s.media.enabled == Some(false)
                 || s.media.paused
                 || s.adapter.paused
@@ -2635,7 +2639,7 @@ impl Runtime {
         media: &MediaService,
         space: &dyn meguri_storage::space::SpaceProvider,
     ) -> Result<Option<Work>, RuntimeError> {
-        self.cloud_media_work_with_space_and_work(collection, media, space, &mut PolicyWork::default())
+        self.cloud_media_work_with_space_and_work(collection, media, space, None, &mut PolicyWork::default())
     }
     /// Complete preparation for the retained SDK, including media open/feed.
     /// Every blocking step stays on the registered engine worker.
@@ -2648,25 +2652,23 @@ impl Runtime {
     ) -> Result<Option<Work>, RuntimeError> {
         self.prepare_cloud_media_sdk_with_work(sdk, work)?;
         let media = self.media_service_with_work(collection, work)?;
-        // Revalidate the original SDK after media-open contention, before the
-        // feed or selector can update tracking or reserve transport work.
-        self.validate_sdk(sdk)?;
-        work.check()?;
-        let prepared = self.cloud_media_work_with_space_and_work(collection, &media, space, work)?;
-        // A successful feed check has recorded its real report. Retain the Host
-        // consumer for subsequent local media writes only after that result.
         let consumer: Arc<dyn meguri_engine::media::MediaFeedConsumer> = self.clone();
         media.set_feed_consumer(Arc::downgrade(&consumer));
-        Ok(prepared)
+        // Revalidate after media-open contention; selection checks the original
+        // SDK again under its state guard after SDK-independent local capture.
+        self.validate_sdk(sdk)?;
+        work.check()?;
+        self.cloud_media_work_with_space_and_work(collection, &media, space, Some(sdk), work)
     }
     fn cloud_media_work_with_space_and_work(
         &self,
         collection: &Collection,
         media: &MediaService,
         space: &dyn meguri_storage::space::SpaceProvider,
+        sdk: Option<&str>,
         authority: &mut PolicyWork,
     ) -> Result<Option<Work>, RuntimeError> {
-        let work = self.cloud_media_work_with_work(collection, media, authority)?;
+        let work = self.cloud_media_work_with_work(collection, media, sdk, authority)?;
         if let Some(Work {
             authority,
             request: Request::Download { name },
