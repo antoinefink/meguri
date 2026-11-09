@@ -90,3 +90,7 @@ Focused execution `20261109T204610Z-91925` compiled and ran the new case.
 It failed at the reopened Host readiness assertion before observer checks.
 Independent source review is clear; execution proof remains open. No assertion
 or readiness condition has been relaxed.
+
+Review and fixer `92467` agree: `scan_drained` is a clean-stop flag.
+The new test must check `scan_completed_this_open` after reconciliation.
+Production is unchanged. The earlier eight cases and all limits are intact.

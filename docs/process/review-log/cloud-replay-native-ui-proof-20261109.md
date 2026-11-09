@@ -22,3 +22,6 @@ equivalent native proof passes. No unit, integration or release acceptance is cl
 Selftest `89436`: twelve checks passed. Reviewed export `88808` adds
 `import AppModel`. Build `90816` stopped at test line 93; native execution
 remains pending. Run `90227` could not reach Docker. Failures are retained.
+
+Export `92467` renames the stage-local dictionary to `stageReport`.
+Assertions and timing limits are unchanged; native execution is pending.

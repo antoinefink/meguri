@@ -31,10 +31,10 @@ final class MacReplayAccessibilityTests: XCTestCase {
                 try press(element(app, "testhooks.replay.\(side)"), app: app, bundle: bundle)
             }
             try wait(app, deadline: deadline) { $0["ready"] as? Bool == true && $0["side"] as? String == side && $0["card"] as? Int == card }
-            let report = try report(app)
+            let stageReport = try report(app)
             // The production CardBehavior catalog currently supplies English.
             // Use its actual localized value, not DOM copy, for every leaf.
-            let label = try XCTUnwrap(report["catalogLabel"] as? String)
+            let label = try XCTUnwrap(stageReport["catalogLabel"] as? String)
             XCTAssertEqual(label, "Play audio")
             let currentCommands = side == "question" ? front : back
             let ids = currentCommands.indices.map { "review.card.replay.\(side == "question" ? "q\($0 + 1)" : "a\($0)")" }
