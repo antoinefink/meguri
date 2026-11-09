@@ -143,3 +143,9 @@ threads-required = "num-test-threads"
 [[profile.default.overrides]]
 filter = 'package(meguri-engine) and (test(/cloud_lifetime_pin_/) or test(/a_transferred_.*reader_waiter_/))'
 threads-required = "num-test-threads"
+
+# Original-resource pool, Host mirror, deadline and cutoff witnesses retain
+# their barrier/teardown budgets and run without competing test processes.
+[[profile.default.overrides]]
+filter = '(package(meguri-engine) or package(meguri-host)) and test(/resource_jobs_/)'
+threads-required = "num-test-threads"

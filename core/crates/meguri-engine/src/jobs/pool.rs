@@ -51,6 +51,21 @@ impl JobPool {
             .push_back(Box::new(work));
         self.shared.ready.notify_one();
     }
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fn run_with_busy_tail_for_testing(
+        &self,
+        work: impl FnOnce() + Send + 'static,
+        entered: std::sync::mpsc::Sender<()>,
+        release: std::sync::mpsc::Receiver<()>,
+    ) {
+        self.run(move || {
+            work();
+            let _ = entered.send(());
+            // A dropped sender releases the worker during unwinding; the
+            // timeout also bounds its wait if the test retains that sender.
+            let _ = release.recv_timeout(std::time::Duration::from_secs(10));
+        });
+    }
 }
 
 impl Shared {

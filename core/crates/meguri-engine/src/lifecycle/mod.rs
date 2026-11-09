@@ -237,6 +237,22 @@ impl Engine {
         &self.inner.jobs
     }
 
+    /// Rust-only composition boundary for later retained-capability wrappers.
+    /// Retains this exact collection/executor and original Host liveness; start
+    /// does no fresh collection lookup and accepts no caller-supplied mode/id.
+    pub fn original_resource_authority(
+        &self,
+        collection: &Collection,
+        host: crate::jobs::registry::OriginalHostLiveness,
+    ) -> crate::jobs::registry::OriginalResourceAuthority {
+        crate::jobs::registry::OriginalResourceAuthority::new(
+            self.jobs(),
+            host,
+            collection,
+            Arc::clone(&self.inner.generation),
+        )
+    }
+
     pub fn state(&self) -> LifecycleState {
         self.lock_state().state.clone()
     }
@@ -619,6 +635,9 @@ impl Engine {
                 LifecycleState::Ready { generation }
             },
         );
+        if !recorded_corrupt {
+            self.jobs().reset_resource_admission();
+        }
         Ok(Collection {
             core,
             generation,
@@ -683,7 +702,10 @@ impl Engine {
         if self.lock_state().current.is_some() {
             self.quiesce_for_suspend(deadline)?;
         } else {
-            self.jobs().wait_empty_until(deadline)?;
+            if let Err(error) = self.jobs().resource_cutoff_until(deadline) {
+                self.record_incomplete_suspend();
+                return Err(error);
+            }
         }
         let current = {
             let mut guard = self.lock_state();

@@ -4,7 +4,9 @@ use std::{
 };
 
 use meguri_engine::{
-    Collection, DerivedHost, Engine, EngineConfig, EngineError, OpenConfig, Ports, media::MediaService,
+    Collection, DerivedHost, Engine, EngineConfig, EngineError, OpenConfig, Ports,
+    jobs::registry::{OriginalHostLiveness, OriginalHostState},
+    media::MediaService,
     ports::BackupService,
 };
 use meguri_model::clock::Clock;
@@ -82,7 +84,7 @@ impl ProcessCore {
         let mut reset = Reset(self, false);
         let (mut host, paths, options) = CoreHost::compose_on(self, config)?;
         // Active means host-owned lifecycle, including NoCollection/Failed.
-        *host.closed.lock().unwrap_or_else(PoisonError::into_inner) = CloseState::Active;
+        host.set_close_state(CloseState::Active);
         if !open_existing && let Some(runtime) = &host.cloud {
             let live = Arc::new(Mutex::new(true));
             runtime.attach_no_collection_identity_owner(
@@ -199,17 +201,47 @@ impl ProcessCore {
             host.close()?;
             return Err(outcome.expect_err("preactivation failure"));
         }
-        *host.closed.lock().unwrap_or_else(PoisonError::into_inner) = CloseState::Active;
+        host.set_close_state(CloseState::Active);
         reset.1 = true;
         Ok(InitialImportCompletion { host, outcome })
     }
 }
 
+#[derive(Clone, Copy)]
 enum CloseState {
     Prepared,
     Active,
     Closing,
     Closed,
+}
+
+impl CloseState {
+    fn compact(self) -> OriginalHostState {
+        match self {
+            Self::Prepared => OriginalHostState::Prepared,
+            Self::Active => OriginalHostState::Active,
+            Self::Closing => OriginalHostState::Closing,
+            Self::Closed => OriginalHostState::Closed,
+        }
+    }
+}
+
+// Restores the canonical state and its same-Host mirror together on error or unwind.
+struct RestoreCloseState<'a>(&'a CoreHost, bool);
+impl Drop for RestoreCloseState<'_> {
+    fn drop(&mut self) {
+        let mut state = self.0.closed.lock().unwrap_or_else(PoisonError::into_inner);
+        if matches!(*state, CloseState::Closing) {
+            self.0.set_close_state_locked(
+                &mut state,
+                if self.1 {
+                    CloseState::Prepared
+                } else {
+                    CloseState::Active
+                },
+            );
+        }
+    }
 }
 
 #[path = "cloud_adoption.rs"]
@@ -222,6 +254,7 @@ pub struct CoreHost {
     pub(crate) export: crate::collection_export::ExportInputs,
     process: ProcessCore,
     closed: Mutex<CloseState>,
+    original_liveness: OriginalHostLiveness,
     no_collection_identity_owner: Option<Arc<Mutex<bool>>>,
     engine: Engine,
     derived: DerivedHost,
@@ -235,6 +268,26 @@ pub struct CoreHost {
 }
 
 impl CoreHost {
+    fn set_close_state_locked(&self, state: &mut CloseState, next: CloseState) {
+        *state = next;
+        self.original_liveness.publish(next.compact());
+    }
+
+    fn set_close_state(&self, next: CloseState) {
+        let mut state = self.closed.lock().unwrap_or_else(PoisonError::into_inner);
+        self.set_close_state_locked(&mut state, next);
+    }
+
+    /// Internal Rust authority for a capability already retaining this Host and
+    /// its original collection. No current/successor Host is resolved at start.
+    pub fn original_resource_authority(
+        &self,
+        collection: &Collection,
+    ) -> meguri_engine::jobs::registry::OriginalResourceAuthority {
+        self.engine
+            .original_resource_authority(collection, self.original_liveness.clone())
+    }
+
     pub(crate) fn media_space_provider(&self) -> &dyn meguri_storage::space::SpaceProvider {
         self.backup_inputs.space.as_ref()
     }
@@ -254,7 +307,7 @@ impl CoreHost {
             }
             return Err(error);
         }
-        *host.closed.lock().unwrap_or_else(PoisonError::into_inner) = CloseState::Active;
+        host.set_close_state(CloseState::Active);
         Ok(host)
     }
 
@@ -383,6 +436,7 @@ impl CoreHost {
             export,
             process: process.clone(),
             closed: Mutex::new(CloseState::Prepared),
+            original_liveness: OriginalHostLiveness::default(),
             no_collection_identity_owner: None,
             engine,
             derived,
@@ -504,29 +558,16 @@ impl CoreHost {
                     });
                 }
                 CloseState::Active => {
-                    *closed = CloseState::Closing;
+                    self.set_close_state_locked(&mut closed, CloseState::Closing);
                     false
                 }
                 CloseState::Prepared => {
-                    *closed = CloseState::Closing;
+                    self.set_close_state_locked(&mut closed, CloseState::Closing);
                     true
                 }
             }
         };
-        struct Restore<'a>(&'a Mutex<CloseState>, bool);
-        impl Drop for Restore<'_> {
-            fn drop(&mut self) {
-                let mut state = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-                if matches!(*state, CloseState::Closing) {
-                    *state = if self.1 {
-                        CloseState::Prepared
-                    } else {
-                        CloseState::Active
-                    };
-                }
-            }
-        }
-        let _restore = Restore(&self.closed, prepared);
+        let _restore = RestoreCloseState(self, prepared);
         // Publish Closing under the original identity lease, then release it:
         // an already running initial-adoption reply needs it to finish. The
         // engine closes registry admission and drains before we reacquire.
@@ -573,7 +614,7 @@ impl CoreHost {
                 if let Some(live) = identity_owner.borrow_mut().as_mut() {
                     **live = false;
                 }
-                *self.closed.lock().unwrap_or_else(PoisonError::into_inner) = CloseState::Closed;
+                self.set_close_state(CloseState::Closed);
                 *self.process.opened.lock().unwrap_or_else(PoisonError::into_inner) = false;
             },
         )
@@ -602,5 +643,222 @@ impl meguri_engine::maintenance::status::StatusProvider for MaintenanceStatusSou
             .map_err(meguri_storage::StorageError::from)?
             .iter()
             .any(|entry| matches!(entry.kind, BackupKind::Backup | BackupKind::ServerCopy)))
+    }
+}
+
+#[cfg(test)]
+mod resource_liveness_tests {
+    use super::*;
+    use meguri_engine::jobs::registry::ResourceMode;
+    use meguri_model::{
+        clock::{StepClock, UtcOffset},
+        rng::SeededRandom,
+    };
+    use std::sync::mpsc;
+
+    fn config_for_prepared(root: &std::path::Path) -> HostConfig {
+        let collection = root.join("collection");
+        let backups = root.join("backups");
+        std::fs::create_dir_all(&collection).unwrap();
+        std::fs::create_dir_all(&backups).unwrap();
+        std::fs::copy(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../conformance/fixtures/storage/schema-18.anki2"),
+            collection.join("collection.anki2"),
+        )
+        .unwrap();
+        HostConfig::new(
+            collection,
+            backups,
+            root.join("widget"),
+            Arc::new(StepClock::new(1_894_701_600_000, UtcOffset::UTC, "UTC")),
+            Arc::new(SeededRandom::new(37)),
+            Arc::new(meguri_storage::space::StatvfsSpace),
+        )
+    }
+
+    fn sample_locked(host: &CoreHost, collection: &Collection, expected: ResourceMode) {
+        let closed = host.closed.lock().unwrap();
+        let (sent, result) = mpsc::channel();
+        // Hold canonical close state throughout registration and sampling.
+        // Unlock before the scoped thread is joined, including on timeout,
+        // so this witness can report an unexpected dependency on that lock.
+        std::thread::scope(|scope| {
+            let start = scope.spawn(|| {
+                host.engine.jobs().start_original_resource(
+                    "mirror while host locked",
+                    host.original_resource_authority(collection),
+                    move |_, mut authority| {
+                        sent.send(authority.recheck()).unwrap();
+                        Ok(())
+                    },
+                );
+            });
+            let sampled = result.recv_timeout(Duration::from_secs(5));
+            drop(closed);
+            start.join().unwrap();
+            assert_eq!(sampled.unwrap(), expected);
+        });
+    }
+
+    #[test]
+    fn resource_jobs_no_collection_successor_close_drains_registered_work_and_busy_tail() {
+        for busy_tail in [false, true] {
+            let first_root = tempfile::tempdir().unwrap();
+            let first_config = config_for_prepared(first_root.path());
+            let process = ProcessCore::new(first_config.engine.clone()).unwrap();
+            let first = process.open(first_config).unwrap();
+            first.close().unwrap();
+            let next_root = tempfile::tempdir().unwrap();
+            let next_config = config_for_prepared(next_root.path());
+            std::fs::remove_file(next_config.collection_directory.join("collection.anki2")).unwrap();
+            let next = process.prepare_cloud_connection(next_config).unwrap();
+            assert!(matches!(
+                next.engine.state(),
+                meguri_engine::LifecycleState::NoCollection
+            ));
+            assert!(matches!(*next.closed.lock().unwrap(), CloseState::Active));
+            let (entered, ready) = mpsc::channel();
+            let (release, wait) = mpsc::channel();
+            if busy_tail {
+                next.engine.jobs().hold_next_busy_tail_for_testing(entered, wait);
+                next.engine
+                    .jobs()
+                    .start("connection busy tail", next.engine.generation(), None, |_| Ok(()));
+            } else {
+                next.engine
+                    .jobs()
+                    .start("ordinary connection work", next.engine.generation(), None, move |_| {
+                        entered.send(()).unwrap();
+                        let _ = wait.recv_timeout(Duration::from_secs(10));
+                        Ok(())
+                    });
+            }
+            ready.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert_eq!(next.engine.jobs().running().is_empty(), busy_tail);
+            assert!(!next.engine.threads().busy_threads().is_empty());
+            std::thread::scope(|scope| {
+                let (sent, closed) = mpsc::channel();
+                let host = &next;
+                let close = scope.spawn(move || {
+                    let result = host.close();
+                    sent.send(result).unwrap();
+                });
+                let early = closed.recv_timeout(Duration::from_millis(40));
+                let still_open = !matches!(*next.closed.lock().unwrap(), CloseState::Closed);
+                // Release the worker before assertions or the scoped join.
+                drop(release);
+                close.join().unwrap();
+                assert!(matches!(early, Err(mpsc::RecvTimeoutError::Timeout)));
+                assert!(still_open);
+                closed.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
+            });
+            assert!(matches!(*next.closed.lock().unwrap(), CloseState::Closed));
+        }
+    }
+
+    #[test]
+    fn resource_jobs_reopen_initializer_keeps_old_collection_sealed_during_open_and_failure() {
+        let root = tempfile::tempdir().unwrap();
+        let config = config_for_prepared(root.path());
+        let path = config.collection_directory.join("collection.anki2");
+        let process = ProcessCore::new(config.engine.clone()).unwrap();
+        let host = process.open(config).unwrap();
+        let original = host.engine.collection().unwrap();
+        sample_locked(&host, &original, ResourceMode::Full);
+        host.engine.close().unwrap();
+        assert_eq!(original.generation(), host.engine.generation());
+        assert!(matches!(*host.closed.lock().unwrap(), CloseState::Active));
+        sample_locked(&host, &original, ResourceMode::DisposalOnly);
+        let (entered, ready) = mpsc::channel();
+        let (release, wait) = mpsc::channel::<()>();
+        let wait = Arc::new(Mutex::new(wait));
+        let mut options = host.initial_open.clone();
+        options.initializers.register(move |connection| {
+            entered.send(()).unwrap();
+            let _ = wait.lock().unwrap().recv_timeout(Duration::from_secs(10));
+            connection.execute_batch("SELECT missing_resource_reopen_initializer()")
+        });
+        std::thread::scope(|scope| {
+            let opening = scope.spawn(|| host.engine.open_raw(&path, options));
+            // Keep all assertions after release and join, including barrier failure.
+            let reached = ready.recv_timeout(Duration::from_secs(5));
+            let state = host.engine.state();
+            let generation = host.engine.generation();
+            let (sent, mode) = mpsc::channel();
+            let job = host.engine.jobs().start_original_resource(
+                "old resource during initializer",
+                host.original_resource_authority(&original),
+                move |_, mut authority| {
+                    sent.send(authority.recheck()).unwrap();
+                    Ok(())
+                },
+            );
+            let sampled = mode.recv_timeout(Duration::from_secs(5));
+            drop(release);
+            let failed = opening.join().unwrap();
+            reached.unwrap();
+            assert!(matches!(state, meguri_engine::LifecycleState::Opening));
+            assert_eq!(generation, original.generation());
+            assert_eq!(sampled.unwrap(), ResourceMode::DisposalOnly);
+            assert!(!job.cancel.is_cancelled());
+            assert!(matches!(
+                failed,
+                Err(EngineError::Open(meguri_storage::OpenError::ConnectionInit { .. }))
+            ));
+        });
+        assert!(matches!(
+            host.engine.state(),
+            meguri_engine::LifecycleState::Failed { .. }
+        ));
+        assert_eq!(host.engine.generation(), original.generation());
+        sample_locked(&host, &original, ResourceMode::DisposalOnly);
+        let current = host.engine.open_raw(&path, host.initial_open.clone()).unwrap();
+        sample_locked(&host, &original, ResourceMode::DisposalOnly);
+        sample_locked(&host, &current, ResourceMode::Full);
+        host.close().unwrap();
+    }
+
+    #[test]
+    fn resource_jobs_host_mirror_covers_prepared_activation_closing_closed_and_failed_close_restore() {
+        let root = tempfile::tempdir().unwrap();
+        let config = config_for_prepared(root.path());
+        let process = ProcessCore::new(config.engine.clone()).unwrap();
+        let (host, paths, options) = CoreHost::compose_on(&process, config).unwrap();
+        let collection = host.engine.open_raw(&paths.collection(), options).unwrap();
+        sample_locked(&host, &collection, ResourceMode::DisposalOnly);
+        // Use the same canonical transition helper as all activation paths.
+        host.set_close_state(CloseState::Active);
+        sample_locked(&host, &collection, ResourceMode::Full);
+        // A real close failure restores Active. A handoff slot refuses before
+        // engine teardown, so it neither advances generation nor releases stores.
+        let slot = host.engine.reserve_collection_export_handoff().unwrap();
+        assert!(host.close().is_err());
+        sample_locked(&host, &collection, ResourceMode::Full);
+        drop(slot);
+        host.set_close_state(CloseState::Closing);
+        sample_locked(&host, &collection, ResourceMode::DisposalOnly);
+        host.set_close_state(CloseState::Active);
+        host.close().unwrap();
+        sample_locked(&host, &collection, ResourceMode::DisposalOnly);
+        // The exact production close guard also restores Prepared on unwind.
+        let prepared_root = tempfile::tempdir().unwrap();
+        let prepared_config = config_for_prepared(prepared_root.path());
+        let prepared_process = ProcessCore::new(prepared_config.engine.clone()).unwrap();
+        let (prepared, paths, options) = CoreHost::compose_on(&prepared_process, prepared_config).unwrap();
+        let prepared_collection = prepared.engine.open_raw(&paths.collection(), options).unwrap();
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _restore = RestoreCloseState(&prepared, true);
+            prepared.set_close_state(CloseState::Closing);
+            sample_locked(&prepared, &prepared_collection, ResourceMode::DisposalOnly);
+            panic!("prepared close unwind");
+        }));
+        assert!(unwound.is_err());
+        assert!(matches!(*prepared.closed.lock().unwrap(), CloseState::Prepared));
+        sample_locked(&prepared, &prepared_collection, ResourceMode::DisposalOnly);
+        // This fixture deliberately opened through raw engine while Prepared;
+        // restore the ordinary ownership boundary before dropping the Host.
+        prepared.set_close_state(CloseState::Active);
+        prepared.close().unwrap();
     }
 }

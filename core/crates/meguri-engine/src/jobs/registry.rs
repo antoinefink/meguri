@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::io;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use crate::cancel::CancelToken;
@@ -31,6 +31,90 @@ pub struct RunningJob {
 enum CompletionMode {
     Ordinary,
     Required,
+    OriginalResource(ResourceMode),
+}
+
+/// Compact state published by the same retained Host alongside its canonical
+/// close-state transitions. Rust composition API only; never a frontend mode.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum OriginalHostState {
+    Prepared,
+    Active,
+    Closing,
+    Closed,
+}
+
+#[derive(Clone, Default)]
+pub struct OriginalHostLiveness(Arc<AtomicU8>);
+
+impl OriginalHostLiveness {
+    pub fn publish(&self, state: OriginalHostState) {
+        self.0.store(state as u8, Ordering::Release);
+    }
+
+    fn is_active(&self) -> bool {
+        self.0.load(Ordering::Acquire) == OriginalHostState::Active as u8
+    }
+}
+
+/// Internal retained-capability authority. Only the engine constructs the
+/// original collection facts; callers cannot supply a mode or generation id.
+#[derive(Clone)]
+pub struct OriginalResourceAuthority {
+    host: OriginalHostLiveness,
+    collection: crate::Collection,
+    engine_generation: Arc<AtomicU64>,
+    registry: std::sync::Weak<Inner>,
+    same_collection: bool,
+}
+
+impl OriginalResourceAuthority {
+    pub(crate) fn new(
+        registry: &JobRegistry,
+        host: OriginalHostLiveness,
+        collection: &crate::Collection,
+        engine_generation: Arc<AtomicU64>,
+    ) -> Self {
+        Self {
+            host,
+            collection: collection.clone(),
+            same_collection: Arc::ptr_eq(&engine_generation, &collection.core.exec.generation_cell),
+            engine_generation,
+            registry: Arc::downgrade(&registry.inner),
+        }
+    }
+
+    // Only bounded atomic loads of original facts, including at registration
+    // under the registry mutex. No owner resolution or executor admission lock.
+    fn is_live(&self) -> bool {
+        self.same_collection
+            && self.host.is_active()
+            && self.collection.generation() == self.collection.current_generation()
+            && self.collection.generation().0 == self.engine_generation.load(Ordering::SeqCst)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResourceMode {
+    Full,
+    DisposalOnly,
+}
+
+/// Per-call authority, latched at registration. Recheck after waits and before
+/// the first effect. This is admission only: it marks no effect or body result.
+pub struct ResourceAuthority {
+    original: OriginalResourceAuthority,
+    mode: ResourceMode,
+}
+
+impl ResourceAuthority {
+    pub fn recheck(&mut self) -> ResourceMode {
+        if self.mode == ResourceMode::Full && !self.original.is_live() {
+            self.mode = ResourceMode::DisposalOnly;
+        }
+        self.mode
+    }
 }
 
 /// The registry. Clones share it.
@@ -43,6 +127,9 @@ pub struct JobRegistry {
 struct RegistryState {
     running: BTreeMap<JobId, RunningJob>,
     paused: bool,
+    resource_cutoff: bool,
+    #[cfg(feature = "test-hooks")]
+    busy_tail: Option<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>,
 }
 
 struct Inner {
@@ -99,7 +186,9 @@ impl JobRegistry {
         slot: Option<SlotGuard>,
         work: impl FnOnce(&JobContext) -> Result<(), EngineError> + Send + 'static,
     ) -> JobHandle {
-        self.start_selected(name, generation, slot, CompletionMode::Ordinary, work)
+        self.start_selected(name, generation, slot, None, CompletionMode::Ordinary, move |ctx, _| {
+            work(ctx)
+        })
     }
 
     /// Original-SDK Ended accounting on the existing pool. Accepted work runs
@@ -110,7 +199,29 @@ impl JobRegistry {
         generation: Generation,
         work: impl FnOnce(&JobContext) -> Result<(), EngineError> + Send + 'static,
     ) -> JobHandle {
-        self.start_selected(name, generation, None, CompletionMode::Required, work)
+        self.start_selected(name, generation, None, None, CompletionMode::Required, move |ctx, _| {
+            work(ctx)
+        })
+    }
+
+    /// Internal original-resource selector for retained Rust capabilities. It
+    /// bypasses the control lane, uses no slot, and always runs accepted bodies.
+    /// Later FFI wrappers alone bind this authority to opaque frontend handles.
+    pub fn start_original_resource(
+        &self,
+        name: &str,
+        original: OriginalResourceAuthority,
+        work: impl FnOnce(&JobContext, ResourceAuthority) -> Result<(), EngineError> + Send + 'static,
+    ) -> JobHandle {
+        let generation = original.collection.generation();
+        self.start_selected(
+            name,
+            generation,
+            None,
+            Some(original),
+            CompletionMode::OriginalResource(ResourceMode::DisposalOnly),
+            move |ctx, authority| work(ctx, authority.expect("resource selector authority")),
+        )
     }
 
     fn start_selected(
@@ -118,14 +229,28 @@ impl JobRegistry {
         name: &str,
         generation: Generation,
         slot: Option<SlotGuard>,
-        completion: CompletionMode,
-        work: impl FnOnce(&JobContext) -> Result<(), EngineError> + Send + 'static,
+        original: Option<OriginalResourceAuthority>,
+        mut completion: CompletionMode,
+        work: impl FnOnce(&JobContext, Option<ResourceAuthority>) -> Result<(), EngineError> + Send + 'static,
     ) -> JobHandle {
         let id = JobId(self.inner.next_id.fetch_add(1, Ordering::SeqCst));
         let cancel = CancelToken::new();
         let progress = ProgressSink::new();
         let mut state = self.lock();
-        if state.paused {
+        let mut authority = original.map(|original| {
+            let mode = if !state.paused
+                && !state.resource_cutoff
+                && original.registry.ptr_eq(&Arc::downgrade(&self.inner))
+                && original.is_live()
+            {
+                ResourceMode::Full
+            } else {
+                ResourceMode::DisposalOnly
+            };
+            completion = CompletionMode::OriginalResource(mode);
+            ResourceAuthority { original, mode }
+        });
+        if state.paused && authority.is_none() {
             cancel.cancel();
             drop(state);
             drop(slot);
@@ -150,6 +275,8 @@ impl JobRegistry {
                 completion,
             },
         );
+        #[cfg(feature = "test-hooks")]
+        let busy_tail = state.busy_tail.take();
         drop(state);
         let context = JobContext {
             id,
@@ -158,12 +285,15 @@ impl JobRegistry {
             slot,
         };
         let registry = self.clone();
-        self.inner.pool.run(move || {
+        let run = move || {
+            if let Some(authority) = &mut authority {
+                authority.recheck();
+            }
             let outcome = if completion == CompletionMode::Ordinary && context.cancel.is_cancelled() {
                 drop(work);
                 JobOutcome::Cancelled
             } else {
-                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(&context))) {
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(&context, authority))) {
                     Ok(Ok(())) => JobOutcome::Succeeded,
                     Ok(Err(EngineError::Cancelled)) => JobOutcome::Cancelled,
                     Ok(Err(error)) => JobOutcome::Failed { error },
@@ -182,7 +312,13 @@ impl JobRegistry {
                 .inner
                 .stream
                 .publish(generation, None, EventKind::JobFinished { id, outcome });
-        });
+        };
+        #[cfg(feature = "test-hooks")]
+        if let Some((entered, release)) = busy_tail {
+            self.inner.pool.run_with_busy_tail_for_testing(run, entered, release);
+            return JobHandle { id, cancel, progress };
+        }
+        self.inner.pool.run(run);
         JobHandle { id, cancel, progress }
     }
 
@@ -190,6 +326,47 @@ impl JobRegistry {
     /// as start, so no unregistered queued work escapes suspend enumeration.
     pub(crate) fn pause(&self, paused: bool) {
         self.lock().paused = paused;
+    }
+
+    /// Collection open or successful resume re-enables resource work.
+    pub(crate) fn reset_resource_admission(&self) {
+        self.lock().resource_cutoff = false;
+    }
+
+    /// The registration mutex is the cutoff linearization point. Lock order
+    /// is registry then thread registry; no lock is retained while waiting.
+    pub(crate) fn resource_cutoff_until(&self, deadline: std::time::Duration) -> Result<(), EngineError> {
+        loop {
+            {
+                let mut state = self.lock();
+                if state.running.is_empty() && self.inner.threads.busy_threads().is_empty() {
+                    if crate::monotonic::now() >= deadline {
+                        return Err(EngineError::SuspendDeadline {
+                            phase: "resource cutoff".into(),
+                        });
+                    }
+                    state.resource_cutoff = true;
+                    return Ok(());
+                }
+            }
+            if crate::monotonic::now() >= deadline {
+                return Err(EngineError::SuspendDeadline {
+                    phase: "resource cutoff".into(),
+                });
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
+    /// Holds an actual pool worker after its job has returned/left the running
+    /// map, before the pool drops its BusyGuard. No production work hook.
+    #[cfg(feature = "test-hooks")]
+    pub fn hold_next_busy_tail_for_testing(
+        &self,
+        entered: std::sync::mpsc::Sender<()>,
+        release: std::sync::mpsc::Receiver<()>,
+    ) {
+        self.lock().busy_tail = Some((entered, release));
     }
 
     pub(crate) fn set_continued(&self, id: JobId) {
@@ -204,11 +381,13 @@ impl JobRegistry {
 
     pub(crate) fn wait_connection_replies_until(&self, deadline: std::time::Duration) -> Result<(), EngineError> {
         self.wait_until(deadline, |job| {
-            job.completion == CompletionMode::Required
-                || matches!(
-                    job.name.as_str(),
-                    "CloudConnection.next_publication_work" | "CloudConnection.adoption_result"
-                )
+            matches!(
+                job.completion,
+                CompletionMode::Required | CompletionMode::OriginalResource(ResourceMode::Full)
+            ) || matches!(
+                job.name.as_str(),
+                "CloudConnection.next_publication_work" | "CloudConnection.adoption_result"
+            )
         })
     }
 
@@ -216,11 +395,13 @@ impl JobRegistry {
     /// Host cleanup is about to release. Other jobs may need participant flush.
     pub(crate) fn wait_host_recovery_until(&self, deadline: std::time::Duration) -> Result<(), EngineError> {
         self.wait_until(deadline, |job| {
-            job.completion == CompletionMode::Required
-                || matches!(
-                    job.name.as_str(),
-                    "CloudConnection.next_publication_work" | "CloudConnection.adoption_result" | "iCloud adoption"
-                )
+            matches!(
+                job.completion,
+                CompletionMode::Required | CompletionMode::OriginalResource(ResourceMode::Full)
+            ) || matches!(
+                job.name.as_str(),
+                "CloudConnection.next_publication_work" | "CloudConnection.adoption_result" | "iCloud adoption"
+            )
         })
     }
 
@@ -247,5 +428,62 @@ impl JobRegistry {
     /// The jobs started and not yet finished, by id.
     pub fn running(&self) -> Vec<RunningJob> {
         self.lock().running.values().cloned().collect()
+    }
+}
+
+#[cfg(all(test, feature = "test-hooks"))]
+mod resource_cutoff_tests {
+    use super::*;
+    use std::{sync::mpsc, time::Duration};
+
+    #[test]
+    fn resource_jobs_cutoff_rechecks_actual_busy_tail_under_registration_mutex() {
+        let threads = ThreadRegistry::new();
+        let registry = JobRegistry::new(&threads, ChangeStream::new(), 4).unwrap();
+        let (entered, tail) = mpsc::channel();
+        let (release, wait) = mpsc::channel();
+        registry.hold_next_busy_tail_for_testing(entered, wait);
+        registry.start("pre-cutoff registered job", Generation(0), None, |_| Ok(()));
+        tail.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(registry.lock().running.is_empty());
+        let failed = registry.resource_cutoff_until(crate::monotonic::now() + Duration::from_millis(30));
+        let marked = registry.lock().resource_cutoff;
+        drop(release); // release before assertions, even if cutoff incorrectly succeeded
+        assert_eq!(
+            failed,
+            Err(EngineError::SuspendDeadline {
+                phase: "resource cutoff".into()
+            })
+        );
+        assert!(!marked);
+        registry
+            .resource_cutoff_until(crate::monotonic::now() + Duration::from_secs(5))
+            .unwrap();
+        assert!(registry.lock().resource_cutoff);
+        registry.pause(false);
+        assert!(
+            registry.lock().resource_cutoff,
+            "generic close unpause cannot reopen authority"
+        );
+        // A completed attempt remains successful, but the next attempt must
+        // independently drain work registered since that earlier cutoff.
+        let (entered, tail) = mpsc::channel();
+        let (release, wait) = mpsc::channel();
+        registry.hold_next_busy_tail_for_testing(entered, wait);
+        registry.start("post-cutoff ordinary test work", Generation(0), None, |_| Ok(()));
+        tail.recv_timeout(Duration::from_secs(5)).unwrap();
+        let result = registry.resource_cutoff_until(crate::monotonic::now() + Duration::from_millis(30));
+        let still_sealed = registry.lock().resource_cutoff;
+        drop(release);
+        assert_eq!(
+            result,
+            Err(EngineError::SuspendDeadline {
+                phase: "resource cutoff".into()
+            })
+        );
+        assert!(still_sealed, "a failed fresh drain keeps admission sealed");
+        registry
+            .resource_cutoff_until(crate::monotonic::now() + Duration::from_secs(5))
+            .unwrap();
     }
 }

@@ -207,11 +207,7 @@ impl Engine {
         check_deadline(deadline, "checkpoint")?;
         exec.control(Control::Suspend { deadline }).wait()?;
         exec.wait_idle_until(deadline)?;
-        while !self.threads().busy_threads().is_empty() {
-            check_deadline(deadline, "thread registry")?;
-            std::thread::sleep(Duration::from_millis(1));
-        }
-        check_deadline(deadline, "completion")?;
+        self.jobs().resource_cutoff_until(deadline)?;
         Ok(())
     }
     pub fn resume(&self) -> Result<ResumeReport, EngineError> {
@@ -242,6 +238,7 @@ impl Engine {
         for participant in self.ports().suspend_participants {
             participant.resume_with_collection(&collection)?;
         }
+        self.jobs().reset_resource_admission();
         self.jobs().pause(false);
         exec.set_admission(Admission::Open);
         let mut state = self.lock_state();
