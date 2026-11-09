@@ -386,7 +386,7 @@ fn cloud_lifetime_pin_and_refused_leases_block_real_replacement() {
         let h = Harness::open();
         let role = if mode == 2 { ReaderRole::Sync } else { ReaderRole::Cloud };
         let mut lease = h.collection.reader(role).unwrap();
-        let snapshot = if mode == 1 {
+        let mut snapshot = if mode == 1 {
             Some(lease.capture_sync(&h.collection).unwrap().0)
         } else {
             None
@@ -405,68 +405,94 @@ fn cloud_lifetime_pin_and_refused_leases_block_real_replacement() {
         let generation = h.engine.generation();
         let replacement = h.dir.path().join("replacement.anki2");
         std::fs::copy(common::fixture("schema-18.anki2"), &replacement).unwrap();
-        let slot = h.engine.acquire_slot(LongOp::Restore).unwrap();
-        let mut exclusive = slot.enter_exclusive(false).unwrap();
-        let privileged = exclusive.collection().clone();
+        let engine = h.engine.clone();
         let subscription = h.engine.stream().subscribe();
+        let (ready, original) = mpsc::channel();
+        let (start, proceed) = mpsc::channel();
         let (swapped, swap_seen) = mpsc::channel();
         let (done, finished) = mpsc::channel();
         let worker = std::thread::spawn(move || {
-            let result = exclusive.replace(move |live| {
-                swapped.send(()).unwrap();
-                std::fs::rename(&replacement, live).map_err(|e| EngineError::internal(e.to_string()))
-            });
-            drop(exclusive);
-            drop(slot);
-            done.send(result.map(|c| c.generation())).unwrap();
+            let result = (|| {
+                let slot = engine.acquire_slot(LongOp::Restore)?;
+                let mut exclusive = slot.enter_exclusive(false)?;
+                ready
+                    .send(exclusive.collection().clone())
+                    .map_err(|e| EngineError::Internal { message: e.to_string() })?;
+                proceed
+                    .recv_timeout(Duration::from_secs(5))
+                    .map_err(|e| EngineError::Internal { message: e.to_string() })?;
+                exclusive
+                    .replace(move |live| {
+                        swapped
+                            .send(())
+                            .map_err(|e| EngineError::Internal { message: e.to_string() })?;
+                        std::fs::rename(&replacement, live)
+                            .map_err(|e| EngineError::Internal { message: e.to_string() })
+                    })
+                    .map(|c| c.generation())
+            })();
+            done.send(result).unwrap();
         });
-        let deadline = meguri_engine::monotonic::now() + Duration::from_secs(5);
-        loop {
-            let remaining = deadline.saturating_sub(meguri_engine::monotonic::now());
-            let event = subscription
-                .recv_timeout(remaining)
-                .expect("replacement reaches reader close");
-            if matches!(
-                event.kind,
-                EventKind::Lifecycle(LifecycleState::ExclusiveBusy {
-                    phase: ExclusivePhase::Replacing,
-                    ..
-                })
-            ) {
-                break;
+        // Always release reader protection and join the worker, including if
+        // the handoff, pre-close read or exclusion assertions fail.
+        let checked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let privileged = original.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert_eq!(privileged.generation(), generation);
+            assert!(privileged.reader(ReaderRole::Query).unwrap().col().is_ok());
+            start.send(()).unwrap();
+            drop(start);
+            let deadline = meguri_engine::monotonic::now() + Duration::from_secs(5);
+            loop {
+                let remaining = deadline.saturating_sub(meguri_engine::monotonic::now());
+                let event = subscription
+                    .recv_timeout(remaining)
+                    .expect("replacement reaches reader close");
+                if matches!(
+                    event.kind,
+                    EventKind::Lifecycle(LifecycleState::ExclusiveBusy {
+                        phase: ExclusivePhase::Replacing,
+                        ..
+                    })
+                ) {
+                    break;
+                }
             }
-        }
-        assert!(matches!(
-            swap_seen.recv_timeout(Duration::from_millis(50)),
-            Err(mpsc::RecvTimeoutError::Timeout)
-        ));
-        assert!(matches!(finished.try_recv(), Err(mpsc::TryRecvError::Empty)));
-        assert_eq!(h.engine.generation(), generation);
-        // The real writer still owns SQLite while readers are being drained.
-        privileged
-            .run(
-                OpSpec::named("reader_barrier_writer_probe", OpSource::Rollover),
-                |ctx| Ok(ctx.scope().col()?),
-            )
-            .unwrap();
-        if let Some(snapshot) = snapshot {
-            assert!(snapshot.col().is_ok());
-            drop(snapshot);
-            // Capture returned an OWNED snapshot. Dropping it must not release
-            // the refused lease's independent replacement barrier.
             assert!(matches!(
                 swap_seen.recv_timeout(Duration::from_millis(50)),
                 Err(mpsc::RecvTimeoutError::Timeout)
             ));
+            assert!(matches!(finished.try_recv(), Err(mpsc::TryRecvError::Empty)));
             assert_eq!(h.engine.generation(), generation);
-        }
+            // The real writer still owns SQLite while readers are being drained.
+            privileged
+                .run(
+                    OpSpec::named("reader_barrier_writer_probe", OpSource::Rollover),
+                    |ctx| Ok(ctx.scope().col()?),
+                )
+                .unwrap();
+            if let Some(snapshot) = snapshot.take() {
+                assert!(snapshot.col().is_ok());
+                drop(snapshot);
+                // Capture returned an OWNED snapshot. Dropping it must not release
+                // the refused lease's independent replacement barrier.
+                assert!(matches!(
+                    swap_seen.recv_timeout(Duration::from_millis(50)),
+                    Err(mpsc::RecvTimeoutError::Timeout)
+                ));
+                assert_eq!(h.engine.generation(), generation);
+            }
+        }));
+        drop(snapshot);
         drop((pin, refused));
-        swap_seen.recv_timeout(Duration::from_secs(5)).unwrap();
-        assert_eq!(
-            finished.recv_timeout(Duration::from_secs(5)).unwrap().unwrap(),
-            Generation(generation.0 + 1)
-        );
-        worker.join().unwrap();
+        let swap_result = swap_seen.recv_timeout(Duration::from_secs(5));
+        let finished_result = finished.recv_timeout(Duration::from_secs(5));
+        let joined = worker.join();
+        if let Err(panic) = checked {
+            std::panic::resume_unwind(panic);
+        }
+        swap_result.unwrap();
+        assert_eq!(finished_result.unwrap().unwrap(), Generation(generation.0 + 1));
+        joined.unwrap();
         h.engine.close().unwrap();
     }
 }

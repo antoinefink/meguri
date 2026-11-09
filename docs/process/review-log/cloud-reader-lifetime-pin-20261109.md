@@ -15,3 +15,10 @@ error constructor. Independent review also finds a test moving a borrowed
 Exclusive and its owning slot into a thread. Both require a test-only repair;
 no check is counted as passing from this run. Source review is still running.
 No unit acceptance or batch gate pass is claimed.
+
+Independent production review clears P0-P2. Filtered test correction `5666`
+uses the public error variant and acquires slot/Exclusive inside the worker.
+The original privileged writer probe, real replacement and owned-snapshot
+checks remain. A bounded handoff and failure cleanup release protection before
+joining. Independent re-review clears P0-P2; all limits and assertions remain.
+Compilation and focused execution still await this corrected source.
