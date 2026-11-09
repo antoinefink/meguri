@@ -19,6 +19,7 @@ extension TestHooks {
             registry.register("card/behaviors/separator") { _ in .screen { CardBehaviorView(answerForm: 1) } }
             registry.register("card/behaviors/fallback") { _ in .screen { CardBehaviorView(answerForm: 2) } }
             registry.register("card/behaviors/graphic") { _ in .screen { CardBehaviorView(answerForm: 3) } }
+            registry.register("card/behaviors/replay-identifier") { _ in .screen { CardBehaviorView(answerForm: 4) } }
         }
     }
 
@@ -29,8 +30,24 @@ extension TestHooks {
         private var actionReceipt = "actionSequence=0 action=recover phase=none"
         private var terminationReceipt = "callback=none"
         private var nativeSnapshot = "native=none"
+        private static let replayIdentifier = "review.card.replay.q0"
+        private let probesReplayIdentifier: Bool
+        private var replayIdentifierAttempted = false
+        var probePagesDisabled: Bool { probesReplayIdentifier && replayIdentifierAttempted }
+        private var replayIdentifierResult = ReplayIdentifierResult()
+        private struct ReplayIdentifierResult {
+            var leafFound = false
+            var protocolSupported = false
+            var writeReadbackMatched = false
+            var rehitReadbackMatched = false
+
+            var state: String {
+                "leafFound=\(leafFound) protocolSupported=\(protocolSupported) writeReadbackMatched=\(writeReadbackMatched) rehitReadbackMatched=\(rehitReadbackMatched)"
+            }
+        }
         var state: String {
             get {
+                if probesReplayIdentifier { return replayIdentifierResult.state }
                 let receipts = "\(actionReceipt) \(terminationReceipt) \(nativeSnapshot)"
                 if let json = status.firstIndex(of: "{") {
                     return "\(status[..<json])\(receipts) | \(status[json...])"
@@ -53,7 +70,10 @@ extension TestHooks {
         private var nativeVoiceFocus = "none"
         #endif
 
-        init(answerForm: Int = 0) { self.answerForm = answerForm }
+        init(answerForm: Int = 0) {
+            self.answerForm = answerForm
+            probesReplayIdentifier = answerForm == 4
+        }
 
         func answerVariant(_ variant: Int) { answerForm = variant }
 
@@ -130,7 +150,18 @@ extension TestHooks {
             #if os(iOS)
             nativeVoiceFocus = "none"
             #endif
-            let payload = CardPayload(cardID: card, question: html, answer: heading + "<input id=typeans aria-label=\"\(inputLabel)\" autocapitalize=off autocorrect=off spellcheck=false>")
+            // Synthetic D4 output with explicit ownership metadata; no media is bound.
+            #if os(macOS)
+            let replayAction = "pycmd('play:q:0')"
+            #else
+            let replayAction = "window.webkit.messageHandlers.meguri.postMessage('play:q:0')"
+            #endif
+            let replayHTML = """
+                <h1>\(title)</h1><a class="replay-button soundLink" id="\(Self.replayIdentifier)" data-meguri-replay="true" aria-label="Play audio" href=# onclick="\(replayAction); return false;" draggable="false"><svg class="playImage" aria-hidden="true" focusable="false" viewBox="0 0 48 48" version="1.1"><rect x="3" y="3" width="42" height="42" rx="12" fill="none" stroke="currentColor" stroke-width="2" /><path d="M18 14L34 24L18 34Z" fill="currentColor" /></svg></a>
+                """
+            let payload = CardPayload(cardID: card, question: answerForm == 4 ? replayHTML : html,
+                                      answer: heading + "<input id=typeans aria-label=\"\(inputLabel)\" autocapitalize=off autocorrect=off spellcheck=false>",
+                                      questionReplayIDs: answerForm == 4 ? [Self.replayIdentifier] : [])
             let update = try await pair.prepare(payload)
             CATransaction.begin()
             _ = try pair.present(update)
@@ -141,7 +172,111 @@ extension TestHooks {
         func zoom() { guard let pair else { return }; pair.cardZoom = CardZoom(percent: pair.cardZoom.percent == 100 ? 150 : 100); Task { await refresh() } }
         func suspend() async { await pair?.suspend(); await refresh() }
         func resume() async { await pair?.resume(); await refresh() }
-        func probe() async { _ = await pair?.probeForegroundLiveness(); probes += 1; await refresh() }
+        func probe() async {
+            if probesReplayIdentifier {
+                await probeReplayIdentifier()
+                return
+            }
+            _ = await pair?.probeForegroundLiveness(); probes += 1; await refresh()
+        }
+        private func probeReplayIdentifier() async {
+            guard !replayIdentifierAttempted else { return }
+            // macOS has no supported setter probe in this experiment.
+            #if os(iOS)
+            guard let pair, let binding = pair.current.update, binding.side == .question,
+                  pair.current.payload?.questionReplayIDs == [Self.replayIdentifier] else { return }
+            let page = pair.current
+            let webView = page.webView
+            guard let window = webView.window, let context = page.hostReports.context,
+                  context.update == binding, context.visibility == .presented else { return }
+            let revision = page.hostReports.viewRevision
+            let token = page.visibleToken
+            let terminations = page.terminations
+            let bounds = webView.bounds
+            let frame = webView.convert(bounds, to: window)
+            let windowBounds = window.bounds
+            let windowFrame = window.frame
+            let scrollBounds = webView.scrollView.bounds
+            let scrollFrame = webView.scrollView.frame
+            let inset = webView.scrollView.adjustedContentInset
+            let zoom = webView.scrollView.zoomScale
+            let pageZoom = webView.pageZoom
+            func isCurrent() -> Bool {
+                self.pair === pair && pair.current === page && page.update == binding
+                    && page.presented && page.settled && !page.closed && page.visibleToken == token
+                    && page.terminations == terminations && page.hostReports.context == context
+                    && page.hostReports.viewRevision == revision && webView.window === window
+                    && webView.bounds == bounds && webView.convert(bounds, to: window) == frame
+                    && window.bounds == windowBounds && window.frame == windowFrame
+                    && webView.scrollView.bounds == scrollBounds && webView.scrollView.frame == scrollFrame
+                    && webView.scrollView.adjustedContentInset == inset
+                    && webView.scrollView.zoomScale == zoom && webView.pageZoom == pageZoom
+                    && UIApplication.shared.applicationState == .active && window.isKeyWindow
+                    && !window.isHidden && window.alpha > 0
+                    && window.windowScene?.activationState == .foregroundActive
+                    && window.rootViewController?.presentedViewController == nil
+                    && !webView.isHidden && webView.alpha > 0 && !webView.accessibilityElementsHidden
+                    && bounds.width > 0 && bounds.height > 0 && window.bounds.intersects(frame)
+            }
+            guard isCurrent() else { return }
+            let result = try? await webView.callAsyncJavaScript("""
+                const anchor = document.getElementById(identifier);
+                if (!anchor || !anchor.matches('a[data-meguri-replay="true"][href]')) return null;
+                for (let node = anchor; node; node = node.parentElement) {
+                    const style = getComputedStyle(node);
+                    if (node.hidden || node.getAttribute('aria-hidden') === 'true' ||
+                        style.display === 'none' || ['hidden', 'collapse'].includes(style.visibility) ||
+                        Number(style.opacity) === 0) return null;
+                }
+                const viewport = window.visualViewport;
+                const left = viewport?.offsetLeft ?? 0, top = viewport?.offsetTop ?? 0;
+                const width = viewport?.width ?? innerWidth, height = viewport?.height ?? innerHeight;
+                const rect = anchor.getBoundingClientRect();
+                const x1 = Math.max(rect.left, left), y1 = Math.max(rect.top, top);
+                const x2 = Math.min(rect.right, left + width), y2 = Math.min(rect.bottom, top + height);
+                if (!(x2 > x1 && y2 > y1)) return null;
+                const x = (x1 + x2) / 2, y = (y1 + y2) / 2;
+                const hit = document.elementFromPoint(x, y);
+                if (!hit || !(hit === anchor || anchor.contains(hit))) return null;
+                return {x, y, left, top, width, height};
+                """, arguments: ["identifier": Self.replayIdentifier], in: nil, contentWorld: .page)
+            guard isCurrent(), let value = result as? [String: Double],
+                  let x = value["x"], let y = value["y"], let left = value["left"], let top = value["top"],
+                  let width = value["width"], let height = value["height"],
+                  [x, y, left, top, width, height].allSatisfy(\.isFinite), width > 0, height > 0,
+                  x >= left, y >= top, x < left + width, y < top + height else { return }
+            // The visual viewport includes page/pinch zoom; DOM rects include scroll.
+            let point = CGPoint(x: bounds.minX + CGFloat((x - left) / width) * bounds.width,
+                                y: bounds.minY + CGFloat((y - top) / height) * bounds.height)
+            guard bounds.contains(point), window.bounds.contains(webView.convert(point, to: window)) else { return }
+            func nativeLeaf() -> NSObject? {
+                guard let element = webView.accessibilityHitTest(point, event: nil) as? NSObject,
+                      element !== webView, !(element is WKWebView), !(element is UIScrollView), !(element is UIWindow),
+                      [0, NSNotFound].contains(element.accessibilityElementCount()),
+                      element.accessibilityElements?.isEmpty != false,
+                      element.accessibilityContainerType == .none, !element.shouldGroupAccessibilityChildren,
+                      element.accessibilityTraits.contains(.link) else { return nil }
+                if !element.isAccessibilityElement {
+                    // As in CardAccessibility, an opaque remote hit may lack the
+                    // in-process element flag; ordinary native containers cannot qualify.
+                    guard !(element is UIView), !(element is UIAccessibilityElement) else { return nil }
+                }
+                return element
+            }
+            guard isCurrent(), !replayIdentifierAttempted else { return }
+            replayIdentifierAttempted = true
+            guard let leaf = nativeLeaf() else { return }
+            replayIdentifierResult.leafFound = true
+            guard let identified = leaf as? any UIAccessibilityIdentification else { return }
+            replayIdentifierResult.protocolSupported = true
+            guard isCurrent() else { return }
+            identified.accessibilityIdentifier = Self.replayIdentifier
+            replayIdentifierResult.writeReadbackMatched = identified.accessibilityIdentifier == Self.replayIdentifier
+            guard isCurrent(), let rehit = nativeLeaf(),
+                  let reidentified = rehit as? any UIAccessibilityIdentification else { return }
+            replayIdentifierResult.rehitReadbackMatched = reidentified.accessibilityIdentifier == Self.replayIdentifier
+            #endif
+        }
         func beginRecoveryReceipt() -> UInt64 {
             recoverySequence += 1
             recordRecoveryReceipt(recoverySequence, phase: "queued")
@@ -175,6 +310,7 @@ extension TestHooks {
             await refresh()
         }
         func refresh() async {
+            if probesReplayIdentifier { return }
             guard let pair else { nativeSnapshot = "native=no-pair"; return }
             let page = pair.current
             // Publish native-only evidence before JavaScript can suspend this read.
@@ -525,6 +661,7 @@ extension TestHooks {
             control("Suspend card", id: "suspend", sheetAction: true) { await model.suspend() }
             control("Resume card", id: "resume", sheetAction: true) { await model.resume() }
             control("Probe pages", id: "probe", sheetAction: true) { await model.probe() }
+                .disabled(model.probePagesDisabled)
             control("Simulate termination callback", id: "recover", sheetAction: true) { model.terminationCallback() }
             control("Focus card", id: "focus", sheetAction: true) { try await model.focusCard() }
         }
