@@ -251,6 +251,49 @@ extension EventTests {
         }
     }
 
+    @Test func policyStartedListenerFailureRetainsActualMultizoneOutputsAfterClose() async throws {
+        try await withNativePolicyFixture { fixture in
+            let (policy, _) = try await nativePolicy(fixture)
+            guard case .commands(let commands) = try await policy.input(.syncNowRequested(.command)) else {
+                throw BridgeError.internal("Expected exchange commands")
+            }
+            let command = try #require(commands.first { if case .runExchange = $0.action { true } else { false } })
+            let execution = try #require(try await policy.prepareExecution(command))
+            let raw = execution.raw
+            try await CoreEventStream.shared.start()
+            let started = try await MaintenanceLane.shared.call(.cloudPolicyExecutionStartReportInvocation) {
+                try raw.startReportInvocation(zones: [.root, .collection], kind: .fetch)
+            }
+            for await event in CoreEventStream.shared.events {
+                if case .jobFinished(let id, _) = event.kind, id.rawValue == started.handle.id { break }
+            }
+            let actual = try #require(try await MaintenanceLane.shared.call(.cloudPolicyOutputResult) { try started.result.result() })
+            let attempted = Mutex<UInt64?>(nil)
+            let retained: MeguriCoreBindings.CloudPolicyOutput = try await retainCompletedPolicyResource(
+                .cloudPolicyExecutionStartReportInvocation, result: .cloudPolicyOutputResult,
+                attempted: { id in attempted.withLock { $0 = id } }, message: "Started listener setup",
+                CloudPolicyJobValue(handle: started.handle, read: { try started.result.result() })
+            )
+            #expect(attempted.withLock { $0 } == started.handle.id)
+            #expect(try await CoreBridge.CancelToken(raw: started.handle.cancel).isCancelled())
+            // Compare full action payloads (not just command counts) from the
+            // exact retained cell. No new projection is sampled as expected data.
+            func actions(_ value: MeguriCoreBindings.CloudPolicyOutput) throws -> [String] {
+                guard case .commands(let commands) = value else { throw BridgeError.internal("Expected Started outputs") }
+                return commands.map { String(describing: $0.action) }
+            }
+            let expected = try actions(actual)
+            let recovered = try actions(retained)
+            #expect(!expected.isEmpty && recovered == expected)
+            _ = try await policy.status() // The listener-failure drain released ordering.
+            _ = try await execution.report(zones: [.root, .collection], kind: .fetch, started: false, error: CancellationError())
+            try await fixture.adapter.stop()
+            try await fixture.collection.close()
+            let reread = try #require(try await MaintenanceLane.shared.call(.cloudPolicyOutputResult) { try started.result.result() })
+            #expect(try actions(reread) == expected)
+        }
+    }
+
     @Test func policyFacadeKeepsTypedFailureBeforeGenericJobFailure() async throws {
         try await withCloudConnection { _ in
             let policy = CoreCloudPolicyService(try await rawJobPolicy())

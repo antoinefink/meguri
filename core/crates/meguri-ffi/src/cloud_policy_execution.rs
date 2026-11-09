@@ -36,6 +36,87 @@ pub struct CloudPolicyExecution {
 }
 
 impl CloudPolicyExecution {
+    pub(super) fn operation_activity_with_work(
+        &self,
+        facts: CloudPolicyOperationFacts,
+        work: &mut p::PolicyWork,
+    ) -> Result<CloudPolicyOutput, CoreError> {
+        self.policy().owns(&self.command)?;
+        self.policy()
+            .driver()?
+            .validate_with_work(&self.command.command, work)
+            .map_err(execution_error)?;
+        let sdk = self.sdk()?;
+        self.policy()
+            .host
+            .cloud_runtime()
+            .ok_or_else(|| failure(CloudPolicyFailure::Closed))?
+            .validate_sdk(&sdk)
+            .map_err(crate::cloud_connection::error)?;
+        let CloudPolicyOperationFacts {
+            zones,
+            kind,
+            started,
+            failed,
+            code,
+            retry_after_ms,
+            saved,
+            app_cancelled,
+        } = facts;
+        let mut commands = Vec::new();
+        for zone in zones {
+            let operation = p::Operation {
+                zone: zone.into(),
+                kind: kind.into(),
+            };
+            if !started && (app_cancelled || code == Some(20)) {
+                self.policy()
+                    .driver()?
+                    .cancel_native_activity(&self.command.command, &sdk, operation)
+                    .map_err(execution_error)?;
+                continue;
+            }
+            if !started && failed {
+                let code = code.unwrap_or(0);
+                let class = operation_error_class(code);
+                let output = self.policy().host.cloud_policy_input_with_work(
+                    p::DeviceEvent::OperationError {
+                        instance: sdk.clone(),
+                        operation,
+                        class,
+                        code,
+                        retry_after_ms,
+                    },
+                    work,
+                );
+                match self.policy().output(output)? {
+                    CloudPolicyOutput::Commands { commands: emitted } => commands.extend(emitted),
+                    output => return Ok(output),
+                }
+            }
+            let phase = if started {
+                p::Activity::Started
+            } else {
+                p::Activity::Ended {
+                    outcome: if failed { p::Outcome::Failed } else { p::Outcome::Ok },
+                    saved,
+                }
+            };
+            match self.policy().output(self.policy().host.cloud_policy_input_with_work(
+                p::DeviceEvent::Operation {
+                    instance: sdk.clone(),
+                    operation,
+                    phase,
+                },
+                work,
+            ))? {
+                CloudPolicyOutput::Commands { commands: emitted } => commands.extend(emitted),
+                output => return Ok(output),
+            }
+        }
+        Ok(CloudPolicyOutput::Commands { commands })
+    }
+
     pub(super) fn register_sdk_with_work(
         &self,
         work: &mut p::PolicyWork,
@@ -211,72 +292,7 @@ impl CloudPolicyExecution {
     /// native supplies the SDK code/retry-after, never a policy outcome.
     pub fn operation_activity(&self, facts: CloudPolicyOperationFacts) -> Result<CloudPolicyOutput, CoreError> {
         callback::enter("CloudPolicyExecution.operation_activity");
-        self.check()?;
-        let sdk = self.sdk()?;
-        self.policy()
-            .host
-            .cloud_runtime()
-            .ok_or_else(|| failure(CloudPolicyFailure::Closed))?
-            .validate_sdk(&sdk)
-            .map_err(crate::cloud_connection::error)?;
-        let CloudPolicyOperationFacts {
-            zones,
-            kind,
-            started,
-            failed,
-            code,
-            retry_after_ms,
-            saved,
-            app_cancelled,
-        } = facts;
-        let mut commands = Vec::new();
-        for zone in zones {
-            let operation = p::Operation {
-                zone: zone.into(),
-                kind: kind.into(),
-            };
-            if !started && (app_cancelled || code == Some(20)) {
-                self.policy()
-                    .driver()?
-                    .cancel_native_activity(&self.command.command, &sdk, operation)
-                    .map_err(execution_error)?;
-                continue;
-            }
-            if !started && failed {
-                let code = code.unwrap_or(0);
-                let class = operation_error_class(code);
-                let output = self.policy().host.cloud_policy_input(p::DeviceEvent::OperationError {
-                    instance: sdk.clone(),
-                    operation,
-                    class,
-                    code,
-                    retry_after_ms,
-                });
-                match self.policy().output(output)? {
-                    CloudPolicyOutput::Commands { commands: emitted } => commands.extend(emitted),
-                    output => return Ok(output),
-                }
-            }
-            let phase = if started {
-                p::Activity::Started
-            } else {
-                p::Activity::Ended {
-                    outcome: if failed { p::Outcome::Failed } else { p::Outcome::Ok },
-                    saved,
-                }
-            };
-            match self
-                .policy()
-                .output(self.policy().host.cloud_policy_input(p::DeviceEvent::Operation {
-                    instance: sdk.clone(),
-                    operation,
-                    phase,
-                }))? {
-                CloudPolicyOutput::Commands { commands: emitted } => commands.extend(emitted),
-                output => return Ok(output),
-            }
-        }
-        Ok(CloudPolicyOutput::Commands { commands })
+        self.operation_activity_with_work(facts, &mut p::PolicyWork::default())
     }
 
     pub fn continue_media_after_send(&self, code: Option<i64>) -> Result<bool, CoreError> {

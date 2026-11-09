@@ -1075,11 +1075,12 @@ public actor CloudKitSyncAdapter {
                 let prepared = try await instance.engine.prepareSend(zones: zones.filter { $0 == instance.zone || $0 == "meguri-media" })
                 guard current == origin, owned[origin] === instance, !instance.stopping else { throw BridgeError.cloudPolicy(.staleCommand) }
                 guard !quiescing else { throw CancellationError() }
-                let operation = try prepared.enqueue {
+                let operation = try prepared.enqueue(prepare: {
+                    if let execution { invocationOutputs.append(try await execution.reportInvocation(zones: reportedZones, kind: .send)) }
+                }, validate: {
                     try validateSDK()
                     try execution?.validateForEnqueue()
-                    if let execution { invocationOutputs.append(try execution.reportInvocation(zones: reportedZones, kind: .send)) }
-                }
+                })
                 try await operation.drain()
                 if let execution { try await execution.validate() }
             }
@@ -1164,11 +1165,12 @@ public actor CloudKitSyncAdapter {
                 let prepared = try await instance.engine.prepareFetch(options: .init(zones: scope, priorityZones: scope, groupID: "meguri-\(id)"))
                 guard current == origin, owned[origin] === instance, !instance.stopping else { throw BridgeError.cloudPolicy(.staleCommand) }
                 guard !quiescing else { throw CancellationError() }
-                let operation = try prepared.enqueue {
+                let operation = try prepared.enqueue(prepare: {
+                    if let execution { invocationOutputs.append(try await execution.reportInvocation(zones: [.root, .collection], kind: .fetch)) }
+                }, validate: {
                     try validateSDK()
                     try execution?.validateForEnqueue()
-                    if let execution { invocationOutputs.append(try execution.reportInvocation(zones: [.root, .collection], kind: .fetch)) }
-                }
+                })
                 try await operation.drain()
                 if let execution { try await execution.validate() }
             }

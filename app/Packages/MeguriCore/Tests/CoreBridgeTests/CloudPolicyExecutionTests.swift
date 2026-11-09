@@ -952,3 +952,102 @@ extension EventTests {
 #endif
 
 enum ResumeProofInvalidation: Sendable { case accountSwitch, generation, close }
+
+extension EventTests {
+    @Test(arguments: [false, true], ["cancel", "token", "retire", "close", "startedFailure"])
+    func nativeStartedPreparationRetainsOutputsAndRevalidatesBeforeSDK(send: Bool, transition: String) async throws {
+        try await withNativePolicyFixture { fixture in
+            let (policy, _) = try await nativePolicy(fixture)
+            let issued = try await policy.input(.syncNowRequested(.command))
+            let command = try #require(try policyCommands(issued).first { if case .runExchange = $0.action { true } else { false } })
+            let execution = try #require(try await policy.prepareExecution(command))
+            let sdk = try #require(try await execution.originalSDK())
+            let engine = try await fixture.engine()
+            let calls = engine.acceptedNetworkCalls.value
+            let validateSDK = try await fixture.core.finalSDKAuthorization(sdk)
+            let prepared: CloudKitNetworkEnqueue
+            if send { prepared = try await engine.prepareSend(zones: [fixture.zone]) }
+            else { prepared = try await engine.prepareFetch(options: .init(zones: ["meguri-root", fixture.zone], priorityZones: [], groupID: "held-started")) }
+            let held = CloudCallbackGate()
+            let outputs = CloudPolicyInvocationOutputs()
+            let zones: [CloudPolicyZone] = send ? [.collection] : [.root, .collection]
+            let kind: CloudPolicyOperationKind = send ? .send : .fetch
+            let operation = try prepared.enqueue(prepare: {
+                if transition == "startedFailure" { await held.enter() }
+                outputs.append(try await execution.reportInvocation(zones: zones, kind: kind))
+                if transition != "startedFailure" { await held.enter() }
+            }, validate: {
+                try validateSDK()
+                try execution.validateForEnqueue()
+            })
+            let deadline = CloudPolicyReadinessDecision()
+            let watchdog = Task {
+                do { try await Task.sleep(for: .seconds(10)) } catch { return }
+                if deadline.expire() { await held.abort(CancellationError()); operation.cancel() }
+            }
+            let observed = Mutex<(any Error)?>(nil)
+            var expected: BridgeError?
+            do {
+                expected = try await withCloudTask(gates: [held], operation: {
+                    do { try await operation.drain(); Issue.record("invalidated Started preparation entered SDK") }
+                    catch { observed.withLock { $0 = error } }
+                }, whileRunning: {
+                    try await held.waitForArrival()
+                    #expect(engine.acceptedNetworkCalls.value == calls)
+                    switch transition {
+                    case "cancel": operation.cancel()
+                    case "retire":
+                        // Retire without synchronously joining the held task.
+                        try await fixture.core.retireSDK(sdk, policyStop: false)
+                    case "close": try await fixture.collection.close()
+                    default: try await fixture.core.setPaused(true)
+                    }
+                    var expected: BridgeError?
+                    if transition != "cancel" {
+                        do {
+                            if transition == "startedFailure" { _ = try await execution.reportInvocation(zones: zones, kind: kind) }
+                            else { try validateSDK(); try execution.validateForEnqueue() }
+                        } catch { expected = BridgeError(error) }
+                    }
+                    await held.open()
+                    return expected
+                })
+            } catch {
+                await held.open(); await operation.cancelAndDrain()
+                watchdog.cancel(); await watchdog.value
+                throw error
+            }
+            await operation.cancelAndDrain()
+            let inTime = deadline.observeReady()
+            watchdog.cancel(); await watchdog.value
+            let retained = outputs.take()
+            #expect(inTime && engine.acceptedNetworkCalls.value == calls)
+            #expect(await held.pendingWaiterCount() == 0)
+            if transition == "startedFailure" { #expect(retained.isEmpty) }
+            else {
+                #expect(retained.count == 1)
+                let output = try #require(retained.first)
+                #expect(try !policyCommands(output).isEmpty)
+            }
+            if transition == "cancel" {
+                #expect(observed.withLock { $0 is CancellationError })
+                // Preserve the existing Ended cancellation lane and its cleanup.
+                _ = try await execution.report(zones: zones, kind: kind, started: false, error: CancellationError())
+                try await fixture.adapter.requestSend(zones: [fixture.zone])
+                #expect(engine.acceptedNetworkCalls.value > calls)
+            } else {
+                let actual = observed.withLock { $0.map { BridgeError($0) } }
+                #expect(expected != nil && actual == expected)
+                if transition == "startedFailure" {
+                    try await fixture.core.setPaused(false)
+                    try await fixture.adapter.stop()
+                    try await fixture.adapter.start(automaticallySync: false)
+                    let successor = try await fixture.engine()
+                    try await fixture.adapter.requestSend(zones: [fixture.zone])
+                    #expect(successor.acceptedNetworkCalls.value > 0)
+                    #expect(engine.acceptedNetworkCalls.value == calls)
+                }
+            }
+        }
+    }
+}

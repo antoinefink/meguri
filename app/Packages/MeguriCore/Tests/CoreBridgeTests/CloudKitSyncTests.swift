@@ -1447,22 +1447,24 @@ private actor CloudThrowingFetchEngine: CloudKitEngine {
         let lifetime = networkLifetime
         let generation = lifetime.authority()
         let prepared = try await sdk.prepareFetch(options: options)
-        return CloudKitNetworkEnqueue { validate in
+        return CloudKitNetworkEnqueue { prepare, validate in
             try lifetime.admit(cancelSDK: { await self.cancelFetchSDKCalls() }) {
-                try await self.invokePreparedFetch(prepared, generation: generation, validate: validate)
+                try await self.invokePreparedFetch(prepared, generation: generation, prepare: prepare, validate: validate)
             }
         }
     }
     private func invokePreparedFetch(_ prepared: CloudKitNetworkEnqueue, generation: UInt64,
+                                     prepare: @escaping @Sendable () async throws -> Void,
                                      validate: @escaping @Sendable () throws -> Void) async throws {
         try await waitForFetchGate()
         let lifetime = networkLifetime
         if throwFetch {
             throwFetch = false
+            try await prepare()
             try lifetime.enqueue(generation: generation, validate: validate, begin: {})
             throw CloudTaskOriginalFailure()
         }
-        let operation = try prepared.enqueue(validate: {
+        let operation = try prepared.enqueue(prepare: prepare, validate: {
             try lifetime.enqueue(generation: generation, validate: validate, begin: {})
         })
         try await operation.drain()

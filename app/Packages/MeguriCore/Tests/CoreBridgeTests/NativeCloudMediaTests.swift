@@ -308,9 +308,13 @@ private final class NativeMediaReadFailure: Error {}
 private final class NativeMediaPendingUpdateFailure: Error {}
 
 private struct NativeEventWaitDelegate: CloudKitEngineDelegate {
+    var returnedGate: CloudCallbackGate?
+    init(returnedGate: CloudCallbackGate? = nil) { self.returnedGate = returnedGate }
     func eventWillDeliver(engine: any CloudKitEngine) async {}
     func handleEvent(_ event: CloudEngineEvent, engine: any CloudKitEngine) async {}
-    func eventHandlerReturned(_ event: CloudEngineEvent, engine: any CloudKitEngine) async {}
+    func eventHandlerReturned(_ event: CloudEngineEvent, engine: any CloudKitEngine) async {
+        if let returnedGate { await returnedGate.enter() }
+    }
     func nextRecordZoneChangeBatch(pending: [String: CloudPendingChange], zone: String,
                                    engine: any CloudKitEngine) async -> CloudEngineBatch? { nil }
     func nextFetchChangesOptions(_ options: CloudFetchOptions, engine: any CloudKitEngine) async -> CloudFetchOptions { options }
@@ -410,6 +414,74 @@ extension EventTests {
         #expect(await held.pendingWaiterCount() == 0)
         #expect(await engine.networkEventWaiterCount() == 0)
         #expect(engine.acceptedNetworkCalls.value == 0 && validations.withLock { $0 } == 0)
+        if let failure { throw failure }
+    }
+
+    @Test(arguments: [false, true], [false, true])
+    func nativePreparationRejoinsEventDeliveredDuringAwait(fetch: Bool, returnedBookkeeping: Bool) async throws {
+        let zone = "prepare-rejoin-zone"
+        let preparation = CloudCallbackGate(), event = CloudCallbackGate()
+        let returnedWork = CloudCallbackGate()
+        let engine = CloudKitEngineFake(configuration: .init(instanceID: "prepare-rejoin", automaticallySync: false,
+            serialization: nil, collectionZone: zone),
+            delegate: NativeEventWaitDelegate(returnedGate: returnedBookkeeping ? event : nil), a23: true, keepAlive: false)
+        let prepared: CloudKitNetworkEnqueue
+        if fetch { prepared = try await engine.prepareFetch(options: .init(zones: [zone], priorityZones: [], groupID: "prepare-rejoin")) }
+        else { prepared = try await engine.prepareSend(zones: [zone]) }
+        let (waits, rejoined) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let validations = CloudAcceptedNetworkCalls()
+        let operation = try prepared.enqueue(prepare: { await preparation.enter() }, validate: { validations.record() })
+        let deadline = CloudPolicyReadinessDecision()
+        let watchdog = Task {
+            do { try await Task.sleep(for: .seconds(10)) } catch { return }
+            if deadline.expire() {
+                await preparation.abort(CancellationError()); await event.abort(CancellationError())
+                await returnedWork.abort(CancellationError())
+                rejoined.finish(); operation.cancel()
+            }
+        }
+        var callback: Task<Void, Never>?
+        var failure: (any Error)?
+        do {
+            try await preparation.waitForArrival()
+            if returnedBookkeeping { await engine.pauseNativeReturnedWork(returnedWork) }
+            if !returnedBookkeeping { await engine.pauseNextCallback(event) }
+            await engine.observeNextNetworkEventWait { rejoined.yield(()) }
+            callback = Task { await engine.emitRetained(.willSend(zone: zone), label: "duringPrepare") }
+            try await event.waitForArrival()
+            await preparation.open()
+            var iterator = waits.makeAsyncIterator()
+            try #require(await iterator.next() != nil)
+            #expect(engine.acceptedNetworkCalls.value == 0 && validations.value == 0)
+            #expect(await engine.networkEventWaiterCount() == 1)
+            let trace = await engine.recordedTrace()
+            #expect(trace.contains(.eventReturned("duringPrepare")) == returnedBookkeeping)
+            await event.open()
+            await callback?.value
+            if returnedBookkeeping {
+                // Delivery has finished and the event is idle; preparation must
+                // still join returned work before validation or SDK entry.
+                try await returnedWork.waitForArrival()
+                #expect(await engine.networkEventWaiterCount() == 0)
+                #expect(engine.acceptedNetworkCalls.value == 0 && validations.value == 0)
+                await returnedWork.open()
+            }
+            try await operation.drain()
+        } catch { failure = error }
+        await preparation.open(); await event.open(); rejoined.finish()
+        await returnedWork.open()
+        if failure != nil { await operation.cancelAndDrain() }
+        await callback?.value
+        let calls = engine.acceptedNetworkCalls.value
+        let inTime = deadline.observeReady()
+        watchdog.cancel(); await watchdog.value
+        await engine.observeNextNetworkEventWait(nil)
+        await engine.release()
+        #expect(inTime && calls == 1 && validations.value == 1)
+        #expect(await preparation.pendingWaiterCount() == 0)
+        #expect(await event.pendingWaiterCount() == 0)
+        #expect(await returnedWork.pendingWaiterCount() == 0)
+        #expect(await engine.networkEventWaiterCount() == 0)
         if let failure { throw failure }
     }
 

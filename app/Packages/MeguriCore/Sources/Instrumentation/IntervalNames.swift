@@ -370,6 +370,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let cloudPolicyExecutionStartRetireOriginal = BridgeCall("CloudPolicyExecution.start_retire_original")
     public static let cloudPolicyRegistrationResult = BridgeCall("CloudPolicyRegistrationResult.result")
     public static let cloudPolicyRetirementResult = BridgeCall("CloudPolicyRetirementResult.result")
+    public static let cloudPolicyExecutionStartReportInvocation = BridgeCall("CloudPolicyExecution.start_report_invocation")
     public static let cloudPolicyExecutionStartBeginMedia = BridgeCall("CloudPolicyExecution.start_begin_media")
     public static let cloudPolicyMediaResult = BridgeCall("CloudPolicyMediaResult.result")
     public static let cloudPolicyExecutionStartBeginFetch = BridgeCall("CloudPolicyExecution.start_begin_fetch")
@@ -514,7 +515,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         cloudWorkflowBeginFirstAssetReadPass, cloudPolicyExecutionBeginAssetReadPass, cloudAssetReadPassNext, cloudAssetReadPassSubmit, cloudAssetReadPassComplete, cloudAssetReadPassCancel, cloudAssetReadPassFinish, cloudAssetReadPassOperationActivity,
         cloudWorkflowMedia, cloudWorkflowSubmitMediaBatch, cloudMediaDownloadsBlocked, cloudPolicyExecutionBeginMedia, cloudPolicyExecutionContinueMediaAfterSend, cloudMediaNextWork, cloudMediaStartNextWork, cloudMediaNextWorkResult, cloudMediaSubmitRead, cloudMediaQueueUpload, cloudMediaReply,
         cloudPolicyExecutionStartRegisterSdk, cloudPolicyExecutionStartRetireOriginal, cloudPolicyRegistrationResult, cloudPolicyRetirementResult,
-        cloudPolicyExecutionStartBeginMedia, cloudPolicyMediaResult, cloudPolicyExecutionStartBeginFetch, cloudPolicyFetchResult, cloudPolicyExecutionStartBeginSend, cloudPolicySendResult,
+        cloudPolicyExecutionStartReportInvocation, cloudPolicyExecutionStartBeginMedia, cloudPolicyMediaResult, cloudPolicyExecutionStartBeginFetch, cloudPolicyFetchResult, cloudPolicyExecutionStartBeginSend, cloudPolicySendResult,
         cloudPolicyStartInput, cloudPolicyStartRefreshAccount, cloudPolicyStartProjectIdentityRead, cloudPolicyStartStatus, cloudPolicyStartExecuteCore, cloudPolicyStartSubmitNative, cloudPolicyStartCaptureExchange, cloudPolicyStartCompleteExchange, cloudPolicyStartEndBeforeCapture, cloudPolicyStartExchangeReadiness, cloudPolicyStartPrepareExecution, cloudPolicyOutputResult, cloudPolicyStatusResult, cloudPolicyAdmissionResult, cloudPolicyCaptureResult, cloudPolicyReadinessResult, cloudPolicyExecutionResult,
         cloudWorkflowPolicy, cloudPolicyValidateOriginalOwner, cloudPolicyInput, cloudPolicyRefreshAccount, cloudPolicyProjectIdentityRead, cloudPolicyStatus, cloudPolicyExecuteCore, cloudPolicySubmitNative, cloudPolicyCaptureExchange, cloudPolicyCompleteExchange, cloudPolicyEndBeforeCapture,
         cloudPolicyExecutionValidateControl, cloudPolicyExecutionPrepareFlush, cloudPolicyExchangeReadiness, cloudPolicyPrepareExecution, cloudPolicyExecutionOriginalSdk, cloudPolicyExecutionValidateExecution, cloudPolicyExecutionRegisterSdk, cloudPolicyExecutionRetireOriginal, cloudPolicyExecutionBeginFetch, cloudPolicyExecutionBeginSend, cloudPolicyExecutionOperationActivity,

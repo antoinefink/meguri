@@ -29,14 +29,17 @@ func cloudFinalCoreCall<T: Sendable>(_ name: BridgeCall, _ body: @Sendable () th
     }
 }
 
-/// Application preparation is complete. enqueue admits ONE retained operation
-/// task; admission is neither an SDK invocation nor network acceptance/success.
+/// enqueue admits ONE retained operation task with asynchronous preparation.
+/// Admission is neither an SDK invocation nor network acceptance/success.
 /// The task must validate its pinned authority immediately before the public
 /// async SDK call, without an intervening application await or owner lookup.
 public struct CloudKitNetworkEnqueue: Sendable {
-    private let begin: @Sendable (@escaping @Sendable () throws -> Void) throws -> CloudKitNetworkOperation
-    public init(_ begin: @escaping @Sendable (@escaping @Sendable () throws -> Void) throws -> CloudKitNetworkOperation) { self.begin = begin }
-    public func enqueue(validate: @escaping @Sendable () throws -> Void) throws -> CloudKitNetworkOperation { try begin(validate) }
+    private let begin: @Sendable (@escaping @Sendable () async throws -> Void, @escaping @Sendable () throws -> Void) throws -> CloudKitNetworkOperation
+    public init(_ begin: @escaping @Sendable (@escaping @Sendable () async throws -> Void, @escaping @Sendable () throws -> Void) throws -> CloudKitNetworkOperation) { self.begin = begin }
+    public func enqueue(prepare: @escaping @Sendable () async throws -> Void = {},
+                        validate: @escaping @Sendable () throws -> Void) throws -> CloudKitNetworkOperation {
+        try begin(prepare, validate)
+    }
 }
 public struct CloudKitNetworkOperation: Sendable {
     private let completion: @Sendable () async throws -> Void

@@ -36,3 +36,25 @@ Listener failure must drain and recover actual effected outputs.
 
 Implementation and review are in progress. No new verification or acceptance
 is claimed in this entry.
+
+## Round 1
+
+Filtered export `37429` passed source isolation. Rust and production Swift
+reviews found no substantive production issue. Swift review found one P2
+coverage gap: both callback cases held an active event, leaving returned work
+after event-idle unproved. The fixer uses the existing returned-work gate.
+Original patch privacy `40047` also flags one public Swift test expression;
+the fixer preserves full action-payload comparison with another public form.
+No privacy exception or assertion change is authorized.
+
+Rust source is integrated for focused checks while that test-only repair runs
+in its isolated copy. No acceptance or passing test is claimed yet.
+
+## Focused checks and retained fixture failure
+
+Format passed. Source privacy `43190` passes after the two test corrections.
+Core `42428` passes 123 of 124 checks. The new multi-zone test fails its
+synchronous baseline nonempty-command assertion; its projection returns an
+empty command list. The fixture is under diagnosis. The failed receipt is kept;
+no assertion has been removed or relaxed. Native compilation and independent
+checks are in progress. This WIP remains unaccepted.

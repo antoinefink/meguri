@@ -287,13 +287,14 @@ actor CloudKitEngineFake: CloudKitEngine {
         try await waitForEventBookkeeping()
         cancelled = false
         let lifetime = networkLifetime; let generation = lifetime.authority()
-        return CloudKitNetworkEnqueue { validate in
+        return CloudKitNetworkEnqueue { prepare, validate in
             try lifetime.admit(cancelSDK: { await self.cancelSDKCalls() }) {
-                try await self.invokePreparedSend(zones: zones, generation: generation, validate: validate)
+                try await self.invokePreparedSend(zones: zones, generation: generation, prepare: prepare, validate: validate)
             }
         }
     }
-    private func invokePreparedSend(zones: [String], generation: UInt64, validate: @Sendable () throws -> Void) async throws {
+    private func invokePreparedSend(zones: [String], generation: UInt64, prepare: @Sendable () async throws -> Void,
+                                    validate: @Sendable () throws -> Void) async throws {
         if let gate = operationTaskPause { operationTaskPause = nil; await waitInCall(gate) }
         #if DEBUG
         if let observer = sendFinalEntryObserver {
@@ -301,6 +302,9 @@ actor CloudKitEngineFake: CloudKitEngine {
             observer(networkLifetime.finalEntryObservation(generation: generation))
         }
         #endif
+        repeat { try await waitForEventBookkeeping() } while eventActive
+        try await prepare()
+        // Preparation suspends the actor; join events and returned work again.
         repeat { try await waitForEventBookkeeping() } while eventActive
         // The observer stays before preparation can wait for the held event.
         // Idle admission, final validation and this retained fake's entry share
@@ -312,14 +316,18 @@ actor CloudKitEngineFake: CloudKitEngine {
         try await waitForEventBookkeeping()
         cancelled = false
         let lifetime = networkLifetime; let generation = lifetime.authority()
-        return CloudKitNetworkEnqueue { validate in
+        return CloudKitNetworkEnqueue { prepare, validate in
             try lifetime.admit(cancelSDK: { await self.cancelSDKCalls() }) {
-                try await self.invokePreparedFetch(options: options, generation: generation, validate: validate)
+                try await self.invokePreparedFetch(options: options, generation: generation, prepare: prepare, validate: validate)
             }
         }
     }
-    private func invokePreparedFetch(options: CloudFetchOptions, generation: UInt64, validate: @Sendable () throws -> Void) async throws {
+    private func invokePreparedFetch(options: CloudFetchOptions, generation: UInt64, prepare: @Sendable () async throws -> Void,
+                                    validate: @Sendable () throws -> Void) async throws {
         if let gate = operationTaskPause { operationTaskPause = nil; await waitInCall(gate) }
+        repeat { try await waitForEventBookkeeping() } while eventActive
+        try await prepare()
+        // Preparation suspends the actor; join events and returned work again.
         repeat { try await waitForEventBookkeeping() } while eventActive
         try networkLifetime.enqueue(generation: generation, validate: validate, begin: {})
         try await fetchChanges(options: options)

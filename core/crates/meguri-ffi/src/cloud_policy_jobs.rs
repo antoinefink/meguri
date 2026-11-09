@@ -142,6 +142,37 @@ impl CloudPolicy {
 
 #[uniffi::export]
 impl CloudPolicyExecution {
+    /// Started facts are constructed here; terminal accounting stays synchronous.
+    pub fn start_report_invocation(
+        self: Arc<Self>,
+        zones: Vec<CloudPolicyZone>,
+        kind: CloudPolicyOperationKind,
+    ) -> Result<CloudPolicyOutputJob, CoreError> {
+        callback::enter("CloudPolicyExecution.start_report_invocation");
+        self.policy().owns(&self.command)?;
+        let (handle, cell) =
+            self.policy()
+                .clone()
+                .start_policy("CloudPolicyExecution.report_invocation", move |_, work| {
+                    self.operation_activity_with_work(
+                        CloudPolicyOperationFacts {
+                            zones,
+                            kind,
+                            started: true,
+                            failed: false,
+                            code: None,
+                            retry_after_ms: None,
+                            saved: 0,
+                            app_cancelled: false,
+                        },
+                        work,
+                    )
+                })?;
+        Ok(CloudPolicyOutputJob {
+            handle,
+            result: Arc::new(CloudPolicyOutputResult { cell }),
+        })
+    }
     pub fn start_begin_media(self: Arc<Self>) -> Result<CloudPolicyMediaJob, CoreError> {
         callback::enter("CloudPolicyExecution.start_begin_media");
         self.policy().owns(&self.command)?;

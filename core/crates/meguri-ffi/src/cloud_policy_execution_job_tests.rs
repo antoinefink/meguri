@@ -23,14 +23,16 @@ enum AdmissionKind {
     Fetch,
     Send,
     NoCall,
+    Invocation,
 }
-const ADMISSIONS: [AdmissionKind; 6] = [
+const ADMISSIONS: [AdmissionKind; 7] = [
     AdmissionKind::Register,
     AdmissionKind::Retire,
     AdmissionKind::Media,
     AdmissionKind::Fetch,
     AdmissionKind::Send,
     AdmissionKind::NoCall,
+    AdmissionKind::Invocation,
 ];
 #[derive(Debug, PartialEq, Eq)]
 enum AdmissionValue {
@@ -45,6 +47,7 @@ enum AdmissionJob {
     Media(CloudPolicyMediaJob),
     Fetch(CloudPolicyFetchJob),
     Send(CloudPolicySendJob),
+    Invocation(CloudPolicyOutputJob),
 }
 impl AdmissionJob {
     fn handle(&self) -> &crate::jobs::JobHandle {
@@ -54,6 +57,7 @@ impl AdmissionJob {
             Self::Media(job) => &job.handle,
             Self::Fetch(job) => &job.handle,
             Self::Send(job) => &job.handle,
+            Self::Invocation(job) => &job.handle,
         }
     }
     fn value(&self) -> Result<Option<AdmissionValue>, CoreError> {
@@ -62,6 +66,12 @@ impl AdmissionJob {
             Self::Retire(job) => job.result.result().map(|value| value.map(|_| AdmissionValue::Done)),
             Self::Media(job) => job.result.result().map(|value| value.map(AdmissionValue::Media)),
             Self::Fetch(job) => job.result.result().map(|value| value.map(AdmissionValue::Fetch)),
+            Self::Invocation(job) => job.result.result().map(|value| {
+                value.map(|output| {
+                    let _ = commands(output); // Preserve the actual projection shape.
+                    AdmissionValue::Done
+                })
+            }),
             Self::Send(job) => job
                 .result
                 .result()
@@ -74,7 +84,7 @@ impl AdmissionJob {
 }
 fn expected_value(kind: AdmissionKind) -> AdmissionValue {
     match kind {
-        AdmissionKind::Register | AdmissionKind::Retire => AdmissionValue::Done,
+        AdmissionKind::Register | AdmissionKind::Retire | AdmissionKind::Invocation => AdmissionValue::Done,
         AdmissionKind::Media => AdmissionValue::Media(false),
         AdmissionKind::Fetch => AdmissionValue::Fetch(1),
         AdmissionKind::Send => AdmissionValue::Send(Some(1)),
@@ -89,6 +99,12 @@ struct AdmissionTarget {
 fn admit(target: AdmissionTarget, kind: AdmissionKind) -> Result<AdmissionJob, CoreError> {
     let execution = target.execution;
     match kind {
+        AdmissionKind::Invocation => execution
+            .start_report_invocation(
+                vec![CloudPolicyZone::Root, CloudPolicyZone::Collection],
+                CloudPolicyOperationKind::Fetch,
+            )
+            .map(AdmissionJob::Invocation),
         AdmissionKind::Register => execution.start_register_sdk().map(AdmissionJob::Register),
         AdmissionKind::Retire => execution.start_retire_original().map(AdmissionJob::Retire),
         AdmissionKind::Media => execution.start_begin_media().map(AdmissionJob::Media),
@@ -1045,5 +1061,154 @@ fn native_admission_jobs_keep_exact_action_and_scope_errors_after_close() {
         replacement.workflow.host.close().unwrap();
         assert!(matches!(outcome, JobOutcome::Failed { .. }));
         assert_eq!(value, Err(expected));
+    }
+}
+
+// Full Started projections, beyond the validation-only responsiveness proof.
+#[test]
+fn native_admission_jobs_started_projection_cancel_before_first_effect_leaves_cycles_unchanged() {
+    let (fixture, _, target, _) = admission_fixture(AdmissionKind::Invocation);
+    let driver = fixture.workflow.host.cloud_policy_driver().unwrap();
+    let before = driver.state();
+    let events = fixture.workflow.host.engine().stream().subscribe();
+    let (entered, reached) = mpsc::channel();
+    let (release, resume) = mpsc::channel();
+    let held = Arc::new(Mutex::new((false, false)));
+    let observation = held.clone();
+    driver.set_projection_hook_for_testing(move || {
+        *observation.lock().unwrap() = (true, false);
+        let _ = entered.send(());
+        let timed_out = resume.recv_timeout(Duration::from_secs(10)).is_err();
+        *observation.lock().unwrap() = (false, timed_out);
+    });
+    let release = Release(release);
+    let job = admit(target.clone(), AdmissionKind::Invocation).unwrap();
+    let entry = reached.recv_timeout(Duration::from_secs(5));
+    let at_cancel = *held.lock().unwrap();
+    job.handle().cancel.cancel().unwrap();
+    drop(release);
+    let outcome = finished(&events, job.handle().id);
+    let after = driver.state();
+    let retry = admit(target, AdmissionKind::Invocation).unwrap();
+    let retry_outcome = finished(&events, retry.handle().id);
+    fixture.workflow.host.close().unwrap();
+    entry.expect("full Started projection reached");
+    assert_eq!(at_cancel, (true, false));
+    assert!(!held.lock().unwrap().1, "projection watchdog did not release work");
+    assert_eq!(outcome, JobOutcome::Cancelled);
+    assert_eq!(job.result(), Err(CoreError::Cancelled));
+    assert_eq!(after, before);
+    assert_eq!(retry_outcome, JobOutcome::Succeeded);
+    assert_eq!(retry.value(), Ok(Some(AdmissionValue::Done)));
+}
+
+fn invocation_snapshot(output: Result<CloudPolicyOutput, CoreError>) -> Result<Vec<String>, CoreError> {
+    output.map(|output| {
+        commands(output)
+            .into_iter()
+            .map(|command| format!("{:?}", command.action))
+            .collect()
+    })
+}
+
+#[test]
+fn native_admission_jobs_started_multizone_keeps_exact_outputs_and_typed_error_after_effect_cancel_close() {
+    for retire in [false, true] {
+        let mut baseline = None;
+        for asynchronous in [false, true] {
+            let (fixture, _, target, sdk) = admission_fixture(AdmissionKind::Invocation);
+            let driver = fixture.workflow.host.cloud_policy_driver().unwrap();
+            let engine = fixture.workflow.host.engine();
+            let events = engine.stream().subscribe();
+            let pool = hold_pool(&fixture);
+            let cancel = Arc::new(Mutex::new(None::<Arc<crate::cancel::CancelToken>>));
+            let token = cancel.clone();
+            let saw = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let observed = saw.clone();
+            let host = fixture.workflow.host.clone();
+            let runtime = fixture.workflow.core.clone();
+            // The second projection is reached only after the first zone's
+            // state publication. Rearm the existing Rust-only one-shot hook.
+            driver.set_projection_hook_for_testing(move || {
+                host.cloud_policy_driver()
+                    .unwrap()
+                    .set_projection_hook_for_testing(move || {
+                        observed.store(true, std::sync::atomic::Ordering::SeqCst);
+                        if let Some(token) = token.lock().unwrap().as_ref() {
+                            token.trigger();
+                        }
+                        if retire {
+                            runtime.retire_sdk(sdk.as_deref().unwrap(), false).unwrap();
+                        }
+                    });
+            });
+            let zones = vec![
+                CloudPolicyZone::Root,
+                CloudPolicyZone::Collection,
+                CloudPolicyZone::Media,
+            ];
+            let (job, output, outcome) = if asynchronous {
+                let job = target
+                    .execution
+                    .start_report_invocation(zones, CloudPolicyOperationKind::Fetch)
+                    .unwrap();
+                *cancel.lock().unwrap() = Some(job.handle.cancel.clone());
+                drop(pool);
+                let outcome = finished(&events, job.handle.id);
+                let output = job.result.result().map(|value| value.expect("completed typed result"));
+                (Some(job), output, Some(outcome))
+            } else {
+                drop(pool);
+                (
+                    None,
+                    target.execution.operation_activity(CloudPolicyOperationFacts {
+                        zones,
+                        kind: CloudPolicyOperationKind::Fetch,
+                        started: true,
+                        failed: false,
+                        code: None,
+                        retry_after_ms: None,
+                        saved: 0,
+                        app_cancelled: false,
+                    }),
+                    None,
+                )
+            };
+            let cycles = driver.state().cycles;
+            fixture.workflow.host.close().unwrap();
+            let snapshot = invocation_snapshot(output);
+            assert!(saw.load(std::sync::atomic::Ordering::SeqCst));
+            if retire {
+                assert!(snapshot.is_err());
+            } else {
+                assert!(snapshot.as_ref().is_ok_and(|actions| !actions.is_empty()));
+                for zone in [p::Zone::Root, p::Zone::Collection, p::Zone::Media] {
+                    assert!(
+                        cycles
+                            .get(&p::Operation {
+                                zone,
+                                kind: p::OperationKind::Fetch
+                            })
+                            .unwrap()
+                            .active
+                    );
+                }
+            }
+            if let Some(job) = job {
+                let outcome = outcome.unwrap();
+                assert_eq!(matches!(outcome, JobOutcome::Failed { .. }), retire);
+                if !retire {
+                    assert_eq!(outcome, JobOutcome::Succeeded);
+                }
+                assert!(job.handle.cancel.requested());
+                let replacement = super::fixture();
+                let reread = invocation_snapshot(job.result.result().map(|value| value.unwrap()));
+                replacement.workflow.host.close().unwrap();
+                assert_eq!(reread, snapshot);
+                assert_eq!(baseline.as_ref().unwrap(), &(snapshot, cycles));
+            } else {
+                baseline = Some((snapshot, cycles));
+            }
+        }
     }
 }

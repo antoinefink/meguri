@@ -212,8 +212,9 @@ struct CloudKitNetworkOperationTests {
         let failure = BufferedNativeFailure()
         let lifetime = CloudKitNetworkLifetime()
         let generation = lifetime.authority()
-        let prepared = CloudKitNetworkEnqueue { validate in
+        let prepared = CloudKitNetworkEnqueue { prepare, validate in
             try lifetime.admit(cancelSDK: {}) {
+                try await prepare()
                 try lifetime.enqueue(generation: generation, validate: validate, begin: {})
                 // Stand-in for an SDK invocation completing immediately.
                 accepted.record()
@@ -225,6 +226,64 @@ struct CloudKitNetworkOperationTests {
         do { try await operation.drain(); Issue.record("native failure was bypassed") }
         catch { #expect((error as? BufferedNativeFailure) === failure) }
         #expect(accepted.value == 1)
+    }
+
+    @Test(arguments: ["cancel", "invalidate", "retire", "failure"])
+    func asyncPreparationHeldRejectsSDKEntryAndDrainsOriginal(transition: String) async throws {
+        let lifetime = CloudKitNetworkLifetime()
+        let generation = lifetime.authority()
+        let held = CloudCallbackGate()
+        let accepted = CloudAcceptedNetworkCalls(), cancelled = CloudAcceptedNetworkCalls()
+        let failure = BufferedNativeFailure()
+        let prepared = CloudKitNetworkEnqueue { prepare, validate in
+            try lifetime.admit(cancelSDK: { cancelled.record(); await held.open() }) {
+                try await prepare()
+                try lifetime.enqueue(generation: generation, validate: validate, begin: {})
+                accepted.record()
+            }
+        }
+        let operation = try prepared.enqueue(prepare: {
+            await held.enter()
+            if transition == "failure" { throw failure }
+        }, validate: {})
+        let deadline = CloudPolicyReadinessDecision()
+        let watchdog = Task {
+            do { try await Task.sleep(for: .seconds(10)) } catch { return }
+            if deadline.expire() { await held.abort(NetworkEntryObservationError.deadline); operation.cancel() }
+        }
+        var caught: (any Error)?
+        do {
+            try await held.waitForArrival()
+            #expect(accepted.value == 0)
+            switch transition {
+            case "cancel": operation.cancel()
+            case "invalidate": lifetime.invalidate()
+            case "retire": lifetime.retire()
+            default: break
+            }
+            await held.open()
+            do { try await operation.drain(); Issue.record("held preparation reached SDK entry") }
+            catch { caught = error }
+        } catch { caught = error }
+        await held.open()
+        await operation.cancelAndDrain()
+        let inTime = deadline.observeReady()
+        watchdog.cancel(); await watchdog.value
+        #expect(inTime && accepted.value == 0)
+        #expect(await held.pendingWaiterCount() == 0)
+        if transition == "failure" { #expect((caught as? BufferedNativeFailure) === failure) }
+        else { #expect(caught is CancellationError) }
+        if transition == "cancel" { #expect(cancelled.value == 1) }
+        if transition != "retire" {
+            let later = try lifetime.admit(cancelSDK: {}) {
+                try lifetime.enqueue(generation: lifetime.authority(), validate: {}, begin: {})
+                accepted.record()
+            }
+            try await later.drain()
+            #expect(accepted.value == 1)
+            operation.cancel()
+            #expect(accepted.value == 1, "the drained UUID cannot cancel later work")
+        }
     }
 
     @Test func cancellationRevokesPreparedWorkButAllowsLaterOriginalSDKOperation() throws {

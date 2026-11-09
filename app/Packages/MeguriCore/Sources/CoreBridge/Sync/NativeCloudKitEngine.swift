@@ -322,14 +322,14 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         let options = CKSyncEngine.SendChangesOptions(scope: .zoneIDs(zones.map(zone)))
         let lifetime = networkLifetime
         let generation = lifetime.authority()
-        return CloudKitNetworkEnqueue { validate in
+        return CloudKitNetworkEnqueue { prepare, validate in
             try lifetime.admit(cancelSDK: {
                 await sdk.cancelOperations()
                 _ = try? await self.drainReturnedWork()
             }) {
                 var operationError: (any Error)?
                 do {
-                    try await self.invokePreparedSend(sdk: sdk, options: options, generation: generation, validate: validate)
+                    try await self.invokePreparedSend(sdk: sdk, options: options, generation: generation, prepare: prepare, validate: validate)
                 } catch { operationError = Self.networkFailure(error) }
                 // Even SDK failure/cancellation must drain returned event work.
                 do { try await self.drainReturnedWork() }
@@ -339,7 +339,11 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         }
     }
     private func invokePreparedSend(sdk: CKSyncEngine, options: CKSyncEngine.SendChangesOptions,
-                                    generation: UInt64, validate: @Sendable () throws -> Void) async throws {
+                                    generation: UInt64, prepare: @Sendable () async throws -> Void,
+                                    validate: @Sendable () throws -> Void) async throws {
+        repeat { try await waitForEventBookkeeping() } while activeEvent
+        try await prepare()
+        // Preparation suspends the actor; join events and returned work again.
         repeat { try await waitForEventBookkeeping() } while activeEvent
         // Same actor turn: event-idle admission, Core validation, lock release,
         // then the captured SDK invocation without another application await.
@@ -355,14 +359,14 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         let prepared = native
         let lifetime = networkLifetime
         let generation = lifetime.authority()
-        return CloudKitNetworkEnqueue { validate in
+        return CloudKitNetworkEnqueue { prepare, validate in
             try lifetime.admit(cancelSDK: {
                 await sdk.cancelOperations()
                 _ = try? await self.drainReturnedWork()
             }) {
                 var operationError: (any Error)?
                 do {
-                    try await self.invokePreparedFetch(sdk: sdk, options: prepared, generation: generation, validate: validate)
+                    try await self.invokePreparedFetch(sdk: sdk, options: prepared, generation: generation, prepare: prepare, validate: validate)
                 } catch { operationError = Self.networkFailure(error) }
                 do { try await self.drainReturnedWork() }
                 catch { if operationError == nil { operationError = error } }
@@ -371,7 +375,11 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         }
     }
     private func invokePreparedFetch(sdk: CKSyncEngine, options: CKSyncEngine.FetchChangesOptions,
-                                     generation: UInt64, validate: @Sendable () throws -> Void) async throws {
+                                     generation: UInt64, prepare: @Sendable () async throws -> Void,
+                                     validate: @Sendable () throws -> Void) async throws {
+        repeat { try await waitForEventBookkeeping() } while activeEvent
+        try await prepare()
+        // Preparation suspends the actor; join events and returned work again.
         repeat { try await waitForEventBookkeeping() } while activeEvent
         try networkLifetime.enqueue(generation: generation, validate: validate, begin: {})
         try await sdk.fetchChanges(options)

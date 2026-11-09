@@ -58,14 +58,18 @@ struct CoreCloudPolicyExecution: Sendable {
                 retryAfterMs: facts?.retryAfterMilliseconds, saved: saved, appCancelled: error is CancellationError)))
         }
     }
-    /// Invocation activity is reported in the validated task, never at task
-    /// creation. This records an attempted SDK call, not network acceptance.
-    func reportInvocation(zones: [CloudPolicyZone], kind: CloudPolicyOperationKind) throws -> CloudPolicyOutput {
+    /// Started preparation belongs to the retained operation task. Final
+    /// synchronous authorization follows this job and all event waits.
+    func reportInvocation(zones: [CloudPolicyZone], kind: CloudPolicyOperationKind) async throws -> CloudPolicyOutput {
         let raw = self.raw
-        return try cloudFinalCoreCall(.cloudPolicyExecutionOperationActivity) {
-            CloudPolicyOutput(try raw.operationActivity(facts: .init(zones: zones.map(\.raw), kind: kind.raw,
-                started: true, failed: false, code: nil, retryAfterMs: nil, saved: 0, appCancelled: false)))
+        let value: MeguriCoreBindings.CloudPolicyOutput = try await CoreCloudPolicyService.runOrdered(
+            .cloudPolicyExecutionStartReportInvocation, result: .cloudPolicyOutputResult,
+            retainResourceResultOnTrackingFailure: true
+        ) { [raw] in
+            let started = try raw.startReportInvocation(zones: zones.map(\.raw), kind: kind.raw)
+            return CloudPolicyJobValue(handle: started.handle, read: { try started.result.result() })
         }
+        return CloudPolicyOutput(value)
     }
     func continueMediaAfterSend(_ error: any Error) async throws -> Bool {
         let raw = self.raw
@@ -113,7 +117,7 @@ struct CoreCloudPolicyExecution: Sendable {
     }
 }
 
-/// The task publishes synchronous Core activity without entering the adapter
+/// The task publishes Core activity without entering the adapter
 /// actor again. Its outputs join the action result before ended activity.
 final class CloudPolicyInvocationOutputs: Sendable {
     private let values = Mutex<[CloudPolicyOutput]>([])
