@@ -4,7 +4,7 @@ Spec: engine/jobs
 Requirements: R170 (core side), R171, R1494, R1858, R1860
 Anki: none (Meguri design: no Anki behavior; written by the implementer, U24 execution note)
 Scenarios: none; tests in `core/crates/meguri-engine/tests/`
-Status: Approved 2026-11-03 (R2066) for J2.1.1. J2.1 and the CloudKit and `CloudAdopt` bullets of J2 and J3 remain approved 2026-10-27 (R2066), with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. Every other section is in force and unchanged.
+Status: Approved 2026-11-09 (R2066) for J2.1.1's original-SDK Ended completion amendment. Other J2.1.1 rules remain approved 2026-11-03. J2.1 and the CloudKit and `CloudAdopt` bullets of J2 and J3 remain approved 2026-10-27 (R2066), with `sync/policy`, `sync/cloudkit-records` and `sync/cloudkit-recovery`. Every other section is in force and unchanged.
 
 Long work in the core runs as jobs (KTD9): a short call starts one and returns its handle at once; the work runs on core-owned threads; its end is one event. This spec also covers the cancel token and the progress sink every long operation takes, and the thread registry every core thread is created through.
 
@@ -42,11 +42,31 @@ J2.1's short-call classification requires bounded work and bounded lock acquisit
 - A CoreBridge lane never performs collection-sized policy work or waits behind it on the Driver lock. Internal Core calls that can do either use typed jobs on J2's existing pool, except the final enqueue checks below. This covers policy inputs, account and accepted-identity projections, status, Core actions, native admission, exchange capture and completion, readiness, and retained execution capabilities. Moving only Core actions to jobs is insufficient.
 - Subscribe to J1 completion before admission. Start through J2's existing pool, returning a handle and retained typed value without Driver locking or projection work. Read that value after completion. Ordinary policy jobs use no slot; recovery admission remains J3.
 - Retain the original Host, generation and issued command or capability. Revalidate them when the work runs, after queue delay and before mutation or admission. Preserve input and action order, the exact outputs and typed errors, required failure follow-ups, and P4's guard and instance checks. A completed-result read does not revalidate against a newer owner or discard the original outcome.
-- Queued cancellation follows J2. Check cancellation again before the first policy-state or durable mutation. Once effects occur, preserve the actual result and follow-up commands; do not replace them with `Cancelled`. Existing op-specific cancellation and commit rules remain `engine/op-model#O4` and `#O5`. Cancelling an awaiting Swift task alone neither cancels Core work nor discards its result (J4).
+- Queued cancellation of ordinary work follows J2. Check cancellation again before the first policy-state or durable mutation. Once effects occur, preserve the actual result and follow-up commands; do not replace them with `Cancelled`. Existing op-specific cancellation and commit rules remain `engine/op-model#O4` and `#O5`. Cancelling an awaiting Swift task alone neither cancels Core work nor discards its result (J4).
 - Register all work for `engine/suspend#S1` and `#S4` cancellation and drain. A listener-setup failure after start explicitly cancels and drains the job. A successful suspend or close leaves no detached work or retained connection in use.
 - Final native enqueue validation remains synchronous, with no intervening application await or fresh owner lookup. Its locks are released before native invocation. An asynchronous job conversion alone does not establish this boundary's responsiveness. Prove that final checks remain short while a projection is held, or obtain a separately reviewed design and any required approval before changing the boundary. This clarification does not reopen capped U114 native repair work.
 
+**Required original-SDK Ended completion.** An original-SDK Ended completion accepted and registered before job admission closes is required completion work. Cancellation remains observable but does not discard its queued body. Execute it on J2's existing pool with every existing original Host, generation, command, capability, guard and SDK check. Ignoring its cancel token does not mark a Core effect or waive authority validation. After queue or lock delay, revalidate before the first actual Core mutation. In particular, recheck original owner, generation, command and SDK after acquiring Driver ownership and before clearing active state for cancellation. Set the ordinary effect latch only at an actual effect; retain the existing post-effect result rules.
+
+Use a separate result cell for this completion mode:
+
+| Case | Stored value |
+|---|---|
+| initial state | `None` |
+| normal return `Ok(value)` | `Some(Ok(value))`, with the complete typed value and required follow-up commands |
+| normal return `Err(error)` | `Some(Err(error))`, with the exact typed error, including `Cancelled`, and required follow-ups |
+| body never called, panic, or drop without a stored return | remain `None`; insert no Cancelled placeholder |
+| completion wrapper drops after storing a return | retain that return without replacement |
+
+Store normal returns before publishing exactly one `JobFinished`. Derive that event from the actual outcome and keep existing panic handling. A stored return is read directly, without checking current owner, generation or SDK authority. Ordinary cells and ordinary queued cancellation keep their existing behavior.
+
+Subscribe before admission. If listener or tracking setup fails afterward, signal cancellation and drain the accepted job. Use a stored return ahead of the setup error, including `Some(Err(Cancelled))`. With `None`, use an applicable terminal failure; otherwise retain the setup or admission outcome.
+
+This mode starts no SDK/network work, takes no slot and grants no owner, generation, command or SDK exemption. Keep existing awaited Ended/cancel paths, original lifetimes, outputs and error-before-Ended order. It adds no threads, reservation, rollback or per-attempt accounting guarantee. Paused admission and early drain follow `engine/suspend#S1` and `#S4`; the existing synchronous Rust activity wrapper keeps its existing behavior.
+
 Focused checks hold a real projection and exercise input, status, admission, readiness and final enqueue checks while unrelated review start/end job admission completes. They also cover queued cancellation, owner close and replacement, exact error and follow-up retention after effects, and listener-setup failure with drain. Preserve all existing readiness conditions, deadlines and error behavior. A Sync Now exchange and background or quit flush remain non-jobs under J2.1; only their internal Core work uses these jobs.
+
+Required completion checks also cover cancelled queued execution exactly once, post-lock authority loss without stale mutation, post-effect result retention, actual typed Cancelled versus no-body result, panic, listener failure, early Runtime/connection drain, normal producer-before-pause ordering and deliberate late paused refusal. Reviewed scope and proposed focused witness names: `docs/process/review-log/cloud-ended-completion-contract-20261109.md`.
 
 ## J3. Arbitration (C7)
 
