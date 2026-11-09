@@ -1,6 +1,6 @@
 # Replay identifier capability probe
 
-Status: experiment; native result pending. Start: `fa203c29`.
+Status: experiment; native attempt not established. Start: `fa203c29`.
 Session: `s-20261103T133750Z-f276f58e`.
 Spec: render/display-transform D4, R1964, R1965.
 
@@ -22,3 +22,15 @@ snapshot must show the expected ID and original name before activation.
 Independent review has no remaining P0–P2 finding. Native execution remains
 pending. Existing tests, checker rules and production controls are unchanged.
 No private API, overlay, tree replacement, timer or retry is added.
+
+## Native result
+
+Export `77637` adds the missing CoreBridge import. Drive `78819` builds,
+but its sheet closes before the Probe action. It makes no native attempt.
+Drive `82971` removes those two scroll actions; all 11 steps complete.
+The Probe action stays enabled and all four values stay false. Admission
+is not established, so this result cannot judge the public setter. The
+OS link still has its name and lacks its ID; the drive remains failed.
+
+Stop this experiment here. Keep the failed receipts and enabled checks.
+This test-only route supplies no production fix or acceptance evidence.

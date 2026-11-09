@@ -1,6 +1,7 @@
 #if MEGURI_TEST_HOOKS
 import AppModel
 import CardRendering
+import CoreBridge
 import DesignSystem
 import Foundation
 import QuartzCore
