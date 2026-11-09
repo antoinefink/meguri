@@ -87,3 +87,15 @@ review finding remains in this component.
 The Started-only component is complete. Ended and other retained-execution
 calls, the original batch gate, physical media evidence and remaining parent
 unit requirements stay open. No Unit trailer or release acceptance is added.
+
+## Signed phone observation
+
+Run `51053` passes normal signed preparation and launch, preserving existing
+app data. Drive `52923` fails before any UI steps or final status capture.
+A fixed system-log signature confirms a timeout enabling automation; no
+device-lock signature is present. No raw device log or user content is quoted.
+This attempt provides no new media or sync-status evidence and is not retried.
+
+The next prepared component is validateControl, continueMediaAfterSend and
+prepareFlush on the existing pool. A source audit separates beginAssetReadPass
+as retained resource work. Ended reporting remains a separate requirement.
