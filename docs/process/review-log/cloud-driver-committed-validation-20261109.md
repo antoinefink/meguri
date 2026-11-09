@@ -60,5 +60,7 @@ still holds its state lock across tracking scans, and Started reporting still
 performs ordered projection before SDK entry. Those remain known technical
 gaps; do not infer a passing full enqueue boundary or unit acceptance.
 
-Core lint `44852` passes formatting, clippy and layering checks. No full gate
-is run over the remaining known enqueue gaps.
+Correction: Core lint `44852` fails clippy on the new test's immediately
+invoked closure. Formatting and layering pass. The earlier pass claim was
+recorded before checking the complete receipt. The syntax repair and lint
+remain pending; no full gate is run over the known enqueue gaps.
