@@ -81,12 +81,17 @@ extension EventTests {
                     if case .jobFinished(let id, _) = event.kind, id.rawValue == stale.handle.id { break }
                 }
                 let staleAttempt = Mutex<UInt64?>(nil)
-                await #expect(throws: BridgeError.cloudPolicy(.staleCommand)) {
+                await #expect(throws: BridgeError.unavailable(reason: "cloud policy command is stale")) {
                     let _: MeguriCoreBindings.CloudAssetReadPass = try await retainCompletedPolicyResource(
                         .cloudPolicyExecutionStartBeginAssetReadPass, result: .cloudPolicyAssetReadPassResult,
                         attempted: { id in staleAttempt.withLock { $0 = id } }, message: "stale retry pass listener setup",
                         CloudPolicyJobValue(handle: stale.handle, read: { try stale.result.result() })
                     )
+                }
+                await #expect(throws: BridgeError.unavailable(reason: "cloud policy command is stale")) {
+                    _ = try await MaintenanceLane.shared.call(.cloudPolicyExecutionBeginAssetReadPass) {
+                        try raw.beginAssetReadPass()
+                    }
                 }
                 try await fixture.adapter.stop()
                 try await fixture.collection.close()
@@ -107,7 +112,7 @@ extension EventTests {
                     rereadCancel = await Task { try await rereadPass.cancel(selected.handle) }.result
                     try await rereadPass.finish()
                 }
-                await #expect(throws: BridgeError.cloudPolicy(.staleCommand)) {
+                await #expect(throws: BridgeError.unavailable(reason: "cloud policy command is stale")) {
                     _ = try await MaintenanceLane.shared.call(.cloudPolicyAssetReadPassResult) { try stale.result.result() }
                 }
                 if reopen { try await fixture.collection.close() }
@@ -119,7 +124,9 @@ extension EventTests {
                 #expect(staleAttempt.withLock { $0 } == stale.handle.id)
                 #expect(try await CoreBridge.CancelToken(raw: started.handle.cancel).isCancelled())
                 #expect(try await CoreBridge.CancelToken(raw: stale.handle.cancel).isCancelled())
-                if case .failure(let error) = foreignCancel { #expect(error is BridgeError) }
+                if case .failure(let error) = foreignCancel {
+                    #expect(error as? BridgeError == .unavailable(reason: "wrong asset read owner"))
+                }
                 else { Issue.record("A different pass accepted the original pass's work") }
             } catch {
                 try? await other?.finish()

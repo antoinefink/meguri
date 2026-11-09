@@ -74,3 +74,17 @@ two parameter cases. Existing Runtime errors remain Unavailable, whereas the
 new assertions expect CloudPolicy StaleCommand. Independent diagnosis and an
 exact legacy-parity test correction are pending. The failed native receipt is
 retained; no unit or batch acceptance is added.
+
+## Focused completion
+
+Export `33871` checks the exact stale errors against the original synchronous
+port. It also checks the exact foreign-pass error. Independent Swift review
+has no P0-P2 finding.
+Native `35241` passes the corrected test in both reopen cases. The other 24
+checks passed in `28884` on unchanged production source. Rust review is clear,
+with the focused coverage described above and passing lint `30174`.
+
+The resource-creation component has focused passing coverage. Parent units,
+remaining completion and resource calls, actual sync/media completion, physical
+identifier findings and the original full batch gate remain open. No Unit
+trailer or release acceptance is added.
