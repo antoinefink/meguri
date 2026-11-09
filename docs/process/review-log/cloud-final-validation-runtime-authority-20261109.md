@@ -60,3 +60,13 @@ held-lock regressions and the durable isolation/readback cases. Lint `71531`
 and similarity pass. Earlier compilation and fixture failures remain retained.
 This completes the reviewed validation component only. Started reporting,
 full native invocation, V3.4 workflow evidence and batch acceptance remain open.
+
+## Native follow-up
+
+XCFramework `73119` passes. Swift `86199` passes 26 checks in the execution
+lane, retained network-operation and native-engine suites. It uses the same
+Rust products with the test-only replay import pending; it is focused
+component evidence, not a clean full gate. Signed phone preparation `88332`
+passes. Phone status drive `90160` completes all five steps but fails its
+hierarchy check. The status still reports missing media. No full sync or
+unit acceptance is claimed.
