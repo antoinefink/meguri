@@ -1,6 +1,9 @@
 # Local copy of the real Anki collection (personal data, never commit)
 /local-data/
 
+# Machine-local VM, tools and credentials; never publish this directory
+/.local/
+
 # Reference checkouts (separate git repos; Anki is AGPL and never part of Meguri)
 /refs/
 

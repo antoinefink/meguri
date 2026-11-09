@@ -1,5 +1,10 @@
 # Mac UI tests and simulators in a VM
 
+Current storage: the dedicated VM may live in the ignored `.local/meguri-vm/`
+directory. T9 is optional when the local copy is configured. See
+[`new-machine.md`](new-machine.md) for migration and host setup. The T9 paths
+below record the original installation.
+
 Antoine decided on 2026-10-15 that Mac UI-driving suites run in a macOS virtual machine on this Mac. Before, they ran on the real screen, at most once an hour. Plan unit U8b implements the change. The same day he extended it: everything that would disturb his Mac runs in the VM, as soon and as often as useful. Plan unit U8c moves the simulators there. This page records provisioning and subsequent verification. The 2026-10-19 supplement below moves the remaining Mac app-hosted checks into the VM.
 
 ## Recovery permission (2026-10-22)

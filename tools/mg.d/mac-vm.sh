@@ -99,8 +99,8 @@ mg_mac_vm_probe() {
 
 # mg_mac_vm_user_step: the one-time step behind a missing VM.
 mg_mac_vm_user_step() {
-  mg_user_step mac-vm missing true "Connect the drive with the macOS test VM" \
-    "Simulators and Mac UI suites run only in the macOS test VM, never on this Mac: connect the T9 drive, or set the VM up and name it in $(mg_mac_vm_config_path) (docs/process/mac-ui-vm.md). Until then they are queued."
+  mg_user_step mac-vm missing true "Make the macOS test VM available" \
+    "Simulators and Mac UI suites run only in the macOS test VM, never on this Mac: make its local or external storage available and name the VM in $(mg_mac_vm_config_path) (docs/process/mac-ui-vm.md). Until then they are queued."
 }
 
 # mg__mac_vm_unavailable_step <reason>: the step behind a VM that is there
