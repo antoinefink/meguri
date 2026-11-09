@@ -429,7 +429,23 @@ private func prepareDebugMediaDownload(_ fixture: CloudKitBridgeFixture,
     try await media.reply(root.handle, result: .record(name: "root", recordType: "MGMediaRoot",
         envelope: Data([0x08, 0x01, 0x12, 0x20]) + Data(repeating: 47, count: 32), asset: nil))
 
+    // SDK pending-list bookkeeping does not acknowledge the dirty collection records.
+    let initialTrackingSendables = try await fixture.core.trackingSendables()
+    let selectedNames = Set(initialTrackingSendables.keys)
+    try #require(!selectedNames.isEmpty)
+    let initialBatch = try #require(try await fixture.core.buildBatch(
+        sdk: sdk, zone: fixture.zone, pending: initialTrackingSendables))
+    try #require(Set(initialBatch.saves.map(\.name)) == selectedNames)
+    try #require(initialBatch.saves.count == selectedNames.count && initialBatch.deletes.isEmpty)
+    _ = try await fixture.core.sent(sdk: sdk, batchID: initialBatch.id, saved: initialBatch.saves,
+        failed: [], deleted: [], failedDeletes: [], batchCount: 1)
+    try await fixture.core.handlerReturned(sdk: sdk)
+    for name in selectedNames {
+        let facts = try #require(try await fixture.core.entityFacts(name: name))
+        try #require(facts.ackedRev == facts.localRev && facts.mark == nil)
+    }
     let before = Set(try await fixture.core.trackingSendables().keys)
+    try #require(selectedNames.isDisjoint(with: before))
     _ = try await CoreMediaService().addMedia(name: "pending.asset", bytes: [7, 1, 5, 3, 9])
     let read = try #require(try await media.nextWork(sdk: sdk))
     switch read.request {
@@ -446,7 +462,9 @@ private func prepareDebugMediaDownload(_ fixture: CloudKitBridgeFixture,
     for update in try await fixture.core.takePendingUpdates(sdk: sdk) {
         try await fixture.core.updateApplied(sdk: sdk, id: update.id, added: Array(update.adds.keys))
     }
-    let batch = try #require(try await fixture.core.buildBatch(sdk: sdk, zone: "meguri-media", pending: [blob: .save]))
+    let mediaPending = try await fixture.core.trackingSendables()
+    try #require(mediaPending == [blob: .save])
+    let batch = try #require(try await fixture.core.buildBatch(sdk: sdk, zone: "meguri-media", pending: mediaPending))
     try #require(batch.saves.count == 1 && batch.saves.first?.name == blob)
     _ = try await fixture.core.sent(sdk: sdk, batchID: batch.id, saved: batch.saves,
         failed: [], deleted: [], failedDeletes: [], batchCount: 1)

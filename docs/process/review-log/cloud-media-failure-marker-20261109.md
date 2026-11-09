@@ -21,3 +21,9 @@ the P2 without another source finding. Native `48676` compiles and runs four
 selected checks: three pass. The new no-work case passes; its download case
 stops in setup because the original media batch is absent. A test-fixture
 repair is pending. No failing result is accepted or retried unchanged.
+
+Export `50749` adds the initial collection Saved acknowledgements and exact
+revision checks. Native `52068` reaches the next fixture phase: newly created
+manifest work is still pending alongside the blob. The original guard remains
+in force. The fixture must follow the native collection-before-media sequence;
+source diagnosis continues before a further test-only change.
