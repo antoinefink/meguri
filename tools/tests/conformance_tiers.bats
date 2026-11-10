@@ -500,6 +500,33 @@ EOF
   python3 "$SB/tools/tests/validate_result.py" "$result"
 }
 
+@test "conformance live replays a selection holding a heatmap scenario on the add-on image, Meguri's edges on the base" {
+  cat >>"$SB/tools/mg.d/zz-conformance-fixture.sh" <<'EOF'
+mg_oracle__heatmap_scenarios() { echo "heatmap-scan $*" >>"$CALLS"; printf '%s' "${HEATMAP_IDS:-}"; }
+mg_oracle__heatmap_build() {
+  echo heatmap-build >>"$CALLS"
+  MG_ORACLE_HEATMAP_TAG="$MG_ORACLE_TAG-heatmap-fixture" MG_ORACLE_HEATMAP_ID=sha256:heatmap
+}
+eval "$(declare -f mg_conf__cli_native | sed '1s/mg_conf__cli_native/mg_fixture__tiers_cli/')"
+mg_conf__cli_native() { printf '%s\n' "${MEGURI_ORACLE_TAG:-}" >>"$CALLS.tag"; mg_fixture__tiers_cli "$@"; }
+EOF
+  export HEATMAP_IDS=stats/heatmap/today-cell
+  mg conformance --live-only --lane native stats
+  [ "$status" -eq 0 ]
+  grep -qx 'heatmap-scan stats' "$CALLS"
+  [ "$(grep -cx heatmap-build "$CALLS")" -eq 1 ]
+  [ "$(cat "$CALLS.tag")" = fixture-heatmap-fixture ]
+  jq -e 'index("--meguri-edge-cmd") as $i | .[$i+1] | fromjson | index("--image") as $j | .[$j+1] == "meguri-oracle:fixture"' "$CALLS.args"
+
+  rm -f "$CALLS" "$CALLS.tag" "$CALLS.args"
+  unset HEATMAP_IDS
+  mg conformance --live-only --lane native smoke/fixture
+  [ "$status" -eq 0 ]
+  grep -qx 'heatmap-scan smoke/fixture' "$CALLS"
+  ! grep -qx heatmap-build "$CALLS"
+  [ "$(cat "$CALLS.tag")" = fixture ]
+}
+
 @test "conformance live still runs native and Docker T0 before T1" {
   mg conformance --live --lane all
   [ "$status" -eq 0 ]

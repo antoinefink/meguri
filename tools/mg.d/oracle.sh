@@ -108,9 +108,11 @@ mg_oracle__compose() {
   MEGURI_ORACLE_TAG="$tag" MEGURI_ORACLE_CONTEXT="$ctx" mg_compose "$@"
 }
 
-# mg_oracle__build <oracle dir>: builds and sets MG_ORACLE_TAG, MG_ORACLE_ID.
+# mg_oracle__build <oracle dir>: builds and sets MG_ORACLE_TAG, MG_ORACLE_ID
+# (the base image: mg_oracle__heatmap may route a selection off it again).
 mg_oracle__build() {
   local dir="$1" log rc
+  MG_ORACLE_BASE_TAG="" MG_ORACLE_BASE_ID=""
   log="$MG_RUN_DIR/build-$(basename "$1").log"
   if ! MG_ORACLE_TAG="$(mg_oracle__tag "$dir")"; then
     mg_failure tag "cannot compute the image tag: no anki== pin in $dir/requirements.lock"
@@ -220,16 +222,24 @@ MG_ORACLE_SYNC_RECORDER=""
 MG_ORACLE_SYNC_CONTAINERS="" # this run's recorders
 
 # mg_oracle__actor_scenarios [filter...]: the ids of the actor scenarios that
-# the filters select, by meguri-cli's rules: an id, a directory prefix or a
-# pattern (`*` also matches `/`), with or without suffix; every actor scenario
-# without filters. An actor scenario is one whose parsed value has a top-level
-# `actors` member, as meguri-cli's scenario parser reads it (`conformance
-# to-json`), so a quoted key or a flow mapping counts as `actors:` does. When
-# the parser cannot run, it records an error and returns 1: a run that missed
-# an actor scenario would start its workers without the fault proxy.
+# the filters select. An actor scenario is one whose parsed value has a
+# top-level `actors` member, so a quoted key or a flow mapping counts as
+# `actors:` does. A run that missed one would start its workers without the
+# fault proxy.
 mg_oracle__actor_scenarios() {
-  local dir="$MG_ROOT/conformance/scenarios" file rel id f out rc
+  mg_oracle__scenarios_where "actor scenarios" 'has("actors")' "$@"
+}
+
+# mg_oracle__scenarios_where <what> <jq test> [filter...]: the ids of the
+# scenarios that the filters select, by meguri-cli's rules (an id, a directory
+# prefix or a pattern (`*` also matches `/`), with or without suffix; every
+# scenario without filters), whose value, as meguri-cli's scenario parser reads
+# it (`conformance to-json`), is a mapping that passes the jq test. When the
+# parser cannot run, it records an error and returns 1.
+mg_oracle__scenarios_where() {
+  local what="$1" test="$2" dir="$MG_ROOT/conformance/scenarios" file rel id f out rc
   local files=()
+  shift 2
   [ -d "$dir" ] || return 0
   while IFS= read -r file; do
     [ -n "$file" ] || continue
@@ -262,12 +272,12 @@ EOF
   # to-json exits 1 when a file does not parse, and still answers for it: that
   # file is no actor scenario here, and the harness reports it invalid.
   if [ "$rc" -ge 2 ] || [ "$(printf '%s\n' "$out" | grep -c '^{')" -ne "${#files[@]}" ]; then
-    mg_failure scenario-parse "meguri-cli could not read the selected scenarios (exit $rc), so which of them are actor scenarios is unknown; see log.txt" \
+    mg_failure scenario-parse "meguri-cli could not read the selected scenarios (exit $rc), so which of them are $what is unknown; see log.txt" \
       "cd core && cargo run -p meguri-cli -- conformance to-json <scenario file>"
     mg_status error
     return 1
   fi
-  printf '%s\n' "$out" | jq -r 'select(.value | type == "object" and has("actors")) | .path' |
+  printf '%s\n' "$out" | jq -r "select(.value | type == \"object\" and ($test)) | .path" |
     while IFS= read -r file; do
       rel="${file#"$dir"/}"
       printf '%s\n' "${rel%.*}"
@@ -322,6 +332,77 @@ mg_oracle__sync_stop() {
   MG_ORACLE_SYNC_FAULTS=""
   MG_ORACLE_SYNC_RECORDER=""
   return 0
+}
+
+# --- The heatmap add-on image (stats-ops.md H4, oracle/heatmap/README.md) ----
+# Only that image observes heatmap_totals and heatmap_report. It runs every
+# other kind as the base image does, so a selection that holds a scenario
+# observing either runs on it whole; any other selection stays on the base.
+
+MG_ORACLE_BASE_TAG="" # the base image while MG_ORACLE_TAG names the add-on's
+MG_ORACLE_BASE_ID=""
+
+# mg_oracle__heatmap_scenarios [filter...]: the selected scenarios that name
+# heatmap_totals or heatmap_report in an `observe` list (dsl.md D7), as a
+# request string or a request mapping's key, in any step or segment.
+mg_oracle__heatmap_scenarios() {
+  mg_oracle__scenarios_where "heatmap scenarios" \
+    '[.. | objects | .observe? | arrays | .[] | if type == "object" then keys[] else . end]
+     | any(. == "heatmap_totals" or . == "heatmap_report")' "$@"
+}
+
+# mg_oracle__heatmap_build: builds $MG_ORACLE_DIR/heatmap/ on
+# meguri-oracle:$MG_ORACLE_TAG (default network: its ADD fetches the add-on's
+# public archive, pinned by hash) as
+# meguri-oracle:$MG_ORACLE_TAG-heatmap-<16 hex of its Dockerfile's sha256>, and
+# sets MG_ORACLE_HEATMAP_TAG and MG_ORACLE_HEATMAP_ID.
+mg_oracle__heatmap_build() {
+  local ctx="$MG_ORACLE_DIR/heatmap" log="$MG_RUN_DIR/build-heatmap.log" rc
+  if [ ! -f "$ctx/Dockerfile" ]; then
+    mg_failure no-heatmap-image "$ctx/Dockerfile does not exist, so no oracle image observes heatmap_totals or heatmap_report"
+    mg_status error
+    return 1
+  fi
+  MG_ORACLE_HEATMAP_TAG="$MG_ORACLE_TAG-heatmap-$(mg_oracle__sha256 <"$ctx/Dockerfile" | cut -c1-16)"
+  echo "oracle: building meguri-oracle:$MG_ORACLE_HEATMAP_TAG from $ctx" >&2
+  docker build --progress plain --build-arg "ORACLE_BASE=meguri-oracle:$MG_ORACLE_TAG" \
+    -t "meguri-oracle:$MG_ORACLE_HEATMAP_TAG" "$ctx" </dev/null 2>&1 | tee "$log" >&2
+  rc=${PIPESTATUS[0]}
+  mg_artifact log "$log" "heatmap add-on image build"
+  if [ "$rc" -ne 0 ]; then
+    mg_failure heatmap-image-build "building meguri-oracle:$MG_ORACLE_HEATMAP_TAG failed; see $(basename "$log")"
+    mg_status error
+    return 1
+  fi
+  MG_ORACLE_HEATMAP_ID="$(docker image inspect "meguri-oracle:$MG_ORACLE_HEATMAP_TAG" --format '{{.Id}}' 2>/dev/null)"
+  if [ -z "$MG_ORACLE_HEATMAP_ID" ]; then
+    mg_failure image-inspect "meguri-oracle:$MG_ORACLE_HEATMAP_TAG is missing after the build"
+    mg_status error
+    return 1
+  fi
+}
+
+# mg_oracle__heatmap [filter...]: after mg_oracle__build, when the selection
+# holds a heatmap scenario, builds the add-on image and points MG_ORACLE_TAG
+# and MG_ORACLE_ID at it, keeping the base's in MG_ORACLE_BASE_TAG and
+# MG_ORACLE_BASE_ID. Once routed, it changes nothing until the next build.
+mg_oracle__heatmap() {
+  local ids
+  [ -z "$MG_ORACLE_BASE_TAG" ] || return 0
+  ids="$(mg_oracle__heatmap_scenarios "$@")" || return 1
+  [ -n "$ids" ] || return 0
+  mg_oracle__heatmap_build || return 1
+  MG_ORACLE_BASE_TAG="$MG_ORACLE_TAG" MG_ORACLE_BASE_ID="${MG_ORACLE_ID:-}"
+  MG_ORACLE_TAG="$MG_ORACLE_HEATMAP_TAG" MG_ORACLE_ID="$MG_ORACLE_HEATMAP_ID"
+  echo "oracle: $(printf '%s\n' "$ids" | grep -c .) selected scenarios observe the heatmap add-on; the selection runs on meguri-oracle:$MG_ORACLE_TAG" >&2
+}
+
+# mg_oracle__image_detail: the `image` detail, with the base image under
+# `base` when the run used the add-on image.
+mg_oracle__image_detail() {
+  jq -nc --arg t "meguri-oracle:$MG_ORACLE_TAG" --arg i "$MG_ORACLE_ID" \
+    --arg bt "$MG_ORACLE_BASE_TAG" --arg bi "$MG_ORACLE_BASE_ID" \
+    '{tag: $t, id: $i} + (if $bt == "" then {} else {base: {tag: ("meguri-oracle:" + $bt), id: $bi}} end)'
 }
 
 mg_oracle() {
@@ -414,7 +495,8 @@ mg_oracle_record_compare() {
   mg_oracle__docker_ok || return 0
   local actors
   actors="$(mg_oracle__actor_scenarios ${selected[0]+"${selected[@]}"})" || return 0
-  mg_oracle__tree && mg_oracle__build "$MG_ORACLE_DIR" || return 0
+  mg_oracle__tree && mg_oracle__build "$MG_ORACLE_DIR" &&
+    mg_oracle__heatmap ${selected[0]+"${selected[@]}"} || return 0
   if [ -n "$actors" ]; then
     mg_oracle__sync_faults || return 0
   fi
@@ -717,7 +799,7 @@ mg_oracle__report() {
   mg_count total "$total"
   mg_count passed "$passed"
   mg_count failed $((total - passed))
-  mg_detail image "$(jq -nc --arg t "meguri-oracle:$MG_ORACLE_TAG" --arg i "$MG_ORACLE_ID" '{tag: $t, id: $i}')"
+  mg_detail image "$(mg_oracle__image_detail)"
   mg_detail oracle "$(jq -c '.oracle' "$report")"
   mg_detail totals "$(jq -c '.totals' "$report")"
   mg_detail timing "$(jq -c '{jobs, wall_s, mean_worker_ms}' "$report")"
@@ -1089,13 +1171,18 @@ mg_oracle__bump() {
 }
 
 # test [pattern]: the driver self-tests inside the container (on the internal
-# network), then the host checks in tools/tests/oracle_host_checks.sh. One TAP
-# stream, numbered across both.
+# network), then the host checks in tools/tests/oracle_host_checks.sh and,
+# without a pattern, test_heatmap_addon on the heatmap add-on image (the base
+# run skips those tests; stats-ops.md H4). One TAP stream, numbered across all.
 mg_oracle_test() {
   mg_oracle__own_tree "test copies oracle/ into its host checks" || return 0
   mg_oracle__docker_ok || return 0
   mg_oracle__tree && mg_oracle__build "$MG_ORACLE_DIR" || return 0
-  local inner="$MG_RUN_DIR/driver.tap" outer="$MG_RUN_DIR/host.tap" tap="$MG_RUN_DIR/oracle-test.tap" rc1 rc2
+  if [ "$#" -eq 0 ]; then
+    mg_oracle__heatmap_build || return 0
+  fi
+  local inner="$MG_RUN_DIR/driver.tap" outer="$MG_RUN_DIR/host.tap" addon="$MG_RUN_DIR/heatmap.tap"
+  local tap="$MG_RUN_DIR/oracle-test.tap" rc1 rc2 rc3=0
   # The driver's sync tests create fault proxies (sync-ops.md S8.2).
   mg_oracle__sync_faults || return 0
   mg_oracle__run "$MG_ORACLE_TAG" "$MG_ORACLE_DIR" -e "ORACLE_SYNC_FAULTS=$MG_ORACLE_SYNC_FAULTS" \
@@ -1106,15 +1193,19 @@ mg_oracle_test() {
     MG_ORACLE_ID="$MG_ORACLE_ID" MG_ORACLE_TAG="$MG_ORACLE_TAG" MG_ORACLE_DIR="$MG_ORACLE_DIR" \
       MG_COMPOSE_PROJECT="$(mg_compose_project)" /bin/bash "$MG_ROOT/tools/tests/oracle_host_checks.sh" | tee "$outer"
     rc2=${PIPESTATUS[0]}
+    mg_oracle__run "$MG_ORACLE_HEATMAP_TAG" "$MG_ORACLE_DIR" oracle selftest test_heatmap_addon </dev/null | tee "$addon"
+    rc3=${PIPESTATUS[0]}
   else
     : >"$outer"
+    : >"$addon"
     rc2=0
   fi
   awk '
     /^1\.\.[0-9]+$/ { plan += substr($0, 4); next }
     /^(not )?ok [0-9]+/ { n++; sub(/ok [0-9]+/, "ok " n); lines[++m] = $0; next }
     { lines[++m] = $0 }
-    END { print "1.." plan; for (i = 1; i <= m; i++) print lines[i] }' "$inner" "$outer" >"$tap"
+    END { print "1.." plan; for (i = 1; i <= m; i++) print lines[i] }' "$inner" "$outer" "$addon" >"$tap"
   mg_artifact tap "$tap"
+  rc2=$((rc2 > rc3 ? rc2 : rc3))
   mg_tap_report "$tap" $((rc1 > rc2 ? rc1 : rc2)) ""
 }

@@ -2137,6 +2137,7 @@ for a in "$@"; do
 done
 case "$1" in
   info | ps | rm) exit 0 ;;
+  build) exit "${STUB_BUILD_RC:-0}" ;;
   image) echo sha256:new; exit 0 ;;
   inspect) echo "true healthy"; exit 0 ;;
   exec) printf '%s\n' "$STUB_HEALTH"; exit 0 ;;
@@ -2154,7 +2155,11 @@ case " $* " in
   *" build oracle "*) exit 0 ;;
   *" up "*" sync-faults "*) exit 0 ;;
   *" run -d "*" sync-recorder "*) printf '%s' "$STUB_EXCHANGES" >"$MEGURI_RECORD_DIR/exchanges.jsonl"; exit 0 ;;
-  *" harness "*) printf '%s\n' "$STUB_REPORT" >"$out${report#/out}"; exit "${STUB_RC:-0}" ;;
+  *" harness "*)
+    printf 'harness-tag %s\n' "$MEGURI_ORACLE_TAG" >>"$STUB_LOG"
+    printf '%s\n' "$STUB_REPORT" >"$out${report#/out}"
+    exit "${STUB_RC:-0}"
+    ;;
 esac
 exit 97
 STUB
@@ -2246,6 +2251,71 @@ harness_report() {
   [ "$status" -eq 2 ]
   [ "$(field '.failures[0].id')" = scenario-parse ]
   ! grep -q -- ' build oracle' "$STUB_LOG"
+  ! grep -q -- ' harness ' "$STUB_LOG"
+  validate "$result"
+}
+
+@test "oracle record and compare run a selection on the heatmap add-on image only when a scenario observes heatmap_totals or heatmap_report" {
+  actor_fixture
+  mkdir -p "$SB/oracle/heatmap" "$SB/conformance/scenarios/stats"
+  printf 'ARG ORACLE_BASE\nFROM ${ORACLE_BASE}\n' >"$SB/oracle/heatmap/Dockerfile"
+  local id sel base digest
+  for id in stats/totals stats/report stats/near; do
+    printf 'id: %s\nclock: {tz: UTC, start: "2030-01-15T10:00:00"}\n' "$id" >"$SB/conformance/scenarios/$id.yaml"
+  done
+  # A kind counts as a request mapping's key or a request string, in a step
+  # at any depth; stats/near names both only outside an observe request.
+  STUB_PARSED="$(jq -c '. + {
+    "stats/totals": {id: "stats/totals", steps: [{observe: [{heatmap_totals: {decks: ["A"]}}, "studied_today_raw"]}]},
+    "stats/report": {id: "stats/report", segments: [{steps: [{observe: ["timing", "heatmap_report"]}]}]},
+    "stats/near": {id: "stats/near", note: "heatmap_totals",
+      steps: [{observe: ["studied_today_raw", {timing: "heatmap_report"}]}]}}' <<<"$STUB_PARSED")"
+  export STUB_PARSED STUB_REPORT
+  digest="$(sha256sum "$SB/oracle/heatmap/Dockerfile" | cut -c1-16)"
+
+  # No heatmap scenario: the base image as before, and no add-on build.
+  STUB_REPORT="$(harness_report compare stats/near=pass smoke/plain=pass)"
+  mg oracle compare stats/near smoke/plain
+  [ "$status" -eq 0 ]
+  ! grep -q '^build ' "$STUB_LOG"
+  base="$(field '.details.image.tag')"
+  [[ "$base" =~ ^meguri-oracle:26\.9\.3-[0-9a-f]{16}$ ]]
+  [ "$(field '.details.image.base')" = null ]
+  grep -qx -- "harness-tag ${base#meguri-oracle:}" "$STUB_LOG"
+  validate "$result"
+
+  # One heatmap scenario takes the whole selection to the add-on image, built
+  # on the base after the base build and before the harness.
+  for sel in stats/totals stats/report "stats/report smoke/plain" stats; do
+    : >"$STUB_LOG"
+    STUB_REPORT="$(harness_report record stats/totals=recorded)"
+    # shellcheck disable=SC2086 # each case is a word list
+    mg oracle record $sel
+    [ "$status" -eq 0 ]
+    grep -qx -- "build --progress plain --build-arg ORACLE_BASE=$base -t $base-heatmap-$digest .*/oracle/heatmap" "$STUB_LOG"
+    [ "$(grep -n -- ' build oracle' "$STUB_LOG" | cut -d: -f1)" -lt "$(grep -n -- '^build ' "$STUB_LOG" | cut -d: -f1)" ]
+    [ "$(grep -n -- '^build ' "$STUB_LOG" | cut -d: -f1)" -lt "$(grep -n -- ' harness record ' "$STUB_LOG" | cut -d: -f1)" ]
+    grep -qx -- "harness-tag ${base#meguri-oracle:}-heatmap-$digest" "$STUB_LOG"
+    [ "$(field '.details.image.tag')" = "$base-heatmap-$digest" ]
+    [ "$(field '.details.image.id')" = sha256:new ]
+    [ "$(field '.details.image.base.tag')" = "$base" ]
+    validate "$result"
+  done
+
+  # An add-on image that does not build, or no oracle/heatmap/, is an error
+  # before the harness.
+  : >"$STUB_LOG"
+  export STUB_BUILD_RC=1
+  mg oracle compare stats/totals
+  unset STUB_BUILD_RC
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = heatmap-image-build ]
+  ! grep -q -- ' harness ' "$STUB_LOG"
+  validate "$result"
+  rm -r "$SB/oracle/heatmap"
+  mg oracle compare stats/totals
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = no-heatmap-image ]
   ! grep -q -- ' harness ' "$STUB_LOG"
   validate "$result"
 }

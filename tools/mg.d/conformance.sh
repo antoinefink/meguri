@@ -359,7 +359,8 @@ mg_conf__record_stale() {
     return 0
   fi
   echo "conformance: re-recording on the oracle: $(printf '%s' "$ids" | tr '\n' ' ')" >&2
-  mg_oracle__tree && mg_oracle__build "$MG_ORACLE_DIR" || return 1
+  # shellcheck disable=SC2086 # one id per word
+  mg_oracle__tree && mg_oracle__build "$MG_ORACLE_DIR" && mg_oracle__heatmap $ids || return 1
   local args=()
   while IFS= read -r id; do
     [ -n "$id" ] && args[${#args[@]}]="--filter" && args[${#args[@]}]="$id"
@@ -392,8 +393,11 @@ mg_conf__live_replay() {
   if [ -z "${MG_ORACLE_TAG:-}" ]; then
     mg_oracle__tree && mg_oracle__build "$MG_ORACLE_DIR" || return 1
   fi
+  # A selection with a heatmap scenario replays on the add-on image
+  # (stats-ops.md H4); Meguri's edges keep the base image.
+  mg_oracle__heatmap "$@" || return 1
   mkdir -p "$handoff" "$MG_ROOT/conformance/fixtures"
-  MG_CONF_EDGE_IMAGE="meguri-oracle:$MG_ORACLE_TAG"
+  MG_CONF_EDGE_IMAGE="meguri-oracle:${MG_ORACLE_BASE_TAG:-$MG_ORACLE_TAG}"
   local owner
   owner="$(python3 -I -B -c 'import uuid; print(uuid.uuid4().hex)')" || return 1
   # Do not expose transport details through MG report artifacts.
