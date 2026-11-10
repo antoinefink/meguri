@@ -66,9 +66,12 @@ def resolve(root,path):
             if candidate.exists():
                 cached.append(v._first_sync_bytes(str(cache),str(candidate)));cache_paths.append((str(cache),str(candidate)))
     need(cached and all(value==raw for value in cached),'profile-cache')
-    command=['/usr/bin/xcodebuild','build-for-testing','-showBuildSettings','-json','-project','app/Meguri.xcodeproj',
-             '-scheme','Meguri','-testPlan','CloudAgent','-configuration','Debug','-destination','platform=macOS,arch=arm64',
-             '-derivedDataPath','build/app/CloudAgentMacDerivedData','MEGURI_SIGNING=team',
+    # Scope comparison needs the real widget settings even when CloudAgent's
+    # execution scheme selects only the app and app-hosted test bundle.
+    derived=os.path.join(root,'build/app/CloudAgentMacDerivedData/Build')
+    command=['/usr/bin/xcodebuild','-showBuildSettings','-json','-project','app/Meguri.xcodeproj',
+             '-alltargets','-configuration','Debug','-sdk','macosx',
+             'SYMROOT='+derived+'/Products','OBJROOT='+derived+'/Intermediates.noindex','MEGURI_SIGNING=team',
              'MEGURI_MAC_AGENT_PROFILE_STYLE=Manual','MEGURI_MAC_AGENT_PROFILE_SPECIFIER='+uuid]
     # The ordinary MG caller runs from the checkout; no profile value is echoed.
     settings=json.loads(v.command(command,'profile-settings').stdout)

@@ -46,3 +46,12 @@ failure can be diagnosed without exporting its private native output. Independen
 review is clear; focused tooling check `39922` passed all three cases. The failed
 parent remains retained. Next is an individual build check, not another full
 parent run.
+
+Individual build `41954` reported `profile-target-scope`: the execution scheme's
+settings include the app and test host, but omit the implicit widget target.
+The preflight now queries all targets read-only with Debug/macOS settings and
+output roots under its existing DerivedData. It still requires exactly one
+widget and test target and unchanged signing properties; missing/duplicate
+targets in either query remain failures. Real build/freeze scheme and plan are
+unchanged. Independent delta review is clear. Focused check `44089` passed all
+three cases. Native verification follows this correction.
