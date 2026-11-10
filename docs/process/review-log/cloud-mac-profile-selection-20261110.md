@@ -67,3 +67,17 @@ explicit widget query for each comparison. Every query retains exact role/count
 checks; it neither deduplicates rows nor permits missing targets. Independent
 delta review is clear. Focused `51545` passed all three cases, including missing,
 duplicate and unexpected-role regressions. Native verification remains pending.
+
+Native `53014` refused the scheme-query shape. The earlier
+`agent-cloud-settings.json` artifact was a filtered policy projection and did
+not prove the full native response shape. Read-only maintenance `54122` then
+verified separate explicit queries for all three targets: each returned exactly
+one matching role, identity, platform and signing intent, with only the app's
+profile selection changed. No product was mutated.
+
+The resolver now uses those proved named-target queries for both phases. Exact
+role/identity checks remain; the actual build/freeze scheme remains unchanged.
+Independent review is clear, and focused `54770` passed all three cases, including
+per-role metadata mismatch checks. This supersedes the query choices above;
+their failed native receipts remain retained. Native product verification is
+still required.
