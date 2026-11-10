@@ -354,12 +354,12 @@ import Testing
             let boundary = variant == 1 ? boundaryBefore : try evidence.acknowledgementBoundary()
             let removed: [CloudWorkflowObservation] = variant == 4 ? [] : [.savedPendingRemoved(name: record.name, requestID: 9)]
             if variant < 2 {
-                let facts = try evidence.requireSelectedAcknowledgement(entity("n1"), observations: removed, beforeManual: boundary)
-                #expect(facts.last?.operation == (variant == 0 ? "n1-earlier-original-ack" : "n1-original-ack-after-manual-request"))
+                let facts = try evidence.requireSelectedAcknowledgement(entity("n1"), observations: removed, attemptBoundary: boundary)
+                #expect(facts.last?.operation == (variant == 0 ? "n1-earlier-original-ack" : "n1-original-ack-after-attempt-boundary-timing-unresolved"))
                 #expect(!facts.contains { $0.operation?.contains("manual-exchange-ack") == true })
             } else {
                 #expect(throws: AgentFailure.execution) {
-                    try evidence.requireSelectedAcknowledgement(entity("n1", ackEnvelopeByte: variant == 5 ? 2 : 1), observations: removed, beforeManual: boundary)
+                    try evidence.requireSelectedAcknowledgement(entity("n1", ackEnvelopeByte: variant == 5 ? 2 : 1), observations: removed, attemptBoundary: boundary)
                 }
             }
         }
@@ -392,6 +392,41 @@ import Testing
                 }
             }
         }
+    }
+    @Test func selectedAckBetweenAttemptSampleAndRequestHasUnresolvedManualTiming() async throws {
+        let evidence = try ledger()
+        let record = CloudRecord(name: "generated-record-n1", envelope: Data([1]), systemFields: Data([2]))
+        let observed = current()
+        evidence.batch(origin: "generated-engine", batch: .init(id: 9, saves: [record], deletes: []), proof: nil, current: observed)
+        let boundary = try evidence.acknowledgementBoundary()
+        let startCallback = DispatchSemaphore(value: 0), callbackFinished = DispatchSemaphore(value: 0)
+        // Hold synchronous MainActor prepare while another actor finishes the
+        // original flight. No suspension is invented inside prepare/request.
+        let callback = Task.detached {
+            guard startCallback.wait(timeout: .now() + 5) == .success else { return false }
+            for (ordinal, event) in [CloudEngineEvent.sent(batchID: 9, saved: [record], failed: [], deleted: []),
+                                     .stateUpdate(Data([9]))].enumerated() {
+                for phase in [CloudSDKObservationPhase.delivered, .committed, .returned] {
+                    evidence.sdk(.init(origin: "generated-engine", ordinal: UInt64(ordinal + 1), event: event, phase: phase), current: observed)
+                }
+            }
+            callbackFinished.signal()
+            return true
+        }
+        var requests = 0
+        let facts = try await AgentManualExchange.run(prepare: {
+            startCallback.signal()
+            guard callbackFinished.wait(timeout: .now() + 5) == .success else { throw AgentFailure.execution }
+        }, request: { requests += 1; return true }, afterRequest: {}, exactResult: {
+            try evidence.requireSelectedAcknowledgement(entity("n1"),
+                observations: [.savedPendingRemoved(name: record.name, requestID: 9)], attemptBoundary: boundary)
+        }, afterResult: {})
+        #expect(await callback.value && requests == 1)
+        #expect(facts.last?.operation == "n1-original-ack-after-attempt-boundary-timing-unresolved")
+        let requestBoundary = try evidence.acknowledgementBoundary()
+        let earlier = try evidence.requireSelectedAcknowledgement(entity("n1"),
+            observations: [.savedPendingRemoved(name: record.name, requestID: 9)], attemptBoundary: requestBoundary)
+        #expect(earlier.last?.operation == "n1-earlier-original-ack")
     }
 }
 #endif

@@ -403,7 +403,7 @@ extension ReviewCollectionStartupTests {
     }
 }
 
-@MainActor private func selectedBootstrapPublish(_ a: ServiceAppHarness) async throws {
+@MainActor func selectedBootstrapPublish(_ a: ServiceAppHarness) async throws {
     let replies = SelectedBootstrapReplies()
     a.observeOwn = { replies.record($0) }
     replies.observeFailure(a.sync)
@@ -494,7 +494,7 @@ private nonisolated final class SelectedConflictOperation: CloudPreparedOwnOpera
     }
 }
 
-@MainActor private func selectedBootstrapSource(root: URL) async throws -> (bytes: Data, noteID: Int64) {
+@MainActor func selectedBootstrapSource(root: URL) async throws -> (bytes: Data, noteID: Int64) {
     let source = root.appending(path: "source")
     let location = CoreBridge.CollectionLocation(collectionDirectory: source, backupsDirectory: root.appending(path: "source-backups"),
                               appGroupSnapshot: root.appending(path: "widget"))
@@ -524,7 +524,7 @@ private nonisolated final class SelectedConflictOperation: CloudPreparedOwnOpera
     return (bytes, noteID)
 }
 
-private nonisolated final class SelectedBootstrapReplies: Sendable {
+nonisolated final class SelectedBootstrapReplies: Sendable {
     private let values = Mutex<[CloudOwnObservation]>([])
     private let terminalKind: SelectedCloudPublicationEvent.Kind
     // Installed before backend creation; a fast original commit stays buffered

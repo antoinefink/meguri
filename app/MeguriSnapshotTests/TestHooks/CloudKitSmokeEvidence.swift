@@ -347,14 +347,15 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
         }
     }
     func requireSelectedAcknowledgement(_ entity: SmokeCloudEntity, observations: [CloudWorkflowObservation],
-                                        beforeManual: UInt64) throws -> [AgentFact] {
+                                        attemptBoundary: UInt64) throws -> [AgentFact] {
         let joined = try requireAcknowledgements([entity], observations: observations)
         guard let returned = joined.first?.count else { throw AgentFailure.execution }
-        // This identifies the original ACK chain. It never claims that the
-        // requested manual exchange produced a callback from another flight.
+        // This identifies the original ACK chain. The attempt sample precedes
+        // prepare/request, while SDK events can arrive on another actor. A later
+        // tick establishes no ordering against the actual manual request.
         return joined + [.init(name: .stateSaved, count: entity.revision,
             digest: CloudKitSmokeGeneratedInput.hex(entity.digest),
-            operation: returned <= beforeManual ? "n1-earlier-original-ack" : "n1-original-ack-after-manual-request")]
+            operation: returned <= attemptBoundary ? "n1-earlier-original-ack" : "n1-original-ack-after-attempt-boundary-timing-unresolved")]
     }
     func requireSelectedFetch(_ entity: SmokeCloudEntity) throws -> [AgentFact] {
         try state.withLock { s in

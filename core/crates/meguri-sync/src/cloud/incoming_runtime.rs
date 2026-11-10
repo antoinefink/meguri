@@ -342,7 +342,24 @@ impl Runtime {
         seq: Seq,
         digest: [u8; 32],
     ) -> Result<(workflow::EntityFacts, Option<u64>), RuntimeError> {
+        self.original_note_observation_with_recheck_for_testing(collection, id, identity, seq, digest, || {})
+    }
+
+    /// The bounded test callback runs after the actual read, with neither
+    /// State nor tracking ownership. It supplies no observation or authority.
+    #[cfg(feature = "test-hooks")]
+    pub fn original_note_observation_with_recheck_for_testing(
+        &self,
+        collection: &Collection,
+        id: i64,
+        identity: meguri_engine::WalIdentity,
+        seq: Seq,
+        digest: [u8; 32],
+        after_read: impl FnOnce(),
+    ) -> Result<(workflow::EntityFacts, Option<u64>), RuntimeError> {
         let account = self.publication_account()?;
+        let decision = self.publication_decision()?;
+        let evidence = collection.open_evidence()?;
         let guard = {
             let s = self.state();
             let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
@@ -358,7 +375,7 @@ impl Runtime {
                 incarnation: s.incarnation,
             }
         };
-        self.with_scan(&guard, collection, |s| {
+        let (result, binding) = self.with_scan(&guard, collection, |s| {
             if identity.generation() != guard.generation
                 || identity.native_file() != guard.file.pair()
                 || collection.last_seq() != seq
@@ -368,6 +385,16 @@ impl Runtime {
             }
             let store = s.store.as_ref().ok_or(Error::Database)?;
             let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+            let runtime = store.runtime_binding(guard.binding)?;
+            if decision.publication.identity != b.binding.facts.publication
+                || decision.publication.decision != meguri_engine::device_state::PublicationDecision::Clear
+                || evidence != b.evidence
+                || store.binding(guard.binding)?.as_ref() != Some(&b.binding)
+                || runtime.file != Some(guard.file)
+                || runtime.open_counter != guard.open
+            {
+                return Err(RuntimeError::StaleIncarnation);
+            }
             let name = codec::entity_name(&b.binding.facts.record_key.0, codec::Kind::Note, &codec::id_key(id))
                 .map_err(|_| Error::InvalidData)?;
             let entity = store.entity_dump(guard.binding, &name)?.ok_or(Error::InvalidData)?;
@@ -398,7 +425,38 @@ impl Runtime {
                         .iter()
                         .any(|r| r.identity() == identity && r.through().0 >= run.seq)
             });
-            Ok((entity, applied.map(|r| r.seq)))
+            Ok(((entity, applied.map(|r| r.seq)), b.binding.clone()))
+        })?;
+        after_read();
+        // Provider reads precede the final State/tracking acquisition. The
+        // second with_scan rereads the actual file and publication, then pins
+        // the same invalidation/incarnation/open/generation under State.
+        let final_account = self.publication_account()?;
+        let final_decision = self.publication_decision()?;
+        if final_account != account
+            || final_decision != decision
+            || !collection.is_current()
+            || collection.open_evidence()? != evidence
+            || collection.last_seq() != seq
+        {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        self.with_scan(&guard, collection, |s| {
+            let store = s.store.as_ref().ok_or(Error::Database)?;
+            let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+            let runtime = store.runtime_binding(guard.binding)?;
+            if s.tracking_stopped
+                || b.binding != binding
+                || store.binding(guard.binding)?.as_ref() != Some(&binding)
+                || runtime.file != Some(guard.file)
+                || runtime.open_counter != guard.open
+                || collection.last_seq() != seq
+            {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+            // Scan progress, feed delivery and ACK bookkeeping are not read
+            // authority and need not remain frozen across this observation.
+            Ok(result)
         })
     }
 

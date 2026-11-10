@@ -598,7 +598,7 @@ import Foundation
             _ = try retainedAdmission()
             try CloudKitSelectedSyncProof.sourceAcknowledged(current, edited: selectedEdit)
             facts += try evidence.requireSelectedAcknowledgement(current.entity,
-                observations: try await backend.workflow.observations(), beforeManual: boundary)
+                observations: try await backend.workflow.observations(), attemptBoundary: boundary)
             facts.append(.init(name: .localDurable, count: current.entity.revision,
                 digest: CloudKitSmokeGeneratedInput.hex(current.entity.digest), operation: "n1"))
         }
