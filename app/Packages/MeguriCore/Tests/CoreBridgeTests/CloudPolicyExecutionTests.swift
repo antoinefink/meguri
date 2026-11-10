@@ -778,6 +778,73 @@ extension EventTests {
         }
     }
 
+    @Test(arguments: ["scheduling", "account", "sdk", "metadata"])
+    func policySendRetiredBySchedulingChangeDoesNotFailPublication(mode: String) async throws {
+        try await withNativePolicyFixture { fixture in
+            let changeAccount = mode == "account", sdkFailure = mode == "sdk"
+            let failure = NativePolicyOriginalFailure()
+            let (policy, executor) = try await nativePolicy(fixture)
+            try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: executor)
+            let engine = try await fixture.engine()
+            await engine.appendFetchScripts([
+                .manual(fetchedZones: ["meguri-root", fixture.zone], records: [fixture.root], group: nil)
+            ])
+            try await fixture.adapter.requestFetch(zones: ["meguri-root", fixture.zone])
+            let pending = try policyCommands(try await policy.input(.foreground))
+            let send = try #require(pending.first { if case .requestSend = $0.action { true } else { false } })
+            let enteredBefore = engine.acceptedNetworkCalls.value
+            let gate = CloudCallbackGate()
+            if mode == "metadata" {
+                await fixture.adapter.setPolicyOperationOriginObserver { await gate.enter() }
+            } else if sdkFailure {
+                await engine.failNextOperation(failure)
+                await fixture.adapter.setSendErrorObserver { await gate.enter() }
+            } else { await engine.pauseNextOperationTask(gate) }
+            try await withCloudTask(gates: [gate], operation: {
+                let result = await executor.execute(send)
+                #expect((result.error != nil) == (changeAccount || sdkFailure) && !result.deferred)
+                if sdkFailure { #expect((result.error as? NativePolicyOriginalFailure) === failure) }
+            }, whileRunning: {
+                try await gate.waitForArrival()
+                let changed = try policyCommands(try await policy.input(.settings(.init(enabled: true, paused: false, automatic: false, media: false))))
+                let configure = try #require(changed.first { if case .configureAutomatic = $0.action { true } else { false } })
+                let original = Task { await executor.execute(configure) }
+                do {
+                    try await fixture.adapter.waitForStopping(instanceID: engine.instanceID)
+                    if changeAccount {
+                        try await fixture.core.accountChanged(sdk: nil, status: .available, identity: Data("synthetic-account-B".utf8))
+                    }
+                    await gate.open()
+                    let result = await original.value
+                    #expect((result.error != nil) == changeAccount && !result.deferred)
+                } catch {
+                    await gate.open()
+                    _ = await original.value
+                    throw error
+                }
+            })
+            await fixture.adapter.setSendErrorObserver(nil)
+            await fixture.adapter.setPolicyOperationOriginObserver(nil)
+            #expect(engine.acceptedNetworkCalls.value == enteredBefore + (sdkFailure ? 1 : 0))
+            #expect(await engine.recordedTrace().contains(.released))
+            #expect(await fixture.factory.engines().count == (changeAccount ? 2 : 3))
+            #expect(try await policy.status().error == nil)
+            if !changeAccount {
+                let next = try await fixture.engine()
+                await next.appendFetchScripts([
+                    .manual(fetchedZones: ["meguri-root", fixture.zone], records: [fixture.root], group: nil),
+                    .manual(fetchedZones: ["meguri-root", fixture.zone], records: [], group: nil)
+                ])
+                let command = try #require(try policyCommands(try await policy.input(.syncNowRequested(.command)))
+                    .first { if case .runExchange = $0.action { true } else { false } })
+                let before = try await observePolicyExchange(command)
+                let result = await executor.execute(command)
+                #expect(result.error == nil)
+                try await qualifiedRecordExchange(command, result: result, fixture: fixture, before: before, outcome: .succeeded)
+            }
+        }
+    }
+
     @Test func nativePolicyHeldConfigureRunsAfterQualifiedExchangeEnd() async throws {
         try await withNativePolicyFixture { fixture in
             let (policy, executor) = try await nativePolicy(fixture)

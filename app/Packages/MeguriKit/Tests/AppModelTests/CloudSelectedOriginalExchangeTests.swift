@@ -64,7 +64,7 @@ extension ReviewCollectionStartupTests {
             await sdk.waitForAutomaticSend()
             await a.sync.waitForInputs(); await a.sync.drainOperations(); await a.sync.waitForInputs()
             try #require(!a.sync.operationFailed)
-            await sdk.holdNextSentResult(zone: nil) { await held.hold() }
+            await sdk.holdNextSentResult(zone: nil, whileDelivering: true) { await held.hold() }
             let receiptsBefore = await wire.receipts.count
             let edit = try await sourceRole.fixedEdit()
             let revision = try #require(edit.localRevision)
@@ -257,7 +257,9 @@ extension ReviewCollectionStartupTests {
             let conflictsBefore = await wire.saveConflicts.count
             await app.sync.waitForInputs(); await app.sync.drainOperations(); await app.sync.waitForInputs()
             try #require(!app.sync.operationFailed)
-            await sdk.holdNextSentResult(zone: nil) { await held.hold() }
+            // Keep the real Saved reply before its Core ACK, inside delivery,
+            // so the later edit's pending updates wait for this handler's return.
+            await sdk.holdNextSentResult(zone: nil, whileDelivering: mode == "later-rewrite") { await held.hold() }
             // Use the already admitted normal SDK path; the Service produces
             // the actual Saved or ServerRecordChanged. No result replacement.
             let prepared = try await sdk.prepareSend(zones: [zone])
@@ -296,6 +298,8 @@ extension ReviewCollectionStartupTests {
                     fields: ["Generated-later-rewrite-Q", row.fields[1]], tags: row.tags))
                 try await CoreCollectionService().flushForBackground()
                 await app.sync.waitForInputs(); await app.sync.drainOperations()
+                let issued = try #require(await sdk.heldSentPendingRevisions[current.entity.recordName])
+                #expect(await sdk.pendingRecordZoneChangeRevisions()[current.entity.recordName] == issued)
             }
             await held.release()
             let originalOperation = try #require(operation)

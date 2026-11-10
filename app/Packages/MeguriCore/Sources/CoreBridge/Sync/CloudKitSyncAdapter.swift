@@ -99,6 +99,7 @@ public actor CloudKitSyncAdapter {
         var assetFirstReadJoins = 0
         var assetClosed = false
         let stopWitness: CloudSDKStopWitness
+        var firstStopReason: StopReason?
         var stopping = false {
             didSet { stopWitness.update(stopping: stopping, authorityRetired: authorityRetired) }
         }
@@ -193,6 +194,10 @@ public actor CloudKitSyncAdapter {
     #if DEBUG
     // Scheduling observation only, after the lane-backed call releases Core.
     private var sendAdmissionObserver: (@Sendable (Bool) async -> Void)?
+    private var policyOperationOriginObserver: (@Sendable () async -> Void)?
+    func setPolicyOperationOriginObserver(_ observer: (@Sendable () async -> Void)?) {
+        policyOperationOriginObserver = observer
+    }
     // Observe exact Core call IDs at admission and successful finalization.
     private var sendCallObserver: (@Sendable (String, UInt64, Bool) -> Void)?
     // Scheduling observation of the first source error, before cleanup awaits.
@@ -464,6 +469,7 @@ public actor CloudKitSyncAdapter {
         guard !quiescing || final else { return nil }
         if let task = stopTasks[origin] { return task }
         guard let instance = owned[origin] else { return nil }
+        if instance.firstStopReason == nil { instance.firstStopReason = reason }
         #if DEBUG
         if !instance.firstStopRecorded {
             instance.firstStopRecorded = true
@@ -1291,6 +1297,7 @@ public actor CloudKitSyncAdapter {
                 #endif
                 sendError = cancellation
             }
+            if let sendError { operationError = sendError }
             #if DEBUG
             site = .completion
             #endif
@@ -1332,7 +1339,8 @@ public actor CloudKitSyncAdapter {
             #if DEBUG
             diagnostic?.record(site, error: error)
             #endif
-            CloudMediaCancellationContext.current?.observe(error); operationError = error
+            CloudMediaCancellationContext.current?.observe(error)
+            if operationError == nil { operationError = error }
         }
         // Admission owns only this original call, even when later work returns
         // early or throws. Normal finalization consumes its single attempt too.
@@ -1583,7 +1591,15 @@ public actor CloudKitSyncAdapter {
         }
         return false
     }
-    func executePolicyOperation(_ command: CloudPolicyCommand, execution: CoreCloudPolicyExecution) async throws {
+    func executePolicyOperation(_ command: CloudPolicyCommand, policy: CoreCloudPolicyService) async throws {
+        // Keep the exact objects through capability creation and its metadata
+        // read. A scheduling stop can release one during either lane await.
+        // Retention permits classification, never a new SDK admission.
+        let originals = owned
+        guard let execution = try await policy.prepareExecution(command) else { return }
+        #if DEBUG
+        await policyOperationOriginObserver?()
+        #endif
         #if DEBUG
         let original: String?
         do { original = try await execution.originalSDK() }
@@ -1596,7 +1612,11 @@ public actor CloudKitSyncAdapter {
         #else
         let original = try await execution.originalSDK()
         #endif
-        guard let origin = original, let instance = owned[origin] else {
+        guard let origin = original else {
+            try await execution.validateControl()
+            return // P4: no engine for this binding when the action starts.
+        }
+        guard let instance = owned[origin] ?? originals[origin] else {
             throw BridgeError.cloudPolicy(.staleCommand)
         }
         func scope(_ zones: [CloudPolicyZone]) -> [String] {
@@ -1608,11 +1628,33 @@ public actor CloudKitSyncAdapter {
                 }
             }
         }
-        switch command.action {
-        case .requestFetch(let zones): _ = try await fetch(zones: scope(zones), origin: origin, execution: execution)
-        case .requestSend(let zones): try await send(zones: scope(zones), origin: origin, execution: execution)
-        default: throw BridgeError.cloudPolicy(.notNativeAction)
+        do {
+            switch command.action {
+            case .requestFetch(let zones): _ = try await fetch(zones: scope(zones), origin: origin, execution: execution)
+            case .requestSend(let zones): try await send(zones: scope(zones), origin: origin, execution: execution)
+            default: throw BridgeError.cloudPolicy(.notNativeAction)
+            }
+        } catch {
+            // P4 permits a scheduling change to retire this task's original
+            // engine. That refusal supplies no transport result. The original
+            // command's control guard must still pass; a changed account,
+            // binding, generation or actual SDK failure is not this case.
+            guard case .requestSend = command.action,
+                  await schedulingRetired(instance, execution: execution, error: error) else { throw error }
         }
+    }
+    private func schedulingRetired(_ instance: Instance, execution: CoreCloudPolicyExecution, error: any Error) async -> Bool {
+        guard !Task.isCancelled else { return false }
+        guard error is CancellationError || (error as? BridgeError) == .cloudPolicy(.staleCommand)
+                || (error as? BridgeError) == .cloudConnection(.authorityChanged) else { return false }
+        func ownedStop() -> Bool {
+            (instance.firstStopReason == .policyConfigureAutomatic || instance.firstStopReason == .configureAutomatic)
+                && (instance.stopping || instance.authorityRetired) && !instance.failed
+                && !quiescing && !suspended && !suspending
+        }
+        guard ownedStop() else { return false }
+        do { try await execution.validateControl() } catch { return false }
+        return ownedStop()
     }
     func flushPolicyCollection(execution: CoreCloudPolicyExecution) async throws {
         guard !suspended, !suspending, let origin = try await execution.originalSDK(), let instance = owned[origin] else {

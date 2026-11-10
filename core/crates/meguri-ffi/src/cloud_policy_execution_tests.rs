@@ -100,6 +100,99 @@ fn guarded_registration_accepts_once_and_retains_actual_sdk_identity() {
     fixture.workflow.host.close().unwrap();
 }
 
+#[test]
+fn policy_reads_and_sends_have_no_capability_while_the_original_engine_stops() {
+    let (fixture, policy, start, root) = start_with_root();
+    let sdk = start.register_sdk().unwrap();
+    let fetch = fixture
+        .workflow
+        .begin_fetch(sdk.instance_id.clone(), vec!["meguri-root".into()])
+        .unwrap();
+    fixture
+        .workflow
+        .will_fetch(sdk.instance_id.clone(), "p4-origin".into(), true)
+        .unwrap();
+    fixture
+        .workflow
+        .fetch_zone(sdk.instance_id.clone(), "meguri-root".into(), true, false)
+        .unwrap();
+    fixture
+        .workflow
+        .fetched(sdk.instance_id.clone(), "meguri-root".into(), vec![root], vec![])
+        .unwrap();
+    fixture
+        .workflow
+        .fetch_zone(sdk.instance_id.clone(), "meguri-root".into(), false, false)
+        .unwrap();
+    fixture
+        .workflow
+        .did_fetch(sdk.instance_id.clone(), "p4-origin".into(), true)
+        .unwrap();
+    assert!(fixture.workflow.finish_fetch(sdk.instance_id.clone(), fetch).unwrap());
+    let collection = fixture.workflow.host.collection().unwrap();
+    let added = meguri_engine::decks::add(&collection, "P4 pending".into()).unwrap();
+    fixture
+        .workflow
+        .await_tracking(collection.generation().0, added.seq.0)
+        .unwrap();
+    let changed = commands(policy.clone().input(settings(true, false)).unwrap());
+    let configure = changed
+        .into_iter()
+        .find(|c| matches!(c.action, CloudPolicyAction::ConfigureAutomatic { .. }))
+        .expect("actual scheduling command");
+    let pending = commands(policy.clone().input(CloudPolicyEvent::Foreground).unwrap());
+    let operations: Vec<_> = pending
+        .into_iter()
+        .filter(|c| {
+            matches!(
+                c.action,
+                CloudPolicyAction::RequestFetch { .. } | CloudPolicyAction::RequestSend { .. }
+            )
+        })
+        .collect();
+    assert_eq!(operations.len(), 2, "actual foreground fetch and send");
+    for command in &operations {
+        assert!(
+            policy
+                .clone()
+                .prepare_execution(command.handle.clone())
+                .unwrap()
+                .is_some()
+        );
+    }
+    let configure = policy.clone().prepare_execution(configure.handle).unwrap().unwrap();
+    configure.retire_original().unwrap();
+    for command in &operations {
+        assert!(
+            policy
+                .clone()
+                .prepare_execution(command.handle.clone())
+                .unwrap()
+                .is_none()
+        );
+    }
+    fixture.workflow.release_sdk(sdk.instance_id).unwrap();
+    for command in &operations {
+        assert!(
+            policy
+                .clone()
+                .prepare_execution(command.handle.clone())
+                .unwrap()
+                .is_none()
+        );
+    }
+    let _ = policy.clone().input(settings(true, true)).unwrap();
+    for command in operations {
+        assert!(matches!(
+            policy.clone().prepare_execution(command.handle),
+            Err(CoreError::CloudPolicy {
+                failure: CloudPolicyFailure::StaleCommand
+            })
+        ));
+    }
+    fixture.workflow.host.close().unwrap();
+}
+
 // engine/jobs J2.1.1: final native enqueue checks stay short under projection.
 #[test]
 fn registered_execution_final_validation_completes_while_real_driver_projection_is_held() {

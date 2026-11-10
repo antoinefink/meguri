@@ -916,6 +916,24 @@ impl Driver {
     ) -> Result<NativeDisposition, DriverError> {
         let owned = self.lock_for_work(work)?;
         self.validate_locked(&owned, command)?;
+        if matches!(
+            command.action.kind,
+            ActionKind::RequestFetch { .. } | ActionKind::RequestSend { .. }
+        ) {
+            let engine = self.runtime.policy_engine(&command.backend_guard)?;
+            if !engine.as_ref().is_some_and(|engine| {
+                !engine.stopping
+                    && Some(engine.binding) == command.action.guard.binding
+                    && !owned
+                        .state
+                        .engine
+                        .as_ref()
+                        .is_some_and(|old| old.instance == engine.instance && old.stopping)
+            }) {
+                work.check()?;
+                return Ok(NativeDisposition::NoOperation);
+            }
+        }
         if let ActionKind::ConfigureAutomatic { on } = command.action.kind {
             let engine = self.runtime.policy_engine(&command.backend_guard)?;
             let running = engine.as_ref().is_some_and(|engine| {

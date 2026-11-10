@@ -68,7 +68,7 @@ actor ServiceSDK: CloudKitEngine {
     private var bookkeepingWaiters: [CheckedContinuation<Void, Never>] = []
     private var cancelled = false
     private var released = false
-    private var nextSentResult: (zone: String?, hold: @Sendable () async -> Void)?
+    private var nextSentResult: (zone: String?, whileDelivering: Bool, hold: @Sendable () async -> Void)?
     private var nextSentHandlerReturn: (@Sendable () async -> Void)?
     private var nextEmptyTerminalReturn: (@Sendable () async -> Void)?
     private var nextCancellation: (@Sendable () -> Void)?
@@ -88,8 +88,8 @@ actor ServiceSDK: CloudKitEngine {
     func pendingRecordZoneChangeRevisions() -> [String: UInt64] { pendingRevision }
     // Holds an actual Service response within the original admitted SDK network
     // call, before its original result handler/ACK. It never replaces a result.
-    func holdNextSentResult(zone: String?, _ hold: @escaping @Sendable () async -> Void) {
-        nextSentResult = (zone, hold)
+    func holdNextSentResult(zone: String?, whileDelivering: Bool = false, _ hold: @escaping @Sendable () async -> Void) {
+        nextSentResult = (zone, whileDelivering, hold)
     }
     init(configuration: CloudEngineConfiguration, delegate: any CloudKitEngineDelegate, wire: ServiceWorkflowWire) throws {
         instanceID = configuration.instanceID; self.delegate = delegate; self.wire = wire
@@ -180,11 +180,13 @@ actor ServiceSDK: CloudKitEngine {
     }
     private func deliver(_ event: CloudEngineEvent, removing: [String] = [], issued: [String: UInt64] = [:],
                          removalGeneration: UInt64? = nil,
+                         beforeHandling: (@Sendable () async -> Void)? = nil,
                          beforeReturn: (@Sendable () async -> Void)? = nil) async throws {
         guard let delegate else { throw ServiceWorkflowFailure.refused }
         if eventActive { await withCheckedContinuation { eventWaiters.append($0) } }
         else { eventActive = true; lifetime.beginEvent() }
         await delegate.eventWillDeliver(engine: self)
+        await beforeHandling?()
         await delegate.handleEvent(event, engine: self)
         if case .sent(let request, let saved, _, _, _) = event, let hold = nextSentHandlerReturn {
             heldSentBatchID = request
@@ -347,16 +349,19 @@ actor ServiceSDK: CloudKitEngine {
                     } else { throw ServiceWorkflowFailure.wire }
                 }
                 try await wire.recordReceipts(original, zone: zone)
+                var beforeHandling: (@Sendable () async -> Void)?
                 if let held = nextSentResult, held.zone == nil || held.zone == zone {
                     nextSentResult = nil
                     heldSentBatchID = batch.id
                     heldSentZone = zone
                     heldSavedNames = saved.map(\.name)
                     heldSentPendingRevisions = issued
-                    await held.hold()
+                    if held.whileDelivering { beforeHandling = held.hold }
+                    else { await held.hold() }
                 }
                 try await deliver(.sent(batchID: batch.id, saved: saved, failed: failed, deleted: deleted),
-                    removing: saved.map(\.name) + deleted, issued: issued, removalGeneration: issuedGeneration)
+                    removing: saved.map(\.name) + deleted, issued: issued, removalGeneration: issuedGeneration,
+                    beforeHandling: beforeHandling)
                 deliveredSentBatches.append(.init(zone: zone, id: batch.id))
                 if !failed.isEmpty { result = .failed }
             } else {

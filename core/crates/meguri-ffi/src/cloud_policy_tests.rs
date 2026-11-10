@@ -780,6 +780,18 @@ fn drain(policy: &Arc<CloudPolicy>, output: CloudPolicyOutput) {
                     _ => panic!("configuration was neither retained nor admitted"),
                 }
             }
+            CloudPolicyAction::RequestFetch { .. } | CloudPolicyAction::RequestSend { .. } => {
+                let before = queue.0.load(Ordering::SeqCst);
+                let prepared = policy.clone().prepare_execution(command.handle.clone()).unwrap();
+                let result = policy.clone().submit_native(command.handle, queue.clone()).unwrap();
+                if prepared.is_none() {
+                    assert!(matches!(result, CloudPolicyAdmission::NoOperation));
+                    assert_eq!(queue.0.load(Ordering::SeqCst), before);
+                } else {
+                    assert!(matches!(result, CloudPolicyAdmission::Admitted { accepted: true }));
+                    assert_eq!(queue.0.load(Ordering::SeqCst), before + 1);
+                }
+            }
             _ => assert!(matches!(
                 policy.clone().submit_native(command.handle, queue.clone()).unwrap(),
                 CloudPolicyAdmission::Admitted { accepted: true }

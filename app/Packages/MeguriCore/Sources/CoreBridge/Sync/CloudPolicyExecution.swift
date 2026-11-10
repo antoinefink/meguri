@@ -444,11 +444,10 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 site = .prepareExecution
                 #endif
                 if zones.contains(.media), mediaService == nil || mediaTransport == nil { throw BridgeError.cloudPolicy(.coreCapabilityUnavailable) }
-                guard let execution = try await policy.prepareExecution(command) else { throw BridgeError.cloudPolicy(.staleCommand) }
                 #if DEBUG
                 site = .requestExecution
                 #endif
-                do { try await adapter.executePolicyOperation(command, execution: execution) }
+                do { try await adapter.executePolicyOperation(command, policy: policy) }
                 catch {
                     outputs.append(contentsOf: await adapter.takePolicyOperationOutputs())
                     throw error
