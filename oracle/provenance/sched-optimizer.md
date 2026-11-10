@@ -4,9 +4,10 @@ Spec-writer notes for `specs/sched/optimizer.md` (O1 to O6 and O17) and the
 inactive scenarios under `conformance/scenarios/sched/optimizer/`. Read at tag
 26.09.3 (`refs/anki-26.09.3`) and the `fsrs` crate at its `v6.6.2` tag
 (`refs/fsrs-rs`, read with `git show v6.6.2:<path>`: the checkout is past the
-tag); no code was copied. The oracle was not run for this pass: the ops of
-O17.1 are not in the driver yet, and each scenario's expected values in its
-comments are read from these files, for the recording stage to confirm.
+tag); no code was copied. The first pass did not run the oracle; the
+recording pass of 2026-11-10 added the ops of O17.1 to the driver
+(`driver/ops/optimizer.py`, `specs/conformance/optimizer-ops.md`) and
+recorded the eight goldens, which confirm the findings listed at the end.
 
 | Spec section | Files read | Read for |
 |---|---|---|
@@ -20,30 +21,39 @@ comments are read from these files, for the recording stage to confirm.
 | O17.1 | `rslib/src/storage/deckconfig/` (the name lookup: the `name` column is `COLLATE unicase` and the first match is taken), `rslib/src/storage/upgrades/` (the column's collation) | why `preset` is matched byte-equal, not through Anki's lookup (`preset-names`, `Twin` and `twin`) |
 | O17.3 | `rslib/src/search/sqlwriter.rs` (the preset search matches `did` or `odid`) | `items` card c9 in a filtered deck |
 
-Findings the spec relies on and the recording stage must confirm:
+Findings the spec relies on, as the goldens of 2026-11-10 show them:
 
-- The short-term check on the default parameters, from stability 1.0 after
-  Again at 2 days, ends below 1.0 after 2 Good steps on the same day and
-  above 1.0 after 40 (a hand computation puts the crossing near 13): the two
-  cases of `relearning-check`.
+- The short-term check on the default parameters keeps the empty list in
+  use at a count of 2 and returns the defaults at 40 (`relearning-check`:
+  `kept` true, then false).
 - The item builder reads every row of every card the search finds, whatever
-  the card's `type` or `queue` (O2's clarification, `items` card c8).
-- The legacy evaluation reads the searched cards' rows only, never the rows
-  of deleted cards that a whole-collection search trains on: `eval` of the
-  `one_preset` white-space step of `weight-search` is not on the training
-  items, which the deviation of that step covers.
-- With the 24 cards of `adopt` and `live-adoption` (one kept group of 24
-  first items, 240 items, below the 300 of the health check), the list
-  trained at counts 1 and 2 has a lower log loss than both the empty list
-  in use and the `fsrs6-c` list, so `kept` is false in every `adopt` call and
-  both sides adopt Learner's list in `live-adoption`. Not computed for this
-  pass; if a recording shows `kept` true, the history is changed, not the
-  spec.
-- Anki's all-preset save gives `Small` of `live-adoption` (one card) the
-  crate's defaults, equal losses at its count of 1, and writes the empty
-  list in use back; Meguri skips it below 64 items. Both leave an empty list,
-  so `fsrs_model_check` and `blob_decode` agree.
-- `health-check`'s call 1: the margins of the adjusted log loss and RMSE
-  from 1.11 and 1.53 (O6) are not known; the recording stage reports them
-  (from a debugging run of the crate, not from the golden) and changes the
-  history when either lies within 0.01 of its threshold.
+  the card's `type` or `queue` (`items`: c8 gives 6 items, c9 in a filtered
+  deck 6 items and 9 reviews).
+- With the 24 cards of `adopt`, every call returns a trained list (`kept`
+  false at counts 1 and 2 and with the `fsrs6-c` list in use), with the same
+  log loss each time; 240 items and 264 reviews. Training repeats exactly:
+  two compare runs matched the recording.
+- `live-adoption`: after Anki's all-preset save in Meguri's place, every
+  preset's model builds and its blobs decode, no card's scheduling columns
+  and no review-log row changed, and `lastFsrsOptimize` is 10, the day
+  number after the scenario's `advance: 10d`.
+- `health-check`'s call 1 is `good`. A one-off run of Anki's time-series
+  evaluation (the `EvaluateParams` call, same search, cutoff and count; not
+  kept in the driver) gave log loss 0.4470 and RMSE(bins) 0.1023 with 274 of
+  the 301 items' last ratings above 1: adjusted log loss about 1.639 (0.53
+  above 1.11) and adjusted RMSE about 1.061 (0.47 below 1.53).
+- `preset-names` gives O2's name table on both paths exactly as the scenario
+  comment lists it (`Trail\` refused on the all-preset path; `Tab<TAB>Split`
+  gets the 6 items of Tab's `Split` card; `twin` gets Twin's card), and the
+  all-preset save empties `Trail\`'s FSRS-5 list.
+- `weight-search`: 12, 18, 12 and 30 items, then the refused search.
+
+## Driver (`specs/conformance/optimizer-ops.md`)
+
+| Section | Files read | Read for |
+|---|---|---|
+| P1.2 | `rslib/src/search/writer.rs` (the term writer: double quotes escaped, quoted when the text holds a space, U+3000 or a parenthesis), `rslib/src/search/builder.rs` (joining with grouping wraps the two terms in parentheses), `rslib/src/deckconfig/update.rs` (the all-preset default search), `ts/routes/deck-options/FsrsOptions.svelte` (the one-preset default search and its untrimmed test) | the two default searches the driver writes |
+| P1.3 | `rslib/src/deckconfig/service.rs` (the ignored-before count reads the date before it searches), `rslib/src/scheduler/fsrs/params.rs` (the date reading) | why a count on a search that finds nothing checks the cutoff text alone |
+| P1.4 | `rslib/src/scheduler/fsrs/params.rs` (the progress thread's review count; the legacy evaluation's card search), `rslib/src/progress.rs` (a new progress handler resets the stored report, so the count is read before the evaluation), `rslib/src/scheduler/service/mod.rs` (the request members), fsrs `src/inference.rs` at `v6.6.2` (RMSE bins summed from a hash map, whose order differs between calls) | `reviews`, and why `eval` has no `rmse_bins` |
+| P2 | `rslib/src/deckconfig/update.rs` (compute-all mode, `println!` of each preset's result, `lastFsrsOptimize`), `proto/anki/deck_config.proto` | the save and why the driver points fd 1 at `/dev/null` for it |
+| P4 | fsrs `src/inference.rs` at `v6.6.2` (evaluation of no item is not-enough-data), `rslib/src/scheduler/fsrs/params.rs` (the legacy evaluation builds the model before it evaluates), `rslib/src/scheduler/fsrs/error.rs`, `rslib/src/error/mod.rs`, `rslib/src/backend/error.rs` (both errors are the invalid-input kind, told apart by their translated messages) | the model check |

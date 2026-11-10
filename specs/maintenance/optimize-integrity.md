@@ -178,7 +178,7 @@ An in-place `VACUUM` builds the new file in a temporary database, which SQLite k
 
 The scenarios use the scenario op `optimize` (`specs/conformance/maintenance-ops.md` M1). Their goldens in `conformance/goldens/maintenance/optimize/` were recorded with the oracle driver's `optimize` op (M1.4 says when they count as current). U132 landed Meguri's adapter, and `conformance/scenarios/maintenance/area.yaml` lists `optimize/*` as active: T0 runs `compact-no-stamps` and `statistics`, and T1 runs the live `anki-opens-optimized`.
 
-The integrity verdict's corrupt case reaches the conformance language only through Check Database (`conformance/collection-check` K10 `corrupt`, with `conformance/maintenance-ops` M2's draft `corrupt_page`); the quick check's cadence and the move to `Failed{Corrupt}` are Meguri design and stay in `tests/integrity.rs`.
+The integrity verdict's corrupt case reaches the conformance language only through Check Database (`conformance/collection-check` K10 `corrupt`, with `conformance/maintenance-ops` M2's `corrupt_page`); the quick check's cadence and the move to `Failed{Corrupt}` are Meguri design and stay in `tests/integrity.rs`.
 
 ## M10. The maintenance status record (R1657)
 

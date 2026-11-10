@@ -5,7 +5,7 @@ Requirements: R1050, R1051, R1052, R1053, R1054, R1055, R1056, R1057, R1058, R10
 Anki: 26.09.3
 Scenarios: conformance/scenarios/search/tags/, conformance/scenarios/search/decks/, conformance/scenarios/search/notetypes/, conformance/scenarios/search/ids/, conformance/scenarios/search/dupe/
 
-What the name and id terms match: `tag:`, `deck:`, `preset:`, `note:`, `card:`, `nid:`, `cid:`, `did:`, `mid:` and `dupe:`. The values each term holds are `grammar.md` G8, the scope of each term `query-model.md` Q3 and Q5, and how terms combine `query-model.md` Q1, Q4 and Q7. Every rule here was checked against the oracle; the scenarios each section names pin its examples (N8), except those of `search/decks/preset-missing`, `search/dupe/entities` and `search/regex/glob-size`, which await their first recording.
+What the name and id terms match: `tag:`, `deck:`, `preset:`, `note:`, `card:`, `nid:`, `cid:`, `did:`, `mid:` and `dupe:`. The values each term holds are `grammar.md` G8, the scope of each term `query-model.md` Q3 and Q5, and how terms combine `query-model.md` Q1, Q4 and Q7. Every rule here was checked against the oracle; the scenarios each section names pin its examples (N8).
 
 ## N1. Shared rules
 
@@ -184,10 +184,10 @@ Meguri reads the candidates through the index on `notes.csum` (`ix_notes_csum`),
 | `search/tags/regex-and-nc` | N2.3, N2.4, N2.5 |
 | `search/decks/names` | N3.2, N3.3, N3.7 |
 | `search/decks/current` | N3.4 |
-| `search/decks/presets`, `preset-missing` (no golden yet) | N3.6 |
+| `search/decks/presets`, `preset-missing` | N3.6 |
 | `search/ids/lists` | N3.5, N5 |
 | `search/notetypes/names` | N4 |
-| `search/dupe/first-field`, `entities` (no golden yet) | N6 |
-| `search/regex/glob-size` (no golden yet) | N2.2 step 4, N3.3, N4.1, N4.2: glob expressions over the size limit (`text-matching.md` T12.1) |
+| `search/dupe/first-field`, `entities` | N6 |
+| `search/regex/glob-size` | N2.2 step 4, N3.3, N4.1, N4.2: glob expressions over the size limit (`text-matching.md` T12.1) |
 
 Filtered decks in these scenarios are rows written with `db_exec` as `specs/conformance/deck-ops.md` K13 (U28) describes (fixed id, deck common `X'08011001'`, the filtered kind blob given there); normal decks with fixed ids copy the default deck's `common` and `kind`. Note, card and note type ids come from the frozen clock (`storage/ids-usn-mtime#I2`): the scenarios pin them with an `ids` observation or a `db_exec` read before the searches that name them.

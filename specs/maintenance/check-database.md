@@ -331,7 +331,7 @@ Recorded with the rejection `failed` of `conformance/collection-check` K10 (`dsl
 
 ### C18.4 Written ahead of their goldens (oracle maintainer)
 
-Inactive and without goldens until `tools/mg oracle record maintenance/check-db` records them; each uses existing ops only.
+Inactive, with goldens recorded at the current pin by `tools/mg oracle record`; each uses existing ops only.
 
 | Scenario (`maintenance/check-db/`) | Damage and observation |
 |---|---|
@@ -339,7 +339,7 @@ Inactive and without goldens until `tools/mg oracle record maintenance/check-db`
 | `filtered-deck-kept` | a filtered deck row (`conformance/deck-ops#K13`) holding one card whose `odid` is its home deck and one whose `odid` is 777, no deck: nothing counted, no deck 777, `odid`, `odue`, `mod`, `usn` and `scm` unchanged; `col.mod` not observed (deviation `check-db-no-change-keeps-mod`) (C9.2, C9.3) |
 | `meguri-studied-handoff` | live (T1, R1925): Meguri adds four notes with FSRS on, answers them on three days over four with every rating, resets one card, suspends a card of a note it keeps, edits and deletes a note; after `handoff: oracle`, `pragma_integrity_check` reads `ok` and Anki's Check Database counts nothing. It complements C18.3's 200-answer T1 suite, which stays a `tools/mg oracle check` job |
 
-Needs a new op (`conformance/maintenance-ops#M2`, draft, no driver op yet), so not yet in `conformance/`:
+Uses `corrupt_page` (`conformance/maintenance-ops#M2`), which the oracle implements and Meguri's testkit model does not read yet; written and recorded, it lands with that model (M2.4):
 
 | Scenario (`maintenance/check-db/`) | Damage and observation |
 |---|---|

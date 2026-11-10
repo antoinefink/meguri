@@ -59,7 +59,7 @@ The oracle runs the screen's calls through Anki's own operations:
 
 ## H4. Status
 
-As of 2026-10-27, the language, schemas and Meguri parser accept both ops. The `notetypes/change/` scenarios and their recorded goldens are on master. `notetypes/change/undo` (added 2026-11-10, `notetypes/change-notetype` M12) also needs `undo`, `redo` and `undo_status` and waits for `tools/mg oracle record`. They remain inactive until U35 supplies and verifies the missing adapters. Parser support does not accept U35.
+As of 2026-10-27, the language, schemas and Meguri parser accept both ops. The `notetypes/change/` scenarios and their recorded goldens are on master. `notetypes/change/undo` (added 2026-11-10, `notetypes/change-notetype` M12) is recorded too; on Meguri it also needs `undo`, `redo` and `undo_status`. They remain inactive until U35 supplies and verifies the missing adapters. Parser support does not accept U35.
 
 Readiness of the three parts:
 

@@ -97,7 +97,7 @@ A duplicate never blocks adding (R808): the Add flow shows the state and adds th
 | Scenario | Covers | Golden |
 |---|---|---|
 | `notes/fields-check/states` | K2, K3 | recorded, with the `fields_check` observation (`specs/conformance/note-ops.md` N4) |
-| `notes/fields-check/cloze-unicase` | K2 cloze fields under unicase, K3's Gap3 row | not yet recorded (added 2026-11-10; it uses only `db_exec`, `reopen` and `fields_check`) |
+| `notes/fields-check/cloze-unicase` | K2 cloze fields under unicase, K3's Gap3 row | recorded |
 | `notes/fields-check/duplicates` | K2, K4, AE34 | recorded |
-| `notes/fields-check/entity-markup` | K2, K4's `&lt;b&gt;Cat` row: entity-encoded markup, one strip only | not yet recorded (added 2026-11-10) |
-| `notetypes/structure/first-field-duplicates` | K4 and AE34 after another field moves to position 0 (`notetypes/structure-changes` S5) | not yet recorded (added 2026-11-10) |
+| `notes/fields-check/entity-markup` | K2, K4's `&lt;b&gt;Cat` row: entity-encoded markup, one strip only | recorded |
+| `notetypes/structure/first-field-duplicates` | K4 and AE34 after another field moves to position 0 (`notetypes/structure-changes` S5) | recorded |

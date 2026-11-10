@@ -22,7 +22,7 @@ characters; the kept ones are under `conformance/scenarios/search/{text,fields,f
 | fields F1–F7 | `rslib/src/search/parser.rs`, `rslib/src/search/sqlwriter.rs`, `rslib/src/text.rs` | mode prefixes, all-fields names, name resolution (unicase equality or case-insensitive pattern), runs of matching positions and their patterns, nc and regex modes |
 | case-folding C2–C6 | `rslib/src/search/sqlwriter.rs`, `rslib/src/text.rs`, `regex-syntax` 0.8.6 tables | which comparisons use `LIKE` (ASCII) and which a case-insensitive regular expression; the simple folding table version |
 
-Added 2026-11-10, read at the same tag; the scenarios named here have no golden yet:
+Added 2026-11-10, read at the same tag; the scenarios named here were first recorded on 2026-11-10 and their goldens agree with these readings:
 
 | Spec section | Anki file | Read for |
 |---|---|---|

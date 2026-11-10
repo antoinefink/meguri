@@ -39,7 +39,7 @@ The template texts of note types the scenario defined, as stored.
 
 ## M5. Status
 
-As of 2026-10-27, the scenario language, schemas and Meguri parser accept these three interfaces. The S16 and D8 scenarios and their recorded goldens are on master. Scenarios added on 2026-11-10 (the undo legs, `remove-last`, `first-field-duplicates`; S16 and D8 mark them "not yet recorded") use only interfaces the oracle has and wait for `tools/mg oracle record`. They remain inactive until U34 supplies and verifies the missing adapters. Parser support does not accept U34.
+As of 2026-10-27, the scenario language, schemas and Meguri parser accept these three interfaces. The S16 and D8 scenarios and their recorded goldens are on master. The scenarios added on 2026-11-10 (the undo legs, `remove-last`, `first-field-duplicates`) use only interfaces the oracle has and are recorded too. They remain inactive until U34 supplies and verifies the missing adapters. Parser support does not accept U34.
 
 Readiness of the three parts:
 

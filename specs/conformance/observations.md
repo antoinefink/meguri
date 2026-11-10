@@ -69,17 +69,18 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `stats_presentation` | `[{scope, history, graph, controls}, ...]` | draft (stats; oracle: the graphs-page image): `[{data, page}, ...]`, a graph's data and what the graphs page presents from it: no-data state, bins with tooltips and click queries, table rows (`stats/graph-presentation` P22, `stats-ops.md` H14) |
 | `graph_preferences` | none | draft (stats; the oracle implements it): `{calendar_first_day_of_week, card_counts_separate_inactive, future_due_show_backlog}`, the three graph preferences as read now, defaults included (`stats-ops.md` H13); never changes the collection |
 | `card_stats` | a non-empty list of card references, each once | draft (stats; the oracle implements it): `{"#cN": <stats>}`, the raw values of Card Info (`stats-ops.md` H9) |
-| `heatmap_totals` | none, or `{decks: [<name>, ...]}` | draft (stats): `{home: {<YYYY-MM-DD>: <count>}, decks?: {<name>: {...}}}`, the heatmap's review count per day for Home and the listed decks (`stats-ops.md` H1; oracle: the add-on image, H4) |
+| `heatmap_totals` | none, or `{decks: [<name>, ...]}` | draft (stats; the add-on oracle image implements it): `{home: {<YYYY-MM-DD>: <count>}, decks?: {<name>: {...}}}`, the heatmap's review count per day for Home and the listed decks (`stats-ops.md` H1, H4) |
 | `studied_today_raw` | none | `{cards, time_ms}`: the count and time the Home studied-today line is built from (`stats-ops.md` H2) |
 | `studied_today_text` | none | the Home studied-today line, an English string (`stats-ops.md` H5) |
 | `studied_today_format` | `{inputs: [[<cards>, <time_ms>], ...]}` | `[<line>, ...]`: the Home line for each pair, without review-log rows (`stats-ops.md` H6) |
-| `heatmap_report` | none, or `{decks: [<name>, ...]}` | draft (stats): `{home: <report>, decks?: {<name>: <report>}}`, the heatmap add-on's history, forecast, today's cell and streaks (`stats-ops.md` H11) |
+| `heatmap_report` | none, or `{decks: [<name>, ...]}` | draft (stats; the add-on oracle image implements it): `{home: <report>, decks?: {<name>: <report>}}`, the heatmap add-on's history, forecast, today's cell and streaks (`stats-ops.md` H11) |
 | `widget_snapshot` | none | draft (stats, Meguri only): the widget snapshot's content (`stats-ops.md` H12) |
 | `today_stats` | `[collection \| {deck: <name>} \| {search: <text>}, ...]` | `[{answers, time_ms, correct, learn, review, relearn, filtered, mature, mature_correct}, ...]`: the Stats Today section's values per scope (`stats-ops.md` H7) |
 | `digest` | none | draft: a hash over all card rows, for fuzzing |
 | `ignored_before_count` | `{preset, dates: [<string>, ...]}`, at most once per observe step | `[{included, total} \| {error: "invalid_date"}, ...]`, one per date: the count behind "N of M cards included" for that date text (`deck-options-ops.md` E2, `sched/memory-state` M5); never changes the collection |
 | `legacy_json` | `{notetypes?, decks?, presets?}`: lists of names | `{notetypes?: {<name>: <object>}, decks?: {...}, presets?: {...}}`, the schema-11 objects of the records as stored now (`model-ops.md` L1) |
 | `blob_decode` | `{notetypes?, decks?, presets?}`: lists of names | `{notetypes?: {<name>: "ok" \| "invalid_blob"}, decks?: {...}, presets?: {...}}`, whether each record's protobuf blobs decode now (`model-ops.md` L4) |
+| `fsrs_model_check` | `{presets: [<name>, ...]}`: exact stored preset names, each once | `{<name>: "ok" \| "invalid_params"}`, whether an FSRS model builds from the preset's parameter list in use now (`optimizer-ops.md` P4); never changes the collection |
 | `notetype_templates` | `{notetypes: [<name>, ...]}` | `{<name>: [{name, front, back, browser_front, browser_back}, ...]}`, the stored template texts of note types the scenario wrote (`notetype-structure-ops.md` M3); never changes the collection |
 | `notetype_structure` | none, or `{notetypes: [<name>, ...]}` | `{<name>: {kind, original_stock_kind, original_id, sort_field, fields, templates}}`: note types without template text, CSS or ids (`notetype-ops.md` T8) |
 | `package_col` | `{name, columns}`: a package file an `export` step wrote, and a list of `col` columns | `{<column>: <value>}`: the `col` row of the legacy package's collection, `ver` an integer and the JSON columns parsed (`model-ops.md` L7) |
@@ -142,6 +143,12 @@ The runner compares the golden's observations (expected) with the executor's (ac
   | any number inside the `data` member of a `stats_presentation` value, and `value`, `x0`, `x1` in its `bins` and the items of its `sectors` (`stats/graph-presentation` P22) | 1e-6 |
   | `stability` and `difficulty` in any `memory_state`, and `fsrs_retrievability`, inside `card_stats` (`stats/card-info` C13.2) | 1e-5 |
   | `r` and `rr` in `card_extractors` rows (`extractor-ops.md` E4) | 1e-5 |
+
+  One tolerance is absolute, `|actual − expected| ≤ tol`, under the same condition on how the values are written:
+
+  | Where | Tolerance |
+  |---|---|
+  | `log_loss` in the `eval` member of a `compute_fsrs_params` output (`optimizer-ops.md` P5) | 0.002 |
 
   Card rows, review-log rows and every other kind are exact: a stored value that a tolerance could hide is a real difference.
 

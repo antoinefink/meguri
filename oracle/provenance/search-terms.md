@@ -24,7 +24,7 @@ Europe/Paris and America/New_York, then the kept scenarios under
 | properties P4.1 | `rslib/src/search/mod.rs` | the browser's Due sort uses another rule |
 | history H1–H8 | `rslib/src/search/parser.rs`, `rslib/src/search/sqlwriter.rs`, `rslib/src/scheduler/mod.rs` (day values from `specs/sched/day-clock.md`, U40) | days raised to 1 except `resched:`, the cutoffs from next-day-at, strict versus inclusive comparisons per term, the answer-button filters, the first-answer test of `introduced:`, the six operator windows of `prop:rated` |
 
-Added 2026-11-10, read at the same tag; the scenarios named here have no golden yet:
+Added 2026-11-10, read at the same tag; the scenarios named here were first recorded on 2026-11-10 and their goldens agree with these readings:
 
 | Spec section | Anki file | Read for |
 |---|---|---|

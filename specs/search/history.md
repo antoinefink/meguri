@@ -103,7 +103,7 @@ At B3 − 1 s nothing changes; at B3 the window moves a day: `rated:1` keeps onl
 |---|---|
 | `search/history/answers` | H5, H6, H7, H8, H9 |
 | `search/history/added-edited` | H3, H4 |
-| `search/history/odd-ease` (no golden yet) | H1, H5, H6, H7, H8 (`ease` outside 0–4, any `type`) |
+| `search/history/odd-ease` | H1, H5, H6, H7, H8 (`ease` outside 0–4, any `type`) |
 | `search/history/dst-paris` | H2, H3, H4, H5, H8; `properties.md` P4; `state-and-flags.md` S1, S7 |
 | `search/history/dst-new-york` | H2, H3, H4, H5, H8; `properties.md` P4 |
 

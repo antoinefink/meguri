@@ -248,7 +248,7 @@ Scenarios `notetypes/structure/remove-notetype` and, for the undo, `undo-removal
 
 ## S16. Scenarios
 
-All under `conformance/scenarios/notetypes/structure/`. Schema changes run as accepted (`specs/conformance/notetype-ops.md` T9). Every listed scenario is present; those marked "not yet recorded" (added 2026-11-10) wait for `tools/mg oracle record` and use only ops and observations the oracle already has. Keep them inactive until their ops and the capabilities of `notetype-ops.md` T10.1 exist. U34 makes active those that need only its own ops and U27's and U29's adapters, after their required checks pass.
+All under `conformance/scenarios/notetypes/structure/`. Schema changes run as accepted (`specs/conformance/notetype-ops.md` T9). Every listed scenario is present and recorded. Keep them inactive until their ops and the capabilities of `notetype-ops.md` T10.1 exist. U34 makes active those that need only its own ops and U27's and U29's adapters, after their required checks pass.
 
 | Scenario | Covers | Golden | Meguri also needs |
 |---|---|---|---|
@@ -264,11 +264,11 @@ All under `conformance/scenarios/notetypes/structure/`. Schema changes run as ac
 | `cloze-fields` | S4 on a cloze note type: rename inside sections, removal with the cloze append on all four texts | recorded | |
 | `rewrite-format` | F3's skips and text preservation; deviation `template-rewrite-keeps-text` | recorded | |
 | `remove-notetype` | S12 | recorded | |
-| `undo-add-template` | S13: undo of a template add removes its cards without graves and returns the note type, `nextPos` and `col.scm`; redo gives the same cards back | not yet recorded | `undo`, `redo`, `undo_status` (U38's undo adapter) |
-| `undo-removals` | S6, S12, S13: undo of a template removal (cards back, graves gone) and of a note type removal (notes, cards, rows, `_nt_<id>_` keys back; `curModel` moved from the removed note type to `Alpha` and back) | not yet recorded | the same |
-| `undo-restore` | `notetypes/restore-to-default` D6, S13: undo and redo of a structural restore | not yet recorded | the same |
-| `remove-last` | S1.2 item 2: removing the last field, then the last template, refused with `invalid_notetype`, nothing written | not yet recorded | |
-| `first-field-duplicates` | S5: `csum` from the new first field, so the duplicate check (AE34, `notes/field-check` K4) finds notes by it | not yet recorded | `fields_check` (U27) |
+| `undo-add-template` | S13: undo of a template add removes its cards without graves and returns the note type, `nextPos` and `col.scm`; redo gives the same cards back | recorded | `undo`, `redo`, `undo_status` (U38's undo adapter) |
+| `undo-removals` | S6, S12, S13: undo of a template removal (cards back, graves gone) and of a note type removal (notes, cards, rows, `_nt_<id>_` keys back; `curModel` moved from the removed note type to `Alpha` and back) | recorded | the same |
+| `undo-restore` | `notetypes/restore-to-default` D6, S13: undo and redo of a structural restore | recorded | the same |
+| `remove-last` | S1.2 item 2: removing the last field, then the last template, refused with `invalid_notetype`, nothing written | recorded | |
+| `first-field-duplicates` | S5: `csum` from the new first field, so the duplicate check (AE34, `notes/field-check` K4) finds notes by it | recorded | `fields_check` (U27) |
 
 The listed scenarios, the recorded goldens and the stated deviations are in `conformance/`. The language, schemas and Meguri parser recognize the new interfaces (`specs/conformance/notetype-structure-ops.md` M5). Their adapters and U34 acceptance remain outstanding. Restore to Default's scenarios are listed in `notetypes/restore-to-default` D8. U34 also makes U29's gate scenarios (`notetypes/gate/after-sync`, `notetypes/gate/structure`) active, since they wait for its `update_notetype` edits (`notetypes/schema-changes` G8).
 

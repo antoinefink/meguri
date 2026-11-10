@@ -125,7 +125,7 @@ N6.6 matches Anki: Anki writes every note, but a note whose row would not change
 
 ### N10.2 Recorded from these descriptions
 
-Every scenario below has its golden under `conformance/goldens/maintenance/check-db-notes/`, recorded at the current pin; N9's entries are in `conformance/deviations.yaml` (except `check-db-recover-invalid-utf8`, which no golden shows, and `check-db-default-deck-filtered`, N10.4). They stay inactive until U129's adapter runs `check_db` with the notes stage; that change adds `check-db-notes/*` to `conformance/scenarios/maintenance/area.yaml`.
+Every scenario below has its golden under `conformance/goldens/maintenance/check-db-notes/`, recorded at the current pin; N9's entries are in `conformance/deviations.yaml` (except `check-db-recover-invalid-utf8`, which no golden shows). They stay inactive until U129's adapter runs `check_db` with the notes stage; that change adds `check-db-notes/*` to `conformance/scenarios/maintenance/area.yaml`.
 
 In `conformance/scenarios/maintenance/check-db-notes/`, with existing scenario ops only (`db_exec`, `check_db`, `add_note`, `set_tag_collapsed`, `ensure_io_notetype`, `reopen`, `advance`, setup; `io-field-tags` also `update_notetype`) and the observations `db_exec`, `notetype_structure`, `tag_tree` and `db_dump`. A scenario that recovers a note type (`recover-*`, `all-notes`) or creates a missing parent deck never observes `undo_status` (`maintenance/check-database` C14). Each damages rows by `db_exec`, sets `usn` 5 on them and advances 1 hour so stamps show, observes the rows and `SELECT mod, scm FROM col`, and ends with a second `check_db` that finds nothing.
 
@@ -167,7 +167,7 @@ Decided 2026-10-27: `io-field-tags` changes the Header field's `prevent_deletion
 
 ### N10.4 Written ahead of their goldens (oracle maintainer)
 
-Inactive and without goldens until `tools/mg oracle record maintenance/check-db-notes` records them; existing ops only, N10.2's conventions.
+Inactive, with goldens recorded at the current pin by `tools/mg oracle record`; existing ops only, N10.2's conventions.
 
 | Scenario (`maintenance/check-db-notes/`) | Damage and observation |
 |---|---|
@@ -175,4 +175,4 @@ Inactive and without goldens until `tools/mg oracle record maintenance/check-db-
 
 Recorded with the rejection `failed` on Anki's side, with no second `check_db`:
 
-- `default-deck-filtered`: deck 1 made filtered by `db_exec` (the kind of `conformance/deck-ops#K13`) while no card is in it, and a note whose only card was deleted, its note type with no last deck. Anki `failed`; Meguri leaves deck 1, generates no card and counts nothing (every count 0). Deviation `check-db-default-deck-filtered` (N9): pointer `/steps/6/check_db`, replaced by the twelve counts at 0. `conformance/deviations.yaml` gets the entry with the golden.
+- `default-deck-filtered`: deck 1 made filtered by `db_exec` (the kind of `conformance/deck-ops#K13`) while no card is in it, and a note whose only card was deleted, its note type with no last deck. Anki `failed`; Meguri leaves deck 1, generates no card and counts nothing (every count 0). Deviation `check-db-default-deck-filtered` (N9): pointer `/steps/6/check_db`, replaced by the twelve counts at 0. Its entry is in `conformance/deviations.yaml`.

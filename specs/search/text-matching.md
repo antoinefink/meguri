@@ -5,7 +5,7 @@ Requirements: R1033, R1034, R1035, R1037, R1038, R1039, R1040, R1041, R1042, R10
 Anki: 26.09.3
 Scenarios: conformance/scenarios/search/text/, conformance/scenarios/search/regex/
 
-What the text terms match: plain text, `nc:`, `sc:`, `w:` and `re:`, and the pattern rules that field searches (`fields.md`) share. Letter case is `case-folding.md`; how terms combine, the modes and the plan are `query-model.md`; the values a term holds are `grammar.md` G7 and G8. Every rule here was checked against the oracle; the scenarios each section names pin its examples (T17), except those of `search/text/nc-escapes`, `search/text/pattern-limit-unreached` and `search/regex/glob-size`, which await their first recording. Pattern conventions (shortest match, "any character", word characters) are `text/strip-html#H1`.
+What the text terms match: plain text, `nc:`, `sc:`, `w:` and `re:`, and the pattern rules that field searches (`fields.md`) share. Letter case is `case-folding.md`; how terms combine, the modes and the plan are `query-model.md`; the values a term holds are `grammar.md` G7 and G8. Every rule here was checked against the oracle; the scenarios each section names pin its examples (T17). Pattern conventions (shortest match, "any character", word characters) are `text/strip-html#H1`.
 
 ## T1. Terms
 
@@ -284,7 +284,7 @@ Meguri compiles every expression of the query while it builds the plan, before a
 
 ### T12.3 Deviation from Anki
 
-Anki compiles an expression the first time a row reaches its test, and returns results when no row does. In `search/regex/invalid-unreached` it returns no ids for `re:[` and `front:re:[` on a collection without notes and for `nosuchfield:re:[` with a note; Meguri reports `invalid_regex` for each (deviation `search-invalid-regex-unreached`, `conformance/deviations.yaml`). The pattern size limit (T3.3) has the same timing difference, a second deviation, `search-pattern-limit-unreached`: on a collection without notes, `front:` followed by 49,999 `a` (a `Front` that is the first of two fields) returns no ids in Anki and `search_failed (pattern too long)` in Meguri; so does a T7.2 run pattern over the limit that only a note type without notes has. Decided 2026-10-27: Meguri keeps the build-time check (one rule for every pattern, no error that depends on which rows exist). The scenario is `search/text/pattern-limit-unreached`; its `conformance/deviations.yaml` entry `search-pattern-limit-unreached` (Meguri's `search_failed` at `/steps/0/search/0` and `/steps/3/search/0` only, not the `dog` search) is still to be added before the scenario becomes active. `search-invalid-regex-unreached` covers regular expressions only. The glob expressions of T12.1 have the same timing difference on a collection without cards; Meguri reports `search_failed` there too, and no scenario observes it, so no entry covers it.
+Anki compiles an expression the first time a row reaches its test, and returns results when no row does. In `search/regex/invalid-unreached` it returns no ids for `re:[` and `front:re:[` on a collection without notes and for `nosuchfield:re:[` with a note; Meguri reports `invalid_regex` for each (deviation `search-invalid-regex-unreached`, `conformance/deviations.yaml`). The pattern size limit (T3.3) has the same timing difference, a second deviation, `search-pattern-limit-unreached`: on a collection without notes, `front:` followed by 49,999 `a` (a `Front` that is the first of two fields) returns no ids in Anki and `search_failed (pattern too long)` in Meguri; so does a T7.2 run pattern over the limit that only a note type without notes has. Decided 2026-10-27: Meguri keeps the build-time check (one rule for every pattern, no error that depends on which rows exist). The scenario is `search/text/pattern-limit-unreached`; its `conformance/deviations.yaml` entries `search-pattern-limit-unreached` (`/steps/0/search/0`) and `search-pattern-limit-unreached-runs` (`/steps/3/search/0`) give Meguri's `search_failed` there only, not for the `dog` search; at its last step both sides report `search_failed`. `search-invalid-regex-unreached` covers regular expressions only. The glob expressions of T12.1 have the same timing difference on a collection without cards; Meguri reports `search_failed` there too, and no scenario observes it, so no entry covers it.
 
 ## T13. Glob conversion to a regular expression
 
@@ -364,13 +364,13 @@ The range of each is the whole term that failed (`errors.md` E5).
 | `search/text/excluded-all` | T7.2, T7.3 |
 | `search/text/no-searchable-field` | T7.2 |
 | `search/text/nc` | T8 |
-| `search/text/nc-escapes` (no golden yet) | T3.2, T5.1, T6, T8.3, T10.1, T12.1; `fields.md` F4, F6 |
+| `search/text/nc-escapes` | T3.2, T5.1, T6, T8.3, T10.1, T12.1; `fields.md` F4, F6 |
 | `search/text/sc`, `sc-no-cloze-type` | T9 |
 | `search/text/word` | T10 |
 | `search/text/pattern-limit` | T3.3 |
-| `search/text/pattern-limit-unreached` (no golden yet) | T3.3, T7.2, T12.3; `fields.md` F4 |
+| `search/text/pattern-limit-unreached` | T3.3, T7.2, T12.3; `fields.md` F4 |
 | `search/regex/basics` | T11 |
 | `search/regex/invalid`, `invalid-unreached` | T12 |
-| `search/regex/glob-size` (no golden yet) | T12.1; `names-and-ids.md` N2.2 step 4, N3.3, N4.1, N4.2 |
+| `search/regex/glob-size` | T12.1; `names-and-ids.md` N2.2 step 4, N3.3, N4.1, N4.2 |
 
 All result scenarios carry the tag `needs-text` (`specs/conformance/search-ops.md` S4). Several set field options and the sort field with `legacy_update` (`specs/conformance/model-ops.md` L2) before adding notes, so Meguri's executor needs that op for note types.

@@ -161,7 +161,7 @@ Not Anki behavior. `meguri_card_f32`, `meguri_retrievability`, `meguri_relative_
 | Scenario | Sections |
 |---|---|
 | `search/props/scheduling` | P2, P3, P4, P5 |
-| `search/props/due-extremes` (no golden yet) | P4 (stored `due` and `odue` near the ends of the 64-bit range, 32-bit operand bounds) |
+| `search/props/due-extremes` | P4 (stored `due` and `odue` near the ends of the 64-bit range, 32-bit operand bounds) |
 | `search/props/memory` | P6, P7, P8, P14; `search/card-extractors` X3, X5 |
 | `search/props/custom-data` | P9, P12, P14 |
 | `search/history/dst-paris`, `search/history/dst-new-york` | P4 across a change of UTC offset |
