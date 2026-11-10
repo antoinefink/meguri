@@ -1,0 +1,13 @@
+Everything in oracle/ankiconnect/ is part of the oracle quarantine and is
+licensed under the GNU Affero General Public License, version 3 or (at your
+option) any later version (SPDX: AGPL-3.0-or-later); the full text is
+../LICENSE. Nothing outside oracle/ links, imports or ships code from here.
+
+The image built from this directory also contains, fetched at build time and
+never committed:
+- the AnkiConnect add-on (GPL-3.0-or-later, Copyright Alex Yatskov and
+  contributors), source and pin in ADDON_PIN; its license text is installed
+  next to it as addons21/2055492159/LICENSE.upstream;
+- Anki's desktop package aqt (AGPL-3.0-or-later), PyQt6 (GPL-3.0) and Qt 6
+  (LGPL-3.0/GPL), pinned in requirements.lock.
+The image is built locally and never pushed to a registry (R1869).

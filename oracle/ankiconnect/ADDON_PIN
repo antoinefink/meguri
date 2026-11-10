@@ -1,0 +1,21 @@
+# AnkiConnect add-on pin for the transcript recorder (U136, servers/transcripts T9, T19.2).
+# The add-on is GPL-3.0-or-later; it is fetched at image build and lives only
+# inside the oracle/ankiconnect image (see LICENSE). The Dockerfile's ADD line
+# repeats archive_url and archive_sha256; change both together.
+upstream=https://git.sr.ht/~foosoft/anki-connect
+tag=25.11.9.0
+commit=532a3c816e08e91c4367e2799ce3779403d70274
+archive_url=https://git.sr.ht/~foosoft/anki-connect/archive/532a3c816e08e91c4367e2799ce3779403d70274.tar.gz
+archive_sha256=cf75820e00ebc28ba0cdcaedbbf646cac3a745121dc9de33b99020ca61a658da
+ankiweb_id=2055492159
+# Installed-build match: unverified. The 2025-11-09 install (meta.json mod
+# 1762717231) is no longer on this Mac (addons21 is empty), so no file of it
+# could be hashed. Tag 25.11.9.0 is upstream's release named for that date and
+# the last tag before it; the next upstream commit is 2025-12-03.
+# Files the image installs as addons21/2055492159 (sha256sum -c, relative to plugin/):
+629566e8eea59f3d67abf1b2339d5c0c621b2d894139e8335db030d022582873  __init__.py
+696e9c384e062e60e4a9cab2e58da6616a16d4955bb3d6404c75347022303cb5  config.json
+85c0f3491685de970757d0ee33d9ae4be805d18a6033295b3c32e577b6632036  config.md
+4196d9efc37f4906ea5caf712ac45c04c22fdb822e57c3b8d4e0ea26b022d214  edit.py
+059b4c6170bdb40286a040e4a7950bccd69259ad5c8dd16e2f0fa2587766b18d  util.py
+69b122ba110ab60af40406d21ce1459f834f972bdaedbef58578a28c3b5c5421  web.py

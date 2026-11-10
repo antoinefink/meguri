@@ -1,0 +1,9 @@
+# Build context is oracle/ankiconnect/. Send only what the image needs.
+*
+!requirements.lock
+!ADDON_PIN
+!launch.py
+!entrypoint.sh
+!addons21/
+**/__pycache__
+**/*.pyc

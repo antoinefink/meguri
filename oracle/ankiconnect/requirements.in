@@ -1,0 +1,6 @@
+# Direct dependencies the AnkiConnect recorder adds to the oracle image
+# (AGPL-3.0-or-later, see LICENSE). Pinned to the base oracle's lock with
+# --constraint ../requirements.lock, so anki and its dependencies stay the
+# base image's. requirements.lock lists only what this image adds; regenerate
+# with the command in README.md.
+aqt[qt]==26.9.3
