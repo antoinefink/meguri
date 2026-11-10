@@ -3,7 +3,7 @@
 Spec: servers/host-security
 Requirements: R1663, R1665, R1666, R1668, R1670, R1672 (status model), R1673, R1674, R1675, R1676, R1677, R1678, R1789 (write path), R1790 (read concurrency), R1949; AE78; R1659; supports R1664, R1667, R1669, R1671, R1679, R1748, R1750, R1797
 Anki: 26.09.3 (no Anki behavior: both protocols are add-on protocols, and Anki's own collection behavior is reached only through the specs cited)
-Scenarios: none yet in `conformance/`. The server transcript format is `servers/transcripts`; until its runner exists (U136), H17 lists the planned scenarios of `conformance/scenarios/servers/host/` as request and reply tables.
+Scenarios: none yet in `conformance/`. The server transcript format is `servers/transcripts`; until its runner exists (U136), H17 lists the planned scenarios of `conformance/recordings/servers/host/` (`servers/transcripts` T2) as request and reply tables.
 
 What both of Meguri's local servers share on the Mac: where and when they listen, how they find out that another app holds their port, the `Host` check that runs before anything else, HTTP/1.1 framing, keep-alive and body limits, how requests reach the collection, how the servers survive sleep, wake and collection replacement, the status each server reports, the local integrations store, and the channel between the Rust host and Swift.
 
@@ -412,7 +412,7 @@ How the AnkiConnect transcript suite meets these differences (`servers/transcrip
 
 ## H17. Planned scenarios
 
-Each row is one declared scenario (`servers/transcripts` T3, `source: declared`) of `conformance/scenarios/servers/host/`, with `server: host`, so it runs in the fixed bind mode on its own network namespace (`servers/transcripts` T20) and every exchange names its server. Unless a row says otherwise, the server named is enabled at the start (`servers/transcripts` T4 `enabled`), the collection is `Ready`, requests use a new connection to `127.0.0.1`, carry `Host: 127.0.0.1:<p>` and no `Origin`, and the request is the protocol's simplest one that needs no collection: AnkiConnect `POST /` with an empty body (the ping, answered `{"apiVersion":"AnkiConnect v.6"}`), Migaku `GET /srs-check`. "OK" means that protocol's normal reply. `<p>` is the server's port. "Advance" is the `advance` step, which moves the host's timer and wall clock (H21); "wait" is the real-time `wait` step. Step names are those of `servers/transcripts` T6 and T7.
+Each row is one declared scenario (`servers/transcripts` T3, `source: declared`) of `conformance/recordings/servers/host/` (`servers/transcripts` T2), with `server: host`, so it runs in the fixed bind mode on its own network namespace (`servers/transcripts` T20) and every exchange names its server. Unless a row says otherwise, the server named is enabled at the start (`servers/transcripts` T4 `enabled`), the collection is `Ready`, requests use a new connection to `127.0.0.1`, carry `Host: 127.0.0.1:<p>` and no `Origin`, and the request is the protocol's simplest one that needs no collection: AnkiConnect `POST /` with an empty body (the ping, answered `{"apiVersion":"AnkiConnect v.6"}`), Migaku `GET /srs-check`. "OK" means that protocol's normal reply. `<p>` is the server's port. "Advance" is the `advance` step, which moves the host's timer and wall clock (H21); "wait" is the real-time `wait` step. Step names are those of `servers/transcripts` T6 and T7.
 
 | Scenario | Setup and requests | Expected |
 |---|---|---|
