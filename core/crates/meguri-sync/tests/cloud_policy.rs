@@ -738,6 +738,108 @@ fn publication_progress_does_not_break_exchange_guard_but_cancelling_does() {
 }
 
 #[test]
+fn publication_terminal_row_removal_keeps_original_guard() {
+    for phase in [PublishStep::Sent, PublishStep::Complete, PublishStep::Done] {
+        let mut state = ready();
+        state.facts.binding.as_mut().unwrap().publish_step = Some(phase);
+        let (state, _) = run(state, Event::SyncNowRequested(Source::Command));
+        let original = state.guard();
+        let exchange = state.exchange.as_ref().unwrap().id;
+        let mut facts = state.facts.clone();
+        facts.binding.as_mut().unwrap().publish_step = None;
+        let (state, _) = step(
+            state,
+            Input {
+                now_ms: 100_000,
+                facts: Some(facts),
+                event: Event::TrackingChanged(ChangeCause::Cloud),
+            },
+        );
+        assert_eq!(state.guard(), original, "terminal phase {phase:?}");
+        assert_eq!(state.exchange.as_ref().unwrap().id, exchange);
+        assert_eq!(state.exchange.as_ref().unwrap().guard, original);
+    }
+}
+
+#[test]
+fn publication_row_removal_does_not_hide_cancellation_or_authority_changes() {
+    for phase in [
+        PublishStep::Bound,
+        PublishStep::Zones,
+        PublishStep::Sent,
+        PublishStep::Complete,
+        PublishStep::Done,
+        PublishStep::Cancelling,
+    ] {
+        for change in 0..11 {
+            let mut state = ready();
+            state.facts.binding.as_mut().unwrap().publish_step = Some(phase);
+            let original = state.guard();
+            let mut facts = state.facts.clone();
+            let binding = facts.binding.as_mut().unwrap();
+            binding.publish_step = None;
+            let event = match change {
+                0 => Event::TrackingChanged(ChangeCause::Cloud),
+                1 => {
+                    binding.id = BindingId([2; 16]);
+                    Event::TrackingChanged(ChangeCause::Cloud)
+                }
+                2 => {
+                    binding.state = BindingState::Isolated(meguri_sync::cloud::IsolationReason::SignedOut);
+                    Event::TrackingChanged(ChangeCause::Cloud)
+                }
+                3 => {
+                    binding.account = OpaqueBytes(vec![2]);
+                    Event::TrackingChanged(ChangeCause::Cloud)
+                }
+                4 => {
+                    binding.usable = false;
+                    Event::TrackingChanged(ChangeCause::Cloud)
+                }
+                5 => {
+                    binding.verified = false;
+                    Event::TrackingChanged(ChangeCause::Cloud)
+                }
+                6 => {
+                    facts.binding = None;
+                    Event::TrackingChanged(ChangeCause::Cloud)
+                }
+                7 => Event::Account(Account {
+                    status: AccountStatus::Available,
+                    identity: Some(OpaqueBytes(vec![2])),
+                }),
+                8 => Event::CollectionReplaced {
+                    generation: facts.generation + 1,
+                },
+                9 => Event::Lifecycle {
+                    state: Lifecycle::NoCollection,
+                    generation: facts.generation,
+                },
+                10 => {
+                    facts.generation += 1;
+                    Event::TrackingChanged(ChangeCause::Cloud)
+                }
+                _ => unreachable!(),
+            };
+            let (state, _) = step(
+                state,
+                Input {
+                    now_ms: 100_000,
+                    facts: Some(facts),
+                    event,
+                },
+            );
+            let terminal = matches!(phase, PublishStep::Sent | PublishStep::Complete | PublishStep::Done);
+            assert_eq!(
+                state.token == original.token,
+                change == 0 && terminal,
+                "phase {phase:?}, change {change}"
+            );
+        }
+    }
+}
+
+#[test]
 fn status_remaining_precedence_and_unknown_media_are_honest() {
     let mut state = ready();
     state.facts.summary.attention.insert(Attention::Refused, 3);

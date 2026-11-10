@@ -79,10 +79,16 @@ fn binding_progress(before: &Option<BindingView>, after: &Option<BindingView>) -
                 && a.account == b.account
                 && a.usable == b.usable
                 && a.verified == b.verified
-                && matches!(
+                && (matches!(
                     b.publish_step,
                     Some(PublishStep::Zones | PublishStep::Sent | PublishStep::Complete | PublishStep::Done)
-                )
+                ) || (b.publish_step.is_none()
+                    // SaveActive removes the Complete row. Own-operation replies
+                    // can advance Sent through Complete before the next projection.
+                    && matches!(
+                        a.publish_step,
+                        Some(PublishStep::Sent | PublishStep::Complete | PublishStep::Done)
+                    )))
         }
         _ => false,
     }

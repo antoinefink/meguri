@@ -1303,14 +1303,24 @@ fn non_atomic_parent_failure_never_submits_children_before_persisted_parent_ackn
 }
 
 fn until_active(host: &CoreHost, service: &mut Service<SeededRandom>) -> OwnRequest {
+    until_active_observing(host, service, |_, _| {})
+}
+fn until_active_observing(
+    host: &CoreHost,
+    service: &mut Service<SeededRandom>,
+    mut observe: impl FnMut(&cloud::runtime::Runtime, &OwnRequest),
+) -> OwnRequest {
     let runtime = host.cloud_runtime().unwrap();
     let collection = host.collection().unwrap();
     let mut sdk = false;
     for _ in 0..32 {
         match runtime.next_publication_work(&collection).unwrap() {
             PublicationWork::Local { op, work } => runtime.perform_publication_local(op, work, &collection).unwrap(),
-            PublicationWork::Own(request) if request.kind == OwnKind::SaveActive => return *request,
             PublicationWork::Own(request) => {
+                observe(runtime, &request);
+                if request.kind == OwnKind::SaveActive {
+                    return *request;
+                }
                 let (result, _) =
                     execute_publication_request(service, &scope(), &request, runtime, &collection).unwrap();
                 runtime.publication_result(&request, result, &collection).unwrap();
@@ -1337,6 +1347,100 @@ fn until_active(host: &CoreHost, service: &mut Service<SeededRandom>) -> OwnRequ
     }
     panic!("no active submission");
 }
+
+#[test]
+fn original_policy_command_survives_real_complete_save_active_row_removal() {
+    use cloud::policy::{ActionKind, ChangeCause, DeviceEvent, DeviceSettings, Lifecycle};
+
+    // Own-operation replies do not project Driver by themselves. Cover both
+    // observing Complete and going from the last Sent projection straight to done.
+    for observe_complete in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("publication-policy");
+        generated(&dir);
+        let host = open_host(&dir, keys());
+        let runtime = host.cloud_runtime().unwrap();
+        let collection = host.collection().unwrap();
+        host.media().unwrap().store().register_full(|_, _| true).unwrap();
+        host.cloud_policy_input(DeviceEvent::Settings(DeviceSettings {
+            enabled: true,
+            paused: false,
+            automatic: false,
+            media: false,
+        }))
+        .unwrap();
+        host.cloud_policy_input(DeviceEvent::Account {
+            identity: IdentityStatus::Available(cloud::OpaqueBytes(scope().account.into_bytes())),
+            origin_sdk: None,
+        })
+        .unwrap();
+        host.cloud_policy_input(DeviceEvent::Network { reachable: true })
+            .unwrap();
+        let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(708)).unwrap();
+        let preview = actual_preview(&host, &mut service, &scope());
+        runtime.confirm_connection_publication(&preview, &collection).unwrap();
+        let driver = host.cloud_policy_driver().unwrap();
+        let mut original = None;
+        let active = until_active_observing(&host, &mut service, |runtime, request| {
+            let (kind, phase) = if observe_complete {
+                (OwnKind::SaveActive, cloud::policy::PublishStep::Complete)
+            } else {
+                (OwnKind::SaveCompleteEpoch, cloud::policy::PublishStep::Sent)
+            };
+            if request.kind == kind {
+                let (sdk, _, _) = runtime.register_sdk(false).unwrap();
+                let commands = host
+                    .cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Cloud))
+                    .unwrap();
+                assert_eq!(driver.state().facts.binding.as_ref().unwrap().publish_step, Some(phase));
+                assert_eq!(
+                    runtime.publication_op().unwrap().unwrap().step,
+                    if observe_complete {
+                        PublishStep::Complete
+                    } else {
+                        PublishStep::Sent
+                    }
+                );
+                let command = commands
+                    .into_iter()
+                    .find(|c| matches!(c.action.kind, ActionKind::UpdatePending(_)))
+                    .expect("original Driver-issued pending update");
+                driver.validate(&command).unwrap();
+                driver.validate_native_execution(&command, Some(&sdk)).unwrap();
+                original = Some((command, sdk));
+            }
+        });
+        let (original, sdk) = original.expect("command issued before terminal row removal");
+        let guard = original.action.guard.clone();
+        assert_eq!(runtime.publication_op().unwrap().unwrap().step, PublishStep::Complete);
+        let backend = runtime.adapter_guard();
+        let (result, _) = execute_publication_request(&mut service, &scope(), &active, runtime, &collection).unwrap();
+        assert!(matches!(&result, OwnResult::Saved(_)));
+        runtime.publication_result(&active, result, &collection).unwrap();
+        assert!(runtime.publication_op().unwrap().is_none());
+        assert!(runtime.sdk_root_confirmed());
+        let projection = runtime
+            .policy_projection(Lifecycle::Ready, collection.generation().0)
+            .unwrap();
+        assert_eq!(projection.facts.binding.as_ref().unwrap().publish_step, None);
+        assert_eq!(runtime.adapter_guard(), backend);
+        host.cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Cloud))
+            .unwrap();
+        assert_eq!(driver.state().guard(), guard);
+        assert_eq!(original.action.guard, guard);
+        driver.validate(&original).unwrap();
+        driver.validate_native_execution(&original, Some(&sdk)).unwrap();
+        host.execute_cloud_policy_core(&original, Duration::from_secs(10))
+            .unwrap();
+        assert_eq!(driver.state().guard(), guard);
+        host.close().unwrap();
+        assert!(
+            driver.validate(&original).is_err(),
+            "close still invalidates original work"
+        );
+    }
+}
+
 #[test]
 fn held_active_is_not_sent_and_actual_lost_reply_retains_submission_evidence_on_restart() {
     for submit in [false, true] {
