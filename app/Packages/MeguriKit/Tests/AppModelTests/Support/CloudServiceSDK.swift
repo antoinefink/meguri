@@ -51,11 +51,15 @@ actor ServiceSDK: CloudKitEngine {
     // This is the SDK's network slot, not the application's policy/input lane.
     private var networkActive = false
     private var networkWaiters: [CheckedContinuation<Void, Never>] = []
-    private var automaticRequested = false
+    // An addition owns a wake until a pass which observed that ordinal ends.
+    // A nil batch must not consume an addition arriving in its terminal callback.
+    private var automaticRequested: UInt64?
+    private var automaticGeneration: UInt64 = 0
     private var automaticRun: (id: UUID, drain: Task<Void, Never>)?
     private(set) var automaticRuns = 0
     private(set) var batchRequests = 0
     private(set) var emptyBatchRequests = 0
+    private(set) var pendingAdditionUpdates = 0
     private nonisolated enum SendResult: Sendable, Equatable { case empty, sent, failed }
     private var pending: [String: CloudPendingChange] = [:]
     private var eventActive = false
@@ -65,9 +69,13 @@ actor ServiceSDK: CloudKitEngine {
     private var released = false
     private var nextSentResult: (zone: String?, hold: @Sendable () async -> Void)?
     private var nextSentHandlerReturn: (@Sendable () async -> Void)?
+    private var nextEmptyTerminalReturn: (@Sendable () async -> Void)?
     private var nextCancellation: (@Sendable () -> Void)?
+    private var nextPendingAddition: (@Sendable () -> Void)?
     func holdNextSentHandlerReturn(_ hold: @escaping @Sendable () async -> Void) { nextSentHandlerReturn = hold }
     func inspectNextCancellation(_ inspect: @escaping @Sendable () -> Void) { nextCancellation = inspect }
+    func inspectNextPendingAddition(_ inspect: @escaping @Sendable () -> Void) { nextPendingAddition = inspect }
+    func holdNextEmptyTerminalReturn(_ hold: @escaping @Sendable () async -> Void) { nextEmptyTerminalReturn = hold }
     var automaticSchedulingEnabled: Bool { automaticallySync }
     private(set) var deliveredSentBatches: [ServiceSentBatch] = []
     private(set) var heldSentBatchID: UInt64?
@@ -96,7 +104,12 @@ actor ServiceSDK: CloudKitEngine {
         revision &+= 1
         for name in update.removes { pending.removeValue(forKey: name); pendingRevision.removeValue(forKey: name) }
         for (name, change) in update.adds { pending[name] = change; pendingRevision[name] = revision }
-        if !update.adds.isEmpty { automaticRequested = true; scheduleAutomaticSend() }
+        if !update.adds.isEmpty {
+            pendingAdditionUpdates += 1
+            let inspect = nextPendingAddition; nextPendingAddition = nil
+            inspect?()
+            automaticRequested = revision; scheduleAutomaticSend()
+        }
     }
     private func removePending(_ names: [String], issued: [String: UInt64]) {
         for name in names where pendingRevision[name] == issued[name] {
@@ -104,7 +117,8 @@ actor ServiceSDK: CloudKitEngine {
         }
     }
     private func scheduleAutomaticSend() {
-        guard automaticallySync, automaticRequested, automaticRun == nil,
+        guard automaticallySync, automaticRequested != nil, automaticRun == nil,
+              automaticGeneration == lifetime.authority(),
               !eventActive, !networkActive, !cancelled, !released, delegate != nil else { return }
         let generation = lifetime.authority(), id = UUID()
         do {
@@ -119,16 +133,15 @@ actor ServiceSDK: CloudKitEngine {
             }
             automaticRuns += 1
             automaticRun = (id, drain)
-        } catch { automaticRequested = false }
+        } catch { automaticRequested = nil }
     }
     private func runAutomaticSend(generation: UInt64) async throws {
         // A successful real batch is progress; nil or any failure ends the run.
         // Never poll pending names or retry failed records on a clock.
-        defer { automaticRequested = false }
         while true {
-            automaticRequested = false
+            try Task.checkCancellation()
             let result = try await invokeSend(zones: [collectionZone, "meguri-media"],
-                generation: generation, prepare: {}, validate: {})
+                generation: generation, automatic: true, prepare: {}, validate: {})
             guard result == .sent, !pending.isEmpty else { return }
         }
     }
@@ -138,7 +151,9 @@ actor ServiceSDK: CloudKitEngine {
         scheduleAutomaticSend() // only an actual update arriving after the run ended
     }
     // Observation joins the original SDK run; it never starts one.
-    func waitForAutomaticSend() async { await automaticRun?.drain.value }
+    func waitForAutomaticSend() async {
+        while let original = automaticRun { await original.drain.value }
+    }
     private func acquireNetwork() async throws {
         if networkActive { await withCheckedContinuation { networkWaiters.append($0) } }
         else { networkActive = true }
@@ -149,7 +164,8 @@ actor ServiceSDK: CloudKitEngine {
         if networkWaiters.isEmpty { networkActive = false }
         else { networkWaiters.removeFirst().resume() }
     }
-    private func deliver(_ event: CloudEngineEvent, removing: [String] = [], issued: [String: UInt64] = [:]) async throws {
+    private func deliver(_ event: CloudEngineEvent, removing: [String] = [], issued: [String: UInt64] = [:],
+                         beforeReturn: (@Sendable () async -> Void)? = nil) async throws {
         guard let delegate else { throw ServiceWorkflowFailure.refused }
         if eventActive { await withCheckedContinuation { eventWaiters.append($0) } }
         else { eventActive = true; lifetime.beginEvent() }
@@ -162,6 +178,7 @@ actor ServiceSDK: CloudKitEngine {
         // SDK successful removals happen after the original handler returns.
         removePending(removing, issued: issued)
         await delegate.eventHandlerReturned(event, engine: self)
+        await beforeReturn?()
         if eventWaiters.isEmpty {
             eventActive = false; lifetime.endEvent()
             let waiting = bookkeepingWaiters; bookkeepingWaiters.removeAll()
@@ -185,14 +202,22 @@ actor ServiceSDK: CloudKitEngine {
             }
         }
     }
-    private func invokeSend(zones: [String], generation: UInt64, prepare: @Sendable () async throws -> Void,
+    private func invokeSend(zones: [String], generation: UInt64, automatic: Bool = false, prepare: @Sendable () async throws -> Void,
                             validate: @Sendable () throws -> Void) async throws -> SendResult {
         try await waitForEventBookkeeping()
         try await acquireNetwork()
+        let observedRevision = revision
         var outcome: SendResult?
         defer {
-            if outcome == .sent { automaticRequested = true }
-            else { automaticRequested = false }
+            if !cancelled, !released, generation == lifetime.authority() {
+                if outcome == .sent, !automatic, !pending.isEmpty {
+                    // A manual pass can hand remaining names to automatic
+                    // scheduling. An automatic run owns its own progress loop.
+                    automaticRequested = max(automaticRequested ?? observedRevision, observedRevision)
+                } else if let requested = automaticRequested, requested <= observedRevision {
+                    automaticRequested = nil
+                }
+            }
             releaseNetwork()
             scheduleAutomaticSend()
         }
@@ -200,6 +225,7 @@ actor ServiceSDK: CloudKitEngine {
         try await prepare()
         repeat { try await waitForEventBookkeeping() } while eventActive
         try lifetime.enqueue(generation: generation, validate: validate, begin: {})
+        automaticGeneration = generation
         let result = try await sendPass(zones: zones)
         outcome = result
         return result
@@ -224,6 +250,7 @@ actor ServiceSDK: CloudKitEngine {
         try await prepare()
         repeat { try await waitForEventBookkeeping() } while eventActive
         try lifetime.enqueue(generation: generation, validate: validate, begin: {})
+        automaticGeneration = generation
         try await fetchPass(options: options)
     }
     private func requireNetwork() throws {
@@ -239,6 +266,7 @@ actor ServiceSDK: CloudKitEngine {
         var result = SendResult.empty
         let delegate = try serviceRequired(delegate)
         for zone in zones where zone == collectionZone || zone == "meguri-media" {
+            var terminalHold: (@Sendable () async -> Void)?
             try requireNetwork()
             try await deliver(.willSend(zone: zone))
             try requireNetwork()
@@ -302,8 +330,13 @@ actor ServiceSDK: CloudKitEngine {
                     removing: saved.map(\.name) + deleted, issued: issued)
                 deliveredSentBatches.append(.init(zone: zone, id: batch.id))
                 if !failed.isEmpty { result = .failed }
-            } else { emptyBatchRequests += 1 }
-            try await deliver(.didSend(zone: zone))
+            } else {
+                emptyBatchRequests += 1
+                if zone == zones.last, result == .empty {
+                    terminalHold = nextEmptyTerminalReturn; nextEmptyTerminalReturn = nil
+                }
+            }
+            try await deliver(.didSend(zone: zone), beforeReturn: terminalHold)
             if result == .failed { break }
         }
         try await saveSerialization()
@@ -386,7 +419,7 @@ actor ServiceSDK: CloudKitEngine {
         let originals = lifetime.beginCancellation()
         defer { lifetime.endCancellation() }
         cancelSDKCalls()
-        automaticRequested = false
+        automaticRequested = nil
         let automatic = automaticRun?.drain
         for operation in originals { await operation.cancelAndDrain() }
         await automatic?.value

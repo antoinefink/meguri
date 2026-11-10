@@ -23,6 +23,9 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
     // A focused shutdown regression can hold delivery of an actual completed
     // command result; it never substitutes execution or issues a capability.
     var afterExecution: (@MainActor (CloudPolicyCommand, SyncCommandResult) async -> Void)?
+    // Runs at the coordinator's existing shutdown boundary, after admission
+    // closes and original command tasks receive owned cancellation.
+    var beforeQuiesce: (@MainActor () async -> Void)?
     private(set) var quiesced = false
     private let quiescences = AsyncStream<Bool>.makeStream()
     private let starts: AsyncStream<Bool>
@@ -240,6 +243,7 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
     func freezeForSuspend() async throws { try await production.freezeForSuspend() }
     func resumeAfterCoreResume() async { await production.resumeAfterCoreResume() }
     func quiesce() async throws {
+        await beforeQuiesce?()
         try await production.quiesce()
         quiesced = true
         quiescences.continuation.yield(true)
@@ -287,6 +291,7 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String) as
     let defaults: UserDefaults
     let wire: ServiceWorkflowWire
     let factory: ServiceSDKFactory
+    private let clock: AppClock
     private(set) var backends: [ServiceAppBackend] = []
     var observeOwn: (@Sendable (CloudOwnObservation) -> Void)?
     var ownTransport: (any CloudOwnTransport)?
@@ -315,14 +320,16 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String) as
     lazy var owner: ReviewCollection = {
         var configuration = LaunchConfiguration()
         configuration.collectionLocation = AppModel.CollectionLocation(directory: root)
-        configuration.clock = .fixed(Date(timeIntervalSince1970: 1_735_689_600))
+        configuration.clock = clock
         configuration.timeZone = TimeZone(secondsFromGMT: 0)
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync)
         owner.makeReviewSurface = { _ in ReviewCoordinatorTests.Surface() }
         return owner
     }()
-    init(root: URL, wire: ServiceWorkflowWire, defaults: UserDefaults? = nil) throws {
+    init(root: URL, wire: ServiceWorkflowWire, defaults: UserDefaults? = nil,
+         clock: AppClock = .fixed(Date(timeIntervalSince1970: 1_735_689_600))) throws {
         self.root = root; self.wire = wire
+        self.clock = clock
         factory = ServiceSDKFactory(wire: wire)
         if let defaults { self.defaults = defaults }
         else { self.defaults = try #require(UserDefaults(suiteName: suite)) }

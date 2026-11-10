@@ -88,6 +88,7 @@ extension ReviewCollectionStartupTests {
                 try #require(try await serviceAppSignal(completion.stream, stage: "automatic SDK original run joined without empty-batch spin"))
                 await joined?.value
                 await app.sync.waitForInputs()
+                try #require(!app.sync.operationFailed)
                 let delivered = await sdk.deliveredSentBatches.filter { $0.zone == zone }
                 try #require(delivered.contains { $0.id == firstBatch })
                 let receipts = await wire.receipts
@@ -116,8 +117,102 @@ extension ReviewCollectionStartupTests {
                 try #require(empty <= 4, "One terminal empty pass is bounded by the two admitted zones")
             } catch {
                 await first.release(); await second.release()
+                _ = await app.sync.cancelAndDrain()
                 await manual?.cancelAndDrain()
-                if let sdk = await app.factory.engines.last { await sdk.cancelOperations() }
+                await joined?.value
+                throw error
+            }
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func serviceSDKTerminalEmptyPassRetainsOnlyNewRealPendingAddition(addition: Bool) async throws {
+        try await withAutomaticServiceApp { app, fixture, wire in
+            app.sync.setDeviceSettings(paused: false, automatic: true, media: true)
+            await app.sync.waitForInputs(); await app.sync.drainOperations()
+            let sdk = try #require(await app.factory.engines.last)
+            await sdk.waitForAutomaticSend()
+            let terminal = ServiceAutomaticGate(), sent = ServiceAutomaticGate()
+            var joined: Task<Void, Never>?
+            var originalEmpty: CloudKitNetworkOperation?
+            do {
+                let seed = try #require(fixture.notes.sorted { $0.id < $1.id }.first { !$0.fields.isEmpty })
+                let backend = try app.backend
+                let zone = try #require(fixture.records.first?.zone)
+                await sdk.holdNextEmptyTerminalReturn { await terminal.hold() }
+                let prepared = try await sdk.prepareSend(zones: [zone, "meguri-media"])
+                originalEmpty = try prepared.enqueue(validate: {})
+                try #require(try await serviceAppSignal(terminal.entered, stage: "original last nil batch terminal callback held"))
+                let before = await sdk.deliveredSentBatches
+                let requests = await sdk.batchRequests, empty = await sdk.emptyBatchRequests
+                let runs = await sdk.automaticRuns, updates = await sdk.pendingAdditionUpdates
+                let receipts = await wire.receipts.count
+                var appNetworkRequests = 0
+                backend.onCommands = { commands in
+                    for command in commands {
+                        switch command.action {
+                        case .requestSend, .runExchange: appNetworkRequests += 1
+                        default: break
+                        }
+                    }
+                }
+                defer { backend.onCommands = nil }
+                if addition {
+                    await sdk.holdNextSentResult(zone: zone) { await sent.hold() }
+                    let added = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+                    await sdk.inspectNextPendingAddition { added.continuation.yield(true) }
+                    try await automaticServiceEdit(app, id: seed.id, suffix: " New addition during terminal callback")
+                    try #require(try await serviceAppSignal(added.stream, stage: "normal pending addition applied during terminal callback"))
+                    added.continuation.finish()
+                    // Prove normal TrackingChanged reached this SDK before
+                    // releasing nil's terminal bookkeeping, not merely Core.
+                    try #require(await sdk.pendingAdditionUpdates > updates)
+                }
+                await terminal.release()
+                if addition {
+                    try #require(try await serviceAppSignal(sent.entered, stage: "new wake's actual Core batch and Service response"))
+                    let actual = try #require(await sdk.heldSentBatchID)
+                    try #require(!before.contains { $0.zone == zone && $0.id == actual })
+                    try #require(await sdk.automaticRuns == runs + 1)
+                    await sent.release()
+                }
+                let completion = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+                let emptyOperation = originalEmpty
+                joined = Task {
+                    do {
+                        try await emptyOperation?.drain()
+                        await sdk.waitForAutomaticSend()
+                        completion.continuation.yield(true)
+                    } catch { Issue.record(error); completion.continuation.yield(false) }
+                    completion.continuation.finish()
+                }
+                try #require(try await serviceAppSignal(completion.stream, stage: "terminal empty automatic runs joined without spin"))
+                await joined?.value
+                await app.sync.waitForInputs()
+                let delivered = await sdk.deliveredSentBatches
+                try #require(delivered.count == before.count + (addition ? 1 : 0))
+                try #require(await sdk.automaticRuns == runs + (addition ? 1 : 0))
+                if addition {
+                    let saved = await wire.receipts.dropFirst(receipts)
+                    try #require(!saved.isEmpty)
+                    for receipt in saved {
+                        let ack = try #require(try await backend.workflow.entityFacts(name: receipt.record.name))
+                        try #require(ack.mark == nil && ack.inFlight.isEmpty && ack.ackedRev == ack.localRev)
+                        try #require(ack.ackedSystemFields == receipt.record.systemFields)
+                    }
+                    try #require(await sdk.emptyBatchRequests <= empty + 3)
+                } else {
+                    try #require(await sdk.batchRequests == requests)
+                    try #require(await sdk.emptyBatchRequests == empty)
+                }
+                try #require(appNetworkRequests == 0 && !app.sync.operationFailed)
+                let finalRequests = await sdk.batchRequests, finalEmpty = await sdk.emptyBatchRequests
+                await sdk.waitForAutomaticSend(); try await sdk.waitForEventBookkeeping()
+                try #require(await sdk.batchRequests == finalRequests)
+                try #require(await sdk.emptyBatchRequests == finalEmpty)
+            } catch {
+                await terminal.release(); await sent.release()
+                _ = await app.sync.cancelAndDrain()
                 await joined?.value
                 throw error
             }
@@ -136,26 +231,37 @@ extension ReviewCollectionStartupTests {
             let stale = try await sdk.prepareSend(zones: [zone])
             let handler = ServiceAutomaticGate()
             let cancellation = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let stopped = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let boundary = ServiceAutomaticGate()
+            let backend = try app.backend
             await sdk.holdNextSentHandlerReturn { await handler.hold() }
-            await sdk.inspectNextCancellation { cancellation.continuation.yield(true) }
-            var stop: Task<Void, Never>?
+            var stop: Task<Bool, Never>?
+            var freshOperation: CloudKitNetworkOperation?
+            var freshJoin: Task<Void, Never>?
             var returned = false
+            backend.beforeQuiesce = {
+                // cancelAndDrain has fenced app admission and qualified any
+                // original command cancellation before reaching this hook.
+                await sdk.inspectNextCancellation { cancellation.continuation.yield(true) }
+                if release { await sdk.release() } else { await sdk.cancelOperations() }
+                returned = true
+                stopped.continuation.yield(true)
+                await boundary.hold()
+            }
+            defer { backend.beforeQuiesce = nil; cancellation.continuation.finish(); stopped.continuation.finish() }
             do {
                 let seed = try #require(fixture.notes.sorted { $0.id < $1.id }.first { !$0.fields.isEmpty })
                 let deliveredBefore = await sdk.deliveredSentBatches.count
                 try await automaticServiceEdit(app, id: seed.id, suffix: " Original automatic callback")
                 try #require(try await serviceAppSignal(handler.entered, stage: "original automatic sent handler held"))
-                stop = Task { @MainActor in
-                    if release { await sdk.release() } else { await sdk.cancelOperations() }
-                    returned = true
-                }
+                stop = Task { @MainActor in await app.sync.cancelAndDrain() }
                 try #require(try await serviceAppSignal(cancellation.stream, stage: "original automatic cancellation fence"))
                 try #require(!returned)
                 // A newer real revision can arrive during drain, but may not
                 // create a fresh automatic operation on the cancelled SDK.
                 try await automaticServiceEdit(app, id: seed.id, suffix: " Dirty while original callback drains")
                 await handler.release()
-                await stop?.value
+                try #require(try await serviceAppSignal(stopped.stream, stage: "original SDK cancellation or release returned"))
                 try #require(returned)
                 await sdk.waitForAutomaticSend()
                 try #require(await sdk.deliveredSentBatches.count == deliveredBefore + 1)
@@ -175,10 +281,39 @@ extension ReviewCollectionStartupTests {
                 await sdk.waitForAutomaticSend()
                 try #require(await sdk.batchRequests == requests)
                 try #require(await sdk.deliveredSentBatches.count == deliveredBefore + 1)
+                if !release {
+                    let fresh = try await sdk.prepareSend(zones: [zone])
+                    let operation = try fresh.enqueue(validate: {})
+                    freshOperation = operation
+                    let completion = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+                    freshJoin = Task {
+                        do {
+                            try await operation.drain()
+                            await sdk.waitForAutomaticSend()
+                            completion.continuation.yield(true)
+                        } catch { Issue.record(error); completion.continuation.yield(false) }
+                        completion.continuation.finish()
+                    }
+                    try #require(try await serviceAppSignal(completion.stream, stage: "fresh post-cancellation SDK authority joined"))
+                    await freshJoin?.value
+                    try #require(await sdk.batchRequests > requests)
+                    let freshRequests = await sdk.batchRequests
+                    do {
+                        try await stale.enqueue(validate: {}).drain()
+                        Issue.record("Fresh authority revived a pre-cancellation SDK preparation")
+                    } catch {}
+                    try #require(await sdk.batchRequests == freshRequests)
+                }
+                try #require(!app.sync.operationFailed)
+                await boundary.release()
+                try #require(await stop?.value == true)
+                try #require(!app.sync.operationFailed)
             } catch {
-                await handler.release()
-                await sdk.cancelOperations()
-                await stop?.value
+                await handler.release(); await boundary.release()
+                if let stop { _ = await stop.value }
+                else { _ = await app.sync.cancelAndDrain() }
+                await freshOperation?.cancelAndDrain()
+                await freshJoin?.value
                 throw error
             }
         }
@@ -196,11 +331,15 @@ extension ReviewCollectionStartupTests {
     var active: ServiceAppHarness?
     do {
         let wire = try ServiceWorkflowWire(process: process, directory: root.appending(path: "transport"))
-        let app = try ServiceAppHarness(root: root.appending(path: "collection"), wire: wire)
+        let app = try ServiceAppHarness(root: root.appending(path: "collection"), wire: wire, clock: .system)
         active = app
         defer { app.defaults.removePersistentDomain(forName: app.suite) }
         try await wire.seed(fixture)
         try await app.adopt(); try await app.exchange()
+        // Join the original exchange's follow-up commands before a settings
+        // change retires that SDK. No preexisting request belongs to our holds.
+        await app.sync.waitForInputs(); await app.sync.drainOperations()
+        try #require(!app.sync.operationFailed)
         try #require(!app.sync.settings.automatic)
         try await body(app, fixture, wire)
         try #require(await app.owner.close())
