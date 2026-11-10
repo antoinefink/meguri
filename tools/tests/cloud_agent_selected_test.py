@@ -2,6 +2,7 @@
 """Generated selected doubles prove reducer refusals, never signed execution."""
 import copy
 import contextlib
+import io
 import os
 import importlib.util
 import json
@@ -181,6 +182,36 @@ class SelectedTests(unittest.TestCase):
             self.assertEqual(c.sanitized_failure({**known, **mutation}), c.sanitized_failure(None))
         self.assertEqual(c.sanitized_failure(known), known)
         with self.assertRaises(s.v.Refused): diagnostic.enter("generated-private-stage")
+
+    def test_install_child_retains_only_allowlisted_delivery_failure(self):
+        root = "/generated/checkout"
+        run = "20261110T000000Z-1"
+        parent = "20261110T000000Z-2"
+        sha = "a" * 40
+        args = ["cloud-agent-selected.py", "--install-child", "--root", root, "--parent-run", parent,
+                "--run-id", run, "--run-directory", root + "/build/mg/cloudkit-agent-install/" + run,
+                "--source-commit", sha]
+        vm = object()
+        for reason, expected in [("profile-device", "profile-device"), ("generated-private-value", "unclassified")]:
+            with self.subTest(reason=reason), tempfile.TemporaryFile() as context:
+                context.write(raw({}))
+                context.seek(0)
+                output = io.StringIO()
+                dup = os.dup
+
+                def refuse(*args, checkpoint):
+                    self.assertIs(args[-1], vm)
+                    checkpoint("recheck-build")
+                    raise s.v.Refused(reason)
+
+                with patch.object(sys, "argv", args), patch.object(os, "dup", side_effect=lambda fd: dup(context.fileno())), \
+                        patch.object(s.v, "source", return_value=sha), patch.object(s, "owned_context",
+                            return_value=contextlib.nullcontext((vm, lambda: None))), \
+                        patch.object(c.i, "deliver", side_effect=refuse), contextlib.redirect_stdout(output):
+                    self.assertEqual(c.main(), 1)
+                self.assertEqual(json.loads(output.getvalue()), {"scope": "DELIVERY-ONLY", "outcome": "failed_evidence",
+                    "category": "selected-delivery-refused", "signed_execution": False, "stage": "recheck-build",
+                    "refusal": expected})
 
     def test_cleanup_diagnostics_do_not_hide_primary_refusal_or_unknown_ownership(self):
         diagnostic = c.Diagnostic(); diagnostic.enter("simulator-os")

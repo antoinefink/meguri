@@ -688,6 +688,7 @@ def main():
     parser.add_argument("--lease-run")
     args = parser.parse_args()
     diagnostic = Diagnostic()
+    delivery = i.DeliveryDiagnostic() if args.install_child else None
     if args.sanitize_failure:
         value = None
         try:
@@ -714,8 +715,10 @@ def main():
         if args.install_child:
             need(args.run_id and args.run_directory and args.source_commit == v.source(args.root), "install-source")
             need(args.run_directory == os.path.join(args.root, "build/mg/cloudkit-agent-install", args.run_id), "install-run")
+            delivery.enter("vm-context")
             with s.owned_context(args.root, args.parent_run, context) as (vm, check):
-                report = i.deliver(args.root, args.run_directory, args.parent_run, args.run_id, args.lease_run, vm)
+                report = i.deliver(args.root, args.run_directory, args.parent_run, args.run_id, args.lease_run, vm,
+                                   checkpoint=delivery.enter)
                 check()
             print(json.dumps(report, sort_keys=True))
             return 0
@@ -734,7 +737,12 @@ def main():
         report, code = {"scope": SCOPE, "outcome": "queued", "category": "vm-unavailable", "signed_execution": False}, 75
     except (v.Refused, v.Invalid, OSError, ValueError, TypeError, KeyError, IndexError, AttributeError,
             UnicodeError, RecursionError, s.subprocess.SubprocessError) as error:
-        report, code = diagnostic.failure(error), 1
+        if delivery is None:
+            report = diagnostic.failure(error)
+        else:
+            report = {"scope": "DELIVERY-ONLY", "outcome": "failed_evidence", "category": "selected-delivery-refused",
+                      "signed_execution": False, **delivery.failure(error)}
+        code = 1
     print(json.dumps(report, sort_keys=True))
     return code
 
