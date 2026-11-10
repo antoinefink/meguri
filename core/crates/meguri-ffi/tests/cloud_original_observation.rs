@@ -466,3 +466,46 @@ fn incoming_read_uses_durable_receipt() {
     fixture.collection.pause_automatic_wal_flush_for_testing(false);
     fixture.host.close().unwrap();
 }
+
+#[test]
+fn historical_inspection_does_not_promote_current_rows_to_missing_original_control_or_edit_proof() {
+    let fixture = Fixture::new();
+    let edited = meguri_engine::notes::update(
+        &fixture.collection,
+        meguri_engine::notes::UpdateNote {
+            id: fixture.id,
+            fields: vec!["Actual ordinary edit".into(), "Original answer".into()],
+            tags: vec!["retained-tag".into()],
+        },
+        meguri_engine::OpSource::UserUndoable,
+    )
+    .unwrap();
+    fixture.collection.flush_wal(WAIT).unwrap();
+    let (live, applied) = fixture.observe(|| {}).unwrap();
+    assert_eq!(live.observed_seq, edited.seq.0);
+    assert_eq!(applied, None);
+    let before = fixture.collection.last_seq();
+    // This fixture's prebound baseline is explicitly not an original selected
+    // publication/adoption. Neither equal canonical content nor a live owner can
+    // create its missing original control and post-flush journal correlations.
+    assert!(
+        fixture
+            .runtime
+            .selected_original_control_witness_for_testing(&fixture.collection)
+            .is_err()
+    );
+    assert!(
+        fixture
+            .runtime
+            .read_original_edit_for_testing(
+                &fixture.collection,
+                fixture.id.0,
+                fixture.original.payload_digest().unwrap(),
+                [0; 32]
+            )
+            .is_err()
+    );
+    assert_eq!(fixture.collection.last_seq(), before);
+    assert_eq!(fixture.observe(|| {}).unwrap().0.payload, live.payload);
+    fixture.host.close().unwrap();
+}

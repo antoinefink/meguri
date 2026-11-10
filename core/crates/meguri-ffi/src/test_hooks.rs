@@ -946,8 +946,8 @@ pub fn test_cloud_smoke_observation(
 #[path = "test_hooks_cloud_original.rs"]
 mod cloud_original;
 pub use cloud_original::{
-    CloudOriginalEditFacts, CloudOriginalEditJob, CloudOriginalEditResult, CloudOriginalObservation,
-    CloudOriginalOwnedFacts, CloudOriginalRole, CloudOriginalRoleFacts,
+    CloudHistoricalOriginalEdit, CloudOriginalEditFacts, CloudOriginalEditJob, CloudOriginalEditResult,
+    CloudOriginalObservation, CloudOriginalOwnedFacts, CloudOriginalRole, CloudOriginalRoleFacts,
 };
 
 /// Inspect only admitted, bounded original snapshot bytes. No native ID, path,
@@ -959,6 +959,10 @@ pub fn test_cloud_original_role(main: Vec<u8>, wal: Option<Vec<u8>>) -> Result<A
 }
 #[uniffi::export]
 impl CloudOriginalRole {
+    pub fn read_original_edit(&self, witness: Vec<u8>) -> Result<CloudHistoricalOriginalEdit, CoreError> {
+        callback::enter("CloudOriginalRole.read_original_edit");
+        self.read_original_edit_inner(witness)
+    }
     pub fn observe(&self) -> Result<CloudOriginalObservation, CoreError> {
         callback::enter("CloudOriginalRole.observe");
         self.observe_inner()
@@ -988,4 +992,125 @@ impl CloudOriginalEditResult {
             .clone()
             .transpose()
     }
+}
+
+#[uniffi::export]
+pub fn test_cloud_original_exchange_witness(
+    command: Arc<crate::cloud_policy::CloudPolicyCommand>,
+) -> Result<Vec<u8>, CoreError> {
+    callback::enter("test_cloud_original_exchange_witness");
+    command.original_exchange_witness_inner()
+}
+#[uniffi::export]
+pub fn test_cloud_read_original_exchange(
+    exchange: u64,
+    witness: Vec<u8>,
+) -> Result<crate::cloud_policy::CloudPolicyExchangeRecord, CoreError> {
+    callback::enter("test_cloud_read_original_exchange");
+    let witness = witness
+        .as_slice()
+        .try_into()
+        .map_err(|_| crate::sync::cloud_error("original witness shape"))?;
+    let host = runtime::host()?;
+    let collection = host.cloud_connection_collection()?;
+    let core = host
+        .cloud_runtime()
+        .ok_or_else(|| crate::sync::cloud_error("original runtime absent"))?;
+    let result = core
+        .read_original_exchange_for_testing(&collection, exchange, witness)
+        .map_err(crate::sync::cloud_error)?;
+    Ok(result.into())
+}
+#[derive(Clone, uniffi::Record)]
+pub struct CloudOriginalControlWitness {
+    pub generation: u64,
+    pub active_sha256: Vec<u8>,
+    pub epoch_sha256: Vec<u8>,
+    pub correlation: Vec<u8>,
+}
+#[derive(Clone, uniffi::Record)]
+pub struct CloudRestoredControlObservation {
+    pub generation: u64,
+    pub required_scan_complete: bool,
+}
+#[uniffi::export]
+pub fn test_cloud_original_control_witness() -> Result<CloudOriginalControlWitness, CoreError> {
+    callback::enter("test_cloud_original_control_witness");
+    let host = runtime::host()?;
+    let collection = host.cloud_connection_collection()?;
+    let core = host
+        .cloud_runtime()
+        .ok_or_else(|| crate::sync::cloud_error("original runtime absent"))?;
+    let original = core
+        .selected_control_for_testing(&collection)
+        .map_err(crate::sync::cloud_error)?;
+    let correlation = core
+        .selected_original_control_witness_for_testing(&collection)
+        .map_err(crate::sync::cloud_error)?;
+    if core
+        .selected_control_for_testing(&collection)
+        .map_err(crate::sync::cloud_error)?
+        != original
+        || !Arc::ptr_eq(&runtime::host()?, &host)
+        || !collection.is_current()
+    {
+        return Err(crate::sync::cloud_error("original controls changed"));
+    }
+    Ok(CloudOriginalControlWitness {
+        generation: collection.generation().0,
+        active_sha256: original
+            .active_sha256
+            .ok_or_else(|| crate::sync::cloud_error("original Active absent"))?
+            .to_vec(),
+        epoch_sha256: original
+            .epoch_sha256
+            .ok_or_else(|| crate::sync::cloud_error("original Complete absent"))?
+            .to_vec(),
+        correlation: correlation.to_vec(),
+    })
+}
+#[uniffi::export]
+pub fn test_cloud_restored_control(
+    original: CloudOriginalControlWitness,
+) -> Result<CloudRestoredControlObservation, CoreError> {
+    callback::enter("test_cloud_restored_control");
+    let shape = || crate::sync::cloud_error("original control shape");
+    let active = original.active_sha256.as_slice().try_into().map_err(|_| shape())?;
+    let epoch = original.epoch_sha256.as_slice().try_into().map_err(|_| shape())?;
+    let correlation = original.correlation.as_slice().try_into().map_err(|_| shape())?;
+    let host = runtime::host()?;
+    let collection = host.cloud_connection_collection()?;
+    let core = host
+        .cloud_runtime()
+        .ok_or_else(|| crate::sync::cloud_error("original runtime absent"))?;
+    // The freshly admitted original platform provider, never journal identity.
+    // Normal Core verification precedes historical reads and ordinary scanning.
+    core.refresh_identity().map_err(crate::sync::cloud_error)?;
+    let observed = core
+        .selected_restored_control_for_testing(&collection, original.generation, active, epoch, correlation)
+        .map_err(crate::sync::cloud_error)?;
+    let status = core.status().map_err(crate::sync::cloud_error)?;
+    let evidence = collection.open_evidence()?;
+    let scan = core.note_scan_proof();
+    let required_scan_complete = status.stored_usable
+        && status.identity_verified
+        && !status.scan_required
+        && !status.scan_running
+        && !status.tracking_stopped
+        && status.scan_completed_this_open
+        && status.note_scan_completed_this_open
+        && status.generation == Some(collection.generation())
+        && scan.is_some_and(|p| {
+            p.snapshot_generation == collection.generation()
+                && (p.snapshot_native_file.device, p.snapshot_native_file.inode) == evidence.native_file
+                && p.receipt.identity().generation() == collection.generation()
+                && p.receipt.identity().native_file() == evidence.native_file
+                && p.receipt.through() >= p.snapshot_seq
+        });
+    core.selected_restored_control_for_testing(&collection, original.generation, active, epoch, correlation)
+        .map_err(crate::sync::cloud_error)?;
+    Ok(CloudRestoredControlObservation {
+        generation: observed.generation,
+        required_scan_complete,
+    })
 }

@@ -10,6 +10,12 @@ nonisolated enum CloudKitSelectedSyncProof {
               current.entity.label == "n1", current.entity.revision == revision,
               current.entity.digest == edited.noteDigest, current.entity.digest.count == 32 else { throw AgentFailure.execution }
     }
+    static func requireRestoredSource(_ current: OriginalCloudObservation, edited: HistoricalOriginalCloudEdit) throws {
+        guard current.generation == edited.generation, current.qChanged,
+              current.entity.label == "n1", current.entity.revision == edited.localRevision,
+              current.entity.digest == edited.noteDigest, current.entity.digest.count == 32,
+              edited.originalSeq > 0, edited.originalGeneration > 0 else { throw AgentFailure.execution }
+    }
     static func sourceAcknowledged(_ current: OriginalCloudObservation, edited: OriginalCloudEditFacts) throws {
         try requireSource(current, edited: edited)
         guard current.entity.acknowledged, current.entity.ackedRevision == edited.localRevision,

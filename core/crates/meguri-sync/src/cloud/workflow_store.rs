@@ -353,6 +353,23 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         };
         super::tracking_payload::load_entity(&self.connection, b, kind, &text).map(Some)
     }
+    // Fixed small-role capture only; role selection remains the independently
+    // verified immutable baseline. A different first current key cannot match it.
+    #[cfg(feature = "test-hooks")]
+    pub(super) fn selected_reopen_note(&self, binding: BindingId) -> Result<Option<EntityFacts>, Error> {
+        self.binding(binding)?.ok_or(Error::BindingNotFound)?;
+        let content: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT content FROM cloud_runtime_notes WHERE binding=?1 ORDER BY id LIMIT 1",
+                [binding.0.as_slice()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        content
+            .map(|text| super::tracking_payload::dump_entity(&self.connection, binding, codec::Kind::Note, &text))
+            .transpose()
+    }
     /// Explicit full-image diagnostic; normal storage callers use entity_facts.
     pub fn entity_dump(&self, b: BindingId, name: &str) -> Result<Option<EntityFacts>, Error> {
         self.binding(b)?.ok_or(Error::BindingNotFound)?;

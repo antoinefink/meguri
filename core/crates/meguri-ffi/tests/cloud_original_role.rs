@@ -712,3 +712,539 @@ fn q_ordinal_is_read_from_actual_original_layout() {
     assert_eq!(facts.note_digest, note);
     assert_eq!(facts.baseline_digest, baseline);
 }
+
+// A real process boundary for the explicitly unsupported committed-before-
+// sufficient-proof window. It must not obtain an edit witness from equal text,
+// the reset engine seq, undo history or a second execution.
+#[test]
+fn original_edit_committed_without_bound_original_witness_fails_after_process_exit_without_replay() {
+    let root = tempfile::tempdir().unwrap();
+    generate(&root.path().join("original"));
+    std::fs::create_dir(root.path().join("live")).unwrap();
+    std::fs::copy(
+        root.path().join("original/collection.anki2"),
+        root.path().join("live/collection.anki2"),
+    )
+    .unwrap();
+    let run = |stage: &str| {
+        std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "original_edit_reopen_process_entry", "--nocapture"])
+            .env("MEGURI_ORIGINAL_EDIT_PROCESS_ROOT", root.path())
+            .env("MEGURI_ORIGINAL_EDIT_PROCESS_STAGE", stage)
+            .output()
+            .unwrap()
+    };
+    let committed = run("commit");
+    assert!(committed.status.success());
+    assert!(root.path().join("original-observations.json").is_file());
+    let before = expected(&root.path().join("live")).0;
+    assert_ne!(before, expected(&root.path().join("original")).0);
+    let recovered = run("refuse");
+    assert!(recovered.status.success());
+    assert_eq!(expected(&root.path().join("live")).0, before);
+}
+#[test]
+fn cloud_child_entry() {
+    meguri_testkit::cloud::child_driver::child_entry().unwrap();
+}
+
+#[derive(Clone, Copy, Debug)]
+#[repr(u8)]
+enum OriginalEditCheckpoint {
+    ConfigurePlatform,
+    StartOpen,
+    WaitOpen,
+    PrepareOriginalRole,
+    PrepareRuntime,
+    ValidateOwned,
+    StartEdit,
+    WaitEdit,
+    ReadEditResult,
+    SyncOriginalObservations,
+    ReadyWriter,
+    ReadOriginalObservations,
+    HistoricalRead,
+    RepeatedHistoricalRead,
+    CompareRowsAndSeq,
+    CloseReader,
+    SyncCheckedMarker,
+    ReadyReader,
+}
+impl OriginalEditCheckpoint {
+    const ALL: [Self; 18] = [
+        Self::ConfigurePlatform,
+        Self::StartOpen,
+        Self::WaitOpen,
+        Self::PrepareOriginalRole,
+        Self::PrepareRuntime,
+        Self::ValidateOwned,
+        Self::StartEdit,
+        Self::WaitEdit,
+        Self::ReadEditResult,
+        Self::SyncOriginalObservations,
+        Self::ReadyWriter,
+        Self::ReadOriginalObservations,
+        Self::HistoricalRead,
+        Self::RepeatedHistoricalRead,
+        Self::CompareRowsAndSeq,
+        Self::CloseReader,
+        Self::SyncCheckedMarker,
+        Self::ReadyReader,
+    ];
+    fn name(self) -> &'static str {
+        match self {
+            Self::ConfigurePlatform => "configurePlatform",
+            Self::StartOpen => "startOpen",
+            Self::WaitOpen => "waitOpen",
+            Self::PrepareOriginalRole => "prepareOriginalRole",
+            Self::PrepareRuntime => "prepareRuntime",
+            Self::ValidateOwned => "validateOwned",
+            Self::StartEdit => "startEdit",
+            Self::WaitEdit => "waitEdit",
+            Self::ReadEditResult => "readEditResult",
+            Self::SyncOriginalObservations => "syncOriginalObservations",
+            Self::ReadyWriter => "readyWriter",
+            Self::ReadOriginalObservations => "readOriginalObservations",
+            Self::HistoricalRead => "historicalRead",
+            Self::RepeatedHistoricalRead => "repeatedHistoricalRead",
+            Self::CompareRowsAndSeq => "compareRowsAndSeq",
+            Self::CloseReader => "closeReader",
+            Self::SyncCheckedMarker => "syncCheckedMarker",
+            Self::ReadyReader => "readyReader",
+        }
+    }
+    fn parse(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|checkpoint| checkpoint.name() == name)
+    }
+}
+static ORIGINAL_EDIT_CHECKPOINT: std::sync::atomic::AtomicU8 =
+    std::sync::atomic::AtomicU8::new(OriginalEditCheckpoint::ConfigurePlatform as u8);
+
+fn original_edit_checkpoint(checkpoint: OriginalEditCheckpoint) {
+    use std::{io::Write, sync::atomic::Ordering};
+    ORIGINAL_EDIT_CHECKPOINT.store(checkpoint as u8, Ordering::SeqCst);
+    let mut output = std::io::stdout().lock();
+    let _ = writeln!(output, "\noriginal-edit-checkpoint {}", checkpoint.name());
+    let _ = output.flush();
+}
+
+// Installed only in the selected test child. No payload or default panic hook.
+fn original_edit_child_panic_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        use std::{io::Write, sync::atomic::Ordering};
+        let checkpoint = OriginalEditCheckpoint::ALL[usize::from(ORIGINAL_EDIT_CHECKPOINT.load(Ordering::SeqCst))];
+        let (source, line, column) = match info.location() {
+            Some(location) => (
+                if location.file().ends_with("/meguri-ffi/tests/cloud_original_role.rs") {
+                    "fixture"
+                } else {
+                    "other"
+                },
+                location.line(),
+                location.column(),
+            ),
+            None => ("other", 0, 0),
+        };
+        let mut output = std::io::stdout().lock();
+        let _ = writeln!(
+            output,
+            "\noriginal-edit-panic {} {source} {line} {column}",
+            checkpoint.name()
+        );
+        let _ = output.flush();
+    }));
+}
+
+enum OriginalEditDiagnostic {
+    Checkpoint(OriginalEditCheckpoint),
+    Panic {
+        checkpoint: OriginalEditCheckpoint,
+        source: &'static str,
+        line: u32,
+        column: u32,
+    },
+}
+impl std::fmt::Display for OriginalEditDiagnostic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Checkpoint(checkpoint) => f.write_str(checkpoint.name()),
+            Self::Panic {
+                checkpoint,
+                source,
+                line,
+                column,
+            } => {
+                write!(f, "{} {source} {line}:{column}", checkpoint.name())
+            }
+        }
+    }
+}
+impl OriginalEditDiagnostic {
+    fn parse(line: &str) -> Option<Self> {
+        let fields: Vec<_> = line.split(' ').collect();
+        match fields.as_slice() {
+            ["original-edit-checkpoint", checkpoint] => {
+                Some(Self::Checkpoint(OriginalEditCheckpoint::parse(checkpoint)?))
+            }
+            ["original-edit-panic", checkpoint, source, line, column] => Some(Self::Panic {
+                checkpoint: OriginalEditCheckpoint::parse(checkpoint)?,
+                source: match *source {
+                    "fixture" => "fixture",
+                    "other" => "other",
+                    _ => return None,
+                },
+                line: line.parse().ok()?,
+                column: column.parse().ok()?,
+            }),
+            _ => None,
+        }
+    }
+}
+
+// Both subprocess stages stop at a content-free readiness message. The writer
+// sends it only after syncing the real edit observations and witness; the reader
+// sends it only after all historical read/no-mutation assertions have completed.
+fn witnessed_edit_process(root: &Path, stage: &str) {
+    use std::{
+        io::{BufRead, BufReader, Read},
+        process::{Command, Stdio},
+        sync::mpsc,
+        time::Duration,
+    };
+    let mode = match stage {
+        "bound-commit" => "boundCommit",
+        "bound-read" => "boundRead",
+        _ => panic!("unsupported witnessed process mode"),
+    };
+    let mut child = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "original_edit_reopen_process_entry", "--nocapture"])
+        .env("MEGURI_ORIGINAL_EDIT_PROCESS_ROOT", root)
+        .env("MEGURI_ORIGINAL_EDIT_PROCESS_STAGE", stage)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let output = child.stdout.take().unwrap();
+    let (ready_tx, ready_rx) = mpsc::channel();
+    let reader = std::thread::spawn(move || {
+        let mut diagnostic = None;
+        let mut ready = false;
+        for line in BufReader::new(output.take(64 * 1024)).lines() {
+            let Ok(line) = line else { break };
+            if line == "original-edit-process-ready" {
+                ready = true;
+                break;
+            }
+            if let Some(retained) = OriginalEditDiagnostic::parse(&line) {
+                diagnostic = Some(retained);
+            }
+        }
+        let _ = ready_tx.send(ready);
+        diagnostic
+    });
+    let ready = ready_rx.recv_timeout(Duration::from_secs(20));
+    // Kill and reap on failure as well. No assertion may abandon the live owner.
+    let killed = child.kill();
+    let (exit_tx, exit_rx) = mpsc::channel();
+    let reaper = std::thread::spawn(move || {
+        let result = child.wait();
+        let _ = exit_tx.send(result);
+    });
+    let exited = exit_rx.recv_timeout(Duration::from_secs(20));
+    assert!(exited.is_ok(), "subprocess cleanup must finish within its bound");
+    reaper.join().unwrap();
+    // Killing closes the pipe even if readiness timed out. Join its reader
+    // through a bounded notification before joining the already-finished thread.
+    if ready.is_err() {
+        let _ = ready_rx.recv_timeout(Duration::from_secs(20)).unwrap();
+    }
+    let diagnostic = reader
+        .join()
+        .unwrap()
+        .map_or_else(|| "none".into(), |value| value.to_string());
+    assert!(
+        ready.is_ok_and(|ready| ready),
+        "subprocess did not reach its proven boundary: mode={mode} last={diagnostic}"
+    );
+    killed.unwrap();
+    let status = exited.unwrap().unwrap();
+    use std::os::unix::process::ExitStatusExt;
+    assert_eq!(status.signal(), Some(9));
+}
+
+#[test]
+fn bound_original_edit_witness_survives_process_kill_without_a_second_mutation() {
+    use meguri_model::rng::SeededRandom;
+    use meguri_sync::cloud::runtime::{KeyByteSource, KeySourceError};
+    use meguri_testkit::cloud::{Config, Scope, Service, coordinator::PublicationRig, devices::IdentityReads};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    struct Keys(AtomicUsize);
+    impl KeyByteSource for Keys {
+        fn draw_key(&self) -> Result<[u8; 32], KeySourceError> {
+            match self.0.fetch_add(1, Ordering::SeqCst) {
+                0 => Ok([31; 32]),
+                1 => Ok([124; 32]),
+                _ => Err(KeySourceError::Unavailable),
+            }
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    generate(&root.path().join("original"));
+    let live = root.path().join("live");
+    std::fs::create_dir(&live).unwrap();
+    std::fs::copy(
+        root.path().join("original/collection.anki2"),
+        live.join("collection.anki2"),
+    )
+    .unwrap();
+    std::fs::create_dir(live.join("collection.media")).unwrap();
+    for entry in std::fs::read_dir(root.path().join("original/collection.media")).unwrap() {
+        let entry = entry.unwrap();
+        std::fs::copy(entry.path(), live.join("collection.media").join(entry.file_name())).unwrap();
+    }
+    // Actual unbound publication supplies controls and Active binding; no edit,
+    // observer tuple, receipt or witness is seeded into tracking.
+    let scope = Scope {
+        container: "synthetic-u114".into(),
+        environment: "development".into(),
+        account: "synthetic-account-A".into(),
+    };
+    let mut service = Service::open(root.path(), Config::default(), SeededRandom::new(811)).unwrap();
+    let mut publisher = PublicationRig::open(
+        &live,
+        &scope,
+        IdentityReads::Available(scope.account.clone()),
+        false,
+        cloud_small::NOW_MS,
+        809,
+        Arc::new(Keys(AtomicUsize::new(0))),
+    )
+    .unwrap();
+    let publication = (|| -> meguri_testkit::cloud::devices::Result<()> {
+        let preview = publisher.preview(&mut service, 10_000)?;
+        publisher.confirm_publication(&preview)?;
+        publisher.drive_ready(&mut service, 10_000)?;
+        Ok(())
+    })();
+    publisher.close_clean().unwrap();
+    publication.unwrap();
+    assert_eq!(expected(&live).0, expected(&root.path().join("original")).0);
+    witnessed_edit_process(root.path(), "bound-commit");
+    let committed = expected(&live).0;
+    assert_ne!(committed, expected(&root.path().join("original")).0);
+    let observations = std::fs::read(root.path().join("original-observations.json")).unwrap();
+    witnessed_edit_process(root.path(), "bound-read");
+    assert_eq!(expected(&live).0, committed);
+    assert_eq!(
+        std::fs::read(root.path().join("original-observations.json")).unwrap(),
+        observations
+    );
+    assert!(root.path().join("historical-read-checked").is_file());
+}
+
+#[test]
+fn original_edit_reopen_process_entry() {
+    use meguri_ffi::{
+        CoreEvent, CoreEventKind, CoreEventListener, JobOutcome,
+        collection::{self, CollectionLocation, DiskCapacity, DiskSpaceProvider, HostClock},
+    };
+    use std::{
+        sync::{Arc, mpsc},
+        time::Duration,
+    };
+    let Some(root) = std::env::var_os("MEGURI_ORIGINAL_EDIT_PROCESS_ROOT") else {
+        return;
+    };
+    let stage = std::env::var("MEGURI_ORIGINAL_EDIT_PROCESS_STAGE").unwrap();
+    let bound = stage == "bound-commit" || stage == "bound-read";
+    if bound {
+        original_edit_child_panic_hook();
+    }
+    let checkpoint = |point| {
+        if bound {
+            original_edit_checkpoint(point);
+        }
+    };
+    let root = std::path::PathBuf::from(root);
+    struct Clock;
+    impl HostClock for Clock {
+        fn now_ms(&self) -> i64 {
+            cloud_small::NOW_MS + 60_000
+        }
+        fn offset_from_utc(&self, _: i64) -> i32 {
+            0
+        }
+        fn zone_id(&self) -> String {
+            "UTC".into()
+        }
+    }
+    struct Space;
+    impl DiskSpaceProvider for Space {
+        fn available_bytes(&self, _: String) -> DiskCapacity {
+            DiskCapacity::Available { bytes: u64::MAX }
+        }
+    }
+    struct Listener(mpsc::Sender<CoreEvent>);
+    impl CoreEventListener for Listener {
+        fn on_event(&self, event: CoreEvent) {
+            let _ = self.0.send(event);
+        }
+    }
+    let (tx, rx) = mpsc::channel();
+    meguri_ffi::events::set_event_listener(Arc::new(Listener(tx))).unwrap();
+    let wait = |job_id| loop {
+        let event = rx.recv_timeout(Duration::from_secs(20)).unwrap();
+        if let CoreEventKind::JobFinished { id, outcome } = event.kind
+            && id == job_id
+        {
+            break outcome;
+        }
+    };
+    let location = CollectionLocation {
+        collection_directory: root.join("live").to_string_lossy().into_owned(),
+        backups_directory: root.join("backups").to_string_lossy().into_owned(),
+        app_group_snapshot: root.join("widget").to_string_lossy().into_owned(),
+        manual_transfer_directory: root.join("manual").to_string_lossy().into_owned(),
+    };
+    std::fs::create_dir_all(root.join("backups")).unwrap();
+    let opened = if bound {
+        use meguri_ffi::sync::{self, CloudAccountStatus, CloudEnvironment, CloudKeyByteProvider};
+        struct NoNewKeys;
+        impl CloudKeyByteProvider for NoNewKeys {
+            fn draw_key(&self) -> Option<Vec<u8>> {
+                panic!("reopening the original binding must not draw a new key")
+            }
+        }
+        checkpoint(OriginalEditCheckpoint::ConfigurePlatform);
+        sync::configure_cloud_platform(
+            "synthetic-u114".into(),
+            CloudEnvironment::Development,
+            CloudAccountStatus::Available,
+            Some(b"synthetic-account-A".to_vec()),
+            Arc::new(NoNewKeys),
+        )
+        .unwrap();
+        checkpoint(OriginalEditCheckpoint::StartOpen);
+        meguri_ffi::test_hooks::test_cloud_start_native_policy_open(location, Arc::new(Clock), Arc::new(Space), 771)
+            .unwrap()
+    } else {
+        collection::start_open(location, Arc::new(Clock), Arc::new(Space), 771).unwrap()
+    };
+    checkpoint(OriginalEditCheckpoint::WaitOpen);
+    assert_eq!(wait(opened.id), JobOutcome::Succeeded);
+    checkpoint(OriginalEditCheckpoint::PrepareOriginalRole);
+    let source = bytes(&root.join("original"));
+    let role = test_cloud_original_role(source.0, source.1).unwrap();
+    if bound {
+        checkpoint(OriginalEditCheckpoint::PrepareRuntime);
+        meguri_ffi::sync::CloudWorkflow::new()
+            .unwrap()
+            .prepare_runtime()
+            .unwrap();
+    }
+    if stage == "commit" || stage == "bound-commit" {
+        checkpoint(OriginalEditCheckpoint::ValidateOwned);
+        assert!(!role.validate_owned().unwrap().q_changed);
+        checkpoint(OriginalEditCheckpoint::StartEdit);
+        let edit = role.clone().start_fixed_edit().unwrap();
+        checkpoint(OriginalEditCheckpoint::WaitEdit);
+        assert_eq!(wait(edit.handle.id), JobOutcome::Succeeded);
+        checkpoint(OriginalEditCheckpoint::ReadEditResult);
+        let facts = edit.result.result().unwrap().unwrap();
+        assert_eq!(facts.updated_notes, 1);
+        if bound {
+            assert!(facts.local_revision.is_some_and(|revision| revision > 0));
+            assert_eq!(facts.original_witness.as_ref().unwrap().len(), 32);
+        } else {
+            assert!(facts.local_revision.is_none() && facts.original_witness.is_none());
+        }
+        let observations = serde_json::json!({"committed": facts.seq, "generation": facts.generation,
+            "digest": facts.note_digest, "durable_revision": facts.local_revision,
+            "witness": facts.original_witness, "writer_process": std::process::id()});
+        checkpoint(OriginalEditCheckpoint::SyncOriginalObservations);
+        let file = std::fs::File::create(root.join("original-observations.json")).unwrap();
+        serde_json::to_writer(&file, &observations).unwrap();
+        file.sync_all().unwrap();
+        std::fs::File::open(&root).unwrap().sync_all().unwrap();
+        if bound {
+            checkpoint(OriginalEditCheckpoint::ReadyWriter);
+            original_edit_process_ready();
+        }
+        // Exit with the actual flushed owner still open, before any simulated
+        // done or clean close. Nothing survives in the next process's EditState.
+        std::process::exit(0);
+    }
+    checkpoint(OriginalEditCheckpoint::ValidateOwned);
+    assert!(role.validate_owned().unwrap().q_changed);
+    if stage == "bound-read" {
+        checkpoint(OriginalEditCheckpoint::ReadOriginalObservations);
+        let observations: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(root.join("original-observations.json")).unwrap()).unwrap();
+        assert_ne!(
+            observations["writer_process"].as_u64().unwrap(),
+            u64::from(std::process::id())
+        );
+        let witness: Vec<u8> = serde_json::from_value(observations["witness"].clone()).unwrap();
+        let collection = meguri_ffi::test_hooks::collection_for_testing().unwrap();
+        let before_seq = collection.last_seq();
+        let before = {
+            let reader = collection.reader(ReaderRole::Query).unwrap();
+            [Table::Col, Table::Notes, Table::Cards, Table::Decks, Table::Revlog]
+                .map(|table| stored_rows(&*reader, table))
+        };
+        checkpoint(OriginalEditCheckpoint::HistoricalRead);
+        let original = role.read_original_edit(witness.clone()).unwrap();
+        assert_eq!(
+            original.original_generation,
+            observations["generation"].as_u64().unwrap()
+        );
+        assert_eq!(original.original_seq, observations["committed"].as_u64().unwrap());
+        assert_eq!(
+            original.local_revision,
+            observations["durable_revision"].as_u64().unwrap()
+        );
+        assert_eq!(
+            original.note_digest,
+            serde_json::from_value::<Vec<u8>>(observations["digest"].clone()).unwrap()
+        );
+        checkpoint(OriginalEditCheckpoint::RepeatedHistoricalRead);
+        assert_eq!(
+            role.read_original_edit(witness).unwrap().original_seq,
+            original.original_seq
+        );
+        checkpoint(OriginalEditCheckpoint::CompareRowsAndSeq);
+        assert_eq!(collection.last_seq(), before_seq);
+        let after = {
+            let reader = collection.reader(ReaderRole::Query).unwrap();
+            [Table::Col, Table::Notes, Table::Cards, Table::Decks, Table::Revlog]
+                .map(|table| stored_rows(&*reader, table))
+        };
+        assert_eq!(after, before);
+        checkpoint(OriginalEditCheckpoint::CloseReader);
+        meguri_ffi::lifecycle::close_collection().unwrap();
+        checkpoint(OriginalEditCheckpoint::SyncCheckedMarker);
+        let checked = std::fs::File::create(root.join("historical-read-checked")).unwrap();
+        checked.sync_all().unwrap();
+        std::fs::File::open(&root).unwrap().sync_all().unwrap();
+        checkpoint(OriginalEditCheckpoint::ReadyReader);
+        original_edit_process_ready();
+    }
+    for missing in [vec![], vec![0; 31], vec![0; 32]] {
+        assert!(role.read_original_edit(missing).is_err());
+    }
+    meguri_ffi::lifecycle::close_collection().unwrap();
+}
+
+fn original_edit_process_ready() -> ! {
+    use std::io::{Read, Write};
+    println!("\noriginal-edit-process-ready");
+    std::io::stdout().flush().unwrap();
+    // Parent retains stdin until its controlled kill. EOF or a byte is a
+    // fixture failure, never permission to mutate, close or report success.
+    let _ = std::io::stdin().read_exact(&mut [0]);
+    panic!("parent must kill the original process after readiness");
+}

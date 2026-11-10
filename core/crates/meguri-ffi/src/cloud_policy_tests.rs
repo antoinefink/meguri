@@ -2825,3 +2825,83 @@ fn policy_without_binding_has_unknown_media_counts() {
 
 #[path = "cloud_policy_job_tests.rs"]
 pub(super) mod policy_job_tests;
+
+#[cfg(feature = "test-hooks")]
+#[test]
+fn original_exchange_witness_uses_issued_handle_and_refuses_completed_or_stale_command() {
+    let (fixture, _, _) = rig();
+    let policy = fixture.workflow.policy().unwrap();
+    let original = run(&policy);
+    let CloudPolicyAction::RunExchange { exchange, .. } = original.action else {
+        unreachable!()
+    };
+    let witness = crate::test_hooks::test_cloud_original_exchange_witness(original.handle.clone()).unwrap();
+    assert_eq!(witness.len(), 32);
+    assert_eq!(
+        crate::test_hooks::test_cloud_original_exchange_witness(original.handle.clone()).unwrap(),
+        witness
+    );
+    let completed = select(
+        &policy,
+        policy
+            .clone()
+            .end_before_capture(exchange, CloudPolicyEarlyEnd::Cancelled)
+            .unwrap(),
+        |action| matches!(action, CloudPolicyAction::RecordExchange { .. }),
+    );
+    assert!(crate::test_hooks::test_cloud_original_exchange_witness(completed.handle.clone()).is_err());
+    drain(
+        &policy,
+        CloudPolicyOutput::Commands {
+            commands: vec![completed],
+        },
+    );
+    assert!(crate::test_hooks::test_cloud_original_exchange_witness(original.handle).is_err());
+    let collection = fixture.workflow.host.collection().unwrap();
+    let actual = fixture
+        .workflow
+        .core
+        .read_original_exchange_for_testing(&collection, exchange, witness.as_slice().try_into().unwrap())
+        .unwrap();
+    assert_eq!(actual.exchange, exchange);
+    assert_eq!(actual.outcome, meguri_sync::cloud::policy::ExchangeOutcome::Cancelled);
+    fixture.workflow.host.close().unwrap();
+}
+
+#[cfg(feature = "test-hooks")]
+#[test]
+fn original_exchange_witness_rechecks_pending_issuance_after_provider_read() {
+    let provider = SamplingAccount::new();
+    let (fixture, _, _) = rig_with_provider(provider.clone());
+    let policy = fixture.workflow.policy().unwrap();
+    let original = run(&policy);
+    let CloudPolicyAction::RunExchange { exchange, .. } = original.action else {
+        unreachable!()
+    };
+    let witness = crate::test_hooks::test_cloud_original_exchange_witness(original.handle.clone()).unwrap();
+    let driver = fixture.workflow.host.cloud_policy_driver().unwrap();
+    let guard = driver.state().guard();
+    let (reached, release) = hold_deck_account(&provider);
+    std::thread::scope(|scope| {
+        let read = scope.spawn(|| crate::test_hooks::test_cloud_original_exchange_witness(original.handle.clone()));
+        reached.recv_timeout(Duration::from_secs(5)).unwrap();
+        drain(
+            &policy,
+            policy
+                .clone()
+                .end_before_capture(exchange, CloudPolicyEarlyEnd::Cancelled)
+                .unwrap(),
+        );
+        assert_eq!(driver.state().guard(), guard);
+        drop(release);
+        assert!(read.join().unwrap().is_err());
+    });
+    let collection = fixture.workflow.host.collection().unwrap();
+    let record = fixture
+        .workflow
+        .core
+        .read_original_exchange_for_testing(&collection, exchange, witness.as_slice().try_into().unwrap())
+        .unwrap();
+    assert_eq!(record.outcome, meguri_sync::cloud::policy::ExchangeOutcome::Cancelled);
+    fixture.workflow.host.close().unwrap();
+}

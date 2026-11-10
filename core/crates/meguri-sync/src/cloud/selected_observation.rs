@@ -533,3 +533,283 @@ impl Runtime {
         Ok(result)
     }
 }
+
+// Kept only across ordinary scanning in this new Runtime. The values were read
+// from its owned store before open_runtime_binding; they are never restored.
+#[derive(Clone)]
+pub(super) struct ReopenNote {
+    pub binding: Binding,
+    pub file: NativeFileIdentity,
+    pub open: u64,
+    pub entity: super::super::workflow::EntityFacts,
+}
+#[derive(Clone)]
+pub struct HistoricalEdit {
+    pub original_generation: u64,
+    pub original_seq: u64,
+    pub local_revision: u64,
+    pub digest: [u8; 32],
+}
+#[derive(Clone)]
+pub struct RestoredControl {
+    pub generation: u64,
+    pub active_sha256: [u8; 32],
+    pub epoch_sha256: [u8; 32],
+}
+fn correlation<T: Serialize>(domain: &[u8], value: &T) -> Result<[u8; 32], RuntimeError> {
+    let mut writer = PublicationHash::default();
+    writer.write_all(domain).map_err(|_| Error::InvalidData)?;
+    serde_json::to_writer(&mut writer, value).map_err(|_| Error::InvalidData)?;
+    Ok(writer.hash.finalize().into())
+}
+impl Runtime {
+    // Reuse the live inspector's native file, publication fence, account,
+    // binding and final-provider rechecks. MissingAfterRestart is accepted only
+    // as current ownership here; it NEVER becomes original reply evidence.
+    fn selected_owned_snapshot(
+        &self,
+        collection: &Collection,
+    ) -> Result<(Snapshot, SelectedControlObservation), RuntimeError> {
+        let control = self.selected_control_for_testing(collection)?;
+        if !matches!(
+            control.status,
+            Proof::Proven | Proof::Missing(Missing::MissingAfterRestart)
+        ) {
+            return Err(Error::RecoveryRefused.into());
+        }
+        let snapshot = self.selected_snapshot()?;
+        let b = snapshot.bound.as_ref().ok_or(Error::RecoveryRefused)?;
+        if b.evidence != collection.open_evidence()? || !collection.is_current() || !b.verified || !b.usable {
+            return Err(Error::RecoveryRefused.into());
+        }
+        Ok((snapshot, control))
+    }
+    fn selected_recheck(
+        &self,
+        collection: &Collection,
+        snapshot: &Snapshot,
+        control: &SelectedControlObservation,
+    ) -> Result<(), RuntimeError> {
+        if &self.selected_control_for_testing(collection)? != control || &self.selected_snapshot()? != snapshot {
+            return Err(Error::RecoveryRefused.into());
+        }
+        Ok(())
+    }
+    fn control_correlation(
+        snapshot: &Snapshot,
+        active: [u8; 32],
+        epoch: [u8; 32],
+        generation: u64,
+    ) -> Result<[u8; 32], RuntimeError> {
+        let bound = snapshot.bound.as_ref().ok_or(Error::RecoveryRefused)?;
+        // Stable, actually owned identity; opening counter and current generation
+        // are deliberately absent. The original generation stays historical.
+        correlation(
+            b"meguri-selected-original-control-v1",
+            &(&bound.binding, bound.file, active, epoch, generation),
+        )
+    }
+    /// Emitted only after the real original Complete/Active or adoption proof.
+    /// The journal stores this correlation together with the original canonical
+    /// digests, not an invented durable copy of the process-local reply.
+    pub fn selected_original_control_witness_for_testing(
+        &self,
+        collection: &Collection,
+    ) -> Result<[u8; 32], RuntimeError> {
+        let (snapshot, control) = self.selected_owned_snapshot(collection)?;
+        if control.status != Proof::Proven || control.binding_matches_epoch != Proof::Proven {
+            return Err(Error::RecoveryRefused.into());
+        }
+        let witness = Self::control_correlation(
+            &snapshot,
+            control.active_sha256.ok_or(Error::RecoveryRefused)?,
+            control.epoch_sha256.ok_or(Error::RecoveryRefused)?,
+            collection.generation().0,
+        )?;
+        self.selected_recheck(collection, &snapshot, &control)?;
+        Ok(witness)
+    }
+    /// Historical journal proof and current acceptance are separate. This method
+    /// does not change selected_control_for_testing or resurrect its old reply.
+    pub fn selected_restored_control_for_testing(
+        &self,
+        collection: &Collection,
+        original_generation: u64,
+        active: [u8; 32],
+        epoch: [u8; 32],
+        witness: [u8; 32],
+    ) -> Result<RestoredControl, RuntimeError> {
+        let (snapshot, control) = self.selected_owned_snapshot(collection)?;
+        if original_generation == 0
+            || control.active_sha256 != Some(active)
+            || control.epoch_sha256.is_some_and(|current| current != epoch)
+            || Self::control_correlation(&snapshot, active, epoch, original_generation)? != witness
+        {
+            return Err(Error::RecoveryRefused.into());
+        }
+        if snapshot.adoption.is_some() && (control.activation != Proof::Proven || control.owned_backup != Proof::Proven)
+        {
+            return Err(Error::RecoveryRefused.into());
+        }
+        self.selected_recheck(collection, &snapshot, &control)?;
+        Ok(RestoredControl {
+            generation: collection.generation().0,
+            active_sha256: active,
+            epoch_sha256: epoch,
+        })
+    }
+    fn edit_correlation(
+        binding: &Binding,
+        file: NativeFileIdentity,
+        entity: &super::super::workflow::EntityFacts,
+        baseline: [u8; 32],
+    ) -> Result<[u8; 32], RuntimeError> {
+        correlation(
+            b"meguri-selected-original-edit-v1",
+            &(
+                binding,
+                file,
+                baseline,
+                &entity.name,
+                &entity.key,
+                entity.origin,
+                entity.observer_open,
+                entity.observed_generation,
+                entity.observed_seq,
+                entity.local_rev,
+                entity.payload.payload_digest().map_err(|_| Error::InvalidData)?,
+            ),
+        )
+    }
+    /// Only the actual fixed-edit post-flush path calls this with its actual
+    /// receipt seq and baseline capability. No product decision consumes it.
+    pub fn original_edit_witness_for_testing(
+        &self,
+        collection: &Collection,
+        id: i64,
+        baseline: [u8; 32],
+        seq: Seq,
+        digest: [u8; 32],
+    ) -> Result<[u8; 32], RuntimeError> {
+        let (entity, _) = self.original_note_observation_for_testing(
+            collection,
+            id,
+            collection.reader(ReaderRole::Query)?.snapshot()?.wal_identity(),
+            collection.last_seq(),
+            digest,
+        )?;
+        let (snapshot, control) = self.selected_owned_snapshot(collection)?;
+        let b = snapshot.bound.as_ref().ok_or(Error::RecoveryRefused)?;
+        if entity.observed_seq != seq.0 || entity.local_rev == 0 || entity.observer_open != b.open_counter {
+            return Err(Error::RecoveryRefused.into());
+        }
+        let witness = Self::edit_correlation(&b.binding, b.file, &entity, baseline)?;
+        self.selected_recheck(collection, &snapshot, &control)?;
+        Ok(witness)
+    }
+    pub fn read_original_edit_for_testing(
+        &self,
+        collection: &Collection,
+        id: i64,
+        baseline: [u8; 32],
+        witness: [u8; 32],
+    ) -> Result<HistoricalEdit, RuntimeError> {
+        let (snapshot, control) = self.selected_owned_snapshot(collection)?;
+        let b = snapshot.bound.as_ref().ok_or(Error::RecoveryRefused)?;
+        let original = {
+            let s = self.state();
+            let original = s.selected_reopen_note.as_ref().ok_or(Error::RecoveryRefused)?;
+            if original.binding != b.binding
+                || original.file != b.file
+                || original.open.checked_add(1) != Some(b.open_counter)
+                || original.entity.observer_open != original.open
+                || original.entity.key != codec::id_key(id)
+                || original.entity.kind != codec::Kind::Note
+                || original.entity.tombstone_at.is_some()
+                || original.entity.local_rev == 0
+                || original.entity.observed_generation == 0
+                || original.entity.observed_seq == 0
+                || Self::edit_correlation(&b.binding, b.file, &original.entity, baseline)? != witness
+            {
+                return Err(Error::RecoveryRefused.into());
+            }
+            let current = with_tracking_access(|| {
+                s.store
+                    .as_ref()
+                    .ok_or(Error::Database)?
+                    .entity_dump(b.binding.id, &original.entity.name)
+            })?
+            .ok_or(Error::RecoveryRefused)?;
+            if current.kind != original.entity.kind
+                || current.key != original.entity.key
+                || current.origin != original.entity.origin
+                || current.payload != original.entity.payload
+                || current.local_rev != original.entity.local_rev
+                || current.tombstone_at.is_some()
+            {
+                return Err(Error::RecoveryRefused.into());
+            }
+            original.clone()
+        };
+        self.selected_recheck(collection, &snapshot, &control)?;
+        Ok(HistoricalEdit {
+            original_generation: original.entity.observed_generation,
+            original_seq: original.entity.observed_seq,
+            local_revision: original.entity.local_rev,
+            digest: original
+                .entity
+                .payload
+                .payload_digest()
+                .map_err(|_| Error::InvalidData)?,
+        })
+    }
+    pub fn original_exchange_witness_for_testing(
+        &self,
+        collection: &Collection,
+        owner: &str,
+        exchange: u64,
+        source: super::super::policy::Source,
+    ) -> Result<[u8; 32], RuntimeError> {
+        let (snapshot, control) = self.selected_owned_snapshot(collection)?;
+        let b = snapshot.bound.as_ref().ok_or(Error::RecoveryRefused)?;
+        if owner.is_empty() || owner.len() > 1024 || exchange == 0 {
+            return Err(Error::RecoveryRefused.into());
+        }
+        let witness = exchange_correlation(&b.binding, b.file, owner, exchange, source)?;
+        self.selected_recheck(collection, &snapshot, &control)?;
+        Ok(witness)
+    }
+    pub fn read_original_exchange_for_testing(
+        &self,
+        collection: &Collection,
+        exchange: u64,
+        witness: [u8; 32],
+    ) -> Result<super::super::policy::ExchangeRecord, RuntimeError> {
+        let (snapshot, control) = self.selected_owned_snapshot(collection)?;
+        let b = snapshot.bound.as_ref().ok_or(Error::RecoveryRefused)?;
+        let record = {
+            let s = self.state();
+            with_tracking_access(|| {
+                s.store
+                    .as_ref()
+                    .ok_or(Error::Database)?
+                    .selected_original_exchange(&b.binding, b.file, exchange, witness)
+            })?
+            .ok_or(Error::RecoveryRefused)?
+        };
+        self.selected_recheck(collection, &snapshot, &control)?;
+        Ok(record)
+    }
+}
+pub(crate) fn exchange_correlation(
+    binding: &Binding,
+    file: NativeFileIdentity,
+    owner: &str,
+    exchange: u64,
+    source: super::super::policy::Source,
+) -> Result<[u8; 32], RuntimeError> {
+    correlation(
+        b"meguri-selected-original-exchange-v1",
+        &(binding, file, owner, exchange, source),
+    )
+}

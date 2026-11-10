@@ -923,6 +923,16 @@ pub struct CloudPolicyCommand {
 }
 #[cfg(any(test, feature = "test-hooks"))]
 impl CloudPolicyCommand {
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fn original_exchange_witness_inner(&self) -> Result<Vec<u8>, CoreError> {
+        self.owner.owns(self)?;
+        let collection = self.owner.collection()?;
+        self.owner
+            .driver()?
+            .original_exchange_witness_for_testing(&self.command, &collection)
+            .map(|v| v.to_vec())
+            .map_err(|_| failure(CloudPolicyFailure::StaleCommand))
+    }
     pub(crate) fn exchange_observation_for_testing(&self) -> Result<p::ExchangeObservation, CoreError> {
         self.owner.owns(self)?;
         self.owner.collection()?;

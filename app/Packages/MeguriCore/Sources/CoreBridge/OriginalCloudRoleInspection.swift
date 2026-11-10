@@ -36,11 +36,20 @@ public struct OriginalCloudEditFacts: Sendable {
     public let source: OpSource
     public let undoName: String?
     public let updatedNotes: UInt32
+    public let originalWitness: Data?
     internal init(_ r: MeguriCoreBindings.CloudOriginalEditFacts) {
         generation = r.generation; seq = r.seq; noteDigest = r.noteDigest
         localRevision = r.localRevision; source = OpSource(r.source)
-        undoName = r.undoName; updatedNotes = r.updatedNotes
+        undoName = r.undoName; updatedNotes = r.updatedNotes; originalWitness = r.originalWitness
     }
+}
+
+public struct HistoricalOriginalCloudEdit: Sendable {
+    public let generation: UInt64
+    public let originalGeneration: UInt64
+    public let originalSeq: UInt64
+    public let localRevision: UInt64
+    public let noteDigest: Data
 }
 
 // Native record correlation stays in process. Only the bounded canonical
@@ -106,6 +115,14 @@ public actor OriginalCloudRoleInspection: CustomStringConvertible, CustomDebugSt
         return try await QueryLane.shared.call(.cloudOriginalRoleValidateOwned) {
             let r = try raw.validateOwned()
             return OriginalCloudOwnedFacts(generation: r.generation, seq: r.seq, noteDigest: r.noteDigest, qChanged: r.qChanged)
+        }
+    }
+    public func readOriginalEdit(witness: Data) async throws -> HistoricalOriginalCloudEdit {
+        let raw = raw
+        return try await QueryLane.shared.call(.cloudOriginalRoleReadOriginalEdit) {
+            let r = try raw.readOriginalEdit(witness: witness)
+            return .init(generation: r.generation, originalGeneration: r.originalGeneration,
+                         originalSeq: r.originalSeq, localRevision: r.localRevision, noteDigest: r.noteDigest)
         }
     }
     public func observe() async throws -> OriginalCloudObservation {

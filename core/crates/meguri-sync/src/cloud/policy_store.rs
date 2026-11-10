@@ -85,6 +85,52 @@ impl TrackingStore {
             |r| r.get(0),
         )?)
     }
+    /// Exact owned original result, never the newest activity summary. Bound
+    /// candidate work and refuse overflow or ambiguity instead of guessing.
+    #[cfg(feature = "test-hooks")]
+    pub(super) fn selected_original_exchange(
+        &self,
+        binding: &Binding,
+        file: super::runtime::NativeFileIdentity,
+        exchange: u64,
+        witness: [u8; 32],
+    ) -> Result<Option<ExchangeRecord>, Error> {
+        if self.binding(binding.id)?.as_ref() != Some(binding) || exchange == 0 {
+            return Err(Error::RecoveryRefused);
+        }
+        let mut q = self.connection.prepare(
+            "SELECT owner,content FROM cloud_policy_exchanges WHERE binding=?1 AND exchange=?2 ORDER BY owner LIMIT 65",
+        )?;
+        let rows = q
+            .query_map(
+                params![binding.id.0.as_slice(), super::runtime_store::checked(exchange)?],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+        if rows.len() > 64 {
+            return Err(Error::RecoveryRefused);
+        }
+        let mut found = None;
+        for (owner, content) in rows {
+            if owner.is_empty() || owner.len() > 1024 {
+                return Err(Error::InvalidData);
+            }
+            let record: ExchangeRecord = decode(&content)?;
+            if record.exchange != exchange {
+                return Err(Error::InvalidData);
+            }
+            let actual =
+                super::selected_observation::exchange_correlation(binding, file, &owner, exchange, record.source)
+                    .map_err(|_| Error::RecoveryRefused)?;
+            if actual == witness {
+                if found.is_some() {
+                    return Err(Error::RecoveryRefused);
+                }
+                found = Some(record);
+            }
+        }
+        Ok(found)
+    }
     pub(super) fn record_cloud_policy_exchange(
         &mut self,
         binding: BindingId,
@@ -285,5 +331,143 @@ mod tests {
         assert!(failed.is_err());
         assert_eq!(store.cloud_policy_evidence(binding.id).unwrap(), before);
         assert!(!store.policy_exchange_recorded(binding.id, "opening-1", 2).unwrap());
+    }
+    #[cfg(feature = "test-hooks")]
+    #[test]
+    fn exact_original_exchange_joins_binding_owner_and_all_optional_accounting() {
+        let root = tempfile::tempdir().unwrap();
+        let mut store = match TrackingStore::open(root.path(), scope()).unwrap() {
+            OpenOutcome::Missing(s) => s,
+            _ => panic!("new store"),
+        };
+        store.install_runtime().unwrap();
+        let facts = BindingFacts {
+            account: OpaqueBytes(vec![1]),
+            epoch: EpochId([2; 16]),
+            record_key: RecordKey([3; 32]),
+            publication: meguri_engine::device_state::PublicationId::from_bytes([4; 16]),
+            state: BindingState::Active,
+        };
+        let binding = store
+            .create_binding(
+                facts.clone(),
+                &FixedClock::new(1000, UtcOffset::UTC),
+                &SeededRandom::new(997),
+            )
+            .unwrap();
+        let file = super::super::runtime::NativeFileIdentity {
+            device: 1,
+            inode: 2,
+            created_seconds: 3,
+            created_nanos: 4,
+        };
+        let media = MediaFacts {
+            upload_files: Some(0),
+            upload_bytes: Some(17),
+            download_files: None,
+            download_bytes: Some(19),
+            unknown_blobs: Some(2),
+            missing_names: Some(3),
+            uploads_running: Some(1),
+            downloads_running: Some(0),
+            root_acked: Some(false),
+            zone_missing: Some(true),
+            no_space: None,
+            remaining_download_ms: Some(21),
+        };
+        let original = ExchangeRecord {
+            exchange: 1,
+            ended_ms: 2000,
+            source: Source::Key,
+            outcome: ExchangeOutcome::Succeeded {
+                selected: 11,
+                held_back: 12,
+                newer_pending: 13,
+                incoming_waiting: 14,
+                media,
+            },
+        };
+        let other = ExchangeRecord {
+            ended_ms: 3000,
+            outcome: ExchangeOutcome::Cancelled,
+            ..original.clone()
+        };
+        store
+            .record_cloud_policy_exchange(binding.id, "owner-original", &original)
+            .unwrap();
+        store
+            .record_cloud_policy_exchange(binding.id, "owner-other", &other)
+            .unwrap();
+        let newer = ExchangeRecord {
+            exchange: 2,
+            ended_ms: 4000,
+            ..original.clone()
+        };
+        store
+            .record_cloud_policy_exchange(binding.id, "owner-original", &newer)
+            .unwrap();
+        assert_eq!(
+            store.cloud_policy_evidence(binding.id).unwrap().last_completed,
+            Some(newer)
+        );
+        let witness =
+            super::super::selected_observation::exchange_correlation(&binding, file, "owner-original", 1, Source::Key)
+                .unwrap();
+        assert_eq!(
+            store.selected_original_exchange(&binding, file, 1, witness).unwrap(),
+            Some(original.clone())
+        );
+        let failed =
+            super::super::selected_observation::exchange_correlation(&binding, file, "owner-other", 1, Source::Key)
+                .unwrap();
+        assert_eq!(
+            store.selected_original_exchange(&binding, file, 1, failed).unwrap(),
+            Some(other)
+        );
+        assert_eq!(
+            store.selected_original_exchange(&binding, file, 1, [0; 32]).unwrap(),
+            None
+        );
+        assert_eq!(
+            store.selected_original_exchange(&binding, file, 3, witness).unwrap(),
+            None
+        );
+        let mut changed_file = file;
+        changed_file.inode += 1;
+        assert_eq!(
+            store
+                .selected_original_exchange(&binding, changed_file, 1, witness)
+                .unwrap(),
+            None
+        );
+        let second = store
+            .create_binding(
+                BindingFacts {
+                    state: BindingState::Isolated(IsolationReason::Stopped),
+                    ..facts
+                },
+                &FixedClock::new(1000, UtcOffset::UTC),
+                &SeededRandom::new(998),
+            )
+            .unwrap();
+        store
+            .record_cloud_policy_exchange(second.id, "owner-original", &original)
+            .unwrap();
+        assert_eq!(
+            store.selected_original_exchange(&second, file, 1, witness).unwrap(),
+            None
+        );
+        // Lost row is indeterminate even while the completed summary survives.
+        store
+            .connection
+            .execute(
+                "DELETE FROM cloud_policy_exchanges WHERE binding=?1 AND owner='owner-original' AND exchange=1",
+                [binding.id.0.as_slice()],
+            )
+            .unwrap();
+        assert_eq!(
+            store.selected_original_exchange(&binding, file, 1, witness).unwrap(),
+            None
+        );
     }
 }

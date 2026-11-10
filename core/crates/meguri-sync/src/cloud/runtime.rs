@@ -520,6 +520,8 @@ struct State {
     #[cfg(feature = "test-hooks")]
     selected_publication: Option<selected_observation::AcceptedPublication>,
     #[cfg(feature = "test-hooks")]
+    selected_reopen_note: Option<selected_observation::ReopenNote>,
+    #[cfg(feature = "test-hooks")]
     last_capture_body_reads: usize,
     #[cfg(feature = "test-hooks")]
     fail_capture_after: Option<usize>,
@@ -887,6 +889,10 @@ impl Runtime {
             state.cloud.handed_images.clear();
         }
         state.bound = None;
+        #[cfg(feature = "test-hooks")]
+        {
+            state.selected_reopen_note = None;
+        }
         state.publish_authority();
         state.scan_required = true;
         state.scan_running = false;
@@ -982,6 +988,22 @@ impl Runtime {
                     binding = store.binding(binding.id)?.ok_or(Error::BindingNotFound)?;
                 }
             }
+            // A bounded test observation of the original owned row, before open
+            // increments the counter and ordinary reconciliation replaces its tuple.
+            // Never writes the historical fields back to tracking.
+            #[cfg(feature = "test-hooks")]
+            let selected_reopen_note = if binding.facts.state == BindingState::Active && previous.file == Some(file) {
+                store
+                    .selected_reopen_note(binding.id)?
+                    .map(|entity| selected_observation::ReopenNote {
+                        binding: binding.clone(),
+                        file,
+                        open: previous.open_counter,
+                        entity,
+                    })
+            } else {
+                None
+            };
             // Record the complete pair only after selection; mismatches retain evidence.
             let durable = if binding.facts.state == BindingState::Active {
                 store.open_runtime_binding(binding.id, file, durable_file)?
@@ -1045,6 +1067,10 @@ impl Runtime {
                     .and_then(|op| (op.step != super::publication::PublishStep::Confirmed).then_some(op.step)),
             });
             state.media = super::media::Process::default();
+            #[cfg(feature = "test-hooks")]
+            {
+                state.selected_reopen_note = selected_reopen_note;
+            }
             state.bound = Some(Bound {
                 binding,
                 evidence,

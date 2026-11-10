@@ -116,6 +116,16 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
             s.append(.applied, "required-scan-before-native-sdk")
         }
     }
+    // A new opening starts an empty ledger. Only its actual SDK admission is
+    // added here; original journal callbacks/commits/ticks are never imported.
+    func admitRestoredSDK(origin: String, control: RestoredCloudControlObservation) throws {
+        try state.withLock { s in
+            guard !s.failed, s.generation == control.generation, control.requiredScanComplete,
+                  s.sdkAdmissions[origin] == nil, s.adoptingFrom == nil else { throw AgentFailure.execution }
+            s.sdkAdmissions[origin] = control.generation
+            s.append(.applied, "required-scan-before-native-sdk")
+        }
+    }
     func requireSelectedAdmission(current: SmokeCloudObservation, control: SelectedCloudControlObservation) throws {
         try state.withLock { s in
             guard !s.failed, s.adoptingFrom == nil, control.requiredScanComplete,

@@ -116,6 +116,7 @@ pub struct CloudOriginalEditFacts {
     pub source: crate::changes::OpSource,
     pub undo_name: Option<String>,
     pub updated_notes: u32,
+    pub original_witness: Option<Vec<u8>>,
 }
 #[derive(uniffi::Object)]
 pub struct CloudOriginalEditResult {
@@ -707,6 +708,30 @@ impl CloudOriginalRole {
                     source: summary.changes.source,
                     undo_name: summary.undo_name,
                     updated_notes: summary.changes.notes.len() as u32,
+                    original_witness: if let Some(core) = retained.cloud_runtime() {
+                        if local_revision.is_some() {
+                            Some(
+                                checked(
+                                    core.original_edit_witness_for_testing(
+                                        &collection,
+                                        self.baseline.note.id,
+                                        self.facts
+                                            .baseline_digest
+                                            .as_slice()
+                                            .try_into()
+                                            .map_err(|_| invalid())?,
+                                        seq,
+                                        digest,
+                                    ),
+                                )?
+                                .to_vec(),
+                            )
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    },
                 };
                 self.edit.lock().unwrap_or_else(PoisonError::into_inner).facts = Some(facts.clone());
                 Ok(facts)
@@ -716,6 +741,101 @@ impl CloudOriginalRole {
         Ok(CloudOriginalEditJob {
             handle: crate::jobs::wrap(handle),
             result: Arc::new(CloudOriginalEditResult { cell }),
+        })
+    }
+}
+
+// This carries historical fields explicitly; never construct CloudOriginalEditFacts
+// with the new generation or claim that the new process executed Update Note.
+#[derive(Clone, uniffi::Record)]
+pub struct CloudHistoricalOriginalEdit {
+    pub generation: u64,
+    pub original_generation: u64,
+    pub original_seq: u64,
+    pub local_revision: u64,
+    pub note_digest: Vec<u8>,
+}
+impl CloudOriginalRole {
+    pub(crate) fn read_original_edit_inner(&self, witness: Vec<u8>) -> Result<CloudHistoricalOriginalEdit, CoreError> {
+        let witness = witness.as_slice().try_into().map_err(|_| invalid())?;
+        let host = runtime::host()?;
+        let collection = host.cloud_connection_collection()?;
+        let generation = collection.generation();
+        // Re-establish this newly prepared baseline's current owned mapping.
+        let owned = self.validate_owned_inner()?;
+        if owned.generation != generation.0 || !owned.q_changed {
+            return Err(invalid());
+        }
+        let core = host.cloud_runtime().ok_or_else(invalid)?;
+        let historical = checked(
+            core.read_original_edit_for_testing(
+                &collection,
+                self.baseline.note.id,
+                self.facts
+                    .baseline_digest
+                    .as_slice()
+                    .try_into()
+                    .map_err(|_| invalid())?,
+                witness,
+            ),
+        )?;
+        // Current durability is independently checked; this receipt is NOT the
+        // original operation's post-flush receipt.
+        let wait = std::time::Duration::from_secs(5);
+        collection.flush_wal(wait)?;
+        let reader = collection.reader(ReaderRole::Query)?;
+        let snapshot = reader.snapshot()?;
+        let current = capture(&*snapshot, NoteId(self.baseline.note.id))?;
+        let note = snapshot.note(NoteId(self.baseline.note.id))?.ok_or_else(invalid)?;
+        let digest = checked(c::Payload::Note(current.note.clone()).payload_digest())?;
+        let integrity = snapshot.smoke_integrity()?;
+        if !self.baseline.compare(&current)?
+            || note.usn.0 != -1
+            || digest != historical.digest
+            || !integrity.integrity_ok
+            || !integrity.schema_ok
+            || integrity.missing_card_notes != 0
+            || integrity.missing_card_decks != 0
+            || integrity.missing_note_types != 0
+            || integrity.missing_field_types != 0
+            || integrity.wrong_field_counts != 0
+        {
+            return Err(invalid());
+        }
+        match collection.wait_wal_covered(snapshot.wal_identity(), snapshot.seq(), wait)? {
+            meguri_engine::WalCoverage::Covered(r)
+                if r.identity() == snapshot.wal_identity() && r.through() >= snapshot.seq() => {}
+            _ => return Err(invalid()),
+        }
+        let reread = checked(
+            core.read_original_edit_for_testing(
+                &collection,
+                self.baseline.note.id,
+                self.facts
+                    .baseline_digest
+                    .as_slice()
+                    .try_into()
+                    .map_err(|_| invalid())?,
+                witness,
+            ),
+        )?;
+        if reread.digest != digest
+            || reread.original_seq != historical.original_seq
+            || reread.original_generation != historical.original_generation
+            || reread.local_revision != historical.local_revision
+            || !Arc::ptr_eq(&runtime::host()?, &host)
+            || !collection.is_current()
+            || collection.last_seq() != snapshot.seq()
+            || snapshot.generation() != generation
+        {
+            return Err(invalid());
+        }
+        Ok(CloudHistoricalOriginalEdit {
+            generation: generation.0,
+            original_generation: historical.original_generation,
+            original_seq: historical.original_seq,
+            local_revision: historical.local_revision,
+            note_digest: digest.to_vec(),
         })
     }
 }

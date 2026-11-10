@@ -292,6 +292,42 @@ import Testing
         }
     }
 
+    // Protocol stop/no-successor check using the runtime's actual missing-ACK
+    // admission rule. Synthetic receipts here do not prove an exchange or ACK.
+    @Test func macExchangeRecoveryRefusalNeverCompletesOrStartsClose() async throws {
+        let fixture = try SelectedFixture(failDone: 5); defer { fixture.remove() }
+        let bytes = try Self.header()
+        let original = try SelectedProtocolRuntime(fixture: fixture, header: bytes)
+        let first = try AgentEngine(storage: fixture.storage, runtime: original, instance: "old")
+        var retained = Data()
+        for count in 1...4 {
+            retained = try await first.deliver(header: bytes, commands: Self.prefix(count, header: bytes), retainedJournal: retained)
+        }
+        let commands = try Self.prefix(5, header: bytes, recovery: "sync_now.exchange")
+        await #expect(throws: AgentFailure.storage) {
+            try await first.deliver(header: bytes, commands: commands, retainedJournal: retained)
+        }
+        let fresh = try SelectedProtocolRuntime(fixture: fixture, header: bytes)
+        let restart = try AgentEngine(storage: AgentFileStorage(directory: fixture.root), runtime: fresh, instance: "new")
+        let result = try await restart.deliver(header: bytes, commands: commands, retainedJournal: retained)
+        let records = try fixture.records()
+        let terminal = try #require(records.last { $0.kind == .done || $0.kind == .failed })
+        #expect(terminal.kind == .failed && terminal.failure == .implementationMissing)
+        let joined = try #require(records.last {
+            $0.kind == .observation && $0.command_seq == terminal.command_seq
+                && $0.agent_instance == "new" && $0.facts.contains { $0.name == .ownedWorkJoined }
+        })
+        #expect(joined.record_seq > terminal.record_seq)
+        #expect(!records.contains { $0.command_seq == 5 && $0.kind == .done || $0.command_seq == 6 })
+        #expect(!records.contains { $0.agent_instance == "new" && !$0.checks.isEmpty })
+        #expect(fresh.executions == 0 && fresh.recoveries == 1 && fresh.joins == 1)
+        let successor = commands + (try Self.command(header: bytes, sequence: 6, action: "close", arguments: [:]))
+        await #expect(throws: AgentFailure.sequence) {
+            try await restart.deliver(header: bytes, commands: successor, retainedJournal: result)
+        }
+        #expect(fresh.executions == 0)
+    }
+
     @Test func completedJournalWithoutIndependentProgressNeverAuthorizesSuccessor() async throws {
         let fixture = try SelectedFixture(); defer { fixture.remove() }
         let bytes = try Self.header()
@@ -381,6 +417,9 @@ private nonisolated struct SelectedProtocolReceipt: Codable {
         recoveries += 1
         guard restored, started.command_sha256 == (try digest(command.command_seq)) else { throw AgentFailure.binding }
         _ = try requireOriginal(command, in: receipts())
+        if command.action == .syncNow {
+            try AgentSelectedRestoration.requireExchangeRecovery(AgentHeader.read(headerBytes).program)
+        }
         let fact = AgentFact(name: .recoveryCommitted, count: UInt64(command.command_seq))
         try observe(fact)
         return checks(command) + [.init(name: .recovery, outcome: .pass, facts: [fact]),

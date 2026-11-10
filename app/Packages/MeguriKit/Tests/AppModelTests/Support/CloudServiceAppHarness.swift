@@ -239,6 +239,9 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
         let start = serviceAppUptimeMilliseconds()
         let label = actionLabel(command.action)
         trace("command.begin ordinal=\(sequence) action=\(label) elapsed_ms=0")
+        if case .configureAutomatic(let requested) = command.action {
+            trace("command.configureAutomatic ordinal=\(sequence) requested=\(requested)")
+        }
         if case .retryAssetEntries = command.action { assetRetryStarted += 1 }
         await beforeExecution?(command)
         #if DEBUG
@@ -385,6 +388,8 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String) as
     private(set) var backends: [ServiceAppBackend] = []
     var observeOwn: (@Sendable (CloudOwnObservation) -> Void)?
     var ownTransport: (any CloudOwnTransport)?
+    // Test-owned admission before a new native backend can resume work.
+    var beforeBackend: (@MainActor () async throws -> Void)?
     lazy var sync = makeSync()
 
     private func makeSync() -> SyncCoordinator {
@@ -402,6 +407,7 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String) as
             }.joined(separator: " | ")
             try #require(allBackendsClosed,
                 "Service app backend close: count=\(backends.count); first 16=[\(closeDiagnostics)]")
+            try await beforeBackend?()
             let backend = try await ServiceAppBackend.make(wire: wire, factory: factory, persisted: persisted, observeOwn: observeOwn, ownTransport: ownTransport)
             backends.append(backend)
             return backend

@@ -364,6 +364,39 @@ impl Driver {
             active_id,
         })
     }
+    #[cfg(feature = "test-hooks")]
+    pub fn original_exchange_witness_for_testing(
+        &self,
+        command: &Command,
+        collection: &Collection,
+    ) -> Result<[u8; 32], DriverError> {
+        self.validate_original_exchange_issuance(command)?;
+        let ActionKind::RunExchange { exchange, source } = command.action.kind else {
+            return Err(DriverError::NotCoreAction);
+        };
+        let witness =
+            self.runtime
+                .original_exchange_witness_for_testing(collection, &command.owner, exchange, source)?;
+        self.validate_original_exchange_issuance(command)?;
+        Ok(witness)
+    }
+    #[cfg(feature = "test-hooks")]
+    fn validate_original_exchange_issuance(&self, command: &Command) -> Result<(), DriverError> {
+        let owned = self.lock_owned();
+        // This includes the original opening and private Runtime guard. The
+        // ordinary command guard alone intentionally survives result recording.
+        self.validate_locked(&owned, command)?;
+        let ActionKind::RunExchange { exchange, source } = command.action.kind else {
+            return Err(DriverError::NotCoreAction);
+        };
+        if !owned.state.exchange.as_ref().is_some_and(|active| {
+            active.id == exchange && active.source == source && active.guard == command.action.guard
+        }) || owned.captures.contains_key(&exchange)
+        {
+            return Err(DriverError::StaleCommand);
+        }
+        Ok(())
+    }
     pub fn new(runtime: Arc<Runtime>, clock: Arc<dyn Clock>) -> Self {
         Self {
             runtime,

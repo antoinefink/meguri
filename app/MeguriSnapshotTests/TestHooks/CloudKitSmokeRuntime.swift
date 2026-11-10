@@ -53,6 +53,8 @@ import Foundation
     private var program: AgentProgram?
     private var originalRole: CloudKitSelectedOriginalRole?
     private var selectedEdit: OriginalCloudEditFacts?
+    private var restoredEdit: HistoricalOriginalCloudEdit?
+    private var restoration: AgentSelectedRestoration?
     private var selectedExchangeAttempted = false
     private var selectedExchangeRecord: CloudPolicyExchangeRecord?
     // Set only after the earlier command's actual source ACK or peer durable
@@ -165,106 +167,7 @@ import Foundation
         }
         switch command.action {
         case .launch:
-            guard owner == nil, let configuration = CloudBuildConfiguration.fromBundle, configuration.schemaConfigured else { throw AgentFailure.execution }
-            try requireVerifiedGeneratedBase()
-            if program != .smoke {
-                originalRole = try await CloudKitSelectedOriginalRole.prepare(base:
-                    AgentGeneratedBase(admittedRunDirectory: directory, originalHeaderBytes: originalHeaderBytes))
-                _ = try retainedAdmission()
-            }
-            // The host must install an authenticated generated small base in
-            // this run's data directory. Never substitute a user's collection.
-            let data = directory.appendingPathComponent("data", isDirectory: true)
-            guard FileManager.default.fileExists(atPath: data.appendingPathComponent("collection.anki2").path) else { throw AgentFailure.execution }
-            let sync = SyncCoordinator(bootstrap: {
-                try await CoreCloudWorkflowService.configurePlatform(container: configuration.container,
-                    environment: configuration.environment, status: .couldNotDetermine, identity: nil)
-            }, makeBackend: { [self] persisted in
-                let admission = try retainedAdmission()
-                let container = CKContainer(identifier: configuration.container)
-                let database = container.privateCloudDatabase
-                // Both the app account reader and adapter use this factory.
-                // Its fresh result matches the frozen input before Core accepts
-                // identity; J2.2 preserves automatic SDK scheduling.
-                let nativeFactory = NativeCloudKitEngineFactory(database: database, accountResolver: { [self] in
-                    try await resolveAccount(container: container)
-                })
-                let stagingRoot = data.appendingPathComponent("cloud-native-staging", isDirectory: true)
-                try admission.revalidate()
-                try FileManager.default.createDirectory(at: stagingRoot, withIntermediateDirectories: true,
-                                                        attributes: [.posixPermissions: 0o700])
-                let staging = try CloudMediaStaging(directory: stagingRoot)
-                let ownTransport = try NativeCloudOwnTransport(database: database, staging: staging)
-                let mediaTransport = try NativeCloudMediaTransport(database: database, staging: staging)
-                try admission.revalidate()
-                let workflow = CoreCloudWorkflowService()
-                let factory: any CloudKitEngineFactory
-                if program == .smoke { factory = nativeFactory }
-                else {
-                    factory = CloudKitSelectedSDKFactory(original: nativeFactory, beforeMake: { [self] configuration in
-                        _ = try retainedAdmission()
-                        let control = try await SelectedCloudControlInspection().current()
-                        let observations = try await workflow.observations()
-                        let kinds = Set(observations.compactMap { observation -> UInt8? in
-                            if case .reconcileKindCompleted(let kind, _) = observation { return kind }; return nil
-                        })
-                        guard kinds == Set(UInt8(1)...UInt8(9)), control.requiredScanComplete else { throw AgentFailure.execution }
-                        if program == .syncNowPhone {
-                            guard let originalRole else { throw AgentFailure.implementationMissing }
-                            let role = try await originalRole.validateOwned(generation: control.generation)
-                            guard !role.qChanged else { throw AgentFailure.execution }
-                        }
-                        _ = try retainedAdmission()
-                        let replacement = changes.events.last { event in
-                            if case .collectionReplaced = event.kind { return event.generation == control.generation }; return false
-                        }
-                        try evidence.admitSDK(origin: configuration.instanceID, control: control, replacement: replacement)
-                    }, failed: { [evidence] in evidence.fail() })
-                }
-                let production = try await NativeCollectionCloudBackend.make(workflow: workflow,
-                    factory: factory, ownTransport: ownTransport, mediaTransport: mediaTransport, persisted: persisted,
-                    observeEvent: { [evidence] event in
-                        evidence.sdk(event)
-                        do {
-                            let current = try await CoreSmokeInspection().cloud()
-                            evidence.validate(origin: event.origin, current: current)
-                        } catch { evidence.fail() }
-                    }, observeBatch: { [evidence] origin, zone, batch in
-                        do {
-                            let inspection = CoreSmokeInspection()
-                            let proof = zone == "meguri-media" ? nil : try await inspection.batch(sdk: origin, id: batch.id)
-                            let current = try await inspection.cloud()
-                            evidence.batch(origin: origin, batch: batch, proof: proof, current: current)
-                        } catch { evidence.fail() }
-                    }, observeOwn: { [evidence] in evidence.own($0) })
-                try admission.revalidate()
-                let wrapper = CloudKitSmokeBackend(production: production, workflow: workflow)
-                backend = wrapper
-                return wrapper
-            }, defaults: nil, clock: .system, directory: data, observeSignals: false)
-            var launch = LaunchConfiguration()
-            launch.collectionLocation = AppModel.CollectionLocation(directory: data)
-            let collection = ReviewCollection(configuration: launch, navigation: AppNavigation(), sync: sync)
-            owner = collection
-            _ = try retainedAdmission()
-            try await ChangeFanout.shared.subscribe(changes)
-            await collection.start()
-            _ = try retainedAdmission()
-            await sync.prepareConnectionAuthority()
-            guard collection.state == .ready, !sync.operationFailed, let backend else { throw AgentFailure.execution }
-            let local = try await inspection.cloud()
-            guard local.publicationID == nil, !local.bindingUsable, local.engine == nil else { throw AgentFailure.execution }
-            try evidence.setGeneration(collection.generation, selectedPublication: program != .smoke)
-            try await resolveGeneratedRoles(collection)
-            if program != .smoke {
-                guard let originalRole else { throw AgentFailure.implementationMissing }
-                let role = try await originalRole.validateOwned(generation: collection.generation)
-                _ = try retainedAdmission()
-                guard !role.qChanged else { throw AgentFailure.execution }
-            }
-            try observe(.init(name: .coreOpened, count: collection.generation))
-            try backend.checkFailure()
-            return [try await integrityCheck(collection)]
+            return try await openRuntime(restoration: nil, observe: observe)
         case .connect:
             guard let owner, preview == nil, owner.review == nil else { throw AgentFailure.execution }
             try await owner.prepareCloudConnectionPreview()
@@ -306,7 +209,8 @@ import Foundation
                 _ = try retainedAdmission()
                 try evidence.requireSelectedPublication(control)
                 try evidence.requireSelectedAdmission(current: completed, control: control)
-                let facts = try CloudKitSelectedSyncProof.controlFacts(control, generation: owner.generation)
+                var facts = try CloudKitSelectedSyncProof.controlFacts(control, generation: owner.generation)
+                facts.append(try await originalControlFact(control))
                 for fact in facts { try observe(fact) }
                 return [.init(name: .coordinatorResult, outcome: .pass, facts: [fact] + facts)]
             }
@@ -354,6 +258,7 @@ import Foundation
                   control.ownedBackup == .proven else { throw AgentFailure.execution }
             try evidence.requireSelectedAdmission(current: completed, control: control)
             var facts = try CloudKitSelectedSyncProof.controlFacts(control, generation: owner.generation)
+            facts.append(try await originalControlFact(control))
             facts.append(.init(name: .applied, count: owner.generation, operation: "owned-adoption-backup-activation"))
             facts.append(.init(name: .localDurable, digest: CloudKitSmokeGeneratedInput.hex(role.noteDigest), operation: "original-n1-preserved"))
             for fact in facts { try observe(fact) }
@@ -543,7 +448,7 @@ import Foundation
                     .init(name: .localDurability, outcome: .pass, facts: [joined])]
         case .edit:
             guard program == .syncNowMac, let owner, let originalRole,
-                  owner.review == nil, selectedEdit == nil else { throw AgentFailure.execution }
+                  owner.review == nil, selectedEdit == nil, restoredEdit == nil else { throw AgentFailure.execution }
             _ = try retainedAdmission()
             let edited = try await originalRole.fixedEdit(generation: owner.generation)
             _ = try retainedAdmission()
@@ -551,8 +456,11 @@ import Foundation
                   let revision = edited.localRevision, revision > 0 else { throw AgentFailure.execution }
             selectedEdit = edited
             let digest = CloudKitSmokeGeneratedInput.hex(edited.noteDigest)
+            guard let witness = edited.originalWitness, witness.count == 32 else { throw AgentFailure.recovery }
             let facts = [AgentFact(name: .localCommitted, count: edited.seq, digest: digest, operation: "n1"),
-                         AgentFact(name: .localDurable, count: revision, digest: digest, operation: "n1")]
+                         AgentFact(name: .localDurable, count: revision, digest: digest, operation: "n1"),
+                         AgentFact(name: .localDurable, count: edited.generation,
+                            digest: CloudKitSmokeGeneratedInput.hex(witness), operation: "original-edit-witness")]
             for fact in facts { try observe(fact) }
             return [.init(name: .localDurability, outcome: .pass, facts: facts)]
         case .observe:
@@ -575,8 +483,132 @@ import Foundation
             return [.init(name: .localDurability, outcome: .pass, facts: facts)]
         }
     }
-    private func originalExchange(owner: ReviewCollection, backend: CloudKitSmokeBackend) async throws -> CloudPolicyExchangeRecord {
+    private func openRuntime(restoration: AgentSelectedRestoration?, observe: @escaping (AgentFact) throws -> Void) async throws -> [AgentCheck] {
+        guard owner == nil, let configuration = CloudBuildConfiguration.fromBundle, configuration.schemaConfigured else { throw AgentFailure.execution }
+        if restoration == nil { try requireVerifiedGeneratedBase() }
+        if program != .smoke {
+            originalRole = try await CloudKitSelectedOriginalRole.prepare(base:
+                AgentGeneratedBase(admittedRunDirectory: directory, originalHeaderBytes: originalHeaderBytes))
+            _ = try retainedAdmission()
+        }
+        // The host must install an authenticated generated small base in
+        // this run's data directory. Never substitute a user's collection.
+        let data = directory.appendingPathComponent("data", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: data.appendingPathComponent("collection.anki2").path) else { throw AgentFailure.execution }
+        let reopenAccount: CloudResolvedAccount?
+        if restoration != nil {
+            reopenAccount = try await resolveAccount(container: CKContainer(identifier: configuration.container))
+        } else { reopenAccount = nil }
+        let sync = SyncCoordinator(bootstrap: {
+            try await CoreCloudWorkflowService.configurePlatform(container: configuration.container,
+                environment: configuration.environment, status: reopenAccount?.status ?? .couldNotDetermine, identity: reopenAccount?.identity)
+        }, makeBackend: { [self] persisted in
+            let admission = try retainedAdmission()
+            let container = CKContainer(identifier: configuration.container)
+            let database = container.privateCloudDatabase
+            // Both the app account reader and adapter use this factory.
+            // Its fresh result matches the frozen input before Core accepts
+            // identity; J2.2 preserves automatic SDK scheduling.
+            let nativeFactory = NativeCloudKitEngineFactory(database: database, accountResolver: { [self] in
+                try await resolveAccount(container: container)
+            })
+            let stagingRoot = data.appendingPathComponent("cloud-native-staging", isDirectory: true)
+            try admission.revalidate()
+            try FileManager.default.createDirectory(at: stagingRoot, withIntermediateDirectories: true,
+                                                    attributes: [.posixPermissions: 0o700])
+            let staging = try CloudMediaStaging(directory: stagingRoot)
+            let ownTransport = try NativeCloudOwnTransport(database: database, staging: staging)
+            let mediaTransport = try NativeCloudMediaTransport(database: database, staging: staging)
+            try admission.revalidate()
+            let workflow = CoreCloudWorkflowService()
+            if restoration != nil {
+                _ = try await validateRestoredProgress(requireScan: false)
+                try evidence.setGeneration((try await inspection.integrity()).generation, selectedPublication: true)
+                try await workflow.prepareRuntimeBeforePolicy()
+                _ = try await validateRestoredProgress(requireScan: true)
+            }
+            let factory: any CloudKitEngineFactory
+            if program == .smoke { factory = nativeFactory }
+            else {
+                factory = CloudKitSelectedSDKFactory(original: nativeFactory, beforeMake: { [self] configuration in
+                    _ = try retainedAdmission()
+                    if restoration != nil {
+                        let control = try await validateRestoredProgress(requireScan: true)
+                        try evidence.admitRestoredSDK(origin: configuration.instanceID, control: control)
+                        return
+                    }
+                    let control = try await SelectedCloudControlInspection().current()
+                    let observations = try await workflow.observations()
+                    let kinds = Set(observations.compactMap { observation -> UInt8? in
+                        if case .reconcileKindCompleted(let kind, _) = observation { return kind }; return nil
+                    })
+                    guard kinds == Set(UInt8(1)...UInt8(9)), control.requiredScanComplete else { throw AgentFailure.execution }
+                    if program == .syncNowPhone {
+                        guard let originalRole else { throw AgentFailure.implementationMissing }
+                        let role = try await originalRole.validateOwned(generation: control.generation)
+                        if restoration == nil { guard !role.qChanged else { throw AgentFailure.execution } }
+                    }
+                    _ = try retainedAdmission()
+                    let replacement = changes.events.last { event in
+                        if case .collectionReplaced = event.kind { return event.generation == control.generation }; return false
+                    }
+                    try evidence.admitSDK(origin: configuration.instanceID, control: control, replacement: replacement)
+                }, failed: { [evidence] in evidence.fail() })
+            }
+            let production = try await NativeCollectionCloudBackend.make(workflow: workflow,
+                factory: factory, ownTransport: ownTransport, mediaTransport: mediaTransport, persisted: persisted,
+                observeEvent: { [evidence] event in
+                    evidence.sdk(event)
+                    do {
+                        let current = try await CoreSmokeInspection().cloud()
+                        evidence.validate(origin: event.origin, current: current)
+                    } catch { evidence.fail() }
+                }, observeBatch: { [evidence] origin, zone, batch in
+                    do {
+                        let inspection = CoreSmokeInspection()
+                        let proof = zone == "meguri-media" ? nil : try await inspection.batch(sdk: origin, id: batch.id)
+                        let current = try await inspection.cloud()
+                        evidence.batch(origin: origin, batch: batch, proof: proof, current: current)
+                    } catch { evidence.fail() }
+                }, observeOwn: { [evidence] in evidence.own($0) })
+            try admission.revalidate()
+            let wrapper = CloudKitSmokeBackend(production: production, workflow: workflow)
+            backend = wrapper
+            return wrapper
+        }, defaults: nil, clock: .system, directory: data, observeSignals: false)
+        var launch = LaunchConfiguration()
+        launch.collectionLocation = AppModel.CollectionLocation(directory: data)
+        let collection = ReviewCollection(configuration: launch, navigation: AppNavigation(), sync: sync)
+        owner = collection
+        _ = try retainedAdmission()
+        try await ChangeFanout.shared.subscribe(changes)
+        await collection.start()
+        _ = try retainedAdmission()
+        await sync.prepareConnectionAuthority()
+        guard collection.state == .ready, !sync.operationFailed, let backend else { throw AgentFailure.execution }
+        let local = try await inspection.cloud()
+        if restoration == nil {
+            guard local.publicationID == nil, !local.bindingUsable, local.engine == nil else { throw AgentFailure.execution }
+            try evidence.setGeneration(collection.generation, selectedPublication: program != .smoke)
+        } else {
+            _ = try await validateRestoredProgress(requireScan: true)
+            guard local.publicationID == nil, local.bindingUsable else { throw AgentFailure.execution }
+        }
+        try await resolveGeneratedRoles(collection)
+        if program != .smoke {
+            guard let originalRole else { throw AgentFailure.implementationMissing }
+            let role = try await originalRole.validateOwned(generation: collection.generation)
+            _ = try retainedAdmission()
+            if restoration == nil { guard !role.qChanged else { throw AgentFailure.execution } }
+        }
+        if restoration == nil { try observe(.init(name: .coreOpened, count: collection.generation)) }
+        try backend.checkFailure()
+        return [try await integrityCheck(collection)]
+    }
+    private func originalExchange(owner: ReviewCollection, backend: CloudKitSmokeBackend, observe: ((AgentFact) throws -> Void)? = nil) async throws -> CloudPolicyExchangeRecord {
         guard owner.review == nil else { throw AgentFailure.execution }
+        defer { backend.observeOriginalIssuance = nil }
+        backend.observeOriginalIssuance = observe
         return try await AgentManualExchange.run(prepare: { try backend.prepareForSyncNow() },
             request: { owner.requestSyncNow() }, afterRequest: {
                 await owner.sync.waitForInputs()
@@ -590,25 +622,31 @@ import Foundation
         guard let owner, let backend, let originalRole, owner.review == nil,
               !selectedExchangeAttempted else { throw AgentFailure.execution }
         if program == .syncNowMac {
-            guard let selectedEdit else { throw AgentFailure.execution }
-            try CloudKitSelectedSyncProof.requireSource(
-                try await originalRole.observe(generation: owner.generation), edited: selectedEdit)
+            let current = try await originalRole.observe(generation: owner.generation)
+            if let restoredEdit { try CloudKitSelectedSyncProof.requireRestoredSource(current, edited: restoredEdit) }
+            else if let selectedEdit { try CloudKitSelectedSyncProof.requireSource(current, edited: selectedEdit) }
+            else { throw AgentFailure.execution }
         } else if program != .syncNowPhone { throw AgentFailure.execution }
         _ = try retainedAdmission()
         try Task.checkCancellation()
         let boundary = try evidence.acknowledgementBoundary()
         selectedExchangeAttempted = true
-        let exchange = try await originalExchange(owner: owner, backend: backend)
+        let exchange = try await originalExchange(owner: owner, backend: backend, observe: observe)
         selectedExchangeRecord = exchange
         var facts = try CloudKitSelectedSyncProof.exchangeFacts(exchange)
         if program == .syncNowMac {
-            guard let selectedEdit else { throw AgentFailure.execution }
+            guard selectedEdit != nil || restoredEdit != nil else { throw AgentFailure.execution }
             await owner.sync.drainOperations()
             await owner.sync.waitForInputs()
             guard !owner.sync.operationFailed else { throw AgentFailure.execution }
             let current = try await originalRole.observe(generation: owner.generation)
             _ = try retainedAdmission()
-            try CloudKitSelectedSyncProof.sourceAcknowledged(current, edited: selectedEdit)
+            if let restoredEdit {
+                try CloudKitSelectedSyncProof.requireRestoredSource(current, edited: restoredEdit)
+                guard current.entity.acknowledged, current.entity.ackedRevision == restoredEdit.localRevision,
+                      current.entity.ackedEnvelopeDigest.count == 32 else { throw AgentFailure.execution }
+            } else if let selectedEdit { try CloudKitSelectedSyncProof.sourceAcknowledged(current, edited: selectedEdit) }
+            else { throw AgentFailure.execution }
             facts += try evidence.requireSelectedAcknowledgement(current.entity,
                 observations: try await backend.workflow.observations(), attemptBoundary: boundary)
             facts.append(.init(name: .localDurable, count: current.entity.revision,
@@ -669,20 +707,80 @@ import Foundation
         guard values.isRegularFile == true, values.isSymbolicLink != true,
               try Data(contentsOf: path) == mediaBytes else { throw AgentFailure.execution }
     }
+    private func originalControlFact(_ control: SelectedCloudControlObservation) async throws -> AgentFact {
+        let original = try await SelectedCloudRestorationInspection().originalControlWitness()
+        guard original.generation == control.generation, original.activeSHA256 == control.activeSHA256,
+              original.epochSHA256 == control.epochSHA256, original.correlation.count == 32 else { throw AgentFailure.recovery }
+        return .init(name: .applied, count: original.generation,
+                     digest: CloudKitSmokeGeneratedInput.hex(original.correlation), operation: "original-control-witness")
+    }
+    private func validateRestoredProgress(requireScan: Bool) async throws -> RestoredCloudControlObservation {
+        _ = try retainedAdmission()
+        guard let restoration, let originalRole else { throw AgentFailure.recovery }
+        let control = try await SelectedCloudRestorationInspection().control(original: .init(
+            generation: restoration.originalGeneration, activeSHA256: try CloudKitSelectedRestoration.bytes(restoration.activeDigest),
+            epochSHA256: try CloudKitSelectedRestoration.bytes(restoration.epochDigest),
+            correlation: try CloudKitSelectedRestoration.bytes(restoration.controlWitness)))
+        guard !requireScan || control.requiredScanComplete else { throw AgentFailure.recovery }
+        let role = try await originalRole.validateOwned(generation: control.generation)
+        if let edit = restoration.edit {
+            let actual = try await originalRole.readOriginalEdit(witness: CloudKitSelectedRestoration.bytes(edit.witness), generation: control.generation)
+            guard actual.originalGeneration == edit.generation, actual.originalSeq == edit.seq,
+                  actual.localRevision == edit.revision,
+                  CloudKitSmokeGeneratedInput.hex(actual.noteDigest) == edit.digest else { throw AgentFailure.recovery }
+            restoredEdit = actual
+        } else if restoration.exchange == nil {
+            guard !role.qChanged else { throw AgentFailure.recovery }
+        }
+        if let exchange = restoration.exchange {
+            let record = try await SelectedCloudRestorationInspection().readOriginalExchange(exchange: exchange.exchange,
+                witness: CloudKitSelectedRestoration.bytes(exchange.witness))
+            // Exact unsuccessful results are observable but cannot recover success.
+            _ = try CloudKitSelectedSyncProof.exchangeFacts(record)
+            selectedExchangeAttempted = true; selectedExchangeRecord = record
+        }
+        _ = try retainedAdmission()
+        return control
+    }
     func recover(_ command: AgentCommand, started: AgentRecord, observe: @escaping (AgentFact) throws -> Void) async throws -> [AgentCheck] {
         _ = try retainedAdmission()
-        // No guessed reconstruction of an operation from a payload digest, and
-        // no reissued mutation. A durable receipt/row inspector is still needed.
-        throw AgentFailure.implementationMissing
+        guard let restoration, let pending = restoration.pending, let owner,
+              pending.record_seq == started.record_seq, pending.agent_instance == started.agent_instance,
+              pending.command_sha256 == started.command_sha256, command.command_seq == nextCommand,
+              command.action == restoration.state.commands[nextCommand - 1].action,
+              command.recovery_check == restoration.state.commands[nextCommand - 1].recovery_check else { throw AgentFailure.recovery }
+        _ = try await validateRestoredProgress(requireScan: true)
+        let facts: [AgentFact]
+        let result: AgentCheck
+        if command.action == .edit, command.recovery_check == "sync_now.edit", let edit = restoredEdit {
+            facts = [.init(name: .recoveryCommitted, count: edit.localRevision,
+                           digest: CloudKitSmokeGeneratedInput.hex(edit.noteDigest), operation: "n1")]
+            result = .init(name: .localDurability, outcome: .pass, facts: facts)
+        } else if command.action == .syncNow, command.recovery_check == "sync_now.exchange", let record = selectedExchangeRecord {
+            guard let program else { throw AgentFailure.recovery }
+            try AgentSelectedRestoration.requireExchangeRecovery(program)
+            facts = try CloudKitSelectedSyncProof.exchangeFacts(record)
+            result = .init(name: .coordinatorResult, outcome: .pass, facts: facts)
+        } else { throw AgentFailure.recovery }
+        for fact in facts { try observe(fact) }
+        let integrity = try await integrityCheck(owner)
+        // Recovery never imports the old SDK ledger or creates selectedCloseProof.
+        nextCommand += 1
+        return [result, integrity, .init(name: .recovery, outcome: .pass, facts: facts)]
     }
     func restore(_ state: AgentRestoration) async throws {
         _ = try retainedAdmission()
         guard try state.header.program == program, owner == nil else { throw AgentFailure.binding }
-        // No reinstall, publication, adoption or replay. Before opening Core
-        // (which can resume owned work), the missing durable operation inspector
-        // must prove the epoch and progress as well as revalidate the original role. Journal phase and
-        // payload equality cannot safely reconstruct those authorities.
-        throw AgentFailure.implementationMissing
+        let restored = try AgentSelectedRestoration(state)
+        restoration = restored
+        do {
+            _ = try await openRuntime(restoration: restored, observe: { _ in throw AgentFailure.recovery })
+            _ = try await validateRestoredProgress(requireScan: true)
+            nextCommand = restored.nextCommand
+        } catch {
+            try await cancelAndJoin()
+            throw error
+        }
     }
     func cancelAndJoin() async throws {
         guard let owner else { return }
@@ -705,6 +803,7 @@ import Foundation
     private let exchanges = AgentExchangeEvents<CloudPolicyExchangeRecord>()
     private let publications = AgentExchangeEvents<SmokeCloudObservation>()
     private var requestedExchange: UInt64?
+    var observeOriginalIssuance: ((AgentFact) throws -> Void)?
     init(production: NativeCollectionCloudBackend, workflow: CoreCloudWorkflowService) {
         self.production = production; self.workflow = workflow
     }
@@ -732,12 +831,19 @@ import Foundation
             // Observe only the original command issued for this input. Activity
             // records merged into the output cannot identify the requested work.
             if case .commands(let commands) = output {
-                let issued = commands.compactMap { command -> UInt64? in
-                    guard case .runExchange(let exchange, let issuedSource) = command.action,
-                          issuedSource == source else { return nil }
-                    return exchange
+                let issued = commands.filter { command in
+                    guard case .runExchange(_, let issuedSource) = command.action else { return false }
+                    return issuedSource == source
                 }
-                if issued.count == 1 { requestedExchange = issued[0] }
+                if issued.count == 1, case .runExchange(let exchange, _) = issued[0].action {
+                    if let observeOriginalIssuance {
+                        let witness = try await SelectedCloudRestorationInspection().originalExchangeWitness(command: issued[0])
+                        guard witness.count == 32 else { throw AgentFailure.recovery }
+                        try observeOriginalIssuance(.init(name: .syncResult, count: exchange,
+                            digest: CloudKitSmokeGeneratedInput.hex(witness), operation: "original-exchange-issued"))
+                    }
+                    requestedExchange = exchange
+                }
             }
         }
         return output
