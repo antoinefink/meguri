@@ -3,7 +3,7 @@
 Spec: servers/ankiconnect-envelope
 Requirements: R1734, R1735, R1736, R1737, R1738, R1739, R1740, R1741, R1742, R1743, R1744, R1745, R1746, R1747, R1748, R1749, R1750, R1751, R1752, R1753, R1775, R1779, R1780, R1781, R1790 (one action, one op), R1797; AE75, AE76, AE77; supports R1659, R1679, R1795
 Anki: 26.09.3
-Scenarios: none yet in `conformance/`. The transcript format is `servers/transcripts`; until its runner exists (U136), E19 lists every planned scenario as a request and reply table, to become `conformance/scenarios/servers/ankiconnect/{envelope,policy,multi}/`.
+Scenarios: none yet in `conformance/`. The transcript format is `servers/transcripts`; until its runner exists (U136), E19 lists every planned scenario as a request and reply table, to become `conformance/recordings/servers/ankiconnect/{envelope,policy,multi}/` (`servers/transcripts` T2; ids `servers/ankiconnect/<dir>/<name>`).
 
 What the AnkiConnect-compatible server on the AnkiConnect port (default 8765) does with one HTTP request before and after an action runs: the request and reply envelope, API versions, the ping, origin gating and CORS, the API key, `requestPermission`, `apiReflect`, `multi`, read-only mode, the collection wait, the action registry, the activity log and the connection snippet for agents.
 

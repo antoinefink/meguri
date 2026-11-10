@@ -3,7 +3,7 @@
 Spec: servers/ankiconnect-gui
 Requirements: R1754 (`sync`), R1782, R1783, R1784, R1785, R1786, R1787, R1788, R1733 (`searchNote` navigation); supports R1549, R1797
 Anki: 26.09.3
-Scenarios: none yet in `conformance/`. The transcript format is `servers/transcripts`; until its runner exists (U136), G12 lists the planned scenarios as request and reply tables, to become `conformance/scenarios/servers/ankiconnect/gui/` (reply shapes only).
+Scenarios: none yet in `conformance/`. The transcript format is `servers/transcripts`; until its runner exists (U136), G12 lists the planned scenarios as request and reply tables, to become `conformance/recordings/servers/ankiconnect/gui/` (`servers/transcripts` T2; ids `servers/ankiconnect/gui/<name>`; reply shapes only).
 
 The five GUI actions Meguri implements on its single-window Mac app (`guiBrowse`, `guiSelectCard`, `guiSelectedNotes`, `guiAddCards`, `guiEditNote`), the `sync` action, and the Browse navigation that the Migaku server's legacy `/create` `searchNote` command asks for. For each: parameters, the checks the core makes, the host interaction it raises, and the reply.
 

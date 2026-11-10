@@ -3,7 +3,7 @@
 Spec: servers/migaku-protocol
 Requirements: R1680, R1681, R1682, R1683, R1684, R1685, R1686, R1687, R1688, R1689, R1690; R1672 (extension connection state), R1678 (Migaku over-limit reply), R1679 (Migaku side), R1669 (Migaku trivial requests)
 Anki: 26.09.3
-Scenarios: none yet. The server transcript format is `servers/transcripts`, whose runner (U136) does not exist yet; P16 lists the planned scenarios of `conformance/scenarios/servers/migaku/endpoints/` as request and reply tables. Until U136 lands, U137 verifies P16's rows through its own Rust tests (`core/crates/meguri-servers/tests/migaku_endpoints.rs`), one test per row.
+Scenarios: none yet. The server transcript format is `servers/transcripts`, whose runner (U136) does not exist yet; P16 lists the planned scenarios of `conformance/recordings/servers/migaku/endpoints/` (`servers/transcripts` T2) as request and reply tables. Until U136 lands, U137 verifies P16's rows through its own Rust tests (`core/crates/meguri-servers/tests/migaku_endpoints.rs`), one test per row.
 
 The HTTP and WebSocket surface that Meguri's Mac app serves on port 44432 so that the Migaku browser extension can send cards to Meguri instead of the Migaku Anki add-on. It targets the extension versions 1.30 (build 1.30.16) and 1.31 (build 1.31.0.17, "Early Access"). The Migaku Anki add-on 0.6.6 is the compatibility reference for routes, reply shapes and headers; where Meguri differs on purpose, P15 says so. Anki itself has no part in this protocol: nothing here is observable through the `anki` oracle, and no deviation entry is needed.
 
@@ -259,7 +259,7 @@ No `conformance/deviations.yaml` entry is needed: there is no Migaku oracle (U13
 
 ## P16. Planned scenarios
 
-Each row is one scenario of `conformance/scenarios/servers/migaku/endpoints/`, to be written in the U136 transcript format once it exists. Unless a row says otherwise: the Migaku integration is on, the collection is Available, every request carries the default `Host` of `servers/transcripts` T6.2 (`127.0.0.1:<bound port>`: 44432 in the app, the ephemeral port in these scenarios, T20), and "CORS(x)" means P6's headers with `Access-Control-Allow-Origin: x` (and `Vary: Origin` when x is not `*`). `EXT` stands for `chrome-extension://abcdefghijklmnopabcdefghijklmnop` (an invented identifier of the Chrome form: 32 letters `a` to `p`).
+Each row is one scenario of `conformance/recordings/servers/migaku/endpoints/`, id `servers/migaku/endpoints/<row>`, to be written in the U136 transcript format once it exists. Unless a row says otherwise: the Migaku integration is on, the collection is Available, every request carries the default `Host` of `servers/transcripts` T6.2 (`127.0.0.1:<bound port>`: 44432 in the app, the ephemeral port in these scenarios, T20), and "CORS(x)" means P6's headers with `Access-Control-Allow-Origin: x` (and `Vary: Origin` when x is not `*`). `EXT` stands for `chrome-extension://abcdefghijklmnopabcdefghijklmnop` (an invented identifier of the Chrome form: 32 letters `a` to `p`).
 
 | Scenario | Request | Expected reply |
 |---|---|---|

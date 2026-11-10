@@ -3,7 +3,7 @@
 Spec: servers/ankiconnect-media
 Requirements: R1761, R1762, R1769, R1770, R1771, R1772, R1773; AE79 (core part); supports R1779, R1780, R1789, R1790
 Anki: 26.09.3
-Scenarios: none yet. The transcript format is `servers/transcripts`, but its harness (U136) is not built; X14 lists the planned scenarios of `conformance/scenarios/servers/ankiconnect/media/` as request and reply tables, and the external-folder tests, which are Meguri's own (no AnkiConnect counterpart). X16 records the add-on's replies as probed on 2026-11-10.
+Scenarios: none yet. The transcript format is `servers/transcripts`, but its harness (U136) is not built; X14 lists the planned scenarios of `conformance/recordings/servers/ankiconnect/media/` (`servers/transcripts` T2; ids `servers/ankiconnect/media/<name>`) as request and reply tables, and the external-folder tests, which are Meguri's own (no AnkiConnect counterpart). X16 records the add-on's replies as probed on 2026-11-10.
 
 The media actions of Meguri's AnkiConnect-compatible server (`storeMediaFile`, `retrieveMediaFile`, `getMediaFilesNames`, `deleteMediaFile`, `getMediaDirPath`), the `audio`, `video` and `picture` attachments that note actions accept, the rules for the `path` and `url` content sources, and the external media folder that `getMediaDirPath` returns and whose files become collection media. The interface targeted is AnkiConnect API version 6 as served by the AnkiConnect add-on build of 2025-11-09 in Anki 26.09.3 (the build U136 pins). The external folder, the readable folders and the source restrictions are Meguri's (R1770–R1773): AnkiConnect returns Anki's own media folder and reads any path.
 
@@ -389,12 +389,12 @@ The case rules of `media/media-files#M14` apply to every stored name; `ankiconne
 
 ## X14. Scenarios
 
-Requests are `version` 6 without key or Origin; replies shown unwrapped. The add-on's replies to the same requests, where they were probed, are in X16. Byte contents: A = `61 0a` (base64 `YQo=`), B = `62 0a` (`Ygo=`). `Pair` and deck `D` are `servers/ankiconnect-actions` A20's. Scenarios that add a note end with `observe: [db_dump(notes, cards), media]` (R1948, `servers/transcripts` T14). A row marked "(Meguri)" asserts Meguri's side of the X13 entry it names.
+Requests are `version` 6 without key or Origin; replies shown unwrapped. The add-on's replies to the same requests, where they were probed, are in X16. Byte contents: A = `61 0a` (base64 `YQo=`), B = `62 0a` (`Ygo=`). `Pair` and deck `D` are `servers/ankiconnect-actions` A20's. Scenarios that add a note end with `observe: [{db_dump: {tables: [notes, cards]}}, media_dir]` (R1948, `servers/transcripts` T14; the table form of T18, R1959). A row marked "(Meguri)" asserts Meguri's side of the X13 entry it names.
 
 | Scenario | Setup | Request | Reply and media after |
 |---|---|---|---|
 | `media/store-data` | empty media | X4's rows 1, 2, 6, 7; then `storeMediaFile {filename: "y.txt", data: "YQo=="}`; `{filename: "z.txt", data: "="}`; `{filename: "w.txt", data: "YQo=", url: 5}` | as X4; error `invalid base64 data` twice (Meguri, `ankiconnect-media-base64`); `"w.txt"` = A (X3.1) |
-| `media/store-conflict` | `clip.mp3` = A | X4's rows 3, 4, 5, then row 9 on a fresh `clip.mp3` = A | as X4 (trash contents checked by a `media_pending`-style observation); row 9: Meguri, `ankiconnect-media-case-variants` |
+| `media/store-conflict` | `clip.mp3` = A | X4's rows 3, 4, 5, then row 9 on a fresh `clip.mp3` = A | as X4 (trash contents checked by a `media_trash` observation, `conformance/observations` O4); row 9: Meguri, `ankiconnect-media-case-variants` |
 | `media/store-traversal` | `a.mp3` = A | `storeMediaFile {filename: "../collection.anki2", data: "Ygo="}` | `"collection.anki2"` (X4 step 3 keeps the last component, as the add-on does, X16.5); stored in collection media; the collection file untouched, nothing trashed |
 | `media/read` | `a.mp3` = A | `retrieveMediaFile {filename: "a.mp3"}`; `{filename: "missing.mp3"}`; `{filename: "../collection.anki2"}`; `{filename: "a/b.mp3"}`; `{filename: "A.MP3"}`; `{filename: ""}` | `"YQo="`; `false`; error `invalid media file name: ../collection.anki2` (Meguri, `ankiconnect-media-flat-names`); error `invalid media file name: a/b.mp3` (the same); `"YQo="` (Meguri, `ankiconnect-media-case-variants`); `false` (Meguri, `ankiconnect-media-non-files`) |
 | `media/names` | X6's folder | X6's rows; `getMediaFilesNames {pattern: ""}` | as X6 (order, Meguri `ankiconnect-media-names-order`); `[]` |

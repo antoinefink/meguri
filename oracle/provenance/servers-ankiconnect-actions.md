@@ -117,3 +117,11 @@ into A7.1, A7.4, A10.1, A18 `ankiconnect-note-member-types`, A20.1
 `create-nested`, A20.3 `add-errors` (four Meguri rows), A21 intro, Q9 and the
 new Q10 (`list index out of range` is the runtime's `IndexError` text, kept as
 an interim).
+
+Transcript alignment (2026-11-10): no new Anki source. The header and A20
+follow `specs/servers/transcripts.md` T2 (scenario paths under
+`conformance/recordings/servers/ankiconnect/`), T18 and
+`specs/servers/ankiconnect-clients.md` C5 (`{db_dump: {tables: [notes, cards]}}`
+and `media_dir`). The proposed A18 row `ankiconnect-nextreviews-isolation-marks`
+was dropped and A11.4 reworded: T10.3 removes U+2068 and U+2069 from
+`nextReviews` items, so the observed marks (A11 row above) need no deviation.
