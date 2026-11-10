@@ -444,8 +444,24 @@ class DeliveryTests(unittest.TestCase):
         self.simulator()
         self.freeze()
         self.vm.bad_install = True
-        with self.assertRaisesRegex(v.Refused, "install-readback"):
+        with self.assertRaisesRegex(v.Refused, "install-entries-missing"):
             self.deliver()
+        self.assertFalse((self.directory / "agent-deployment.json").exists())
+
+    def test_install_inventory_reports_fixed_difference_classes(self):
+        expected = {"generated-private-file": {"type": "file", "mode": 0o755, "sha256": "a" * 64, "bytes": 5}}
+        install.require_installed_inventory(expected, copy.deepcopy(expected))
+        original = expected["generated-private-file"]
+        for changed, reason in (
+            ({"other": original}, "install-entries-replaced"),
+            ({**expected, "other": original}, "install-entries-added"),
+            ({"generated-private-file": {"type": "directory", "mode": 0o755}}, "install-entry-type"),
+            ({"generated-private-file": {**original, "mode": 0o555}}, "install-entry-mode"),
+            ({"generated-private-file": {**original, "mode": 0o555, "sha256": "b" * 64}}, "install-entry-content"),
+        ):
+            with self.subTest(reason=reason), self.assertRaises(v.Refused) as failure:
+                install.require_installed_inventory(expected, changed)
+            self.assertEqual(failure.exception.args, (reason,))
 
     def test_lease_wrong_kind_owner_expired_and_old_boot_refuse(self):
         self.simulator()

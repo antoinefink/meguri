@@ -620,6 +620,8 @@ DELIVERY_REFUSALS = {"unclassified", "filesystem-refused", "input-shape", "recei
     "destination-frozen-selected", "destination-frozen-map", "private-authority", "private-changed",
     "vm-instance-changed", "vm-ssh", "vm-copy", "vm-simctl", "input-changed", "copy-readback",
     "copy-readback-changed", "copy-source", "product-size", "install-observation", "install-readback",
+    "install-entries-missing", "install-entries-added", "install-entries-replaced",
+    "install-entry-type", "install-entry-mode", "install-entry-content",
     "product-changed", "agent-binding", "agent-environment", "build-signature", "build-signing",
     "product-cloud-grants", "profile-team", "profile-identity", "profile-signer-platform",
     "profile-expired", "profile-device", "profile-development", "profile-grants", "source-changed"}
@@ -647,6 +649,24 @@ class DeliveryDiagnostic:
         elif isinstance(error, subprocess.SubprocessError):
             code = "process-refused"
         return {"stage": self.stage if self.stage in DELIVERY_STAGES else "entry", "refusal": code}
+
+
+def require_installed_inventory(expected, installed):
+    """Explain a failed exact comparison using fixed categories only."""
+    if expected == installed:
+        return
+    need(isinstance(installed, dict), "install-readback")
+    missing, added = expected.keys() - installed.keys(), installed.keys() - expected.keys()
+    need(not (missing and added), "install-entries-replaced")
+    need(not missing, "install-entries-missing")
+    need(not added, "install-entries-added")
+    for name, original in expected.items():
+        actual = installed[name]
+        need(isinstance(actual, dict), "install-readback")
+        need(actual.get("type") == original["type"], "install-entry-type")
+        need({k: v for k, v in actual.items() if k != "mode"} ==
+             {k: v for k, v in original.items() if k != "mode"}, "install-entry-content")
+    raise v.Refused("install-entry-mode")
 
 
 def deliver(root, directory, parent, child, lease_run, vm, *, checkpoint=None):
@@ -718,8 +738,9 @@ def deliver(root, directory, parent, child, lease_run, vm, *, checkpoint=None):
             checkpoint("simulator-readback")
             installed_proof = vm.guest("inventory", os.path.dirname(installed), installed)
             need(isinstance(installed_proof, dict) and set(installed_proof) == {"path", "entries"}
-                 and installed_proof["path"] == installed and installed_proof["entries"] == before[0],
+                 and installed_proof["path"] == installed,
                  "install-readback")
+            require_installed_inventory(before[0], installed_proof["entries"])
             need(v.snapshot(boundary, product) == before, "product-changed")
             installation = create(boundary, os.path.join(directory, "installation.json"), raw_json({
                 "protocol_version": 1, "operation": "mg-vm-simctl-install-and-nofollow-readback",
