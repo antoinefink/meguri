@@ -66,6 +66,15 @@ impl Fixture {
         Self::with_recipe(keys, identity, local, None)
     }
     fn with_recipe(keys: Arc<Keys>, identity: Option<Arc<CachedIdentity>>, local: bool, recipe: Option<&str>) -> Self {
+        Self::with_recipe_at_alias(keys, identity, local, recipe, false)
+    }
+    fn with_recipe_at_alias(
+        keys: Arc<Keys>,
+        identity: Option<Arc<CachedIdentity>>,
+        local: bool,
+        recipe: Option<&str>,
+        alias: bool,
+    ) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let data = directory.path().join("collection");
         let backups = directory.path().join("backups");
@@ -80,7 +89,11 @@ impl Fixture {
             meguri_engine::bootstrap::create(&data.join("collection.anki2"), clock.as_ref(), random.as_ref()).unwrap();
         }
         let mut config = HostConfig::new(
-            data,
+            if alias {
+                data.join("..").join("collection")
+            } else {
+                data
+            },
             backups,
             directory.path().join("widget"),
             clock.clone(),

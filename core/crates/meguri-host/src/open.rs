@@ -326,7 +326,7 @@ impl CoreHost {
         let engine = process.engine.clone();
         let cloud = config.cloud.clone().map(|inputs| {
             Arc::new(meguri_sync::cloud::runtime::Runtime::new(
-                config.collection_directory.clone(),
+                paths.directory.clone(),
                 inputs,
             ))
         });

@@ -100,3 +100,54 @@ R2 privacy passed `private/20261110T002912Z-56562`; Rust format and
 Host opens the engine through CollectionPaths' canonical directory, but supplies
 the original directory spelling to Runtime. Aligning those admitted roots is
 next; no observer predicate has been changed.
+
+R2 path-composition fixer continuation: supplied clean master `b2deb04e`,
+original batch base `1416a520542a8c5daa38a23bfe398da704c3d6c9`, same recorded
+fixer session. Runtime now receives `paths.directory.clone()` from the existing
+admitted CollectionPaths, matching Engine's collection root. All observer
+predicates, diagnostics and final rechecks remain untouched.
+
+One FFI regression reuses the normal Host fixture and actual publication helper
+through a temporary `collection/../collection` directory alias. The original
+Host runtime reaches the existing OperationInProgress control refusal with its
+actual Active reply still held; it grants no done proof. Different-root and
+closed-collection calls must still refuse. Existing control negatives and the
+five Native cases remain unchanged, as does the held AgentGeneratedBase patch.
+
+Verification: one source consistency check only; no git, network, builds or
+tests. Root owns focused execution, the unchanged Native rerun, independent
+review and provenance/privacy/similarity checks. The actual nine-test R2 run
+above remains the latest executable evidence. No unit, full gate, signed sync
+or release acceptance is claimed.
+
+The canonical-root repair has a clear independent source review.
+`core-test/20261110T003411Z-58100` passed the real Host alias regression,
+including incomplete-publication, different-root and closed-owner checks.
+Rust formatting passed. The unchanged native rerun follows below; this
+is not signed CloudKit proof.
+
+
+Final native evidence for this checkpoint:
+
+- `swift-test/20261110T003523Z-58704` compiled and ran nine cases: four passed,
+  five failed with eight issues. All four ordering cases passed. The initial
+  path refusal disappeared, and the factory scan assertion passed. Publication
+  completion is still unproved; the five Native cases remain failed.
+- A fixed-enum diagnostic was added to the existing matching-conflict message;
+  independent review confirmed no data values or assertion changes.
+  `swift-test/20261110T003656Z-60861` ran that one case and failed. It reports
+  `operationInProgress`, with operationFailed true and no Complete/done proof.
+  Earlier runs reported operationFailed false. Preserve both outcomes; the
+  operation's retained failure and completion boundary need diagnosis.
+- Privacy passed `private/20261110T003544Z-59920`; similarity passed
+  `similarity/20261110T003547Z-60206` before the final enum diagnostic/log update.
+
+The new checks establish command order and root admission. Keep every enabled
+assertion and each retained failure. Publication completion is still pending.
+The native workflow, signed round trip, batch gate and release are unaccepted.
+
+Final checks: `core-lint/20261110T003752Z-62364`,
+`similarity/20261110T003752Z-62361`, and full-batch
+`static-checks/20261110T003752Z-62254` passed. All four source files passed
+`private/20261110T003753Z-63035`; the rewritten log passed
+`private/20261110T003822Z-80975`. Failed native receipts remain open.

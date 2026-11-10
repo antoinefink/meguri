@@ -280,7 +280,7 @@ extension ReviewCollectionStartupTests {
                 await a.sync.waitForInputs()
                 let control = try await SelectedCloudControlInspection().current()
                 if matching {
-                    print("selected-publication-conflict operationFailed=\(a.sync.operationFailed) controlProven=\(control.status == .proven) completePresent=\(control.publicationComplete != nil) donePresent=\(control.publicationDoneActive != nil)")
+                    print("selected-publication-conflict operationFailed=\(a.sync.operationFailed) status=\(control.status) controlProven=\(control.status == .proven) completePresent=\(control.publicationComplete != nil) donePresent=\(control.publicationDoneActive != nil)")
                     try #require(!a.sync.operationFailed && control.status == .proven)
                     try #require(control.provenance == .runtimeAcceptedPublication)
                     let complete = try #require(control.publicationComplete)

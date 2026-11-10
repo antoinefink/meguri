@@ -971,6 +971,37 @@ fn active_request(fixture: &Fixture) -> (Arc<CloudConnection>, Arc<CloudPublicat
 }
 
 #[test]
+fn normal_host_open_at_directory_alias_reaches_selected_control_checks() {
+    use c::selected_observation::{Missing, Proof};
+    let fixture = Fixture::with_recipe_at_alias(keys(), None, true, None, true);
+    let (_connection, _request) = active_request(&fixture);
+    let collection = fixture.workflow.host.collection().unwrap();
+    assert_eq!(
+        collection.path(),
+        fixture
+            ._directory
+            .path()
+            .join("collection")
+            .canonicalize()
+            .unwrap()
+            .join("collection.anki2")
+    );
+    let runtime = fixture.workflow.host.cloud_runtime().unwrap();
+    assert!(Arc::ptr_eq(runtime, &fixture.workflow.core));
+    let observation = runtime.selected_control_for_testing(&collection).unwrap();
+    // Actual publication has reached Active, but its reply is still held.
+    assert_eq!(observation.status, Proof::Missing(Missing::OperationInProgress));
+    assert!(observation.publication_done_active.is_none());
+    let other = Fixture::new(keys());
+    let foreign = runtime
+        .selected_control_for_testing(&other.workflow.host.collection().unwrap())
+        .unwrap();
+    assert_eq!(foreign.status, Proof::Missing(Missing::CurrentCollectionChanged));
+    fixture.workflow.host.close().unwrap();
+    assert!(runtime.selected_control_for_testing(&collection).is_err());
+}
+
+#[test]
 fn selected_reply_projection_retains_original_request_without_granting_commit_or_fresh_owner_proof() {
     use c::selected_observation::{Missing, Proof, PublicationEvent};
     let fixture = Fixture::new(keys());
