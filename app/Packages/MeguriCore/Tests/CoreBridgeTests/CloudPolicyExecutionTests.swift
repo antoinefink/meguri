@@ -157,6 +157,27 @@ private actor PolicyPendingEngine: CloudKitEngine {
     func release() async { await sdk.release() }
 }
 
+/// Expected lists are derived at each producer boundary, before SDK delivery.
+private func expectPendingDelivery(_ expected: [CloudPendingUpdate], fixture: CloudKitBridgeFixture,
+    engine: CloudKitEngineFake) async throws {
+    let ids = expected.map(\.id)
+    let observations = try await fixture.core.observations()
+    let emissions = observations.filter {
+        if case .corePendingEmitted(_, let id) = $0 { ids.contains(id) } else { false }
+    }
+    #expect(emissions == expected.map { .corePendingEmitted(kind: $0.kind, actionID: $0.id) })
+    let applied = await engine.recordedTrace().filter {
+        if case .pendingApplied(let id, _, _) = $0 { ids.contains(id) } else { false }
+    }
+    #expect(applied == expected.map { .pendingApplied($0.id, $0.removes.sorted(), $0.adds.keys.sorted()) })
+    for update in expected {
+        let acknowledged = observations.compactMap { observation -> String? in
+            if case .pendingAdded(let name, let id) = observation, id == update.id { name } else { nil }
+        }
+        #expect(acknowledged.sorted() == update.adds.keys.sorted())
+    }
+}
+
 private struct PolicyPendingApplyFailure: Error {}
 
 extension EventTests {
@@ -173,6 +194,12 @@ extension EventTests {
             let calls = engine.acceptedNetworkCalls.value
             try await addPendingDeck(f, name: "Ordinary pending addition")
             let command = try await pendingCommand(policy, cause: cause)
+            // Tracking has already emitted Full; isolate the explicit command.
+            let commandBoundary = try await f.core.emittedUpdateIDs()
+            let trackingIDs = commandBoundary.filter { !emitted.contains($0) }
+            try #require(trackingIDs.count == 1)
+            let trackingID = try #require(trackingIDs.first)
+            let sendables = try await f.core.trackingSendables()
             let kind: CloudUpdateKind = cause == .local ? .full : .changes
             let expectedUpdate: CloudPolicyUpdate = cause == .local ? .full : .changes
             guard case .updatePending(let update) = command.action else { Issue.record("Expected UpdatePending"); return }
@@ -186,21 +213,22 @@ extension EventTests {
             #expect(result.outputs.count == 1 && result.acknowledgedOutputCount == 0)
             #expect(delivered.withLock { $0.isEmpty })
             _ = try policyCommands(try #require(result.outputs.first))
-            let ids = try await f.core.emittedUpdateIDs().filter { !emitted.contains($0) }
-            try #require(ids.count == 1)
+            let allEmitted = try await f.core.emittedUpdateIDs()
+            let ids = allEmitted.filter { !commandBoundary.contains($0) }
+            try #require(ids.count == 1, "The explicit command must emit exactly one list")
             let id = try #require(ids.first)
+            #expect(allEmitted.filter { !emitted.contains($0) } == [trackingID, id])
             let after = await engine.pendingRecordZoneChanges()
             let added = Set(after.keys).subtracting(before.keys)
             try #require(added.count == 1, "The real local deck must reach the idle SDK")
-            #expect(after == (try await f.core.trackingSendables()))
-            let observations = try await f.core.observations()
-            #expect(observations.contains(.corePendingEmitted(kind: kind, actionID: id)))
-            for name in added {
-                #expect(after[name] == .save)
-                #expect(observations.contains(.pendingAdded(name: name, actionID: id)))
-            }
-            let expectedAdds = kind == .full ? after.keys.sorted() : added.sorted()
-            #expect(await engine.recordedTrace().contains(.pendingApplied(id, [], expectedAdds)))
+            let currentSendables = try await f.core.trackingSendables()
+            #expect(after == sendables && after == currentSendables)
+            for name in added { #expect(after[name] == .save) }
+            // Changes compares with desired, already updated by tracking Full.
+            try await expectPendingDelivery([
+                CloudPendingUpdate(id: trackingID, kind: .full, adds: sendables, removes: []),
+                CloudPendingUpdate(id: id, kind: kind, adds: kind == .full ? sendables : [:], removes: [])
+            ], fixture: f, engine: engine)
             #expect(engine.acceptedNetworkCalls.value == calls && engine.automaticallySync == automatic)
         }
     }
@@ -327,21 +355,41 @@ extension EventTests {
             let emitted = try await f.core.emittedUpdateIDs()
             let gate = CloudCallbackGate()
             await engine.pauseNextCallback(gate)
-            try await withCloudTask(gates: [gate], operation: {
+            let expected = try await withCloudTask(gates: [gate], operation: {
                 await engine.emitRetained(.stateUpdate(Data([0x70, 0x34])), label: "pendingBridge")
             }, whileRunning: {
                 try await gate.waitForArrival()
+                var expected: [CloudPendingUpdate] = []
+                var previous = emitted
                 for cause in [CloudPolicyChangeCause.local, .cloud] {
                     try await addPendingDeck(f, name: "Deferred pending \(cause)")
                     let command = try await pendingCommand(policy, cause: cause)
+                    let commandBoundary = try await f.core.emittedUpdateIDs()
+                    let trackingIDs = commandBoundary.filter { !previous.contains($0) }
+                    try #require(trackingIDs.count == 1)
+                    let trackingID = try #require(trackingIDs.first)
+                    let sendables = try await f.core.trackingSendables()
+                    let kind: CloudUpdateKind = cause == .local ? .full : .changes
+                    let expectedUpdate: CloudPolicyUpdate = cause == .local ? .full : .changes
+                    guard case .updatePending(let update) = command.action else { throw BridgeError.internal("Expected UpdatePending") }
+                    #expect(update == expectedUpdate)
                     let result = await executor.execute(command)
                     #expect(result.error == nil && result.outputs.count == 1 && result.acknowledgedOutputCount == 0)
+                    previous = try await f.core.emittedUpdateIDs()
+                    let commandIDs = previous.filter { !commandBoundary.contains($0) }
+                    try #require(commandIDs.count == 1, "The explicit command must emit exactly one list")
+                    let commandID = try #require(commandIDs.first)
+                    expected.append(CloudPendingUpdate(id: trackingID, kind: .full, adds: sendables, removes: []))
+                    expected.append(CloudPendingUpdate(id: commandID, kind: kind, adds: kind == .full ? sendables : [:], removes: []))
+                    #expect(previous.filter { !emitted.contains($0) } == expected.map(\.id))
                 }
                 #expect(await engine.pendingRecordZoneChanges() == before)
                 await gate.open()
+                return expected
             })
             let ids = try await f.core.emittedUpdateIDs().filter { !emitted.contains($0) }
-            try #require(ids.count == 2)
+            #expect(ids == expected.map(\.id))
+            try await expectPendingDelivery(expected, fixture: f, engine: engine)
             let trace = await engine.recordedTrace()
             let returned = try #require(trace.firstIndex(of: .eventReturned("pendingBridge")))
             let applied = trace.compactMap { event -> UInt64? in
@@ -352,10 +400,7 @@ extension EventTests {
             let after = await engine.pendingRecordZoneChanges()
             let additions = Set(after.keys).subtracting(before.keys)
             #expect(additions.count == 2)
-            let observations = try await f.core.observations()
-            for name in additions {
-                #expect(observations.contains { if case .pendingAdded(let added, let id) = $0 { added == name && ids.contains(id) } else { false } })
-            }
+            #expect(after == (try await f.core.trackingSendables()))
             #expect(await gate.pendingWaiterCount() == 0 && engine.acceptedNetworkCalls.value == 0)
         }
     }

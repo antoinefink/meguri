@@ -23,6 +23,34 @@ the earlier failed run were retained.
 Source review explains the new Bridge test failures: normal tracking already
 emits a Full list before explicit UpdatePending emits its list. The tests must
 measure the command at its actual boundary and retain proof for every original
-list and its actual producer. That test correction remains open.
+list and its actual producer. That test correction is prepared below; verification remains pending.
 `similarity/20261110T015132Z-40201` passed. Source privacy passed; the shorter
 log is checked separately before commit.
+
+Fixture-only repair: clean invocation start `0b6801ee` (supplied by parent;
+no Git inspection). Recorded fixer in the filtered clean room. The two positive
+Bridge functions now capture the exact boundary after tracked addition and
+command issue, before execution, and require one command emission. Expected
+lists retain tracking Full followed by command Full/Changes for each edit
+(two lists in the parameter cases; four in the held callback), with exact
+ordered SDK application and per-producer addition acknowledgements. Changes
+expects empty adds because the tracking Full already updated desired state.
+The failed `39025` receipt above is preserved. Product code, SDK tests, native
+policy guards, failure/cancellation checks and existing bounds are unchanged.
+One source consistency check only; no build, tests, Git or network run here.
+Parent owns focused verification of five Bridge functions/eight cases and
+inclusive regressions, independent review and provenance/privacy/similarity
+checks. No extra SDK six-case rerun without a new concern; no Unit/full gate or
+signed-exchange claim.
+
+## Corrected producer-boundary verification
+
+Independent test review found no P0–P2 finding. The corrected tests retain every
+tracking and command list, isolate the command's single emission, and check
+acknowledgements against each actual producer. Root moved one async read out of
+a Boolean autoclosure to compile the same assertion.
+`swift-test/20261110T060227Z-50327`: all five functions passed (eight parameter
+cases). Earlier failures 39025 and the compile failure 46475 remain recorded.
+`private/20261110T015714Z-45852` and `similarity/20261110T015720Z-46131` passed.
+The real review/media/reopen test also passed in
+`swift-test/20261110T015609Z-43861`. No signed exchange is claimed.
