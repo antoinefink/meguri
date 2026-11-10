@@ -39,3 +39,10 @@ cases and native decode failures. Independent delta review is clear of P0–P2
 findings. `selftest/20261110T165508Z-34326` passed all 27 affected CloudAgent
 tooling checks. Actual native profile selection and cloud execution remain
 pending; fixture checks do not establish either.
+
+Native parent `37903` stopped at build preflight `38548`, before compilation,
+with a profile-validation refusal. Added a closed-code diagnostic so that this
+failure can be diagnosed without exporting its private native output. Independent
+review is clear; focused tooling check `39922` passed all three cases. The failed
+parent remains retained. Next is an individual build check, not another full
+parent run.

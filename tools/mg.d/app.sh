@@ -94,6 +94,17 @@ mg_app_mac_agent_private_settings() {
   "$@" 2>"$MG_CLOUD_AGENT_MAC_PROFILE_PRIVATE/resolved-settings.log"
 }
 
+mg_app_mac_agent_profile_refusal() {
+  local reason
+  reason="$(tail -n 1 "$MG_CLOUD_AGENT_MAC_PROFILE_PRIVATE/validation.log" 2>/dev/null)"
+  reason="${reason#App-only Mac CloudAgent profile validation refused: }"
+  case "$reason" in
+    source-dirty|source-changed|profile-input|profile-cache|profile-settings|profile-target-scope|profile-entitlements|profile-host|profile-signer|profile-team|profile-identity|profile-device|profile-expired|profile-development|profile-grants|profile-signer-platform|profile-changed|guarded-input) ;;
+    *) reason=guarded-input ;;
+  esac
+  mg_failure agent-profile "Approved app-only Mac CloudAgent profile validation refused ($reason)"
+}
+
 # Explicit action keeps every nested UI/snapshot/perf caller on its test plan.
 # Only explicit preview actions select build; no ambient switch changes callers.
 mg_app_build_action() {
@@ -173,7 +184,7 @@ mg_app_build_action() {
     if ! MG_CLOUD_AGENT_MAC_PROFILE_BINDING="$(python3 -B -I "$MG_TOOLS/scripts/cloud-agent-mac-profile.py" \
         --root "$MG_ROOT" --file "$MEGURI_CLOUD_AGENT_MAC_PROFILE_FILE" \
         2>"$MG_CLOUD_AGENT_MAC_PROFILE_PRIVATE/validation.log")"; then
-      mg_failure agent-profile "Approved app-only Mac CloudAgent profile validation refused"
+      mg_app_mac_agent_profile_refusal
       mg_status fail
       return 1
     fi
