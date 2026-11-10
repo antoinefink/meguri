@@ -255,7 +255,15 @@ impl Runtime {
         let _ = self.adapter_now();
         let mut s = self.state();
         Self::check_media_locked(&s, a)?;
-        let changed = with_tracking_access(|| s.store.as_mut().ok_or(Error::Database)?.put_media(a.binding, ledger))?;
+        let changed = with_tracking_access(|| {
+            let changed = s.store.as_mut().ok_or(Error::Database)?.put_media(a.binding, ledger);
+            #[cfg(feature = "test-hooks")]
+            let changed = changed.inspect_err(|error| {
+                let (kind, variant) = RuntimeError::Tracking(*error).refusal_tags_for_testing();
+                eprintln!("cloudMedia.commitRefused site=ledgerWrite errorKind={kind} variant={variant}");
+            });
+            changed
+        })?;
         self.notify_media_pending_locked(&mut s, changed)?;
         Ok(())
     }
@@ -345,6 +353,8 @@ impl Runtime {
         };
         if let Some((authority, _, proposed_ledger, _, _)) = &apply_commit {
             if authority.0 != a || feed_state.revision != proposed_ledger.revision {
+                #[cfg(feature = "test-hooks")]
+                eprintln!("cloudMedia.ledgerRefused check=applyCommitScope");
                 return Err(Error::RecoveryRequired.into());
             }
             feed_state = proposed_ledger.clone();
@@ -577,7 +587,13 @@ impl Runtime {
                 apply_commit
                     .as_ref()
                     .map(|(_, intent, _, proposals, clear)| (intent, proposals.as_slice(), *clear)),
-            )?;
+            );
+            #[cfg(feature = "test-hooks")]
+            let changed_work = changed_work.inspect_err(|error| {
+                let (kind, variant) = RuntimeError::Tracking(*error).refusal_tags_for_testing();
+                eprintln!("cloudMedia.commitRefused site=feedCommit errorKind={kind} variant={variant}");
+            });
+            let changed_work = changed_work?;
             Ok((changed_work, store.media_floor(feed.status.feed_id.0)?))
         })?;
         self.notify_media_pending_locked(&mut state, changed_work)?;
@@ -733,7 +749,13 @@ impl Runtime {
                         s.incoming.running = true;
                         MediaRunning(self.state.clone(), self.incoming_idle.clone())
                     };
-                    self.apply_staged_media(collection, media, &a, &name)?;
+                    let applied = self.apply_staged_media(collection, media, &a, &name);
+                    #[cfg(feature = "test-hooks")]
+                    let applied = applied.inspect_err(|error| {
+                        let (kind, variant) = error.refusal_tags_for_testing();
+                        eprintln!("cloudMedia.commitRefused site=stagedApply errorKind={kind} variant={variant}");
+                    });
+                    applied?;
                     drop(running);
                     self.finish_media_pending(&a)?;
                     ledger = self.with_media(&a, |s| s.media_ledger(a.binding))?;

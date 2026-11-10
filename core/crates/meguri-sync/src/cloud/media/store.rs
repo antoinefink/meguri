@@ -27,9 +27,14 @@ pub(crate) fn put_ledger(tx: &rusqlite::Transaction<'_>, b: BindingId, ledger: &
         )
         .optional()?;
     let current: Ledger = content.map(|v| decode(&v)).transpose()?.unwrap_or_default();
-    if current.revision != ledger.revision
-        || matches!((current.feed, ledger.feed), (Some((old_id, old)), Some((id, next))) if old_id == id && next < old)
-    {
+    if current.revision != ledger.revision {
+        #[cfg(feature = "test-hooks")]
+        eprintln!("cloudMedia.ledgerRefused check=revisionMismatch");
+        return Err(Error::RecoveryRequired);
+    }
+    if matches!((current.feed, ledger.feed), (Some((old_id, old)), Some((id, next))) if old_id == id && next < old) {
+        #[cfg(feature = "test-hooks")]
+        eprintln!("cloudMedia.ledgerRefused check=feedRegression");
         return Err(Error::RecoveryRequired);
     }
     let mut next = ledger.clone();
@@ -207,6 +212,8 @@ impl TrackingStore {
         if let Some((_, proposals, _)) = apply_commit {
             for (prior, candidate) in proposals {
                 if workflow_store::entity(&tx, binding_id, candidate.kind, &candidate.key)? != *prior {
+                    #[cfg(feature = "test-hooks")]
+                    eprintln!("cloudMedia.ledgerRefused check=applyPriorEntity");
                     return Err(Error::RecoveryRequired);
                 }
             }
