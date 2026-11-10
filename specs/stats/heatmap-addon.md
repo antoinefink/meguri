@@ -117,7 +117,7 @@ The period that contains a date `d`: in `year` mode `year(d) − year(T)`; in `m
 | 2026-10-12 | `months` | −1 / 1 | 2025-09-01 … 2026-05-31 / 2027-03-01 … 2027-11-30 |
 | 2026-01-15 | `months` | 0 | 2025-09-01 … 2026-05-31 |
 
-The grid's layout (week columns, week start, month blocks, labels) is U227's (its `specs/stats/heatmap-presentation.md`, not yet written). When the mode changes, an offset from the old mode means nothing: hosts ask for `p` = 0 again.
+The grid's layout (week columns, week start, month blocks, labels) is U227's (`stats/heatmap-presentation` M2 to M4). When the mode changes, an offset from the old mode means nothing: hosts ask for `p` = 0 again.
 
 ## A6. Navigation bounds
 
@@ -251,9 +251,9 @@ Every value is computed for the instant of the query. A change of T (rollover, z
 
 - **Rows after today.** Counted on T (`stats/day-buckets` B4.3, R1280): deviation `heatmap-future-rows-today`. It reaches the history count of T, today's kind, the streaks and the levels.
 - **Drawn day.** Every count stays on its B4.1 date (`stats/day-buckets` B4.6, R1270): deviation `heatmap-drawn-day-shift`. Meguri's streaks and totals read the same dates as its counts.
-- Both entries are added to `conformance/deviations.yaml` with the scenarios that show them (`specs/conformance/stats-ops.md` H4). Until then they are held, and this file only names them.
-- **Deck pages by home deck** (R1284, N4), also for the forecast (A3 item 2). The unit that adds a filtered-deck scenario adds its entry.
-- **Clicked day.** The add-on opens a range search on review ids; Meguri opens A9's searches, and on deck pages adds the deck term the add-on leaves out (R1322). This is UI behaviour, outside the oracle.
+- Both entries are added to `conformance/deviations.yaml` with the goldens of the scenarios that show them (`specs/conformance/stats-ops.md` H4). Until then they are held, and this file only names them.
+- **Deck pages by home deck** (R1284, N4), also for the forecast (A3 item 2): entry `heatmap-deck-home-deck`, added with the goldens of `stats/heatmap-totals/filtered-deck-card`, `stats/heatmap/forecast-filtered` and `forecast-filtered-day0` (H4).
+- **Clicked day.** For a history day the add-on opens a range search on review ids, which its own Browser hook resolves only when the range is the whole search. On a deck page it puts the current-deck term before the range, so the hook does not act, the range is read as a search on a field and nothing is found. For a forecast day it opens `prop:due=N` (with the current-deck term on deck pages). Meguri opens A9's searches, which on deck pages join the deck's name term (R1322). This is UI behaviour, outside the oracle.
 - **No gestures, themes or legend.** The mode is a setting (R1325), `colors` is ignored (R1315). These are UI rules (U227, U229).
 
 ## A15. Points the requirements leave open
@@ -266,10 +266,10 @@ Decided 2026-10-27, in this order of priority: data safety, the plan's requireme
 4. **`limdate` in the future** empties the window instead of being ignored. Negative values of `limhist`, `limfcst` and `limdate` are not set (the add-on writes none; `stats/heatmap-config` K3 rule 4). Scenario `heatmap/limits-odd`.
 5. **The first history day** for Days learned and the first period is the earliest active date in the window, not the window's first date. Scenario `streaks/limhist-span`.
 6. **Rounding at .5** for Daily average and Days learned: to even. Scenario `streaks/rounding-half`.
-7. **`a`** is the rounded Daily average of the scope's whole filtered history, and the forecast uses the same `a`. Scenarios `heatmap/levels-history`, `heatmap/levels-forecast`.
-8. **Threshold edges** are "at most" for every table of A7 and A8.2, as R1313 says for the cells. Scenarios `heatmap/levels-history`, `streaks/tints`.
+7. **`a`** is the rounded Daily average of the scope's whole filtered history, and the forecast uses the same `a`. Meguri unit tests `levels-history`, `levels-forecast` (A16).
+8. **Threshold edges** are "at most" for every table of A7 and A8.2, as R1313 says for the cells. Meguri unit tests `levels-history`, `tints` (A16).
 9. **Today's forecast** counts only cards due today (`k` = 0), not overdue ones (R1310). Scenario `heatmap/today-cell`.
-10. **The forecast's due day** of a card in a filtered deck is P4.1's (`odue`), so the Browser's `prop:due=N` finds every card the cell counts, and maybe others (A9). Only cards that would count in their home deck count (A3 item 1): a filtered deck that does not reschedule puts new and intraday learning cards in queue 2, and they stay out, as R293 asks. If the add-on reads `due` there, counting the home due of review and interday learning cards is a deviation under R1284's reasoning; the filtered-deck scenario adds its entry. Leaving out the other cards matches an add-on that reads `due`, since their `due` is then a negative position (overdue). Scenario `heatmap/forecast-filtered`.
+10. **The forecast's due day** of a card in a filtered deck is P4.1's (`odue`), so the Browser's `prop:due=N` finds every card the cell counts, and maybe others (A9). Only cards that would count in their home deck count (A3 item 1): a filtered deck that does not reschedule puts new and intraday learning cards in queue 2, and they stay out, as R293 asks. If the add-on reads `due` there, counting the home due of review and interday learning cards is a deviation under R1284's reasoning; the filtered-deck scenario adds its entry. Leaving out the other cards matches an add-on that reads `due`, since their `due` is then a negative position (overdue). Scenarios `heatmap/forecast-filtered`, `heatmap/forecast-filtered-day0`.
 11. **The forecast end** with `limfcst` set is `T + limfcst` even when no card is due that late, and without it the 73,000-day cap ends the forecast when a corrupt due lies beyond it (R1311). Scenarios `heatmap/forecast-limfcst`, `heatmap/forecast-cap`.
 12. **No history** is judged on the filtered history (after the window), and the query still returns the period's forecast; the hosts show R1309's message instead of the grid. Scenario `heatmap/no-history-forecast`.
 13. **Streaks across a drawn-day shift** read B4.1 dates in Meguri (A14). Whether the add-on computes its streaks on drawn dates is open; scenario `streaks/lord-howe-dst-start` shows it, and if it does, the difference falls under `heatmap-drawn-day-shift`.
@@ -277,26 +277,28 @@ Decided 2026-10-27, in this order of priority: data safety, the plan's requireme
 
 ## A16. Scenarios
 
-No heatmap or streak scenario is in the tree yet. The oracle-maintainer adds them with an observation that runs the add-on's whole report headless (history after its limits, forecast, today's cell, the four streak values), on the add-on image of `specs/conformance/stats-ops.md` H4, keyed by the date on which the add-on draws each count (H1). The kind is `heatmap_report` (`specs/conformance/stats-ops.md` H11); its schema shape lands with the executor support. Each golden is recorded at the oracle pin of `conformance/oracle.json`; the goldens are then authoritative. Values below are Meguri's from this file. All run in Europe/Paris with rollover 4 unless a zone is named; T is 2026-10-12 unless a time is given.
+As of 2026-11-10 every scenario below is in the tree, inactive and without a golden (`specs/conformance/stats-ops.md` H4). Their goldens wait for an observation that runs the add-on's whole report headless (history after its limits, forecast, today's cell, the four streak values), on the add-on image of `specs/conformance/stats-ops.md` H4, keyed by the date on which the add-on draws each count (H1). The kind is `heatmap_report` (`specs/conformance/stats-ops.md` H11); its schema shape lands with the executor support. Each golden is recorded at the oracle pin of `conformance/oracle.json`; the goldens are then authoritative. Values below are Meguri's from this file. All run in Europe/Paris with rollover 4 unless a zone is named; T is 2026-10-12 unless a time is given.
 
 `conformance/scenarios/stats/heatmap/`:
 
 | Scenario | Pins | Setup and expected values |
 |---|---|---|
-| `forecast-queues` | A3 items 1, 3 | cards in queues 0, 1, 2, 3, −1, −2, −3, due today, tomorrow and yesterday: only queues 2 and 3 due today or later count |
+| `forecast-queues` | A3 items 1, 3, 4, A4 | cards in queues 0, 1, 2, 3, −1, −2 and −3, due yesterday, today and tomorrow, plus a relearning card (type 3) in queue 3 due tomorrow and a preview card (queue 4) whose `due` reads as today: only queues 2 and 3 due today or later count, today 2 and tomorrow 3; today's cell `future`, 2 |
 | `forecast-limfcst` | A3, A15 item 11 | `limfcst` 30, cards due at +10, +30, +31: 2 cards, last forecast day T + 30 |
 | `forecast-cap` | A3, A15 item 11 | one card due at +5, one at +10⁹ days: forecast +5: 1, last forecast day T + 73,000 |
 | `forecast-scope` | A3 item 2 | `limdecks` [Excl] with cards due in `Excl`, `Excl::Sub` and `Keep`: Home counts `Keep` only; deck page `Excl` counts `Excl` and `Excl::Sub` |
 | `forecast-filtered` | A3 item 1, A15 item 10 | a review card moved into a filtered deck, `odue` +3: forecast +3 on its home deck's page and on Home; then a filtered deck that does not reschedule takes one review card due +5, one new card and one intraday learning card: the review card counts on +5, the other two count nowhere and E stays 5 |
+| `forecast-filtered-day0` | A3 item 1 | on the collection's first day (Anki's today 0), a filtered deck that does not reschedule holds a new card of home deck `H` (`odid` set, `odue` 0), and a review card of `H` is due 0: only the review card counts, on T, on Home and on `H`'s page alike (membership is judged by the card, not by `odue`) |
+| `forecast-overdue-only` | A3, A4 | only two review cards, both overdue: forecast `{}`, last forecast day `null`, today's cell `today`, 0 |
 | `today-cell` (AE54) | A4, A15 item 9 | 12 cards due today, 3 overdue, no review: today `future`, 12; after one answer: `today`, 1 |
 | `limhist-edge` | A2.2, A15 item 2 | `limhist` 90, rows on T − 89, T − 90, T − 91: only T − 89 is in the history |
 | `limdate-unit` | A2.2, A15 items 1, 3 | `limdate` the epoch seconds of 2026-09-01 00:00 local; rows on 08-31 23:00, 09-01 02:00 (heatmap day 08-31) and 09-01 05:00: only the 05:00 row counts |
-| `limdate-creation` | A2.2 | `limdate` equal to `crt`, rows before and after: all count |
+| `limdate-creation` | A2.2 | rows before and after the creation date; `limdate` equal to `crt`, then `crt` − 14,400 (the local midnight `stats/heatmap-config` K6.1 stores, still the creation date): all count both times; then `crt` + 86,400: the rows before that date drop |
+| `limdate-fraction` | A2.2 (fraction rule), A15 item 6 | `limdate` 1,788,213,599.5 (2026-08-31 23:59:59.5 local) and then 1,788,213,600.5 (09-01 00:00:00.5): their dates are 08-31 and 09-01, so rows on heatmap days 08-30, 08-31 (two) and 09-01 give history {08-31: 2, 09-01: 1}, then {09-01: 1} |
 | `limhist-and-limdate` | A2.2 | `limhist` 90 with a `limdate` 200 days back, then 30 days back: the later bound applies each time |
 | `limits-odd` | A15 item 4 | `limdate` one day after T: no history; `limhist` −5 and `limfcst` −5: not set |
 | `no-history-forecast` | A15 item 12 | rows only before a `limdate`, cards due: no history, forecast present |
-| `levels-history` (AE55) | A7, A15 items 7, 8 | a daily average of 410 with days of 300, 307, 308, 1,640, 1,641 and 1,700 rows: levels 4, 4, 5, 9, 10, 10; a Meguri unit test while H11 has no levels (A15 item 14, H11) |
-| `levels-forecast` | A7 | 8 cards due on one day with a daily average of 8: level 3; a Meguri unit test while H11 has no levels (A15 item 14, H11) |
+| `today-dst-shift` | `stats/day-buckets` B4.2, B6, A1, A4 | Europe/Paris on 2026-03-29, a row at 04:15 +02:00 (after Anki's day starts, before T moves): at 04:30 T is 03-28 and the row is on 03-28, today's cell `today`, 1; at 05:00 (at(T + 1)) T is 03-29 and today's cell `today`, 0; studied today 1 row both times |
 
 `conformance/scenarios/stats/streaks/`:
 
@@ -308,12 +310,20 @@ No heatmap or streak scenario is in the tree yet. The oracle-maintainer adds the
 | `gaps` | A8.1 | runs of 5, 2 and 3 days with gaps, the last ending T − 2: longest 5, current 0 |
 | `rounding-half` | A15 item 6 | 5 rows over 2 days (2.5), 7 over 2 (3.5); 1 active day in 8 (12.5 %) |
 | `limhist-span` | A15 item 5 | `limhist` 30, first row in the window on T − 10: Days learned over 11 days |
-| `tints` | A8.2, A15 item 8 | streaks of 14, 15, 30, 31, 180, 181; Days learned 25, 26, 99, 100; a Meguri unit test while H11 has no tints (A15 item 14, H11) |
 | `limdecks-home-only` | N3.3, R1340 | `limdecks` [A]: Home streaks without A's rows, deck page A unchanged |
 | `future-row` | A14, deviation `heatmap-future-rows-today` | only a row dated after T: current streak 1 in Meguri |
 | `empty` | A2.2 | no rows: no history, no streak values |
 | `lord-howe-dst-start` | A15 item 13 | Australia/Lord_Howe, active days around 2026-10-04 |
+| `deleted-card` (AE6, deck part) | `stats/counting-rules` N3.1, N3.2, N4 | deck `A`, one card with rows on T − 1 and T, another on T − 3 and T − 2, then the second card's note is deleted: Home keeps 4 days (streaks 4), `A`'s page drops to T − 1 and T (streaks 2), and with `limcdel` true Home reads as `A` |
 
-A5 (periods), A6 (bounds), A9 (searches) and A10 (totals) have no scenario: they are tested by Meguri's unit tests (U96 `heatmap_grid`), one per row of their tables and examples, plus months mode across a year end and the bounds with no history and with `limfcst` set and no card counted (A3). U96's unit tests also cover A2.2's range rule (`limhist` 2,147,483,647 and 4,294,967,296: no limit; `limdate` 253,402,300,800 and `1e300`: an empty window), A3's overdue-only forecast and the A10 and A11 shapes with and without history; the add-on writes no such limits, so they have no oracle scenario.
+Meguri unit tests while H11 has no levels or tints (A15 item 14, `specs/conformance/stats-ops.md` H11); no scenario file exists for them:
+
+| Test | Pins | Inputs and expected values |
+|---|---|---|
+| `levels-history` (AE55) | A7, A15 items 7, 8 | a daily average of 410 with days of 300, 307, 308, 1,640, 1,641 and 1,700 rows: levels 4, 4, 5, 9, 10, 10 |
+| `levels-forecast` | A7 | 8 cards due on one day with a daily average of 8: level 3 |
+| `tints` | A8.2, A15 item 8 | streaks of 14, 15, 30, 31, 180, 181; Days learned 25, 26, 99, 100 |
+
+A5 (periods), A6 (bounds), A9 (searches) and A10 (totals) have no scenario: they are tested by Meguri's unit tests (U96 `heatmap_grid`), one per row of their tables and examples, plus months mode across a year end and the bounds with no history and with `limfcst` set and no card counted (A3). U96's unit tests also cover A2.2's range rule (`limhist` 2,147,483,647 and 4,294,967,296: no limit; `limdate` 253,402,300,800 and `1e300`: an empty window) and the A10 and A11 shapes with and without history; the add-on writes no such limits, so they have no oracle scenario.
 
 Writer tests for `stats/heatmap-config` K6 are Meguri's own, except the oracle scenario `heatmap-config/writer-output`, which observes `heatmap_report` (K6.4).

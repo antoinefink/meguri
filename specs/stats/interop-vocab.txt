@@ -118,3 +118,22 @@ all_time
 # keyword of Added bar queries and the draft observation kind.
 added
 stats_presentation
+# Heatmap grid presentation (specs/stats/heatmap-presentation.md, U227): the
+# `heatmap` key members the grid takes or ignores, and the search keyword of
+# the forecast cells' searches it passes on.
+colors
+mode
+due
+# Graph preferences observation (specs/conformance/stats-ops.md H13): the
+# draft kind, Anki's GraphPreferences message and its field names.
+graph_preferences
+GraphPreferences
+calendar_first_day_of_week
+card_counts_separate_inactive
+future_due_show_backlog
+browser_links_supported
+# Add-on report observation (specs/conformance/stats-ops.md H11) and the
+# stats_presentation page members (specs/stats/graph-presentation.md P22).
+heatmap_report
+no_data
+sectors

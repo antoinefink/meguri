@@ -125,7 +125,7 @@ This needs an offset change between local midnight and 00:00 UTC of the same dat
 | Pacific/Auckland | 2026-09-27 | 2026-09-26 |
 | Asia/Beirut | 2026-03-29 | 2026-03-28 |
 
-Europe/Paris, America/New_York, America/St_Johns and Asia/Kathmandu have no such date. Only the Lord Howe row has a scenario (`lord-howe-dst-start`, oracle value 2026-10-03: 2); its golden lands with it (`specs/conformance/stats-ops.md` H4).
+Europe/Paris, America/New_York, America/St_Johns and Asia/Kathmandu have no such date. Only the Lord Howe row has scenarios: `lord-howe-dst-start` here (oracle value 2026-10-03: 2) and `stats/streaks/lord-howe-dst-start`; their goldens wait for the add-on image (`specs/conformance/stats-ops.md` H4). The calendar runs only in the add-on's web view, which the oracle does not run, so the headless oracle applies this placement itself to the dates the add-on's computation keys its counts by (`specs/conformance/stats-ops.md` H1, drawn date). The rule above is the placement the oracle-maintainer saw in that web view; if a later reading of it shows no shift, this section, H1's rule and the `heatmap-drawn-day-shift` entry change together.
 
 Meguri does not reproduce this. Every count stays on its B4.1 date, in every heatmap, streak and widget value (R1270: a review belongs to the local date of the review time minus the rollover hours). This is the deviation `heatmap-drawn-day-shift` (its `conformance/deviations.yaml` entry is added with scenario `lord-howe-dst-start`, `specs/conformance/stats-ops.md` H4). The add-on's own counts agree with Meguri. Only the cell the add-on draws them in differs.
 
@@ -146,13 +146,13 @@ Meguri does not reproduce this. Every count stays on its B4.1 date, in every hea
 
 ## B7. Scenarios
 
-All scenarios in `conformance/scenarios/stats/day-buckets/` write review-log rows with `db_exec`. The rows belong to a card id no card has (counted as a deleted card's reviews, `stats/counting-rules` N1), so the scenarios need no notes. The values below are Meguri's, from B2 and B4. Each scenario gets a golden recorded from the oracles when the scenarios land (`specs/conformance/stats-ops.md` H4); the goldens are then authoritative. Each golden equals the table except where a deviation is named: `future-row` (B4.3) and `lord-howe-dst-start` (B4.6).
+All scenarios in `conformance/scenarios/stats/day-buckets/` write review-log rows with `db_exec`. The rows belong to a card id no card has (counted as a deleted card's reviews, `stats/counting-rules` N1), so the scenarios need no notes. The values below are Meguri's, from B2 and B4. As of 2026-11-10 every scenario below is in the tree, inactive and without a golden; each gets a golden recorded from the oracles once the add-on image and `heatmap_totals` exist (`specs/conformance/stats-ops.md` H4), and the goldens are then authoritative. Each golden equals the table except where a deviation is named: `future-row` (B4.3) and `lord-howe-dst-start` (B4.6).
 
 | Scenario | Pins | `heatmap_totals.home` | `studied_today_raw` |
 |---|---|---|---|
 | `rollover-shift` (AE5) | 02:30 and 05:00 with rollover 4 | 10-11: 1, 10-12: 1 | 1 row, 6000 ms |
 | `ease-zero-row` (AE52) | a Set Due Date row with `limresched` true, then false, then true | 10-11: 1; then 10-11: 1, 10-12: 1; then 10-11: 1 | 0 rows, 0 ms (three times) |
-| `paris-spring-forward` (AE58) | B4.1, B4.4 | 03-28: 2, 03-29: 1 | 2 rows, 5000 ms |
+| `paris-spring-forward` (AE58) | B4.1, B4.4; also `timing` (the Anki-day half of AE58): `days_elapsed` 2, `next_day_at` 2026-03-30 04:00 +02:00 (1,774,836,000), `utc_offset_secs` 7200 | 03-28: 2, 03-29: 1 | 2 rows, 5000 ms |
 | `paris-fall-back` | B4.1 | 10-24: 1, 10-25: 2 | 1 row, 3000 ms |
 | `lord-howe-dst-start` | 30-minute change, B4.6, deviation | 10-03: 1, 10-04: 1 (oracle: 10-03: 2) | 2 rows, 3000 ms |
 | `lord-howe-dst-end` | 30-minute change, B4.4 | 04-05: 2 | 1 row, 2000 ms |
@@ -164,5 +164,9 @@ All scenarios in `conformance/scenarios/stats/day-buckets/` write review-log row
 | `other-creation-zone` | B1 (creation zone has no effect) | 10-11: 1, 10-12: 1 | 1 row, 2000 ms |
 | `rollover-while-open` | B6 | 10-12: 1 (three times), then 10-12: 1, 10-13: 1 | 1 row, 5000 ms; then 1 row, 5000 ms; then 0 rows, 0 ms; then 1 row, 7000 ms |
 | `rollover-zero` | `R` = 0 | 10-11: 1, 10-12: 1 | 1 row, 2000 ms |
+| `rollover-23` | `R` = 23, the latest hour (B2, B4.1, B4.2) | 10-11: 1, 10-12: 1 | 1 row, 2000 ms |
+| `rollover-change` | B4.1, B6: a change of `rollover` from 4 to 2 applies at once | 10-11: 1, then 10-12: 1 | not observed (the oracle keeps the scheduler day it computed before a config write, `sched/day-clock` D14.2) |
 
 (Dates are in 2026. `n rows, m ms` is `{cards: n, time_ms: m}`. `then` separates the successive observations of one scenario, `(three times)` marks one value observed at three steps, and `/` separates the two scenarios of the `travel-*` row. Each column has one value per observation step.)
+
+B4.2 and B6's move of T at another instant than Anki's day is pinned by `stats/heatmap/today-dst-shift` (`stats/heatmap-addon` A16), which observes `heatmap_report` and `studied_today_raw`.

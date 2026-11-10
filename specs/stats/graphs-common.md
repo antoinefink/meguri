@@ -114,6 +114,7 @@ The result also carries `fsrs` (a JSON boolean; anything else, or no key, reads 
 
 - The aggregates for both settings of each boolean are in the record (Card Counts both ways, Future Due with and without backlog), so flipping one re-bins without a core call.
 - A change from the screen is written through U103's config op, one key at a time (`editor/config-keys` K6). Nothing else in this spec writes config. Anki writes all three keys on every change (G13).
+- Scenarios observe the three values with the draft `graph_preferences` kind (`conformance/stats-ops` H13) and `fsrs` through the `context` part of the `stats` kind (G14); scenario `preferences-read` (G15).
 
 ## G8. Requests and results
 
@@ -271,7 +272,7 @@ The scope scenarios observe the draft `stats` kind (`conformance/observations` O
 
 ## G15. Scenarios
 
-`conformance/scenarios/stats/graphs/scope/`, for the oracle-maintainer to add with the `stats` kind (G14) and the stats op of `oracle/driver/ops/stats.py`. As of 2026-10-27 each is in the tree with its golden; the oracle has the kind, the runner not yet. `unreadable-row`'s third case stores a `lastIvl` of 3,000,000,000 instead of NULL, which the `revlog` table refuses (NOT NULL). Review-log rows come from `db_exec` as in `conformance/stats-ops` H3. All in Europe/Paris, rollover 4, unless named.
+`conformance/scenarios/stats/graphs/scope/`, for the oracle-maintainer to add with the `stats` kind (G14) and the stats op of `oracle/driver/ops/stats.py`. As of 2026-10-27 each is in the tree with its golden; the oracle has the kind, the runner not yet. The exception is `preferences-read`, which also needs the `graph_preferences` kind (`conformance/stats-ops` H13). It is at `conformance/scenarios/stats/presentation/preferences-read`, with its golden, although it belongs with these; a move to this directory takes its golden along (a renamed id is a new scenario, recorded again). `unreadable-row`'s third case stores a `lastIvl` of 3,000,000,000 instead of NULL, which the `revlog` table refuses (NOT NULL). Review-log rows come from `db_exec` as in `conformance/stats-ops` H3. All in Europe/Paris, rollover 4, unless named.
 
 | Scenario | Pins | Expected |
 |---|---|---|
@@ -286,5 +287,6 @@ The scope scenarios observe the draft `stats` kind (`conformance/observations` O
 | `unreadable-row` | G4 | Collection scope, a row with `ease` 300 dated 400 days ago: `year` returns data, `all` returns `unreadable_row`; the same with `factor` −1 and with a `lastIvl` of 3,000,000,000 (beyond 32 bits, G4) |
 | `scope-follows-retag` | G2, G10 | Search `tag:verbs`: a note retagged between two observations moves its cards' rows in and out |
 | `read-only` | G11 | `timing`, `db_dump`, `stats` for every scope and history, `db_dump`: the dumps are equal |
+| `preferences-read` | G7 | no `fsrs` in setup; `graph_preferences` for a new collection, then after writing (`cardCountsSeparateInactive`, `futureDueShowBacklog`, `firstDayOfWeek`) as (`false`, `false`, `1`; `true`, `true`, `5`; `0`, `"false"`, `6`; `null`, `1`, `3`; then `firstDayOfWeek` `"1"`, `1.0` and `true`), then with the three keys removed: `{calendar_first_day_of_week, card_counts_separate_inactive, future_due_show_backlog}` reads `{0, true, true}`, `{1, false, false}`, `{5, true, true}`, `{6, true, true}`, `{0, true, true}` four times, then `{0, true, true}`; then `context` with `fsrs` missing, `true`, `1`, `"true"`, `null` and removed: `fsrs` false, true, false, false, false, false |
 
 Meguri-only tests (no oracle): the deck names `stats/browse-queries` Q2.2 lists and the full name `_*` (G2.1, G13); the memo, context token and refresh rules, including Context changed after a commit between the two requests and no second request after an error (G8.3); an unreadable card row failing a request for review-log graphs only (G4); the cache contract (G9.6); release and reload, with an empty and a non-empty overlay (G9.5); the background build start, including a rebuild verdict at bind held until `homeIdle` (G9.2).
