@@ -231,6 +231,7 @@ def build(storage: str, anki_backup: str, out: str) -> None:
         "variants/media-unnormalized": with_media("con.jpg"),
         "variants/media-sha1-short": with_media("x.jpg", abc_sha1[:19]),
         "variants/no-media-map": replace(backup_entries, "media", None),
+        "variants/media-member-missing": replace(backup_entries, "media", raw_frame(media_map("x.jpg", 3, abc_sha1))),
     }
     for name, entries in packages.items():
         write_archive(os.path.join(out, name + ".colpkg"), entries)

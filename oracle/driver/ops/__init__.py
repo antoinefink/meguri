@@ -20,6 +20,7 @@ from . import (  # noqa: F401
     model,
     notes,
     notetypes,
+    optimizer,
     package,
     presets,
     preservation,

@@ -351,6 +351,12 @@
         "tags": { "type": "array", "items": { "type": "string" } }
       }
     },
+    "heatmap_decks": {
+      "type": "object",
+      "required": ["decks"],
+      "additionalProperties": false,
+      "properties": { "decks": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } } }
+    },
     "observation_request": {
       "description": "observations.md O2 and O4.",
       "anyOf": [
@@ -367,6 +373,11 @@
           "description": "stats-ops.md H2, H5: studied_today_raw and studied_today_text take no references.",
           "type": "string",
           "pattern": "^\\s*(studied_today_raw|studied_today_text)\\s*$"
+        },
+        {
+          "description": "stats-ops.md H1, H11: heatmap_totals and heatmap_report alone give Home and take no references.",
+          "type": "string",
+          "pattern": "^\\s*(heatmap_totals|heatmap_report)\\s*$"
         },
         {
           "description": "stats-ops.md H13: graph_preferences takes no references.",
@@ -637,6 +648,8 @@
             "studied_today_raw": { "description": "stats-ops.md H2.", "type": "null" },
             "studied_today_text": { "description": "stats-ops.md H5.", "type": "null" },
             "graph_preferences": { "description": "stats-ops.md H13.", "type": "null" },
+            "heatmap_totals": { "description": "stats-ops.md H1: Home and these decks, by full name, each once.", "$ref": "#/$defs/heatmap_decks" },
+            "heatmap_report": { "description": "stats-ops.md H11: Home and these decks, by full name, each once.", "$ref": "#/$defs/heatmap_decks" },
             "studied_today_format": {
               "description": "stats-ops.md H6: [cards, time_ms] pairs.",
               "type": "object",
@@ -787,6 +800,15 @@
                 "notetypes": { "$ref": "#/$defs/names" },
                 "decks": { "$ref": "#/$defs/names" },
                 "presets": { "$ref": "#/$defs/names" }
+              }
+            },
+            "fsrs_model_check": {
+              "description": "Draft (optimizer-ops.md P4): whether an FSRS model builds from each named preset's parameter list in use; never changes the collection.",
+              "type": "object",
+              "required": ["presets"],
+              "additionalProperties": false,
+              "properties": {
+                "presets": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "uniqueItems": true }
               }
             },
             "file_col": {
@@ -1834,6 +1856,17 @@
           "type": "object",
           "maxProperties": 0
         },
+        "corrupt_page": {
+          "description": "Draft (maintenance-ops.md M2; the oracle implements it): close the collection, fold a leftover WAL into the file, overwrite the named table's root page with 0xFF bytes and open the collection again; no output, no rejection. Damage revlog; not in actor scenarios or before a handoff (M2.3).",
+          "type": "object",
+          "required": ["table"],
+          "additionalProperties": false,
+          "properties": {
+            "table": {
+              "enum": ["col", "notes", "cards", "revlog", "graves", "deck_config", "config", "tags", "fields", "templates", "notetypes", "decks"]
+            }
+          }
+        },
         "media_outside": {
           "description": "Stable (media-ops.md F4): change the media folder directly, bypassing the store: create or rewrite files, create empty subdirectories, remove entries.",
           "type": "array",
@@ -1938,6 +1971,29 @@
         },
         "enable_v3": {
           "description": "Stable (specs/conformance/fsrs-policy-ops.md F3): Anki's scheduler update to the current scheduler. Meguri ensures the session is Hosted, running its real engine-open normalization on promotion.",
+          "type": "object",
+          "maxProperties": 0
+        },
+        "compute_fsrs_params": {
+          "description": "Draft (specs/conformance/optimizer-ops.md P1): one preset's FSRS parameter computation, writing nothing; preset by its exact stored name, relearning_steps the count passed to training and to the adoption rule, form which of Anki's two default searches (one_preset when missing); rejections invalid_cutoff, invalid_search.",
+          "type": "object",
+          "required": ["preset", "relearning_steps"],
+          "additionalProperties": false,
+          "properties": {
+            "preset": { "type": "string", "minLength": 1 },
+            "relearning_steps": { "$ref": "#/$defs/u32" },
+            "form": { "enum": ["one_preset", "all_presets"] }
+          }
+        },
+        "optimize_all_presets": {
+          "description": "Draft (specs/conformance/optimizer-ops.md P2), oracle only: Anki's deck options Save and optimize all presets on the deck (stored human name), FSRS on, rescheduling off; output none.",
+          "type": "object",
+          "required": ["deck"],
+          "additionalProperties": false,
+          "properties": { "deck": { "type": "string", "minLength": 1 } }
+        },
+        "optimizer_run": {
+          "description": "Draft (specs/conformance/optimizer-ops.md P3), live chains: one Optimize now run committed to its end on Meguri; the oracle runs optimize_all_presets on the default deck in its place; output none.",
           "type": "object",
           "maxProperties": 0
         },

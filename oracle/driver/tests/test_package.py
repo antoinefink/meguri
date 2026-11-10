@@ -159,6 +159,8 @@ def make_fixtures(root: str) -> dict:
         "media-con": with_media(b"con.jpg"),
         "media-sha1-short": with_media(b"x.jpg", abc[:19]),
         "media-ok": with_media(b"x.jpg"),
+        # A map naming member 0, which the archive lacks (E2.3).
+        "media-member-missing": [e for e in entries if e[0] != "media"] + [("media", raw_frame(media_map(b"x.jpg", 3, abc)))],
     }
     for name, content in variants.items():
         write_zip(os.path.join(package, name + ".colpkg"), content)
@@ -362,6 +364,7 @@ class Import(Packages):
             "meta-4": "too_new", "meta-empty": "too_new", "meta-ff": "corrupt", "no-collection": "corrupt",
             "raw-collection": "corrupt", "not-a-zip": "corrupt", "v12-inside": "corrupt", "no-media": "corrupt",
             "media-traversal": "corrupt", "media-con": "corrupt", "media-sha1-short": "corrupt",
+            "media-member-missing": "corrupt",
         }
         dump = {"observe": ["db_dump"]}
         imports = [import_fixture(f"package/{name}.colpkg") for name in cases]
@@ -371,9 +374,11 @@ class Import(Packages):
         self.assertEqual(steps[2:2 + len(cases)], [{"import": {"error": kind}} for kind in cases.values()])
         self.assertEqual(steps[1], steps[2 + len(cases)])
         self.assertEqual(steps[-1], {"db_exec": {"rows": [[sql_facts(self.fixture("storage/v18.anki2"))["notes"]]]}})
-        # No file was left in the session directory or its media folder.
+        # No file was left in the session directory or its media folder, but
+        # the missing-member refusal opens Anki's media database before it
+        # fails, which creates collection.media.db2 (no observation reads it).
         listing = lambda d: sorted(os.path.relpath(os.path.join(p, f), d) for p, _, fs in os.walk(d) for f in fs)  # noqa: E731
-        self.assertEqual(listing(out), listing(baseline))
+        self.assertEqual([f for f in listing(out) if f != "collection.media.db2"], listing(baseline))
 
     def test_missing_packages(self):
         err = self.error([OPEN, {"import": {"format": "colpkg", "name": "none.colpkg"}}])

@@ -23,6 +23,11 @@ it holds and copies OUT to conformance/fixtures/package/apkg/:
                               in ms plus 0, 1, ... (revlog cid follows)
     deck-tree.apkg            the same layout: decks Lang renamed A::B and
                               Lang::Verbs renamed F::x (no deck A, no deck F)
+    media-subdir.apkg         as meta-version-4 with meta 08 03, plus entry 0 (a
+                              frame of abc) before media, a frame of a P5 map
+                              with one record: a/b.jpg, size 3, SHA-1 of abc
+    legacy-subdir.apkg        as legacy-traversal, map {"0": "a/b.jpg"}
+    legacy-no-media-map.apkg  as legacy-traversal without entry 0 and media
 
 Stored entries dated 1980-01-01 00:00:00, in the order above. The two edited
 collections are rewritten with sqlite3 on a scratch copy, secure_delete on. Every other
@@ -31,6 +36,7 @@ deck-package input of the apkg scenarios is the scenario's own export.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -60,6 +66,22 @@ def raw_frame(data: bytes) -> bytes:
     for k, chunk in enumerate(chunks):
         out += (len(chunk) << 3 | int(k == len(chunks) - 1)).to_bytes(3, "little") + chunk
     return bytes(out)
+
+
+def varint(n: int) -> bytes:
+    out = bytearray()
+    while True:
+        byte, n = n & 0x7F, n >> 7
+        out.append(byte | (0x80 if n else 0))
+        if not n:
+            return bytes(out)
+
+
+def media_map(name: str, size: int, sha1: bytes) -> bytes:
+    """package/container.md P5: one media entry (name 1, size 2, sha1 3) in field 1."""
+    raw = name.encode()
+    entry = b"\x0a" + varint(len(raw)) + raw + b"\x10" + varint(size) + b"\x1a" + varint(len(sha1)) + sha1
+    return b"\x0a" + varint(len(entry)) + entry
 
 
 def write_zip(path: str, entries: list[tuple[str, bytes]]) -> None:
@@ -132,7 +154,13 @@ def make(storage: str, out: str) -> None:
         write_zip(os.path.join(out, name + ".apkg"), [
             ("collection.anki21", edited(schema11, edit)), ("collection.anki2", schema11), ("media", b"{}"),
         ])
-    print(f"apkg.py: wrote 6 packages to {out}", file=sys.stderr)
+    write_zip(os.path.join(out, "media-subdir.apkg"), [
+        ("meta", b"\x08\x03"), ("collection.anki21b", raw_frame(schema11)), ("collection.anki2", schema11),
+        ("0", raw_frame(b"abc")), ("media", raw_frame(media_map("a/b.jpg", 3, hashlib.sha1(b"abc").digest()))),
+    ])
+    write_zip(os.path.join(out, "legacy-subdir.apkg"), legacy + [("0", b"abc"), ("media", b'{"0": "a/b.jpg"}')])
+    write_zip(os.path.join(out, "legacy-no-media-map.apkg"), legacy)
+    print(f"apkg.py: wrote 9 packages to {out}", file=sys.stderr)
 
 
 def main(argv: list[str]) -> int:

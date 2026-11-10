@@ -1,0 +1,8 @@
+# Review Heatmap 1.0.1 (AGPL-3.0): the files heatmap/Dockerfile installs from the public
+# tag v1.0.1 of github.com/glutanimate/review-heatmap (commit
+# 5ab7964ac5bbab33358ef9cd5dd4f31517f43e48): the repository's LICENSE and everything under
+# src/review_heatmap/, paths as in the repository. The line below is the sha256 of their
+# `sha256sum` listing (one "<sha256>  <path>" line per file, sorted by path in C order)
+# and the file count. The Dockerfile and observe/heatmap_addon.py refuse any other set.
+# Changing it re-records every heatmap golden (specs/conformance/stats-ops.md H4).
+cbfafd8471d2daa5dfc6938880b46245806693accb683786a9e56a86b9835c84  100

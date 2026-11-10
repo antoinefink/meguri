@@ -24,9 +24,13 @@ and protobuf errors as the same plain BackendError, so a probe reads the kind):
 too_new is the import error whose message is the backend's own "too new"
 translation; corrupt is the import error whose message is its "not a valid
 file" translation, a protobuf decode error, a zip error (Anki raises those as
-sync errors) and an I/O error, which are what the import raises before it
-replaces the collection (E2.3). Any other failure stays a run error. No
-message leaves the driver (R1887).
+sync errors), an I/O error and an invalid-input error, which are what the
+import raises before it replaces the collection (E2.3). Given a media folder
+(the driver always passes the session's), Anki's collection package import
+raises invalid input only for a media map that names a member the archive
+lacks, so the kind alone identifies it; the message is untranslated text and
+is never read. Any other failure stays a run error. No message leaves the
+driver (R1887).
 
 E2.4: a scenario with a collection package import has no setup, opens first,
 adds no note and names no logical id anywhere; checked before any collection.
@@ -53,9 +57,14 @@ COLPKG_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\.colpkg")
 IMPORT_FORMS = ({"format", "fixture"}, {"format", "name"})
 _LOGICAL_ID = re.compile(r"#[nc][1-9]")
 _ERR = backend_pb2.BackendError
-# Backend error kinds Anki's collection package import raises for a package
-# it cannot read before the replace (E2.3), besides its import errors.
+# Backend error kinds Anki's package imports raise for a package they cannot
+# read before the replace (E2.3), besides their import errors (ops/apkg.py
+# shares them).
 _CORRUPT_KINDS = frozenset({_ERR.PROTO_ERROR, _ERR.SYNC_OTHER_ERROR, _ERR.IO_ERROR})
+# The collection package import only: INVALID_INPUT is a media map member
+# missing from the archive, its one invalid-input error when a media folder is
+# given. The deck package import keeps invalid input a run error.
+_COLPKG_CORRUPT_KINDS = _CORRUPT_KINDS | {_ERR.INVALID_INPUT}
 
 
 def colpkg_name(value: Any, what: str) -> str:
@@ -159,7 +168,7 @@ def _refusal(tr, error: backend_pb2.BackendError) -> str | None:
         if error.message == tr.importing_the_provided_file_is_not_a():
             return "corrupt"
         return None
-    return "corrupt" if error.kind in _CORRUPT_KINDS else None
+    return "corrupt" if error.kind in _COLPKG_CORRUPT_KINDS else None
 
 
 @op("import", rejects=("too_new", "corrupt", "notetype_kind_conflict"))

@@ -11,6 +11,46 @@
     "steps": { "type": "array", "items": { "$ref": "#/$defs/step_output" } }
   },
   "$defs": {
+    "heatmap_days": {
+      "description": "stats-ops.md H1, H11: date YYYY-MM-DD -> count of at least 1; dates with no count are absent.",
+      "type": "object",
+      "propertyNames": { "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+      "additionalProperties": { "type": "integer", "minimum": 1 }
+    },
+    "heatmap_report": {
+      "description": "stats-ops.md H11: one scope's report.",
+      "type": "object",
+      "required": ["today", "history", "forecast", "last_forecast_day", "today_cell", "streaks"],
+      "additionalProperties": false,
+      "properties": {
+        "today": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "history": { "$ref": "#/$defs/heatmap_days" },
+        "forecast": { "$ref": "#/$defs/heatmap_days" },
+        "last_forecast_day": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }] },
+        "today_cell": {
+          "type": "object",
+          "required": ["kind", "count"],
+          "additionalProperties": false,
+          "properties": { "kind": { "enum": ["today", "future"] }, "count": { "type": "integer", "minimum": 0 } }
+        },
+        "streaks": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["daily_average", "days_learned", "longest_streak", "current_streak"],
+              "additionalProperties": false,
+              "properties": {
+                "daily_average": { "type": "integer", "minimum": 0 },
+                "days_learned": { "type": "integer", "minimum": 0 },
+                "longest_streak": { "type": "integer", "minimum": 0 },
+                "current_streak": { "type": "integer", "minimum": 0 }
+              }
+            }
+          ]
+        }
+      }
+    },
     "search_text_outputs": {
       "description": "specs/conformance/search-ops.md S6: {text} or a parse error (never a run error), one per case.",
       "type": "array",
@@ -560,6 +600,44 @@
             }
           }
         },
+        "compute_fsrs_params": {
+          "description": "optimizer-ops.md P1: item and review counts, whether the list in use came back, the health result and the returned list's log loss, or the rejection invalid_cutoff or invalid_search.",
+          "anyOf": [
+            {
+              "type": "object",
+              "required": ["items", "reviews", "kept", "health", "eval"],
+              "additionalProperties": false,
+              "properties": {
+                "items": { "type": "integer", "minimum": 0 },
+                "reviews": { "type": "integer", "minimum": 0 },
+                "kept": { "type": "boolean" },
+                "health": { "enum": ["good", "bad", null] },
+                "eval": {
+                  "anyOf": [
+                    { "type": "null" },
+                    {
+                      "type": "object",
+                      "required": ["log_loss"],
+                      "additionalProperties": false,
+                      "properties": { "log_loss": { "$ref": "#/$defs/f32" } }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/rejection" },
+                { "properties": { "error": { "enum": ["invalid_cutoff", "invalid_search"] } } }
+              ]
+            }
+          ]
+        },
+        "fsrs_model_check": {
+          "description": "optimizer-ops.md P4: per preset name, ok or invalid_params.",
+          "type": "object",
+          "additionalProperties": { "enum": ["ok", "invalid_params"] }
+        },
         "blob_decode": {
           "description": "model-ops.md L4: per record, ok or invalid_blob.",
           "type": "object",
@@ -991,6 +1069,26 @@
           }
         },
         "db_dump": { "$ref": "#/$defs/db_dump" },
+        "heatmap_totals": {
+          "description": "stats-ops.md H1: the history count per day of Home and of each requested deck, by full name.",
+          "type": "object",
+          "required": ["home"],
+          "additionalProperties": false,
+          "properties": {
+            "home": { "$ref": "#/$defs/heatmap_days" },
+            "decks": { "type": "object", "minProperties": 1, "additionalProperties": { "$ref": "#/$defs/heatmap_days" } }
+          }
+        },
+        "heatmap_report": {
+          "description": "stats-ops.md H11: the add-on's report of Home and of each requested deck, by full name.",
+          "type": "object",
+          "required": ["home"],
+          "additionalProperties": false,
+          "properties": {
+            "home": { "$ref": "#/$defs/heatmap_report" },
+            "decks": { "type": "object", "minProperties": 1, "additionalProperties": { "$ref": "#/$defs/heatmap_report" } }
+          }
+        },
         "studied_today_raw": {
           "description": "stats-ops.md H2: the counted rows and the sum of their stored time.",
           "type": "object",
