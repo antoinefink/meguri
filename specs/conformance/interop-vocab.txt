@@ -514,3 +514,8 @@ invalid_search
 invalid_params
 one_preset
 all_presets
+# Wave 9 (conformance/review-config-ops): the review_config observation and the review settings keys it reports.
+hideAudioPlayButtons
+interruptAudioWhenAnswering
+review_config
+timeLim

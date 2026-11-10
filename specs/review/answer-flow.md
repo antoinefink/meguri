@@ -84,7 +84,7 @@ Terms: the **current card** is item 0 of the session's head (`sched/review-sessi
 **Open point, blocking U178: what `estTimes` = false does.** Two rules disagree, and an implementer cannot meet both:
 
 - R354 and the plan's U178 say the labels are always shown. This is a difference from Anki that writes nothing. U178's test list has "estTimes = false → labels still shown".
-- R131, `review/review-preferences#P4.1` and the design contract's N3 (which lists R131) show or hide the labels by the key, as Anki does, and let Settings write it.
+- R131 and the design contract's N3 (which lists R131) show or hide the labels by the key, as Anki does, and let Settings write it. `review/review-preferences#P4.1` states both branches; until the plan settles it, Meguri follows the R354 branch, which reads and writes nothing.
 
 Antoine decides. Until then, U178 implements and tests only the `estTimes` = true case, and this file states only Anki's rule above.
 

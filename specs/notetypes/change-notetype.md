@@ -5,7 +5,7 @@ Requirements: R944, R945, R946, R947, R948; supports R949, R951, R1189, R1475, R
 Anki: 26.09.3
 Scenarios: conformance/scenarios/notetypes/change/
 
-Moving selected notes to another note type, or remapping the fields and templates of their own note type: the info query that gives the default mappings, the loss preview and the schema stamp, and the change itself. The screens are U203 (and the Browse entry, U87 and U210); the scenario ops are `specs/conformance/change-notetype-ops.md`.
+Moving selected notes to another note type, or remapping the fields and templates of their own note type: the info query that gives the default mappings, the loss preview and the schema stamp, and the change itself. The screens are U203 (and the Browse entry, U87 and U210); the scenario ops are `specs/conformance/change-notetype-ops.md`. The sheet's pickers (target order, opening state, template choices another row uses, the collapsed loss list) are `notetypes/editor-actions` A16.
 
 Terms. The **old note type** is the one the selected notes share; the **new note type** is the target, any note type of the collection, the old one included (R944). Fields and templates are numbered by their 0-based ordinal. "Standard" and "cloze" are the note type kinds (`notetypes/records`). Card generation terms are `notes/card-generation`'s; deck placement and new-card positions are `notes/deck-placement-and-position`'s; stamps are `storage/ids-usn-mtime`'s (`now_s`, `now_ms`, local change).
 

@@ -5,7 +5,7 @@ Requirements: R248, R254, R820, R821, R823, R825, R826, R827, R828, R829, R830, 
 Anki: 26.09.3
 Scenarios: conformance/scenarios/editor/field-html/
 
-The note editor component (U190) that Add (U195), the edit flows (U196, U184), the Browse editor (U221), the Edit Field sheet (U220) and the image-occlusion flows reuse: what field HTML it shows and what it writes back, when a change is saved and as which op, the field list, and the messages between the editor page and its native host. Formatting and cloze tools (U192), the tag editor (U193), media insertion and image display (U194), paste and drop (U197) and what the editor does when another writer changes the note (U196, R822) build on it and are specified with those units.
+The note editor component (U190) that Add (U195), the edit flows (U196, U184), the Browse editor (U221), the Edit Field sheet (U220) and the image-occlusion flows reuse: what field HTML it shows and what it writes back, when a change is saved and as which op, the field list, and the messages between the editor page and its native host. Formatting and cloze tools (U192), the tag editor (U193), media insertion and image display (U194), paste and drop (U197) and what the editor does when another writer changes the note (U196, R822) build on it: `editor/tag-editor`, `editor/paste`, `editor/formatting`, `editor/cloze-wrap`, `editor/add-flow` and `editor/edit-flows`.
 
 Meguri's editor page is Meguri's own: no Anki editor script, style or asset is used in the app or in its tests (R1960).
 
@@ -107,7 +107,7 @@ A commit is the page handing one field's H3 steps 1 and 2 result to the host, wi
 
 - **idle**: 600 ms after its last input. Each input restarts that field's timer. Every field has its own timer, so a commit of one field never cancels another field's pending commit.
 - **blur**: at once when focus leaves the field.
-- **flush**: at once, with every other field that has a pending commit and with the tag editor's pending edit (U193). The host flushes, and waits for the reply, before any toolbar, menu or keyboard command that acts on the note or leaves it (U192's commands, Cards…, Fields…, preview, Add), before it loads another note into the page and before it closes the editor (these two with `hold`, B3), and when the scene moves to the background or resigns active (U151). A mode switch (H6) and collapsing a focused field (F3) first commit that field.
+- **flush**: at once, with every other field that has a pending commit and with the tag editor's pending edit (`editor/tag-editor` G11). The host flushes, and waits for the reply, before any toolbar, menu or keyboard command that acts on the note or leaves it (U192's commands, Cards…, Fields…, preview, Add), before it loads another note into the page and before it closes the editor (these two with `hold`, B3), and when the scene moves to the background or resigns active (U151). A mode switch (H6) and collapsing a focused field (F3) first commit that field.
 
 A field with no input since its last commit commits nothing on blur, flush, a mode switch or a collapse.
 
@@ -144,12 +144,12 @@ A patch with neither fields nor tags is not sent.
 - The patch op asks to be refused, never parked, while the collection is unavailable (`engine/lifecycle` L4), so it never runs on another generation; it then fails with `CollectionUnavailable`.
 - Decided 2026-10-27: a field's last sent value becomes its target when the host submits the patch, so a later commit, made while that patch is still queued, is compared with the queued value. A field that later becomes unchanged again sends its baseline's stored HTML, so the stored bytes come back.
 - Decided 2026-10-27: when a patch fails, whatever its result (`NotFound`, `Stale`, `InvalidArgument`, `CollectionUnavailable`, `StaleGeneration`, a storage error such as a full disk, or a panic), each of its fields gets back, as its last sent value, its **last committed value**: the target of that field's last patch that committed, or its baseline's stored HTML when none did. Its session target and its content on screen stay.
-- Every failure is shown to the user at once, never silently, in U196's wording: `NotFound` says the note was deleted, and U196 then closes the editor (R822); `InvalidArgument` says the note needs Check Database (U128); `Stale` is handled as below; any other failure says the change was not saved and keeps the text in the editor.
+- Every failure is shown to the user at once, never silently, in the wording of `editor/edit-flows` W9: `NotFound` says the note was deleted, and U196 then closes the editor (R822, `editor/edit-flows` W5.4); `InvalidArgument` says the note needs Check Database (U128); `Stale` is handled as below; any other failure says the change was not saved and keeps the text in the editor.
 - Each flush also puts into its patch every field whose session target differs from its last sent value, even with no input since its last commit, so a field whose patch failed is sent again at the next flush.
 - When a patch of the flush made before loading another note or closing the editor fails, the host neither loads nor closes, except for a deleted note: it reports the failure, sends `release` (B3) and keeps the note and its text in the editor. A background flush's failure is reported when the scene is active again.
 - After `Stale`, the host reads the note and its note type again and reloads the editor without losing text (R822). Each field whose session target differs from its last committed value is matched to a field of the new layout: the one with the same `id`, or the one with the same name when the old field had no `id`, and none when the note's `mid` is no longer the patch's note type id. Each matched field loads with its session target as `html` and the newly stored value as `baselineHtml` (B4), so it starts changed (H2), and its last sent value is the newly stored value. The host then sends at once one patch on the new layout with those targets; when it fails, it is handled as any failure above, with no further automatic retry. A field with no match is shown to the user with its text, which can be copied, and is never dropped silently. A rename alone is therefore saved with no text lost.
 - A refused patch is never sent again for another note.
-- The `Changes` events of the editor's own patches (`engine/change-stream` S3, matched by op seq) do not reload the editor; U196 specifies the matching.
+- The `Changes` events of the editor's own patches (`engine/change-stream` S3, matched by op seq) do not reload the editor; `editor/edit-flows` W1 specifies the matching: while an own patch is in flight the host holds the note's `Changes` events, then skips those whose seq is an own patch's.
 - Add mode sends no op: the draft holds the targets (S1) and U195's add op takes them. Content mode (U220) binds no note, has one field and no tags, and never sends an op; after its flush, its result is the value S1 keeps.
 
 ## S3. Field check updates (R807, R812)
@@ -161,7 +161,7 @@ A patch with neither fields nor tags is not sent.
 ## F1. The field list (R825, R833)
 
 - One entry per field, in note type field order, then the tag editor (U193), which content mode leaves out.
-- In a note type whose `original_stock_kind` is Image Occlusion, two fields are not shown (`notetypes/stock-kinds` K4, R833), found as Anki finds them: when fields with `tag` 0, 1, 2 and 3 (Occlusion, Image, Header, Back Extra) all exist, the fields whose `tag` is 0 and 1; otherwise, when the note type has at least four fields, ordinals 0 and 1; otherwise ordinal 0 only. Decided 2026-10-27: Meguri follows Anki here, so a note type that lost its tags (Check Database restores them) still never shows the occlusion data as an editable field. Hidden fields are never loaded into the page, committed or patched; the mask editor writes them (U206).
+- In a note type whose `original_stock_kind` is Image Occlusion, two fields are not shown (`notetypes/stock-kinds` K4, R833), found as Anki finds them: when fields with `tag` 0, 1, 2 and 3 (Occlusion, Image, Header, Back Extra) all exist, the fields whose `tag` is 0 and 1; otherwise, when the note type has at least four fields, ordinals 0 and 1; otherwise ordinal 0 only. Decided 2026-10-27: Meguri follows Anki here, so a note type that lost its tags (Check Database restores them) still never shows the occlusion data as an editable field. Hidden fields are never loaded into the page; the session writes them as host fields, which S1 and S2 commit and patch like page fields (`editor/image-occlusion-notes` O6.1). Which view an image-occlusion session shows (mask editor or fields) is `editor/image-occlusion-notes` O3; a stock-kind-6 note type with fewer than four fields gets no mask editor and shows `editor/image-occlusion-notes` O2's notice.
 - Each entry has the field name as its label, the input, and a mode button (H6). Accessibility identifiers: `editor.field.<ord>`, `editor.field.<ord>.label`, `editor.field.<ord>.htmlToggle`.
 - The field's `description` is its placeholder: shown as plain text (never parsed as HTML), in rich mode only, while the field's target would be empty, in the field's font size, in the secondary label color, on one line truncated at its end.
 
@@ -186,7 +186,7 @@ A patch with neither fields nor tags is not sent.
 
 ## F5. Undo inside a field (R832)
 
-Each field keeps its own edit history, apart from WebKit's: snapshots at edit boundaries, with consecutive typing grouped. ⌘Z and ⇧⌘Z with a field focused undo and redo that field only, and each is an input (S1). With no field focused they go to the collection undo (U159). Loading a note or `setField` clears the field's history. Decided 2026-10-27: the history holds snapshots of the content in the field's current mode, and a mode switch (H6) clears it, since the two modes edit different things; the page then sends `historyState`.
+Each field keeps its own edit history, apart from WebKit's: snapshots at edit boundaries, with consecutive typing grouped. ⌘Z and ⇧⌘Z with a field focused undo and redo that field only, and each is an input (S1). When the focused field has nothing to undo (or redo), ⌘Z (or ⇧⌘Z) and Edit › Undo (Redo) go to the collection undo (U159), so after an add, whose next draft's fields load with empty histories, ⌘Z in the first field undoes the add (`editor/add-flow` A5); the Edit menu's title follows the target (the field's history while it can undo, else the collection's step name). With no field focused they go to the collection undo (U159). Loading a note or `setField` clears the field's history. Decided 2026-10-27: the history holds snapshots of the content in the field's current mode, and a mode switch (H6) clears it, since the two modes edit different things; the page then sends `historyState`.
 
 ## F6. Scripts in fields (R831)
 
@@ -238,7 +238,7 @@ U192 adds the format state message, U193 the tag messages and U194 the image mes
 | `setFocus` | `loadId`, `ord` | done; the selection is restored as F4 says |
 | `setMarks` | `loadId`, `duplicate` (boolean), `hint` (string or null) | done (S3) |
 | `flush` | `loadId`, `hold` (boolean) | `commits`: one `{ord, html, unchanged}` per field committed (S1), in field order, and the tag editor's pending tags (U193). With `hold` true the page, once it has answered, accepts no input (keys, paste, drop, commands) until the next `openNote` or `release` |
-| `release` | `loadId` | done; ends a flush's hold (S2) |
+| `release` | `loadId` | done; ends a flush's hold (S2); also sent by Browse after a change that keeps the same note in the pane (`editor/edit-flows` W2) and by the Add screen when an add or close stops (`editor/add-flow` A5, A7) |
 | `undo`, `redo` | `loadId`, `ord` | `applied` (boolean) |
 | `setTheme` | `theme` | done |
 

@@ -53,7 +53,7 @@ Error strings of this file:
 
 | Parameter | Type | Default |
 |---|---|---|
-| `query` | string; `null` counts as absent | absent: Browse keeps its current search |
+| `query` | string; `null` counts as absent | absent: Browse keeps its current search (when Browse holds no result yet, the default search runs: `browser/entry-points` E3 rule 6, E2) |
 | `reorderCards` | any (envelope E12.2; the checks below), an object `{order, columnId}`; `null` counts as absent | absent: the sort is left as it is |
 
 Checks, in this order (the first failure is the reply):

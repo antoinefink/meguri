@@ -416,6 +416,7 @@ Expected deviation entries, each with the scenario that asserts Meguri's side. T
 | R1747 | a supplied `key` with no key configured is ignored; the add-on refuses it | `replace` |
 | R1740 | unknown `params` members are ignored and a missing one is named in Meguri's words; the add-on reports Python's argument errors | `replace` of `/body/json` |
 | R1777 | Unicode case folding in search | `replace` of the result |
+| R1795 | a write through the server is never recorded in Meguri's undo history, and Meguri's executor starts with no setup steps (T20); Anki records, keeps or empties its history and keeps its setup's steps (`servers/api-undo-history` Y6) | `replace` of `/steps/*/undo_status` by `{"undo": null, "redo": null}`, with `tags: [undo-reference]`; every scenario of `servers/ankiconnect/undo/` has the tag `undo-reference` |
 
 A deviation entry suppresses exactly its declared pointer in its declared scenarios: any other difference still fails (T17's self-test checks this).
 
@@ -517,6 +518,7 @@ For every scenario that is not `pass`, `tools/mg servers-contract` reports, in t
 3. Settled: two fresh recorders at the same clock start gave byte-identical replies, ids included. Ids follow T10.1's "How the recorder's ids fall": they coincide across kinds and a deleted id is reused, which T10.1's entity rule and error-string rule handle. `#unknown` still needs ids of deleted entities to be at least 1,000,000,000, which holds for any clock after 2001.
 4. Settled: the add-on's `cardsInfo` `question` and `answer` start with the note type's CSS in a `<style>` element (Anki 26.9.3 renders them that way), and `servers/ankiconnect-actions` gives Meguri the same start. T10.3 normalizes nothing beyond `conformance/render-ops#Q5.4`, so any remaining difference becomes a deviation entry.
 5. Whether the AnkiConnect transcript suite should also record replies with `Origin` values of real client extensions (their extension ids). The inventory uses synthetic extension ids, since the add-on treats every extension id alike (`servers/ankiconnect-clients` C2).
+6. Transcripts cannot look below the top undo step; `servers/api-undo-history` Y5 reads recorded writes by their top step only. Proposed there (Y9 Q4), for this file's owner and the oracle maintainer, not yet a rule: a T7.1 step `undo` (no value) that runs the DSL's `undo` op (`conformance/undo-ops` V1) on the server's collection after every earlier exchange completed, on both executors, and outputs what V1's `undo` outputs. After a recorded write, `undo` then `observe: [undo_status]` shows the baseline's top step again only when the steps below were kept.
 
 ## T20. Meguri's executor
 
@@ -524,4 +526,5 @@ For every scenario that is not `pass`, `tools/mg servers-contract` reports, in t
 - **Clock.** The host's clock is a test clock (`servers/host-security` H21) that is the scenario clock: `advance` moves it; real-time limits (connection timeouts, the 1 s bound of `servers/host-security` H10.4, probe and fetch limits) run in real time, which `wait` lets pass.
 - **Interactions.** The host's interactions go to a `TestHost` that T7.2 and T7.5 script, with T7.5's defaults.
 - **Order.** Steps run in order. A step starts after the previous one completed, except after an `async` exchange, which runs on while later steps run, until its `await`. A scenario that ends with an `async` exchange not awaited is a run error.
+- **Undo history.** Meguri's executor starts every scenario with both undo histories (undo and redo) empty: the setup leaves no step, the state in which `conformance/undo-ops` V5 has the DSL's undo scenarios start (`servers/api-undo-history` Y6).
 

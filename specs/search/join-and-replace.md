@@ -5,7 +5,7 @@ Requirements: R1078, R1079; supports R1076, R1077, R1109, R1114, R1153, R1322 (A
 Anki: 26.09.3
 Scenarios: conformance/scenarios/search/builder/, conformance/scenarios/search/join-replace/
 
-The search text Meguri writes for UI actions: searches built from structured items (a deck, a tag, a flag, ids), a built item joined to the current search with AND or OR, and a built item put in place of the current search's terms of the same kind. Every Meguri-generated search except Stats' joined text goes through these services (U88): sidebar and chips, Home "Browse", editor duplicates, Select Notes, AnkiConnect GUI actions. Stats "Show in Browser" is not a caller: its text is the literal join of `stats/browse-queries` Q3, which is not J6's canonical join, and its Deck scope text (`deck:"..."`, `stats/browse-queries` Q2.2) is not the form J3 builds for a deck. U88 tests only that AE60's text parses and that its canonical form equals a golden (J11). The text is written by `canonical-form.md`; what it means is `query-model.md`. The token spans, incomplete-tail classification and suggestions of U88 are Meguri's own and live in `search/editing-services` (not this file).
+The search text Meguri writes for UI actions: searches built from structured items (a deck, a tag, a flag, ids), a built item joined to the current search with AND or OR, and a built item put in place of the current search's terms of the same kind. Every Meguri-generated search except Stats' joined text goes through these services (U88): sidebar and chips, Home "Browse", editor duplicates, Select Notes, AnkiConnect GUI actions. Which entry point hands Browse which built item is `browser/entry-points` E3; Select Notes is E8. Stats "Show in Browser" is not a caller: its text is the literal join of `stats/browse-queries` Q3, which is not J6's canonical join, and its Deck scope text (`deck:"..."`, `stats/browse-queries` Q2.2) is not the form J3 builds for a deck. U88 tests only that AE60's text parses and that its canonical form equals a golden (J11). The text is written by `canonical-form.md`; what it means is `query-model.md`. The token spans, incomplete-tail classification and suggestions of U88 are Meguri's own and live in `search/editing-services` (not this file).
 
 ## J1. The services
 
@@ -94,7 +94,7 @@ E puts `_` in place of some characters, and `_` matches any character, so the bu
 - **Note type by name n** is refused when n holds White_Space other than U+0020 or a character U+001C–U+001F, or is not in NFC (`names-and-ids.md` N4.1 puts the value in NFC). The caller builds the note-type-id item (`mid:`).
 - A negative id cannot be written (J3), so a deck or note type that needs these items and has a negative id gets no built search: the UI offers none for it, as for J3.3.
 
-These callers are the sidebar, Home "Browse", Select Notes and the suggestions of `search/editing-services` D6.6. The deck-ids text does not follow a later rename; a built search is used at once.
+These callers are the sidebar (`browser/sidebar` S3.4, S3.5; a dragged id list saved as a saved search: S10.3), Home "Browse", Select Notes and the suggestions of `search/editing-services` D6.6. The deck-ids text does not follow a later rename; a built search is used at once.
 
 ## J4. Writing a built item
 
@@ -198,7 +198,7 @@ Negated operator words are not terms and are never replaced. Consequences, all A
 | replace (empty), deck `X` | `deck:*` |
 | replace `(a  b)`, deck `X` | `a b` |
 
-AE43 (core part) is the first join and the first replace above. In 26.09.3 the join brackets the existing two-item search, as the golden of `search/join-replace/ae43` records; the plan's AE43 text without brackets predates this check.
+AE43 (core part) is the first join and the first replace above. Which sidebar input calls which service with which arguments is `browser/sidebar` S8. In 26.09.3 the join brackets the existing two-item search, as the golden of `search/join-replace/ae43` records; the plan's AE43 text without brackets predates this check.
 
 ## J10. Differences from Anki
 

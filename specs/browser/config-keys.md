@@ -198,11 +198,11 @@ Toggling Browse's Cards/Notes switch writes the new mode: true for notes. Nothin
 | Note Types | `collapseNotetypes` |
 | Tags | `collapseTags` |
 
-Collapsing a section writes true to its key, expanding it writes false. Decks and tags inside the sections keep their own expansion in the deck and the tag rows, not here (U216, `tags/tags`).
+Collapsing a section writes true to its key, expanding it writes false. Decks and tags inside the sections keep their own expansion in the deck and the tag rows, not here (U216, `tags/tags`). Which toggles write, and when (only while the sidebar's filter is off, never on a rebuild), and the order of the writes of one mixed Expand or Collapse: `browser/sidebar` S5.
 
 ### K6.3 Previewer (`previewBothSides`, R1218)
 
-True: the previewer shows each card directly on its answer side, so question and answer appear together, and moving goes from card to card. Toggling writes the new value.
+True: the previewer shows each card directly on its answer side, so question and answer appear together, and moving goes from card to card. Toggling writes the new value. What the previewer does with the setting (the side shown, moving through the results, audio): `browser/preview` P3, P6 and P7.
 
 ### K6.4 Default search (`defaultSearchText`, R1112, R1267)
 
@@ -215,6 +215,8 @@ True: the previewer shows each card directly on its answer side, so question and
 | `""`, `"   "`, `"　"` | no | `deck:current`, empty field |
 | `"  deck:x "` | yes | `  deck:x ` |
 | `"​"` | yes | `​` |
+
+- When Browse runs it (a plain open, an open from review, the clear button, Esc and the empty state's action), that it is not put in canonical form and not recorded in recent searches, and what a stored text that does not parse or whose run fails shows: `browser/entry-points` E2, E4, E7.
 
 ### K6.5 Search keys (`ignoreAccentsInSearch`, `normalize_note_text`)
 
@@ -236,7 +238,7 @@ True: the previewer shows each card directly on its answer side, so question and
 - When the key holds a JSON object, each member whose value is a string is a saved search: the member name is its name, the value its search text. Members with other values are kept by every write and never shown.
 - When the key is absent, unreadable or holds something other than an object, there are no saved searches, and the first saved-search write replaces the value with a new object.
 - Names are compared exactly: `Leeches` and `leeches` are two saved searches. Names and search texts are stored as given, with no trimming or normalization.
-- The order in which the sidebar lists them is U216's (R1158). Anki's desktop sidebar lists them by name in code point order.
+- The order in which the sidebar lists them is `browser/sidebar` S3.1 (R1158). Anki's desktop sidebar lists them by name in code point order.
 
 ### K7.2 Writes
 
@@ -280,24 +282,25 @@ The shape, the shown names and the Rename Flag and Restore Default Name writes a
 
 ### K10.2 Undo
 
-The undo classes are U25's. The plan reads R42 with R366 and R725 this way: only the current-deck selection is a write that neither records nor clears undo; every other write the user cannot undo clears the whole undo and redo history.
+The undo classes are U25's. The plan reads R42 with R366 and R725 this way, and `storage/settings-keys` S3 item 5 (R115) adds Settings to it: only the current-deck selection and Settings' collection-config writes are writes that neither record nor clear undo; every other write the user cannot undo clears the whole undo and redo history.
 
 | Keys and writes | Anki | Meguri |
 |---|---|---|
 | `browserTableShowNotesMode`, `activeCols`, `activeNoteCols`, the four sort keys, the `collapse*` keys, `previewBothSides` | no undo step; earlier undo steps stay undoable; redo steps are dropped | non-undoable writes (op source `UserNonUndoable`): no undo entry, and a write that changes the key clears the undo and redo history (reason `ClearedByNonUndoableOp`) |
-| `defaultSearchText`, `ignoreAccentsInSearch` | saved by the preferences dialog together with the other preferences, as one undoable step | written by Settings › Browse like every Settings write (`UserNonUndoable`): no undo entry, and the history is cleared when the key changes |
+| `defaultSearchText`, `ignoreAccentsInSearch` | saved by the preferences dialog together with the other preferences, as one undoable step | written by Settings › Browse like every Settings write (`UserNonUndoable`): no undo entry; a skip-undo op (`engine/undo` M2) that keeps the earlier undo steps and empties the redo history, as every Settings write (`storage/settings-keys` S3 item 5) |
 | `savedFilters` | no undo step, as the first row | one undoable entry per write, named "Save Search", "Update Saved Search", "Rename Saved Search" or "Delete Saved Search" (R2020); a write that changes nothing makes no entry |
 | `flagLabels` | no undo step, as the first row | "Rename Flag" (`tags/flags-and-marked` F4) |
 | `setDueBrowser`, `restorePositionBrowser`, `resetCountsBrowser` | inside the Set Due Date or Reset step, undone with it | the same (U48, U87) |
 
 - An action that writes nothing (K4.2, K4.3, K5.2, K6.1 to K6.5, K7.2, `storage/config-table` C4) changes no data. It records no entry and keeps the undo steps (R725 clears them only for actions that change data). What it does to the redo history depends on its undo class (`engine/undo` M2, A2):
-  - A non-undoable action (K4.2, K4.3, K5.2, the K6.1 to K6.5 writes) also leaves the redo history: an op of source `UserNonUndoable` that changes nothing changes neither history. Showing a column that is already displayed therefore keeps the user's undo and redo steps.
+  - A non-undoable action (K4.2, K4.3, K5.2, the K6.1 to K6.3 writes) also leaves the redo history: an op of source `UserNonUndoable` that changes nothing changes neither history. Showing a column that is already displayed therefore keeps the user's undo and redo steps.
+  - A Settings write (K6.4, and K6.5's `ignoreAccentsInSearch`) is a skip-undo op: one that writes nothing keeps the undo steps and still empties the redo history (`engine/undo` M2). Committing the value Settings already shows submits no write (`storage/settings-keys` S3 item 2).
   - A saved-search action (K7.2) is an undoable op (`UserUndoable`). Every undoable op empties the redo history, also when it writes nothing. After an undo, a Save Search of a text already saved under that name writes nothing, keeps the undo steps and drops the redo step.
 - The first row differs from Anki, whose browser keeps the user's undo steps across sort, column, mode, section and previewer changes. The plan lists this among its deferred product decisions ("Expand and collapse writes and undo", under Open Questions). Its default is the table above: the `collapse*` keys, like the other writes in the row, clear the history. Its alternative puts the row in the current-deck selection's skip-undo class (R42): no entry, the undo steps kept and the redo history emptied, as in Anki (`engine/undo` M2). If the alternative is chosen, only the row's undo class changes. The stored values, the change reports and the K13 tests that are not about undo stay the same.
 
 ## K11. Device-only Browse state
 
-Column widths (per device and mode, R1136), row density (R1151), the inspector position, the search field's syntax mode, search history and recent searches stay on the device (KTD12, U210): never in the collection, never synced. Settings › Browse shows them next to the two synced settings of K6.4 and K6.5 (R1267).
+Column widths (per device and mode, R1136), row density (R1151), the inspector position, whether the inspector is collapsed and which of its tabs it shows (`browser/inspector` I8), the search field's syntax mode, recent searches (Browse's one search history: 30 entries, newest first, an equal entry moved to the front, `browser/entry-points` E6) and the accepted-suggestion list of `search/editing-services` D6.1 stay on the device (KTD12, U210): never in the collection, never synced. Settings › Browse shows them next to the two synced settings of K6.4 and K6.5 (R1267).
 
 ## K12. Sync
 

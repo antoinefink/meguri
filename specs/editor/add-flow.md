@@ -18,7 +18,7 @@ What the Add screen (U195) does between opening and closing: its two choosers, a
 
 Each chooser is a searchable list of names. ⌘N opens the note type chooser and ⌘D the deck chooser (R246); the Type and Deck rows open them too.
 
-- **Note types.** Every note type of the collection, by stored name, in `unicase` order (`storage/schema-18`), ties by ascending id.
+- **Note types.** Every note type of the collection, by stored name, in `unicase` order (`storage/schema-18`), ties by ascending id. When the collection has no image occlusion note type, the list also has the stand-in row of `editor/image-occlusion-notes` O10, sorted and filtered by its label with the stored names.
 - **Decks.** Every normal deck by its full human name (`decks/decks` D17's names: stored components joined by `::`), in D17's order (`unicase` order of the stored name, ties by ascending id). Filtered decks are not listed. The default deck (id 1) is left out exactly when `decks/decks` D12 hides it from the deck tree (top-level, no child deck, no card with `did` 1, cards whose `odid` is 1 not counting, another top-level deck exists; R797), with two exceptions that keep it listed: it is the deck the draft has selected, or every other top-level deck is filtered (so the list is never empty). U195 reads the names from D17's snapshot and whether D12 hides the default deck from the deck tree query, which holds a node for id 1 exactly when D12 shows it; both are read when the chooser opens. Example: decks `Default` (no cards), `Spanish`, `Spanish::Mining`: the list is `Spanish`, `Spanish::Mining`; after a card is added to `Default`, `Default` is listed first.
 - **Filter.** The search text is split at U+0020; empty pieces are ignored. A name is listed when every piece occurs in it as a substring, comparing under Unicode simple case folding. An empty search lists every name. Example: `sp min` lists `Spanish::Mining`; `mining sp` lists it too; `spm` does not.
 - **Selection.** The list opens with the draft's current choice highlighted (when the filter leaves it listed; otherwise the first row). Choosing the current note type or deck again changes nothing. Choosing another note type is A3. Choosing another deck selects it and changes nothing else; the field check does not run again (it does not depend on the deck).
@@ -57,6 +57,8 @@ Values are copied as they are, byte for byte. The new note type's sticky options
 | Front `a`, Back `b` | front, back | front `a`, back `b` (by position: names differ in case) |
 | Front `a`, Back `b` | Back, Front | Back `b`, Front `a` (both by name) |
 
+A change into or between image occlusion note types maps the hidden Occlusion and Image fields as `editor/image-occlusion-notes` O10 says.
+
 ## A4. Sticky pins (R805, R255, R862)
 
 - Each field of the Add screen shows a pin (`editor.field.<ord>.pin`) whose state is the field's `sticky` option in the stored note type (`notetypes/records` N2). Pins exist only in the Add screen.
@@ -81,9 +83,9 @@ Values are copied as they are, byte for byte. The new note type's sticky options
    | `missing_cloze` | the confirmation "Add without a cloze deletion?" (screen contract) asks first (R811). Cancel: nothing is written, `release` is sent. Add: go on |
    | `duplicate`, `normal` | go on (R808) |
 
-   For an image occlusion note type the check is U206's (R809: refused when no occlusion exists).
+   For an image occlusion note type, `editor/image-occlusion-notes` O7 step 1 runs first (R994: refused with "No occlusions created" when the Occlusion text the add would store holds no mask numbered 1 or more), then this table; `missing_cloze` then reaches the confirmation only when the note type's front does not use the Occlusion field with `cloze:`.
 5. **The add.** `notes/note-records` A1 with the draft's note type, the flushed field values, the tag list, the selected deck and `update_add_defaults` true: one op, one undoable step "Add Note" (A5, R814), which also writes the keys of A4 (R801).
-6. **On success**, in this order: audio that the editor started (R851) stops; a toast says how many cards the add created, the count the op returns (A2: at least 1), in the plural entry "1 card added" / "N cards added" with Undo (screen contract); the note's id goes to the top of the History (A6); the next draft replaces the draft as `notes/add-defaults` D6 says (sticky values kept, other fields empty, tags kept, focus in the first field); `release` is sent; the field check runs on the next draft.
+6. **On success**, in this order: audio that the editor started (R851) stops; a toast says how many cards the add created, the count the op returns (A2: at least 1), in the plural entry "1 card added" / "N cards added" with Undo (screen contract); the note's id goes to the top of the History (A6); the next draft replaces the draft as `notes/add-defaults` D6 says (sticky values kept, other fields empty, tags kept, focus in the first field; for an image occlusion note type with `editor/image-occlusion-notes` O7 step 4's additions: Occlusion and Image emptied whatever their sticky options, the picker shown again); `release` is sent; the field check runs on the next draft.
 7. **On failure** (any error of the op): its message shows in one line above Add; the draft, its selection and the History are unchanged; `release` is sent.
 
 Edit › Undo and ⌘Z undo the newest step of the collection history (`engine/undo` M3, M4), which right after an add is "Add Note": the note, its cards, the tags it registered and its config writes go (`notes/note-records` A5). After an add, focus is in the next draft's first field, whose own history is empty (the load cleared it, `editor/field-html` F5), so ⌘Z there reaches the collection undo; once the user has typed into a field, ⌘Z first undoes that typing (F5) and reaches the collection undo only when the field has nothing left to undo. The toast's Undo acts on the add's own step only: it undoes when the top step of the history is that add's step (its id is the add op's seq, `engine/op-model` O4), and otherwise (another step was recorded after it, such as a pin toggle's "Update Note Type", or the history was cleared) it is disabled and the toast closes. The next draft is not changed by the undo; the History row of that note turns into "(Note deleted)" (A6).
@@ -110,7 +112,7 @@ On iPhone the swipe-down is held back while the draft is not unchanged, and the 
 
 ## A8. Create Copy and prefilled drafts (R817)
 
-Create Copy (Browse, `browser/bulk-actions` B13; the review ⋯ menu, U183) and a draft prefilled by `guiAddCards` (U146) replace the draft as `notes/add-defaults` D3 says, including when they ask first. The copy's values are copied byte for byte, its tags as stored, its note type the note's, its deck the card's home deck; no field check of the source note is reused (S3 runs on the new draft). For an image occlusion note, U206 also copies the occlusions.
+Create Copy (Browse, `browser/bulk-actions` B13; the review ⋯ menu, U183) and a draft prefilled by `guiAddCards` (U146) replace the draft as `notes/add-defaults` D3 says, including when they ask first. The copy's values are copied byte for byte, its tags as stored, its note type the note's, its deck the card's home deck; no field check of the source note is reused (S3 runs on the new draft). For an image occlusion note, the mask editor opens on the copy's shapes with the Rectangle tool (`editor/image-occlusion-notes` O5; `editor/mask-editor` M2).
 
 ## A9. Keys (R245, R246, R247, R255, R862, R259)
 
@@ -127,7 +129,7 @@ The keys belong to a context of their own, `editor.addScreen`: active while keyb
 | Close | Esc | ⌘W | `editor.addScreen` | Esc, ⌘W |
 | Add tag | ⇧⌘T | | `editor.addScreen` and `editor.any` (`editor/tag-editor` G9) | ⇧⌘T |
 
-While `editor.addScreen` is active its keys take precedence over the window's other uses of the same keys; the registry test of `editor/formatting` F14 lists them for "Add panel over Browse" with focus in the panel and with focus in Browse's table, and fails on a duplicate (R200).
+While `editor.addScreen` is active its keys take precedence over the window's other uses of the same keys; the registry test of `editor/formatting` F14 lists them for "Add panel over Browse" with focus in the panel and with focus in Browse's table, and fails on a duplicate (R200). While the mask editor shows, its own keys take precedence over these, and Esc and ⌘Z go to it only as `editor/mask-editor` M7.1 says.
 
 ## A10. Differences from Anki
 

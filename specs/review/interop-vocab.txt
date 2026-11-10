@@ -35,3 +35,15 @@ _drawMark
 preventDefault
 contenteditable
 textarea
+# Wave 9 (review/review-preferences): collection config keys the review settings read or name.
+collapseTime
+creationOffset
+dayLearnFirst
+dueCounts
+fsrsShortTermWithStepsEnabled
+hideAudioPlayButtons
+interruptAudioWhenAnswering
+loadBalancerEnabled
+newSpread
+renderLatex
+rollover

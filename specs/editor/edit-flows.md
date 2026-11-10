@@ -20,8 +20,8 @@ How an editor bound to an existing note behaves in its hosts (U196): Browse's ed
 - The pane shows the editor when exactly one row is selected: in cards mode the note of that card, in notes mode that note. With no row, or more than one, the pane shows no editor (screen contract). The card the editor refers to (for Cards… and preview) is the selected row's card in cards mode and, in notes mode, the selected note's card with the lowest `ord` (the rule `browser/bulk-actions` B2 gives for a note's card, applied to the selected row, not to the focused one, which can differ).
 - **Flush first.** Before the selection changes, a search runs, the mode switches, the sort changes, any Browse action or menu command runs, the pane is hidden and Browse closes, Browse asks the pane to flush with `hold` (`editor/field-html` B3) and waits for the reply. The reply waits for the flush's patches (S2). Then the change proceeds. When the pane then shows another note, its `openNote` ends the hold; when it keeps the same note (a sort, a search that keeps the row selected, an action on that row such as Change Deck) or hides the editor, Browse sends `release` once the change is done, so the editor never stays held.
 - **A failed flush.** When a patch of that flush fails (except `NotFound`), the change does not proceed: the table keeps the previous selection (the row being edited stays selected), the pane keeps the note and its text, the failure shows as `editor/field-html` S2 says, and `release` is sent. `NotFound` proceeds as W5.4.
-- **Preview** (⇧⌘P, R257) is Browse's preview of the editor's card, opened after a flush; a host without a preview disables the command.
-- ⌘↩ in the pane flushes and keeps focus where it is; Esc flushes and moves focus to the table. Neither closes Browse.
+- **Preview** (⇧⌘P, R257) is Browse's preview of the editor's card, opened after a flush; a host without a preview disables the command (the preview's own rules: `browser/preview`; Browse's Go commands, which flush first and stop on a failed flush: `browser/inspector` I4).
+- ⌘↩ in the pane flushes and keeps focus where it is; Esc flushes and moves focus to the table. Neither closes Browse. While the mask editor shows in the pane, Esc first goes to it as `editor/mask-editor` M7.1 says; an image-occlusion note opens on the mask editor inside the pane (`editor/image-occlusion-notes` O3).
 
 ## W3. Saving and closing (R820, R824, R863, R245, R259)
 
@@ -36,6 +36,8 @@ How an editor bound to an existing note behaves in its hosts (U196): Browse's ed
 Binding the editor to a note writes nothing. A host that closes, or a pane that loads another note, with no unsaved edit sends no patch; a field the user never touched is never sent; a touched field whose final target equals its stored HTML is not sent (`editor/field-html` H2, S1); and a patch whose result equals the stored row writes nothing (`notes/note-records` U2). AE40: a Migaku note opened from review and closed at once leaves `mod` and `usn` unchanged; editing only Translation leaves Sentence's bytes unchanged.
 
 ## W5. When another writer changes the note (R822, R1793)
+
+In an image-occlusion session the hidden Occlusion and Image fields are host fields that follow W5 like the shown fields; what a reload does to the mask editor's document and its history is `editor/image-occlusion-notes` O6.2.
 
 The host handles the change stream in seq order, holding events while an own patch is in flight and skipping own patches (W1). For each foreign change:
 

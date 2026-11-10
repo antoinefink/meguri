@@ -1,11 +1,11 @@
 # Note editing strings
 
 Spec: editor/editing-strings
-Requirements: R797, R798, R799, R804, R807, R815, R816, R817, R826, R827, R828, R890, R916, R918, R919, R922, R925, R926, R928, R929, R931, R932, R933, R934, R935, R936, R937, R939, R944, R945, R946, R948, R1000
+Requirements: R797, R798, R799, R804, R807, R815, R816, R817, R826, R827, R828, R890, R916, R918, R919, R922, R925, R926, R928, R929, R931, R932, R933, R934, R935, R936, R937, R939, R944, R945, R946, R948, R1000; supports R1793
 Anki: 26.09.3 for E3 to E9 (the English of Anki desktop's add, editor, note type, card template, field, change note type and image occlusion screens, with E11's differences); none for the keys and E10's language rule
 Scenarios: none (Meguri's tests, E12)
 
-The interface text of the note editing screens that must be Anki's own words: labels users look up, questions whose wording a Product Contract requirement quotes, and two names that end up stored in the collection. U160 (E4), U190 to U197 and U200 to U207 take each such string only from this file (KTD1). Every other string of these screens is Meguri's own (R1959) and lives in the String Catalog with no Anki source; the screen contracts in `docs/design/screen-inventory.yaml` place every string and own appearance.
+The interface text of the note editing screens that must be Anki's own words: labels users look up, questions whose wording a Product Contract requirement quotes, and two names that end up stored in the collection. U160 (E4), U190 to U197 and U200 to U207 take each such string only from this file (KTD1). The image occlusion screens' own strings (U205 to U207), which are Meguri's wording apart from R993's and R994's quoted words, are `editor/image-occlusion-strings`. Every other string of these screens is Meguri's own (R1959) and lives in the String Catalog with no Anki source; the screen contracts in `docs/design/screen-inventory.yaml` place every string and own appearance.
 
 ## E1. Keys, arguments and plurals
 
@@ -27,6 +27,10 @@ These strings are fixed by their own specs; this file does not repeat them. The 
 | "Indent/unindent currently only works with lists." (R845) | `editor/formatting` F19 | Anki's |
 | Fields…, Cards…, Shrink Images, Close HTML Tags (R847, R848) and the other toolbar and menu labels | `editor/formatting` F19 | Meguri's; F19 gives Anki's label beside each |
 | the image controls and label, including Restore Original Size and ` (Original: w×h)` (R878 to R880), and the field context menu (R881) | `editor/paste` P21 | Meguri's; P21 gives Anki's label beside each |
+| the external-change banner "Changed by an external tool" with Reload and Keep mine (R1793); the deleted-note notice; the save-failure lines (Check Database, could not be saved) and the unmatched-field line of `editor/field-html` S2 | `editor/edit-flows` W9 (keys `edit.externalChange.*`, `edit.noteDeleted.notice`, `edit.saveFailed.*`, `edit.unmatchedField.message`) | Meguri's; R1793 fixes the banner's words |
+| the Add toast "1 card added" / "N cards added" with Undo (R813) | screen contract `editor.add`; `editor/add-flow` A5 step 6 | Meguri's; Anki's reads "1 card added." with a full stop |
+| "No notes added yet." (History with no entry) | screen contract `editor.add`; `editor/add-flow` A6 | Meguri's |
+| Copy Info's fixed text: the headings `## Front Template`, `## Back Template`, `## Styling`, the fence labels `html` and `css` and their layout (R932) | `notetypes/editor-actions` A13 | Anki's, written in English in every interface language (not String Catalog entries) |
 
 ## E3. Add screen (U195; R797, R807, R815 to R817)
 
@@ -83,7 +87,7 @@ The two values of the Settings control that U160 places on its Editing page (R14
 | `templates.affectsNotes` | one: `Changes below will affect the %lld note that uses this card type.` other: `Changes below will affect the %lld notes that use this card type.` | under the card type picker of a standard note type, or under the card picker of a cloze one (R931); the argument is the number of notes of the note type, the same for every card type of it (U29's note count of the note type, not a count per template) |
 | `templates.addCardType` | Add Card Type… | Options item of a standard note type (R932) |
 | `templates.addCardType.confirm` | one: `This will create %lld card. Proceed?` other: `This will create %lld cards. Proceed?` | after Add Card Type when the note type has at least one note; the argument is the number of notes of the note type (R932) |
-| `templates.removeCardType` | Remove Card Type… | Options item of a standard note type (R932); disabled while the note type has one template (R933) |
+| `templates.removeCardType` | Remove Card Type… | Options item of a standard note type (R932); disabled while the draft has one template (R933; `notetypes/editor-actions` A7) |
 | `templates.removeCardType.confirm` | one: `Delete the ‘%1$@’ card type, and its %2$lld card?` other: `Delete the ‘%1$@’ card type, and its %2$lld cards?` | the remove question (R933); `%1$@` is the template's name, `%2$lld` the number of its cards from `notetypes/structure-changes` S11, pluralized on that number |
 | `templates.renameCardType` | Rename Card Type… | Options item of a standard note type (R932) |
 | `templates.repositionCardType` | Reposition Card Type… | Options item of a standard note type (R932) |
@@ -100,6 +104,8 @@ The two values of the Settings control that U160 places on its Editing page (R14
 - A cloze note type has one template, and the editors never add, remove or move it (`notetypes/structure-changes` S6). As in Anki, its Options menu therefore has only Restore to Default…, Copy Info and Browser Appearance…: no Add, Remove, Rename or Reposition Card Type and no Deck Override. Its Back Template has no Flip.
 - The remove question is one entry: R933's line about notes left with no card is Meguri's own and shows as a separate line under it, never joined to it.
 - The card count of `templates.removeCardType.confirm` is pluralized as a whole sentence: "Delete the ‘Card 2’ card type, and its 1 card?", "… and its 0 cards?".
+- What Add Card Type, Remove Card Type, Rename Card Type, Reposition Card Type, Deck Override, Browser Appearance, Insert Field and Flip do to the draft, and the exact text Copy Info puts on the pasteboard, are `notetypes/editor-actions` A6 to A15; this file gives only their labels and questions.
+- Flip's message when no `<hr id=answer>` has text on both sides, Deck Override's line for an override whose deck no longer exists, its refusal lines for a name under a filtered deck or too deep (at confirm and at save), and Copy Info's confirmation are Meguri's own lines in the Note Types String Catalog (`notetypes/editor-actions` A11, A13, A15; `noteTypes.templates`); this file lists no keys for them.
 
 ## E8. Field editor (U201; R826 to R828, R922, R925, R926)
 
@@ -130,6 +136,7 @@ The two values of the Settings control that U160 places on its Editing page (R14
 
 - Browse's menu item and toolbar action that open the sheet (⇧⌘M, R944, R1227) are Browse's command names, written under `browser/browse-strings` W6 with R944's words "Change Note Type"; this file has no key for them. The sheet's own text above, the field and template pickers' `(Nothing)` and the toast are U203's, in the Note Types String Catalog.
 - The toast is this sheet's own entry. Browse's bulk result messages, such as Edit Field's "N notes updated" (R1211), are `browser/browse-strings` W6's and are separate keys, even where the English matches.
+- The mask editor's tools and commands, the image picker, the Mask Editor toggle, Change Image, the add refusal "No occlusions created" (R994), the image-occlusion notices, the per-mask audio inspector and the canvas's accessibility text are `editor/image-occlusion-strings`, entries of the same Image Occlusion String Catalog.
 
 ## E10. Names written into the collection
 
@@ -167,4 +174,4 @@ The oracle runs the collection library, not Anki's UI, so these strings are chec
 | `TemplatePreviewModelTests` (U202) | E7's Fill Empty Fields toggle |
 | `FieldsEditorModelTests` (U201) | E8: the rows, the last-field message, the delete question at 0, 1 and 12 notes, the six option labels |
 | `ChangeNotetypeModelTests` (U203) | E9's title, `(Nothing)` in both pickers, the toast at 1 and 50 notes |
-| `OcclusionDocumentTests` (U205) | E9's two mode names, Hide All, Guess One first |
+| `OcclusionDocumentTests` (U205) | E9's two mode names, Hide All, Guess One first; `editor/image-occlusion-strings` S9 |

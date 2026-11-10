@@ -213,7 +213,7 @@ The job's result on success:
 | `safety_backup` | the backup's file name (C5) |
 | `instant` | the repair instant, epoch milliseconds |
 
-- The UI's text is Meguri's own, one line per count above 0 and one per other non-empty member, keyed by member (R1887); with all counts 0 and the lists empty it says that no problems were found (R1639). Anki's messages are never shown or stored.
+- The UI's text is Meguri's own, one line per count above 0 and one per other non-empty member, keyed by member (R1887); with all counts 0 and the lists empty it says that no problems were found (R1639). Anki's messages are never shown or stored. The command's label (Maintenance page, Tools menu, damaged-collection remedy) is `maintenance/maintenance-strings#S2`; whether it gains an ellipsis because C2 asks first is S7's open question.
 - The `check_db` scenario op returns `problems` only (`conformance/collection-check` K10).
 
 ## C13. Errors and a collection too damaged

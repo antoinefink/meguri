@@ -212,6 +212,8 @@ Contexts, registered with U158's shortcut registry:
 | `editor.htmlSource` | a field in HTML mode has keyboard focus |
 | `editor.any` | any part of an editor page has keyboard focus: a field in either mode, or the tag editor |
 | `editor.note` | the key window shows an editor with a note (the Add screen, Edit Current, Browse's editor), wherever keyboard focus is in that window |
+| `editor.addScreen` | keyboard focus is inside the Add screen: the first responder is a view of the Mac panel (fields, tag area, choosers, buttons), or the Add sheet shows (iPad, iPhone) (`editor/add-flow` A9) |
+| `imageOcclusion.maskEditor` | the image occlusion mask editor view shows in the key window with keyboard focus in it (`editor/mask-editor` M7.1); its keys take precedence over `editor.note`'s and the Add screen's, Esc and ⌘Z only as M7.1 says |
 
 | Command | Key shown in the menu | Other keys | Context | Anki |
 |---|---|---|---|---|
@@ -236,7 +238,7 @@ Contexts, registered with U158's shortcut registry:
 | Shrink Images, Close HTML Tags | none | | `editor.note` | none |
 | Attach… | ⌥⌘A | F3 | `editor.richText` (`editor/paste` P5) | F3 |
 | Record Audio… | ⌥⌘R | F5 | `editor.richText` (`editor/paste` P20) | F5 |
-| Tags, Add-screen keys | U193, U195 | | | |
+| Tag editor keys; Add-screen keys; edit-panel and Browse-pane keys; mask editor keys | `editor/tag-editor` G4, G8, G9; `editor/add-flow` A9; `editor/edit-flows` W2, W3; `editor/mask-editor` M4, M7 | | | |
 
 - **Superscript and Subscript.** Decided 2026-10-27: ⌘= is Superscript and ⇧⌘= Subscript, as in Anki 26.09.3. R249, R837 and R861 name the opposite keys while R861 and R249 also say the keys are Anki's with Ctrl mapped to ⌘; Anki compatibility settles the conflict. The `=` key is the key that types `=` without Shift on the active layout.
 - **Primary and other keys.** Decided 2026-10-27: a menu item shows the key that every Apple keyboard can type (⌃⌘C rather than F7, which needs Fn on many keyboards) and Apple's usual indent keys (⌘] and ⌘[). The other keys run the same command and are listed in Help › Keyboard Shortcuts (R201); they are not shown again in the iPad ⌘ overlay.
@@ -248,7 +250,7 @@ Contexts, registered with U158's shortcut registry:
   - View › Zoom In (⌘+, R218) loses its keys while `editor.richText` is active, because on most layouts ⌘+ is ⇧⌘=; Zoom Out and Actual Size keep theirs. This settles the shell coverage note's collision.
   - ⌥⌘A is Attach… while `editor.richText` is active, also in Browse's editor; Browse's Select All then keeps only ⌘A in the table (R1153, R1225, `browse.browser`), as the browser-ui coverage note proposes. While `editor.any` is active in another way (a field in HTML mode, the tag editor), ⌥⌘A does nothing; with focus elsewhere in Browse it is Select All.
   - The system's Show Colors and Show Fonts commands are not in the menus: Meguri's Format menu replaces the system's text formatting commands (⇧⌘C is Cloze Deletion; ⌘T is unbound).
-  - The registry test lists the enabled bindings per context (editor over review, editor in Browse with ⌥⌘A in rich mode, in HTML mode, in the tag editor and in the table, Add panel over Browse, editor focused in each mode, tag editor focused, Add screen with focus on its Deck row) and fails on any duplicate (R200).
+  - The registry test lists the enabled bindings per context (editor over review, editor in Browse with ⌥⌘A in rich mode, in HTML mode, in the tag editor and in the table, Add panel over Browse, editor focused in each mode, tag editor focused, Add screen with focus on its Deck row, the mask editor over the Add screen, over Browse's editor pane and over the review edit panel, and with a label being edited) and fails on any duplicate (R200). It lists the Add screen's keys of `editor/add-flow` A9 (⌘↩, ⌘N, ⌘D, ⇧⌘H, F9, ⌥⌘P, ⇧F9, Esc, ⌘W, ⇧⌘T) under `editor.addScreen`, and tests Add panel over Browse twice: with focus in the panel (the A9 keys enabled, Browse's ⌘D Change Deck and ⌘N Add Note not) and with focus in Browse's table beside the panel (Browse's keys enabled, `editor.addScreen` inactive).
 - A disabled command's key does nothing: it neither types nor reaches another context (for example ⇧⌘C in a field that is not a cloze field).
 
 ## F15. Menus (R864, R865, R278, N4, N11.3)

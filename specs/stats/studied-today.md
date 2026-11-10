@@ -307,6 +307,7 @@ The Today section is the Today graph of the Stats graph request (`stats/graphs-c
 - Lines are always English, whatever the device language (R1448; the plan's Open Questions keep these strings verbatim in every locale).
 - No line contains U+2068 or U+2069. Anki puts that pair of invisible direction marks around each number and around some of the parts of text that hold one: on the Home line also around the time span (`in 13 seconds`); on its Stats page around every inserted part, the card count's words included. The Again line has none, because Anki joins its number to the text without inserting it as a part. Meguri leaves every mark out, and the oracle's normalization (H5, H6) removes every U+2068 and U+2069 wherever it stands, not only around digits.
 - No line contains a line break. Anki's Studied sentence holds two line breaks, after the count and after `today`, which its pages show as spaces; Meguri writes single spaces there.
+- The Home line is a core text in the sense of `text/interface-text` I4: it has no String Catalog entry, U167's string lint does not treat it as catalog text, and its numbers keep T5.1's writing in every region (I6).
 
 ### T6.4 What the oracle checks
 

@@ -306,7 +306,9 @@ A shape is written as `{{c` N `::image-occlusion:` kind, then each property as `
 
 ## F11. Writing the field (R1011, R1012; AE38)
 
-The writer's input: the shapes in the editor's order (bottom to top; a group's masks one after another), the mode, and the **reference size** W × H, in pixels, at which the editor shows the whole image (fit to its area, as U205 lays it out). W and H must be positive and finite; otherwise the writer refuses the whole input with the error `invalid_size`. A shape that came from the field carries the source it was read from (F7.3).
+The writer's input: the shapes in the editor's order (bottom to top; a group's masks one after another), the mode, and the **reference size** W × H, in pixels, at which the editor shows the whole image (fit to its area, as U205 lays it out; CSS pixels, which Meguri's editor measures in points and sets once per image load, `editor/mask-editor` M1). W and H must be positive and finite; otherwise the writer refuses the whole input with the error `invalid_size`. A shape that came from the field carries the source it was read from (F7.3).
+
+The pixels of F6's 40, of rule 2.2's 5 and of F15 are these units at the reference size.
 
 1. **Unchanged save.** When the input's shapes are exactly the shapes the strict reading gave (same count and order, each equal to what was read) and the mode is the mode read, the output is the original field text, byte for byte, separators included (R1012).
 2. Otherwise each shape, in input order, gives one of:
@@ -334,7 +336,7 @@ Untouched shapes are never dropped by rule 2.2, even when they are smaller than 
 {{c7::image-occlusion:rect:left=.05:top=.5:angle=833:width=.2:height=.08:fill=#cc3344:oi=1}}<br>
 ```
 
-(one line in the field; shown here on seven). The user moves c4 to left 0.0625, top 0.35 and deletes c6. The writer outputs the c1, c2, c3, c5 and c7 lines exactly as above, with the c4 line replaced by `{{c4::image-occlusion:rect:left=.0625:top=.35:width=.2:height=.08:oi=1}}<br>` and the c6 line gone. Saving with nothing changed returns the seven lines unchanged. Switching to Hide One without moving anything rewrites every mask without `oi`: c2 becomes `{{c2::image-occlusion:rect:left=.3:top=.1:width=.2:height=.08}}<br>`. Card 6 is not deleted by the save (R1015); U205 warns about it.
+(one line in the field; shown here on seven). The user moves c4 to left 0.0625, top 0.35 and deletes c6. The writer outputs the c1, c2, c3, c5 and c7 lines exactly as above, with the c4 line replaced by `{{c4::image-occlusion:rect:left=.0625:top=.35:width=.2:height=.08:oi=1}}<br>` and the c6 line gone. Saving with nothing changed returns the seven lines unchanged. Switching to Hide One without moving anything rewrites every mask without `oi`: c2 becomes `{{c2::image-occlusion:rect:left=.3:top=.1:width=.2:height=.08}}<br>`. Card 6 is not deleted by the save (R1015); the editor shows `editor/image-occlusion-notes` O9's notice, or, when another field still holds `{{c6::…}}` (an A06 audio cloze), `editor/mask-audio` A7's warning, since Empty Cards then keeps card 6 too (`editor/mask-audio` A5).
 
 ## F12. Numbers for new and edited shapes (R1009, R1010)
 
@@ -367,7 +369,7 @@ Pure rules over the shapes currently in the editor. U205 applies them; nothing e
 - **Get** (note): for a note whose note type is detected, the field roles, the image name of its Image field, and the strict reading of its Occlusion field (F7), shapes or error. A note of any other note type gives the error `not_image_occlusion`.
   - **Image name**: found in the first `<img` tag (lower case, followed by white space) that contains `src` `=` `"` (white space allowed around the `=`) before the tag's first `>`. When that tag contains several, the last counts. The name is the text from that `"` to the next `"`, at least one character, used as written with no decoding (`data-src="…"` also matches). None when no tag has one. Anki then treats the file as the note's image when its extension (after the last `.`, any case) is `jpg`, `jpeg`, `png`, `gif`, `svg`, `webp`, `ico` or `avif` and the file exists in the media folder (U205, U31).
 - **Update** (note, Occlusion text): sets the Occlusion field (by its role) to the writer's output and saves the note through the normal note update (U27), which changes nothing when the text is the stored one. A note whose note type is not detected gives `not_image_occlusion`.
-- The FFI exposes Detect, the strict reading (F7), the writer (F10, F11) and the number rules (F12). Messages and warnings are U205's (R1015, R1019).
+- The FFI exposes Detect, the strict reading (F7), the writer (F10, F11) and the number rules (F12). When the editor calls the writer and the number rules is `editor/mask-editor` M9 (a refused write is taken back there); messages and warnings are `editor/image-occlusion-notes` O9 (R1015) and `editor/mask-audio` A7 (R1019).
 
 ## F14. Layouts in existing collections
 
@@ -391,6 +393,8 @@ None of these is visible to the oracle, so `conformance/deviations.yaml` has no 
 - **Untouched shapes** (R1012). Anki rewrites every shape on every save, in the order its loader produced (which is not the field order), and drops shapes that are below 5 pixels at the current window size. Meguri keeps untouched shapes' sources and order, and applies the drop rules only to the shapes it writes (F11).
 - **Numbers** (R1009, R1010). Anki's editor renumbers polygons it modifies and gives ungrouped masks numbers only at save time; Meguri's numbers change only by F12.
 - **Unknown properties** are kept (F7.3, F10); Anki drops them.
+
+Editor and flow differences that touch no stored text are `editor/mask-editor` M10 and `editor/image-occlusion-notes` O11.
 
 ## F16. Scenarios
 

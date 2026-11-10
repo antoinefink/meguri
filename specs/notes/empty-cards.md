@@ -1,7 +1,7 @@
 # Empty Cards (generation side)
 
 Spec: notes/empty-cards
-Requirements: R952; supports R1015, R1473, R1652, R1653, R1654, R2008
+Requirements: R952, R1653; supports R1015, R1473, R1652, R1654, R2008
 Anki: 26.09.3
 Scenarios: conformance/scenarios/cardgen/empty/; U131's maintenance/empty-cards/ (E7)
 
@@ -18,7 +18,7 @@ The note's existing cards play no part, and G6 (the card of ordinal 0 a note get
 
 - A card whose template's front does not parse, or renders nothing for the note (a front of `{{^Deck}}{{Back}}{{/Deck}}`: `Deck` is never empty), is empty.
 - A card whose ordinal has no template (a standard note type whose template count is not above the ordinal, left by another program or an older client) is empty.
-- An image-occlusion note follows the cloze rule: the card of a mask that was removed is empty (R1015).
+- An image-occlusion note follows the cloze rule: the card of a mask that was removed is empty (R1015), unless another field of the note still holds a cloze with that number (an audio cloze `{{c6::[sound:…]}}` in an `A06` field): that card stays required (`editor/mask-audio` A5; scenario `editor/image-occlusion/audio-fields`).
 - Cards of ordinal 499 are not empty while the note has a cloze number of 500 or more, whatever their count.
 
 ## E2. The scan
@@ -54,6 +54,8 @@ The scan's result is a plan for the delete (E4), which never trusts it blindly.
 ## E4. The delete
 
 Input: the card ids the scan listed (all of them: the screen offers no per-card choice) and the "Keep notes with no valid cards" option (R952).
+
+The option starts on every time the report opens and is never stored: Anki 26.9.3's report opens with it on and does not remember a change, and Meguri does the same (R1653). Its label is `maintenance/maintenance-strings#S4`.
 
 Inside one write transaction, from the live rows (`engine/op-model` O7, re-derived):
 

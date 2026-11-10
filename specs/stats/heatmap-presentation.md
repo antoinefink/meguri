@@ -1,11 +1,11 @@
 # Heatmap grid presentation
 
 Spec: stats/heatmap-presentation
-Requirements: R149, R183, R289, R294, R296, R297, R298, R299, R300, R301, R307, R308, R1301, R1302, R1303, R1304, R1305, R1306, R1307, R1308, R1313, R1314, R1315, R1316, R1317, R1318, R1319, R1320, R1321, R1322, R1323, R1324, R1325, R1346, R1379, R1380, R1381, R1382, R1383, R1439, R1441, R1443, R1444, R1445, R1839, R1997
+Requirements: R149, R183, R289, R294, R296, R297, R298, R299, R300, R301, R307, R308, R309, R310, R1301, R1302, R1303, R1304, R1305, R1306, R1307, R1308, R1313, R1314, R1315, R1316, R1317, R1318, R1319, R1320, R1321, R1322, R1323, R1324, R1325, R1346, R1379, R1380, R1381, R1382, R1383, R1439, R1441, R1443, R1444, R1445, R1839, R1997
 Anki: 26.09.3 (the Stats Calendar's grid, M6, M8.3); the Review Heatmap add-on 1.0.1 for the Home and deck-page grid (R1447)
 Scenarios: none. Every rule here is drawing, text or interaction. The oracle runs neither the add-on's web view nor Anki's graphs page drawing (`stats/heatmap-addon` A15 item 14, `specs/conformance/stats-ops.md` H11, `stats/graph-presentation` P22), so nothing here has a golden. M20 lists the Meguri tests built from this file's tables.
 
-The one native heatmap grid (U227): how the cells of a period are laid out, labelled, coloured and outlined, the tooltip and callout text, the Back, Today and Forward controls, pointer, touch and keyboard interaction, and what VoiceOver reads. One component serves Home and deck pages (R289, R1346), the Stats Calendar (R1379, U230) and the small and medium widgets (R307, R308, U165).
+The one native heatmap grid (U227): how the cells of a period are laid out, labelled, coloured and outlined, the tooltip and callout text, the Back, Today and Forward controls, pointer, touch and keyboard interaction, and what VoiceOver reads. One component serves Home and deck pages (R289, R1346), the Stats Calendar (R1379, U230) and the widget's grids: the trailing grids of the small and medium families (R307, R308) and the year grid of the large and extra-large families (R309, R310; `stats/widget-families` F2, F3; U165).
 
 The component computes no count, level, search, bound or streak. Its data comes from `stats/heatmap-addon` A11 (Home, deck pages), from `stats/graphs-revlog` V3 with `stats/graph-presentation` P7 (Calendar) and from `stats/widget-snapshot` W3 (widget). Days are civil dates; the component reads no clock, no time zone and no collection. Its layout, palette and text rules are pure functions of M1's input, tested as such (M20).
 
@@ -20,16 +20,17 @@ The host passes a series; the component draws it as it is.
 | `mode` | `year`, `months`, `trailing(N)` or `calendar` |
 | `today` | T, a date. Home and deck pages: A11's `today`. Calendar: the record's `today_date` (P7). Widget: the entry's `today` (W4) |
 | `weekStart` | 0 (Sunday), 1 (Monday), 5 (Friday) or 6 (Saturday): the synced `firstDayOfWeek` after `specs/editor/config-keys.md` K5 (R149, R1381) |
-| `period` | the first and last dates shown: A11's `period_start` and `period_end` (`year`, `months`), January 1 to December 31 of the shown year (`calendar`), or M5's weeks (`trailing`) |
-| `days` | `year`, `months`: A11's `days`, date → `{kind, count, level, search}`. `calendar`: exactly the dates P7's drawn-cell rule draws, date → `{count, query}`; the Stats host computes the set with U226's P7 rule and passes it (U230). `trailing`: date → `{kind, count, level}`, built by the widget host (U165) from W3 as below |
+| `period` | the first and last dates shown: A11's `period_start` and `period_end` (`year`, `months`), January 1 to December 31 of the shown year (`calendar`), M5's weeks (`trailing`), or January 1 to December 31 of the year of the entry's `today` (the widget's `year`) |
+| `days` | `year`, `months`: A11's `days`, date → `{kind, count, level, search}`. `calendar`: exactly the dates P7's drawn-cell rule draws, date → `{count, query}`; the Stats host computes the set with U226's P7 rule and passes it (U230). `trailing`: date → `{kind, count, level}`, built by the widget host (U165) from W3 as below; the widget's `year`: the same mapping as `trailing`, for every date of its year (`stats/widget-families` F1) |
 | `colouring` | `discrete` (levels 0 to 10, M8.1) for `year`, `months` and `trailing`; `continuous` with the record's `max_count` for `calendar` (M8.3) |
-| `navigation` | `year`, `months`: A11's `first_period`, `last_period`, `can_go_back`, `can_go_forward` and the shown offset `p`. `calendar`: P7's year bounds as `can_go_back` and `can_go_forward`. `trailing`: none |
-| `totals` | A10's `totals` (`year`, `months` only), for M15.2 and M15.3 |
+| `navigation` | `year`, `months`: A11's `first_period`, `last_period`, `can_go_back`, `can_go_forward` and the shown offset `p`. `calendar`: P7's year bounds as `can_go_back` and `can_go_forward`. `trailing` and the widget's `year`: none |
+| `totals` | A10's `totals` (`year` and `months` on Home and deck pages only; none in the widget), for M15.2 and M15.3 |
 
 - A date of the period with no entry is empty: in `year`, `months` and `trailing` it is a `past` cell before T and a `future` cell after T, with count 0 and level 0 (A11). In `calendar` a date with no entry is not drawn (M6); the component applies none of P7's rules itself.
 - `trailing` from a W3 snapshot: a date before T takes kind `past` and the count and level of `history.counts` and `history.levels` at its index from `history.start` (level 0 before `history.start`); T takes `todayCell`'s kind, count and level; a date after T takes kind `future`, count 0 and `forecast.levels` at index `date − today` (level 0 past the array's end). For a W4 entry, T is the entry's `today` and its cell the entry's `todayCell`, the other dates as W4's last bullet says. Widget cells show no count (M5), so the forecast's missing counts are never read.
+- The widget's grids are static. `trailing` and the widget's `year` have no controls (M11), no selection, hover, tooltip or callout (M9, M10.1, M12, M13), no period requests (M11.5) and one VoiceOver element (M15.1); wherever this file names `trailing` for one of these rules, the widget's `year` follows it too (`stats/widget-families` F3).
 - Outputs: the day callback (M14) and the period requests (M11.5).
-- `mode` is the `heatmap` key's `mode` (A5) on Home and deck pages, fixed `calendar` on the Stats screen and fixed `trailing(8)` or `trailing(20)` in the widget. The component offers no way to change it (R1325, M11.1).
+- `mode` is the `heatmap` key's `mode` (A5) on Home and deck pages, fixed `calendar` on the Stats screen, fixed `trailing(8)` or `trailing(20)` in the small and medium widgets, and fixed `year` in the large and extra-large widgets, for the year of the entry's `today` (`stats/widget-families` F3). The component offers no way to change it (R1325, M11.1).
 - Dates are of the proleptic Gregorian calendar. `weekday(d)` is 0 for Sunday to 6 for Saturday. `d + k` and `d₂ − d₁` are calendar-day arithmetic.
 
 ## M2. Weekday rows
@@ -123,7 +124,7 @@ Mode `calendar`, the Stats screen's Calendar card (R1379; U230).
 The grid fits the width W it is given, never scrolls sideways, and is centred in it when it is narrower (R1307):
 
 1. Count the width in pitch units, `k`: `year`: C (M3); `months`: the total block columns plus 2.5; `calendar`: C; `trailing(N)`: N.
-2. `p = min(14, (W − L) / k)` for `year`, `months` and `calendar`, where L is the label column's width (M7.3; 0 for `year`). For `trailing`, `p = min(W / N, H / 7)` for the widget's height H, with no cap.
+2. `p = min(14, (W − L) / k)` for `year`, `months` and `calendar`, where L is the label column's width (M7.3; 0 for `year`). For `trailing`, `p = min(W / N, H / 7)` for the widget's height H, with no cap. In the widget, `year` also takes at most H ÷ 7 for the height H the widget gives the grid without its label: `p = min(14, W ÷ C, H ÷ 7)` (`stats/widget-families` F3).
 3. Round `p` down to the display's pixel grid (1 ÷ display scale).
 4. `g = max(one pixel, p ÷ 6 rounded down to the pixel grid)`, `a = p − g`.
 5. Block gap in `months`: between the last column of one block and the first column of the next the space is 3g in total, in place of the gap g between columns. The grid is then `(total columns) × p − g + 8 × 2g + L` wide, which is at most `k × p + L` since g ≤ p ÷ 6. At W 370 and scale 3 with 46 columns and L 11: 46 × 22⁄3 + 15 × 1 + 11 = 363⅓ pt.
@@ -178,7 +179,7 @@ The palette is Meguri's (HeatmapKit, the U9 lint allow-list), with tokens `heatm
   1. CIELAB lightness L* changes in one direction along each ramp, by at least 4 between adjacent steps (R1443: levels are ordered by lightness).
   2. Step 1 of each ramp differs from the empty fill by at least 4 in L*.
   3. History steps have CIELCh chroma at least 20 and a hue between 100° and 150°; forecast steps have chroma at most 4.
-- The ramps carry the levels of `stats/heatmap-addon` A8.2's streak tints as well; using them for text, and its contrast, is U228's.
+- The ramps carry the levels of `stats/heatmap-addon` A8.2's streak tints as well; using them for text, and its contrast, is U228's in the activity section and U165's in the widget (`stats/widget-families` F4).
 
 ### M8.3 Continuous mapping (Calendar)
 
@@ -197,7 +198,7 @@ Anki uses a blue ramp capped at 20% to 100% of its intensity (80% at night). Meg
 
 - **Increase Contrast** (R1443): every drawn cell gets a 1 pt border inside its edge in the system's separator colour (`UIColor.opaqueSeparator` on iPhone and iPad; `NSColor.separatorColor` on the Mac, which has no opaque one, composited over the cell's fill), and the empty fill becomes the system's primary fill (`systemFill`, the same name on both platforms). Outlines (M9) keep their colours and widths.
 - **Smart Invert**: the grid is excluded from inversion, so its levels keep their order.
-- **Widget rendering modes** (accented, vibrant) are U165's (R313, R1437).
+- **Widget rendering modes**: in WidgetKit's accented mode (the tinted and clear appearances) and vibrant mode (the Mac desktop with an app in front of it) the levels stay apart by opacity steps of one colour, not by hue; the values are U165's (R313, R1437; `stats/widget-families` F3).
 - No visual resembles Activity rings: square cells only, no circular progress (R1997).
 
 ## M9. Outlines
@@ -211,7 +212,7 @@ Anki uses a blue ramp capped at 20% to 100% of its intensity (80% at night). Meg
 - The selection starts at T and stays on its date until another cell is chosen (R1306). It survives paging, width changes and data refreshes. While the selection is on T it moves with T when T changes (a rollover, a zone change, a new widget entry); a selection on another date stays where it is. The selection lives as long as the host's view: when the screen is shown again it starts at T. With the selection on T only today's outline is drawn, as in the add-on, where a click on an empty day leaves today alone highlighted.
 - Today's outline wins over the hover outline on T's cell. A selected cell that is hovered keeps its selection outline and adds the hover outline inside.
 - In `calendar` the selection is the cell whose tooltip or callout shows (P16), and it clears with it. Anki's calendar draws no hover or selection outline (M18).
-- `trailing` draws today's outline only.
+- `trailing` and the widget's `year` draw today's outline only.
 - The three outlines differ in place and width as well as colour, so none is told by colour alone (R1443).
 
 ## M10. Day text
@@ -231,6 +232,7 @@ Anki uses a blue ramp capped at 20% to 100% of its intensity (80% at night). Meg
 - Today's cell follows its kind: with no review yet and cards due it reads `**12** cards **due** on …`; after one answer, `**1** card **reviewed** on …` (AE54).
 - The empty wording follows the kind, so T's empty cell reads `No reviews` and every later cell `No cards due`. The add-on compares the cell's midnight with the wall clock instead (M18).
 - `calendar` cells take P7's two lines: the date (M10.2), then `<n> review(s)`.
+- The widget (`trailing` and its `year`) shows none of these texts: it has no tooltip or callout (`stats/widget-families` F3).
 
 | Cell | English text |
 |---|---|
@@ -258,7 +260,7 @@ Counts in M10, M15 and M17 use the locale's integer format with grouping: `1,234
 
 - Above the grid, centred: Back, Today and Forward, small borderless native buttons with the symbols `chevron.left`, `circle.fill` (small scale) and `chevron.right` (R1317). The symbols do not mirror in right-to-left layouts (M7.3).
 - `calendar`: Back, the shown year as text, Forward; no Today button (R1380).
-- `trailing`: no controls.
+- `trailing` and the widget's `year`: no controls.
 - Nothing else: no options, support or theme button, and no hidden gesture on any control (R1325). The mode is a setting (R1339).
 
 ### M11.2 Bounds and paging
@@ -351,7 +353,7 @@ The widget has no interaction; its tap opens the app (U165).
 
 ### M15.1 Element tree
 
-`year` and `months`, in reading order (R1441, R183):
+`year` (outside the widget) and `months`, in reading order (R1441, R183):
 
 1. the Back, Today and Forward buttons (M17 labels);
 2. the grid element (`heatmap.grid`), a container labelled `Heatmap` (M17) that holds, in order:
@@ -359,7 +361,7 @@ The widget has no interaction; its tap opens the app (U165).
    2. the month element (M15.3);
    3. one container per month of the period, labelled with the month (M17), holding that month's day elements in date order (M15.4).
 
-The grid element is the keyboard focus target of M11.3. A custom rotor `Months` moves between the month containers. The drawn year, month and weekday labels are hidden from VoiceOver: each day's text already names its date. `calendar`: Back, the shown year as static text (read as its digits), Forward, then P18.1's chart container in the grid element's place, holding the month containers and day elements (no summary or month element of its own: P18.1's summary is the container's label), and M15.6. `trailing` is one element whose label is the widget's (U165).
+The grid element is the keyboard focus target of M11.3. A custom rotor `Months` moves between the month containers. The drawn year, month and weekday labels are hidden from VoiceOver: each day's text already names its date. `calendar`: Back, the shown year as static text (read as its digits), Forward, then P18.1's chart container in the grid element's place, holding the month containers and day elements (no summary or month element of its own: P18.1's summary is the container's label), and M15.6. `trailing` and the widget's `year` are one element whose label is the widget's (U165, `stats/widget-families` F3); M15.2 to M15.4 do not apply to them.
 
 ### M15.2 Summary
 
@@ -499,8 +501,8 @@ Decided 2026-11-10, in this order of priority: the plan's requirements, the add-
 
 No conformance scenario (the Scenarios line). U227's tests, from this file's tables:
 
-- Layout (Swift Testing, HeatmapKit): every row of M2, M3, M4 and M5; the column count of every year 2000 to 2050 for each week start against `ceil((o + days) / 7)`; months mode across a year end; trailing mode for both N and every week start, built from a W3 snapshot and a W4 entry (M1); a `calendar` series without some dates of the year draws no cell for them (M6).
-- Pitch (M7.2): every row of M7.2's table, the 640 pt Mac example, a 1,400 pt Mac width (`p` 14, centred), M7.2 step 5's total width of 363⅓ pt, a grid never wider than W, and a side of at least 5 pt in every mode whenever W ≥ 6k + L.
+- Layout (Swift Testing, HeatmapKit): every row of M2, M3, M4 and M5; the column count of every year 2000 to 2050 for each week start against `ceil((o + days) / 7)`; months mode across a year end; trailing mode for both N and every week start, built from a W3 snapshot and a W4 entry (M1); the widget's `year` built from a W3 snapshot and a W4 entry, for Tₛ on December 31 and January 1 (`stats/widget-families` F1, F3); a `calendar` series without some dates of the year draws no cell for them (M6).
+- Pitch (M7.2): every row of M7.2's table, the 640 pt Mac example, a 1,400 pt Mac width (`p` 14, centred), M7.2 step 5's total width of 363⅓ pt, a grid never wider than W, a side of at least 5 pt in every mode whenever W ≥ 6k + L, and the widget's `year` limited by H ÷ 7.
 - Labels (M7.3): each step of the month and weekday label rules, chosen by width, pitch and text size; L and the pitch taken again after the weekday labels shrink (M7.2 step 6).
 - Hit-testing (M7.4): points in cells, in widened gaps, in block gaps, in undrawn slots and on labels.
 - Colours (M8): every M8.1 row; M8.2's three rules in light, dark and both contrast settings; M8.3's table.
@@ -513,5 +515,5 @@ No conformance scenario (the Scenarios line). U227's tests, from this file's tab
 - Mac UI tests (VM): hover 0.35 s shows the tooltip, and moving to the next cell updates it at once; a click on an empty future day returns the selection to T with no callback; with the grid focused, → shows the next period and Shift-← the first; the focus order Back, Today, Forward, grid.
 - Touch UI tests: tap, scrub with the magnified callout, hold and release without moving, swipe paging (Calendar included), a short sideways drag that does nothing, long press jumps, a vertical drag that scrolls the list, and with a callout open a tap on another cell that moves it in one tap.
 - VoiceOver tree: the order of M15.1, the adjustable month element, the `Months` rotor, the day element `heatmap.day.2026-10-12` with `Show in Browser`.
-- Snapshots: `year` and `months`, light and dark, Increase Contrast, an empty history, a very busy history, 53 and 54 columns, iPhone and iPad and Mac widths, the widget families, and the Calendar with sparse and dense years; `months` and `calendar` at iPhone width with the default and an accessibility text size (alternate and absent weekday labels, narrow and absent month labels).
+- Snapshots: `year` and `months`, light and dark, Increase Contrast, an empty history, a very busy history, 53 and 54 columns, iPhone and iPad and Mac widths, the widget families (small, medium, large, extra large, in full-colour, accented and vibrant modes), and the Calendar with sparse and dense years; `months` and `calendar` at iPhone width with the default and an accessibility text size (alternate and absent weekday labels, narrow and absent month labels).
 - Drawing: M16's signpost within one frame at 120 Hz on the reference fixture.

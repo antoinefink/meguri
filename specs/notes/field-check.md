@@ -59,6 +59,8 @@ Examples (scenario `notes/fields-check/states`), with a standard type Std (Front
 | the same type: `x`, (empty) | `missing_cloze` |
 | Gap3 (Text, Extra), first front `{{cloze:text}}`: `{{c1::x}}`, (empty) | `normal` (unicase match; scenario `notes/fields-check/cloze-unicase`) |
 
+Image-occlusion drafts (masks, labels only, an empty Occlusion field, a cloze in Header, a moved Header first, an audio cloze in a field the front does not use) are `editor/image-occlusion-notes` O7 step 2 and `editor/mask-audio` A8; scenarios `editor/image-occlusion/add-check` and `editor/image-occlusion/audio-fields`.
+
 ## K4. Duplicates (R807, R808)
 
 The duplicates of a draft are the notes that:
@@ -89,8 +91,8 @@ A duplicate never blocks adding (R808): the Add flow shows the state and adds th
 
 ## K5. What uses which state
 
-- The Add screen (U195): `empty` refuses adding (R809); `notetype_not_cloze` and `field_not_cloze` refuse it (R810); `missing_cloze` asks whether to add anyway (R811); `duplicate` marks the field and offers Show Duplicates (R807); every state but `normal` shows its hint live (R812).
-- The edit flows (U196) show the same marks without refusing a save.
+- The Add screen (U195): `empty` refuses adding (R809); `notetype_not_cloze` and `field_not_cloze` refuse it (R810); `missing_cloze` asks whether to add anyway (R811); `duplicate` marks the field and offers Show Duplicates (R807); every state but `normal` shows its hint live (R812). The order of flush, selection check, field check, confirmation and add is `editor/add-flow` A5.
+- The edit flows (U196, `editor/edit-flows`) show the same marks without refusing a save.
 
 ## K6. Scenarios
 

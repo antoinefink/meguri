@@ -12,6 +12,7 @@ How Meguri writes a deck package (`.apkg`, U122): which rows go in for a deck, a
 - Entry points (UI units): a deck's menu (U152), a Browse selection of notes or cards (U210, U219), and Settings for the whole collection (U160). All of them call the one operation of A11.
 - The output is always a file for the user to save or share: the owned artifact of `package/file-export#E3`, delivered through `#E4`. Export never changes the collection, its media folder, its media journal, backups or sync state, and starts no network request (`package/file-export#E1`).
 - It needs an open, `Ready` collection, as `package/file-export#E1` says.
+- Every entry point and what it starts with (File › Export… and Settings › Collection's Export…, File › Export Deck… and Deck › Export Deck… (R280, R283), a deck's context menu and the iPhone deck ⋯ menu, Browse's Export Notes (R273, R1227), Settings › Backups' Export Collection with Media… (R1636)), which formats each offers, the scope list (a whole-collection entry, then `decks/decks#D17`'s decks) and which options each format shows: `package/transfer-sheets#X4`. The option labels are `package/transfer-strings#S3`.
 
 ## A2. Inputs and options
 

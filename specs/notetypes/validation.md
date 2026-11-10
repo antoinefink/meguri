@@ -73,7 +73,7 @@ The check the field editor (U201) runs on a typed name before it changes its dra
 
 The editor explains a refusal inline with its own wording (R921). The save's own normalization (`notetypes/records` N4) still runs and would make any name that slipped through valid; V5 is what the user sees. Anki's field editor ignores a case-only rename of a field; Meguri applies it (no scenario observes the editor).
 
-Template and note type names typed by the user are not checked beyond N4: blank input (after trimming) is ignored by the editors (U200), and anything else is saved as typed, with `"` removed.
+Template and note type names typed by the user are not checked beyond N4: blank input (after trimming) is ignored by the editors (U200), and anything else is saved as typed, with `"` removed. The prompts' prefilled values and blank handling are `notetypes/editor-actions` A3, A4, A8 and A10.
 
 ## V6. Scenarios
 

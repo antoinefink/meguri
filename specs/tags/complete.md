@@ -93,8 +93,8 @@ Anki's request takes `match_limit` and returns at most `match_limit` + 1 tags. M
 
 - The editor queries for the tag being typed, with its displayed separators written as `::`, and with `limit` 500 (R883).
 - Before it sends the text, the editor removes one leading `:` when the text begins with a single colon (not `::`), and one trailing `:` when it ends with a single colon (not `::`). So `verb:` asks for `verb` while the user is typing a separator. An empty result sends no query and shows no suggestions, and so does an empty tag.
-- Each keystroke cancels the query in flight. Only the reply to the latest query is shown.
-- Suggestions are shown with `::` displayed as `∷` (R882). Tags already on the note are not removed from the list. Choosing one replaces the tag being typed (R884). The tag's spelling on save is `tags/tags` T3.
+- Each change of the typed text cancels the query in flight and sends a new one; moving the highlight through the suggestions sends none, and no query is sent while the input holds an input method's marked text (`editor/tag-editor` G4, G6). Only the reply to the latest query is shown.
+- Suggestions are shown with `::` displayed as `∷` (R882). Tags already on the note are not removed from the list. Choosing one replaces the tag being typed and ends it once; the highlight cycle and acceptance by Return, Space and click are `editor/tag-editor` G6 (R884). The tag's spelling on save is `tags/tags` T3.
 - Browse's tag entry (U218) uses the same query, the same `limit` and the same preparation.
 
 ## C6. Differences from Anki

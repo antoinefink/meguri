@@ -62,3 +62,11 @@ suspend
 clear_unused_tags
 delete_note
 change_note_type
+# Wave 9 (browser/entry-points, browser/sidebar): AnkiConnect action and config key names the entry points name, and the search-builder members the sidebar items use.
+curDeck
+field_text
+guiBrowse
+guiEditNote
+preset_deck
+reorderCards
+searchNote

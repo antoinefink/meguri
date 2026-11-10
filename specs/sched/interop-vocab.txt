@@ -267,3 +267,6 @@ legacy_header_only_rebound
 legacy_identity_upgraded
 pristine_v2_rebound
 migration_replayed_answers
+# Reviewer display keys that config-keys G3 names (review/review-preferences P4.1, P5).
+estTimes
+dueCounts

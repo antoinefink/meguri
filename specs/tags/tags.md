@@ -255,7 +255,7 @@ Browse's sidebar shows the registry as a tree (U84's vocabulary snapshot, U216).
 | `Bar::x`, `bar::y` (written by another client, T3) | `Bar` › (`x`, `y`) |
 | `a!`, `a::b`, `B`, `b::c` | `a` › `b`; `a!`; `B` › `c` |
 
-The sidebar runs `tag:<full name>` for a node and `tag:_*` for the Tags root (search area, U80). It gives T8 and T12 the names as this tree spells them.
+The sidebar runs `tag:<full name>` for a node and `tag:_*` for the Tags root (search area, U80). It gives T8 and T12 the names as this tree spells them. The sidebar's tag items, their actions and drops are `browser/sidebar` S3.6, S5, S9 and S10.
 
 ## T14. Rows, stamps and preservation (R1467)
 

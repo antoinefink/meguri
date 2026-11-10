@@ -63,6 +63,8 @@ After the save normalization of `notetypes/records` N4 (names, uniqueness, NFC; 
 
 The schema reasons decide `col.scm` (G3, G5) and the safety backup (S1.2 item 6). A save with renames, options, names, styling, back or browser texts, deck overrides or browser fonts and nothing else is not a schema change (R950); without renames and front changes it touches no note and no card and is a plain save (`notetypes/records` N3, N8).
 
+How the editors move a field or a template (a move, never a swap; a move to the current position changes nothing) is `notetypes/editor-actions` A9.
+
 ## S3. Order of the save
 
 1. Normalize the draft (`notetypes/records` N4 steps 1 to 5, 7) and classify it (S2).
@@ -186,7 +188,7 @@ The saved `reqs` are computed from the templates as S4 leaves them, with the sav
 
 - The note type's rows are written by `notetypes/records` N3.2: changed `fields` and `templates` rows by `ord`, the `notetypes` row stamped (`mtime_secs` = `now_s`, `usn` −1) whenever anything in the aggregate differs. A template with an origin keeps its row's `mtime_secs` and `usn` wherever it moves; a new one gets 0 and 0. Restore to Default is the exception: its origins only map notes, cards and the report, and every restored field and template takes the stock values, ids and row stamps of `notetypes/restore-to-default` D3 (D4).
 - A schema-classified save sets `col.scm` to `now_ms` (`notetypes/schema-changes` G5) and so passes the storage guard (G6). A save that only renames leaves `scm` (F4).
-- Deck overrides are written as values of the draft and are never a schema change (R934, R950); creating the deck an override names is the template editor's job before it saves (U200).
+- Deck overrides are written as values of the draft and are never a schema change (R934, R950); creating the deck an override names is the template editor's job before it saves (U200): `notetypes/editor-actions` A11, one `decks/decks` D5 "Add Deck" step per template whose override is still a name, after the draft's live checks and just before the save; a D5 refusal stops the save with the note type not saved (decks that earlier steps created stay); nothing is created when the draft is discarded.
 - The save reports its structure as `engine/change-stream#S2.5` requires (approved with R2066; its guard refuses an unreported change with `StructureNotReported`): its reasons, and maps built from the origins: entry i of `field_map` is the origin of saved field i, or −1 when it has none; `template_map` likewise. Every save that adds, removes, moves or renames a field or a template, a template rename alone included, or changes the sort field reports a `layouts` entry; a save that only renames reports identity maps and no reason code. A note type removal (S12) reports the id in `removed` with reason 4 `notetype_removed`; Restore to Default reports its layout from `notetypes/restore-to-default` D4's origins, with reason 5 `notetype_restored` only when D5 classifies it.
 
 ## S10. Planning, progress and cancel (R927)

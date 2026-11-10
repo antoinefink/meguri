@@ -124,3 +124,9 @@ keep_notes
 kept_valid
 all_empty
 type_changes
+# Wave 9 (notetypes/editor-actions): schema-11 browser appearance keys, and Copy Info's fence label.
+bafmt
+bfont
+bqfmt
+bsize
+html

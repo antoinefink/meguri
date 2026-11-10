@@ -321,7 +321,7 @@ this output extension.
 
 This extension admits latest-format whole-collection files through the existing local entry flow. It starts no Anki server request. Server work remains frozen. Deck-package merges retain their separate contract; a legacy whole-collection file follows P19, which changes only what it names here.
 
-Keep the existing coordinated source lifetime, owned source copy and opaque inspection handle. Bind confirmation to the source SHA-256, destination, engine, collection generation and committed operation sequence. The handle also owns the validated media inventory and bytes. A path or client-supplied count never replaces that authority. Check these guards again after participant flush and before activation; stale confirmation requires a new preview. Preserve the selected source.
+Keep the existing coordinated source lifetime, owned source copy and opaque inspection handle. Bind confirmation to the source SHA-256, destination, engine, collection generation and committed operation sequence. The handle also owns the validated media inventory and bytes. A path or client-supplied count never replaces that authority. Check these guards again after participant flush and before activation; stale confirmation requires a new preview. Preserve the selected source. The coordinated source lifetime on the app side is `package/file-intake#K3` steps 1 and 2.
 
 Inspect all collection and media data before changing live database, media or journal state. Extend P12 with these checks:
 
@@ -424,6 +424,8 @@ Added for U120. One pure function used by U162's file intake and by the local se
 | `notes.txt` holding text | `Unsupported` |
 
 A file classified `Apkg` or `Colpkg` that is not a valid package fails later, at inspect, with `Corrupt` or `TooNew`.
+
+Where each class goes from each source and lifecycle state, how the intake reads the file for step 2 (in place, read only, under its security scope and a coordinated read; nothing is copied before the flow's source copy), and the file types Meguri declares to the system: `package/file-intake` K2, K3, K5 and K6.
 
 ## P19. Legacy collection-file import (U124)
 

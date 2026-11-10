@@ -24,7 +24,7 @@ The core services behind Browse's search field (U88): canonical text for a commi
 
 ## D2. Canonical text
 
-`canonicalize(text)` gives the canonical text of `canonical-form.md` F1–F6, or the parse error (kind of `errors.md` E1, details of E2, range of E5). U210 calls it to commit (R1109: Return, an accepted suggestion, a sidebar or chip action) and for searches that other screens hand to Browse (R1114), except Stats' joined text, which Browse shows exactly as `stats/browse-queries` Q3 writes it (Q5) and never puts through this service. `dog cat or  fish` gives `dog cat OR fish`; an empty text, or one of spaces only, gives `deck:*` (F2.1). Which text the field then shows for a committed empty search is U210's.
+`canonicalize(text)` gives the canonical text of `canonical-form.md` F1–F6, or the parse error (kind of `errors.md` E1, details of E2, range of E5). U210 calls it to commit (R1109: Return, an accepted suggestion, a sidebar or chip action) and for searches that other screens hand to Browse (R1114), except Stats' joined text, which Browse shows and runs exactly as `stats/browse-queries` Q3 writes it (Q5); for that text U210 calls `canonicalize` only to record its canonical form in recent searches (`browser/entry-points` E3 rule 5, E6), never to show or run it. `dog cat or  fish` gives `dog cat OR fish`; an empty text, or one of spaces only, gives `deck:*` (F2.1). A committed empty search shows `deck:*` in the field, runs `deck:*` and records it, as Anki's browser does (`browser/entry-points` E5 step 3).
 
 ## D3. Token spans (R1086, R1087)
 

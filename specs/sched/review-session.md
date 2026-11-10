@@ -1,7 +1,7 @@
 # Review session
 
 Spec: sched/review-session
-Requirements: R600, R602, R620, R621, R622, R623, R627, R680, R720, R721, R722, R727, R728, R729; core side of R326, R362, R444, R456, R457, R459, R460, R461, R462, R463, R726; AE13 (core part), AE22 (session part), AE27; supports R1807, R1811, R1812, R1813, R1817, R1894, R2006
+Requirements: R600, R602, R620, R621, R622, R623, R627, R680, R720, R721, R722, R727, R728, R729; core side of R326, R362, R444, R456, R457, R459, R460, R461, R462, R463, R726; AE13 (core part), AE22 (session part), AE27; supports R1708, R1794, R1807, R1811, R1812, R1813, R1817, R1894, R2006
 Anki: 26.09.3 for P1 to P11 (how a held study queue changes between builds); none for C1 to C19 (Meguri's session contract C5, from the plan and the Product Contract)
 Scenarios: conformance/scenarios/sched/session/
 
@@ -170,6 +170,8 @@ C18 owns execution of this mapping. It is separate from scenario activation and 
 ## C2. `startSession(deckId, resumeCardId?)`
 
 Result: `Started{sessionId, generation, head, counts, validUntil, timeLim}` or `Refused{PresetUnsupported{presetIds} | FsrsPolicyPending}`.
+
+`timeLim` is the value read at the start. A config change of `timeLim` reported during the session (`engine/change-stream`) gives the client the new value for its next timebox check (`review/review-preferences` P3); it starts no new session and resets no timebox.
 
 0. **Submission.** On submission, before the start is queued for the writer: request cancellation of a queued or running optimizer commit op, with reason `sessionActive`, without waiting (`sched/optimizer#O10`). It fires for every submitted start, also one that admission then refuses. It marks nothing and cancels no training; step 2 does that.
 1. **Admission.** On the writer, atomically check and reserve the collection-owned admission state shared with `enableFsrs` (`sched/fsrs-policy#S3`). No session is exposed before this succeeds. Refusals, in order, write nothing, fire no step-2 hook (the step 0 request has already been made) and reserve nothing:
@@ -461,6 +463,7 @@ For every committed change set that is not the session's own answer, undo or red
 - The current card: `CurrentCardChanged{eligible}` when it is still presented and its token or render key changed (the side on screen is rendered again, R456); `{memoryOnly}` when its only change is the memory state in `data` (`s`, `d`, `dr`, `decay`, `lrt`; the change set's memory-only flag, U24): new labels and token, no new page; `{removed}` when it is no longer presented: the UI moves to the new head with "This card was changed elsewhere" (R456).
 - An op the user starts from the review screen (U48's bury, suspend, flag, forget, set due date, U30's mark, Delete Note, and editing, R1812) names the session and returns a head diff in its result: the head of a fresh build at its commit instant, with the current-card rule, computed by patching or rebuilding (C18 checks it against a fresh build).
 - A memory-state change of other cards keeps their render keys and changes their tokens.
+- Changes made through the local servers (source `LocalApi`: `servers/migaku-receive`, `servers/ankiconnect-actions`) are changes made elsewhere like any other. A received note adds cards, so `sched/queue-building#B10` rebuilds, as for any added cards; the current card stays item 0 with its render key by the current-card rule (C4), so it is not rendered again while the counts change (R1708). An API change to the current card follows the current-card bullet above, whatever the write: `CurrentCardChanged{eligible}` when it is still presented and its token or render key changed (the side on screen is rendered again), and `{removed}` when it is no longer presented (suspended, deleted, moved out of the session's deck and its descendants, forgotten or rescheduled out of the queue) (R1794).
 
 ### C13.1 Mark and Delete Note from the review screen (R381, R387, R392, R393)
 

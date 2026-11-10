@@ -215,6 +215,7 @@ Every step carries the name of the operation that made it; Anki shows it as "Und
 - **Every operation empties the redo history**, whether or not it changed anything and whether or not it records a step: an `edit_note` that saves the note unchanged (`storage/ids-usn-mtime` S4), a config write without an undo entry (W4), a config write of the value the key already holds, the removal of a missing key. Only undo and redo leave it as it is.
 - **A config write without an undo entry (W4) keeps the undo steps**: it writes the key and moves `col.mod` as usual, and the steps below it can still be undone (A7 shows its effect on `col.mod`).
 - **Both histories are emptied** by a `db_exec` statement that does not begin with `select` (also one that changes nothing), by Check Database and by closing the collection. A `select` leaves both.
+- **A failing operation empties both histories.** When an operation fails and rolls back, because of an error in its work or at its commit, Anki discards undo: both histories are emptied, whatever kind the operation had, also an undoable one (a note type that the template check of `notetypes/validation` V3 refuses, a note the library refuses). A check that refuses before any operation begins leaves both.
 - **`delete_notes` whose notes no longer exist** runs no operation (`record-ops.md` W3): both histories stay as they are.
 - Undo moves its step to the redo history and redo moves it back; neither touches any other step. With nothing to apply they are refused (`undo-ops.md` V1).
 
@@ -313,7 +314,7 @@ Every row a step changed, in any table, comes back as A4 to A6 describe for note
 
 ### A11. What this changes in M1 to M12
 
-Anki's results above that the mechanism did not produce at first. M1, M2, M4 and M5 now follow items 1 to 5 (U25's implementer, with the code); item 6 stays as written.
+Anki's results above that the mechanism did not produce at first. M1, M2, M4 and M5 now follow items 1 to 5 (U25's implementer, with the code); items 6 and 7 stay as written.
 
 1. **Redo emptied by every op (A2).** M1's "an op that changed nothing records nothing and leaves redo alone" and M2's skip-undo op that "is neither recorded nor clears anything" become: every op of source `UserUndoable` empties the redo history when it runs, whether or not it changed something; a skip-undo op (W4's config write, and R42's deck selection, where Anki records a "Select Deck" step and so empties redo too) keeps the undo steps and empties redo. Undo and redo keep it.
 2. **Merging (A3).** A step needs the second at which its first op began (the clock seam's time, rounded down to whole seconds; a redone step takes the time of the redo). When an "Update Note" op merges into the top step, the step keeps its before-images and takes the op's after-images, so that M4.2's check accepts the next undo; its id, kind, session and touched set stay. The step a redo of an "Update Note" step records merges the same way; the redo step an undo leaves never merges.
@@ -321,3 +322,4 @@ Anki's results above that the mechanism did not produce at first. M1, M2, M4 and
 4. **`col.mod` on redo (A7).** The redo step takes as its `col.mod` value the one `col.mod` held when the undo ran, and the step a redo records takes the one it held when the redo ran, instead of the step's own values swapped (M4.5, M5).
 5. **Names (A1).** The steps of these ops carry the names of `undo-ops.md` V4 exactly: "Update Note", "Delete Note", "Add Note", "Answer Card", "Suspend", "Update Config".
 6. **Unchanged, for the record.** Anki's operations without an undo record (Check Database, raw statements) empty both histories even when they change nothing; M2 gives an op that changed nothing no effect. The scenario ops of that kind are `check_db` and `db_exec`, which Meguri clears explicitly (M6, `record-ops.md` W1), so no scenario shows a difference; the units that add other such ops decide.
+7. **Unchanged, for the record: failing ops.** Anki empties both histories when an operation fails (A2); Meguri's failing op leaves both (M2). No scenario combines a failing op with `undo_status`; a scenario that does needs a deviation entry. For server writes this difference is part of `ankiconnect-undo-history` (`servers/api-undo-history` Y3, Y6).

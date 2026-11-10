@@ -267,7 +267,7 @@ For each deck of O7.2 step 3, with the save's value for each field:
 
 ## O10. Scheduling preferences (R760, R761, R665)
 
-A separate op, named "Preferences" (undo id `preferences`), source user, for the settings screen (U160) and the Load balancer toggle outside deck options. Its input is any of:
+A separate op, named "Preferences" (undo id `preferences`), source user: the core's scheduling preferences save, which `conformance/deck-options-ops` E4 drives. Settings › Review submits its Settings form (below); the Load balancer toggle is deck options' own (R751, O7.2). Its input is any of:
 
 | Setting | Key (`sched/config-keys#G2`, `sched/day-clock#D2`) | Default | Values | Stored as |
 |---|---|---|---|---|
@@ -281,6 +281,7 @@ A separate op, named "Preferences" (undo id `preferences`), source user, for the
 - Save `rollover` when the resulting hour differs from its effective hour before the save. When the hour is unchanged, this save does not materialize a missing rollover row. This conditional rule follows the pinned preferences save; the day query's own writes remain D5's responsibility.
 - An empty request is invalid before execution: require at least one supplied field (E4). Completing omitted fields applies only after a request passes that validation.
 - No other preference key is written. All actual writes belong to one Preferences undo step; no changed row means no new step. Undo restores the preceding rows exactly, including absence for a key this save inserted; redo reapplies the saved rows. These rules are separate from O7.2 step 7: the deck options save preserves a missing global key when its default stays unchanged.
+- **Settings form (U160).** Settings › Review's "Next day starts at" and "Learn ahead limit" rows submit this op with exactly one field, `rollover` or the learn-ahead minutes (`review/review-preferences` P6.1). It differs from the save above in three points. (1) The field is written only when it differs from the value shown: the effective hour, or `collapseTime` / 60 rounded down; otherwise nothing is written. (2) Only that key is written: omitted fields are not completed, so no `collapseTime` or `loadBalancerEnabled` row is inserted or rewritten. (3) It is an op of source `UserNonUndoable` marked skip-undo (`engine/undo` M2, R115): no "Preferences" step, earlier undo steps kept, redo emptied. Validation, the day clock rules and the queue rebuild and count refresh (R761) apply unchanged. `conformance/deck-options-ops` E4 runs the save above, not this form.
 - A change of `rollover` makes the day clock compute afresh at once (`sched/day-clock#D6`, `#D8`, `#D13`): today and `next_day_at` follow the new hour, and when the day number changes the rollover op runs (`sched/day-clock#D9`: unbury when the day moved forward past `lastUnburied`, undo history cleared).
 - The change set rebuilds the study queue and refreshes deck counts at once (R761); a learn-ahead change takes effect at the next queue build. Scenario `sched/options/prefs-rollover` (golden pending, O13): at 05:00 UTC on day 2, moving the hour from 4 to 6 makes today 1 again, so a review due on day 2 is no longer due; moving it back to 4 makes today 2, unburies a card buried on day 1 and writes `lastUnburied` 2.
 
@@ -299,7 +300,7 @@ The screen's labels, help texts and warning wording are Meguri's (R734, U232); t
 - **Historical retention** range 0.70 to 0.97, the read bounds (R753). Anki's screen accepts 0.5 to 1.0 and then reads values outside the bounds as 0.9.
 - **Step warning** on any step of 1 day or more (R743). Anki looks at the last step only.
 - **Step text** (O5.2): for a step of an exact multiple of 43,800 minutes that is not a multiple of 525,600, Anki shows a rounded number of days; Meguri shows exact hours.
-- **Load balancer** toggle on the deck options screen and in the settings (R665); Anki's desktop shows none.
+- **Load balancer** toggle on the deck options screen (R665, R751); Settings has none (`storage/settings-keys` S2). Anki's desktop shows none.
 - **Preset removal** (O6.5): Anki's screen warns before the first schema change since a sync that the next sync must upload the whole collection; Meguri asks nothing and takes a safety backup before the save (`notetypes/schema-changes#G9`).
 - **Minimum interval under FSRS** (R745): Anki's screen hides Minimum interval while FSRS is on, because FSRS does not use it (`sched/fsrs-transitions#T2.5`). Meguri, always under FSRS, shows it in Lapses as R745 asks; the stored value is still written and read by SM-2 clients. Added 2026-11-10; see O16.
 - **Opening from a review** (R730, O15.1): Anki asks which deck when the studied deck is not the card's own deck; Meguri opens the card's home deck without asking.

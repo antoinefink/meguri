@@ -94,7 +94,7 @@ Every local save, add and clone applies these steps in this order. A step that r
 7. Unique note type name: when another note type of the collection has a name equal under unicase, `+` is appended until no other note type has such a name. A note type never collides with itself, so a case-only rename keeps the new spelling (`Alpha` renamed `ALPHA` stays `ALPHA`). Examples with `Pair` stored: adding `pair` gives `pair+`, then `PAIR` gives `PAIR++`, then `Pa"ir` gives `Pair+++`.
 8. Card requirements: N6.
 
-Anki's Python layer has a rename of its own for note types added or saved through its legacy API (a hyphen and five characters of a checksum); Meguri follows the core rule of step 7 (R907).
+Anki's Python layer has a rename of its own for note types added or saved through its legacy API (a hyphen and five characters of a checksum); Meguri follows the core rule of step 7 (R907). Anki's desktop Add sheet and Rename save through that layer, so a typed name that collides under unicase gets the hyphen suffix there and `+` only when the collision comes from step 1 or 2 (`notetypes/editor-actions` A3, A4, A17).
 
 Saves of rows arriving by sync or import go through the same normalization in Anki; whether and how Meguri applies it to sync is U107's, and an `.apkg` import without a merge applies steps 1 to 8 as an unchecked save (`package/apkg-import#I7`, U120); with a merge, the merged note type follows `package/notetype-merge#J4.5` (steps 1 to 5, 7 and 8 as an unchecked save, J4.4 standing in for step 6; U121).
 
@@ -185,10 +185,12 @@ A clone is a new note type copied from an existing one:
 - Field options (R925; `sticky` through the Add screen's pin, R805), template renames, browser appearance (R935), deck override (R934) and styling are plain saves under N3 and N4. None is a schema change (`notetypes/schema-changes` G2). They touch no note and no card.
 - Field renames and template text edits are U34's: the first rewrites template references (R923), the second may generate cards (R789). Neither is a schema change.
 
+The editors' input rules for these edits (prefilled names, blank input, field options and kept sizes, Deck Override's deck lookup and creation at save, Browser Appearance's trimmed formats and font pair) are `notetypes/editor-actions` A4, A8, A10, A11 and A12.
+
 ## N9. Image Occlusion note type on demand (R913)
 
 - The collection's Image Occlusion note type is the note type with the lowest id among those whose `original_stock_kind` is 6 and that have at least 4 fields.
-- Ensuring one exists (when the user first creates an occlusion, U63/U68): when such a note type exists, nothing is written. Otherwise the stock Image Occlusion kind (`notetypes/stock-kinds` K4) is added as N5 says, named `Image Occlusion` with N4 step 7 applied (`Image Occlusion+` when a note type of that name exists), except that `curModel` keeps its value.
+- Ensuring one exists (when the user first creates an occlusion, U63/U68; U206 ensures it when the Add screen's stand-in Image Occlusion row is chosen, `editor/image-occlusion-notes` O10): when such a note type exists, nothing is written. Otherwise the stock Image Occlusion kind (`notetypes/stock-kinds` K4) is added as N5 says, named `Image Occlusion` with N4 step 7 applied (`Image Occlusion+` when a note type of that name exists), except that `curModel` keeps its value.
 - A note type of stock kind 6 with fewer than 4 fields does not count, so a second one is added beside it.
 
 ## N10. Meguri never edits note types on its own (R1586, R1590)

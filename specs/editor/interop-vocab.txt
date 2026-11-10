@@ -236,3 +236,25 @@ undo_status
 fields_check
 set_config
 quot
+# Wave 9 (editor/add-flow, editor/mask-editor, editor/image-occlusion-notes, editor/mask-audio, editor/config-keys K12): Anki backend method names used as scenario ops, image occlusion shape attributes and note type members, field check states, and the graph preference keys.
+add_field
+add_note
+cardCountsSeparateInactive
+clone_notetype
+empty_cards
+ensure_io_notetype
+field_not_cloze
+fill
+fs
+futureDueShowBacklog
+image-occlusion
+missing_cloze
+move_field
+oi
+points
+rx
+ry
+scale
+sticky
+tag
+update_notetype

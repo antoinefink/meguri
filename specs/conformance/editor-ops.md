@@ -92,13 +92,15 @@ Added 2026-11-10 for `editor/config-keys` K7 and K8, modelled on `conformance/br
 
   | Keys | Value |
   |---|---|
-  | `pasteImagesAsPng`, `pasteStripsFormatting`, `addToCur`, `shrinkEditorImages`, `closeHTMLTags` | boolean |
+  | `pasteImagesAsPng`, `pasteStripsFormatting`, `addToCur`, `shrinkEditorImages`, `closeHTMLTags`, `cardCountsSeparateInactive`, `futureDueShowBacklog` | boolean |
   | `firstDayOfWeek` | one of the integers 0, 1, 5 and 6 (K5) |
+
+  The two graph keys are written as the Stats toggles write them (`editor/config-keys` K12).
 
   Any other key, or another value, is `invalid_scenario`. `customColorPickerPalette` is not in the list: Meguri's palette write applies K9's add or remove to the stored value, and Anki's collection library has no such write, so scenarios write the palette's bytes with `set_config` (`record-ops.md` W4; scenario `editor/formatting/options/key-writes`).
 - **Effect.** The key is set to the value as one operation with no undo entry (`storage/config-table` C4): it keeps the undo steps and empties the redo history (`engine/undo` A2).
-  - Oracle: the collection's boolean setter for `pasteImagesAsPng`, `pasteStripsFormatting` and `addToCur`, its generic config setter for the other three, each without an undo entry. `firstDayOfWeek` is not written through Anki's graph preferences save, which also writes two other keys (`editor/config-keys` K6). Anki writes when the value's compact bytes differ from the stored bytes.
-  - Meguri: the whole-value write of `editor/config-keys` K1 (K8 for its two keys), the operation the Settings pages, the Stats menu and the editor's options menu run once they have decided to write. The app's own test, that the user picked a value different from the one read (K1), happens before that operation and is not part of the op: the op writes whenever the value differs from the stored value (deviation `config-same-value-other-bytes`, as B1 says), so a value of another type is replaced.
+  - Oracle: the collection's boolean setter for `pasteImagesAsPng`, `pasteStripsFormatting`, `addToCur`, `cardCountsSeparateInactive` and `futureDueShowBacklog`, its generic config setter for `shrinkEditorImages`, `closeHTMLTags` and `firstDayOfWeek`, each without an undo entry. `firstDayOfWeek` is not written through Anki's graph preferences save, which also writes two other keys (`editor/config-keys` K6). Anki writes when the value's compact bytes differ from the stored bytes.
+  - Meguri: the whole-value write of `editor/config-keys` K1 (K8 and K12 for their two keys each), the operation the Settings pages, the Stats menu and the editor's options menu run once they have decided to write. The app's own test, that the user picked a value different from the one read (K1), happens before that operation and is not part of the op: the op writes whenever the value differs from the stored value (deviation `config-same-value-other-bytes`, as B1 says), so a value of another type is replaced.
 - **Output** none (`{}`).
 
 ## E7. Observation kind `editor_config`

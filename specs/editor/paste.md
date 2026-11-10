@@ -71,7 +71,7 @@ Every file this spec puts into media goes through one importer (U194), which cal
 
 A Meguri addition (Anki desktop has neither; AnkiMobile has a similar size limit).
 
-- Photo Library: the system photo picker, images only, any number of images; each becomes its own `<img>` snippet, in the order picked. Camera: the system camera, one still photo. A Live Photo gives its still image. Videos are not offered.
+- Photo Library: the system photo picker, images only, any number of images; each becomes its own `<img>` snippet, in the order picked. Camera: the system camera, one still photo. A Live Photo gives its still image. Videos are not offered. The image occlusion picker's Photo Library takes one image (`editor/image-occlusion-notes` O4.1).
 - Each image is decoded with its orientation applied, so the stored pixels are the right way up.
 - **Image max size.** A device-local setting (not in the collection; U160 places it on Settings › Editing): Off, or the longest side in pixels, one of 640, 800, 1024, 1280, 1600, 2048 and 4096. Default 1024. When the image's longer side exceeds the setting, the image is scaled so its longer side equals the setting exactly and the other side is the scaled length rounded to the nearest integer, halves away from zero, at least 1. Smaller images and Off keep their size; nothing is made larger. Example: 4032×3024 at 1024 → 1024×768; 3024×4032 → 768×1024; 1000×500 → unchanged.
 - Then the image is encoded and named by P7: JPEG `.jpg`, or PNG `.png` when `pasteImagesAsPng` is `true`. Never HEIC.
@@ -355,6 +355,8 @@ The recorder is an in-window panel (R853; the screen contract owns its placement
 - **Stopped.** An interruption (a call, another app taking the audio session, an audio route loss such as an unplugged microphone) or the app moving to the background or resigning active stops the recording and keeps the take recorded so far. The panel then shows P21's stopped message, the final time, Save and Cancel; recording does not resume. Nothing is ever saved without Save. A take left unsaved when the app ends is a temporary file, removed at the next launch; it never reaches media.
 - **Failure.** When the recorder cannot start or fails while recording, the panel closes with P21's alert and nothing is added.
 - **Target.** The field keeps its selection while the panel is up (`editor/field-html` F4). When the field can no longer take the snippet at Save (another note loaded, the note closed, the field in HTML mode or collapsed), Save still adds the take, so the audio is not lost, and inserts nothing (P25); Check Media later reports the file as unused (`media/media-files` M13).
+
+The mask editor's Record Audio (`editor/mask-audio` A4) uses this recorder, its format, name, states and P21's words, with its own enabling (no field focus needed) and target (the mask's audio field).
 
 ## P21. Strings
 

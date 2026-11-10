@@ -5,7 +5,7 @@ Requirements: R798, R799, R800, R801, R803, R806; supports R48, R80, R796, R805,
 Anki: 26.09.3
 Scenarios: conformance/scenarios/notes/add-defaults/ (listed in D7, recorded on the Linux oracle)
 
-The core services the Add screen (U195) calls for its starting deck and note type and for a note type's default deck (U191), and the Add-screen rules around them: when the screen asks, what a blank draft is, what happens to a selection that stops existing, and what the next note holds after an add. The rules that pick the deck and the note type are `editor/config-keys` K4; this file does not restate them. The keys an add writes are `notes/note-records` A4. The live check of a draft is `notes/field-check`; tag suggestions are `tags/complete`.
+The core services the Add screen (U195) calls for its starting deck and note type and for a note type's default deck (U191), and the Add-screen rules around them: when the screen asks, what a blank draft is, what happens to a selection that stops existing, and what the next note holds after an add. The rules that pick the deck and the note type are `editor/config-keys` K4; this file does not restate them. The keys an add writes are `notes/note-records` A4. The live check of a draft is `notes/field-check`; tag suggestions are `tags/complete`. The rest of the Add screen (choosers, note type change and its field mapping, pins, the add, History, closing, keys) is `editor/add-flow`.
 
 ## D1. The starting defaults
 
@@ -67,9 +67,9 @@ A read-only query on the query lane. It writes nothing.
 
 ## D5. A selection that stops existing
 
-Another operation (a deck or note type deletion, a deck turned filtered, an incoming sync) can remove what the Add screen has selected. The Add screen checks its selection after each such change and before an add:
+Another operation (a deck or note type deletion, a deck turned filtered, an incoming sync) can remove what the Add screen has selected. The Add screen checks its selection after each such change and before an add (when the check before an add replaces the note type or the deck, the add stops so the user sees the change: `editor/add-flow` A5 step 3):
 
-- a selected note type that no longer exists is replaced by the first note type in name order (K4.1's fallback). The draft's content is mapped to it as for a note type change (R802), and the last added note is forgotten (D4). D2 is not consulted: the selected deck stays;
+- a selected note type that no longer exists is replaced by the first note type in name order (K4.1's fallback). The draft's content is mapped to it as for a note type change (R802, `editor/add-flow` A3.1), and the last added note is forgotten (D4). D2 is not consulted: the selected deck stays;
 - a selected deck that no longer exists, or that is now filtered, is replaced by the default deck (id 1);
 - when no note type exists at all (D1's `InvalidArgument`), the draft and its selection stay as they are, Add is disabled and the screen says that the collection has no note type. When a note type exists again, the first rule applies. When the selected deck must be replaced and deck 1 does not exist either (a damaged collection), the selection stays and an add is refused with `NotFound` (D1) and writes nothing.
 

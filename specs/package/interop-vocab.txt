@@ -123,3 +123,14 @@ relearn_steps
 # Note type merging (notetype-merge.md, U121): the note type config field
 # the merge does not read.
 original_stock_kind
+# Wave 9 (package/file-intake, package/transfer-sheets): the media types and
+# extensions Anki declares for its package and add-on files, and the plist
+# role key both bundles use. The import log list `conflicting` is an ordinary
+# word and stays unmasked.
+ankiaddon
+CFBundleTypeRole
+vnd.anki
+x-anki
+x-ankiaddon
+x-apkg
+x-colpkg

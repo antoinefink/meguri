@@ -39,7 +39,7 @@ The places where U162's import and export sheets (`package/transfer-sheets`) sho
 
 - The order on the sheet is `package/transfer-sheets#X4.3`'s.
 - Anki 26.9.3's label for the last option ends with " (slower/larger files)". Meguri shows R1618's text without it. Whether the sheet adds its own footnote about speed and size is Meguri's choice.
-- "Anki" in `export.legacySupport` names the other app as a plain compatibility fact (R156). U167's `lint-strings` allowlist must hold this key.
+- "Anki" in `export.legacySupport` names the other app as a plain compatibility fact (R156). U167's `lint-strings` allowlist must hold this key (`text/interface-text` I7).
 
 ## S4. Meguri's own wording
 

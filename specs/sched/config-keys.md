@@ -24,15 +24,15 @@ Writing a key stores its value in the compact JSON form, as a local change, and 
 
 | Key | Reader | Default | Meaning | Written by (Meguri) |
 |---|---|---|---|---|
-| `collapseTime` | u32 | 1200 | learn-ahead limit in seconds ("Learn ahead limit", minutes in the UI, R760) | Settings (U49): minutes × 60 |
-| `rollover` | `sched/day-clock#D2` | 4 | next day starts at this hour (R760) | explicit compatibility day query; Settings; automatic checks use the effective default without repairing it (D8) |
+| `collapseTime` | u32 | 1200 | learn-ahead limit in seconds ("Learn ahead limit", minutes in the UI, R760) | Settings: minutes × 60, the one key, no undo step (`review/review-preferences` P6.1); the scheduling preferences save (U49, `sched/deck-options` O10) |
+| `rollover` | `sched/day-clock#D2` | 4 | next day starts at this hour (R760) | explicit compatibility day query; Settings, the one key, no undo step (`review/review-preferences` P6.1); automatic checks use the effective default without repairing it (D8) |
 | `creationOffset`, `localOffset` | `sched/day-clock#D2` | none, 0 | day-count offsets | the day clock (`localOffset` only) |
 | `lastUnburied` | u32 | 0 | last day buried cards were restored | explicit compatibility query (D7); automatic check only after actual restoration, and real bury actions atomically before burying (D8) |
 | `nextPos` | u32 | 0 (a new collection holds 1) | next new-card position (R590, `sched/card-data#K7`) | card generation: the read value + 1, wrapping from 4294967295 to 0 |
-| `timeLim` | u32 | 0 | timebox limit in seconds, 0 = off (R759; minutes in the UI) | Settings: minutes × 60 |
+| `timeLim` | u32 | 0 | timebox limit in seconds, 0 = off (R759; minutes in the UI) | Settings: minutes × 60, only when the shown minutes change (`review/review-preferences` P3) |
 | `newCardsIgnoreReviewLimit` | bool | false | "New cards ignore review limit" (R608, R741) | deck options save (U49) |
 | `applyAllParentLimits` | bool | false | "Limits start from top" (R607, R741) | deck options save (U49) |
-| `loadBalancerEnabled` | bool | true | load balancer (R665, R751) | its toggle (U49) |
+| `loadBalancerEnabled` | bool | true | load balancer (R665, R751) | its toggle in deck options' Advanced section (R751, U232); not in Settings |
 | `fsrs` | bool | false | FSRS on | the FSRS-only policy turns it on (R702, U50) |
 | `fsrsShortTermWithStepsEnabled` | bool | false | short-term scheduling also for presets with steps (R658) | never (no UI); read by U45 |
 | `fsrsHealthCheck` | bool | true | health check after optimizing (R700) | never; read by U47 |
@@ -56,7 +56,7 @@ Writing a key stores its value in the compact JSON form, as a local change, and 
 
 ## G3. Keys the scheduler does not use
 
-`dayLearnFirst` and `newSpread` belong to Anki's previous scheduler; the current one does not read them. `estTimes` and `dueCounts` are reviewer display options (R582), `activeDecks` a legacy list, `curDeck` the current deck (`decks/decks#D11`). Meguri's scheduler reads none of them for scheduling and never writes them (`curDeck` is the decks area's). Like every key Meguri does not use, they survive unchanged (`storage/config-table#C7`).
+`dayLearnFirst` and `newSpread` belong to Anki's previous scheduler; the current one does not read them. `estTimes` and `dueCounts` are reviewer display options (R582), `activeDecks` a legacy list, `curDeck` the current deck (`decks/decks#D11`). Meguri's scheduler reads none of them for scheduling and never writes them (`curDeck` is the decks area's). `dueCounts` is never read or written (`review/review-preferences` P5). Whether the review screen reads `estTimes` and Settings › Review writes it depends on R131 versus R354 (`review/review-preferences` P4.1); until the plan settles it, nothing in Meguri reads or writes it. Like every key Meguri does not use, they survive unchanged (`storage/config-table#C7`).
 
 ## G4. Writes of Anki's deck options save (for U49)
 

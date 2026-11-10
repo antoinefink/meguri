@@ -195,7 +195,7 @@ Check Media never records a deletion for a missing file and never removes a jour
 | `hashed` | files hashed by the registration (`sync/media-tracking#T6`) | |
 
 - The engine keeps the report until the next run that finishes or the collection closes (C1), under a report id. U133 pages each list (`page(report, list, offset, limit)`); counts come with the summary. The UI offers Delete Unused only when `unused` is not empty, Tag Missing only when `missing_notes` is not empty, and Restore Deleted and Empty Trash only when the trash is not empty.
-- The tag Tag Missing adds is `missing-media` (exact). All other wording is Meguri's own (U163).
+- The tag Tag Missing adds is `missing-media` (exact). The four action labels are `maintenance/maintenance-strings#S3`: Tag Missing, Delete Unused and Empty Trash are Anki's; C16's button shows R1649's "Restore Trash", which Anki labels "Restore Deleted" (the name this file uses for the action). All other wording is Meguri's own (U163).
 
 ## C13. Tag Missing (R1649)
 

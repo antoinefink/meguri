@@ -86,6 +86,8 @@ Read from the collection config when a card is rendered:
 
 `hideAudioPlayButtons` is the preference "Show play buttons on cards with audio", inverted. Anki inserts `reviewExtra` when it builds the review page and prints a non-string value as Python text; Meguri uses only a string value.
 
+In Meguri's interface its only writer is Settings › Review's "Show play buttons on cards with audio" row, which stores the inverted toggle (`review/review-preferences` P4). After a reported change the card on screen keeps its page on both sides; the next card presented is rendered with the new value, because its `renderKey` includes the effective value (`sched/review-session` C6) and a page prepared before the change is not used.
+
 ## K10. Card state for the page
 
 For `_drawFlag` and `_drawMark` (R478, U66):

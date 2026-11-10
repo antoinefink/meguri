@@ -28,3 +28,11 @@ from Anki. The Skip question key was renamed so that it follows the protobuf
 field rather than Anki's translation id; the New card gather order key keeps
 `newGatherPriority`, which is the stored deck config JSON key
 (`model/schema11-json`), an interface name.
+
+Wave 9 edit requests (2026-11-10, same session):
+
+| Spec section | Source | Read for |
+|---|---|---|
+| activity-strings S4 (the "+N" note) | `qt/aqt/overview.py` (the deck overview's count table), `ftl/core/studying.ftl` (`studying-counts-differ`) | Anki's overview shows each count's difference with a sign from its number formatting (ASCII `+` and `-`) and one tooltip that gives burying as the reason |
+| graph-presentation P21 (retention help row) | `ftl/core/statistics.ftl` (`statistics-true-retention-tooltip`) | the row records the open difference noted above as a proposed decision; Anki's word is not named |
+| graph-presentation P5.1, P19 (week start menu) | `ts/routes/graphs/CalendarGraph.svelte`, `ts/routes/graphs/calendar.ts` | Anki has no menu: a click on a weekday label sets the week start. The menu, its label and its four items are R1381's and `editor/config-keys` K5's |

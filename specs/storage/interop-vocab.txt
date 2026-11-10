@@ -111,3 +111,18 @@ secure_delete
 # The schema-11 copy (schema11-downgrade.md, U33): the SQLite pragma whose
 # value shows the source unchanged.
 data_version
+# Wave 9 (storage/settings-keys): collection config keys Settings stores or
+# names. The ordinary words `backups` and `version` stay unmasked.
+addToCur
+collapseTime
+defaultSearchText
+dueCounts
+estTimes
+firstDayOfWeek
+hideAudioPlayButtons
+ignoreAccentsInSearch
+interruptAudioWhenAnswering
+pasteImagesAsPng
+pasteStripsFormatting
+rollover
+timeLim

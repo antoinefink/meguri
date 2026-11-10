@@ -91,6 +91,8 @@ No toast follows an accepted answer, except the leech toast. A refused or failed
 | `review.timebox.finish` | Finish | |
 
 - Trigger: `timeLim` > 0, and the active time since the timebox started (R431) is greater than `timeLim` seconds when an answer is accepted. It is checked after accepted answers only, never after bury, suspend, delete or undo. `timeLim` 0 never shows it.
+- `timeLim` is read with the u32 read of `review/review-preferences` P2 (a stored `600.0` reads 0, no timebox; Anki's check reads the raw value, P7).
+- The timebox clock starts when the session starts and restarts as below, whatever `timeLim` holds; with 0 only the check is off. A change of `timeLim` reported while a session is open replaces the limit for the following checks without resetting the timebox time or the card count, so turning the limit on mid-session can show the sheet at the next accepted answer (`review/review-preferences` P3).
 - cards: the answers accepted live since the timebox started. Neither undo nor redo changes that number, and a redo is not an accepted answer for the trigger (as in Anki): answer, undo, redo counts 1.
 - minutes: `timeLim` / 60 rounded to the nearest whole number, an exact half to the even neighbour (90 → 2, 150 → 2, 600 → 10, 20 → 0). It is the limit, not the measured time.
 - Examples: 1 answer, `timeLim` 600 → "1 card studied in 10 minutes."; 25 answers, `timeLim` 60 → "25 cards studied in 1 minute.".
@@ -205,7 +207,7 @@ The oracle runs the collection library, not Anki's UI, so the text itself is che
 | `ReviewPanelHostTests` (U183) | S19: the Current / Previous labels and the Deck Options title with the home deck's name (a filtered deck's card names its original deck) |
 | `DeckPageStoreTests` (U155) | S8.1: the ready-in line from `next_learning_ready_at`, no Continue, the Deck Options link after each limit paragraph only while the route is attached |
 
-Every key must exist in the catalog with exactly this English value (U167's string lint). The counts behind the strings are collection facts; their oracle scenarios (bury counts, the timebox's card count across undo and redo, the C7 ready-in boundaries) are not recorded yet.
+Every key must exist in the catalog with exactly this English value (U167's string lint). This check belongs to the unit that adds the catalog, runs in the `tools/mg lint-ui` job with U167's `lint-strings`, and starts when the catalog exists (`text/interface-text` I3). The counts behind the strings are collection facts; their oracle scenarios (bury counts, the timebox's card count across undo and redo, the C7 ready-in boundaries) are not recorded yet.
 
 ## S13. Answer controls (R184, R185, R339, R349, R351, R1981)
 
@@ -235,6 +237,7 @@ Spoken units. Each row is two plain entries, `<stem>.one` and `<stem>.other`, wh
 - Examples of accessibility labels: "Again, less than 10 minutes", "Hard, 1 minute", "Good, 3 days", "Easy, 2.3 months".
 - Voice Control's input label of each answer button is its grade name alone, and of the Show Answer button `review.showAnswer`, so the spoken commands are "Tap Good" and "Tap Show Answer" (R185). The accessible answer controls that replace the tap zones (R1981) are these four buttons, with the same labels.
 - The menu commands' titles are the grade names and `review.showAnswer` (N11.3, R339), with no interval.
+- Until the plan settles R131 versus R354 (`review/review-preferences` P4.1), interval labels are shown whatever `estTimes` holds (R354) and nothing reads the key. P4.1 states the R131 branch's labels; this section changes only once the plan chooses it.
 
 ## S14. Forget choices (R386)
 

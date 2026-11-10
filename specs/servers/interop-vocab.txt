@@ -500,3 +500,8 @@ ntid
 cid
 oid
 unclosed_group
+# Wave 9 (servers/api-undo-history): the undo observation, the undo step ids it reads, and the AnkiConnect parameter it names.
+add_note
+filename
+undo_status
+update_note

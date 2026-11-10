@@ -111,7 +111,7 @@ Other files own the rest of the server:
 | `getNumCardsReviewedByDay` | none | list | read | review log | |
 
 - A write action whose op changes nothing still succeeds with its result; the op records no undo step and publishes no event (`engine/op-model` O4).
-- No action here is recorded on the undo history; a write truncates it as `engine/undo` M7 says (R1795, R1796).
+- No action here is recorded on the undo history; a write truncates it as `engine/undo` M7 says (R1795, R1796). Anki's own history after the same actions, and how it differs: `servers/api-undo-history` Y2 to Y4.
 - Each write action is exactly one op, also where AnkiConnect makes several collection calls (`addNotes`, `updateNote`, `updateNoteTags`, `replaceTags`, `replaceTagsInAllNotes`, `changeDeck`, `deleteDecks`): it commits whole or not at all (R1790).
 - A note add or update through this file never writes the Add-screen defaults (`notes/note-records#A4`: `update_add_defaults` false).
 

@@ -395,7 +395,7 @@ These 48 names of the reference get `unsupported action` and never appear in `ap
 - A request is answered in every case (R1659): it waits, then succeeds or gets an error. It is never dropped.
 - An action that changes the collection is exactly one op with source `LocalApi` (`engine/op-model#O1`): it commits whole or not at all (R1790). When the op is refused at commit because the collection became unavailable or changed generation, the reply is `collection is not available` and nothing changed.
 - Read actions may run at the same time as each other and as writes (R1790). Write ops commit one at a time, in arrival order, in the same queue as UI writes (`engine/op-model#O2`).
-- `LocalApi` ops are not recorded in the undo history and truncate it where they intersect it (`engine/undo#M7`, R1795, R1796).
+- `LocalApi` ops are not recorded in the undo history and truncate it where they intersect it (`engine/undo#M7`, R1795, R1796). (Anki's history after the same writes: `servers/api-undo-history`.)
 - A handler that fails unexpectedly (a panic) is caught for that request only (`servers/host-security` H9.4): the AnkiConnect error responder answers the error envelope `Meguri: internal error` (HTTP 200, E5.1 headers, `Connection: close`) and the server keeps serving. Inside `multi` the failure is caught for that sub-action's slot only (E11).
 
 ## E15. Error strings
@@ -507,6 +507,7 @@ Each needs an entry in `conformance/deviations.yaml` once the transcripts exist 
 | chunked request body | ignored (read as empty: ping) | decoded | R1734 |
 | connection reuse | closed after each reply | keep-alive (`servers/host-security`) | R1677 |
 | read-only mode, activity log, agent snippet, body limit | none | E13, E16, E17, E2 | R1678, R1779–R1781 |
+| Undo history | Anki records, keeps or empties its undo history by the library calls the add-on makes for each write, and a call that fails empties it; whether its Edit menu or `guiUndo` reverts a recorded write is unverified (`servers/api-undo-history` Y9 Q6) | a write is never recorded; the history is cut below the newest step the write intersects (that step and every older one go), and a failing write leaves it (`engine/undo#M7`; `servers/api-undo-history` Y3; deviation `ankiconnect-undo-history`) | R1795, R1796 |
 
 ## E19. Scenarios
 

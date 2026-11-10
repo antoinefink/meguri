@@ -121,6 +121,7 @@ The target notes go to `notetypes/change-notetype`: M4 refuses a selection whose
 - `notes/note-records` D1 on the target notes: every card of each note goes too, one step "Delete Note", fully undoable. No confirmation.
 - Before deleting, Anki selects and focuses one row whose note is not a target, skipping rows of deleted items: the nearest such row below the bottom selected row, else the nearest above the top selected row, else none (the selection is cleared). Meguri does the same.
 - Anki's operation returns the number of cards removed and its message counts cards ("`N` cards deleted."). Meguri's operation returns both counts, notes removed and cards removed; its message counts notes (R1212).
+- What the editor pane, the preview and Card Info show after the move: `browser/inspector` I6 and `browser/preview` P9.
 
 ## B12. Export Notes (R1213)
 

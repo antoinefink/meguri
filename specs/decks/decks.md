@@ -185,7 +185,8 @@ The tree that Home and the sidebars show (counts are U41's):
 - One node per deck. A node's children are its child decks, in `unicase` order of their stored names (no two are equal).
 - A node holds the deck's id, the last component of its name, whether it is filtered, and its two collapse flags.
 - A deck whose parent deck does not exist is left out, with its descendants, until Check Database creates the missing parents (U128). (Anki places such a deck under the node that precedes it in name order when that node is one level up; D15.5.)
-- The default deck is hidden when it is top-level, has no child decks, no card has `did` 1, and at least one other top-level deck exists (R39). Cards of the default deck sitting in a filtered deck do not count.
+- The default deck is hidden when it is top-level, has no child decks, no card has `did` 1, and at least one other top-level deck exists (R39). Cards of the default deck sitting in a filtered deck do not count. The Add screen's deck chooser applies this rule with two exceptions that keep the default deck listed: it is the deck the draft has selected, or every other top-level deck is filtered (`editor/add-flow` A2).
+- Browse's sidebar shows this tree with each node's `browser_collapsed` as its expansion (`browser/sidebar` S3.4, S5); its deck actions and drops are `browser/sidebar` S9 and S10.
 
 ## D13. Other deck writes and what they keep (R322, R69)
 

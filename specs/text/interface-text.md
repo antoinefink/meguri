@@ -36,7 +36,7 @@ Catalog entries whose English must equal a spec table, mostly because it is Anki
 | `stats/heatmap-presentation` M17 | Stats | Home and deck-page heatmap, the Stats Calendar | Home and deck page |
 | `sync/status-strings` | Sync (`Anki: none`) | toolbar sync button, status popover, Settings › Account & Sync | yes |
 | `package/transfer-strings` | Settings | import and export sheets (U162; Settings › Collection keeps file import and export, N11.4) | yes |
-| `maintenance/maintenance-strings` | Settings | Settings › Maintenance and its reports (U163), the Tools menu (U159) | yes |
+| `maintenance/maintenance-strings` | Settings | Settings › Maintenance and its reports (U163), the Tools menu (U159), the damaged-collection screen's Check Database (R169) | yes |
 | `editor/editing-strings` | Editor, Settings, Note Types, Image Occlusion (E1) | add and edit screens, Settings › Editing (E4), note types, image occlusion | E4 only |
 | `editor/image-occlusion-strings` | Image Occlusion (`Anki: none` for its English) | image occlusion screens | no |
 | `decks/deck-options-strings` | Deck Options | deck options | no |
@@ -98,7 +98,7 @@ The allowlist is Meguri's (U167) and holds plain compatibility facts. It must co
 
 | Text | Source | Note |
 |---|---|---|
-| `Support older Anki versions` | `package/transfer-strings` S3, key `export.legacySupport` | R1618's and R1625's label; Anki's own label adds ` (slower/larger files)` |
+| `Support older Anki versions` | `package/transfer-strings` S3, key `export.legacySupport`; the option is `package/apkg-export` A2 and A13, `package/legacy-export` | R1618's and R1625's label; Anki's own label adds ` (slower/larger files)` |
 | the Anki Transfers section and its Import from Anki and Export to Anki actions | R118, `docs/design/native-interface-contract.md` N11.4 | hidden while N12.4 holds; the code and its strings stay |
 | the Anki Server section | N11.4 | hidden by N12.4; the code and its strings stay |
 | the AnkiConnect-compatible server toggle | R153 | the Integrations page (Mac) |

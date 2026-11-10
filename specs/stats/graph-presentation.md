@@ -190,7 +190,7 @@ Decided 2026-10-27: bar queries are written by these rules as plain text and joi
 
 - The labels are P19's: `1 Month`, `3 Months`, `1 Year`, `All`, `50%`, `95%`, `100%`.
 - An option that needs all history is not offered while the history is `last12Months` (R1367).
-- Each range control is a segmented picker (R1366). The other controls: Backlog (Future Due, a toggle bound to `futureDueShowBacklog`, shown only when have backlog is true, R1375), Time (Reviews, a toggle, off at each open), Separate suspended/buried cards (Card Counts, bound to `cardCountsSeparateInactive`), the year (Calendar, P7). The two bound toggles write config only through `stats/graphs-common` G7.
+- Each range control is a segmented picker (R1366). The other controls: Backlog (Future Due, a toggle bound to `futureDueShowBacklog`, shown only when have backlog is true, R1375), Time (Reviews, a toggle, off at each open), Separate suspended/buried cards (Card Counts, bound to `cardCountsSeparateInactive`), the year (Calendar, P7), and the week start (Calendar, a pop-up menu labelled `Week starts on` holding exactly `Sunday`, `Monday`, `Friday` and `Saturday`, bound to `firstDayOfWeek`, `editor/config-keys` K5, R1381). The two bound toggles and the week-start menu write config only through `stats/graphs-common` G7.
 
 ### P5.2 Remembered per device
 
@@ -600,6 +600,7 @@ Meguri takes these texts only from this table. `<…>` marks a number or name; `
 | Added subtitle | `The number of new cards you have added.` |
 | Range labels | `1 Month`, `3 Months`, `1 Year`, `All`, `50%`, `95%`, `100%`: title case, as `docs/design/native-interface-contract.md` N11.7 sets for the history labels. Anki writes `1 month`, `3 months`, `1 year`, `all`; P22's `range` values keep that wording. |
 | Toggles | `Backlog`, `Time`, `Separate suspended/buried cards` |
+| Calendar week start (U230, R1381) | `Week starts on`; items `Sunday`, `Monday`, `Friday`, `Saturday` (the K5 values 0, 1, 5, 6) |
 | Days (P3) | `Today`, `Tomorrow`, `In <n> days`, `In <a>-<b> days`, `Yesterday`, `<n> days ago`, `<a>-<b> days ago` |
 | Running total | `Running total` |
 | Counts | `<n> card(s)`, `<n> note(s)`, `<n> review(s)`, `<n> card(s) due`, `<n> review(s)/day`, `<n> minute(s)/day`, `<n> card(s)/day` |
@@ -658,6 +659,7 @@ Decided 2026-10-27:
 | Stability, Difficulty and Retrievability shown whatever `fsrs` says | R1397 (`stats/graphs-cards` C6.3) | scenarios set `fsrs` true |
 | One colour per series (P17.2) | native charts | none |
 | Card Counts' Mature label query (`stats/browse-queries` Q7) | R1393 | the comparison reads Q4.1's texts |
+| Retention help text: in the sentence about single-day data, P19's `varies a lot` replaces Anki's wording, because the repository's private-token scan rejects one of Anki's words. Decided 2026-11-10 (proposed): P19's text is final for U230 and U231 | R1409 asks for Anki's text; the scan rule wins | none (the help text is in no golden) |
 
 The text differences are one pending `conformance/deviations.yaml` entry, `stats-presentation-text-marks`, added with the first presentation golden. The fractional Intervals query is a second, `stats-intervals-fractional-edge`, added with its Meguri-only test (P23).
 

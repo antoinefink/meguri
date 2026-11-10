@@ -113,7 +113,7 @@ Three synced config keys change what graphs show. The result carries their value
 The result also carries `fsrs` (a JSON boolean; anything else, or no key, reads `false`) and `R`.
 
 - The aggregates for both settings of each boolean are in the record (Card Counts both ways, Future Due with and without backlog), so flipping one re-bins without a core call.
-- A change from the screen is written through U103's config op, one key at a time (`editor/config-keys` K6). Nothing else in this spec writes config. Anki writes all three keys on every change (G13).
+- A change from the screen is written through U103's config op, one key at a time, by the rules of `editor/config-keys` K1 (K12 for the two booleans): a compact JSON `true` or `false` (the K5 integer for `firstDayOfWeek`), written at once only when the user flips the toggle or picks a weekday giving a value different from the one read, as one skip-undo write of source `UserNonUndoable`; a missing key or a value of another type is kept until then. Nothing else in this spec writes config. Anki writes all three keys on every change (G13, `editor/config-keys` K6).
 - Scenarios observe the three values with the draft `graph_preferences` kind (`conformance/stats-ops` H13) and `fsrs` through the `context` part of the `stats` kind (G14); scenario `preferences-read` (G15).
 
 ## G8. Requests and results
@@ -235,7 +235,7 @@ U103's `StatsChanged{graphsStale}` is the change-set part of this list.
 
 ## G11. Read only
 
-Requests, builds, updates and releases never write `collection.anki2` (R1295): no row, `usn`, `mod`, `col.mod` or config key changes. Only the preference writes of G7 and the heatmap settings write config. Scenario `read-only` compares dumps around the observations, after a `timing` observation, as `conformance/stats-ops` H3 says.
+Requests, builds, updates and releases never write `collection.anki2` (R1295): no row, `usn`, `mod`, `col.mod` or config key changes. Only the preference writes of G7 and the heatmap settings write config. Scenario `read-only` compares dumps around the observations, after a `timing` observation, as `conformance/stats-ops` H3 says. The PDF export (`stats/pdf-export` X8) reads only the screen's model and writes nothing to the collection either.
 
 ## G12. Decisions
 

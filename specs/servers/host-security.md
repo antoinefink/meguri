@@ -376,7 +376,7 @@ When two could apply, the one met first in time counts.
 
 These are Swift's half of R1666 to R1671 and are listed so the host's contract is complete:
 
-- While any server is `listening`, the app holds a process activity that prevents App Nap from delaying socket handling, so trivial requests are answered within 200 ms while Meguri is hidden or in the background (R1669).
+- While any server is enabled (H3: its setting is on, whatever its state: `waiting_for_collection`, `binding`, `listening` or `port_in_use`), the app holds a process activity that prevents App Nap from delaying socket handling, so trivial requests are answered within 200 ms while Meguri is hidden or in the background, and retry and restart timers (H4.3, H9.4) are not delayed either (R1669); the activity is released when neither server is enabled.
 - While either server is enabled, closing the main window does not quit the app (R1667).
 - The sandboxed build carries the network-server and network-client entitlements. Loopback-only listening must not trigger the Local Network or firewall prompts, checked on a clean user account (R1671, U147).
 - Swift calls the revalidate operation (H9.3) on wake and on network path changes, and applies the config with the API key from the Keychain at launch and on every settings change.

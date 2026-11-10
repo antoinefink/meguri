@@ -334,7 +334,7 @@ The template editor's preview simulates a typed answer. After A3 steps 1 to 3 (n
 
 ### A11.2 Browse preview (R1220)
 
-The Browse preview shows no type-in: on both sides, before A3 step 2, every match of `[[type:`, one or more characters other than `]` (line feeds allowed), then `]]`, is removed. No box, comparison or warning is shown.
+The Browse preview shows no type-in: on both sides, before A3 step 2, every match of `[[type:`, one or more characters other than `]` (line feeds allowed), then `]]`, is removed. No box, comparison or warning is shown. The Browse preview's other rules (sides, moving through the results, re-rendering, audio, closing) are `browser/preview`.
 
 ## A12. Plan alignment
 

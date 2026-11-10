@@ -19,6 +19,8 @@ Use the card's **home deck**: original deck id when the card is in a filtered de
 | skip question on answer replay | preset `skip_question_when_replaying_answer`, false by default; legacy `replayq` is its inverse | answer replay uses only answer entries when true |
 | interrupt on answer/next card | collection `interruptAudioWhenAnswering`, true by default | whether a side/card transition stops the current clip |
 
+`interruptAudioWhenAnswering` is read with the strict boolean read of `sched/config-keys#G1` (`review/review-preferences` P2) and written, in Meguri's interface, only by Settings › Review (`review/review-preferences` P4).
+
 The controller accepts already resolved typed policy values; caller/database parsing belongs to existing config APIs. Autoplay controls automatic native AV selection, not manual replay and not a card's HTML `autoplay` or `play()` (A8). A setting change affects later commands; it does not restart a current clip merely because the setting changed.
 
 Every queued entry retains its card, side and original AV index. Native player completion/load callbacks carry a playback generation so a stopped item's delayed callback cannot advance or terminate a newer queue. A deliberately surviving old clip under interrupt-off keeps its own identity until it ends; it is not relabeled as the new card's clip. Closing the owner stops playback and releases callbacks/resources.

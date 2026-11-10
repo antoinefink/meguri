@@ -11,7 +11,7 @@ Stamping terms (`usn` -1, `now_s`, `now_ms`, `col.mod`) are those of `storage/id
 
 ## I1. Scope and entry points
 
-- Entry points (U162): the Import command, drag and drop, Dock and Finder opens, Open in / share sheet, Files. Each gives a file; P18 classifies it. `Apkg` goes to this import; `Colpkg` to U124; `Unsupported` is refused before anything is copied, with a message naming the accepted types (U162).
+- Entry points (U162): the Import command, drag and drop, Dock and Finder opens, Open in / share sheet, Files. Each gives a file; P18 classifies it. `Apkg` goes to this import; `Colpkg` to U124; `Unsupported` is refused before anything is copied, with a message naming the accepted types (U162). How each source delivers the file, several files at once, whole-collection names from a drop, and what happens in each lifecycle state (no collection, a damaged collection, an exclusive phase, a review session): `package/file-intake` K1 to K6. The intake reads the selected file in place, read only, under its security scope and a coordinated read; nothing is copied before I2's source copy (`package/file-intake#K3`).
 - The import adds to the target and never replaces it. It runs while a review session stays open (R52): it holds no exclusive phase (`engine/lifecycle#L9`), and its commit reaches the session as a change made elsewhere (`sched/review-session#C13`).
 - Its apply needs an open, `Ready` collection (I14). Its inspect (I3) opens no connection to the target; it uses only the collection directory, for staging (I15).
 
@@ -19,7 +19,7 @@ Stamping terms (`usn` -1, `now_s`, `now_ms`, `col.mod`) are those of `storage/id
 
 An import is a session with three calls: `inspect(file)` (I3, I4), `apply(session, options)` (I14) and `close(session)`.
 
-- **Source copy.** `inspect` first takes the owned source copy of `package/container#P16.1` (preflight P10's last row): one copy of the selected file into a fresh P9 staging directory of the session, under a fixed name of the implementer's choice (never one derived from the file or an entry). From then on every read goes to that copy. The selected file is never read again, never changed and never removed; U162's own temporary copy of a security-scoped file is U162's to remove.
+- **Source copy.** `inspect` first takes the owned source copy of `package/container#P16.1` (preflight P10's last row): one copy of the selected file into a fresh P9 staging directory of the session, under a fixed name of the implementer's choice (never one derived from the file or an entry). From then on every read goes to that copy. The selected file is never read again, never changed and never removed. U162 keeps the selected file's security scope open until this copy exists, the copy reads the file under U162's coordinated read, and U162 takes no copy of its own (`package/file-intake#K3`); a system copy in the app's `Documents/Inbox` is U162's to remove (K3 step 6).
 - The session owns its staging directory: the source copy, the package collection (I3) and nothing else. `close`, dropping the session, and the engine closing remove it (P9). After a kill, U32's launch sweep removes it.
 - A session commits at most once. An `apply` that failed or was cancelled before its commit leaves the session open for another `apply`; an `apply` after a commit or after `close` is refused with `SessionClosed`.
 - The session belongs to the engine, not to a generation: a collection replaced after `inspect` does not invalidate it, since `apply` plans against the target as it is then (I14). A session whose engine closed is closed.
@@ -96,7 +96,7 @@ These are facts about the package. What the options will do (new, updated, dupli
 | Import any learning progress | `withScheduling` | JSON `true` or `false` | `false` |
 | Import any deck presets | `withDeckConfigs` | JSON `true` or `false` | `false` |
 
-- Any value of another JSON type, and any other string, reads as the default. The sheet (U162) shows these values first.
+- Any value of another JSON type, and any other string, reads as the default. The sheet (U162) shows these values first. The labels and their order on the sheet: `package/transfer-strings#S2`, `package/transfer-sheets#X2.2`.
 - The apply writes the five chosen values to these keys at the start of its write phase, as local config changes (`storage/config-table#C4`: only a key whose value differs is written). They are part of the import's undo step: undoing the import restores them. An import that fails or is cancelled writes none.
 - The string forms are those Anki 26.9.3 stores (to be confirmed by scenario `apkg-import/options-keys`, I18).
 
@@ -268,7 +268,7 @@ The apply's result carries one log:
 
 - Each entry holds its id and every field of the note: for new and updated notes as written, for the others as in the package after I8's reorder. Each field is reduced: `text/strip-html` H5, then each U+000A replaced by U+0020, then cut to at most 80 bytes of UTF-8 at a character boundary.
 - Entries are in I9's order. A note is in exactly one list, except that a new, updated or duplicate note can also be in `missing_deck`.
-- The log is kept with the session's result and read in pages through U133 (category, offset, count); the UI shows each entry's first field (U162).
+- The log is kept with the session's result and read in pages through U133 (category, offset, count); the UI shows each entry's first field (U162). The result's lines, their order, which offer Show in Browse, the separate line for `missing_deck`, one table row per note and its per-row Show: `package/transfer-sheets#X2.5`.
 
 ## I14. The operation
 

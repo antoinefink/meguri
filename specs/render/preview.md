@@ -11,7 +11,7 @@ How the engine renders a card that is not stored as it would look: a note type d
 
 - **Note type draft**: a note type as an editor holds it, saved or not: name, kind (standard or cloze), field names in order, templates in order (each a name, a question text and an answer text) and CSS. A draft of a stored note type keeps that note type's id.
 - **Note draft**: field values in the draft's field order, a tag list, and the id of a stored note when the values are that note's (edited or not). A new note has no id.
-- **Target**: the card ordinal to show. For a standard draft it is a template index (0 for the first template). For a cloze draft it is the cloze number minus one.
+- **Target**: the card ordinal to show. For a standard draft it is a template index (0 for the first template). For a cloze draft it is the cloze number minus one. The target a template editor opens at is `notetypes/editor-actions` A5.
 - **Preview render**: one render of one target of a note draft with a note type draft, in preview mode (`card-render-pipeline.md` K1).
 
 ## V2. The engine call (Meguri contract)
@@ -19,7 +19,7 @@ How the engine renders a card that is not stored as it would look: a note type d
 `renderUncommitted(notetypeDraft, noteDraft?, target, fillEmpty, platform)` returns one `RenderedCard` (`card-render-pipeline.md` K11) in preview mode and the **preview note**: the id (0 for a new note), values and tags of the note it rendered, before V6.
 
 - `fillEmpty` is a boolean (V6). `platform` is `display-transform.md` D1's `mac` or `ios`, for the device actually running the page (V12). The host's `hidePlayButtons` is not a caller input: the engine reads it from the call's snapshot (K9), as D1 says.
-- `noteDraft` is optional. When the caller gives one (V5 rule 1, V13), it is used as given. When it is absent, the engine applies V5 rules 2 and 3 in the call's snapshot: the stored note of `notetypeDraft`'s id with the smallest id, or, when the draft has no id or that note type has no notes, a new note with every value empty and no tags. A stored note's tags are its stored tag list (`special-fields.md` P3). Its stored values are matched to the draft's fields by position: missing trailing values are empty and values beyond the draft's field count are dropped.
+- `noteDraft` is optional. When the caller gives one (V5 rules 1 and 4, V13), it is used as given. When it is absent, the engine applies V5 rules 2 and 3 in the call's snapshot: the stored note of `notetypeDraft`'s id with the smallest id, or, when the draft has no id or that note type has no notes, a new note with every value empty and no tags. A stored note's tags are its stored tag list (`special-fields.md` P3). Its stored values are matched to the draft's fields by position: missing trailing values are empty and values beyond the draft's field count are dropped.
 - The preview note lets the caller show which note it is and list its cards (V6). The type-in is always simulated (V9). There is no typed text and no reveal call.
 - Field values of a given note draft: the i-th value belongs to the i-th draft field. Missing trailing values are empty.
 - Field names and template texts are taken as given. A draft with no fields renders with the special values only. When two draft fields have exactly the same name, the first one in field order gives the map's value; the later one is not reachable by name.
@@ -67,8 +67,9 @@ The field map follows `special-fields.md` P2 and P3, with these values:
 
 - **Which note** (R938):
   1. Opened from an editor (Add, Edit, Browse's editor, the review screen's Edit): that editor's note, with its unsaved values and tags, and its stored id when it has one. The caller passes it as the note draft. Fill-empty starts off.
-  2. The template editor opened from note type management: the type's first note, which is the stored note of that note type with the smallest id. Its stored values and tags are used. The caller passes no note draft and the engine picks it (V2). Fill-empty starts off.
+  2. The template editor opened from note type management: the type's first note, which is the stored note of that note type with the smallest id. Its stored values and tags are used. The caller passes no note draft and the engine picks it (V2). Fill-empty starts off. Anki's Cards… from its Note Types list previews a new empty note with fill-empty on instead, whatever the note count (V15). Open question for Antoine: this rule follows R938's "or the type's first note"; following Anki would change only this rule.
   3. A note type with no notes: a new note with every value empty and no tags, also picked by the engine (V2). Fill-empty starts on (as Anki does when its card layout screen is opened from note type management). The user can turn it off, as in Anki.
+  4. The template editor opened from Browse's sidebar, Edit Template on a card type child (`browser/sidebar` S9.7, `notetypes/editor-actions` A5): a new note with every value empty and no tags, as in rule 3, with fill-empty on, even when the note type has notes (as Anki does). Since the engine picks the first note whenever the note type has notes (V2), the caller passes this new note as the note draft: no id, no tags and no values, which V2 reads as all empty. The user can turn fill-empty off.
 - With no notes and fill-empty off, the preview shows what review would show for such a note: usually a blank card (`display-transform.md` D7). It shows a template error only when the draft has one.
 
 ## V6. Fill empty fields (R939)
@@ -180,7 +181,6 @@ U71's timing test:
 The oracle can observe none of these (they belong to Anki's desktop interface). Meguri's tests check them against this file.
 
 - Anki's template editor opened from note type management shows a new, empty note with fill-empty on. Meguri shows the type's first note (V5 rule 2, R938) and keeps the empty note for types with no notes.
-- Anki's template editor opened from the Browse sidebar's card type item also shows a new, empty note with fill-empty on. Meguri treats it as V5 rule 2.
 - Anki previews a stored note as saved. One of its editors saves the note before opening the card layout screen, and the other reloads the note from the collection by its id, so the save normalization (`text/checksum-and-sort-field#C1`) can apply there. Meguri previews the editor's unsaved values as given (V5, R938), so the V5 table's U+0001 and `<b` U+000D `r>` rows can differ. For a new note (Add), Anki also uses the unsaved values.
 - Anki autoplays the previewed side's audio when the Default deck's options (deck id 1) autoplay, not the options of the previewed card's deck, and only on the first render after the target or the side changes. Card-authored media play without a gesture only then. Meguri never autoplays (V12).
 - Anki's mobile option adds only the class `mobile` to `<html>`. Meguri chooses one of its three platform class sets (V12, R940).

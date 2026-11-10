@@ -83,14 +83,14 @@ Browse shows these Anki strings, each listed in the file named here and taken on
 
 Every other text of Browse is Meguri's own wording, or is fixed by the requirement that quotes it: where a requirement quotes a text, the requirement fixes it, even where it is word for word Anki's English. The unit that shows a text writes it. This covers:
 
-- the search field: token menus, the "or" connector, the clear button, Syntax mode, the syntax reference, suggestions and their descriptions, the placeholder, the inline error label (R1086 to R1108);
+- the search field: token menus, the "or" connector, the clear button, Syntax mode, the syntax reference (its headings and the sentences beside its examples; the example texts are Meguri's too, fixed in `search/syntax-reference` Y2 to Y9 and taken only from there), suggestions and their descriptions, the placeholder, the inline error label (R1086 to R1108);
 - result and selection counts, empty states, the multi-selection summary and the "Results changed" indicator (R1110, R1111, R1221, R1792);
-- the filter sidebar: the section names, which R1157 quotes (Saved Searches, Today, Flags, Card State, Decks, Note Types, Tags; also Anki's), the Today items, and every context menu and management action. R899 quotes "Restore default name", the flag action that removes a flag's name; the same open title-case question as W2's applies to it (W7), and until it is settled R899's text stands. R1159 names the Today items differently from Anki ("Due today" where Anki says "Due"), so those are not Anki's labels (R1157 to R1180);
-- menu and command names, shortcuts' menu items and the row context menu (R1186, R1225 to R1231);
+- the filter sidebar: the section names, which R1157 quotes (Saved Searches, Today, Flags, Card State, Decks, Note Types, Tags; also Anki's), the Today items, and every context menu and management action. R899 quotes "Restore default name", the flag action that removes a flag's name; the same open title-case question as W2's applies to it (W7), and until it is settled R899's text stands. R1159 names the Today items differently from Anki ("Due today" where Anki says "Due"), so those are not Anki's labels (R1157 to R1180; behaviour: `browser/sidebar`);
+- menu and command names, shortcuts' menu items and the row context menu (R1186, R1225 to R1231; the commands and their keys: `browser/command-map`);
 - bulk result messages: "12 cards suspended", "N notes deleted" and the rest (R1176, R1184, R1191, R1212), written by U218 and U219. The Find and Replace and Edit Field results, which R1207 and R1211 quote as "N of M notes updated" and "N notes updated" (Anki's English too, which ends the second with a period), are U220's, since U220's sheets start them; `browser/find-replace` F9's plural rule applies, and its "U219's" is read as U220's. `browser/bulk-actions` B16 and `browser/find-replace` F9 give Anki's messages for comparison only;
 - the Change Deck chooser, the Change Note Type mapping, Add Tags and Remove Tags, the Set Due Date dialog (prompt, hint, validation messages), Edit Field, and the export sheet (R1187, R1189, R1190, R1196, R1208 to R1210, R1213);
 - column tooltips (R1132; `browser/columns` C2 keys them);
-- Preview and the inspector: Show both sides, tab names, the Current and Previous switch of Card Info (R1216 to R1222, R1263);
+- Preview and the inspector: Show both sides, tab names, the Current and Previous switch of Card Info (R1216 to R1222, R1263; behaviour: `browser/preview`, `browser/inspector`);
 - the iPhone layout: quick-filter chips, status chips ("Now", which R1235 quotes and is also Anki's, and "+N more tags"), toolbars, Select mode and swipe actions (R1234 to R1239);
 - Settings › Browse labels (R1267) and every accessibility label (R1240).
 
@@ -102,7 +102,7 @@ Every other text of Browse is Meguri's own wording, or is fixed by the requireme
 | No bold markup or colon on any label; the control labels are Meguri's | native form controls | W2 |
 | An invalid pattern or tag replacement shows inline as Meguri's sentence, before Apply too | R1206 | W2.1 |
 
-Open question for Antoine: macOS writes menu and pop-up menu items in title case. Should the In entry be "All Fields" and the flag action "Restore Default Name", as `browser/find-replace` F2, `tags/flags-and-marked` F4 and U217's approach write them? That needs R1200 and R899 corrected, or a design-contract exception like `docs/design/native-interface-contract.md` N11.7's title-case labels; this file follows the requirements until then.
+Open question for Antoine: macOS writes menu and pop-up menu items in title case. Should the In entry be "All Fields" and the flag action "Restore Default Name", as `browser/find-replace` F2, `tags/flags-and-marked` F4 and U217's approach write them? That needs R1200 and R899 corrected, or a design-contract exception like `docs/design/native-interface-contract.md` N11.7's title-case labels; this file follows the requirements until then. The same question covers the Browse empty state's action, which R1110 quotes as "Clear search" and the `browse.browser` contract writes "Clear Search" (`browser/entry-points` E7); R1110's text stands until it is settled.
 
 ## W8. Tests
 
@@ -114,4 +114,4 @@ The oracle runs the collection library, not Anki's UI, so the text itself is che
 | `ResetSheetTests` (U219) | W3: both keys, their order and their starting values |
 | `SelectionLaunchersTests` (U219, which lists no Grade Now test file of its own) | W4: the four keys in order on the Grade Now sheet |
 
-Every key must exist in the Browse String Catalog with exactly this English value (U167's string lint).
+Every key must exist in the Browse String Catalog with exactly this English value (U167's string lint). This check belongs to the unit that adds the catalog, runs in the `tools/mg lint-ui` job with U167's `lint-strings`, and starts when the catalog exists (`text/interface-text` I3).

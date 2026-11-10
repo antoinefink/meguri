@@ -7,6 +7,8 @@ Scenarios: conformance/scenarios/stats/widget/
 
 The file the heatmap and streak widget reads (KTD16): what it holds, when the core rebuilds and rewrites it, and what it must never hold. It is Meguri's own format, with no Anki or add-on behaviour: the core writes it (U100) and the widget extension decodes it (U165). Every value in it comes from the Home heatmap rules of `stats/heatmap-addon` and the studied-today values of `stats/studied-today`, so the widget runs no date, streak or level logic of its own (R1435).
 
+What each widget family draws from a snapshot state, and with which add-on wording, is `stats/widget-families`.
+
 ## W1. File
 
 - One file, `widget-snapshot.json`, in the App Group container (KTD12). Swift passes its path when the collection opens (U37). The core never looks up App Group containers and writes no other file there, apart from W6's temporary file.
@@ -38,7 +40,7 @@ The snapshot is for the Home scope: the whole collection under the `heatmap` set
 | `forecast` | object | `levels`: an array of integers, the forecast level (A7) of each date from `today` on, index 0 being `today`; trailing zeros left out, and a date past the array's end has level 0 |
 | `todayCell` | object | `kind` (`"today"` or `"future"`), `count` and `level`: today's cell (A4). `count` is the review count, so 0 when `kind` is `"future"` |
 | `streaks` | object | `dailyAverage`, `daysLearned`, `longestStreak`, `currentStreak`, each `{"level": …, "value": …}` (A8) |
-| `studiedToday` | object | `cards`, `timeMs` and `text`: `stats/counting-rules` N6's two numbers and the Home line of `stats/studied-today` T2, as the Home screen shows it |
+| `studiedToday` | object | `cards`, `timeMs` and `text`: `stats/counting-rules` N6's two numbers and the Home line of `stats/studied-today` T2, as the Home screen shows it; the large family shows `text` verbatim (`stats/widget-families` F5, `text/interface-text` I4) |
 | `upcoming` | array | 7 objects (W4) |
 
 - **Ranges.** `history.start` is the earlier of January 1 of T's year and the first day of the week (per `weekStart`) 19 weeks before the week that contains T, so the year grids and the 20-week grid of U165's widget families can be drawn. The forecast covers dates up to December 31 of the year of `upcoming[6].today + 6`, so a horizon that crosses the year end has the next year's forecast too.

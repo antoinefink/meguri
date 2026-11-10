@@ -14,3 +14,10 @@ mechanism and U165's staleness line; F3 the three WidgetKit rendering modes;
 F4 the catalog bundle and tint contrast rules; F5 corrected the
 `todayCell.count` reading of A4 and the per-setting citations; the scenario
 now observes today's cell directly.
+
+Wave 9 edit requests (2026-11-10, same session): the widget `year` rules
+added to `stats/heatmap-presentation` (intro, M1, M7.2, M8.2, M8.4, M9,
+M10.1, M11.1, M15.1, M20), the widget lines of `stats/activity-strings`
+(intro, S1, S2), `stats/widget-snapshot` (intro, W3 `studiedToday`),
+`stats/studied-today` T6.3 and `stats/counting-rules` N9 restate F1 to F5
+and `text/interface-text` I4, I6. No Anki or add-on file was read for them.

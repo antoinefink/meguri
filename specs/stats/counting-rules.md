@@ -3,7 +3,7 @@
 Spec: stats/counting-rules
 Requirements: R1275, R1276, R1277, R1278, R1279, R1281, R1282, R1283, R1284, R1286, R1287, R1288, R1292, R1295, R1296, R290, R291, R304, R1340, R1341, R1343, R1447, R1453, R1818
 Anki: 26.09.3
-Scenarios: conformance/scenarios/stats/heatmap-totals/, conformance/scenarios/stats/day-buckets/
+Scenarios: conformance/scenarios/stats/heatmap-totals/, conformance/scenarios/stats/day-buckets/, conformance/scenarios/stats/widget-today-count/
 
 Which review-log rows each review aggregate counts, and the contract the core's always-resident aggregates meet. Days come from `stats/day-buckets`. The settings come from `stats/heatmap-config`. The heatmap rules (N2 to N5) follow the Review Heatmap add-on 1.0.1, except where a deviation is named (R1447). The studied-today rule (N6) follows Anki.
 
@@ -51,7 +51,7 @@ The Home heatmap and its streak stats count the rows N2 keeps, from this set:
 
 - **N3.1** `limcdel` false and `limdecks` empty: every row, deleted cards' rows included (R1281, R291).
 - **N3.2** `limcdel` true and `limdecks` empty: only rows whose card exists (R1341).
-- **N3.3** `limdecks` a non-empty list: only rows whose card exists and whose card's current deck (`cards.did`) is neither a listed deck nor a descendant of one (R1340). This holds whatever `limcdel` says. A deleted card's row leaves Home as soon as the list is non-empty, also when the listed decks never held that card, and also when every listed id names no deck. An id that names no deck excludes nothing else. Scenario `limdecks-deleted-card` pins this. The add-on oracle's recording of it confirms the rule; its golden lands with the scenario (`specs/conformance/stats-ops.md` H4).
+- **N3.3** `limdecks` a non-empty list: only rows whose card exists and whose card's current deck (`cards.did`) is neither a listed deck nor a descendant of one (R1340). This holds whatever `limcdel` says. A deleted card's row leaves Home as soon as the list is non-empty, also when the listed decks never held that card, and also when every listed id names no deck. An id that names no deck excludes nothing else. Scenario `limdecks-deleted-card` pins this. The add-on oracle's recording of it confirms the rule; its golden of 2026-11-10 holds it (`specs/conformance/stats-ops.md` H4).
 - A descendant of deck `D` is a deck whose full name starts with `D`'s full name followed by `::`. `Excl::Sub` descends from `Excl`; `Exclusive` and `Keep::Excl` do not (scenario `limdecks-subtree`). Names are read at query time, so renaming, moving or deleting a deck changes what is excluded at once (R304).
 - N3.3 reads the card's **current** deck: a card sitting in a filtered deck is judged by the filtered deck, as the add-on does. Deck pages use the home deck instead (N4). A product decision to use the home deck on Home too would be a new deviation.
 - Each counted row adds 1 to its heatmap day (`stats/day-buckets` B4, with B4.3 at query time). Days with no counted row are absent.
@@ -109,7 +109,7 @@ Building, keeping, storing and querying these values never writes `collection.an
 
 ## N9. Scenarios
 
-`conformance/scenarios/stats/heatmap-totals/`, with the values N2 to N6 give. As of 2026-11-10 every scenario below is in the tree, inactive and without a golden; each gets a golden recorded from the oracles once the add-on image and `heatmap_totals` exist (`specs/conformance/stats-ops.md` H4), and the goldens are then authoritative. Each equals this table, with no deviation except in `filtered-deck-card` (N4, `heatmap-deck-home-deck`). All rows are on 2026-10-12 in Europe/Paris, rollover 4.
+`conformance/scenarios/stats/heatmap-totals/`, with the values N2 to N6 give. As of 2026-11-10 every scenario below is in the tree, inactive, with a golden recorded on the add-on image on 2026-11-10 (`specs/conformance/stats-ops.md` H4); the goldens are authoritative. Each equals this table, with no deviation except in `filtered-deck-card` (N4, `heatmap-deck-home-deck`). All rows are on 2026-10-12 in Europe/Paris, rollover 4.
 
 | Scenario | Pins | Values |
 |---|---|---|
@@ -128,3 +128,5 @@ Building, keeping, storing and querying these values never writes `collection.an
 | `suspended-buried-rows` | N1, N2 (a card's queue plays no part) | one row each on a suspended, a user-buried and a review card of `Lang`: Home/Lang 3/3; studied 3 rows, 6,000 ms |
 | `deck-names` | N3.3, N4, `stats/heatmap-config` K3 rule 3 (duplicate ids), `specs/conformance/stats-ops.md` H1 (deck names) | decks `Langue Été`, `Langue Été::Sub Deck`, `Autre` and `Reste`, one row each: Home/`Langue Été`/`Langue Été::Sub Deck` 4/2/1; with `limdecks` [Autre, Autre, Langue Été::Sub Deck] (ids) 2/2/1 |
 | `answers-and-deletes` | N7 through real answers and a deletion | Home/Lang none, 1/1, 2/2, 2/1; studied 0/0, 1/5000, 2/12000, 2/12000 |
+
+Also `stats/widget-today-count/limdecks-vs-studied` (N3.3, N6; `stats/widget-families` F5): Home today's cell 5, then 2 with `limdecks` [Lang]; studied 5 rows, 10,000 ms both times.

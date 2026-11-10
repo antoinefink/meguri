@@ -183,7 +183,7 @@ The limits edit (U133a's call, U163a's Backups page) sets all four values, each 
 3. Write as `storage/config-table` C4: when the result is the same value as the stored one, nothing is written; otherwise the row gets the result as a BLOB, `usn` −1, `mtime_secs` now, and `col.mod` moves.
 4. The text is C5's compact form with one change of order: `daily`, `weekly`, `monthly`, `minimum_interval_mins` first, in that order, then the other members in C5's sorted order. Without other members this is the text Anki writes: `{"daily":3,"weekly":2,"monthly":1,"minimum_interval_mins":45}`.
 
-- The write is a Settings write: no undo entry, and a write that changes the key clears the undo and redo history, as `browser/config-keys` K10.2 says for Settings writes. It reports a config change naming `backups`. Anki's preferences save records an undoable step instead; no scenario observes undo here.
+- The write is a Settings write with no undo entry: a skip-undo op of source `UserNonUndoable` (`engine/undo` M2) that keeps the earlier undo steps and empties the redo history, as every Settings write (`storage/settings-keys` S3 item 5). It reports a config change naming `backups`. Anki's preferences save records an undoable step instead; no scenario observes undo here.
 - Anki writes only the four members and drops every other member. Meguri keeps them (R2017). Deviation `backups-limits-unknown-members-kept` (scenario `package/backups/limits-write-unknown-member`).
 - The core accepts the whole range, as Anki's does. Anki's desktop settings offer 0 to 9999 for the three counts and 5 to 9999 minutes for the interval; U163a uses the same ranges.
 
