@@ -26,6 +26,38 @@ struct Registration {
     sdk: Option<String>,
 }
 
+#[cfg(feature = "test-hooks")]
+fn operation_policy_refusal(error: &CoreError) -> &'static str {
+    match error {
+        CoreError::CloudPolicy { failure } => match failure {
+            CloudPolicyFailure::Closed => "Closed",
+            CloudPolicyFailure::WrongOwner => "WrongOwner",
+            CloudPolicyFailure::GenerationChanged => "GenerationChanged",
+            CloudPolicyFailure::StaleCommand => "StaleCommand",
+            CloudPolicyFailure::NotCoreAction => "NotCoreAction",
+            CloudPolicyFailure::NotNativeAction => "NotNativeAction",
+            CloudPolicyFailure::CoreCapabilityUnavailable => "CoreCapabilityUnavailable",
+            CloudPolicyFailure::UnqualifiedCompletion => "UnqualifiedCompletion",
+        },
+        _ => "OtherCoreError",
+    }
+}
+
+#[cfg(feature = "test-hooks")]
+fn operation_driver_refusal(site: &'static str, error: &p::DriverError) {
+    let (kind, variant) = match error {
+        p::DriverError::Runtime(error) => error.refusal_tags_for_testing(),
+        p::DriverError::CoreActionFailed { error, .. } => error.refusal_tags_for_testing(),
+        p::DriverError::ApplyDeferred(_) => ("Driver", "ApplyDeferred"),
+        p::DriverError::StaleCommand => ("Driver", "StaleCommand"),
+        p::DriverError::Unavailable(_) => ("Driver", "Unavailable"),
+        p::DriverError::NotCoreAction => ("Driver", "NotCoreAction"),
+        p::DriverError::CoreCapabilityUnavailable(_) => ("Driver", "CoreCapabilityUnavailable"),
+        p::DriverError::UnqualifiedCompletion => ("Driver", "UnqualifiedCompletion"),
+    };
+    eprintln!("cloudOperation.refused site={site} errorKind={kind} variant={variant}");
+}
+
 #[derive(uniffi::Object)]
 pub struct CloudPolicyExecution {
     pub(super) command: Arc<CloudPolicyCommand>,
@@ -41,18 +73,47 @@ impl CloudPolicyExecution {
         facts: CloudPolicyOperationFacts,
         work: &mut p::PolicyWork,
     ) -> Result<CloudPolicyOutput, CoreError> {
-        self.policy().owns(&self.command)?;
-        self.policy()
-            .driver()?
-            .validate_with_work(&self.command.command, work)
-            .map_err(execution_error)?;
-        let sdk = self.sdk()?;
-        self.policy()
+        let owner = self.policy().owns(&self.command);
+        #[cfg(feature = "test-hooks")]
+        let owner = owner.inspect_err(|error| {
+            let variant = operation_policy_refusal(error);
+            eprintln!("cloudOperation.refused site=commandValidation step=owner variant={variant}");
+        });
+        owner?;
+        let driver = self.policy().driver();
+        #[cfg(feature = "test-hooks")]
+        let driver = driver.inspect_err(|error| {
+            let variant = operation_policy_refusal(error);
+            eprintln!("cloudOperation.refused site=commandValidation step=driver variant={variant}");
+        });
+        let validation = driver?.validate_with_work(&self.command.command, work);
+        #[cfg(feature = "test-hooks")]
+        let validation = validation.inspect_err(|error| operation_driver_refusal("commandValidation", error));
+        validation.map_err(execution_error)?;
+        let sdk = self.sdk();
+        #[cfg(feature = "test-hooks")]
+        let sdk = sdk.inspect_err(|error| {
+            let variant = operation_policy_refusal(error);
+            eprintln!("cloudOperation.refused site=originalSDKValidation step=originalSDK variant={variant}");
+        });
+        let sdk = sdk?;
+        let runtime = self
+            .policy()
             .host
             .cloud_runtime()
-            .ok_or_else(|| failure(CloudPolicyFailure::Closed))?
-            .validate_sdk(&sdk)
-            .map_err(crate::cloud_connection::error)?;
+            .ok_or_else(|| failure(CloudPolicyFailure::Closed));
+        #[cfg(feature = "test-hooks")]
+        let runtime = runtime.inspect_err(|error| {
+            let variant = operation_policy_refusal(error);
+            eprintln!("cloudOperation.refused site=originalSDKValidation step=runtime variant={variant}");
+        });
+        let validation = runtime?.validate_sdk(&sdk);
+        #[cfg(feature = "test-hooks")]
+        let validation = validation.inspect_err(|error| {
+            let (kind, variant) = error.refusal_tags_for_testing();
+            eprintln!("cloudOperation.refused site=originalSDKValidation errorKind={kind} variant={variant}");
+        });
+        validation.map_err(crate::cloud_connection::error)?;
         let CloudPolicyOperationFacts {
             zones,
             kind,
@@ -102,14 +163,17 @@ impl CloudPolicyExecution {
                     saved,
                 }
             };
-            match self.policy().output(self.policy().host.cloud_policy_input_with_work(
+            let input = self.policy().host.cloud_policy_input_with_work(
                 p::DeviceEvent::Operation {
                     instance: sdk.clone(),
                     operation,
                     phase,
                 },
                 work,
-            ))? {
+            );
+            #[cfg(feature = "test-hooks")]
+            let input = input.inspect_err(|error| operation_driver_refusal("operationInput", error));
+            match self.policy().output(input)? {
                 CloudPolicyOutput::Commands { commands: emitted } => commands.extend(emitted),
                 output => return Ok(output),
             }

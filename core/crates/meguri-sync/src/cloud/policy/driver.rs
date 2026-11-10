@@ -527,7 +527,13 @@ impl Driver {
                 operation,
                 phase,
             } => {
-                self.runtime.validate_sdk(&instance)?;
+                let validation = self.runtime.validate_sdk(&instance);
+                #[cfg(feature = "test-hooks")]
+                let validation = validation.inspect_err(|error| {
+                    let (kind, variant) = error.refusal_tags_for_testing();
+                    eprintln!("cloudOperation.refused site=inputSDKValidation errorKind={kind} variant={variant}");
+                });
+                validation?;
                 Event::EngineActivity {
                     instance,
                     operation,
@@ -563,15 +569,35 @@ impl Driver {
         publish: bool,
     ) -> Result<Vec<Command>, DriverError> {
         let (event, ended_ms) = observation;
+        #[cfg(feature = "test-hooks")]
+        let operation_input = matches!(&event, Event::EngineActivity { .. });
         let now_ms = ended_ms.unwrap_or_else(|| self.clock.now_ms());
         let cleanup_before = owned.state.last_cleanup_ms;
         let ended_session = match self.runtime.instance() {
-            Ok(instance) => self.runtime.poll_review_with_work(&instance, work)?,
+            Ok(instance) => {
+                let polled = self.runtime.poll_review_with_work(&instance, work);
+                #[cfg(feature = "test-hooks")]
+                let polled = polled.inspect_err(|error| {
+                    if operation_input {
+                        let (kind, variant) = error.refusal_tags_for_testing();
+                        eprintln!("cloudOperation.refused site=inputReviewPoll errorKind={kind} variant={variant}");
+                    }
+                });
+                polled?
+            }
             Err(_) => None,
         };
         let projection = self
             .runtime
-            .policy_projection_with_work(lifecycle_kind(&lifecycle), generation.0, work)?;
+            .policy_projection_with_work(lifecycle_kind(&lifecycle), generation.0, work);
+        #[cfg(feature = "test-hooks")]
+        let projection = projection.inspect_err(|error| {
+            if operation_input {
+                let (kind, variant) = error.refusal_tags_for_testing();
+                eprintln!("cloudOperation.refused site=inputProjection errorKind={kind} variant={variant}");
+            }
+        });
+        let projection = projection?;
         #[cfg(feature = "test-hooks")]
         {
             let hook = self

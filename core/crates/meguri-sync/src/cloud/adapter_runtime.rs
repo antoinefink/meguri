@@ -164,15 +164,51 @@ impl Runtime {
         Self::sdk_locked(&s, sdk)
     }
     pub(super) fn sdk_locked(s: &State, sdk: &str) -> Result<(), RuntimeError> {
-        if !s
+        #[cfg(not(feature = "test-hooks"))]
+        let valid = s
             .adapter
             .sdk
             .as_ref()
-            .is_some_and(|a| a.id == sdk && !a.stopping && a.guard == Self::adapter_guard_locked(s))
-        {
+            .is_some_and(|a| a.id == sdk && !a.stopping && a.guard == Self::adapter_guard_locked(s));
+        // Mirror the original short circuit. Compute the existing guard only
+        // after the ID and stopping checks, exactly once, without provider I/O.
+        #[cfg(feature = "test-hooks")]
+        let valid = match s.adapter.sdk.as_ref() {
+            None => {
+                eprintln!("cloudSDK.refused site=sdkLocked check=absent");
+                false
+            }
+            Some(a) if a.id != sdk => {
+                eprintln!("cloudSDK.refused site=sdkLocked check=currentIDMatch");
+                false
+            }
+            Some(a) if a.stopping => {
+                eprintln!("cloudSDK.refused site=sdkLocked check=stopping");
+                false
+            }
+            Some(a) => {
+                let guard = Self::adapter_guard_locked(s);
+                if a.guard == guard {
+                    true
+                } else {
+                    let mask = u8::from(a.guard.generation != guard.generation)
+                        | (u8::from(a.guard.binding != guard.binding) << 1)
+                        | (u8::from(a.guard.token != guard.token) << 2);
+                    eprintln!("cloudSDK.refused site=sdkLocked check=guardMatch mismatchMask={mask}");
+                    false
+                }
+            }
+        };
+        if !valid {
             return Err(RuntimeError::StaleIncarnation);
         }
-        Self::caller_locked(s, sdk)
+        let caller = Self::caller_locked(s, sdk);
+        #[cfg(feature = "test-hooks")]
+        let caller = caller.inspect_err(|error| {
+            let (kind, variant) = error.refusal_tags_for_testing();
+            eprintln!("cloudSDK.refused site=sdkLocked check=callerValidation errorKind={kind} variant={variant}");
+        });
+        caller
     }
     /// Re-creation invalidates the SDK authority without changing the policy guard.
     pub fn retire_sdk(&self, sdk: &str, policy_stop: bool) -> Result<(), RuntimeError> {
