@@ -32,7 +32,49 @@ def signing_command(args):
     env=dict(os.environ)
     for key in ('CODESIGN_ALLOCATE','DEVELOPER_DIR','SDKROOT','TOOLCHAINS'):
         env.pop(key,None)
-    stage.command(args, timeout=60, env=env)
+    previous = os.umask(0o022)
+    try:
+        stage.command(args, timeout=60, env=env)
+    finally:
+        os.umask(previous)
+
+
+def prepare_install_modes(boundary, products, app_path, original):
+    """Use native simulator bundle permissions inside the generated app only."""
+    entries, pins = original
+    expected = dict(entries)
+    with v.authority(os.path.join(products, app_path)):
+        for path, entry in entries.items():
+            if not path.startswith(app_path + '/'):
+                continue
+            mode = entry.get('mode')
+            standard = {0o600: 0o644, 0o700: 0o755}.get(mode)
+            if standard is None:
+                continue
+            directory = entry['type'] == 'directory'
+            identity = v.directory_identity if directory else v.identity
+            parent, name = os.path.split(os.path.join(products, path))
+            flags = os.O_RDONLY | os.O_NOFOLLOW | (os.O_DIRECTORY if directory else os.O_NONBLOCK)
+            with v.authority(parent) as fd:
+                child = os.open(name, flags, dir_fd=fd)
+                try:
+                    opened = os.fstat(child)
+                    need(opened.st_uid == os.getuid() and (directory or opened.st_nlink == 1) and
+                         identity(opened) == pins[path] ==
+                         identity(os.stat(name, dir_fd=fd, follow_symlinks=False)), 'initial-install-modes')
+                    os.fchmod(child, standard)
+                    need(identity(os.fstat(child)) == identity(os.stat(name, dir_fd=fd, follow_symlinks=False)),
+                         'initial-install-modes')
+                finally:
+                    os.close(child)
+            expected[path] = {**entry, 'mode': standard}
+    if expected == entries:
+        return original
+    after = v.snapshot(boundary, products)
+    need(after[0] == expected and all(
+        after[1][path][:2] == pin[:2] if expected.get(path) != entries.get(path) else after[1][path] == pin
+        for path, pin in pins.items()), 'initial-install-modes')
+    return after
 
 
 def code_bytes(parent,name):
@@ -582,7 +624,8 @@ def initial_sign(root, directory, sha, products, xctestrun, settings_path, widge
         agent = v.test_inputs(products, xctestrun, app, 'ios-sim')
         app_path = os.path.join(products, app['path'])
         agent_path = os.path.join(products, agent['path'])
-        before = v.snapshot(os.path.join(root, 'build'), products)
+        boundary = os.path.join(root, 'build')
+        before = prepare_install_modes(boundary, products, app['path'], v.snapshot(boundary, products))
         paths, bundles = native_plan(products, app, agent, before[0])
         need(all(target_settings[target].get('PRODUCT_BUNDLE_IDENTIFIER') == item['bundle_id']
                  for target, item in (('Meguri', app), ('MeguriSnapshotTests', agent))), 'initial-settings')
@@ -675,6 +718,7 @@ def main():
             'initial-settings', 'initial-widget', 'initial-code', 'initial-code-changed', 'initial-unknown-code', 'initial-signer', 'initial-signer-ambiguous',
             'initial-certificate', 'initial-metadata', 'initial-entitlements', 'initial-product-changed',
             'initial-executable-replaced', 'initial-signing', 'initial-entitlements-changed', 'initial-signature',
+            'initial-install-modes',
             'product-signature', 'product-cloud-grants', 'product-debug', 'product-entitlements',
             'agent-signature', 'agent-platform', 'input-changed'}
         code = error.args[0] if isinstance(error, v.Refused) and len(error.args) == 1 and type(error.args[0]) is str and error.args[0] in allowed else 'guarded-input'

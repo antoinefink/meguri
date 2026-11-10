@@ -45,6 +45,34 @@ def generated_fat(first,second):
 
 
 class CodeFingerprintTests(unittest.TestCase):
+    def test_simulator_preparation_sets_installable_modes_only_inside_the_generated_app(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            products = root / 'products'
+            app = products / 'Meguri.app'
+            contents = app / 'Resources'
+            contents.mkdir(parents=True)
+            resource = contents / 'generated-resource'
+            executable = app / 'generated-executable'
+            sibling = products / 'retained-resource'
+            for path, mode in ((resource, 0o600), (executable, 0o700), (sibling, 0o600)):
+                path.write_bytes(b'generated')
+                path.chmod(mode)
+            contents.chmod(0o700)
+            app.chmod(0o700)
+            (app / 'link').symlink_to('Resources/generated-resource')
+            before = m.v.snapshot(str(root), str(products))
+            after = m.prepare_install_modes(str(root), str(products), app.name, before)
+            self.assertEqual({path: entry['mode'] for path, entry in after[0].items() if 'mode' in entry}, {
+                'Meguri.app': 0o700, 'Meguri.app/Resources': 0o755,
+                'Meguri.app/Resources/generated-resource': 0o644,
+                'Meguri.app/generated-executable': 0o755, 'retained-resource': 0o600})
+            self.assertEqual({path: {k: v for k, v in entry.items() if k != 'mode'}
+                              for path, entry in after[0].items()},
+                             {path: {k: v for k, v in entry.items() if k != 'mode'}
+                              for path, entry in before[0].items()})
+            self.assertEqual(m.prepare_install_modes(str(root), str(products), app.name, after), after)
+
     def test_signature_growth_and_native_replacement_preserve_only_original_code(self):
         original=code_image_fixture();allocated=code_image_fixture(signature=b'c'*128)
         self.assertEqual(m.code_fingerprint(original),m.code_fingerprint(allocated))
