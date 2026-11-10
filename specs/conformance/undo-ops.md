@@ -75,7 +75,6 @@ The closed list of step ids that `undo_status` reports, with Anki's English name
 | `grade_now` | Grade Now | `grade_now` (`sched-ops.md` J8) |
 | `image_occlusion` | Image Occlusion | |
 | `import` | Import | |
-| `move_received_card` | Move Received Card | (Meguri only: a move from Migaku's Recently received, `servers/migaku-received-log` L13, whatever the number of rows) |
 | `preferences` | Preferences | `set_scheduling_prefs` (`deck-options-ops.md` E4) |
 | `remove_note_type` | Remove Note Type | |
 | `remove_tag` | Remove Tag | |
@@ -95,6 +94,8 @@ The closed list of step ids that `undo_status` reports, with Anki's English name
 | `update_note` | Update Note | `edit_note` |
 | `update_note_type` | Update Note Type | |
 | `update_tag` | Update Tag | |
+
+Pending Meguri-only row: U140 adds `move_received_card` | Move Received Card (a move from Migaku's Recently received, `servers/migaku-received-log` L13, whatever the number of rows) between `import` and `preferences`, in the same change as the engine's step name, since the engine's name list must equal this table.
 
 `set_config` without `undoable` records no step (W4), and `db_exec`, `check_db`, `reopen`, `open`, `legacy_update` and `handoff` empty both histories on the oracle (V5).
 
