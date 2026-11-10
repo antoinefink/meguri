@@ -249,7 +249,7 @@ Every value is computed for the instant of the query. A change of T (rollover, z
 
 ## A14. Where Meguri differs from the add-on
 
-- **Rows after today.** Counted on T (`stats/day-buckets` B4.3, R1280): deviation `heatmap-future-rows-today`. It reaches the history count of T, today's kind, the streaks and the levels.
+- **Rows after today.** Counted on T (`stats/day-buckets` B4.3, R1280): deviation `heatmap-future-rows-today`. It reaches the history count of T, today's kind, the streaks and the levels. The add-on keeps such a row on its own date after T. The row is not in today's cell, and when it is the latest active day the add-on's current streak is 0 (golden of `streaks/future-row`). When every active day of the filtered history is after T, the add-on has no report: it fails while computing Days learned (`specs/conformance/stats-ops.md` H11, Errors). Meguri's first history day is then T, so Days learned is 100 (A8.1). The scenario therefore has a row on T − 1 too; the case with only rows after T is a Meguri unit test (A16).
 - **Drawn day.** Every count stays on its B4.1 date (`stats/day-buckets` B4.6, R1270): deviation `heatmap-drawn-day-shift`. Meguri's streaks and totals read the same dates as its counts.
 - Both entries are added to `conformance/deviations.yaml` with the goldens of the scenarios that show them (`specs/conformance/stats-ops.md` H4). Until then they are held, and this file only names them.
 - **Deck pages by home deck** (R1284, N4), also for the forecast (A3 item 2): entry `heatmap-deck-home-deck`, added with the goldens of `stats/heatmap-totals/filtered-deck-card` and `stats/heatmap/forecast-filtered` (H4). The golden of `forecast-filtered-day0` shows no deck difference.
@@ -278,7 +278,7 @@ Decided 2026-10-27, in this order of priority: data safety, the plan's requireme
 
 ## A16. Scenarios
 
-As of 2026-11-10 every scenario below is in the tree and inactive. On 2026-11-10 each got a golden except `streaks/future-row`, on which the add-on fails (`specs/conformance/stats-ops.md` H4). The goldens come from an observation that runs the add-on's whole report headless (history after its limits, forecast, today's cell, the four streak values), on the add-on image of `specs/conformance/stats-ops.md` H4, keyed by the date on which the add-on draws each count (H1). The kind is `heatmap_report` (`specs/conformance/stats-ops.md` H11); the add-on image's driver has it, its schema shape is in `conformance/schema/`, and `tools/mg` runs these scenarios on that image (H4). Each golden is recorded at the oracle pin of `conformance/oracle.json`; the goldens are then authoritative. Values below are Meguri's from this file. All run in Europe/Paris with rollover 4 unless a zone is named; T is 2026-10-12 unless a time is given.
+As of 2026-11-10 every scenario below is in the tree and inactive. On 2026-11-10 each got a golden (`specs/conformance/stats-ops.md` H4). The goldens come from an observation that runs the add-on's whole report headless (history after its limits, forecast, today's cell, the four streak values), on the add-on image of `specs/conformance/stats-ops.md` H4, keyed by the date on which the add-on draws each count (H1). The kind is `heatmap_report` (`specs/conformance/stats-ops.md` H11); the add-on image's driver has it, its schema shape is in `conformance/schema/`, and `tools/mg` runs these scenarios on that image (H4). Each golden is recorded at the oracle pin of `conformance/oracle.json`; the goldens are then authoritative. Values below are Meguri's from this file. All run in Europe/Paris with rollover 4 unless a zone is named; T is 2026-10-12 unless a time is given.
 
 `conformance/scenarios/stats/heatmap/`:
 
@@ -312,7 +312,7 @@ As of 2026-11-10 every scenario below is in the tree and inactive. On 2026-11-10
 | `rounding-half` | A15 item 6 | 5 rows over 2 days (2.5), 7 over 2 (3.5); 1 active day in 8 (12.5 %) |
 | `limhist-span` | A15 item 5 | `limhist` 30, first row in the window on T − 10: Days learned over 11 days |
 | `limdecks-home-only` | N3.3, R1340 | `limdecks` [A]: Home streaks without A's rows, deck page A unchanged |
-| `future-row` | A14, deviation `heatmap-future-rows-today` | only a row dated after T: current streak 1 in Meguri |
+| `future-row` | A8.1, A14, deviation `heatmap-future-rows-today` | a row on T − 1 and one dated after T (T + 1, noon): history {T − 1: 1, T: 1}, today's cell `today`, 1, longest and current streak 2, Days learned 100 in Meguri |
 | `empty` | A2.2 | no rows: no history, no streak values |
 | `lord-howe-dst-start` | A15 item 13 | Australia/Lord_Howe, active days around 2026-10-04 |
 | `deleted-card` (AE6, deck part) | `stats/counting-rules` N3.1, N3.2, N4 | deck `A`, one card with rows on T − 1 and T, another on T − 3 and T − 2, then the second card's note is deleted: Home keeps 4 days (streaks 4), `A`'s page drops to T − 1 and T (streaks 2), and with `limcdel` true Home reads as `A` |
@@ -326,5 +326,7 @@ Meguri unit tests while H11 has no levels or tints (A15 item 14, `specs/conforma
 | `tints` | A8.2, A15 item 8 | streaks of 14, 15, 30, 31, 180, 181; Days learned 25, 26, 99, 100 |
 
 A5 (periods), A6 (bounds), A9 (searches) and A10 (totals) have no scenario: they are tested by Meguri's unit tests (U96 `heatmap_grid`), one per row of their tables and examples, plus months mode across a year end and the bounds with no history and with `limfcst` set and no card counted (A3). U96's unit tests also cover A2.2's range rule (`limhist` 2,147,483,647 and 4,294,967,296: no limit; `limdate` 253,402,300,800 and `1e300`: an empty window) and the A10 and A11 shapes with and without history; the add-on writes no such limits, so they have no oracle scenario.
+
+A history whose only row is dated after T is a U96 unit test too, since the add-on fails there (A14): history {T: 1}, today's cell `today`, 1, Daily average 1, Days learned 100, longest and current streak 1.
 
 Writer tests for `stats/heatmap-config` K6 are Meguri's own, except the oracle scenario `heatmap-config/writer-output`, which observes `heatmap_report` (K6.4).
