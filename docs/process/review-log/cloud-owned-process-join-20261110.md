@@ -91,3 +91,31 @@ cannot establish the cause. Earlier probe failures were fixture diagnostics:
 the VM's Python lacks os.setxattr; the corrected probe uses the public Darwin
 interface. No guard was removed or relaxed, and this probe makes no account
 lookup or CloudKit call.
+
+## Owner channel ancestor metadata
+
+Base: `16eced51`. Setup `20261110T204623Z-9988` again failed before account
+read. Classifier `20261110T204757Z-12694` identified `ancestorAttribute`, not a
+private-stage or socket change. All current directory and socket pins had
+passed before that notification was consumed.
+
+The owner channel is now shared test support so generated real-socket tests
+exercise the exact class used by the app-hosted setup. Ancestor device, inode,
+owner and mode bindings are still checked at every boundary. Rename, delete
+and revoke notifications remain active for the whole chain. Attribute-event
+history remains required on the private setup directory; it is no longer a
+history requirement for OS-managed ancestors. Thus the channel does not claim
+to detect a permission change and restoration on an ancestor between checks.
+The host's approved-source admission and private input checks are unchanged.
+This changes no product account fence, database operation or approval rule.
+
+Six tests pass in `swift-test/20261110T205021Z-13032`: benign OS-ancestor mode
+and timestamp updates; current ancestor permissions; private permission
+change-and-restore; private timestamp events; ancestor rename-and-restore;
+and replacing a socket with another socket of the same mode. A failed channel
+check is now retained, so another check cannot clear the original refusal.
+
+Focused setup tooling `20261110T205044Z-14680`, privacy
+`20261110T205043Z-14437` and similarity `20261110T205044Z-14871` pass. These
+are generated tests with no account lookup. The next signed setup run and
+full batch integration remain pending; there is no round-trip acceptance.

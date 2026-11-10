@@ -10,3 +10,4 @@
 
 - `selectedBootstrapSource` uses the system clock. Harnesses opening its bytes must use `clock: .system` when checking edit stamps.
 - With a healthy Service, join and close the owner before stopping its helper. `cleanupAfterServiceFailure` is for a broken transport.
+- `CloudKitAgent/Support` also compiles in the app-hosted Snapshot target. Keep Swift Testing fixtures outside that directory.
