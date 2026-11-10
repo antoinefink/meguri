@@ -68,3 +68,18 @@ that host helper. Independent review confirmed strict object-identity matching
 and unchanged failure/privacy boundaries. Four tests exercise real transport
 lease/write errors and the closed output. Focused run `74544` passed; privacy
 passed after only a new test name was rephrased. Assertions stayed unchanged.
+
+Actual attempt `75699` produced `EPERM` at capture with no mapped site or guest
+record (`78506`, read-only). The failing operation is unknown.
+Real transport checks `78994` and `79527` passed three messages,
+a finished child, a still-live child at close, and the actual owner subclass
+with a deliberate request failure. All original handles joined. These checks
+used no account, SDK or Xcode and do not prove owner setup.
+
+Source review found that cleanup can replace an active request exception. The
+owner wrapper now records the closed original request failure before cleanup,
+then rethrows it unchanged. Join code also has a known diagnostic site. Success
+arguments and return identity, approval and final failure behavior stay the same;
+no join failure is ignored. Independent review cleared the change. Focused run
+`80022` passed, including four new primary-error/cleanup cases. Privacy passed.
+Actual setup remains pending; no permission failure is declared fixed.

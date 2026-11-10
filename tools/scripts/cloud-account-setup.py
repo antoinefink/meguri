@@ -59,7 +59,7 @@ class SetupDiagnostic:
     PHASES = frozenset(('initial', 'terminal', 'vm-context', 'native-build', 'product-input',
         'product-check', 'approved-source', 'copy-products', 'path-preflight', 'support-authority',
         'owner-launch', 'loaded-owner-proof', 'capture-precheck', 'capture', 'capture-proof',
-        'terminal-approval', 'fresh-precheck', 'fresh', 'fresh-proof', 'publish', 'finish',
+        'owner-request', 'terminal-approval', 'fresh-precheck', 'fresh', 'fresh-proof', 'publish', 'finish',
         'guest-initial', 'guest-owner-root', 'guest-owner-plan', 'guest-native-launch', 'guest-accept',
         'guest-hello', 'guest-host-command', 'guest-original-proof', 'guest-app-send', 'guest-app-receive',
         'guest-final-join'))
@@ -107,7 +107,8 @@ def emit_setup_site(error):
     """Host-only code identity and public line number; no traceback rendering."""
     try:
         functions = ((s.Transport.request, 'transport-request'), (h.Original.check, 'original-check'),
-                     (h.Directory.check, 'directory-check'), (v.command, 'native-command'))
+                     (h.Directory.check, 'directory-check'), (v.command, 'native-command'),
+                     (h.setup_join, 'original-join'))
         sites = []
         for function, label in functions:
             code = getattr(function, '__code__', None)
@@ -576,6 +577,21 @@ def relay_guest_diagnostic(raw):
 class Transport(s.Transport):
     def source(self):
         return guest_source()
+
+    def request(self, action, raw=b"", **metadata):
+        try:
+            return super().request(action, raw, **metadata)
+        except BaseException as error:
+            # Preserve this failure before ExitStack invokes original cleanup,
+            # which may itself fail. Diagnostics cannot replace either error.
+            try:
+                diagnostic = SetupDiagnostic()
+                diagnostic.enter('owner-request')
+                diagnostic.emit(error)
+                emit_setup_site(error)
+            except BaseException:
+                pass
+            raise
 
     def close(self):
         if self.closed:

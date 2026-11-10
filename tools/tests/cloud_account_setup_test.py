@@ -280,6 +280,60 @@ class HostSiteDiagnosticTests(unittest.TestCase):
                          {'phase':'guest-initial','refusal':'setup-order','kind':'refused'})
 
 
+class PrimaryRequestDiagnosticTests(unittest.TestCase):
+    def transport(self):
+        transport=p.Transport.__new__(p.Transport);transport.closed=False;transport.buffer=bytearray()
+        transport.vm=mock.Mock();transport.child=mock.Mock();transport.child.poll.return_value=None
+        transport.err=tempfile.TemporaryFile();self.addCleanup(transport.err.close)
+        transport.child.stdin=tempfile.TemporaryFile();self.addCleanup(transport.child.stdin.close)
+        return transport
+
+    def test_actual_request_failure_recorded_before_cleanup_masks_it(self):
+        primary=OSError(p.errno.ENOENT,'GENERATED_PRIVATE_PRIMARY');cleanup=OSError(p.errno.EPERM,'GENERATED_PRIVATE_CLEANUP')
+        transport=self.transport();stream=transport.child.stdin;out=io.StringIO();events=[]
+        def close(instance):
+            events.append('cleanup');instance.closed=True
+            self.assertIn('owner-request',out.getvalue());raise cleanup
+        with mock.patch.object(p.s.select,'select',return_value=([],[stream],[])), \
+             mock.patch.object(p.s.os,'write',side_effect=primary),mock.patch.object(p.s.Transport,'close',close), \
+             contextlib.redirect_stderr(out):
+            try:
+                with contextlib.closing(transport):transport.request('capture')
+            except OSError as error:
+                self.assertIs(error,cleanup);self.assertIs(error.__context__,primary)
+            else:self.fail('original cleanup error must remain a failure')
+        records=out.getvalue().splitlines()
+        value=json.loads(records[0].removeprefix('MG_OWNER_SETUP_DIAGNOSTIC '))
+        site=json.loads(records[1].removeprefix('MG_OWNER_SETUP_SITE '))
+        self.assertEqual(value,{'phase':'owner-request','kind':'os-error','refusal':'ENOENT'})
+        self.assertEqual(site['site'],'transport-request');self.assertEqual(events,['cleanup'])
+        self.assertNotIn('GENERATED_PRIVATE',out.getvalue())
+
+    def test_diagnostic_failure_cannot_replace_original_request_error(self):
+        primary=OSError(p.errno.EIO,'GENERATED_PRIVATE_PRIMARY');transport=self.transport()
+        with mock.patch.object(p.s.Transport,'request',side_effect=primary), \
+             mock.patch.object(p.SetupDiagnostic,'emit',side_effect=OSError('GENERATED_PRIVATE_OBSERVER')):
+            with self.assertRaises(OSError) as error:transport.request('capture')
+        self.assertIs(error.exception,primary)
+
+    def test_success_is_exactly_forwarded_without_failure_records(self):
+        transport=self.transport();result=({'status':'generated'},b'generated')
+        with mock.patch.object(p.s.Transport,'request',return_value=result) as original, \
+             mock.patch.object(p.SetupDiagnostic,'emit') as diagnostic,mock.patch.object(p,'emit_setup_site') as site:
+            self.assertIs(transport.request('generated',b'payload',fixed='value'),result)
+            original.assert_called_once_with('generated',b'payload',fixed='value');diagnostic.assert_not_called();site.assert_not_called()
+
+    def test_actual_original_join_eperm_has_closed_site_without_signal_execution(self):
+        error=OSError(p.errno.EPERM,'GENERATED_PRIVATE_JOIN');child=mock.Mock();child.pid=77;out=io.StringIO()
+        with mock.patch.object(p.signal,'signal'),mock.patch.object(p.os,'killpg',side_effect=error),contextlib.redirect_stderr(out):
+            try:p.h.setup_join(child)
+            except OSError as caught:self.assertIs(caught,error);p.emit_setup_site(caught)
+            else:self.fail('original join refusal must propagate')
+        value=json.loads(out.getvalue().removeprefix('MG_OWNER_SETUP_SITE '))
+        self.assertEqual(value['site'],'original-join');self.assertGreaterEqual(value['line'],p.h.setup_join.__code__.co_firstlineno)
+        self.assertNotIn('GENERATED_PRIVATE_JOIN',out.getvalue());child.wait.assert_not_called()
+
+
 class Producer(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
