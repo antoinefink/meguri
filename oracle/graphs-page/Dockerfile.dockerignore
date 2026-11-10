@@ -1,0 +1,3 @@
+# Build context is oracle/ (graphs-page/Dockerfile). Send only the lock.
+*
+!ankiconnect/requirements.lock

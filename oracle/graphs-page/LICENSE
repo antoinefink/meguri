@@ -1,0 +1,11 @@
+Everything in oracle/graphs-page/ is part of the oracle quarantine and is
+licensed under the GNU Affero General Public License, version 3 or (at your
+option) any later version (SPDX: AGPL-3.0-or-later); the full text is
+../LICENSE. Nothing outside oracle/ links, imports or ships code from here.
+
+The image built from this directory also contains, installed at build time
+and never committed: Anki's desktop package aqt (AGPL-3.0-or-later), whose
+wheel holds the built graphs page this image runs, PyQt6 (GPL-3.0) and Qt 6
+(LGPL-3.0/GPL), pinned in ../ankiconnect/requirements.lock. The page and its assets stay in
+the image (R1960). The image is built locally and never pushed to a registry
+(R1869).

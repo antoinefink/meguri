@@ -1150,82 +1150,51 @@
             "anyOf": [
               { "$ref": "#/$defs/search_error" },
               { "type": "object", "required": ["error"], "additionalProperties": false, "properties": { "error": { "const": "unreadable_row" } } },
-              {
-                "type": "object",
-                "minProperties": 1,
-                "not": { "required": ["error"] },
-                "additionalProperties": false,
-                "properties": {
-                  "reviews": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": { "count": { "$ref": "#/$defs/graph_review_days" }, "time": { "$ref": "#/$defs/graph_review_days" } }
-                  },
-                  "true_retention": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                      "today": { "$ref": "#/$defs/graph_retention" }, "yesterday": { "$ref": "#/$defs/graph_retention" },
-                      "week": { "$ref": "#/$defs/graph_retention" }, "month": { "$ref": "#/$defs/graph_retention" },
-                      "year": { "$ref": "#/$defs/graph_retention" }, "all_time": { "$ref": "#/$defs/graph_retention" }
-                    }
-                  },
-                  "hours": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                      "one_month": { "$ref": "#/$defs/graph_hours" }, "three_months": { "$ref": "#/$defs/graph_hours" },
-                      "one_year": { "$ref": "#/$defs/graph_hours" }, "all_time": { "$ref": "#/$defs/graph_hours" }
-                    }
-                  },
-                  "buttons": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                      "one_month": { "$ref": "#/$defs/graph_buttons" }, "three_months": { "$ref": "#/$defs/graph_buttons" },
-                      "one_year": { "$ref": "#/$defs/graph_buttons" }, "all_time": { "$ref": "#/$defs/graph_buttons" }
-                    }
-                  },
-                  "future_due": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                      "future_due": { "$ref": "#/$defs/graph_int_map" },
-                      "have_backlog": { "const": true },
-                      "daily_load": { "type": "integer", "minimum": 1 }
-                    }
-                  },
-                  "card_counts": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": { "including_inactive": { "$ref": "#/$defs/graph_card_counts" }, "excluding_inactive": { "$ref": "#/$defs/graph_card_counts" } }
-                  },
-                  "intervals": { "type": "object", "additionalProperties": false, "properties": { "intervals": { "$ref": "#/$defs/graph_int_map" } } },
-                  "stability": { "type": "object", "additionalProperties": false, "properties": { "intervals": { "$ref": "#/$defs/graph_int_map" } } },
-                  "difficulty": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": { "eases": { "$ref": "#/$defs/graph_int_map" }, "average": { "$ref": "#/$defs/f32" } }
-                  },
-                  "retrievability": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                      "retrievability": { "$ref": "#/$defs/graph_int_map" },
-                      "average": { "$ref": "#/$defs/f32" },
-                      "sum_by_card": { "$ref": "#/$defs/f32" },
-                      "sum_by_note": { "$ref": "#/$defs/f32" }
-                    }
-                  },
-                  "added": { "type": "object", "additionalProperties": false, "properties": { "added": { "$ref": "#/$defs/graph_int_map" } } },
-                  "context": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": { "rollover_hour": { "type": "integer", "minimum": 1, "maximum": 23 }, "fsrs": { "const": true } }
-                  }
-                }
-              }
+              { "$ref": "#/$defs/graph_parts" }
             ]
+          }
+        },
+        "stats_presentation": {
+          "description": "stats-ops.md H14, stats/graph-presentation P22: per request, in order, the graph's stats part (data) and what Anki's graphs page presents from it (page).",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["data", "page"],
+            "additionalProperties": false,
+            "properties": {
+              "data": { "$ref": "#/$defs/graph_parts", "maxProperties": 1 },
+              "page": {
+                "anyOf": [
+                  {
+                    "description": "P22: a chart graph's page; Card Counts' adds sectors (the seven pie values in row order) and has no bins.",
+                    "type": "object",
+                    "required": ["no_data", "bins", "table"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "no_data": { "type": "boolean" },
+                      "bins": { "type": "array", "items": { "$ref": "#/$defs/presentation_bin" } },
+                      "table": { "$ref": "#/$defs/presentation_table" },
+                      "sectors": { "type": "array", "minItems": 7, "maxItems": 7, "items": { "type": "number", "minimum": 0 } }
+                    }
+                  },
+                  {
+                    "description": "P22: Retention's page, its table only.",
+                    "type": "object",
+                    "required": ["table"],
+                    "additionalProperties": false,
+                    "properties": { "table": { "$ref": "#/$defs/presentation_table" } }
+                  },
+                  {
+                    "description": "P22: the Calendar's page, its no-data state only.",
+                    "type": "object",
+                    "required": ["no_data"],
+                    "additionalProperties": false,
+                    "properties": { "no_data": { "type": "boolean" } }
+                  }
+                ]
+              }
+            }
           }
         },
         "card_stats": {
@@ -2146,6 +2115,115 @@
         "time": { "type": "integer" },
         "type": { "type": "integer" }
       }
+    },
+    "graph_parts": {
+      "description": "stats-ops.md H10, stats/graphs-common G14: the requested parts of one graph-data response, each one message of Anki's graph data in protobuf field names (map keys decimal strings, scalars at 0 and empty maps omitted).",
+      "type": "object",
+      "minProperties": 1,
+      "not": { "required": ["error"] },
+      "additionalProperties": false,
+      "properties": {
+        "reviews": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "count": { "$ref": "#/$defs/graph_review_days" }, "time": { "$ref": "#/$defs/graph_review_days" } }
+        },
+        "true_retention": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "today": { "$ref": "#/$defs/graph_retention" }, "yesterday": { "$ref": "#/$defs/graph_retention" },
+            "week": { "$ref": "#/$defs/graph_retention" }, "month": { "$ref": "#/$defs/graph_retention" },
+            "year": { "$ref": "#/$defs/graph_retention" }, "all_time": { "$ref": "#/$defs/graph_retention" }
+          }
+        },
+        "hours": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "one_month": { "$ref": "#/$defs/graph_hours" }, "three_months": { "$ref": "#/$defs/graph_hours" },
+            "one_year": { "$ref": "#/$defs/graph_hours" }, "all_time": { "$ref": "#/$defs/graph_hours" }
+          }
+        },
+        "buttons": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "one_month": { "$ref": "#/$defs/graph_buttons" }, "three_months": { "$ref": "#/$defs/graph_buttons" },
+            "one_year": { "$ref": "#/$defs/graph_buttons" }, "all_time": { "$ref": "#/$defs/graph_buttons" }
+          }
+        },
+        "future_due": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "future_due": { "$ref": "#/$defs/graph_int_map" },
+            "have_backlog": { "const": true },
+            "daily_load": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "card_counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "including_inactive": { "$ref": "#/$defs/graph_card_counts" }, "excluding_inactive": { "$ref": "#/$defs/graph_card_counts" } }
+        },
+        "intervals": { "type": "object", "additionalProperties": false, "properties": { "intervals": { "$ref": "#/$defs/graph_int_map" } } },
+        "stability": { "type": "object", "additionalProperties": false, "properties": { "intervals": { "$ref": "#/$defs/graph_int_map" } } },
+        "difficulty": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "eases": { "$ref": "#/$defs/graph_int_map" }, "average": { "$ref": "#/$defs/f32" } }
+        },
+        "retrievability": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "retrievability": { "$ref": "#/$defs/graph_int_map" },
+            "average": { "$ref": "#/$defs/f32" },
+            "sum_by_card": { "$ref": "#/$defs/f32" },
+            "sum_by_note": { "$ref": "#/$defs/f32" }
+          }
+        },
+        "added": { "type": "object", "additionalProperties": false, "properties": { "added": { "$ref": "#/$defs/graph_int_map" } } },
+        "context": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "rollover_hour": { "type": "integer", "minimum": 1, "maximum": 23 }, "fsrs": { "const": true } }
+        }
+      }
+    },
+    "presentation_bin": {
+      "description": "stats-ops.md H14, stats/graph-presentation P22: one bin in axis order. drawn is x1 > x0 from the edges; an undrawn bin has tooltip and query null; query is null for a drawn bin that sends none.",
+      "type": "object",
+      "required": ["x0", "x1", "value", "drawn", "tooltip", "query"],
+      "additionalProperties": false,
+      "properties": {
+        "x0": { "type": "number" },
+        "x1": { "type": "number" },
+        "value": { "type": "number", "minimum": 0 },
+        "drawn": { "type": "boolean" },
+        "tooltip": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "anyOf": [
+                  { "type": "string" },
+                  { "type": "array", "prefixItems": [{ "type": "string" }, { "type": "string" }], "minItems": 2, "maxItems": 2 }
+                ]
+              }
+            }
+          ]
+        },
+        "query": { "type": ["string", "null"] }
+      }
+    },
+    "presentation_table": {
+      "description": "stats-ops.md H14, stats/graph-presentation P22: the table's rows in order, each its cells' text ([label, value, ...]).",
+      "type": "array",
+      "items": { "type": "array", "minItems": 1, "items": { "type": "string" } }
     },
     "graph_int_map": {
       "description": "stats/graphs-common G14: a protobuf map with integer keys as decimal strings; omitted when empty.",
