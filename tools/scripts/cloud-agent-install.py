@@ -472,9 +472,10 @@ def live_simulator(vm, root, expected, lease, observed, *, checkpoint=None):
          runtime == pins["runtime"]["identifier"] and
          selected[0].get("buildversion") == pins["runtime"]["build"] == expected["os_build"],
          "simulator-runtime")
-    # Observe the booted runtime too, rather than relying only on its inventory.
+    # CoreSimulator owns this booted runtime environment value. iOS runtimes
+    # do not contain macOS's /usr/bin/sw_vers; inventory alone is insufficient.
     checkpoint("simulator-os")
-    running = vm.call("simctl", "spawn", udid, "/usr/bin/sw_vers", "-buildVersion").decode().strip()
+    running = vm.call("simctl", "getenv", udid, "SIMULATOR_RUNTIME_BUILD_VERSION").decode().strip()
     need(running == expected["os_build"], "simulator-runtime")
     checkpoint("simulator-receipt")
     need(v.receipt(root, os.path.join(root, "build/mg"), lease["lease_receipt"],

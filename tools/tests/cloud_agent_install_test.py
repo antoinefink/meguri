@@ -76,7 +76,7 @@ class TransportDouble:
                                           [self.test.device]}}).encode()
         if args == ("list", "runtimes", "--json"):
             return json.dumps({"runtimes": [self.test.runtime]}).encode()
-        if args[:2] == ("spawn", UDID):
+        if args == ("getenv", UDID, "SIMULATOR_RUNTIME_BUILD_VERSION"):
             return self.test.fixture.expected["os_build"].encode()
         if args[:2] == ("install", UDID):
             if self.install_failure:
@@ -391,14 +391,14 @@ class DeliveryTests(unittest.TestCase):
         install.live_simulator(self.vm, str(self.root), expected, lease, self.observed, checkpoint=stages.append)
         self.assertEqual(stages, ["simulator-lease", "simulator-device", "simulator-runtime", "simulator-os", "simulator-receipt"])
         original_call = self.vm.call
-        for output in (None, b"generated-wrong-build"):
+        for output in (None, b"", b"generated-wrong-build"):
             stages = []
-            def fail_spawn(operation, *args, **kwargs):
-                if args[:1] == ("spawn",):
+            def fail_environment(operation, *args, **kwargs):
+                if args[:1] == ("getenv",):
                     if output is None: raise v.Refused("vm-simctl")
                     return output
                 return original_call(operation, *args, **kwargs)
-            with patch.object(self.vm, "call", side_effect=fail_spawn):
+            with patch.object(self.vm, "call", side_effect=fail_environment):
                 with self.subTest(command_failed=output is None), self.assertRaisesRegex(v.Refused, "vm-simctl|simulator-runtime"):
                     install.live_simulator(self.vm, str(self.root), expected, lease, self.observed, checkpoint=stages.append)
             self.assertEqual(stages[-1], "simulator-os")

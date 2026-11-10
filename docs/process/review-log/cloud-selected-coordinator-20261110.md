@@ -62,3 +62,26 @@ Focused Docker receipts `20261110T145452Z-69562` (5/5) and
 Independent review finds no concrete P0–P2 issues in the diagnostic delta;
 the reviewer verified final source hashes after the cleanup type guard changed.
 The next instrumented actual attempt remains pending. No acceptance is claimed.
+
+## Supported booted-runtime build observation
+
+Starting commit: `1aa1d51816ea864b9bb49f5df13048c716aab194`.
+Instrumented actual run `20261110T145657Z-76388` identified the failed
+`simulator-os` command (`vm-simctl`), before fixtures/build/app execution.
+Replaced the macOS executable spawn with the exact leased simulator's
+`simctl getenv ... SIMULATOR_RUNTIME_BUILD_VERSION`. All prior live authority
+checks, exact build equality, pins and timeouts remain unchanged. Missing,
+empty, mismatched and failed output still refuse; there is no inventory fallback.
+
+Temporary VM-leased MG runtime probe `20261110T150148Z-93734` passed every live
+checkpoint with `signed_execution=false`. Ancillary probe `20261110T150030Z-88948`
+failed an extra help-text predicate before attempting the runtime command; that
+non-safety prerequisite was removed. Both receipts and probe source remain.
+The temporary route and script are removed from tools.
+
+Status `20261110T150214Z-95337` proved original acquire76869 unchanged and its
+process exited. With root's checked no-orphans fence, exact standard MG release
+`20261110T150243Z-96695` passed. Focused Docker receipt
+`20261110T150308Z-98264` passed 6/6 selected/delivery/handoff cases.
+Independent source review finds no P0–P2 issues and confirms the two frozen
+source hashes. The next actual selected run and full gate remain pending.
