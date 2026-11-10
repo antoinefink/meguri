@@ -308,6 +308,166 @@ def app_identity_entitlements(original, team, bundle):
     return expected
 
 
+def retain_preparation_input(root, path, held, checks):
+    v.contained(root, path)
+    witness = {}
+    parent = held.enter_context(v.authority(os.path.dirname(path), witness))
+    name = os.path.basename(path)
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+    held.callback(os.close, fd)
+    info = os.fstat(fd)
+    need(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_uid == os.getuid() and
+         not info.st_mode & 0o022 and 0 < info.st_size <= 16 * 1024 * 1024, 'initial-entitlements')
+    raw = os.pread(fd, info.st_size + 1, 0)
+    pin = (v.identity(info), info.st_uid, info.st_gid)
+    def check():
+        witness['check']()
+        current = os.fstat(fd)
+        named = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        need((v.identity(current), current.st_uid, current.st_gid) == pin ==
+             (v.identity(named), named.st_uid, named.st_gid)
+             and os.pread(fd, info.st_size + 1, 0) == raw and len(raw) == info.st_size, 'initial-entitlements')
+    check()
+    checks.append(check)
+    return raw
+
+
+def expand_role_entitlements(value, settings):
+    if type(value) is dict:
+        return {key: expand_role_entitlements(item, settings) for key, item in value.items()}
+    if type(value) is list:
+        return [expand_role_entitlements(item, settings) for item in value]
+    if type(value) is not str:
+        return value
+    def replace(match):
+        name = match.group(1) or match.group(2)
+        need(name in settings and type(settings[name]) is str, 'initial-entitlements')
+        return settings[name]
+    result = re.sub(r'\$\(([^)]+)\)|\$\{([^}]+)\}', replace, value)
+    need('$(' not in result and '${' not in result, 'initial-entitlements')
+    return result
+
+
+def merge_native_request(normal, simulated, requested, role, settings):
+    need(type(normal) is dict and type(simulated) is dict and type(requested) is dict and
+         role in ('Meguri', 'MeguriWidget'), 'initial-entitlements')
+    cloud = {'com.apple.developer.icloud-container-identifiers', 'com.apple.developer.icloud-services',
+             'com.apple.developer.icloud-container-environment', 'aps-environment'}
+    keys = {'com.apple.security.application-groups'} | (cloud if role == 'Meguri' else set())
+    need(set(requested) == keys and typed_entitlements(simulated) == typed_entitlements(requested),
+         'initial-entitlements')
+    groups = requested.get('com.apple.security.application-groups')
+    need(type(groups) is list and groups == ['group.com.antoinefink.meguri.dev'] and
+         all(type(group) is str for group in groups) and settings.get('MEGURI_APP_GROUP') == groups[0],
+         'initial-entitlements')
+    expected = dict(normal)
+    for key, value in requested.items():
+        need(key not in normal or typed_entitlements({key: normal[key]}) == typed_entitlements({key: value}),
+             'initial-entitlements')
+        expected.setdefault(key, value)
+    if role == 'Meguri':
+        need(settings.get('CONFIGURATION') == 'Debug' and settings.get('ENABLE_TESTABILITY') == 'YES' and
+             settings.get('MEGURI_CLOUD_AGENT_INJECTION') == 'YES' and
+             settings.get('MEGURI_SIGNING') == 'team' and settings.get('MEGURI_CORE_FEATURES') == 'ankiweb,test-hooks' and
+             {'DEBUG', 'MEGURI_TEST_HOOKS'} <= set(settings.get('SWIFT_ACTIVE_COMPILATION_CONDITIONS', '').split()),
+             'initial-settings')
+        need('get-task-allow' not in expected or expected['get-task-allow'] is True, 'initial-entitlements')
+        need('com.apple.security.get-task-allow' not in expected or
+             expected['com.apple.security.get-task-allow'] is True, 'initial-entitlements')
+        expected.setdefault('get-task-allow', True)
+    else:
+        need(not any(v.protected(key) for key in expected) and
+             not any(key in expected for key in ('get-task-allow', 'com.apple.security.get-task-allow')),
+             'initial-entitlements')
+    return expected
+
+
+def prepare_role_grants(root, products, role, settings, held, checks):
+    widget = role == 'MeguriWidget'
+    bundle = 'com.antoinefink.meguri.dev' + ('.widget' if widget else '')
+    source = ('MeguriWidget/MeguriWidget-iOS.entitlements' if widget else 'Meguri/Meguri-iOS.entitlements')
+    product = 'MeguriWidget.appex' if widget else 'Meguri.app'
+    temp = os.path.join(root, 'build/app/CloudAgentSimDerivedData/Build/Intermediates.noindex/Meguri.build',
+                        'Debug-iphonesimulator', role + '.build')
+    need(role in ('Meguri', 'MeguriWidget') and settings.get('TARGET_NAME') == role and
+         settings.get('PRODUCT_NAME') == role and settings.get('PRODUCT_BUNDLE_IDENTIFIER') == bundle and
+         settings.get('CONFIGURATION') == 'Debug' and settings.get('PLATFORM_NAME') == 'iphonesimulator' and
+         settings.get('MEGURI_SIGNING') == 'team' and settings.get('CODE_SIGN_IDENTITY') == 'Apple Development' and
+         settings.get('SRCROOT') == os.path.join(root, 'app') and settings.get('CODE_SIGN_ENTITLEMENTS') == source and
+         settings.get('FULL_PRODUCT_NAME') == product and settings.get('TARGET_TEMP_DIR') == temp and
+         settings.get('BUILT_PRODUCTS_DIR') == os.path.join(products, 'Debug-iphonesimulator') and
+         settings.get('MEGURI_BUNDLE_ID_SUFFIX') == '.dev',
+         'initial-settings')
+    original_source = v.plist(retain_preparation_input(root, os.path.join(root, 'app', source), held, checks), 'initial-entitlements')
+    expected_source = {'com.apple.security.application-groups': ['$(MEGURI_APP_GROUP)']}
+    if not widget:
+        expected_source.update({
+            'com.apple.developer.icloud-container-identifiers': ['$(MEGURI_CLOUD_CONTAINER)'],
+            'com.apple.developer.icloud-services': ['CloudKit'],
+            'com.apple.developer.icloud-container-environment': '$(MEGURI_CLOUD_ENTITLEMENT_ENVIRONMENT)',
+            'aps-environment': '$(MEGURI_CLOUD_PUSH_ENVIRONMENT)'})
+    need(typed_entitlements(original_source) == typed_entitlements(expected_source), 'initial-entitlements')
+    requested = expand_role_entitlements(original_source, settings)
+    if not widget:
+        try:
+            v.check_cloud(settings, 'Debug', 'ios', 'team')
+        except (ValueError, TypeError, KeyError):
+            raise v.Refused('initial-settings') from None
+    normal = v.plist(retain_preparation_input(root, os.path.join(temp, product + '.xcent'), held, checks), 'initial-entitlements')
+    simulated = v.plist(retain_preparation_input(root, os.path.join(temp, product + '-Simulated.xcent'), held, checks), 'initial-entitlements')
+    return normal, merge_native_request(normal, simulated, requested, role, settings)
+
+
+def resolved_targets(raw, targets, exact=False):
+    def pairs(items):
+        need(len({key for key, _ in items}) == len(items), 'initial-settings')
+        return dict(items)
+    try:
+        rows = json.loads(raw, object_pairs_hook=pairs)
+    except (ValueError, UnicodeError):
+        raise v.Refused('initial-settings') from None
+    need(type(rows) is list and all(type(row) is dict for row in rows) and
+         (not exact or len(rows) == len(targets) and {row.get('target') for row in rows} == set(targets)),
+         'initial-settings')
+    result = {}
+    for target in targets:
+        matches = [row.get('buildSettings') for row in rows if row.get('target') == target]
+        need(len(matches) == 1 and type(matches[0]) is dict, 'initial-settings')
+        value = matches[0]
+        need(value.get('TARGET_NAME') == target and value.get('CONFIGURATION') == 'Debug' and
+             value.get('PLATFORM_NAME') == 'iphonesimulator' and value.get('MEGURI_SIGNING') == 'team' and
+             value.get('CODE_SIGN_IDENTITY') == 'Apple Development' and
+             type(value.get('DEVELOPMENT_TEAM')) is str and
+             re.fullmatch(r'[A-Z0-9]{10}', value['DEVELOPMENT_TEAM']), 'initial-settings')
+        result[target] = value
+    return result
+
+
+def first_freeze(root, directory, sha, products, xctestrun, checks):
+    # All source/native/settings descriptors remain alive through publication.
+    def check():
+        for verify in checks:
+            verify()
+        need(v.source(root) == sha, 'source-changed')
+    check()
+    need(not any(os.path.lexists(os.path.join(directory, name)) for name in
+                 ('agent-build.json', 'agent-build-reference.json')), 'initial-already-frozen')
+    reference = v.publish_frozen_build(root, products, xctestrun, 'ios-sim', os.path.basename(directory),
+                                       sha, os.path.join(directory, 'agent-build.json'))
+    check()
+    raw = (json.dumps(reference, sort_keys=True) + '\n').encode()
+    with v.authority(directory) as parent:
+        fd = os.open('agent-build-reference.json', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     0o600, dir_fd=parent)
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+    check()
+    need(v.file_reference(os.path.join(root, 'build'), os.path.join(directory, 'agent-build.json')) == reference,
+         'initial-product-changed')
+
+
 @contextlib.contextmanager
 def private_entitlements_input(directory, value):
     raw = plistlib.dumps(value, fmt=plistlib.FMT_XML, sort_keys=True)
@@ -349,15 +509,17 @@ def private_entitlements_input(directory, value):
                 os.close(fd)
 
 
-def sign_initial_code(directory, path, signer, metadata, app_identity=None):
+def sign_initial_code(directory, path, signer, metadata, app_identity=None, role_grants=None):
     identifier, entitlements = metadata
     arguments = ['/usr/bin/codesign', '--force', '--sign', signer, '--timestamp=none']
-    if app_identity is None:
+    if app_identity is None and role_grants is None:
         signing_command(arguments + ['--preserve-metadata=identifier,entitlements', path])
         return None
-    team, bundle = app_identity
-    need(identifier == bundle, 'initial-metadata')
-    expected = app_identity_entitlements(entitlements, team, bundle)
+    expected = entitlements if role_grants is None else role_grants
+    if app_identity is not None:
+        team, bundle = app_identity
+        need(identifier == bundle, 'initial-metadata')
+        expected = app_identity_entitlements(expected, team, bundle)
     expected_raw = typed_entitlements(expected)
     with private_entitlements_input(directory, expected) as (input_path, check):
         check()
@@ -385,7 +547,7 @@ def compare_product_files(before, after, executable, signature_root, native_resu
             need(path not in final or final[path]['type'] in ('file', 'directory'), 'initial-product-changed')
 
 
-def initial_sign(root, directory, sha, products, xctestrun, settings_path):
+def initial_sign(root, directory, sha, products, xctestrun, settings_path, widget_settings_path):
     need(v.source(root) == sha, 'source-changed')
     run = os.path.basename(directory)
     need(v.MG_RUN_ID.fullmatch(run) and directory == os.path.join(root, 'build/mg/build-app', run), 'initial-run')
@@ -393,31 +555,33 @@ def initial_sign(root, directory, sha, products, xctestrun, settings_path):
          'initial-already-frozen')
     need(products == os.path.join(root, 'build/app/CloudAgentSimDerivedData/Build/Products'), 'initial-products')
     v.contained(products, xctestrun)
-    settings_pin = v.binary(os.path.join(root, 'build'), settings_path)
-    settings = v.json_input(os.path.join(root, 'build'), settings_path)
-    target_settings = {}
-    for target in ('Meguri', 'MeguriSnapshotTests'):
-        rows = [x['buildSettings'] for x in settings if x.get('target') == target]
-        need(len(rows) == 1, 'initial-settings')
-        value = rows[0]
-        need(value.get('CONFIGURATION') == 'Debug' and value.get('PLATFORM_NAME') == 'iphonesimulator'
-             and value.get('MEGURI_SIGNING') == 'team' and value.get('CODE_SIGN_IDENTITY') == 'Apple Development'
-             and isinstance(value.get('DEVELOPMENT_TEAM'), str)
-             and re.fullmatch(r'[A-Z0-9]{10}', value['DEVELOPMENT_TEAM']), 'initial-settings')
-        target_settings[target] = value
-    team = target_settings['Meguri']['DEVELOPMENT_TEAM']
-    need(target_settings['MeguriSnapshotTests']['DEVELOPMENT_TEAM'] == team, 'initial-settings')
-    app, info = v.bundle(products, 'Debug-iphonesimulator/Meguri.app', 'ios-sim')
-    need(app['bundle_id'] == 'com.antoinefink.meguri.dev', 'initial-settings')
-    agent = v.test_inputs(products, xctestrun, app, 'ios-sim')
-    need(all(target_settings[target].get('PRODUCT_BUNDLE_IDENTIFIER') == item['bundle_id']
-             for target, item in (('Meguri', app), ('MeguriSnapshotTests', agent))), 'initial-settings')
-    app_path = os.path.join(products, app['path'])
-    agent_path = os.path.join(products, agent['path'])
-    before = v.snapshot(os.path.join(root, 'build'), products)
-    paths, bundles = native_plan(products, app, agent, before[0])
-    signer, certificate = choose_identity(team)
     with contextlib.ExitStack() as held:
+        checks = []
+        need(settings_path == os.path.join(directory, 'agent-settings.json') and
+             widget_settings_path == os.path.join(directory, 'agent-widget-settings.json'), 'initial-settings')
+        target_settings = resolved_targets(retain_preparation_input(root, settings_path, held, checks),
+                                            ('Meguri', 'MeguriSnapshotTests'))
+        widget_settings = resolved_targets(retain_preparation_input(root, widget_settings_path, held, checks),
+                                            ('MeguriWidget',), exact=True)['MeguriWidget']
+        team = target_settings['Meguri']['DEVELOPMENT_TEAM']
+        need(target_settings['MeguriSnapshotTests']['DEVELOPMENT_TEAM'] == team == widget_settings['DEVELOPMENT_TEAM'],
+             'initial-settings')
+        app, info = v.bundle(products, 'Debug-iphonesimulator/Meguri.app', 'ios-sim')
+        need(app['bundle_id'] == 'com.antoinefink.meguri.dev', 'initial-settings')
+        agent = v.test_inputs(products, xctestrun, app, 'ios-sim')
+        app_path = os.path.join(products, app['path'])
+        agent_path = os.path.join(products, agent['path'])
+        before = v.snapshot(os.path.join(root, 'build'), products)
+        paths, bundles = native_plan(products, app, agent, before[0])
+        need(all(target_settings[target].get('PRODUCT_BUNDLE_IDENTIFIER') == item['bundle_id']
+                 for target, item in (('Meguri', app), ('MeguriSnapshotTests', agent))), 'initial-settings')
+        role_grants = {}
+        for role, settings in (('Meguri', target_settings['Meguri']), ('MeguriWidget', widget_settings)):
+            normal, expected = prepare_role_grants(root, products, role, settings, held, checks)
+            role_grants[app_path if role == 'Meguri' else app_path + '/PlugIns/MeguriWidget.appex'] = (normal, expected)
+        need(target_settings['Meguri'].get('MEGURI_APP_GROUP') == widget_settings.get('MEGURI_APP_GROUP') ==
+             'group.com.antoinefink.meguri.dev', 'initial-entitlements')
+        signer, certificate = choose_identity(team)
         witnesses, executable_parents = [], {}
         for path in paths:
             witness = {}
@@ -429,8 +593,10 @@ def initial_sign(root, directory, sha, products, xctestrun, settings_path):
         for path in paths:
             for witness in witnesses:
                 witness['check']()
-            need(v.source(root) == sha and v.snapshot(os.path.join(root, 'build'), products) == before
-                 and v.binary(os.path.join(root, 'build'), settings_path) == settings_pin, 'initial-product-changed')
+            for check in checks:
+                check()
+            need(v.source(root) == sha and v.snapshot(os.path.join(root, 'build'), products) == before,
+                 'initial-product-changed')
             identifier, entitlements = signing_metadata(path)
             item = bundles.get(path)
             need(item is None or identifier == item['bundle_id'], 'initial-metadata')
@@ -441,8 +607,14 @@ def initial_sign(root, directory, sha, products, xctestrun, settings_path):
             original_code=code_fingerprint(original_bytes)
             # choose_identity already bound this team to the selected DER/private key;
             # only the exact resolved and metadata-validated app gets identity composition.
-            expected_app_entitlements = sign_initial_code(directory, path, signer, (identifier, entitlements),
-                (team, app['bundle_id']) if path == app_path else None)
+            composed = role_grants.get(path)
+            if composed is not None:
+                need(typed_entitlements(entitlements) == typed_entitlements(composed[0]), 'initial-entitlements')
+            expected_entitlements = sign_initial_code(directory, path, signer, (identifier, entitlements),
+                (team, app['bundle_id']) if path == app_path else None,
+                None if composed is None else composed[1])
+            for check in checks:
+                check()
             for witness in witnesses:
                 witness['check']()
             native_result = v.identity(os.stat(os.path.basename(executable), dir_fd=executable_parents[path], follow_symlinks=False))
@@ -455,9 +627,9 @@ def initial_sign(root, directory, sha, products, xctestrun, settings_path):
                 write_code_difference(directory, os.path.relpath(path, products), original_bytes, final_bytes)
             need(same_code,'initial-code-changed')
             final_metadata = signing_metadata(path)
-            if path == app_path:
+            if composed is not None:
                 need(final_metadata[0] == identifier and typed_entitlements(final_metadata[1]) ==
-                     expected_app_entitlements, 'initial-entitlements-changed')
+                     expected_entitlements, 'initial-entitlements-changed')
             else:
                 need(final_metadata == (identifier, entitlements), 'initial-entitlements-changed')
             v.command(['/usr/bin/codesign', '--verify', '--deep', '--strict', path], 'initial-signature')
@@ -471,19 +643,21 @@ def initial_sign(root, directory, sha, products, xctestrun, settings_path):
                     'app_build': info['CFBundleVersion'], 'container': info['MeguriCloudContainer'], 'environment': info['MeguriCloudEnvironment']}
         need(v.independent_product(root, app_path, expected, target_settings['Meguri']) == team, 'initial-signature')
         v.independent_agent(root, {'platform': 'ios-sim', 'products': {'path': products}, 'agent': v.bundle(products, agent['path'], 'ios-sim')[0]}, team)
-        need(v.snapshot(os.path.join(root, 'build'), products) == before and v.source(root) == sha
-             and v.binary(os.path.join(root, 'build'), settings_path) == settings_pin, 'initial-product-changed')
+        need(v.snapshot(os.path.join(root, 'build'), products) == before and v.source(root) == sha,
+             'initial-product-changed')
+        first_freeze(root, directory, sha, products, xctestrun,
+                     checks + [witness['check'] for witness in witnesses])
 
 
 def main():
     for number in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
         signal.signal(number, lambda *_: (_ for _ in ()).throw(stage.Cancelled()))
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ('root', 'run-directory', 'source-commit', 'products', 'xctestrun', 'settings'):
+    for name in ('root', 'run-directory', 'source-commit', 'products', 'xctestrun', 'settings', 'widget-settings'):
         parser.add_argument('--' + name, required=True)
     args = parser.parse_args()
     try:
-        initial_sign(args.root, args.run_directory, args.source_commit, args.products, args.xctestrun, args.settings)
+        initial_sign(args.root, args.run_directory, args.source_commit, args.products, args.xctestrun, args.settings, args.widget_settings)
         return 0
     except (v.Refused, v.Invalid, stage.Refused, stage.Cancelled, OSError, ValueError, TypeError, KeyError, AttributeError) as error:
         allowed = {'source-changed', 'source-dirty', 'initial-run', 'initial-already-frozen', 'initial-products',
@@ -493,7 +667,7 @@ def main():
             'product-signature', 'product-cloud-grants', 'product-debug', 'product-entitlements',
             'agent-signature', 'agent-platform', 'input-changed'}
         code = error.args[0] if isinstance(error, v.Refused) and len(error.args) == 1 and type(error.args[0]) is str and error.args[0] in allowed else 'guarded-input'
-        print('Initial simulator development signing refused: ' + code + '; no frozen proof created', file=sys.stderr)
+        print('Initial simulator development signing refused: ' + code + '; no signed build admission', file=sys.stderr)
         return 1
 
 

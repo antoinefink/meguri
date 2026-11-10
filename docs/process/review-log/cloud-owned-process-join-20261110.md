@@ -119,3 +119,12 @@ Focused setup tooling `20261110T205044Z-14680`, privacy
 `20261110T205043Z-14437` and similarity `20261110T205044Z-14871` pass. These
 are generated tests with no account lookup. The next signed setup run and
 full batch integration remain pending; there is no round-trip acceptance.
+
+Signed setup `20261110T205158Z-15438` now completes its guarded capture
+without a transport or channel failure. It reports `awaiting_user` for
+`cloudkit-test-accounts`: the native account check reports no signed-in
+account in the dedicated VM. No approval was entered, no approved account
+source was published, and there is no signed-sync acceptance. Static check
+`20261110T205202Z-16159` passes. The owner was asked to sign the VM into the
+intended isolated development test account; independent simulator preparation
+continues while that step waits.

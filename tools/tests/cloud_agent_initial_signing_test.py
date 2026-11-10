@@ -336,7 +336,7 @@ class MutationTests(unittest.TestCase):
             run.mkdir(parents=True);(run/'agent-build.json').write_text('{}')
             with patch.object(m.v,'source',return_value='a'*40),patch.object(m,'choose_identity') as choose:
                 with self.assertRaisesRegex(m.v.Refused,'initial-already-frozen'):
-                    m.initial_sign(str(root),str(run),'a'*40,'unused','unused','unused')
+                    m.initial_sign(str(root),str(run),'a'*40,'unused','unused','unused','unused')
                 choose.assert_not_called()
 
 
@@ -441,11 +441,294 @@ class MetadataTests(unittest.TestCase):
 
     def test_failure_output_never_contains_native_or_private_exception_text(self):
         argv=['initial','--root','/generated','--run-directory','/generated','--source-commit','generated',
-              '--products','/generated','--xctestrun','/generated','--settings','/generated']
+              '--products','/generated','--xctestrun','/generated','--settings','/generated','--widget-settings','/generated']
         output=io.StringIO()
         with patch.object(sys,'argv',argv),patch.object(m,'initial_sign',side_effect=m.v.Refused('generated-private-value')),contextlib.redirect_stderr(output):
             self.assertEqual(m.main(),1)
         self.assertNotIn('generated-private',output.getvalue())
+
+
+GROUP = 'group.com.antoinefink.meguri.dev'
+
+
+def grant_fixture(role='Meguri'):
+    value = {'com.apple.security.application-groups': [GROUP]}
+    if role == 'Meguri':
+        value.update({'com.apple.developer.icloud-container-identifiers': ['iCloud.generated.dev'],
+                      'com.apple.developer.icloud-services': ['CloudKit'],
+                      'com.apple.developer.icloud-container-environment': 'Development',
+                      'aps-environment': 'development'})
+    return value
+
+
+def role_settings(root, role):
+    widget = role == 'MeguriWidget'
+    return {'TARGET_NAME': role, 'PRODUCT_NAME': role, 'CONFIGURATION': 'Debug',
+            'PLATFORM_NAME': 'iphonesimulator', 'MEGURI_SIGNING': 'team', 'DEVELOPMENT_TEAM': TEAM,
+            'CODE_SIGN_IDENTITY': 'Apple Development', 'ENABLE_TESTABILITY': 'YES', 'MEGURI_CLOUD_AGENT_INJECTION': 'YES',
+            'MEGURI_CORE_FEATURES': 'ankiweb,test-hooks', 'SWIFT_ACTIVE_COMPILATION_CONDITIONS': 'DEBUG MEGURI_TEST_HOOKS',
+            'MEGURI_APP_GROUP': GROUP, 'MEGURI_CLOUD_CONTAINER': 'iCloud.generated.dev',
+            'MEGURI_CLOUD_CONFIGURATION': 'development', 'MEGURI_CLOUD_ENVIRONMENT': 'development',
+            'MEGURI_CLOUD_CONTAINER_development': 'iCloud.generated.dev', 'MEGURI_CLOUD_CONTAINER_production': 'iCloud.generated.production',
+            'INFOPLIST_KEY_MeguriCloudContainer': 'iCloud.generated.dev', 'INFOPLIST_KEY_MeguriCloudEnvironment': 'development',
+            'MEGURI_CLOUD_SCHEMA_CONFIGURED_development': 'YES', 'MEGURI_CLOUD_SCHEMA_CONFIGURED_production': 'NO',
+            'MEGURI_CLOUD_SCHEMA_CONFIGURED': 'YES', 'MEGURI_CLOUD_SCHEMA_BOOLEAN': '1',
+            'MEGURI_CLOUD_ENTITLEMENT_ENVIRONMENT': 'Development', 'MEGURI_CLOUD_PUSH_ENVIRONMENT': 'development',
+            'MEGURI_BUNDLE_ID_SUFFIX': '.dev', 'SRCROOT': str(root/'app'),
+            'PRODUCT_BUNDLE_IDENTIFIER': 'com.antoinefink.meguri.dev' + ('.widget' if widget else ''),
+            'CODE_SIGN_ENTITLEMENTS': 'MeguriWidget/MeguriWidget-iOS.entitlements' if widget else 'Meguri/Meguri-iOS.entitlements',
+            'FULL_PRODUCT_NAME': 'MeguriWidget.appex' if widget else 'Meguri.app',
+            'TARGET_TEMP_DIR': str(root/'build/app/CloudAgentSimDerivedData/Build/Intermediates.noindex/Meguri.build/Debug-iphonesimulator'/ (role+'.build')),
+            'BUILT_PRODUCTS_DIR': str(root/'build/app/CloudAgentSimDerivedData/Build/Products/Debug-iphonesimulator')}
+
+
+def write_role_inputs(root, role):
+    settings = role_settings(root, role)
+    source = {'com.apple.security.application-groups': ['$(MEGURI_APP_GROUP)']}
+    if role == 'Meguri':
+        source.update({'com.apple.developer.icloud-container-identifiers': ['$(MEGURI_CLOUD_CONTAINER)'],
+                       'com.apple.developer.icloud-services': ['CloudKit'],
+                       'com.apple.developer.icloud-container-environment': '$(MEGURI_CLOUD_ENTITLEMENT_ENVIRONMENT)',
+                       'aps-environment': '$(MEGURI_CLOUD_PUSH_ENVIRONMENT)'})
+    paths = [root/'app'/settings['CODE_SIGN_ENTITLEMENTS'],
+             Path(settings['TARGET_TEMP_DIR'])/(settings['FULL_PRODUCT_NAME']+'.xcent'),
+             Path(settings['TARGET_TEMP_DIR'])/(settings['FULL_PRODUCT_NAME']+'-Simulated.xcent')]
+    for path, value in zip(paths, (source, {}, grant_fixture(role))):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(plistlib.dumps(value))
+    return settings, paths
+
+
+class NativeRequestGrantTests(unittest.TestCase):
+    def test_retained_file_owner_and_group_are_part_of_the_input_pin(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(); path = root/'input'; path.write_bytes(b'generated')
+            original = path.stat(); actual_fstat = os.fstat
+            class ChangedStat:
+                def __init__(self, value, field): self.value, self.field = value, field
+                def __getattr__(self, name):
+                    value = getattr(self.value, name)
+                    return value + 1 if name == self.field else value
+            for field in ('st_uid', 'st_gid'):
+                with contextlib.ExitStack() as held:
+                    checks = []; m.retain_preparation_input(str(root), str(path), held, checks)
+                    def observed(fd):
+                        value = actual_fstat(fd)
+                        return ChangedStat(value, field) if value.st_dev == original.st_dev and value.st_ino == original.st_ino else value
+                    with patch.object(m.os, 'fstat', side_effect=observed):
+                        with self.assertRaises(m.v.Refused): checks[0]()
+
+    def test_each_role_adds_only_its_declared_grants_and_preserves_original_typed_map(self):
+        for role in ('Meguri', 'MeguriWidget'):
+            normal = {'existing-data': b'generated', 'existing-boolean': True, 'existing-integer': 1}
+            before = m.typed_entitlements(normal)
+            requested = grant_fixture(role)
+            settings = role_settings(Path('/generated'), role)
+            merged = m.merge_native_request(normal, requested, requested, role, settings)
+            self.assertEqual(m.typed_entitlements(normal), before)
+            for key, value in normal.items():
+                self.assertEqual(m.typed_entitlements({key: merged[key]}), m.typed_entitlements({key: value}))
+            self.assertEqual(set(merged)-set(normal), set(requested) | ({'get-task-allow'} if role == 'Meguri' else set()))
+            if role == 'MeguriWidget': self.assertNotIn('get-task-allow', merged)
+
+    def test_extra_missing_conflicting_or_wrong_typed_native_inputs_refuse(self):
+        requested = grant_fixture()
+        cases = []
+        for key, value in (('extra', True), ('get-task-allow', True), ('aps-environment', 'production'),
+                           ('com.apple.security.application-groups', []), ('com.apple.developer.icloud-services', True)):
+            simulated = copy.deepcopy(requested); simulated[key] = value
+            cases.append(({}, simulated))
+        missing = copy.deepcopy(requested); del missing['aps-environment']; cases.append(({}, missing))
+        for key, value in (('aps-environment', 'production'), ('com.apple.security.application-groups', []),
+                           ('get-task-allow', 1), ('get-task-allow', False),
+                           ('com.apple.security.get-task-allow', False), ('com.apple.security.get-task-allow', 1)):
+            cases.append(({key: value}, requested))
+        for normal, simulated in cases:
+            with self.subTest(normal=normal, simulated=simulated):
+                with self.assertRaises(m.v.Refused):
+                    m.merge_native_request(normal, simulated, requested, 'Meguri', role_settings(Path('/generated'), 'Meguri'))
+        for group in (None, [], ['wrong'], [GROUP, GROUP], [True]):
+            changed = copy.deepcopy(requested); changed['com.apple.security.application-groups'] = group
+            with self.assertRaises(m.v.Refused):
+                m.merge_native_request({}, changed, changed, 'Meguri', role_settings(Path('/generated'), 'Meguri'))
+
+    def test_widget_refuses_app_source_grants_or_debugger_inheritance(self):
+        widget = grant_fixture('MeguriWidget'); settings = role_settings(Path('/generated'), 'MeguriWidget')
+        for normal in (grant_fixture(), {'get-task-allow': True}, {'com.apple.security.get-task-allow': True}):
+            with self.assertRaises(m.v.Refused): m.merge_native_request(normal, widget, widget, 'MeguriWidget', settings)
+        with self.assertRaises(m.v.Refused): m.merge_native_request({}, grant_fixture(), grant_fixture(), 'MeguriWidget', settings)
+
+    def test_explicit_debug_testability_and_hooks_intent_is_required(self):
+        requested = grant_fixture()
+        for key, value in (('CONFIGURATION', 'Profile'), ('CONFIGURATION', 'Release'), ('ENABLE_TESTABILITY', 'NO'),
+                           ('MEGURI_SIGNING', 'adhoc'), ('MEGURI_CLOUD_AGENT_INJECTION', 'NO'), ('MEGURI_CORE_FEATURES', 'ankiweb'),
+                           ('SWIFT_ACTIVE_COMPILATION_CONDITIONS', 'DEBUG'), ('MEGURI_APP_GROUP', '')):
+            settings = role_settings(Path('/generated'), 'Meguri'); settings[key] = value
+            with self.assertRaises(m.v.Refused): m.merge_native_request({}, requested, requested, 'Meguri', settings)
+
+    def test_named_target_parser_refuses_missing_duplicate_wrong_role_config_and_shape(self):
+        settings = role_settings(Path('/generated'), 'MeguriWidget')
+        row = {'target': 'MeguriWidget', 'buildSettings': settings}
+        self.assertEqual(m.resolved_targets(json.dumps([row]).encode(), ('MeguriWidget',)), {'MeguriWidget': settings})
+        cases = [b'[{"target":"MeguriWidget","target":"Meguri"}]', [], [row, row], [{'target': 'Meguri', 'buildSettings': settings}], [True], {}, b'bad-json']
+        for key, value in (('TARGET_NAME', 'Meguri'), ('CONFIGURATION', 'Release'), ('PLATFORM_NAME', 'iphoneos'),
+                           ('DEVELOPMENT_TEAM', None), ('CODE_SIGN_IDENTITY', '-')):
+            changed = copy.deepcopy(row); changed['buildSettings'][key] = value; cases.append([changed])
+        for rows in cases:
+            with self.assertRaises(m.v.Refused): m.resolved_targets(rows if type(rows) is bytes else json.dumps(rows).encode(), ('MeguriWidget',))
+
+    def test_fixed_source_native_paths_and_role_descriptors_are_pinned(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(); settings, paths = write_role_inputs(root, 'Meguri')
+            products = str(root/'build/app/CloudAgentSimDerivedData/Build/Products')
+            for key, value in (('TARGET_NAME', 'MeguriWidget'), ('CODE_SIGN_ENTITLEMENTS', '../other'),
+                               ('SRCROOT', '/elsewhere'), ('TARGET_TEMP_DIR', '/elsewhere'), ('BUILT_PRODUCTS_DIR', '/elsewhere')):
+                changed = dict(settings); changed[key] = value
+                with contextlib.ExitStack() as held, self.assertRaises(m.v.Refused):
+                    m.prepare_role_grants(str(root), products, 'Meguri', changed, held, [])
+            for index in range(3):
+                original = paths[index].read_bytes()
+                for substitution in ('mutation', 'replacement', 'symlink'):
+                    with contextlib.ExitStack() as held:
+                        checks = []; m.prepare_role_grants(str(root), products, 'Meguri', settings, held, checks)
+                        if substitution == 'mutation': paths[index].write_bytes(b'changed')
+                        else:
+                            paths[index].unlink()
+                            if substitution == 'replacement': paths[index].write_bytes(original)
+                            else: paths[index].symlink_to(paths[(index+1)%3])
+                        with self.assertRaises((m.v.Refused, OSError)): [check() for check in checks]
+                    paths[index].unlink(); paths[index].write_bytes(original)
+            source = plistlib.loads(paths[0].read_bytes()); source['unapproved'] = True
+            paths[0].write_bytes(plistlib.dumps(source))
+            with contextlib.ExitStack() as held, self.assertRaises(m.v.Refused):
+                m.prepare_role_grants(str(root), products, 'Meguri', settings, held, [])
+
+
+class InitialFreezeLifetimeTests(unittest.TestCase):
+    def test_first_freeze_publishes_once_with_inputs_alive_and_refuses_a_second_call(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(); directory = root/'build/mg/build-app/20261110T000000Z-123'; directory.mkdir(parents=True)
+            input_path = directory/'input'; input_path.write_bytes(b'generated-bound-input')
+            products = root/'build/products'; products.mkdir(); (products/'generated').write_bytes(b'product')
+            events = []
+            def freeze(*args):
+                events.append('freeze'); checks[0]()
+                return {'products': {'entries': m.v.snapshot(str(root/'build'), str(products))[0]}}
+            with contextlib.ExitStack() as held:
+                checks = []; m.retain_preparation_input(str(root), str(input_path), held, checks)
+                with patch.object(m.v, 'source', return_value='a'*40), patch.object(m.v, 'freeze_build', side_effect=freeze) as native:
+                    m.first_freeze(str(root), str(directory), 'a'*40, str(products), str(products/'test.xctestrun'), checks)
+                    self.assertEqual(native.call_count, 1)
+                    reference = json.loads((directory/'agent-build-reference.json').read_bytes())
+                    self.assertEqual(reference, m.v.file_reference(str(root/'build'), str(directory/'agent-build.json')))
+                    with self.assertRaisesRegex(m.v.Refused, 'initial-already-frozen'):
+                        m.first_freeze(str(root), str(directory), 'a'*40, str(products), str(products/'test.xctestrun'), checks)
+                    self.assertEqual(native.call_count, 1)
+            self.assertEqual(events, ['freeze'])
+
+    def test_input_substitution_during_freeze_or_original_failure_never_publishes_reference(self):
+        for failure in ('mutation', 'replacement', 'signing-failure', 'cancel'):
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve(); directory = root/'build/mg/build-app/20261110T000000Z-123'; directory.mkdir(parents=True)
+                products = root/'build/products'; products.mkdir(); (products/'generated').write_bytes(b'product')
+                input_path = directory/'input'; input_path.write_bytes(b'bound')
+                def freeze(*args):
+                    if failure == 'cancel': raise m.stage.Cancelled()
+                    if failure == 'signing-failure': raise m.v.Refused('build-signature')
+                    if failure == 'replacement': input_path.unlink()
+                    input_path.write_bytes(b'bound' if failure == 'replacement' else b'changed')
+                    return {'products': {'entries': m.v.snapshot(str(root/'build'), str(products))[0]}}
+                with contextlib.ExitStack() as held:
+                    checks = []; m.retain_preparation_input(str(root), str(input_path), held, checks)
+                    with patch.object(m.v, 'source', return_value='a'*40), patch.object(m.v, 'freeze_build', side_effect=freeze) as native:
+                        with self.assertRaises((m.v.Refused, m.stage.Cancelled)):
+                            m.first_freeze(str(root), str(directory), 'a'*40, str(products), str(products/'test.xctestrun'), checks)
+                        self.assertEqual(native.call_count, 1)
+                self.assertFalse((directory/'agent-build-reference.json').exists())
+
+    def test_existing_manifest_or_reference_symlink_never_overwrites(self):
+        for name in ('agent-build.json', 'agent-build-reference.json'):
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve(); directory = root/'build/mg/build-app/20261110T000000Z-123'; directory.mkdir(parents=True)
+                outside = root/'outside'; outside.write_bytes(b'keep'); (directory/name).symlink_to(outside)
+                with patch.object(m.v, 'source', return_value='a'*40), patch.object(m.v, 'publish_frozen_build') as publish:
+                    with self.assertRaises(m.v.Refused): m.first_freeze(str(root), str(directory), 'a'*40, 'unused', 'unused', [])
+                    publish.assert_not_called()
+                self.assertEqual(outside.read_bytes(), b'keep')
+
+
+class InitialTransactionLifetimeTests(unittest.TestCase):
+    def test_role_inputs_stay_bound_through_joined_signing_and_first_freeze(self):
+        for mode in ('success', 'signing-failure', 'cancel', 'source-substitution', 'normal-substitution', 'simulated-substitution', 'settings-substitution'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve(); run = root/'build/mg/build-app/20261110T000000Z-123'; run.mkdir(parents=True)
+                products = root/'build/app/CloudAgentSimDerivedData/Build/Products'; products.mkdir(parents=True)
+                app_relative = 'Debug-iphonesimulator/Meguri.app'; app_path = products/app_relative
+                agent_relative = app_relative+'/PlugIns/MeguriSnapshotTests.xctest'
+                widget_relative = app_relative+'/PlugIns/MeguriWidget.appex'
+                metadata = {}
+                for relative, identifier, executable, kind in (
+                        (app_relative, 'com.antoinefink.meguri.dev', 'Meguri', 'APPL'),
+                        (agent_relative, 'generated.agent', 'MeguriSnapshotTests', 'BNDL'),
+                        (widget_relative, 'com.antoinefink.meguri.dev.widget', 'MeguriWidget', 'XPC!')):
+                    path = products/relative; path.mkdir(parents=True)
+                    info = {'CFBundleIdentifier': identifier, 'CFBundleExecutable': executable,
+                            'CFBundlePackageType': kind, 'CFBundleSupportedPlatforms': ['iPhoneSimulator'],
+                            'CFBundleVersion': 'generated', 'MeguriCloudContainer': 'iCloud.generated.dev',
+                            'MeguriCloudEnvironment': 'development'}
+                    (path/'Info.plist').write_bytes(plistlib.dumps(info)); (path/executable).write_bytes(code_image_fixture())
+                    metadata[str(path)] = (identifier, {})
+                injection = app_path/'Frameworks/libXCTestBundleInject.dylib'; injection.parent.mkdir(); injection.write_bytes(code_image_fixture())
+                metadata[str(injection)] = ('generated.library', None)
+                app_settings, app_inputs = write_role_inputs(root, 'Meguri')
+                widget_settings, widget_inputs = write_role_inputs(root, 'MeguriWidget')
+                agent_settings = dict(app_settings); agent_settings.update(TARGET_NAME='MeguriSnapshotTests', PRODUCT_BUNDLE_IDENTIFIER='generated.agent')
+                settings_path = run/'agent-settings.json'; widget_settings_path = run/'agent-widget-settings.json'
+                settings_path.write_text(json.dumps([{'target': 'Meguri', 'buildSettings': app_settings},
+                                                    {'target': 'MeguriSnapshotTests', 'buildSettings': agent_settings}]))
+                widget_settings_path.write_text(json.dumps([{'target': 'MeguriWidget', 'buildSettings': widget_settings}]))
+                xctestrun = products/'generated.xctestrun'; xctestrun.write_bytes(b'generated')
+                agent, _ = m.v.bundle(str(products), agent_relative, 'ios-sim')
+                events = []; live = []
+                def native(arguments):
+                    events.append('sign'); path = arguments[-1]
+                    if '--entitlements' in arguments:
+                        private = Path(arguments[arguments.index('--entitlements')+1]); live.append(private)
+                        self.assertTrue(private.is_file())
+                        metadata[path] = (metadata[path][0], plistlib.loads(private.read_bytes()))
+                    if mode == 'signing-failure': raise m.stage.Refused()
+                    if mode == 'cancel': raise m.stage.Cancelled()
+                    substitution = {'source-substitution': app_inputs[0], 'normal-substitution': app_inputs[1],
+                                    'simulated-substitution': app_inputs[2], 'settings-substitution': settings_path}.get(mode)
+                    if substitution is not None:
+                        original = substitution.read_bytes(); substitution.unlink(); substitution.write_bytes(original)
+                def freeze(*args):
+                    events.append('freeze')
+                    self.assertEqual(metadata[str(app_path)][1]['get-task-allow'], True)
+                    self.assertEqual(metadata[str(products/widget_relative)][1], grant_fixture('MeguriWidget'))
+                    # Inputs still refer to their original bytes when publication runs.
+                    self.assertEqual(plistlib.loads(app_inputs[2].read_bytes()), grant_fixture())
+                    return {'products': {'entries': m.v.snapshot(str(root/'build'), str(products))[0]}}
+                read_original = m.v._first_sync_bytes
+                def certificate_or_original(base, path):
+                    if Path(base).name.startswith('meguri-initial-signed-') and path == str(Path(base)/'certificate0'):
+                        return CERT
+                    return read_original(base, path)
+                with patch.object(m.v, 'source', return_value='a'*40), patch.object(m, 'choose_identity', return_value=(SHA, CERT)), \
+                     patch.object(m.v, 'test_inputs', return_value=agent), patch.object(m, 'signing_metadata', side_effect=lambda path: copy.deepcopy(metadata[path])), \
+                     patch.object(m, 'signing_command', side_effect=native), patch.object(m.v, 'command'), \
+                     patch.object(m.v, '_first_sync_bytes', side_effect=certificate_or_original), patch.object(m.v, 'independent_product', return_value=TEAM), \
+                     patch.object(m.v, 'independent_agent'), patch.object(m.v, 'freeze_build', side_effect=freeze) as freeze_call:
+                    args = (str(root), str(run), 'a'*40, str(products), str(xctestrun), str(settings_path), str(widget_settings_path))
+                    if mode == 'success':
+                        m.initial_sign(*args)
+                        self.assertEqual(freeze_call.call_count, 1); self.assertEqual(events[-1], 'freeze')
+                        self.assertTrue((run/'agent-build-reference.json').is_file())
+                    else:
+                        with self.assertRaises((m.v.Refused, m.stage.Refused, m.stage.Cancelled)): m.initial_sign(*args)
+                        freeze_call.assert_not_called()
+                        self.assertFalse((run/'agent-build.json').exists()); self.assertFalse((run/'agent-build-reference.json').exists())
+                self.assertTrue(all(not path.exists() for path in live))
 
 
 if __name__=='__main__':unittest.main()

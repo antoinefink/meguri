@@ -87,3 +87,41 @@ original joined signing call. Other code paths and final verifiers stay unchange
 Focused combined tooling run `58031` passed all three cases, including seven new
 identity/input-lifetime tests. The source privacy scan passed. Actual native
 verification of this composition remains pending.
+
+## Role-specific native grants and first-freeze lifetime
+
+Starting commit: `89c84f54`. The existing prepared patch was applied. Antoine
+requested direct work; this integration has local review, not a new independent
+review.
+
+The prior native audit `67564` showed the ordinary app signature and normal
+xcent missing the source's CloudKit/push grants, development App Group and
+debugger permission. The app and widget simulated xcent files retained their
+own source requests. Missing app and widget groups did not prove a match.
+
+Preparation now binds each role to its exact entitlement source, actual named
+resolved settings and normal/simulated native xcent files. It preserves every
+normal typed value and admits only the role's declared source requests. The
+app's extra debugger grant is a permission change, limited to explicit team
+Debug, test hooks, testability and CloudAgent injection. It is not treated as
+identity metadata. The widget gets only its own development App Group, with
+no app, cloud, push or debugger inheritance. Conflicts and wrong types refuse.
+
+Source, native-input and settings descriptors stay retained through joined
+signing and the first manifest publication. File owner/group checks were added
+during local review. The existing freeze publisher was extracted unchanged so
+the simulator helper can call it inside that lifetime. Mac retains its prior
+path. There is one simulator first freeze. Final product, agent and frozen
+manifest checks are unchanged.
+
+Focused run `20261110T205610Z-18415` exposed incomplete generated fixtures:
+an empty product tree was rejected before freeze, and a certificate mock also
+replaced Info.plist bytes. Fixtures now supply actual generated product entries
+and mock only certificate extraction. Assertions and refusal behavior remain.
+Run `20261110T205658Z-18740` passed all four affected wrappers. Final combined
+run `20261110T205816Z-19139` passed all eight selected wrappers, including final
+input admission and Mac-profile tests. Privacy `20261110T205817Z-19589` and
+similarity `20261110T205816Z-19099` pass.
+
+Native simulator signing and a full batch gate remain pending. No unit trailer,
+round-trip pass or release acceptance follows from these generated checks.

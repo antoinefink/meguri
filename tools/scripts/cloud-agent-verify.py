@@ -600,6 +600,30 @@ def freeze_build(root, products, xctestrun, platform, run, sha):
             "products": {"path": products, "entries": before[0]}}
 
 
+def publish_frozen_build(root, products, xctestrun, platform, run, sha, manifest):
+    """Publish the producer's first manifest with its unchanged input envelope."""
+    producer_pin = snapshot(os.path.join(root, "build"), products)
+    value = freeze_build(root, products, xctestrun, platform,
+                         run, sha)
+    # O_EXCL and held parents prevent a pre-existing symlink or receipt
+    # pathname from redirecting the producer's output.
+    path = contained(os.path.join(root, "build"), manifest)
+    with authority(os.path.dirname(path)) as parent:
+        fd = os.open(os.path.basename(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     0o600, dir_fd=parent)
+        with os.fdopen(fd, "wb") as stream:
+            raw = (json.dumps(value, sort_keys=True) + "\n").encode()
+            need(len(raw) <= 16 * 1024 * 1024, "build-manifest-size")
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+    need(source(root) == sha and
+         snapshot(os.path.join(root, "build"), products) == producer_pin and
+         producer_pin[0] == value["products"]["entries"],
+         "product-changed")
+    return file_reference(os.path.join(root, "build"), path)
+
+
 def check_reference(reference):
     need(isinstance(reference, dict) and set(reference) == {"path", "sha256", "bytes"} and
          isinstance(reference["path"], str) and type(reference["bytes"]) is int and
@@ -800,27 +824,9 @@ def main():
         if args.freeze_build:
             need(all((args.source_commit, args.platform, args.products, args.xctestrun, args.manifest)) and
                  args.header is None and args.results_directory is None, "usage")
-            root = os.path.abspath(args.root)
-            producer_pin = snapshot(os.path.join(root, "build"), args.products)
-            value = freeze_build(root, args.products, args.xctestrun, args.platform,
-                                 args.run_id, args.source_commit)
-            # O_EXCL and held parents prevent a pre-existing symlink or receipt
-            # pathname from redirecting the producer's output.
-            path = contained(os.path.join(root, "build"), args.manifest)
-            with authority(os.path.dirname(path)) as parent:
-                fd = os.open(os.path.basename(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                             0o600, dir_fd=parent)
-                with os.fdopen(fd, "wb") as stream:
-                    raw = (json.dumps(value, sort_keys=True) + "\n").encode()
-                    need(len(raw) <= 16 * 1024 * 1024, "build-manifest-size")
-                    stream.write(raw)
-                    stream.flush()
-                    os.fsync(stream.fileno())
-            need(source(root) == args.source_commit and
-                 snapshot(os.path.join(root, "build"), args.products) == producer_pin and
-                 producer_pin[0] == value["products"]["entries"],
-                 "product-changed")
-            print(json.dumps(file_reference(os.path.join(root, "build"), path)))
+            reference = publish_frozen_build(os.path.abspath(args.root), args.products, args.xctestrun,
+                                             args.platform, args.run_id, args.source_commit, args.manifest)
+            print(json.dumps(reference))
             return 0
         need(args.results_directory and args.header and not any((args.source_commit, args.platform,
              args.products, args.xctestrun, args.manifest)), "usage")

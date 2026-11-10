@@ -29,4 +29,5 @@ REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   [ ! -e "$BATS_TEST_TMPDIR/agent-build.json" ]
   [ ! -e "$BATS_TEST_TMPDIR/agent-build-reference.json" ]
   [ ! -e "$BATS_TEST_TMPDIR/agent-settings.json" ]
+  [ ! -e "$BATS_TEST_TMPDIR/agent-widget-settings.json" ]
 }

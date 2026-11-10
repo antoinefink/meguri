@@ -1026,6 +1026,7 @@ mg_app_quit_mac() {
 mg_app_agent_freeze() {
   local platform="$1" source_commit="$2" sdk=iphonesimulator products xctestrun profile_settings=() settings_command=(xcodebuild)
   local settings="$MG_RUN_DIR/agent-settings.json" policy="$MG_RUN_DIR/agent-cloud-settings.json"
+  local widget_settings="$MG_RUN_DIR/agent-widget-settings.json"
   local manifest="$MG_RUN_DIR/agent-build.json" reference="$MG_RUN_DIR/agent-build-reference.json"
   if [ "${MEGURI_APP_SIGNING-adhoc}" != team ] || [ -z "$source_commit" ]; then
     mg_detail agent_compile_only true
@@ -1042,7 +1043,7 @@ mg_app_agent_freeze() {
       "MEGURI_MAC_AGENT_PROFILE_SPECIFIER=$(jq -r .uuid <<<"$MG_CLOUD_AGENT_MAC_PROFILE_BINDING")")
     settings_command=(mg_app_mac_agent_private_settings xcodebuild)
   fi
-  [ "$platform" != ios-sim ] || profile_settings=("CODE_SIGN_IDENTITY=Apple Development")
+  [ "$platform" != ios-sim ] || profile_settings=("CODE_SIGN_IDENTITY=Apple Development" MEGURI_CLOUD_AGENT_INJECTION=YES)
   products="$MG_ROOT/$MG_APP_DD/Build/Products"
   xctestrun="$(MG_APP_TEST_SCHEME=Meguri mg__vm_xctestrun CloudAgent "$sdk" Debug)"
   if [ -z "$xctestrun" ] || ! "${settings_command[@]}" build-for-testing -showBuildSettings -json -project app/Meguri.xcodeproj \
@@ -1052,15 +1053,19 @@ mg_app_agent_freeze() {
     mg_status fail
     return 1
   fi
-  # Initial simulator signing is part of this native build, before its first
-  # manifest. Keep every final Mac and simulator verifier unchanged.
-  if [ "$platform" = ios-sim ] && ! python3 -B -I "$MG_TOOLS/scripts/cloud-agent-initial-signing.py" \
-      --root "$MG_ROOT" --run-directory "$MG_RUN_DIR" --source-commit "$source_commit" \
-      --products "$products" --xctestrun "$xctestrun" --settings "$settings"; then
-    rm -f "$settings"
-    mg_failure agent-build "Initial simulator development signing refused; no frozen proof created"
-    mg_status fail
-    return 1
+  if [ "$platform" = ios-sim ]; then
+    # A scheme query can omit the extension. Bind its actual named role and the
+    # same producer output roots; no scheme-shape inference from public policy.
+    if ! (umask 077; xcodebuild -showBuildSettings -json -project app/Meguri.xcodeproj \
+        -target MeguriWidget -configuration Debug -sdk iphonesimulator \
+        "SYMROOT=$products" "OBJROOT=$MG_ROOT/$MG_APP_DD/Build/Intermediates.noindex" \
+        MEGURI_SIGNING=team "CODE_SIGN_IDENTITY=Apple Development" MEGURI_CLOUD_AGENT_INJECTION=YES >"$widget_settings" \
+        2>"$MG_RUN_DIR/agent-widget-settings.log"); then
+      rm -f "$settings" "$widget_settings"
+      mg_failure agent-build "CloudAgent widget resolved settings are missing"
+      mg_status fail
+      return 1
+    fi
   fi
   # Retain app policy and agent host bindings; omit raw signing settings.
   if ! jq '[.[] | select(.target == "Meguri" or .target == "MeguriSnapshotTests") | {target, buildSettings:
@@ -1078,14 +1083,29 @@ mg_app_agent_freeze() {
     mg_status fail
     return 1
   fi
-  rm -f "$settings"
-  if ! python3 -B -I "$MG_TOOLS/scripts/cloud-agent-verify.py" --freeze-build \
-      --root "$MG_ROOT" --run-id "$MG_RUN_ID" --source-commit "$source_commit" \
-      --platform "$platform" --products "$products" --xctestrun "$xctestrun" \
-      --manifest "$manifest" >"$reference"; then
-    mg_failure agent-build "CloudAgent product freezing failed; no signed build admission"
-    mg_status fail
-    return 1
+  if [ "$platform" = ios-sim ]; then
+    # Initial signing and the first publication share held source/native/settings
+    # descriptors. The helper publishes both exact outputs; do not freeze twice.
+    if ! python3 -B -I "$MG_TOOLS/scripts/cloud-agent-initial-signing.py" \
+        --root "$MG_ROOT" --run-directory "$MG_RUN_DIR" --source-commit "$source_commit" \
+        --products "$products" --xctestrun "$xctestrun" --settings "$settings" \
+        --widget-settings "$widget_settings"; then
+      rm -f "$settings" "$widget_settings"
+      mg_failure agent-build "Initial simulator development signing refused; no signed build admission"
+      mg_status fail
+      return 1
+    fi
+    rm -f "$settings" "$widget_settings"
+  else
+    rm -f "$settings"
+    if ! python3 -B -I "$MG_TOOLS/scripts/cloud-agent-verify.py" --freeze-build \
+        --root "$MG_ROOT" --run-id "$MG_RUN_ID" --source-commit "$source_commit" \
+        --platform "$platform" --products "$products" --xctestrun "$xctestrun" \
+        --manifest "$manifest" >"$reference"; then
+      mg_failure agent-build "CloudAgent product freezing failed; no signed build admission"
+      mg_status fail
+      return 1
+    fi
   fi
   if ! mg_app_mac_agent_profile_check; then
     mg_failure agent-profile "App-only Mac CloudAgent profile changed during first freeze"

@@ -21,6 +21,7 @@ REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   [[ "$output" == *"status:fail"* ]]
   [[ "$output" != *"awaiting_user"* ]]
   [[ "$output" != *"scenarios"* ]]
+  [[ "$output" != *"unexpected-second-freeze"* ]]
   [[ "$output" != *"status:pass"* ]]
 }
 
@@ -89,10 +90,13 @@ REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
     python3() {
       case "$*" in
         *"cloud-agent-initial-signing.py"*"--source-commit fixture-source"*"--xctestrun"*"--settings"*)
+          [[ "$*" == *"--widget-settings"* ]] || return 10
           printf "initial-signing-before-freeze\n" >&2
+          printf "{}\n" >"$MG_RUN_DIR/agent-build.json"
+          printf "{\"path\":\"fixture-manifest\",\"sha256\":\"fixture-digest\",\"bytes\":42}\n" >"$MG_RUN_DIR/agent-build-reference.json"
           return 0
           ;;
-        *"--freeze-build"*"--source-commit fixture-source"*"--platform ios-sim"*"--xctestrun"*"--manifest"*) ;;
+        *"--freeze-build"*) printf "unexpected-second-freeze\n"; return 9 ;;
         *) return 8 ;;
       esac
       printf "{\"path\":\"fixture-manifest\",\"sha256\":\"fixture-digest\",\"bytes\":42}\n"
@@ -109,6 +113,7 @@ REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   [[ "$output" == *"artifact:json:agent-cloud-settings.json"* ]]
   [[ "$output" == *'detail:agent_build:{"path":"fixture-manifest","sha256":"fixture-digest","bytes":42}'* ]]
   [[ "$output" != *"scenarios"* ]]
+  [[ "$output" != *"unexpected-second-freeze"* ]]
   [[ "$output" != *"status:pass"* ]]
 }
 
