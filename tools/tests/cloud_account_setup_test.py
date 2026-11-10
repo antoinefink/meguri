@@ -169,6 +169,33 @@ class SetupDiagnosticTests(unittest.TestCase):
 
 
 class GuestDiagnosticTests(unittest.TestCase):
+    def test_app_markers_accept_only_closed_fields_with_bounded_lines(self):
+        good={'phase':'observationChannel','channel':'attributeEvent'}
+        prefix=b'MG_OWNER_APP_DIAGNOSTIC '
+        invalid=({'phase':'GENERATED_PRIVATE_MARKER','channel':'events'},
+                 {**good,'private':'GENERATED_PRIVATE_MARKER'},
+                 {'phase':'observationChannel','channel':[]},
+                 {'phase':'observationChannel','channel':'GENERATED_PRIVATE_MARKER'})
+        raw=b'GENERATED_PRIVATE_MARKER\n'+b''.join(prefix+json.dumps(value).encode()+b'\n' for value in invalid[:3])
+        raw+=prefix+json.dumps(good).encode()+b'\n'
+        out=io.StringIO()
+        with contextlib.redirect_stderr(out):p.AppSetupDiagnostic.relay(raw)
+        self.assertEqual(json.loads(out.getvalue().removeprefix(prefix.decode())),good)
+        self.assertNotIn('GENERATED_PRIVATE_MARKER',out.getvalue())
+        for value in (prefix+b'{}\n'*5,prefix+json.dumps(good).encode()+b'\n'):
+            out=io.StringIO()
+            with contextlib.redirect_stderr(out):p.AppSetupDiagnostic.relay(value*5)
+            self.assertEqual(out.getvalue(),'')
+        for value in invalid:
+            out=io.StringIO()
+            with contextlib.redirect_stderr(out):p.AppSetupDiagnostic.relay(prefix+json.dumps(value).encode()+b'\n')
+            self.assertEqual(out.getvalue(),'')
+        for raw in (prefix+b'{"phase":"captureSend","phase":"configuration","channel":"ready"}\n',
+                    prefix+b' '*4096+b'\n',b'X'*(p.CAP+1)):
+            out=io.StringIO()
+            with contextlib.redirect_stderr(out):p.AppSetupDiagnostic.relay(raw)
+            self.assertEqual(out.getvalue(),'')
+
     def test_guest_errno_and_refusal_emit_only_closed_fields(self):
         for error,code in ((OSError(p.errno.EPIPE,"GENERATED_PRIVATE_MARKER"),"os-broken-pipe"),
                            (p.v.Refused("transport-frame"),"transport-frame")):

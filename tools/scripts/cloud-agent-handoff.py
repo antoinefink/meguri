@@ -675,8 +675,9 @@ class SetupChild(subprocess.Popen):
                     self._setup_joined = True
                     self.originals.pop(self.pid, None)
                 return self.returncode
-        except (v.Refused, OSError):
-            if not self._setup_joined:
+        except (v.Refused, OSError) as error:
+            cancelled = isinstance(error, v.Refused) and error.args == ('setup-cancelled',)
+            if not self._setup_joined and not cancelled:
                 self._setup_invalid = True
             raise
 
@@ -729,8 +730,9 @@ class SetupChild(subprocess.Popen):
                         raise v.Refused('setup-join-uncertain') from None
                 except OSError:
                     raise v.Refused('setup-join-uncertain') from None
-        except (v.Refused, OSError):
-            if not self._setup_joined:
+        except (v.Refused, OSError) as error:
+            cancelled = isinstance(error, v.Refused) and error.args == ('setup-cancelled',)
+            if not self._setup_joined and not cancelled:
                 self._setup_invalid = True
             raise
 

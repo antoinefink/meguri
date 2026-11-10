@@ -127,6 +127,36 @@ def emit_setup_site(error):
         pass
 
 
+class AppSetupDiagnostic:
+    PHASES = frozenset(('configuration', 'product', 'channel', 'helloSend', 'captureCommand',
+        'observationChannel', 'observationProduct', 'observationMatch', 'observationConfiguration',
+        'observationEncode', 'accountStatus', 'accountIdentity', 'captureSend', 'freshCommand',
+        'freshSend', 'nextCommand', 'holdSend', 'finishSend'))
+    CHANNELS = frozenset(('none', 'initial', 'root', 'directories', 'socket', 'events', 'ready',
+        'responseWrite', 'commandRead', 'commandParse', 'attributeEvent', 'renameEvent',
+        'deleteEvent', 'revokeEvent', 'otherEvent'))
+
+    @classmethod
+    def relay(cls, raw):
+        prefix = b'MG_OWNER_APP_DIAGNOSTIC '
+        if type(raw) is not bytes or len(raw) > CAP:
+            return
+        lines = [line for line in raw.splitlines() if line.startswith(prefix)]
+        if len(lines) > 4:
+            return
+        for line in lines:
+            if len(line) > 4096:
+                continue
+            try:
+                value = strict(line[len(prefix):])
+                if (type(value) is dict and set(value) == {'phase', 'channel'} and
+                        type(value['phase']) is str and value['phase'] in cls.PHASES and
+                        type(value['channel']) is str and value['channel'] in cls.CHANNELS):
+                    print(prefix.decode() + json.dumps(value, sort_keys=True), file=sys.stderr)
+            except (v.Refused, OSError, ValueError, TypeError, KeyError, AttributeError):
+                pass
+
+
 class PublicationUncertain(v.Refused):
     pass
 
@@ -531,10 +561,17 @@ def guest_setup(diagnostic=None):
         finally:
             if child is not None:
                 h.setup_join(child)
+                # Read only closed app markers after the original has joined.
+                # Raw XCTest output remains private and cannot become evidence.
+                for output in (out, err):
+                    try:
+                        AppSetupDiagnostic.relay(os.pread(output.fileno(), CAP + 1, 0))
+                    except (OSError, ValueError):
+                        pass
 
 
 def guest_source():
-    definitions = (v.Refused, v.need, v.digest, v.identity, h.directory_pin, h.file_pin, i.strict, i.raw_json, SetupDiagnostic,
+    definitions = (v.Refused, v.need, v.digest, v.identity, h.directory_pin, h.file_pin, i.strict, i.raw_json, SetupDiagnostic, AppSetupDiagnostic,
         h.Directory, h.write_new, h.root_state, h.checked_raw, h.setup_cancel, h.setup_launch,
         h.SetupSigInfo, h.SetupBSDInfo, h.SetupKernel, h.SetupChild, h.setup_process,
         h.setup_join, h.setup_command, s.frame_read, s.frame_write, setup_plan, guest_setup)
@@ -552,6 +589,7 @@ def guest_source():
 
 def relay_guest_diagnostic(raw):
     """Relay only closed records from the original, already joined guest."""
+    AppSetupDiagnostic.relay(raw)
     prefix = b'MG_OWNER_GUEST_DIAGNOSTIC '
     if len(raw) > CAP:
         return

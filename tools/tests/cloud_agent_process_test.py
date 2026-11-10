@@ -86,6 +86,16 @@ class ManagedTests(unittest.TestCase):
             self.assertTrue(child._setup_joined);self.assertFalse(child._setup_invalid)
             self.assertEqual(child.returncode,23);h.setup_join(child)
             waitpid.assert_called_once_with(123,0);kill.assert_not_called()
+
+    def test_cancel_during_nonreaping_observation_keeps_cleanup_authority(self):
+        child,model=self.child()
+        with patch.object(model,'terminal',side_effect=h.v.Refused('setup-cancelled')),patch.object(h.os,'waitpid') as reap:
+            with self.assertRaisesRegex(h.v.Refused,'setup-cancelled'):child.poll()
+            self.assertFalse(child._setup_invalid);self.assertFalse(child._setup_reaped)
+            reap.assert_not_called()
+        with self.guards(),patch.object(h.os,'waitpid',return_value=(123,23<<8)) as reap,patch.object(h.os,'killpg') as kill:
+            h.setup_join(child)
+            self.assertTrue(child._setup_joined);reap.assert_called_once_with(123,0);kill.assert_not_called()
     def test_existing_term_timeout_kill_and_final_wait_budgets(self):
         child,model=self.child();model.running=True;model.quiescent=False;signals=[];waits=[]
         def signal_group(pid,number):

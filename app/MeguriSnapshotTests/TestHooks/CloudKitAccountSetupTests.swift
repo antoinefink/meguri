@@ -17,35 +17,50 @@ import XCTest
             XCTFail("Owner setup requires its separate startup selection")
             return
         }
+        var phase = OwnerSetupPhase.configuration
+        var originalChannel: OwnerSetupChannel?
         do {
             guard let configuration = CloudBuildConfiguration.fromBundle,
                   case .development = configuration.environment, configuration.schemaConfigured,
                   let path = ProcessInfo.processInfo.environment["MEGURI_CLOUD_ACCOUNT_DIRECTORY"] else {
                 throw AgentFailure.binding
             }
+            phase = .product
             let original = try AgentRunningProductInspector.observe()
+            phase = .channel
             let channel = try OwnerSetupChannel(path: path)
+            originalChannel = channel
             defer { channel.close() }
             func observation() throws -> [String: Any] {
+                phase = .observationChannel
                 try channel.check()
+                phase = .observationProduct
                 let actual = try AgentRunningProductInspector.observe()
+                phase = .observationMatch
                 try actual.requireSameOwnedProduct(as: original)
+                phase = .observationConfiguration
                 guard let current = CloudBuildConfiguration.fromBundle,
                       current.container == configuration.container, current.environment == configuration.environment,
                       current.schemaConfigured == configuration.schemaConfigured else { throw AgentFailure.binding }
+                phase = .observationEncode
                 return try OwnerSetupObservation.encode(actual)
             }
-            try channel.send(["pid": getpid(), "container": configuration.container, "observation": observation()])
+            let initialObservation = try observation()
+            phase = .helloSend
+            try channel.send(["pid": getpid(), "container": configuration.container, "observation": initialObservation])
             // Only the original parent, after actual product/signature/profile,
             // destination and loaded-image admission, sends this first command.
+            phase = .captureCommand
             guard try channel.action() == "capture" else { throw AgentFailure.binding }
             let container = CKContainer(identifier: configuration.container)
             func read() async throws -> [String: Any] {
                 _ = try observation()
                 var status = "failed", identity: [UInt8] = []
                 do {
+                    phase = .accountStatus
                     switch try await container.accountStatus() {
                     case .available:
+                        phase = .accountIdentity
                         let record = try await container.userRecordID()
                         identity = Array(record.recordName.utf8) // Exact V9.1 encoding.
                         guard !identity.isEmpty else { throw AgentFailure.binding }
@@ -60,23 +75,42 @@ import XCTest
                 try Task.checkCancellation()
                 return ["status": status, "identity": identity, "observation": try observation()]
             }
-            try channel.send(try await read())
+            let captured = try await read()
+            phase = .captureSend
+            try channel.send(captured)
+            phase = .freshCommand
             guard try channel.action() == "fresh" else { throw AgentFailure.binding }
-            try channel.send(try await read())
+            let fresh = try await read()
+            phase = .freshSend
+            try channel.send(fresh)
             while true {
+                phase = .nextCommand
                 switch try channel.action() {
-                case "hold": try channel.send(["observation": observation()])
+                case "hold":
+                    let current = try observation()
+                    phase = .holdSend
+                    try channel.send(["observation": current])
                 case "finish":
                     _ = try observation()
+                    phase = .finishSend
                     try channel.send(["finished": true])
                     return
                 default: throw AgentFailure.binding
                 }
             }
         } catch {
+            let checkpoint = originalChannel?.checkpoint.rawValue ?? "none"
+            let marker = "MG_OWNER_APP_DIAGNOSTIC {\"phase\":\"\(phase.rawValue)\",\"channel\":\"\(checkpoint)\"}\n"
+            try? FileHandle.standardError.write(contentsOf: Data(marker.utf8))
             XCTFail("Owner setup refused; no signed execution evidence")
         }
     }
+}
+
+private enum OwnerSetupPhase: String {
+    case configuration, product, channel, helloSend, captureCommand
+    case observationChannel, observationProduct, observationMatch, observationConfiguration, observationEncode
+    case accountStatus, accountIdentity, captureSend, freshCommand, freshSend, nextCommand, holdSend, finishSend
 }
 
 // Same actual loaded-product observer as preflight/normal CloudAgent, with the
@@ -110,6 +144,11 @@ import XCTest
 // only in memory/kernel buffers. Relative connect avoids macOS sun_path limits
 // without accepting another root or placing a socket outside the sandbox.
 @MainActor private final class OwnerSetupChannel {
+    enum Checkpoint: String {
+        case initial, root, directories, socket, events, ready, responseWrite, commandRead, commandParse
+        case attributeEvent, renameEvent, deleteEvent, revokeEvent, otherEvent
+    }
+    private(set) var checkpoint = Checkpoint.initial
     private struct Pin: Equatable {
         let device: dev_t, inode: ino_t, owner: uid_t, mode: mode_t
         init(_ value: stat) { device = value.st_dev; inode = value.st_ino; owner = value.st_uid; mode = value.st_mode }
@@ -188,9 +227,11 @@ import XCTest
         }
     }
     func check() throws {
+        checkpoint = .root
         guard !closed, try AgentRunDirectory.osApplicationSupportRoot().path + "/" + URL(fileURLWithPath: path).lastPathComponent == path else {
             throw AgentFailure.storage
         }
+        checkpoint = .directories
         for directory in directories {
             var held = stat(), named = stat()
             guard fstat(directory.fd, &held) == 0, Pin(held) == directory.pin else { throw AgentFailure.storage }
@@ -198,14 +239,30 @@ import XCTest
             guard result == 0, Pin(named) == directory.pin else { throw AgentFailure.storage }
         }
         var named = stat(), event = kevent(), zero = timespec(tv_sec: 0, tv_nsec: 0)
+        checkpoint = .socket
         guard let directory = directories.last, fstatat(directory.fd, "channel", &named, AT_SYMLINK_NOFOLLOW) == 0,
-              Pin(named) == socketPin, named.st_nlink == 1,
-              kevent(events, nil, 0, &event, 1, &zero) == 0 else { throw AgentFailure.storage }
+              Pin(named) == socketPin, named.st_nlink == 1 else { throw AgentFailure.storage }
+        checkpoint = .events
+        let count = kevent(events, nil, 0, &event, 1, &zero)
+        guard count == 0 else {
+            if count == 1 {
+                switch event.fflags {
+                case UInt32(NOTE_ATTRIB): checkpoint = .attributeEvent
+                case UInt32(NOTE_RENAME): checkpoint = .renameEvent
+                case UInt32(NOTE_DELETE): checkpoint = .deleteEvent
+                case UInt32(NOTE_REVOKE): checkpoint = .revokeEvent
+                default: checkpoint = .otherEvent
+                }
+            }
+            throw AgentFailure.storage
+        }
+        checkpoint = .ready
     }
     func send(_ value: [String: Any]) throws {
         try check()
         let bytes = try JSONSerialization.data(withJSONObject: value.merging(["bytes": 0]) { _, new in new }, options: [.sortedKeys]) + Data([10])
         guard bytes.count <= Self.limit else { throw AgentFailure.storage }
+        checkpoint = .responseWrite
         try bytes.withUnsafeBytes { raw in
             var offset = 0
             while offset < raw.count {
@@ -218,6 +275,7 @@ import XCTest
     }
     func action() throws -> String {
         try check()
+        checkpoint = .commandRead
         while !buffered.contains(10) {
             var chunk = [UInt8](repeating: 0, count: 4096)
             let count = chunk.withUnsafeMutableBytes { Darwin.recv(socketFD, $0.baseAddress, $0.count, 0) }
@@ -227,6 +285,7 @@ import XCTest
         let end = buffered.firstIndex(of: 10)!
         let line = Data(buffered[..<end])
         buffered.removeSubrange(...end)
+        checkpoint = .commandParse
         let fields = try AgentJSON.parseEvidence(line).record("action bytes")
         guard try fields.integer("bytes") == 0 else { throw AgentFailure.shape }
         try check()

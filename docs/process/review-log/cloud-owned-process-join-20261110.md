@@ -51,3 +51,26 @@ The temporary MG probe route was removed afterward.
 The final integrated patch has no new independent review.
 Antoine requested direct work. Full integration and real signed setup
 remain pending. Passing cleanup is not proof of a working CloudKit round trip.
+
+## Signed setup follow-up
+
+Commit `050e260c` was pushed before owner setup `20261110T203215Z-96644`.
+The run still fails, but cleanup now joins and relays the original guest's
+closed diagnostic: `guest-app-receive / transport-frame`. The original stream
+and stage were checked unchanged by classifier `20261110T203404Z-99438`.
+This means the response ended before a complete frame arrived. It does not
+prove that the app sent malformed data or that an account is missing.
+No approval was entered and no source was published.
+
+Local follow-up review found that parent cancellation during a nonreaping
+observation must leave the original available for cleanup. It is not an
+ownership failure. The narrow correction retains the failure fence for all
+other observation errors. Focused run `20261110T203513Z-99768` passed all three
+affected wrappers, including the new cancellation case.
+
+The setup-only Swift test now records only enumerated operation and channel
+checkpoints on refusal. The guest relays only bounded, exact-schema marker
+records after its original child joins. Host relay retains the same boundary.
+Raw XCTest text, paths, exception descriptions and account values stay private.
+The directory, socket, event and loaded-product checks remain enabled and
+unchanged. Native compilation and the next setup attempt are still pending.
