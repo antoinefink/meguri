@@ -4,6 +4,7 @@ Spec: conformance/cloudkit-agent
 Requirements: R2047, R2048, R2049, R2050, R2051, R2052, R2053, R2054, R2055, R2056, R2057, R2058, R2059, R2064, R2065; supports R2066
 Anki: none (Meguri design)
 Scenarios: none (protocol tests, app-hosted `CloudKitSoakTests`, and signed runs of conformance/cloudkit-acceptance Q7)
+Status: Under review (R2066) for J4.1, J5.1 and two 2026-11-10 pointer sentences: "J4.1 states how the journal shows that order." in J4's engine-observation paragraph, and "After a relaunch, J5.1 states which process the host joins and which work that `close` joins." at the end of J3.2's "Original exchanges and peer evidence". Do not implement them until approved. Every other section, and every other sentence of J3.2 and J4, is in force and unchanged.
 
 This file defines the command file and durable journal of `conformance/cloudkit-acceptance#Q7.3`. It supplies a protocol for the executable agent, not evidence that an agent or a signed run exists. Q4, Q5 and Q7 of that contract remain authoritative. This file adds no sync deadline, retry, account permission or acceptance exception.
 
@@ -842,6 +843,7 @@ and preserved content/relations above, with normal local metadata checks. Local 
 return, inbox presence or a peer memory cache cannot prove the peer holds the edit.
 Missing durable observation fails; it does not trigger mutation or exchange replay.
 `close` retains J3.1's coherent final integrity and joined-shutdown requirements.
+After a relaunch, J5.1 states which process the host joins and which work that `close` joins.
 
 #### Fresh runtime and interruption
 
@@ -894,7 +896,7 @@ All records contain:
 
 `observation` contains facts from real operation receipts, engine events and checks. Event names are fixed; device, instance, operation and entity names use local labels. Allowed facts include counts, canonical payload digests, status values and CloudKit error codes. Write no CloudKit record, account identity or collection content. For errors, record the typed domain and code, never the error's free text.
 
-Engine observations preserve callback order, the engine-instance label and the related operation label. Per-record result observations precede the state-save observation that reflects them. The journal must retain enough actual order to judge Q7.6's A6; a summary saying A6 holds cannot replace those events. A state-save or apply observation references the actual durable operation it reports. Background callbacks may follow their command's `done`; they retain that command identity and never add another terminal result. Automatic callbacks without a causal command use the latest started command as the observation boundary, without claiming it caused them.
+Engine observations preserve callback order, the engine-instance label and the related operation label. Per-record result observations precede the state-save observation that reflects them. J4.1 states how the journal shows that order. The journal must retain enough actual order to judge Q7.6's A6; a summary saying A6 holds cannot replace those events. A state-save or apply observation references the actual durable operation it reports. Background callbacks may follow their command's `done`; they retain that command identity and never add another terminal result. Automatic callbacks without a causal command use the latest started command as the observation boundary, without claiming it caused them.
 
 `done` contains the actual operation result and the checks required for that command by Q5 and the selected leg. Its `checks` entries name the check, its observed facts or evidence reference, and its outcome. It does not accept an expected result supplied by the command as an observation. Every completed local mutation links to the real core operation receipt or the durable entities and revisions that prove its effect. A Sync Now result comes from the real coordinator and its tracking, not a command's requested result.
 
@@ -905,6 +907,29 @@ After failure, the agent stops accepting commands and cancels and joins the work
 Run every check required by Q5 and the selected leg. The caller cannot select fewer checks. The agent records the app's checks when the contract requires them. The coordinator compares devices and service state using their actual observations. Checks that still need evidence stay open; the journal cannot report them as passed.
 
 All command files, journals, copied logs and evidence pass Q5's `content-free` check. Use account labels only, never an address, user record id, credential or token. Core inspection can read generated content in process; it exports only the facts these checks need. This file does not define the final media aggregate encoding or replace Q7.4's final comparison.
+
+### J4.1 Order evidence for engine observations
+
+In J4, "precede" is the order in which one engine instance delivered its callbacks, as `sync/cloudkit-records` assumption A6 states it for one engine. Acceptance Q7.5's "event order in the step log" and Q7.6's A6 entry mean the same order. This section states only how the journal shows that order. It sets no ledger value: acceptance Q7.4 and Q7.6 judge A6 from the order shown here, unchanged.
+
+A per-record result observation and the state-save observation that reflects it are identified only by their recorded references: the result's related operation label and the durable operation that the state save references (J4). Nearby records, instants and later durable state do not identify that state save.
+
+The journal shows the order of such a pair only from records of one engine instance: the same `agent_instance` and the same engine-instance label.
+
+- Append order (`record_seq`) is the pair's shown order, subject to the next rule.
+- If both observations also carry a callback-order fact, such as a tick, under the same fact name, the pair has a shown order only when that fact gives the same strict order as append order. When it gives the other order, or equal values, the journal shows no order for the pair. Neither form overrides the other: the journal does not record when the agent assigned the fact or when it appended the record relative to the callback, so neither is taken as the delivery order.
+
+An agent that appends callback observations out of their delivery order, for example after buffering them, therefore does not show the order J4 requires, whatever order fact it records.
+
+The journal also shows no order:
+
+- for a pair whose observations belong to different engine instances or `agent_instance` values, including an original process and the process relaunched after it (J5.1);
+- for a result and a state save whose recorded references do not link them;
+- for a result the journal does not hold, such as an observation that the original process buffered and a kill lost (J5.1). The journal does not show that every result reached it; a check that needs a result the journal does not hold has missing evidence (J5).
+
+`observed_at` instants, summary facts, durable rows and later state supply no missing order or link. When J4, a leg check or a J5 recovery check requires the order of a pair and the journal shows none, that is a failed evidence check (acceptance Q7.4), and the checks that depend on it fail. The failure names the pair and the order each form gives.
+
+A callback-order fact orders observations only. It does not move an observation to another command, `agent_instance`, engine instance or terminal state.
 
 ## J5. Relaunch and interrupted commands
 
@@ -921,6 +946,22 @@ The check must distinguish the committed operation from one that never committed
 Only a successful recovery check permits a `done` record with `recovered_from` naming the original `started` record. It proves the planned interrupted outcome; it does not reissue a mutation to obtain that outcome. Missing recovery instructions, missing evidence, a failed check or an indeterminate outcome stops the run. Failed or indeterminate recovery records `failed`; the agent cannot continue to the next command.
 
 If the journal ends after a terminal `done`, the next command is its successor. If it ends before any `started` for the next accepted command, that command may start normally. These are progress rules for this agent, not a new sync retry mechanism. Recovery and normal execution retain the product's existing account fences, deadlines and cancellation rules.
+
+### J5.1 Process boundary at a relaunch
+
+This section applies when the host coordinator relaunches the app after a kill, or after it terminated the app for an offline period (acceptance Q7.3, J5). It grants no interruption or recovery that J3.2 and J5 do not grant.
+
+The original process ends with all in-process work it owned: the work of its in-app sync coordinator (`SyncCoordinator`), its engine instance and that instance's callbacks. No later process can cancel, drain or join that work. A request that the original process had sent may still take effect on the CloudKit service; J5's recovery check decides that outcome, which may be indeterminate.
+
+What the original process leaves is evidence, not work. That evidence includes the durable collection, tracking and media state; the device-local run directory (J2, J3); the complete journal records the original process appended, each with its original `agent_instance`, command identity and `record_seq`, and for engine observations its engine-instance and operation labels (J4); and the host coordinator's retained copies of the delivered commands and the journal prefix (J3). Observations the original process never appended are lost. They are not evidence, and nothing stands in for them (J4.1). The preserved bytes of an incomplete final line are diagnostic evidence only (J5). This section does not change how service state is shown: by journaled observations, by the peer's observations and by the host coordinator's comparison (J3.2, J4).
+
+This evidence is input to the J5 recovery check of the interrupted command and to J3.2's reconstruction of mappings and phase, under their rules; journal phase alone does not prove that a referenced entity or operation exists (J3.2). The relaunched process makes every check of a recovered `done` itself, including Q5 `results`, recomputed as Q5 states. An original `done` line or check outcome is input to that check, never its outcome. Recovery observations, including any real CloudKit observation J5 requires, carry the original command identity and the new `agent_instance` (J5).
+
+Original records stay where they are, with their original `agent_instance`, engine-instance label and command identity. The relaunched process does not relabel them as its own engine instance's work or as a later command's work, and it does not attribute an automatic callback to the manual exchange. An original acknowledgement whose manual or automatic cause is unresolved is never reported as the manual exchange's own acknowledgement. It may satisfy the revision only through J3.2's earlier-automatic acknowledgement rule, with its original event/operation proof. An acknowledgement event that the relaunched process's engine delivers is neither the original exchange's acknowledgement nor an earlier one, so it cannot satisfy the interrupted command's revision-specific acknowledgement. Durable acknowledgement state counts for the interrupted command only together with the original exchange's actual result (J3.2) or, for an earlier automatic acknowledgement, its original event/operation proof; a durable row alone does not show which process wrote it.
+
+The relaunched process owns only the work it starts: its in-app sync coordinator's work, its engine instance and that instance's callbacks. A `close` in that process applies J3.1 to that work, in J3.1's order: actual cancellation/drain, join of the owned work, the final `close.integrity` snapshot, Core close, then `close.joined`. `close.joined` reports only that process's own work, with every fact J3.1's table requires of it. It never claims that the original process, its engine or its callbacks were drained, joined or closed. Where J3.2 applies J3.1's close rule after a relaunch, the app-hosted process that the host joins is the one that ran `close`; the host never joins the killed process. The kill and the original process's exit are not a clean close. A recovered `done` permits its successor under J5; it supplies neither `close.integrity` nor `close.joined`. The host coordinator still checks each terminal result and its evidence, and compares the devices' observations, before it delivers `close` (J3, J3.2, J6). Each further relaunch starts a new process boundary under the same rules.
+
+This adds no deadline, retry, account permission or cancellation rule. J5's account fences, deadlines and cancellation rules apply unchanged.
 
 ## J6. Coordinator evidence and result scope
 
