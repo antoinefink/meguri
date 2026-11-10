@@ -127,12 +127,22 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
                 return .init(outputs: [], error: CancellationError(), deferred: false)
                 #endif
             }
-            return await projectAccountRead(await complete())
+            let result = await complete()
+            guard result.verified, result.error == nil, !closed, !Task.isCancelled else {
+                return .init(outputs: result.outputs, error: result.error, deferred: false, accountVerified: result.verified)
+            }
+            return .init(outputs: result.outputs, error: result.error, deferred: false, accountVerified: result.verified,
+                afterOutputs: { [self] admitted in
+                    guard admitted, accounts.isCurrentRead(id), !closed, !Task.isCancelled else {
+                        return .init(outputs: [], error: CancellationError(), deferred: false)
+                    }
+                    return await projectAccountRead(result)
+                })
         }
     }
     private func projectAccountRead(_ result: CloudAppAccountReadResult) async -> SyncCommandResult {
         guard result.verified, result.error == nil, !closed, !Task.isCancelled else {
-            return .init(outputs: result.outputs, error: result.error, deferred: false, accountVerified: result.verified)
+            return .init(outputs: [], error: result.error, deferred: false, accountVerified: result.verified)
         }
         do {
             let lifecycle: CollectionLifecycle = try await CoreCollectionService().lifecycle()
@@ -143,11 +153,11 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
                     // StartEngine. Core settles queued inbox work before its scan.
                     try await workflow.prepareRuntimeBeforePolicy()
                     let refreshed = try await policy.input(.refresh(.cloud))
-                    return .init(outputs: result.outputs + [refreshed], error: nil, deferred: false, accountVerified: true)
+                    return .init(outputs: [refreshed], error: nil, deferred: false, accountVerified: true)
                 }
             }
-            return .init(outputs: result.outputs, error: nil, deferred: false, accountVerified: true)
-        } catch { return .init(outputs: result.outputs, error: error, deferred: false) }
+            return .init(outputs: [], error: nil, deferred: false, accountVerified: true)
+        } catch { return .init(outputs: [], error: error, deferred: false) }
     }
     func freezeForSuspend() async throws {
         await accounts.freeze()
@@ -231,7 +241,15 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
 #if canImport(CloudKit)
 extension SyncCommandResult {
     init(_ result: CloudPolicyNativeResult) {
-        self.init(outputs: result.outputs, error: result.error, deferred: result.deferred, mediaCancellation: result.mediaCancellation)
+        let afterOutputs: (@MainActor @Sendable (Bool) async -> SyncCommandResult)?
+        if let followup = result.afterOutputs {
+            afterOutputs = { _ in SyncCommandResult(await followup()) }
+        } else {
+            afterOutputs = nil
+        }
+        self.init(outputs: result.outputs, error: result.error, deferred: result.deferred, mediaCancellation: result.mediaCancellation,
+            acknowledgedOutputCount: result.acknowledgedOutputCount,
+            afterOutputs: afterOutputs)
     }
 }
 #endif

@@ -298,6 +298,7 @@ impl Runtime {
         use Missing::*;
         let missing = SelectedControlObservation::missing;
         if collection.path() != self.directory.join("collection.anki2") {
+            eprintln!("selected-control:path");
             return Ok(missing(CurrentCollectionChanged));
         }
         let _lease = collection.reader(ReaderRole::Cloud).map_err(|_| Error::InvalidData)?;
@@ -344,9 +345,12 @@ impl Runtime {
                 || evidence.native_file != file.pair()
                 || snapshot.runtime.as_ref().and_then(|r| r.file) != Some(file)
             {
+                eprintln!("selected-control:file-open-current-generation-runtime-file");
                 return Err(CurrentCollectionChanged);
             }
-            let decision = decision.as_ref().ok_or(CurrentCollectionChanged)?;
+            let decision = decision.as_ref().ok_or(CurrentCollectionChanged).inspect_err(|_| {
+                eprintln!("selected-control:publication-fence-absent");
+            })?;
             let account_binding_matches = matches!(&decision.publication.binding,
             meguri_engine::device_state::AccountBinding::Connected { account, configuration, environment }
             if account.as_bytes() == binding.facts.account.0.as_slice()
@@ -358,6 +362,7 @@ impl Runtime {
                 || decision.pending_reason.is_some()
                 || !account_binding_matches
             {
+                eprintln!("selected-control:publication-fence");
                 return Err(CurrentCollectionChanged);
             }
             if snapshot.live_operation {
@@ -417,6 +422,7 @@ impl Runtime {
                     || receipt.complete_request.incarnation != snapshot.incarnation
                     || receipt.complete_request.generation != evidence.generation.0
                 {
+                    eprintln!("selected-control:accepted-receipt-identity");
                     return Err(CurrentCollectionChanged);
                 }
                 let Some(done) = &receipt.done_active else {
@@ -521,6 +527,7 @@ impl Runtime {
             || device.replacement_evidence().map_err(|_| Error::InvalidData)? != latest_replacement
             || self.selected_snapshot()? != snapshot
         {
+            eprintln!("selected-control:final-provider-snapshot-recheck");
             result = missing(CurrentCollectionChanged);
         }
         Ok(result)

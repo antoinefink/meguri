@@ -36,6 +36,9 @@ protocol SyncCoordinatorBackend: AnyObject {
     // RunCleanup alone reports its qualified local-pass return before waiting
     // for native inventory. This callback grants no Core or SDK authority.
     func execute(_ command: CloudPolicyCommand, corePrepared: @escaping @MainActor @Sendable () async -> Void) async -> SyncCommandResult
+    func execute(_ command: CloudPolicyCommand, corePrepared: @escaping @MainActor @Sendable () async -> Void,
+                 acknowledgeOutputs: @escaping @MainActor @Sendable ([CloudPolicyOutput]) async -> Void,
+                 performInput: @escaping @MainActor @Sendable (@escaping @Sendable () async throws -> CloudPolicyOutput) async throws -> CloudPolicyOutput) async -> SyncCommandResult
     func beginAccountRead(transition: Bool) async throws -> UInt64
     func readAccount(_ read: UInt64) async -> SyncCommandResult
     // Resolve only. The completion commits proof only when admitted == true;
@@ -50,6 +53,15 @@ protocol SyncCoordinatorBackend: AnyObject {
 extension SyncCoordinatorBackend {
     func execute(_ command: CloudPolicyCommand, corePrepared: @escaping @MainActor @Sendable () async -> Void) async -> SyncCommandResult {
         await execute(command)
+    }
+    func execute(_ command: CloudPolicyCommand, corePrepared: @escaping @MainActor @Sendable () async -> Void,
+                 acknowledgeOutputs: @escaping @MainActor @Sendable ([CloudPolicyOutput]) async -> Void,
+                 performInput: @escaping @MainActor @Sendable (@escaping @Sendable () async throws -> CloudPolicyOutput) async throws -> CloudPolicyOutput) async -> SyncCommandResult {
+        await CloudPolicyOutputAcknowledgement.$current.withValue(acknowledgeOutputs) {
+            await CloudPolicyOutputAcknowledgement.$input.withValue(performInput) {
+                await execute(command, corePrepared: corePrepared)
+            }
+        }
     }
     // Transport-only test results already completed; retain their failures
     // even when admission closes. Native backends defer the actual proof.
@@ -67,9 +79,14 @@ nonisolated struct SyncCommandResult: Sendable {
     let deferred: Bool
     let accountVerified: Bool
     let mediaCancellation: Bool
-    init(outputs: [CloudPolicyOutput], error: (any Error)?, deferred: Bool, accountVerified: Bool = false, mediaCancellation: Bool = false) {
+    let acknowledgedOutputCount: Int
+    // Account preparation returns before any subsequent Core preparation/input.
+    let afterOutputs: (@MainActor @Sendable (Bool) async -> SyncCommandResult)?
+    init(outputs: [CloudPolicyOutput], error: (any Error)?, deferred: Bool, accountVerified: Bool = false, mediaCancellation: Bool = false, acknowledgedOutputCount: Int = 0,
+         afterOutputs: (@MainActor @Sendable (Bool) async -> SyncCommandResult)? = nil) {
         self.outputs = outputs; self.error = error; self.deferred = deferred; self.accountVerified = accountVerified
         self.mediaCancellation = mediaCancellation
+        self.acknowledgedOutputCount = acknowledgedOutputCount; self.afterOutputs = afterOutputs
     }
 }
 enum SyncOwnerFailure: Error { case configurationUnavailable }
@@ -164,8 +181,13 @@ public final class SyncCoordinator {
         case completeAccount(UInt64, backend: any SyncCoordinatorBackend, generation: UInt64, revision: UInt64,
                              complete: @MainActor (Bool) async -> SyncCommandResult,
                              acknowledged: CheckedContinuation<Bool, Never>)
+        case accountOutputsReturned(UInt64, backend: any SyncCoordinatorBackend, generation: UInt64, revision: UInt64,
+                                    result: SyncCommandResult, acknowledged: CheckedContinuation<Bool, Never>)
         case resumeBinding(CloudConnectionPreview, service: CoreCloudConnectionService, generation: UInt64, revision: UInt64,
                            acknowledged: CheckedContinuation<ResumeAdmission, any Error>)
+        case nativeInput(@Sendable () async throws -> CloudPolicyOutput, generation: UInt64, revision: UInt64,
+                         phaseOwner: UUID?, acknowledged: CheckedContinuation<CloudPolicyOutput, any Error>)
+        case nativeInputReturned(CloudPolicyOutput, acknowledged: CheckedContinuation<CloudPolicyOutput, any Error>)
         case corePhaseFinished(UUID)
         case corePrepared(acknowledged: CheckedContinuation<Void, Never>)
         case ownCore(UUID, backend: any SyncCoordinatorBackend, generation: UInt64, revision: UInt64,
@@ -979,7 +1001,11 @@ public final class SyncCoordinator {
                         // Leave the reducer free to ACK actual returned results.
                         // Their tasks release the phase only after joining ACK.
                         guard let ready = inputQueue.firstIndex(where: {
-                            switch $0 { case .result, .corePrepared, .ownCoreReturned, .corePhaseFinished: true; default: false }
+                            switch $0 {
+                            case .result, .corePrepared, .ownCoreReturned, .corePhaseFinished: true
+                            case .nativeInput(_, _, _, let owner, _): owner.map { corePhase[$0] != nil } == true
+                            default: false
+                            }
                         }) else { return }
                         index = ready
                     }
@@ -990,6 +1016,19 @@ public final class SyncCoordinator {
     }
     private func reduce(_ input: Input) async {
         switch input {
+        case .nativeInput(let work, let expected, let revision, let owner, let acknowledged):
+            // A failed Core command has already returned its actual result and
+            // joined ACK. Hand its phase to this required follow-up input turn
+            // without letting unrelated queued inputs pass between them.
+            if let owner { await reduce(.corePhaseFinished(owner)) }
+            do {
+                let output = try await work()
+                await reduce(.result(.init(outputs: [output], error: nil, deferred: false),
+                    generation: expected, revision: revision, shutdownCancelled: false, acknowledged: nil))
+                enqueue(.nativeInputReturned(output, acknowledged: acknowledged))
+            } catch { acknowledged.resume(throwing: error) }
+        case .nativeInputReturned(let output, let acknowledged):
+            acknowledged.resume(returning: output)
         case .corePrepared(let acknowledged), .ownCoreReturned(let acknowledged): acknowledged.resume()
         case .corePhaseFinished(let id):
             guard let phase = corePhase.removeValue(forKey: id) else { return }
@@ -1039,9 +1078,6 @@ public final class SyncCoordinator {
             // this lane may rotate authority, after all original command ACKs.
             observeAccountPolicyDrain?(.finished)
             let result = await complete(true)
-            // A different read already begun on this same owner is the exact
-            // supersession witness. Keep its predecessor's error and outputs;
-            // only the generic failure presentation changes for cancellation.
             let supersededAccountCancellation = result.error is CancellationError
                 && pendingAccountRead.map { $0 != read } == true
                 && expected == generation && revision == hostRevision && backend === original
@@ -1056,6 +1092,23 @@ public final class SyncCoordinator {
             #if DEBUG
             observeCausalBoundary?(.proofResultReduced, nil)
             #endif
+            enqueue(.accountOutputsReturned(read, backend: original, generation: expected, revision: revision,
+                result: result, acknowledged: acknowledged))
+        case .accountOutputsReturned(let read, let original, let expected, let revision, let result, let acknowledged):
+            if let next = result.afterOutputs {
+                let admitted = !closing && !suspended && !replacing && accountTask?.isCancelled == false
+                    && expected == generation && revision == hostRevision && backend === original
+                    && pendingAccountRead.map { $0 != read } != true
+                let followup = await next(admitted)
+                let supersededAccountCancellation = followup.error is CancellationError
+                    && pendingAccountRead.map { $0 != read } == true
+                    && expected == generation && revision == hostRevision && backend === original
+                await reduce(.result(followup, generation: expected, revision: revision, shutdownCancelled: false,
+                    supersededAccountCancellation: supersededAccountCancellation, acknowledged: nil))
+                enqueue(.accountOutputsReturned(read, backend: original, generation: expected, revision: revision,
+                    result: followup, acknowledged: acknowledged))
+                return
+            }
             if result.accountVerified { await reduce(.ownAccountProof(read, generation: expected, revision: revision)) }
             if result.error == nil, result.accountVerified {
                 startRetainedRecoveryAfterProof(original, generation: expected, revision: revision)
@@ -1087,7 +1140,7 @@ public final class SyncCoordinator {
             } catch { acknowledged.resume(throwing: error) }
         case .result(let result, let expected, let revision, let shutdownCancelled, let supersededAccountCancellation, let acknowledged):
             if expected == generation, revision == hostRevision, !replacing, !suspended {
-                for output in result.outputs {
+                for output in result.outputs.dropFirst(result.acknowledgedOutputCount) {
                     consume(output, generation: expected)
                 }
                 if result.deferred { hasDeferredNativeWork = true }
@@ -1099,7 +1152,7 @@ public final class SyncCoordinator {
                         operationFailed = true; failureRevision &+= 1
                     }
                 }
-                if !closing, result.accountVerified, awaitingResumeProof { foregroundAfterAccountProof() }
+                if !closing, result.afterOutputs == nil, result.accountVerified, awaitingResumeProof { foregroundAfterAccountProof() }
                 if !closing, initialAdoptionEnabledBefore != nil, ownTask == nil, let backend {
                     enqueue(.reconcile(backend, acknowledged: nil))
                 }
@@ -1295,16 +1348,29 @@ public final class SyncCoordinator {
                         default: break
                         }
                     }
-                    let result: SyncCommandResult
-                    if corePhaseOwner {
-                        result = await backend.execute(command, corePrepared: { [self] in
-                            // RunCleanup's qualified local pass has returned.
-                            // ACK that actual stage before its native inventory
-                            // wait; retain the original final result task below.
-                            await withCheckedContinuation { enqueue(.corePrepared(acknowledged: $0)) }
-                            enqueue(.corePhaseFinished(id))
-                        })
-                    } else { result = await backend.execute(command) }
+                    var result: SyncCommandResult
+                    result = await backend.execute(command, corePrepared: { [self] in
+                        // The qualified local cleanup pass returned; inventory
+                        // remains owned by the original command task.
+                        await withCheckedContinuation { enqueue(.corePrepared(acknowledged: $0)) }
+                        if corePhaseOwner { enqueue(.corePhaseFinished(id)) }
+                    }, acknowledgeOutputs: { [self] outputs in
+                        await withCheckedContinuation { acknowledged in
+                            enqueue(.result(.init(outputs: outputs, error: nil, deferred: false),
+                                generation: value.generation, revision: revision,
+                                shutdownCancelled: context.shutdownCancelled, acknowledged: acknowledged))
+                        }
+                        // Release this local stage before joining follow-up
+                        // Core phases. This wait runs on the command task,
+                        // never on the reducer which must ACK those results.
+                        if corePhaseOwner { enqueue(.corePhaseFinished(id)) }
+                        await waitForInputs()
+                    }, performInput: { [self] work in
+                        try await withCheckedThrowingContinuation { acknowledged in
+                            enqueue(.nativeInput(work, generation: value.generation, revision: revision,
+                                phaseOwner: corePhaseOwner ? id : nil, acknowledged: acknowledged))
+                        }
+                    })
                     // The native executor validates control capabilities as well
                     // as network work. UI effects occur only after that admission.
                     if result.error == nil, revision == hostRevision {
@@ -1339,16 +1405,20 @@ public final class SyncCoordinator {
                         // after the exact native operation has drained.
                         quitCompletion?(); quitCompletion = nil
                     }
-                    await withCheckedContinuation { acknowledged in
+                    while true {
+                        await withCheckedContinuation { acknowledged in
+                            #if DEBUG
+                            observeCausalBoundary?(.commandResultEnqueue, command)
+                            #endif
+                            enqueue(.result(result, generation: value.generation, revision: revision,
+                                shutdownCancelled: context.shutdownCancelled, acknowledged: acknowledged))
+                        }
                         #if DEBUG
-                        observeCausalBoundary?(.commandResultEnqueue, command)
+                        observeCausalBoundary?(.commandAcknowledgementJoined, command)
                         #endif
-                        enqueue(.result(result, generation: value.generation, revision: revision,
-                            shutdownCancelled: context.shutdownCancelled, acknowledged: acknowledged))
+                        guard let followup = result.afterOutputs else { break }
+                        result = await followup(true)
                     }
-                    #if DEBUG
-                    observeCausalBoundary?(.commandAcknowledgementJoined, command)
-                    #endif
                 }
             }
         }

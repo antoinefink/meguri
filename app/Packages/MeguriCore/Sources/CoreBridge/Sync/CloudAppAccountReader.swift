@@ -122,6 +122,7 @@ public final class CloudAppAccountReader {
             return .init(outputs: outputs, error: error, verified: false)
         }
     }
+    public func isCurrentRead(_ id: UInt64) -> Bool { admits(id, epoch: epoch) }
     private func admits(_ id: UInt64, epoch expected: UInt64) -> Bool {
         !frozen && !closed && !Task.isCancelled && epoch == expected && latest == id
     }

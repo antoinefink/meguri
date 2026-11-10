@@ -367,6 +367,46 @@ extension ReviewCollectionStartupTests {
 
 extension ReviewCollectionStartupTests {
     #if DEBUG
+    @Test func acceptedAccountOutputsAndFollowupsAreACKedBeforePreparationInput() async throws {
+        try await withP4OrderingCommands { commands in
+            let backend = SyncOwnerFake(), held = SyncOwnerGate(), followup = SyncOwnerGate()
+            var order: [String] = []
+            let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: nil)
+            await sync.preparePlatform(); await sync.completeOpenedHost(generation: 704)
+            await sync.prepareConnectionAuthority()
+            sync.observeCausalBoundary = { boundary, command in
+                guard case .commandAcknowledgementJoined = boundary, let command else { return }
+                order.append(command.raw === commands.status.raw ? "account.ack" : "followup.ack")
+            }
+            backend.executeCommand = { command in
+                if command.raw === commands.status.raw {
+                    order.append("account.core"); await held.hold()
+                    return .init(outputs: [.commands([commands.record])], error: nil, deferred: false)
+                }
+                #expect(command.raw === commands.record.raw)
+                order.append("followup.core"); await followup.hold()
+                return .init(outputs: [], error: nil, deferred: false)
+            }
+            backend.accountResult = .init(outputs: [.commands([commands.status])], error: nil, deferred: false,
+                accountVerified: true, afterOutputs: { admitted in
+                    #expect(admitted)
+                    order.append("preparation.input")
+                    return .init(outputs: [], error: nil, deferred: false, accountVerified: true)
+                })
+            await sync.accountChanged()
+            await held.waitUntilHeld()
+            #expect(order == ["account.core"])
+            held.release(); await followup.waitUntilHeld()
+            #expect(order == ["account.core", "account.ack", "followup.core"])
+            followup.release()
+            await sync.prepareConnectionAuthority(); await sync.drainOperations()
+            #expect(order == ["account.core", "account.ack", "followup.core", "followup.ack", "preparation.input"])
+            #expect(!sync.operationFailed && sync.failureRevision == 0)
+            sync.observeCausalBoundary = nil
+            #expect(await sync.cancelAndDrain())
+        }
+    }
+
     @Test func corePhaseJoinsOriginalResultsAndFollowupsBeforeNextPolicyInput() async throws {
         try await withP4OrderingCommands { commands in
             let backend = SyncOwnerFake(), first = SyncOwnerGate(), followup = SyncOwnerGate()
@@ -672,6 +712,7 @@ extension ReviewCollectionStartupTests {
 }
 
 @MainActor private func withShutdownHarness(
+    mediaEnabled: Bool = true,
     _ body: (ServiceAppHarness) async throws -> Void
 ) async throws {
     let fixture = try InitialCloudFixture.load()
@@ -686,6 +727,10 @@ extension ReviewCollectionStartupTests {
         let wire = try ServiceWorkflowWire(process: process, directory: root.appending(path: "transport"))
         let harness = try ServiceAppHarness(root: root.appending(path: "collection"), wire: wire)
         active = harness
+        if !mediaEnabled {
+            harness.defaults.set(["enabled": false, "paused": false, "automatic": false, "media": false],
+                forKey: "meguri.cloud.deviceSettings")
+        }
         defer { harness.defaults.removePersistentDomain(forName: harness.suite) }
         try await wire.seed(fixture)
         try await harness.adopt()
@@ -713,18 +758,27 @@ private struct P4OrderingCommands {
 // Actual issued handles, retained by the live harness. The fake replaces only
 // execution to control causal order; these tests make no native-admission claim.
 @MainActor private func withP4OrderingCommands(_ body: (P4OrderingCommands) async throws -> Void) async throws {
-    try await withShutdownHarness { harness in
+    try await withShutdownHarness(mediaEnabled: false) { harness in
         let backend = try harness.backend
         var observed: [CloudPolicyCommand] = []
         backend.onCommands = { observed.append(contentsOf: $0) }
         defer { backend.onCommands = nil }
         try await harness.exchange(phase: .aBaseline)
         await harness.sync.drainOperations()
-        harness.sync.setDeviceSettings(paused: false, automatic: true, media: true)
-        harness.sync.receive(.foreground)
-        await harness.sync.drainOperations()
-        harness.sync.setDeviceSettings(paused: true, automatic: true, media: true)
-        await harness.sync.drainOperations()
+        try #require(!harness.sync.operationFailed && harness.sync.failureRevision == 0)
+        // Core issues the remaining real handles. Execution is replaced only in
+        // the fake bodies below; do not run ConfigureAutomatic's replacement
+        // SDK or media actions merely to obtain scheduler test capabilities.
+        let policy = try await backend.workflow.policy()
+        for output in [
+            try await policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))),
+            try await policy.input(.settings(.init(enabled: true, paused: true, automatic: true, media: false)))
+        ] {
+            guard case .commands(let issued) = output else {
+                throw BridgeError.internal("P4 command acquisition failed")
+            }
+            observed.append(contentsOf: issued)
+        }
         backend.onCommands = nil
         let commands = P4OrderingCommands(
             status: try #require(observed.first { if case .statusChanged = $0.action { true } else { false } }),

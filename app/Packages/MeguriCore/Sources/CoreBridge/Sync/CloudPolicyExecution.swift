@@ -258,12 +258,42 @@ public struct CloudPolicyNativeResult: Sendable {
     public let error: (any Error)?
     public let deferred: Bool
     public let mediaCancellation: Bool
+    public let acknowledgedOutputCount: Int
+    public let afterOutputs: (@Sendable () async -> CloudPolicyNativeResult)?
     /// The original cleanup failure is diagnostic evidence, outside app failure cycles.
     public let zoneDeletionError: (any Error)?
     public let cleanupInventoryError: (any Error)?
-    init(outputs: [CloudPolicyOutput], error: (any Error)?, deferred: Bool, zoneDeletionError: (any Error)? = nil, cleanupInventoryError: (any Error)? = nil, mediaCancellation: Bool = false) {
+    init(outputs: [CloudPolicyOutput], error: (any Error)?, deferred: Bool, zoneDeletionError: (any Error)? = nil, cleanupInventoryError: (any Error)? = nil, mediaCancellation: Bool = false, acknowledgedOutputCount: Int = 0, afterOutputs: (@Sendable () async -> CloudPolicyNativeResult)? = nil) {
         self.outputs = outputs; self.error = error; self.deferred = deferred; self.zoneDeletionError = zoneDeletionError; self.cleanupInventoryError = cleanupInventoryError
-        self.mediaCancellation = mediaCancellation
+        self.mediaCancellation = mediaCancellation; self.acknowledgedOutputCount = acknowledgedOutputCount
+        self.afterOutputs = afterOutputs
+    }
+}
+// Forward the existing coordinator ACK seam through transparent backend
+// observers without replacing their execute/result hooks.
+public enum CloudPolicyOutputAcknowledgement {
+    @TaskLocal public static var current: (@Sendable ([CloudPolicyOutput]) async -> Void)?
+    @TaskLocal public static var input: (@Sendable (@escaping @Sendable () async throws -> CloudPolicyOutput) async throws -> CloudPolicyOutput)?
+}
+// A receipt for an already returned output prefix, not a scheduler or authority.
+// Standalone callers retain the full result and their existing execution loop.
+private struct CloudPolicyOutputDelivery: Sendable {
+    let deliver: (@Sendable ([CloudPolicyOutput]) async -> Void)?
+    private(set) var count = 0
+    mutating func acknowledge(_ outputs: [CloudPolicyOutput]) async {
+        guard let deliver else { return }
+        await deliver(Array(outputs.dropFirst(count)))
+        count = outputs.count
+    }
+    mutating func includeAcknowledgedPrefix(_ count: Int) { self.count += count }
+    mutating func appendInput(to outputs: inout [CloudPolicyOutput],
+                              _ work: @escaping @Sendable () async throws -> CloudPolicyOutput) async throws {
+        await acknowledge(outputs)
+        if let input = CloudPolicyOutputAcknowledgement.input {
+            let output = try await input(work)
+            outputs.append(output)
+            count = outputs.count
+        } else { outputs.append(try await work()) }
     }
 }
 public protocol CloudPolicyNativeExecuting: Sendable {
@@ -321,6 +351,26 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
         self.zoneDeletionWorker = ownTransport.map { CloudZoneDeletionExecutor(transport: $0) }
         self.flushDeadline = flushDeadline
     }
+    private func nextPolicyInput(_ work: @escaping @Sendable () async throws -> CloudPolicyOutput) async throws -> CloudPolicyOutput {
+        if let input = CloudPolicyOutputAcknowledgement.input { return try await input(work) }
+        return try await work()
+    }
+    private func deferredRefreshAfterFailure() -> @Sendable () async -> CloudPolicyNativeResult {
+        let returned = CloudPolicyOutputAcknowledgement.current
+        let input = CloudPolicyOutputAcknowledgement.input
+        return {
+            await CloudPolicyOutputAcknowledgement.$current.withValue(returned) {
+                await CloudPolicyOutputAcknowledgement.$input.withValue(input) {
+                    await self.refreshAfterFailure()
+                }
+            }
+        }
+    }
+    private func refreshAfterFailure() async -> CloudPolicyNativeResult {
+        let followup = try? await nextPolicyInput { [policy] in try await policy.input(.refresh(.cloud)) }
+        return .init(outputs: followup.map { [$0] } ?? [], error: nil, deferred: false,
+            acknowledgedOutputCount: CloudPolicyOutputAcknowledgement.input == nil ? 0 : (followup == nil ? 0 : 1))
+    }
     public func quiesce() async throws {
         quiescing = true
         heldMediaResume.removeAll()
@@ -333,6 +383,11 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
         await execute(command, corePrepared: {})
     }
     public func execute(_ command: CloudPolicyCommand, corePrepared: @escaping @Sendable () async -> Void) async -> CloudPolicyNativeResult {
+        await execute(command, corePrepared: corePrepared, acknowledgeOutputs: CloudPolicyOutputAcknowledgement.current)
+    }
+    public func execute(_ command: CloudPolicyCommand, corePrepared: @escaping @Sendable () async -> Void,
+                        acknowledgeOutputs: (@Sendable ([CloudPolicyOutput]) async -> Void)?) async -> CloudPolicyNativeResult {
+        var delivery = CloudPolicyOutputDelivery(deliver: acknowledgeOutputs)
         var outputs: [CloudPolicyOutput] = []
         if !mediaHookInstalled {
             mediaHookInstalled = true
@@ -365,7 +420,9 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 if try await adapter.executePolicyLifecycle(command, execution: execution, policy: policy) {
                     return .init(outputs: [], error: nil, deferred: true)
                 }
-                outputs.append(try await policy.input(.refresh(.cloud)))
+                outputs.append(contentsOf: await adapter.takePolicyOperationOutputs())
+                await delivery.acknowledge(outputs)
+                try await delivery.appendInput(to: &outputs) { [policy] in try await policy.input(.refresh(.cloud)) }
             case .requestFetch(let zones), .requestSend(let zones):
                 if zones.contains(.media), mediaService == nil || mediaTransport == nil { throw BridgeError.cloudPolicy(.coreCapabilityUnavailable) }
                 guard let execution = try await policy.prepareExecution(command) else { throw BridgeError.cloudPolicy(.staleCommand) }
@@ -375,7 +432,8 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                     throw error
                 }
                 outputs.append(contentsOf: await adapter.takePolicyOperationOutputs())
-                outputs.append(try await policy.input(.refresh(.cloud)))
+                await delivery.acknowledge(outputs)
+                try await delivery.appendInput(to: &outputs) { [policy] in try await policy.input(.refresh(.cloud)) }
             case .runCleanup:
                 guard cleanupRun == nil else { throw CloudOwnTransportFailure.busy }
                 let task = Task { await self.performCleanup(command, corePrepared: corePrepared) }
@@ -409,7 +467,8 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                     if let instance { await drainOriginalMedia(instance) }
                     _ = try await permit.beginMedia()
                     try await adapter.waitForDeferredUpdates()
-                    outputs.append(try await policy.input(.refresh(.cloud)))
+                    await delivery.acknowledge(outputs)
+                    try await delivery.appendInput(to: &outputs) { [policy] in try await policy.input(.refresh(.cloud)) }
                 } else if case .prioritizeMedia = command.action {
                     _ = try await permit.beginMedia()
                 } else {
@@ -431,7 +490,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                     let context = CloudMediaCancellationContext(sdk: instance)
                     let running = Task {
                         await CloudMediaCancellationContext.$current.withValue(context) {
-                            await self.performMediaRound(command, permit: permit, instance: instance, runID: runID, worker: worker, coreMedia: mediaService, context: context)
+                            await self.performMediaRound(command, permit: permit, instance: instance, runID: runID, worker: worker, coreMedia: mediaService, context: context, acknowledgeOutputs: acknowledgeOutputs)
                         }
                     }
                     mediaRuns[instance] = running; mediaRunIDs[instance] = runID; mediaRunContexts[instance] = context
@@ -443,13 +502,13 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 guard let execution = try await policy.prepareExecution(command) else { throw BridgeError.cloudPolicy(.staleCommand) }
                 try await execution.validateControl()
                 let id = UUID()
-                let task = Task { await self.performFlush(execution: execution) }
+                let task = Task { await self.performFlush(execution: execution, acknowledgeOutputs: acknowledgeOutputs) }
                 flushTask = (id, task, execution)
                 let deadline = Task<CloudPolicyOutput?, Never> {
                     do {
                         try await self.flushDeadline(until)
                         _ = await self.cancelFlush(id: id)
-                        return try await self.policy.input(.backgroundExpiring)
+                        return try await self.nextPolicyInput { [policy] in try await policy.input(.backgroundExpiring) }
                     } catch { return nil }
                 }
                 let result = await withTaskCancellationHandler { await task.value }
@@ -457,7 +516,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 deadline.cancel()
                 let expired = await deadline.value
                 if flushTask?.id == id { flushTask = nil }
-                if let expired { return .init(outputs: result.outputs + [expired], error: result.error, deferred: result.deferred) }
+                if let expired { return .init(outputs: result.outputs + [expired], error: result.error, deferred: result.deferred, acknowledgedOutputCount: result.acknowledgedOutputCount + (CloudPolicyOutputAcknowledgement.input == nil ? 0 : 1)) }
                 return result
             case .cancelBackgroundFlush:
                 guard let execution = try await policy.prepareExecution(command) else { throw BridgeError.cloudPolicy(.staleCommand) }
@@ -471,7 +530,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 guard exchange == nil else { throw BridgeError.cloudPolicy(.unqualifiedCompletion) }
                 exchange = id
                 defer { exchange = nil }
-                let task = Task { await self.performExchange(command, id: id) }
+                let task = Task { await self.performExchange(command, id: id, acknowledgeOutputs: acknowledgeOutputs) }
                 nativeExchangeTask = task
                 defer { nativeExchangeTask = nil }
                 return await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
@@ -479,15 +538,26 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 let execution = try await policy.prepareExecution(command)
                 if execution != nil, exchange == id { nativeExchangeTask?.cancel(); await adapter.cancelPolicyExchange() }
             }
-            return .init(outputs: outputs, error: nil, deferred: false)
+            return .init(outputs: outputs, error: nil, deferred: false, acknowledgedOutputCount: delivery.count)
         } catch {
             #if DEBUG
             DebugCloudDiagnostics.record(.policyExecute, action: command.action, error: error)
             #endif
             // A failed native event transaction may have stopped tracking. Its
             // real projection supplies StopEngine and any other required work.
-            if let followup = try? await policy.input(.refresh(.cloud)) { outputs.append(followup) }
-            return .init(outputs: outputs, error: error, deferred: false)
+            if CloudPolicyOutputAcknowledgement.input != nil {
+                switch command.action {
+                case .updatePending, .applyReady, .recordExchange, .recordQuietPoint, .probeTracking, .statusChanged:
+                    // Return the failed local computation through its original
+                    // ACK before the later refresh takes another input turn.
+                    return .init(outputs: outputs, error: error, deferred: false, acknowledgedOutputCount: delivery.count,
+                        afterOutputs: deferredRefreshAfterFailure())
+                default: break
+                }
+            }
+            await delivery.acknowledge(outputs)
+            _ = try? await delivery.appendInput(to: &outputs) { [policy] in try await policy.input(.refresh(.cloud)) }
+            return .init(outputs: outputs, error: error, deferred: false, acknowledgedOutputCount: delivery.count)
         }
     }
     private func performCleanup(_ command: CloudPolicyCommand, corePrepared: @Sendable () async -> Void) async -> CloudPolicyNativeResult {
@@ -504,14 +574,19 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
             var inventoryFailure: (any Error)?
             do { try await worker.run(pass) }
             catch { inventoryFailure = error }
-            let projection = try await policy.input(.refresh(.cloud))
-            return .init(outputs: [projection], error: nil, deferred: false, cleanupInventoryError: inventoryFailure)
+            let projection = try await nextPolicyInput { [policy] in try await policy.input(.refresh(.cloud)) }
+            return .init(outputs: [projection], error: nil, deferred: false, cleanupInventoryError: inventoryFailure, acknowledgedOutputCount: CloudPolicyOutputAcknowledgement.input == nil ? 0 : 1)
         } catch {
             CloudCleanupDiagnostics.record(error)
+            if CloudPolicyOutputAcknowledgement.input != nil {
+                return .init(outputs: [], error: error, deferred: false,
+                    afterOutputs: deferredRefreshAfterFailure())
+            }
             // A failed required computation may have stopped tracking. Return
             // its actual projection so lifecycle follow-ups can still drain.
-            let followup = try? await policy.input(.refresh(.cloud))
-            return .init(outputs: followup.map { [$0] } ?? [], error: error, deferred: false)
+            let followup = try? await nextPolicyInput { [policy] in try await policy.input(.refresh(.cloud)) }
+            return .init(outputs: followup.map { [$0] } ?? [], error: error, deferred: false,
+                acknowledgedOutputCount: CloudPolicyOutputAcknowledgement.input == nil ? 0 : (followup == nil ? 0 : 1))
         }
     }
     private func drainCleanups(sdk: String) async {
@@ -547,8 +622,8 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
         // Reset isolation and tracking failures may have changed real policy facts.
         // Refresh after the original worker joins, including its error path.
         do {
-            let followup = try await policy.input(.refresh(.cloud))
-            return .init(outputs: [followup], error: nil, deferred: false, zoneDeletionError: failure)
+            let followup = try await nextPolicyInput { [policy] in try await policy.input(.refresh(.cloud)) }
+            return .init(outputs: [followup], error: nil, deferred: false, zoneDeletionError: failure, acknowledgedOutputCount: CloudPolicyOutputAcknowledgement.input == nil ? 0 : 1)
         } catch {
             CloudZoneDeletionDiagnostics.record(.completion, error: error)
             return .init(outputs: [], error: nil, deferred: false, zoneDeletionError: failure ?? error)
@@ -576,7 +651,9 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
         _ = await original.task.value
         return failure
     }
-    private func performFlush(execution: CoreCloudPolicyExecution) async -> CloudPolicyNativeResult {
+    private func performFlush(execution: CoreCloudPolicyExecution,
+                              acknowledgeOutputs: (@Sendable ([CloudPolicyOutput]) async -> Void)?) async -> CloudPolicyNativeResult {
+        var delivery = CloudPolicyOutputDelivery(deliver: acknowledgeOutputs)
         var outputs: [CloudPolicyOutput] = []
         do {
             if let exchange = nativeExchangeTask {
@@ -584,17 +661,22 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 if let failure = result.error { throw failure }
             } else {
                 try Task.checkCancellation()
-                outputs.append(try await execution.prepareFlush())
+                try await delivery.appendInput(to: &outputs) { try await execution.prepareFlush() }
+                await delivery.acknowledge(outputs)
                 try Task.checkCancellation()
                 try await adapter.flushPolicyCollection(execution: execution)
             }
             outputs.append(contentsOf: await adapter.takePolicyOperationOutputs())
-            outputs.append(try await policy.input(.refresh(.cloud)))
-            return .init(outputs: outputs, error: nil, deferred: false)
+            await delivery.acknowledge(outputs)
+            try await delivery.appendInput(to: &outputs) { [policy] in try await policy.input(.refresh(.cloud)) }
+            await delivery.acknowledge(outputs)
+            return .init(outputs: outputs, error: nil, deferred: false, acknowledgedOutputCount: delivery.count)
         } catch {
             outputs.append(contentsOf: await adapter.takePolicyOperationOutputs())
-            if let state = try? await policy.input(.refresh(.cloud)) { outputs.append(state) }
-            return .init(outputs: outputs, error: error, deferred: false)
+            await delivery.acknowledge(outputs)
+            _ = try? await delivery.appendInput(to: &outputs) { [policy] in try await policy.input(.refresh(.cloud)) }
+            await delivery.acknowledge(outputs)
+            return .init(outputs: outputs, error: error, deferred: false, acknowledgedOutputCount: delivery.count)
         }
     }
     private func drainOriginalMedia(_ sdk: String, stopWitness: CloudSDKStopWitness? = nil) async {
@@ -617,23 +699,27 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
         mediaDrains.removeValue(forKey: sdk)
     }
     private func performMediaRound(_ issued: CloudPolicyCommand, permit: CoreCloudPolicyExecution, instance: String, runID: UUID,
-                          worker: CloudMediaExecutor, coreMedia: CoreCloudMediaService, context: CloudMediaCancellationContext) async -> CloudPolicyNativeResult {
+                          worker: CloudMediaExecutor, coreMedia: CoreCloudMediaService, context: CloudMediaCancellationContext,
+                          acknowledgeOutputs: (@Sendable ([CloudPolicyOutput]) async -> Void)?) async -> CloudPolicyNativeResult {
         defer {
             if mediaRunIDs[instance] == runID {
                 mediaRuns.removeValue(forKey: instance); mediaRunIDs.removeValue(forKey: instance); mediaRunContexts.removeValue(forKey: instance)
             }
         }
+        var delivery = CloudPolicyOutputDelivery(deliver: acknowledgeOutputs)
         var outputs: [CloudPolicyOutput] = []
         var selected = (issued, permit)
         do {
             repeat {
                 let (issued, permit) = selected
+                await delivery.acknowledge(outputs)
                 try Task.checkCancellation()
                 guard try await permit.beginMedia() else { break }
                 let onlyEnvelopes: Bool
                 if case .readBlobs = issued.action { onlyEnvelopes = true } else { onlyEnvelopes = false }
                 await worker.beginRound()
-                outputs.append(try await permit.report(zones: [.media], kind: .read, started: true))
+                try await delivery.appendInput(to: &outputs) { try await permit.report(zones: [.media], kind: .read, started: true) }
+                await delivery.acknowledge(outputs)
                 var readFailure: (any Error)?
                 var sendStopped = false
                 do {
@@ -659,6 +745,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                             catch {
                                 context.observe(error)
                                 outputs.append(contentsOf: await adapter.takePolicyOperationOutputs())
+                                await delivery.acknowledge(outputs)
                                 if try await permit.continueMediaAfterSend(error) == false { sendStopped = true; throw error }
                             }
                             outputs.append(contentsOf: await adapter.takePolicyOperationOutputs())
@@ -671,7 +758,9 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 #if DEBUG
                 await mediaEndReadObserver?(instance)
                 #endif
-                do { outputs.append(try await permit.report(zones: [.media], kind: .read, started: false, error: sendStopped ? nil : readFailure)) }
+                await delivery.acknowledge(outputs)
+                let endedFailure = sendStopped ? nil : readFailure
+                do { try await delivery.appendInput(to: &outputs) { try await permit.report(zones: [.media], kind: .read, started: false, error: endedFailure) } }
                 catch {
                     if context.observeEndReadReportFailure(error, primary: readFailure) {
                         #if DEBUG
@@ -681,11 +770,12 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                     if readFailure == nil { readFailure = error }
                 }
                 if let readFailure { throw readFailure }
-                outputs.append(try await policy.input(.refresh(.cloud)))
+                await delivery.acknowledge(outputs)
+                try await delivery.appendInput(to: &outputs) { [policy] in try await policy.input(.refresh(.cloud)) }
                 guard let queuedResume = heldMediaResume.removeValue(forKey: instance) else { break }
                 selected = queuedResume
             } while true
-            return .init(outputs: outputs, error: nil, deferred: false)
+            return .init(outputs: outputs, error: nil, deferred: false, acknowledgedOutputCount: delivery.count)
         } catch {
             var mediaCancellation = context.observe(error)
             #if DEBUG
@@ -700,21 +790,24 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 }
                 let replacementID = UUID()
                 let replacementContext = CloudMediaCancellationContext(sdk: instance)
+                await delivery.acknowledge(outputs)
                 let pendingRun = Task {
                     await CloudMediaCancellationContext.$current.withValue(replacementContext) {
-                        await self.performMediaRound(queuedResume.0, permit: queuedResume.1, instance: instance, runID: replacementID, worker: replacement, coreMedia: coreMedia, context: replacementContext)
+                        await self.performMediaRound(queuedResume.0, permit: queuedResume.1, instance: instance, runID: replacementID, worker: replacement, coreMedia: coreMedia, context: replacementContext, acknowledgeOutputs: acknowledgeOutputs)
                     }
                 }
                 mediaRuns[instance] = pendingRun; mediaRunIDs[instance] = replacementID; mediaRunContexts[instance] = replacementContext
                 let completed = await pendingRun.value
                 outputs.append(contentsOf: completed.outputs)
+                delivery.includeAcknowledgedPrefix(completed.acknowledgedOutputCount)
                 if let failure = completed.error {
                     mediaCancellation = mediaCancellation && completed.mediaCancellation && failure is CancellationError
                 }
             }
-            do { outputs.append(try await policy.input(.refresh(.cloud))) }
+            await delivery.acknowledge(outputs)
+            do { try await delivery.appendInput(to: &outputs) { [policy] in try await policy.input(.refresh(.cloud)) } }
             catch { mediaCancellation = context.observe(error) && mediaCancellation }
-            return .init(outputs: outputs, error: error, deferred: false, mediaCancellation: mediaCancellation)
+            return .init(outputs: outputs, error: error, deferred: false, mediaCancellation: mediaCancellation, acknowledgedOutputCount: delivery.count)
         }
     }
 
@@ -760,7 +853,9 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
             return try await group.next()!
         }
     }
-    private func performExchange(_ command: CloudPolicyCommand, id: UInt64) async -> CloudPolicyNativeResult {
+    private func performExchange(_ command: CloudPolicyCommand, id: UInt64,
+                                 acknowledgeOutputs: (@Sendable ([CloudPolicyOutput]) async -> Void)?) async -> CloudPolicyNativeResult {
+        var delivery = CloudPolicyOutputDelivery(deliver: acknowledgeOutputs)
         var outputs: [CloudPolicyOutput] = []
         var reservation: UUID?
         do {
@@ -772,7 +867,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 if let readiness { early = readiness }
                 else { early = try await exchangeGate?.waitBeforeCapture(command) }
                 if let outcome = early {
-                    outputs.append(try await policy.endBeforeCapture(id, outcome: outcome))
+                    try await delivery.appendInput(to: &outputs) { [policy] in try await policy.endBeforeCapture(id, outcome: outcome) }
                 } else {
                     try Task.checkCancellation()
                     guard let execution = try await policy.prepareExecution(command) else { throw BridgeError.cloudPolicy(.staleCommand) }
@@ -782,6 +877,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                     try Task.checkCancellation()
                     let capture = try await policy.captureExchange(command)
                     outputs.append(capture.output)
+                    await delivery.acknowledge(outputs)
                     if let runtimeID = capture.runtimeExchange {
                         captured = true
                         try await adapter.runPolicyExchange(runtimeID: runtimeID, execution: execution, prepared: preparedExchange)
@@ -794,13 +890,16 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 failure = error
             }
             outputs.append(contentsOf: await adapter.takePolicyOperationOutputs())
+            await delivery.acknowledge(outputs)
             if captured {
-                outputs.append(try await policy.completeExchange(id))
+                try await delivery.appendInput(to: &outputs) { [policy] in try await policy.completeExchange(id) }
             } else if let failure {
-                outputs.append(try await policy.endBeforeCapture(id, outcome: failure is CancellationError ? .cancelled : .failed(.other)))
+                let outcome: CloudPolicyEarlyEnd = failure is CancellationError ? .cancelled : .failed(.other)
+                try await delivery.appendInput(to: &outputs) { [policy] in try await policy.endBeforeCapture(id, outcome: outcome) }
             }
             if let reservation { await adapter.releasePolicyExchange(reservation) }
             reservation = nil
+            await delivery.acknowledge(outputs)
             if let held = heldConfigure {
                 heldConfigure = nil
                 do {
@@ -808,7 +907,9 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                     let policy = self.policy
                     let configure = Task { try await adapter.executePolicyLifecycle(held.0, execution: held.1, policy: policy) }
                     _ = try await configure.value
-                    outputs.append(try await policy.input(.refresh(.cloud)))
+                    outputs.append(contentsOf: await adapter.takePolicyOperationOutputs())
+                    await delivery.acknowledge(outputs)
+                    try await delivery.appendInput(to: &outputs) { [policy] in try await policy.input(.refresh(.cloud)) }
                 } catch {
                     #if DEBUG
                     DebugCloudDiagnostics.record(.policyExchange, action: held.0.action, error: error)
@@ -816,14 +917,17 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                     if failure == nil { failure = error }
                 }
             }
-            return .init(outputs: outputs, error: failure, deferred: false)
+            await delivery.acknowledge(outputs)
+            return .init(outputs: outputs, error: failure, deferred: false, acknowledgedOutputCount: delivery.count)
         } catch {
             #if DEBUG
             DebugCloudDiagnostics.record(.policyExchange, action: command.action, error: error)
             #endif
             if let reservation { await adapter.releasePolicyExchange(reservation) }
-            if let followup = try? await policy.input(.refresh(.cloud)) { outputs.append(followup) }
-            return .init(outputs: outputs, error: error, deferred: false)
+            await delivery.acknowledge(outputs)
+            _ = try? await delivery.appendInput(to: &outputs) { [policy] in try await policy.input(.refresh(.cloud)) }
+            await delivery.acknowledge(outputs)
+            return .init(outputs: outputs, error: error, deferred: false, acknowledgedOutputCount: delivery.count)
         }
     }
 }
