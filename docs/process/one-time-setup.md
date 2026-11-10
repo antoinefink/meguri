@@ -83,6 +83,30 @@ does not certify portal configuration, schema encryption/promotion, push deliver
 or signed multi-device sync. Those external checks remain required.
 
 
+### `cloudkit-test-accounts`
+
+Only Antoine runs `tools/mg cloudkit-account-setup --label acct1` in his own
+foreground Terminal, from clean master with no competing Apple or VM job.
+Source `.local/activate` first. Use `MEGURI_APP_SIGNING=team`; if the verified
+Mac build pins an installed profile with `MEGURI_CLOUD_AGENT_MAC_PROFILE_FILE`,
+retain that same setting. Keep the dedicated VM signed in to the intended
+isolated development test account.
+
+The setup-only producer verifies the signed product and observes the live
+account. At its terminal prompt, Antoine confirms the intended account with
+`approve acct1`. A fresh matching observation precedes publication of the
+private approved source. Agents never run this command or enter the approval.
+No account value or private file content needs to be shared; report only the
+setup outcome and run ID. `acct1` is enough for the initial same-account check;
+`acct2` is a separate setup for account-isolation checks, after `acct1` exists.
+
+The source belongs to this host user's OS Application Support data. Copying the
+repository or VM to another Mac does not publish it on the new host. No source
+importer or candidate-file adoption is supported. Missing source input is a
+setup requirement, not evidence of a failed CloudKit exchange. Successful setup
+supplies no signed-sync or release acceptance.
+
+
 ### `docker-resources`
 
 Give Docker Desktop at least 12 CPUs and 16 GB of memory: Docker Desktop › Settings › Resources. The oracle runs 12 workers. Doctor warns below these values. It reads the memory total inside Docker's Linux VM, which is up to about 1 GB below the setting, so it accepts 90% of 16 GB.

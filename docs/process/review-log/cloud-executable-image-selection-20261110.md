@@ -22,3 +22,13 @@ Privacy run `30301` flagged a new comment; filtered follow-up `30969` changed
 only that comment, preserving every tested source statement and assertion. The
 final combined source scan passed. Real app-hosted preflight remains pending.
 No owner setup entry point was invoked. Cross-device CloudKit remains unverified.
+
+Actual signed Mac smoke `32638` built `33348`, passed VM delivery and admitted
+the new preflight evidence. It then reported `awaiting_user` for
+`cloudkit-test-accounts` before command delivery or agent execution. Read-only
+metadata run `39718` proved the host approved source file is absent while its
+private parent directories have the expected authority. No account values were
+read, and no setup or exchange was attempted. The missing owner-step heading
+is now documented; the prepared local command has not been invoked.
+Final committed-source similarity run `33618` passed. No full gate or signed
+exchange pass is claimed.

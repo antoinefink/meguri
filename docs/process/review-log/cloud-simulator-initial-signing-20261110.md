@@ -46,3 +46,12 @@ counts, then preserves the same refusal. It exports no code bytes or account
 values and never affects admission. Focused tooling run `31486` passed both
 cases, including the three new generated diagnostic tests. Actual native delta
 capture remains pending.
+
+Focused native build `37103` retained the exact transaction diagnostic and
+refused the same check. For both slices of the first injection library,
+`__LINKEDIT.vmsize` grew from 16384 to 32768 as the signature grew. Signature
+start, segment start and virtual address stayed fixed; the diagnostic found
+zero other changed bytes before the signature. This proves the specific
+allocation change, while the earlier SDK comparison did not. A narrow
+pairwise allocation repair is being prepared; the original failed run stays
+failed, with no frozen proof.
