@@ -1,0 +1,31 @@
+# Harness self-test (specs/servers/transcripts T10.1, T18): setup ids and a new
+# note as entity tokens, mod as @<seconds since clock.start>.
+id: servers/ankiconnect/harness/tokens
+description: setup notes and cards as tokens, a new note as the next token
+tags: [harness, no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{FrontSide}}<hr id=answer>{{Back}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: {Front: alpha, Back: first}}
+    - {notetype: Pair, deck: Lang, fields: {Front: beta, Back: second}, tags: [t1]}
+steps:
+  - http:
+      body: {json: {action: findNotes, version: 6, params: {query: "deck:Lang"}}}
+  - http:
+      body: {json: {action: notesInfo, version: 6, params: {notes: ["#n2"]}}}
+  - http:
+      body:
+        json:
+          action: addNote
+          version: 6
+          params: {note: {deckName: Lang, modelName: Pair, fields: {Front: gamma, Back: third}}}
+  - observe: [{db_dump: {tables: [notes, cards]}}]

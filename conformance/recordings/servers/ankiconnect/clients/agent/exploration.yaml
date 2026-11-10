@@ -1,0 +1,37 @@
+# Agent sessions and scripts (servers/ankiconnect-clients C2 env G): no Origin,
+# no Content-Type, no key. Setup is the common setup of C6.
+# C4 agent exploration (order assumed, C9.9): read-only calls over decks, note types, notes and cards.
+id: servers/ankiconnect/clients/agent/exploration
+description: "agent exploration sequence (assumed order)"
+tags: [client:agent, no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Lang, "Lang::Mining"]
+  notetypes:
+    - name: Vocab
+      fields: [Word, Reading, Meaning, Audio, Picture]
+      templates:
+        - {name: Recognition, front: "{{Word}}", back: "{{FrontSide}}<hr id=answer>{{Meaning}}{{Audio}}{{Picture}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Vocab, deck: "Lang::Mining", fields: {Word: alpha, Meaning: first}, tags: [mined]}
+    - {notetype: Vocab, deck: Lang, fields: {Word: beta, Meaning: second}}
+  media_files:
+    - {name: old.mp3, fill: {size: 16, byte: 0}}
+steps:
+  - http:
+      body: {json: {action: version, version: 6}}
+  - http:
+      body: {json: {action: deckNames, version: 6}}
+  - http:
+      body: {json: {action: modelNames, version: 6}}
+  - http:
+      body: {json: {action: findNotes, version: 6, params: {query: "\"note:Vocab\" is:new"}}}
+  - http:
+      body: {json: {action: notesInfo, version: 6, params: {notes: ["#n1", "#n2"]}}}
+  - http:
+      body: {json: {action: findCards, version: 6, params: {query: "deck:Lang"}}}
+  - http:
+      body: {json: {action: notesInfo, version: 6, params: {query: "tag:mined"}}}

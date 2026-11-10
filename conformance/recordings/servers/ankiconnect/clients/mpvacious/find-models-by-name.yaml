@@ -1,0 +1,25 @@
+# servers/ankiconnect-clients C3 row 8, C7 mpvacious/find-models-by-name.
+# Env M (servers/ankiconnect-clients C2, C5): no Origin, no Content-Type,
+# version 6. Setup is C6's. All values are synthetic.
+id: servers/ankiconnect/clients/mpvacious/find-models-by-name
+description: findModelsByName for the setup note type
+tags: [client:mpvacious, no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Lang, "Lang::Mining"]
+  notetypes:
+    - name: Vocab
+      fields: [Word, Reading, Meaning, Audio, Picture]
+      templates:
+        - {name: Recognition, front: "{{Word}}", back: "{{FrontSide}}<hr id=answer>{{Meaning}}{{Audio}}{{Picture}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Vocab, deck: "Lang::Mining", fields: {Word: alpha, Meaning: first}, tags: [mined]}
+    - {notetype: Vocab, deck: Lang, fields: {Word: beta, Meaning: second}}
+  media_files:
+    - {name: old.mp3, fill: {size: 16, byte: 0}}
+steps:
+  - http:
+      body: {json: {action: findModelsByName, version: 6, params: {modelNames: [Vocab]}}}

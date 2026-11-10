@@ -1,0 +1,157 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "reply": {
+          "body": {
+            "json": {
+              "error": null,
+              "result": "#d4"
+            }
+          },
+          "closed": true,
+          "headers": {
+            "access-control-allow-headers": "*",
+            "access-control-allow-origin": "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content-type": "application/json"
+          },
+          "status": 200
+        }
+      },
+      {
+        "reply": {
+          "body": {
+            "json": {
+              "error": null,
+              "result": "#d4"
+            }
+          },
+          "closed": true,
+          "headers": {
+            "access-control-allow-headers": "*",
+            "access-control-allow-origin": "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content-type": "application/json"
+          },
+          "status": 200
+        }
+      },
+      {
+        "reply": {
+          "body": {
+            "json": {
+              "error": null,
+              "result": {
+                "css": ".card {}",
+                "did": null,
+                "flds": [
+                  {
+                    "collapsed": false,
+                    "description": "",
+                    "excludeFromSearch": false,
+                    "font": "Arial",
+                    "id": "#rand",
+                    "name": "Sentence",
+                    "ord": 0,
+                    "plainText": false,
+                    "preventDeletion": false,
+                    "rtl": false,
+                    "size": 20,
+                    "sticky": false,
+                    "tag": null
+                  },
+                  {
+                    "collapsed": false,
+                    "description": "",
+                    "excludeFromSearch": false,
+                    "font": "Arial",
+                    "id": "#rand",
+                    "name": "Image",
+                    "ord": 1,
+                    "plainText": false,
+                    "preventDeletion": false,
+                    "rtl": false,
+                    "size": 20,
+                    "sticky": false,
+                    "tag": null
+                  }
+                ],
+                "id": "#m8",
+                "latexPost": "\\end{document}",
+                "latexPre": "\\documentclass[12pt]{article}\n\\special{papersize=3in,5in}\n\\usepackage[utf8]{inputenc}\n\\usepackage{amssymb,amsmath}\n\\pagestyle{empty}\n\\setlength{\\parindent}{0in}\n\\begin{document}\n",
+                "latexsvg": false,
+                "mod": "@0",
+                "name": "Clip",
+                "originalStockKind": 1,
+                "req": [
+                  [
+                    0,
+                    "any",
+                    [0]
+                  ]
+                ],
+                "sortf": 0,
+                "tmpls": [
+                  {
+                    "afmt": "{{FrontSide}}<hr id=answer>{{Image}}",
+                    "bafmt": "",
+                    "bfont": "",
+                    "bqfmt": "",
+                    "bsize": 0,
+                    "did": null,
+                    "id": "#rand",
+                    "name": "Card",
+                    "ord": 0,
+                    "qfmt": "{{Sentence}}"
+                  }
+                ],
+                "type": 0,
+                "usn": -1
+              }
+            }
+          },
+          "closed": true,
+          "headers": {
+            "access-control-allow-headers": "*",
+            "access-control-allow-origin": "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content-type": "application/json"
+          },
+          "status": 200
+        }
+      },
+      {
+        "reply": {
+          "body": {
+            "json": {
+              "error": null,
+              "result": ["Sentence", "Image"]
+            }
+          },
+          "closed": true,
+          "headers": {
+            "access-control-allow-headers": "*",
+            "access-control-allow-origin": "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content-type": "application/json"
+          },
+          "status": 200
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "addon": {
+      "build": "2025-11-09",
+      "sha256": "cf75820e00ebc28ba0cdcaedbbf646cac3a745121dc9de33b99020ca61a658da"
+    },
+    "anki_version": "26.9.3",
+    "driver_sha256": "a60739e009ed2f2363ce95f72c5dd60fe780979db10609a63913767414322c12",
+    "image": "meguri-oracle-ankiconnect:recorder",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "servers/ankiconnect/clients/asbplayer/first-run",
+  "scenario_sha256": "67d2a1f1596f2b192d447de19ad5c5a31dcd1680bbeac28985942b16992cd2ee",
+  "tz": "Europe/Paris"
+}

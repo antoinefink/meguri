@@ -1,0 +1,27 @@
+# Agent sessions and scripts (servers/ankiconnect-clients C2 env G): no Origin,
+# no Content-Type, no key. Setup is the common setup of C6.
+# C3 row 13: findCards with a deck query, then a search that does not parse (R1778).
+id: servers/ankiconnect/clients/agent/find-cards
+description: "findCards with a deck query, then a malformed query"
+tags: [client:agent, no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Lang, "Lang::Mining"]
+  notetypes:
+    - name: Vocab
+      fields: [Word, Reading, Meaning, Audio, Picture]
+      templates:
+        - {name: Recognition, front: "{{Word}}", back: "{{FrontSide}}<hr id=answer>{{Meaning}}{{Audio}}{{Picture}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Vocab, deck: "Lang::Mining", fields: {Word: alpha, Meaning: first}, tags: [mined]}
+    - {notetype: Vocab, deck: Lang, fields: {Word: beta, Meaning: second}}
+  media_files:
+    - {name: old.mp3, fill: {size: 16, byte: 0}}
+steps:
+  - http:
+      body: {json: {action: findCards, version: 6, params: {query: "deck:Lang"}}}
+  - http:
+      body: {json: {action: findCards, version: 6, params: {query: "("}}}

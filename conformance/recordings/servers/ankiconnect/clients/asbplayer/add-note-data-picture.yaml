@@ -1,0 +1,36 @@
+# servers/ankiconnect-clients C7 `asbplayer/add-note-data-picture` (C3 rows 25), env A (C2, C5).
+# Setup: C6, repeated here. All values are synthetic.
+# The picture is conformance/fixtures/servers/ankiconnect/pixel.png, inlined.
+id: servers/ankiconnect/clients/asbplayer/add-note-data-picture
+description: addNote with a picture given as base64 data
+tags: [client:asbplayer]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Lang, "Lang::Mining"]
+  notetypes:
+    - name: Vocab
+      fields: [Word, Reading, Meaning, Audio, Picture]
+      templates:
+        - {name: Recognition, front: "{{Word}}", back: "{{FrontSide}}<hr id=answer>{{Meaning}}{{Audio}}{{Picture}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Vocab, deck: "Lang::Mining", fields: {Word: alpha, Meaning: first}, tags: [mined]}
+    - {notetype: Vocab, deck: Lang, fields: {Word: beta, Meaning: second}}
+  media_files:
+    - {name: old.mp3, fill: {size: 16, byte: 0}}
+steps:
+  - http:
+      headers: [[Origin, "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"], [Content-Type, application/json]]
+      body:
+        json:
+          action: addNote
+          version: 6
+          params:
+            note:
+              deckName: Lang
+              modelName: Vocab
+              fields: {Word: shot}
+              picture: {data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR42mNgAAAAAgAB5Sfe/AAAAABJRU5ErkJggg==", filename: shot.png, fields: [Picture]}
+  - observe: [{db_dump: {tables: [notes, cards]}}, media_dir]

@@ -8,6 +8,8 @@ commit=532a3c816e08e91c4367e2799ce3779403d70274
 archive_url=https://git.sr.ht/~foosoft/anki-connect/archive/532a3c816e08e91c4367e2799ce3779403d70274.tar.gz
 archive_sha256=cf75820e00ebc28ba0cdcaedbbf646cac3a745121dc9de33b99020ca61a658da
 ankiweb_id=2055492159
+# The build date goldens record as oracle.addon.build (servers/transcripts T9).
+build=2025-11-09
 # Installed-build match: unverified. The 2025-11-09 install (meta.json mod
 # 1762717231) is no longer on this Mac (addons21 is empty), so no file of it
 # could be hashed. Tag 25.11.9.0 is upstream's release named for that date and

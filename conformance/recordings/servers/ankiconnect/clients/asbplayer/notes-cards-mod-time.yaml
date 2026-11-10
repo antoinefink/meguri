@@ -1,0 +1,28 @@
+# servers/ankiconnect-clients C7 `asbplayer/notes-cards-mod-time` (C3 rows 16, 18), env A (C2, C5).
+# Setup: C6, repeated here. All values are synthetic.
+id: servers/ankiconnect/clients/asbplayer/notes-cards-mod-time
+description: notesModTime and cardsModTime of setup entities
+tags: [client:asbplayer]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Lang, "Lang::Mining"]
+  notetypes:
+    - name: Vocab
+      fields: [Word, Reading, Meaning, Audio, Picture]
+      templates:
+        - {name: Recognition, front: "{{Word}}", back: "{{FrontSide}}<hr id=answer>{{Meaning}}{{Audio}}{{Picture}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Vocab, deck: "Lang::Mining", fields: {Word: alpha, Meaning: first}, tags: [mined]}
+    - {notetype: Vocab, deck: Lang, fields: {Word: beta, Meaning: second}}
+  media_files:
+    - {name: old.mp3, fill: {size: 16, byte: 0}}
+steps:
+  - http:
+      headers: [[Origin, "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"], [Content-Type, application/json]]
+      body: {json: {action: notesModTime, version: 6, params: {notes: ["#n1"]}}}
+  - http:
+      headers: [[Origin, "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"], [Content-Type, application/json]]
+      body: {json: {action: cardsModTime, version: 6, params: {cards: ["#c1"]}}}

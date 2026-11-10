@@ -1,0 +1,46 @@
+# servers/ankiconnect-clients C4 "mpvacious, add" (assumed order, C9.9).
+# Env M (servers/ankiconnect-clients C2, C5): no Origin, no Content-Type,
+# version 6. Setup is C6's. All values are synthetic.
+id: servers/ankiconnect/clients/mpvacious/add
+description: the add sequence (media folder, note type, addNote, find, read, move)
+tags: [client:mpvacious, no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Lang, "Lang::Mining"]
+  notetypes:
+    - name: Vocab
+      fields: [Word, Reading, Meaning, Audio, Picture]
+      templates:
+        - {name: Recognition, front: "{{Word}}", back: "{{FrontSide}}<hr id=answer>{{Meaning}}{{Audio}}{{Picture}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Vocab, deck: "Lang::Mining", fields: {Word: alpha, Meaning: first}, tags: [mined]}
+    - {notetype: Vocab, deck: Lang, fields: {Word: beta, Meaning: second}}
+  media_files:
+    - {name: old.mp3, fill: {size: 16, byte: 0}}
+steps:
+  - http:
+      body: {json: {action: getMediaDirPath, version: 6}}
+  - media_dir_write: {name: mpv_add.mp3, base64: "AAECAw=="}
+  - media_dir_write: {name: mpv_add.png, fixture: {path: servers/ankiconnect/pixel.png, sha256: a4d4c009619311d9b83904acfd62fe3b7f918c312522bbcc6ad51cdec4fd1edf}}
+  - http:
+      body: {json: {action: findModelsByName, version: 6, params: {modelNames: [Vocab]}}}
+  - http:
+      body:
+        json:
+          action: addNote
+          version: 6
+          params:
+            note:
+              deckName: Lang
+              modelName: Vocab
+              fields: {Word: kappa, Meaning: tenth, Audio: "[sound:mpv_add.mp3]", Picture: "<img src=\"mpv_add.png\">"}
+  - http:
+      body: {json: {action: findNotes, version: 6, params: {query: "added:1"}}}
+  - http:
+      body: {json: {action: notesInfo, version: 6, params: {notes: ["#n3"]}}}
+  - http:
+      body: {json: {action: changeDeck, version: 6, params: {cards: ["#c3"], deck: "Lang::Mining"}}}
+  - observe: [{db_dump: {tables: [notes, cards, decks]}}, media_dir]

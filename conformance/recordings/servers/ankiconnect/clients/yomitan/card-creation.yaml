@@ -1,0 +1,54 @@
+# servers/ankiconnect-clients C7 yomitan/card-creation (C4 Yomitan, card creation; the call order is assumed, C9.9).
+# Common setup: servers/ankiconnect-clients C6. Envelope: Yomitan's (C2, C5):
+# a synthetic extension Origin, Content-Type application/json, version 2.
+id: servers/ankiconnect/clients/yomitan/card-creation
+description: "Yomitan card creation (assumed sequence)"
+tags: [client:yomitan]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Lang, "Lang::Mining"]
+  notetypes:
+    - name: Vocab
+      fields: [Word, Reading, Meaning, Audio, Picture]
+      templates:
+        - {name: Recognition, front: "{{Word}}", back: "{{FrontSide}}<hr id=answer>{{Meaning}}{{Audio}}{{Picture}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Vocab, deck: "Lang::Mining", fields: {Word: alpha, Meaning: first}, tags: [mined]}
+    - {notetype: Vocab, deck: Lang, fields: {Word: beta, Meaning: second}}
+  media_files:
+    - {name: old.mp3, fill: {size: 16, byte: 0}}
+steps:
+  - http:
+      headers: [[Origin, "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], [Content-Type, application/json]]
+      body: {json: {action: version, version: 2}}
+  - http:
+      headers: [[Origin, "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], [Content-Type, application/json]]
+      body: {json: {action: apiReflect, version: 2, params: {scopes: [actions], actions: [version, requestPermission, apiReflect, multi, deckNames, modelNames, modelFieldNames, findModelsByName, findNotes, findCards, notesInfo, notesModTime, cardsInfo, cardsModTime, areSuspended, suspend, canAddNotes, canAddNotesWithErrorDetail, addNote, addNotes, updateNoteFields, addTags, storeMediaFile, getMediaDirPath, changeDeck, createDeck, createModel, guiBrowse, guiEditNote, guiAddCards, guiSelectedNotes, sync, notAnAction]}}}
+  - http:
+      headers: [[Origin, "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], [Content-Type, application/json]]
+      body: {json: {action: deckNames, version: 2}}
+  - http:
+      headers: [[Origin, "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], [Content-Type, application/json]]
+      body: {json: {action: modelNames, version: 2}}
+  - http:
+      headers: [[Origin, "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], [Content-Type, application/json]]
+      body: {json: {action: modelFieldNames, version: 2, params: {modelName: Vocab}}}
+  - http:
+      headers: [[Origin, "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], [Content-Type, application/json]]
+      body: {json: {action: multi, version: 2, params: {actions: [{action: findNotes, params: {query: "\"deck:Lang::Mining\" \"Word:zeta\""}}]}}}
+  - http:
+      headers: [[Origin, "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], [Content-Type, application/json]]
+      body: {json: {action: canAddNotesWithErrorDetail, version: 2, params: {notes: [{deckName: Lang, modelName: Vocab, fields: {Word: zeta}}]}}}
+  - http:
+      headers: [[Origin, "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], [Content-Type, application/json]]
+      body: {json: {action: storeMediaFile, version: 2, params: {filename: y_zeta.mp3, data: "AAECAw=="}}}
+  - http:
+      headers: [[Origin, "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], [Content-Type, application/json]]
+      body: {json: {action: addNote, version: 2, params: {note: {deckName: Lang, modelName: Vocab, fields: {Word: zeta, Audio: "[sound:y_zeta.mp3]"}}}}}
+  - http:
+      headers: [[Origin, "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], [Content-Type, application/json]]
+      body: {json: {action: guiBrowse, version: 2, params: {query: "nid:${#n3}"}}}
+  - observe: [{db_dump: {tables: [notes, cards]}}, media_dir]

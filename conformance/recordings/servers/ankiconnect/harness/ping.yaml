@@ -1,0 +1,10 @@
+# Harness self-test (specs/servers/transcripts T17, T18): a request with no
+# body, no Origin.
+id: servers/ankiconnect/harness/ping
+description: empty-body ping
+tags: [harness, no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http: {}

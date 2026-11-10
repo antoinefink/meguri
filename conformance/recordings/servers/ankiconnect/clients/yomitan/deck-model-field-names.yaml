@@ -1,0 +1,35 @@
+# servers/ankiconnect-clients C7 yomitan/deck-model-field-names (C3 rows 5, 6, 7).
+# Common setup: servers/ankiconnect-clients C6. Envelope: Yomitan's (C2, C5):
+# a synthetic extension Origin, Content-Type application/json, version 2.
+id: servers/ankiconnect/clients/yomitan/deck-model-field-names
+description: "deckNames, modelNames, modelFieldNames, and an unknown note type"
+tags: [client:yomitan]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Lang, "Lang::Mining"]
+  notetypes:
+    - name: Vocab
+      fields: [Word, Reading, Meaning, Audio, Picture]
+      templates:
+        - {name: Recognition, front: "{{Word}}", back: "{{FrontSide}}<hr id=answer>{{Meaning}}{{Audio}}{{Picture}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Vocab, deck: "Lang::Mining", fields: {Word: alpha, Meaning: first}, tags: [mined]}
+    - {notetype: Vocab, deck: Lang, fields: {Word: beta, Meaning: second}}
+  media_files:
+    - {name: old.mp3, fill: {size: 16, byte: 0}}
+steps:
+  - http:
+      headers: [[Origin, "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], [Content-Type, application/json]]
+      body: {json: {action: deckNames, version: 2}}
+  - http:
+      headers: [[Origin, "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], [Content-Type, application/json]]
+      body: {json: {action: modelNames, version: 2}}
+  - http:
+      headers: [[Origin, "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], [Content-Type, application/json]]
+      body: {json: {action: modelFieldNames, version: 2, params: {modelName: Vocab}}}
+  - http:
+      headers: [[Origin, "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], [Content-Type, application/json]]
+      body: {json: {action: modelFieldNames, version: 2, params: {modelName: Nope}}}

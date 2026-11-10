@@ -1,0 +1,29 @@
+# servers/ankiconnect-clients C7 yomitan/find-union-and-nid-filter (C3 row 46, C9.10).
+# Common setup: servers/ankiconnect-clients C6. Envelope: Yomitan's (C2, C5):
+# a synthetic extension Origin, Content-Type application/json, version 2.
+id: servers/ankiconnect/clients/yomitan/find-union-and-nid-filter
+description: "findNotes with a union, and an nid list filter inside multi"
+tags: [client:yomitan]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Lang, "Lang::Mining"]
+  notetypes:
+    - name: Vocab
+      fields: [Word, Reading, Meaning, Audio, Picture]
+      templates:
+        - {name: Recognition, front: "{{Word}}", back: "{{FrontSide}}<hr id=answer>{{Meaning}}{{Audio}}{{Picture}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Vocab, deck: "Lang::Mining", fields: {Word: alpha, Meaning: first}, tags: [mined]}
+    - {notetype: Vocab, deck: Lang, fields: {Word: beta, Meaning: second}}
+  media_files:
+    - {name: old.mp3, fill: {size: 16, byte: 0}}
+steps:
+  - http:
+      headers: [[Origin, "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], [Content-Type, application/json]]
+      body: {json: {action: findNotes, version: 2, params: {query: "(\"Word:alpha\") or (\"Word:beta\")"}}}
+  - http:
+      headers: [[Origin, "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], [Content-Type, application/json]]
+      body: {json: {action: multi, version: 2, params: {actions: [{action: findNotes, params: {query: "nid:${#n1},${#n2} (deck:Lang::Mining)"}}]}}}

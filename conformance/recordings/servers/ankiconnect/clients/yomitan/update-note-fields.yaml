@@ -1,0 +1,36 @@
+# servers/ankiconnect-clients C7 yomitan/update-note-fields (C3 row 28, C4 Yomitan overwrite).
+# Common setup: servers/ankiconnect-clients C6. Envelope: Yomitan's (C2, C5):
+# a synthetic extension Origin, Content-Type application/json, version 2.
+id: servers/ankiconnect/clients/yomitan/update-note-fields
+description: "overwrite: findNotes, notesInfo, updateNoteFields with audio, notesInfo"
+tags: [client:yomitan]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Lang, "Lang::Mining"]
+  notetypes:
+    - name: Vocab
+      fields: [Word, Reading, Meaning, Audio, Picture]
+      templates:
+        - {name: Recognition, front: "{{Word}}", back: "{{FrontSide}}<hr id=answer>{{Meaning}}{{Audio}}{{Picture}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Vocab, deck: "Lang::Mining", fields: {Word: alpha, Meaning: first}, tags: [mined]}
+    - {notetype: Vocab, deck: Lang, fields: {Word: beta, Meaning: second}}
+  media_files:
+    - {name: old.mp3, fill: {size: 16, byte: 0}}
+steps:
+  - http:
+      headers: [[Origin, "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], [Content-Type, application/json]]
+      body: {json: {action: findNotes, version: 2, params: {query: "Word:alpha"}}}
+  - http:
+      headers: [[Origin, "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], [Content-Type, application/json]]
+      body: {json: {action: notesInfo, version: 2, params: {notes: ["#n1"]}}}
+  - http:
+      headers: [[Origin, "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], [Content-Type, application/json]]
+      body: {json: {action: updateNoteFields, version: 2, params: {note: {id: "#n1", fields: {Meaning: changed, nope: x}, audio: {data: "AAECAw==", filename: u.mp3, fields: [Audio]}}}}}
+  - http:
+      headers: [[Origin, "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], [Content-Type, application/json]]
+      body: {json: {action: notesInfo, version: 2, params: {notes: ["#n1"]}}}
+  - observe: [{db_dump: {tables: [notes, cards]}}, media_dir]

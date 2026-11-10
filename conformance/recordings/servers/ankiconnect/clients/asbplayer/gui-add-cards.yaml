@@ -1,0 +1,25 @@
+# servers/ankiconnect-clients C7 `asbplayer/gui-add-cards` (C3 rows 37), env A (C2, C5).
+# Setup: C6, repeated here. All values are synthetic.
+id: servers/ankiconnect/clients/asbplayer/gui-add-cards
+description: guiAddCards opens the Add window with a filled note
+tags: [client:asbplayer]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Lang, "Lang::Mining"]
+  notetypes:
+    - name: Vocab
+      fields: [Word, Reading, Meaning, Audio, Picture]
+      templates:
+        - {name: Recognition, front: "{{Word}}", back: "{{FrontSide}}<hr id=answer>{{Meaning}}{{Audio}}{{Picture}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Vocab, deck: "Lang::Mining", fields: {Word: alpha, Meaning: first}, tags: [mined]}
+    - {notetype: Vocab, deck: Lang, fields: {Word: beta, Meaning: second}}
+  media_files:
+    - {name: old.mp3, fill: {size: 16, byte: 0}}
+steps:
+  - http:
+      headers: [[Origin, "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"], [Content-Type, application/json]]
+      body: {json: {action: guiAddCards, version: 6, params: {note: {deckName: Lang, modelName: Vocab, fields: {Word: epsilon}}}}}

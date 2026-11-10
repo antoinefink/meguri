@@ -1,0 +1,43 @@
+# servers/ankiconnect-clients C7 `asbplayer/update` (the C4 asbplayer update sequence), env A (C2, C5).
+# Setup: C6, repeated here. All values are synthetic.
+# storeMediaFile returns the given name (C7 yomitan/store-media-file), so the
+# field names it literally. The picture is conformance/fixtures/servers/ankiconnect/pixel.png.
+id: servers/ankiconnect/clients/asbplayer/update
+description: asbplayer's update sequence (assumed order, C9.9)
+tags: [client:asbplayer]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Lang, "Lang::Mining"]
+  notetypes:
+    - name: Vocab
+      fields: [Word, Reading, Meaning, Audio, Picture]
+      templates:
+        - {name: Recognition, front: "{{Word}}", back: "{{FrontSide}}<hr id=answer>{{Meaning}}{{Audio}}{{Picture}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Vocab, deck: "Lang::Mining", fields: {Word: alpha, Meaning: first}, tags: [mined]}
+    - {notetype: Vocab, deck: Lang, fields: {Word: beta, Meaning: second}}
+  media_files:
+    - {name: old.mp3, fill: {size: 16, byte: 0}}
+steps:
+  - http:
+      headers: [[Origin, "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"], [Content-Type, application/json]]
+      body: {json: {action: findNotes, version: 6, params: {query: "added:1"}}}
+  - http:
+      headers: [[Origin, "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"], [Content-Type, application/json]]
+      body: {json: {action: notesInfo, version: 6, params: {notes: ["#n1"]}}}
+  - http:
+      headers: [[Origin, "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"], [Content-Type, application/json]]
+      body: {json: {action: storeMediaFile, version: 6, params: {filename: asb_u.png, data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR42mNgAAAAAgAB5Sfe/AAAAABJRU5ErkJggg=="}}}
+  - http:
+      headers: [[Origin, "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"], [Content-Type, application/json]]
+      body: {json: {action: updateNoteFields, version: 6, params: {note: {id: "#n1", fields: {Picture: "<img src=\"asb_u.png\">"}}}}}
+  - http:
+      headers: [[Origin, "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"], [Content-Type, application/json]]
+      body: {json: {action: addTags, version: 6, params: {notes: ["#n1"], tags: asb}}}
+  - http:
+      headers: [[Origin, "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"], [Content-Type, application/json]]
+      body: {json: {action: guiBrowse, version: 6, params: {query: "nid:${#n1}"}}}
+  - observe: [{db_dump: {tables: [notes, cards]}}, media_dir]

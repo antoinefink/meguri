@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-# AnkiConnect transcript recorder (U136 spike): the pinned Anki desktop app
+# AnkiConnect transcript recorder (U136): the pinned Anki desktop app
 # (aqt 26.9.3) on the oracle image, offscreen under libfaketime, with the
 # AnkiConnect add-on (GPL-3.0-or-later) pinned in ADDON_PIN. AGPL-3.0-or-later
 # quarantine (LICENSE); built locally only, never pushed (R1869).
@@ -46,6 +46,7 @@ RUN mkdir -p /tmp/ac /opt/ankiconnect/addons21/2055492159 \
  && rm -rf /tmp/ac /tmp/anki-connect.tar.gz
 
 COPY addons21/meguri_recorder/ /opt/ankiconnect/addons21/meguri_recorder/
+COPY recorder/ /opt/ankiconnect/recorder/
 COPY launch.py entrypoint.sh /opt/ankiconnect/
 
 USER oracle

@@ -1,0 +1,11 @@
+# Harness self-test (specs/servers/transcripts T17, T18): version 6 on a fresh
+# connection, no Origin.
+id: servers/ankiconnect/harness/version
+description: version 6, wrapped reply
+tags: [harness, no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {json: {action: version, version: 6}}

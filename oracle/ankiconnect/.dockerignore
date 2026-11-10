@@ -5,5 +5,6 @@
 !launch.py
 !entrypoint.sh
 !addons21/
+!recorder/
 **/__pycache__
 **/*.pyc

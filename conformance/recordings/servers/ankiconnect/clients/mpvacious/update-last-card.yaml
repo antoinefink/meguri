@@ -1,0 +1,37 @@
+# servers/ankiconnect-clients C3 rows 28, 29, 35, 38, C7 mpvacious/update-last-card,
+# with C4's notesInfo and file write between guiSelectedNotes and updateNoteFields.
+# Env M (servers/ankiconnect-clients C2, C5): no Origin, no Content-Type,
+# version 6. Setup is C6's. All values are synthetic.
+id: servers/ankiconnect/clients/mpvacious/update-last-card
+description: browse, read the selection, update the selected note and tag it
+tags: [client:mpvacious, no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Lang, "Lang::Mining"]
+  notetypes:
+    - name: Vocab
+      fields: [Word, Reading, Meaning, Audio, Picture]
+      templates:
+        - {name: Recognition, front: "{{Word}}", back: "{{FrontSide}}<hr id=answer>{{Meaning}}{{Audio}}{{Picture}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Vocab, deck: "Lang::Mining", fields: {Word: alpha, Meaning: first}, tags: [mined]}
+    - {notetype: Vocab, deck: Lang, fields: {Word: beta, Meaning: second}}
+  media_files:
+    - {name: old.mp3, fill: {size: 16, byte: 0}}
+steps:
+  - http:
+      body: {json: {action: guiBrowse, version: 6, params: {query: "nid:${#n2}"}}}
+  - interaction: {kind: GuiSelectedNotes, answer: {notes: ["#n2"]}}
+  - http:
+      body: {json: {action: guiSelectedNotes, version: 6}}
+  - http:
+      body: {json: {action: notesInfo, version: 6, params: {notes: ["#n2"]}}}
+  - media_dir_write: {name: mpv_u.png, fixture: {path: servers/ankiconnect/pixel.png, sha256: a4d4c009619311d9b83904acfd62fe3b7f918c312522bbcc6ad51cdec4fd1edf}}
+  - http:
+      body: {json: {action: updateNoteFields, version: 6, params: {note: {id: "#n2", fields: {Picture: "<img src=\"mpv_u.png\">"}}}}}
+  - http:
+      body: {json: {action: addTags, version: 6, params: {notes: ["#n2"], tags: "mpv clip"}}}
+  - observe: [{db_dump: {tables: [notes, cards, tags]}}, media_dir]
