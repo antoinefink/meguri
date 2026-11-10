@@ -81,3 +81,12 @@ Independent review is clear, and focused `54770` passed all three cases, includi
 per-role metadata mismatch checks. This supersedes the query choices above;
 their failed native receipts remain retained. Native product verification is
 still required.
+
+Native `61801` reached signer selection and refused `profile-signer`. Maintenance
+`73247` proved one valid private-key identity and one matching profile certificate,
+but zero matches under the helper's display-label suffix filter. The actual DER
+team field, development certificate name and expiry checks passed. The selector
+now checks those certificate facts directly and retains its one-candidate rule.
+Regressions cover a person suffix different from the team, wrong DER team/name,
+expiry and ambiguity. Independent review is clear; focused `83778` passed all
+three tooling cases. Native verification remains pending.

@@ -17,6 +17,7 @@ class ProfileTests(unittest.TestCase):
   cache=self.home/'Library/Developer/Xcode/UserData/Provisioning Profiles';cache.mkdir(parents=True)
   self.cache=cache/(UUID+'.provisionprofile');self.cache.write_bytes(self.input.read_bytes())
   ent=self.root/'app/request.entitlements';ent.parent.mkdir(parents=True,exist_ok=True);ent.write_bytes(plistlib.dumps(self.f.ent))
+  self.certificate_team=fixtures.TEAM;self.expired_certificate=False;self.other_certificate_cn=False;self.two_identities=False
   self.ent=ent;self.changed_other=False;self.target_shape=None;self.unexpected_role=None
   self.settings=fixtures.settings();self.settings.update(CONFIGURATION='Debug',PLATFORM_NAME='macosx',MEGURI_SIGNING='team',
    DEVELOPMENT_TEAM=fixtures.TEAM,CODE_SIGN_ENTITLEMENTS='request.entitlements')
@@ -25,6 +26,15 @@ class ProfileTests(unittest.TestCase):
                patch.object(m.subprocess,'run',side_effect=self.decode)):
    item.start();self.addCleanup(item.stop)
  def decode(self,args,*,input,capture_output,timeout):
+  if args[0]=='/usr/bin/openssl':
+   self.assertEqual(args[1:4],['x509','-inform','DER']);self.assertIn(input,self.profile['DeveloperCertificates'])
+   self.assertTrue(capture_output);self.assertEqual(timeout,60)
+   if '-subject' in args:
+    cn='Generated Other' if self.other_certificate_cn else 'Apple Development: Generated'
+    out=('subject=CN='+cn+',OU='+self.certificate_team+',O=Generated').encode()
+    return subprocess.CompletedProcess(args,0,out,b'')
+   self.assertEqual(args[-3:],['-noout','-checkend','0'])
+   return subprocess.CompletedProcess(args,1 if self.expired_certificate else 0,b'',b'')
   self.assertEqual(args,['/usr/bin/security','cms','-D'])
   self.assertEqual(input,b'generated-approved-profile')
   self.assertTrue(capture_output);self.assertEqual(timeout,60)
@@ -54,8 +64,9 @@ class ProfileTests(unittest.TestCase):
    out=json.dumps(targets).encode()
   elif args[0]=='/usr/sbin/system_profiler':out=json.dumps({'SPHardwareDataType':[{'provisioning_UDID':fixtures.FIXTURE_VM_ID}]}).encode()
   elif 'find-identity' in args:
-   cert=self.profile['DeveloperCertificates'][0];sha=hashlib.sha1(cert).hexdigest()
-   out=('1) '+sha+' "Apple Development: Generated ('+fixtures.TEAM+')"\n').encode()
+   certs=self.profile['DeveloperCertificates'] if self.two_identities else self.profile['DeveloperCertificates'][:1]
+   out=''.join(str(n)+') '+hashlib.sha1(cert).hexdigest()+' "Apple Development: Generated (generated-person-id)"\n'
+    for n,cert in enumerate(certs,1)).encode()
   else:out=plistlib.dumps(self.profile)
   return subprocess.CompletedProcess(args,0,out,b'')
  def test_exact_installed_profile_and_current_requested_grants_resolve_private_binding(self):
@@ -100,6 +111,7 @@ class ProfileTests(unittest.TestCase):
  def test_transient_original_path_substitution_cannot_change_decoded_authority(self):
   admitted=self.input.read_bytes()
   def substitute(args,*,input,capture_output,timeout):
+   if args[0]!='/usr/bin/security':return self.decode(args,input=input,capture_output=capture_output,timeout=timeout)
    self.assertEqual(args,['/usr/bin/security','cms','-D'])
    self.assertEqual(input,admitted)
    # A pathname decoder would inspect this different profile. The stdin
@@ -111,11 +123,12 @@ class ProfileTests(unittest.TestCase):
    return result
   with patch.object(m.subprocess,'run',side_effect=substitute) as native:
    value=m.resolve(str(self.root),str(self.input))
-  self.assertEqual(native.call_count,1)
+  self.assertEqual(sum(call.args[0][0]=='/usr/bin/security' for call in native.call_args_list),1)
   self.assertEqual(value['sha256'],m.v.digest(admitted))
   self.assertEqual(value['uuid'],UUID)
  def test_persistent_original_path_substitution_still_refuses(self):
   def substitute(args,**kwargs):
+   if args[0]!='/usr/bin/security':return self.decode(args,**kwargs)
    result=self.decode(args,**kwargs)
    self.input.write_bytes(b'generated-substituted-profile')
    return result
@@ -129,6 +142,15 @@ class ProfileTests(unittest.TestCase):
     with self.assertRaisesRegex(m.v.Refused,'profile-input'):m.decode_profile(b'generated-approved-profile')
   with patch.object(m.subprocess,'run',side_effect=subprocess.TimeoutExpired([],60)):
    with self.assertRaisesRegex(m.v.Refused,'profile-input'):m.decode_profile(b'generated-approved-profile')
+ def test_certificate_der_team_development_cn_expiry_and_ambiguity_remain_strict(self):
+  for field,value in [('certificate_team','OTHER12345'),('other_certificate_cn',True),('expired_certificate',True)]:
+   original=getattr(self,field);setattr(self,field,value)
+   with self.subTest(field=field):
+    with self.assertRaisesRegex(m.v.Refused,'profile-signer'):m.resolve(str(self.root),str(self.input))
+   setattr(self,field,original)
+  self.profile['DeveloperCertificates'].append(b'generated-second-private-key-certificate')
+  self.two_identities=True
+  with self.assertRaisesRegex(m.v.Refused,'profile-signer'):m.resolve(str(self.root),str(self.input))
  def test_unresolved_macro_refuses(self):
   with self.assertRaises(m.v.Refused):m.expand({'key':'$(UNSET)'},{})
 

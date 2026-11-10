@@ -29,13 +29,28 @@ def expand(value,settings):
     return result
 
 
+def certificate_team(certificate,team):
+    # Display labels may end in a person identifier. Team authority is in DER.
+    def inspect(arguments):
+        try:
+            value=subprocess.run(['/usr/bin/openssl','x509','-inform','DER',*arguments],
+                input=certificate,capture_output=True,timeout=60)
+        except (OSError,subprocess.SubprocessError):
+            raise v.Refused('profile-signer') from None
+        need(value.returncode==0 and len(value.stdout)+len(value.stderr)<=1024*1024,'profile-signer')
+        return value.stdout
+    subject=inspect(['-noout','-subject','-nameopt','RFC2253']).decode().strip().replace('subject=','',1).strip()
+    inspect(['-noout','-checkend','0'])
+    return (re.findall(r'(?:^|,)OU=([A-Z0-9]{10})(?=,|$)',subject)==[team] and
+            re.search(r'(?:^|,)CN=Apple Development:',subject) is not None)
+
+
 def private_identity(profile,team):
     raw=v.command(['/usr/bin/security','find-identity','-v','-p','codesigning'],'profile-signer').stdout.decode()
-    hashes=[sha.upper() for sha,name in re.findall(r'^\s*\d+\)\s+([A-Fa-f0-9]{40})\s+"(Apple Development:[^"\n]+)"\s*$',raw,re.M)
-            if name.endswith(' ('+team+')')]
+    hashes={sha.upper() for sha,_ in re.findall(r'^\s*\d+\)\s+([A-Fa-f0-9]{40})\s+"(Apple Development:[^"\n]+)"\s*$',raw,re.M)}
     certificates=profile.get('DeveloperCertificates',[])
     need(isinstance(certificates,list) and all(isinstance(c,bytes) for c in certificates),'profile-signer')
-    choices=[c for c in certificates if hashlib.sha1(c).hexdigest().upper() in hashes]
+    choices=[c for c in certificates if hashlib.sha1(c).hexdigest().upper() in hashes and certificate_team(c,team)]
     need(len(choices)==1,'profile-signer')
     return choices[0]
 
