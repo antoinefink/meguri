@@ -199,3 +199,9 @@ files changing from 0755 to 0644. The signing plan identifies six loadable
 files and two standalone executables in that product. The next build prepares
 the loadable files with 0644. The frozen, copied and installed inventory
 comparisons remain exact. A fresh signed install must confirm the mapping.
+
+On `5ddc99b2`, focused checks `65331` pass all four wrappers. Signed
+run `65981` passes Mac delivery `70898` and simulator delivery `71640`
+with exact installed inventory. It then reaches `awaiting_user` for
+`cloudkit-test-accounts`. The check has reached the approved account
+input, so no CloudKit exchange or review sync has run yet.
