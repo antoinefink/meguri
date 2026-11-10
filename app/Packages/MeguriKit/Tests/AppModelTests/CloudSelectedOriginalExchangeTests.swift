@@ -23,8 +23,8 @@ extension ReviewCollectionStartupTests {
         let held = SelectedOriginalReplyGate()
         do {
             let wire = try ServiceWorkflowWire(process: process, directory: root.appending(path: "transport"))
-            let a = try ServiceAppHarness(root: root.appending(path: "A"), wire: wire)
-            let b = try ServiceAppHarness(root: root.appending(path: "B"), wire: wire)
+            let a = try ServiceAppHarness(root: root.appending(path: "A"), wire: wire, clock: .system)
+            let b = try ServiceAppHarness(root: root.appending(path: "B"), wire: wire, clock: .system)
             defer { a.defaults.removePersistentDomain(forName: a.suite); b.defaults.removePersistentDomain(forName: b.suite) }
             for directory in [a.root, b.root] {
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
@@ -32,6 +32,8 @@ extension ReviewCollectionStartupTests {
             }
             active = a
             try await selectedBootstrapPublish(a)
+            await a.sync.waitForInputs(); await a.sync.drainOperations(); await a.sync.waitForInputs()
+            try #require(!a.sync.operationFailed)
             try #require(await a.owner.close())
             // Establish B's original binding before A's edit. The later peer
             // step must use ordinary incremental fetched/apply, not adoption.
@@ -46,6 +48,8 @@ extension ReviewCollectionStartupTests {
             try #require(adopted.status == .proven && adopted.provenance == .retainedAdoption)
             try #require(adopted.activation == .proven && adopted.ownedBackup == .proven && adopted.requiredScanComplete)
             try #require(try await CoreNoteService().readNote(id: input.noteID).fields[0] == "Generated-Q")
+            await b.sync.waitForInputs(); await b.sync.drainOperations(); await b.sync.waitForInputs()
+            try #require(!b.sync.operationFailed)
             try #require(await b.owner.close())
 
             active = a
@@ -58,6 +62,8 @@ extension ReviewCollectionStartupTests {
             }
             let sdk = try #require(await a.factory.engines.last)
             await sdk.waitForAutomaticSend()
+            await a.sync.waitForInputs(); await a.sync.drainOperations(); await a.sync.waitForInputs()
+            try #require(!a.sync.operationFailed)
             await sdk.holdNextSentResult(zone: nil) { await held.hold() }
             let receiptsBefore = await wire.receipts.count
             let edit = try await sourceRole.fixedEdit()
@@ -166,7 +172,7 @@ extension ReviewCollectionStartupTests {
         }
     }
 
-    @Test(arguments: ["failed", "later-rewrite"])
+    @Test(arguments: ["server-record-changed", "later-rewrite"])
     func selectedOriginalHeldFailedAndMismatchedACKRefuseRealServiceProof(mode: String) async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "synthetic-selected-original-refusal-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
@@ -177,39 +183,109 @@ extension ReviewCollectionStartupTests {
         try FileManager.default.createDirectory(at: service, withIntermediateDirectories: false)
         let process = try await CloudServiceProcess.open(stateDirectory: service, pageSize: 32)
         var active: ServiceAppHarness?, operation: CloudKitNetworkOperation?
+        var drain: Task<Void, any Error>?
         let held = SelectedOriginalReplyGate()
         do {
             let wire = try ServiceWorkflowWire(process: process, directory: root.appending(path: "transport"))
-            let app = try ServiceAppHarness(root: root.appending(path: "collection"), wire: wire)
+            let app = try ServiceAppHarness(root: root.appending(path: "collection"), wire: wire, clock: .system)
             active = app
             defer { app.defaults.removePersistentDomain(forName: app.suite) }
             try FileManager.default.createDirectory(at: app.root, withIntermediateDirectories: false)
             try input.bytes.write(to: app.root.appending(path: "collection.anki2"))
             try await selectedBootstrapPublish(app)
+            await app.sync.waitForInputs(); await app.sync.drainOperations(); await app.sync.waitForInputs()
+            try #require(!app.sync.operationFailed)
             _ = try await role.validateOwned()
             let sdk = try #require(await app.factory.engines.last)
-            if mode == "failed" {
-                let quota = try await wire.call(.object(["SetQuota": .object(["bytes": .integer(0)])]))
-                try #require(try quota.ok().text == "Done")
+            await sdk.waitForAutomaticSend(); try await sdk.waitForEventBookkeeping()
+            try #require(!(await sdk.automaticSchedulingEnabled))
+            let backend = try app.backend
+            let baselineSnapshot = try await backend.workflow.durableSnapshot()
+            let batchesBefore = await sdk.batchRequests
+            let deliveredBefore = await sdk.deliveredSentBatches.count
+            var appNetworkRequests = 0
+            backend.onCommands = { commands in
+                for command in commands {
+                    switch command.action {
+                    case .requestSend, .runExchange: appNetworkRequests += 1
+                    default: break
+                    }
+                }
             }
+            defer { backend.onCommands = nil }
             let edit = try await role.fixedEdit()
             await app.sync.waitForInputs(); await app.sync.drainOperations()
-            let backend = try app.backend
+            try #require(!app.sync.operationFailed)
+            let revision = try #require(edit.localRevision)
+            try #require(revision > 0 && edit.updatedNotes == 1 && edit.source == .userUndoable)
             let current = try await role.observe()
-            try #require(!current.entity.acknowledged && current.entity.revision == edit.localRevision)
+            try selectedOriginalNonACK(current, edit: edit)
+            let baseline = try #require(baselineSnapshot.entities.first { $0.name == current.entity.recordName })
+            try #require(baseline.mark == nil && baseline.localRev == baseline.ackedRev && baseline.ackedRev < revision)
+            let baselineSaved = try #require(await wire.receipts.last { $0.record.name == current.entity.recordName })
+            let zone = baselineSaved.zone
+            try #require(baselineSaved.record.systemFields == baseline.ackedSystemFields)
+            var competing: ServiceSavedReceipt?
+            if mode == "server-record-changed" {
+                let read = try await wire.read(zone: zone, name: current.entity.recordName, all: true)
+                let server = try ServiceRecordBytes(serviceRequired(try read.ok()["Record"]))
+                try #require(server.name == baselineSaved.record.name && server.recordType == baselineSaved.record.recordType)
+                try #require(server.envelope == baselineSaved.record.envelope && server.systemFields == baseline.ackedSystemFields)
+                // A real conditional re-save of the exact ACK baseline advances
+                // only the Service tag. Core keeps its older conditional base.
+                let reply = try await wire.modify(zone: zone, changes: [.object(["Save": .object([
+                    "record": .object(["name": .string(server.name), "record_type": .string(server.recordType),
+                        "fields": try serviceRequired(server.raw["fields"])]),
+                    "if_unchanged": .bytes(server.systemFields),
+                ])])])
+                let mutations = try #require(try reply.ok()["Modified"]?.items)
+                try #require(mutations.count == 1 && mutations[0]["name"]?.text == server.name)
+                let saved = try ServiceRecordBytes(serviceRequired(mutations[0]["result"]?["Ok"]?["Saved"]))
+                try #require(saved.name == server.name && saved.recordType == server.recordType && saved.envelope == server.envelope)
+                try #require(try saved.asset("pa") == server.asset("pa"))
+                try #require(saved.systemFields != server.systemFields && !saved.systemFields.isEmpty)
+                try await wire.recordReceipts(reply, zone: zone)
+                competing = .init(original: reply, zone: zone, record: saved.record(zone: zone))
+                let unchanged = try #require(try await backend.workflow.entityFacts(name: server.name))
+                try #require(unchanged.ackedRev == baseline.ackedRev && unchanged.ackedSystemFields == baseline.ackedSystemFields)
+            }
             let receiptsBefore = await wire.receipts.count
+            let conflictsBefore = await wire.saveConflicts.count
+            await app.sync.waitForInputs(); await app.sync.drainOperations(); await app.sync.waitForInputs()
+            try #require(!app.sync.operationFailed)
             await sdk.holdNextSentResult(zone: nil) { await held.hold() }
             // Use the already admitted normal SDK path; the Service produces
-            // the actual Saved or quota failure. No OpResult/ACK replacement.
-            let zone = try #require((await wire.receipts).first { $0.record.name == current.entity.recordName }?.zone)
+            // the actual Saved or ServerRecordChanged. No result replacement.
             let prepared = try await sdk.prepareSend(zones: [zone])
             operation = try prepared.enqueue(validate: {})
             try #require(try await serviceAppSignal(held.entered, stage: "selected original refusal Service reply held"))
             let batch = try #require(await sdk.heldSentBatchID)
-            if mode == "failed" { try #require(!(await sdk.heldSavedNames).contains(current.entity.recordName)) }
+            if mode == "server-record-changed" { try #require(!(await sdk.heldSavedNames).contains(current.entity.recordName)) }
             else { try #require((await sdk.heldSavedNames).contains(current.entity.recordName)) }
             let whileHeld = try await role.observe()
-            try #require(!whileHeld.entity.acknowledged && whileHeld.entity.ackedRevision < whileHeld.entity.revision)
+            try selectedOriginalNonACK(whileHeld, edit: edit)
+            try #require(whileHeld.entity.ackedEnvelopeDigest == Data(SHA256.hash(data: baselineSaved.record.envelope)))
+            let handed = try #require(try await backend.workflow.entityFacts(name: current.entity.recordName))
+            try #require(handed.inFlight.filter { $0.localRev == revision }.count == 1)
+            try #require(handed.ackedRev == baseline.ackedRev && handed.ackedSystemFields == baseline.ackedSystemFields)
+            let mark = try #require(handed.mark)
+            try #require(mark.payloadDigest == handed.payloadDigest && handed.payloadDigest != baseline.ackedPayloadDigest)
+            if mode == "server-record-changed" {
+                let competing = try #require(competing)
+                let conflicts = await wire.saveConflicts.dropFirst(conflictsBefore)
+                try #require(conflicts.count == 1)
+                let conflict = try #require(conflicts.first)
+                try #require(conflict.code == "ServerRecordChanged" && conflict.zone == zone && conflict.name == current.entity.recordName)
+                try #require(conflict.server.name == competing.record.name && conflict.server.recordType == competing.record.recordType)
+                try #require(conflict.server.envelope == baselineSaved.record.envelope && conflict.server.systemFields == competing.record.systemFields)
+                try #require(conflict.original.requestID > competing.original.requestID)
+                try #require(conflict.original.originalRequest["caller"]?["instance"]?.text == sdk.instanceID)
+                let changes = try #require(conflict.original.originalRequest["operation"]?["Modify"]?["changes"]?.items)
+                let sent = try #require(changes.first { $0["Save"]?["record"]?["name"]?.text == current.entity.recordName }?["Save"])
+                try #require(try sent["if_unchanged"]?.bytes() == baseline.ackedSystemFields)
+                try #require(try sent["record"]?["fields"]?["e"]?["EncryptedBytes"]?.bytes() != conflict.server.envelope)
+                try #require((await wire.receipts).count == receiptsBefore)
+            }
             if mode == "later-rewrite" {
                 let row = try await CoreNoteService().readNote(id: input.noteID)
                 _ = try await CoreNoteService().updateNote(.init(id: row.id,
@@ -217,20 +293,54 @@ extension ReviewCollectionStartupTests {
                 try await CoreCollectionService().flushForBackground()
                 await app.sync.waitForInputs(); await app.sync.drainOperations()
             }
-            await held.release(); try await operation?.drain()
+            await held.release()
+            let originalOperation = try #require(operation)
+            let joined = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            drain = Task {
+                defer { joined.continuation.finish() }
+                try await originalOperation.drain()
+                joined.continuation.yield(true)
+            }
+            try #require(try await serviceAppSignal(joined.stream, stage: "selected original refusal SDK operation drained"))
+            try await drain?.value
             try await sdk.waitForEventBookkeeping()
             await app.sync.waitForInputs(); await app.sync.drainOperations()
+            try #require(!app.sync.operationFailed)
+            let observations = try await backend.workflow.observations()
+            try #require(observations.contains(.batchBuilt(names: [current.entity.recordName], batchID: batch)))
+            try #require(observations.contains(.handlerReturned(requestID: batch)))
+            let delivered = await sdk.deliveredSentBatches.dropFirst(deliveredBefore)
+            try #require(delivered.count == 1 && delivered.first?.id == batch && delivered.first?.zone == zone)
+            try #require(await sdk.batchRequests == batchesBefore + 1 && appNetworkRequests == 0)
+            let policy = try await backend.workflow.policy()
+            try #require(try await policy.status().inFlight == 0)
             let facts = try #require(try await backend.workflow.entityFacts(name: current.entity.recordName))
-            try #require(facts.mark != nil && facts.ackedRev < facts.localRev && facts.inFlight.isEmpty)
-            if mode == "failed" {
+            try #require(facts.mark != nil && facts.ackedRev < facts.localRev)
+            try #require(await sdk.pendingRecordZoneChanges()[current.entity.recordName] == .save)
+            if mode == "server-record-changed" {
                 let refused = try await role.observe()
-                try #require(!refused.entity.acknowledged && refused.entity.revision == edit.localRevision)
+                try selectedOriginalNonACK(refused, edit: edit)
+                try #require(refused.entity.ackedEnvelopeDigest == whileHeld.entity.ackedEnvelopeDigest)
+                // K10.3/K12.1 retain this durable handed history after failure.
+                // Handler return/drain above proves active work has ended.
+                try #require(facts.localRev == revision && facts.inFlight == handed.inFlight && facts.mark == handed.mark)
+                try #require(facts.payloadDigest == handed.payloadDigest && facts.ackedPayloadDigest == baseline.ackedPayloadDigest)
+                try #require(facts.ackedRev == baseline.ackedRev && facts.ackedSystemFields == baseline.ackedSystemFields)
                 try #require((await wire.receipts).count == receiptsBefore)
-                #expect(!(try await backend.workflow.observations()).contains(.savedPendingRemoved(name: current.entity.recordName, requestID: batch)))
+                try #require(!observations.contains(.savedPendingRemoved(name: current.entity.recordName, requestID: batch)))
+                let competing = try #require(competing)
+                let read = try await wire.read(zone: zone, name: current.entity.recordName, all: true)
+                let server = try ServiceRecordBytes(serviceRequired(try read.ok()["Record"]))
+                try #require(server.name == competing.record.name && server.recordType == competing.record.recordType)
+                try #require(server.envelope == baselineSaved.record.envelope && server.systemFields == competing.record.systemFields)
+                let durable = try await backend.workflow.durableSnapshot()
+                try #require(!durable.inboxNames.contains(current.entity.recordName) && !durable.trackingStopped)
             } else {
                 let original = try #require(await wire.receipts.dropFirst(receiptsBefore).last { $0.record.name == current.entity.recordName })
                 try #require(facts.ackedRev == edit.localRevision && facts.ackedSystemFields == original.record.systemFields)
                 try #require(facts.localRev > facts.ackedRev && facts.payloadDigest != facts.ackedPayloadDigest)
+                try #require(facts.inFlight.isEmpty)
+                try #require(observations.contains(.savedPendingRemoved(name: current.entity.recordName, requestID: batch)))
                 await #expect(throws: (any Error).self) { try await role.observe() }
             }
             try #require(await app.owner.close())
@@ -239,11 +349,18 @@ extension ReviewCollectionStartupTests {
             try #require(exit.diagnostics.isEmpty && !exit.diagnosticLimitExceeded)
         } catch {
             await held.release(); await operation?.cancelAndDrain()
+            _ = try? await drain?.value
             if let active { await active.cleanupAfterServiceFailure() }
             else { #expect(await process.cancel().joined) }
             throw error
         }
     }
+}
+
+@MainActor private func selectedOriginalNonACK(_ observed: OriginalCloudObservation, edit: OriginalCloudEditFacts) throws {
+    try #require(observed.generation == edit.generation && observed.seq >= edit.seq && observed.observedSeq == edit.seq)
+    try #require(observed.qChanged && observed.entity.revision == edit.localRevision && observed.entity.digest == edit.noteDigest)
+    try #require(!observed.entity.acknowledged && observed.entity.ackedRevision < observed.entity.revision)
 }
 
 @MainActor private func selectedOriginalACK(_ observed: OriginalCloudObservation, edit: OriginalCloudEditFacts,

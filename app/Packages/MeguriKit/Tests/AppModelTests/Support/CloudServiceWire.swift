@@ -69,6 +69,15 @@ nonisolated struct ServiceSavedReceipt: Sendable {
     let zone: String
     let record: CloudRecord
 }
+// Actual per-record conflict fields, retained alongside their original request
+// and response. Observation only; this never substitutes an SDK result.
+nonisolated struct ServiceSaveConflictReceipt: Sendable {
+    let original: ServiceOriginalReply
+    let zone: String
+    let name: String
+    let code: String
+    let server: ServiceRecordBytes
+}
 // Original accepted Read receipts, never fabricated server records or ACKs.
 nonisolated struct ServiceAssetReadObservation: Sendable {
     let original: ServiceOriginalReply
@@ -181,6 +190,7 @@ actor ServiceWorkflowWire {
     let staging: CloudMediaStaging
     private let sourceDirectory: URL
     private(set) var receipts: [ServiceSavedReceipt] = []
+    private(set) var saveConflicts: [ServiceSaveConflictReceipt] = []
     private struct AssetDeliveryFault {
         let zone: String
         let name: String
@@ -279,6 +289,10 @@ actor ServiceWorkflowWire {
             if let raw = mutation["result"]?["Ok"]?["Saved"] {
                 let record = try ServiceRecordBytes(raw)
                 receipts.append(.init(original: original, zone: zone, record: record.record(zone: zone)))
+            } else if let error = mutation["result"]?["Err"], error["code"]?.text == "ServerRecordChanged" {
+                saveConflicts.append(try .init(original: original, zone: zone,
+                    name: serviceRequired(mutation["name"]?.text), code: serviceRequired(error["code"]?.text),
+                    server: ServiceRecordBytes(serviceRequired(error["server_record"]))))
             }
         }
     }
