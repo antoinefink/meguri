@@ -158,3 +158,23 @@ synthetic provisioning refusal before copy and rejects private exception text
 from the install-child report. Independent review finds no P0–P2 issues and
 confirms the frozen source hashes. One instrumented actual Mac delivery remains
 required; no real delivery or CloudKit pass is claimed.
+
+## Selected delivery and repeat simulator builds
+
+Starting commit `5d50ad98`. Signed run `15948` passed both builds and stopped
+at Mac delivery. The selected installer now uses the same closed diagnostic
+as the smoke installer. Focused checks `21720` passed four wrappers, including
+the selected child's refusal and private-text checks.
+
+Run `22762` identified `recheck-build/profile-device` at install `27041`.
+The previous local activation omitted the installed profile that covers the
+VM. The machine-local activation now supplies that existing profile. Run
+`28155` passed the Mac build with that input and reached
+`initial-entitlements` during simulator signing. The Xcode build log shows
+that it signed the app and reused the embedded widget from the previous run.
+
+The next signed simulator build refreshes only that generated embedded
+widget before Xcode runs. The widget target's product and unrelated app
+files stay in place. The original signature and entitlement checks still
+apply before the first freeze. Focused checks `33337` passed four wrappers,
+including the exact removal boundary and symlink refusal.

@@ -117,6 +117,29 @@ REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   [[ "$output" != *"status:pass"* ]]
 }
 
+@test "CloudAgent simulator build refreshes only its generated embedded widget" {
+  run bash -c '
+    mg_job() { :; }
+    mg_failure() { printf "failure:%s\n" "$1"; }
+    mg_status() { :; }
+    source "$1/tools/mg.d/app.sh"
+    MG_ROOT="$2"
+    MG_APP_DD=build/app/CloudAgentSimDerivedData
+    products="$(mg_app_products ios-sim Debug)"
+    plugins="$products/Meguri.app/PlugIns"
+    widget="$plugins/MeguriWidget.appex"
+    mkdir -p "$widget" "$products/MeguriWidget.appex"
+    touch "$widget/old" "$products/MeguriWidget.appex/native" "$plugins/keep"
+    mg_app_remove_embedded_widget ios-sim Debug || exit 1
+    [ ! -e "$widget" ] && [ -f "$products/MeguriWidget.appex/native" ] && [ -f "$plugins/keep" ] || exit 2
+    ln -s "$products/MeguriWidget.appex" "$widget"
+    if mg_app_remove_embedded_widget ios-sim Debug; then exit 3; fi
+    [ -L "$widget" ] && [ -f "$products/MeguriWidget.appex/native" ] || exit 4
+  ' _ "$REPO_ROOT" "$BATS_TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ "$output" = "failure:embedded-widget" ]
+}
+
 # bats test_tags=gate
 @test "signed-agent T3 registration leaves the original soak pending" {
   run python3 -B -c '

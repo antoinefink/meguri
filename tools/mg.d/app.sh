@@ -32,12 +32,16 @@ mg_app_products() {
 # Xcode can retain an embedded widget signed by an earlier signing mode.
 # Remove only its generated copy so the build embeds the current product.
 mg_app_remove_embedded_widget() {
-  local widget path
-  case "$MG_APP_DD" in
-    build/app/DerivedData|build/app/StandaloneDerivedData|build/app/PersonalPreviewDerivedData|build/app/CloudAgentMacDerivedData) ;;
+  local platform="$1" config="$2" widget path
+  case "$platform/$MG_APP_DD" in
+    mac/build/app/DerivedData|mac/build/app/StandaloneDerivedData|mac/build/app/PersonalPreviewDerivedData|mac/build/app/CloudAgentMacDerivedData)
+      widget="$(mg_app_products mac "$config")/Meguri.app/Contents/PlugIns/MeguriWidget.appex"
+      ;;
+    ios-sim/build/app/CloudAgentSimDerivedData)
+      widget="$(mg_app_products ios-sim "$config")/Meguri.app/PlugIns/MeguriWidget.appex"
+      ;;
     *) mg_failure embedded-widget "widget cleanup requires a known app build directory"; mg_status error; return 1 ;;
   esac
-  widget="$(mg_app_products mac "$1")/Meguri.app/Contents/PlugIns/MeguriWidget.appex"
   path="$widget"
   while [ "$path" != "$MG_ROOT" ]; do
     if [ -L "$path" ]; then
@@ -48,7 +52,7 @@ mg_app_remove_embedded_widget() {
     path="${path%/*}"
   done
   if ! rm -rf "$widget"; then
-    mg_failure embedded-widget "could not remove the generated embedded widget before the Mac build"
+    mg_failure embedded-widget "could not remove the generated embedded widget before the build"
     mg_status error
     return 1
   fi
@@ -209,7 +213,11 @@ mg_app_build_action() {
     *) dest="generic/platform=iOS Simulator" ;;
   esac
   if [ "$platform" = mac ]; then
-    mg_app_remove_embedded_widget "$config" || return 1
+    mg_app_remove_embedded_widget mac "$config" || return 1
+  elif [ "$signing/$action/$platform/$config/$plan/$scheme" = team/build-for-testing/ios-sim/Debug/CloudAgent/Meguri ]; then
+    # Initial signing changes the embedded widget after Xcode returns.
+    # Re-embed Xcode's native widget before verifying the next build's inputs.
+    mg_app_remove_embedded_widget ios-sim "$config" || return 1
   fi
   if [ "$action" = build-for-testing ] && [ "$config/$plan/$scheme" = Debug/CloudAgent/Meguri ]; then
     case "$platform" in mac|ios-sim) build_command=(mg_app_cloud_agent_build) ;; esac
