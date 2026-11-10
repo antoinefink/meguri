@@ -349,21 +349,21 @@ h09c785fd688d,rust,tag,model,in-scope,lenient JSON reading: a value of the wrong
 h6719d2739159,rust,tag,model,in-scope,A new collection's current deck is the default deck (id 1),storage/config/current-deck,done
 had3c7e0753e9,rust,tag,model,in-scope,"Typed config reads give nothing for a missing key, another JSON type or bytes that are not JSON; each key's reader is specified and tested with the area that reads it",browser/config/absent-defaults browser/config/wrong-shapes,done
 hde5c73b93e34,rust,tag,model,in-scope,"Undoing config writes deletes an added key and writes a changed or removed row back exactly, stamps included; redo writes them again",undo/config-writes,done
-h00dd7a3ecf58,python,tag,notes,in-scope,"Rendering a card of a note not yet added, with a given template (template preview, U71)",,deferred
-h086997a07e68,python,tag,notes,in-scope,"Rendering a card of a note not yet added at a given ordinal (template preview, U71)",,deferred
+h00dd7a3ecf58,python,tag,notes,in-scope,"Rendering a card of a note not yet added with a draft note type and template (template preview, U71)",render/preview/drafts,done
+h086997a07e68,python,tag,notes,in-scope,"Rendering a card of a note not yet added at a given ordinal (template preview, U71)",render/preview/drafts,done
 h093e8eefc4fb,python,tag,notes,not-applicable,The Python note object's mapping interface; Meguri has no such API,,done
 h0e48526720ac,python,tag,notes,not-applicable,The Python note object's in-memory tag helpers; the stored tags follow tags/tags T4,,done
 h1753942ba715,python,tag,notes,not-applicable,The Python note object's in-memory tag helpers; the stored tags follow tags/tags T4,,done
 h1a6674d12546,python,tag,notes,in-scope,A new note's card has ordinal 0,notes/records/add,done
 h21b38b36b10e,python,tag,notes,in-scope,"New cloze cards follow the deck their siblings share, else the note type's last deck",cardgen/placement/existing-note,done
-h29bfba9891f3,python,tag,notes,in-scope,"Rendering a card of a note not yet added (template preview, U71)",,deferred
-h498f28841425,python,tag,notes,in-scope,"Removing cards and the notes they leave empty, with graves (notes/note-records D2); its scenario op comes with Empty Cards (U35)",,deferred
+h29bfba9891f3,python,tag,notes,in-scope,"Rendering a card of a note not yet added, first template by default (template preview, U71)",render/preview/drafts,done
+h498f28841425,python,tag,notes,in-scope,"Removing all of a note's cards removes the note too, with card and note graves (notes/note-records D2, U131)",maintenance/empty-cards/undo-redo,done
 h4fd1c300c9be,python,tag,notes,in-scope,"Empty Cards with special fields on the front (U35, U131)",,deferred
 h7c0167c254eb,python,tag,notes,not-applicable,The Python note object refusing to save a note not yet added,,done
 h8ec017fa8bdc,python,tag,notes,in-scope,Fields stored joined by U+001F,notes/records/add,done
 hb3be21cbb738,python,tag,notes,not-applicable,The Python note object's in-memory tag helpers,,done
 hb4a338c747b2,python,tag,notes,in-scope,"The cloze numbers of a note's fields, seen through the ordinals of its cards",cardgen/cloze/numbers,done
-hb78d6a2b0271,python,tag,notes,in-scope,"Rendering a cloze card of a note not yet added (template preview, U71)",,deferred
+hb78d6a2b0271,python,tag,notes,in-scope,"Rendering a cloze card of a note not yet added at a given ordinal (template preview, U71)",render/preview/drafts,done
 hbc1c4bad3495,python,tag,notes,in-scope,The field check of a plain note is normal,notes/fields-check/states,done
 hc2d41d1889af,python,tag,notes,not-applicable,The Python note object raising on an unknown field name,,done
 hc8ae2d43aae9,python,tag,notes,not-applicable,The Python note constructor's argument rules,,done
@@ -411,7 +411,7 @@ h1d25e53134b6,python,tag,notetypes,in-scope,"Note type structure changes: fields
 h29e9a6801163,python,tag,notetypes,not-applicable,Deprecated helpers of Anki's Python add-on API,,done
 h29fa8d30a069,python,tag,notetypes,in-scope,Each template's stored list of fields its card needs,notetypes/records/stock-structure,done
 h2ef9d9aa9a2d,python,tag,notetypes,in-scope,A copied note type keeps its fields and templates under a new id and name,notetypes/records/clone,done
-h38373cc87211,python,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+h38373cc87211,python,tag,notetypes,in-scope,"removing a note type removes its notes and cards, with graves (U34)",notetypes/structure/undo-removals,done
 h3db0bf46358b,python,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
 h51425d9fe4e8,python,tag,notetypes,in-scope,"A cloze note's cards take their ordinals from its cloze numbers, whatever filters the template chains (notes/card-generation G4)",cardgen/cloze/numbers,done
 h6ace0b701063,python,tag,notetypes,not-applicable,Add-on entries in Anki's own stock note type list,,done
@@ -451,7 +451,7 @@ h5fa3b00a8f49,rust,tag,notetypes,in-scope,Merging note types on package import (
 h6288de9d6fb5,rust,tag,notetypes,in-scope,Empty Cards report (U131),,deferred
 h675f93f3e234,rust,tag,notetypes,in-scope,"A card renders in full on both sides, FrontSide on the answer, and unknown filters do not stop it",render/pipeline/basic render/pipeline/read-only render/special-fields/new-note,done
 h68d09bf06f67,rust,tag,notetypes,in-scope,"Note type list with note counts for the Note Types screen (U37, U200)",,deferred
-h6ac9613310a8,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+h6ac9613310a8,rust,tag,notetypes,in-scope,a removed note type leaves the note type list (U34),notetypes/manage/list-order,done
 h6df8b626e405,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
 h706cf39b03b8,rust,tag,notetypes,in-scope,"Note type list with note counts for the Note Types screen (U37, U200)",,deferred
 h74bea2ac61c6,rust,tag,notetypes,in-scope,"Saving a note type that arrives with its id and stamps, as sync and import do (U107, U120)",,deferred
@@ -467,7 +467,7 @@ h95ef12a29223,rust,tag,notetypes,in-scope,Change Note Type: field and template m
 h9836b2bac499,rust,tag,notetypes,not-applicable,"The backend's key name for per-template add-on settings in the config table (ordinal 0 on cloze note types); Anki's own screens write no such key, and Meguri keeps such keys untouched and removes them with their note type (storage/config-table C7, C10)",,done
 h9c3d56d899d8,rust,tag,notetypes,in-scope,"A Tags section on the front requires no card for an untagged note, which still gets ordinal 0 (notes/card-generation G3, G6)",cardgen/normal/conditionals,done
 h9e510243ea25,rust,tag,notetypes,in-scope,Random insertion positions are a seeded draw from the counter value (notes/deck-placement-and-position P4),cardgen/position/random,done
-ha1bb31fa12da,rust,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
+ha1bb31fa12da,rust,tag,notetypes,in-scope,"Change Note Type between note types with different field counts, default maps (U35)",notetypes/change/undo,done
 ha2b5da04d17c,rust,tag,notetypes,not-applicable,"The backend's key name for per-template add-on settings in the config table (ordinal 0 on cloze note types); Anki's own screens write no such key, and Meguri keeps such keys untouched and removes them with their note type (storage/config-table C7, C10)",,done
 ha5a622e9741a,rust,tag,notetypes,in-scope,Saving a note type without an id adds it,notetypes/records/names,done
 ha8d3154d3f27,rust,tag,notetypes,in-scope,reserved keys in a note type's other bytes never reach the legacy JSON object,model/schema11/notetype-other-reserved,done
@@ -482,14 +482,14 @@ hc107f1d1cc3e,rust,tag,notetypes,in-scope,A note type's legacy JSON object carri
 hd276a7ef2889,rust,tag,notetypes,in-scope,Empty Cards report (U131),,deferred
 hd70ff7b8b5c8,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
 hdaeb4b410d26,rust,tag,notetypes,not-applicable,"The backend's key name for per-template add-on settings in the config table (ordinal 0 on cloze note types); Anki's own screens write no such key, and Meguri keeps such keys untouched and removes them with their note type (storage/config-table C7, C10)",,done
-hdeaee1c610b2,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+hdeaee1c610b2,rust,tag,notetypes,in-scope,adding a template gives existing notes the card it now requires (U34),notetypes/structure/undo-add-template,done
 hdf581e6e5983,rust,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
 he9ab9d659d6c,rust,tag,notetypes,in-scope,An added note type gets an id and can be found by it,notetypes/records/names,done
 hebcc44832da5,rust,tag,notetypes,in-scope,An added note type can be found by its name,notetypes/records/names,done
 heee51bc192e5,rust,tag,notetypes,not-applicable,Encoding of Anki's Change Note Type request message,,done
 hf0e8584063a7,rust,tag,notetypes,in-scope,Generation skips the ordinals the note's cards already have (notes/card-generation G7),cardgen/normal/edits-only-add,done
 hf53f4d36434a,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
-hf6670629d7af,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+hf6670629d7af,rust,tag,notetypes,in-scope,saving a note type with an added template generates the new cards (U34),notetypes/structure/undo-add-template,done
 hf8bc5a7dc25e,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
 hf96cb48a0ba8,rust,tag,notetypes,not-applicable,Conversions between Anki's internal id types,,done
 hfa6f221eb91d,rust,tag,notetypes,not-applicable,Errors of Anki's backend lookups by unknown name or id; Meguri has its own errors,,done
@@ -642,7 +642,7 @@ h429c8ae08c83,rust,tag,render,in-scope,"AV extraction: play markers per side, a 
 h450787d61876,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
 h4726941374ef,rust,tag,render,in-scope,"Preview render of a note not yet added, both sides",render/special-fields/new-note render/template/blank,done
 h47dca159695d,rust,tag,render,in-scope,U64: expected typed-answer text must discard HTML and audio references while preserving decoded visible spacing.,render/type-answer/compare,done
-h4820dda6cd77,rust,tag,render,in-scope,U131/U246: report a blank reverse card while retaining its note when another card remains nonempty.,,deferred
+h4820dda6cd77,rust,tag,render,in-scope,Empty Cards lists a blank reverse card and keeps its note while another card is valid (U131),maintenance/empty-cards/report,done
 h492c28d52d9d,rust,tag,render,in-scope,cloze-only: with number lists,render/cloze/only,done
 h4b173b76b6d5,rust,tag,render,out-of-scope,Replacing formula source with generated media references belongs to excluded LaTeX rendering parity (R565).,,done
 h50201233953a,rust,tag,render,in-scope,Nested cloze markup and the numbers of nested clozes,render/cloze/nesting render/cloze/numbers,done
@@ -653,7 +653,7 @@ h5e0630507a22,rust,tag,render,not-applicable,Argument checking of a backend call
 h6442084ed16c,rust,tag,render,in-scope,"Template tokenizing: tags, comments, white space, stray braces, structural errors",render/template/tags render/template/comments render/template/errors render/corpus/templates-01,done
 h67f6485701c2,rust,tag,render,in-scope,cloze: output by card number and side; empty when no cloze is active,render/cloze/basic,done
 h6954b568831d,rust,tag,render,in-scope,Hints on clozes with number lists,render/cloze/multi-number render/cloze/hints,done
-h6a3197e57c5e,rust,tag,render,in-scope,U131/U246: an Empty Cards report must identify when deleting every empty card would also delete its note.,,deferred
+h6a3197e57c5e,rust,tag,render,in-scope,Empty Cards marks a note whose every card is empty as one the delete would remove (U131),cardgen/empty/undo maintenance/empty-cards/undo-redo,done
 h6b5987957b1c,rust,tag,render,in-scope,"U64: a missing non-ASCII character must count as one displayed gap, independent of UTF-8 byte length.",render/type-answer/compare,done
 h6d969fd370f8,rust,tag,render,in-scope,Nested clozes and hints on both sides,render/cloze/nesting render/cloze/hints,done
 h71a7fc765fe3,rust,tag,render,in-scope,Type-in markers and the chain rewrite,render/filters/type,done
@@ -886,40 +886,40 @@ hfea722b04230,rust,tag,sched,in-scope,U41/U246: concatenated queue sources must 
 h6d2b664432d7,python,tag,search,in-scope,"U86/U246: replacement must support no-match, all-field, field-scoped and regex modes with correct changed-note counts.",,deferred
 hce3457dc5c85,python,tag,search,out-of-scope,A collection-wide duplicate-group report with optional search restriction is the explicitly excluded Find Duplicates feature; per-note warnings and dupe: search remain required.,,done
 hefdc4581f106,python,tag,search,in-scope,"U81/U82/U84/U91: cover the combined search matrix for wildcards, tags, states, ids, fields, names, properties, rated/added dates and sorting; parser cases alone are insufficient.",,deferred
-h0218dc5d4063,rust,tag,search,in-scope,"U88/U246: state-filter construction must map new, learning, review, due, suspended and buried choices to their correct search predicates.",,deferred
+h0218dc5d4063,rust,tag,search,in-scope,"built state items for new, learning, review, due, suspended and buried give their search terms (U88)",browser/sidebar/item-searches,done
 h04f566130b07,rust,tag,search,in-scope,U88/U246: building a search from an empty explicit group must return a typed invalid-input error.,,deferred
 h0d07ce6ed51b,rust,tag,search,in-scope,U84/U246: the Browser column catalog must expose a nonempty supported column set.,,deferred
-h1147e041f6aa,rust,tag,search,in-scope,U81/U82/U91: executing a tag predicate must return tagged cards while excluding an otherwise valid untagged card.,,deferred
+h1147e041f6aa,rust,tag,search,in-scope,a tag search returns the tagged cards and not the untagged ones (U82),browser/sidebar/item-searches,done
 h1814f80ec140,rust,tag,search,in-scope,U88/U246: a generated single-note search must retain its full numeric note identifier.,,deferred
-h1e2bc38446e3,rust,tag,search,in-scope,U88/U246: build an AND expression from a pair of structured filter inputs.,,deferred
-h1e765459935f,rust,tag,search,in-scope,U88/U246: retain two child predicates when constructing an intersection group.,,deferred
+h1e2bc38446e3,rust,tag,search,in-scope,joining a search with an item under AND (U88),browser/sidebar/combine,done
+h1e765459935f,rust,tag,search,in-scope,a built AND group of two items keeps both (U88),browser/sidebar/combine,done
 h1f546a2494d6,rust,tag,search,in-scope,U88/U246: a generated recently-edited predicate must preserve the requested day count.,,deferred
-h239bcdef1181,rust,tag,search,in-scope,U88/U246: the any-flag choice must search for a nonzero flag rather than one particular color.,,deferred
+h239bcdef1181,rust,tag,search,in-scope,the built any-flag item searches for a nonzero flag (U88),browser/sidebar/item-searches,done
 h2e49ab2ea87a,rust,tag,search,in-scope,U88/U246: converting an empty explicit search group must refuse it rather than silently treating it as the whole collection.,,deferred
 h3007a5ce27b9,rust,tag,search,in-scope,"search text read into items, terms, keys and values: whitespace, quoting, escapes, negation and groups",search/lexing/whitespace search/lexing/terms search/lexing/escapes search/lexing/colons search/lexing/keys search/lexing/hyphens search/structure/groups search/structure/negation search/canonical/leaves,done
-h39a4ffc60079,rust,tag,search,in-scope,U88/U246: joining two generated filters by union must emit disjunction and preserve both predicates.,,deferred
+h39a4ffc60079,rust,tag,search,in-scope,joining a search with an item under OR keeps both sides (U88),browser/sidebar/combine,done
 h3b56f50b724c,rust,tag,search,in-scope,"U82/U91: executing a note-type predicate must exclude cards of another note type, including cloze cards.",,deferred
 h3cb2e631185c,rust,tag,search,not-applicable,Defaulting an unknown enum in the foreign search RPC is generated-binding behavior; Meguri's typed API does not expose that RPC enum (R1879).,,done
-h438f4d8ed7d7,rust,tag,search,in-scope,U84/U85/U246: map the selected Browser column and descending-order option into the executable sort.,,deferred
-h4506a7c0ae63,rust,tag,search,in-scope,U88/U246: constructing a note-type-name filter must retain the supplied name as a note-type predicate.,,deferred
+h438f4d8ed7d7,rust,tag,search,in-scope,"a Browser sort by a column, ascending and descending, orders the results (U84, U85)",browser/modes/sorted-both-modes,done
+h4506a7c0ae63,rust,tag,search,in-scope,a built note type item gives a note type term with its name (U88),browser/sidebar/item-searches,done
 h4bf38055f427,rust,tag,search,in-scope,U84/U246: each column's advertised card/note sorting availability must agree with the executable order it supplies.,,deferred
-h555785228ea2,rust,tag,search,in-scope,U88/U246: the unflagged choice must generate the zero-flag predicate.,,deferred
+h555785228ea2,rust,tag,search,in-scope,the built no-flag item searches for flag 0 (U88),browser/sidebar/item-searches,done
 h565039430e2d,rust,tag,search,in-scope,"U81/U82/U91: prove wildcard escaping, field/history/deck/property/custom-data predicates and injection-safe parameters through result equivalence; internal SQL text need not match.",,deferred
 h5b05256eb14d,rust,tag,search,in-scope,U88/U246: constructing a recently-added search must retain its requested number of days.,,deferred
 h5cdce206bbe1,rust,tag,search,in-scope,U88/U246: a generated due-within-days search must use an inclusive upper bound.,,deferred
 h63a23874d7e3,rust,tag,search,in-scope,"canonical search text: redundant quotes and escapes dropped, needed ones added, OR in capitals, numbers normalized",search/canonical/quoting search/canonical/leaves search/canonical/numbers search/canonical/round-trips search/structure/operators,done
-h66aebcbc4027,rust,tag,search,in-scope,U82/U91: executing a deck predicate must include its card and exclude a card stored in another deck.,,deferred
+h66aebcbc4027,rust,tag,search,in-scope,a deck search returns that deck's cards and not those of other decks (U82),browser/sidebar/item-searches,done
 h66d9a93ef6e9,rust,tag,search,in-scope,U84/U85/U246: selecting Browser columns must update the active row-projection state.,,deferred
 h6b3ffb448b14,rust,tag,search,in-scope,"U86/U246: literal replacement text containing a dollar and digits must be stored verbatim, without capture expansion.",,deferred
-h6becb38c0590,rust,tag,search,in-scope,U88/U246: constructing a tag filter must retain its value as a tag predicate.,,deferred
+h6becb38c0590,rust,tag,search,in-scope,a built tag item gives a tag term with its name (U88),browser/sidebar/item-searches,done
 h7594406238d4,rust,tag,search,in-scope,U88/U246: literal query generation must quote wildcard metacharacters and the escape character.,,deferred
 h75a546f3b68f,rust,tag,search,in-scope,U88/U246: replacing a filter kind must update matching nodes inside nested searches while preserving unrelated kinds and negation.,,deferred
 h75c01d18f14a,rust,tag,search,not-applicable,Passing an arbitrary SQL order clause through the foreign RPC is not a supported native Browser sort API or persisted format (R1879).,,done
-h765dd9e980ae,rust,tag,search,in-scope,U88/U246: negating a generated filter must preserve its child predicate under logical negation.,,deferred
-h7669cd3519d0,rust,tag,search,in-scope,U88/U246: a generated group containing one filter must reduce to that filter without changing its meaning.,,deferred
+h765dd9e980ae,rust,tag,search,in-scope,a built negated item negates its child (U88),browser/sidebar/combine,done
+h7669cd3519d0,rust,tag,search,in-scope,"a built group of one item is that item, without a group (U88)",browser/sidebar/combine,done
 h79e4ec8d2c86,rust,tag,search,in-scope,a committed search of several items keeps its items and loses only an outer group's brackets,search/canonical/top-level search/structure/groups,done
 h7c1c920002b6,rust,tag,search,in-scope,U88/U246: all seven flag-color choices must generate their corresponding stored flag numbers.,,deferred
-h855ecd06d4e6,rust,tag,search,in-scope,U88/U246: replacing a filter inside a group must leave a different filter kind intact.,,deferred
+h855ecd06d4e6,rust,tag,search,in-scope,replacing an item's kind inside a group leaves terms of other kinds (U88),browser/sidebar/combine,done
 h88ad03350510,rust,tag,search,in-scope,U88/U246: an absent generated filter must represent an unrestricted collection search.,,deferred
 h8b9aff97d516,rust,tag,search,in-scope,U86/U246: Find and Replace must report the number of changed notes when the request selects the full collection.,,deferred
 h8f79a3f11361,rust,tag,search,in-scope,U88/U246: constructing a duplicate predicate must preserve both note-type identity and first-field text.,,deferred
@@ -927,18 +927,18 @@ h944eb618c913,rust,tag,search,in-scope,U88/U246: a generated field-text filter m
 h993a80697567,rust,tag,search,in-scope,U88/U246: a generated multi-note filter must preserve the complete identifier list in valid search syntax.,,deferred
 h9d1214dbd878,rust,tag,search,in-scope,a card search returns the matching card ids,search/structure/precedence-results search/structure/card-note-modes,done
 ha95e1702a2fa,rust,tag,search,in-scope,"U88/U246: negating a generated predicate twice must restore its original meaning, including state filters.",,deferred
-haaeb313b212e,rust,tag,search,in-scope,U88/U246: generated card-template ordinal filters must preserve their requested ordinal.,,deferred
+haaeb313b212e,rust,tag,search,in-scope,a built template item keeps its ordinal (U88),browser/sidebar/item-searches,done
 habf4018f4772,rust,tag,search,in-scope,U85/U246: an explicitly unordered search must avoid imposing a Browser sort.,,deferred
-had58959b0fc6,rust,tag,search,in-scope,U88/U246: a generated field-presence filter must match nonempty content in the named field rather than every note type.,,deferred
+had58959b0fc6,rust,tag,search,in-scope,a built field-present item matches notes whose named field is not empty (U88),browser/sidebar/item-searches,done
 hb32e7c6fa35a,rust,tag,search,in-scope,U85/U246: an omitted sort request must preserve the unordered-search default.,,deferred
 hb42dc5c927d9,rust,tag,search,in-scope,"U88/U246: generated rated-history filters must distinguish the four buttons, any rated answer and manual rescheduling.",,deferred
 hba8e30116b92,rust,tag,search,in-scope,committing an invalid search text is a parse error,search/errors/kinds,done
 hc2037626ba58,rust,tag,search,in-scope,a committed search of one item is written without extra brackets,search/canonical/top-level,done
 hc3217305a1d5,rust,tag,search,in-scope,U88/U246: a generated introduced-within-days filter must retain the supplied day count.,,deferred
-hc518b95b631b,rust,tag,search,in-scope,U88/U246: a two-child union group must preserve both predicates under disjunction.,,deferred
-hc6331517314c,rust,tag,search,in-scope,U88/U246: the public search builder must serialize a tag choice into valid canonical tag search text.,,deferred
+hc518b95b631b,rust,tag,search,in-scope,a built OR group of two items keeps both under OR (U88),browser/sidebar/combine,done
+hc6331517314c,rust,tag,search,in-scope,building a tag item gives canonical tag search text (U88),browser/sidebar/item-searches,done
 hc98944e6bdef,rust,tag,search,in-scope,"which rows a search tests in cards and notes mode, from the scopes of its terms",search/structure/damaged-rows search/structure/whole-collection search/structure/card-note-modes,done
-hcd65bea8e67f,rust,tag,search,in-scope,U88/U246: a generated due-on-day filter must use equality rather than a range bound.,,deferred
+hcd65bea8e67f,rust,tag,search,in-scope,a built due-on-day item gives an equality due term (U88),browser/sidebar/item-searches,done
 hcf4fefe3e9ef,rust,tag,search,in-scope,U88/U246: replacing a standalone filter with another of the same kind must discard the old value.,,deferred
 hd007ebca9ed4,rust,tag,search,not-applicable,Combining adjacent integer ranges is an internal SQL-planning optimization; exact helper output is not a persisted or native-app interface (R1879).,,done
 hdff0242575ab,rust,tag,search,in-scope,the empty search returns every card,search/structure/whole-collection,done
@@ -947,7 +947,7 @@ he2a0ba83d1b8,rust,tag,search,in-scope,"U84/U85/U246: Browser row projection mus
 he56ed2a516b3,rust,tag,search,in-scope,U88/U246: a generated rated-history filter must retain both its time window and chosen answer button.,,deferred
 he8cfded7f1d7,rust,tag,search,not-applicable,Unknown flag-enum fallback in a foreign generated search RPC is not Meguri's typed filter contract (R1879).,,done
 he8f1b333539e,rust,tag,search,in-scope,search parse error kinds and the texts each reports,search/errors/kinds search/errors/order search/errors/escapes search/errors/arguments,done
-he93785c73a0f,rust,tag,search,in-scope,U88/U246: constructing a deck-name filter must retain its value as a deck predicate.,,deferred
+he93785c73a0f,rust,tag,search,in-scope,a built deck item gives a deck term with its name (U88),browser/sidebar/item-searches,done
 hfa4a20b50574,rust,tag,search,in-scope,U88/U246: preserve grouped precedence when composing search expressions; explicitly flat composition has different semantics.,,deferred
 hfd43294d32a2,rust,tag,search,in-scope,a note search returns the notes with a matching card,search/structure/precedence-results search/structure/card-note-modes,done
 h36e914747858,python,tag,stats,out-of-scope,Producing the legacy HTML statistics report for an empty collection belongs to the explicitly excluded legacy Stats screen.,,done
