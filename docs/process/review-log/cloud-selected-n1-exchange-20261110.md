@@ -110,3 +110,37 @@ also requires its original structural images. The fixture needs repair.
 The new binary now reserves the test pool for its bounded commit/flush checks.
 The new Service tests also need explicit 32-record pages. No passing ACK/apply
 or signed exchange is claimed.
+
+## R2 bounded Rust fixture repair
+
+Recorded fixer starting commit: `0b6801ee` (supplied clean baseline).
+Original batch base: `1416a520542a8c5daa38a23bfe398da704c3d6c9`.
+
+The original-observation fixture now captures all table-backed canonical
+payloads from one held original collection snapshot, including Deck, Preset,
+Notetype with its raw field/template parts, Tag, and the original Note/Card
+images. It installs these immutable revision-one baselines with the existing
+`prepare_entity_baseline_for_testing` hook before opening the Active runtime.
+Envelope kind/key come from each projected payload. Empty media remains covered
+by ordinary reconciliation. No target incoming revision or positive verdict is
+seeded: the changed Note still comes from an ordinary updater in a separate
+CoreHost, and Incoming must produce the COMMIT, WAL and settled apply receipts.
+
+Scope is the Rust fixture/helper and this log. Production reconciliation,
+authority guards, all observation assertions, COMMIT/flush holds and ten-second
+deadlines are preserved. The binary reservation, native page configuration,
+SDK/autotests and pending Bridge executor are untouched.
+
+The fixer completed one source consistency check and exports without tests,
+builds, Git, network, raw logs or forbidden/private-source access. Parent owns
+focused execution, independent review and provenance/privacy/similarity checks.
+The earlier failed run is retained; no passing receipt, Unit/gate, signed
+exchange or acceptance is claimed.
+
+## Structural fixture execution
+
+`core-test/20261110T015712Z-45301`: durable Incoming receipt case passed. The
+authority-drift case still failed its initial observation, before any drift.
+Unchanged seeded entities have zero observation provenance; the full scan does
+not stamp them. Its next correction must use an actual update and flush in that
+case. Production predicates and the separate apply test remain intact.

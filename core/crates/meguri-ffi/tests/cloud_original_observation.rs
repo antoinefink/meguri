@@ -67,15 +67,38 @@ fn payload(rows: &impl ReadRows, id: NoteId) -> c::Payload {
     )
     .unwrap()
 }
+fn original_baselines(rows: &impl ReadRows) -> Vec<c::Payload> {
+    let view = row_payload::ReadView(rows);
+    let mut baselines = Vec::new();
+    for kind in row_payload::KINDS {
+        let Some(table) = row_payload::table(kind) else {
+            continue;
+        };
+        let mut after = None;
+        loop {
+            let page = view.page(table, after.as_ref()).unwrap();
+            if page.is_empty() {
+                break;
+            }
+            for row in page {
+                after = Some(RowKey::from_stored(table, &row).unwrap());
+                baselines.push(
+                    row_payload::project(&view, kind, &row, |id| {
+                        let notetype = view.row(Table::Notetypes, &RowKey::Id(id))?.unwrap();
+                        row_payload::notetype(&view, &notetype, 1)
+                    })
+                    .unwrap(),
+                );
+            }
+        }
+    }
+    baselines
+}
 fn envelope(row: &c::Payload, revision: u64, base: Option<[u8; 32]>) -> Vec<u8> {
     c::Entity::build(
         c::EntityFields {
-            kind: c::Kind::Note,
-            key: c::id_key(match row {
-                c::Payload::Note(n) => n.id,
-                _ => unreachable!(),
-            })
-            .to_vec(),
+            kind: row.kind(),
+            key: row_payload::payload_key(row).unwrap(),
             origin: [3; 16],
             erev: revision,
             generation: None,
@@ -140,7 +163,14 @@ impl Fixture {
         .unwrap()
         .value
         .id;
-        let original = payload(&*collection.reader(ReaderRole::Query).unwrap(), id);
+        // Capture every original canonical row, including raw notetype parts,
+        // before producing the later incoming revision. An Active binding must
+        // already own these structural images; reconcile cannot publish them.
+        let (original, baselines) = {
+            let reader = collection.reader(ReaderRole::Query).unwrap();
+            let snapshot = reader.snapshot().unwrap();
+            (payload(&*snapshot, id), original_baselines(&*snapshot))
+        };
         collection.flush_wal(WAIT).unwrap();
         host.close().unwrap();
         // Produce the incoming image with the ordinary updater in another real
@@ -193,15 +223,18 @@ impl Fixture {
                     &SeededRandom::new(443),
                 )
                 .unwrap();
-            let name = c::entity_name(&KEY, c::Kind::Note, &c::id_key(id.0)).unwrap();
-            store
-                .prepare_note_baseline_for_testing(
-                    binding.id,
-                    &name,
-                    &envelope(&original, 1, None),
-                    cloud::OpaqueBytes(b"initial-fields".to_vec()),
-                )
-                .unwrap();
+            for baseline in &baselines {
+                let key = row_payload::payload_key(baseline).unwrap();
+                let name = c::entity_name(&KEY, baseline.kind(), &key).unwrap();
+                store
+                    .prepare_entity_baseline_for_testing(
+                        binding.id,
+                        &name,
+                        &envelope(baseline, 1, None),
+                        cloud::OpaqueBytes(b"initial-fields".to_vec()),
+                    )
+                    .unwrap();
+            }
             binding.id
         });
         config.cloud = Some(CloudInputs {
