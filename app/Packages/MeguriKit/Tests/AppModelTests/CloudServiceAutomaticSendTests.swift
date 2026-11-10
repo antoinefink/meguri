@@ -79,6 +79,7 @@ extension ReviewCollectionStartupTests {
                 let firstBatch = try #require(await sdk.heldSentBatchID)
                 let zone = try #require(await sdk.heldSentZone)
                 let names = await sdk.heldSavedNames
+                let firstIssued = await sdk.heldSentPendingRevisions
                 let bits = UInt64(bitPattern: seed.id)
                 let prefix: [UInt8] = [8, 1, 16, 1, 26, 8] + (0..<8).reversed().map { UInt8(truncatingIfNeeded: bits >> ($0 * 8)) }
                 let noteName = try #require(fixture.records.first { $0.encrypted.starts(with: prefix) }?.name)
@@ -103,7 +104,21 @@ extension ReviewCollectionStartupTests {
                     }
                 }
                 defer { backend.onCommands = nil }
+                let added = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+                await sdk.inspectNextPendingAddition { added.continuation.yield(true) }
+                defer { added.continuation.finish() }
                 try await automaticServiceEdit(app, id: seed.id, suffix: " Later dirty revision")
+                try #require(try await serviceAppSignal(added.stream, stage: "newer edited-name pending addition applied before original result"))
+                let originalIssuedRevision = try #require(firstIssued[noteName])
+                let newerPendingRevision = try #require(await sdk.pendingRecordZoneChangeRevisions()[noteName])
+                try #require(newerPendingRevision > originalIssuedRevision)
+                try #require(await sdk.pendingRecordZoneChanges()[noteName] == .save)
+                let edited = try #require(try await backend.workflow.entityFacts(name: noteName))
+                let firstLocalRevision = try #require(firstRevisions[noteName])
+                try #require(edited.localRev > firstLocalRevision && edited.mark != nil)
+                var secondBatch: UInt64?
+                var secondNames: [String] = []
+                var secondIssued: [String: UInt64] = [:]
                 if automatic {
                     await sdk.holdNextSentResult(zone: zone) { await second.hold() }
                 }
@@ -113,6 +128,11 @@ extension ReviewCollectionStartupTests {
                     let nextBatch = try #require(await sdk.heldSentBatchID)
                     try #require(nextBatch != firstBatch)
                     let nextNames = await sdk.heldSavedNames
+                    secondBatch = nextBatch
+                    secondNames = nextNames
+                    secondIssued = await sdk.heldSentPendingRevisions
+                    let nextIssuedRevision = try #require(secondIssued[noteName])
+                    try #require(nextIssuedRevision >= newerPendingRevision && nextIssuedRevision > originalIssuedRevision)
                     let repeated = Set(names).intersection(nextNames)
                     try #require(repeated.contains(noteName))
                     for name in [noteName] {
@@ -136,8 +156,32 @@ extension ReviewCollectionStartupTests {
                 await app.sync.waitForInputs()
                 try #require(!app.sync.operationFailed)
                 let removalObservations = try await backend.workflow.observations()
+                // The newer applied revision prevents removal of the original
+                // complete set. A real ACK alone cannot supply that receipt.
                 for name in names {
-                    try #require(removalObservations.contains(.savedPendingRemoved(name: name, requestID: firstBatch)))
+                    try #require(!removalObservations.contains(.savedPendingRemoved(name: name, requestID: firstBatch)))
+                }
+                if automatic {
+                    let request = try #require(secondBatch)
+                    try #require(!secondNames.isEmpty)
+                    let atRemoval = try #require(await sdk.sentRemovalPendingRevisions[request])
+                    let returned = try #require(removalObservations.firstIndex(of: .handlerReturned(requestID: request)))
+                    // Compare every actual issued revision at the SDK removal
+                    // boundary, after the handler. Concurrent app updates may
+                    // supersede this set too; its proof must then stay Missing.
+                    let originalSetUnchanged = secondNames.allSatisfy { name in
+                        guard let issued = secondIssued[name] else { return false }
+                        return atRemoval[name] == issued
+                    }
+                    for name in secondNames {
+                        let removed = removalObservations.firstIndex(of: .savedPendingRemoved(name: name, requestID: request))
+                        if originalSetUnchanged {
+                            let removal = try #require(removed)
+                            try #require(returned < removal)
+                        } else {
+                            try #require(removed == nil, "Missing: second original set was superseded before SDK removal")
+                        }
+                    }
                 }
                 let delivered = await sdk.deliveredSentBatches.filter { $0.zone == zone }
                 try #require(delivered.contains { $0.id == firstBatch })

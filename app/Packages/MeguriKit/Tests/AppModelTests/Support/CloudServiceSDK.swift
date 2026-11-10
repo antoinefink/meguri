@@ -82,6 +82,10 @@ actor ServiceSDK: CloudKitEngine {
     private(set) var heldSentBatchID: UInt64?
     private(set) var heldSentZone: String?
     private(set) var heldSavedNames: [String] = []
+    // Read-only test snapshots of actual SDK issue/removal boundaries.
+    private(set) var heldSentPendingRevisions: [String: UInt64] = [:]
+    private(set) var sentRemovalPendingRevisions: [UInt64: [String: UInt64]] = [:]
+    func pendingRecordZoneChangeRevisions() -> [String: UInt64] { pendingRevision }
     // Holds an actual Service response within the original admitted SDK network
     // call, before its original result handler/ACK. It never replaces a result.
     func holdNextSentResult(zone: String?, _ hold: @escaping @Sendable () async -> Void) {
@@ -189,6 +193,9 @@ actor ServiceSDK: CloudKitEngine {
             await hold()
         }
         // SDK successful removals happen after the original handler returns.
+        if case .sent(let request, _, _, _, _) = event {
+            sentRemovalPendingRevisions[request] = pendingRevision
+        }
         let removed = removePending(removing, issued: issued)
         if case .sent(let request, let saved, _, let deleted, _) = event {
             let expected = Set(saved.map(\.name) + deleted)
@@ -345,6 +352,7 @@ actor ServiceSDK: CloudKitEngine {
                     heldSentBatchID = batch.id
                     heldSentZone = zone
                     heldSavedNames = saved.map(\.name)
+                    heldSentPendingRevisions = issued
                     await held.hold()
                 }
                 try await deliver(.sent(batchID: batch.id, saved: saved, failed: failed, deleted: deleted),

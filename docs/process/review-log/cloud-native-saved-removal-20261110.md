@@ -115,3 +115,24 @@ eight cases. The filter did not select the instrumentation registry test;
 that check remains pending. The initial compiler failure is retained in
 `swift-test/20261110T105532Z-87532`. Rust and Service checks are pending.
 There is no native SDK or signed round-trip acceptance from these results.
+
+
+## R2 — newer pending revision
+
+Source and spec reviewers confirmed a defect in the new test assertion.
+K12.3/K12.4 and P4 require a newer pending revision to survive the old reply.
+The original request therefore has no complete-set removal receipt. The
+separate held-handler positive remains intact.
+
+The test now joins the real pending update within its existing bound. It
+checks the edited name's SDK revision, Core localRev, mark and pending save.
+It rejects false first-request removal proof. The automatic second batch uses
+actual issued revisions and the pending map at removal. An unchanged complete
+set needs real removal observations; a superseded set must have none. These
+read-only test snapshots change no SDK behavior.
+
+All earlier assertions, counts, time limits and cleanup remain intact.
+Production code is unchanged. R2 source review is clear. No Unit is accepted.
+Run the three Service functions already listed above. The first R2 selection
+could not compile because of a separate replay-test API error; it executed
+no cases. Root must run them after that correction.
