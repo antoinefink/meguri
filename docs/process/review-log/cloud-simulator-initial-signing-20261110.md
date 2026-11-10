@@ -28,3 +28,6 @@ tooling check `8165` passed all 31 cases, including signature allocation models,
 code/resource mutation refusals, signer cases, cancellation/timeout and refusing
 an existing frozen product. These are generated fixtures, not native signing
 evidence. Actual simulator build/signing and cross-device CloudKit remain pending.
+
+Only local names changed. Checks and behavior stay the same. Focused run `10472`
+passed both simulator tooling cases.
