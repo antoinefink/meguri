@@ -34,7 +34,7 @@ mg_app_products() {
 mg_app_remove_embedded_widget() {
   local widget path
   case "$MG_APP_DD" in
-    build/app/DerivedData|build/app/StandaloneDerivedData|build/app/PersonalPreviewDerivedData) ;;
+    build/app/DerivedData|build/app/StandaloneDerivedData|build/app/PersonalPreviewDerivedData|build/app/CloudAgentMacDerivedData) ;;
     *) mg_failure embedded-widget "widget cleanup requires a known app build directory"; mg_status error; return 1 ;;
   esac
   widget="$(mg_app_products mac "$1")/Meguri.app/Contents/PlugIns/MeguriWidget.appex"
@@ -1038,6 +1038,13 @@ mg_build_app() {
   if [ "$plan" = CloudAgent ] && { [ "$config" != Debug ] || [ "$standalone" = true ] || [ "$personal" = true ]; }; then
     mg_drive__usage "--test-plan CloudAgent requires Debug on mac or ios-sim, without --standalone or --personal-preview"
     return 0
+  fi
+  if [ "$plan" = CloudAgent ]; then
+    # Whole-product frozen inventories must survive the peer platform build.
+    case "$platform" in
+      mac) MG_APP_DD=build/app/CloudAgentMacDerivedData ;;
+      ios-sim) MG_APP_DD=build/app/CloudAgentSimDerivedData ;;
+    esac
   fi
   if [ "$plan" = CloudAgent ] && [ "${MEGURI_APP_SIGNING-adhoc}" = team ]; then
     if ! agent_source="$(git -C "$MG_ROOT" rev-parse HEAD)" ||

@@ -176,10 +176,12 @@ def owned_context(root, parent, context):
         holder.close()
 
 
-def child(root, job, args, sha, context=None):
+def child(root, job, args, sha, context=None, *, context_key="MG_CLOUD_AGENT_SMOKE_CONTEXT_FD"):
     """Fresh MG child, original returned result, synchronous exit, no latest lookup."""
     env = dict(os.environ, MEGURI_APP_SIGNING="team")
+    need(context_key in {"MG_CLOUD_AGENT_SMOKE_CONTEXT_FD", "MG_CLOUD_AGENT_SELECTED_CONTEXT_FD"}, "child-context")
     env.pop("MG_CLOUD_AGENT_SMOKE_CONTEXT_FD", None)
+    env.pop("MG_CLOUD_AGENT_SELECTED_CONTEXT_FD", None)
     with contextlib.ExitStack() as held:
         descriptors = ()
         if context is not None:
@@ -187,7 +189,18 @@ def child(root, job, args, sha, context=None):
             private.write(i.raw_json(context))
             private.seek(0)
             descriptors = (private.fileno(),)
-            env["MG_CLOUD_AGENT_SMOKE_CONTEXT_FD"] = str(private.fileno())
+            env[context_key] = str(private.fileno())
+            if context_key == "MG_CLOUD_AGENT_SELECTED_CONTEXT_FD":
+                # All selected children use the already retained VM. This file
+                # stays private and alive until the original child has exited.
+                selection = context["selection"]
+                env["MEGURI_SIM_ALLOW_HOST"] = "0"
+                env["MEGURI_MAC_UI_ALLOW_HOST"] = "0"
+                config = held.enter_context(tempfile.NamedTemporaryFile(mode="w+b"))
+                config.write(i.raw_json({"vms": [{key: selection[key] for key in ("name", "tart", "ssh")}]}))
+                config.flush()
+                os.fsync(config.fileno())
+                env["MEGURI_MAC_VM_CONFIG"] = config.name
         out, err = held.enter_context(tempfile.TemporaryFile()), held.enter_context(tempfile.TemporaryFile())
         process = None
         try:
@@ -218,8 +231,9 @@ def child(root, job, args, sha, context=None):
             if r["status"] == "warn" and r["details"].get("outcome") == "awaiting_user" and steps and \
                     steps <= {"cloudkit-dev-container", "cloudkit-test-accounts"} and not r["failures"]:
                 raise UserStep(sorted(steps)[0])
-            if job == "cloudkit-agent-install" and r["status"] == "warn" and not r["failures"] and \
-                    r["details"].get("outcome") == "queued" and r["details"].get("queued") is True:
+            if job in {"cloudkit-agent-install", "sim"} and r["status"] == "warn" and not r["failures"] and \
+                    r["details"].get("outcome") == "queued" and r["details"].get("queued") is True and \
+                    (job != "sim" or steps == {"mac-vm"}):
                 raise i.Queued("vm-unavailable")
             raise v.Refused("child-failed")
         need(not r["failures"] and not r["user_steps"] and r["summary"]["failed"] == 0 and
@@ -608,7 +622,8 @@ def completion(command_number, checks, journal=None):
 
 class Journal:
     """Original-prefix and fixed content-free wire validation, no recovery."""
-    def __init__(self, header_raw, commands):
+    def __init__(self, header_raw, commands, *, program=None):
+        self.program = PROGRAM if program is None else program
         self.header, self.commands, self.retained = v.digest(header_raw), commands, b""
         self.header_value = strict(header_raw)
         self.done_checks, self.done_observations, self.late_observations = {}, {}, []
@@ -639,7 +654,7 @@ class Journal:
                 fact(f)
             kind = r["kind"]
             if kind == "started":
-                need(set(r) == required | {"action"} and r["action"] == PROGRAM[n-1][0] and
+                need(set(r) == required | {"action"} and r["action"] == self.program[n-1][0] and
                      not r["facts"] and not r["checks"] and n not in started and
                      started == set(range(1, n)) and all(terminal.get(p) == "done" for p in range(1, n)),
                      "journal-start")
@@ -747,7 +762,7 @@ def close_appends(authority):
     authority._smoke_logs = {}
 
 
-def smoke_plan(manifest, run_path):
+def smoke_plan(manifest, run_path, *, selected=False):
     products = manifest["products"]["path"]
     xpath = products + "/" + manifest["xctestrun"]["path"]
     raw = h.checked_raw(xpath)
@@ -755,8 +770,10 @@ def smoke_plan(manifest, run_path):
          {k: manifest["xctestrun"][k] for k in ("sha256", "bytes")}, "launch-template")
     plan = plistlib.loads(raw)
     targets = plan["TestConfigurations"][0]["TestTargets"]
-    need(len(targets) == 1 and targets[0]["OnlyTestIdentifiers"] ==
-         ["CloudKitSoakTests", "CloudKitPathPreflightTests"], "launch-selection")
+    admitted = [["CloudKitSoakTests", "CloudKitPathPreflightTests"]]
+    if selected:
+        admitted.append(["CloudKitSoakTests"])
+    need(len(targets) == 1 and targets[0]["OnlyTestIdentifiers"] in admitted, "launch-selection")
     target = targets[0]
     target["OnlyTestIdentifiers"] = ["CloudKitSoakTests"]
     for key in ("EnvironmentVariables", "TestingEnvironmentVariables"):
@@ -783,8 +800,27 @@ def guest_smoke():
     support, copied, manifest = request["support"], request["copied"], request["manifest"]
     header = request["header"].encode("utf-8")
     expected = strict(header)
-    need(expected["selection"] == "smoke" and expected["device_kind"] == "mac" and
-         expected["account_labels"] == ["acct1"] and LABEL.fullmatch(expected["device"]) and
+    selected = request.get("selected", False)
+    need(type(selected) is bool, "launch-selection")
+    if selected:
+        destination = request.get("destination")
+        need(expected["selection"] == "sync_now" and expected["device_kind"] in {"mac", "iphone"} and
+             isinstance(destination, dict) and set(destination) == {"device_kind", "vm", "vm_instance", "simulator"} and
+             destination["device_kind"] == expected["device_kind"], "selected-destination")
+        simulator = destination["simulator"]
+        if expected["device_kind"] == "mac":
+            need(simulator is None and manifest["platform"] == "mac", "selected-destination")
+            launch_destination = "platform=macOS"
+        else:
+            need(manifest["platform"] == "ios-sim" and isinstance(simulator, dict) and
+                 set(simulator) == {"udid", "lease_receipt"} and isinstance(simulator["udid"], str) and
+                 re.fullmatch(r"[0-9A-Fa-f-]{36}", simulator["udid"]), "selected-destination")
+            launch_destination = "platform=iOS Simulator,id=" + simulator["udid"]
+    else:
+        need(expected["selection"] == "smoke" and expected["device_kind"] == "mac" and
+             "destination" not in request, "smoke-selection")
+        launch_destination = "platform=macOS"
+    need(expected["account_labels"] == ["acct1"] and LABEL.fullmatch(expected["device"]) and
          v.MG_RUN_ID.fullmatch(expected["run_id"]), "smoke-selection")
     run_path = support["path"] + "/Meguri/CloudKitSigned/" + expected["run_id"] + "/" + expected["device"]
     child, launched, finished = None, False, False
@@ -863,7 +899,7 @@ def guest_smoke():
             os.fsync(directory.fd)
         tree = FixtureTree(run_path + "/fixture-evidence/parent")
         held.callback(tree.close)
-        original_plan, plan = smoke_plan(manifest, run_path)
+        original_plan, plan = smoke_plan(manifest, run_path, selected=selected)
         # Derived bytes contain a private OS root: retain outside public output.
         stage = tempfile.mkdtemp(prefix="meguri-cloud-smoke-", dir=os.path.realpath(tempfile.gettempdir()))
         os.chmod(stage, 0o700)
@@ -905,7 +941,7 @@ def guest_smoke():
                                    if not k.startswith(("TEST_RUNNER_", "MEGURI_CLOUD_AGENT_"))}
                     with h.setup_launch():
                         child = subprocess.Popen(["/usr/bin/xcodebuild", "test-without-building", "-xctestrun",
-                            stage + "/smoke.xctestrun", "-destination", "platform=macOS",
+                            stage + "/smoke.xctestrun", "-destination", launch_destination,
                             "-only-testing:MeguriSnapshotTests/CloudKitSoakTests", "-parallel-testing-enabled", "NO",
                             "-collect-test-diagnostics", "never", "-resultBundlePath", stage + "/smoke.xcresult"],
                             env=environment, stdout=out, stderr=err, start_new_session=True)

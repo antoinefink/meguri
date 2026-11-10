@@ -269,6 +269,35 @@ class DeliveryTests(unittest.TestCase):
         path.write_bytes((json.dumps(value, indent=3) + "\n\n").encode())
         return path, value
 
+    def test_selected_full_map_is_frozen_before_children_and_rechecked(self):
+        mac = {"device_kind": "mac", "vm": self.vm.selection["name"], "vm_instance": INSTANCE, "simulator": None}
+        entries = {"mac1": mac, "phone1": dict(mac, device_kind="iphone", simulator={
+            "udid": UDID, "lease_receipt": {"job": "sim", "run_id": LEASE_RUN}})}
+        with install.freeze_destinations(fixtures.RUN, fixtures.SHA, entries) as check:
+            path = self.support / "Meguri/CloudKitSignedPrivate" / fixtures.RUN / "destinations.json"
+            original = path.read_bytes()
+            self.assertEqual(json.loads(original)["destinations"], entries)
+            for label, destination in entries.items():
+                with install.destinations(fixtures.RUN, fixtures.SHA, label, destination):
+                    check()
+                self.assertEqual(path.read_bytes(), original)
+        changed = copy.deepcopy(entries); changed["phone1"]["simulator"]["udid"] = IPAD_UDID
+        with self.assertRaisesRegex(v.Refused, "destination-frozen-map"):
+            with install.freeze_destinations(fixtures.RUN, fixtures.SHA, changed): pass
+        with self.assertRaises(v.Refused):
+            with install.freeze_destinations(fixtures.RUN, fixtures.SHA, entries) as check:
+                value = json.loads(path.read_bytes())
+                value["destinations"]["phone1"]["simulator"]["udid"] = IPAD_UDID
+                path.write_bytes(install.raw_json(value)); check()
+
+    def test_selected_full_map_never_expands_an_existing_single_map(self):
+        mac = {"device_kind": "mac", "vm": self.vm.selection["name"], "vm_instance": INSTANCE, "simulator": None}
+        with install.destinations(fixtures.RUN, fixtures.SHA, "mac1", mac): pass
+        entries = {"mac1": mac, "phone1": dict(mac, device_kind="iphone", simulator={
+            "udid": UDID, "lease_receipt": {"job": "sim", "run_id": LEASE_RUN}})}
+        with self.assertRaisesRegex(v.Refused, "destination-frozen-map"):
+            with install.freeze_destinations(fixtures.RUN, fixtures.SHA, entries): pass
+
     def test_prefrozen_valid_abc_map_accepts_every_selection_without_rewriting(self):
         path, value = self.frozen_three_device_map()
         original = path.read_bytes()

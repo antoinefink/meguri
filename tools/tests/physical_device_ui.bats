@@ -178,7 +178,7 @@ EOF
 
 @test "build-app explicit CloudAgent forwards the positional plan and records the actual build choice" {
   trace_app_build
-  local platform config_args
+  local platform config_args dd
   export MG_APP_TEST_PLAN=UI
   for platform in mac ios-sim; do
     for config_args in implicit explicit; do
@@ -191,7 +191,9 @@ EOF
       [ "$status" -eq 0 ]
       [ "$(field .status)" = pass ]
       called "^app-build <$platform> <Debug> <CloudAgent>$"
-      called '^xcodebuild build-for-testing .* -testPlan CloudAgent -configuration Debug .* -derivedDataPath build/app/DerivedData '
+      dd=CloudAgentSimDerivedData
+      [ "$platform" != mac ] || dd=CloudAgentMacDerivedData
+      called "^xcodebuild build-for-testing .* -testPlan CloudAgent -configuration Debug .* -derivedDataPath build/app/$dd "
       [ "$(field .details.build.test_plan)" = CloudAgent ]
       [ "$(field .details.build.action)" = build-for-testing ]
       if [ "$platform" = mac ]; then
@@ -226,6 +228,23 @@ EOF
       done
     done
   done
+}
+
+@test "build-app CloudAgent platform roots retain the first inventory across the peer build" {
+  trace_app_build
+  mg build-app --platform mac --test-plan CloudAgent
+  [ "$status" -eq 0 ]
+  local first="$SB/build/app/CloudAgentMacDerivedData/Build/Products"
+  local manifest="$BATS_TEST_TMPDIR/first-inventory"
+  find "$first" -type f -exec shasum -a 256 {} + | sort >"$manifest"
+  [ -s "$manifest" ]
+  mg build-app --platform ios-sim --test-plan CloudAgent
+  [ "$status" -eq 0 ]
+  find "$first" -type f -exec shasum -a 256 {} + | sort >"$manifest.after"
+  cmp "$manifest" "$manifest.after"
+  [ -d "$SB/build/app/CloudAgentSimDerivedData/Build/Products" ]
+  [ ! -d "$SB/build/app/DerivedData" ]
+  not_called 'test-without-building|^(sim-|vm-test|host-lease|open)|xcrun (simctl|devicectl)'
 }
 
 @test "build-app failure reproduction preserves explicit CloudAgent and default UI plans" {

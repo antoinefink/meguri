@@ -1,12 +1,13 @@
 # Signed-agent J2.1 admission, plus the explicitly selected single-Mac smoke.
 mg_job cloudkit-signed host mg_cloudkit_signed \
-  "Signed CloudKit agent: --header input admission only, or --smoke single-Mac generated-data execution in the configured VM"
+  "Signed CloudKit agent: --header input admission only, or --smoke single-Mac / --selected Mac+iPhone-simulator generated QA in the configured VM"
 
 mg_cloudkit_signed() {
-  local header="" smoke="" results="$MG_ROOT/build/mg" report="$MG_RUN_DIR/input-admission.json" rc outcome
+  local header="" smoke="" selected="" results="$MG_ROOT/build/mg" report="$MG_RUN_DIR/input-admission.json" rc outcome
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --smoke) smoke=1; shift ;;
+      --selected) selected=1; shift ;;
       --header|--results-directory)
         if [ "$#" -lt 2 ]; then
           mg_failure usage "cloudkit-signed requires an input path"
@@ -17,12 +18,21 @@ mg_cloudkit_signed() {
         shift 2
         ;;
       *)
-        mg_failure usage "usage: tools/mg cloudkit-signed --smoke | --header <run.json> [--results-directory <directory>]"
+        mg_failure usage "usage: tools/mg cloudkit-signed --smoke | --selected | --header <run.json> [--results-directory <directory>]"
         mg_status error
         return 0
         ;;
     esac
   done
+  if [ -n "$selected" ]; then
+    if [ -n "$smoke" ] || [ -n "$header" ] || [ "$results" != "$MG_ROOT/build/mg" ]; then
+      mg_failure usage "--selected cannot use smoke, external header or receipt inputs"
+      mg_status error
+      return 0
+    fi
+    mg_cloudkit_signed_selected
+    return 0
+  fi
   if [ -n "$smoke" ]; then
     if [ -n "$header" ] || [ "$results" != "$MG_ROOT/build/mg" ]; then
       mg_failure usage "--smoke cannot use external header or receipt inputs"
@@ -142,7 +152,23 @@ mg_cloudkit_agent_install() {
       --parent-run "$parent" --source-commit "$MG_COMMIT_SHA" --header-template "$template" >"$report" 2>"$private/prepare.err"
   )
   rc=$?
-  if [ "$rc" -eq 0 ] && [ -n "${MG_CLOUD_AGENT_SMOKE_CONTEXT_FD:-}" ]; then
+  if [ "$rc" -eq 0 ] && [ -n "${MG_CLOUD_AGENT_SELECTED_CONTEXT_FD:-}" ]; then
+    case "$MG_CLOUD_AGENT_SELECTED_CONTEXT_FD" in
+      *[!0-9]*|'') rc=1 ;;
+      *)
+        local selected_lease_args=()
+        [ -z "$lease_run" ] || selected_lease_args=(--lease-run "$lease_run")
+        (umask 077
+          python3 -B -I "$MG_TOOLS/scripts/cloud-agent-selected.py" --install-child \
+            --root "$MG_ROOT" --parent-run "$parent" --run-id "$MG_RUN_ID" \
+            --run-directory "$MG_RUN_DIR" --source-commit "$MG_COMMIT_SHA" \
+            ${selected_lease_args[0]+"${selected_lease_args[@]}"} \
+            3<&"$MG_CLOUD_AGENT_SELECTED_CONTEXT_FD" >"$report" 2>"$private/helpers.log"
+        )
+        rc=$?
+        ;;
+    esac
+  elif [ "$rc" -eq 0 ] && [ -n "${MG_CLOUD_AGENT_SMOKE_CONTEXT_FD:-}" ]; then
     # The real parent supplies a private inherited descriptor, never a route
     # option. Python proves the holder's parent run and process ancestry. The
     # child reuses that retained VM instead of taking/draining a second lease.
@@ -380,4 +406,110 @@ mg_cloudkit_agent_handoff() {
   fi
   mg_artifact json "$report" "Finalized four-role receipt transport only; no signed execution"
   return "$rc"
+}
+
+
+# Bounded generated QA only; it cannot supply the full signed lane or soak.
+mg_cloudkit_signed_selected_private() (
+  local private="$1" report="$2" rc cleanup_rc
+  MG_EXIT_CMDS=()
+  MG_STATE="$private/state"
+  MG_RUN_DIR="$private"
+  mkdir -m 700 "$MG_STATE" || exit 1
+  mg_mac_vm_probe
+  rc=$?
+  case "$rc" in 0) ;; 1) exit 75 ;; *) exit 1 ;; esac
+  MG_MAC_VMS="$(jq -c '[.[0]]' <<<"$MG_MAC_VMS")" || exit 1
+  MG_SIM_RUNNER=vm
+  MG_MAC_RUNNER=vm
+  mg_mac_vm_take --no-copy --running-only
+  rc=$?
+  case "$rc" in 0) ;; 2) exit 75 ;; *) exit 1 ;; esac
+  mvl_lease_held "$MG_LEASE_DIR" || exit 1
+  jq -nc --argjson selection "$MG_MAC_VM" --arg slot "$MG_LEASE_SLOT" \
+    '{selection:$selection,lease_slot:$slot}' >"$private/context.json" || exit 1
+  MG_MAC_VM_TESTING=1
+  python3 -B -I "$MG_TOOLS/scripts/cloud-agent-selected.py" \
+    --root "$MG_ROOT" --parent-run "$MG_RUN_ID" \
+    3<"$private/context.json" >"$report"
+  rc=$?
+  mvl_lease_held "$MG_LEASE_DIR" || exit 1
+  # Both original supervisors have exited before checking remote orphan state.
+  # A failed/unknown drain keeps the simulator reservation instead of resetting
+  # data possibly still used by accepted work.
+  mg__mac_vm_stop_orphans
+  if [ -n "$MG_MAC_VM_STOP_REASON" ]; then
+    case "$rc" in 0|75) ;; *) exit "$rc" ;; esac
+    [ -z "$MG_MAC_VM_STOP_UNREACHABLE" ] || exit 75
+    exit 1
+  fi
+  python3 -B -I "$MG_TOOLS/scripts/cloud-agent-selected.py" --release-lease \
+    --root "$MG_ROOT" --parent-run "$MG_RUN_ID" \
+    3<"$private/context.json" >"$private/cleanup.json"
+  cleanup_rc=$?
+  [ "$cleanup_rc" -eq 0 ] || exit 1
+  if [ "$rc" -eq 0 ]; then
+    jq -e '. == {scope:"SELECTED-GENERATED",outcome:"reservation-released"}' "$private/cleanup.json" >/dev/null || exit 1
+  fi
+  exit "$rc"
+)
+
+mg_cloudkit_signed_selected() {
+  local private rc category report="$MG_RUN_DIR/selected-report.json" file device
+  if [ "${MG_JOB:-}" != cloudkit-signed ] || [ "${MG_COMMIT_DIRTY:-true}" != false ]; then
+    mg_failure selected-source "Selected QA requires its clean MG parent source"
+    mg_status fail
+    return 0
+  fi
+  private="$(mktemp -d "${TMPDIR:-/tmp}/meguri-cloud-selected-parent.XXXXXX")" || return 1
+  chmod 700 "$private" || return 1
+  (umask 077; mg_cloudkit_signed_selected_private "$private" "$report") >"$private/helpers.log" 2>&1
+  rc=$?
+  mg_detail lane '"cloud-signed"'
+  mg_detail scope '"SELECTED-GENERATED"'
+  mg_detail selection '"sync_now"'
+  case "$rc" in
+    0)
+      if jq -e '. == {scope:"SELECTED-GENERATED",selection:"sync_now",outcome:"selected_completed",signed_execution:true,devices:["mac1","phone1"],commands:12,controls_equal:true,note_equal:true,closed_journals:true,original_app_hosted_joined:true}' "$report" >/dev/null 2>&1; then
+        mg_detail outcome '"selected_completed"'
+        mg_status pass
+      else rc=1; fi
+      ;;
+    75)
+      jq -nc '{scope:"SELECTED-GENERATED",selection:"sync_now",outcome:"queued",category:"vm-unavailable",signed_execution:false}' >"$report"
+      mg_detail outcome '"queued"'
+      mg_user_step mac-vm missing true "Make the configured test VM available for selected QA" \
+        "Both original app-hosted processes need the same retained VM and simulator reservation."
+      mg_queued_part mac-vm "CloudAgent selected QA" "configured VM unavailable"
+      mg_queued_settle
+      ;;
+    76)
+      category="$(jq -r '.category | select(. == "cloudkit-test-accounts" or . == "cloudkit-dev-container")' "$report" 2>/dev/null)"
+      if [ -n "$category" ]; then
+        mg_detail outcome '"awaiting_user"'
+        mg_user_step "$category" missing true "Complete the existing development CloudKit setup" \
+          "Selected QA observed a missing approved account or development-container prerequisite."
+        mg_status warn
+      else rc=1; fi
+      ;;
+    78)
+      mg_detail outcome '"implementation_missing"'
+      mg_failure implementation_missing "Required selected runtime observation is missing"
+      mg_status fail
+      ;;
+  esac
+  case "$rc" in 0|75|76|78) ;; *)
+    jq -nc '{scope:"SELECTED-GENERATED",selection:"sync_now",outcome:"failed_evidence",category:"selected-refused",signed_execution:false}' >"$report"
+    mg_detail outcome '"failed_evidence"'
+    mg_failure selected-evidence "Selected QA failed original input, callback, comparison or joined-process validation"
+    mg_status fail
+    ;;
+  esac
+  mg_artifact json "$report" "Generated selected QA only; no full-lane or soak acceptance"
+  for device in mac1 phone1; do
+    for file in commands.jsonl steps.jsonl launch-selection.json; do
+      [ ! -f "$MG_RUN_DIR/$device/$file" ] || mg_artifact file "$MG_RUN_DIR/$device/$file" "Original selected command, journal or launch selection"
+    done
+  done
+  mg_message "cloudkit-signed: SELECTED-GENERATED sync_now only; full lane, soak and first-real-sync remain unaccepted"
 }

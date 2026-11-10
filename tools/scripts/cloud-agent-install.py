@@ -476,10 +476,10 @@ def live_simulator(vm, root, expected, lease, observed):
 
 
 @contextlib.contextmanager
-def destinations(parent, sha, label, destination):
+def destinations(parent, sha, label, destination, *, full_map=None):
     """Select one entry from a fully validated frozen map; never append/relabel.
 
-    A future multi-device coordinator must freeze its FULL map before delivery.
+    The selected coordinator freezes its full map before delivery.
     Hold private directory authority and the file witness across the operation.
     """
     support = os.path.expanduser("~/Library/Application Support")
@@ -503,7 +503,7 @@ def destinations(parent, sha, label, destination):
                 bindings.append((fd, name, child, v.directory_identity(info)))
                 fd = child
             value = {"protocol_version": 1, "job": "cloudkit-signed", "run_id": parent,
-                     "source_commit": sha, "destinations": {label: destination}}
+                     "source_commit": sha, "destinations": {label: destination} if full_map is None else full_map}
             validate_destinations(value, parent, sha)
             try:
                 out = os.open("destinations.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL |
@@ -532,12 +532,20 @@ def destinations(parent, sha, label, destination):
                     frozen = strict(raw)
                     validate_destinations(frozen, parent, sha)
                     need(frozen["destinations"].get(label) == destination, "destination-frozen-selected")
+                    if full_map is not None:
+                        need(frozen["destinations"] == full_map, "destination-frozen-map")
                     return pin, raw
                 finally:
                     os.close(opened)
             before = check()
-            yield
-            need(check() == before, "private-changed")
+            def recheck():
+                need(check() == before, "private-changed")
+                for parent_fd, name, child, pin in bindings:
+                    need(v.directory_identity(os.fstat(child)) == pin and
+                         v.directory_identity(os.stat(name, dir_fd=parent_fd, follow_symlinks=False)) == pin,
+                         "private-changed")
+            yield recheck
+            recheck()
             for parent_fd, name, child, pin in bindings:
                 need(v.directory_identity(os.fstat(child)) == pin and
                      v.directory_identity(os.stat(name, dir_fd=parent_fd, follow_symlinks=False)) == pin,
@@ -545,6 +553,21 @@ def destinations(parent, sha, label, destination):
         finally:
             for child in reversed(held):
                 os.close(child)
+
+
+
+@contextlib.contextmanager
+def freeze_destinations(parent, sha, entries):
+    """Parent freezes the complete selected map before either delivery."""
+    need(isinstance(entries, dict) and set(entries) == {"mac1", "phone1"} and
+         entries["mac1"].get("device_kind") == "mac" and
+         entries["phone1"].get("device_kind") == "iphone" and
+         entries["mac1"].get("vm") == entries["phone1"].get("vm") and
+         entries["mac1"].get("vm_instance") == entries["phone1"].get("vm_instance"), "destination-selected-map")
+    # Copy before retaining: later caller mutation cannot redefine this map.
+    original = strict(raw_json(entries))
+    with destinations(parent, sha, "mac1", original["mac1"], full_map=original) as check:
+        yield check
 
 
 def validate_destinations(value, parent, sha):
