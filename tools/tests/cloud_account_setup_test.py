@@ -324,14 +324,16 @@ class PrimaryRequestDiagnosticTests(unittest.TestCase):
             original.assert_called_once_with('generated',b'payload',fixed='value');diagnostic.assert_not_called();site.assert_not_called()
 
     def test_actual_original_join_eperm_has_closed_site_without_signal_execution(self):
-        error=OSError(p.errno.EPERM,'GENERATED_PRIVATE_JOIN');child=mock.Mock();child.pid=77;out=io.StringIO()
-        with mock.patch.object(p.signal,'signal'),mock.patch.object(p.os,'killpg',side_effect=error),contextlib.redirect_stderr(out):
+        error=OSError(p.errno.EPERM,'GENERATED_PRIVATE_JOIN');child=mock.Mock(spec=p.h.SetupChild)
+        child._setup_joined=False;child.join_original.side_effect=error;out=io.StringIO()
+        with mock.patch.object(p.signal,'signal'),mock.patch.object(p.os,'killpg') as kill,contextlib.redirect_stderr(out):
             try:p.h.setup_join(child)
-            except OSError as caught:self.assertIs(caught,error);p.emit_setup_site(caught)
+            except p.v.Refused as caught:self.assertEqual(str(caught),'setup-join-uncertain');p.emit_setup_site(caught)
             else:self.fail('original join refusal must propagate')
         value=json.loads(out.getvalue().removeprefix('MG_OWNER_SETUP_SITE '))
         self.assertEqual(value['site'],'original-join');self.assertGreaterEqual(value['line'],p.h.setup_join.__code__.co_firstlineno)
         self.assertNotIn('GENERATED_PRIVATE_JOIN',out.getvalue());child.wait.assert_not_called()
+        self.assertTrue(child._setup_invalid);kill.assert_not_called()
 
 
 class Producer(unittest.TestCase):

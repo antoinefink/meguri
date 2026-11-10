@@ -477,7 +477,7 @@ def guest_setup(diagnostic=None):
                            if not k.startswith(("TEST_RUNNER_", "MEGURI_CLOUD_AGENT_", "MEGURI_CLOUD_ACCOUNT_"))}
             diagnostic.enter("guest-native-launch")
             with h.setup_launch():
-                child = subprocess.Popen(["/usr/bin/xcodebuild", "test-without-building", "-xctestrun", path + "/owner.xctestrun",
+                child = h.setup_process(["/usr/bin/xcodebuild", "test-without-building", "-xctestrun", path + "/owner.xctestrun",
                     "-destination", "platform=macOS", "-only-testing:MeguriSnapshotTests/CloudKitAccountSetupTests/testOwnerSetup",
                     "-parallel-testing-enabled", "NO", "-collect-test-diagnostics", "never", "-resultBundlePath", path + "/owner.xcresult"],
                     env=environment, stdout=out, stderr=err, start_new_session=True)
@@ -536,9 +536,10 @@ def guest_setup(diagnostic=None):
 def guest_source():
     definitions = (v.Refused, v.need, v.digest, v.identity, h.directory_pin, h.file_pin, i.strict, i.raw_json, SetupDiagnostic,
         h.Directory, h.write_new, h.root_state, h.checked_raw, h.setup_cancel, h.setup_launch,
+        h.SetupSigInfo, h.SetupBSDInfo, h.SetupKernel, h.SetupChild, h.setup_process,
         h.setup_join, h.setup_command, s.frame_read, s.frame_write, setup_plan, guest_setup)
-    names = ("Directory", "write_new", "root_state", "checked_raw", "setup_cancel", "setup_launch", "setup_join", "setup_command")
-    preamble = ("import os,sys,stat,json,re,hashlib,contextlib,signal,subprocess,tempfile,plistlib,socket,errno\n"
+    names = ("Directory", "write_new", "root_state", "checked_raw", "setup_cancel", "setup_launch", "setup_join", "setup_command", "setup_process")
+    preamble = ("import os,sys,stat,json,re,hashlib,contextlib,signal,subprocess,tempfile,plistlib,socket,errno,ctypes,threading,time\n"
                 "from types import SimpleNamespace\nCAP=16*1024*1024\nWAIT=600\nTREE_CAP=128*1024*1024\n")
     return (preamble + "\n".join(inspect.getsource(f) for f in definitions) +
         "\nv=SimpleNamespace(digest=digest,identity=identity,Refused=Refused)\ni=SimpleNamespace(raw_json=raw_json)\n" +

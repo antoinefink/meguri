@@ -205,7 +205,7 @@ def child(root, job, args, sha, context=None, *, context_key="MG_CLOUD_AGENT_SMO
         process = None
         try:
             with h.setup_launch():
-                process = subprocess.Popen([os.path.join(root, "tools/mg"), job, *args], env=env,
+                process = h.setup_process([os.path.join(root, "tools/mg"), job, *args], env=env,
                                            stdout=out, stderr=err, pass_fds=descriptors, start_new_session=True)
             process.wait(timeout=3600)
         finally:
@@ -942,7 +942,7 @@ def guest_smoke():
                     environment = {k: val for k, val in os.environ.items()
                                    if not k.startswith(("TEST_RUNNER_", "MEGURI_CLOUD_AGENT_"))}
                     with h.setup_launch():
-                        child = subprocess.Popen(["/usr/bin/xcodebuild", "test-without-building", "-xctestrun",
+                        child = h.setup_process(["/usr/bin/xcodebuild", "test-without-building", "-xctestrun",
                             stage + "/smoke.xctestrun", "-destination", launch_destination,
                             "-only-testing:MeguriSnapshotTests/CloudKitSoakTests", "-parallel-testing-enabled", "NO",
                             "-collect-test-diagnostics", "never", "-resultBundlePath", stage + "/smoke.xcresult"],
@@ -1025,14 +1025,15 @@ def guest_smoke():
 def guest_source():
     definitions = (v.Refused, v.need, v.digest, v.identity, i.strict, i.raw_json,
         h.directory_pin, h.file_pin, h.Directory, h.Original, h.private_child, h.write_new,
-        h.root_state, h.checked_raw, h.setup_cancel, h.setup_launch, h.setup_join, h.setup_command,
+        h.root_state, h.checked_raw, h.setup_cancel, h.setup_launch, h.SetupSigInfo, h.SetupBSDInfo, h.SetupKernel, h.SetupChild, h.setup_process,
+        h.setup_join, h.setup_command,
         FrozenFile, FixtureTree, materialize_private, frame_write, frame_read, append_exact, close_appends,
         smoke_plan, guest_smoke)
-    preamble = ("import os,sys,stat,json,re,hashlib,contextlib,signal,subprocess,tempfile,plistlib\n"
+    preamble = ("import os,sys,stat,json,re,hashlib,contextlib,signal,subprocess,tempfile,plistlib,ctypes,errno,threading,time\n"
                 "from types import SimpleNamespace\nCAP=16*1024*1024\nTREE_CAP=128*1024*1024\nWAIT=600\n"
                 "LABEL=re.compile(" + repr(LABEL.pattern) + ")\nDIGEST=re.compile(" + repr(DIGEST.pattern) + ")\n")
     names = ("directory_pin", "file_pin", "Directory", "Original", "private_child", "write_new", "root_state",
-             "checked_raw", "setup_cancel", "setup_launch", "setup_join", "setup_command")
+             "checked_raw", "setup_cancel", "setup_launch", "setup_join", "setup_command", "setup_process")
     return (preamble + "\n".join(inspect.getsource(f) for f in definitions) +
         "\nv=SimpleNamespace(need=need,digest=digest,identity=identity,Refused=Refused,relative=lambda p: "
         "p if isinstance(p,str) and p and not p.startswith('/') and all(x not in ('','.','..') for x in p.split('/')) "
@@ -1059,7 +1060,7 @@ class Transport:
         try:
             vm.lease_check()
             with h.setup_launch():
-                self.child = subprocess.Popen(["/bin/bash", "-c", i.BRIDGE, "cloud-agent-smoke",
+                self.child = h.setup_process(["/bin/bash", "-c", i.BRIDGE, "cloud-agent-smoke",
                     os.path.join(vm.root, "tools"), "copy", cmd], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                     stderr=self.err, env=environment, start_new_session=True, bufsize=0)
             os.set_blocking(self.child.stdin.fileno(), False)

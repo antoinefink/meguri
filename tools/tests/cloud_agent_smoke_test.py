@@ -942,7 +942,7 @@ class GuestSupervisorTests(unittest.TestCase):
         with patch.object(s.sys, "stdin", stdin), patch.object(s.sys, "stdout", stdout), \
              patch.object(s, "smoke_plan", return_value=(b"original", b"derived")), \
              patch.object(s.tempfile, "mkdtemp", return_value=str(stage)), \
-             patch.object(s.subprocess, "Popen", side_effect=self.launch), \
+             patch.object(s.h, "setup_process", side_effect=self.launch), \
              patch.object(s.h, "setup_command", return_value=raw({"passedTests": 1, "failedTests": 0, "skippedTests": 0})), \
              patch.object(s.h, "setup_join", side_effect=lambda child: self.assertIs(child, self.process)) as join:
             try:

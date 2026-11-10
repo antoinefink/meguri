@@ -10,6 +10,8 @@ import plistlib
 import shlex
 import signal
 import struct
+import threading
+from types import SimpleNamespace
 from pathlib import Path
 import subprocess
 import sys
@@ -741,10 +743,20 @@ class SetupLifecycleTests(unittest.TestCase):
         output = b'{"generated":true}'
         payload = io.BytesIO(b"generated-private-stream")
 
-        class Child:
-            pid = 123456
-            returncode = None
-            alive = True
+        class Child(h.SetupChild):
+            def __init__(self):
+                self.pid = self._setup_pid = 123456
+                self.returncode = None
+                self.args = ['generated-original']
+                self.alive, self.status = True, None
+                self._setup_ready = True
+                self._setup_joined = self._setup_reaped = self._setup_invalid = False
+                self._setup_start_stamp = None
+                self._setup_lock = threading.RLock()
+                self._setup_kernel = SimpleNamespace(
+                    terminal=lambda pid: None if self.alive else self.status,
+                    quiet=lambda pid, status: not self.alive,
+                    owned=lambda pid, status, start_stamp: (True, (1, 2)))
 
             def initial(self):
                 events.append("original-launch")
@@ -752,12 +764,13 @@ class SetupLifecycleTests(unittest.TestCase):
                     raise subprocess.TimeoutExpired("generated-original", 600 if transport else 180)
                 if mode in ("cancel", "hangup"):
                     h.setup_cancel(signal.SIGTERM if mode == "cancel" else signal.SIGHUP, None)
-                self.returncode = 255 if mode == "lost-ssh" else 0
+                self.status = 255 if mode == "lost-ssh" else 0
                 self.alive = False
 
             def communicate(self, input=None, timeout=None):
                 events.append(("communicate", input, timeout))
                 self.initial()
+                h.SetupChild.wait(self, timeout=timeout)
 
             def wait(self, timeout=None):
                 events.append(("wait", timeout))
@@ -765,12 +778,8 @@ class SetupLifecycleTests(unittest.TestCase):
                     self.initial()
                 elif timeout == 10 and self.alive:
                     raise subprocess.TimeoutExpired("generated-original", timeout)
-                elif timeout is None:
-                    self_test.assertFalse(self.alive)
-                    events.append("original-joined")
-                    if self.returncode is None:
-                        self.returncode = -signal.SIGKILL
-                return self.returncode
+                return h.SetupChild.wait(self, timeout=timeout)
+
 
         self_test = self
         child = Child()
@@ -799,14 +808,22 @@ class SetupLifecycleTests(unittest.TestCase):
             events.append(("kill-original-group", number))
             if number == signal.SIGKILL:
                 child.alive = False
+                child.status = -signal.SIGKILL
+
+        def reap(pid, options):
+            self.assertEqual((pid, options), (child.pid, 0))
+            self.assertFalse(child.alive)
+            events.append("original-joined")
+            return pid, child.status << 8 if child.status >= 0 else -child.status
 
         def change_handler(number, handler):
             previous = handlers[number]
             handlers[number] = handler
             return previous
 
-        with patch.object(h.subprocess, "Popen", side_effect=popen), \
+        with patch.object(h, "setup_process", side_effect=popen), \
              patch.object(h.os, "killpg", side_effect=killpg), \
+             patch.object(h.os, "waitpid", side_effect=reap), \
              patch.object(h.signal, "signal", side_effect=change_handler), \
              patch.dict(h.os.environ, {"TEST_RUNNER_GENERATED": "remove", "MEGURI_CLOUD_AGENT_GENERATED": "remove"}):
             def invoke():
@@ -828,9 +845,15 @@ class SetupLifecycleTests(unittest.TestCase):
         self.assertEqual(handlers, original_handlers)
         self.assertEqual(events.count("original-launch"), 1)
         self.assertEqual(events.count("original-joined"), 1)
-        self.assertLess(events.index("original-launch"), events.index(("kill-original-group", signal.SIGTERM)))
-        self.assertLess(events.index(("kill-original-group", signal.SIGKILL)), events.index("original-joined"))
-        self.assertIn(("wait", 10), events)
+        if mode in ("normal", "lost-ssh"):
+            # Successful managed wait has already proved quiet and reaped;
+            # cleanup must never signal that now-reusable group id.
+            self.assertFalse(any(isinstance(event, tuple) and event[0] == "kill-original-group" for event in events))
+            self.assertNotIn(("wait", 10), events)
+        else:
+            self.assertLess(events.index("original-launch"), events.index(("kill-original-group", signal.SIGTERM)))
+            self.assertLess(events.index(("kill-original-group", signal.SIGKILL)), events.index("original-joined"))
+            self.assertIn(("wait", 10), events)
         if transport:
             if mode == "cancel-during-launch":
                 # Cancellation after handle assignment joins without further IO.

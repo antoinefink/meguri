@@ -9,6 +9,9 @@ remain private. Original artifact paths resolve only on the host.
 
 import contextlib
 import ctypes
+import errno
+import threading
+import time
 import importlib.util
 import inspect
 import copy
@@ -524,25 +527,252 @@ def setup_launch():
     need(not pending, "setup-cancelled")
 
 
+class SetupSigInfo(ctypes.Structure):
+    _fields_ = [('signo', ctypes.c_int), ('error', ctypes.c_int), ('code', ctypes.c_int),
+        ('pid', ctypes.c_int32), ('uid', ctypes.c_uint32), ('status', ctypes.c_int),
+        ('address', ctypes.c_void_p), ('value', ctypes.c_void_p), ('band', ctypes.c_long),
+        ('padding', ctypes.c_ulong * 7)]
+
+
+class SetupBSDInfo(ctypes.Structure):
+    _fields_ = [(name, ctypes.c_uint32) for name in ('flags', 'status', 'exitstatus', 'pid', 'ppid',
+        'uid', 'gid', 'ruid', 'rgid', 'saveduid', 'savedgid', 'reserved')]
+    _fields_ += [('command', ctypes.c_char * 16), ('name', ctypes.c_char * 32)]
+    _fields_ += [(name, ctypes.c_uint32) for name in ('files', 'pgid', 'jobcontrol', 'terminal', 'terminalgroup')]
+    _fields_ += [('nice', ctypes.c_int32), ('seconds', ctypes.c_uint64), ('microseconds', ctypes.c_uint64)]
+
+
+class SetupKernel:
+    CAPACITY = 16384
+
+    def __init__(self):
+        need(sys.platform == 'darwin' and ctypes.sizeof(ctypes.c_void_p) == 8 and
+             ctypes.sizeof(SetupSigInfo) == 104 and ctypes.sizeof(SetupBSDInfo) == 136 and
+             [getattr(SetupSigInfo, name).offset for name in ('code', 'pid', 'uid', 'status')] == [8, 12, 16, 20] and
+             [getattr(SetupBSDInfo, name).offset for name in ('status', 'pid', 'ppid', 'uid', 'ruid', 'saveduid',
+                 'pgid', 'seconds', 'microseconds')] == [4, 12, 16, 20, 28, 36, 100, 120, 128],
+             'setup-join-uncertain')
+        self.lib = ctypes.CDLL('/usr/lib/libSystem.B.dylib', use_errno=True)
+        self.lib.waitid.argtypes = [ctypes.c_int, ctypes.c_uint32, ctypes.POINTER(SetupSigInfo), ctypes.c_int]
+        self.lib.waitid.restype = ctypes.c_int
+        self.lib.proc_listpgrppids.argtypes = [ctypes.c_int32, ctypes.c_void_p, ctypes.c_int]
+        self.lib.proc_listpgrppids.restype = ctypes.c_int
+        self.lib.proc_pidinfo.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int]
+        self.lib.proc_pidinfo.restype = ctypes.c_int
+
+    def terminal(self, pid):
+        while True:
+            info = SetupSigInfo()
+            ctypes.set_errno(0)
+            result = self.lib.waitid(1, pid, ctypes.byref(info), 4 | 32 | 1)
+            if result == -1 and ctypes.get_errno() == errno.EINTR:
+                continue
+            need(result == 0, 'setup-join-uncertain')
+            if info.pid == 0:
+                return None
+            # Darwin leaves si_uid zero (MG88495); it is not UID authority.
+            need(info.pid == pid and info.signo == signal.SIGCHLD and info.code in (1, 2, 3) and
+                 (0 <= info.status <= 255 if info.code == 1 else 0 < info.status < signal.NSIG),
+                 'setup-join-uncertain')
+            return info.status if info.code == 1 else -info.status
+
+    def members(self, pid):
+        values = (ctypes.c_int32 * self.CAPACITY)()
+        ctypes.set_errno(0)
+        count = self.lib.proc_listpgrppids(pid, values, ctypes.sizeof(values))
+        need(0 < count < self.CAPACITY and ctypes.get_errno() == 0, 'setup-join-uncertain')
+        members = tuple(values[:count])
+        need(all(value > 0 for value in members) and len(set(members)) == len(members) and pid in members,
+             'setup-join-uncertain')
+        return set(members)
+
+    def member(self, pid):
+        info = SetupBSDInfo()
+        ctypes.set_errno(0)
+        size = self.lib.proc_pidinfo(pid, 3, 0, ctypes.byref(info), ctypes.sizeof(info))
+        if size == 0 and ctypes.get_errno() == errno.ESRCH:
+            return None
+        need(size == 136 and info.pid == pid, 'setup-join-uncertain')
+        return info
+
+    def owned(self, pid, terminal, start_stamp):
+        members = self.members(pid)
+        for member in members:
+            if member == pid and terminal is not None:
+                continue  # The reserved, waitid-proved terminal original.
+            info = self.member(member)
+            if info is None or info.pgid != pid:
+                return False, start_stamp  # Incomplete sample never authorizes a signal/reap.
+            need(info.uid == info.ruid == info.saveduid == os.getuid(), 'setup-join-uncertain')
+            if member == pid:
+                token = (info.seconds, info.microseconds)
+                need(info.ppid == os.getpid() and info.flags & 32 and info.seconds > 0 and
+                     0 <= info.microseconds < 1000000 and (start_stamp is None or token == start_stamp),
+                     'setup-join-uncertain')
+                start_stamp = token
+        return self.members(pid) == members, start_stamp
+
+    def quiet(self, pid, terminal):
+        if terminal is None:
+            return False
+        try:
+            os.killpg(pid, 0)
+        except PermissionError as error:
+            need(error.errno == errno.EPERM, 'setup-join-uncertain')
+            # EPERM alone proves nothing. The complete pinned group must contain
+            # only the same waitid-proved terminal original (MG87151/MG88495).
+            if self.members(pid) == {pid}:
+                return True
+            self.owned(pid, terminal, None)
+            return False
+        except OSError:
+            raise v.Refused('setup-join-uncertain') from None
+        self.owned(pid, terminal, None)  # Reject foreign/ambiguous metadata.
+        return False
+
+
+class SetupChild(subprocess.Popen):
+    originals = {}  # Strong original handles until a verified final reap.
+
+    def __init__(self, *args, **kwargs):
+        need(kwargs.get('start_new_session') is True, 'setup-join-uncertain')
+        self._setup_ready = False
+        self._setup_kernel = SetupKernel()  # Refuse missing API/ABI before spawn.
+        self._setup_lock = threading.RLock()
+        self._setup_joined = self._setup_reaped = self._setup_invalid = False
+        self._setup_start_stamp = None
+        super().__init__(*args, **kwargs)
+        self._setup_pid = self.pid
+        self.originals[self.pid] = self
+        self._setup_ready = True
+
+    def _internal_poll(self, *args, **kwargs):
+        if not getattr(self, '_setup_ready', False):
+            return super()._internal_poll(*args, **kwargs)
+        try:
+            with self._setup_lock:
+                need(not self._setup_invalid and self.pid == self._setup_pid, 'setup-join-uncertain')
+                if self._setup_reaped:
+                    need(self._setup_joined, 'setup-join-uncertain')
+                    return self.returncode
+                need(self.returncode is None, 'setup-join-uncertain')
+                terminal = self._setup_kernel.terminal(self.pid)
+                if not self._setup_kernel.quiet(self.pid, terminal):
+                    return None
+                with setup_launch():
+                    while True:
+                        try:
+                            waited, status = os.waitpid(self.pid, 0)
+                            break
+                        except InterruptedError:
+                            continue
+                    self._setup_reaped = True
+                    need(waited == self.pid and (os.WIFEXITED(status) or os.WIFSIGNALED(status)),
+                         'setup-join-uncertain')
+                    code = os.WEXITSTATUS(status) if os.WIFEXITED(status) else -os.WTERMSIG(status)
+                    need(code == terminal, 'setup-join-uncertain')
+                    self.returncode = code
+                    self._setup_joined = True
+                    self.originals.pop(self.pid, None)
+                return self.returncode
+        except (v.Refused, OSError):
+            if not self._setup_joined:
+                self._setup_invalid = True
+            raise
+
+    def _wait(self, timeout=None):
+        if not getattr(self, '_setup_ready', False):
+            return super()._wait(timeout=timeout)
+        return self.wait(timeout=timeout)
+
+    def _try_wait(self, *args, **kwargs):
+        need(not getattr(self, '_setup_ready', False), 'setup-join-uncertain')
+        return super()._try_wait(*args, **kwargs)
+
+    def _handle_exitstatus(self, *args, **kwargs):
+        need(not getattr(self, '_setup_ready', False), 'setup-join-uncertain')
+        return super()._handle_exitstatus(*args, **kwargs)
+
+    def poll(self):
+        return self._internal_poll()
+
+    def wait(self, timeout=None):
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while True:
+            code = self.poll()
+            if code is not None:
+                return code
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
+                raise subprocess.TimeoutExpired(self.args, timeout)
+            time.sleep(0.2 if remaining is None else min(0.2, remaining))
+
+    def send_signal(self, *args, **kwargs):
+        raise v.Refused('setup-join-uncertain')
+
+    terminate = kill = send_signal
+
+    def _setup_signal(self, number):
+        try:
+            with self._setup_lock:
+                if self.poll() is not None:
+                    return
+                terminal = self._setup_kernel.terminal(self.pid)
+                complete, self._setup_start_stamp = self._setup_kernel.owned(self.pid, terminal, self._setup_start_stamp)
+                need(complete and not self._setup_reaped, 'setup-join-uncertain')
+                try:
+                    os.killpg(self.pid, number)
+                except PermissionError as error:
+                    # A last-member exit can race the signal. Accept only a fresh
+                    # full quiet proof and actual final reap; never ignore EPERM.
+                    if error.errno != errno.EPERM or self.poll() is None:
+                        raise v.Refused('setup-join-uncertain') from None
+                except OSError:
+                    raise v.Refused('setup-join-uncertain') from None
+        except (v.Refused, OSError):
+            if not self._setup_joined:
+                self._setup_invalid = True
+            raise
+
+    def join_original(self):
+        if self.poll() is not None:
+            return
+        self._setup_signal(signal.SIGTERM)
+        try:
+            self.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            self._setup_signal(signal.SIGKILL)
+            self.wait()  # Preserve the existing post-KILL unbounded wait.
+
+    def __del__(self):
+        if not getattr(self, '_setup_ready', False):
+            super().__del__()
+        # Managed originals stay strongly retained; generic Popen cleanup must
+        # never reap before the group check or report success after ECHILD.
+
+
+def setup_process(*args, **kwargs):
+    return SetupChild(*args, **kwargs)
+
+
 def setup_join(child):
-    # Only a child launched with start_new_session=True: never a process
-    # lookup or a host-wide kill. Finish this join despite parent cancellation.
+    # Only a start_new_session original: query only its still-reserved group,
+    # never process names or other groups, and never signal after final reap.
+    primary = sys.exc_info()[1]
     signals = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
     handlers = {number: signal.signal(number, signal.SIG_IGN) for number in signals}
     try:
-        try:
-            os.killpg(child.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        try:
-            child.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            pass
-        try:
-            os.killpg(child.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        child.wait()
+        need(isinstance(child, SetupChild), 'setup-join-uncertain')
+        child.join_original()
+    except (OSError, v.Refused) as error:
+        if isinstance(child, SetupChild) and not child._setup_joined:
+            child._setup_invalid = True
+        failure = v.Refused('setup-join-uncertain')
+        if primary is not None:
+            # An unjoined child is a technical failure even when the original
+            # operation requested user setup. Preserve that original as cause.
+            raise failure from primary
+        raise failure from None
     finally:
         for number, handler in handlers.items():
             signal.signal(number, handler)
@@ -556,7 +786,7 @@ def setup_command(argv):
         child = None
         try:
             with setup_launch():
-                child = subprocess.Popen(argv, stdout=out, stderr=err, env=environment, start_new_session=True)
+                child = setup_process(argv, stdout=out, stderr=err, env=environment, start_new_session=True)
             child.wait(timeout=180)
         except subprocess.TimeoutExpired:
             raise v.Refused("setup-timeout") from None
@@ -768,8 +998,9 @@ def frozen_layout(parent, sha, label, state):
 def guest_source():
     definitions = (v.Refused, v.need, v.digest, v.identity, strict, directory_pin, file_pin,
                    Directory, Original, publish_exclusive, private_child, write_new, root_state, guest_support,
-                   checked_raw, setup_cancel, setup_launch, setup_join, setup_command, guest_preflight, guest_evidence)
-    preamble = ("import os,sys,stat,json,re,hashlib,contextlib,ctypes,copy,plistlib,signal,subprocess,tempfile\nfrom types import SimpleNamespace\n"
+                   checked_raw, setup_cancel, setup_launch, SetupSigInfo, SetupBSDInfo, SetupKernel, SetupChild, setup_process,
+                   setup_join, setup_command, guest_preflight, guest_evidence)
+    preamble = ("import os,sys,stat,json,re,hashlib,contextlib,ctypes,copy,plistlib,signal,subprocess,tempfile,errno,threading,time\nfrom types import SimpleNamespace\n"
                 "CAP=16*1024*1024\nROLES=" + repr(ROLES) + "\n")
     names = ("need", "digest", "identity", "MG_RUN_ID")
     return (preamble + "\n".join(inspect.getsource(item) for item in definitions) +
@@ -803,7 +1034,7 @@ class VM(i.VM):
             child = None
             try:
                 with setup_launch():
-                    child = subprocess.Popen(["/bin/bash", "-c", i.BRIDGE, "cloud-agent-delivery",
+                    child = setup_process(["/bin/bash", "-c", i.BRIDGE, "cloud-agent-delivery",
                                               os.path.join(self.root, "tools"), operation, *args],
                                              stdin=subprocess.PIPE if data is not None else stream,
                                              stdout=out, stderr=err, env=env, start_new_session=True)

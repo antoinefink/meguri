@@ -299,7 +299,7 @@ class SelectedTests(unittest.TestCase):
             self.assertNotIn("generated-private", " ".join(argv))
             captured.append(private)
             raise s.v.Refused("generated-stop-before-launch")
-        with patch.object(s.subprocess, "Popen", side_effect=stop_before_launch), \
+        with patch.object(s.h, "setup_process", side_effect=stop_before_launch), \
              patch.object(s.h, "setup_launch", return_value=contextlib.nullcontext()), \
              patch.dict(s.os.environ, {"MEGURI_SIM_ALLOW_HOST": "1", "MEGURI_MAC_UI_ALLOW_HOST": "1", "MG_CLOUD_AGENT_SMOKE_CONTEXT_FD": "99"}):
             with self.assertRaisesRegex(s.v.Refused, "generated-stop-before-launch"):

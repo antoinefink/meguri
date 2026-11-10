@@ -2,6 +2,10 @@
 
 REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
 
+@test "CloudAgent managed originals require quiet groups and one verified reap" {
+  python3 -B "$REPO_ROOT/tools/tests/cloud_agent_process_test.py"
+}
+
 @test "CloudAgent finalized four-role handoff generated boundaries supply no signed proof" {
   python3 -B "$REPO_ROOT/tools/tests/cloud_agent_handoff_test.py"
 }
