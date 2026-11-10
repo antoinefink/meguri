@@ -302,7 +302,43 @@ fn original_observation_rechecks_file_account_publication_and_runtime_guard_afte
         "none",
     ] {
         let fixture = Fixture::new();
-        assert!(fixture.observe(|| {}).is_ok());
+        assert_eq!(
+            payload(&*fixture.collection.reader(ReaderRole::Query).unwrap(), fixture.id),
+            fixture.original
+        );
+        let baseline_seq = fixture.collection.last_seq();
+        // Reconcile preserves the seeded baseline without current-open observer
+        // provenance. Obtain it through a real local edit, not a tracking stamp.
+        let edited = meguri_engine::notes::update(
+            &fixture.collection,
+            meguri_engine::notes::UpdateNote {
+                id: fixture.id,
+                fields: vec!["Observed local question".into(), "Original answer".into()],
+                tags: vec!["retained-tag".into()],
+            },
+            meguri_engine::OpSource::UserUndoable,
+        )
+        .unwrap();
+        assert!(edited.value.written);
+        assert!(edited.seq > baseline_seq);
+        fixture.collection.flush_wal(WAIT).unwrap();
+        // Ordinary update returns after its synchronous observer; require the
+        // actual commit's persisted capture before the initial observation.
+        assert!(
+            fixture
+                .runtime
+                .capture_proof(edited.seq, fixture.collection.generation())
+                .is_some_and(|proof| proof.attempted && proof.persisted)
+        );
+        let updated = payload(&*fixture.collection.reader(ReaderRole::Query).unwrap(), fixture.id);
+        assert_ne!(
+            updated.payload_digest().unwrap(),
+            fixture.original.payload_digest().unwrap()
+        );
+        let (initial, applied) = fixture.observe(|| {}).unwrap();
+        assert_eq!(initial.payload, updated);
+        assert_eq!(initial.observed_seq, edited.seq.0);
+        assert_eq!(applied, None);
         let seq = fixture.collection.last_seq();
         let generation = fixture.collection.generation();
         let sidecar = fixture.collection.path().parent().unwrap().join("meguri-sidecar.json");

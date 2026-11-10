@@ -144,3 +144,40 @@ authority-drift case still failed its initial observation, before any drift.
 Unchanged seeded entities have zero observation provenance; the full scan does
 not stamp them. Its next correction must use an actual update and flush in that
 case. Production predicates and the separate apply test remain intact.
+
+
+## Authority-drift initial-state fixture repair
+
+Recorded fixer starting commit: `13526851` (supplied clean baseline).
+Original batch base: `1416a520542a8c5daa38a23bfe398da704c3d6c9`.
+
+Only the authority-drift test now performs one ordinary user-undoable note
+update per fixture, changing actual field content while retaining the normal
+updater's metadata and provenance handling, followed by a real WAL flush with
+the existing ten-second bound. It asserts the pre-edit canonical image equals
+the original baseline, the updater reports a write with an advanced seq, the
+actual commit has persisted observer capture, and the canonical digest changed.
+The initial original-reader observation must return that changed payload and
+the update's seq with no Incoming apply attribution before drift begins.
+Observer capture is synchronous on this ordinary update path; the test checks
+its persisted capture proof rather than writing or forcing tracking state.
+
+The shared Fixture::new baselines and incoming envelope, separate Incoming
+COMMIT/WAL test, outside-lock provider mutations, bookkeeping control, all drift
+refusals, ten-second waits and exact binary reservation remain unchanged.
+Production guards, receipts and tracking stamps are untouched.
+
+This repair received one source consistency check only. No builds, tests, Git,
+network, raw logs or forbidden/private sources were accessed. The supplied
+`45301` result remains the execution evidence: Incoming passed and initial
+authority observation failed before drift. Parent owns subsequent execution,
+independent review and provenance/privacy/similarity checks. This source-only
+handoff makes no passing-test, Unit/gate, signed exchange or acceptance claim.
+
+## Live provenance verification
+
+Independent fixture review found no required finding. A real ordinary update,
+tracking capture and WAL flush establish the authority matrix's initial state.
+`core-test/20261110T060700Z-54128`: both cases passed, none skipped. This covers
+actual durable Incoming readback and the final authority recheck. The earlier
+failed receipts remain retained. Signed and native peer evidence is separate.
