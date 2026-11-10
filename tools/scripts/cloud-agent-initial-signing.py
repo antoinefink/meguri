@@ -163,6 +163,49 @@ def code_difference(before, after):
     return report
 
 
+def signature_allocation_matches(before, after):
+    """Accept only the measured pairwise 16KiB signature-allocation growth."""
+    original = code_fingerprint(before)
+    if code_fingerprint(after) == original:
+        return True
+    if before[:4] != after[:4]:
+        return False
+    difference = code_difference(before, after)
+    if difference['slice_counts'][0] != difference['slice_counts'][1]:
+        return False
+    adjusted, changed = bytearray(after), False
+    for item in difference['slices']:
+        old, new = item['before'], item['after']
+        a, b = old['fields'], new['fields']
+        if ((old['cpu'], old['subtype']) != (new['cpu'], new['subtype']) or
+                item['other_changed_byte_count'] != 0 or
+                any(a[name] != b.get(name) for name in
+                    ('signature_offset', 'linkedit_fileoff', 'linkedit_vmaddr'))):
+            return False
+        if a['linkedit_vmsize'] == b['linkedit_vmsize']:
+            continue
+        signature_growth = b['signature_size'] - a['signature_size']
+        if not (signature_growth > 0 and
+                b['linkedit_filesize'] - a['linkedit_filesize'] == signature_growth and
+                b['linkedit_vmsize'] > a['linkedit_vmsize'] and
+                all(fields['linkedit_vmsize'] == ((fields['linkedit_filesize'] + 16383) // 16384) * 16384
+                    for fields in (a, b))):
+            return False
+        # Both inputs already passed the unchanged strict Mach-O/fat parser.
+        # Restore only this proved field in an in-memory comparison copy.
+        base = new['fat_offset']
+        cursor = base + 32
+        ncmds = struct.unpack_from('<I', after, base + 16)[0]
+        for _ in range(ncmds):
+            command, size = struct.unpack_from('<II', after, cursor)
+            if command == 0x19 and after[cursor + 8:cursor + 24].rstrip(b'\0') == b'__LINKEDIT':
+                struct.pack_into('<Q', adjusted, cursor + 32, a['linkedit_vmsize'])
+                changed = True
+                break
+            cursor += size
+    return changed and code_fingerprint(bytes(adjusted)) == original
+
+
 def write_code_difference(directory, target, before, after):
     """Private diagnostic only. Its success never changes the refusing guard."""
     try:
@@ -328,9 +371,10 @@ def initial_sign(root, directory, sha, products, xctestrun, settings_path):
             compare_product_files(before, after, executable, signature_root, native_result)
             final_bytes=code_bytes(parent,name)
             final_code=code_fingerprint(final_bytes)
-            if final_code != original_code:
+            same_code = final_code == original_code or signature_allocation_matches(original_bytes, final_bytes)
+            if not same_code:
                 write_code_difference(directory, os.path.relpath(path, products), original_bytes, final_bytes)
-            need(final_code==original_code,'initial-code-changed')
+            need(same_code,'initial-code-changed')
             need(signing_metadata(path) == (identifier, entitlements), 'initial-entitlements-changed')
             v.command(['/usr/bin/codesign', '--verify', '--deep', '--strict', path], 'initial-signature')
             with tempfile.TemporaryDirectory(prefix='meguri-initial-signed-') as temporary:

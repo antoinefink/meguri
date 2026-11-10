@@ -112,6 +112,85 @@ class CodeDifferenceDiagnosticTests(unittest.TestCase):
         self.assertFalse(result['slices'][1]['changed_fields']['linkedit_vmsize'])
 
 
+def measured_allocation_fixture(cpu=0x1000007,subtype=3,signature_size=480):
+    # Generated Mach-O containing the exact measured allocation dimensions.
+    start,fileoff = (20992,16384) if cpu==0x1000007 else (56128,49152)
+    filesize=start+signature_size-fileoff
+    header=struct.pack('<8I',0xfeedfacf,cpu,subtype,6,2,88,0,0)
+    segment=struct.pack('<II16sQQQQIIII',0x19,72,b'__LINKEDIT',fileoff,
+                        (filesize+16383)//16384*16384,fileoff,filesize,7,1,0,0)
+    command=struct.pack('<4I',0x1d,16,start,signature_size)
+    return header+segment+command+b'\x55'*(start-120)+b's'*signature_size
+
+
+def measured_fat_fixture(first,second,align=14):
+    first_offset=(48+(1<<align)-1)//(1<<align)*(1<<align)
+    second_offset=(first_offset+len(first)+(1<<align)-1)//(1<<align)*(1<<align)
+    header=struct.pack('>II',0xcafebabe,2)
+    header+=struct.pack('>5I',0x1000007,3,first_offset,len(first),align)
+    header+=struct.pack('>5I',0x100000c,0,second_offset,len(second),align)
+    return header+b'\0'*(first_offset-len(header))+first+b'\0'*(second_offset-first_offset-len(first))+second
+
+
+class SignatureAllocationTests(unittest.TestCase):
+    def cases(self):
+        return [(measured_allocation_fixture(),measured_allocation_fixture(signature_size=18704)),
+                (measured_allocation_fixture(cpu=0x100000c,subtype=0,signature_size=416),
+                 measured_allocation_fixture(cpu=0x100000c,subtype=0,signature_size=18640))]
+
+    def rejects(self,before,after):
+        try:result=m.signature_allocation_matches(before,after)
+        except m.v.Refused:return
+        self.assertFalse(result)
+
+    def test_both_measured_thin_slices_and_fat_reallocation(self):
+        x86,arm=self.cases()
+        for before,after in (x86,arm):
+            self.assertNotEqual(m.code_fingerprint(before),m.code_fingerprint(after))
+            self.assertTrue(m.signature_allocation_matches(before,after))
+        before=measured_fat_fixture(x86[0],arm[0]);after=measured_fat_fixture(x86[1],arm[1])
+        self.assertEqual(struct.unpack_from('>I',before,36)[0],49152)
+        self.assertEqual(struct.unpack_from('>I',after,36)[0],65536)
+        self.assertTrue(m.signature_allocation_matches(before,after))
+
+    def test_existing_strict_fast_path_stays_exact(self):
+        self.assertTrue(m.signature_allocation_matches(code_image_fixture(),code_image_fixture(signature=b'x'*128)))
+        self.rejects(code_image_fixture(),code_image_fixture(signature=b'x'*5000))
+
+    def test_arbitrary_old_new_virtual_sizes_no_growth_or_shrink_refuse(self):
+        before,after=self.cases()[0]
+        for old_vm,new_vm in ((32768,49152),(16384,49152),(8192,32768)):
+            old,new=bytearray(before),bytearray(after)
+            struct.pack_into('<Q',old,64,old_vm);struct.pack_into('<Q',new,64,new_vm)
+            self.rejects(bytes(old),bytes(new))
+        virtual_only=bytearray(before);struct.pack_into('<Q',virtual_only,64,32768)
+        self.rejects(before,bytes(virtual_only));self.rejects(after,before)
+
+    def test_signature_start_arch_segment_layout_and_code_mutations_refuse(self):
+        before,after=self.cases()[0]
+        mutations=[(112,'<I',20993),(4,'<I',0x100000c),(8,'<I',0),
+                   (56,'<Q',16385),(72,'<Q',16385),(80,'<Q',23313),
+                   (116,'<I',18703),(16,'<I',3),(24,'<I',1)]
+        for position,fmt,value in mutations:
+            changed=bytearray(after);struct.pack_into(fmt,changed,position,value)
+            with self.subTest(position=position):self.rejects(before,bytes(changed))
+        shifted=bytearray(after);struct.pack_into('<I',shifted,112,20993);struct.pack_into('<I',shifted,116,18703)
+        m.code_fingerprint(bytes(shifted))
+        self.rejects(before,bytes(shifted))
+        changed=bytearray(after);changed[200]^=1;self.rejects(before,bytes(changed))
+        self.rejects(before,after+b'\0')
+
+    def test_one_valid_fat_slice_cannot_mask_bad_peer_or_alignment(self):
+        x86,arm=self.cases();before=measured_fat_fixture(x86[0],arm[0])
+        peer=bytearray(arm[1]);struct.pack_into('<Q',peer,64,49152)
+        self.rejects(before,measured_fat_fixture(x86[1],bytes(peer)))
+        peer=bytearray(arm[1]);peer[200]^=1
+        self.rejects(before,measured_fat_fixture(x86[1],bytes(peer)))
+        self.rejects(before,measured_fat_fixture(x86[1],arm[1],align=15))
+        overlap=bytearray(measured_fat_fixture(x86[1],arm[1]));struct.pack_into('>I',overlap,36,16384)
+        self.rejects(before,bytes(overlap))
+
+
 class SignerTests(unittest.TestCase):
     def fake(self, args, category):
         if args[1] == 'find-identity':

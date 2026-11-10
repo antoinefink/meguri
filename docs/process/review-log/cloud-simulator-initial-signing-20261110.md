@@ -55,3 +55,17 @@ zero other changed bytes before the signature. This proves the specific
 allocation change, while the earlier SDK comparison did not. A narrow
 pairwise allocation repair is being prepared; the original failed run stays
 failed, with no frozen proof.
+
+The pairwise repair preserves the strict fingerprint fast path. Its fallback
+requires unchanged slice identity, signature start, segment start and virtual
+address, zero other changed bytes, equal positive signature/file-size growth,
+and both virtual allocations exactly rounded to 16 KiB. It restores only that
+proved allocation field in a comparison copy and still requires the complete
+existing fingerprint to match. It permits neither arbitrary allocation changes
+nor code, load-command or slice changes. Native signature, grant, source and
+first-freeze checks stay unchanged.
+
+Independent review found no P0–P2 issue. Focused tooling run `41267` passed both
+cases with five new generated allocation tests, including both measured slices
+and the fat layout, plus mutation and malformed-input refusals. The final source
+privacy scan passed. Actual native signing remains pending for this repair.
