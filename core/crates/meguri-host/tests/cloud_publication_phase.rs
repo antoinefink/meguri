@@ -1367,6 +1367,127 @@ fn driver_refresh_at_sent_restores_automatic_off_after_real_zones_start() {
 }
 
 #[test]
+fn driver_explicit_tracking_error_precedes_reconciled_zones_opening() {
+    publication_driver_tracking_failure(false);
+}
+
+#[test]
+fn driver_explicit_storage_full_precedes_reconciled_zones_opening() {
+    publication_driver_tracking_failure(true);
+}
+
+fn publication_driver_tracking_failure(no_space: bool) {
+    use cloud::policy::{ActionKind, Attention, ChangeCause, DeviceEvent, DeviceSettings, Lifecycle, Scan};
+
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("publication-policy-failure");
+    generated(&dir);
+    let host = open_host(&dir, keys());
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    host.media().unwrap().store().register_full(|_, _| true).unwrap();
+    host.cloud_policy_input(DeviceEvent::Settings(DeviceSettings {
+        enabled: true,
+        paused: false,
+        automatic: false,
+        media: true,
+    }))
+    .unwrap();
+    host.cloud_policy_input(DeviceEvent::Account {
+        identity: IdentityStatus::Available(cloud::OpaqueBytes(scope().account.into_bytes())),
+        origin_sdk: None,
+    })
+    .unwrap();
+    host.cloud_policy_input(DeviceEvent::Network { reachable: true })
+        .unwrap();
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(709)).unwrap();
+    assert_eq!(bind_and_write(&host, &mut service, &scope()).step, PublishStep::Bound);
+    host.cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Cloud))
+        .unwrap();
+    let driver = host.cloud_policy_driver().unwrap();
+    let before = driver.state();
+    assert_eq!(
+        before.facts.binding.as_ref().unwrap().publish_step,
+        Some(cloud::policy::PublishStep::Bound)
+    );
+    assert_eq!(before.tracking_stop, None);
+    assert!(!before.gate_open() && before.engine.is_none());
+
+    // Advance real publication and reconciliation without another policy input.
+    own_until_scan(&host, &mut service);
+    runtime
+        .reconcile_binding(&collection, &host.media().unwrap(), Duration::from_secs(30))
+        .unwrap();
+    let projection = runtime
+        .policy_projection(Lifecycle::Ready, collection.generation().0)
+        .unwrap();
+    assert_eq!(
+        projection.facts.binding.as_ref().unwrap().publish_step,
+        Some(cloud::policy::PublishStep::Zones)
+    );
+    assert_eq!(projection.facts.summary.scan, Scan::None);
+    assert!(projection.facts.summary.collection_known && projection.facts.summary.sendable > 0);
+    assert!(!projection.tracking_stopped && projection.engine.is_none());
+    assert_eq!(driver.state(), before);
+
+    let commands = host
+        .cloud_policy_input(DeviceEvent::TrackingWriteFailed { no_space })
+        .unwrap();
+    let state = driver.state();
+    assert_eq!(state.facts.binding, projection.facts.binding);
+    assert_eq!(state.tracking_stop, Some(no_space));
+    assert!(!state.gate_open() && state.engine.is_none());
+    assert!(!commands.iter().any(|c| matches!(
+        c.action.kind,
+        ActionKind::StartEngine { .. }
+            | ActionKind::RequestFetch { .. }
+            | ActionKind::RequestSend { .. }
+            | ActionKind::ResumeMedia
+    )));
+    for kind in [
+        ActionKind::CancelFlushTimer,
+        ActionKind::CancelBackgroundFlush,
+        ActionKind::PauseMedia,
+    ] {
+        assert_eq!(commands.iter().filter(|c| c.action.kind == kind).count(), 1);
+    }
+    let expected = if no_space {
+        Attention::LocalStorageFull
+    } else {
+        Attention::TrackingError
+    };
+    let other = if no_space {
+        Attention::TrackingError
+    } else {
+        Attention::LocalStorageFull
+    };
+    let mut statuses = Vec::new();
+    for command in &commands {
+        driver.validate(command).unwrap();
+        if let ActionKind::StatusChanged(status) = &command.action.kind {
+            assert_eq!(status.attention.get(&expected), Some(&1));
+            assert!(!status.attention.contains_key(&other));
+            assert!(!statuses.contains(status));
+            statuses.push(status.clone());
+        }
+    }
+    assert_eq!(statuses.last().map(|s| s.as_ref()), Some(&driver.status()));
+    // Preserve Runtime's independent refusal even with reconciled sendable rows.
+    assert!(matches!(
+        runtime.register_sdk(state.automatic()),
+        Err(cloud::runtime::RuntimeError::Incomplete(
+            cloud::runtime::Incomplete::WholeBindingReconciliation
+        ))
+    ));
+    let failed = runtime
+        .policy_projection(Lifecycle::Ready, collection.generation().0)
+        .unwrap();
+    assert!(failed.tracking_stopped && failed.engine.is_none());
+    host.close().unwrap();
+    assert!(commands.iter().all(|c| driver.validate(c).is_err()));
+}
+
+#[test]
 fn original_policy_command_survives_real_complete_save_active_row_removal() {
     publication_driver_automatic_terminal(true, true);
 }

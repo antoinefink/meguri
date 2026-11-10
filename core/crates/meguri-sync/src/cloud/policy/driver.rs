@@ -630,10 +630,17 @@ impl Driver {
             engine.stopping = true;
         }
         owned.state.engine = engine;
-        let tracking_failed = projection.tracking_stopped
-            && owned.state.tracking_stop.is_none()
-            && !matches!(event, Event::TrackingWriteFailed { .. });
-        if tracking_failed {
+        // Install explicit failures exactly once, before Binding can open the
+        // gate. Projection-only failures still precede the original trigger.
+        let (tracking_failure, event) = match event {
+            failure @ Event::TrackingWriteFailed { .. } => (Some(failure), None),
+            event => (
+                (projection.tracking_stopped && owned.state.tracking_stop.is_none())
+                    .then_some(Event::TrackingWriteFailed { no_space: false }),
+                Some(event),
+            ),
+        };
+        if let Some(event) = tracking_failure {
             let mut facts = projection.facts.clone();
             facts.binding = owned.state.facts.binding.clone();
             let (state, emitted) = step(
@@ -641,7 +648,7 @@ impl Driver {
                 Input {
                     now_ms,
                     facts: Some(facts),
-                    event: Event::TrackingWriteFailed { no_space: false },
+                    event,
                 },
             );
             owned.state = state;
@@ -650,8 +657,8 @@ impl Driver {
         // Runtime publication progress is a Binding input (P4/P6). Neither a
         // synthesized session event nor the original trigger may consume the
         // old binding first: Zones -> Sent must compare effective automatic
-        // scheduling before projected facts replace it. Keep the original
-        // event below, including its operation result and completion handling.
+        // scheduling before projected facts replace it. Keep the nonfailure
+        // trigger below, including its operation result and completion handling.
         if owned.state.facts.binding != projection.facts.binding {
             let (state, emitted) = step(
                 owned.state.clone(),
@@ -677,21 +684,23 @@ impl Driver {
             actions.extend(emitted);
         }
         // A refresh cannot turn a still-failed Runtime into a successful local commit.
-        let event = if projection.tracking_stopped && matches!(event, Event::TrackingChanged(ChangeCause::Local)) {
-            Event::TrackingChanged(ChangeCause::Cloud)
-        } else {
-            event
-        };
-        let (state, emitted) = step(
-            owned.state.clone(),
-            Input {
-                now_ms,
-                facts: Some(projection.facts),
-                event,
-            },
-        );
-        owned.state = state;
-        actions.extend(emitted);
+        if let Some(event) = event {
+            let event = if projection.tracking_stopped && matches!(event, Event::TrackingChanged(ChangeCause::Local)) {
+                Event::TrackingChanged(ChangeCause::Cloud)
+            } else {
+                event
+            };
+            let (state, emitted) = step(
+                owned.state.clone(),
+                Input {
+                    now_ms,
+                    facts: Some(projection.facts),
+                    event,
+                },
+            );
+            owned.state = state;
+            actions.extend(emitted);
+        }
         // A start may still be awaiting native construction. Reissue that
         // intent with the current scheduling preference; its old value is
         // rejected by validate_locked without invalidating other actions.
