@@ -511,10 +511,16 @@ import Testing
         evidence.batch(origin: "generated-engine", batch: .init(id: 9, saves: [record], deletes: []), proof: nil, current: observed)
         let boundary = try evidence.acknowledgementBoundary()
         let startCallback = DispatchSemaphore(value: 0), callbackFinished = DispatchSemaphore(value: 0)
-        // Hold synchronous MainActor prepare while another actor finishes the
+        // Hold synchronous MainActor prepare while a GCD worker finishes the
         // original flight. No suspension is invented inside prepare/request.
-        let callback = Task.detached {
-            guard startCallback.wait(timeout: .now() + 5) == .success else { return false }
+        let (callback, callbackCompletion) = AsyncStream<Bool>.makeStream()
+        DispatchQueue.global().async {
+            var completed = false
+            defer {
+                callbackCompletion.yield(completed)
+                callbackCompletion.finish()
+            }
+            guard startCallback.wait(timeout: .now() + 5) == .success else { return }
             for (ordinal, event) in [CloudEngineEvent.sent(batchID: 9, saved: [record], failed: [], deleted: []),
                                      .stateUpdate(Data([9]))].enumerated() {
                 for phase in [CloudSDKObservationPhase.delivered, .committed, .returned] {
@@ -522,22 +528,30 @@ import Testing
                 }
             }
             callbackFinished.signal()
-            return true
+            completed = true
         }
         var requests = 0
-        let facts = try await AgentManualExchange.run(prepare: {
-            startCallback.signal()
-            guard callbackFinished.wait(timeout: .now() + 5) == .success else { throw AgentFailure.execution }
-        }, request: { requests += 1; return true }, afterRequest: {}, exactResult: {
-            try evidence.requireSelectedAcknowledgement(entity("n1"),
-                observations: [.savedPendingRemoved(name: record.name, requestID: 9)], attemptBoundary: boundary)
-        }, afterResult: {})
-        #expect(await callback.value && requests == 1)
-        #expect(facts.last?.operation == "n1-original-ack-after-attempt-boundary-timing-unresolved")
-        let requestBoundary = try evidence.acknowledgementBoundary()
-        let earlier = try evidence.requireSelectedAcknowledgement(entity("n1"),
-            observations: [.savedPendingRemoved(name: record.name, requestID: 9)], attemptBoundary: requestBoundary)
-        #expect(earlier.last?.operation == "n1-earlier-original-ack")
+        do {
+            let facts = try await AgentManualExchange.run(prepare: {
+                startCallback.signal()
+                guard callbackFinished.wait(timeout: .now() + 5) == .success else { throw AgentFailure.execution }
+            }, request: { requests += 1; return true }, afterRequest: {}, exactResult: {
+                try evidence.requireSelectedAcknowledgement(entity("n1"),
+                    observations: [.savedPendingRemoved(name: record.name, requestID: 9)], attemptBoundary: boundary)
+            }, afterResult: {})
+            var callbackCompleted = false
+            for await completed in callback { callbackCompleted = completed }
+            #expect(callbackCompleted && requests == 1)
+            #expect(facts.last?.operation == "n1-original-ack-after-attempt-boundary-timing-unresolved")
+            let requestBoundary = try evidence.acknowledgementBoundary()
+            let earlier = try evidence.requireSelectedAcknowledgement(entity("n1"),
+                observations: [.savedPendingRemoved(name: record.name, requestID: 9)], attemptBoundary: requestBoundary)
+            #expect(earlier.last?.operation == "n1-earlier-original-ack")
+        } catch {
+            // Join the bounded worker even when prepare refuses or a later step throws.
+            for await _ in callback {}
+            throw error
+        }
     }
 }
 #endif

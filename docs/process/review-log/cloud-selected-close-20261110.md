@@ -21,3 +21,11 @@ or release acceptance is claimed.
 `unit-sim/20261110T062053Z-60571`: iPhone build passed, execution failed before
 any test because this target is absent from the Unit plan. It proves no ledger
 case. The dedicated Snapshot-plan Mac job is now used for execution.
+
+## App-hosted execution
+
+The corrected Snapshot build ran in the dedicated VM. All six new ledger cases
+passed, one executed case per receipt and none skipped: `66992`, `69228`,
+`70750`, `72250`, `73737`, `75220` (mac-hosted-test, 2026-11-10).
+The real selected-close integration case remains unimplemented; these are ledger
+checks, not proof of a signed shutdown or recovery run.
