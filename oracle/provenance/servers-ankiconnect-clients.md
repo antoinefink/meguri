@@ -55,3 +55,19 @@ manager caches, so the add-on's own `addNote` and `canAdd*` change what
 A setup applied through the library therefore leaves `did` `null`. C9.11 now
 cites `specs/servers/ankiconnect-gui.md` G11, which already declares both
 `guiEditNote` differences.
+
+Recorder issue pass (2026-11-10, same session): checked against the
+recorder's code and the committed recordings under
+`conformance/recordings/servers/ankiconnect/clients/` (commit 5cae7aef). No
+client, AnkiConnect or Anki source was read. Changes: header and C7 point at
+the recordings (`conformance/AGENTS.md`); C4, C5 and C7 use the observation
+names `media_dir` (`specs/conformance/observations.md` O4) and the
+`db_dump` table lists the recordings use (R1959); C7 `agent/find-cards`
+gives the recorded search error's form (`Invalid search: ` and U+2068/U+2069
+around Anki's text) and Meguri's `search/errors#E7` `unclosed_group` text
+with the deviation pointer; C7 `yomitan/gui-edit-note` gives the two
+deviation pointers (a bare `null` at version 2) and the never-existing id
+`1000000000001`'s normalization, from the recorded golden; C7
+`mpvacious/find-models-by-name` reads `#m7` as recorded; C7 gains the
+recorded `mpvacious/add` row (C4's mpvacious add sequence). Migaku client
+rows were not added (held for the product owner).

@@ -65,3 +65,31 @@ identity compared by note entity (T10.1); the `HEAD` exemption from the
 Content-Length check (T8), following `servers/migaku-protocol` P4.
 `conformance/oracle.json` was checked: it has no `ankiconnect_addon_sha256`
 yet, so T9 names ADDON_PIN's `archive_sha256` as the current pin.
+
+## Recorder issue pass (2026-11-10)
+
+Same session. Issues reported by the oracle maintainer's recorder
+(`oracle/ankiconnect/`, commit 5cae7aef, session s-20261110T114344Z-1cd5e318),
+checked against the recorder's code (`recorder/__main__.py`,
+`recorder/transcript.py`), its README and the 51 committed recordings under
+`conformance/recordings/servers/ankiconnect/`. No AnkiConnect or Anki source
+was read for this pass.
+
+| Spec text | Source | Change |
+|---|---|---|
+| T1, T2, header | `conformance/AGENTS.md` (recordings rule), recorder README "Files" | transcripts live at `conformance/recordings/servers/<server>/<path>.yaml` with the golden `.json` beside it; ids unchanged; the recorder is `record.sh` until the `tools/mg` job exists |
+| T5, T10.1 "Stock note types count" | recorded `migaku/destination-by-id` (`modelNamesAndIds`: stock kinds `#m1`-`#m6`, setup type `#m7`), `mpvacious/find-models-by-name` (`#m7`); `specs/storage/new-collection.md` B7, B11; `specs/notetypes/stock-kinds.md` K1, K2 | kept the numbering: Meguri's new collection already holds the six stock kinds at `now_ms`..+5 in K1 order, so no product decision is needed |
+| T10.1 card numbering | recorder `Tokens._add_new` (ascending id per kind); `specs/conformance/normalized-dump.md` N5 | ascending card id, not template order; cloze caution from `conformance/AGENTS.md` |
+| T10.1 retired tokens | T10.2 and T17 already state it; the recorder's `Tokens.real` raises `unknown_ref` for a retired token and its error-string lookup sees only live entities | spec kept; cross-reference added; recorder gap reported |
+| T10.1 isolation marks | recorded `agent/find-cards` step 1 (`Invalid search: ` with U+2068/U+2069) | error strings keep them; a whole-string `replace` |
+| T7.1, T14 | `specs/conformance/observations.md` O4 | `media` renamed `media_dir`; `media_trash`, `media_pending` named |
+| T7.4 run errors | recorder `RunError` kinds (`permission_unused`, `clock_escaped`, `anki_exited`, `fixture_mismatch`, `fixture_unavailable`, `unsupported_step`, `invalid_scenario`) and the `ClockCheck` window | table of kinds; `invalid` status from `specs/conformance/dsl.md` D10 |
+| T9 lock and driver hash | recorder `oracle_identity`, `recorder_sha256`, `RECORDER_FILES`; `oracle/driver/meta.py` `driver_files`; `oracle/ankiconnect/requirements.lock`; `conformance/oracle.json` | `ankiconnect_lock_sha256` added (the recorder does not write it yet); `driver_sha256` defined as the recorder computes it |
+| T10.6 (new) | recorder `Normalizer.observation` (no id replacement); recorded `harness/tokens` dump (real keys, `mid`, `nid`, `did`); `specs/conformance/observations.md` O1, O4, O8; `specs/storage/graves.md` (grave types 0, 1, 2) | id positions in `db_dump` and `decks`; keys without a token kept as digits; tables limited |
+| T16 "Record twice", T17 rows | recorder README "Clock" (libfaketime cache race, one recording in a dozen) | acceptance needs two byte-identical recordings |
+| T18 `harness/tokens` | recorded `harness/tokens.yaml` | `{db_dump: {tables: [notes, cards]}}` (R1959) |
+
+Meguri decisions made here: the run-error table; T10.6's positions, the
+retired-first lookup for `graves`, digit keys for untokened ids, and the
+table limit; the record-twice acceptance rule; the staleness of a golden
+without `ankiconnect_lock_sha256`.

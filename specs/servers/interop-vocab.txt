@@ -480,3 +480,23 @@ cardLapses
 media.trash
 collection.media
 collection.anki2
+# servers/transcripts T7.4 run errors, T9 golden header, T10.6 db_dump columns;
+# servers/ankiconnect-clients C7 observation and search-error names
+ankiconnect_lock_sha256
+archive_sha256
+meguri_recorder
+permission_unused
+clock_escaped
+anki_exited
+fixture_mismatch
+fixture_unavailable
+unsupported_step
+invalid_scenario
+reused_ref
+media_trash
+media_pending
+mid
+ntid
+cid
+oid
+unclosed_group
