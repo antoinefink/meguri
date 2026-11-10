@@ -82,7 +82,8 @@ import XCTest
 // same bounded private observation consumed by admit_preflight on the parent.
 @MainActor private enum OwnerSetupObservation {
     static func encode(_ observation: AgentRunningProductObservation) throws -> [String: Any] {
-        guard case .mac(let os) = observation.os, let main = observation.images.first else { throw AgentFailure.binding }
+        guard case .mac(let os) = observation.os else { throw AgentFailure.binding }
+        let main = try observation.executableImage()
         return try AgentRunDirectory.withOSApplicationSupportRoot(create: true) { root, chain in
             func bundle(_ value: AgentRunningProductObservation.BundleIdentity) -> [String: String] {
                 ["root": value.root, "canonical_root": value.canonicalRoot,

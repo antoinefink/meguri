@@ -23,7 +23,8 @@ import XCTest
                 ["path": $0.path, "cpu": $0.identity.cpu, "subtype": $0.identity.subtype,
                  "uuid": $0.identity.uuid.map { String(format: "%02x", $0) }.joined()]
             }
-            guard !images.isEmpty, images.count <= 128, let main = observation.images.first else { throw AgentFailure.binding }
+            guard !images.isEmpty, images.count <= 128 else { throw AgentFailure.binding }
+            let main = try observation.executableImage()
             let value: [String: Any] = ["protocol_version": 1, "scope": "PATH-PREPARATION-ONLY",
                 "application_support": root.path, "application_support_chain": rootChain, "host": bundle(observation.host), "agent": bundle(observation.agent),
                 "app_build": observation.appBuild, "os_build": os, "executable_path": observation.executablePath,

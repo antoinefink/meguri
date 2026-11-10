@@ -28,6 +28,24 @@ nonisolated struct AgentRunningProductObservation: Equatable {
     let executablePath: String, anchorImagePath: String
     let images: [AgentRunningImage]
     let os: OS
+
+    // Select the loaded executable by its OS path, not by dyld order.
+    // Binding checks internal aliases declared in the manifest.
+    // Producers require exact observed paths.
+    func executableImage(resolvingOwnedPath resolve: (String) throws -> String = { $0 }) throws -> AgentRunningImage {
+        func owned(_ path: String) -> Bool {
+            path.hasPrefix(host.root + "/") || path.hasPrefix(host.canonicalRoot + "/")
+        }
+        guard !images.isEmpty, images.count <= 4096,
+              owned(executablePath), owned(host.executable) else { throw AgentFailure.binding }
+        let executable = try resolve(executablePath)
+        guard try resolve(host.executable) == executable else { throw AgentFailure.binding }
+        let matches = try images.filter { image in
+            try owned(image.path) && resolve(image.path) == executable
+        }
+        guard matches.count == 1 else { throw AgentFailure.binding }
+        return matches[0]
+    }
 }
 
 // Bounded little-endian Mach-O 64 and universal (32/64-bit fat table) parsing.
@@ -125,8 +143,8 @@ nonisolated enum AgentRunningMachO {
             let bytes = Data(bytes: pointer, count: 32 + Int(raw.sizeofcmds))
             images.append(.init(path: try boundedPath(name), identity: try AgentRunningMachO.identity(bytes)))
         }
-        // Image zero is dyld's actual main image. Its path is checked separately
-        // from Bundle.main.executableURL and _NSGetExecutablePath below.
+        // System injection can precede the executable in dyld's image list.
+        // Consumers select the executable from the OS path, never its index.
         let os: AgentRunningProductObservation.OS
         #if targetEnvironment(simulator)
         guard let runtimeBuild = ProcessInfo.processInfo.environment["SIMULATOR_RUNTIME_BUILD_VERSION"],
@@ -172,6 +190,7 @@ nonisolated enum AgentRunningMachO {
     let coverage: Coverage
     let missingIndependentObservations = Set(MissingIndependentObservation.allCases)
     private let authority: AgentRunningFileAuthority
+    private let admittedPath: (String) throws -> String
     private let refresh: (() throws -> AgentRunningProductObservation)?
     private var invalidated = false
 
@@ -187,9 +206,10 @@ nonisolated enum AgentRunningMachO {
     // Explicitly fake-only. No callback or injected observation can construct
     // actualClient coverage or satisfy the independent counterpart requirement.
     static func generatedUnitOnly(receipts: AgentProductReceiptBinding, observation: AgentRunningProductObservation,
+                                  refresh: (() throws -> AgentRunningProductObservation)? = nil,
                                   boundary: ((AgentRunningFileAuthority.Boundary) throws -> Void)? = nil) throws -> AgentRunningProductBinding {
         try AgentRunningProductBinding(receipts: receipts, observation: observation, coverage: .generatedUnitOnly,
-                                       refresh: nil, boundary: boundary)
+                                       refresh: refresh, boundary: boundary)
     }
     private init(receipts: AgentProductReceiptBinding, observation o: AgentRunningProductObservation,
                  coverage: Coverage, refresh: (() throws -> AgentRunningProductObservation)?,
@@ -223,9 +243,10 @@ nonisolated enum AgentRunningMachO {
         let main = try inventory.resolved(build.app.path + "/" + build.app.executable)
         let agent = try inventory.resolved(build.agent.path + "/" + build.agent.executable)
         let agentRoot = try inventory.resolved(build.agent.path)
+        let mainImage = try o.executableImage(resolvingOwnedPath: admitted)
         guard o.agent.canonicalRoot == authority.path(agentRoot),
               try admitted(o.host.executable) == main, try admitted(o.executablePath) == main,
-              try admitted(o.images[0].path) == main, try admitted(o.agent.executable) == agent,
+              try admitted(mainImage.path) == main, try admitted(o.agent.executable) == agent,
               try admitted(o.anchorImagePath) == agent else { throw AgentFailure.binding }
         // Check aliases declared in the manifest as well as aliases dyld used.
         try authority.admitLinks(build.app.path + "/" + build.app.executable)
@@ -258,7 +279,7 @@ nonisolated enum AgentRunningMachO {
         }
         try authority.revalidate(); try receipts.revalidate()
         self.receipts = receipts; observation = o; self.coverage = coverage
-        self.authority = authority; self.refresh = refresh
+        self.authority = authority; admittedPath = admitted; self.refresh = refresh
     }
     func requireHeader(_ header: AgentHeader, originalHeaderBytes: Data) throws {
         guard receipts.header == header, receipts.originalHeaderBytes == originalHeaderBytes else { throw AgentFailure.binding }
@@ -280,7 +301,8 @@ nonisolated enum AgentRunningMachO {
                       current.appBuild == observation.appBuild, current.os == observation.os,
                       current.executablePath == observation.executablePath,
                       current.anchorImagePath == observation.anchorImagePath,
-                      current.images.first == observation.images.first,
+                      try current.executableImage(resolvingOwnedPath: admittedPath)
+                        == observation.executableImage(resolvingOwnedPath: admittedPath),
                       ownedImages(current) == ownedImages(observation) else { throw AgentFailure.binding }
             }
             try authority.revalidate(); try receipts.revalidate()

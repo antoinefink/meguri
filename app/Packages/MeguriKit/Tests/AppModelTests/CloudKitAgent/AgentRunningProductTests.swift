@@ -185,8 +185,9 @@ import Testing
                          executablePath: executablePath ?? observed.executablePath, anchorImagePath: anchor ?? observed.anchorImagePath,
                          images: images ?? observed.images, os: os ?? observed.os)
         }
-        func bind(_ observation: Observation? = nil, boundary: ((AgentRunningFileAuthority.Boundary) throws -> Void)? = nil) throws -> AgentRunningProductBinding {
-            try .generatedUnitOnly(receipts: receipts, observation: observation ?? observed, boundary: boundary)
+        func bind(_ observation: Observation? = nil, refresh: (() throws -> Observation)? = nil,
+                  boundary: ((AgentRunningFileAuthority.Boundary) throws -> Void)? = nil) throws -> AgentRunningProductBinding {
+            try .generatedUnitOnly(receipts: receipts, observation: observation ?? observed, refresh: refresh, boundary: boundary)
         }
     }
     private func withFixture(kind: String = "mac", internalLink: Bool = false, widgets: Bool = false,
@@ -234,6 +235,80 @@ import Testing
             #expect(throws: AgentFailure.implementationMissing) { try binding.requireIndependentCounterpart() }
             let missingHostDebug = f.observed.images.filter { $0.path != f.debugURL.path }
             #expect(throws: AgentFailure.binding) { try f.bind(f.candidate(images: missingHostDebug)) }
+        }
+    }
+    @Test func injectedSystemImageBeforeExecutableDoesNotSelectMainByPosition() throws {
+        try withFixture { f in
+            let system = AgentRunningImage(path: "/usr/lib/libRPAC.dylib", identity: f.observed.images[0].identity)
+            let observation = f.candidate(images: [system] + f.observed.images)
+            // This is the exact selector used by both observation producers.
+            #expect(try observation.executableImage() == f.observed.images[0])
+            #expect(try observation.executableImage().path == observation.executablePath)
+            let binding = try f.bind(observation)
+            try binding.revalidate()
+            #expect(binding.coverage == .generatedUnitOnly)
+            #expect(throws: AgentFailure.implementationMissing) { try binding.requireIndependentCounterpart() }
+
+            let missing = f.candidate(images: [system] + Array(f.observed.images.dropFirst()))
+            let duplicate = f.candidate(images: [system] + f.observed.images + [f.observed.images[0]])
+            let mismatched = f.candidate(executablePath: f.agentURL.path, images: observation.images)
+            let systemExecutable = f.candidate(executablePath: system.path, hostExecutable: system.path, images: observation.images)
+            for candidate in [missing, duplicate, mismatched, systemExecutable] {
+                #expect(throws: AgentFailure.binding) { try candidate.executableImage() }
+                #expect(throws: AgentFailure.binding) { try f.bind(candidate) }
+            }
+            for identity in [AgentRunningImageIdentity(cpu: Self.cpu, subtype: 0, uuid: Data(repeating: 9, count: 16)),
+                             AgentRunningImageIdentity(cpu: 7, subtype: 0, uuid: f.observed.images[0].identity.uuid),
+                             AgentRunningImageIdentity(cpu: Self.cpu, subtype: 2, uuid: f.observed.images[0].identity.uuid)] {
+                var images = observation.images
+                images[1] = .init(path: f.mainURL.path, identity: identity)
+                #expect(throws: AgentFailure.binding) { try f.bind(f.candidate(images: images)) }
+            }
+        }
+    }
+    @Test func refreshIgnoresSystemOrderingAndKeepsOwnedIdentitiesAndExecutableFences() throws {
+        for internalLink in [false, true] {
+            try withFixture(internalLink: internalLink) { f in
+                let system = AgentRunningImage(path: "/usr/lib/libRPAC.dylib", identity: f.observed.images[0].identity)
+                let original = f.candidate(images: [system] + f.observed.images)
+                var current = original
+                let binding = try f.bind(original, refresh: { current })
+                current = f.candidate(images: f.observed.images + [system])
+                try binding.revalidate()
+                current = f.candidate(images: [f.observed.images[0], system] + Array(f.observed.images.dropFirst()))
+                try binding.revalidate()
+                #expect(binding.coverage == .generatedUnitOnly)
+                #expect(throws: AgentFailure.implementationMissing) { try binding.requireIndependentCounterpart() }
+
+                var changedIdentity = f.observed.images
+                changedIdentity[0] = .init(path: changedIdentity[0].path,
+                    identity: .init(cpu: Self.cpu, subtype: 0, uuid: Data(repeating: 9, count: 16)))
+                let failures = [
+                    f.candidate(images: [system] + Array(f.observed.images.dropFirst())),
+                    f.candidate(images: original.images + [f.observed.images[0]]),
+                    f.candidate(images: [system] + changedIdentity),
+                    f.candidate(executablePath: f.agentURL.path, images: original.images),
+                    f.candidate(anchor: f.mainURL.path, images: original.images),
+                    f.candidate(hostExecutable: f.agentURL.path, images: original.images),
+                    f.candidate(images: original.images + [.init(path: f.product.path + "/unlisted", identity: system.identity)]),
+                    f.candidate(images: [system] + Array(f.observed.images.dropLast()))
+                ]
+                for failure in failures {
+                    current = original
+                    let retained = try f.bind(original, refresh: { current })
+                    current = failure
+                    #expect(throws: AgentFailure.binding) { try retained.revalidate() }
+                    #expect(throws: AgentFailure.storage) { try retained.revalidate() }
+                }
+                if internalLink {
+                    current = original
+                    let retained = try f.bind(original, refresh: { current })
+                    // A declared alias may bind initially, but changing the OS
+                    // executable spelling after retention still fails.
+                    current = f.candidate(executablePath: f.physicalMainURL.path, images: original.images)
+                    #expect(throws: AgentFailure.binding) { try retained.revalidate() }
+                }
+            }
         }
     }
     @Test func widgetProductsDoNotRelaxLoadedHostImageInventoryUUIDAndHashChecks() throws {
