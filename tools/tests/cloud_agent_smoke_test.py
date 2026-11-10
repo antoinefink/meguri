@@ -351,6 +351,25 @@ class CurrentEvidenceTests(unittest.TestCase):
         self.proof("sdk-joined", count=5)
         with self.assertRaisesRegex(s.v.Refused, "smoke-join-order"): self.complete()
 
+    def test_late_callback_keeps_original_command_and_original_append_order(self):
+        self.obs[9].append({"name": "engineCallback", "count": 37, "engine": "engine1",
+                            "operation": "sdk5-state-delivered"})
+        self.proof("sdk-joined", count=5)
+        lines = [json.loads(line) for line in generated_journal(self.commands, 10, self.checks, self.obs).splitlines()]
+        start_close = next(i for i, line in enumerate(lines) if line["kind"] == "started" and line["command_seq"] == 10)
+        phases = [("stateSaved", "committed"), ("engineCallback", "returned")]
+        lines[start_close + 1:start_close + 1] = [record(self.commands, 9, 0, "observation", facts=[
+            {"name": name, "count": count, "engine": "engine1", "operation": "sdk5-state-" + stage}])
+            for count, (name, stage) in enumerate(phases, 38)]
+        for seq, line in enumerate(lines, 1):
+            line["record_seq"] = seq
+        journal = s.Journal(raw(header()), self.commands)
+        journal.inspect(b"".join(raw(line) for line in lines), 10)
+        self.assertEqual(journal.ordered_trace[journal.done_trace_offsets[9] - 1]["operation"], "sdk5-state-delivered")
+        self.assertEqual(journal.ordered_trace[journal.done_trace_offsets[10] - 1]["operation"], "sdk5-state-returned")
+        s.completion(9, journal.done_checks[9], journal)
+        s.completion(10, journal.done_checks[10], journal)
+
     def test_generic_pass_cannot_clear_native_fence(self):
         self.checks[3][0]["facts"] = [{"name": "commandCompleted"}]
         with self.assertRaises(s.v.Refused): self.complete(3)

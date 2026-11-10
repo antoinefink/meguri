@@ -83,6 +83,29 @@ import Darwin
         #expect(store.events.firstIndex(of: "durable-started")! < store.events.firstIndex(of: "bootstrap")!)
         #expect(store.events.last == "durable-done")
     }
+    @Test func callbackWriterAppendsWithOriginalCommandAfterSuccessorStarts() async throws {
+        let (store, runtime, engine) = try harness()
+        let launch = Self.command()
+        let first = try await engine.deliver(header: Self.header, commands: launch, retainedJournal: Data())
+        let journal = try #require(runtime.callbackJournal)
+        let original = try journal()
+        let commands = launch + Self.command(2, action: "connect")
+        let second = try await engine.deliver(header: Self.header, commands: commands, retainedJournal: first)
+        let successor = try journal()
+        try original(.init(name: .engineCallback, operation: "old-callback"))
+        try successor(.init(name: .engineCallback, operation: "next-callback"))
+        let bytes = try store.read(.journal)
+        #expect(bytes.starts(with: second))
+        let records = try store.records()
+        let callbacks = Array(records.suffix(2))
+        #expect(callbacks.map(\.kind) == [.observation, .observation])
+        #expect(callbacks.map(\.command_seq) == [1, 2])
+        #expect(callbacks.map(\.command_sha256) == [AgentJSON.hash(Data(launch.dropLast())),
+            AgentJSON.hash(Data(commands.dropFirst(launch.count).dropLast()))])
+        #expect(callbacks.map(\.agent_instance) == ["process1", "process1"])
+        #expect(callbacks.map(\.record_seq) == [records.count - 1, records.count])
+        #expect(try await engine.deliver(header: Self.header, commands: commands, retainedJournal: second) == bytes)
+    }
     @Test func sequentialMutationAndSyncDuplicatesCountEachExecutorOnce() async throws {
         let (store, runtime, engine) = try harness()
         let launch = Self.command()
@@ -615,10 +638,12 @@ import Darwin
     var executions = 0, lookups = 0, databaseCalls = 0, recoveries = 0, mutations = 0, joins = 0
     var accountMatches = true, failExecution = false, failRecovery = false, committed = false, workJoined = false
     var callback: ((AgentFact) throws -> Void)?
+    var callbackJournal: AgentCallbackJournal?
     var productFailure: AgentFailure?
     var callbackFailure: (any Error)?
     var joinError: (any Error)?
     init(store: any AgentStorage) { self.store = store }
+    func installCallbackJournal(_ journal: @escaping AgentCallbackJournal) { callbackJournal = journal }
     func verifyProduct(_ header: AgentHeader) throws {
         if let productFailure { throw productFailure }
         let actual = try AgentHeader.read(CloudKitAgentProtocolTests.header)

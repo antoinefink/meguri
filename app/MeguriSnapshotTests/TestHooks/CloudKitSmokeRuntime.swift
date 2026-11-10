@@ -38,6 +38,7 @@ import Foundation
     private let inspection = CoreSmokeInspection()
     private let changes = CloudKitSmokeChanges()
     private let evidence = CloudKitSmokeEvidence()
+    private lazy var callbackJournal = CloudKitSmokeJournal(evidence: evidence)
     private var preview: CloudConnectionPreview?
     private var deckID: Int64?
     private var marker: String?
@@ -66,6 +67,8 @@ import Foundation
         self.directory = admittedRun.directory
         self.originalHeaderBytes = admittedRun.originalHeaderBytes
     }
+    func installCallbackJournal(_ journal: @escaping AgentCallbackJournal) { callbackJournal.install(journal) }
+
     func verifyProduct(_ header: AgentHeader) throws {
         userSteps = []
         try admittedRun.revalidate()
@@ -557,18 +560,18 @@ import Foundation
             }
             let production = try await NativeCollectionCloudBackend.make(workflow: workflow,
                 factory: factory, ownTransport: ownTransport, mediaTransport: mediaTransport, persisted: persisted,
-                observeEvent: { [evidence] event in
-                    evidence.sdk(event)
+                observeEvent: { [evidence, callbackJournal] event in
+                    await callbackJournal.record(event)
                     do {
                         let current = try await CoreSmokeInspection().cloud()
                         evidence.validate(origin: event.origin, current: current)
                     } catch { evidence.fail() }
-                }, observeBatch: { [evidence] origin, zone, batch in
+                }, observeBatch: { [evidence, callbackJournal] origin, zone, batch in
                     do {
                         let inspection = CoreSmokeInspection()
                         let proof = zone == "meguri-media" ? nil : try await inspection.batch(sdk: origin, id: batch.id)
                         let current = try await inspection.cloud()
-                        evidence.batch(origin: origin, batch: batch, proof: proof, current: current)
+                        await callbackJournal.recordBatch(origin: origin, batch: batch, proof: proof, current: current)
                     } catch { evidence.fail() }
                 }, observeOwn: { [evidence] in evidence.own($0) })
             try admission.revalidate()
@@ -776,6 +779,7 @@ import Foundation
         do {
             _ = try await openRuntime(restoration: restored, observe: { _ in throw AgentFailure.recovery })
             _ = try await validateRestoredProgress(requireScan: true)
+            try evidence.check()
             nextCommand = restored.nextCommand
         } catch {
             try await cancelAndJoin()

@@ -114,3 +114,37 @@ Static-checks/20261102T162332Z-5554 passes3/3 at the original batch base.
 Similarity/20261102T162335Z-6474 scans708 files with zero flags and zero
 allowlisted matches. The original failed full gate remains open; no Unit
 trailer, milestone acceptance or signed-smoke pass is added.
+
+## Durable callback observations
+
+Starting commit `921d0bb9`. The signed test runtime now uses the agent's
+durable journal writer during the awaited callback and batch handoff. The
+ledger releases its mutex before the writer appends. A callback's commit and
+return retain the command selected at delivery, including across a successor
+start. A batch without a known causal command uses the latest started command.
+Ordinary traces already buffered are written in their original order. An
+append failure uses the agent's existing journal fence and join path.
+
+The host reads callback traces in journal order up to each terminal record.
+It accepts late callback phases under the original command before close, and
+still refuses any trace appended after the joined close. The account check
+remains the first ordinary fact for a command. Trace observations can precede
+it while the account check awaits a reply.
+
+`swift-test/20261110T230521Z-98754` passes all 37 protocol tests. The new test
+uses two started commands and confirms durable append under both exact hashes,
+with the original command retained after the successor starts. The first
+build `97363` refused conversion of the writer to a sendable closure. The
+writer now has an explicit main-actor boundary. `selftest/20261110T230630Z-2033`
+passes five wrappers, including the new retained-journal order case.
+
+`mac-hosted-test/20261110T230704Z-2399` executes the new callback and batch
+handoff test in the VM, with one pass and no failures or skips. The first
+build `269` refused a mutable test capture. The fixture now installs two
+writers with fixed command values and retains the original phase assertions.
+
+Direct review checked callback attribution, append failure, late trace order
+and the close boundary. This change supplies the durable append path for J4.
+Distinct engine labels after re-creation, per-record and pending-list evidence
+for J4.1, and original exchange reconstruction for J5.1 remain open. No
+signed CloudKit run, full gate or Unit completion is claimed.

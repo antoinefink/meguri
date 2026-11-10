@@ -277,7 +277,11 @@ nonisolated struct AgentRecord: Codable {
     }
 }
 
+typealias AgentObservationWriter = @MainActor (AgentFact) throws -> Void
+typealias AgentCallbackJournal = @MainActor () throws -> AgentObservationWriter
+
 @MainActor protocol AgentRuntime: AnyObject {
+    func installCallbackJournal(_ journal: @escaping AgentCallbackJournal)
     // Must use independent product/source/device/signing observations. No
     // identity lookup or database operation is permitted in this method.
     func verifyProduct(_ header: AgentHeader) throws
@@ -299,6 +303,8 @@ nonisolated struct AgentRestoration {
 }
 
 extension AgentRuntime {
+    func installCallbackJournal(_ journal: @escaping AgentCallbackJournal) {}
+
     func restore(_ state: AgentRestoration) async throws {
         throw AgentFailure.implementationMissing
     }

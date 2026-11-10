@@ -74,6 +74,32 @@ import Testing
                                event: .stateUpdate(Data([9])), phase: phase), current: current())
         }
     }
+    @Test func callbackJournalWritesEachPhaseBeforeReturnAndKeepsItsCommand() throws {
+        let evidence = try ledger()
+        let journal = CloudKitSmokeJournal(evidence: evidence)
+        var commands: [Int] = []
+        var records: [AgentFact] = []
+        func installWriter(for command: Int) {
+            journal.install { { fact in commands.append(command); records.append(fact) } }
+        }
+        installWriter(for: 1)
+        let event = CloudEngineEvent.stateUpdate(Data([9]))
+        journal.record(.init(origin: "generated-engine", ordinal: 1, event: event, phase: .delivered))
+        #expect(records.map(\.operation) == ["sdk1-state-delivered"])
+        installWriter(for: 2)
+        journal.record(.init(origin: "generated-engine", ordinal: 1, event: event, phase: .committed))
+        #expect(records.last?.name == .stateSaved && commands == [1, 1])
+        journal.record(.init(origin: "generated-engine", ordinal: 1, event: event, phase: .returned))
+        #expect(records.last?.operation == "sdk1-state-returned" && commands == [1, 1, 1])
+        let batch = CloudEngineBatch(id: 7, saves: [.init(name: "generated-blob", envelope: Data([4]), systemFields: nil)], deletes: [])
+        journal.recordBatch(origin: "generated-engine", batch: batch, proof: nil, current: current())
+        #expect(records.suffix(2).map(\.operation) == ["batch1-media-handoff", "batch1-save-count"])
+        #expect(commands == [1, 1, 1, 2, 2])
+        journal.record(.init(origin: "generated-engine", ordinal: 2, event: event, phase: .delivered))
+        #expect(commands == [1, 1, 1, 2, 2, 2])
+        #expect(evidence.drain().isEmpty)
+        try evidence.check()
+    }
     @Test func originalOwnAttemptRequiresPrepareEnqueueReplyThenCommit() throws {
         let identity = UUID()
         let metadata = CloudOwnMetadata(operationID: Data([1]), attempt: 4, kind: .createZones)

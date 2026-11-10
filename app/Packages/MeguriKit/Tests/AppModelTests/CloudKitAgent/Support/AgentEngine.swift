@@ -186,6 +186,16 @@ import Foundation
         acceptedLines = candidateBytes
         commands = candidateCommands
         journalEntries = candidateEntries
+        runtime.installCallbackJournal { [weak self] in
+            guard let self, let started = journalEntries.last(where: { $0.kind == .started }) else {
+                throw AgentFailure.journal
+            }
+            let command = commands[started.command_seq - 1]
+            return { [weak self] fact in
+                guard let self else { throw AgentFailure.journal }
+                try append(.observation, command: command, facts: [fact])
+            }
+        }
         if completedEntries.contains(where: { $0.kind == .failed }) {
             // A crash after terminal failure can leave cancellation unfinished.
             try await cancelOwnedWork()

@@ -251,8 +251,8 @@ class Journal(s.Journal):
                     s.fact(item)
                 facts.extend(check["facts"])
             observations = self.done_observations[number]
-            need(observations and observations[0] == {"name": "accountVerified"}, "selected-account")
             ordinary = [item for item in observations if not Evidence.trace(item)]
+            need(ordinary and ordinary[0] == {"name": "accountVerified"}, "selected-account")
             expected = [{"name": "accountVerified"}]
             if number == 1:
                 need(len(ordinary) == 2, "selected-open")

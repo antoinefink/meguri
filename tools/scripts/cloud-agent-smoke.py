@@ -536,16 +536,20 @@ def completion(command_number, checks, journal=None):
     need(journal.done_checks.get(command_number) == checks, "smoke-terminal-context")
     previous, evidence = {}, SmokeEvidence()
     baseline, held_projection, missing = None, None, []
+    trace_offset = 0
     for number in range(1, command_number + 1):
         need(number in journal.done_checks and number in journal.done_observations, "smoke-context")
+        trace_end = journal.done_trace_offsets[number]
+        for item in journal.ordered_trace[trace_offset:trace_end]:
+            need(evidence.ingest(item), "smoke-trace")
+        trace_offset = trace_end
         facts = _completion_facts(number, journal.done_checks[number])
         observations = []
-        need(journal.done_observations[number] and
-             journal.done_observations[number][0] == {"name": "accountVerified"}, "smoke-operation-observations")
         for item in journal.done_observations[number]:
             fact(item)
-            if not evidence.ingest(item):
+            if not TRACE.fullmatch(item.get("operation", "")):
                 observations.append(item)
+        need(observations and observations[0] == {"name": "accountVerified"}, "smoke-operation-observations")
         expected = [{"name": "accountVerified"}]
         if number == 1:
             need(len(observations) == 2, "smoke-open-observation")
@@ -605,8 +609,7 @@ def completion(command_number, checks, journal=None):
                 for n in range(320))
             need(facts[2]["digest"] == v.digest(media), "smoke-media-digest")
         previous[number] = facts
-    # Buffered traces belong to their original aliases, regardless of which
-    # command drains them. Summary stateSaved/entity facts never stand in for SDK.
+    # Trace order comes from the original journal prefix at each terminal.
     need(evidence.last_batch is None, "smoke-batch-save-count")
     if command_number >= 3:
         evidence.publication()
@@ -626,13 +629,15 @@ class Journal:
         self.program = PROGRAM if program is None else program
         self.header, self.commands, self.retained = v.digest(header_raw), commands, b""
         self.header_value = strict(header_raw)
-        self.done_checks, self.done_observations, self.late_observations = {}, {}, []
+        self.done_checks, self.done_observations = {}, {}
+        self.ordered_trace, self.done_trace_offsets = [], {}
 
     def inspect(self, raw, delivered):
         need(type(raw) is bytes and len(raw) <= CAP and raw.startswith(self.retained), "journal-prefix")
         complete = raw[:raw.rfind(b"\n") + 1]
         started, terminal, instance, done_checks = set(), {}, None, {}
-        observations, done_observations, late_observations = {}, {}, []
+        observations, done_observations = {}, {}
+        ordered_trace, done_trace_offsets = [], {}
         for seq, line in enumerate(complete.splitlines(), 1):
             r = strict(line.decode("utf-8"))
             required = {"header_sha256", "record_seq", "command_seq", "command_sha256", "agent_instance",
@@ -662,9 +667,8 @@ class Journal:
                 observations[n] = []
             elif kind == "observation":
                 need(set(r) == required and n in started and r["facts"] and not r["checks"], "journal-observation")
-                if n in terminal:
-                    late_observations.extend(r["facts"])
                 observations[n].extend(r["facts"])
+                ordered_trace.extend(item for item in r["facts"] if TRACE.fullmatch(item.get("operation", "")))
             elif kind in ("done", "failed"):
                 need(n in started and n not in terminal and n == len(started), "journal-terminal")
                 if kind == "failed":
@@ -688,12 +692,13 @@ class Journal:
                          all(c["outcome"] == "pass" and c["facts"] for c in r["checks"]), "journal-required-checks")
                     done_checks[n] = r["checks"]
                     done_observations[n] = list(observations[n])
+                    done_trace_offsets[n] = len(ordered_trace)
                 terminal[n] = kind
             else:
                 raise v.Refused("journal-kind")
         self.done_checks = done_checks
         self.done_observations = done_observations
-        self.late_observations = late_observations
+        self.ordered_trace, self.done_trace_offsets = ordered_trace, done_trace_offsets
         return complete, terminal
 
     def retain(self, complete):
@@ -1237,7 +1242,7 @@ def execute(root, parent, vm, expected, header, files, support, copied, recheck,
             append_exact(local, "steps.jsonl", journal.retained, final[len(journal.retained):])
             journal.retain(final)
             completion(10, journal.done_checks[10], journal)
-            need(all(not TRACE.fullmatch(item.get("operation", "")) for item in journal.late_observations),
+            need(len(journal.ordered_trace) == journal.done_trace_offsets[10],
                  "smoke-work-after-terminal")
             check()
         return {"scope": "SMOKE", "outcome": "smoke_completed", "signed_execution": True,

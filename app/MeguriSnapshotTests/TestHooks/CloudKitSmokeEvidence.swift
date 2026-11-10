@@ -4,6 +4,55 @@ import CryptoKit
 import Foundation
 import Synchronization
 
+// Only the signed test runtime installs this writer. SDK callbacks await it
+// before returning. The mutex ledger releases its lock before any append.
+@MainActor final class CloudKitSmokeJournal {
+    private let evidence: CloudKitSmokeEvidence
+    private var latest: AgentCallbackJournal?
+    private var callback: (origin: String, ordinal: UInt64, writer: AgentObservationWriter)?
+
+    init(evidence: CloudKitSmokeEvidence) { self.evidence = evidence }
+
+    func install(_ journal: @escaping AgentCallbackJournal) { latest = journal }
+
+    func record(_ event: CloudSDKObservation) {
+        evidence.sdk(event)
+        flush(event: event)
+    }
+
+    func recordBatch(origin: String, batch: CloudEngineBatch, proof: SmokeBatchProof?, current: SmokeCloudObservation) {
+        evidence.batch(origin: origin, batch: batch, proof: proof, current: current)
+        flush()
+    }
+
+    private func flush(event: CloudSDKObservation? = nil) {
+        let facts = evidence.drain()
+        guard !facts.isEmpty else { return }
+        do {
+            guard let latest else { throw AgentFailure.journal }
+            let current = try latest()
+            var engine = current
+            if let event, facts.contains(where: { $0.engine != nil }) {
+                // No causal command is available here. Bind at delivery and
+                // keep that command through commit, return and a later step.
+                switch event.phase {
+                case .delivered:
+                    callback = (event.origin, event.ordinal, current)
+                case .committed, .returned:
+                    guard let callback, callback.origin == event.origin, callback.ordinal == event.ordinal else {
+                        throw AgentFailure.journal
+                    }
+                    engine = callback.writer
+                }
+                if case .returned = event.phase { callback = nil }
+            }
+            for fact in facts {
+                try (fact.engine == nil ? current : engine)(fact)
+            }
+        } catch { evidence.fail() }
+    }
+}
+
 // One bounded run-local ledger. Synchronous enqueue observations cannot hop to
 // a Task: that would destroy their ordering relative to the original reply.
 nonisolated final class CloudKitSmokeEvidence: Sendable {
