@@ -4388,7 +4388,9 @@ fn prior_open_observation_does_not_block_reopened_batch_or_sync_now_selection() 
 #[test]
 fn whole_scan_after_actual_reopen_refreshes_acknowledged_row_provenance_without_tracking_changes() {
     use cloud::entity_codec::{Kind, Payload};
-    use meguri_storage::ReaderRole;
+    use meguri_engine::{DisabledReason, UndoScope, UndoStatus};
+    use meguri_model::ids::NoteId;
+    use meguri_storage::{ReaderRole, RowKey, Table};
 
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("acknowledged-scan-provenance");
@@ -4408,7 +4410,7 @@ fn whole_scan_after_actual_reopen_refreshes_acknowledged_row_provenance_without_
     let Payload::Note(note) = &published[1].payload else {
         panic!("actual published note");
     };
-    edit_workflow_note(&collection, note, "retained pending history across reopen");
+    edit_workflow_note(&collection, note, "retained dirty flight across reopen");
     let pending_name = published[1].name.clone();
     let batch = runtime
         .build_collection_batch(
@@ -4439,8 +4441,11 @@ fn whole_scan_after_actual_reopen_refreshes_acknowledged_row_provenance_without_
         (snapshot.seq().0, snapshot.generation().0)
     };
     let history = collection.cloud_pending_keys().unwrap();
-    assert!(!history.is_empty(), "real edit history must survive reopening");
+    assert!(history.is_empty(), "M6/M9.7: close drops history and its pending map");
     let undo_depth = collection.undo_depth_for_testing().unwrap();
+    assert_eq!(undo_depth, 0, "a fresh opening has no undo history");
+    // Phase A: prove unchanged acknowledged and dirty/in-flight tracking across
+    // the actual reopen before creating any history in this opening.
     runtime
         .reconcile_binding(&collection, &host.media().unwrap(), Duration::from_secs(30))
         .unwrap();
@@ -4466,6 +4471,68 @@ fn whole_scan_after_actual_reopen_refreshes_acknowledged_row_provenance_without_
     assert_eq!(collection.undo_depth_for_testing().unwrap(), undo_depth);
     assert_eq!(collection.cloud_pending_keys().unwrap(), history);
     let (sdk, _, _) = runtime.register_sdk(false).unwrap();
+    runtime.validate_sdk(&sdk).unwrap();
+
+    // Phase B: create real pending history in this same opening. Use the batch
+    // builder's production Cloud barrier without another SDK send or fetch.
+    let pending = runtime.entity_facts(&pending_name).unwrap().unwrap();
+    let Payload::Note(note) = &pending.payload else {
+        panic!("actual pending note");
+    };
+    edit_workflow_note(&collection, note, "new pending history within reopened collection");
+    let touched = (Table::Notes, RowKey::Id(NoteId(note.id).0));
+    let (seq, generation) = {
+        let mut lease = collection.reader(ReaderRole::Cloud).unwrap();
+        let (snapshot, hold) = lease.capture_cloud(&collection, vec![touched.clone()]).unwrap();
+        assert!(!hold.flagged.is_empty(), "the real barrier must flag the new edit");
+        (snapshot.seq().0, snapshot.generation().0)
+    };
+    let history = collection.cloud_pending_keys().unwrap();
+    assert!(!history.is_empty(), "this opening must contain real pending history");
+    assert_eq!(
+        history.values().flatten().cloned().collect::<BTreeSet<_>>(),
+        BTreeSet::from([touched])
+    );
+    let undo_depth = collection.undo_depth_for_testing().unwrap();
+    assert!(undo_depth > 0);
+    assert!(matches!(
+        collection.peek_undo(UndoScope::Global).unwrap(),
+        UndoStatus::Unavailable(DisabledReason::UploadPending)
+    ));
+    let before = runtime.entity_facts_page(Kind::Note, None).unwrap();
+    let counter = runtime.status().unwrap().change_counter;
+    let current_open = runtime.stored_state_for_testing().unwrap().open_counter;
+    assert_eq!(current_open, open);
+    assert_eq!(collection.last_seq().0, seq);
+    runtime
+        .reconcile_binding(&collection, &host.media().unwrap(), Duration::from_secs(30))
+        .unwrap();
+    let status = runtime.status().unwrap();
+    assert_eq!(status.binding.as_ref(), Some(&binding));
+    assert!(!status.scan_required && !status.tracking_stopped);
+    assert_eq!(status.change_counter, counter);
+    let stored = runtime.stored_state_for_testing().unwrap();
+    assert_eq!(stored.open_counter, current_open);
+    assert!(stored.whole_scan);
+    let cursor = &stored.coverage.as_ref().unwrap().cursor;
+    assert_eq!((cursor.seq, cursor.generation), (seq, generation));
+    for mut expected in before {
+        expected.observer_open = current_open;
+        expected.observed_seq = seq;
+        expected.observed_generation = generation;
+        let actual = runtime.entity_facts(&expected.name).unwrap().unwrap();
+        assert!(
+            actual == expected,
+            "same-opening scan may change only actual provenance"
+        );
+    }
+    assert_eq!(collection.last_seq().0, seq);
+    assert_eq!(collection.undo_depth_for_testing().unwrap(), undo_depth);
+    assert_eq!(collection.cloud_pending_keys().unwrap(), history);
+    assert!(matches!(
+        collection.peek_undo(UndoScope::Global).unwrap(),
+        UndoStatus::Unavailable(DisabledReason::UploadPending)
+    ));
     runtime.validate_sdk(&sdk).unwrap();
     host.close().unwrap();
 }

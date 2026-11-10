@@ -1,9 +1,17 @@
 # Guarded whole-scan observer provenance
 
+Latest root result: `core-test/20261110T114633Z-28443` ran 17 cases; 16 passed.
+The reopened unchanged-row proof now passes. The new current-opening history
+phase retains real nonempty pending history but fails its unchanged-counter
+assertion (8 versus 7). No asynchronous drain is proved missing: the observer
+is synchronous. Keep the assertion and diagnose the exact changed entity.
+All selected held-scan, newer-write, old reopening and original-role tests pass.
+
 WIP: root R2 source review is clear. Focused Docker run
 `core-test/20261110T113706Z-8882` passed ten cases and failed the new Host
 fixture before its scan: it expected nonempty undo pending keys after reopen.
-That setup needs correction without dropping real history-preservation coverage.
+R3 corrects that setup and retains real same-opening history coverage; root
+verification of the correction remains pending.
 The old reopening regression and eight original-role cases passed. The changed
 store case and held-scan targets were not selected; they still need execution.
 Rust lint `20261110T113935Z-10844`, similarity `20261110T113935Z-10759`
@@ -86,3 +94,44 @@ failure and the concurrent media-feed candidate were not independently observed
 here. History checks cover pending-key membership/undo depth/collection sequence,
 not a bytewise audit of every stored history row. No unit, gate or signed
 acceptance is claimed.
+
+## R3 reopened-history fixture correction
+
+Recorded implementer clean runner; starting baseline is evidenced by root's
+commit record. Original batch remains
+`1416a520542a8c5daa38a23bfe398da704c3d6c9`. Supplied focused result `8882`
+is retained: old reopening, equal-payload store and original-role eight passed;
+the new Host case failed before reconciliation on the invalid nonempty-map
+expectation. `engine/undo#M6` and `#M9.7` require close to drop history and its
+in-memory pending map.
+
+Only the new Host test changes. Phase A still publishes through actual Saved,
+retains a clean acknowledged note and a dirty note with handed flight through
+actual close/reopen, and proves full `EntityFacts` equality except actual scan
+provenance. Fresh-open depth and pending map must both be empty and remain
+exactly equal after its first normal whole scan. Binding, counter, collection
+seq and SDK registration/validation assertions remain.
+
+Only after that proof, Phase B makes a new ordinary `UserUndoable` edit to the
+pending note. The actual Cloud reader's `capture_cloud` receives that note's
+`(Table::Notes, RowKey::Id(NoteId(note.id).0))`, using the production
+`build_collection_batch` barrier and `begin_cloud_hold`, with no row writes.
+It requires real flagged history, a nonempty exact pending-key map, positive
+depth and `UploadPending`; captures actual seq/generation/open/counter and full
+entity baselines; then performs one normal reconcile. It compares the entire
+map, depth, counter, collection seq and entity facts (only actual provenance
+may differ), plus binding, whole-scan cursor and SDK validity. No extra send,
+fetch, root confirmation, retry or fabricated flags/history is introduced.
+
+Root's next focused selection must include both Host reopen tests above, the
+same-open boundary case, both store cases (`guarded_scan_equal_payload_` **and**
+`guarded_changed_scan_`), the unchanged original-role Core eight, and all five
+held-scan/account/suspension/fault cases listed above. Include the Host
+`--test cloud_runtime` target explicitly; `guarded_scan_` alone misses the
+changed-payload store case. No assertions, skips or limits are weakened.
+
+One source-consistency check only; no Git, network, build or test execution in
+this runner. Production, diagnostic, store tests, old selection regression and
+held-scan refusals are unchanged. Root owns compilation, focused checks,
+independent review and provenance/privacy/similarity verification. No unit,
+gate or signed acceptance is claimed.
