@@ -99,3 +99,11 @@ entity key expects `Vec<u8>`, while `codec::id_key(1)` returns an array. No
 selected test ran. A bounded fixture conversion fix is required before focused
 verification. R2's independent reviews are clear; no unit acceptance is claimed.
 
+The one-line fixture conversion was exported by filtered run `8518` and applied.
+`core-format/20261110T163406Z-11652` passed. Focused
+`core-test/20261110T163411Z-11651` compiled and ran five tests: four passed,
+including the new ACK writer/kill/reopen case and both pure predicate tests.
+The existing edit-only reopen case failed its sequence comparison after the
+new fixture deliberately performed a fresh ACK. That write must be separated
+from the read-only observation checks; all assertions remain required.
+

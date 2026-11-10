@@ -943,7 +943,7 @@ mod original_ack_tests {
         EntityFacts {
             name: "predicate-only".into(),
             kind: codec::Kind::Note,
-            key: codec::id_key(1),
+            key: codec::id_key(1).to_vec(),
             origin: [1; 16],
             sent: true,
             local_rev: 3,
