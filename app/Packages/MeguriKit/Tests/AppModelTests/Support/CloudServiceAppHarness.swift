@@ -48,6 +48,8 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
     private var diagnosticSequence: UInt64 = 0
     private var diagnosticBaseline: UInt64 = 0
     private var commandSequence: UInt64 = 0
+    // The first observed failure survives ring trimming and later cleanup errors.
+    private(set) var firstFailureDiagnostic: String?
     var diagnostics: [String] { diagnosticEntries.map(\.message) }
     var exchangeDiagnostics: [String] {
         diagnosticEntries.filter { $0.sequence > diagnosticBaseline }.map(\.message)
@@ -94,8 +96,68 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
         let category: String
         switch error {
         case is CancellationError: category = "cancellation"
-        case BridgeError.cloudPolicy(let failure): category = "cloudPolicy.\(String(describing: failure))"
-        case is BridgeError: category = "bridge"
+        case let error as BridgeError:
+            // Fixed public taxonomy from DebugCloudDiagnostics.failureTag;
+            // associated values must never enter harness diagnostics.
+            switch error {
+            case .cloudPolicy(let failure):
+                switch failure {
+                case .closed: category = "cloudPolicy.closed"
+                case .wrongOwner: category = "cloudPolicy.wrongOwner"
+                case .generationChanged: category = "cloudPolicy.generationChanged"
+                case .staleCommand: category = "cloudPolicy.staleCommand"
+                case .notCoreAction: category = "cloudPolicy.notCoreAction"
+                case .notNativeAction: category = "cloudPolicy.notNativeAction"
+                case .coreCapabilityUnavailable: category = "cloudPolicy.coreCapabilityUnavailable"
+                case .unqualifiedCompletion: category = "cloudPolicy.unqualifiedCompletion"
+                }
+            case .cloudConnection(let failure):
+                switch failure {
+                case .closed: category = "connection.closed"
+                case .wrongOwner: category = "connection.wrongOwner"
+                case .consumed: category = "connection.consumed"
+                case .authorityChanged: category = "connection.authorityChanged"
+                case .accountUnavailable: category = "connection.accountUnavailable"
+                case .accountMismatch: category = "connection.accountMismatch"
+                case .busy: category = "connection.busy"
+                case .keyUnavailable: category = "connection.keyUnavailable"
+                case .epochIncomplete: category = "connection.epochIncomplete"
+                case .unreadableControl: category = "connection.unreadableControl"
+                case .notOffered: category = "connection.notOffered"
+                case .incomingStagingUnavailable: category = "connection.incomingStagingUnavailable"
+                case .mediaApplyUnavailable: category = "connection.mediaApplyUnavailable"
+                case .resetRecoveryUnavailable: category = "connection.resetRecoveryUnavailable"
+                case .tracking: category = "connection.tracking"
+                case .incomplete: category = "connection.incomplete"
+                case .fileIdentityUnavailable: category = "connection.fileIdentityUnavailable"
+                }
+            case .maintenance: category = "bridge.maintenance"
+            case .exportSourceChanged: category = "bridge.exportSourceChanged"
+            case .exportSourceInvalid: category = "bridge.exportSourceInvalid"
+            case .exportFormatLimit: category = "bridge.exportFormatLimit"
+            case .deckOptionsInvalid: category = "bridge.deckOptionsInvalid"
+            case .stale: category = "bridge.stale"
+            case .staleGeneration: category = "bridge.staleGeneration"
+            case .undoUnavailable: category = "bridge.undoUnavailable"
+            case .notetypeRefused: category = "bridge.notetypeRefused"
+            case .deckRefused: category = "bridge.deckRefused"
+            case .noteNotFound: category = "bridge.noteNotFound"
+            case .notFound: category = "bridge.notFound"
+            case .insufficientSpace: category = "bridge.insufficientSpace"
+            case .open: category = "bridge.open"
+            case .suspendDeadline: category = "bridge.suspendDeadline"
+            case .schedOpRefused: category = "bridge.schedOpRefused"
+            case .sessionActive: category = "bridge.sessionActive"
+            case .invalidTypeAnswerReplacement: category = "bridge.invalidTypeAnswerReplacement"
+            case .cancelled: category = "bridge.cancelled"
+            case .busy: category = "bridge.busy"
+            case .unavailable: category = "bridge.unavailable"
+            case .unsupported: category = "bridge.unsupported"
+            case .invalidArgument: category = "bridge.invalidArgument"
+            case .internal: category = "bridge.internal"
+            case .mediaCommitPending: category = "bridge.mediaCommitPending"
+            case .commitCompleted: category = "bridge.commitCompleted"
+            }
         default: category = "other"
         }
         let actionTag = action.map { " action=\(actionLabel($0))" } ?? ""
@@ -103,7 +165,12 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
         let closePhase = closed ? "returned" : closeFailure != nil ? "failed" : closeEntered > 0 ? "draining" : "notStarted"
         let ownership = SyncCommandTaskContext.current?.shutdownCancelled == true ? "ownedShutdown" : "none"
         let diagnostic = "\(stage.rawValue).\(kind.rawValue): \(category)\(actionTag) task=\(taskState) close=\(closePhase) cancellation=\(ownership)"
-        trace(diagnostic)
+        if firstFailureDiagnostic == nil {
+            firstFailureDiagnostic = diagnostic
+            trace("firstFailure \(diagnostic)", emit: true)
+        } else {
+            trace(diagnostic)
+        }
         return diagnostic
     }
     private func actionLabel(_ action: CloudPolicyAction) -> String {
