@@ -8,11 +8,16 @@ import Testing
 @MainActor @Suite(.serialized) struct CloudKitSelectedRestorationTests {
     @Test func restoredAdmissionBeginsAnEmptyLedgerAndDoesNotSupplyOriginalCallbacksOrHeldReview() throws {
         let evidence = CloudKitSmokeEvidence()
+        let digest = String(repeating: "0", count: 64)
+        let original = AgentRecord(header_sha256: digest, record_seq: 1, command_seq: 1, command_sha256: digest,
+            agent_instance: "original", observed_at: "2026-11-10T00:00:00Z", kind: .observation,
+            facts: [.init(name: .engineCallback, count: 1, engine: "engine1", operation: "sdk1-state-delivered")])
+        try evidence.reserveHistoricalEngines([original])
         try evidence.setGeneration(12, selectedPublication: true)
         let current = RestoredCloudControlObservation(generation: 12, requiredScanComplete: true)
         try evidence.admitRestoredSDK(origin: "fresh-sdk", control: current)
         let facts = evidence.drain()
-        #expect(facts.count == 1 && facts[0].operation == "required-scan-before-native-sdk")
+        #expect(facts.count == 1 && facts[0].operation == "required-scan-before-native-sdk" && facts[0].engine == "engine2")
         #expect(!facts.contains { $0.name == .engineCallback || $0.name == .stateSaved })
         #expect(throws: AgentFailure.execution) { try evidence.joinedOriginalWork() }
         #expect(throws: AgentFailure.execution) { try evidence.joined() }

@@ -309,6 +309,39 @@ import Testing
         #expect(joined.map(\.count) == [5, 2])
         #expect(!joined.contains { $0.operation?.contains("held") == true })
     }
+    @Test func replacementEngineKeepsOriginalBatchAndStateSeparate() throws {
+        let evidence = try ledger()
+        let original = "generated-engine"
+        let replacement = "replacement-engine"
+        let record = CloudRecord(name: entity("n1").recordName, envelope: Data([1]), systemFields: Data([2]))
+        try evidence.admitSmokeSDK(origin: original)
+        evidence.batch(origin: original, batch: .init(id: 9, saves: [record], deletes: []), proof: nil, current: current())
+        let sent = CloudEngineEvent.sent(batchID: 9, saved: [record], failed: [], deleted: [])
+        for phase in [CloudSDKObservationPhase.delivered, .committed, .returned] {
+            evidence.sdk(.init(origin: original, ordinal: 1, event: sent, phase: phase), current: current())
+        }
+
+        try evidence.admitSmokeSDK(origin: replacement)
+        let replaced = current(engine: replacement)
+        evidence.batch(origin: replacement, batch: .init(id: 9, saves: [], deletes: []), proof: nil, current: replaced)
+        for phase in [CloudSDKObservationPhase.delivered, .committed, .returned] {
+            evidence.sdk(.init(origin: replacement, ordinal: 1, event: .stateUpdate(Data([3])), phase: phase), current: replaced)
+        }
+        try evidence.check()
+        let observations: [CloudWorkflowObservation] = [.savedPendingRemoved(name: record.name, requestID: 9)]
+        #expect(throws: AgentFailure.execution) {
+            try evidence.requireAcknowledgements([entity("n1")], observations: observations)
+        }
+        #expect(throws: AgentFailure.execution) { try evidence.joinedOriginalWork() }
+
+        stateCallback(evidence, ordinal: 2)
+        let ack = try evidence.requireAcknowledgements([entity("n1")], observations: observations)
+        #expect(ack.first?.operation == "n1-sdk1-batch1-ack" && ack.first?.engine == "engine1")
+        let facts = evidence.drain()
+        #expect(facts.first { $0.operation == "batch2-media-handoff" }?.engine == "engine2")
+        let joined = try evidence.joinedOriginalWork()
+        #expect(joined.last?.operation == "sdk-joined" && joined.last?.count == 3 && joined.last?.engine == nil)
+    }
     @Test func commonOriginalJoinWaitsForOriginalOwnCommitAndSDKReturn() throws {
         let evidence = try ledger(selected: true)
         let identity = UUID()

@@ -66,12 +66,12 @@ def generated(kind):
         for own, label in enumerate(("createZones", "saveMediaRoot", "savePublishingEpoch", "saveCompleteEpoch", "saveActive"), 1):
             traces += [event("stateSaved" if phase == "committed" else "applied", "own%d-%s-%s" % (own, label, phase))
                        for phase in ("prepared", "enqueued", "replied", "committed")]
-        traces += [event("applied", "required-scan-before-native-sdk")]
+        traces += [event("applied", "required-scan-before-native-sdk", engine=True)]
         traces += callback("state")
         check(3, [("coordinatorResult", [fact("stateSaved", "p1", 7, engine=True)] + control)])
     else:
-        traces += [event("applied", label) for label in
-                   ("normal-adoption-generation-joined", "required-scan-before-native-sdk")]
+        traces += [event("applied", "normal-adoption-generation-joined"),
+                   event("applied", "required-scan-before-native-sdk", engine=True)]
         traces += callback("state")
         control += [fact("applied", "owned-adoption-backup-activation", 1),
                     fact("localDurable", "original-n1-preserved", digest="0" * 64)]
@@ -136,6 +136,34 @@ def admitted(kind, through=6, mutate=None):
 
 
 class SelectedTests(unittest.TestCase):
+    def test_replacement_engine_cannot_prove_original_save(self):
+        evidence = c.Evidence()
+
+        def trace(label, name="applied", engine="engine1"):
+            evidence.ingest({"name": name, "count": evidence.tick + 1, "operation": label, "engine": engine})
+
+        def callback(label, engine):
+            for phase in ("delivered", "committed", "returned"):
+                name = "stateSaved" if label.endswith("-state") and phase == "committed" else "engineCallback"
+                trace(label + "-" + phase, name, engine)
+
+        trace("required-scan-before-native-sdk")
+        trace("batch1-collection-handoff")
+        evidence.ingest({"name": "applied", "count": 1, "operation": "batch1-save-count", "engine": "engine1"})
+        callback("sdk1-sent-batch1", "engine1")
+        ack = {"name": "applied", "count": evidence.tick, "operation": "n1-sdk1-batch1-ack", "engine": "engine1"}
+        with self.assertRaisesRegex(s.v.Refused, "selected-scan-before-sdk"):
+            trace("sdk2-state-delivered", "engineCallback", "engine2")
+        trace("required-scan-before-native-sdk", engine="engine2")
+        callback("sdk2-state", "engine2")
+        with self.assertRaisesRegex(s.v.Refused, "selected-ack-state"):
+            evidence.acknowledged(ack)
+        with self.assertRaisesRegex(s.v.Refused, "selected-ack-callback"):
+            evidence.acknowledged({**ack, "engine": "engine2"})
+        callback("sdk3-state", "engine1")
+        evidence.acknowledged(ack)
+        evidence.joined([fact("ownedWorkJoined", "own-joined", 0), fact("ownedWorkJoined", "sdk-joined", 3)])
+
     def test_preflight_diagnostics_export_only_closed_stage_and_refusal_values(self):
         diagnostic = c.Diagnostic()
         diagnostic.enter("simulator-os")

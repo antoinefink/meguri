@@ -148,3 +148,26 @@ and the close boundary. This change supplies the durable append path for J4.
 Distinct engine labels after re-creation, per-record and pending-list evidence
 for J4.1, and original exchange reconstruction for J5.1 remain open. No
 signed CloudKit run, full gate or Unit completion is claimed.
+
+## Engine identity across replacement
+
+Starting commit `bacd5f5f`. The signed test runtime gives each admitted engine
+its own label. A restored runtime reserves the original journal's labels.
+Callback phases and batch handoffs retain the engine label. An upload
+acknowledgement needs a completed state callback from the same engine. The
+phone's fetch proof also keeps its phases within one engine.
+
+Direct review checked alias reuse, callback attribution, batch identity and
+close across engine replacement. The host verifier requires each engine's own
+admission and refuses a later engine's saved state as proof of an earlier
+engine's upload.
+`selftest/20261110T231747Z-11764` passes all five wrappers.
+`mac-hosted-test/20261110T231745Z-11229` verifies that a restored admission
+leaves the original callback ledger empty and uses a fresh engine label.
+`mac-hosted-test/20261110T231804Z-11228` verifies that a replacement engine
+can reuse native ordinals and batch IDs while the original upload still
+needs its own completed state callback.
+
+J4.1 still needs per-record results and pending-list evidence. J5.1 still
+needs original exchange reconstruction and a signed recovery run. The
+full gate and signed round trip remain open.

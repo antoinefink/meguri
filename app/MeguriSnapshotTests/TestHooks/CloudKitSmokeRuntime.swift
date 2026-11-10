@@ -205,7 +205,8 @@ import Foundation
             guard let publicationID = issued.publicationID else { throw AgentFailure.execution }
             try evidence.requirePublication(publicationID, completed: completed)
             backend.watchPublication = false
-            let fact = AgentFact(name: .stateSaved, count: completed.seq, engine: "engine1", operation: "p1")
+            guard let origin = completed.engine else { throw AgentFailure.execution }
+            let fact = try AgentFact(name: .stateSaved, count: completed.seq, engine: evidence.engineLabel(for: origin), operation: "p1")
             try observe(fact)
             if program != .smoke {
                 let control = try await SelectedCloudControlInspection().current()
@@ -531,7 +532,11 @@ import Foundation
                 _ = try await validateRestoredProgress(requireScan: true)
             }
             let factory: any CloudKitEngineFactory
-            if program == .smoke { factory = nativeFactory }
+            if program == .smoke {
+                factory = CloudKitSelectedSDKFactory(original: nativeFactory, beforeMake: { [evidence] configuration in
+                    try evidence.admitSmokeSDK(origin: configuration.instanceID)
+                }, failed: { [evidence] in evidence.fail() })
+            }
             else {
                 factory = CloudKitSelectedSDKFactory(original: nativeFactory, beforeMake: { [self] configuration in
                     _ = try retainedAdmission()
@@ -775,6 +780,7 @@ import Foundation
         _ = try retainedAdmission()
         guard try state.header.program == program, owner == nil else { throw AgentFailure.binding }
         let restored = try AgentSelectedRestoration(state)
+        try evidence.reserveHistoricalEngines(state.records)
         restoration = restored
         do {
             _ = try await openRuntime(restoration: restored, observe: { _ in throw AgentFailure.recovery })

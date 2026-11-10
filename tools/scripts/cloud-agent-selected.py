@@ -124,6 +124,7 @@ class Evidence(s.SmokeEvidence):
     def __init__(self):
         super().__init__()
         self.admissions = {}
+        self.adoption = None
 
     @staticmethod
     def trace(item):
@@ -134,12 +135,19 @@ class Evidence(s.SmokeEvidence):
     def ingest(self, item):
         operation = item.get("operation", "")
         if operation in {"normal-adoption-generation-joined", "required-scan-before-native-sdk"}:
-            s.evidence_shape(item, "applied")
+            is_admission = operation == "required-scan-before-native-sdk"
+            s.evidence_shape(item, "applied", engine=is_admission)
             self.tick += 1
-            need(item["count"] == self.tick <= 4096 and self.last_batch is None and
-                 operation not in self.admissions, "selected-admission-order")
-            self.admissions[operation] = self.tick
+            need(item["count"] == self.tick <= 4096 and self.last_batch is None, "selected-admission-order")
+            if is_admission:
+                need(item["engine"] not in self.admissions, "selected-admission-order")
+                self.admissions[item["engine"]] = self.tick
+            else:
+                need(self.adoption is None and not self.admissions, "selected-adoption-order")
+                self.adoption = self.tick
             return True
+        if self.trace(item) and "engine" in item:
+            need(item["engine"] in self.admissions, "selected-scan-before-sdk")
         found = FETCH.fullmatch(operation)
         if found is None:
             return super().ingest(item)
@@ -147,33 +155,27 @@ class Evidence(s.SmokeEvidence):
         s.evidence_shape(item, "engineCallback", engine=True)
         self.tick += 1
         need(item["count"] == self.tick <= 4096 and self.last_batch is None, "selected-callback-order")
-        if phase == "delivered":
-            need(int(sdk) == len(self.sdk) + 1 and all(len(row[2]) == 3 for row in self.sdk.values()),
-                 "selected-callback-origin")
-            self.sdk[sdk] = [kind, None, []]
-        need(sdk in self.sdk and self.sdk[sdk][:2] == [kind, None], "selected-callback-origin")
-        phases = self.sdk[sdk][2]
-        need(len(phases) < 3 and phase == ("delivered", "committed", "returned")[len(phases)], "selected-callback-order")
-        phases.append(self.tick)
+        self.ingest_callback(sdk, kind, None, phase, item["engine"])
         return True
 
     def acknowledged(self, item):
         found = ACK.fullmatch(item.get("operation", ""))
         need(found is not None, "selected-ack-operation")
         sdk, batch = found.groups()
-        exact(item, "applied", ("count", "operation"), engine="engine1")
+        exact(item, "applied", ("count", "operation", "engine"))
         callback = self.sdk.get(sdk)
         need(callback is not None and callback[:2] == ["sent", batch] and len(callback[2]) == 3 and
-             callback[2][-1] == item["count"] and self.batches[batch]["saves"] > 0,
+             callback[3] == item["engine"] and callback[2][-1] == item["count"] and self.batches[batch]["saves"] > 0,
              "selected-ack-callback")
-        need(any(kind == "state" and len(ticks) >= 2 and ticks[1] > item["count"]
-                 for kind, _, ticks in self.sdk.values()), "selected-ack-state")
+        need(self.has_later_state(item["engine"], item["count"]), "selected-ack-state")
 
     def fetched(self, item):
-        exact(item, "engineCallback", ("count",), engine="engine1", operation="n1-original-fetched-returned")
-        pages = [ticks[-1] for kind, _, ticks in self.sdk.values() if kind == "fetched" and len(ticks) == 3]
+        exact(item, "engineCallback", ("count", "engine"), operation="n1-original-fetched-returned")
+        returned = [(kind, ticks[-1]) for kind, _, ticks, engine in self.sdk.values()
+                    if engine == item["engine"] and len(ticks) == 3]
+        pages = [tick for kind, tick in returned if kind == "fetched"]
         need(item["count"] in pages, "selected-fetch-return")
-        kinds = {kind: [ticks[-1] for value, _, ticks in self.sdk.values() if value == kind and len(ticks) == 3]
+        kinds = {kind: [tick for value, tick in returned if value == kind]
                  for kind in ("fetch-start", "fetch-zone-start", "fetch-zone-end", "fetch-end")}
         need(any(start < zone < item["count"] < end < finish for start in kinds["fetch-start"]
                  for zone in kinds["fetch-zone-start"] for end in kinds["fetch-zone-end"]
@@ -183,15 +185,13 @@ class Evidence(s.SmokeEvidence):
         values = unique(facts)
         need(set(values) == {"own-joined", "sdk-joined"}, "selected-join-shape")
         exact(values["own-joined"], "ownedWorkJoined", ("count",), operation="own-joined")
-        exact(values["sdk-joined"], "ownedWorkJoined", ("count",), engine="engine1", operation="sdk-joined")
-        need(values["own-joined"]["count"] == len(self.own) and
-             values["sdk-joined"]["count"] == len(self.sdk) > 0 and self.last_batch is None and
+        self.require_joined_engines(values["sdk-joined"])
+        need(values["own-joined"]["count"] == len(self.own) and self.last_batch is None and
              all(len(ticks) == 4 for _, ticks in self.own.values()) and
-             all(len(ticks) == 3 for _, _, ticks in self.sdk.values()), "selected-join-order")
-        for kind, batch, ticks in self.sdk.values():
+             all(len(ticks) == 3 for _, _, ticks, _ in self.sdk.values()), "selected-join-order")
+        for kind, batch, ticks, engine in self.sdk.values():
             if kind == "sent" and self.batches[batch]["saves"]:
-                need(any(event == "state" and len(after) == 3 and after[1] > ticks[-1]
-                         for event, _, after in self.sdk.values()), "selected-join-state")
+                need(self.has_later_state(engine, ticks[-1]), "selected-join-state")
 
 
 class Journal(s.Journal):
@@ -213,7 +213,6 @@ class Journal(s.Journal):
             "n1-original-fetched-returned", "normal-adoption-generation-joined", "required-scan-before-native-sdk"}
         for record in self.records:
             for item in record["facts"] + [f for check in record["checks"] for f in check["facts"]]:
-                need("engine" not in item or item["engine"] == "engine1", "selected-public-fact")
                 label = item.get("operation")
                 traced = s.TRACE.fullmatch(label or "")
                 need(label is None or label in labels or ACK.fullmatch(label) or FETCH.fullmatch(label) or
@@ -300,17 +299,16 @@ class Journal(s.Journal):
         return completed
 
     def control(self, facts, evidence):
-        scan = evidence.admissions.get("required-scan-before-native-sdk")
-        need(scan is not None and evidence.sdk and all(ticks[0] > scan for _, _, ticks in evidence.sdk.values()),
+        need(evidence.admissions and evidence.sdk and
+             all(ticks[0] > evidence.admissions[engine] for _, _, ticks, engine in evidence.sdk.values()),
              "selected-scan-before-sdk")
-        adoption = evidence.admissions.get("normal-adoption-generation-joined")
-        need((adoption is not None and adoption < scan) if self.kind == "iphone" else adoption is None,
-             "selected-adoption-order")
+        need((evidence.adoption is not None) == (self.kind == "iphone"), "selected-adoption-order")
         if self.kind == "iphone":
             exact(facts[0], "integrity", ("count",))
             facts = facts[1:]
         else:
-            exact(facts[0], "stateSaved", ("count",), engine="engine1", operation="p1")
+            exact(facts[0], "stateSaved", ("count", "engine"), operation="p1")
+            need(facts[0]["engine"] in evidence.admissions, "selected-scan-before-sdk")
             evidence.publication()
             facts = facts[1:]
         values = unique(facts)

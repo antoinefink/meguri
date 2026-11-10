@@ -138,8 +138,8 @@ def current_evidence(*, held_batches=True, target_card=True):
     publication += callback(1, "state")
     observations[3] += publication
     observations[5].insert(1, f("localDurable", 1, "c1-before-answer", digest="0"*64))
-    observations[6][1:1] = [f("applied", 9, "c1-held-projection", True, "0"*64),
-                              f("applied", 0, "r1-held-absent", True)]
+    observations[6][1:1] = [f("applied", 9, "c1-held-projection", digest="0"*64),
+                              f("applied", 0, "r1-held-absent")]
     def batch(n, kind, saves):
         return [event("applied", "batch%d-%s-handoff" % (n, kind), True),
                 f("applied", saves, "batch%d-save-count" % n, True)]
@@ -168,11 +168,11 @@ def current_evidence(*, held_batches=True, target_card=True):
                   f("applied", 0, "batch1-r1-absent", True)]
         if target_card:
             proof.append(f("applied", 9, "batch1-c1-held", True, "0"*64))
-    proof += [f("applied", 2 if held_batches else 0, "held-batches", True),
-             f("applied", 1 if held_batches else 0, "held-media-batches", True),
-             f("applied", 1 if held_batches else 0, "held-collection-batches", True),
-             f("applied", 1 if held_batches and target_card else 0, "c1-held-handed", True),
-             f("applied", 0, "r1-held-handed", True),
+    proof += [f("applied", 2 if held_batches else 0, "held-batches"),
+             f("applied", 1 if held_batches else 0, "held-media-batches"),
+             f("applied", 1 if held_batches else 0, "held-collection-batches"),
+             f("applied", 1 if held_batches and target_card else 0, "c1-held-handed"),
+             f("applied", 0, "r1-held-handed"),
              f("ownedWorkJoined", 5, "own-joined"),
              f("ownedWorkJoined", 4, "sdk-joined", True)]
     checks[10].insert(1, {"name": "coordinatorResult", "outcome": "pass", "facts": copy.deepcopy(proof)})

@@ -299,9 +299,9 @@ def fact(value):
         need(set(value) == {"name"}, "journal-private-fact")
     if value["name"] == "ownedWorkJoined":
         need(set(value) == {"name"} or
-             (set(value) == {"name", "count", "operation"} and value["operation"] == "own-joined") or
+             (set(value) == {"name", "count", "operation"} and value["operation"] in {"own-joined", "sdk-joined"}) or
              (set(value) == {"name", "count", "operation", "engine"} and
-              value["operation"] == "sdk-joined" and value["engine"] == "engine1"), "journal-private-fact")
+              value["operation"] == "sdk-joined"), "journal-private-fact")
     if value["name"] == "coreOpened":
         need(set(value) == {"name", "count"}, "journal-core-opened")
     if "count" in value:
@@ -311,6 +311,8 @@ def fact(value):
     for key in ("engine", "operation"):
         if key in value:
             need(isinstance(value[key], str) and LABEL.fullmatch(value[key]), "journal-label")
+    if "engine" in value:
+        need(ENGINE.fullmatch(value["engine"]), "journal-engine")
     need(("error_domain" in value) == ("error_code" in value), "journal-error")
     if "error_domain" in value:
         need(value["error_domain"] in ("agent", "core", "cloudKit", "cancellation") and
@@ -355,7 +357,7 @@ def _completion_facts(number, checks):
     elif number == 2:
         exact(facts[0], "applied", count=20, operation="p1")
     elif number == 3:
-        exact(facts[0], "stateSaved", ("count",), engine="engine1", operation="p1")
+        exact(facts[0], "stateSaved", ("count", "engine"), operation="p1")
     elif number in (4, 6, 8):
         label = {4: "n1", 6: "s1", 8: "m1"}[number]
         exact(facts[0], "localCommitted", ("count",), operation=label)
@@ -378,7 +380,7 @@ def _completion_facts(number, checks):
             need({f.get("operation", "").split("-")[0] for f in facts[4:8]} ==
                  {"n1", "c1", "r1", "m1"}, "smoke-ack-labels")
             for item in facts[4:8]:
-                exact(item, "applied", ("count", "operation"), engine="engine1")
+                exact(item, "applied", ("count", "operation", "engine"))
                 need(re.fullmatch(r"[ncrm]1-sdk[1-9][0-9]*-batch[1-9][0-9]*-ack", item["operation"]),
                      "smoke-ack-labels")
         exact(facts[-1], "syncResult", ("count",), operation="exchange1")
@@ -390,6 +392,7 @@ def _completion_facts(number, checks):
 # identities, envelopes or state. Check copies are deliberately not ingested.
 OWN_KINDS = {"createZones", "saveMediaRoot", "savePublishingEpoch", "saveCompleteEpoch",
              "saveActive", "readOwnEpoch", "readResetMediaRoot"}
+ENGINE = re.compile(r"engine[1-9][0-9]*")
 TRACE = re.compile(r"(?:own([1-9][0-9]*)-([A-Za-z]+)-(prepared|enqueued|replied|committed)|"
                    r"sdk([1-9][0-9]*)-(state|sent)(?:-batch([1-9][0-9]*))?-(delivered|committed|returned)|"
                    r"batch([1-9][0-9]*)-(collection-handoff|media-handoff|save-count))")
@@ -398,7 +401,8 @@ TRACE = re.compile(r"(?:own([1-9][0-9]*)-([A-Za-z]+)-(prepared|enqueued|replied|
 def evidence_shape(item, name, *, engine=False, digest=False):
     need(set(item) == {"name", "count", "operation"} |
          ({"engine"} if engine else set()) | ({"digest"} if digest else set()) and
-         item["name"] == name and (not engine or item["engine"] == "engine1"), "smoke-evidence-shape")
+         item["name"] == name and (not engine or isinstance(item["engine"], str) and ENGINE.fullmatch(item["engine"])),
+         "smoke-evidence-shape")
 
 
 class SmokeEvidence:
@@ -407,6 +411,27 @@ class SmokeEvidence:
         self.tick, self.own, self.sdk, self.batches = 0, {}, {}, {}
         self.last_batch = None
 
+    def ingest_callback(self, sdk, event, batch, stage, engine):
+        if stage == "delivered":
+            need(int(sdk) == len(self.sdk) + 1 <= 1024 and
+                 all(other != engine or len(phases) == 3 for _, _, phases, other in self.sdk.values()), "smoke-sdk-origin")
+            need(batch is None or batch in self.batches and self.batches[batch]["engine"] == engine,
+                 "smoke-sdk-handoff")
+            self.sdk[sdk] = [event, batch, [], engine]
+        need(sdk in self.sdk and self.sdk[sdk][:2] == [event, batch] and self.sdk[sdk][3] == engine, "smoke-sdk-origin")
+        phases = self.sdk[sdk][2]
+        need(len(phases) < 3 and stage == ("delivered", "committed", "returned")[len(phases)], "smoke-sdk-order")
+        phases.append(self.tick)
+
+    def require_joined_engines(self, item):
+        engines = {engine for _, _, _, engine in self.sdk.values()}
+        evidence_shape(item, "ownedWorkJoined", engine=len(engines) == 1)
+        need(item["count"] == len(self.sdk) > 0 and (len(engines) != 1 or item["engine"] in engines), "smoke-join-count")
+
+    def has_later_state(self, engine, returned):
+        return any(other == engine and kind == "state" and len(ticks) == 3 and ticks[1] > returned
+                   for kind, _, ticks, other in self.sdk.values())
+
     def ingest(self, item):
         match = TRACE.fullmatch(item.get("operation", ""))
         if match is None:
@@ -414,7 +439,8 @@ class SmokeEvidence:
         own, kind, phase, sdk, event, batch, stage, handed, handoff = match.groups()
         if handoff == "save-count":
             evidence_shape(item, "applied", engine=True)
-            need(handed == self.last_batch and self.batches[handed]["saves"] is None,
+            need(handed == self.last_batch and self.batches[handed]["saves"] is None and
+                 self.batches[handed]["engine"] == item["engine"],
                  "smoke-batch-save-count")
             self.batches[handed]["saves"] = item["count"]
             self.last_batch = None
@@ -437,20 +463,11 @@ class SmokeEvidence:
             evidence_shape(item, "stateSaved" if event == "state" and stage == "committed" else "engineCallback",
                            engine=True)
             need((event == "sent") == (batch is not None) and int(sdk) <= 1024, "smoke-sdk-origin")
-            if stage == "delivered":
-                need(int(sdk) == len(self.sdk) + 1 and all(len(c[2]) == 3 for c in self.sdk.values()),
-                     "smoke-sdk-origin")
-                need(batch is None or batch in self.batches, "smoke-sdk-handoff")
-                self.sdk[sdk] = [event, batch, []]
-            need(sdk in self.sdk and self.sdk[sdk][:2] == [event, batch], "smoke-sdk-origin")
-            phases = self.sdk[sdk][2]
-            need(len(phases) < 3 and stage == ("delivered", "committed", "returned")[len(phases)],
-                 "smoke-sdk-order")
-            phases.append(self.tick)
+            self.ingest_callback(sdk, event, batch, stage, item["engine"])
         else:
             evidence_shape(item, "applied", engine=True)
             need(int(handed) == len(self.batches) + 1 and int(handed) <= 256, "smoke-batch-origin")
-            self.batches[handed] = {"kind": handoff, "tick": self.tick, "saves": None}
+            self.batches[handed] = {"kind": handoff, "tick": self.tick, "saves": None, "engine": item["engine"]}
             self.last_batch = handed
         return True
 
@@ -458,7 +475,7 @@ class SmokeEvidence:
         required = OWN_KINDS - {"readOwnEpoch", "readResetMediaRoot"}
         if not all(len(ticks) == 4 for _, ticks in self.own.values()) or not required <= {
                 k for k, ticks in self.own.values() if len(ticks) == 4} or not any(
-                kind == "state" and len(ticks) == 3 for kind, _, ticks in self.sdk.values()):
+                kind == "state" and len(ticks) == 3 for kind, _, ticks, _ in self.sdk.values()):
             raise Missing("smoke-publication-sdk-order")
 
     def acknowledgements(self, facts):
@@ -469,11 +486,10 @@ class SmokeEvidence:
             entity, sdk, batch, _ = item["operation"].split("-")
             acknowledged.setdefault(batch[5:], set()).add(entity)
             callback = self.sdk.get(sdk[3:])
-            need(callback is not None and callback[:2] == ["sent", batch[5:]] and len(callback[2]) == 3 and
+            need(callback is not None and callback[:2] == ["sent", batch[5:]] and callback[3] == item["engine"] and len(callback[2]) == 3 and
                  item["count"] == callback[2][-1], "smoke-ack-callback")
             need(self.batches[batch[5:]]["saves"] > 0, "smoke-ack-handoff")
-            if not any(kind == "state" and len(ticks) == 3 and ticks[1] > item["count"]
-                       for kind, _, ticks in self.sdk.values()):
+            if not self.has_later_state(callback[3], item["count"]):
                 raise Missing("smoke-acknowledgement-sdk-order")
         need(all(len(entities) <= self.batches[batch]["saves"] for batch, entities in acknowledged.items()),
              "smoke-ack-handoff-count")
@@ -489,18 +505,21 @@ class SmokeEvidence:
             if item["name"] == "ownedWorkJoined":
                 fact(item)
             else:
-                evidence_shape(item, "applied", engine=True, digest=bool(re.fullmatch(
+                evidence_shape(item, "applied", engine=bool(re.fullmatch(r"batch[1-9][0-9]*-.*", label or "")), digest=bool(re.fullmatch(
                     r"batch[1-9][0-9]*-c1-held", label or "")))
         def take(label):
             if label not in labels:
                 raise Missing("smoke-review-held-image")
             return labels.pop(label)
-        for label, count in (("own-joined", len(self.own)), ("sdk-joined", len(self.sdk))):
-            item = take(label)
-            evidence_shape(item, "ownedWorkJoined", engine=label == "sdk-joined")
-            need(item["count"] == count and count > 0, "smoke-join-count")
+        item = take("own-joined")
+        evidence_shape(item, "ownedWorkJoined")
+        need(item["count"] == len(self.own) > 0, "smoke-join-count")
+        self.require_joined_engines(take("sdk-joined"))
         need(self.last_batch is None and all(len(t) == 4 for _, t in self.own.values()) and
-             all(len(t) == 3 for _, _, t in self.sdk.values()), "smoke-join-order")
+             all(len(t) == 3 for _, _, t, _ in self.sdk.values()), "smoke-join-order")
+        for kind, batch, ticks, engine in self.sdk.values():
+            if kind == "sent" and self.batches[batch]["saves"]:
+                need(self.has_later_state(engine, ticks[-1]), "smoke-join-state")
         counts = {label: take(label)["count"] for label in
                   ("held-batches", "held-collection-batches", "held-media-batches",
                    "c1-held-handed", "r1-held-handed")}
@@ -512,17 +531,17 @@ class SmokeEvidence:
             need(not (snapshot and media_snapshot), "smoke-held-batch-kind")
             if snapshot is not None or media_snapshot is not None:
                 held = snapshot if snapshot is not None else media_snapshot
-                need(held["count"] >= answer["count"] and info["saves"] is not None and
+                need(held["engine"] == info["engine"] and held["count"] >= answer["count"] and info["saves"] is not None and
                      info["kind"] == ("collection-handoff" if snapshot is not None else "media-handoff"),
                      "smoke-held-snapshot")
                 (collection if snapshot is not None else media).add(batch)
             if snapshot is not None:
                 absent = take(prefix + "-r1-absent")
-                need(absent["count"] == 0, "smoke-held-review")
+                need(absent["engine"] == info["engine"] and absent["count"] == 0, "smoke-held-review")
                 card = labels.pop(prefix + "-c1-held", None)
                 if card is not None:
                     cards += 1
-                    need(info["saves"] > 0 and card["digest"] == baseline["digest"] and
+                    need(card["engine"] == info["engine"] and info["saves"] > 0 and card["digest"] == baseline["digest"] and
                          card["count"] < answer["count"], "smoke-held-card")
         need(not labels and counts == {"held-batches": len(collection) + len(media),
              "held-collection-batches": len(collection), "held-media-batches": len(media),
@@ -587,8 +606,8 @@ def completion(command_number, checks, journal=None):
                 else:
                     need(baseline is not None and len(observations) >= 6, "smoke-held-baseline")
                     held_projection, absent = observations[1:3]
-                    evidence_shape(held_projection, "applied", engine=True, digest=True)
-                    evidence_shape(absent, "applied", engine=True)
+                    evidence_shape(held_projection, "applied", digest=True)
+                    evidence_shape(absent, "applied")
                     need(held_projection["operation"] == "c1-held-projection" and
                          held_projection["digest"] == baseline["digest"] and
                          held_projection["count"] < facts[0]["count"] and absent["operation"] == "r1-held-absent" and
