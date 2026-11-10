@@ -36,7 +36,14 @@ extension TestHooks {
         var pair: CardPagePair?
         private var operationReady = false
         private var shown: CardUpdate?
-        var ready: Bool { operationReady && shown != nil && shown == pair?.current.update }
+        private var completion: (page: CardPage, update: CardUpdate)?
+        private var readyBinding: CardReplayAccessibilityBinding? {
+            guard operationReady, let pair, let completion,
+                  pair.current === completion.page, pair.current.update == completion.update,
+                  shown == completion.update else { return nil }
+            return pair.current.replayAccessibilityBinding
+        }
+        var ready: Bool { readyBinding != nil }
         var failure = ""
         var checkpoint = 0
         var commands: [String] = []
@@ -49,8 +56,9 @@ extension TestHooks {
         private var card: Int64 = 0
 
         var report: String {
+            let binding = readyBinding
             var value: [String: Any] = [
-                "ready": ready, "failure": failure, "checkpoint": checkpoint,
+                "ready": binding != nil, "failure": failure, "checkpoint": checkpoint,
                 "card": pair?.current.update?.card ?? 0,
                 "side": pair?.current.update?.sideName ?? "none",
                 "catalogLabel": CardRuntime.replayLabel,
@@ -58,7 +66,7 @@ extension TestHooks {
                 "actions": actions,
                 "unmatchedActions": unmatchedActions
             ]
-            if ready, let binding = pair?.current.replayAccessibilityBinding,
+            if let binding,
                let data = try? JSONEncoder().encode(binding),
                let metadata = try? JSONSerialization.jsonObject(with: data) {
                 value["nativeWebBinding"] = metadata
@@ -85,7 +93,14 @@ extension TestHooks {
                 let pair = CardPagePair(configuration: configuration, resolver: resolver, appearance: .light)
                 self.pair = pair
                 pair.onSignal = { [weak model = self, weak pair] signal, update in
-                    if signal == "shown", pair?.current.update == update { model?.shown = update }
+                    guard let model, let pair, model.pair === pair,
+                          signal == "shown", pair.current.update == update else { return }
+                    model.shown = update
+                }
+                pair.onCommitted = { [weak model = self, weak pair] update, _ in
+                    guard let model, let pair, model.pair === pair,
+                          update.side == .question, pair.current.update == update else { return }
+                    model.completion = (pair.current, update)
                 }
                 pair.onAction = { [weak model = self, weak observer] action in
                     guard let model else { return }
@@ -135,7 +150,18 @@ extension TestHooks {
         }
 
         func next() { perform { try await self.question() } }
-        func answer() { perform { _ = try await self.pair?.showAnswer() } }
+        func answer() {
+            perform {
+                guard let pair = self.pair, let previous = pair.current.update else { throw CardPage.Failure.notPrepared }
+                let page = pair.current
+                _ = try await pair.showAnswer()
+                guard self.pair === pair, pair.current === page, let update = page.update,
+                      update.card == previous.card, update.side == .answer,
+                      update != previous, self.shown == update,
+                      page.replayAccessibilityBinding != nil else { throw CardPage.Failure.notPrepared }
+                self.completion = (page, update)
+            }
+        }
 
         /// Test setup for the driver's two wait directions. Toggle visibility
         /// on this synthetic page without changing its binding or activating
@@ -175,7 +201,7 @@ extension TestHooks {
         /// presses. Await its reply before publishing cumulative command counts;
         /// no delay or counter increment is used to simulate an activation.
         func takeCheckpoint() {
-            perform {
+            perform(preservingPresentation: true) {
                 guard let page = self.pair?.current, let update = page.update else { throw CardPage.Failure.notPrepared }
                 _ = try await page.webView.callAsyncJavaScript("""
                     await window.webkit.messageHandlers[handler].postMessage({
@@ -188,15 +214,27 @@ extension TestHooks {
             }
         }
 
-        private func perform(_ operation: @escaping @MainActor () async throws -> Void) {
+        private func perform(preservingPresentation: Bool = false,
+                             _ operation: @escaping @MainActor () async throws -> Void) {
+            let previous = preservingPresentation ? completion : nil
             operationReady = false
+            completion = nil
+            if !preservingPresentation { shown = nil }
             work = Task {
-                do { try await operation(); operationReady = true }
+                do {
+                    try await operation()
+                    if let previous, self.pair?.current === previous.page,
+                       previous.page.update == previous.update, shown == previous.update {
+                        completion = previous
+                    }
+                    operationReady = true
+                }
                 catch { if !Task.isCancelled { failure = "fixture operation failed" } }
             }
         }
 
         func stop() {
+            operationReady = false; completion = nil; shown = nil
             publicationWork?.cancel(); publicationWork = nil
             work?.cancel(); work = nil
             pair?.close(); pair = nil; observer = nil

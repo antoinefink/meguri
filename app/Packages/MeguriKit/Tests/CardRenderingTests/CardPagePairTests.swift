@@ -2,6 +2,7 @@
 import CoreBridge
 import Foundation
 import Instrumentation
+import QuartzCore
 import Testing
 import WebKit
 #if os(macOS)
@@ -13,6 +14,73 @@ extension WebKitSuites {
         func make(_ fixture: MediaFixture, configuration: CardWebConfiguration? = nil,
                   compare: @escaping (TypeAnswerDescriptor, String) async throws -> String = { _, text in "<code>\(text)</code>" }) async throws -> CardPagePair {
             CardPagePair(configuration: configuration ?? CardWebConfiguration(store: .nonPersistent()), resolver: try await fixture.resolved(), compare: compare)
+        }
+
+        @Test func replayBindingRequiresCurrentShownAndCompletedPresentation() async throws {
+            let fixture = try await CardBehaviorFixture()
+            defer { fixture.close() }
+            let pair = fixture.pair
+            let questionIDs = ["review.card.replay.q1"]
+            let answerIDs = ["review.card.replay.a0"]
+            let question = try await pair.prepare(CardPayload(cardID: 9, question: """
+                <a class="replay-button soundLink" id="review.card.replay.q1" data-meguri-replay="true" href="#">question</a><script>
+                onShownHook.push(function () {
+                  return new Promise(resolve => { window.releaseReplayQuestion = resolve; });
+                });
+                </script>
+                """, answer: """
+                <a class="replay-button soundLink" id="review.card.replay.a0" data-meguri-replay="true" href="#">answer</a><script>
+                onShownHook.push(function () {
+                  return new Promise(resolve => { window.releaseReplayAnswer = resolve; });
+                });
+                </script>
+                """, questionReplayIDs: questionIDs, answerReplayIDs: answerIDs))
+            let page = pair.idle
+            #expect(page.replayAccessibilityBinding == nil)
+            let commits = AsyncStream<CardUpdate>.makeStream(bufferingPolicy: .bufferingOldest(1))
+            defer { pair.onCommitted = nil; commits.continuation.finish() }
+            pair.onCommitted = { update, _ in commits.continuation.yield(update) }
+            CATransaction.begin()
+            _ = try pair.present(question)
+            #expect(page.replayAccessibilityBinding == nil)
+            CATransaction.commit()
+            let committed = try await Spike.deadline("replay binding native commit", timeout: .seconds(3)) {
+                for await update in commits.stream { return update }
+                throw Spike.Failure("missing replay binding commit")
+            }
+            #expect(committed == question && pair.current === page && page.hostDOMKnown)
+            // Native presentation alone cannot stand in for matching shown hooks.
+            #expect(page.replayAccessibilityBinding == nil)
+            try await CardBehaviorFixture.until("held replay question shown hook") {
+                try await fixture.bool("return typeof releaseReplayQuestion === 'function';") == true
+            }
+            try await fixture.script("releaseReplayQuestion();")
+            try await page.waitForShown(question)
+            let front = try #require(page.replayAccessibilityBinding)
+            #expect(front.card == question.card && front.generation == question.generation)
+            #expect(front.side == "question" && front.generatedIDs == questionIDs)
+
+            let reveal = Task { try await pair.showAnswer() }
+            defer { reveal.cancel() }
+            try await CardBehaviorFixture.until("held replay answer shown hook") {
+                guard page.update?.side == .answer else { return false }
+                return try await fixture.bool("return typeof releaseReplayAnswer === 'function';") == true
+            }
+            // The previous question's shown/settled facts cannot grant an answer binding.
+            #expect(!page.settled && page.replayAccessibilityBinding == nil)
+            try await fixture.script("releaseReplayAnswer();")
+            _ = try await Spike.deadline("replay binding answer completion", timeout: .seconds(3)) { try await reveal.value }
+            let answer = try #require(page.update)
+            let back = try #require(page.replayAccessibilityBinding)
+            #expect(!page.settled) // Presented answers emit shown, without hidden preparation's settled.
+            #expect(pair.current === page && answer.side == .answer)
+            #expect(back.card == answer.card && back.generation == answer.generation && back.generation != front.generation)
+            #expect(back.side == "answer" && back.generatedIDs == answerIDs)
+            #expect(back.page == front.page && back.document == front.document && back.root == front.root)
+            await page.hostReports.publish()
+            #expect(page.replayAccessibilityBinding == back)
+            pair.close()
+            #expect(page.replayAccessibilityBinding == nil)
         }
 
         @Test(arguments: [false, true])

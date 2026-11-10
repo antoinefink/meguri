@@ -11,9 +11,11 @@ public final class CardPage: NSObject, WKNavigationDelegate {
     /// Native test/export metadata, taken from the live host binding and trusted
     /// transform output. It makes no claim about WebKit's AX publication.
     public var replayAccessibilityBinding: CardReplayAccessibilityBinding? {
-        guard behaviorAvailable, hostDOMKnown, settled,
+        // Presented answers have matching shown hooks, without a hidden
+        // preparation's settled receipt. hostDOMKnown excludes pending presentation.
+        guard behaviorAvailable, hostDOMKnown, readyPhases.contains("shown"),
               committedRootDocument == documentID, webView.url == MediaOrigin.url,
-              let update, let payload else { return nil }
+              let update, let payload, payload.cardID == update.card else { return nil }
         #if os(macOS)
         let identifier = webView.accessibilityIdentifier()
         #else
