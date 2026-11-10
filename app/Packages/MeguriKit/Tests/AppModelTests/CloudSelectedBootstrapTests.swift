@@ -211,7 +211,7 @@ extension ReviewCollectionStartupTests {
         var active: ServiceAppHarness?
         do {
             let wire = try ServiceWorkflowWire(process: process, directory: root.appending(path: "transport"))
-            let a = try ServiceAppHarness(root: root.appending(path: "A"), wire: wire)
+            let a = try ServiceAppHarness(root: root.appending(path: "A"), wire: wire, clock: .system)
             active = a
             defer { a.defaults.removePersistentDomain(forName: a.suite) }
             try FileManager.default.createDirectory(at: a.root, withIntermediateDirectories: false)

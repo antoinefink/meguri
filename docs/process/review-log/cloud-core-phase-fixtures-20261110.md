@@ -43,3 +43,30 @@ prove Apple SDK transport, signed devices or visual rendering.
 
 Earlier failures remain failures. The full batch gate, independent review and
 real signed iCloud round trip remain pending. No Unit trailer is added.
+
+## Broader clean-tree check
+
+`swift-test/20261110T213105Z-38198` ran all MeguriKit tests on clean `fc15bcc2`:
+790 pass and 6 fail out of 796, with no skips. The 29-test checkpoint passes in
+that run too. The broader run stays failed.
+
+One failing edit fixture generated its baseline with the system clock, then
+opened it with the Service harness's fixed 2025 clock. Its real updater therefore
+moved the note's timestamp backward. Starting at `fc15bcc2`, that fixture now
+uses `.system`, as the existing test instructions require. No timestamp or
+revision comparison changes. `swift-test/20261110T213734Z-40331` passes the
+corrected edit test, including close/reopen and exact committed readback.
+
+Four failures share an actual `requestSend` refusal during automatic-scheduling
+reconfiguration. Retained traces show an older send and later
+`ConfigureAutomatic` overlapping, with `connection.authorityChanged` at native
+invocation admission or reporting. Publication then lacks its required reply.
+These are unresolved; they are not dismissed as fixture errors or passing sync.
+The affected cases are publication with peer adoption, the later-rewrite refusal,
+published-edit restoration, and adopted-phone restoration. Diagnose that overlap
+with a controlled original-command hold before changing its production behavior.
+
+The sixth failure is the replay-control test's unavailable native AX child tree.
+Its cause is not established. The renderer also reported its already-declared
+known WebKit memory issue. Neither check was suppressed or changed. The full
+batch gate and real signed round trip remain pending.
