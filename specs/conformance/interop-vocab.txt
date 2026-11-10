@@ -88,6 +88,10 @@ studied_today_text
 studied_today_format
 today_stats
 mature_correct
+graph_preferences
+calendar_first_day_of_week
+card_counts_separate_inactive
+future_due_show_backlog
 # Undo ops and observation (undo-ops.md, U25); undoable is the config API's
 # argument name.
 undo_status
@@ -455,3 +459,32 @@ fixture-evidence/parent/
 fixture-evidence/preparation-result.json
 fixture-evidence/prepared/
 data/
+# conformance/bulk-ops X1 to X3 (U86, U87): Find and Replace and Change
+# Deck ops, their argument and rejection kinds, the field-names kind.
+find_replace
+find_replace_fields
+change_deck
+ignore_case
+invalid_regex
+space_in_replacement
+field_count
+regex
+# editor-ops.md (U197): the fetch op, its setup sections and their keys, the
+# rejection kind, the HTTP headers the fixture server sends and its folder
+# name.
+add_media_from_url
+http_fixtures
+url_files
+content_type
+delay_ms
+byte_delay_ms
+redirect_to
+fetch_failed
+url-files
+Content-Type
+Content-Length
+Location
+# conformance/editor-ops E6 and E7 (2026-11-10)
+editor_config_set
+editor_config
+calendar_first_day_of_week

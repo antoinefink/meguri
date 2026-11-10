@@ -75,7 +75,7 @@ No other key is allowed.
 
 Pure `type_answer` observations need no setup or collection (`type-answer-ops.md` K1; D8).
 
-Setup runs on a fresh, empty collection created at `clock.start`, in this section order whatever the key order: `config`, `presets`, `decks`, `notetypes`, `notes`, `cards`, `revlog`, `media_files`. In an actor scenario it runs on the first actor's collection only (`sync-ops.md` S2.2).
+Setup runs on a fresh, empty collection created at `clock.start`, in this section order whatever the key order: `config`, `presets`, `decks`, `notetypes`, `notes`, `cards`, `revlog`, `media_files`, `http_fixtures`, `url_files`. In an actor scenario it runs on the first actor's collection only (`sync-ops.md` S2.2).
 
 ### D6.1 config
 
@@ -123,6 +123,14 @@ A list of review-history rows `{card: #cN, id, ease, ivl, lastIvl, factor, time,
 
 A list of files and empty subdirectories created directly in the collection's media folder, bypassing the media store, as an outside program would: `{name, text}`, `{name, fill: {size, byte?}}` or `{name, dir: true}` (`media-ops.md` F2, F3). Case variants are allowed only in scenarios tagged `media-case-variants` (draft, `media-ops.md` F14.4).
 
+### D6.9 http_fixtures (draft)
+
+A list of HTTP responses `{path, status?, content_type?, text | fill?, delay_ms?, byte_delay_ms?, redirect_to?}` that the executor serves on loopback for the scenario's `add_media_from_url` steps (`editor-ops.md` E2).
+
+### D6.10 url_files (draft)
+
+A list of files `{name, text}` or `{name, fill}` written to a folder outside the media folder, which `{files}` URLs name (`editor-ops.md` E3).
+
 ## D7. Steps
 
 A step is a mapping with exactly one key, the op name. Steps run in order. Each step produces one output (`observations.md` O1).
@@ -161,6 +169,7 @@ Decided 2026-10-27, since many draft ops now have a driver op: an op's status sa
 | `set_tag_collapsed` | `{tags: [<name>, ...], collapsed: <boolean>}` | none | stable (`tag-ops.md` G7) |
 | `set_flag` | `{cards: [#cN, ...], flag: <integer>}` | `{count}`; rejection `invalid_flag` | stable (`tag-ops.md` G8) |
 | `browser_config_set` | `{key, value}`: one of the 22 browser config keys and a value of its shape, written whole | none | stable (`browser-config-ops.md` B1) |
+| `editor_config_set` | `{key, value}`: one of the five boolean editing keys or `firstDayOfWeek` (0, 1, 5 or 6), written whole with no undo entry | none | draft: no driver op yet (`editor-ops.md` E6) |
 | `add_deck` | `{name}`: a typed deck name | `{name}`: the stored name of the deck returned; rejections `filtered_parent`, `too_deep` | stable (`deck-ops.md` K2) |
 | `rename_deck` | `{deck, name}` | `{name}`; rejections `filtered_parent`, `too_deep`, `under_descendant` (Meguri's only) | stable (`deck-ops.md` K3) |
 | `reparent_decks` | `{decks: [...], parent}`: `parent` empty for the top level | `{count}`; rejection `filtered_parent` | stable (`deck-ops.md` K4) |
@@ -196,6 +205,7 @@ Decided 2026-10-27, since many draft ops now have a driver op: an op's status sa
 | `trash_media` | `{names: [...]}`: move these files to the media trash | none | stable (`media-ops.md` F6) |
 | `restore_media_trash` | `{}` | none | stable (`media-ops.md` F7) |
 | `empty_media_trash` | `{}` | none | stable (`media-ops.md` F8) |
+| `add_media_from_url` | `{url}`: `url` starts with `{fixture}/` or `{files}/`; one fetch and the add of its bytes | `{name}`: the name the fetch derived (oracle) or the stored name (Meguri); rejection `fetch_failed` | draft: the oracle implements it; Meguri's executor and the typed model pending (`editor-ops.md` E4) |
 | `check_media` | `{}`: a Check Media run | `{unused, missing, missing_notes, renamed, dirs, oversize, extracted, trash_count, field_templates}` | draft: the oracle implements it; Meguri's executor and the typed model pending (`media-ops.md` F14.1) |
 | `delete_unused_media` | `{}`: trash the `unused` list of the latest `check_media` step since the start or the latest handoff | `{count}` | draft: the oracle implements it; Meguri's executor and the typed model pending (`media-ops.md` F14.2) |
 | `tag_missing_media` | `{}`: tag `missing-media` on the `missing_notes` of the latest `check_media` step since the start or the latest handoff | `{count}` | draft: the oracle implements it; Meguri's executor and the typed model pending (`media-ops.md` F14.3) |
@@ -222,12 +232,14 @@ Decided 2026-10-27, since many draft ops now have a driver op: an op's status sa
 | `change_notetype` | `{fields?, templates?}`: the change saved for the latest `change_notetype_info` step | `{notes}`; rejections `no_changes`, `schema_changed`, `not_found`, `multiple_notetypes` (Meguri's only) | stable (`change-notetype-ops.md` H2) |
 | `empty_cards` | `{}`: the Empty Cards scan | the list of `empty-cards-ops.md` Y1 | stable (`empty-cards-ops.md` Y1) |
 | `delete_empty_cards` | `{keep_notes}`: delete what the latest `empty_cards` step listed | `{deleted, kept_valid}` | stable (`empty-cards-ops.md` Y2) |
+| `find_replace` | `{notes?, find, replace, regex?, ignore_case?, in?: all \| tags \| {field}}`: Browse's Find and Replace on the listed notes, or on all notes when `notes` is missing | `{count}`; rejections `invalid_regex`, `space_in_replacement`, `field_count` | draft: the oracle implements it; Meguri's executor and the typed model pending (`bulk-ops.md` X1) |
+| `change_deck` | `{cards, deck}`: Browse's Change Deck to the deck of that stored name | `{count}`; rejection `filtered_deck` | draft: the oracle implements it; Meguri's executor and the typed model pending (`bulk-ops.md` X2) |
 
 An op with no output records `{}`; an op with output records `{<op>: <output>}`. An op's output never has a member named `error`.
 
 ### D7.3 Rejections
 
-- When Anki refuses an op as part of its behavior (a duplicate name, an invalid input, a missing note), the step records `{<op>: {"error": "<kind>"}}`, the op changes nothing, no logical id is assigned, and the run goes on with the next step. One exception: Anki empties its undo history and study queues on most refusals of a deck-package `import` (`package-ops.md` E6.4).
+- When Anki refuses an op as part of its behavior (a duplicate name, an invalid input, a missing note), the step records `{<op>: {"error": "<kind>"}}`, the op changes nothing, no logical id is assigned, and the run goes on with the next step. Exceptions: Anki empties its undo history and study queues on most refusals of a deck-package `import` (`package-ops.md` E6.4) and on `find_replace`'s `invalid_regex` and `field_count` (`bulk-ops.md` X1).
 - Kinds are lower-case identifiers (`[a-z][a-z0-9_]*`) from the op's closed list in the D7.2 table, which the owning area writes with the driver op; the observation schema restricts that op's `error` to the list. A refusal whose kind is not in the list is a run error (`anki_error` on the oracle), until the area adds the kind. Kinds are compared exactly, never the message (R1887).
 - Executor failures stay run errors: `invalid_scenario`, `unsupported_op`, `unknown_ref`, `worker_died` and the other protocol error kinds stop the run and give the scenario `error` (D10).
 
@@ -236,7 +248,7 @@ An op with no output records `{}`; an op with output records `{<op>: <output>}`.
 - An executor runs a scenario and returns its observations or an error. The oracle executor is a pool of oracle workers (`conformance/schema/protocol.json`), keyed by time zone. Meguri's executor runs the core in-process, with a scenario clock (D5) and the seeded random source, through the time and randomness seams (R1875).
 - Each executor declares capabilities: the setup sections, ops and observation kinds it implements. Before running, the runner compares the scenario's needs with them. A scenario that needs anything missing is `pending` (D10) and is not run.
 - An op's spec may split the op into finer capabilities, needed by the steps that use the part they name (`update_notetype`: `notetype-ops.md` T10.1). They count as ops.
-- An observation's spec may likewise declare a finer capability, listed with observation kinds. A `template` request containing any card case needs both `template` and `template.card` (`render-ops.md` Q1.3); new-note cases need only `template`. Finer capabilities gate execution without changing the observation's wire kind or value.
+- An observation's spec may likewise declare a finer capability, listed with observation kinds. A `template` request containing any card case needs both `template` and `template.card` (`render-ops.md` Q1.3); new-note cases need only `template`. A case with `fill_empty: true` adds `template.fill_empty` (Q1.3). Finer capabilities gate execution without changing the observation's wire kind or value.
 - Meguri's executor implements a part of the language through per-area adapters (`core/crates/meguri-testkit/src/exec/<area>.rs`). `meguri-cli conformance capabilities` lists them. The adapters that write and open a collection in a handoff directory count as the `handoff` op. The ability to play an actor of an actor scenario, through the parties executor, counts as the `actor` op (`sync-ops.md` S10.2).
 - **The new collection** (D6) is a capability of its own, `new_collection`, listed with the setup sections. Meguri declares it once its executor starts every scenario that needs it from a new collection made at `clock.start`: U28's bootstrap (`storage/new-collection`), or before it a stand-in that an area's spec defines (the note type area's, U29). A scenario needs it unless its first step is `open` (`storage-ops.md` P1) or it has no `setup` and touches no collection: every step is `advance`, `set_clock` or an `observe` of kinds that never read a collection (`text`, `cloze`, `image_occlusion`, `type_answer`, `fsrs_next`, `studied_today_format` (`stats-ops.md` H6), `canonical_search` (`search-ops.md` S2), `search_build`, `search_join` and `search_replace` (`search-ops.md` S6), `card_extractors` (`extractor-ops.md` E5), and `template` when every case is a new-note case). So `smoke/runner-empty` (no steps) needs nothing, while a scenario with no setup that runs `set_config` or `db_exec`, or observes `timing`, needs it: without it the scenario is `pending`, not an `error` for want of an open collection. A live scenario needs it when Meguri runs its first segment (D9.2); an actor scenario needs it for each Meguri actor, which starts from a new collection (`sync-ops.md` S2.2, S10.2).
 

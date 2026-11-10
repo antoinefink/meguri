@@ -1,0 +1,74 @@
+# Find and Replace and the card and note bulk actions (U86, U87)
+
+Spec-writer notes for `specs/browser/find-replace.md` F1-F13,
+`specs/browser/bulk-actions.md` B1-B18 and `specs/conformance/bulk-ops.md`
+X1-X5 (session s-20261110T085429Z-165d83d3). Read at tag 26.09.3
+(`refs/anki-26.09.3`); no code was copied. No oracle probe was run for this
+draft: every expected value in the scenario comments comes from reading the
+sources below and the pinned `regex` 1.11.2 / `regex-automata` 0.4.10 crate
+sources (MIT/Apache, not Anki), and the goldens that `tools/mg oracle record`
+writes once the driver ops of X5 exist are the authority. `tools/mg
+similarity` could not run from the cleanroom worktree (no `refs/anki`
+corpus there; retried after the review fixes, run
+20261110T113017Z-97807, `no-corpus`). Still pending: run `tools/mg
+similarity` and the provenance and privacy checks on this package's files
+from the main checkout before merging, and record the run id here.
+
+| Spec section | Anki files read | Read for |
+|---|---|---|
+| find-replace F1, F11 | `proto/anki/search.proto`, `proto/anki/tags.proto`, `rslib/src/search/service/mod.rs`, `rslib/src/tags/service.rs`, `pylib/anki/collection.py`, `pylib/anki/tags.py` | request fields, match case as the inverse of ignore case, an empty id list meaning every note, the counts returned |
+| find-replace F2 | `qt/aqt/browser/find_and_replace.py`, `qt/aqt/forms/findreplace.ui`, `qt/aqt/utils.py`, `qt/aqt/browser/browser.py`, `qt/aqt/browser/sidebar/tree.py` | the In list's fixed entries and order, the checkbox defaults, Selected notes only disabled without a selection and off from a sidebar field, the 50-entry histories in the profile, the In index remembered per session, the warning on failure |
+| find-replace F3 | `rslib/src/storage/notetype/mod.rs`, `rslib/src/storage/notetype/field_names_for_notes.sql`, `rslib/src/storage/upgrades/schema15_upgrade.sql` | distinct field names of the notes' note types, the `unicase` collation of `fields.name` behind both the distinct and the order |
+| find-replace F4, F5 | `rslib/src/search/service/mod.rs`, `rslib/src/findreplace.rs`, `rslib/src/error/mod.rs`, `Cargo.toml`, `Cargo.lock` | escaping in literal mode, the `(?i)` prefix, NFC of the built pattern only for fields and only with the key on, `$` doubled in a literal replacement, compile errors as the invalid-regex error, the crate version |
+| find-replace F6 | `rslib/src/findreplace.rs`, `rslib/src/notes/mod.rs` (transform of notes, update without and with cards, field count check, sort field and checksum), `rslib/src/notes/undo.rs`, `rslib/src/notetype/mod.rs` (field lookup by `unicase`), `rslib/src/storage/notetype/mod.rs` (notes by note type, then id) | per-note-type field resolution, notes skipped without the field, a match counting as a change even when the text is equal, tags not canonified, every field normalized, cards generated and never removed, the whole operation failing on a field-count mismatch |
+| find-replace F7 | `rslib/src/tags/findreplace.rs`, `rslib/src/tags/register.rs`, `rslib/src/tags/mod.rs`, `rslib/src/storage/note/mod.rs`, `rslib/src/ops.rs` | the separator check on the replacement before the pattern, no NFC, the replacer that keeps `$` literal, per-tag matching, canonicalization (normalize, register, deduplicate, sort), every matched note stamped and counted, the "Update Tag" step |
+| find-replace F8, F9 | `qt/aqt/browser/find_and_replace.py`, `qt/aqt/operations/note.py`, `ftl/core/findreplace.ftl`, `ftl/core/browsing.ftl`, `rslib/src/ops.rs`, `rslib/src/collection/transact.rs` | the total shown as the number of selected notes, the two messages and their plural forms, the step names, no step and no `col.mod` change without changes |
+| bulk-actions B1, B2 | `qt/aqt/browser/browser.py`, `qt/aqt/browser/table/table.py`, `qt/aqt/browser/table/state.py`, `rslib/src/notes/service.rs`, `rslib/src/storage/card/mod.rs` | which actions need a selection, cards of notes and notes of cards, the current index independent of the selection, a note's first card in template order |
+| bulk-actions B3, B4 | `qt/aqt/browser/browser.py`, `qt/aqt/operations/scheduling.py`, `pylib/anki/scheduler/base.py` | the checkmarks from the current card's queue, one restore call for both unsuspend and unbury, suspend and bury by hand otherwise |
+| bulk-actions B5, B6 | `qt/aqt/browser/browser.py`, `qt/aqt/forms/browser.ui` | the flag toggle against the current card, nothing done without one, the seven menu items, marking through add and remove of the tag |
+| bulk-actions B7 | `qt/aqt/browser/browser.py`, `qt/aqt/studydeck.py`, `pylib/anki/decks.py`, `rslib/src/decks/service.rs`, `rslib/src/decks/name.rs`, `rslib/src/decks/mod.rs`, `rslib/src/storage/deck/mod.rs`, `rslib/src/card/mod.rs` (set deck), `rslib/src/scheduler/filtered/card.rs`, `rslib/src/search/sqlwriter.rs`, `rslib/src/search/mod.rs`, `qt/aqt/operations/card.py`, `ftl/core/browsing.ftl` | normal decks only, the default deck left out when no card is in it, the chooser preselection, the add button's own deck operation, the refusals, cards already in the target skipped by their current deck, the return from a filtered deck, the FSRS keys cleared, the step adjuster before the move, the memory-state update of the target deck's cards without a state when at least one card moved, the count and message |
+| bulk-actions B8 | `qt/aqt/browser/browser.py` | the selected notes passed to the change dialog |
+| bulk-actions B9 | `qt/aqt/browser/browser.py` | the whitespace runs turned into spaces before adding, remove with the text as typed, Clear Unused Tags without a selection |
+| bulk-actions B10 | `qt/aqt/browser/browser.py`, `qt/aqt/operations/scheduling.py` | the browser config key and context passed to Set Due Date and Reset, Grade Now's four buttons and answer keys |
+| bulk-actions B11 | `qt/aqt/browser/browser.py`, `qt/aqt/browser/table/table.py`, `qt/aqt/operations/note.py`, `rslib/src/notes/mod.rs`, `ftl/core/browsing.ftl` | no confirmation, the focus move before deleting, the card count returned and shown |
+| bulk-actions B12 | `qt/aqt/browser/browser.py` | the selected note ids given to the export dialog |
+| bulk-actions B13 | `qt/aqt/browser/browser.py`, `qt/aqt/addcards.py`, `pylib/anki/cards.py`, `ts/routes/editor/NoteEditor.svelte` | the current note and the current card's home deck, fields and tags copied from the original note |
+| bulk-actions B15, B16 | `rslib/src/ops.rs`, `ftl/core/browsing.ftl`, the files of B3 to B11 | step names, counts and messages per action, filtered-deck handling per action |
+| bulk-ops X1-X3 | `pylib/anki/collection.py`, `pylib/anki/tags.py`, `rslib/src/error/mod.rs`, `rslib/src/card/mod.rs` | the library calls the driver should make and the errors to map to rejection kinds |
+
+Driver hints for the oracle maintainer (U86, U87 role work; X5):
+
+- `find_replace`: resolve `notes` to real ids (missing key: pass an empty list). For `in: all` call `col.find_and_replace(note_ids=..., search=find, replacement=replace, regex=regex, field_name=None, match_case=not ignore_case)`; for `{field: name}` pass `field_name=name`; for `tags` call `col.tags.find_and_replace(ids, find, replace, regex, not ignore_case)`. Output `{"count": out.count}`. Map the backend's invalid-regex error to `invalid_regex`, its invalid-input error to `space_in_replacement` (tags) or `field_count` (fields); anything else is a run error. An empty `notes` list, a repeated reference, unknown keys and wrong types are `invalid_scenario`.
+- `change_deck`: resolve the deck by its human name as the deck ops do (filtered decks inserted with `db_exec` included), call `col.set_deck(card_ids, deck_id)`, output `{"count": out.count}`; the filtered-deck error is `filtered_deck`.
+- `find_replace_fields`: `col.field_names_for_note_ids(ids)` as a list of strings.
+- Expected outcomes to confirm with a probe when the ops land: `browser/find-replace/ae47` counts 3; `regex` counts 1 for every step but the `ss` one (0); `refusals` records the five refusals in order and then count 1; `unchanged-match` counts 1 for each of its four steps with every matched note stamped; `tags` gives the stored texts its comment lists; `change-deck/basic` counts 5, then `filtered_deck`, then 0; `change-deck/presets` counts 0 (c4 alone, still without a state), then 5, then 1, with `left` 2 for c1, 2 for c7 (relearning), 2 for c8 (old list empty) and 1 for c6.
+
+Oracle maintainer notes (2026-11-10, same session, driver `oracle/driver/ops/bulk.py`):
+
+| Spec section | Anki files read | Read for |
+|---|---|---|
+| bulk-ops X1 (Oracle, Undo history on the oracle), dsl D7.3 | `rslib/src/backend/error.rs`, `rslib/src/error/mod.rs`, `rslib/src/error/invalid_input.rs`, `rslib/src/collection/transact.rs`, `rslib/src/undo/mod.rs`, `rslib/src/tags/findreplace.rs`, `rslib/src/search/service/mod.rs` | the invalid-regex error sent with the invalid-input kind, so the three refusals share one kind; the separator check outside the transaction; the pattern compiled inside it before any note is read; a failure inside the transaction discarding the undo and redo histories and the study queues |
+
+- Correction to the driver hint above: there is no separate invalid-regex kind. The driver names the refusals as bulk-ops X1 now says.
+- Every expected outcome listed above matched the recording (`refusals` records six refusals, as its comment lists, not five): `tools/mg oracle record browser/bulk browser/find-replace` (run 20261110T110227Z-7558) and `tools/mg oracle compare` (run 20261110T110420Z-14430, 23 pass). No scenario or spec value needed a change.
+- `oracle/driver/tests/test_bulk.py` records that `invalid_regex` and `field_count` empty the undo history and `space_in_replacement` does not.
+
+Review fixes (2026-11-10, same session, after the independent review):
+
+| Spec section | Anki files read | Read for |
+|---|---|---|
+| find-replace F2 | `qt/aqt/browser/find_and_replace.py`, `qt/aqt/utils.py` | the In list built from the notes passed at opening whatever the checkbox, both histories saved on every Apply before the operation runs (empty and refused texts included), the session prefill only when the text equals the newest entry, the In choice restored only when text and position both match |
+| find-replace F4 (crate), F5 | `Cargo.toml`, `Cargo.lock`; `regex-automata` 0.4.10 interpolation (MIT/Apache, not Anki) | the `regex` and `regex-syntax` versions; a braced reference read as an unsigned integer when it parses as one (a leading `+` accepted), else as a name |
+| find-replace F6 steps 2, 4, 7 | `rslib/src/findreplace.rs`, `rslib/src/notes/mod.rs` (transform of notes, update preparation), `rslib/src/storage/note/mod.rs` (row loader, update), `rslib/src/tags/mod.rs` (split and join) | stored values read as split, a named field read at its ordinal or not at all, the field count checked on save, the note type looked up for every group of listed notes, tags split on load and joined with canonical spacing on save |
+| find-replace F7 step 3 | `rslib/src/tags/findreplace.rs`, `rslib/src/tags/service.rs`, `rslib/src/storage/note/mod.rs`, `rslib/src/storage/note/search_nids_setup.sql` | notes read through an id table keyed by note id (ascending order), tags in stored order, a note without tags never matched |
+| find-replace F9 | `qt/aqt/browser/find_and_replace.py`, `qt/aqt/operations/note.py`, `qt/aqt/operations/tag.py`, `rslib/src/collection/transact.rs` | the message chosen by whether ids were passed; histories emptied by a failure inside the transaction, kept by the separator check before it |
+| bulk-actions B1 | `qt/aqt/browser/table/table.py` | the selected rows in selection-model order |
+| bulk-actions B2 | `qt/aqt/browser/browser.py` | the toggles' direction taken from the checked state the menu shows |
+| bulk-actions B7.1 | `qt/aqt/studydeck.py`, `rslib/src/decks/service.rs`, `rslib/src/decks/mod.rs`, `rslib/src/storage/deck/mod.rs` | the filter (words at U+0020, lowercased substring match), the row selected after filtering, the default deck left out only by `did` |
+| bulk-actions B7.2 | `rslib/src/card/mod.rs` (set deck), `rslib/src/error/filtered.rs`, `ftl/core/browsing.ftl` | refusals before the transaction, the count incremented only for moved cards, the filtered-deck message |
+| bulk-actions B9 | `qt/aqt/browser/browser.py` | Remove Tags passing the text unchanged |
+| bulk-actions B10 | `qt/aqt/browser/browser.py`, `qt/aqt/profiles.py` | one shortcut per Grade Now button, the profile's answer key |
+| bulk-actions B16 | `qt/aqt/operations/tag.py`, `qt/aqt/operations/scheduling.py`, `qt/aqt/operations/card.py`, `qt/aqt/operations/note.py`, `ftl/core/browsing.ftl`, `ftl/core/scheduling.ftl` | the message of each action, the scheduling messages counting the selected cards |
+
+- Scenario values changed by the review (texts renamed away from Anki test fixtures, the KELVIN SIGN stored raw, n4's tags stored with uneven spacing, an empty-find tag case added): `browser/find-replace/tags`, `refusals`, `field-names`, `regex`, `all-fields` and `ae47` need `tools/mg oracle record` again. Expected outcomes: `tags` stores ` $9 ` for n7 and ` xaxbx ` for n10 (count 1, n11 untouched); `refusals` records the same six refusals and then count 1; `field-names` gives Aside, Meaning, Text, Word, then Aside, Extra, Text, then none, then Extra, Text; `regex` gives `kk` for n10 as before; `all-fields` stores ` zz aa bb ` for n4; `ae47` counts 3.
+- Re-recorded after the review (2026-11-10): `tools/mg oracle record` of the six scenarios (run 20261110T113139Z-99687, 6 recorded). Every expected outcome above matched, and the undo of the `tags` scenario's last step removed `a::blank::blank` from the registry. `tools/mg oracle compare browser/bulk browser/find-replace` (run 20261110T113208Z-1279) passed 23 of 23. `tools/mg similarity` on the package's specs, schemas and scenarios gave `no-corpus` without an override (run 20261110T113242Z-3191). With `MG_SIMILARITY_REFS` it passed but scanned nothing, because the scan config leaves out `specs/**` and `conformance/scenarios/**` (run 20261110T113253Z-3510). The similarity, provenance and privacy checks from the main checkout are still pending.

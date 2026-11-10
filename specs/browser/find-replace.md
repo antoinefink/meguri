@@ -1,0 +1,222 @@
+# Find and Replace
+
+Spec: browser/find-replace
+Requirements: R1200, R1201, R1202, R1203, R1204, R1205, R1206, R1207, AE47; supports R1179, R1181, R1182, R1183, R1184, R1185, R1245, R1832, R1860
+Anki: 26.09.3
+Scenarios: conformance/scenarios/browser/find-replace/
+
+Browse's Find and Replace rewrites text in the fields or in the tags of notes. This file gives what the sheet offers (F2, F3), how the find text becomes a pattern (F4) and the replacement text (F5), what the operation does to the notes it rewrites (F6, F7), which notes it reads (F8), what it reports (F9), the live preview Meguri adds (F10) and the operation's contract (F11). How a bulk operation runs (job, compute phase, commit phase, cancellation, progress, change set, undo entry) is the Meguri design doc `browser/bulk-framework` (U86); this file says only what the run computes and writes. The selection's ids come from `browser/result-sets` H12 (`resolve_selection`). The scenario ops are `specs/conformance/bulk-ops.md` X1 and X3.
+
+Terms: `now_s` and `now_ms` are the operation's instant in seconds and milliseconds. Separators, tag normalization and spelling are `tags/tags` T1 to T4. `unicase` is `text/unicode-primitives#U2`, NFC `#U3`.
+
+## F1. Inputs
+
+| Input | Values |
+|---|---|
+| Notes | a list of note ids, or **all notes** (F8) |
+| Find | a string, possibly empty |
+| Replace With | a string, possibly empty |
+| In | **All Fields**, **Tags**, or a field name |
+| Treat input as regular expression | boolean |
+| Ignore case | boolean |
+
+Anki's backend takes "match case", the inverse of Ignore case, and an empty note list for all notes. Meguri's op takes an explicit all-notes target (F11).
+
+## F2. The sheet (R1200, R1201)
+
+- **In** lists, in this order: All Fields, Tags, then the field names of F3. Opened from a field in Browse's sidebar (R1179), the field names are only that field's name, and it is preselected. Otherwise the field names are F3's for the selection as it is when the sheet opens, or, with an empty selection, for every note type (F3's Meguri listing). The list does not change while the sheet is open: turning Selected notes only off or on keeps it and the chosen entry (as in Anki, whose list always comes from the selection). When the sheet is not opened from a sidebar field, the entry chosen first is the remembered In choice when the list offers it again (below), else All Fields.
+- **Selected notes only**: on when the sheet opens; off and disabled when the selection is empty; off, and enabled when there is a selection, when opened from a sidebar field. Off means all notes (F8). The selected notes are the selection's notes: in cards mode the distinct notes of the selected cards, in notes mode the selected notes (`browser/result-sets` H12, target notes).
+- **Ignore case** is on and **Treat input as regular expression** off the first time.
+- **Remembered per device** (R1201), never in the collection (Anki keeps them in its profile, so they never sync):
+  - the last state of Ignore case and of Treat input as regular expression, saved on every Apply;
+  - a history of Find texts and one of Replace With texts, newest first, the last 30 of each (Anki keeps 50). Each Apply enters both texts before the operation runs, so a refused run enters them too (as in Anki). A text already in the history, compared code point by code point, moves to the front instead of being entered twice. Meguri never enters an empty text; Anki enters it like any other;
+  - the In choice, as the entry's text and position, saved on every Apply and restored when the list offers the same text at the same position. Anki restores it only within one app session and keeps it in memory; Meguri remembers it across launches.
+  - Within one app launch, a sheet opens with Find and with Replace With prefilled with the text of the last Apply when that text is still the newest history entry; otherwise they open empty. Anki does the same within one app session.
+- **Selected notes only** is not remembered: R1201's checkbox choices are read as the two checkboxes above. It follows the selection each time the sheet opens, as in Anki, so a replacement that was run on all notes once never silently widens a later one.
+- The sheet needs no text to run: an empty Find is a valid pattern (F4). Apply starts F11's operation; the sheet closes when it succeeds and shows F4's error when it is refused.
+
+## F3. Field names (R1200)
+
+The field names the In list offers for a set of notes (`selection_summary` in `browser/bulk-framework`):
+
+1. Take the note types of the notes that exist. Notes that no longer exist add nothing.
+2. Take every field name of those note types.
+3. Keep one entry per name under `unicase`: `Meaning` in one note type and `meaning` in another give one entry. Its spelling is the one of the note type with the lowest id among them (Anki leaves the choice to SQLite).
+4. Order the entries by `unicase`, then by code points for names `unicase` finds equal (none remain after step 3).
+
+| Note types of the notes | Field names offered |
+|---|---|
+| `Vocab` (Word, Meaning) and `Gloss` (Text, Aside) | Aside, Meaning, Text, Word |
+| `Plain` (Text, Extra) and `Gloss` (Text, Aside) | Aside, Extra, Text |
+| none (empty selection) | none: In offers All Fields and Tags only |
+
+With the all-notes target and an empty selection Anki offers no field name. Meguri's `selection_summary` for the all-notes target lists the fields of every note type of the collection (U86's design), so a collection-wide replacement in one field can be started without a selection.
+
+## F4. The pattern (R1202, R1203)
+
+The find text becomes one pattern of the Rust `regex` crate (Anki 26.09.3 builds with `regex` 1.11.2, `regex-syntax` 0.8.6): Unicode-aware, matching characters, not bytes. Meguri compiles it with the same crate and its default builder limits, and pins the crate to the 1.11 series with its matching `regex-syntax`. The accepted syntax, the Unicode tables, the limits and the error messages, which the user sees (step 5), can change between crate versions, so an update of either crate is a compatibility change reviewed against this file and its scenarios.
+
+1. **Literal** (Treat input as regular expression off): every character of the find text stands for itself. Anki escapes the text with the crate's escape function, which puts `\` before each ASCII meta character; any escaping with the same meaning is correct.
+2. **Regular expression** (on): the find text is the pattern as typed, in the crate's syntax: classes such as `\w` and `\d` are Unicode classes, `.` does not match LF, `^` and `$` anchor at the ends of the whole text unless the pattern turns on `(?m)`.
+3. **Ignore case** (on): the pattern is preceded by `(?i)`, so it matches case-insensitively by Unicode simple case folding: `k` matches `K` and U+212A KELVIN SIGN, `ss` never matches `ß`. A pattern of its own may still turn the flag off with `(?-i)`.
+4. **NFC** (In is All Fields or a field, not Tags): when `normalize_note_text` reads true (`browser/config-keys` K1: also when missing or not a boolean), the pattern text is normalized to NFC after steps 1 to 3. Escaping adds only `\` before ASCII punctuation and `(?i)` ends with `)`, neither of which composes with what follows, so for literal text this equals normalizing the find text first. So with the key on, a decomposed `cafe` U+0301 finds the stored `café` (U+00E9). With the key off the text is used as typed and finds only text stored in the same form. With In set to Tags there is no NFC step: stored tags are NFC (`tags/tags` T2), so a decomposed literal find text never matches them.
+5. A pattern the crate refuses (a syntax error, or a pattern over its compiled-size or nesting limits) refuses the whole operation with `InvalidRegex`, carrying the crate's message; Anki shows that message in a warning. Nothing is written and no undo step is recorded. A literal find text can fail only by size.
+
+The empty find text is a pattern that matches the empty string at every character boundary: before the first character, between any two characters and after the last. So it also matches once in an empty field.
+
+| Find | Regex | Ignore case | Text | Matches |
+|---|---|---|---|---|
+| `a.b` | off | on | `a.b axb` | `a.b` only |
+| `a.b` | on | on | `a.b axb` | `a.b`, `axb` |
+| `CAT` | off | off | `cat Cat CAT` | the last word |
+| `cat` | off | on | `cat Cat CAT` | all three |
+| `k` | off | on | `K`, U+212A | both |
+| `ss` | off | on | `ß` | none |
+| `(` | off | on | `f(x)` | `(` |
+| `(` | on | on | any | refused, `InvalidRegex` |
+| (empty) | off | on | `ab` | three empty matches, at 0, 1 and 2 |
+
+## F5. The replacement (R1202)
+
+Every match of the pattern in a text is replaced, left to right, without overlap, each by the replacement text read as follows:
+
+- **Literal mode**: the Replace With text exactly as typed; `$` is an ordinary character (`$5` stays `$5`).
+- **Regular-expression mode**: the crate's replacement syntax.
+
+  | In the replacement | Becomes |
+  |---|---|
+  | `$$` | one `$` |
+  | `${name}` or `${7}` | the text of that capture group: a number when the braces hold ASCII digits, optionally after one `+`, whose value fits an unsigned 64-bit integer; otherwise a name. Any text without `}` may stand between the braces, so `${+1}` is group 1, and a run of digits too long for that integer is a name, which no group has (nothing) |
+  | `$name` or `$7` | the same, the reference being the longest run of ASCII letters, digits and `_` after `$`: `$1a` is the group named `1a`, not group 1 followed by `a` |
+  | `$0`, `${0}` | the whole match |
+  | a reference to a group the pattern does not have, or one that took part in no match | nothing (the empty string) |
+  | `$` followed by anything else, or `${` with no `}` after it | the characters as they stand (`$ ` stays `$ `) |
+
+| Find (regex) | Replace With | Text | Result |
+|---|---|---|---|
+| `(\w+)@` | `${1} at` | `Foo@ example` | `Foo at example` |
+| `(?P<n>\d+)` | `${n}kg` | `12 and 7` | `12kg and 7kg` |
+| `(\d)` | `$1a` | `a1b2` | `ab` |
+| `[aeiou]` | `<$0>` | `kiwi` | `k<i>w<i>` |
+| `x` | `$$-$ -${` | `x` | `$-$ -${` |
+| `(\d)` | `<${+1}>` | `a1` | `a<1>` |
+| `^$` | `none` | (empty) | `none` |
+| (empty) | `-` (literal) | `aé` | `-a-é-` |
+
+A match whose replacement equals the matched text still counts as a match (F6, F7).
+
+## F6. In All Fields or a field (R1204, R1207)
+
+1. **Order.** The operation reads the notes in ascending note type id, then ascending note id. The order shows only in the ids of cards that step 5 adds (`notes/card-generation` G8).
+2. **Fields read.** The stored `flds` is split at every U+001F (`notes/note-records` N1), so a damaged row is read with the count it holds. All Fields: every stored value, those beyond the note type's field count included. A field name: the note type's field whose name equals it under `unicase` (`meaning` finds `Meaning`), read as the stored value at that field's ordinal, or as nothing when the row holds fewer values (no match is possible there); a note whose note type has no such field is skipped: not read, not written, not counted. The text read is the stored value, markup included: a pattern sees tags such as `<b>` and entities such as `&nbsp;` as written.
+3. **Matched notes.** A note matches when the pattern has at least one match in a field it reads. Every such field gets F5's result; the others stay as stored.
+4. **The new row.** A matched note is saved as a note update (`notes/note-records` U3) with these differences: its tags are not canonified, and the comparison below replaces U2. The stored `tags` text is split as `tags/tags` T6 step 1 does (at U+0020 and U+3000, empty pieces dropped) and joined again with one U+0020 between tags and one at each end, or stored as the empty string when no tag remains: order, case and duplicates stay, nothing is normalized, spelled or registered, but the spacing becomes canonical (` zz  aa `, `zz　aa` and `zz aa` are all stored as ` zz aa `; a text of separators only as the empty string). So every field is normalized (`notes/note-records` N2: controls other than TAB and LF removed, then NFC when the key is on), `sfld` and `csum` are computed again (`text/checksum-and-sort-field` C2 to C4), `mod` is `now_s` and `usn` -1; `guid`, `mid`, `flags` and `data` stay.
+5. **Cards.** The cards the note now requires are added (`notes/card-generation` G7), placed by `notes/deck-placement-and-position` D3; no card is ever deleted, also when a field the template needs becomes empty.
+6. **Unchanged matches** (R1204). Meguri writes a matched note only when its new `flds` differs from the stored `flds`; a note whose replaced, normalized fields equal the stored ones is not written, not counted, and adds no card. Anki writes and counts every matched note: replacing `a` with `a`, `(x)` with `$1`, or an empty find text with an empty replacement stamps the note (`mod`, `usn`, `col.mod`) and runs card generation, although `flds` stays the same. Deviation `find-replace-unchanged-match` (R1204, R1207), scenario `browser/find-replace/unchanged-match`.
+7. **Field count.** A matched note whose stored field count differs from its note type's (a damaged row, which Check Database repairs, `notes/note-records` F1) refuses the whole operation before anything is committed: `FieldCountMismatch{noteId}`, the first such note in step 1's order. A match found only in a value beyond the note type's count (step 2) is a match and refuses too. Anki fails the same way (invalid input) and keeps nothing. A damaged note the pattern does not match does not refuse the operation.
+   - **A missing note type.** A listed note whose `mid` names no note type (a damaged collection, `maintenance/check-database-notes` N4) refuses the whole operation with `NotFound{noteId}`, the first such note in step 1's order, whether or not the pattern would match it. Anki refuses it with invalid input before it reads that note type's notes. The Tags target (F7) never reads note types and has no such refusal.
+8. **Count.** The number of notes written.
+
+Examples (In `Meaning`, literal, Ignore case on, Replace With `$5`):
+
+| Note type, fields | Find `cost` gives |
+|---|---|
+| Vocab: `rate`, `the cost of it` | Meaning `the $5 of it`, written |
+| Vocab: `charge`, `Cost cost` | Meaning `$5 $5`, written |
+| Vocab: `cost`, `worth` | no match in Meaning: untouched |
+| Plain (no Meaning): `cost here`, `x` | skipped |
+
+## F7. In Tags (R1205)
+
+1. **Refusal first.** A Replace With text holding a separator (U+0020 or U+3000) refuses the operation with `InvalidInput` before the pattern is built ("replacement name cannot contain a space" is Anki's message; the wording is U219's).
+2. **Pattern and replacement.** F4 steps 1 to 3 and 5 (no NFC) and F5.
+3. **Per tag.** The listed notes that exist are handled in ascending note id, whatever the list's order; the order shows in T3's spelling, since a tag a note registers earlier in the operation spells the same name in a later note. For each note, its stored tags are split at separators, dropping empty pieces (`tags/tags` T6 step 1), and the pattern runs on each tag on its own, in stored order: `^` and `$` anchor at the ends of one tag, and no match spans two tags. A note matches when at least one tag has a match. A note without tags has nothing to run on and never matches, also with an empty find text, which matches every tagged note (F4).
+4. **The new tags.** A matched note's tag list, each tag replaced by F5's result (unmatched tags as they were), is stored as a note save stores tags (`tags/tags` T4 steps 1 to 5): empty results are dropped, each tag is normalized (T2) and spelled and registered (T3), duplicates go, the rest is sorted and joined. Only `tags`, `mod` (`now_s`) and `usn` (-1) change; fields, `sfld` and `csum` stay, nothing is normalized in them and no card is added. Tag rows the note no longer uses stay in the registry (`tags/tags` T11 removes them).
+5. **Unchanged matches.** As in F6 step 6, Meguri writes a matched note only when the new `tags` text differs from the stored one; Anki writes and counts every matched note. Same deviation.
+6. **Count.** The number of notes written.
+
+| Stored tags | Find | Regex | Replace With | Stored after |
+|---|---|---|---|---|
+| ` keep old::x ` | `old` | off | `new` | ` keep new::x ` |
+| ` new::x old::x ` | `old` | off | `new` | ` new::x ` |
+| ` OLD::y ` (Ignore case on) | `old` | off | `new` | ` new::y ` |
+| ` also solo ` | `^so` | on | `x` | ` also xlo ` |
+| ` ax x::x ` | `x$` | on | `z` | ` az x::z ` |
+| ` drop stay ` | `drop` | off | (empty) | ` stay ` |
+| ` fee ` | `fee` | off | `$9` | ` $9 ` |
+| ` a::b ` | `b` | off | `::` | ` a::blank::blank ` (T2: empty components become `blank`) |
+| ` ab ` | (empty) | off | `x` | ` xaxbx ` |
+| (empty) | (empty) | off | `x` | not matched, untouched |
+| ` stay ` | `stay` | off | `two words` | refused, step 1 |
+
+## F8. Which notes (R1200)
+
+- **Selected notes only**: the selected notes (F2), as ids. Ids of notes deleted since the selection was taken are skipped.
+- **All notes**: every note of the collection when the operation reads it (the compute phase's snapshot, `browser/bulk-framework`).
+- The considered count of F9 is the number of note ids the operation was given: the selected notes, those the field target skips (F6 step 2) included; for all notes, the number of notes read.
+
+## F9. Result (R1207, R1184)
+
+- The operation returns the count of F6 step 8 or F7 step 6 (Meguri's `affected`) and the number of notes considered (F8; Meguri's `considered`).
+- Anki's English message: with Selected notes only, "`N` of `M` notes updated" (singular "note" when `M` is 1), `M` being the selected notes; for all notes, "`N` notes updated." (singular when `N` is 1). Meguri uses the same rule: R1207's "`N` of `M` notes updated" for a target of note ids, `N` the `affected` and `M` the `considered` count, and "`N` notes updated" for the all-notes target. The wording and its plural forms are U219's.
+- **Undo.** One undoable step: "Find and Replace" (`specs/conformance/undo-ops.md` V4 `find_and_replace`) for All Fields and a field; "Update Tag" (V4 `update_tag`) for Tags, which is Anki's name for that operation. Undo restores every note row the step wrote, removes the cards it added (`engine/undo` A9), removes the tag rows it registered, and restores `col.mod`.
+- **Nothing written** (count 0): no step is recorded and `col.mod` stays; like every operation it still empties the redo history (`engine/undo` A2).
+- **Refused or cancelled** (F11): nothing is written, no step is recorded, and Meguri's undo and redo histories stay as they were (`engine/undo` M2: an op that fails and rolls back leaves both). Anki differs for `InvalidRegex` (both targets), `FieldCountMismatch` and the missing note type (F6 step 7): it refuses them inside its transaction, which empties its undo and redo histories; it keeps them for F7 step 1's refusal, made before the transaction (`specs/conformance/bulk-ops.md` X1).
+- `col.mod` becomes `now_ms` when anything was written.
+
+## F10. Live preview (Meguri, R1206)
+
+Anki shows neither a count nor an error before Apply. Meguri's sheet shows, while the user types (U86's `find_replace_preview`, run as `browser/bulk-framework` says):
+
+- **Matching notes**: the number of F8's notes that match (F6 step 3 for fields, F7 step 3 for tags) with the current inputs. It counts matches, so a note whose replacement would leave it as stored (F6 step 6) is counted here although Apply leaves it alone.
+- **Invalid pattern**: F4 step 5's refusal as an inline error: the message of the pattern Apply would build (F4 steps 1 to 4), and a range when one can be found. Apply is disabled while it shows. With Tags, a Replace With text holding a separator shows F7 step 1's refusal the same way, with no range.
+  - **The range** is a half-open interval of character offsets (Unicode scalar values) into the find text as typed, as `search/errors` E5's ranges are, and crosses the FFI in UTF-16 code units (`browser/result-sets` H15). The `regex` crate's compile error carries only a message, so the range comes from a second parse with `regex-syntax`'s parser (with the crate's default nesting limit), which reports a span with each of its errors: the find text as typed, without the `(?i)` prefix (case-insensitivity is set as a parser option instead) and without the NFC step, so its offsets are already offsets into the typed text, whatever NFC would change. Its byte offsets are converted to character offsets.
+  - No range: in literal mode (only a size limit can refuse, step 5 of F4); when that parse finds no error, as for a pattern over the compiled-size limit, which only compiling finds; or when its error differs in kind from the refusal of the built pattern (possible only when NFC changes the text).
+  - Example, regex mode, Ignore case on, the key on: the find text `e`, U+0301, `(`, `x` (four characters) is refused for an unclosed group; NFC would make it three characters, but the range is 2..3 in characters and 2..3 in UTF-16, the `(` as typed. With `😀(` the range is 1..2 in characters and 2..3 in UTF-16.
+
+## F11. The operation (engine)
+
+| Input | |
+|---|---|
+| target | note ids, or all notes |
+| find, replace | strings |
+| regex, ignore case | booleans |
+| in | all fields, tags, or a field name |
+
+- Refusals, each before anything is written, in this order: `InvalidArgument` for a target list that is empty or names a note twice (Anki takes an empty list for all notes and rewrites a repeated note once; no Meguri caller sends either), and for a field name that is empty (Anki takes an empty field name for All Fields; Meguri's sheet never offers one); `InvalidInput` (F7 step 1); `InvalidRegex{message}` (F4 step 5); then, while notes are read, `NotFound{noteId}` and `FieldCountMismatch{noteId}` (F6 step 7). F9 says what a refusal leaves of the undo and redo histories.
+- Output: `{affected, considered}` (F9), with the change set: the notes written, the cards added, the tag rows registered.
+- One engine op named `find_replace` (`engine/op-model` O1), source `UserUndoable`, one step named as F9 says. Above U24's row threshold it declares its write under the `bulk_op` catalog entry (O9), whose write phase is not cancellable. It reads the notes and computes the new rows in its compute phase and writes them in one transaction (`browser/bulk-framework`); a run cancelled before its commit leaves the collection and both histories exactly as they were and records no step (R1860).
+- A field name that no note type of the target has is not an error: every note is skipped and the count is 0.
+
+## F12. Scenarios
+
+Every scenario below uses the `find_replace` op (`specs/conformance/bulk-ops.md` X1) and observes the rows with `db_dump`, as U86's execution note asks, except `field-names`, which uses the `find_replace_fields` observation (X3). None is active. All have oracle goldens; Meguri's executor does not have the op and the kind yet (X5).
+
+| Scenario | Covers |
+|---|---|
+| `browser/find-replace/ae47` | AE47: F5 literal `$`, F6 named field across two note types, untouched notes keep `mod` and `usn`, the count, one undo step restoring every row |
+| `browser/find-replace/regex` | F4 regex mode, case flags (U+212A KELVIN SIGN stored raw with `db_exec`, since a save would compose it to `K`), literal meta characters, F5's replacement table, the empty find text |
+| `browser/find-replace/all-fields` | F6 All Fields over two note types, field name matched under `unicase`, markup in field text, `sfld` and `csum` recomputed, controls removed by the save, stored tags re-joined with canonical spacing but neither sorted nor registered (step 4) |
+| `browser/find-replace/nfc` | F4 step 4 with `normalize_note_text` on and off |
+| `browser/find-replace/card-generation` | F6 step 5: a field filled adds the card, a field emptied deletes none |
+| `browser/find-replace/tags` | F7: per-tag matching, anchors, deduplication, spelling and registration, empty results, literal `$`, the empty find text and a note without tags, the "Update Tag" step |
+| `browser/find-replace/all-notes` | F8: the all-notes target, a deleted note in the list skipped, a field name no note type has |
+| `browser/find-replace/refusals` | F4 step 5 in both targets, F7 step 1 (U+0020 and U+3000), F6 step 7 with a damaged note matched and not matched, nothing written |
+| `browser/find-replace/no-match` | F9: count 0, no step, `col.mod` kept, the earlier step still undoable, the redo history emptied |
+| `browser/find-replace/unchanged-match` | F6 step 6 and F7 step 5 on Anki: matched notes stamped and counted although unchanged; deviation `find-replace-unchanged-match` |
+| `browser/find-replace/field-names` | F3 |
+
+Meguri's tests (U86, `core/crates/meguri-engine/tests/find_replace.rs`) cover what no oracle shows: F2's sheet state and history, F3's all-notes listing, F6 step 6 and F7 step 5 on Meguri's side (the deviation's test), F10's preview count, ranges (F10's two examples) and supersession, F11's `InvalidArgument` cases, `NotFound` for a note of a missing note type, both histories kept after each refusal, cancellation before commit leaving the database digest equal and no step, and R1832's budget (150k notes in at most 5 s with progress, U242).
+
+## F13. Differences from Anki
+
+| Difference | Why | Where |
+|---|---|---|
+| A matched note whose rewrite leaves it as stored is not written or counted | R1204 | F6 step 6, F7 step 5; deviation `find-replace-unchanged-match` |
+| History of 30 entries (Anki: 50) | R1201 | F2 |
+| In choice remembered across app launches | R1201 | F2 |
+| All-notes field list from every note type | U86 design | F3 |
+| Live matching count and inline pattern error | R1206 | F10 |
+| A target naming a note twice, an empty target list or an empty field name is refused | engine invariant | F11 |
+| A refusal keeps the undo and redo histories (Anki empties both for an invalid pattern, a field-count mismatch and a missing note type) | `engine/undo` M2 | F9 |
+| An empty Find or Replace With text is not entered in its history | native history behavior | F2 |

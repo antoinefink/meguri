@@ -3,7 +3,7 @@
 Spec: conformance/browser-ops
 Requirements: R1884, R1886, R1887, R1920; supports R1118–R1131, R1139–R1145
 Anki: 26.09.3
-Scenarios: conformance/scenarios/browser/sort/, conformance/scenarios/browser/columns/
+Scenarios: conformance/scenarios/browser/sort/, conformance/scenarios/browser/columns/, conformance/scenarios/browser/modes/
 
 What the browser scenarios observe: sorted searches (an `order` member on `search` requests, `search-ops.md` S1) and Browse rows (the `browser_rows` kind). Both executors implement them with the meanings below; `conformance/schema/scenario.schema.json` and `observation.schema.json` hold their shapes. What they exercise is `specs/browser/sorting.md` and `specs/browser/columns.md`.
 
@@ -14,7 +14,7 @@ What the browser scenarios observe: sorted searches (an `order` member on `searc
 - **`unsortable`.** The output is `{error: "unsortable"}` when `column` is not one of the 19 keys, or names a column that is not sortable in the request's mode (`browser/sorting` S1).
 - **Error order.** A parse error of the query (`search/errors` E1, E4) comes first. Then `unsortable`. Then the run errors (`invalid_regex`, `search_failed`; E3). So `(` sorted by Question is `unclosed_group`, and `"re:("` sorted by Question is `unsortable` on both sides, although Meguri finds the bad pattern while it builds the plan.
 - **Oracle.** Anki's card or note search with its built-in sort for the column key and direction, on the collection as it is at that step, with the scenario clock. Anki refuses a column it cannot sort with an invalid-input error; the oracle tells it from a run error by also sorting a query that cannot fail (the empty search) by the same column in the same mode: when that is refused too, the output is `unsortable`.
-- **Meguri.** Its executor parses the query, checks the column against the catalog for the mode, builds the plan and runs the sorted search (U84 keys, U85 entry point) in the product's fold mode, as `search-ops.md` S1 says for unsorted searches. The core refuses an unsortable column with kind `unsortable_column` (`browser/sorting` S1); the executor records that refusal as `unsortable`.
+- **Meguri.** Its executor parses the query, checks the column against the catalog for the mode, builds the plan and runs the sorted search (U84 keys, U85 entry point) in the product's fold mode, as `search-ops.md` S1 says for unsorted searches. The core refuses an unsortable column with kind `unsortable_column` (`browser/sorting` S1); the executor records that refusal as `unsortable`. Once U85 lands, the browser adapter runs every `search` request of a `browser/` scenario through the entry points of `browser/result-sets` (H16): an unsorted one through `search_ids`, a sorted one through `start_search` with slow-term plans streamed.
 - Nothing in the collection changes. In particular Meguri creates no schema object (`browser/sorting` S10).
 
 ## B2. Equal-key runs
@@ -84,4 +84,4 @@ A cell text that matches none of its column's forms is recorded as `{unparsed: <
 
 ## B6. Status
 
-Stable: the oracle driver implements `order` on `search` requests and `browser_rows`, `conformance/schema/scenario.schema.json` and `observation.schema.json` hold their shapes, and the 22 scenarios of `browser/sorting` S11 and `browser/columns` C15 have goldens recorded at the current oracle pin. Meguri's runner does not implement either yet: until the testkit's scenario model reads `order` and `browser_rows`, T0 reports those scenarios as `invalid` (`dsl.md` D10), and until U84's adapter lands, `pending`. U84 marks the scenarios active in `conformance/scenarios/browser/area.yaml` as its adapter lands (`dsl.md` D9.1).
+Stable: the oracle driver implements `order` on `search` requests and `browser_rows`, `conformance/schema/scenario.schema.json` and `observation.schema.json` hold their shapes, and the 22 scenarios of `browser/sorting` S11 and `browser/columns` C15 have goldens recorded at the current oracle pin. The 11 scenarios of `browser/result-sets` H16 (`browser/modes/`) use the same two members and have no goldens yet. Meguri's runner does not implement either yet: until the testkit's scenario model reads `order` and `browser_rows`, T0 reports those scenarios as `invalid` (`dsl.md` D10), and until U84's adapter lands, `pending`. U84 marks the scenarios active in `conformance/scenarios/browser/area.yaml` as its adapter lands (`dsl.md` D9.1).
