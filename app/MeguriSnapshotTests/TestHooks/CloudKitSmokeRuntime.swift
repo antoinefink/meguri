@@ -23,7 +23,7 @@ import Foundation
     var missing: [Dependency] {
         let selected = program ?? (try? AgentHeader.read(originalHeaderBytes).program)
         return selected == .smoke || selected == nil ? [.recoveryInspector]
-            : [.peerApplyInspector, .selectedRecoveryInspector]
+            : [.selectedRecoveryInspector]
     }
     private(set) var userSteps: [String] = []
     private let admittedRun: AgentRunDirectory
@@ -52,6 +52,9 @@ import Foundation
     private var nextCommand = 1
     private var program: AgentProgram?
     private var originalRole: CloudKitSelectedOriginalRole?
+    private var selectedEdit: OriginalCloudEditFacts?
+    private var selectedExchangeAttempted = false
+    private var selectedExchangeRecord: CloudPolicyExchangeRecord?
 
     init(admittedRun: AgentRunDirectory) {
         self.admittedRun = admittedRun
@@ -529,20 +532,35 @@ import Foundation
                     .init(name: .localDurability, outcome: .pass, facts: [joined])]
         case .edit:
             guard program == .syncNowMac, let owner, let originalRole,
-                  owner.review == nil else { throw AgentFailure.execution }
+                  owner.review == nil, selectedEdit == nil else { throw AgentFailure.execution }
             _ = try retainedAdmission()
             let edited = try await originalRole.fixedEdit(generation: owner.generation)
             _ = try retainedAdmission()
             guard edited.source == .userUndoable, edited.updatedNotes == 1,
                   let revision = edited.localRevision, revision > 0 else { throw AgentFailure.execution }
+            selectedEdit = edited
             let digest = CloudKitSmokeGeneratedInput.hex(edited.noteDigest)
             let facts = [AgentFact(name: .localCommitted, count: edited.seq, digest: digest, operation: "n1"),
                          AgentFact(name: .localDurable, count: revision, digest: digest, operation: "n1")]
             for fact in facts { try observe(fact) }
             return [.init(name: .localDurability, outcome: .pass, facts: facts)]
         case .observe:
-            // Peer readback still requires durable apply provenance.
-            throw AgentFailure.implementationMissing
+            guard program == .syncNowPhone, let owner, let originalRole, let backend,
+                  selectedExchangeRecord != nil, owner.review == nil else { throw AgentFailure.execution }
+            await owner.sync.waitForInputs()
+            await owner.sync.drainOperations()
+            await owner.sync.waitForInputs()
+            guard !owner.sync.operationFailed else { throw AgentFailure.execution }
+            try Task.checkCancellation()
+            _ = try retainedAdmission()
+            let current = try await originalRole.observe(generation: owner.generation)
+            _ = try retainedAdmission()
+            try Task.checkCancellation()
+            var facts = try CloudKitSelectedSyncProof.peerFacts(current)
+            facts += try evidence.requireSelectedFetch(current.entity)
+            try backend.checkFailure()
+            for fact in facts { try observe(fact) }
+            return [.init(name: .localDurability, outcome: .pass, facts: facts)]
         }
     }
     private func originalExchange(owner: ReviewCollection, backend: CloudKitSmokeBackend) async throws -> CloudPolicyExchangeRecord {
@@ -557,12 +575,35 @@ import Foundation
             })
     }
     private func selectedExchange(observe: @escaping (AgentFact) throws -> Void) async throws -> [AgentCheck] {
-        guard let owner, let backend, owner.review == nil else { throw AgentFailure.execution }
-        // Receiving requires no local n1/c1/r1/m1 mutation. The selected wrapper
-        // still needs its own durable note/epoch evidence before a done record.
+        guard let owner, let backend, let originalRole, owner.review == nil,
+              !selectedExchangeAttempted else { throw AgentFailure.execution }
+        if program == .syncNowMac {
+            guard let selectedEdit else { throw AgentFailure.execution }
+            try CloudKitSelectedSyncProof.requireSource(
+                try await originalRole.observe(generation: owner.generation), edited: selectedEdit)
+        } else if program != .syncNowPhone { throw AgentFailure.execution }
+        _ = try retainedAdmission()
+        try Task.checkCancellation()
+        let boundary = try evidence.acknowledgementBoundary()
+        selectedExchangeAttempted = true
         let exchange = try await originalExchange(owner: owner, backend: backend)
-        for fact in try CloudKitSelectedSyncProof.exchangeFacts(exchange) { try observe(fact) }
-        throw AgentFailure.implementationMissing
+        selectedExchangeRecord = exchange
+        var facts = try CloudKitSelectedSyncProof.exchangeFacts(exchange)
+        if program == .syncNowMac {
+            guard let selectedEdit else { throw AgentFailure.execution }
+            await owner.sync.drainOperations()
+            await owner.sync.waitForInputs()
+            guard !owner.sync.operationFailed else { throw AgentFailure.execution }
+            let current = try await originalRole.observe(generation: owner.generation)
+            _ = try retainedAdmission()
+            try CloudKitSelectedSyncProof.sourceAcknowledged(current, edited: selectedEdit)
+            facts += try evidence.requireSelectedAcknowledgement(current.entity,
+                observations: try await backend.workflow.observations(), beforeManual: boundary)
+            facts.append(.init(name: .localDurable, count: current.entity.revision,
+                digest: CloudKitSmokeGeneratedInput.hex(current.entity.digest), operation: "n1"))
+        }
+        for fact in facts { try observe(fact) }
+        return [.init(name: .coordinatorResult, outcome: .pass, facts: facts)]
     }
     private func requireInitialPreview(_ summary: CloudConnectionSummary) throws {
         guard summary.localCollectionPresent, !summary.initialAdoptionRequired, !summary.localEmpty,

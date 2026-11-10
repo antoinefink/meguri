@@ -946,8 +946,8 @@ pub fn test_cloud_smoke_observation(
 #[path = "test_hooks_cloud_original.rs"]
 mod cloud_original;
 pub use cloud_original::{
-    CloudOriginalEditFacts, CloudOriginalEditJob, CloudOriginalEditResult, CloudOriginalOwnedFacts, CloudOriginalRole,
-    CloudOriginalRoleFacts,
+    CloudOriginalEditFacts, CloudOriginalEditJob, CloudOriginalEditResult, CloudOriginalObservation,
+    CloudOriginalOwnedFacts, CloudOriginalRole, CloudOriginalRoleFacts,
 };
 
 /// Inspect only admitted, bounded original snapshot bytes. No native ID, path,
@@ -959,6 +959,10 @@ pub fn test_cloud_original_role(main: Vec<u8>, wal: Option<Vec<u8>>) -> Result<A
 }
 #[uniffi::export]
 impl CloudOriginalRole {
+    pub fn observe(&self) -> Result<CloudOriginalObservation, CoreError> {
+        callback::enter("CloudOriginalRole.observe");
+        self.observe_inner()
+    }
     pub fn facts(&self) -> Result<CloudOriginalRoleFacts, CoreError> {
         callback::enter("CloudOriginalRole.facts");
         Ok(self.facts_inner())

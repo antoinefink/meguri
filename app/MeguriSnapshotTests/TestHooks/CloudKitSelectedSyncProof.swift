@@ -3,6 +3,25 @@ import CoreBridge
 import Foundation
 
 nonisolated enum CloudKitSelectedSyncProof {
+    static func requireSource(_ current: OriginalCloudObservation, edited: OriginalCloudEditFacts) throws {
+        guard current.generation == edited.generation, current.seq >= edited.seq,
+              current.observedSeq == edited.seq, current.qChanged,
+              let revision = edited.localRevision, revision > 0,
+              current.entity.label == "n1", current.entity.revision == revision,
+              current.entity.digest == edited.noteDigest, current.entity.digest.count == 32 else { throw AgentFailure.execution }
+    }
+    static func sourceAcknowledged(_ current: OriginalCloudObservation, edited: OriginalCloudEditFacts) throws {
+        try requireSource(current, edited: edited)
+        guard current.entity.acknowledged, current.entity.ackedRevision == edited.localRevision,
+              current.entity.ackedEnvelopeDigest.count == 32 else { throw AgentFailure.execution }
+    }
+    static func peerFacts(_ current: OriginalCloudObservation) throws -> [AgentFact] {
+        guard current.qChanged, current.entity.label == "n1", current.entity.digest.count == 32,
+              let applied = current.appliedSeq, applied > 0,
+              applied == current.observedSeq, applied <= current.seq else { throw AgentFailure.implementationMissing }
+        return [.init(name: .localDurable, count: applied,
+                      digest: CloudKitSmokeGeneratedInput.hex(current.entity.digest), operation: "n1")]
+    }
     static func controlFacts(_ control: SelectedCloudControlObservation, generation: UInt64) throws -> [AgentFact] {
         guard control.generation == generation, control.status == .proven,
               control.bindingMatchesEpoch == .proven, control.requiredScanComplete,
@@ -35,8 +54,14 @@ nonisolated enum CloudKitSelectedSyncProof {
         // unobserved, never zero. Keep every observed counter independently.
         for (label, count) in [("media-upload-pending", media.uploadFiles), ("media-download-pending", media.downloadFiles),
                                ("media-missing", media.missingNames), ("media-unknown", media.unknownBlobs),
-                               ("media-uploads-running", media.uploadsRunning), ("media-downloads-running", media.downloadsRunning)] {
+                               ("media-uploads-running", media.uploadsRunning), ("media-downloads-running", media.downloadsRunning),
+                               ("media-upload-bytes", media.uploadBytes), ("media-download-bytes", media.downloadBytes),
+                               ("media-remaining-download-ms", media.remainingDownloadMs)] {
             if let count { facts.append(.init(name: .syncResult, count: count, operation: label)) }
+        }
+        for (label, observed) in [("media-root-acked", media.rootAcked), ("media-zone-missing", media.zoneMissing),
+                                  ("media-no-space", media.noSpace)] {
+            if let observed { facts.append(.init(name: .syncResult, count: observed ? 1 : 0, operation: label)) }
         }
         return facts
     }

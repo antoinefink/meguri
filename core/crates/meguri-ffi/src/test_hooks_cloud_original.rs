@@ -73,6 +73,16 @@ pub struct CloudOriginalOwnedFacts {
     pub q_changed: bool,
 }
 
+#[derive(Clone, uniffi::Record)]
+pub struct CloudOriginalObservation {
+    pub generation: u64,
+    pub seq: u64,
+    pub q_changed: bool,
+    pub entity: super::CloudSmokeEntity,
+    pub observed_seq: u64,
+    pub applied_seq: Option<u64>,
+}
+
 #[derive(Clone)]
 struct Baseline {
     note: c::Note,
@@ -378,6 +388,82 @@ impl Baseline {
     }
 }
 impl CloudOriginalRole {
+    pub(crate) fn observe_inner(&self) -> Result<CloudOriginalObservation, CoreError> {
+        let host = checked(runtime::host())?;
+        let collection = checked(host.cloud_connection_collection())?;
+        let generation = collection.generation();
+        let bound_generation = {
+            let owner = self.owner.lock().unwrap_or_else(PoisonError::into_inner);
+            let (bound, bound_generation) = owner.as_ref().ok_or_else(invalid)?;
+            if !bound.upgrade().is_some_and(|h| Arc::ptr_eq(&h, &host)) {
+                return Err(invalid_category("observation.owner_or_generation"));
+            }
+            *bound_generation
+        };
+        let core = host.cloud_runtime().ok_or_else(invalid)?;
+        if bound_generation != generation {
+            // Existing-collection adoption replaces the collection inside the
+            // retained Host. Only its actual completed activation bridges this
+            // generation; an ordinary successor opening cannot rebind a role.
+            use meguri_sync::cloud::selected_observation::{Proof, Provenance};
+            let adopted = checked(core.selected_control_for_testing(&collection))?;
+            if generation <= bound_generation
+                || adopted.status != Proof::Proven
+                || adopted.provenance != Some(Provenance::RetainedAdoption)
+                || adopted.activation != Proof::Proven
+                || adopted.owned_backup != Proof::Proven
+            {
+                return Err(invalid_category("observation.adoption_authority"));
+            }
+        }
+        let reader = checked(collection.reader(ReaderRole::Query))?;
+        let snapshot = checked(reader.snapshot())?;
+        let current = capture(&*snapshot, NoteId(self.baseline.note.id))?;
+        let q_changed = self.baseline.compare(&current)?;
+        let digest = checked(c::Payload::Note(current.note).payload_digest())?;
+        let (e, applied_seq) = checked(core.original_note_observation_for_testing(
+            &collection,
+            self.baseline.note.id,
+            snapshot.wal_identity(),
+            snapshot.seq(),
+            digest,
+        ))?;
+        let actual = checked(runtime::host())?;
+        if !Arc::ptr_eq(&actual, &host)
+            || snapshot.generation() != generation
+            || collection.last_seq() != snapshot.seq()
+            || checked(host.cloud_connection_generation())? != generation
+        {
+            return Err(invalid_category("observation.owner_changed"));
+        }
+        Ok(CloudOriginalObservation {
+            generation: generation.0,
+            seq: snapshot.seq().0,
+            q_changed,
+            observed_seq: e.observed_seq,
+            applied_seq,
+            entity: super::CloudSmokeEntity {
+                label: "n1".into(),
+                record_name: e.name,
+                revision: e.local_rev,
+                acked_revision: e.acked_rev,
+                digest: digest.to_vec(),
+                acked_envelope_digest: c::sha256(&e.acked_envelope.0).to_vec(),
+                acknowledged: e.local_rev > 0
+                    && e.acked_rev == e.local_rev
+                    && e.acked_payload_digest == digest
+                    && e.mark.is_none()
+                    && e.in_flight.is_empty()
+                    && e.server_erev > 0
+                    && !e.acked_system_fields.is_empty()
+                    && !e.acked_envelope.0.is_empty(),
+                media_bytes: None,
+                media_sha256: None,
+                blob_present: false,
+                media_change_counter: None,
+            },
+        })
+    }
     pub(crate) fn facts_inner(&self) -> CloudOriginalRoleFacts {
         self.facts.clone()
     }

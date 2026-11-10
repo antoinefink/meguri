@@ -24,6 +24,9 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
         var phase = 0
         var returned: UInt64?
         var saved: Set<String> = []
+        var received: [String: Data] = [:]
+        var zone: String?
+        var group: String?
     }
     private struct Batch {
         let alias: String
@@ -218,21 +221,40 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
                 let kind: String
                 let batch: UInt64?
                 let saved: [CloudRecord]
+                var received: [String: Data] = [:]
+                var zone: String?
+                var group: String?
                 switch observation.event {
                 case .stateUpdate: kind = "state"; batch = nil; saved = []
                 case .sent(let id, let records, let failures, let deleted, let failedDeletes):
                     guard failures.isEmpty, deleted.isEmpty, failedDeletes.isEmpty else { throw AgentFailure.execution }
                     kind = "sent"; batch = id; saved = records
                 case .deliveryFailed: throw AgentFailure.execution
+                case .willFetch(let id, _) where s.selectedPublication:
+                    kind = "fetch-start"; batch = nil; saved = []; group = id
+                case .willFetchZone(let id) where s.selectedPublication:
+                    kind = "fetch-zone-start"; batch = nil; saved = []; zone = id
+                case .fetched(let id, let records, let deleted) where s.selectedPublication:
+                    guard deleted.isEmpty, Set(records.map(\.name)).count == records.count else { throw AgentFailure.execution }
+                    kind = "fetched"; batch = nil; saved = []; zone = id
+                    received = Dictionary(uniqueKeysWithValues: records.map { ($0.name, Self.hash($0.envelope)) })
+                case .didFetchZone(let id, let error) where s.selectedPublication:
+                    guard error == nil else { throw AgentFailure.execution }
+                    kind = "fetch-zone-end"; batch = nil; saved = []; zone = id
+                case .didFetch(let id, _) where s.selectedPublication:
+                    kind = "fetch-end"; batch = nil; saved = []; group = id
                 default: return
                 }
                 if case .delivered = observation.phase {
                     guard s.callbacks.count < 1024, observation.ordinal > s.lastOrdinal,
                           s.callbacks.values.allSatisfy({ $0.phase == 3 }) else { throw AgentFailure.execution }
                     s.lastOrdinal = observation.ordinal
-                    s.callbacks[observation.ordinal] = Callback(alias: "sdk\(s.callbacks.count + 1)", kind: kind, batch: batch)
+                    var cb = Callback(alias: "sdk\(s.callbacks.count + 1)", kind: kind, batch: batch)
+                    cb.received = received; cb.zone = zone; cb.group = group
+                    s.callbacks[observation.ordinal] = cb
                 }
-                guard var cb = s.callbacks[observation.ordinal], cb.kind == kind, cb.batch == batch else { throw AgentFailure.execution }
+                guard var cb = s.callbacks[observation.ordinal], cb.kind == kind, cb.batch == batch,
+                      cb.received == received, cb.zone == zone, cb.group == group else { throw AgentFailure.execution }
                 let expected: Int
                 let suffix: String
                 switch observation.phase {
@@ -316,6 +338,40 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
                       let batch = cb.batch, let alias = s.batches[batch]?.alias else { throw AgentFailure.execution }
                 return .init(name: .applied, count: cb.returned, engine: "engine1", operation: entity.label + "-" + cb.alias + "-" + alias + "-ack")
             }
+        }
+    }
+    func acknowledgementBoundary() throws -> UInt64 {
+        try state.withLock { s in
+            guard !s.failed else { throw AgentFailure.execution }
+            return s.tick
+        }
+    }
+    func requireSelectedAcknowledgement(_ entity: SmokeCloudEntity, observations: [CloudWorkflowObservation],
+                                        beforeManual: UInt64) throws -> [AgentFact] {
+        let joined = try requireAcknowledgements([entity], observations: observations)
+        guard let returned = joined.first?.count else { throw AgentFailure.execution }
+        // This identifies the original ACK chain. It never claims that the
+        // requested manual exchange produced a callback from another flight.
+        return joined + [.init(name: .stateSaved, count: entity.revision,
+            digest: CloudKitSmokeGeneratedInput.hex(entity.digest),
+            operation: returned <= beforeManual ? "n1-earlier-original-ack" : "n1-original-ack-after-manual-request")]
+    }
+    func requireSelectedFetch(_ entity: SmokeCloudEntity) throws -> [AgentFact] {
+        try state.withLock { s in
+            guard !s.failed, s.selectedPublication else { throw AgentFailure.execution }
+            let callbacks = s.callbacks.values.filter { $0.phase == 3 }.sorted { ($0.returned ?? 0) < ($1.returned ?? 0) }
+            for page in callbacks where page.kind == "fetched" && page.received[entity.recordName] == entity.ackedEnvelopeDigest {
+                guard let pageAt = page.returned, let zone = page.zone,
+                      let start = callbacks.last(where: { $0.kind == "fetch-start" && ($0.returned ?? .max) < pageAt }),
+                      let startAt = start.returned,
+                      let zoneStart = callbacks.last(where: { $0.kind == "fetch-zone-start" && $0.zone == zone && ($0.returned ?? .max) < pageAt }),
+                      let zoneStartAt = zoneStart.returned, zoneStartAt > startAt,
+                      let zoneEnd = callbacks.first(where: { $0.kind == "fetch-zone-end" && $0.zone == zone && ($0.returned ?? 0) > pageAt }),
+                      let zoneEndAt = zoneEnd.returned,
+                      callbacks.contains(where: { $0.kind == "fetch-end" && $0.group == start.group && ($0.returned ?? 0) > zoneEndAt }) else { continue }
+                return [.init(name: .engineCallback, count: pageAt, engine: "engine1", operation: "n1-original-fetched-returned")]
+            }
+            throw AgentFailure.implementationMissing
         }
     }
     func joined() throws -> [AgentFact] {

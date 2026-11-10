@@ -340,5 +340,58 @@ import Testing
         unowned.sdk(.init(origin: "generated-engine", ordinal: 1, event: sent, phase: .committed), current: current())
         #expect(throws: AgentFailure.execution) { try unowned.check() }
     }
+    @Test func selectedAckKeepsOriginalAttributionAndRejectsHeldFailedAndDifferentEnvelope() throws {
+        for variant in 0..<6 {
+            let evidence = try ledger()
+            let record = CloudRecord(name: "generated-record-n1", envelope: Data([1]), systemFields: Data([2]))
+            let boundaryBefore = try evidence.acknowledgementBoundary()
+            evidence.batch(origin: "generated-engine", batch: .init(id: 9, saves: [record], deletes: []), proof: nil, current: current())
+            let sent = CloudEngineEvent.sent(batchID: 9, saved: [record], failed: [], deleted: [])
+            for phase in variant == 2 ? [CloudSDKObservationPhase.delivered, .committed] : [.delivered, .committed, .returned] {
+                evidence.sdk(.init(origin: "generated-engine", ordinal: 1, event: sent, phase: phase), current: current())
+            }
+            if variant != 2 && variant != 3 { stateCallback(evidence, ordinal: 2) }
+            let boundary = variant == 1 ? boundaryBefore : try evidence.acknowledgementBoundary()
+            let removed: [CloudWorkflowObservation] = variant == 4 ? [] : [.savedPendingRemoved(name: record.name, requestID: 9)]
+            if variant < 2 {
+                let facts = try evidence.requireSelectedAcknowledgement(entity("n1"), observations: removed, beforeManual: boundary)
+                #expect(facts.last?.operation == (variant == 0 ? "n1-earlier-original-ack" : "n1-original-ack-after-manual-request"))
+                #expect(!facts.contains { $0.operation?.contains("manual-exchange-ack") == true })
+            } else {
+                #expect(throws: AgentFailure.execution) {
+                    try evidence.requireSelectedAcknowledgement(entity("n1", ackEnvelopeByte: variant == 5 ? 2 : 1), observations: removed, beforeManual: boundary)
+                }
+            }
+        }
+    }
+    @Test func selectedFetchedNeedsEligibleOriginalCallbacksCommitReturnAndExactEnvelope() throws {
+        for variant in 0..<8 {
+            let evidence = CloudKitSmokeEvidence()
+            try evidence.setGeneration(11, selectedPublication: true)
+            let record = CloudRecord(name: "generated-record-n1", envelope: Data([1]), systemFields: Data([2]))
+            var events: [CloudEngineEvent] = [.willFetch(groupID: "generated-fetch", reason: .manual),
+                .willFetchZone(zone: "generated-zone"), .fetched(zone: "generated-zone", records: [record], deleted: []),
+                .didFetchZone(zone: "generated-zone", error: nil), .didFetch(groupID: "generated-fetch", reason: .manual)]
+            if variant == 1 { events.removeFirst() }
+            if variant == 2 { events.removeLast() }
+            if variant == 3 { events[4] = .didFetch(groupID: "other-fetch", reason: .manual) }
+            if variant == 4 { events[3] = .didFetchZone(zone: "other-zone", error: nil) }
+            if variant == 5 { events[3] = .didFetchZone(zone: "generated-zone", error: .networkFailure) }
+            if variant == 6 { events = Array(events.prefix(3)) }
+            for (i, event) in events.enumerated() {
+                let phases: [CloudSDKObservationPhase] = variant == 6 && i == 2 ? [.delivered, .committed] : [.delivered, .committed, .returned]
+                for phase in phases { evidence.sdk(.init(origin: "generated-engine", ordinal: UInt64(i + 1), event: event, phase: phase), current: current()) }
+            }
+            if variant == 0 {
+                let facts = try evidence.requireSelectedFetch(entity("n1"))
+                #expect(facts.map(\.operation) == ["n1-original-fetched-returned"])
+                #expect(!facts.contains { $0.name == .localDurable }) // Callback is only one side of the apply join.
+            } else {
+                #expect(throws: (any Error).self) {
+                    try evidence.requireSelectedFetch(entity("n1", ackEnvelopeByte: variant == 7 ? 2 : 1))
+                }
+            }
+        }
+    }
 }
 #endif

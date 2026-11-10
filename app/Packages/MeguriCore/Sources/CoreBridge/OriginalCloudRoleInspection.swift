@@ -43,6 +43,26 @@ public struct OriginalCloudEditFacts: Sendable {
     }
 }
 
+// Native record correlation stays in process. Only the bounded canonical
+// digest and sequence facts may be projected into the agent journal.
+public struct OriginalCloudObservation: Sendable {
+    public let generation: UInt64
+    public let seq: UInt64
+    public let qChanged: Bool
+    public let entity: SmokeCloudEntity
+    public let observedSeq: UInt64
+    public let appliedSeq: UInt64?
+    internal init(_ r: MeguriCoreBindings.CloudOriginalObservation) {
+        generation = r.generation; seq = r.seq; qChanged = r.qChanged
+        observedSeq = r.observedSeq; appliedSeq = r.appliedSeq
+        let e = r.entity
+        entity = .init(label: e.label, recordName: e.recordName, revision: e.revision,
+            ackedRevision: e.ackedRevision, digest: e.digest, ackedEnvelopeDigest: e.ackedEnvelopeDigest,
+            acknowledged: e.acknowledged, mediaBytes: e.mediaBytes, mediaSHA256: e.mediaSha256,
+            blobPresent: e.blobPresent, mediaChangeCounter: e.mediaChangeCounter)
+    }
+}
+
 // The caller retains verified-source authority through each await. Rust retains
 // the full canonical baseline and all native identities behind this handle.
 public actor OriginalCloudRoleInspection: CustomStringConvertible, CustomDebugStringConvertible {
@@ -86,6 +106,12 @@ public actor OriginalCloudRoleInspection: CustomStringConvertible, CustomDebugSt
         return try await QueryLane.shared.call(.cloudOriginalRoleValidateOwned) {
             let r = try raw.validateOwned()
             return OriginalCloudOwnedFacts(generation: r.generation, seq: r.seq, noteDigest: r.noteDigest, qChanged: r.qChanged)
+        }
+    }
+    public func observe() async throws -> OriginalCloudObservation {
+        let raw = raw
+        return try await QueryLane.shared.call(.cloudOriginalRoleObserve) {
+            try OriginalCloudObservation(raw.observe())
         }
     }
 }

@@ -152,6 +152,36 @@ fn changing_live_collection_does_not_change_retained_original_witness() {
     assert_eq!(role.facts().unwrap(), baseline);
     assert_eq!(bytes(&original), original_bytes);
 }
+
+#[test]
+fn canonical_original_note_digest_includes_every_represented_metadata_cell() {
+    for cell in [
+        "mod=mod+1",
+        "csum=csum+1",
+        "sfld='different stored sort'",
+        "tags=' different-tag '",
+        "flags=flags+1",
+        "data='different opaque data'",
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        generate(temp.path());
+        let before = bytes(temp.path());
+        let original = test_cloud_original_role(before.0, before.1).unwrap();
+        let db = PlainDatabase::open(&temp.path().join("collection.anki2")).unwrap();
+        db.execute_batch(&format!("UPDATE notes SET {cell} WHERE id=(SELECT min(id) FROM notes)"))
+            .unwrap();
+        let after = bytes(temp.path());
+        let observed = test_cloud_original_role(after.0, after.1).unwrap();
+        assert_ne!(
+            observed.facts().unwrap().note_digest,
+            original.facts().unwrap().note_digest
+        );
+        assert_ne!(
+            observed.facts().unwrap().baseline_digest,
+            original.facts().unwrap().baseline_digest
+        );
+    }
+}
 #[test]
 fn missing_invalid_ambiguous_relations_empty_and_corrupt_images_fail_closed() {
     for sql in [
@@ -363,6 +393,10 @@ fn fixed_edit_uses_real_owned_host_and_normal_update_with_committed_readback_and
             assert_eq!(wait(open().id), JobOutcome::Succeeded);
             assert!(!role.validate_owned().unwrap().q_changed);
             assert!(
+                role.observe().is_err(),
+                "successor Host cannot regain original observation authority"
+            );
+            assert!(
                 role.clone().start_fixed_edit().is_err(),
                 "validation cannot rebind edit authority to a successor Host"
             );
@@ -524,6 +558,10 @@ fn fixed_edit_uses_real_owned_host_and_normal_update_with_committed_readback_and
         }
         meguri_ffi::lifecycle::close_collection().unwrap();
         assert!(role.validate_owned().is_err());
+        assert!(
+            role.observe().is_err(),
+            "a closed Host supplies no current ACK/apply observation"
+        );
         assert_eq!(bytes(&original), original_bytes);
     }
 }

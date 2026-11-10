@@ -331,6 +331,77 @@ impl Runtime {
         self.state().incoming.receipts.clone()
     }
 
+    /// Fixed-role reader support. Inputs come from the caller's held native
+    /// snapshot, never a command or journal. No work is advanced by this read.
+    #[cfg(feature = "test-hooks")]
+    pub fn original_note_observation_for_testing(
+        &self,
+        collection: &Collection,
+        id: i64,
+        identity: meguri_engine::WalIdentity,
+        seq: Seq,
+        digest: [u8; 32],
+    ) -> Result<(workflow::EntityFacts, Option<u64>), RuntimeError> {
+        let account = self.publication_account()?;
+        let guard = {
+            let s = self.state();
+            let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+            if account != b.binding.facts.account || s.tracking_stopped {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+            ScanGuard {
+                invalidation: s.invalidation,
+                binding: b.binding.id,
+                open: b.open_counter,
+                generation: b.evidence.generation,
+                file: b.file,
+                incarnation: s.incarnation,
+            }
+        };
+        self.with_scan(&guard, collection, |s| {
+            if identity.generation() != guard.generation
+                || identity.native_file() != guard.file.pair()
+                || collection.last_seq() != seq
+                || s.tracking_stopped
+            {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+            let store = s.store.as_ref().ok_or(Error::Database)?;
+            let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+            let name = codec::entity_name(&b.binding.facts.record_key.0, codec::Kind::Note, &codec::id_key(id))
+                .map_err(|_| Error::InvalidData)?;
+            let entity = store.entity_dump(guard.binding, &name)?.ok_or(Error::InvalidData)?;
+            if entity.kind != codec::Kind::Note
+                || entity.key != codec::id_key(id)
+                || entity.tombstone_at.is_some()
+                || entity.observer_open != guard.open
+                || entity.observed_generation != guard.generation.0
+                || entity.observed_seq > seq.0
+                || entity.payload.payload_digest().map_err(|_| Error::InvalidData)? != digest
+            {
+                return Err(Error::InvalidData.into());
+            }
+            let intents = store.apply_intents(guard.binding)?;
+            let inbox = store.inbox(guard.binding)?;
+            let applied = s.incoming.runs.iter().rev().find(|run| {
+                !s.incoming.running
+                    && run.native_file == guard.file
+                    && run.generation == guard.generation.0
+                    && run.seq == entity.observed_seq
+                    && run.seq <= seq.0
+                    && !run.entry_ids.is_empty()
+                    && run.changed_keys.contains(&name)
+                    && !intents.iter().any(|i| i.id == run.intent_id)
+                    && !inbox.iter().any(|e| run.entry_ids.contains(&e.id))
+                    && s.incoming
+                        .receipts
+                        .iter()
+                        .any(|r| r.identity() == identity && r.through().0 >= run.seq)
+            });
+            Ok((entity, applied.map(|r| r.seq)))
+        })
+    }
+
     /// Non-SDK transport boundary. It persists the very same facts as adapter_fetched.
     pub fn receive_collection_records(&self, instance: &str, records: &[Saved]) -> Result<(), RuntimeError> {
         let at = self.adapter_now()?;

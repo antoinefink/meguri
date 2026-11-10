@@ -174,6 +174,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let cloudOriginalRoleStartFixedEdit = BridgeCall("CloudOriginalRole.start_fixed_edit")
     public static let cloudOriginalEditResult = BridgeCall("CloudOriginalEditResult.result")
     public static let cloudOriginalRoleValidateOwned = BridgeCall("CloudOriginalRole.validate_owned")
+    public static let cloudOriginalRoleObserve = BridgeCall("CloudOriginalRole.observe")
     public static let testSmokeIntegrity = BridgeCall("test_smoke_integrity")
     public static let testCloudSmokeBatch = BridgeCall("test_cloud_smoke_batch")
     public static let testCloudSmokeReview = BridgeCall("test_cloud_smoke_review")
@@ -559,7 +560,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         startCreateBackup, createBackupResultOutcome, startRestoreBackup, restoreBackupResultOutcome, startRunDueMaintenance, dueMaintenanceResultOutcome, listBackups, backupLimits, setBackupLimits, maintenanceStatus,
         startCollectionExport, collectionExportResultOutcome, collectionExportArtifactMetadata, collectionExportArtifactAcquire, collectionExportArtifactDiscard, collectionExportLeasePath, collectionExportLeaseFinish, startCollectionExportSave, collectionExportSaveResultOutcome,
         startCollectionInspection, collectionInspectResultOutcome, collectionInspectionFacts, collectionInspectionDiscard, startCollectionActivation, collectionActivationResultOutcome, jobProgressSetListener,
-        testCloudSelectedControl, testCloudSelectedPublicationEvent, testCloudOriginalRole, cloudOriginalRoleFacts, cloudOriginalRoleValidateOwned, cloudOriginalRoleStartFixedEdit, cloudOriginalEditResult, testSmokeIntegrity, testCloudSmokeObservation, testCloudSmokeBatch, testCloudSmokeReview, testCloudStartNativePolicyOpen, testCloudRequireNativePolicyBaseline, testCloudPolicyExchangeObservation, startOpen, prepareCloudConnectionHost, closeCollection, collectionLifecycle, waitCollectionAvailable, deckTreeWithCounts, allDeckNames, matchDeckName, deckStudyState, deckDescriptionHtml,
+        testCloudSelectedControl, testCloudSelectedPublicationEvent, testCloudOriginalRole, cloudOriginalRoleFacts, cloudOriginalRoleValidateOwned, cloudOriginalRoleObserve, cloudOriginalRoleStartFixedEdit, cloudOriginalEditResult, testSmokeIntegrity, testCloudSmokeObservation, testCloudSmokeBatch, testCloudSmokeReview, testCloudStartNativePolicyOpen, testCloudRequireNativePolicyBaseline, testCloudPolicyExchangeObservation, startOpen, prepareCloudConnectionHost, closeCollection, collectionLifecycle, waitCollectionAvailable, deckTreeWithCounts, allDeckNames, matchDeckName, deckStudyState, deckDescriptionHtml,
         startSession, reviewSessionJobResult, peekFirstCard, sessionHead, refreshSessionCard, renderSessionHead, answerSession, endSession, peekReviewUndo, flushReviewForBackground,
         coreVersion, coreBuildInfo, setEventListener, cancelTokenNew, cancelTokenCancel, cancelTokenIsCancelled, renderCard, compareTypedAnswer, cardExcerpts,
         deckDeletionJobResult, addDeck, startRenameDeck, startMoveDecks, startCollapseDecks,

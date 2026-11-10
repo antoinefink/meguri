@@ -20,6 +20,18 @@ import Foundation
         return CloudKitSelectedOriginalRole(source: source, reader: reader)
     }
     func revalidate() throws { try source.revalidate() }
+    func observe(generation: UInt64) async throws -> OriginalCloudObservation {
+        try source.revalidate()
+        do {
+            let result = try await reader.observe()
+            try source.revalidate()
+            guard result.generation == generation else { throw AgentFailure.execution }
+            return result
+        } catch {
+            try source.revalidate()
+            throw error
+        }
+    }
     func fixedEdit(generation: UInt64) async throws -> OriginalCloudEditFacts {
         try source.revalidate()
         do {
