@@ -178,3 +178,10 @@ widget before Xcode runs. The widget target's product and unrelated app
 files stay in place. The original signature and entitlement checks still
 apply before the first freeze. Focused checks `33337` passed four wrappers,
 including the exact removal boundary and symlink refusal.
+
+Run `34620` passed both signed builds (`36041` and `37912`) and Mac
+delivery (`39447`). The simulator accepted the install command, then
+delivery `40169` refused at `simulator-readback/install-readback`. The
+installed inventory did not match the frozen product. The runner joined
+its work and released the simulator reservation. No CloudKit operation ran.
+The two existing Mac widget cleanup tests passed in `37066`.
