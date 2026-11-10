@@ -78,6 +78,40 @@ class CodeFingerprintTests(unittest.TestCase):
             with self.assertRaises(m.v.Refused):m.code_fingerprint(raw)
 
 
+class CodeDifferenceDiagnosticTests(unittest.TestCase):
+    def test_exact_vmsize_and_payload_deltas_are_classified_without_bytes(self):
+        before=code_image_fixture();after=bytearray(code_image_fixture(payload=b'BAD_CODE'))
+        struct.pack_into('<Q',after,64,8192)
+        result=m.code_difference(before,bytes(after));item=result['slices'][0]
+        self.assertTrue(item['changed_fields']['linkedit_vmsize'])
+        self.assertEqual(item['before']['fields']['linkedit_vmsize'],4096)
+        self.assertEqual(item['after']['fields']['linkedit_vmsize'],8192)
+        self.assertGreater(item['other_changed_byte_count'],0)
+        self.assertEqual(result['before_sha256'],hashlib.sha256(before).hexdigest())
+        self.assertNotIn('BAD_CODE',json.dumps(result))
+        self.assertNotEqual(m.code_fingerprint(before),m.code_fingerprint(bytes(after)))
+
+    def test_private_diagnostic_is_exclusive_and_retains_first_evidence(self):
+        before=code_image_fixture();after=code_image_fixture(signature=b'x'*5000)
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary).resolve();target='Debug-iphonesimulator/Meguri.app/Meguri.debug.dylib'
+            m.write_code_difference(str(root),target,before,after)
+            path=root/'initial-code-difference.json';raw=path.read_bytes()
+            self.assertEqual(path.stat().st_mode&0o777,0o600)
+            self.assertEqual(json.loads(raw)['target'],target)
+            m.write_code_difference(str(root),target,after,before)
+            self.assertEqual(path.read_bytes(),raw)
+            self.assertNotEqual(m.code_fingerprint(before),m.code_fingerprint(after))
+
+    def test_fat_diagnostic_reports_both_exact_transaction_slices(self):
+        before=generated_fat(code_image_fixture(),code_image_fixture(cpu=0x1000007,subtype=3))
+        after=generated_fat(code_image_fixture(signature=b'x'*5000),code_image_fixture(cpu=0x1000007,subtype=3))
+        result=m.code_difference(before,after)
+        self.assertEqual(result['slice_counts'],[2,2])
+        self.assertTrue(result['slices'][0]['changed_fields']['linkedit_vmsize'])
+        self.assertFalse(result['slices'][1]['changed_fields']['linkedit_vmsize'])
+
+
 class SignerTests(unittest.TestCase):
     def fake(self, args, category):
         if args[1] == 'find-identity':

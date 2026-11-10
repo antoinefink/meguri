@@ -100,6 +100,85 @@ def code_fingerprint(raw):
     return tuple(sorted(result))
 
 
+def code_difference(before, after):
+    """Classify exact transaction inputs without recording their code bytes."""
+    def slices(raw):
+        if raw[:4] == b'\xcf\xfa\xed\xfe':
+            return [(0, len(raw), raw)]
+        formats = {b'\xca\xfe\xba\xbe': ('>', False), b'\xbe\xba\xfe\xca': ('<', False),
+                   b'\xca\xfe\xba\xbf': ('>', True), b'\xbf\xba\xfe\xca': ('<', True)}
+        endian, wide = formats[raw[:4]]
+        count = struct.unpack_from(endian + 'I', raw, 4)[0]
+        result = []
+        for index in range(count):
+            values = struct.unpack_from(endian + ('IIQQII' if wide else 'IIIII'), raw,
+                                        8 + index * (32 if wide else 20))
+            offset, size = values[2:4]
+            result.append((offset, size, raw[offset:offset + size]))
+        return result
+
+    def describe(value):
+        offset, size, raw = value
+        head = struct.unpack_from('<8I', raw)
+        cursor, fields, values = 32, {}, {}
+        for _ in range(head[4]):
+            command, length = struct.unpack_from('<II', raw, cursor)
+            if command == 0x1d:
+                fields['signature_offset'] = (cursor + 8, 4)
+                fields['signature_size'] = (cursor + 12, 4)
+            elif command == 0x19 and raw[cursor + 8:cursor + 24].rstrip(b'\0') == b'__LINKEDIT':
+                for name, displacement in (('linkedit_vmaddr', 24), ('linkedit_vmsize', 32),
+                                           ('linkedit_fileoff', 40), ('linkedit_filesize', 48)):
+                    fields[name] = (cursor + displacement, 8)
+            cursor += length
+        for name, (position, width) in fields.items():
+            values[name] = int.from_bytes(raw[position:position + width], 'little')
+        return {'cpu': head[1], 'subtype': head[2], 'fat_offset': offset,
+                'slice_bytes': size, 'fields': values}, fields, raw
+
+    # The caller has already applied the unchanged strict parser to both inputs.
+    old, new = [describe(value) for value in slices(before)], [describe(value) for value in slices(after)]
+    report = {'before_sha256': hashlib.sha256(before).hexdigest(),
+              'after_sha256': hashlib.sha256(after).hexdigest(),
+              'slice_counts': [len(old), len(new)], 'slices': []}
+    for left, right in zip(old, new):
+        a, af, ar = left
+        b, bf, br = right
+        limit = min(a['fields']['signature_offset'], b['fields']['signature_offset'])
+        covered = set()
+        changed = {}
+        for name, (position, width) in af.items():
+            changed[name] = a['fields'][name] != b['fields'].get(name)
+            if bf.get(name) == (position, width):
+                covered.update(range(position, position + width))
+        count, first = 0, []
+        for index in range(limit):
+            if index not in covered and ar[index] != br[index]:
+                count += 1
+                if len(first) < 32:
+                    first.append(index)
+        report['slices'].append({'before': a, 'after': b, 'changed_fields': changed,
+                                 'other_changed_byte_count': count,
+                                 'other_changed_offsets_first32': first})
+    return report
+
+
+def write_code_difference(directory, target, before, after):
+    """Private diagnostic only. Its success never changes the refusing guard."""
+    try:
+        diagnostic = {'scope': 'INITIAL-SIGNING-EXACT-TRANSACTION-DIAGNOSTIC',
+                      'target': v.relative(target), **code_difference(before, after)}
+        with v.authority(directory) as parent:
+            fd = os.open('initial-code-difference.json', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                         0o600, dir_fd=parent)
+            with os.fdopen(fd, 'w') as stream:
+                json.dump(diagnostic, stream, sort_keys=True)
+                stream.write('\n')
+    except (v.Refused, OSError, ValueError, TypeError, KeyError, IndexError, struct.error):
+        # Diagnostics cannot replace or suppress initial-code-changed.
+        pass
+
+
 def native_plan(products, app, agent, entries):
     app_path = os.path.join(products, app['path'])
     agent_path = os.path.join(products, agent['path'])
@@ -238,7 +317,8 @@ def initial_sign(root, directory, sha, products, xctestrun, settings_path):
             executable = os.path.relpath(path, products) if item is None else item['path'] + '/' + item['executable']
             signature_root = None if item is None else item['path'] + '/_CodeSignature'
             parent=executable_parents[path];name=os.path.basename(executable)
-            original_code=code_fingerprint(code_bytes(parent,name))
+            original_bytes=code_bytes(parent,name)
+            original_code=code_fingerprint(original_bytes)
             signing_command(['/usr/bin/codesign', '--force', '--sign', signer, '--timestamp=none',
                              '--preserve-metadata=identifier,entitlements', path])
             for witness in witnesses:
@@ -246,7 +326,11 @@ def initial_sign(root, directory, sha, products, xctestrun, settings_path):
             native_result = v.identity(os.stat(os.path.basename(executable), dir_fd=executable_parents[path], follow_symlinks=False))
             after = v.snapshot(os.path.join(root, 'build'), products)
             compare_product_files(before, after, executable, signature_root, native_result)
-            need(code_fingerprint(code_bytes(parent,name))==original_code,'initial-code-changed')
+            final_bytes=code_bytes(parent,name)
+            final_code=code_fingerprint(final_bytes)
+            if final_code != original_code:
+                write_code_difference(directory, os.path.relpath(path, products), original_bytes, final_bytes)
+            need(final_code==original_code,'initial-code-changed')
             need(signing_metadata(path) == (identifier, entitlements), 'initial-entitlements-changed')
             v.command(['/usr/bin/codesign', '--verify', '--deep', '--strict', path], 'initial-signature')
             with tempfile.TemporaryDirectory(prefix='meguri-initial-signed-') as temporary:

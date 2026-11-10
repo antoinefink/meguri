@@ -31,3 +31,18 @@ evidence. Actual simulator build/signing and cross-device CloudKit remain pendin
 
 Only local names changed. Checks and behavior stay the same. Focused run `10472`
 passed both simulator tooling cases.
+
+Actual focused simulator build `23812` refused `initial-code-changed` before
+its first freeze. Read-only jobs `27494` and `28131` retained the failure and
+found only the first signing target had a development signature. Its current
+fingerprint equals the retained SDK input, which does not establish the exact
+intermediate native pre-sign bytes. No signing limit is relaxed from that
+comparison.
+
+An independently reviewed diagnostic retains exact before/after bytes in memory
+within the original signing transaction. On a fingerprint mismatch only, it
+writes a private exclusive file with fixed Mach-O fields, hashes and byte-offset
+counts, then preserves the same refusal. It exports no code bytes or account
+values and never affects admission. Focused tooling run `31486` passed both
+cases, including the three new generated diagnostic tests. Actual native delta
+capture remains pending.
