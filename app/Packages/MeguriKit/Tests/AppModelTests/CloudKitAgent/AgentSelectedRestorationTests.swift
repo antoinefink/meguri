@@ -3,7 +3,8 @@ import Testing
 
 // Prefix evidence only. Real owned progress is proved in Core/Service tests.
 @Suite struct AgentSelectedRestorationTests {
-    @MainActor private func state(phone: Bool = false, completed: Int = 3, pending: Bool = false, editGeneration: UInt64 = 7) throws -> AgentRestoration {
+    @MainActor private func state(phone: Bool = false, completed: Int = 3, pending: Bool = false,
+                                  editGeneration: UInt64 = 7, recordTerminal: Bool = true) throws -> AgentRestoration {
         var object = try #require(JSONSerialization.jsonObject(with: CloudKitAgentProtocolTests.header) as? [String: Any])
         object["selection"] = "sync_now"; object["device_kind"] = phone ? "iphone" : "mac"
         let headerBytes = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
@@ -41,6 +42,16 @@ import Testing
                 facts = [.init(name: .syncResult, count: 1, digest: String(repeating: "7", count: 64), operation: "original-exchange-issued")]
             }
             for fact in facts { append(.observation, command: command, facts: [fact]) }
+            if command.action == .syncNow && recordTerminal {
+                append(.observation, command: command, facts: [
+                    .init(name: .syncResult, count: 1, operation: "terminal-exchange-succeeded"),
+                    .init(name: .syncResult, count: 30, operation: "terminal-ended-ms"),
+                    .init(name: .syncResult, count: 1, operation: "terminal-selected"),
+                    .init(name: .syncResult, count: 0, operation: "terminal-held-back"),
+                    .init(name: .syncResult, count: 0, operation: "terminal-newer-pending"),
+                    .init(name: .syncResult, count: 0, operation: "terminal-incoming-waiting")
+                ])
+            }
             if command.command_seq <= completed { append(.done, command: command) }
         }
         return .init(header: header, commands: commands, records: records)
@@ -54,6 +65,10 @@ import Testing
         #expect(interruptedEdit.pending?.action == .edit && interruptedEdit.edit?.seq == 9)
         let exchange = try AgentSelectedRestoration(state(completed: 4, pending: true))
         #expect(exchange.exchange?.exchange == 1 && exchange.pending?.action == .syncNow)
+        #expect(exchange.exchange?.terminal.count == 6)
+        #expect(throws: AgentFailure.recovery) {
+            try AgentSelectedRestoration(state(completed: 4, pending: true, recordTerminal: false))
+        }
         let phone = try AgentSelectedRestoration(state(phone: true))
         #expect(phone.nextCommand == 4 && phone.edit == nil)
         let phoneExchange = try AgentSelectedRestoration(state(phone: true, pending: true))
@@ -93,6 +108,23 @@ import Testing
         }
         #expect(throws: AgentFailure.recovery) {
             try AgentSelectedRestoration(state(pending: true, editGeneration: 0))
+        }
+    }
+    @MainActor @Test func interruptedExchangeRequiresACompleteResultFromItsOriginalProcess() throws {
+        let original = try state(completed: 4, pending: true)
+        for foreign in [false, true] {
+            var records = original.records
+            let index = try #require(records.firstIndex { $0.facts.first?.operation == "terminal-exchange-succeeded" })
+            if foreign {
+                var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(records[index])) as? [String: Any])
+                json["agent_instance"] = "fresh2"
+                records[index] = try AgentRecord.read(JSONSerialization.data(withJSONObject: json))
+            } else {
+                records[index].facts.removeLast()
+            }
+            #expect(throws: AgentFailure.recovery) {
+                try AgentSelectedRestoration(.init(header: original.header, commands: original.commands, records: records))
+            }
         }
     }
 }

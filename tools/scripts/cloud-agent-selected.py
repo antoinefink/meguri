@@ -29,6 +29,12 @@ ACK = re.compile(r"n1-sdk([1-9][0-9]*)-batch([1-9][0-9]*)-ack")
 MEDIA = {"media-upload-pending", "media-download-pending", "media-missing", "media-unknown",
          "media-uploads-running", "media-downloads-running", "media-upload-bytes", "media-download-bytes",
          "media-remaining-download-ms", "media-root-acked", "media-zone-missing", "media-no-space"}
+EXCHANGE_COUNTS = {"selected", "held-back", "newer-pending", "incoming-waiting"}
+TERMINAL_LABELS = {"terminal-exchange-" + outcome for outcome in
+                   ("succeeded", "incomplete", "waiting", "failed", "cancelled")} | {
+    "terminal-" + field for field in EXCHANGE_COUNTS | MEDIA | {"ended-ms", "outstanding", "blocked", "retry-ms"}
+} | {"terminal-error-" + name for name in ("no-account", "configuration", "offline", "throttled", "quota-full",
+     "local-storage-full", "tracking", "conflict-recovery", "unsupported-schema", "other")}
 
 
 
@@ -215,7 +221,7 @@ class Journal(s.Journal):
             for item in record["facts"] + [f for check in record["checks"] for f in check["facts"]]:
                 label = item.get("operation")
                 traced = s.TRACE.fullmatch(label or "")
-                need(label is None or label in labels or ACK.fullmatch(label) or FETCH.fullmatch(label) or
+                need(label is None or label in labels or label in TERMINAL_LABELS or ACK.fullmatch(label) or FETCH.fullmatch(label) or
                      (traced and (traced.group(2) is None or traced.group(2) in s.OWN_KINDS)),
                      "selected-public-fact")
         return complete, terminal
@@ -276,11 +282,10 @@ class Journal(s.Journal):
                 elif (self.kind == "mac" and number == 5) or (self.kind == "iphone" and number == 4):
                     self.exchange(facts, evidence, completed)
                     issued = [f for f in ordinary if f.get("operation") == "original-exchange-issued"]
-                    if issued:
-                        need(len(issued) == 1, "selected-exchange-issuance")
-                        exact(issued[0], "syncResult", ("count", "digest"), operation="original-exchange-issued")
-                        need(issued[0]["count"] == facts[0]["count"], "selected-exchange-issuance")
-                        expected.insert(1, issued[0])
+                    need(len(issued) == 1, "selected-exchange-issuance")
+                    exact(issued[0], "syncResult", ("count", "digest"), operation="original-exchange-issued")
+                    need(issued[0]["count"] == facts[0]["count"], "selected-exchange-issuance")
+                    expected[1:1] = [issued[0], *self.exchange_terminal(number, facts, ends[number])]
                 elif self.kind == "iphone" and number == 5:
                     need(len(facts) == 2, "selected-peer")
                     exact(facts[0], "localDurable", ("count", "digest"), operation="n1")
@@ -297,6 +302,18 @@ class Journal(s.Journal):
             need(evidence.last_batch is None, "selected-batch-count")
             completed[number] = facts
         return completed
+
+    def exchange_terminal(self, number, facts, end):
+        groups = [record["facts"] for record in self.records if record["kind"] == "observation" and
+                  record["command_seq"] == number and record["record_seq"] < end and
+                  any(item.get("operation") in TERMINAL_LABELS for item in record["facts"])]
+        need(len(groups) == 1 and len(groups[0]) >= 2, "selected-exchange-terminal")
+        group = groups[0]
+        exact(group[0], "syncResult", count=facts[0]["count"], operation="terminal-exchange-succeeded")
+        exact(group[1], "syncResult", ("count",), operation="terminal-ended-ms")
+        need(group[2:] == [{**item, "operation": "terminal-" + item["operation"]} for item in facts
+                           if item.get("operation") in EXCHANGE_COUNTS | MEDIA], "selected-exchange-terminal")
+        return group
 
     def control(self, facts, evidence):
         need(evidence.admissions and evidence.sdk and
@@ -330,7 +347,8 @@ class Journal(s.Journal):
 
     def exchange(self, facts, evidence, completed):
         values = unique(facts)
-        required = {"original-exchange", "selected", "held-back", "newer-pending", "incoming-waiting"}
+        need(facts and facts[0].get("operation") == "original-exchange", "selected-exchange")
+        required = {"original-exchange"} | EXCHANGE_COUNTS
         extra = set(values) - required - MEDIA
         if self.kind == "mac":
             ack = [name for name in extra if ACK.fullmatch(name)]

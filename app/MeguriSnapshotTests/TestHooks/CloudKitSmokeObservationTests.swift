@@ -2,6 +2,10 @@
 @testable import CoreBridge
 import Foundation
 import CryptoKit
+import enum MeguriCoreBindings.CloudPolicyExchangeOutcome
+import enum MeguriCoreBindings.CloudPolicyOperationError
+import enum MeguriCoreBindings.CloudPolicySource
+import struct MeguriCoreBindings.CloudPolicyExchangeRecord
 import Testing
 
 // Generated observations exercise ledger admission and refusal only. They are never actual
@@ -80,7 +84,10 @@ import Testing
         var commands: [Int] = []
         var records: [AgentFact] = []
         func installWriter(for command: Int) {
-            journal.install { { fact in commands.append(command); records.append(fact) } }
+            journal.install { { facts in
+                commands.append(contentsOf: repeatElement(command, count: facts.count))
+                records.append(contentsOf: facts)
+            } }
         }
         installWriter(for: 1)
         let event = CloudEngineEvent.stateUpdate(Data([9]))
@@ -99,6 +106,22 @@ import Testing
         #expect(commands == [1, 1, 1, 2, 2, 2])
         #expect(evidence.drain().isEmpty)
         try evidence.check()
+    }
+    @Test func terminalExchangePreservesUnsuccessfulAccountingFromTheOriginalResult() throws {
+        let incomplete = CoreBridge.CloudPolicyExchangeRecord(.init(
+            exchange: 7, endedMs: 30, source: .command, outcome: .incomplete(outstanding: 3, blocked: 1)))
+        let facts = try CloudKitSelectedSyncProof.terminalExchangeFacts(incomplete)
+        #expect(facts.map(\.operation) == ["terminal-exchange-incomplete", "terminal-ended-ms",
+                                           "terminal-outstanding", "terminal-blocked"])
+        #expect(facts.map(\.count) == [7, 30, 3, 1])
+        #expect(throws: AgentFailure.execution) { try CloudKitSelectedSyncProof.exchangeFacts(incomplete) }
+
+        let waiting = CoreBridge.CloudPolicyExchangeRecord(.init(
+            exchange: 7, endedMs: 30, source: .command, outcome: .waiting(class: .throttled, retryAfterMs: 50)))
+        let retry = try CloudKitSelectedSyncProof.terminalExchangeFacts(waiting)
+        #expect(retry.map(\.operation) == ["terminal-exchange-waiting", "terminal-ended-ms",
+                                          "terminal-error-throttled", "terminal-retry-ms"])
+        #expect(retry.map(\.count) == [7, 30, nil, 50])
     }
     @Test func originalOwnAttemptRequiresPrepareEnqueueReplyThenCommit() throws {
         let identity = UUID()

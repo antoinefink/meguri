@@ -5,6 +5,7 @@ import contextlib
 import io
 import os
 import importlib.util
+import itertools
 import json
 from pathlib import Path
 import sys
@@ -93,7 +94,6 @@ def generated(kind):
                      fact("stateSaved", "n1-earlier-original-ack", 2, "1" * 64),
                      fact("localDurable", "n1", 2, "1" * 64)]
         check(5, [("coordinatorResult", exchange)])
-        observations[5].insert(1, fact("syncResult", "original-exchange-issued", 1, "d" * 64))
         observations[5] += upload
     else:
         check(4, [("coordinatorResult", exchange)])
@@ -104,6 +104,13 @@ def generated(kind):
         observations[4] += fetch
         check(5, [("localDurability", [fact("localDurable", "n1", 9, "1" * 64),
                                        fact("engineCallback", "n1-original-fetched-returned", returned, engine=True)])])
+    number = 5 if kind == "mac" else 4
+    observations[number][1:1] = [
+        fact("syncResult", "original-exchange-issued", 1, "d" * 64),
+        fact("syncResult", "terminal-exchange-succeeded", 1),
+        fact("syncResult", "terminal-ended-ms", 30),
+        *[{**item, "operation": "terminal-" + item["operation"]} for item in exchange
+          if item["operation"] in c.EXCHANGE_COUNTS | c.MEDIA]]
     join = [fact("ownedWorkJoined", "own-joined", 5 if kind == "mac" else 0),
             fact("ownedWorkJoined", "sdk-joined", sdk, engine=True)]
     check(6, [("integrity", [fact("integrity", count=5)]), ("coordinatorResult", join),
@@ -122,7 +129,11 @@ def journal_bytes(kind, checks, observations, through=6, header_value=None):
                         "observed_at": "2026-11-10T12:00:00Z", "kind": record_kind, "facts": [], "checks": [], **extra})
     for n in range(1, through+1):
         add(n, "started", action=c.PROGRAMS[kind][n-1][0])
-        for item in observations[n]: add(n, "observation", facts=[item])
+        for terminal, items in itertools.groupby(observations[n], key=lambda item: item.get("operation") in c.TERMINAL_LABELS):
+            if terminal:
+                add(n, "observation", facts=list(items))
+            else:
+                for item in items: add(n, "observation", facts=[item])
         add(n, "done", checks=checks[n])
     return b"".join(raw(r) for r in records)
 
@@ -249,6 +260,8 @@ class SelectedTests(unittest.TestCase):
         def add_media(checks, observations):
             item = fact("syncResult", "media-upload-pending", 0)
             checks[4][0]["facts"].append(item); observations[4].append(copy.deepcopy(item))
+            index = next(i for i, f in enumerate(observations[4]) if f.get("operation") == "original-exchange")
+            observations[4].insert(index, {**item, "operation": "terminal-media-upload-pending"})
         absent = admitted("iphone").completion(4)[4]
         present = admitted("iphone", mutate=add_media).completion(4)[4]
         self.assertNotIn("media-upload-pending", c.unique(absent))
@@ -257,6 +270,21 @@ class SelectedTests(unittest.TestCase):
             item = fact("syncResult", "media-no-space", 2)
             checks[4][0]["facts"].append(item); observations[4].append(copy.deepcopy(item))
         with self.assertRaises(s.v.Refused): admitted("iphone", mutate=bad)
+
+    def test_exchange_summary_needs_matching_original_terminal_accounting(self):
+        for mutation in ("missing", "changed", "split"):
+            def alter(checks, observations):
+                group = observations[5]
+                idx = next(i for i, item in enumerate(group) if item.get("operation") == "terminal-selected")
+                if mutation == "missing":
+                    group[:] = [f for f in group if f.get("operation") not in c.TERMINAL_LABELS]
+                elif mutation == "changed":
+                    group[idx]["count"] += 1
+                else:
+                    group.insert(idx, group.pop(next(i for i, f in enumerate(group)
+                                                     if f.get("operation") == "original-exchange")))
+            with self.subTest(mutation=mutation), self.assertRaisesRegex(s.v.Refused, "selected-exchange-terminal"):
+                admitted("mac", mutate=alter)
 
     def test_missing_ack_revision_and_callback_state_refuse(self):
         for label in ("n1-sdk2-batch1-ack", "n1-earlier-original-ack", "sdk3-state-committed"):

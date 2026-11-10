@@ -14,6 +14,10 @@ import Synchronization
     init(evidence: CloudKitSmokeEvidence) { self.evidence = evidence }
 
     func install(_ journal: @escaping AgentCallbackJournal) { latest = journal }
+    func writer() throws -> AgentObservationWriter {
+        guard let latest else { throw AgentFailure.journal }
+        return try latest()
+    }
 
     func record(_ event: CloudSDKObservation) {
         evidence.sdk(event)
@@ -29,8 +33,7 @@ import Synchronization
         let facts = evidence.drain()
         guard !facts.isEmpty else { return }
         do {
-            guard let latest else { throw AgentFailure.journal }
-            let current = try latest()
+            let current = try writer()
             var callbackWriter = current
             func isCallback(_ fact: AgentFact) -> Bool {
                 fact.engine != nil && (fact.name == .engineCallback || fact.name == .stateSaved)
@@ -50,7 +53,7 @@ import Synchronization
                 if case .returned = event.phase { callbacks.removeValue(forKey: event.origin) }
             }
             for fact in facts {
-                try (isCallback(fact) ? callbackWriter : current)(fact)
+                try (isCallback(fact) ? callbackWriter : current)([fact])
             }
         } catch { evidence.fail() }
     }

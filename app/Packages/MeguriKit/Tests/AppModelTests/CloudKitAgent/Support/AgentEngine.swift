@@ -191,9 +191,9 @@ import Foundation
                 throw AgentFailure.journal
             }
             let command = commands[started.command_seq - 1]
-            return { [weak self] fact in
-                guard let self else { throw AgentFailure.journal }
-                try append(.observation, command: command, facts: [fact])
+            return { [weak self] facts in
+                guard let self, !facts.isEmpty else { throw AgentFailure.journal }
+                try append(.observation, command: command, facts: facts)
             }
         }
         if completedEntries.contains(where: { $0.kind == .failed }) {

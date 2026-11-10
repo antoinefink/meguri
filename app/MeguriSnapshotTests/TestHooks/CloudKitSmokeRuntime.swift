@@ -615,8 +615,13 @@ import Foundation
     }
     private func originalExchange(owner: ReviewCollection, backend: CloudKitSmokeBackend, observe: ((AgentFact) throws -> Void)? = nil) async throws -> CloudPolicyExchangeRecord {
         guard owner.review == nil else { throw AgentFailure.execution }
-        defer { backend.observeOriginalIssuance = nil }
+        let terminalWriter = try observe.map { _ in try callbackJournal.writer() }
+        defer {
+            backend.observeOriginalIssuance = nil
+            backend.observeOriginalTerminal = nil
+        }
         backend.observeOriginalIssuance = observe
+        backend.observeOriginalTerminal = terminalWriter
         return try await AgentManualExchange.run(prepare: { try backend.prepareForSyncNow() },
             request: { owner.requestSyncNow() }, afterRequest: {
                 await owner.sync.waitForInputs()
@@ -743,7 +748,10 @@ import Foundation
         if let exchange = restoration.exchange {
             let record = try await SelectedCloudRestorationInspection().readOriginalExchange(exchange: exchange.exchange,
                 witness: CloudKitSelectedRestoration.bytes(exchange.witness))
-            // Exact unsuccessful results are observable but cannot recover success.
+            guard try CloudKitSelectedSyncProof.terminalExchangeFacts(record) == exchange.terminal else {
+                throw AgentFailure.recovery
+            }
+            // A matching row is a cross-check. Unsuccessful results cannot recover success.
             _ = try CloudKitSelectedSyncProof.exchangeFacts(record)
             selectedExchangeAttempted = true; selectedExchangeRecord = record
         }
@@ -814,6 +822,7 @@ import Foundation
     private let publications = AgentExchangeEvents<SmokeCloudObservation>()
     private var requestedExchange: UInt64?
     var observeOriginalIssuance: ((AgentFact) throws -> Void)?
+    var observeOriginalTerminal: AgentObservationWriter?
     init(production: NativeCollectionCloudBackend, workflow: CoreCloudWorkflowService) {
         self.production = production; self.workflow = workflow
     }
@@ -861,6 +870,12 @@ import Foundation
     func execute(_ command: CloudPolicyCommand) async -> SyncCommandResult {
         do { try await observePublication() } catch { exchanges.fail(.execution); publications.fail(.execution) }
         let result = await production.execute(command)
+        if result.error == nil, !result.deferred, case .recordExchange(let record) = command.action {
+            if record.exchange == requestedExchange, let observeOriginalTerminal {
+                do { try observeOriginalTerminal(CloudKitSelectedSyncProof.terminalExchangeFacts(record)) }
+                catch { exchanges.fail((error as? AgentFailure) ?? .journal) }
+            }
+        }
         do { try await observePublication() } catch { exchanges.fail(.execution); publications.fail(.execution) }
         if result.error != nil { exchanges.fail(.execution); publications.fail(.execution) }
         if result.error == nil, !result.deferred, case .recordExchange(let record) = command.action { exchanges.yield(record) }

@@ -51,7 +51,63 @@ nonisolated enum CloudKitSelectedSyncProof {
         guard case .succeeded(let selected, let held, let newer, let incoming, let media) = exchange.outcome else {
             throw AgentFailure.execution
         }
-        var facts = [AgentFact(name: .syncResult, count: exchange.exchange, operation: "original-exchange"),
+        return successfulExchangeFacts(exchange.exchange, selected: selected, held: held, newer: newer,
+                                       incoming: incoming, media: media)
+    }
+
+    static func terminalExchangeFacts(_ exchange: CloudPolicyExchangeRecord) throws -> [AgentFact] {
+        guard exchange.exchange > 0, exchange.source == .command else { throw AgentFailure.execution }
+        let outcome: String
+        var accounting: [AgentFact] = []
+        switch exchange.outcome {
+        case .succeeded(let selected, let held, let newer, let incoming, let media):
+            outcome = "succeeded"
+            accounting = successfulExchangeFacts(exchange.exchange, selected: selected, held: held, newer: newer,
+                                                  incoming: incoming, media: media).dropFirst().map { fact in
+                var entry = fact
+                entry.operation = fact.operation.map { "terminal-" + $0 }
+                return entry
+            }
+        case .incomplete(let outstanding, let blocked):
+            outcome = "incomplete"
+            accounting = [.init(name: .syncResult, count: outstanding, operation: "terminal-outstanding"),
+                          .init(name: .syncResult, count: blocked, operation: "terminal-blocked")]
+        case .waiting(let error, let retry):
+            outcome = "waiting"
+            accounting = [terminalError(error)]
+            if let retry {
+                accounting.append(.init(name: .syncResult, count: UInt64(bitPattern: retry), operation: "terminal-retry-ms"))
+            }
+        case .failed(let error):
+            outcome = "failed"
+            accounting = [terminalError(error)]
+        case .cancelled:
+            outcome = "cancelled"
+        }
+        return [.init(name: .syncResult, count: exchange.exchange, operation: "terminal-exchange-" + outcome),
+                .init(name: .syncResult, count: UInt64(bitPattern: exchange.endedMilliseconds),
+                      operation: "terminal-ended-ms")] + accounting
+    }
+
+    private static func terminalError(_ error: CloudPolicyOperationError) -> AgentFact {
+        let label = switch error {
+        case .noAccount: "no-account"
+        case .configuration: "configuration"
+        case .offline: "offline"
+        case .throttled: "throttled"
+        case .quotaFull: "quota-full"
+        case .localStorageFull: "local-storage-full"
+        case .trackingError: "tracking"
+        case .conflictRecovery: "conflict-recovery"
+        case .unsupportedSchema: "unsupported-schema"
+        case .other: "other"
+        }
+        return .init(name: .syncResult, operation: "terminal-error-" + label)
+    }
+
+    private static func successfulExchangeFacts(_ exchange: UInt64, selected: UInt64, held: UInt64, newer: UInt64,
+                                                incoming: UInt64, media: CloudPolicyMediaFacts) -> [AgentFact] {
+        var facts = [AgentFact(name: .syncResult, count: exchange, operation: "original-exchange"),
                      .init(name: .syncResult, count: selected, operation: "selected"),
                      .init(name: .syncResult, count: held, operation: "held-back"),
                      .init(name: .syncResult, count: newer, operation: "newer-pending"),

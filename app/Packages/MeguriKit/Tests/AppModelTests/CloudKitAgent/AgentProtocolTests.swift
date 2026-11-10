@@ -92,8 +92,10 @@ import Darwin
         let commands = launch + Self.command(2, action: "connect")
         let second = try await engine.deliver(header: Self.header, commands: commands, retainedJournal: first)
         let successor = try journal()
-        try original(.init(name: .engineCallback, operation: "old-callback"))
-        try successor(.init(name: .engineCallback, operation: "next-callback"))
+        let originalFacts = [AgentFact(name: .engineCallback, operation: "old-callback"),
+                             .init(name: .stateSaved, operation: "old-state")]
+        try original(originalFacts)
+        try successor([.init(name: .engineCallback, operation: "next-callback")])
         let bytes = try store.read(.journal)
         #expect(bytes.starts(with: second))
         let records = try store.records()
@@ -103,6 +105,7 @@ import Darwin
         #expect(callbacks.map(\.command_sha256) == [AgentJSON.hash(Data(launch.dropLast())),
             AgentJSON.hash(Data(commands.dropFirst(launch.count).dropLast()))])
         #expect(callbacks.map(\.agent_instance) == ["process1", "process1"])
+        #expect(callbacks.first?.facts == originalFacts)
         #expect(callbacks.map(\.record_seq) == [records.count - 1, records.count])
         #expect(try await engine.deliver(header: Self.header, commands: commands, retainedJournal: second) == bytes)
     }

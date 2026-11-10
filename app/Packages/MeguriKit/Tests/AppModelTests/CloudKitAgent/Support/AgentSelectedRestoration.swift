@@ -13,6 +13,7 @@ nonisolated struct AgentSelectedRestoration {
     struct Exchange {
         let exchange: UInt64
         let witness: String
+        let terminal: [AgentFact]
     }
     let state: AgentRestoration
     let nextCommand: Int
@@ -116,7 +117,24 @@ nonisolated struct AgentSelectedRestoration {
                 let issued = try observation(command.command_seq, .syncResult, "original-exchange-issued")
                 guard let id = issued.1.count, id > 0, let witness = issued.1.digest,
                       AgentJSON.digest(witness) else { throw AgentFailure.recovery }
-                exchange = .init(exchange: id, witness: witness)
+                let resultRecords = state.records.filter { record in
+                    record.command_seq == command.command_seq && record.kind == .observation &&
+                        record.facts.contains { $0.operation?.hasPrefix("terminal-") == true }
+                }
+                guard resultRecords.count == 1, let terminal = resultRecords.first,
+                      terminal.agent_instance == issued.0.agent_instance,
+                      terminal.record_seq > issued.0.record_seq,
+                      terminal.facts.first == .init(name: .syncResult, count: id, operation: "terminal-exchange-succeeded"),
+                      terminal.facts.dropFirst().prefix(5).map(\.operation) ==
+                        ["terminal-ended-ms", "terminal-selected", "terminal-held-back",
+                         "terminal-newer-pending", "terminal-incoming-waiting"],
+                      terminal.facts.allSatisfy({ fact in
+                          fact.count != nil && fact.operation?.hasPrefix("terminal-") == true &&
+                              fact == .init(name: .syncResult, count: fact.count, operation: fact.operation)
+                      }),
+                      Set(terminal.facts.map(\.operation)).count == terminal.facts.count
+                else { throw AgentFailure.recovery }
+                exchange = .init(exchange: id, witness: witness, terminal: terminal.facts)
             } else if !(program == .syncNowMac && command.action == .edit && command.recovery_check == "sync_now.edit" && edit != nil) {
                 throw AgentFailure.implementationMissing
             }

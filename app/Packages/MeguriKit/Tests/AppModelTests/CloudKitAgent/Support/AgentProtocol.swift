@@ -277,7 +277,7 @@ nonisolated struct AgentRecord: Codable {
     }
 }
 
-typealias AgentObservationWriter = @MainActor (AgentFact) throws -> Void
+typealias AgentObservationWriter = @MainActor ([AgentFact]) throws -> Void
 typealias AgentCallbackJournal = @MainActor () throws -> AgentObservationWriter
 
 @MainActor protocol AgentRuntime: AnyObject {

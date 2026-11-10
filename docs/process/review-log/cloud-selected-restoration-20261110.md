@@ -338,3 +338,22 @@ lint run `20261110T144419Z-14189` passes clippy but fails formatting. Standard
 layout. Final `core-lint/20261110T144503Z-18070` passes all four checks.
 Independent tuple follow-up review finds no P0–P2 issues; no public ABI, guard,
 assertion or timing change. The retained earlier failures remain in place.
+
+## Original terminal exchange record
+
+Starting commit `428b4ae3`. After the original `RecordExchange` executes,
+the agent appends its outcome and accounting together, before delivering the
+result to the waiting command. The writer retains that command's identity.
+The host compares the successful accounting with the command result. A
+relaunch requires the original process's terminal record before reading its
+durable counterpart, and rejects a difference between them.
+
+Direct review checked command attribution, one-record append, outcome and
+media field coverage, and refusal on a missing, split or changed result.
+The initial Mac build required selective imports for generated test types.
+The final VM test `80423` passes, Swift run `80422` passes all 41 tests, and
+host checks `79873` pass all five wrappers.
+
+The original capture, per-record outcomes and the state saves that reflect
+them still need evidence for J4.1 and the J5.1 recomputation. Mac exchange
+recovery and the signed account-dependent run remain open.
