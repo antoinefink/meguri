@@ -176,10 +176,11 @@ import Testing
         }
         func candidate(hostID: String? = nil, agentID: String? = nil, appBuild: String? = nil,
                        executablePath: String? = nil, anchor: String? = nil, hostExecutable: String? = nil,
-                       agentRoot: String? = nil, images: [AgentRunningImage]? = nil, os: Observation.OS? = nil) -> Observation {
-            let host = Observation.BundleIdentity(root: observed.host.root, canonicalRoot: observed.host.canonicalRoot,
+                       agentRoot: String? = nil, images: [AgentRunningImage]? = nil, os: Observation.OS? = nil,
+                       host: Observation.BundleIdentity? = nil, agent: Observation.BundleIdentity? = nil) -> Observation {
+            let host = host ?? Observation.BundleIdentity(root: observed.host.root, canonicalRoot: observed.host.canonicalRoot,
                 bundleID: hostID ?? observed.host.bundleID, executable: hostExecutable ?? observed.host.executable)
-            let agent = Observation.BundleIdentity(root: agentRoot ?? observed.agent.root, canonicalRoot: agentRoot ?? observed.agent.canonicalRoot,
+            let agent = agent ?? Observation.BundleIdentity(root: agentRoot ?? observed.agent.root, canonicalRoot: agentRoot ?? observed.agent.canonicalRoot,
                 bundleID: agentID ?? observed.agent.bundleID, executable: observed.agent.executable)
             return .init(host: host, agent: agent, appBuild: appBuild ?? observed.appBuild,
                          executablePath: executablePath ?? observed.executablePath, anchorImagePath: anchor ?? observed.anchorImagePath,
@@ -277,6 +278,10 @@ import Testing
                 try binding.revalidate()
                 current = f.candidate(images: [f.observed.images[0], system] + Array(f.observed.images.dropFirst()))
                 try binding.revalidate()
+                let addedSystem = AgentRunningImage(path: "/System/Library/Frameworks/CloudKit.framework/CloudKit",
+                    identity: system.identity)
+                current = f.candidate(images: [addedSystem] + f.observed.images + [system])
+                try binding.revalidate()
                 #expect(binding.coverage == .generatedUnitOnly)
                 #expect(throws: AgentFailure.implementationMissing) { try binding.requireIndependentCounterpart() }
 
@@ -309,6 +314,83 @@ import Testing
                     #expect(throws: AgentFailure.binding) { try retained.revalidate() }
                 }
             }
+        }
+    }
+    @Test func ownerSharedComparisonAcceptsSystemLoadsAndPreservesEveryProductFence() throws {
+        try withFixture { f in
+            let system = AgentRunningImage(path: "/usr/lib/libRPAC.dylib", identity: f.observed.images[0].identity)
+            let addedSystem = AgentRunningImage(path: "/System/Library/Frameworks/CloudKit.framework/CloudKit",
+                identity: system.identity)
+            let original = f.candidate(images: [system] + f.observed.images)
+            let actual = f.candidate(images: [addedSystem, f.observed.images[0], system] + Array(f.observed.images.dropFirst()))
+            #expect(actual != original)
+            // Call the exact throwing comparison used by owner observation(),
+            // with its default exact-path resolver. These remain fake inputs.
+            try actual.requireSameOwnedProduct(as: original)
+            try original.requireSameOwnedProduct(as: actual)
+            #expect(try actual.executableImage() == original.executableImage())
+
+            var failures = [
+                f.candidate(hostID: "other"), f.candidate(agentID: "other"),
+                f.candidate(appBuild: ""), f.candidate(appBuild: "other"),
+                f.candidate(executablePath: f.agentURL.path), f.candidate(anchor: f.mainURL.path),
+                f.candidate(hostExecutable: f.agentURL.path), f.candidate(agentRoot: f.product.path),
+                f.candidate(os: .mac(build: "other")), f.candidate(os: .simulator(runtimeBuild: "os-sample-7")),
+                f.candidate(images: Array(f.observed.images.reversed())),
+                f.candidate(images: f.observed.images + [.init(path: f.product.path + "/new.dylib", identity: system.identity)]),
+                f.candidate(images: []),
+                f.candidate(images: f.observed.images + Array(repeating: system, count: 4096))
+            ]
+            func changedBundle(_ value: Observation.BundleIdentity, root: String? = nil,
+                               canonicalRoot: String? = nil, executable: String? = nil) -> Observation.BundleIdentity {
+                .init(root: root ?? value.root, canonicalRoot: canonicalRoot ?? value.canonicalRoot,
+                      bundleID: value.bundleID, executable: executable ?? value.executable)
+            }
+            failures += [
+                f.candidate(host: changedBundle(original.host, root: original.host.root + "/other")),
+                f.candidate(host: changedBundle(original.host, canonicalRoot: original.host.canonicalRoot + "/other")),
+                f.candidate(agent: changedBundle(original.agent, root: original.agent.root + "/other")),
+                f.candidate(agent: changedBundle(original.agent, canonicalRoot: original.agent.canonicalRoot + "/other")),
+                f.candidate(agent: changedBundle(original.agent, executable: f.mainURL.path))
+            ]
+            for index in f.observed.images.indices {
+                var missing = f.observed.images; missing.remove(at: index)
+                failures.append(f.candidate(images: missing))
+                failures.append(f.candidate(images: f.observed.images + [f.observed.images[index]]))
+                for path in [f.product.path + "/other", f.directory.path + "/external",
+                             f.observed.images[index].path + "/../alias"] {
+                    var images = f.observed.images
+                    images[index] = .init(path: path, identity: images[index].identity)
+                    failures.append(f.candidate(images: images))
+                }
+                let image = f.observed.images[index], identity = image.identity
+                for changed in [AgentRunningImageIdentity(cpu: identity.cpu, subtype: identity.subtype, uuid: Data(repeating: 9, count: 16)),
+                                AgentRunningImageIdentity(cpu: 7, subtype: identity.subtype, uuid: identity.uuid),
+                                AgentRunningImageIdentity(cpu: identity.cpu, subtype: identity.subtype + 1, uuid: identity.uuid)] {
+                    var images = f.observed.images
+                    images[index] = .init(path: image.path, identity: changed)
+                    failures.append(f.candidate(images: images))
+                }
+            }
+            for failure in failures {
+                #expect(throws: AgentFailure.binding) { try failure.requireSameOwnedProduct(as: original) }
+                #expect(throws: AgentFailure.binding) { try original.requireSameOwnedProduct(as: failure) }
+            }
+            // Equal malformed inputs cannot bypass executable uniqueness or
+            // either total-image or owned-image bounds.
+            let oversizedOwned = f.candidate(images: f.observed.images + (0..<126).map {
+                .init(path: f.product.path + "/extra-\($0).dylib", identity: system.identity)
+            })
+            for invalid in [f.candidate(images: []), f.candidate(images: Array(f.observed.images.dropFirst())),
+                            f.candidate(images: f.observed.images + [f.observed.images[0]]),
+                            f.candidate(images: f.observed.images + Array(repeating: system, count: 4096)), oversizedOwned] {
+                #expect(throws: AgentFailure.binding) { try invalid.requireSameOwnedProduct(as: invalid) }
+            }
+        }
+        try withFixture(internalLink: true) { f in
+            // A manifest-admitted alias works for binding (covered above), but
+            // owner must not normalize it into the actual executable image.
+            #expect(throws: AgentFailure.binding) { try f.observed.requireSameOwnedProduct(as: f.observed) }
         }
     }
     @Test func widgetProductsDoNotRelaxLoadedHostImageInventoryUUIDAndHashChecks() throws {

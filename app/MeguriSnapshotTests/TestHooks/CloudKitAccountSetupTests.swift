@@ -28,11 +28,12 @@ import XCTest
             defer { channel.close() }
             func observation() throws -> [String: Any] {
                 try channel.check()
-                guard try AgentRunningProductInspector.observe() == original,
-                      let current = CloudBuildConfiguration.fromBundle,
+                let actual = try AgentRunningProductInspector.observe()
+                try actual.requireSameOwnedProduct(as: original)
+                guard let current = CloudBuildConfiguration.fromBundle,
                       current.container == configuration.container, current.environment == configuration.environment,
                       current.schemaConfigured == configuration.schemaConfigured else { throw AgentFailure.binding }
-                return try OwnerSetupObservation.encode(original)
+                return try OwnerSetupObservation.encode(actual)
             }
             try channel.send(["pid": getpid(), "container": configuration.container, "observation": observation()])
             // Only the original parent, after actual product/signature/profile,

@@ -21,3 +21,18 @@ publication, uncertain-publication handling and process cleanup stay unchanged.
 Independent review found no P0–P2 issue. Combined tooling run `58031` passed all
 three cases, including four new diagnostic tests. The source privacy scan
 passed. A new actual setup observation remains pending.
+
+Filtered fixer `57174` addresses a separate source-supported P2: the owner
+compared the full dyld image array while its evidence contains only owned
+images. Normal SDK calls may add system frameworks. A shared throwing product
+comparison now serves owner setup and binding refresh. It keeps complete bundle,
+build, OS, executable and anchor identity, unique executable selection, bounded
+images and exact ordered owned images. Binding retains its manifest resolver;
+owner uses exact paths and encodes the newly checked actual observation. Parent
+hash, source, receipt, channel, configuration and fresh-account guards remain.
+This was not established as the original cause of `51920`.
+
+Independent review found no P0–P2 issue. Focused Swift run `59381` passed all 17
+tests, including direct shared-comparison system-load and product-mutation
+regressions. Final source privacy and similarity checks passed. Actual setup
+with these corrections remains pending.

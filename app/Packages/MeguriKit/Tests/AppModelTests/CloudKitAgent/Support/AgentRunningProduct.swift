@@ -29,6 +29,28 @@ nonisolated struct AgentRunningProductObservation: Equatable {
     let images: [AgentRunningImage]
     let os: OS
 
+    // Recheck the original product while allowing unrelated system frameworks
+    // to load or move in dyld order. Keep the complete owned subset ordered.
+    // Only binding supplies a resolver for manifest-admitted internal links;
+    // owner observations require exact paths.
+    func requireSameOwnedProduct(as original: Self,
+                                 resolvingOwnedPath resolve: (String) throws -> String = { $0 }) throws {
+        func ownedImages(_ value: Self) -> [AgentRunningImage] {
+            value.images.filter {
+                $0.path.hasPrefix(value.host.root + "/") || $0.path.hasPrefix(value.host.canonicalRoot + "/")
+            }
+        }
+        guard host == original.host, agent == original.agent,
+              appBuild == original.appBuild, os == original.os,
+              executablePath == original.executablePath, anchorImagePath == original.anchorImagePath,
+              try executableImage(resolvingOwnedPath: resolve)
+                == original.executableImage(resolvingOwnedPath: resolve) else { throw AgentFailure.binding }
+        let currentOwned = ownedImages(self), originalOwned = ownedImages(original)
+        guard !currentOwned.isEmpty, currentOwned.count <= 128,
+              !originalOwned.isEmpty, originalOwned.count <= 128,
+              currentOwned == originalOwned else { throw AgentFailure.binding }
+    }
+
     // Select the loaded executable by its OS path, not by dyld order.
     // Binding checks internal aliases declared in the manifest.
     // Producers require exact observed paths.
@@ -292,18 +314,7 @@ nonisolated enum AgentRunningMachO {
             if let refresh {
                 let current = try refresh()
                 // No loaded-code substitution after the retained observation.
-                func ownedImages(_ value: AgentRunningProductObservation) -> [AgentRunningImage] {
-                    value.images.filter { image in
-                        image.path.hasPrefix(value.host.root + "/") || image.path.hasPrefix(value.host.canonicalRoot + "/")
-                    }
-                }
-                guard current.host == observation.host, current.agent == observation.agent,
-                      current.appBuild == observation.appBuild, current.os == observation.os,
-                      current.executablePath == observation.executablePath,
-                      current.anchorImagePath == observation.anchorImagePath,
-                      try current.executableImage(resolvingOwnedPath: admittedPath)
-                        == observation.executableImage(resolvingOwnedPath: admittedPath),
-                      ownedImages(current) == ownedImages(observation) else { throw AgentFailure.binding }
+                try current.requireSameOwnedProduct(as: observation, resolvingOwnedPath: admittedPath)
             }
             try authority.revalidate(); try receipts.revalidate()
         } catch { invalidated = true; throw (error as? AgentFailure) ?? .storage }
