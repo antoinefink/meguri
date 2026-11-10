@@ -1,6 +1,23 @@
 import CoreBridge
 import Foundation
 
+/// Trusted host metadata for the named macOS native-web identity rule (D4).
+/// AX identifiers are observed separately and never synthesized from this data.
+public nonisolated struct CardReplayAccessibilityBinding: Codable, Equatable, Sendable {
+    public let page: String
+    public let document: String
+    public let card: Int64
+    public let generation: UInt64
+    public let side: String
+    public let root: String
+    public let generatedIDs: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case page, document, card, generation, side, root
+        case generatedIDs = "generatedIds"
+    }
+}
+
 /// Native identity, restricted to integers JavaScript can carry exactly.
 public nonisolated struct CardUpdate: Sendable, Hashable {
     public let card: Int64

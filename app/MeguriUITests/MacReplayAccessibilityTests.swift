@@ -2,10 +2,50 @@ import Foundation
 import XCTest
 #if os(macOS)
 
-/// Out-of-process native proof. A missing WebKit XCUI identifier must fail,
-/// even when the DOM has the requested ID or exposes AXDOMIdentifier.
+/// Out-of-process proof of D4 native web identity and the same AX link press.
 @MainActor
 final class MacReplayAccessibilityTests: XCTestCase {
+    private var actionNumber = 0
+
+    func testNativeReplayWaitObservesDisappearanceAndPublicationWithinTimeout() throws {
+        continueAfterFailure = false
+        let build = try BuildUnderTest.current()
+        let bundle = try build.bundleIdentifier
+        _ = try XCTUnwrap(build.configuration == .debug && bundle.hasSuffix(".dev") ? true : nil)
+        let app = XCUIApplication()
+        app.launchArguments = MeguriLaunch(locale: "en_US", animations: false, windowSize: "1000x760",
+            route: "card/replay-accessibility").arguments
+        app.launch()
+        addTeardownBlock { @MainActor in app.terminate() }
+        try app.bringToFront(bundleIdentifier: bundle)
+        try wait(app) { $0["ready"] as? Bool == true }
+        let native = try XCTUnwrap(HierarchyExport.tree(app).nativeWeb)
+        let id = try XCTUnwrap(native.binding.generatedIDs.first)
+        _ = try native.uniqueLink(id)
+        // This fixture action schedules visibility only, before either wait.
+        // Neither wait can press a link or use DOM facts as native proof.
+        element(app, "testhooks.replay.cyclePublication").clickOrTap()
+        var disappearance: [Bool] = []
+        try NativeWebCapture.wait(id, in: app, binding: native.binding, timeout: 10, gone: true) {
+            disappearance.append($0)
+        }
+        XCTAssertEqual(disappearance.first, true, "Gone wait must first observe the actual published link")
+        XCTAssertEqual(disappearance.last, false, "Gone wait must observe actual native disappearance")
+        var appearance: [Bool] = []
+        try NativeWebCapture.wait(id, in: app, binding: native.binding, timeout: 10, gone: false) {
+            appearance.append($0)
+        }
+        XCTAssertEqual(appearance.first, false, "Appearance wait must begin before real publication")
+        XCTAssertEqual(appearance.last, true)
+        let restored = try XCTUnwrap(HierarchyExport.tree(app).nativeWeb)
+        XCTAssertEqual(restored.binding, native.binding)
+        _ = try restored.uniqueLink(id)
+        let observed = try report(app)
+        XCTAssertEqual(observed["received"] as? [String], [])
+        XCTAssertEqual(observed["commands"] as? [String], [])
+        XCTAssertEqual(observed["actions"] as? [String], [])
+    }
+
     func testGeneratedReplaysKeepNativeIdentityLocalizationAndExactCommands() throws {
         continueAfterFailure = false
         let build = try BuildUnderTest.current()
@@ -52,33 +92,36 @@ final class MacReplayAccessibilityTests: XCTestCase {
             XCTAssertEqual(published, .completed, "Native links must publish within the side's 10-second budget")
             XCTAssertEqual(web.count, 1, "Idle page must not leak into the native tree")
             XCTAssertEqual(nativeLinks.count, expectedIDs.count, "Empty/partial native trees cannot establish replay proof")
-            XCTAssertEqual(Set(nativeLinks.allElementsBoundByIndex.map(\.identifier)), Set(expectedIDs))
             XCTAssertEqual(Set(expectedIDs).count, expectedIDs.count)
+            let native = try XCTUnwrap(tree.nativeWeb)
+            XCTAssertEqual(native.binding.generatedIDs, ids, "IDs must come from the current trusted payload")
+            // Keep XCUI observations verbatim and check every published leaf's
+            // visibility independently. They do not select native press targets.
+            for link in nativeLinks.allElementsBoundByIndex {
+                XCTAssertTrue(link.isEnabled)
+                XCTAssertTrue(link.isHittable)
+                XCTAssertFalse(link.frame.isEmpty)
+                XCTAssertTrue(app.windows.firstMatch.frame.contains(link.frame))
+            }
             if side == "question" {
-                let authored = web.links.matching(identifier: "review.card.replay.q0")
+                let authored = native.root.allNodes().filter { $0.type == "link" && $0.axDOMIdentifier == "review.card.replay.q0" }
                 XCTAssertEqual(authored.count, 1)
-                XCTAssertEqual(authored.element(boundBy: 0).label, "Author & 猫", "An authored replay lookalike keeps its name")
+                XCTAssertEqual(authored.first?.label, "Author & 猫", "An authored replay lookalike keeps its name")
             }
             for (id, command) in zip(ids, currentCommands) {
-                let matches = app.descendants(matching: .any).matching(identifier: id)
-                XCTAssertEqual(matches.count, 1, "Native identifier must uniquely locate \(id)")
-                let target = matches.element(boundBy: 0)
-                XCTAssertEqual(target.elementType, .link)
-                XCTAssertEqual(target.identifier, id)
-                XCTAssertEqual(target.label, label)
-                XCTAssertTrue(target.isEnabled)
-                XCTAssertTrue(target.isHittable)
-                XCTAssertFalse(target.frame.isEmpty)
-                XCTAssertTrue(app.windows.firstMatch.frame.contains(target.frame), "Native replay must be fully visible")
-                let exported = tree.elements(id)
-                XCTAssertEqual(exported.count, 1, "Unchanged native hierarchy export must see \(id)")
-                let leaf = try XCTUnwrap(exported.first)
+                let (_, leaf) = try native.uniqueLink(id)
                 XCTAssertEqual(leaf.type, "link")
+                XCTAssertEqual(leaf.axDOMIdentifier, id)
                 XCTAssertEqual(leaf.label, label)
                 XCTAssertTrue(leaf.enabled)
                 XCTAssertNotNil(leaf.hitPoint)
-
-                try press(target, app: app, bundle: bundle)
+                XCTAssertFalse(leaf.frame.isEmpty)
+                XCTAssertTrue(app.windows.firstMatch.frame.contains(leaf.frame))
+                let before = try HierarchyExport.tree(app)
+                try attach(before, app: app, name: "replay-native-action-\(actionNumber)-before")
+                try native.press(id, in: app)
+                try attach(HierarchyExport.tree(app), app: app, name: "replay-native-action-\(actionNumber)-after")
+                actionNumber += 1
                 commands.append(command)
                 let parts = command.split(separator: ":")
                 let index = try XCTUnwrap(Int(parts[2]))
@@ -107,7 +150,12 @@ final class MacReplayAccessibilityTests: XCTestCase {
     private func press(_ target: XCUIElement, app: XCUIApplication, bundle: String) throws {
         try app.bringToFront(bundleIdentifier: bundle)
         XCTAssertTrue(target.isHittable)
+        try attach(HierarchyExport.tree(app), app: app, name: "replay-native-action-\(actionNumber)-before")
         target.clickOrTap()
+        // A side-changing action may temporarily have no ready host binding.
+        // Capture the raw native/XCTest tree immediately, before waiting.
+        try attach(HierarchyExport.tree(app, requireNativeBinding: false), app: app, name: "replay-native-action-\(actionNumber)-after")
+        actionNumber += 1
     }
 
     private func report(_ app: XCUIApplication) throws -> [String: Any] {
@@ -128,17 +176,21 @@ final class MacReplayAccessibilityTests: XCTestCase {
     }
 
     private func attach(_ tree: HierarchyExport.Tree, app: XCUIApplication, stage: Int) throws {
+        try attach(tree, app: app, name: "replay-native-\(stage)")
+    }
+
+    private func attach(_ tree: HierarchyExport.Tree, app: XCUIApplication, name: String) throws {
         let shot = app.windows.firstMatch.screenshot()
         let width = try XCTUnwrap(HierarchyExport.pngPixelWidth(shot.pngRepresentation))
         XCTAssertGreaterThan(tree.window.width, 0)
         let scale = Double(width) / Double(tree.window.width)
         let data = try HierarchyExport.json(tree, platform: "mac", screenshotOrigin: tree.window.origin, screenshotScale: scale)
         let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
-        attachment.name = "replay-native-\(stage).json"
+        attachment.name = "\(name).json"
         attachment.lifetime = .keepAlways
         add(attachment)
         let screenshot = XCTAttachment(screenshot: shot)
-        screenshot.name = "replay-native-\(stage)"
+        screenshot.name = name
         screenshot.lifetime = .keepAlways
         add(screenshot)
     }

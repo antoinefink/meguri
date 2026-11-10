@@ -267,21 +267,103 @@ def native_sheet_grabbers(document, root):
     return recognized
 
 
+def native_replay_identities(document, root):
+    """D4 only: exact AXDOMIdentifier on actual owned native links.
+
+    The retained xcui_root is checked separately, never a leaf mapping.
+    Trust comes from host metadata, not classes, labels or an ID prefix.
+    """
+    if "native_web" not in document:
+        return {}, []
+    def failure(message):
+        return {}, [{"kind": "native-web-identity", "message": message}]
+    binding = document["native_web"]
+    if (document.get("platform") != "mac" or document.get("native_web_rule") != "render/display-transform#D4"
+            or not isinstance(binding, dict) or binding != document.get("native_web_binding_at_end")):
+        return failure("Unsupported or stale native web binding")
+    ids = binding.get("generated_ids")
+    if (not isinstance(ids, list) or not all(isinstance(i, str) and i for i in ids)
+            or len(set(ids)) != len(ids) or not isinstance(binding.get("page"), str) or not binding["page"]
+            or not isinstance(binding.get("document"), str) or not binding["document"]
+            or type(binding.get("card")) is not int or type(binding.get("generation")) is not int
+            or binding.get("side") not in ("question", "answer") or not binding.get("root")):
+        return failure("Missing or ambiguous trusted host metadata")
+    owners = [e for e in root.walk() if e.raw.get("native_ax") is True and e.identifier == binding["page"]]
+    if len(owners) != 1:
+        return failure("Exact owned native page root must be unique")
+    owner = owners[0]
+    if sum(e.type == "webView" for e in owner.walk()) != 1:
+        return failure("Owned page must contain one actual native web area")
+    raw_xcui = document.get("xcui_root")
+    if not isinstance(raw_xcui, dict):
+        return failure("Raw XCTest hierarchy must be retained")
+    xcui = Element(raw_xcui, None, 0)
+    if sum(e.type == "webView" and e.identifier == binding["page"] for e in xcui.walk()) != 1:
+        return failure("Exact owned XCTest page root must be unique")
+    links = [e for e in owner.walk() if e.type == "link" and e.raw.get("native_ax") is True]
+    identities, issues = {}, []
+    for ident in ids:
+        matches = [e for e in links if e.raw.get("ax_dom_identifier") == ident
+                   and type(e.raw.get("ax_dom_identifier_error")) is int and e.raw["ax_dom_identifier_error"] == 0
+                   and e.raw.get("ax_dom_identifier_wrong_type") is False]
+        if len(matches) != 1:
+            issues.append({"kind": "native-web-identity", "identifier": ident,
+                           "message": "Exact unique supported native AXDOMIdentifier required: " + ident})
+            continue
+        e = matches[0]
+        raw_id = e.raw.get("ax_identifier")
+        if (not all(k in e.raw for k in ("ax_identifier", "ax_identifier_error", "ax_identifier_wrong_type"))
+                or type(e.raw["ax_identifier_error"]) is not int
+                or type(e.raw["ax_identifier_wrong_type"]) is not bool
+                or (raw_id is not None and not isinstance(raw_id, str)) or e.identifier != (raw_id or "")):
+            issues.append(dict(kind="native-web-identity", message="Raw AXIdentifier was filled or normalized", **describe(e)))
+            continue
+        identities[e] = ident
+    return identities, issues
+
+
 def check(document):
     """The issues in one hierarchy export, as a list of dicts with a `kind`."""
     if not isinstance(document, dict) or document.get("schema") != 1 or not isinstance(document.get("root"), dict):
         raise InputError("not a hierarchy export (schema 1 with a root element)")
     root = Element(document["root"], None, 0)
+    native_ids, issues = native_replay_identities(document, root)
+    ordinary = ordinary_issues(document, root, native_ids)
+    if "xcui_root" not in document:
+        return issues + ordinary
+    if not isinstance(document["xcui_root"], dict):
+        raise InputError("xcui_root must be an original XCTest root element")
+    comparison_page = document["native_web"]["page"] if native_ids else None
+    raw = ordinary_issues(document, Element(document["xcui_root"], None, 0), {},
+                          native_link_comparison_page=comparison_page)
+    return ([dict(i, source="native_ax") for i in issues]
+            + [dict(i, source="root") for i in ordinary]
+            + [dict(i, source="xcui_root") for i in raw])
+
+
+def ordinary_issues(document, root, native_ids, native_link_comparison_page=None):
+    """Ordinary diagnostics for one observation, without merging identities."""
     elements = [e for e in root.walk() if not e.under(SYSTEM_UI) and not e.under(TRANSIENT)]
     sheet_grabbers = native_sheet_grabbers(document, root)
     issues = []
 
     for e in elements:
-        if ((e.type in INTERACTIVE or e.type in ROWS) and not e.identifier and e.visible and not e.in_system_alert()
+        # Only the original XCTest link observations inside the exact replaced
+        # page lack authority to assert a missing native web identity. This
+        # grants no identity to any raw leaf. All actual AX links are audited
+        # above; other raw controls/pages retain missing-ID diagnostics too.
+        comparison_link = (native_link_comparison_page is not None and e.type == "link"
+                           and any(a.type == "webView" and a.identifier == native_link_comparison_page
+                                   for a in e.ancestors))
+        if ((e.type in INTERACTIVE or e.type in ROWS) and not e.identifier and e not in native_ids and not comparison_link and e.visible and not e.in_system_alert()
                 and not e.is_sidebar_toggle() and e not in sheet_grabbers
                 and not (e.type in ROWS and e.identified_inside())):
             issues.append(dict(kind="missing-identifier", message="%s '%s' has no accessibility identifier" % (e.type, e.label),
                                **describe(e)))
+
+    for e, ident in native_ids.items():
+        if not IDENTIFIER.fullmatch(ident):
+            issues.append(dict(kind="bad-identifier", message="Invalid native web identifier: " + ident, **describe(e)))
 
     by_identifier = {}
     for e in elements:

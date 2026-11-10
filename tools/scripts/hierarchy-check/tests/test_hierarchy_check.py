@@ -54,6 +54,119 @@ def kinds(issues):
     return sorted(i["kind"] for i in issues)
 
 
+class NativeReplayIdentity(unittest.TestCase):
+    def fixture(self):
+        link = el("link", label="Play audio", f=(20, 30, 44, 44))
+        link.update(native_ax=True, ax_identifier="", ax_identifier_error=0, ax_identifier_wrong_type=False,
+                    ax_dom_identifier="review.card.replay.q1", ax_dom_identifier_error=0,
+                    ax_dom_identifier_wrong_type=False)
+        page = el("webView", "review.card.page.a", f=(0, 0, 400, 800), children=[link])
+        page["native_ax"] = True
+        value = doc(page)
+        value["platform"] = "mac"
+        value["xcui_root"] = doc(el("webView", "review.card.page.a", f=(0, 0, 400, 800),
+                                    children=[el("link", label="Play audio", f=(20, 30, 44, 44))]))["root"]
+        binding = dict(page="review.card.page.a", document="synthetic-document", card=1,
+                       generation=2, side="question", root="meguri-media://media/",
+                       generated_ids=["review.card.replay.q1"])
+        value.update(native_web_rule="render/display-transform#D4", native_web=binding,
+                     native_web_binding_at_end=dict(binding))
+        return value, page, link
+
+    def test_exact_native_dom_identity_with_empty_raw_identifier(self):
+        value, _, link = self.fixture()
+        self.assertEqual(hierarchy_check.check(value), [])
+        self.assertEqual(link["identifier"], "")
+        self.assertEqual(link["ax_identifier"], "")
+        self.assertEqual(value["xcui_root"]["children"][0]["children"][0]["children"][0]["identifier"], "")
+
+    def test_missing_unsupported_wrong_type_and_duplicate_fail(self):
+        mutations = [lambda p, e: e.pop("ax_dom_identifier"),
+                     lambda p, e: e.update(ax_dom_identifier_error=-25205),
+                     lambda p, e: e.update(ax_dom_identifier_wrong_type=True),
+                     lambda p, e: e.update(ax_dom_identifier=42),
+                     lambda p, e: p["children"].append(dict(e))]
+        for mutation in mutations:
+            value, page, link = self.fixture()
+            mutation(page, link)
+            self.assertIn("native-web-identity", kinds(hierarchy_check.check(value)))
+
+    def test_stale_binding_and_untrusted_prefix_fail(self):
+        for key, changed in [("document", "old"), ("card", 2), ("generation", 3), ("side", "answer"), ("page", "review.card.page.b")]:
+            value, _, _ = self.fixture()
+            value["native_web_binding_at_end"][key] = changed
+            self.assertIn("native-web-identity", kinds(hierarchy_check.check(value)))
+        value, _, _ = self.fixture()
+        value["native_web"]["generated_ids"] = []
+        value["native_web_binding_at_end"]["generated_ids"] = []
+        self.assertIn("missing-identifier", kinds(hierarchy_check.check(value)))
+
+    def test_no_field_alias_or_mobile_or_name_geometry_fallback(self):
+        value, _, link = self.fixture()
+        link["identifier"] = link["ax_dom_identifier"]
+        self.assertIn("native-web-identity", kinds(hierarchy_check.check(value)))
+        for platform in ["ios", "ipad"]:
+            value, _, _ = self.fixture()
+            value["platform"] = platform
+            self.assertIn("native-web-identity", kinds(hierarchy_check.check(value)))
+        value, _, link = self.fixture()
+        del link["ax_dom_identifier"]
+        self.assertIn("missing-identifier", kinds(hierarchy_check.check(value)))
+
+    def test_other_identifier_and_geometry_rules_remain_active(self):
+        value, page, _ = self.fixture()
+        page["children"] += [el("button", label="Other", f=(100, 50, 44, 44)),
+                             el("staticText", label="One", f=(0, 100, 80, 20)),
+                             el("staticText", label="Two", f=(0, 100, 80, 20))]
+        self.assertEqual(kinds(hierarchy_check.check(value)), ["missing-identifier", "text-overlap"])
+        # An authored lookalike has no generated ownership, even with a DOM ID.
+        authored = dict(page["children"][0])
+        authored.update(ax_dom_identifier="review.card.replay.q0", label="Author & 猫")
+        page["children"] = [page["children"][0], authored]
+        self.assertEqual(kinds(hierarchy_check.check(value)), ["missing-identifier"])
+
+    def test_original_xcui_overlap_and_raw_id_findings_survive_different_ax_tree(self):
+        value, _, _ = self.fixture()
+        original_page = value["xcui_root"]["children"][0]["children"][0]
+        original_page["children"] += [
+            el("staticText", "bad ID", "Original one", f=(10, 100, 80, 20)),
+            el("staticText", "review.card.duplicate", "Original two", f=(10, 100, 80, 20)),
+            el("button", "review.card.duplicate", "Original action", f=(200, 100, 40, 40)),
+        ]
+        issues = hierarchy_check.check(value)
+        self.assertEqual(kinds(issues), ["bad-identifier", "duplicate-identifier", "text-overlap"])
+        self.assertTrue(all(i["source"] == "xcui_root" for i in issues))
+        overlap = next(i for i in issues if i["kind"] == "text-overlap")
+        self.assertEqual(overlap["labels"], ["Original one", "Original two"])
+        self.assertEqual(overlap["frames"], [frame(10, 100, 80, 20)] * 2)
+        self.assertEqual(original_page["children"][0]["identifier"], "")
+
+    def test_ax_and_xcui_diagnostics_stay_separate_without_leaf_mapping(self):
+        value, page, link = self.fixture()
+        original_page = value["xcui_root"]["children"][0]["children"][0]
+        original_page["children"] += [el("staticText", label="Raw one", f=(10, 100, 80, 20)),
+                                      el("staticText", label="Raw two", f=(10, 100, 80, 20))]
+        page["children"] += [el("staticText", label="AX one", f=(10, 200, 80, 20)),
+                             el("staticText", label="AX two", f=(10, 200, 80, 20)),
+                             el("button", label="Still requires identity", f=(100, 300, 40, 40))]
+        page["children"].append(el("link", label=link["label"], f=(20, 30, 44, 44)))
+        issues = hierarchy_check.check(value)
+        self.assertEqual(kinds(issues), ["missing-identifier", "missing-identifier", "text-overlap", "text-overlap"])
+        self.assertEqual([i["source"] for i in issues if i["kind"] == "text-overlap"], ["root", "xcui_root"])
+        self.assertTrue(all(i["source"] == "root" for i in issues if i["kind"] == "missing-identifier"))
+
+    def test_raw_other_controls_and_unowned_pages_keep_missing_id_checks(self):
+        value, _, _ = self.fixture()
+        original_window = value["xcui_root"]["children"][0]
+        original_window["children"][0]["children"].append(el("button", label="Raw unidentified action"))
+        original_window["children"].append(el("webView", "review.card.otherPage", children=[
+            el("link", label="Play audio", f=(20, 30, 44, 44))]))
+        issues = hierarchy_check.check(value)
+        self.assertEqual(kinds(issues), ["missing-identifier", "missing-identifier"])
+        self.assertEqual({i["label"] for i in issues}, {"Raw unidentified action", "Play audio"})
+        self.assertTrue(all(i["source"] == "xcui_root" for i in issues))
+
+
 class MissingIdentifier(unittest.TestCase):
     def test_a_button_without_identifier_is_reported_with_its_frame_and_label(self):
         issues = hierarchy_check.check(doc(el("button", label="Save", f=(10, 20, 80, 44))))

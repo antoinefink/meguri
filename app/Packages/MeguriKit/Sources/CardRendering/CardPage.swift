@@ -8,6 +8,22 @@ public final class CardPage: NSObject, WKNavigationDelegate {
     public let diagnostics: CardDiagnostics
     public private(set) var update: CardUpdate?
     public private(set) var payload: CardPayload?
+    /// Native test/export metadata, taken from the live host binding and trusted
+    /// transform output. It makes no claim about WebKit's AX publication.
+    public var replayAccessibilityBinding: CardReplayAccessibilityBinding? {
+        guard behaviorAvailable, hostDOMKnown, settled,
+              committedRootDocument == documentID, webView.url == MediaOrigin.url,
+              let update, let payload else { return nil }
+        #if os(macOS)
+        let identifier = webView.accessibilityIdentifier()
+        #else
+        guard let identifier = webView.accessibilityIdentifier else { return nil }
+        #endif
+        return CardReplayAccessibilityBinding(page: identifier, document: documentID.uuidString,
+            card: update.card, generation: update.generation, side: update.sideName,
+            root: MediaOrigin.url.absoluteString,
+            generatedIDs: update.side == .question ? payload.questionReplayIDs : payload.answerReplayIDs)
+    }
     public private(set) var presented = false
     public var settled: Bool { runtimeSettled && appearancePaints == 0 && !restoringText }
     public internal(set) var visibleToken: UInt64?

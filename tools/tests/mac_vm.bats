@@ -179,7 +179,16 @@ for stage in 0 1 2 3; do
          [node("webView"; ""; ""; $window; ($authored + $generated))])])}
   ' >"$att/replay-native-$stage.json"
 done
+# Synthetic exporter fixtures only: action-boundary inventories and images.
+for ((action=0; action<43; action++)); do
+  for phase in before after; do
+    cp "$att/replay-native-0.json" "$att/replay-native-action-$action-$phase.json"
+  done
+done
+for hierarchy in "$att"/replay-native-*.json; do printf 'synthetic-png' >"${hierarchy%.json}.png"; done
 case "$mode" in
+  missing-action) rm "$att/replay-native-action-0-before.json" ;;
+  missing-screenshot) rm "$att/replay-native-action-0-after.png" ;;
   missing-stage) rm "$att/replay-native-3.json" ;;
   missing-identifier)
     jq '.root.children[0].children[0].children[1].identifier = ""' \
@@ -187,7 +196,7 @@ case "$mode" in
     mv "$att/changed.tmp" "$att/replay-native-0.json" ;;
   invalid-hierarchy) printf '{}\n' >"$att/replay-native-0.json" ;;
 esac
-find "$att" -name 'replay-native-*.json' -type f -exec basename {} \; |
+find "$att" -name 'replay-native-*' -type f -exec basename {} \; |
   sort | jq -R '{suggestedHumanReadableName: ., exportedFileName: .}' |
   jq -s '[{attachments: .}]' >"$bundle/manifest.tmp"
 case "$mode" in
@@ -848,7 +857,7 @@ exec '"$(command -v tar)"' "$@"'
   [ "$(field .details.queued)" = true ]
   [ "$(field '.summary | "\(.total) \(.passed) \(.failed) \(.queued) \(.errors)"')" = "8 5 0 3 0" ]
   [ "$(field '.details.suites | map(select(. == "replay-native")) | length')" = 1 ]
-  [ "$(field .details.replay_native_hierarchies)" = 4 ]
+  [ "$(field .details.replay_native_hierarchies)" = 90 ]
   called "^vm-xcodebuild .* -only-testing:MeguriUITests/MacReplayAccessibilityTests/testGeneratedReplaysKeepNativeIdentityLocalizationAndExactCommands\$"
   [ "$(field '[.details.queued_parts[] | .part] | join(" ")')" = "test-hooks drive-open-sample-sheet drive-sample-transition" ]
   [ "$(field '[.details.queued_parts[] | .user_step] | unique | join(" ")')" = mac-input ]
@@ -865,22 +874,22 @@ exec '"$(command -v tar)"' "$@"'
 }
 
 # bats test_tags=gate
-@test "replay-native exports one executed pass and four native hierarchies through the unchanged checker" {
+@test "replay-native exports one executed pass and every hierarchy and screenshot boundary" {
   mg mac-ui --suite replay-native
   [ "$status" -eq 0 ]
   [ "$(field .status)" = pass ]
   [ "$(field .details.mac_runner)" = vm ]
   [ "$(field '.summary | "\(.total) \(.passed) \(.failed) \(.queued) \(.errors)"')" = "1 1 0 0 0" ]
   [ "$(field '.details.replay_native_tests | "\(.outcome) \(.passed) \(.failed) \(.skipped)"')" = "Passed 1 0 0" ]
-  [ "$(field .details.replay_native_hierarchies)" = 4 ]
-  [ "$(field '[.artifacts[] | select(.kind == "hierarchy")] | length')" = 4 ]
+  [ "$(field .details.replay_native_hierarchies)" = 90 ]
+  [ "$(field '[.artifacts[] | select(.kind == "hierarchy")] | length')" = 90 ]
   called "^vm-xcodebuild .* -only-testing:MeguriUITests/MacReplayAccessibilityTests/testGeneratedReplaysKeepNativeIdentityLocalizationAndExactCommands\$"
   not_called "^host-xcodebuild"
   local proof="$(dirname "$result")/replay-native-proof" stage
   jq -e '.testNodes[0].children | length == 1 and
     .[0].nodeType == "Test Case" and .[0].result == "Passed" and
     .[0].nodeIdentifier == "MacReplayAccessibilityTests/testGeneratedReplaysKeepNativeIdentityLocalizationAndExactCommands"' "$proof/test-cases.json"
-  jq -e '.counts.files == 4 and .counts.issues == 0 and (.files | length) == 4' "$proof/hierarchy-check.json"
+  jq -e '.counts.files == 90 and .counts.issues == 0 and (.files | length) == 90' "$proof/hierarchy-check.json"
   for stage in 0 1 2 3; do
     cmp "$proof/attachments/replay-native-$stage.json" "$proof/replay-native-$stage.json"
     jq -e --argjson stage "$stage" '.schema == 1 and .platform == "mac" and
@@ -900,7 +909,7 @@ exec '"$(command -v tar)"' "$@"'
     [ "$status" -eq 1 ]
     [ "$(field .status)" = fail ]
     [ "$(field '[.failures[] | select(.id == "replay-native-results")] | length')" = 1 ]
-    [ "$(field .details.replay_native_hierarchies)" = 4 ]
+    [ "$(field .details.replay_native_hierarchies)" = 90 ]
     proof="$(dirname "$result")/replay-native-proof"
     jq -e --argjson counts "$(field .details.replay_native_tests)" '
       .passed == $counts.passed and .failed == $counts.failed and .skipped == $counts.skipped
@@ -911,7 +920,7 @@ exec '"$(command -v tar)"' "$@"'
 # bats test_tags=gate
 @test "replay-native rejects empty, incomplete and duplicate hierarchy manifests" {
   local mode
-  for mode in empty-manifest missing-stage duplicate-stage; do
+  for mode in empty-manifest missing-stage duplicate-stage missing-action missing-screenshot; do
     FAKE_VM_REPLAY_RESULT="$mode" mg mac-ui --suite replay-native
     [ "$status" -eq 1 ]
     [ "$(field .status)" = fail ]
@@ -926,7 +935,7 @@ exec '"$(command -v tar)"' "$@"'
   [ "$status" -eq 1 ]
   [ "$(field .status)" = fail ]
   [ "$(field '[.failures[] | select(.id == "replay-native-hierarchy")] | length')" = 1 ]
-  jq -e '.counts.files == 4 and .counts["missing-identifier"] == 1 and .counts.issues == 1' \
+  jq -e '.counts.files == 90 and .counts["missing-identifier"] == 1 and .counts.issues == 1' \
     "$(dirname "$result")/replay-native-proof/hierarchy-check.json"
 
   FAKE_VM_REPLAY_RESULT=invalid-hierarchy mg mac-ui --suite replay-native

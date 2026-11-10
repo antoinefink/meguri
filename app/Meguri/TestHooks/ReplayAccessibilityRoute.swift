@@ -45,10 +45,11 @@ extension TestHooks {
         private var observer: ReplayTransportObserver?
         private var root: URL?
         private var work: Task<Void, Never>?
+        private var publicationWork: Task<Void, Never>?
         private var card: Int64 = 0
 
         var report: String {
-            let value: [String: Any] = [
+            var value: [String: Any] = [
                 "ready": ready, "failure": failure, "checkpoint": checkpoint,
                 "card": pair?.current.update?.card ?? 0,
                 "side": pair?.current.update?.sideName ?? "none",
@@ -57,6 +58,11 @@ extension TestHooks {
                 "actions": actions,
                 "unmatchedActions": unmatchedActions
             ]
+            if ready, let binding = pair?.current.replayAccessibilityBinding,
+               let data = try? JSONEncoder().encode(binding),
+               let metadata = try? JSONSerialization.jsonObject(with: data) {
+                value["nativeWebBinding"] = metadata
+            }
             return (try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]))
                 .flatMap { String(data: $0, encoding: .utf8) } ?? "unavailable"
         }
@@ -131,6 +137,40 @@ extension TestHooks {
         func next() { perform { try await self.question() } }
         func answer() { perform { _ = try await self.pair?.showAnswer() } }
 
+        /// Test setup for the driver's two wait directions. Toggle visibility
+        /// on this synthetic page without changing its binding or activating
+        /// any replay. Native AX observations, never this script, prove waits.
+        func cycleReplayPublication() {
+            guard publicationWork == nil, ready, let page = pair?.current,
+                  let binding = page.replayAccessibilityBinding,
+                  let id = binding.generatedIDs.first else { return }
+            publicationWork = Task {
+                do {
+                    try await Task.sleep(for: .seconds(2))
+                    guard self.pair?.current === page, page.replayAccessibilityBinding == binding else {
+                        throw CardPage.Failure.notPrepared
+                    }
+                    _ = try await page.webView.callAsyncJavaScript("""
+                        const link = document.getElementById(id);
+                        if (!link) throw new Error('synthetic replay absent');
+                        link.style.setProperty('display', 'none', 'important');
+                        """, arguments: ["id": id], in: nil,
+                        contentWorld: .world(name: CardRuntime.interactionWorldName))
+                    try await Task.sleep(for: .seconds(3))
+                    guard self.pair?.current === page, page.replayAccessibilityBinding == binding else {
+                        throw CardPage.Failure.notPrepared
+                    }
+                    _ = try await page.webView.callAsyncJavaScript("""
+                        const link = document.getElementById(id);
+                        if (!link) throw new Error('synthetic replay absent');
+                        link.style.removeProperty('display');
+                        """, arguments: ["id": id], in: nil,
+                        contentWorld: .world(name: CardRuntime.interactionWorldName))
+                } catch { if !Task.isCancelled { self.failure = "fixture publication cycle failed" } }
+                self.publicationWork = nil
+            }
+        }
+
         /// A round trip through the same isolated transport follows prior native
         /// presses. Await its reply before publishing cumulative command counts;
         /// no delay or counter increment is used to simulate an activation.
@@ -157,6 +197,7 @@ extension TestHooks {
         }
 
         func stop() {
+            publicationWork?.cancel(); publicationWork = nil
             work?.cancel(); work = nil
             pair?.close(); pair = nil; observer = nil
             if let root { try? FileManager.default.removeItem(at: root) }
@@ -176,6 +217,8 @@ extension TestHooks {
                         .accessibilityIdentifier("testhooks.replay.answer")
                     Button("Checkpoint") { model.takeCheckpoint() }
                         .accessibilityIdentifier("testhooks.replay.checkpoint")
+                    Button("Cycle replay publication") { model.cycleReplayPublication() }
+                        .accessibilityIdentifier("testhooks.replay.cyclePublication")
                 }
                 .disabled(!model.ready)
                 Text("Synthetic replay fixture")

@@ -403,6 +403,13 @@ final class AgentDriver {
         case let .launch(options):
             try launch(options)
         case let .tap(id):
+            #if os(macOS)
+            if let native = try currentTree().nativeWeb, native.binding.generatedIDs.contains(id) {
+                _ = try onlyElement(id)
+                try native.press(id, in: running())
+                return
+            }
+            #endif
             try coordinate(at: try hitPoint(id)).clickOrTap()
         case let .type(id, text):
             try coordinate(at: try hitPoint(id)).clickOrTap()
@@ -412,6 +419,12 @@ final class AgentDriver {
         case let .scroll(id, direction):
             try drag(id, direction, scroll: true)
         case let .wait(id, timeout, gone):
+            #if os(macOS)
+            if let binding = try NativeWebCapture.binding(in: running()), binding.generatedIDs.contains(id) {
+                try NativeWebCapture.wait(id, in: running(), binding: binding, timeout: timeout, gone: gone)
+                return
+            }
+            #endif
             let element = try running().descendants(matching: .any).matching(identifier: id).firstMatch
             if gone {
                 guard element.waitForNonExistence(timeout: timeout) else {
@@ -576,6 +589,11 @@ final class AgentDriver {
     }
 
     private func hitPoint(_ id: String) throws -> CGPoint {
+        #if os(macOS)
+        if try currentTree().nativeWeb?.binding.generatedIDs.contains(id) == true {
+            throw StepFailure(message: "Native replay '\(id)' requires its original AX press")
+        }
+        #endif
         let element = try onlyElement(id)
         guard let point = element.hitPoint else {
             throw StepFailure(message: "'\(id)' is outside its window (frame \(element.frame)); nothing to tap")

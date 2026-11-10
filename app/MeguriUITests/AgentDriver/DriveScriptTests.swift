@@ -1,6 +1,121 @@
 import Foundation
 import XCTest
 
+#if os(macOS)
+/// Exercise the production polling and candidate classifier with a controlled
+/// publication clock. These are observations, never activation retries.
+@MainActor
+final class NativeReplayWaitTests: XCTestCase {
+    private let id = "review.card.replay.q1"
+    private var binding: NativeWebCapture.Binding {
+        .init(page: "review.card.page.a", document: "synthetic-document", card: 1,
+              generation: 2, side: "question", root: "meguri-media://media/",
+              generatedIDs: [id])
+    }
+
+    private func link(type: String = "link", error: Int = 0, wrongType: Bool = false,
+                      domID: String? = "review.card.replay.q1") -> HierarchyExport.Node {
+        var node = HierarchyExport.Node(type: type, identifier: "", label: "Play audio", value: nil,
+            frame: CGRect(x: 10, y: 10, width: 44, height: 44), hitPoint: CGPoint(x: 32, y: 32),
+            enabled: true, selected: false, focused: false, children: [])
+        node.nativeAX = true
+        node.axDOMIdentifier = domID
+        node.axDOMIdentifierError = error
+        node.axDOMIdentifierWrongType = wrongType
+        return node
+    }
+
+    func testGoneWaitObservesPresentThenActualRemoval() throws {
+        let start = Date(timeIntervalSince1970: 100)
+        var now = start
+        var nodes = [link()]
+        var observations: [Bool] = []
+        try NativeReplayWait.until(id: id, timeout: 0.3, gone: true, now: { now }, pause: { delay in
+            now = now.addingTimeInterval(delay)
+            if now.timeIntervalSince(start) >= 0.09 { nodes.removeAll() }
+        }) { deadline in
+            XCTAssertEqual(deadline, start.addingTimeInterval(0.3))
+            let present = try NativeWebCapture.publishedLinkIndex(self.id, binding: self.binding, nodes: nodes) != nil
+            observations.append(present)
+            return present
+        }
+        XCTAssertEqual(observations.first, true)
+        XCTAssertEqual(observations.last, false)
+        XCTAssertGreaterThan(observations.count, 1)
+        XCTAssertLessThan(now.timeIntervalSince(start), 0.3)
+    }
+
+    func testAppearanceWaitObservesPublicationWithinRequestedTimeout() throws {
+        let start = Date(timeIntervalSince1970: 100)
+        var now = start
+        var nodes: [HierarchyExport.Node] = []
+        var observations: [Bool] = []
+        try NativeReplayWait.until(id: id, timeout: 0.3, gone: false, now: { now }, pause: { delay in
+            now = now.addingTimeInterval(delay)
+            if now.timeIntervalSince(start) >= 0.09 { nodes = [self.link()] }
+        }) { deadline in
+            XCTAssertEqual(deadline, start.addingTimeInterval(0.3))
+            let present = try NativeWebCapture.publishedLinkIndex(self.id, binding: self.binding, nodes: nodes) != nil
+            observations.append(present)
+            return present
+        }
+        XCTAssertEqual(observations.first, false)
+        XCTAssertEqual(observations.last, true)
+        XCTAssertGreaterThan(observations.count, 1)
+        XCTAssertLessThan(now.timeIntervalSince(start), 0.3)
+    }
+
+    func testBothWaitDirectionsStopAtTheirRequestedDeadline() {
+        for gone in [false, true] {
+            let start = Date(timeIntervalSince1970: 100)
+            var now = start
+            var observations = 0
+            XCTAssertThrowsError(try NativeReplayWait.until(id: id, timeout: 0.12, gone: gone,
+                now: { now }, pause: { now = now.addingTimeInterval($0) }) { deadline in
+                XCTAssertEqual(deadline, start.addingTimeInterval(0.12))
+                XCTAssertLessThan(now, deadline)
+                observations += 1
+                return gone
+            })
+            XCTAssertGreaterThan(observations, 1)
+            XCTAssertEqual(now, start.addingTimeInterval(0.12))
+        }
+    }
+
+    func testPublishedInvalidCandidatesFailImmediatelyInBothDirections() {
+        let cases = [[link(domID: nil)], [link(error: -25205)], [link(wrongType: true)],
+                     [link(type: "button")], [link(), link()]]
+        for gone in [false, true] {
+            for nodes in cases {
+                var pauses = 0
+                var observations = 0
+                XCTAssertThrowsError(try NativeReplayWait.until(id: id, timeout: 2, gone: gone,
+                    pause: { _ in pauses += 1 }) { _ in
+                    observations += 1
+                    return try NativeWebCapture.publishedLinkIndex(self.id, binding: self.binding, nodes: nodes) != nil
+                })
+                XCTAssertEqual(observations, 1)
+                XCTAssertEqual(pauses, 0)
+            }
+        }
+    }
+
+    func testStaleObservationFailsWithoutWaitingOrRetry() {
+        for gone in [false, true] {
+            var pauses = 0
+            var observations = 0
+            XCTAssertThrowsError(try NativeReplayWait.until(id: id, timeout: 2, gone: gone,
+                pause: { _ in pauses += 1 }) { _ in
+                observations += 1
+                throw NativeWebCapture.Failure("Stale native replay wait binding")
+            })
+            XCTAssertEqual(observations, 1)
+            XCTAssertEqual(pauses, 0)
+        }
+    }
+}
+#endif
+
 /// The drive script format (tools/drive-scripts/AGENTS.md). These tests only
 /// parse JSON; they launch no app.
 final class DriveScriptTests: XCTestCase {
