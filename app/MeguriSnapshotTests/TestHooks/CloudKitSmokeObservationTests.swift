@@ -63,9 +63,9 @@ import Testing
               publicationInitial: false, publicationComplete: publicationComplete, bindingUsable: bindingUsable,
               engine: engine, entities: [], cardNoteID: nil, lastReviewID: nil)
     }
-    private func ledger() throws -> CloudKitSmokeEvidence {
+    private func ledger(selected: Bool = false) throws -> CloudKitSmokeEvidence {
         let evidence = CloudKitSmokeEvidence()
-        try evidence.setGeneration(11)
+        try evidence.setGeneration(11, selectedPublication: selected)
         return evidence
     }
     private func stateCallback(_ evidence: CloudKitSmokeEvidence, ordinal: UInt64 = 1) {
@@ -259,6 +259,117 @@ import Testing
             let invalid = try ledger()
             invalid.sdk(.init(origin: "generated-engine", ordinal: 1, event: .stateUpdate(Data([9])), phase: .delivered), current: wrong)
             #expect(throws: AgentFailure.execution) { try invalid.check() }
+        }
+    }
+    @Test func commonOriginalJoinUsesCompletedPublicationBatchAndStateWithoutFictionalReview() throws {
+        let evidence = try ledger(selected: true)
+        publication(evidence, mediaResult: .saved(controlRecord))
+        let record = CloudRecord(name: entity("n1").recordName, envelope: Data([1]), systemFields: Data([2]))
+        evidence.batch(origin: "generated-engine", batch: .init(id: 9, saves: [record], deletes: []), proof: nil, current: current())
+        let sent = CloudEngineEvent.sent(batchID: 9, saved: [record], failed: [], deleted: [])
+        for phase in [CloudSDKObservationPhase.delivered, .committed, .returned] {
+            evidence.sdk(.init(origin: "generated-engine", ordinal: 1, event: sent, phase: phase), current: current())
+        }
+        // The earlier source ACK and the common join both need the original
+        // saved envelope and a later committed AND returned state callback.
+        #expect(throws: AgentFailure.execution) { try evidence.joinedOriginalWork() }
+        stateCallback(evidence, ordinal: 2)
+        _ = try evidence.requireSelectedAcknowledgement(entity("n1"),
+            observations: [.savedPendingRemoved(name: record.name, requestID: 9)],
+            attemptBoundary: evidence.acknowledgementBoundary())
+        #expect(throws: AgentFailure.execution) { try evidence.joined() } // Smoke still needs held evidence.
+        let joined = try evidence.joinedOriginalWork()
+        #expect(joined.map(\.operation) == ["own-joined", "sdk-joined"])
+        #expect(joined.map(\.count) == [5, 2])
+        #expect(!joined.contains { $0.operation?.contains("held") == true })
+    }
+    @Test func commonOriginalJoinWaitsForOriginalOwnCommitAndSDKReturn() throws {
+        let evidence = try ledger(selected: true)
+        let identity = UUID()
+        let metadata = CloudOwnMetadata(operationID: Data([1]), attempt: 4, kind: .createZones)
+        for phase in [CloudOwnObservationPhase.prepared, .enqueued(true), .replied(.zonesCreated)] {
+            evidence.own(.init(metadata: metadata, identity: identity, phase: phase))
+        }
+        let event = CloudEngineEvent.stateUpdate(Data([9]))
+        for phase in [CloudSDKObservationPhase.delivered, .committed] {
+            evidence.sdk(.init(origin: "generated-engine", ordinal: 1, event: event, phase: phase), current: current())
+        }
+        #expect(throws: AgentFailure.execution) { try evidence.joinedOriginalWork() }
+        evidence.own(.init(metadata: metadata, identity: identity, phase: .committed))
+        #expect(throws: AgentFailure.execution) { try evidence.joinedOriginalWork() }
+        evidence.sdk(.init(origin: "generated-engine", ordinal: 1, event: event, phase: .returned), current: current())
+        #expect(try evidence.joinedOriginalWork().map(\.count) == [1, 1])
+    }
+    @Test func commonOriginalPeerJoinRetainsOriginalFetchWithoutHeldReview() throws {
+        let evidence = try ledger(selected: true)
+        let record = CloudRecord(name: entity("n1").recordName, envelope: Data([1]), systemFields: Data([2]))
+        let events: [CloudEngineEvent] = [.willFetch(groupID: "generated-fetch", reason: .manual),
+            .willFetchZone(zone: "generated-zone"), .fetched(zone: "generated-zone", records: [record], deleted: []),
+            .didFetchZone(zone: "generated-zone", error: nil), .didFetch(groupID: "generated-fetch", reason: .manual)]
+        for (i, event) in events.enumerated() {
+            for phase in [CloudSDKObservationPhase.delivered, .committed, .returned] {
+                evidence.sdk(.init(origin: "generated-engine", ordinal: UInt64(i + 1), event: event, phase: phase), current: current())
+            }
+        }
+        let fetched = try evidence.requireSelectedFetch(entity("n1"))
+        #expect(fetched.first?.operation == "n1-original-fetched-returned")
+        // This callback proof cannot replace runtime's earlier durable peer
+        // observation. The common join proves only the retained original work.
+        #expect(!fetched.contains { $0.name == .localDurable })
+        #expect(throws: AgentFailure.execution) { try evidence.joined() }
+        #expect(try evidence.joinedOriginalWork().map(\.count) == [0, 5])
+    }
+    @Test func commonOriginalJoinCannotUseEmptyMapsCurrentStateOrRefusedOwnWork() throws {
+        let empty = try ledger(selected: true)
+        empty.validate(origin: "generated-engine", current: current())
+        #expect(throws: AgentFailure.execution) { try empty.joinedOriginalWork() }
+        let refused = try ledger(selected: true)
+        stateCallback(refused)
+        let identity = UUID()
+        let metadata = CloudOwnMetadata(operationID: Data([1]), attempt: 4, kind: .createZones)
+        refused.own(.init(metadata: metadata, identity: identity, phase: .prepared))
+        refused.own(.init(metadata: metadata, identity: identity, phase: .enqueued(false)))
+        #expect(throws: AgentFailure.execution) { try refused.joinedOriginalWork() }
+        let failed = try ledger(selected: true)
+        stateCallback(failed)
+        failed.fail()
+        #expect(throws: AgentFailure.execution) { try failed.joinedOriginalWork() }
+    }
+    @Test func commonOriginalJoinRejectsWrongCallbackIdentityOrderAndChangedPayload() throws {
+        for variant in 0..<7 {
+            let evidence = try ledger(selected: true)
+            let record = CloudRecord(name: "generated-record-n1", envelope: Data([1]), systemFields: nil)
+            evidence.batch(origin: "generated-engine", batch: .init(id: 9, saves: [record], deletes: []), proof: nil, current: current())
+            let sent = CloudEngineEvent.sent(batchID: 9, saved: [record], failed: [], deleted: [])
+            evidence.sdk(.init(origin: "generated-engine", ordinal: 1, event: sent, phase: .delivered), current: current())
+            evidence.sdk(.init(origin: "generated-engine", ordinal: 1, event: sent, phase: .committed), current: current())
+            let changed = CloudRecord(name: record.name, envelope: Data([2]), systemFields: nil)
+            let returned: CloudEngineEvent = variant == 3 ? .sent(batchID: 9, saved: [changed], failed: [], deleted: [])
+                : variant == 4 ? .sent(batchID: 10, saved: [record], failed: [], deleted: [])
+                : variant == 5 ? .sent(batchID: 9, saved: [], failed: [], deleted: []) : sent
+            evidence.sdk(.init(origin: variant == 0 ? "other-engine" : "generated-engine",
+                ordinal: variant == 1 ? 2 : 1, event: returned,
+                phase: variant == 6 ? .committed : .returned), current: current(generation: variant == 2 ? 12 : 11))
+            stateCallback(evidence, ordinal: 3)
+            #expect(throws: AgentFailure.execution) { try evidence.joinedOriginalWork() }
+        }
+        let alteredState = try ledger(selected: true)
+        alteredState.sdk(.init(origin: "generated-engine", ordinal: 1, event: .stateUpdate(Data([9])), phase: .delivered), current: current())
+        alteredState.sdk(.init(origin: "generated-engine", ordinal: 1, event: .stateUpdate(Data([10])), phase: .committed), current: current())
+        #expect(throws: AgentFailure.execution) { try alteredState.joinedOriginalWork() }
+    }
+    @Test func commonOriginalJoinRefusesLateCallbacksAndOwnWorkAfterTerminalProof() throws {
+        for lateOwn in [false, true] {
+            let evidence = try ledger(selected: true)
+            publication(evidence, mediaResult: .saved(controlRecord))
+            stateCallback(evidence)
+            _ = try evidence.joinedOriginalWork()
+            if lateOwn {
+                evidence.own(.init(metadata: .init(operationID: Data([2]), attempt: 5, kind: .createZones),
+                    identity: UUID(), phase: .prepared))
+            } else { stateCallback(evidence, ordinal: 2) }
+            #expect(throws: AgentFailure.execution) { try evidence.check() }
+            #expect(throws: AgentFailure.execution) { try evidence.joinedOriginalWork() }
         }
     }
     private func heldProjection(cardDigest: UInt8 = 11, reviewDigest: Data? = nil,

@@ -55,6 +55,9 @@ import Foundation
     private var selectedEdit: OriginalCloudEditFacts?
     private var selectedExchangeAttempted = false
     private var selectedExchangeRecord: CloudPolicyExchangeRecord?
+    // Set only after the earlier command's actual source ACK or peer durable
+    // apply + original fetched callback proof has succeeded and been observed.
+    private var selectedCloseProof: (program: AgentProgram, generation: UInt64)?
 
     init(admittedRun: AgentRunDirectory) {
         self.admittedRun = admittedRun
@@ -516,15 +519,23 @@ import Foundation
             try observe(result); facts.append(result)
             return [.init(name: .coordinatorResult, outcome: .pass, facts: facts)]
         case .close:
-            // Smoke's joined proof below also proves its held review images.
-            // It cannot be used to certify a program without that review.
-            if program != .smoke { throw AgentFailure.implementationMissing }
             guard let owner, owner.review == nil, await owner.sync.cancelAndDrain() else { throw AgentFailure.execution }
+            if program != .smoke {
+                guard let program, program == .syncNowMac || program == .syncNowPhone,
+                      let backend, !owner.sync.operationFailed, selectedExchangeRecord != nil,
+                      selectedCloseProof?.program == program,
+                      selectedCloseProof?.generation == owner.generation else { throw AgentFailure.execution }
+                try backend.checkFailure()
+                try changes.checkFailure()
+                try evidence.check()
+            }
             let integrity = try await integrityCheck(owner)
             guard await owner.close() else { throw AgentFailure.execution }
             self.owner = nil
             changes.finish()
-            let proof = try evidence.joined()
+            let proof: [AgentFact]
+            if program == .smoke { proof = try evidence.joined() }
+            else { proof = try evidence.joinedOriginalWork() }
             for fact in proof { try observe(fact) }
             let joined = AgentFact(name: .ownedWorkJoined)
             try observe(joined)
@@ -560,6 +571,7 @@ import Foundation
             facts += try evidence.requireSelectedFetch(current.entity)
             try backend.checkFailure()
             for fact in facts { try observe(fact) }
+            selectedCloseProof = (.syncNowPhone, owner.generation)
             return [.init(name: .localDurability, outcome: .pass, facts: facts)]
         }
     }
@@ -603,6 +615,10 @@ import Foundation
                 digest: CloudKitSmokeGeneratedInput.hex(current.entity.digest), operation: "n1"))
         }
         for fact in facts { try observe(fact) }
+        if program == .syncNowMac {
+            try backend.checkFailure()
+            selectedCloseProof = (.syncNowMac, owner.generation)
+        }
         return [.init(name: .coordinatorResult, outcome: .pass, facts: facts)]
     }
     private func requireInitialPreview(_ summary: CloudConnectionSummary) throws {

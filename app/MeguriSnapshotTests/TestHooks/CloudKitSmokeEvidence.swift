@@ -24,6 +24,8 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
         var phase = 0
         var returned: UInt64?
         var saved: Set<String> = []
+        var savedRecords: [String: Data] = [:]
+        var stateDigest: Data?
         var received: [String: Data] = [:]
         var zone: String?
         var group: String?
@@ -46,6 +48,7 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
     }
     private struct State {
         var failed = false
+        var joined = false
         var selectedPublication = false
         var generation: UInt64?
         var origin: String?
@@ -124,7 +127,7 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
     func own(_ observation: CloudOwnObservation) {
         state.withLock { s in
             do {
-                guard !s.failed, s.generation != nil else { throw AgentFailure.execution }
+                guard !s.failed, !s.joined, s.generation != nil else { throw AgentFailure.execution }
                 let kind = Self.kind(observation.metadata.kind)
                 if case .prepared = observation.phase {
                     guard s.own.count < 256, s.own[observation.identity] == nil,
@@ -201,7 +204,7 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
     func validate(origin: String, current: SmokeCloudObservation) {
         state.withLock { s in
             do {
-                guard current.engine == origin else { throw AgentFailure.execution }
+                guard !s.joined, current.engine == origin else { throw AgentFailure.execution }
                 try s.bind(origin, generation: current.generation)
             } catch { s.failed = true }
         }
@@ -209,7 +212,7 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
     func sdk(_ observation: CloudSDKObservation, current: SmokeCloudObservation? = nil) {
         state.withLock { s in
             do {
-                guard !s.failed, let generation = s.generation else { throw AgentFailure.execution }
+                guard !s.failed, !s.joined, let generation = s.generation else { throw AgentFailure.execution }
                 if let current {
                     guard current.engine == observation.origin else { throw AgentFailure.execution }
                     try s.bind(observation.origin, generation: current.generation)
@@ -222,10 +225,11 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
                 let batch: UInt64?
                 let saved: [CloudRecord]
                 var received: [String: Data] = [:]
+                var stateDigest: Data?
                 var zone: String?
                 var group: String?
                 switch observation.event {
-                case .stateUpdate: kind = "state"; batch = nil; saved = []
+                case .stateUpdate(let data): kind = "state"; batch = nil; saved = []; stateDigest = Self.hash(data)
                 case .sent(let id, let records, let failures, let deleted, let failedDeletes):
                     guard failures.isEmpty, deleted.isEmpty, failedDeletes.isEmpty else { throw AgentFailure.execution }
                     kind = "sent"; batch = id; saved = records
@@ -245,15 +249,19 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
                     kind = "fetch-end"; batch = nil; saved = []; group = id
                 default: return
                 }
+                guard Set(saved.map(\.name)).count == saved.count else { throw AgentFailure.execution }
+                let savedRecords = Dictionary(uniqueKeysWithValues: saved.map { ($0.name, Self.hash($0.envelope)) })
                 if case .delivered = observation.phase {
                     guard s.callbacks.count < 1024, observation.ordinal > s.lastOrdinal,
                           s.callbacks.values.allSatisfy({ $0.phase == 3 }) else { throw AgentFailure.execution }
                     s.lastOrdinal = observation.ordinal
                     var cb = Callback(alias: "sdk\(s.callbacks.count + 1)", kind: kind, batch: batch)
+                    cb.savedRecords = savedRecords; cb.stateDigest = stateDigest
                     cb.received = received; cb.zone = zone; cb.group = group
                     s.callbacks[observation.ordinal] = cb
                 }
                 guard var cb = s.callbacks[observation.ordinal], cb.kind == kind, cb.batch == batch,
+                      cb.savedRecords == savedRecords, cb.stateDigest == stateDigest,
                       cb.received == received, cb.zone == zone, cb.group == group else { throw AgentFailure.execution }
                 let expected: Int
                 let suffix: String
@@ -282,7 +290,7 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
     func batch(origin: String, batch: CloudEngineBatch, proof: SmokeBatchProof?, current: SmokeCloudObservation) {
         state.withLock { s in
             do {
-                guard !s.failed, s.batches.count < 256, s.batches[batch.id] == nil,
+                guard !s.failed, !s.joined, s.batches.count < 256, s.batches[batch.id] == nil,
                       current.engine == origin, batch.deletes.isEmpty,
                       Set(batch.saves.map(\.name)).count == batch.saves.count else { throw AgentFailure.execution }
                 try s.bind(origin, generation: current.generation)
@@ -375,13 +383,28 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
             throw AgentFailure.implementationMissing
         }
     }
+    // Common original-attempt/callback join. Selected programs have no held
+    // review; their earlier source ACK or peer apply proof is retained by runtime.
+    func joinedOriginalWork() throws -> [AgentFact] {
+        try state.withLock { s in
+            let facts = try Self.originalWorkJoin(s)
+            s.joined = true
+            return facts
+        }
+    }
+    private static func originalWorkJoin(_ s: State) throws -> [AgentFact] {
+        guard !s.failed, !s.joined, s.generation != nil, s.origin != nil, s.adoptingFrom == nil,
+              s.own.values.allSatisfy({ $0.phase == 4 }),
+              !s.callbacks.isEmpty, s.callbacks.values.allSatisfy({ cb in
+                  cb.phase == 3 && (cb.saved.isEmpty || s.stateCommits.contains { $0 > (cb.returned ?? UInt64.max) })
+              }) else { throw AgentFailure.execution }
+        return [.init(name: .ownedWorkJoined, count: UInt64(s.own.count), operation: "own-joined"),
+                .init(name: .ownedWorkJoined, count: UInt64(s.callbacks.count), engine: "engine1", operation: "sdk-joined")]
+    }
     func joined() throws -> [AgentFact] {
         try state.withLock { s in
-            guard !s.failed, s.own.values.allSatisfy({ $0.phase == 4 }),
-                  !s.callbacks.isEmpty, s.callbacks.values.allSatisfy({ cb in
-                      cb.phase == 3 && (cb.saved.isEmpty || s.stateCommits.contains { $0 > (cb.returned ?? UInt64.max) })
-                  }),
-                  let held = s.held else { throw AgentFailure.execution }
+            let originalWork = try Self.originalWorkJoin(s)
+            guard let held = s.held else { throw AgentFailure.execution }
             let batches = s.batches.values.compactMap(\.proof).filter { $0.session == held.session && $0.seq >= held.seq }
             for batch in batches {
                 for image in batch.images where image.name == held.card || image.name == held.review {
@@ -401,13 +424,12 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
                 }
                 facts.append(.init(name: .applied, count: 0, engine: "engine1", operation: batch.alias + "-r1-absent"))
             }
+            s.joined = true
             return facts + [.init(name: .applied, count: UInt64(batches.count + mediaBatches.count), engine: "engine1", operation: "held-batches"),
                     .init(name: .applied, count: UInt64(mediaBatches.count), engine: "engine1", operation: "held-media-batches"),
                     .init(name: .applied, count: UInt64(batches.count), engine: "engine1", operation: "held-collection-batches"),
                     .init(name: .applied, count: UInt64(batches.flatMap(\.images).filter { $0.name == held.card }.count), engine: "engine1", operation: "c1-held-handed"),
-                    .init(name: .applied, count: 0, engine: "engine1", operation: "r1-held-handed"),
-                    .init(name: .ownedWorkJoined, count: UInt64(s.own.count), operation: "own-joined"),
-                    .init(name: .ownedWorkJoined, count: UInt64(s.callbacks.count), engine: "engine1", operation: "sdk-joined")]
+                    .init(name: .applied, count: 0, engine: "engine1", operation: "r1-held-handed")] + originalWork
         }
     }
     private static func hash(_ data: Data) -> Data { Data(SHA256.hash(data: data)) }
