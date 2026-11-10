@@ -23,6 +23,7 @@ deletes the occupying row, the 30-step limit, setup's "Add Note" steps).
 | engine/undo A7, ids-usn-mtime S5 | `rslib/src/collection/transact.rs`, `rslib/src/collection/timestamps.rs`, `rslib/src/collection/undo.rs` | no `col.mod` bump while undoing; the restored value and the value saved for the inverse step |
 | engine/undo A8, ids-usn-mtime I4 | `rslib/src/revlog/undo.rs`, `rslib/src/storage/revlog/mod.rs`, `rslib/src/storage/revlog/add.sql` | restore without uniquify, the change recorded even when ignored, removal by id |
 | undo-ops V1, V2 | `rslib/src/collection/service.rs`, `rslib/src/backend/error.rs`, `pylib/anki/collection.py`, `pylib/anki/_backend.py`, `pylib/anki/errors.py` | the undo, redo and undo-status calls, the "undo empty" error for both |
+| undo-ops V4 `move_received_card` (2026-11-10) | none: Meguri design from plan R1727 and U140, `specs/servers/migaku-received-log.md` L13 | the Meguri-only step and the "Meguri only" marking; no Anki operation records it |
 
 Harvest classification (this pass): `rslib/src/undo/mod.rs` tests `undo`
 (`h876dbf5f6be7`), `coalesce_note_undo_entries` (`h8c7ca9736257`) and `custom`
