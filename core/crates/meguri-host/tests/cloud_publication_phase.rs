@@ -4296,19 +4296,29 @@ fn prior_open_observation_does_not_block_reopened_batch_or_sync_now_selection() 
         .reconcile_binding(&collection, &host.media().unwrap(), Duration::from_secs(30))
         .unwrap();
     assert_eq!(runtime.status().unwrap().binding.unwrap(), binding);
-    assert!(runtime.stored_state_for_testing().unwrap().open_counter > pending.observer_open);
-    {
+    let current_open = runtime.stored_state_for_testing().unwrap().open_counter;
+    assert!(current_open > pending.observer_open);
+    let (seq, generation) = {
         let lease = collection.reader(ReaderRole::Query).unwrap();
         let snapshot = lease.snapshot().unwrap();
         assert_eq!(pending.observed_generation, snapshot.generation().0);
         assert!(pending.observed_seq > snapshot.seq().0);
-    }
+        (snapshot.seq().0, snapshot.generation().0)
+    };
     let rescanned = runtime.entity_facts(&before.name).unwrap().unwrap();
-    assert_eq!(rescanned.observer_open, pending.observer_open);
-    assert_eq!(rescanned.observed_generation, pending.observed_generation);
-    assert_eq!(rescanned.observed_seq, pending.observed_seq);
+    assert_eq!(rescanned.observer_open, current_open);
+    assert_eq!(rescanned.observed_generation, generation);
+    assert_eq!(rescanned.observed_seq, seq);
     assert_eq!(rescanned.local_rev, pending.local_rev);
     assert_eq!(rescanned.payload, pending.payload);
+    let mut expected = pending.clone();
+    expected.observer_open = current_open;
+    expected.observed_seq = seq;
+    expected.observed_generation = generation;
+    assert!(
+        rescanned == expected,
+        "reconciliation may change only actual scan provenance"
+    );
 
     let instance = runtime.instance().unwrap();
     runtime.start_sdk_instance(&instance).unwrap();
@@ -4372,6 +4382,91 @@ fn prior_open_observation_does_not_block_reopened_batch_or_sync_now_selection() 
     )
     .unwrap();
     assert_eq!(image.payload, Some(pending.payload));
+    host.close().unwrap();
+}
+
+#[test]
+fn whole_scan_after_actual_reopen_refreshes_acknowledged_row_provenance_without_tracking_changes() {
+    use cloud::entity_codec::{Kind, Payload};
+    use meguri_storage::ReaderRole;
+
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("acknowledged-scan-provenance");
+    generated(&dir);
+    let host = open_host(&dir, keys());
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(618)).unwrap();
+    let binding = publish_actual_collection(&host, &mut service);
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let published = runtime.entity_facts_page(Kind::Note, None).unwrap();
+    assert_eq!(published.len(), 2);
+    assert!(
+        published.iter().all(|row| {
+            row.server_erev > 0 && row.mark.is_none() && row.acked_payload.as_ref() == Some(&row.payload)
+        })
+    );
+    let Payload::Note(note) = &published[1].payload else {
+        panic!("actual published note");
+    };
+    edit_workflow_note(&collection, note, "retained pending history across reopen");
+    let pending_name = published[1].name.clone();
+    let batch = runtime
+        .build_collection_batch(
+            &runtime.instance().unwrap(),
+            &collection,
+            &BTreeSet::from([pending_name.clone()]),
+        )
+        .unwrap();
+    assert_eq!(batch.saves.len(), 1);
+    let before = runtime.entity_facts_page(Kind::Note, None).unwrap();
+    assert!(before[0].mark.is_none());
+    assert!(before[1].mark.is_some() && !before[1].in_flight.is_empty());
+    let old_open = runtime.stored_state_for_testing().unwrap().open_counter;
+    let counter = runtime.status().unwrap().change_counter;
+    host.close().unwrap();
+    drop(collection);
+    drop(host);
+
+    let host = open_host(&dir, keys());
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    runtime.refresh_identity().unwrap();
+    let open = runtime.stored_state_for_testing().unwrap().open_counter;
+    assert!(open > old_open);
+    let (seq, generation) = {
+        let lease = collection.reader(ReaderRole::Cloud).unwrap();
+        let snapshot = lease.snapshot().unwrap();
+        (snapshot.seq().0, snapshot.generation().0)
+    };
+    let history = collection.cloud_pending_keys().unwrap();
+    assert!(!history.is_empty(), "real edit history must survive reopening");
+    let undo_depth = collection.undo_depth_for_testing().unwrap();
+    runtime
+        .reconcile_binding(&collection, &host.media().unwrap(), Duration::from_secs(30))
+        .unwrap();
+    let status = runtime.status().unwrap();
+    assert_eq!(status.binding.as_ref(), Some(&binding));
+    assert!(!status.scan_required && !status.tracking_stopped);
+    assert_eq!(status.change_counter, counter);
+    let stored = runtime.stored_state_for_testing().unwrap();
+    assert!(stored.whole_scan);
+    let cursor = &stored.coverage.as_ref().unwrap().cursor;
+    assert_eq!((cursor.seq, cursor.generation), (seq, generation));
+    for mut expected in before {
+        expected.observer_open = open;
+        expected.observed_seq = seq;
+        expected.observed_generation = generation;
+        let actual = runtime.entity_facts(&expected.name).unwrap().unwrap();
+        assert!(
+            actual == expected,
+            "scan may change only provenance for an equal payload"
+        );
+    }
+    assert_eq!(collection.last_seq().0, seq);
+    assert_eq!(collection.undo_depth_for_testing().unwrap(), undo_depth);
+    assert_eq!(collection.cloud_pending_keys().unwrap(), history);
+    let (sdk, _, _) = runtime.register_sdk(false).unwrap();
+    runtime.validate_sdk(&sdk).unwrap();
     host.close().unwrap();
 }
 

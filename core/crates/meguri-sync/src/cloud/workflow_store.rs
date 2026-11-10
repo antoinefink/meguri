@@ -1,4 +1,8 @@
 //! Additive stable-layout entity tracking. Notes retain their original table.
+#[cfg(test)]
+#[path = "workflow_store_tests.rs"]
+mod tests;
+
 use super::{
     entity_codec as codec,
     row_payload::{self, View},
@@ -477,6 +481,9 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
             return Ok(());
         }
         current.observe(image.payload, DirtySource::Snapshot, &mut state.change_counter)?;
+        current.observer_open = open;
+        current.observed_seq = seq;
+        current.observed_generation = generation;
         image = current;
         let tx = self.connection.transaction()?;
         put(&tx, b, &image)?;

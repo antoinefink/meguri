@@ -1155,7 +1155,13 @@ impl Driver {
             .ok_or(DriverError::StaleCommand)?
             .instance
             .clone();
-        let id = self.runtime.sync_now_with_work(&sdk, collection, work)?;
+        let capture = self.runtime.sync_now_with_work(&sdk, collection, work);
+        #[cfg(feature = "test-hooks")]
+        let capture = capture.inspect_err(|error| {
+            let (kind, variant) = error.refusal_tags_for_testing();
+            eprintln!("cloudCapture.refused site=exchangeCapture errorKind={kind} variant={variant}");
+        });
+        let id = capture?;
         owned.captures.insert(exchange, (sdk, id));
         Ok(id)
     }
