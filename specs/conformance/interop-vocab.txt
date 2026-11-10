@@ -396,6 +396,8 @@ observed_at
 kind
 checks
 recovered_from
+# Engine order evidence failure reason (cloudkit-agent.md J4.1).
+engine_order_not_shown
 # Signed device protected setup and frozen source inputs (cloudkit-agent.md J2).
 CFBundleExecutable
 expected-accounts.json
