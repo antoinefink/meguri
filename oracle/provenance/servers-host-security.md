@@ -49,3 +49,33 @@ detached interactions (H11.2); per-state status values (H12); the fetcher
 result table, name resolution inside the time limit, status left to the
 caller (H13); the rewritten H17 scenario list. All are Meguri decisions with
 no external source beyond the sibling specs listed above.
+
+## Probes against the AnkiConnect add-on (2026-11-10)
+
+Session s-20261110T085429Z-165d83d3, item `ac-envelope`. AnkiConnect 25.11.9.0
+(commit `532a3c8`) in Anki 26.9.3 offscreen, image
+`meguri-oracle-ankiconnect:spike`, frozen clock 1894701600, internal Docker
+network, raw HTTP from inside the container. For the downloads a loopback
+fixture server inside the same container served 200, 201, 204, 404, redirect
+chains, a 12 s late head and a 14 s body sent a byte every 2 s; a second
+container ran with `HTTP_PROXY` pointing at a loopback logging proxy.
+
+| Spec text | Result |
+|---|---|
+| H16 bind | `/proc/net/tcp` lists `127.0.0.1:8765` only; nothing in `tcp6`; connects to `::1` and to the container address refused |
+| H16 Host | `Host: evil.example:8765` and no `Host` both served |
+| H16 keep-alive | close after every reply, also with `Connection: keep-alive` and HTTP/1.0; two pipelined requests got one reply |
+| H16 malformed or stalled | `GARBAGE` request line: the ping; `Host:x` / `Content-Length:32` without spaces: the ping; `Content-Length: abc`: no reply within 8 s, connection open; 20 of 40 declared body bytes then silence: closed after 5.0 s without reply; a connection that sends nothing: open after 30 s; a body sent one byte every 0.4 s: served |
+| H16 body limit | 1, 4 and 16 MiB bodies served in 0.1, 0.7 and 17 s; 64 MiB not accepted within a 120 s send timeout |
+| H16 concurrency | requests sent while a permission dialog was open got no reply (see the envelope probes) |
+| H16 downloads | status 200 only; 30 redirects followed, 31 fail with a redirect-limit text; 10 s read timeout per wait (late head fails at 10.0 s, the slow 14 s body succeeds); `HTTP_PROXY` used; `User-Agent: Anki 26.09.3`, `Accept-Encoding: gzip, deflate` |
+| H18.3-H18.6 | observations added; none answers the policy question |
+
+## Review fixes (2026-11-10, second pass)
+
+Same session; probe container `acenv-r02-81080` (removed afterwards); add-on
+`plugin/web.py` read from the image.
+
+| Spec text | Source and result |
+|---|---|
+| H16 malformed or stalled, concurrency (R0.3) | head with `Content-Length: 40` and 20 body bytes, then a ping on a second connection 0.3 s later: ping answered after 4.73 s; a head cut short (`Content-Le`) then a ping: 4.74 s; `GARBAGE` request line with a `deckNames` body: served `["Default"]`. Source: the client reader sets a 5 s socket timeout and loops on a blocking receive until a whole request is parsed; the method is the first word of the request line and is compared only with `OPTIONS`; the reviewer saw Anki log an unhandled error for `Content-Length: abc` while a new connection was answered at once |

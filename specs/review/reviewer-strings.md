@@ -1,11 +1,11 @@
 # Reviewer strings
 
 Spec: review/reviewer-strings
-Requirements: R86, R363, R370, R382, R383, R387, R429, R430, R432, R433, R434, R435, R436, R437, R439, R456, R581, R635
-Anki: 26.09.3 for S3 to S9 (the wording, plural forms and triggers of Anki desktop's reviewer, congratulations page and unbury dialog, except the differences S11 lists); none for S10 and the keys
+Requirements: R86, R184, R185, R339, R349, R351, R363, R370, R382, R383, R384, R386, R387, R429, R430, R432, R433, R434, R435, R436, R437, R439, R456, R581, R635, R1981
+Anki: 26.09.3 for S3 to S9 (the wording, plural forms and triggers of Anki desktop's reviewer, congratulations page and unbury dialog, except the differences S11 lists) and for the English values only of S13 and S14 (the reviewer's answer bar and the Forget dialog's two toggles); none for S10, the keys, S13's spoken forms and where S13 and S14 show their strings
 Scenarios: conformance/scenarios/review/ (none recorded yet, S12)
 
-The text the review screen shows besides the card: toasts, the timebox prompt, Auto Advance reminders, the congratulations notices and the unbury choices. U175, U182, U185, U186 and U187 take every such string only from this file (KTD1). U155's finished state and U157's summary reuse S8 and S9 for the same facts.
+The text the review screen shows besides the card: toasts, the timebox prompt, Auto Advance reminders, the congratulations notices, the unbury choices, the grade names and Show Answer, and the Forget choices. U175, U178, U182, U183, U185, U186 and U187 take every such string only from this file (KTD1). U155's finished state and U157's summary reuse S8 and S9 for the same facts. U153's toasts and U159's Edit menu take their undo and redo titles from S5.
 
 ## S1. Keys, arguments and plurals
 
@@ -65,6 +65,7 @@ No toast follows an answer, except the leech toast.
 | `undo.step.<id>` | the name of `specs/conformance/undo-ops.md` V4 for `<id>` | |
 
 - The step name is `undo.step.<id>` for the step's V4 id (`undo.step.answer_card` = "Answer Card", `undo.step.bury` = "Bury", `undo.step.delete_note` = "Delete Note"). The named forms label the back button, its Mac tooltip and the Undo and Redo items; the plain forms are used when there is no step.
+- Decided 2026-11-10: these forms are the app's only undo and redo titles, outside review too. The Edit menu's Undo and Redo items (U159, R173) use `review.undo.named` and `review.redo.named` with the `undo.step.<id>` name of the step that `peek(Global)` or `peek_redo(Global)` reports (`engine/undo`; "Undo Delete Deck"), and `review.undo.plain` and `review.redo.plain`, disabled, when there is none. The action name that U159 gives the system undo manager (the iPhone and iPad undo gestures) is the `undo.step.<id>` text alone; the system adds its own Undo and Redo words to it. The Undo button of a U153 toast is `review.undo.plain`. The `review.` prefix is part of the key, not a location: the String Catalog that holds this section and the `undo.step.<id>` names must be one that U153 and U159 can read as well as review.
 - After an undo or redo in review, VoiceOver hears `review.announce.undone` or `review.announce.redone` with the step's name ("Answer Card undone"). Decided 2026-10-27: no visible toast; the card coming back is the visible feedback (Anki shows the same text as a tooltip). R581's toast list does not include undo.
 
 ## S6. Auto Advance (R432, R433)
@@ -157,6 +158,8 @@ Shown in place of a card when the applied head's `terminalState` (`sched/review-
 - Anki 26.09.3 desktop reads the card from before the answer when it shows the leech notice, so without add-ons it never adds "It has been suspended."; Meguri adds it when the outcome leaves the card suspended (R363, S3). Anki also shows the leech notice only after its modal timebox dialog closes; Meguri shows the toast together with the sheet (S3).
 - Anki never disables the Auto Advance toggle: with both times 0 it still says "Auto Advance enabled". Meguri disables it from the current card's preset with an explanation (R433, S6).
 - Anki's timebox measures wall-clock time since it started; Meguri's counts active time only, without background time (R431) or time with no card presented, and restarts at a crossing that shows no sheet (S7).
+- Anki 26.09.3 titles the dialog behind Forget… "Reset Card"; the review screen's dialog is the Forget dialog, and its title is Meguri's wording (S14). Only its two toggle labels are Anki's.
+- Anki's reviewer has no Show Answer accessibility action, no Magic Tap and no spoken answer labels; Meguri adds them (R349, R185, S13). Anki's grade names and Show Answer are the same words.
 - Anki's congratulations page clamps the ready-in amount to at least 60 seconds, so once the card is ready it still says "ready in 1 minute" until the page refreshes, and the page has no Continue button. Meguri removes the paragraph at the ready instant and shows Continue (R437, S8).
 
 ## S12. Tests and scenarios
@@ -168,9 +171,51 @@ The oracle runs the collection library, not Anki's UI, so the text itself is che
 | `AnswerPathTests` (U175) | S3: both leech keys from `Accepted.leech` and `Accepted.suspended`, none after a redo, the toast together with the timebox sheet |
 | `CardActionPerformerTests` (U182) | S4's keys, counts and absences; the delete toast closing when another step is recorded or undone before Undo, a late Undo tap doing nothing, and the toast staying while VoiceOver runs |
 | `ReviewUndoControllerTests` (U179) | S5's labels and announcements, with no toast |
+| `UndoStoreTests` (U159) | S5's named Edit menu titles for a Global step, the disabled plain titles with no step, and the step name alone as the system action name |
 | `AutoAdvanceControllerTests` (U185) | S6: the toasts, the toggle disabled from the current card's preset (0, negative and NaN times), ⇧A while disabled, a 0/0 card while Auto Advance is on |
 | `TimeboxControllerTests` (U185) | S7: the examples, the four message forms, the half-to-even rule, the restart at a crossing with no sheet, no timebox time while no card is presented, undo while the sheet is shown, Esc as Continue |
 | `CongratsModelTests` (U186) | S8: the examples (89,999 ms included), each paragraph's condition, the 86,400 cut-off, the Continue switch from the head, `Finished` with no ready-in line or Continue, and C17.1's two regressions (Easy on the last learning card inside learn-ahead; Again with a 60-minute step) while a committed C7 query disagrees; S9's chooser cases |
 | `ExternalChangeHandlerTests` (U187) | S10: the toast for each applied `{removed}`, none for `{eligible}`, `{memoryOnly}` or a rollover's rebuilt head |
+| `AnswerButtonsTests` (U178) | S13: the four grade names in their fixed order; Show Answer as the button with and without an assistive technology, as the menu command and as the accessibility action; the interval taken from `sched/answer-labels` and never from the catalog; the accessibility label examples, `.one` only for the amount `1` (`1.5` uses `.other`), `less than` for a `<` label, `(end)` spoken as it is; the Voice Control input labels |
+| `ForgetDialogModelTests` (U183) | S14: both labels, their order, and each toggle's starting value from its config key |
 
 Every key must exist in the catalog with exactly this English value (U167's string lint). The counts behind the strings are collection facts; their oracle scenarios (bury counts, the timebox's card count across undo and redo, the C7 ready-in boundaries) are not recorded yet.
+
+## S13. Answer controls (R184, R185, R339, R349, R351, R1981)
+
+| Key | English | Used for |
+|---|---|---|
+| `review.answer.again` | Again | grade name of the first answer button and of its menu command |
+| `review.answer.hard` | Hard | the same, second |
+| `review.answer.good` | Good | the same, third |
+| `review.answer.easy` | Easy | the same, fourth |
+| `review.showAnswer` | Show Answer | the question side's button, on every platform and whether or not an assistive technology is on (`docs/design/native-interface-contract.md` N11.2, which replaces R184's limit); the Show Answer menu command (N11.3); the card's accessibility action, which VoiceOver's Magic Tap also performs (R349) |
+| `review.answer.accessibilityLabel` | `%1$@, %2$@` | an answer button's accessibility label: the grade name, then the spoken interval (R185: "Good, 3 days") |
+| `review.answer.lessThan` | `less than %@` | the spoken interval of a label that starts with `<` (`sched/answer-labels` A5); `%@` is the rest of the spoken interval |
+
+Spoken units. Each row is two plain entries, `<stem>.one` and `<stem>.other`, whose `%@` is the label's amount as text (`sched/answer-labels` A3: `10`, `1.5`, `2.3`). The `.one` entry is used when the amount is exactly `1`, the `.other` entry for every other amount. These are not catalog plurals (S1), because the amount can have a decimal digit.
+
+| Key stem | Unit (`sched/answer-labels` A2) | `.one` | `.other` |
+|---|---|---|---|
+| `review.answer.unit.seconds` | seconds | `%@ second` | `%@ seconds` |
+| `review.answer.unit.minutes` | minutes | `%@ minute` | `%@ minutes` |
+| `review.answer.unit.hours` | hours | `%@ hour` | `%@ hours` |
+| `review.answer.unit.days` | days | `%@ day` | `%@ days` |
+| `review.answer.unit.months` | months | `%@ month` | `%@ months` |
+| `review.answer.unit.years` | years | `%@ year` | `%@ years` |
+
+- The answers are in the order Again, Hard, Good, Easy (R351). Where the name and the interval sit, and the button sizes and styles, are the design contract's (N11.2, N12.3 on the Mac, N13.3 on touch); this file gives only their text.
+- The visible interval is `sched/answer-labels`' string, shown as it is and never a catalog entry. The spoken interval is built from the same label (its `<` prefix, amount and unit, A3 to A5), never from a second computation such as the interval's seconds (this overrides U178's approach), so it never disagrees with the visible one: `<10m` is "less than 10 minutes", `1d` is "1 day", `1.5h` is "1.5 hours", `2.3mo` is "2.3 months". The end label `(end)` (A5) is spoken as that text.
+- Examples of accessibility labels: "Again, less than 10 minutes", "Hard, 1 minute", "Good, 3 days", "Easy, 2.3 months".
+- Voice Control's input label of each answer button is its grade name alone, and of the Show Answer button `review.showAnswer`, so the spoken commands are "Tap Good" and "Tap Show Answer" (R185). The accessible answer controls that replace the tap zones (R1981) are these four buttons, with the same labels.
+- The menu commands' titles are the grade names and `review.showAnswer` (N11.3, R339), with no interval.
+
+## S14. Forget choices (R386)
+
+| Key | English | Starts from |
+|---|---|---|
+| `review.forget.restorePosition` | Restore original position where possible | `restorePositionReviewer`, default true (`sched/manual-ops#M6.4`) |
+| `review.forget.resetCounts` | Reset repetition and lapse counts | `resetCountsReviewer`, default false |
+
+- These are the two toggles of the Forget dialog that review's Forget… command opens (U183, R386), in this order, for the two choices of `sched/manual-ops#M6.1`; the op stores both values (M6.4).
+- The dialog's title, its buttons and the whole Set Due Date dialog (prompt, hint, validation messages) are Meguri's wording: R384 and R386 quote no other Anki text. Their results are S4's toasts.

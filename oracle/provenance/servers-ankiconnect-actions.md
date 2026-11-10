@@ -2,9 +2,10 @@
 
 Spec-writer notes for `specs/servers/ankiconnect-actions.md` A1-A21
 (session s-20261110T085429Z-165d83d3, wave `servers`, package
-`ankiconnect-actions`). No code was copied and no oracle probe was run: the
-U136 recorder does not exist yet, so every reply in A20 comes from reading the
-sources below, and the goldens U136 records are the authority. The add-on
+`ankiconnect-actions`). No code was copied. The first pass ran no oracle
+probe, so the replies in A20 came from reading the sources below; the probe
+section at the end records what was then observed on the pinned build. The
+goldens U136 records stay the authority. The add-on
 build of 2025-11-09 was not available; its closest public source (below) was
 read instead, and A21 Q6 leaves the final word to U136's `ADDON_PIN`
 recording.
@@ -54,6 +55,40 @@ Sources:
 | A20 | Meguri design from the sections above and the plan's U142 test scenarios; the scenario note types `Pair`, `Gap`, `Rev` are Meguri's own (R1959); tokens per `specs/servers/transcripts.md` T10.1 | expected replies derived from reading, not recorded |
 | A21 | the plan's Product Contract (R1738, R1758, R1762, R1767, R1774) against the add-on's behavior | the open decisions |
 
+Probe of the pinned add-on (2026-11-10, same session, wave 5 item
+`ac-actions`): AnkiConnect 25.11.9.0 (`ADDON_PIN`, commit `532a3c8`) in
+Anki 26.9.3, image `meguri-oracle-ankiconnect:spike`, run as
+`oracle/ankiconnect/README.md` says (internal network, tmpfs `/scratch`,
+`ORACLE_CLOCK_START=1894701600`, `TZ=Europe/Paris`, no published port), probed
+with `docker exec` and Python `urllib` to `127.0.0.1:8765`. Containers and
+network were named `ac-actions-*` and removed afterwards. Setup went through
+the add-on's own actions (`createModel`, `createDeck`, `addNote`,
+`insertReviews`, `answerCards`); for states no action makes (a filtered deck,
+user and scheduler buried cards, learning cards with chosen review-log rows, a
+note without cards, a card without its note, templates a checked save
+refuses) a throwaway probe add-on in the container's tmpfs ran Anki's Python
+API on the main thread. The collection was read from a copy of its file. No
+private data was used; every value was synthetic. Probe scripts and raw
+outputs stayed in the session scratchpad and are not committed.
+
+| Spec section | Observed |
+|---|---|
+| A4 | profile list, active profile, exact-name `loadProfile`, `reloadCollection` null |
+| A5 | deck name order, `deckNamesAndIds`, `getDecks` (unknown id under Default, filtered decks by `did`), `createDeck` ids under the frozen clock (middle level lowest), `changeDeck` creating the target, stamping cards already there, accepting a filtered target, `deleteDecks` texts and exact names, `deckNameFromId` fallback, `getDeckStats` members, preorder, zero-count creation of unknown names |
+| A6, A6.1, A6.2 | note type reads, not-found texts, every A6.1 row (two through an unchecked write), `createModel` check order and texts, `Card <n>` names, the `-` + five characters clash name, stock CSS for missing or null `css`, `curModel` set |
+| A7 | step order, member texts (runtime texts), string `tags` accepted, non-object `options` ignored, `duplicateScopeOptions` null error, default and scoped checks (A7.3 table and `dupe-scope` rows), Python list form of `addNotes` errors, rollback leaving graves and moving `nextPos`, add defaults written |
+| A8 | `Note was not found: <id>` from four actions, case-sensitive `updateNoteFields`, `updateNote` and `updateNoteTags` texts |
+| A9 | `findNotes` without query, `notesInfo` members, `query` winning over `notes`, the missing-key text for a note without cards |
+| A10, A10.1 | tag add, remove, registry, clear, every replace row |
+| A11 | `cardsInfo` member order, render outcomes, LaTeX tag and message, isolation marks in `nextReviews`, `cardsModTime`, `cardsToNotes` |
+| A12 | the `suspend` result table, unknown-id behavior, `unsuspend` null and the position-dependent unburying, `areDue` and `getIntervals` rows, learn-ahead |
+| A13 | invalid days text, missing ids skipped, repeated ids database error, `type` 4 rows |
+| A14 | counts including types 4 and 5, rollover dates |
+| A16, A18 | scan order, ASCII-only case folding for `über`, search error text; every A18 row except the step-remap and FSRS points of `ankiconnect-changedeck-op` and the too-deep error |
+
+Not probed: `notes/preservation`, `cards/reschedule` against the UI ops,
+`search/current` with cards, the too-deep deck error.
+
 Similarity: run `tools/mg similarity` from the main checkout against the
 AnkiConnect corpus U136 adds before merging; this worktree has no corpus.
 
@@ -61,3 +96,24 @@ Review fixes (same session): the ordered branch tables of A12.4/A12.5, the
 scoped duplicate steps of A7.3 and the pattern wording of A6.1 were recast as
 card-state rules, rules plus outcome tables, and template-tag rules; the
 add-on's internal mechanisms they summarize are recorded here only.
+
+Second review fixes (same session, 2026-11-10): re-probed on the pinned
+image in a throwaway container and internal network (`acrev-*-9c1e`, both
+removed), setup through the add-on's actions. Observed: `addNote` with
+`tags: "pq rs"` stored the tags `p q r s` (the add-on assigns the string to
+the note's tag list unconverted, so it is read one character at a time);
+`options` 5, true, `{duplicateScopeOptions: 7}` failed with
+`argument of type '<int|bool>' is not iterable`; `options` `"allowDuplicate"`,
+`"duplicateScope"` and `{duplicateScopeOptions: "deckName"}` failed with
+`string indices must be integers, not 'str'`; `["allowDuplicate"]` and
+`{duplicateScopeOptions: ["deckName"]}` failed with
+`list indices must be integers or slices, not str`; `"xyz"`, `[]`,
+`{duplicateScopeOptions: "xyz"}` and `{duplicateScopeOptions: []}` were
+ignored and the note added (the add-on tests membership with Python `in`
+before indexing); `tags: ["a", "OLD", "old"]` stored `a OLD`, then
+`replaceTags old -> z` gave `a z`; `createDeck A::B::C` gave `A::B`, `A`,
+`A::B::C` ids in that order, as `specs/decks/decks.md` D3 states. Written
+into A7.1, A7.4, A10.1, A18 `ankiconnect-note-member-types`, A20.1
+`create-nested`, A20.3 `add-errors` (four Meguri rows), A21 intro, Q9 and the
+new Q10 (`list index out of range` is the runtime's `IndexError` text, kept as
+an interim).

@@ -3,7 +3,7 @@
 Spec: servers/ankiconnect-media
 Requirements: R1761, R1762, R1769, R1770, R1771, R1772, R1773; AE79 (core part); supports R1779, R1780, R1789, R1790
 Anki: 26.09.3
-Scenarios: none yet. The transcript format is `servers/transcripts`, but its harness (U136) is not built; X14 lists the planned scenarios of `conformance/scenarios/servers/ankiconnect/media/` as request and reply tables, and the external-folder tests, which are Meguri's own (no AnkiConnect counterpart).
+Scenarios: none yet. The transcript format is `servers/transcripts`, but its harness (U136) is not built; X14 lists the planned scenarios of `conformance/scenarios/servers/ankiconnect/media/` as request and reply tables, and the external-folder tests, which are Meguri's own (no AnkiConnect counterpart). X16 records the add-on's replies as probed on 2026-11-10.
 
 The media actions of Meguri's AnkiConnect-compatible server (`storeMediaFile`, `retrieveMediaFile`, `getMediaFilesNames`, `deleteMediaFile`, `getMediaDirPath`), the `audio`, `video` and `picture` attachments that note actions accept, the rules for the `path` and `url` content sources, and the external media folder that `getMediaDirPath` returns and whose files become collection media. The interface targeted is AnkiConnect API version 6 as served by the AnkiConnect add-on build of 2025-11-09 in Anki 26.09.3 (the build U136 pins). The external folder, the readable folders and the source restrictions are Meguri's (R1770–R1773): AnkiConnect returns Anki's own media folder and reads any path.
 
@@ -19,6 +19,7 @@ Media storage itself (names, dedupe, conflict renames, trash, staging, registrat
 - **MD5 hex** of bytes: their MD5 digest as 32 lower-case hexadecimal digits.
 - **Content source**: one of the members `data`, `path`, `url` of a `storeMediaFile` request or an attachment object (X3).
 - **Flat name**: a text containing no `/`, no `\` and no NUL, and not equal to `.` or `..`. (A name such as `a..b.mp3` is flat.)
+- **Falsy**: a missing member and the JSON values `null`, `false`, `0` (also `0.0`), `""`, `[]` and `{}`. Every other value is **truthy**. The add-on tests its optional members this way (X16.1, X16.5).
 
 ## X2. Actions
 
@@ -30,13 +31,15 @@ Media storage itself (names, dedupe, conflict renames, trash, staging, registrat
 | `deleteMediaFile` | `filename` | null | write | files trashed (0 or 1) |
 | `getMediaDirPath` | none | absolute path | read | 0 |
 
+Registry types (`servers/ankiconnect-envelope#E12.2`): `filename` is a required string; `pattern` is a string, `*` when absent; `data`, `path`, `url`, `skipHash` and `deleteExisting` have the type any. The generic checks never name these five, so `data: 0`, `data: null` and `deleteExisting: null` reach the action, and X3.1 and X4 own their errors.
+
 Write actions are refused in read-only mode (R1779) by the envelope. Each write action is one `LocalApi` op of the media store (`media/media-journal#J5`), so media sync and Check Media see it like an editor change (R1789).
 
 ## X3. Content sources
 
 ### X3.1 Choosing the source
 
-Each of `data`, `path`, `url` is a string or `null`; another type is `invalid parameter: <name>` (`servers/ankiconnect-envelope#E12.2`). The first of the three that is a non-empty string is used: a missing member, `null` and the empty string count as absent. When all three are absent: error `You must provide a "data", "path", or "url" field.` A later member is never tried when an earlier one fails.
+The members are taken in the order `data`, `path`, `url`. A falsy member (X1) counts as absent, whatever its type. The first member that is not absent is the source, and only its type is checked: it must be a string, and a truthy non-string (`123`, `true`, `["YQo="]`) is `invalid parameter: <name>` (`servers/ankiconnect-envelope#E12.2`; the add-on gives its runtime's text, `ankiconnect-media-error-text`). Members after the source are never looked at, whatever their values: `{data: "YQo=", url: 5}` stores the `data` bytes, and `{data: 0, path: <a readable file>}` reads the file. When all three are absent: error `You must provide a "data", "path", or "url" field.` A later member is never tried when an earlier one fails. Settled by the 2026-11-10 probes (X16.1): the add-on behaves so, and Meguri follows it.
 
 | Source | Bytes |
 |---|---|
@@ -46,10 +49,11 @@ Each of `data`, `path`, `url` is a string or `null`; another type is `invalid pa
 
 ### X3.2 `data`
 
-Standard base64 (RFC 4648 §4 alphabet, `=` padding), decoded in two steps:
+Standard base64 (RFC 4648 §4 alphabet, `=` padding), decoded in three steps:
 
-1. Every character that is not `A`–`Z`, `a`–`z`, `0`–`9`, `+`, `/` or `=` is removed (line breaks, spaces, and also the URL-safe `-` and `_`).
-2. What remains must be a run of alphabet characters of length L followed by padding, with L mod 4 = 0 and no `=`, L mod 4 = 2 and exactly `==`, or L mod 4 = 3 and exactly `=`. It decodes to floor(L × 3 / 4) bytes. Anything else (no padding where it is needed, `=` inside the text, too many `=`, more text after the padding, L mod 4 = 1): error `invalid base64 data` (Meguri wording, X12).
+1. A text holding a character outside ASCII is an error `invalid base64 data`. The add-on refuses such a text too (X16.2).
+2. Every other character that is not `A`–`Z`, `a`–`z`, `0`–`9`, `+`, `/` or `=` is removed (line breaks, spaces, and also the URL-safe `-` and `_`).
+3. What remains must be a run of alphabet characters of length L followed by padding, with L mod 4 = 0 and no `=`, L mod 4 = 2 and exactly `==`, or L mod 4 = 3 and exactly `=`. It decodes to floor(L × 3 / 4) bytes. Anything else (no padding where it is needed, `=` inside the text, too many `=`, more text after the padding, L mod 4 = 1): error `invalid base64 data` (Meguri wording, X12).
 
 | `data` | Bytes |
 |---|---|
@@ -59,10 +63,13 @@ Standard base64 (RFC 4648 §4 alphabet, `=` padding), decoded in two steps:
 | `Y Q o =`, `YQo=` + LF | `61 0a` |
 | `YQo`, `YQ` (unpadded) | error |
 | `YQ=o`, `=YQo` | error |
-| `YQo==`, `YQ==YQ==` | error (AnkiConnect decodes both; X13 `ankiconnect-media-base64`) |
-| `-_8=` | error (after step 1, `8=` is not valid) |
+| `YQo==`, `YQ==YQ==` | error (the add-on decodes them to `61 0a` and `61`; X13 `ankiconnect-media-base64`) |
+| `YQo=garbage` | error (the add-on decodes `61 0a` and ignores the text after the padding; the same entry) |
+| `=`, `==` | error (L = 0 takes no padding; the add-on decodes them to no bytes and stores an empty file; the same entry) |
+| `-_8=` | error (after step 2, `8=` is not valid; the add-on refuses it too) |
+| `YQ==é` | error (the add-on refuses it too) |
 
-The empty string never reaches decoding: X3.1 treats it as absent. A `data` made only of removed characters (a single space) decodes to no bytes, which is valid.
+The empty string never reaches decoding: X3.1 treats it as absent. A `data` made only of removed characters (a single space) decodes to no bytes, which is valid; the add-on also stores an empty file for it (X16.2). Every row whose result is bytes, and every error row not marked otherwise, matches the add-on's outcome (X16.2); the error texts are X12's.
 
 ### X3.3 `path` (R1772)
 
@@ -76,7 +83,7 @@ The checks run in this order; the first that fails gives the error. `<path>` is 
 6. When its size is above 268,435,456 bytes (the AnkiConnect body limit, `servers/host-security#H8`): `cannot read file: <path> (too large)`.
 7. Read the bytes from the opened descriptor. A read failure: `cannot read file: <path> (<reason>)`, `<reason>` the system's description.
 
-So a symbolic link inside a readable folder that points outside every root is refused, and a root configured through a symbolic link (`/tmp` for `/private/tmp`) accepts its children, because both sides are canonical. This holds in every build, sandboxed or not.
+The add-on reads any path its process can open, a relative path from its working folder, and reports the runtime's error texts (X16.3; `ankiconnect-media-path-roots`). So, in Meguri, a symbolic link inside a readable folder that points outside every root is refused, and a root configured through a symbolic link (`/tmp` for `/private/tmp`) accepts its children, because both sides are canonical. This holds in every build, sandboxed or not.
 
 ### X3.4 `url` (R1773)
 
@@ -91,7 +98,7 @@ Fetched with the shared fetcher of `servers/host-security#H13`, with AnkiConnect
 | a final status that is not 2xx | `<url> download failed with return code <status>` (AnkiConnect's text; `<status>` in decimal) |
 | any other failure (name resolution, connection, TLS) | `cannot download <url> (<reason>)` |
 
-`<url>` is the member as given. The body is taken as is; no content type is checked. A 2xx status other than 200 is accepted (H13); AnkiConnect refuses it (X13 `ankiconnect-media-url-limits`).
+`<url>` is the member as given. The body is taken as is; no content type is checked. A 2xx status other than 200 is accepted (H13); the add-on refuses it with the status text above (X13 `ankiconnect-media-url-limits`). That status text is the add-on's, observed for 201, 204, 404 and 500 (X16.4).
 
 ### X3.5 When the bytes are obtained
 
@@ -99,13 +106,13 @@ Decoding `data`, reading a `path` and downloading a `url` happen before the acti
 
 ## X4. `storeMediaFile` (R1769)
 
-Parameters: `filename` (string, required), the content sources, `skipHash` (string or null, default null), `deleteExisting` (boolean or null, default `true` when missing; `null` counts as false, as in AnkiConnect).
+Parameters: `filename` (string, required), the content sources, `skipHash` (any value, default null; only a string can match), `deleteExisting` (true when the member is missing; otherwise true exactly when its value is truthy, X1, so `null`, `false` and `0` count as false and `"yes"` as true). These rules are the add-on's (X16.5).
 
 1. Get the bytes (X3), before the op (X3.5).
 2. When `skipHash` is a string equal to the MD5 hex of the bytes (exact comparison, so upper-case hex never matches): the result is `null` and nothing is written or trashed. No op runs.
-3. Take N = transform(`filename`) and its lowercase candidate L, as `media/media-files#M3` steps 1 and 3 define them. M3's refusals (N empty, N ignored) are errors with X12's texts, before anything is looked up. N is a flat name (`text/media-filenames#F1`), so nothing below ever looks outside the collection media folder.
+3. Let D be the text after the last `/` of `filename`, or all of `filename` when it holds no `/`: the add-on's media layer keeps only the last component of a `/`-separated name (X16.5). Take N = transform(D) and its lowercase candidate L, as `media/media-files#M3` steps 1 and 3 define them. M3's refusals (N empty, N ignored) are errors with X12's texts, before anything is looked up. N is a flat name (`text/media-filenames#F1`), so nothing below ever looks outside the collection media folder.
 4. When `deleteExisting` is true: resolve N (`media/media-files#M5`), and when it resolves to nothing, resolve L. When one resolves to a file: if that file's content equals the bytes, the result is that file's name and nothing is written (R1571); otherwise the file goes to the trash (`media/media-files#M10.1`, called with the resolved name), and step 5 follows in the same op.
-5. Add the bytes under the desired name `filename` (`media/media-files#M3`): the name is transformed and lowercased, identical content already present is reused, and other content under a taken name gets the hash name (M4). The result is the stored name.
+5. Add the bytes under the desired name D (`media/media-files#M3`): the name is transformed and lowercased, identical content already present is reused, and other content under a taken name gets the hash name (M4). The result is the stored name.
 
 No lookup, trash call or write ever receives the untransformed `filename`. The result is the name to put in fields (R983); it can differ from `filename`.
 
@@ -118,10 +125,14 @@ No lookup, trash call or write ever receives the untransformed `filename`. The r
 | `clip.mp3` = A | `{filename: "clip.mp3", data: <A>}` | `"clip.mp3"` | unchanged, nothing trashed |
 | none | `{filename: "x.mp3", data: <A>, skipHash: <MD5 hex of A>}` | `null` | nothing |
 | none | `{filename: "x.mp3", data: ""}` | error `You must provide a "data", "path", or "url" field.` | nothing |
+| none | `{filename: "a/b.mp3", data: <A>}` | `"b.mp3"` | `b.mp3` = A |
+| `clip.mp3` = A | `{filename: "Clip.mp3", data: <B>}` | `"clip.mp3"` | `clip.mp3` = B; A in the trash |
+
+Rows 1 to 8 give the add-on's reply (X16.5). Row 5 differs only in the trash: the add-on moves A to the trash and writes it again (`ankiconnect-media-delete-existing`). Row 9 differs in the reply: step 4 resolves `Clip.mp3` to its case variant `clip.mp3` (M5 step 3), while the add-on trashes by the exact name, finds nothing on its case-sensitive volume, keeps A and returns `"clip-<sha1 of B>.mp3"` (`ankiconnect-media-case-variants`).
 
 ## X5. `retrieveMediaFile` (R1769)
 
-`filename`: a string. When it is not a flat name (X1): error `invalid media file name: <filename>` (X12), before any file is looked at (`../collection.anki2`, `a/b.mp3`). Otherwise resolve it (`media/media-files#M5`): a file gives its bytes in standard base64 with padding; nothing gives `false`.
+`filename`: a string. When it is not a flat name (X1): error `invalid media file name: <filename>` (X12), before any file is looked at (`../collection.anki2`, `a/b.mp3`). Otherwise resolve it (`media/media-files#M5`): a file gives its bytes in standard base64 with padding; nothing gives `false`. M5 resolves only regular files, so `""` and the name of a directory give `false`; a case variant of a present name resolves to that file (M5 step 3), so with `a.mp3` present `A.MP3` returns its bytes. The add-on gives error `[Errno 21] Is a directory: …` for `""` and a directory name (`ankiconnect-media-non-files`), and `false` for a case variant on its case-sensitive volume (`ankiconnect-media-case-variants`, X16.6). The add-on instead keeps the name's last path component, normalizes it to NFC and strips the characters Anki removes from media names, so `sub/a.mp3`, `/etc/a.mp3` and `a?.mp3` all return `a.mp3`'s bytes, and `../collection.anki2` returns `false` (X16.6); Meguri refuses such names (`ankiconnect-media-flat-names`).
 
 ## X6. `getMediaFilesNames` (R1769)
 
@@ -141,24 +152,26 @@ Matching is a shell-style glob over the whole name, case-sensitive:
 | the same | (missing) | `["a.mp3", "b.mp3", "c.jpg"]` |
 | the same | `A.MP3` | `[]` |
 
+The add-on gives these sets on a case-sensitive volume (X16.7), in directory order, and also lists directories; `""` gives `[""]`, and a pattern holding `/` lists other folders (`sub/*`, `../*`, `/etc/*`), returning the last component of each match (`ankiconnect-media-names-order`, `ankiconnect-media-flat-names`). Its behavior on a case-insensitive volume (X13) was not probed.
+
 ## X7. `deleteMediaFile` (R1769)
 
-`filename`: a string. Not a flat name: error `invalid media file name: <filename>`. Otherwise one op trashes it (`media/media-files#M10.1` `trash([filename])`): a file it resolves to moves to the trash and its deletion becomes pending for media sync; a name that resolves to nothing changes nothing. The result is `null` either way.
+`filename`: a string. Not a flat name: error `invalid media file name: <filename>`. Otherwise one op trashes it (`media/media-files#M10.1` `trash([filename])`): a file it resolves to moves to the trash and its deletion becomes pending for media sync; a name that resolves to nothing changes nothing. The result is `null` either way, as in the add-on (X16.8). `""` and the name of a directory resolve to nothing (M5 resolves only regular files): `null`, nothing trashed. A case variant resolves to the present file (M5 step 3): with only `b.mp3` present, `B.MP3` trashes `b.mp3`, where the add-on removes nothing (`ankiconnect-media-case-variants`). The add-on trashes by the raw name: a directory name moves that directory to the trash and `""` moves every file of the media folder into the trash when no trash folder exists yet (`Directory not empty (os error 39)` once one does) (`ankiconnect-media-non-files`); `sub/x` fails with `No such file or directory (os error 2)` and `../x` leaves the file in place (`ankiconnect-media-flat-names`). Meguri's flat-name check and M10.1 resolution keep all of these inside collection media.
 
 ## X8. `getMediaDirPath` (R1770)
 
 - With an external folder configured (`ankiconnect.media_dir` not null) that is an allowed root (X1): its `path` as configured, without a trailing `/`. This holds also while its scans are suspended (X11.7): files written there still reach collection media through the note hook (X11.6).
 - Otherwise (none configured, or a folder that is not an allowed root, such as one whose bookmark U144 could not resolve): error `no media folder is set up: choose one in Meguri Settings › AnkiConnect › Media Folder` (X12; the label is confirmed against U144's screen, X15 Q6).
 
-The collection media folder is never returned: it lives in the app container, and tools writing there would meet macOS privacy prompts.
+The collection media folder is never returned: it lives in the app container, and tools writing there would meet macOS privacy prompts. The add-on returns the absolute path of the profile's `collection.media` folder (X16.9).
 
 ## X9. Name-only actions and other names
 
-Only `retrieveMediaFile`, `getMediaFilesNames` and `deleteMediaFile` apply the flat-name check (R1769). `storeMediaFile` and attachments never use `filename` as a path: X4 step 3 transforms it into a flat name (`text/media-filenames#F1` removes `/` and `\`) before any lookup, trash call or write, so `a/b.mp3` is stored as `ab.mp3` and `../collection.anki2` can neither be read, replaced nor trashed through it.
+Only `retrieveMediaFile`, `getMediaFilesNames` and `deleteMediaFile` apply the flat-name check (R1769). `storeMediaFile` and attachments never use `filename` as a path: X4 step 3 keeps the text after its last `/`, as the add-on does, and transforms that into a flat name (`text/media-filenames#F1` removes `\`) before any lookup, trash call or write. So `a/b.mp3` is stored as `b.mp3`, `a\b.mp3` as `ab.mp3`, and `../collection.anki2` as `collection.anki2` inside collection media; the collection file can neither be read, replaced nor trashed through it. The add-on gives the same replies (X16.5).
 
 ## X10. Note attachments (R1761, R1762)
 
-`addNote`, `addNotes`, `updateNoteFields` and `updateNote` (with `fields`) accept, in the note object, the members `audio`, `video` and `picture`, each `null`, one attachment object or a list of them. (`guiAddCards` takes the same members; `servers/ankiconnect-gui`.) The `canAdd*` actions ignore them (`servers/ankiconnect-actions` A7.7).
+`addNote`, `addNotes`, `updateNoteFields` and `updateNote` (with `fields`) accept, in the note object, the members `audio`, `video` and `picture`, each `null`, one attachment object or a list of them. `updateNote` processes them only when it has `fields`; with `tags` alone the add-on ignores them too (X16.10). (`guiAddCards` takes the same members; `servers/ankiconnect-gui`.) The `canAdd*` actions ignore them (`servers/ankiconnect-actions` A7.7); the add-on stores their files (X16.10; `servers/ankiconnect-actions` A18 `ankiconnect-canadd-no-media`).
 
 ### X10.1 The attachment object
 
@@ -167,20 +180,22 @@ Only `retrieveMediaFile`, `getMediaFilesNames` and `deleteMediaFile` apply the f
 | `filename` | the desired name, as in X4 (required) |
 | `data`, `path`, `url` | the content sources (X3) |
 | `skipHash` | as in X4 |
-| `deleteExisting` | boolean or null, as in X4, but **default false**: a missing or `null` member does not trash an existing file |
-| `fields` | optional list of field names to append the reference to |
+| `deleteExisting` | its truthiness, as in X4, but **default false**: a missing or `null` member does not trash an existing file (the add-on's behavior, X16.10) |
+| `fields` | optional list of field names to append the reference to (X10.2 steps 2 and 3) |
+
+**Error paths.** An attachment's own member errors name the member by its own name within the attachment (`missing parameter: filename`, `invalid parameter: fields`), whether `audio` holds one object or a list: `servers/ankiconnect-actions` A1 treats an attachment like an element of a list parameter. An `audio` (`video`, `picture`) value or list entry that is neither `null` nor an object is `invalid parameter: <path>`, with `<path>` the path of that note member under A1: `note.audio` for `addNote`, `updateNoteFields` and `updateNote`, `audio` for an element of `notes`.
 
 ### X10.2 Processing
 
-The attachments are processed after the fields are set and before the note is checked (`servers/ankiconnect-actions` A7.2 step 8, A8.1 step 3): first every `audio` entry, then every `video` entry, then every `picture` entry, each list in its order. A `null` entry is skipped; an entry that is neither `null` nor an object fails the note with `invalid parameter: audio` (`video`, `picture`). Before the op opens, every entry's source is read (X3.5), giving bytes or an error text per entry; an entry whose own members fail (below) reads nothing. Then, inside the op, for each entry:
+The attachments are processed after the fields are set and before the note is checked (`servers/ankiconnect-actions` A7.2 step 8, A8.1 step 3): first every `audio` entry, then every `video` entry, then every `picture` entry, each list in its order. A `null` entry is skipped; an entry that is neither `null` nor an object fails the note with `invalid parameter: note.audio` (`note.video`, `note.picture`; the path of X10.1); the add-on fails it too, with its runtime's text (X16.10). Before the op opens, every entry's source is read (X3.5), giving bytes or an error text per entry; an entry whose own members fail (below) reads nothing. Then, inside the op, for each entry:
 
 1. Store the file as `storeMediaFile` does (X4 steps 2 to 5 with the entry's members and its pre-read bytes), staged (`media/media-files#M13`).
-2. On success with a stored name `N` (not `null` from `skipHash`) and a `fields` member that is a list of strings: for each listed name that is exactly the name of one of the note's fields (case-sensitive, also for `addNote`, whose `fields` member matches case-insensitively), append to that field's current value `[sound:N]` for audio and video, or `<img src="N">` for a picture. No separator is added. Names that match no field are skipped.
-3. On failure (the entry's pre-read error of X3, an error of X4, or a member error of the entry itself, such as a missing `filename`: `missing parameter: filename`, `servers/ankiconnect-actions` A1), the error text with `&`, `<`, `>` written as `&amp;`, `&lt;`, `&gt;` (in that order) is appended to each listed field, as in step 2. The note does not fail and the other attachments go on (R1762). When this entry has no `fields` member, the note fails instead with `missing parameter: fields`, and with `invalid parameter: fields` when `fields` is not a list of strings (AnkiConnect fails here too, with its runtime's text; X15 Q7). For `addNote` and `updateNote*` that is the action's error; for `addNotes` it is that note's entry in the error list (`servers/ankiconnect-actions` A7.6).
+2. On success with a stored name `N` (not `null` from `skipHash`) and a `fields` member that is a list: for each string entry of the list that is exactly the name of one of the note's fields (case-sensitive, also for `addNote`, whose `fields` member matches case-insensitively), append to that field's current value `[sound:N]` for audio and video, or `<img src="N">` for a picture. No separator is added; a name listed twice gets two references. Entries that are numbers, booleans or `null`, and names that match no field, are skipped. This is the add-on's behavior (X16.10). An entry that is a list or an object fails the note with `invalid parameter: fields`, and nothing is appended; the add-on fails the note too, with its runtime's text (`unhashable type: 'list'`), after it has stored the file, which stays (X16.10); Meguri's op rolls back, as for any failed add (below).
+3. On failure (the entry's pre-read error of X3, an error of X4, or a member error of the entry itself, such as a missing `filename`: `missing parameter: filename`, `servers/ankiconnect-actions` A1, where the add-on appends `'filename'`), the error text with `&`, `<`, `>` written as `&amp;`, `&lt;`, `&gt;` (in that order) is appended to each listed field, as in step 2 (a list or object entry fails the note here too, as in the add-on). The note does not fail and the other attachments go on (R1762). An empty list appends nothing. When this entry has no `fields` member, the note fails instead with `missing parameter: fields` (the add-on fails it with `'fields'`, X16.10), and with `invalid parameter: fields` when `fields` is not a list (`null` included). For non-list values the add-on differs (`ankiconnect-media-attach-fields-type`, X15 Q7, X16.10): a number, `true` or `null` fails the note with its runtime's text (`'int' object is not iterable`, `'bool' object is not iterable`, `'NoneType' object is not iterable`); a string it reads character by character, appending to any field whose name is one of those characters; an object it reads by its member names, appending to the fields those names give (`{"Gloss": 1}` appends to `Gloss`; `{}` appends nothing); in both of these it adds the note. For `addNote` and `updateNote*` that is the action's error; for `addNotes` it is that note's entry in the error list (`servers/ankiconnect-actions` A7.6).
 
-On success, a `fields` member that is absent or not a list of strings appends nothing and is not an error.
+On success, a `fields` member that is absent or not a list appends nothing and is not an error, as in the add-on (X16.10).
 
-A `skipHash` match appends nothing. The X3.5 reads of an action that fails before step 1 are discarded. When the action later fails (a duplicate, a missing deck, any note of an `addNotes` batch), its op rolls back and none of its staged files is left (`servers/ankiconnect-actions` A18 `ankiconnect-failed-add-media`).
+A `skipHash` match appends nothing. The X3.5 reads of an action that fails before step 1 are discarded. When the action later fails (a duplicate, a missing deck, any note of an `addNotes` batch), its op rolls back and none of its staged files is left (`servers/ankiconnect-actions` A18 `ankiconnect-failed-add-media`). The add-on leaves them: observed for a duplicate, an empty note and a failed `addNotes` batch; a missing deck or note type fails before any attachment is stored (X16.10).
 
 | Note `fields` | Attachments | Field values after |
 |---|---|---|
@@ -189,6 +204,9 @@ A `skipHash` match appends nothing. The X3.5 reads of an action that fails befor
 | `Term`: `word` | `audio: {filename: "x.mp3", url: "ftp://h/x", fields: ["Gloss"]}` | Gloss `cannot download ftp://h/x (only http and https are allowed)`; the note is added |
 | `Term`: `word` | `audio: {filename: "x.mp3", url: "ftp://h/x"}` | error `missing parameter: fields`, nothing added |
 | `Term`: `word` | `audio: {filename: "x.mp3", data: <A>, fields: ["term"]}` | unchanged (case-sensitive) |
+| `Term`: `word` | `audio: {filename: "x.mp3", data: <A>, fields: ["Gloss", ["x"]]}` | error `invalid parameter: fields`, nothing added, no file |
+
+The add-on gives these field values (X16.10), except for its own texts (`ankiconnect-media-error-text`): row 3 appends `No connection adapters were found for 'ftp://h/x'`, row 4's error is `'fields'`, and row 6's is `unhashable type: 'list'`, with `x.mp3` left in media (`servers/ankiconnect-actions` A18 `ankiconnect-failed-add-media`).
 
 ### X10.3 The external folder before the commit
 
@@ -334,14 +352,15 @@ A notice reports an external file that did not land in collection media under it
 
 ## X12. Meguri error texts
 
-Texts without an AnkiConnect counterpart (proposed wording, X15 Q1). Implementers take them only from here.
+Texts without an AnkiConnect counterpart (proposed wording, X15 Q1). Implementers take them only from here. `<filename>` is the `filename` member as given, also in X4, where only its last component is used (`{filename: "a/"}` gives `invalid media file name: a/`); `<pattern>` is the `pattern` member as given; `<path>` and `<url>` are as X3.3 and X3.4 say.
 
 | Where | Text |
 |---|---|
 | X3.2 | `invalid base64 data` |
 | X3.3 | `cannot read file: <path> (not permitted)` (R1772), `cannot read file: <path> (not found)`, `cannot read file: <path> (not a file)`, `cannot read file: <path> (too large)`, `cannot read file: <path> (<reason>)` |
 | X3.4 | `cannot download <url> (only http and https are allowed)`, `cannot download <url> (too many redirects)`, `cannot download <url> (timed out)`, `cannot download <url> (too large)`, `cannot download <url> (<reason>)` |
-| X5, X6, X7 | `invalid media file name: <filename>` |
+| X5, X7 | `invalid media file name: <filename>` |
+| X6 | `invalid media file name: <pattern>` |
 | X4: M3 `invalid_name` | `invalid media file name: <filename>` |
 | X4: M3 `ignored_name` | `media file name is reserved: <filename>` |
 | X8 | `no media folder is set up: choose one in Meguri Settings › AnkiConnect › Media Folder` |
@@ -355,33 +374,37 @@ Proposed `conformance/deviations.yaml` entries for the U136 replay. "Scenario" n
 | Proposed id | AnkiConnect | Meguri | Scenario |
 |---|---|---|---|
 | `ankiconnect-media-dir` | `getMediaDirPath` returns Anki's media folder | the external folder, or an error (X8) | `media/dir` |
-| `ankiconnect-media-flat-names` | `retrieveMediaFile` takes the last path component; `deleteMediaFile` and `getMediaFilesNames` follow separators and `..` | error (X5–X7) | `media/read` |
-| `ankiconnect-media-path-roots` | `path` reads any file | allowed roots only (X3.3) | `media/path` |
-| `ankiconnect-media-url-limits` | 10 s timeout, the client library's redirect rules, only status 200 accepted | 30 s, 5 redirects, `http`/`https` only, any 2xx accepted, 256 MiB cap (X3.4) | `media/attach-fail`; the stub tests below |
-| `ankiconnect-media-names-order` | `getMediaFilesNames` in directory order, also matching directories; the empty pattern gives `[""]`; on a case-insensitive volume a pattern without wildcards matches any case | regular files only, sorted; the empty pattern gives `[]`; matching is case-sensitive everywhere (X6) | `media/names` |
-| `ankiconnect-media-delete-existing` | with `deleteExisting`, the existing file is trashed by the exact given name and the same content is written again | the transformed name resolved by M5; identical content is kept, nothing trashed (X4 step 4) | `media/store-conflict` |
-| `ankiconnect-media-base64` | the runtime's lenient decoder: decoding stops at the first complete padding, extra `=` are accepted | X3.2's rule: such texts are errors | `media/store-data` |
-| `ankiconnect-media-error-text` | the runtime's error texts for decoding, file and download errors, also where they are appended to fields (X10.2 step 3) | X12's | `media/attach-fail`, `media/path` |
+| `ankiconnect-media-flat-names` | `retrieveMediaFile` takes the last path component; `deleteMediaFile` and `getMediaFilesNames` follow separators and `..`, and `getMediaFilesNames` also absolute patterns, so it lists any folder (X16.6 to X16.8) | error (X5–X7) | `media/read` |
+| `ankiconnect-media-path-roots` | `path` reads any file its process can open, a relative path from its working folder (X16.3) | allowed roots only (X3.3) | `media/path` |
+| `ankiconnect-media-url-limits` | 10 s for each connection attempt and each socket read, not for the whole download (a body arriving in parts 4 s apart over 16 s is stored); up to 30 redirects (a 31st: `Exceeded 30 redirects.`); only status 200 accepted (201 and 204 refused); schemes other than `http` and `https` refused with the client library's text, also as a redirect target (X16.4) | 30 s, 5 redirects, `http`/`https` only, any 2xx accepted, 256 MiB cap (X3.4) | `media/attach-fail`; the stub tests below |
+| `ankiconnect-media-names-order` | `getMediaFilesNames` in directory order, also matching directories; the empty pattern gives `[""]` (X16.7); on a case-insensitive volume a pattern without wildcards matches any case (not probed) | regular files only, sorted; the empty pattern gives `[]`; matching is case-sensitive everywhere (X6) | `media/names` |
+| `ankiconnect-media-delete-existing` | with `deleteExisting`, the existing file is trashed by the exact given name and the same content is written again; a `filename` of `""` moves every file of the media folder into the trash when no trash folder exists yet; `sub/inner.mp3` naming an existing subfolder's file fails with `No such file or directory (os error 2)`, and `..` with `Device or resource busy (os error 16)` (X16.5) | the transformed name resolved by M5; identical content is kept, nothing trashed (X4 step 4); `""` is an error (M3 `invalid_name`, X12); `sub/inner.mp3` is stored as `"inner.mp3"` and `..` as `".._"` (X4 step 3, `text/media-filenames#F1` step 5) | `media/store-conflict` |
+| `ankiconnect-media-case-variants` | names are matched exactly on the add-on's case-sensitive volume: with `clip.mp3` = A present, `storeMediaFile` `Clip.mp3` with B returns `"clip-<sha1 of B>.mp3"` and keeps A; `retrieveMediaFile` `CLIP.MP3` returns `false`; with `b.mp3` present, `deleteMediaFile` `B.MP3` removes nothing (X16.5, X16.6, X16.8) | case variants resolve to the present file (`media/media-files#M5` step 3): `"clip.mp3"` with B stored and A trashed (X4 row 9); A's bytes (X5); `b.mp3` trashed (X7) | `media/store-conflict`, `media/read`, `media/delete-names` |
+| `ankiconnect-media-non-files` | `retrieveMediaFile` with `""` or a directory name: error `[Errno 21] Is a directory: …`; `deleteMediaFile` with a directory name moves that directory to the trash, and with `""` moves every file of the media folder into the trash when no trash folder exists yet (`Directory not empty (os error 39)` once one does) (X16.6, X16.8) | `false` and `null`; nothing trashed (X5, X7) | `media/read`, `media/delete-names` |
+| `ankiconnect-media-base64` | the runtime's lenient decoder: decoding stops at the first complete padding (`YQo=garbage` gives `61 0a`), extra `=` are accepted, and padding alone (`=`, `==`) decodes to no bytes, so an empty file is stored (X16.2) | X3.2's rule: such texts are errors | `media/store-data` |
+| `ankiconnect-media-error-text` | the runtime's error texts for decoding, file, download and parameter errors, also where they are appended to fields (X10.2 step 3); X16 lists the observed ones | X12's, and the envelope's parameter texts | `media/attach-fail`, `media/path` |
+| `ankiconnect-media-attach-fields-type` | for a failing attachment: a string `fields` is matched character by character and an object `fields` by its member names, the error text appended to the fields so named, and the note is added (`{}` appends nothing); a number, `true` or `null` fails the note with the runtime's text (`'int' object is not iterable`, `'bool' object is not iterable`, `'NoneType' object is not iterable`) (X16.10) | any non-list `fields` of a failing attachment, `null` included, fails the note with `invalid parameter: fields` (X10.2 step 3; X15 Q7) | `media/attach-fail` |
 
-The case rules of `media/media-files#M14` apply to every stored name and need their own entries where a golden shows them. The failed-add and `canAdd*` differences are `servers/ankiconnect-actions` A18's (`ankiconnect-failed-add-media`: `media/attach-rollback`).
+The case rules of `media/media-files#M14` apply to every stored name; `ankiconnect-media-case-variants` names the cases the probe showed, and other cases need their own entries where a golden shows them. The failed-add and `canAdd*` differences are `servers/ankiconnect-actions` A18's (`ankiconnect-failed-add-media`: `media/attach-rollback`; `ankiconnect-canadd-no-media`: `notes/can-add-media`). A list or object entry in `fields` fails the note in the add-on and in Meguri (X10.2 step 2); the file the add-on leaves behind is `ankiconnect-failed-add-media`'s. The probe also showed that the add-on's `canAddNote` returns `false` when an attachment fails with no `fields` (X16.10), where Meguri's check, which ignores attachments, can return `true`; A18's `ankiconnect-canadd-no-media` should name that reply too.
 
 ## X14. Scenarios
 
-Requests are `version` 6 without key or Origin; replies shown unwrapped. Byte contents: A = `61 0a` (base64 `YQo=`), B = `62 0a` (`Ygo=`). `Pair` and deck `D` are `servers/ankiconnect-actions` A20's. Scenarios that add a note end with `observe: [db_dump(notes, cards), media]` (R1948, `servers/transcripts` T14). A row marked "(Meguri)" asserts Meguri's side of the X13 entry it names.
+Requests are `version` 6 without key or Origin; replies shown unwrapped. The add-on's replies to the same requests, where they were probed, are in X16. Byte contents: A = `61 0a` (base64 `YQo=`), B = `62 0a` (`Ygo=`). `Pair` and deck `D` are `servers/ankiconnect-actions` A20's. Scenarios that add a note end with `observe: [db_dump(notes, cards), media]` (R1948, `servers/transcripts` T14). A row marked "(Meguri)" asserts Meguri's side of the X13 entry it names.
 
 | Scenario | Setup | Request | Reply and media after |
 |---|---|---|---|
-| `media/store-data` | empty media | X4's rows 1, 2, 6, 7; then `storeMediaFile {filename: "y.txt", data: "YQo=="}` | as X4; the last: error `invalid base64 data` (Meguri, `ankiconnect-media-base64`) |
-| `media/store-conflict` | `clip.mp3` = A | X4's rows 3, 4, 5 | as X4 (trash contents checked by a `media_pending`-style observation) |
-| `media/store-traversal` | `a.mp3` = A | `storeMediaFile {filename: "../collection.anki2", data: "Ygo="}` | `"..collection.anki2"` (F1 removes the `/`); stored in collection media; the collection file untouched, nothing trashed |
-| `media/read` | `a.mp3` = A | `retrieveMediaFile {filename: "a.mp3"}`; `{filename: "missing.mp3"}`; `{filename: "../collection.anki2"}`; `{filename: "a/b.mp3"}` | `"YQo="`; `false`; error `invalid media file name: ../collection.anki2` (Meguri, `ankiconnect-media-flat-names`); error `invalid media file name: a/b.mp3` (the same) |
+| `media/store-data` | empty media | X4's rows 1, 2, 6, 7; then `storeMediaFile {filename: "y.txt", data: "YQo=="}`; `{filename: "z.txt", data: "="}`; `{filename: "w.txt", data: "YQo=", url: 5}` | as X4; error `invalid base64 data` twice (Meguri, `ankiconnect-media-base64`); `"w.txt"` = A (X3.1) |
+| `media/store-conflict` | `clip.mp3` = A | X4's rows 3, 4, 5, then row 9 on a fresh `clip.mp3` = A | as X4 (trash contents checked by a `media_pending`-style observation); row 9: Meguri, `ankiconnect-media-case-variants` |
+| `media/store-traversal` | `a.mp3` = A | `storeMediaFile {filename: "../collection.anki2", data: "Ygo="}` | `"collection.anki2"` (X4 step 3 keeps the last component, as the add-on does, X16.5); stored in collection media; the collection file untouched, nothing trashed |
+| `media/read` | `a.mp3` = A | `retrieveMediaFile {filename: "a.mp3"}`; `{filename: "missing.mp3"}`; `{filename: "../collection.anki2"}`; `{filename: "a/b.mp3"}`; `{filename: "A.MP3"}`; `{filename: ""}` | `"YQo="`; `false`; error `invalid media file name: ../collection.anki2` (Meguri, `ankiconnect-media-flat-names`); error `invalid media file name: a/b.mp3` (the same); `"YQo="` (Meguri, `ankiconnect-media-case-variants`); `false` (Meguri, `ankiconnect-media-non-files`) |
 | `media/names` | X6's folder | X6's rows; `getMediaFilesNames {pattern: ""}` | as X6 (order, Meguri `ankiconnect-media-names-order`); `[]` |
 | `media/delete` | `a.mp3` = A | `deleteMediaFile {filename: "a.mp3"}`; again | `null`, file in the trash, deletion pending; `null`, nothing |
+| `media/delete-names` | `a.mp3` = A, `b.mp3` = B | `deleteMediaFile {filename: ""}`; `{filename: "B.MP3"}` | `null`, nothing trashed (Meguri, `ankiconnect-media-non-files`); `null`, `b.mp3` in the trash, deletion pending, `a.mp3` kept (Meguri, `ankiconnect-media-case-variants`) |
 | `media/dir` | no external folder | `getMediaDirPath` | error X8 (Meguri, `ankiconnect-media-dir`) |
 | `media/attach` | `Pair`, deck `D` | `addNote` with X10.2's rows 1 and 2 | fields as X10.2; files stored |
-| `media/attach-fail` | the same | X10.2's rows 3 and 4 | as X10.2 (row 3's appended text: Meguri, `ankiconnect-media-error-text`) |
+| `media/attach-fail` | the same | X10.2's rows 3, 4 and 6 | as X10.2 (row 3's appended text: Meguri, `ankiconnect-media-error-text`; row 6's missing file: Meguri, `ankiconnect-failed-add-media`) |
 | `media/attach-rollback` | the same, with a note `x` already in `D` | `addNote` with Term `x` (a duplicate) and `audio: {filename: "n.mp3", data: "Ygo=", fields: ["Gloss"]}` | error `cannot create note because it is a duplicate`; no `n.mp3` in media (Meguri, `ankiconnect-failed-add-media`) |
-| `media/attach-notes` | the same | `addNotes` with two notes, the second's `audio` lacking `fields` and failing (`url: "ftp://h/x"`) | error `['missing parameter: fields']`; nothing added |
+| `media/attach-notes` | the same | `addNotes` with two notes, the second's `audio` lacking `fields` and failing (`url: "ftp://h/x"`) | error `['missing parameter: fields']`; nothing added (the add-on: `["'fields'"]`, with the first note's file left in media, X16.10) |
 | `media/skip-hash` | the same | `addNote` with `audio: {filename: "x.mp3", data: <A>, skipHash: "60b725f10c9c85c70d97880dfe8191b3", fields: ["Term"]}` | note added, Term without a reference, no file (the MD5 of A) |
 | `media/path` | readable folder `/tmp/r` holding `f.mp3`, a link `out` → `/etc/hosts` | `storeMediaFile {filename: "f.mp3", path: "/tmp/r/f.mp3"}`; `{…, path: "/tmp/r/out"}`; `{…, path: "/etc/hosts"}`; `{…, path: "/etc/does-not-exist"}`; `{…, path: "/tmp/r/missing.mp3"}`; `{…, path: "r/f.mp3"}` | `"f.mp3"`; error `cannot read file: /tmp/r/out (not permitted)`; error `cannot read file: /etc/hosts (not permitted)`; error `cannot read file: /etc/does-not-exist (not permitted)`; error `cannot read file: /tmp/r/missing.mp3 (not found)`; error `cannot read file: r/f.mp3 (not permitted)` (Meguri, `ankiconnect-media-path-roots`) |
 
@@ -415,8 +438,159 @@ External-folder tests (Meguri only, `ankiconnect_extmedia.rs`, a temporary folde
 - Q2. Closed: downloads take the shared fetcher's cap (`servers/host-security#H13`, the 256 MiB body limit of H8), and `path` reads use the same cap (X3.3 step 6). Confirm the `path` cap, which no source fixes.
 - Q3. Whether removing or renaming a file in the external folder should ever affect collection media is not stated by R1771; X11.3 copies only and never removes. Confirm.
 - Q4. Names starting with `.` are skipped by the scan (X11.3) so that editor and system temporary files (`.DS_Store`, `.clip.mp3.part`) are not copied; the hook (X11.6) still ingests such a name when a note references it explicitly. Confirm.
-- Q5. U136's `ADDON_PIN` recording of the add-on build of 2025-11-09 confirms or overrides the replies of the recorded actions in this file; where a golden differs, the golden decides and this file changes.
+- Q5. U136's `ADDON_PIN` recording of the add-on build of 2025-11-09 confirms or overrides the replies of the recorded actions in this file; where a golden differs, the golden decides and this file changes. The 2026-11-10 probe (X16) ran every recorded action of this file against that build; this file now states its replies, and a later golden still decides.
 - Q6. The X8 text names "Settings › AnkiConnect › Media Folder" as R1770 does, while U144's screen is titled Settings › Integrations. The text must name the screen and control exactly as U144 builds them; U144 confirms or changes it.
-- Q7. An attachment that fails and has no `fields` member fails the note (X10.2 step 3), as AnkiConnect does, although R1762 says an attachment failure "does not fail the call". Confirm the add-on's behavior, or amend R1762's wording to exclude this case.
+- Q7. An attachment that fails and has no `fields` member fails the note (X10.2 step 3), as AnkiConnect does, although R1762 says an attachment failure "does not fail the call". The add-on's behavior is settled by the probe (X16.10): it fails the note with `'fields'` (`["'fields'"]` for `addNotes`, which keeps the files of the batch's other notes). Open: amend R1762's wording to exclude this case (recommended), or let such an attachment fail silently. The non-list `fields` case (`ankiconnect-media-attach-fields-type`) belongs to the same decision.
 - Q8. The plan (U143) says ingest events are logged in the activity log, but `servers/ankiconnect-envelope#E16` keeps one entry per request with no names (R1780). X11.9 sends them as a separate host event. Decide whether E16 gains an entry kind for them (and whether file names may appear there), or whether U144 shows them elsewhere.
 - Q9. A folder that moved or was renamed (its bookmark resolves to a new path) suspends the scans until the user picks it again, and a new pick records a new baseline, so files a tool wrote meanwhile and no note referenced are not copied. A relocation call that keeps the index (re-keying it to the new path) would avoid that. Decide whether U144 and U143 add one.
+
+## X16. Observed add-on behavior (probe of 2026-11-10)
+
+The AnkiConnect add-on 25.11.9.0 (the build U136 pins) in Anki 26.9.3, run in the quarantined recorder image on Linux (a case-sensitive volume) with a new profile, answered the requests below. Requests were `version` 6 with no key and no `Origin`; replies are shown unwrapped; every reply had HTTP status 200. A = `61 0a` (`YQo=`), B = `62 0a` (`Ygo=`). `<media folder>` is the profile's `collection.media` folder, given as an absolute path in the real texts. Meguri follows these observations except where X12 gives a Meguri text or X13 a deviation. They do not replace U136's goldens (X15 Q5). A second run on the same day, in a new container (review fixes), added the rows marked "(re-probe)".
+
+### X16.1 Content sources
+
+| `storeMediaFile` members | Add-on reply |
+|---|---|
+| `data: ""`; no source member; all three `null`; `data: 0` | error `You must provide a "data", "path", or "url" field.` |
+| `data: 123`, `data: true`, `data: ["YQo="]` | error `argument should be a bytes-like object or ASCII string, not 'int'` (`'bool'`, `'list'`) |
+| `data: "Ygo="` and `path` of a readable file | the `data` bytes stored |
+| `data: "YQo="` with `url: 5`, `path: 5`, `url: true` or `path: ["x"]` (re-probe) | the `data` bytes stored; the other member is not looked at |
+| `data: 0` and `path` of a readable file (re-probe) | the file's bytes stored |
+| `data: ""` and `path` of a readable file | the file's bytes stored |
+| `path: "/nope"` and a working `url` | error `[Errno 2] No such file or directory: '/nope'`; the `url` is not fetched |
+| no `filename` | a runtime error saying that the required argument `filename` is missing |
+| `filename: 5` | error `bad argument type for built-in operation` |
+
+### X16.2 `data`
+
+| `data` | Add-on |
+|---|---|
+| `YQ==`, `YWJj`, `Y Q o =`, `YQo=` + LF | `61`; `61 62 63`; `61 0a`; `61 0a` |
+| `YQo==`, `YQ==YQ==`, `YQo=garbage` | `61 0a`; `61`; `61 0a` |
+| ` ` (one space) | no bytes: an empty file is stored |
+| `=`, `==` (re-probe) | no bytes: an empty file is stored |
+| `YQo`, `YQ`, `YQ=o`, `=YQo` | error `Incorrect padding` |
+| `Y`, `-_8=` | error `Invalid base64-encoded string: number of data characters (1) cannot be 1 more than a multiple of 4` |
+| `YQ==é`, `é` | error `string argument should contain only ASCII characters` |
+
+### X16.3 `path`
+
+| `path` | Add-on reply |
+|---|---|
+| `/etc/hostname` (outside every Meguri root) | the file's bytes stored |
+| `/nope/missing.mp3` | error `[Errno 2] No such file or directory: '/nope/missing.mp3'` |
+| `/tmp` (a directory) | error `[Errno 21] Is a directory: '/tmp'` |
+| `relative.txt` | error `[Errno 2] No such file or directory: 'relative.txt'` (looked up from the process's working folder) |
+| `7` (a number) | error `[Errno 22] Invalid argument` |
+
+### X16.4 `url`
+
+Against an HTTP stub on the container's loopback:
+
+| Stub behavior or `url` | Add-on reply |
+|---|---|
+| status 200 | stored |
+| status 201, 204, 404, 500 | error `<url> download failed with return code <status>` |
+| 5, 6 and 30 redirects, then 200 | stored |
+| 31 redirects | error `Exceeded 30 redirects.` |
+| `ftp://…`, `file://…`, or a redirect to `ftp://…` | error `No connection adapters were found for '<url>'`, naming the redirect target for a redirect |
+| `nonsense` (no scheme) | error starting `Invalid URL 'nonsense': No scheme supplied.`, then a question that names `https://nonsense` |
+| connection refused, unknown host, TLS to a plain HTTP port | the client library's text, which starts `HTTPConnectionPool(host='<host>', port=<port>): Max retries exceeded with url: <path>` (`HTTPSConnectionPool` for `https`) and names the system error |
+| no response for 12 s | after 10.0 s: error `HTTPConnectionPool(host='<host>', port=<port>): Read timed out. (read timeout=10.0)` |
+| a 5-byte body sent one byte every 4 s | stored after 16 s (the limit applies to each read, not to the download) |
+
+The add-on's request carried the headers `Host`, `User-Agent` (`Anki 26.09.3`), `Accept`, `Accept-Encoding` and `Connection`.
+
+### X16.5 `storeMediaFile` names, `skipHash`, `deleteExisting`
+
+| Collection media before | Request | Add-on reply | After |
+|---|---|---|---|
+| none | `Clip.MP3`, A | `"clip.mp3"` | |
+| `clip.mp3` = A | `clip.mp3`, B | `"clip.mp3"` | B; A in `media.trash` |
+| `clip.mp3` = A | `clip.mp3`, A | `"clip.mp3"` | A; a copy of A in `media.trash` |
+| `clip.mp3` = A | `clip.mp3`, B, `deleteExisting` `false` or `null` | `"clip-<sha1 hex of B>.mp3"` | both files |
+| `clip.mp3` = A | `clip.mp3`, B, `deleteExisting` `"yes"` | `"clip.mp3"` | B; A trashed |
+| `clip.mp3` = A | `Clip.mp3`, B (`deleteExisting` missing) | `"clip-<sha1 hex of B>.mp3"` | A kept and nothing trashed: the trash call named `Clip.mp3`, which is not present |
+| none | A, `skipHash` = MD5 hex of A | `null` | nothing |
+| none | A, `skipHash` = the same in upper case, `""` or `5` | the stored name | stored |
+| `x.mp3` = A | `x.mp3`, B, `skipHash` = MD5 hex of A | `"x.mp3"` | B; A trashed |
+| none | `a/b.mp3`; `a\b.mp3` | `"b.mp3"`; `"ab.mp3"` | |
+| none; `outside.txt` in the profile folder | `../outside.txt`, B | `"outside.txt"` | stored in collection media; the profile folder's file unchanged |
+| `sub/inner.mp3` (a subfolder) | `sub/inner.mp3`, B | error `No such file or directory (os error 2)` | nothing |
+| none | `a?b:c*.mp3`; `e` + U+0301 + `.mp3` | `"abc.mp3"`; `"é.mp3"` (NFC) | |
+| files, no `media.trash` folder yet | `""`, A | error `Failed to read '<media folder>/': Is a directory (os error 21)` | every file of collection media moved into `media.trash` |
+| files, `media.trash` present | `""`, A | error `Directory not empty (os error 39)` | nothing |
+| | `???`, `deleteExisting: false` | error `Failed to read '<media folder>/': Is a directory (os error 21)` | nothing |
+| | `..`, A | error `Device or resource busy (os error 16)` | nothing |
+
+### X16.6 `retrieveMediaFile`
+
+With `a.mp3` = A and `été.mp3` present: `a.mp3`, `sub/a.mp3`, `x/../a.mp3`, `/etc/a.mp3` and `a?.mp3` return `"YQo="`; `missing.mp3` and `../collection.anki2` return `false`; the decomposed spelling of `été.mp3` returns that file; `sub` (a directory) gives error `[Errno 21] Is a directory: '<media folder>/sub'`, `""` gives `[Errno 21] Is a directory: '<media folder>/'`, and `null` gives `expected str, bytes or os.PathLike object, not NoneType`. Re-probe, with `clip.mp3` present: `CLIP.MP3` and `Clip.mp3` return `false`.
+
+### X16.7 `getMediaFilesNames`
+
+Folder: `b.mp3`, `a.mp3`, `c.jpg`, `.hidden.mp3`, `A.MP3x`, a directory `dir.mp3` and a directory `sub` holding `inner.mp3`. Results came in the folder's directory order; shown here as sets.
+
+| `pattern` | Add-on result |
+|---|---|
+| missing, `*`, `**` | every entry except `.hidden.mp3`, the two directories included |
+| `*.mp3` | `dir.mp3`, `a.mp3`, `b.mp3` |
+| `[ab].*`, `?.mp3` | `a.mp3`, `b.mp3` |
+| `[!a]*` | every entry except `a.mp3` and `.hidden.mp3` |
+| `A.MP3`, `[a` | `[]` |
+| `.*` | `.hidden.mp3` |
+| `""` | `[""]` |
+| `sub/*`, `*/*` | `inner.mp3` |
+| `../*` | the profile folder's entries (`collection.anki2`, `collection.media`, `media.trash`, …) |
+| `/etc/*` | the names in `/etc` |
+
+### X16.8 `deleteMediaFile`
+
+`a.mp3` returns `null` and moves the file to `media.trash`; the same call again returns `null`. `B.MP3` with only `b.mp3` present returns `null` and removes nothing (confirmed by the re-probe). `dir.mp3` (a directory) returns `null` and moves the directory to `media.trash`. `sub/inner.mp3` gives error `No such file or directory (os error 2)` and removes nothing. `../outside2.txt` returns `null` and the profile folder's file stays. `""` with `media.trash` present gives `Directory not empty (os error 39)`. `5` gives `bad argument type for built-in operation`.
+
+### X16.9 `getMediaDirPath`
+
+The absolute path of `<profile folder>/collection.media`, without a trailing `/`.
+
+### X16.10 Attachments
+
+Note type `Pair` (fields `Term`, `Gloss`), deck `D`; `Gloss` empty unless stated.
+
+| Note request | Add-on outcome |
+|---|---|
+| X10.2's rows 1, 2 and 5 | the field values X10.2 shows (row 2: `<img src="cat.jpg">`) |
+| X10.2's row 3 (`url: "ftp://h/x"`, `fields: ["Gloss"]`) | note added; Gloss `No connection adapters were found for 'ftp://h/x'` |
+| row 4 (`url` fails, no `fields`) | error `'fields'` |
+| `picture`, `video` and `audio`, each to `Term` | Term `w7` became `w7[sound:a7.mp3][sound:v7.mp4]<img src="p7.png">`: audio, then video, then picture |
+| `audio: [null, {…, fields: ["Term"]}]` | the `null` skipped; one reference |
+| `audio: ["x", {…}]`; `audio: 5` | error `string indices must be integers, not 'str'`; error `'int' object is not subscriptable` |
+| an entry without `filename`, `fields: ["Gloss"]` | note added; Gloss `'filename'` |
+| `fields: "Term"` on success; `fields: 5` on success | note added; nothing appended |
+| `fields: "Gloss"` with a failing `data` | note added; nothing appended (no field has a one-letter name) |
+| `fields: 5` with a failing `data` | error `'int' object is not iterable` |
+| `fields: ["Gloss", "Gloss"]` | Gloss `[sound:a19.mp3][sound:a19.mp3]` |
+| `fields: [5, "Gloss"]` | Gloss `[sound:a20.mp3]` |
+| `fields: ["Gloss", null, true, 1.5]` (re-probe) | Gloss `[sound:u8.mp3]` |
+| `fields: ["Gloss", ["x"]]`, `fields: ["Gloss", {"a": 1}]` (re-probe) | error `unhashable type: 'list'` (`'dict'`); no note added; the file stays in collection media |
+| `fields: ["Gloss", ["x"]]` with a failing `data` (re-probe) | error `unhashable type: 'list'`; no note added |
+| `fields: [null, "Gloss"]` with a failing `data` (re-probe) | note added; Gloss holds the error text |
+| `fields: {"Gloss": 1}` with a failing `data` (`YQ`) (re-probe) | note added; Gloss `Incorrect padding` |
+| `fields: {"Gloss": 1}` on success (re-probe) | note added; nothing appended; the file stored |
+| `fields: null`, `fields: true` with a failing `data` (re-probe) | error `'NoneType' object is not iterable` (`'bool' object is not iterable`) |
+| `fields: {}`, `fields: []` with a failing `data` (re-probe) | note added; nothing appended |
+| `url: "ftp://h/<x>&y"`, `fields: ["Gloss"]` | Gloss `No connection adapters were found for 'ftp://h/&lt;x&gt;&amp;y'` |
+| `clip9.mp3` = A present; attachment `clip9.mp3`, B, no `deleteExisting` | Gloss `[sound:clip9-<sha1 hex of B>.mp3]`; A kept |
+| the same with `deleteExisting: true` | Gloss `[sound:clip9.mp3]`; B stored, A trashed |
+| `skipHash` = MD5 hex of the bytes, `fields: ["Term"]` | note added; Term unchanged; no file |
+| a duplicate of an existing note, with an attachment | error `cannot create note because it is a duplicate`; the attachment's file stays in collection media |
+| an empty first field, with an attachment | error `cannot create note because it is empty`; the file stays |
+| a missing deck, with an attachment | error `deck was not found: Nope`; no file |
+| `addNotes`: a note with a good attachment, then one whose attachment fails with no `fields` | error `["'fields'"]`; no note added; the first note's file stays |
+| `addNotes`: one note whose failing attachment has `fields: ["Gloss"]` | the note added; Gloss holds the error text |
+| `updateNoteFields` with `fields: {"Gloss": "g"}` and an audio attachment to `Gloss`; with `fields: {}` | Gloss `g[sound:u1.mp3]`; the reference appended to the current value |
+| `updateNote` with `fields` and a picture | the field set, then `<img src="u2.png">` appended |
+| `updateNote` with `tags` only and an attachment | tags set; the attachment ignored, no file |
+| `updateNoteFields` whose attachment fails with no `fields` | error `'fields'`; the note's fields unchanged |
+| `canAddNote`, `canAddNoteWithErrorDetail`, `canAddNotes` with an attachment | `true`, `{"canAdd": true}`, `[true]`; each attachment's file stored in collection media |
+| `canAddNote` whose attachment fails with no `fields` | `false` |

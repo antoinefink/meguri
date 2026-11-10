@@ -5,7 +5,7 @@ Requirements: R1754 (except the `sync` round trip, U146), R1755, R1756, R1757, R
 Anki: 26.09.3
 Scenarios: none yet. The transcript format is `servers/transcripts`, but its harness (U136) is not built; A20 lists the planned scenarios of `conformance/scenarios/servers/ankiconnect/{decks,models,notes,tags,cards,search,stats,clients}/` as request and reply tables, written with the entity tokens of `servers/transcripts` T10.1. The files are written when the harness lands.
 
-The non-media, non-GUI actions that Meguri's AnkiConnect-compatible server (port 8765 by default) answers, with AnkiConnect's parameter names, result shapes and error strings. The interface this file targets is AnkiConnect API version 6 as served by the AnkiConnect add-on build of 2025-11-09 running in Anki 26.09.3, the build the U136 recorder pins. Its goldens are the authority on reply shapes; where Meguri differs on purpose, A18 lists the difference and its proposed deviation entry.
+The non-media, non-GUI actions that Meguri's AnkiConnect-compatible server (port 8765 by default) answers, with AnkiConnect's parameter names, result shapes and error strings. The interface this file targets is AnkiConnect API version 6 as served by the AnkiConnect add-on build of 2025-11-09 running in Anki 26.09.3, the build the U136 recorder pins. Its goldens are the authority on reply shapes; where Meguri differs on purpose, A18 lists the difference and its proposed deviation entry. That build was probed on 2026-11-10 (A21 Q6): the AnkiConnect replies stated in A4 to A14, A18 and A20 below are the observed ones, except where a section says a point is unverified. Meguri's own replies where it differs on purpose are specified, not observed: the A17 texts, the Meguri column of A18 (the A7.1 and A7.4 member errors among them) and the A20 rows marked (Meguri).
 
 Every action here is a thin adapter: it decodes its parameters, runs one engine query on a server reader or one engine op of source `LocalApi` (`engine/op-model` O1), and shapes the reply. The collection behavior itself is the referenced specs' (notes, decks, note types, tags, scheduling, search, stats); this file states only what the action adds: parameter decoding, lookups by name, the checks AnkiConnect makes before calling the collection, result shapes and error strings.
 
@@ -266,6 +266,8 @@ An object, in template order: template name → `[question names, answer names]`
 | `{{FrontSide}}` / `{{Gloss}}` | `[[], ["Gloss"]]` |
 | `{Term}` / `{{}}` | `[[], []]` |
 
+Every row was observed on the add-on. Anki's checked save refuses the templates of the `{{{Term}}}` and `{Term}` rows (`createModel` fails), so those two rows apply only to note types stored without the check (an import or a direct write).
+
 The rules behind the table, in terms of the template syntax of `render/template-syntax`:
 
 - Each side lists, in order of appearance, the **simple tags** of its text: a `{{`, a non-empty body, the first `}}` after it. A tag whose body holds `#`, `/` or `}` is not listed, so section openers and closers are skipped, while an inverted-section opener (`{{^Term}}`, whose body starts with `^`) is listed. The body may hold `{`, so the text `{{{Term}}` (a third brace before) is one tag. The text is read from the start and reading resumes after each tag.
@@ -285,6 +287,8 @@ Checks, in this order; the first that fails is the error:
 | a note type's name equals `modelName` code point for code point | `Model name already exists` |
 | a `cardTemplates` element lacks `Front` (then `Back`), or one is not a string | `missing parameter: Front` (then `Back`), `invalid parameter: Front` (member errors, A1) |
 
+The order was observed on the add-on (empty `inOrderFields` before an existing name, an existing name before a missing `Front`). Its member texts are `'Front'`, `'Back'`, and for a non-string a backend JSON error text; they are compared by shape.
+
 Then one op adds a note type from scratch (`notetypes/records#N5.1`): kind cloze when `isCloze` is true, else standard; the fields `inOrderFields` in order (N5.2); one template per element of `cardTemplates` in order (N5.3), named by its `Name` when present, else `Card <n>` with `n` its 1-based position in `cardTemplates` (so `[{Name: "X"}, {}]` gives `X` and `Card 2`); `css` when it is a string, else Meguri's base card CSS (N5.1). The add normalizes as `notetypes/records#N4` says, so a name equal to another note type's only under `unicase` gets `+` appended (N4 step 7; A18 `ankiconnect-createmodel-name-clash`), and runs the checked-save rules of `notetypes/validation#V1`–`#V3`. A refusal is an error with the Meguri text of A17 for its kind. The add sets `curModel` (N5).
 
 The result is the stored note type in schema-11 JSON form (`model/schema11-json#S4`), as `findModelsById` would return it right after.
@@ -303,6 +307,8 @@ The result is the stored note type in schema-11 JSON form (`model/schema11-json#
 | `audio`, `video`, `picture` | object or list | no | attachments: `servers/ankiconnect-media` X10 |
 
 A missing required member, or a member of another type, is a member error (A1): `missing parameter: note.modelName` for `addNote` and `canAddNote*`, `missing parameter: modelName` for an element of `notes`. A `fields` member value that is not a string is `invalid parameter: note.fields` (`fields` within an element of `notes`). The action makes these checks at the steps of A7.2, interleaved with the lookups.
+
+Observed in the add-on: a missing member fails with the member name in single quotation marks (`'deckName'`, `'fields'`); a `deckName`, `modelName` or field value of another type, or a `tags` list holding a non-string, fails with `bad argument type for built-in operation`; a `fields` that is a string fails with `'str' object has no attribute 'items'`. These are compared by shape. A `tags` member that is a string is accepted, and each character of the string becomes one tag (`"pq rs"` gives ` p q r s `), where Meguri gives a member error (A18 `ankiconnect-note-member-types`, A21 Q9).
 
 ### A7.2 Building the note
 
@@ -371,7 +377,7 @@ Attachments are appended before the check (A7.2 step 8), so an attachment refere
 | `duplicateScopeOptions.checkChildren` | boolean | false | `option parameter "duplicateScopeOptions.checkChildren" must be boolean` |
 | `duplicateScopeOptions.checkAllModels` | boolean | false | `option parameter "duplicateScopeOptions.checkAllModels" must be boolean` |
 
-Options are read only when present; `duplicateScopeOptions` is read even when `duplicateScope` is not `"deck"` (so `checkAllModels` alone selects the scoped check over the whole collection). `duplicateScopeOptions` `null` counts as absent. For an element of `notes`, the member-error paths start at `options` (`invalid parameter: options.duplicateScopeOptions`). AnkiConnect has no type check for `duplicateScopeOptions` and its `deckName`; what it does with other types is its runtime's, and transcripts compare those replies by shape only (`servers/ankiconnect-envelope#E18`).
+Options are read only when present; `duplicateScopeOptions` is read even when `duplicateScope` is not `"deck"` (so `checkAllModels` alone selects the scoped check over the whole collection). `duplicateScopeOptions` `null` counts as absent. For an element of `notes`, the member-error paths start at `options` (`invalid parameter: options.duplicateScopeOptions`). AnkiConnect has no type check for `options`, `duplicateScopeOptions` and its `deckName`. Observed: an `options` or `duplicateScopeOptions` that is not an object is ignored, and the note added, only when it is a string that contains none of its member names (`"xyz"`) or a list that has none of them as an element (`[]`); any other non-object fails with a runtime text: a number or boolean (`argument of type 'int' is not iterable`), a string that contains a member name (`"allowDuplicate"`: `string indices must be integers, not 'str'`), a list that holds one (`list indices must be integers or slices, not str`). `duplicateScopeOptions` `null` fails with `argument of type 'NoneType' is not iterable`; a `deckName` of another type fails with `bad argument type for built-in operation`. Meguri keeps the member errors of this table and treats `null` as absent. The replies that differ in outcome (an ignored `options` or `duplicateScopeOptions`, and `null`) are A18 `ankiconnect-note-member-types`; the other errors are compared by shape (`servers/ankiconnect-envelope#E18`).
 
 ### A7.5 `addNote`
 
@@ -407,7 +413,7 @@ These four build and check notes exactly as A7.2 and A7.3 do, without step 8, an
 
 ## A8. Updating and deleting notes (R1763)
 
-A note id that names no note is error `Note was not found: <id>`, with a capital `N` as the add-on writes it. R1738 writes `note was not found: <id>`; A21 Q2 must be decided before implementation, and this file changes with the decision.
+A note id that names no note is error `Note was not found: <id>`, with a capital `N` as the add-on writes it (observed for `updateNoteFields`, `updateNote`, `updateNoteTags` and `getNoteTags`, 2026-11-10). R1738 writes `note was not found: <id>`; A21 Q2 must be decided before implementation, and this file changes with the decision. A missing `id` or `fields` member gives the add-on's `'id'` or `'fields'` (compared by shape).
 
 ### A8.1 `updateNoteFields`
 
@@ -479,7 +485,7 @@ or `{}` for an id that names no note. Repeated ids give repeated entries.
 | `replaceTags` | `notes`, `tag_to_replace`, `replace_with_tag` | A10.1 on the listed notes | `null` |
 | `replaceTagsInAllNotes` | `tag_to_replace`, `replace_with_tag` | A10.1 on every note | `null` |
 
-`tags` must be a string: a list is the envelope's type error.
+`tags` must be a string: a list is the envelope's type error (the add-on answers `bad argument type for built-in operation`; compared by shape).
 
 ### A10.1 Replacing one tag
 
@@ -493,6 +499,8 @@ For each note that exists (missing ids skipped), when one of its stored tags mat
 | ` a old ` | `old` → `x y` | ` a x y ` |
 | ` a old ` | `old` → (empty) | ` a ` |
 | ` ΑΣ ` | `ας` → `z` | ` z ` (lower-case form of `ΑΣ` is `ας`) |
+
+The rows were observed on the add-on. A save keeps one spelling of tags equal ignoring case (`tags/tags#T4`), so the stored ` a OLD old ` of row 3 is reached only by a direct database write; through a save the first spelling is kept and it is ` a OLD `, with the same result.
 
 ## A11. Finding and reading cards (R1766)
 
@@ -515,12 +523,13 @@ For each note that exists (missing ids skipped), when one of its stored tags mat
 | `ord` | the card's `ord` |
 | `deckName` | the human name of the card's current deck (`did`); the deck of id 1's when it does not exist |
 | `css` | the note type's CSS as stored |
-| `factor`, `interval`, `type`, `queue`, `due`, `reps`, `lapses`, `left`, `mod` | the card's `factor`, `ivl`, `type`, `queue`, `due`, `reps`, `lapses`, `left`, `mod` as stored |
+| `factor`, `interval` | the card's `factor`, `ivl` as stored |
 | `note` | the card's `nid` |
+| `type`, `queue`, `due`, `reps`, `lapses`, `left`, `mod` | the card's `type`, `queue`, `due`, `reps`, `lapses`, `left`, `mod` as stored |
 | `nextReviews` | A11.4 |
 | `flags` | the card's `flags` as stored |
 
-An id that names no card, or a card whose note does not exist, gives `{}`.
+An id that names no card, or a card whose note does not exist, gives `{}`. The member order above is the add-on's observed order (`note` between `interval` and `type`).
 
 ### A11.3 Question and answer
 
@@ -532,11 +541,11 @@ The card is rendered in review mode (`render/card-render-pipeline#K4`, read only
 | blank | `<style>` css `</style>` question text + D7 notice | `<style>` css `</style>` D7 notice |
 | template error | `<style></style>` D8 notice | `<style></style>` D8 notice |
 
-LaTeX is not turned into images and nothing is written (K8; A18 `ankiconnect-cardsinfo-latex`). The D8 notice has Meguri's wording (A18 `ankiconnect-cardsinfo-template-error`).
+LaTeX is not turned into images and nothing is written (K8; A18 `ankiconnect-cardsinfo-latex`). The D8 notice has Meguri's wording (A18 `ankiconnect-cardsinfo-template-error`). The three outcome rows, the CSS prefix and the empty `<style></style>` of a template error were observed on the add-on.
 
 ### A11.4 `nextReviews`
 
-The four answer button labels (Again, Hard, Good, Easy, in that order) for answering the card now, as the review screen shows them: the next states of the card (U45, through U43) described by `sched/answer-labels` A1–A6. Always four strings, also for new, suspended and buried cards.
+The four answer button labels (Again, Hard, Good, Easy, in that order) for answering the card now, as the review screen shows them: the next states of the card (U45, through U43) described by `sched/answer-labels` A1–A6. Always four strings, also for new, suspended and buried cards. The add-on wraps each amount in U+2068 and U+2069 (a new card's labels read `<`, U+2068, `1`, U+2069, `m` and so on); Meguri's labels carry no isolation marks (`sched/answer-labels`), so `nextReviews` differs by these characters only (A18 `ankiconnect-nextreviews-isolation-marks`).
 
 ### A11.5 `cardsModTime`
 
@@ -562,9 +571,28 @@ A card id that names no card is error `Card was not found: <id>` where an action
 - When a listed id names no card: error `Card was not found: <id>` for the first such id in list order, nothing written (A18 `ankiconnect-suspend-unknown-card`).
 - The result: `false` when `cards` is empty, or when it holds exactly one card and that card already has the requested state (suspended: `queue` −1; for `suspend` false: not suspended). Otherwise `true`, also when no card changed. This is AnkiConnect's result. It differs from R1767's "true if anything changed" for a list of two or more cards that all have the requested state already; A21 Q3 must be decided before implementation.
 
+Observed on the add-on (2026-11-10):
+
+| Cards before | Request | Result |
+|---|---|---|
+| (none) | `suspend {cards: []}` | `false` |
+| c3 suspended | `suspend {cards: [c3]}` | `false` |
+| c1, c2 not suspended | `suspend {cards: [c1, c2]}` | `true`; both suspended |
+| c1, c2 suspended | `suspend {cards: [c1, c2]}`; with c3 also, `[c1, c2, c3]` | `true`; `true` |
+| c1 suspended, c5 not | `suspend {cards: [c1, c5]}` | `true` |
+| c4 not suspended | `suspend {cards: [c4], suspend: false}` | `false` |
+| c1 suspended | `suspend {cards: [c1], suspend: false}` | `true`; c1 unsuspended |
+| a buried card | `suspend` on it | `true`; suspended |
+| c3 suspended; 7 no card | `suspend {cards: [c3, 7]}` | `true`, no error, nothing written |
+| the same | `suspend {cards: [7, c3]}`, `{cards: [7]}`; c4 not suspended: `{cards: [c4, 7]}` | error `Card was not found: 7` |
+
+The `[c3, 7]` row is where Meguri differs (A18 `ankiconnect-suspend-unknown-card`: Meguri fails it with `Card was not found: 7`).
+
 ### A12.2 `unsuspend`
 
 `cards`: ids. One op runs `sched/manual-ops#M4` on the listed cards whose `queue` is −1; buried and unsuspended cards are untouched. Unknown ids: as A12.1. The result is `null`, as AnkiConnect's (A21 Q3). With two or more listed cards, AnkiConnect may also unbury a listed buried card; Meguri never does, and the scenarios list no buried card here.
+
+Observed on the add-on: the result is `null` for an empty list, for unsuspended cards and for suspended ones. A listed id that names no card fails with `Card was not found: <id>` and nothing is restored (`[c3, 7]` with c3 suspended leaves c3 suspended). Whether a listed buried card (user or scheduler buried) is restored with the suspended cards depends on its position in the list: `[c1, c2, c4]` with c1 unsuspended, c2 buried, c4 suspended restores c2 and c4; `[c4, c3]` with c4 suspended and c3 buried restores c4 only.
 
 ### A12.3 `suspended`, `areSuspended`
 
@@ -579,7 +607,7 @@ A card id that names no card is error `Card was not found: <id>` where an action
 - Any other id is judged by its latest row:
   - A latest row whose `ivl` is −1200 or more (a review interval in days, or a learning step of at most 20 minutes) gives whether the card is due now: `search/state-and-flags#S1` with A16's context. An id that names no card is never due.
   - A latest row whose `ivl` is below −1200 (a learning step longer than 20 minutes, in seconds) gives `true` when the row's time in seconds (`id` / 1000, with its fraction) plus −`ivl` is at most now in seconds, compared as real numbers, else `false`.
-- An id that is not a new card and has no review-log row fails the whole action with `list index out of range`.
+- An id that is not a new card and has no review-log row fails the whole action with `list index out of range` (the add-on's text, A21 Q10).
 
 | Card (now = T) | Result |
 |---|---|
@@ -591,8 +619,10 @@ A card id that names no card is error `Card was not found: <id>` where an action
 | learning; latest row at T − 3,600 s with `ivl` −1800 | `true` (T − 3,600 + 1,800 ≤ T) |
 | learning; latest row at T − 600 s with `ivl` −1800 | `false` |
 | suspended review card; latest row `ivl` 4 | `false` (S1: never due) |
-| learning card with no row (imported) | error `list index out of range` |
-| id 7, no card, no row | error `list index out of range` |
+| learning card with no row (imported) | error `list index out of range` (A21 Q10) |
+| id 7, no card, no row | error `list index out of range` (A21 Q10) |
+
+Every row was observed on the add-on. With a latest row of `ivl` −600, a learning card due at now + 1,200 s is `true` and one due at now + 1,300 s is `false`: S1 includes the learn-ahead seconds (`collapseTime`, default 1,200).
 
 ### A12.5 `getIntervals`
 
@@ -602,16 +632,16 @@ A card id that names no card is error `Card was not found: <id>` where an action
 |---|---|---|
 | of type new (`type` 0) | `0` | `0` |
 | other, with review-log rows | the `ivl` of its latest row (A12.4) | the list of `ivl` of all its rows, in ascending row `id` order |
-| other, with no review-log row (an unknown id included) | error `list index out of range` (the whole action) | `[]` |
+| other, with no review-log row (an unknown id included) | error `list index out of range` (the whole action, A21 Q10) | `[]` |
 
-A negative value is a learning interval in seconds; a positive value is days (R1767).
+A negative value is a learning interval in seconds; a positive value is days (R1767). Observed on the add-on: a new card is `0` with `complete` true too, also after a Reset that left review-log rows; an unknown id gives `[]` with `complete` true.
 
 ## A13. Rescheduling (R1768)
 
 - `forgetCards`: `cards`: ids. One op runs `sched/manual-ops#M6` Reset with "Restore original position" on, "Reset repetition and lapse counts" off and no context (no remembered keys written, M6.4), in list order. Missing ids are skipped. The result is `null`.
-- `setDueDate`: `cards`: ids; `days`: the days text. One op runs `sched/set-due-date#S9` with the text and no context (S6: nothing remembered). The result is `true`. An invalid text is an error with the Meguri text of A17 for `InvalidDays`; nothing is written.
+- `setDueDate`: `cards`: ids; `days`: the days text. One op runs `sched/set-due-date#S9` with the text and no context (S6: nothing remembered). Missing ids are skipped (observed: `setDueDate {cards: [7], days: "1"}` gives `true`). The result is `true`. An invalid text is an error with the Meguri text of A17 for `InvalidDays`; nothing is written.
 
-Both write exactly the rows the UI's Forget and Set Due Date write on the same cards (review-log rows included).
+Both write exactly the rows the UI's Forget and Set Due Date write on the same cards (review-log rows included). Observed on the add-on: each wrote one review-log row of `type` 4 per card.
 
 ## A14. Statistics (R1774)
 
@@ -619,6 +649,8 @@ Both actions read the review log with `stats/day-buckets` B1's inputs (N, the da
 
 - `getNumCardsReviewedToday`: the number of such rows in the studied-today window (`stats/day-buckets#B2`: `id` > (N − 86,400) × 1,000).
 - `getNumCardsReviewedByDay`: a list of `[date, count]` pairs, one per date that has at least one such row, newest date first. `date` is a `YYYY-MM-DD` text: the local date, in the device zone, of the instant `floor(id / 1,000) − H × 3,600` seconds, read with the offset the zone has at that instant (as `stats/day-buckets#B4.1`), where H is the hour of N's local time (the rollover hour, except where a time zone change at the rollover hour moved N). `count` is an integer.
+
+Observed on the add-on (zone Europe/Paris, rollover 4): rows at 03:59 and 04:01 local on 2030-01-15 count for `2030-01-14` and `2030-01-15`, and only the 04:01 row counts today; rows of `type` 4 and 5 are counted by both actions, as are the `type` 4 rows that `setDueDate` and `forgetCards` write (A18 `ankiconnect-review-counts-exclusions`).
 
 ## A15. Writes and preservation (R1789, R1790)
 
@@ -657,25 +689,27 @@ Each row is a proposed `conformance/deviations.yaml` entry for the U136 replay. 
 
 | Proposed id | AnkiConnect | Meguri | Scenario |
 |---|---|---|---|
-| `ankiconnect-search-order` | `findNotes`/`findCards` ids in the database's scan order | ascending ids (R1777) | `search/current`, `search/empty` |
-| `ankiconnect-search-error-text` | Anki's search error text | `search/errors#E7` text | `search/error` |
-| `ankiconnect-add-defaults` | every add writes `curModel`, `_nt_<id>_lastDeck`, `_deck_<id>_lastNotetype` | none written (`notes/note-records#A4`) | `notes/add-defaults` |
-| `ankiconnect-add-filtered-deck` | a filtered `deckName` is accepted and the cards go to Default (`notes/deck-placement-and-position#D2`) | error (R1758) | `notes/add-filtered-deck` |
-| `ankiconnect-addnotes-rollback` | passing notes are added, then deleted: graves, deleted-notes log lines, `nextPos` moved, their media files kept | nothing written | `notes/add-notes` |
-| `ankiconnect-failed-add-media` | attachment files of a failed add stay in the media folder | none left (`media/media-files#M13`) | `media/attach-rollback` |
-| `ankiconnect-canadd-no-media` | `canAdd*` fetch and store attachment files | nothing fetched or stored | `notes/can-add-media` |
-| `ankiconnect-changedeck-op` | every listed card stamped with the new `did` (also cards already there), no step remap, FSRS keys kept; a filtered target accepted | `browser/bulk-actions#B7.2`; filtered target refused | `decks/change-deck` |
-| `ankiconnect-getdeckstats-no-create` | a listed name that finds no deck creates it and reports it | left out, nothing created | `decks/deck-stats` |
-| `ankiconnect-suspend-unknown-card` | an unknown id fails only where AnkiConnect happens to look it up | the first unknown id always fails, nothing written | `cards/suspend` |
-| `ankiconnect-unsuspend-buried` | with two or more listed cards, a listed buried card may be unburied | buried cards untouched | `cards/suspend` |
-| `ankiconnect-review-counts-exclusions` | every review-log row counts | types 4 and 5 left out (R1774) | `stats/by-day-rollover`, `stats/today` |
-| `ankiconnect-createmodel-name-clash` | a name equal under `unicase` only gets `-` and five characters derived from the clock | `+` appended (`notetypes/records#N4` step 7) | `models/create` |
-| `ankiconnect-createmodel-css` | Anki's stock CSS when `css` is missing | Meguri's base card CSS (`notetypes/records#N5.1`) | `models/create` |
-| `ankiconnect-cardsinfo-template-error` | Anki's template error text | Meguri's D8 notice | `cards/info-errors` |
-| `ankiconnect-cardsinfo-latex` | `[latex]`, `[$]` and `[$$]` in `question` and `answer` replaced by LaTeX image tags, with images generated into media (or Anki's LaTeX error text) as a side effect of the read | left as stored, nothing written (`render/card-render-pipeline#K8`) | `cards/info-errors` |
-| `ankiconnect-notesinfo-no-cards` | a listed note without cards fails the whole action with the runtime's missing-key text | `cards: []` | `notes/info` |
-| `ankiconnect-repeated-ids` | a write list naming a card twice fails with a database error, or handles it twice | first occurrences only (A2) | `cards/reschedule` |
-| `ankiconnect-error-text` | Anki's backend error texts for the A17 cases (an invalid `days` text, a deck under a filtered deck or too deep, a refused note type) | the A17 texts | `cards/reschedule`, `decks/create-nested`, `models/create` |
+| `ankiconnect-search-order` | `findNotes`/`findCards` ids in the database's scan order (observed: `findCards {query: "deck:Lang"}` gave `[#c2, #c1]`; `findNotes {query: ""}` listed a later note type's note last) | ascending ids (R1777) | `search/current`, `search/empty` |
+| `ankiconnect-search-error-text` | Anki's search error text: `Invalid search: ` and the message wrapped in U+2068/U+2069 (observed) | `search/errors#E7` text | `search/error` |
+| `ankiconnect-add-defaults` | every add writes `curModel`, `_nt_<id>_lastDeck`, `_deck_<id>_lastNotetype` (observed); the note type's schema-11 `did` then reads as that deck's id in `findModels*` | none written (`notes/note-records#A4`) | `notes/add-defaults` |
+| `ankiconnect-add-filtered-deck` | a filtered `deckName` is accepted and the cards go to Default (`notes/deck-placement-and-position#D2`); `canAddNoteWithErrorDetail` answers `{"canAdd": true}` (observed) | error (R1758) | `notes/add-filtered-deck` |
+| `ankiconnect-addnotes-rollback` | passing notes are added, then deleted: graves, deleted-notes log lines, `nextPos` moved, their media files kept (observed: two passing notes left four graves and moved `nextPos` from 5 to 7; an attachment file stayed) | nothing written | `notes/add-notes` |
+| `ankiconnect-failed-add-media` | attachment files of a failed add stay in the media folder (observed for a duplicate) | none left (`media/media-files#M13`) | `media/attach-rollback` |
+| `ankiconnect-canadd-no-media` | `canAdd*` fetch and store attachment files (observed: `canAddNote` with a `data` attachment stored the file) | nothing fetched or stored | `notes/can-add-media` |
+| `ankiconnect-changedeck-op` | every listed card stamped with the new `did` (also cards already there: their `mod` changes), no step remap, FSRS keys kept; a filtered target accepted (`did` the filtered deck, `odid` 0); a new name under a filtered deck fails with `Filtered decks can not have child decks.` (observed, except the step and FSRS points) | `browser/bulk-actions#B7.2`; filtered target refused | `decks/change-deck` |
+| `ankiconnect-getdeckstats-no-create` | a listed name that finds no deck creates it and reports it with zero counts (observed) | left out, nothing created | `decks/deck-stats` |
+| `ankiconnect-suspend-unknown-card` | an unknown id fails only where AnkiConnect happens to look it up (observed: `[c3, 7]` with c3 suspended gives `true`) | the first unknown id always fails, nothing written | `cards/suspend` |
+| `ankiconnect-unsuspend-buried` | with two or more listed cards, a listed buried card may be unburied (observed, A12.2) | buried cards untouched | `cards/suspend` |
+| `ankiconnect-review-counts-exclusions` | every review-log row counts (observed, A14) | types 4 and 5 left out (R1774) | `stats/by-day-rollover`, `stats/today` |
+| `ankiconnect-createmodel-name-clash` | a name equal under `unicase` only gets `-` and five characters derived from the clock (observed: `pair` beside `Pair` gave `pair-6455a`) | `+` appended (`notetypes/records#N4` step 7) | `models/create` |
+| `ankiconnect-createmodel-css` | Anki's stock CSS when `css` is missing or `null` (observed) | Meguri's base card CSS (`notetypes/records#N5.1`) | `models/create` |
+| `ankiconnect-cardsinfo-template-error` | Anki's template error text, after `<style></style>` (observed) | Meguri's D8 notice | `cards/info-errors` |
+| `ankiconnect-cardsinfo-latex` | `[latex]`, `[$]` and `[$$]` in `question` and `answer` replaced by LaTeX image tags, with images generated into media (or Anki's LaTeX error text) as a side effect of the read. Observed with the recorder's default preferences: `[$]x[/$]` became an `<img class=latex …>` tag naming a `latex-<40 hex>.png` file, followed by `LaTeX image generation is disabled in the preferences.`, and no file was written | left as stored, nothing written (`render/card-render-pipeline#K8`) | `cards/info-errors` |
+| `ankiconnect-notesinfo-no-cards` | a listed note without cards fails the whole action with the runtime's missing-key text (observed: the note id in decimal, `1894701600005`) | `cards: []` | `notes/info` |
+| `ankiconnect-repeated-ids` | a write list naming a card twice fails with a database error, or handles it twice (observed: `setDueDate` fails with a backend database error text reporting a failed UNIQUE constraint; `forgetCards` succeeds) | first occurrences only (A2) | `cards/reschedule` |
+| `ankiconnect-error-text` | Anki's backend error texts for the A17 cases. Observed: an invalid `days` text gives the text itself (`abc`); a deck under a filtered deck gives `Filtered decks can not have child decks.`; a refused template gives `Card template ⁨1⁩ in note type '⁨<name>⁩' has a problem.<br>` and a reason (U+2068/U+2069 around the number and the name); too deep is unverified | the A17 texts | `cards/reschedule`, `decks/create-nested`, `models/create` |
+| `ankiconnect-note-member-types` | a string `tags` in a note object is accepted and each character becomes one tag (`"pq rs"` gives ` p q r s `); an `options` or `duplicateScopeOptions` that is a string containing none of its member names, or a list holding none, is ignored and the note added (other non-objects fail on both sides and are compared by shape); `duplicateScopeOptions` `null` fails with `argument of type 'NoneType' is not iterable` (observed, A7.1, A7.4) | member errors; `null` counts as absent | `notes/add-errors` |
+| `ankiconnect-nextreviews-isolation-marks` | `nextReviews` amounts wrapped in U+2068/U+2069 (observed) | no isolation marks (`sched/answer-labels`) | `cards/info` |
 
 The search folding difference (R1777) and the envelope's differences are declared by U136 and `servers/ankiconnect-envelope`. `notes/note-records#U2`'s `note-save-same-after-normalizing` also applies to `updateNoteFields`.
 
@@ -694,7 +728,7 @@ Card templates that call AnkiConnect from a card (`servers/ankiconnect-clients` 
 
 ## A20. Scenarios
 
-Planned scenarios, each a list of requests (`version` 6 unless a row says otherwise, no key, no Origin) with the replies the recorder must show. Setup uses the U4 DSL (`conformance/dsl`). The scenarios define their own note types (R1959): `Pair` is a standard note type with fields `Term`, `Gloss`, one template `Card 1` (question `{{Term}}`, answer `{{FrontSide}}<hr>{{Gloss}}`) and CSS `.card{}`; `Gap` is a cloze note type with fields `Body`, `Aside` and one template (question `{{cloze:Body}}`, answer `{{cloze:Body}}<br>{{Aside}}`). Ids are written with the tokens of `servers/transcripts` T10.1: `#n1`, `#c1`, `#d1` (decks numbered in ascending id order, so `#d1` is the first deck the scenario creates), `#m1`; `1` is the Default deck. Replies are shown unwrapped as `result` or `error`. A row marked "(Meguri)" asserts Meguri's side of the A18 entry it names; the golden records AnkiConnect's.
+Planned scenarios, each a list of requests (`version` 6 unless a row says otherwise, no key, no Origin) with the replies the recorder must show. Setup uses the U4 DSL (`conformance/dsl`). The scenarios define their own note types (R1959): `Pair` is a standard note type with fields `Term`, `Gloss`, one template `Card 1` (question `{{Term}}`, answer `{{FrontSide}}<hr>{{Gloss}}`) and CSS `.card{}`; `Gap` is a cloze note type with fields `Body`, `Aside` and one template (question `{{cloze:Body}}`, answer `{{cloze:Body}}<br>{{Aside}}`). Ids are written with the tokens of `servers/transcripts` T10.1: `#n1`, `#c1`, `#d1` (decks numbered in ascending id order, so `#d1` is the first deck the scenario creates), `#m1`; `1` is the Default deck. Replies are shown unwrapped as `result` or `error`. A row marked "(Meguri)" asserts Meguri's side of the A18 entry it names; the golden records AnkiConnect's. The AnkiConnect replies of these rows were probed on the pinned add-on on 2026-11-10 and matched, except where a row says what was observed; not probed: `notes/preservation`, `cards/reschedule`'s comparison with the UI ops, `search/current` with cards in `B`, and the too-deep deck error.
 
 Every scenario that adds or updates a note (`notes/`, `models/create`, and `servers/ankiconnect-media` `media/attach*`) ends with `observe: [db_dump(notes, cards), media]`, so the oracle's recording of the same requests carries the R1948 equivalence of note, cards and stored media (`servers/transcripts` T14).
 
@@ -702,14 +736,14 @@ Every scenario that adds or updates a note (`notes/`, `models/create`, and `serv
 
 | Scenario | Setup | Request | Reply |
 |---|---|---|---|
-| `create-nested` | none | `createDeck {deck: "A::B::C"}` | result `#d3`; decks `A` (`#d1`), `A::B` (`#d2`), `A::B::C` exist |
+| `create-nested` | none | `createDeck {deck: "A::B::C"}` | result `#d3`; decks `A::B` (`#d1`), `A` (`#d2`), `A::B::C` exist (missing ancestors are created nearest first, so `A::B` gets the lowest id, then `A`, then the named deck: `decks/decks#D3`, D5) |
 | | | `createDeck {deck: "a::b::c"}` | result `#d3`, nothing written |
 | | | `deckNames` | `["A", "A::B", "A::B::C", "Default"]` |
 | | filtered deck `F` | `createDeck {deck: "F::x"}` | error `cannot create deck under a filtered deck: F::x` (Meguri, `ankiconnect-error-text`) |
 | `delete` | deck `A` with one Pair note | `deleteDecks {decks: ["A"]}` | error `Since Anki 2.1.28 it's not possible to delete decks without deleting cards as well` |
 | | | `deleteDecks {decks: ["a"], cardsToo: true}` | result null; nothing deleted (exact names) |
 | | | `deleteDecks {decks: ["A"], cardsToo: true}` | result null; deck, note and card gone with graves |
-| `names-ids` | decks `b`, `A::C` | `deckNamesAndIds` | `{"A": #d2, "A::C": #d3, "b": #d1, "Default": 1}` (creating `A::C` creates its parent `A` first) |
+| `names-ids` | decks `b`, `A::C` | `deckNamesAndIds` | `{"A": #d2, "A::C": #d3, "b": #d1, "Default": 1}` (creating `A::C` creates its parent `A` first; observed) |
 | `get-decks` | c1 in `A`, c2 in `B`, c3 in `A` | `getDecks {cards: [#c1, #c2, #c3, 999]}` | `{"A": [#c1, #c3], "B": [#c2], "Default": [999]}` |
 | `name-from-id` | deck `A` | `deckNameFromId {deckId: #d1}`; `{deckId: 12345}` | `"A"`; `"Default"` |
 | `change-deck` | c1 in `A`, c2 in `New::Sub`; filtered deck `F` | `changeDeck {cards: [#c1, #c2], deck: "New::Sub"}` | result null; c1 in `New::Sub`; c2's row unchanged (Meguri, `ankiconnect-changedeck-op`) |
@@ -748,6 +782,10 @@ Every scenario that adds or updates a note (`notes/`, `models/create`, and `serv
 | | | with `fields: {Term: "x"}` twice | second: error `cannot create note because it is a duplicate` |
 | | | the same with `options: {allowDuplicate: true}` | result `#n2` |
 | | | with `options: {allowDuplicate: "yes"}` | error `option parameter "allowDuplicate" must be boolean` |
+| | | with `fields: {Term: "t1"}` and `tags: "pq rs"` | error `invalid parameter: note.tags`, nothing written (Meguri, `ankiconnect-note-member-types`) |
+| | | with `fields: {Term: "t2"}` and `options: "xyz"` | error `invalid parameter: note.options`, nothing written (Meguri, `ankiconnect-note-member-types`) |
+| | | with `fields: {Term: "t3"}` and `options: 5` | error `invalid parameter: note.options` (the add-on's runtime text, compared by shape) |
+| | | with `fields: {Term: "t4"}` and `options: {duplicateScopeOptions: null}` | result `#n3` (Meguri, `ankiconnect-note-member-types`) |
 | | | `modelName: "Gap"`, `fields: {Body: "no cloze"}` | error `cannot create note for unknown reason` |
 | `add-no-card` | note type `Rev`: fields `Term`, `Gloss`, one template (question `{{Gloss}}`, answer `{{Term}}`); deck `D` | `addNote` with `fields: {Term: "x"}` | result `#n1`; one card of ordinal 0 (A7.3, A21 Q7) |
 | `add-defaults` | `Pair`, deck `D`; `curModel` another note type | `addNote` as `add-match` | result `#n1`; `curModel` and the `_nt_`/`_deck_` keys unchanged (Meguri, `ankiconnect-add-defaults`) |
@@ -762,7 +800,7 @@ Every scenario that adds or updates a note (`notes/`, `models/create`, and `serv
 | | | `updateNote {note: {id: #n1}}` | error `Must provide a "fields" or "tags" property.` |
 | | | `notesModTime {notes: [#n1, 5]}` | `[{"noteId": #n1, "mod": <now>}, {}]` |
 | | | `updateNoteFields {note: {id: 5, fields: {}}}` | error `Note was not found: 5` (A21 Q2) |
-| `info` | n1 as above; note n2 whose card row was removed outside Meguri (setup writes the database directly) | `notesInfo {notes: [#n1, 5]}` | `[{"noteId": #n1, "profile": "<PROFILE>", "tags": ["c"], "fields": {"Term": {"value": "x", "order": 0}, "Gloss": {"value": "q", "order": 1}}, "modelName": "Pair", "mod": <mod>, "cards": [#c1]}, {}]` |
+| `info` | n1 as above; note n2 whose card row was removed outside Meguri (setup writes the database directly) | `notesInfo {notes: [#n1, 5]}` | `[{"noteId": #n1, "profile": "<PROFILE>" (the golden holds the recorder's profile name, A21 Q1), "tags": ["c"], "fields": {"Term": {"value": "x", "order": 0}, "Gloss": {"value": "q", "order": 1}}, "modelName": "Pair", "mod": <mod>, "cards": [#c1]}, {}]` |
 | | | `notesInfo {}` | error `Must provide either "notes" or a "query"` |
 | | | `notesInfo {notes: [#n2]}` | `[{…, "cards": []}]` (Meguri, `ankiconnect-notesinfo-no-cards`) |
 | `delete` | n1 | `deleteNotes {notes: [#n1, 5]}` | result null; card and note graves; a deleted-notes log line |
@@ -790,7 +828,7 @@ Every scenario that adds or updates a note (`notes/`, `models/create`, and `serv
 | | | `suspend {cards: [#c1, #c2]}` | `true`; both suspended |
 | | | `areSuspended {cards: [#c1, #c3, 7]}` | `[true, true, null]` |
 | | | `unsuspend {cards: [#c1]}` | `null`; c1 restored |
-| | | `unsuspend {cards: [#c1, #c4, #c2]}` | `null`; c2 restored; c4 still buried (Meguri, `ankiconnect-unsuspend-buried`) |
+| | | `unsuspend {cards: [#c1, #c4, #c2]}` | `null`; c2 restored; c4 still buried (Meguri, `ankiconnect-unsuspend-buried`; the golden restores c4 too, A12.2) |
 | | | `suspend {cards: [#c3, 7]}` | error `Card was not found: 7`; nothing written (Meguri, `ankiconnect-suspend-unknown-card`) |
 | | | `suspended {card: 7}` | error `Card was not found: 7` |
 | `intervals` | c1 new; c2 with rows ivl −600, 1, 4; c3 learning with one row ivl −1800 dated now − 3600 s | `getIntervals {cards: [#c1, #c2, #c3]}`; `{cards: [#c2], complete: true}` | `[0, 4, -1800]`; `[[-600, 1, 4]]` |
@@ -804,7 +842,7 @@ Every scenario that adds or updates a note (`notes/`, `models/create`, and `serv
 
 | Scenario | Setup | Request | Reply |
 |---|---|---|---|
-| `folding` | a note `Über` | `findNotes {query: "über"}` | `[#n1]` (declared U136 deviation R1777) |
+| `folding` | a note `Über` | `findNotes {query: "über"}` | `[#n1]` (declared U136 deviation R1777; the golden is `[]`: the add-on finds `Über` neither with `über` nor with `Term:über`, observed) |
 | `current` | decks `A`, `B`, `curDeck` = `B`, cards in both | `findCards {query: "deck:current"}` | the cards of `B`, ascending |
 | `error` | any | `findNotes {query: "("}` | error: E7's `unclosed_group` text |
 | `empty` | 3 notes | `findNotes {query: ""}`; `findNotes {}` | all 3 ascending; `[]` |
@@ -823,11 +861,15 @@ The client scenarios are `servers/ankiconnect-clients` C7's (`yomitan/`, `asbpla
 
 ## A21. Open questions
 
-- Q1. The PROFILE name. Anki names a first profile `User 1`; Meguri has no profiles. Proposed: `User 1`, so scripts written against a fresh Anki keep working.
-- Q2. (Blocks implementation of A8.) R1738 lists `note was not found: <id>` in lower case. The add-on's text for a missing note is `Note was not found: <id>` (and `Card was not found: <id>`), which this file uses so that the goldens replay. Either the Product Contract text is amended to the add-on's, or Meguri uses R1738's text and a deviation `ankiconnect-note-not-found-case` is added (golden `notes/update`). `guiEditNote` (U146) is not part of this decision: the add-on answers an unknown id there with Anki's own not-found message, so Meguri uses R1786's lower-case `note was not found: <id>` there in every case (`servers/ankiconnect-gui` G7, G11).
-- Q3. (Blocks implementation of A12.1 and A12.2.) R1767 says `suspend` and `unsuspend` return true when anything changed. The add-on returns A12.1's result for `suspend` (`true` for a list of two or more cards that are all suspended already) and nothing (`null`) for `unsuspend`. This file follows the add-on so that the goldens replay. The plan's U142 test "suspend on already suspended cards → false" passes under this file only for a one-card list; with the add-on's rule it must be restated as "a one-card list of an already suspended card → false". Following R1767 literally instead needs deviations `ankiconnect-suspend-result` and `ankiconnect-unsuspend-result` (golden `cards/suspend`).
-- Q4. R1774 asks for Meguri's stats exclusions, and this file uses the studied-today rule (types 4 and 5 left out) for both actions. The add-on counts every row. Confirm, or choose the add-on's rule and drop `ankiconnect-review-counts-exclusions`.
-- Q5. The A17 texts are Meguri's proposal; no source fixes them.
-- Q6. U136's `ADDON_PIN` recording of the add-on build of 2025-11-09 confirms or overrides the replies in this file; where a golden differs, the golden decides and this file changes.
-- Q7. R1758 lists `cannot create note because it is empty` also "when no card would be generated". In Anki every added note gets a card (`notes/card-generation#G6`), so the add-on never refuses a note for that, and this file follows it (scenario `notes/add-no-card`). The add-on's error for an add that generates no card (`The field values you have provided would make an empty question on all cards.`) is therefore never produced. Confirm, or decide that Meguri refuses such a note (a deviation entry and a card-generation check before the add).
-- Q8. The cloze states (`missing_cloze`, `notetype_not_cloze`, `field_not_cloze`) give the add-on's `cannot create note for unknown reason`. R1758 names no error for them. Confirm that the add-on's text stays.
+Probe of 2026-11-10 on the pinned add-on (provenance in `oracle/provenance/servers-ankiconnect-actions.md`): Q6 is settled; Q1 to Q5 and Q7 to Q10 are product decisions and stay open, each with what the add-on was seen to do. Until a decision, each question's interim rule applies, and this file is written to it: Q2, Q3, Q7, Q8 and Q10 follow the add-on, so that the goldens replay, Q2 and Q3 against the wording of R1738 and R1767; Q4, Q5 and Q9 use Meguri's rule, with the A18 entries they name; Q1 uses its proposed value.
+
+- Q1. (Open, product.) The PROFILE name. Anki names a first profile `User 1`; Meguri has no profiles. Proposed: `User 1`, so scripts written against a fresh Anki keep working. Observed: the en_US name of Anki's first profile is `User 1`; the recorder names its profile from its configuration (`oracle` by default), and `getProfiles`, `getActiveProfile` and `notesInfo`'s `profile` report that name, while `loadProfile` is `true` only for that name exactly (`Oracle` gives `false`). If `User 1` is chosen, the recorder runs with its profile named `User 1` so the goldens carry it.
+- Q2. (Open, product; blocks implementation of A8.) R1738 lists `note was not found: <id>` in lower case. The add-on's text for a missing note is `Note was not found: <id>` (and `Card was not found: <id>`), which this file uses so that the goldens replay. Either the Product Contract text is amended to the add-on's, or Meguri uses R1738's text and a deviation `ankiconnect-note-not-found-case` is added (golden `notes/update`). `guiEditNote` (U146) is not part of this decision: the add-on answers an unknown id there with Anki's own not-found message, so Meguri uses R1786's lower-case `note was not found: <id>` there in every case (`servers/ankiconnect-gui` G7, G11). Observed: `Note was not found: 5` from `updateNoteFields`, `updateNote`, `updateNoteTags` and `getNoteTags`; `Card was not found: 7` from `suspend`, `unsuspend` and `suspended`. The fact is settled; the choice between amending R1738 and the deviation is not.
+- Q3. (Open, product; blocks implementation of A12.1 and A12.2.) R1767 says `suspend` and `unsuspend` return true when anything changed. The add-on returns A12.1's result for `suspend` (`true` for a list of two or more cards that are all suspended already) and nothing (`null`) for `unsuspend`. This file follows the add-on so that the goldens replay. The plan's U142 test "suspend on already suspended cards → false" passes under this file only for a one-card list; with the add-on's rule it must be restated as "a one-card list of an already suspended card → false". Following R1767 literally instead needs deviations `ankiconnect-suspend-result` and `ankiconnect-unsuspend-result` (golden `cards/suspend`). Observed: A12.1's table and A12.2's results (`null` in every case, also when cards were restored). The fact is settled; whether to amend R1767 is not.
+- Q4. (Open, product.) R1774 asks for Meguri's stats exclusions, and this file uses the studied-today rule (types 4 and 5 left out) for both actions. The add-on counts every row. Confirm, or choose the add-on's rule and drop `ankiconnect-review-counts-exclusions`. Observed: both actions counted inserted rows of `type` 4 and 5, and the `type` 4 rows of `setDueDate` and `forgetCards`.
+- Q5. (Open, product.) The A17 texts are Meguri's proposal; no source fixes them. Observed add-on texts for the same cases are in A18 `ankiconnect-error-text`; a filtered `deckName` in `addNote` and a filtered `changeDeck` target are accepted by the add-on, so it has no text for them.
+- Q6. (Settled, 2026-11-10.) U136's `ADDON_PIN` build (25.11.9.0) was probed through the recorder image. Its replies confirmed this file except for the points now written into A7.1, A7.4, A10.1, A11.2, A11.4, A12, A13, A14, A18 and A20; where a later recorded golden differs, the golden still decides and this file changes.
+- Q7. (Open, product.) R1758 lists `cannot create note because it is empty` also "when no card would be generated". In Anki every added note gets a card (`notes/card-generation#G6`), so the add-on never refuses a note for that, and this file follows it (scenario `notes/add-no-card`). The add-on's error for an add that generates no card (`The field values you have provided would make an empty question on all cards.`) is therefore never produced. Confirm, or decide that Meguri refuses such a note (a deviation entry and a card-generation check before the add). Observed: the `notes/add-no-card` note was added with one card of ordinal 0.
+- Q8. (Open, product.) The cloze states (`missing_cloze`, `notetype_not_cloze`, `field_not_cloze`) give the add-on's `cannot create note for unknown reason`. R1758 names no error for them. Confirm that the add-on's text stays. Observed: a cloze note type with `Body: "no cloze"` gives `cannot create note for unknown reason`.
+- Q9. (Open, product; new 2026-11-10.) The add-on accepts a string `tags` in a note object and makes each character of it one tag (`"pq rs"` gives ` p q r s `). It ignores an `options` or `duplicateScopeOptions` that is a string containing none of its member names or a list holding none; other non-objects fail there too, with runtime texts. A7.1 and A7.4 give member errors (A18 `ankiconnect-note-member-types`). Proposed: keep the member errors. A client that sends a string `tags` already gets letter tags from the add-on, so no working client depends on the add-on's reading, and an error shows the mistake where silent letter tags would not; accepting the string as tag text, as `updateNoteTags` does (A8.3), would be a third behavior that matches neither. Interim: the member errors of A7.1 and A7.4, with the deviation.
+- Q10. (Open, product; new 2026-11-10.) For an id that is not a new card and has no review-log row, `areDue` and `getIntervals` (`complete` false) fail the whole action with `list index out of range` (A12.4, A12.5). That text is the add-on's language-runtime message, not an authored interface string. This file uses it so that the goldens replay exactly. Alternative: an A17 Meguri text (for example `card has no review history: <id>`) with a deviation `ankiconnect-no-revlog-text`, whose scenario would add a card without review-log rows to `cards/intervals`. Interim: the add-on's text. Observed: the text for a learning card with no row and for an unknown id in `areDue` (A12.4's rows).

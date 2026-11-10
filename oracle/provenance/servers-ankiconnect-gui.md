@@ -58,3 +58,33 @@ not found` and `model was not found` strings come from the Product Contract
   restart Anki between them so a left-open window cannot change later
   replies.
 - `sync-not-connected` needs a profile without a sync login.
+
+## Probes against the running add-on (2026-11-10)
+
+Session and setup as in `servers-ankiconnect-envelope.md` "Probes against the
+running add-on": AnkiConnect 25.11.9.0 in Anki 26.9.3 offscreen, frozen clock
+1894701600. Collection: deck German with two Basic notes, one Basic note in
+Default, default Browse columns. No modal dialog was triggered (no invalid
+query, no unsortable column).
+
+| Spec text | Probe and result |
+|---|---|
+| G2 value text | `reorderCards` `['noteCrt']` and `x`; `order` `5`, `True`; `columnId` `['noteCrt']`: texts in the runtime's form |
+| G3 | `{}` and `{"query": null, "reorderCards": null}` reply `[]`; `order up` with `columnId nope` gives the order error; `noteCrt` and `cardLapses` with default columns, and `nope`, give `invalid columnId: <id>`; valid sorts on `deck`, `cardDue`, `noteFld` reply the ids |
+| G11 bad reorder | after a bad `reorderCards` on `deck:Default`, selecting the Default card then `guiSelectedNotes` gave that note, so the search ran |
+| G11 non-string query | `query: 5` fails with a Qt runtime text |
+| G4 | before any browser: `false`; afterwards `true` for an outside card, an unknown id and `"1"`, with no row selected after |
+| G5 | before any browser `[]`; after selecting a card, its note |
+| G6 | unknown deck, unknown model, both unknown (deck reported); missing `modelName` and a non-string field value give runtime texts; valid note, `{}` and `note: null` reply `0` in 0.02-0.2 s; a second `guiAddCards` with the window open replied `0` at once |
+| G7, G11 | unknown id: Anki's database-inconsistency message naming the id; an existing note: runtime error from building the edit window under Anki 26.9.3, so `edit-valid` became a Meguri row |
+| G9 | no sync login: `sync: auth not configured`; `params {"version": 2}`: unexpected-keyword text |
+| Not probed | sort keys after a `reorderCards` (the collection is locked while Anki runs, so its config could not be read); the first-direction rule; filtered decks; window activation |
+
+## Review fixes (2026-11-10, second pass)
+
+Same session; probe container `acenv-r02-81080` (removed afterwards).
+
+| Spec text | Source and result |
+|---|---|
+| G11 open Add window (R0.0) | source-derived, not observable offscreen: Anki 26.09.3 `qt/aqt/addcards.py` (the close-with-callback and if-can-close methods, and the discard-or-keep question shown through the callback-based ask-user dialog) and `ts/routes/editor/NoteEditor.svelte` (the should-prompt-before-closing check, true for any non-empty field). The add-on closes the current Add window with a callback and returns the note id at once. Only the immediate `0` reply was observed (G6 row above) |
+| G2, G11, G12 `browse-order-null` (R0.5, R1.3) | `order` values `-0`, `null`, `5.0`, `1e2`, `true` gave `invalid card order: 0`, `None`, `5.0`, `100.0`, `True` |

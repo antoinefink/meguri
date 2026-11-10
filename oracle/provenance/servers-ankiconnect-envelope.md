@@ -80,3 +80,51 @@ keys `apiVersion`, `permission`, `granted`, `denied`, `requireApikey`,
 `tools/mg similarity` was not run from the cleanroom worktree; run it from the
 main checkout (with the AnkiConnect sources in the local similarity corpus,
 U136) before merging.
+
+## Probes against the running add-on (2026-11-10)
+
+Spec-writer session s-20261110T085429Z-165d83d3, item `ac-envelope`.
+Add-on: AnkiConnect release 25.11.9.0 (upstream commit `532a3c8`, the
+archive and file hashes of `oracle/ankiconnect/ADDON_PIN`), inside Anki
+26.9.3 offscreen, image `meguri-oracle-ankiconnect:spike`, frozen clock
+`ORACLE_CLOCK_START=1894701600`, `TZ=Europe/Paris`, on an `--internal`
+Docker network with no published port. Requests were raw HTTP/1.1 written
+from inside the container to `127.0.0.1:8765` (so repeated and malformed
+headers could be sent); add-on config was changed between requests by
+editing the profile's add-on `meta.json`, which the add-on reads on every
+request; permission dialogs were answered by the recorder's driver add-on.
+
+| Spec text | Probe and result |
+|---|---|
+| intro ("checked against that build") | about 150 requests over E2-E12; every claim in those sections held except the rows below |
+| E2 `HEAD` | `HEAD` with a body gets the full reply body (new E18 row) |
+| E2 connection | two pipelined requests: one reply, then close |
+| E5.3 | 403 for every refused origin: `HTTP/1.1 403 Forbidden`, ACAO `http://localhost`, ACAH `*`, no `Content-Type`, no `Content-Length`, empty body, close |
+| E7.4 | `Access-Control-Request-Private-Network: TRUE` or `false` gets no allow header; only `true` does |
+| E7.2, E18 localhost rule | allowed: `http://127.0.0.1`, `http://127.0.0.1:3000`, `http://127.0.0.1:x`, `https://127.0.0.1`, the three extension prefixes; refused: `https://127.0.0.1:8443`, `http://127.0.0.1x`, `http://127.0.0.10`, `http://localhost:8080`, `https://localhost`, `http://[::1]:3000`, `CHROME-EXTENSION://abc`, `http://LOCALHOST`; matching is case-sensitive |
+| E9 params, E18 | `requestPermission` with `params: {"x": 1}` fails with the unexpected-keyword text before any dialog (no queued answer consumed) |
+| E9.1, E18 (removed row "appended again") | two concurrent `requestPermission` from one origin with two queued `allow`: one dialog, the second request granted from the updated list, one list entry, one answer left unused |
+| E11, E18 | `[createDeck B, 1]` fails with a runtime text but deck B exists afterwards; a sub-action with `"version": "6"` ran (its deck exists) and its slot holds a runtime text |
+| E18 `key` row | no key configured: `"key": null` accepted; `""`, `false`, `5`, `"whatever"` refused |
+| E18 empty `Origin` | `Origin:` empty and no `*`: dialog shown; Deny with the checkbox appended nothing; ACAO empty |
+| E18 `null` with `*` | `requestPermission` from `Origin: null` with `*`: granted |
+| E18 modal | while a dialog waits, `version` and the ping got no reply within 4 s |
+| E15.1 | `updateNoteFields` unknown id: `Note was not found: <id>`; `modelNameFromId` unknown id: `model was not found: <id>` |
+| E12 | `apiReflect` with `actions: null` lists 121 names, sorted, equal to E12.3 plus E12.4 |
+| E10 examples | `scopes ["other"]` with `actions "x"`: `actions has invalid value`; `scopes ["actions","actions",5]`: `"scopes": ["actions"]` |
+| Open questions | observations added to each; none of the policy questions is answered by a probe |
+
+## Review fixes (2026-11-10, second pass)
+
+Same session and item. Probe container `acenv-r02-81080` on its own
+`--internal` network, same image and clock, removed afterwards. Add-on
+`plugin/web.py` and `plugin/__init__.py` of the pinned release were read
+from the image (`/opt/ankiconnect/addons21/2055492159/`) for the header
+parser and the permission branches.
+
+| Spec text | Source and result |
+|---|---|
+| E18 empty `Origin`, `null` (R0.2) | with one queued `allow`: `requestPermission` from `Origin: ` (one space) granted, ACAO empty; then `deckNames` from it 200 `["Default"]` with ACAO empty (403 before). Same for `Origin: null`: granted, then served with ACAO `null`. The add-on's Yes branch appends the origin with no emptiness check; its ignore branch requires a non-empty origin |
+| E18 header line without a space (R0.1) | `Origin:https://evil.example` with `deckNames`: 200 `["Default"]`, ACAO `http://localhost`. The parser splits header lines on colon-space only, so such a line is not read as `Origin` (reviewer's probe also: `Origin:` alone allowed and granted; `Origin:  http://localhost` 403) |
+| E2, E19 `head-request` (R1.2) | Meguri rule: HTTP framing for `HEAD`, `Content-Length` absent or the `GET` length, not compared; same rule as `servers/migaku-protocol` P4. No reference source |
+| E19 permission kinds (R1.4) | `permission-allow`, `permission-deny-ignore`, `permission-deny` reclassified as Rec., since the driver add-on answers the dialog (`servers-transcripts.md`, T19.1); list contents moved to new declared rows whose ids end in `-lists` |

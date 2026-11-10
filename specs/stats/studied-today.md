@@ -62,6 +62,8 @@ With no counted row the line still shows (R1298):
 Studied 0 cards in 0 seconds today (0s/card)
 ```
 
+Decided 2026-11-10: this is the line, not an open question. It is the default the plan's deferred decision on the zero line sets (R1298 over R44), and Meguri follows that default. R44's `No cards studied today` is never shown. Only a new product decision changes this section.
+
 ### T2.4 Examples
 
 Every row was checked against the oracle at the current pin. Scenario `studied-today/format-table` observes exactly these inputs when it lands (`specs/conformance/stats-ops.md` H8). The last column is the first Today line for the same numbers (T4.2), where it differs or helps.

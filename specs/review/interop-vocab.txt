@@ -1,8 +1,11 @@
 # Interface names the review specs use that are not ordinary words: the
-# collection config key the timebox reads, and the congratulations
-# compatibility members (sched/counts C7) they compare with.
+# collection config key the timebox reads, the congratulations
+# compatibility members (sched/counts C7) they compare with, and the config
+# keys behind the Forget toggles (reviewer-strings S14).
 timeLim
 secs_until_next_learn
 learning_remaining
 review_remaining
 new_remaining
+restorePositionReviewer
+resetCountsReviewer

@@ -7,7 +7,7 @@ Scenarios: none yet in `conformance/`. The transcript format is `servers/transcr
 
 The five GUI actions Meguri implements on its single-window Mac app (`guiBrowse`, `guiSelectCard`, `guiSelectedNotes`, `guiAddCards`, `guiEditNote`), the `sync` action, and the Browse navigation that the Migaku server's legacy `/create` `searchNote` command asks for. For each: parameters, the checks the core makes, the host interaction it raises, and the reply.
 
-Targets: AnkiConnect API version 6, as served by the AnkiConnect add-on build of 2025-11-09 ("the reference"). The reference opens separate Qt windows; Meguri navigates its one main window instead, so window behavior is Meguri's (R1782–R1788) and only reply shapes are compared with recordings. G11 lists the differences.
+Targets: AnkiConnect API version 6, as served by the AnkiConnect add-on build of 2025-11-09 ("the reference"). The reference opens separate Qt windows; Meguri navigates its one main window instead, so window behavior is Meguri's (R1782–R1788) and only reply shapes are compared with recordings. G11 lists the differences. The reference replies stated in this file were checked against that build running in the transcript oracle (Anki 26.9.3, offscreen), except the G11 rows on modal notices, on the first sort direction, on filtered decks and on the question an open Add window asks before it is replaced, which would block the oracle, need a setup it does not have yet or cannot be seen offscreen; where a check changed the text, the section says "observed".
 
 Everything before the action runs (origin, key, registry lookup, read-only mode, parameter checks, the 30 s collection wait, reply wrapping and error envelopes) is `servers/ankiconnect-envelope` (E3). Registry flags of these actions are its E12.3. Searches are Browse's (`search/query-model`, `browser/result-sets`); column keys and sorting are `browser/config-keys` K3 to K6. The host-interaction channel is `servers/host-security` H11.2 (U135).
 
@@ -47,7 +47,7 @@ Error strings of this file:
 | `Meguri: the API is in read-only mode` | G3 | envelope E13 |
 | G9's `sync: …` strings | G9 | Meguri, except `sync: auth not configured` |
 
-`<value>`, `<order>` and `<columnId>`: a string is written as it is, with no quotes. Any other value is written as compact JSON: no white space, object members in the order received, strings with only the escapes JSON requires (`"`, `\` and the controls below U+0020, as `\"`, `\\`, `\n`, `\r`, `\t`, `\b`, `\f`, else `\u` and 4 lower-case hex digits), other characters as raw UTF-8, numbers as received. The reference writes non-string values in its language runtime's text form instead (`['noteCrt']`, `True`, `None`), so the texts are equal only for strings (G11).
+`<value>`, `<order>` and `<columnId>`: a string is written as it is, with no quotes. Any other value is written as compact JSON: no white space, object members in the order received, strings with only the escapes JSON requires (`"`, `\` and the controls below U+0020, as `\"`, `\\`, `\n`, `\r`, `\t`, `\b`, `\f`, else `\u` and 4 lower-case hex digits), other characters as raw UTF-8, numbers as received. The reference writes non-string values in its language runtime's text form of the parsed value instead (observed: `['noteCrt']`, `True`, `None` for `null`, `5`, `0` for `-0`, `5.0` for `5.0`, `100.0` for `1e2`). So the texts are equal only for strings and for integers written in plain digits, with an optional `-`, other than `-0` (G11).
 
 ## G3. `guiBrowse(query?, reorderCards?)` (R1782)
 
@@ -68,7 +68,7 @@ Checks, in this order (the first failure is the reply):
 | 6 | (after the collection wait) `columnId` is a column key displayed in Browse's current mode: one of the displayed columns of `browser/config-keys#K4.1` for the mode of `#K6.1`, as stored in the collection | `invalid columnId: <columnId>` |
 | 7 | `query`, when present, parses and runs | the Browse error message (`search/errors#E7`) |
 
-- The reply is the card ids that `findCards` returns for `query` (`servers/ankiconnect-actions`: the same search engine, ascending ids, R1776, R1777), whatever mode Browse is in. Without `query` the reply is `[]`, as in the reference.
+- The reply is the card ids that `findCards` returns for `query` (`servers/ankiconnect-actions`: the same search engine, ascending ids, R1776, R1777), whatever mode Browse is in. Without `query` the reply is `[]`, as in the reference (observed for `{}` and for `{"query": null, "reorderCards": null}`). The reference checks `order` before `columnId` (observed: `order` `up` with `columnId` `nope` gives `invalid card order: up`), as rows 4 and 6 do.
 - **The sort.** With `reorderCards` and a column sortable in the mode, the core writes the sort as `browser/config-keys#K5.2` "Set sort (`columnId`, `order`)" does (the mode's column and backwards keys, each written only when it changes), as one `LocalApi` op (envelope E14), not as the UI's `UserNonUndoable` write of `#K10.2`: no undo entry, and the undo and redo history is not cleared (G2 rule 7). It commits before the interaction is posted. When the column is not sortable in the mode (`question`, `answer`; `stability`, `difficulty`, `retrievability` in notes mode), nothing is written, the sort is left unchanged and the action still succeeds, with no alert. The reference also keeps its sort and replies the ids, but only after the user dismisses a modal notice (G11).
 - The interaction asks the app to show Browse with `query` as its search text and run it as if the user had entered it (`browser/result-sets#H3`); Browse shows the sort the collection now holds. When the interaction is refused or times out, a sort already written stays.
 - The mode (cards or notes) is not changed.
@@ -98,7 +98,7 @@ Examples (collection: notes `n1`, `n2` in deck German with cards `c1` < `c2`; `c
 
 - Not a collection action: no wait.
 - The interaction asks the app to select the row of card `card` in Browse's current results: in cards mode the card's row, in notes mode its note's row. The selection becomes that one row; the editor follows the selection as when the user clicks the row.
-- Reply `true` when Browse is showing and the row is in the results and is now selected; `false` when Browse is not showing or the card is not in the results (also for an id no card has). With `false` the selection is left as it was. The window and the search do not change. Difference: the reference clears its browser's selection and replies `true` whenever its browser window exists, whether or not the card is in its results (G11).
+- Reply `true` when Browse is showing and the row is in the results and is now selected; `false` when Browse is not showing or the card is not in the results (also for an id no card has). With `false` the selection is left as it was. The window and the search do not change. Difference: the reference clears its browser's selection and replies `true` whenever its browser window exists, whether or not the card is in its results (G11). Observed: `false` before any browser window was opened in the session; afterwards `true` for a card outside the results, for an id no card has and for the string `"1"`, each leaving no row selected.
 
 ## G5. `guiSelectedNotes()` (R1783)
 
@@ -142,7 +142,7 @@ The interaction then asks the app to present the in-window Add panel (never a ne
 - Replace draft loads the prefill as in the first row; Keep draft drops the prefill and leaves the draft untouched. The choice happens after the reply.
 - With `closeAfterAdding: true` the panel closes after the user's next successful add from that prefilled panel; with Keep draft it has no effect.
 - Without `note`, the panel is presented as it is (its draft, if any, untouched).
-- The reply is `0` once the app answers `presented`, in every case above (the note is not saved, R1784). The reference also replies with the unsaved note's id, which is `0`.
+- The reply is `0` once the app answers `presented`, in every case above (the note is not saved, R1784). The reference also replies with the unsaved note's id, which is `0` (observed with a note, without `note` and with `"note": null`, each within about 0.2 s of the request, so it does not wait for the user; a second `guiAddCards` while its Add window held text also replied `0` at once).
 
 ## G7. `guiEditNote(note)` (R1786)
 
@@ -150,8 +150,8 @@ The interaction then asks the app to present the in-window Add panel (never a ne
 |---|---|
 | `note` | integer, required |
 
-- When no note has id `note`: `note was not found: <note>` (decimal id), without navigating. Difference: the reference replies with Anki's own not-found message there.
-- Otherwise the interaction asks the app to show Browse on the search `nid:<note>`, select the first row of its results (the note's only row in notes mode) and open the editor on the note. Answer `done` → reply `null`.
+- When no note has id `note`: `note was not found: <note>` (decimal id), without navigating. Difference: the reference replies with Anki's own not-found message there (observed: Anki's database-inconsistency message, which names the id in quotes).
+- Otherwise the interaction asks the app to show Browse on the search `nid:<note>`, select the first row of its results (the note's only row in notes mode) and open the editor on the note. Answer `done` → reply `null`. Difference: under Anki 26.9.3 the reference fails here; its edit window cannot be built and the reply is an error envelope with a runtime text (observed), so `null` is Meguri's reply from R1786 (G11).
 
 | Params | Reply |
 |---|---|
@@ -229,19 +229,22 @@ Each needs a `conformance/deviations.yaml` entry once transcripts exist (U136); 
 | Case | Reference | Meguri | Req |
 |---|---|---|---|
 | where GUI actions show | separate browser, Add and Edit windows | the main window's Browse and in-window Add panel | R1782, R1784, R1786 |
-| `guiBrowse` with a bad `reorderCards` | the browser opens and searches, then the error is replied | the error is replied and nothing changes | R1782 |
+| `guiBrowse` with a bad `reorderCards` | the browser opens and searches, then the error is replied (observed: the selection that follows uses the new search's rows) | the error is replied and nothing changes | R1782 |
+| `guiBrowse` with a non-string `query` | error with a runtime text, after the browser opened | `invalid parameter: query` | R1782 |
 | `guiBrowse` with a query that fails to parse | the browser opens and shows a modal warning; request handling stops until it is dismissed; then the error is replied | the error is replied at once and nothing changes | R1782, R1791 |
-| texts of `reorderCards should be a dict:`, `invalid card order:`, `invalid columnId:` with a non-string value | the value in its language runtime's text form | the value as compact JSON (G2) | R1782 |
+| texts of `reorderCards should be a dict:`, `invalid card order:`, `invalid columnId:` with a value that is `-0` or is neither a string nor an integer in plain digits | the parsed value in its language runtime's text form (`None`, `True`, `0` for `-0`, `100.0` for `1e2`) | the value as compact JSON (G2) | R1782 |
 | `guiBrowse` with a column not sortable in the mode | a modal notice; request handling stops until it is dismissed | no notice; sort unchanged | R1782, R1791 |
 | `guiBrowse` new sort column whose first direction is descending | the requested `ascending` is replaced by descending | the requested direction is used | R1782 |
 | `guiBrowse` sort write | the browser's own sort setting (a write the user cannot undo) | a `LocalApi` op that leaves the undo history (G3); refused in read-only mode | R1796, R1779 |
 | `guiSelectCard` with a card not in the results | clears the selection; `true` while the browser window exists | selection unchanged; `false` | R1783 |
+| `guiSelectCard` with a non-integer `card` (`"1"`) | `true` while the browser window exists | `invalid parameter: card` | R1783 |
 | `guiSelectedNotes` order | the table's selection order (notes mode) or the database's (cards mode) | Browse row order | R1783 |
 | `sync` with `params` members (Yomitan sends `{"version": 2}`) | error (unexpected keyword argument) | ignored; the action runs | R1740 |
-| `guiAddCards` with an open Add window | the window is closed (asking about unsaved text) and reopened | Replace / Keep prompt, draft kept unless replaced | R1785 |
+| `guiAddCards` with an open Add window | the reply comes at once (observed); when the window's fields hold text, a non-blocking question offers to discard the text or keep editing, and the window is replaced only when the user discards; an empty window is replaced at once | Replace / Keep prompt, draft kept unless replaced | R1785 |
 | `guiAddCards` side effects | selects the deck and sets the current note type at once | none until the user adds | U27 |
 | `closeAfterAdding` | ignored | honoured | R1784 |
 | `guiEditNote` unknown id | Anki's not-found message | `note was not found: <id>` | R1786 |
+| `guiEditNote` existing note | fails under Anki 26.9.3: error envelope with a runtime text | Browse on `nid:<id>`, editor open; `null` | R1786 |
 | unsaved work | not checked | `cannot navigate: close the open sheet first` | R1787 |
 | `sync` | Anki's own sync with its server; also starts a GUI sync | the iCloud exchange; never an Anki transfer | R1754, R1549 |
 | GUI actions not in G1 | implemented | `unsupported action` (envelope E12.4) | R1775 |
@@ -263,10 +266,13 @@ Each needs a `conformance/deviations.yaml` entry once transcripts exist (U136); 
 | `browse-missing-member` | `reorderCards: {"order": "ascending"}` | `Must provide a "columnId" and a "order" property"` | Rec. |
 | `browse-hidden-column` | `reorderCards: {"order": "ascending", "columnId": "cardLapses"}` | `invalid columnId: cardLapses` | Rec. |
 | `browse-unknown-column` | `reorderCards: {"order": "ascending", "columnId": "nope"}` | `invalid columnId: nope` | Rec. |
+| `browse-order-before-column` | `reorderCards: {"order": "up", "columnId": "nope"}` | `invalid card order: up` | Rec. |
+| `browse-order-number` | `reorderCards: {"order": 5, "columnId": "noteCrt"}` | `invalid card order: 5` | Rec. |
+| `browse-order-null` | `reorderCards: {"order": null, "columnId": "noteCrt"}` | `invalid card order: null` | Meguri (G11, text; the reference writes `None`) |
 | `browse-unsortable` | `reorderCards: {"order": "ascending", "columnId": "question"}` with Question displayed | the ids; sort unchanged; no alert | Meguri (the reference blocks on a modal notice, G11) |
 | `browse-bad-query` | `guiBrowse {"query": "("}` | the Browse error text for `(` | Meguri (window unchanged; the reference blocks on a modal warning, G11) |
 | `browse-dict-value` | `guiBrowse {"query": "x", "reorderCards": ["noteCrt"]}` | `reorderCards should be a dict: ["noteCrt"]` | Meguri (G11, text) |
-| `select-no-browse` | Browse not showing; `guiSelectCard {"card": c1}` | `false` | Rec. (reference: no browser window) |
+| `select-no-browse` | Browse not showing; `guiSelectCard {"card": c1}` | `false` | Rec. (reference: no browser window yet in the session) |
 | `select-in-results` | after `browse-ids`; `guiSelectCard {"card": c2}` | `true`; row c2 selected | Meguri |
 | `select-not-in-results` | after `browse-ids`, row c1 selected; `guiSelectCard {"card": c3}` | `false`; row c1 still selected | Meguri (G11) |
 | `selected-none` | Browse not showing; `guiSelectedNotes` | `[]` | Rec. |
@@ -285,7 +291,7 @@ Each needs a `conformance/deviations.yaml` entry once transcripts exist (U136); 
 | `add-close-after` | `options.closeAfterAdding: true`; user adds | panel closes after the add | Meguri |
 | `add-no-config-write` | valid note | `col` config `curDeck`, `curModel` and the Add defaults unchanged | Meguri (G11) |
 | `edit-unknown` | `guiEditNote {"note": 999}` | `note was not found: 999` | Meguri (G11) |
-| `edit-valid` | `guiEditNote {"note": n1}` | `null`; Browse on `nid:n1`, row selected, editor on n1 | Rec. reply, Meguri window |
+| `edit-valid` | `guiEditNote {"note": n1}` | `null`; Browse on `nid:n1`, row selected, editor on n1 | Meguri (the reference fails under Anki 26.9.3, G11) |
 | `sheet-refuses` | unsaved deck-options sheet open; each of the five GUI actions | `cannot navigate: close the open sheet first`; sheet unchanged | Meguri |
 | `add-draft-refuses-browse` | Add panel holds unsaved text; `guiBrowse {"query": "deck:German"}` | `cannot navigate: close the open sheet first`; draft unchanged | Meguri |
 | `no-answer` | `TestHost` never answers `GuiBrowse` | after 10 s, `cannot navigate: Meguri did not respond`; an interaction cancelled event | Meguri |
@@ -308,11 +314,13 @@ Each needs a `conformance/deviations.yaml` entry once transcripts exist (U136); 
 
 ## Open questions (not normative)
 
-- G2 rule 5 lets only the navigating actions bring Meguri to front; R1787 says "GUI actions". `guiSelectCard` and `guiSelectedNotes` do not change the window in the reference either. Confirm.
-- G2 rule 4 refuses `guiSelectedNotes` and `guiSelectCard` too while an unsaved sheet is open (U146's test "any GUI action"), although they would not discard anything. Confirm.
-- G6: the reply is sent when the panel or the Replace/Keep prompt is presented, before the user chooses; R1784 fixes the value (`0`) but not the moment.
-- G6: a `deckName` naming a filtered deck. The reference opens its Add window on it (the add then fails there). This draft presents the panel and leaves the refusal to the Add panel's own rules (U195); `addNote` refuses filtered decks at once (R1758). Decide whether `guiAddCards` should refuse with `addNote`'s filtered-deck error instead.
-- G9: the `sync:` error texts other than `sync: auth not configured` are this draft's; no source fixes them. G10: the `/create` `searchNote` request shape is `servers/migaku-received-log`'s; this file takes its 1 to 19 digit value as the payload.
+Probe results against the reference are recorded with each question. A question about what Meguri should do stays open with what the probe showed.
+
+- G2 rule 5 lets only the navigating actions bring Meguri to front; R1787 says "GUI actions". `guiSelectCard` and `guiSelectedNotes` do not change the window in the reference either. Confirm. Window activation cannot be observed in the offscreen oracle. Still open.
+- G2 rule 4 refuses `guiSelectedNotes` and `guiSelectCard` too while an unsaved sheet is open (U146's test "any GUI action"), although they would not discard anything. Confirm. The reference checks nothing of the kind, so no probe applies. Still open.
+- G6: the reply is sent when the panel or the Replace/Keep prompt is presented, before the user chooses; R1784 fixes the value (`0`) but not the moment. Observed: the reference replies `0` as soon as its Add window is shown, without waiting for the user. Still open (policy).
+- G6: a `deckName` naming a filtered deck. The reference opens its Add window on it (the add then fails there). This draft presents the panel and leaves the refusal to the Add panel's own rules (U195); `addNote` refuses filtered decks at once (R1758). Decide whether `guiAddCards` should refuse with `addNote`'s filtered-deck error instead. Not probed: the v6 action set cannot create a filtered deck, so the recorder needs a setup step for it. Still open.
+- G9: the `sync:` error texts other than `sync: auth not configured` are this draft's; no source fixes them. Observed: without a sync login the reference replies `sync: auth not configured`, and with `params` `{"version": 2}` it fails with its unexpected-keyword text. Still open (accept the texts). G10: the `/create` `searchNote` request shape is `servers/migaku-received-log`'s; this file takes its 1 to 19 digit value as the payload.
 - G9: `SyncNow` has no timeout, relying on every exchange ending with a P12.6 result. Decide whether a safety limit (and its error text) is wanted for an app that never answers, given that `sync/policy` P12.5 sets no overall time limit on the exchange.
 - G2 rule 5: with bring to front off, a closed main window is opened without activating Meguri. Confirm, or keep the window closed and refuse the action.
 - G2 rule 6: what the screen shows when a navigating action ends a review session (for example whether N11.6's session summary appears) belongs to U150/U175's exit, which no spec defines yet. `review-left` cannot be finalized until it does.

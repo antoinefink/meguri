@@ -7,7 +7,7 @@ Scenarios: none yet in `conformance/`. The transcript format is `servers/transcr
 
 What the AnkiConnect-compatible server on the AnkiConnect port (default 8765) does with one HTTP request before and after an action runs: the request and reply envelope, API versions, the ping, origin gating and CORS, the API key, `requestPermission`, `apiReflect`, `multi`, read-only mode, the collection wait, the action registry, the activity log and the connection snippet for agents.
 
-Targets: AnkiConnect API version 6, as served by the AnkiConnect add-on build of 2025-11-09 (121 actions), which is the reference that U136 records against (R1799). "The reference" below means that build. Everything not marked as a difference behaves as the reference does; E18 lists every difference.
+Targets: AnkiConnect API version 6, as served by the AnkiConnect add-on build of 2025-11-09 (upstream release 25.11.9.0, 121 actions), which is the reference that U136 records against (R1799). "The reference" below means that build. Everything not marked as a difference behaves as the reference does; E18 lists every difference. The statements about what the reference does in E2 to E12, E15 and E18 were checked against that build running in the transcript oracle, except that E6's "same names for every version" was checked only for the versions E19 uses; where a check changed the text, the section says "observed".
 
 Other files: binding, the `Host` check, body limits, keep-alive and listener status are `servers/host-security` (U135), which also owns the parts this file builds on: the config document and its apply (H10.2, H10.3), the events to Swift (H11.1), the interaction channel (H11.2) and caught handler failures (H9.4). The collection actions and their parameters are `servers/ankiconnect-actions` (U142), the media actions and attachment objects `servers/ankiconnect-media` (U143), the GUI actions and `sync` `servers/ankiconnect-gui` (U146). Transcript format and normalization are `servers/transcripts` (U136).
 
@@ -24,11 +24,11 @@ Other files: binding, the `Host` check, body limits, keep-alive and listener sta
 
 ## E2. Transport
 
-- Every HTTP method is accepted and handled the same way, except `OPTIONS` (E7.4). `GET`, `POST`, `PUT` or any other token: only the body matters. A `HEAD` request is handled as a `GET` and its reply carries no body, as HTTP requires.
+- Every HTTP method is accepted and handled the same way, except `OPTIONS` (E7.4). `GET`, `POST`, `PUT` or any other token: only the body matters. A `HEAD` request is handled as a `GET` and its reply carries no body, as HTTP requires (difference: the reference sends the body, E18). This is HTTP framing, not special handling of the method (R1734): the action runs as for any other method, and the reply has the status and headers the same request would get with `GET`, except that `Content-Length` may be absent or give the length of the omitted body. Scenarios do not compare `Content-Length` on `HEAD` replies (`servers/transcripts` T8).
 - The request target is ignored: `/`, `/anything` and `/?x=1` are the same request (as in the reference).
 - The `Content-Type` request header is ignored. Clients send `application/json` (a browser then sends the E7.4 preflight first; Yomitan does this), `text/plain` (no preflight) or none.
 - The body is the bytes HTTP/1.1 delivers: by `Content-Length`, or decoded from `Transfer-Encoding: chunked`. A body longer than the AnkiConnect limit of `servers/host-security` H8 (256 MiB, R1678) is not read further and not parsed: the reply is the error envelope `Meguri: the request body is too large` when the origin is allowed (E7), 403 otherwise (E5.3). Either reply carries `Connection: close` and the connection closes after it (`servers/host-security` H7.3, H8).
-- Keep-alive, the 5 s idle timeout and `Connection: close` follow `servers/host-security`. The reference closes the connection after every reply; clients of both work with either.
+- Keep-alive, the 5 s idle timeout and `Connection: close` follow `servers/host-security`. The reference closes the connection after every reply and never answers a second request sent on the same connection (observed with two pipelined requests: one reply, then close); clients of both work with either.
 
 ## E3. The order of checks
 
@@ -109,7 +109,7 @@ Every reply in this section is HTTP 200 with these headers (R1739), in addition 
 
 ### E5.3 403
 
-- A refused request (E3 rows 1, 3 to 6) gets status 403, an empty body (`Content-Length: 0`) and no `Content-Type` and no `Access-Control-*` header (R1745, AE76). Difference: the reference's 403 carries `Access-Control-Allow-Origin` with its fallback value `http://localhost` and `Access-Control-Allow-Headers: *` (E18).
+- A refused request (E3 rows 1, 3 to 6) gets status 403, an empty body (`Content-Length: 0`) and no `Content-Type` and no `Access-Control-*` header (R1745, AE76). Difference: the reference's 403 carries `Access-Control-Allow-Origin` with its fallback value `http://localhost` and `Access-Control-Allow-Headers: *` (E18); observed: no `Content-Type`, no `Content-Length`, an empty body and a closed connection, whatever the request's origin.
 
 ## E6. Versions (R1736, R1741)
 
@@ -186,7 +186,7 @@ Examples: `Origin: null` with `["*"]` and `deckNames` gets 403 (row 1, no header
 
 An `OPTIONS` request, whatever its origin, target and body, gets HTTP 200 with an empty body (`Content-Length: 0`) and the headers of E5.1: `Content-Type: application/json`, `Access-Control-Allow-Origin` (E7.3) and `Access-Control-Allow-Headers: *`.
 
-- When the request carries `Access-Control-Request-Private-Network` with the value `true`, the reply also carries `Access-Control-Allow-Private-Network: true`.
+- When the request carries `Access-Control-Request-Private-Network` with the value `true`, the reply also carries `Access-Control-Allow-Private-Network: true`. The value is compared exactly, as in the reference (observed: `TRUE` or `false` gets no such header).
 - The reply has no `Access-Control-Allow-Methods`, as in the reference; browsers then allow the simple methods, `POST` among them.
 - No key, read-only or collection check applies, and the activity log records nothing.
 
@@ -200,7 +200,7 @@ An `OPTIONS` request, whatever its origin, target and body, gets HTTP 200 with a
 
 ## E9. `requestPermission` (R1749, R1750)
 
-- Only a top-level action (inside `multi` it fails, E11). It needs no key, is not gated by read-only mode and does not wait for the collection. Client `params` are ignored.
+- Only a top-level action (inside `multi` it fails, E11). It needs no key, is not gated by read-only mode and does not wait for the collection. Client `params` are ignored (difference: the reference fails a `requestPermission` that has a `params` member, before any prompt, with its unexpected-keyword text, E18).
 - The answer is decided by the first matching row:
 
 | # | Request origin | Result | Lists changed |
@@ -233,7 +233,7 @@ An `OPTIONS` request, whatever its origin, target and body, gets HTTP 200 with a
 
 - The core makes the change, while it handles the app's resolve call for Allow, or for Deny with `ignore` true, and before that call returns `true`: it takes the current config document, appends the origin to `ankiconnect.cors_origins` (Allow) or `ankiconnect.deny_origins` (Deny with the checkbox) unless the entry is already there, leaves every other member as it is, and writes and swaps the document exactly as an apply does (`servers/host-security` H10.3). Applies and these appends run one at a time, in the order they reach the core.
 - Swift, when its resolve returns `true` for such an answer, makes the same append to its own copy of the document (Settings › AnkiConnect, U144) before it applies anything else. A Settings edit made while the prompt was open is therefore applied on top of the append, and the next whole-document apply keeps the entry. An apply that Swift sent before its resolve is processed before the append.
-- No outcome, a cancel, Deny without the checkbox and an Allow for an origin already listed write nothing.
+- No outcome, a cancel, Deny without the checkbox and an Allow for an origin already listed write nothing. The reference ends the same way, by another route: it handles one request at a time, so a second `requestPermission` from an origin waits behind the first prompt and is then granted from the updated list without a prompt (observed: two concurrent requests, one prompt, one list entry).
 
 ## E10. `apiReflect` (R1751)
 
@@ -251,11 +251,11 @@ The first matching row gives the answer:
 | 6 | `actions` a list of strings | `{"scopes": ["actions"], "actions": [<the list's items that are registry names, in the list's order, repeats kept>]}` |
 
 - Names are matched exactly; names the reference has and Meguri does not (E12.4) never appear (R1775).
-- Examples: `{"scopes": ["actions"], "actions": ["addNote", "guiReviewActive"]}` → `{"scopes": ["actions"], "actions": ["addNote"]}`; `["version", "version", "Version"]` → `["version", "version"]`; `{"scopes": ["other"]}` → `{"scopes": []}`; `{"scopes": ["other"], "actions": [5]}` → `{"scopes": []}`, as in the reference.
+- Examples: `{"scopes": ["actions"], "actions": ["addNote", "guiReviewActive"]}` → `{"scopes": ["actions"], "actions": ["addNote"]}`; `["version", "version", "Version"]` → `["version", "version"]`; `{"scopes": ["other"]}` → `{"scopes": []}`; `{"scopes": ["other"], "actions": [5]}` → `{"scopes": []}` and `{"scopes": ["other"], "actions": "x"}` → `actions has invalid value`, as in the reference. Repeated or extra items of `scopes` do not change the answer: `["actions", "actions", 5]` gives `"scopes": ["actions"]` there too.
 
 ## E11. `multi` (R1752, R1753)
 
-Parameter: `actions` (required, a list). Missing: `missing parameter: actions`. Not a list, or an element that is not an object: `invalid parameter: actions`, and no sub-action runs (the reference also fails the whole call for a non-object element, with another text, E18).
+Parameter: `actions` (required, a list). Missing: `missing parameter: actions`. Not a list, or an element that is not an object: `invalid parameter: actions`, and no sub-action runs (the reference also fails the whole call for a non-object element, with another text, but only when it reaches that element: the elements before it have already run and their changes stay, E18).
 
 - Each element is a sub-action envelope with the members `action`, `version`, `params` and `key`, read as E4 reads a body. The sub-actions run one after another in list order; each starts after the previous one's reply is final, and sees everything earlier sub-actions committed.
 - Each sub-action is answered by the first row that applies:
@@ -412,7 +412,7 @@ Exact text, shared by every action that can produce them. The ones this file pro
 | `scopes has invalid value` | E10 |
 | `actions has invalid value` | E10 |
 
-The other R1738 strings (`model was not found: <name>`, `deck was not found: <name>`, `note was not found: <id>`, `cannot create note because it is a duplicate`, `cannot create note because it is empty`) belong to the actions that produce them (`servers/ankiconnect-actions`, `servers/ankiconnect-gui`). R1738 writes the note string in lower case; the reference build writes `Note was not found: <id>` (and `Card was not found: <id>`) with a capital letter. `servers/ankiconnect-actions` uses the reference's capital form for its note actions, pending its A21 Q2. `guiEditNote` is not affected by that decision: the reference answers an unknown id there with Anki's own not-found message, not with this text, so Meguri uses R1786's lower-case literal (`servers/ankiconnect-gui` G7, G11). See Open questions.
+The other R1738 strings (`model was not found: <name>`, `deck was not found: <name>`, `note was not found: <id>`, `cannot create note because it is a duplicate`, `cannot create note because it is empty`) belong to the actions that produce them (`servers/ankiconnect-actions`, `servers/ankiconnect-gui`). R1738 writes the note string in lower case; the reference build writes `Note was not found: <id>` (and `Card was not found: <id>`) with a capital letter. `servers/ankiconnect-actions` uses the reference's capital form for its note actions, pending its A21 Q2. `guiEditNote` is not affected by that decision: the reference answers an unknown id there with Anki's own not-found message, not with this text, so Meguri uses R1786's lower-case literal (`servers/ankiconnect-gui` G7, G11). Observed: `updateNoteFields` with an unknown id replies `Note was not found: <id>`, and `modelNameFromId` with an unknown id `model was not found: <id>`. See Open questions.
 
 ### E15.2 Meguri's own strings
 
@@ -486,28 +486,31 @@ Each needs an entry in `conformance/deviations.yaml` once the transcripts exist 
 | 403 headers | `Access-Control-Allow-Origin: http://localhost`, `Access-Control-Allow-Headers: *` | no CORS headers | R1745, AE76 |
 | `Access-Control-Allow-Origin` with no `Origin` | `http://localhost` | `*` | R1739 |
 | localhost rule | only `http://127.0.0.1`, `https://127.0.0.1` and `http://127.0.0.1:` followed by anything, plus the extension prefixes | also `http(s)://localhost[:port]` and `https://127.0.0.1:port`; a port must be digits | R1743 |
-| `Origin: null` or an empty `Origin` with `*` in the allow-list | allowed | 403 | R1744 |
+| `Origin: null` or an empty `Origin` (`Origin: `) with `*` in the allow-list | allowed | 403 | R1744 |
 | more than one `Origin` header | the last value counts | 403; `requestPermission` denied without a prompt (E9 row 2) | R1744 |
-| `requestPermission` with `Origin: null` (no `*`) | the prompt; Deny with the checkbox deny-lists `null` | denied, no prompt (E9 row 3) | R1744, R1749 |
+| `requestPermission` with `Origin: null` (no `*`) | the prompt; Allow appends `null` to its allow-list, after which every request with `Origin: null` is allowed (observed); Deny with the checkbox deny-lists `null`; `Access-Control-Allow-Origin: null` | denied, no prompt (E9 row 3) | R1744, R1749 |
+| `requestPermission` with an empty `Origin` (no `*`), sent as `Origin: ` with one space after the colon | the prompt; Allow appends the empty string to its allow-list, after which every request with an empty `Origin` is allowed, with an empty `Access-Control-Allow-Origin` (observed); Deny with the checkbox appends nothing; `Access-Control-Allow-Origin` empty | denied, no prompt (E9 row 3) | R1744, R1749 |
+| an `Origin` header line without a space after the colon (`Origin:` with nothing after it, `Origin:https://evil.example`) | the line is not read (`servers/host-security` H16), so the request counts as having no `Origin`: it is served, `requestPermission` is granted with no prompt, and `Access-Control-Allow-Origin` is `http://localhost` (observed); a value after two spaces keeps one leading space and matches no entry (observed: `Origin:  http://localhost` gets 403) | the header is read as HTTP defines it, without the white space around the value: `Origin:` is an empty `Origin` (E7.2 row 3) and `Origin:https://evil.example` is that origin | R1744, R1677 |
+| `requestPermission` with `Origin: null` while the allow-list holds `*` | granted | denied, no prompt (E9 row 3) | R1744 |
 | JSON tokens `NaN`, `Infinity`, `-Infinity`, and nesting deeper than 128 levels | accepted by its decoder | `invalid request: the body is not valid JSON` | R1734 |
 | sub-action check order | key, then action lookup, then the call (a bad `version` or `params` shows only when the action runs) | `version` and `params` first (E11 row 1), then key and lookup | R1752 |
-| `key` sent while no key is configured | `valid api key must be provided` | ignored | R1747 |
-| unknown `params` members | error (unexpected keyword argument) | ignored | R1740 |
+| `key` other than `null` sent while no key is configured (`""`, `false` and `0` included) | `valid api key must be provided` | ignored | R1747 |
+| unknown `params` members (also on `requestPermission`, before any prompt) | error (unexpected keyword argument) | ignored | R1740 |
 | texts of envelope and parameter errors (E15.2) | language runtime messages | Meguri's strings | R1737, R1740 |
 | non-string item in `apiReflect` `actions` while `scopes` holds `actions` | language runtime error text | `actions has invalid value` | R1751 |
-| permission prompt outcome for an origin already listed | appended again (the list can hold repeats) | not appended twice (E9.1) | R1750 |
 | sub-action with a non-integer `version` | the action runs, then the reply fails | refused before it runs | R1752 |
-| non-object element of `multi`'s `actions` | whole call fails, runtime text | whole call fails, `invalid parameter: actions` | R1753 |
+| non-object element of `multi`'s `actions` | whole call fails, runtime text, after the elements before it ran (their changes stay) | whole call fails, `invalid parameter: actions`; nothing runs | R1753 |
 | `requestPermission` inside `multi` | fails with a missing-argument text | `requestPermission cannot be used inside multi` | R1749 |
 | E12.4 actions | implemented | `unsupported action` | R1775 |
-| permission prompt | modal; every request waits; no timeout | per request; 120 s; others served | R1750 |
+| permission prompt | modal; every request waits, the ping included; no timeout | per request; 120 s; others served | R1750 |
+| `HEAD` request | the reply carries the body | no body | R1734 |
 | chunked request body | ignored (read as empty: ping) | decoded | R1734 |
 | connection reuse | closed after each reply | keep-alive (`servers/host-security`) | R1677 |
 | read-only mode, activity log, agent snippet, body limit | none | E13, E16, E17, E2 | R1678, R1779–R1781 |
 
 ## E19. Scenarios
 
-Planned transcript scenarios. "Rec." means the reply must equal the reference recording, after `servers/transcripts` normalization (T10) and comparison (T11), with the E18 entries named in the row as `deviations.yaml` transforms (T12): "ACAO per E18" is a `replace` of the `access-control-allow-origin` header, "headers per E18" an `absent` on both CORS headers, "text per E18" an `any_string` on `/body/json/error`. "Meguri" means the expectation is Meguri's own (a deviation or an app interaction the recorder cannot drive): a declared scenario (`servers/transcripts` T13, with T7.2 and T7.3 steps) or a test in `core/crates/meguri-servers/tests/` (U141). Unless a row says otherwise: default settings (allow-list `["http://localhost"]`, empty deny-list, no key, read-only off), method `POST`, no `Origin`, a fresh collection whose only deck is `Default`, and replies HTTP 200 with the E5.1 headers. `ACAO` is `Access-Control-Allow-Origin`.
+Planned transcript scenarios. "Rec." means the reply must equal the reference recording, after `servers/transcripts` normalization (T10) and comparison (T11), with the E18 entries named in the row as `deviations.yaml` transforms (T12): "ACAO per E18" is a `replace` of the `access-control-allow-origin` header, "headers per E18" an `absent` on both CORS headers, "text per E18" an `any_string` on `/body/json/error`. "Meguri" means the expectation is Meguri's own (a deviation, a check of Meguri's own state such as the config document, or an app interaction the recorder cannot drive: no answer, timeouts, joined prompts, closed waiters, resolve calls): a declared scenario (`servers/transcripts` T13, with T7.2 and T7.3 steps) or a test in `core/crates/meguri-servers/tests/` (U141). Unless a row says otherwise: default settings (allow-list `["http://localhost"]`, empty deny-list, no key, read-only off), method `POST`, no `Origin`, a fresh collection whose only deck is `Default`, and replies HTTP 200 with the E5.1 headers. `ACAO` is `Access-Control-Allow-Origin`.
 
 ### E19.1 `envelope/`
 
@@ -545,6 +548,8 @@ Planned transcript scenarios. "Rec." means the reply must equal the reference re
 | `version-overflow` | `{"action": "version", "version": 1e400}` | error envelope, `"version" must be an integer` | Rec. (text) |
 | `nan-token` | `{"action": "version", "version": 6, "x": NaN}` | error envelope, not valid JSON | Meguri (E18) |
 | `chunked` | chunked body `{"action": "version", "version": 6}` | `{"result": 6, "error": null}` | Meguri (E18) |
+| `head-request` | `HEAD`, `{"action": "version", "version": 6}` | 200, E5.1 headers, no body; `Content-Length` absent or the length of the body the same request gets with `GET`, not compared | Meguri (E18) |
+| `duplicate-member` | `{"action": "nope", "action": "version", "version": 6}` | `{"result": 6, "error": null}` | Rec. |
 | `body-too-large` | `Content-Length` of the limit + 1 | `{"result": null, "error": "Meguri: the request body is too large"}`, body not read | Meguri |
 | `deck-names-v6` | `{"action": "deckNames", "version": 6}` | `{"result": ["Default"], "error": null}` | Rec. |
 
@@ -565,7 +570,7 @@ Planned transcript scenarios. "Rec." means the reply must equal the reference re
 | `list-empty-no-origin` | allow-list `[]`; no `Origin` | 200 | Rec. (ACAO) |
 | `list-star` | allow-list `["*"]`; `Origin: https://evil.example` | 200, ACAO `*` | Rec. |
 | `list-star-null` | allow-list `["*"]`; `Origin: null` | 403 | Meguri (E18) |
-| `list-star-empty-origin` | allow-list `["*"]`; `Origin:` with an empty value | 403 | Meguri (E18) |
+| `list-star-empty-origin` | allow-list `["*"]`; `Origin: ` (one space after the colon, then nothing) | 403 | Meguri (E18) |
 | `origin-twice` | two headers `Origin: chrome-extension://abc` and `Origin: https://evil.example`; `deckNames` v6 | 403, no CORS headers | Meguri (E18) |
 | `permission-origin-twice` | the two headers of `origin-twice`; `requestPermission` v6 | `{"result": {"permission": "denied"}, "error": null}`, ACAO `http://localhost`, no prompt | Meguri (E18) |
 | `list-star-permission-null` | allow-list `["*"]`; `Origin: null`; `requestPermission` v6 | denied, ACAO `*`, no prompt | Meguri (E18) |
@@ -575,14 +580,19 @@ Planned transcript scenarios. "Rec." means the reply must equal the reference re
 | `preflight` | `OPTIONS`, `Origin: chrome-extension://abc` | 200, empty body, `Content-Type: application/json`, ACAO echoed, `Access-Control-Allow-Headers: *`, no Allow-Methods | Rec. |
 | `preflight-pna` | as `preflight` plus `Access-Control-Request-Private-Network: true` | as `preflight` plus `Access-Control-Allow-Private-Network: true` | Rec. |
 | `preflight-disallowed` | `OPTIONS`, `Origin: https://evil.example` | 200, empty body, ACAO `http://localhost` | Rec. |
+| `preflight-pna-case` | as `preflight` plus `Access-Control-Request-Private-Network: TRUE` | as `preflight`, no `Access-Control-Allow-Private-Network` | Rec. |
 | `permission-allowed` | `Origin: chrome-extension://abc`, `{"action": "requestPermission", "version": 6}` | `{"result": {"permission": "granted", "requireApikey": false, "version": 6}, "error": null}` | Rec. |
 | `permission-v4` | no `Origin`, `{"action": "requestPermission"}` | `{"permission": "granted", "requireApikey": false, "version": 6}` | Rec. |
 | `permission-key` | key `k1`; no `Origin`; `requestPermission` v6 without `key` | granted with `"requireApikey": true` | Rec. |
 | `permission-deny-listed` | deny-list `["https://evil.example"]`; that origin; `requestPermission` v6 | `{"result": {"permission": "denied"}, "error": null}`, ACAO `https://evil.example`, no prompt | Rec. |
-| `permission-null` | `Origin: null`; `requestPermission` v6 | `{"result": {"permission": "denied"}, "error": null}`, no prompt | Meguri |
-| `permission-allow` | `Origin: https://site.example`; `requestPermission` v6; test host answers Allow | granted; allow-list ends with `https://site.example`; then `deckNames` v6 from it → 200 | Meguri |
-| `permission-deny-ignore` | as above; Deny with the checkbox; then `requestPermission` again | both `{"permission": "denied"}`; one prompt only; deny-list holds the origin (AE76) | Meguri |
-| `permission-deny` | Deny without the checkbox; then `requestPermission` again | denied, then a second prompt | Meguri |
+| `permission-null` | `Origin: null`; `requestPermission` v6 | `{"result": {"permission": "denied"}, "error": null}`, no prompt | Meguri (E18) |
+| `permission-empty-origin` | `Origin: ` (one space after the colon, then nothing); `requestPermission` v6 | `{"result": {"permission": "denied"}, "error": null}`, no prompt | Meguri (E18) |
+| `permission-params` | `Origin: https://site.example`; `requestPermission` v6 with `params: {"x": 1}`; test host answers Allow | granted | Meguri (E18) |
+| `permission-allow` | `Origin: https://site.example`; `permission: allow`; `requestPermission` v6; then `deckNames` v6 from it | granted; then 200 `["Default"]`, ACAO `https://site.example` | Rec. |
+| `permission-allow-lists` | as `permission-allow`, then a `config` step (`servers/transcripts` T7.3) | the allow-list ends with `https://site.example`; the deny-list is unchanged | Meguri (Meguri's config document) |
+| `permission-deny-ignore` | `Origin: https://site.example`; `permission: deny_ignore`; `requestPermission` v6; then `requestPermission` again with no scripted answer | both `{"permission": "denied"}`; the second raises no prompt (a prompt would be a run error, T7.2) | Rec. |
+| `permission-deny-ignore-lists` | as `permission-deny-ignore`, then a `config` step | the deny-list holds the origin (AE76); the allow-list is unchanged | Meguri (Meguri's config document) |
+| `permission-deny` | `Origin: https://site.example`; `permission: deny` before each of two `requestPermission` v6 | both denied; each consumed its scripted answer, so the second raised a prompt of its own (T7.2) | Rec. |
 | `permission-timeout` | no outcome; injected clock passes 120 s | denied; prompt removed; lists unchanged | Meguri |
 | `permission-coalesced` | two `requestPermission` from one origin at once; Allow | one prompt; both granted | Meguri |
 | `permission-coalesced-timeout` | `requestPermission` from one origin; clock +100 s; a second one from it; clock +20 s | both denied at 120 s after the first; one prompt, cancelled once | Meguri |
@@ -619,12 +629,15 @@ Planned transcript scenarios. "Rec." means the reply must equal the reference re
 | `sub-bad-version` | `[{"action": "createDeck", "version": "6", "params": {"deck": "A"}}]` | slot `"version" must be an integer`; no deck A | Meguri (E18) |
 | `sub-permission` | `[{"action": "requestPermission"}]` | slot `requestPermission cannot be used inside multi` | Meguri (E18) |
 | `non-object-entry` | outer v6; `[1]` | `{"result": null, "error": "invalid parameter: actions"}` | Meguri (E18) |
+| `non-object-entry-later` | outer v6; `[{"action": "createDeck", "params": {"deck": "B"}}, 1]` | `{"result": null, "error": "invalid parameter: actions"}`; no deck B | Meguri (E18) |
 | `nested` | outer v6; `[{"action": "multi", "params": {"actions": [{"action": "version"}]}}]` | `{"result": [[6]], "error": null}` | Rec. |
 | `reflect-all` | `{"action": "apiReflect", "version": 6, "params": {"scopes": ["actions"], "actions": null}}` | `{"scopes": ["actions"], "actions": [<the 73 names of E12.3 in order>]}` wrapped | Meguri (E12.4) |
 | `reflect-filter` | `apiReflect` v6, `actions: ["addNote", "guiReviewActive"]` | `{"scopes": ["actions"], "actions": ["addNote"]}` wrapped | Meguri (E12.4) |
 | `reflect-repeat` | `actions: ["version", "version", "Version"]` | `["version", "version"]` in `actions` | Rec. |
 | `reflect-no-scope` | `scopes: ["other"]` | `{"scopes": []}` wrapped | Rec. |
 | `reflect-no-scope-bad-item` | `scopes: ["other"], actions: [5]` | `{"scopes": []}` wrapped | Rec. |
+| `reflect-no-scope-bad-actions` | `scopes: ["other"], actions: "x"` | `actions has invalid value` | Rec. |
+| `reflect-scopes-repeat` | `scopes: ["actions", "actions", 5], actions: ["version"]` | `{"scopes": ["actions"], "actions": ["version"]}` wrapped | Rec. |
 | `reflect-scopes-null` | `scopes: null` | `scopes has invalid value` | Rec. |
 | `reflect-scopes-string` | `scopes: "actions"` | `scopes has invalid value` | Rec. |
 | `reflect-scopes-missing` | `params: {}` | `scopes has invalid value` | Rec. |
@@ -640,10 +653,13 @@ Planned transcript scenarios. "Rec." means the reply must equal the reference re
 
 ## Open questions (not normative)
 
-- R1739 says `Access-Control-Allow-Origin` is "<allowed origin or *>". E7.3 reads `*` for requests without `Origin`, which differs from the reference's `http://localhost` on every no-Origin transcript. If the Product Contract owner prefers transcript equality, the row changes to `http://localhost` and the E18 row goes.
-- E9 rows 2 and 3 (no prompt for several `Origin` headers or for `Origin: null`) and E7.2 rows 2 and 3 (both refused even with `*`) extend R1744 to `requestPermission`, to repeated headers and to the `*` entry. Confirm.
-- E12.3 makes `sync` and `guiAddCards` mutating, so read-only mode refuses them. Confirm, or make `guiAddCards` mutating only when it carries attachments.
-- E12.3 and `servers/ankiconnect-gui` G3 refuse a `guiBrowse` that carries `reorderCards` in read-only mode, because the sort is a collection config write. Confirm, or let read-only mode skip the sort and still navigate.
-- E15.1: R1738 lists `note was not found: <id>` in lower case; the reference's note actions write `Note was not found: <id>`. The Product Contract owner decides which one those actions send (`servers/ankiconnect-actions` A21 Q2). `guiEditNote` keeps R1786's lower-case text either way, since the reference has no such text there (G7, G11).
+Probe results against the reference are recorded here; "settled" marks a question a probe answered. A question about what Meguri should do stays open with what the probe showed.
+
+- R1739 says `Access-Control-Allow-Origin` is "<allowed origin or *>". E7.3 reads `*` for requests without `Origin`, which differs from the reference's `http://localhost` on every no-Origin transcript. If the Product Contract owner prefers transcript equality, the row changes to `http://localhost` and the E18 row goes. Observed: the reference sends `http://localhost` on every reply to a request without `Origin` (ping, actions, errors, the preflight and its 403), and `*` on every reply while the allow-list holds `*`, whatever the origin. Still open (policy).
+- E9 rows 2 and 3 (no prompt for several `Origin` headers or for `Origin: null`) and E7.2 rows 2 and 3 (both refused even with `*`) extend R1744 to `requestPermission`, to repeated headers and to the `*` entry. Confirm. Observed: with `*` the reference serves `null`, an empty `Origin` and repeated headers alike, and grants `requestPermission` to `null`; without `*`, repeated headers count by their last value (the allow decision, the prompt and the deny-list entry all use it), `null` gets the prompt and Deny with the checkbox deny-lists `null`, and an empty `Origin` gets the prompt but nothing is appended. Still open (policy; E18 lists each case).
+- E12.3 makes `sync` and `guiAddCards` mutating, so read-only mode refuses them. Confirm, or make `guiAddCards` mutating only when it carries attachments. The reference has no read-only mode, so no probe applies. Still open.
+- E12.3 and `servers/ankiconnect-gui` G3 refuse a `guiBrowse` that carries `reorderCards` in read-only mode, because the sort is a collection config write. Confirm, or let read-only mode skip the sort and still navigate. No probe applies. Still open.
+- E15.1: R1738 lists `note was not found: <id>` in lower case; the reference's note actions write `Note was not found: <id>`. The Product Contract owner decides which one those actions send (`servers/ankiconnect-actions` A21 Q2). `guiEditNote` keeps R1786's lower-case text either way, since the reference has no such text there (G7, G11). Observed: `Note was not found: <id>` with a capital letter (`updateNoteFields`); `guiEditNote` with an unknown id answers with Anki's database-inconsistency message that names the id. Still open (policy).
 - E16: the external-folder ingest notices are a host event of their own (`servers/ankiconnect-media` X11.9), not activity-log entries. Whether the log should list them too is `servers/ankiconnect-media` X15 Q8.
 - Settled: the core's permission append (E9.1) is named in `servers/host-security` H10.3 as a second writer, serialized with Swift's applies.
+- Settled by probe: the 121 action names `apiReflect` lists are exactly E12.3's 73 and E12.4's 48, sorted by code point; E4's checks, E4.1's integer edges (`6.0`, `6e0`, `6.0000000000000001` and long digit strings accepted; `6.5`, `1e400`, `-1e400`, `"6"`, `true`, `null` refused), the ping only for an allowed origin, white space not a ping, key before lookup and envelope checks before key, the localhost rule of E18, the preflight headers, the `requestPermission` answers and list updates, `multi`'s slots and `apiReflect`'s table all behave as written. Meguri follows them except where E18 says otherwise.

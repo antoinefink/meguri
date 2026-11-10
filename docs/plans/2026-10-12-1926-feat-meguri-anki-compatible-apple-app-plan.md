@@ -13644,7 +13644,7 @@ Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). 
 - Covers AE51. Fixture with daily reviews 2025-10-13 → 2026-10-11, rollover 4, fixed clock 2026-10-12 21:00 → Current streak "364 days"; advance the injected clock past 04:00 on 2026-10-13 → Current streak "0 days", Longest "364 days", without user action.
 - Covers AE6. Fixture with 10 reviews today, one card later deleted → Home today cell count 10, deck page today cell 9.
 - Covers AE5. Rollover 4, reviews at 02:30 and 05:00 on Oct 12 → tooltip on Oct 11 cell "1 card reviewed", Oct 12 cell "1 card reviewed".
-- Zero answers today → the core's zero line displayed verbatim: R1298's "Studied 0 cards in 0 seconds today (0s/card)" (R44's "No cards studied today" is an open question). 1 review → singular form.
+- Zero answers today → the core's zero line displayed verbatim: R1298's "Studied 0 cards in 0 seconds today (0s/card)" (the default of the zero-line item under Deferred product decisions, as `specs/stats/studied-today.md` T2.3 fixes it; R44's "No cards studied today" is not shown unless that decision changes; corrected 2026-11-10). 1 review → singular form.
 - Answer a card, return to Home → line and today cell incremented; undo → decremented (R1300).
 - Empty collection → "No reviews yet", no heatmap, no streak stats.
 - Deck page click on Oct 1 (11 days ago) for deck "Spanish" → Browser search equals that day's U96 search, `deck:Spanish prop:rated=-11` (`specs/stats/heatmap-addon.md` A9; corrected 2026-10-27); for a deck named `a_b*` the search matches only that deck.

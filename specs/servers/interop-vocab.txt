@@ -471,3 +471,12 @@ migaku_move
 migaku_create
 move_received_card
 migaku
+odid
+collapseTime
+nextPos
+HTTP_PROXY
+guid
+cardLapses
+media.trash
+collection.media
+collection.anki2

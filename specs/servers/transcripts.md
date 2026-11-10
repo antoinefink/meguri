@@ -170,9 +170,9 @@ No other header is added: no `User-Agent`, `Accept`, `Connection` or `Content-Ty
 | `allow` | the Yes button | Allow |
 | `deny` | the No button, ignore box clear | Deny, checkbox clear |
 | `deny_ignore` | the No button, ignore box checked | Deny, checkbox checked |
-| `none` | not available: the add-on waits for the dialog forever (declared only) | no answer; the interaction times out (120 s on the host's timer clock, which `advance` moves; run the exchange `async`, then `advance`) |
+| `none` | not available: the add-on waits for the dialog forever and answers no other request meanwhile, the ping included (declared only) | no answer; the interaction times out (120 s on the host's timer clock, which `advance` moves; run the exchange `async`, then `advance`) |
 
-An exchange that raises a prompt with no scripted answer is a run error on both sides. A scripted answer that no prompt consumed by the end of the scenario is a run error too.
+An exchange that raises a prompt with no scripted answer is a run error on both sides. A scripted answer that no prompt consumed by the end of the scenario is a run error too. The recorder's driver add-on answers the dialog itself (T19.1): `allow` adds the origin to the add-on's allow-list, `deny_ignore` to its ignore list, and `deny` changes nothing, so a later request from that origin prompts again. A `requestPermission` that ends without a prompt consumes no answer: an allowed origin, a deny-listed (ignored) origin, and in the recorder one with a `params` member, which fails before any prompt.
 
 ### T7.3 Meguri-only host steps (declared scenarios only)
 
@@ -240,7 +240,7 @@ A normalized reply is:
 - `body`: `{"empty": true}` when the body has no bytes; `{"json": <value>}` when the bytes are valid UTF-8 and one JSON value (RFC 8259, white space allowed around it); otherwise `{"text": <string>}` when valid UTF-8, else `{"base64": <string>}`.
 - `closed`: whether the server closed the connection right after the reply (before the executor's next action on it). Recorded for information; not compared unless a declared `expect` names it (T11).
 - `interim`: the status codes of interim (1xx) responses read before the final reply, in order; present only for an exchange with `expect_continue` (T6.1), `[]` when none came. Declared scenarios only.
-- Content-Length consistency is checked, not recorded: a reply whose `Content-Length` differs from its body length is a run error (`bad_framing`) for Meguri's executor; the recorder accepts the add-on's 403 reply, which has none.
+- Content-Length consistency is checked, not recorded: a reply whose `Content-Length` differs from its body length is a run error (`bad_framing`) for Meguri's executor; the recorder accepts the add-on's 403 reply, which has none. A reply to `HEAD` is exempt: it has no body, and its `Content-Length` may be absent or give the length of the omitted body, as HTTP allows (`servers/ankiconnect-envelope` E2, `servers/migaku-protocol` P4); Meguri's executor reads no body bytes after the head of a `HEAD` reply.
 - JSON integers are kept exactly at any size (field and template ids are 64-bit); they are never turned into floating-point numbers. Numbers with a fraction or exponent keep their kind (`conformance/observations` O6, O7).
 
 ## T9. Goldens
@@ -252,7 +252,7 @@ A normalized reply is:
   "oracle": {
     "anki_version": "26.9.3",
     "lock_sha256": "<hex>",
-    "addon": {"build": "2025-11-09", "sha256": "<hex of the add-on archive>"},
+    "addon": {"build": "2025-11-09", "sha256": "<hex of the add-on source archive>"},
     "image": "<oracle-ankiconnect image tag>",
     "driver_sha256": "<hex>"
   },
@@ -263,6 +263,7 @@ A normalized reply is:
 ```
 
 - Written only by the recorder through `tools/mg oracle record`; text format as `conformance/dsl` D11 (sorted keys, two-space indents, LF, final newline).
+- `oracle.addon.sha256` is the SHA-256, in lower-case hex, of the pinned upstream source archive of the add-on (upstream release 25.11.9.0), the value that `ankiconnect_addon_sha256` in `conformance/oracle.json` will hold once that key is added (see the staleness rule below); until then the current pin is `archive_sha256` in `oracle/ankiconnect/ADDON_PIN`, which the image's `ADD --checksum` repeats. The image build checks the archive against it and each installed add-on file against its own pinned hash, so one value names the exact add-on code. `oracle.addon.build` is the build date `2025-11-09`, for reading only.
 - `observations.steps` holds one output per scenario step (T7.4), already normalized by T10. A golden never holds a real id that T10.1 maps, a wall-clock time, a host path or a random id.
 - A golden is **stale** when `scenario_sha256` differs from the scenario's hash, or when `oracle.lock_sha256`, `oracle.addon.sha256` or `oracle.anki_version` differs from the current oracle pin (`conformance/oracle.json` gains `ankiconnect_addon_sha256` and `ankiconnect_image`). `driver_sha256` and `image` never make a golden stale on their own.
 - Two recordings of the same scenario at different wall-clock times and on different machines give byte-identical goldens (T17).
@@ -284,15 +285,20 @@ Real ids differ between runs and between Anki and Meguri; tokens name entities b
 
 - After every exchange, and before that exchange's reply is normalized, notes, cards, decks and note types that have no token yet get the next ones, in ascending id order per entity (cards of one note in template order, as `adopt`, `conformance/normalized-dump` N5). So the reply of the `addNote` that created a note already shows that note's token. Entities deleted before they got a token never get one.
 - Ids below 1,000,000,000 (the Default deck and the default preset, id 1) are never tokens: both sides use the same small ids, and a count, an ord or a version must never be mistaken for an id.
-- **Where ids are replaced.** A JSON integer is replaced by an entity's token only at a position that T10.5 declares to hold an id of that entity, and only when it equals the real id of an entity with a token. At such a position, an integer that matches no entity becomes `"#unknown"` when it is at least 1,000,000,000 (a deleted or never-existing id), and stays as it is otherwise.
-- **Inside error strings.** In the `error` member of an AnkiConnect error reply, each run of 10 or more digits that equals the real id of exactly one tokened entity is replaced by its token; other runs stay.
+- **How the recorder's ids fall.** Under the frozen clock every new id of a kind is the clock's milliseconds plus the lowest offset not used by that kind yet (observed: the stock note types get `<ms>` to `<ms>+5`, and the first deck, note and card each get `<ms>`). So ids of different kinds are often equal, and an id freed by a deletion is given to the next entity of that kind (observed for notes, their cards and decks). Two recordings of one scenario give the same ids. Meguri's ids need not follow this scheme; tokens make the two agree.
+- **A token names an entity, not an id.** After each exchange, a tokened entity that no longer exists is retired (below): its token is never given to another entity, and a later entity with the same id gets the next token as a new entity. An entity found at a tokened id whose identity changed within one exchange is new too: a note whose `guid` differs, a card whose note entity or template ord differs, a deck or note type whose name differs. Notes are resolved first: a card's note is compared by the note's token after this exchange's notes got theirs, not by the note id, so a card whose note was deleted and replaced by a new note at the same id within one exchange (a `multi` with `deleteNotes` then `addNote`) is a new card even when its id and ord are unchanged.
+- **Retired tokens.** A token whose entity no longer exists is **retired**. It keeps the entity's last real id. Retiring, like giving new tokens, happens after the exchange and before its reply is normalized, so the reply of the deleting exchange already sees the entity as retired. A live entity always wins over a retired one with the same id; among retired entities of one kind with the same last id (the reference can reuse an id, delete it again and so on), the one retired last wins.
+- **Where ids are replaced.** A JSON integer is replaced by an entity's token only at a position that T10.5 declares to hold an id of that entity, and only when it equals the real id of a live entity with a token. At such a position, an integer that matches no live entity becomes `"#unknown"` when it is at least 1,000,000,000 (a deleted or never-existing id), and stays as it is otherwise; retired tokens are not used at positions.
+- **Inside error strings.** In the `error` member of an AnkiConnect error reply, each run of 10 or more digits is replaced by the token of the tokened entity whose real id it equals. Because ids of different kinds coincide, the kind is taken from the message when it names one: a message that starts with `Note` or `note` looks among notes, `Card` or `card` among cards, `deck` among decks, `model` among note types (`Note was not found: <id>`, `model was not found: <id>`). Any other message is replaced only when exactly one tokened entity of any kind has that id. Live entities are searched first; when none has the id, retired ones are, with the same kind rule, so `Note was not found: <id>` for a deleted note reads `Note was not found: #n1` on both sides even though Meguri's deleted id differs from the reference's. Other runs stay.
 - Integers equal to an entity id at positions T10.5 does not name stay as they are. The recorder reports each such case as a warning naming the scenario, step and pointer, so the table can be completed.
+- A reused id also moves an entity in replies that the reference orders by storage position rather than by id: observed, after a note is deleted and another added, `findNotes` and `findCards` list the new note and its card last, although their ids are now the lowest. Scenarios whose replies list notes or cards do not delete before adding unless the order is compared as a set (T11).
 
 ### T10.2 Substitution in requests
 
 - A JSON string value that is exactly a token (`"#n3"`, `"#c1"`, `"#d2"`, `"#m1"`) is replaced by that entity's real id as a JSON integer.
 - Inside any string (in `json` bodies, `text` bodies, `target` and header values), `${#n3}` is replaced by the decimal real id, `${port}` by the bound port of the exchange's server, and `${fixture_base}` by the base URL of the scenario's HTTP fixtures (`conformance/dsl` D6.9) as this executor serves them, with no final slash (`http://127.0.0.1:<fixture port>`). Each executor serves the fixtures on its own loopback, so the value differs between them. `$${` writes a literal `${`. Any other `${...}` is a scenario error.
 - A token that names no entity yet is a scenario error (`unknown_ref`), as in `conformance/dsl` D7.1.
+- A retired token is replaced by its entity's last real id (`notesInfo` `["#n1"]` after `deleteNotes` asks about the deleted id on both sides). When that id now belongs to a live entity of the same kind (the reference reuses freed ids, T10.1), the substitution is a run error (`reused_ref`): the request would name another entity on one side only. Scenarios therefore use a retired token only before the next entity of its kind is created.
 
 ### T10.3 Times and environment values
 
@@ -442,6 +448,9 @@ For every scenario that is not `pass`, `tools/mg servers-contract` reports, in t
 | a deviation entry `absent` on `/steps/0/reply/headers/access-control-allow-headers` for a stub that drops that header and changes `content-type` | `fail` with only the `content-type` difference reported; the entry listed as applied |
 | a Migaku equivalence scenario whose resulting note is replayed into the anki oracle | `pass`; with one field of the add record mutated before the replay, `fail` on that field's pointer and on `sfld`/`csum` when it is the sort field |
 | an oracle scenario whose request body names `"#n9"` with only 2 notes | `error`, `unknown_ref` |
+| `addNote` (`#n1`), `deleteNotes ["#n1"]`, then `notesInfo ["#n1"]` | both executors send the deleted id; the reply matches the golden |
+| as above with an `addNote` (`#n2`) before the `notesInfo`, recorded | `error`, `reused_ref` (the reference gave `#n2` the freed id) |
+| `updateNoteFields` on a deleted `#n1` | the error reads `Note was not found: #n1` on both executors |
 | a reply id at a position T10.5 does not list | recorded unchanged; the recorder's warning names the step and pointer |
 
 ## T18. Planned harness scenarios
@@ -457,9 +466,9 @@ For every scenario that is not `pass`, `tools/mg servers-contract` reports, in t
 
 ## T19. Open questions
 
-1. Whether the recorder can drive the add-on's permission dialog from its driver add-on (T7.2). If it cannot, `permission` steps other than with an already allowed or denied origin become declared-only, and R1749's prompt outcomes are checked only against the spec.
-2. Whether the add-on build of 2025-11-09 is byte-identical to a public upstream commit. Only the installed build's date is known; U136's `ADDON_PIN` records the hash, and the oracle maintainer finds the matching commit or uses the local-only archive (T9).
-3. Whether two runs of Anki under libfaketime always assign the same note and card ids. Tokens make this harmless for replies, but `#unknown` (T10.1) depends on ids of deleted entities being at least 1,000,000,000, which holds for any clock after 2001.
+1. Settled: the recorder's driver add-on answers the add-on's permission dialog (T7.2). Observed: `allow`, `deny` and `deny_ignore` each give the reply and the list change T7.2 states, and an ignored origin is denied with no dialog. A dialog with no queued answer holds every request, so `none` stays declared-only.
+2. Whether the add-on build of 2025-11-09 is byte-identical to a public upstream commit. The oracle pins upstream release 25.11.9.0, the release named for that date and the last one before it, by its source archive's hash (T9). The user's installed copy no longer exists, so byte identity with it cannot be checked. Its 121 actions match the pinned release exactly (`servers/ankiconnect-envelope` E12). Still open, as a fact that no probe can settle.
+3. Settled: two fresh recorders at the same clock start gave byte-identical replies, ids included. Ids follow T10.1's "How the recorder's ids fall": they coincide across kinds and a deleted id is reused, which T10.1's entity rule and error-string rule handle. `#unknown` still needs ids of deleted entities to be at least 1,000,000,000, which holds for any clock after 2001.
 4. Settled: the add-on's `cardsInfo` `question` and `answer` start with the note type's CSS in a `<style>` element (Anki 26.9.3 renders them that way), and `servers/ankiconnect-actions` gives Meguri the same start. T10.3 normalizes nothing beyond `conformance/render-ops#Q5.4`, so any remaining difference becomes a deviation entry.
 5. Whether the AnkiConnect transcript suite should also record replies with `Origin` values of real client extensions (their extension ids). The inventory uses synthetic extension ids, since the add-on treats every extension id alike (`servers/ankiconnect-clients` C2).
 

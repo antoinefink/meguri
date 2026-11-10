@@ -39,3 +39,29 @@ replies; `${fixture_base}` and `<fixture>`; the `getDecks` position; the
 deviation `tags` selector and the `no-origin` tag; the `--tag` and id-prefix
 filters of the job; and the step order with background exchanges. The
 `retry_tick` step was folded into `advance`.
+
+## Probes against the running add-on (2026-11-10)
+
+Session s-20261110T085429Z-165d83d3, item `ac-envelope`. AnkiConnect 25.11.9.0
+(commit `532a3c8`, `oracle/ankiconnect/ADDON_PIN`) in Anki 26.9.3 offscreen,
+image `meguri-oracle-ankiconnect:spike`, `ORACLE_CLOCK_START=1894701600`.
+
+| Spec text | Result |
+|---|---|
+| T7.2, T19.1 | the driver add-on's `allow`, `deny`, `deny_ignore` answers gave granted / denied / denied and the list changes stated; a prompt with no answer held the ping and `version` for at least 4 s |
+| T9 `oracle.addon.sha256` | defined as ADDON_PIN's `archive_sha256` (the Dockerfile's `ADD --checksum` value); the installed files are checked against ADDON_PIN's per-file hashes at build |
+| T10.1, T19.3 | `modelNamesAndIds`: stock types at `1894701600000` to `...005`; `createDeck`, `addNote`, its card: `1894701600000` each; after `deleteNotes` of the first note, the next `addNote` and its card got `1894701600000` again; after `deleteDecks`, the next `createDeck` got the freed deck id; `createModel` got `...006`; three containers at the same clock start gave the same ids |
+| T10.1 order note | after the delete and re-add, `findNotes` and `findCards` listed the re-used id last |
+| T10.1 error strings | `Note was not found: 1894701600099`, `model was not found: 1894701600099` |
+| T10.3 | `notesInfo` and `notesModTime` `mod` equal the clock start (1894701600); `createModel` template and field ids are large random integers |
+
+## Review fixes (2026-11-10, second pass)
+
+Same session. Meguri decisions, no external source beyond the probes above:
+retired tokens keep their entity's last real id for request substitution and
+for error strings, live entities winning; `reused_ref` when a retired id was
+reused by a live entity (the reference reuses freed ids, T19.3 probe); card
+identity compared by note entity (T10.1); the `HEAD` exemption from the
+Content-Length check (T8), following `servers/migaku-protocol` P4.
+`conformance/oracle.json` was checked: it has no `ankiconnect_addon_sha256`
+yet, so T9 names ADDON_PIN's `archive_sha256` as the current pin.

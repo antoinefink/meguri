@@ -23,3 +23,35 @@ header choices for scenarios (`application/json` for the extension envs),
 the `no-origin` and `client:none` tags, the scenario list and the literal
 parameters of each scenario, and which forms are marked known, assumed or
 unverified.
+
+Probe of the pinned add-on (2026-11-10, wave 5 item `ac-actions`):
+AnkiConnect 25.11.9.0 (`ADDON_PIN`, commit `532a3c8`) in Anki 26.9.3, image
+`meguri-oracle-ankiconnect:spike`, internal network, tmpfs `/scratch`,
+`ORACLE_CLOCK_START=1894701600`, `TZ=Europe/Paris`, no published port;
+containers `ac-actions-*`, removed afterwards. The C6 setup was made through
+the add-on's actions; every single-call C7 oracle row except
+`asbplayer/request-permission-key` (needs a key in the add-on's config), and
+each call of the sequence rows on its own, was sent with its env's `Origin`, `Content-Type` and `version`. URL attachments
+used a loopback HTTP server inside the container; the picture was a synthetic
+1x1 PNG, not the not-yet-written `pixel.png` fixture. Observed and written
+into C3 and C7: `multi` with a query-less `findNotes` answering `[]`; the
+add-on's `model was not found: Nope`; scan-order card lists; the
+`storeMediaFile` names (given name, or `<stem>-<SHA-1 hex>.<ext>` with
+`deleteExisting: false` and different bytes); `Card 1` and stock CSS for
+`createModel` without names or CSS; the model's `did` after adds;
+`guiEditNote` failing on an existing note and Anki's inconsistent-database
+text for an unknown one; `guiSelectedNotes` returning the earlier selection.
+Every other reply was as the first pass expected. C9.1 to C9.10 are client
+facts and were not probed. Scripts and raw outputs stayed in the session
+scratchpad.
+
+Second review fix (same session): C7 `mpvacious/find-models-by-name`'s `did`.
+The add-on's note builder (installed `addons21/2055492159/__init__.py`,
+`createNote`) sets `did` on the note type dict that Anki's Python model
+manager caches, so the add-on's own `addNote` and `canAdd*` change what
+`findModels*` report in that session; Anki 26.09.3's `Collection.add_note`
+(`pylib/anki/collection.py`) and schema-11 conversion
+(`rslib/src/notetype/schema11.rs`, `did` from the stored target deck) do not.
+A setup applied through the library therefore leaves `did` `null`. C9.11 now
+cites `specs/servers/ankiconnect-gui.md` G11, which already declares both
+`guiEditNote` differences.
