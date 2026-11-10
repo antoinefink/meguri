@@ -142,3 +142,11 @@ wrong role, wrong type and an unknown alias refuse; unknown grants still refuse.
 Focused run `20261110T210337Z-22365` passed all four affected wrappers. Privacy
 `20261110T210347Z-23038` and similarity `20261110T210342Z-22684` pass. The next
 native build is still pending.
+
+Native `build-app/20261110T210440Z-23414` passes on clean `7331db13`, with
+the declared frozen agent-build artifact. This is the first passing native
+simulator build for this preparation: the unchanged final product, agent,
+platform, signature, entitlement and first-freeze checks all completed.
+No app was launched, no account was read and no CloudKit exchange was run.
+The signed round trip still awaits the dedicated VM's test-account sign-in
+and remaining execution evidence. The full batch gate remains pending.
