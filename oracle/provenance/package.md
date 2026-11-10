@@ -73,3 +73,20 @@ Harvest rows classified with this unit (`conformance/catalog/harvest.csv`):
 the two thinning tests (a hand-built set with small limits, covered by
 `period-boundaries` and `week-boundary`; a year of daily backups with the default
 limits, covered by `retention-hourly-400-days`).
+
+# Package specs: collection package import with media and legacy formats (U124)
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) on 2026-11-10 to write
+`specs/package/container.md` P19 and the media and legacy parts of
+`specs/conformance/package-ops.md` E2.2, E2.3 and E4.1. No code was copied;
+nothing was probed against the oracle in this session (the oracle was held by
+another workflow), so the new `package/colpkg/` scenarios must confirm
+these readings when recorded.
+
+| Spec section | Anki file | Read for |
+|---|---|---|
+| container P19; package-ops E2.2 | `rslib/src/import_export/package/colpkg/import.rs` (media restored before the collection rename; latest format compares the media database's checksum for the name after registering folder changes, legacy compares the existing file's length with the member's uncompressed size; a differing file is overwritten through a temp file and rename; no file is ever removed) | the reuse test per format and the absence of deletion |
+| container P19; package-ops E2.3 (draft row) | `rslib/src/import_export/package/media.rs` (legacy map keyed by member number, names normalized after the safety check, size and hash unset; a mapped member missing from the archive is an invalid-input error, raised before the collection rename) | the legacy map, and the missing-member failure the driver must map |
+| package-ops E2.2 (scan by time) | `rslib/src/media/mod.rs` (checksum getter reads the media database; changes registered by the change tracker) | why a scenario advances the clock before a change the import must see |
+| container P16.5 | `rslib/src/import_export/package/colpkg/import.rs` (media entries restored one by one in map order before the collection rename, so a failure part way leaves earlier files written; an existing file is overwritten in place, never moved aside), `rslib/src/sync/media/database/client/changetracker.rs` (the folder's modification time checked first, then each file's, in whole seconds; an equal time skips the file) | the three differences and why the scenarios avoid them |
+| package-ops E2.3 (draft row) | `oracle/driver/ops/colpkg.py` (the corrupt-kind set: protobuf, I/O and sync-other errors) read together with `media.rs` above | that the missing-member error needs a new driver mapping |

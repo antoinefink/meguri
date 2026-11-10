@@ -241,6 +241,20 @@ Interrupted
 evaluate_with_time_series_splits
 log_loss
 rmse_bins
+# The oracle side of O17: Anki's backend calls and request fields the ops
+# drive, and the conformance op, observation, rejection and form names of O17.1.
+ComputeFsrsParams
+EvaluateParamsLegacy
+current_params
+health_check
+compute_fsrs_params
+optimize_all_presets
+optimizer_run
+fsrs_model_check
+invalid_cutoff
+invalid_search
+one_preset
+all_presets
 
 # Pending-answer journal durable identity and fixed migration report (C12).
 fgetattrlist

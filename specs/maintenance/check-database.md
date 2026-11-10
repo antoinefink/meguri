@@ -148,7 +148,7 @@ Count: one per deck created, in `decks_missing`. Scenario `maintenance/check-db/
 
 ### C9.3 Filtered fields outside a filtered deck (R1643)
 
-Every card with `odid` above 0 whose `did` names a normal deck gets `odid` 0 and `odue` 0. Its other columns stay, `mod`, `usn` and `data` included (`data` byte for byte). Each such card is counted in `card_properties`. A card whose `did` names a filtered deck is left alone, whatever its `odid` names.
+Every card with `odid` above 0 whose `did` names a normal deck gets `odid` 0 and `odue` 0. Its other columns stay, `mod`, `usn` and `data` included (`data` byte for byte). Each such card is counted in `card_properties`. A card whose `did` names a filtered deck is left alone, whatever its `odid` names, also an `odid` that names no deck: C9.2 creates decks for missing `did`s only (scenario `maintenance/check-db/filtered-deck-kept`).
 
 Meguri reads only the cards' `id`, `did`, `odid` and `odue` here. Anki reads every column of each card it changes and stops the run, changing nothing, when one is out of its stored range (for example a negative `reps`); Meguri goes on and leaves those columns. Anki also writes the card's `data` back in its own canonical form: keys it does not know are dropped, a value that is not a JSON object becomes `{}`, `s` without `d` is dropped, and `s`, `d`, `dr` and `decay` are rounded to 4, 3, 2 and 3 decimal places. Decided 2026-10-27, data safety: Meguri keeps `data` as stored, since this repair is about `odid` and `odue` only. Both are deviation `check-db-lrt-reads-needed-columns` (C8.7, C17).
 
@@ -191,7 +191,7 @@ The config key `nextPos` becomes the largest `due` of the cards with `type` 0 (a
 - When the count is above 0, the tables are re-keyed in this order: `notes` (and every card's `nid` that named an old note id), then `cards` (and every review-log row's `cid` that named an old card id), then `revlog`. In each table the rows above the cutoff, in ascending order of their old id, take the new ids `now_ms`, `now_ms` + 1, `now_ms` + 2, ... No stamp changes; graves are not touched.
 - Example (scenario `maintenance/check-db/future-ids`, `now_ms` T): a note at T + 2 days and one at T + 1 day; only the first is counted, and it takes T, whatever larger valid ids exist.
 - When a new id is already used by a row of that table, Anki stops with a constraint error and changes nothing. Meguri skips every id already used in the table, so the k-th row takes the k-th unused id from `now_ms` up. Deviation `check-db-future-ids-skip-used` (C17).
-- C8.7 runs before this step, so a card's `lrt` set from a review-log row that is re-keyed here still names the row's old id. The next run's C8.7 then corrects it and counts it in `card_last_review_time` (Anki does the same).
+- C8.7 runs before this step, so a card's `lrt` set from a review-log row that is re-keyed here still names the row's old id. The next run's C8.7 then corrects it and counts it in `card_last_review_time` (Anki does the same). Scenario `maintenance/check-db/future-ids-lrt`.
 
 ## C11. The schema stamp and `col.mod`
 
@@ -272,7 +272,7 @@ Not deviations, since no scenario can show them: the order of backup and integri
 
 ## C18. Scenarios and tests
 
-### C18.1 Goldens on this branch
+### C18.1 First goldens
 
 | Scenario | Shows |
 |---|---|
@@ -283,11 +283,11 @@ Not deviations, since no scenario can show them: the order of backup and integri
 | `maintenance/check-db/future-ids` | C10.4: one id two days ahead re-keyed to `now_ms`, one exactly a day ahead kept |
 | `sched/memory/lrt-repair` | C8.7 in full (`sched/memory-state#M6`) |
 
-They become active when the runner's `check_db` adapter runs this op: the change that lands it creates `conformance/scenarios/maintenance/area.yaml` listing them (it does not exist yet).
+These and every scenario of C18.2 have goldens recorded at the current pin under `conformance/goldens/maintenance/check-db/`. They stay inactive until U128's `check_db` adapter runs the op: the change that lands it adds `check-db/*` to `conformance/scenarios/maintenance/area.yaml` (which already lists `optimize/*`). That pattern also makes C18.4's live `meguri-studied-handoff` active, which T1 then requires; if Meguri's executor does not yet declare what that scenario's first segment uses (FSRS answers, `forget`, `suspend`, `edit_note`, `delete_notes`, `handoff`; `conformance/dsl` D9.2), the change lists the other `check-db/` scenarios by name instead and the pattern comes when those capabilities do. C17's four entries are already in `conformance/deviations.yaml` with the scenarios that show them.
 
-### C18.2 To record (oracle maintainer)
+### C18.2 Recorded from these descriptions
 
-Each uses only existing scenario ops (`db_exec`, `check_db`, `add_note`, `advance`, `answer`, `set_config`, setup) and, as observations, `db_exec` selects and `undo_status`. Unless a row says otherwise, the scenario first sets `usn` 5 on the rows it damages and advances the clock 1 hour, so a stamp shows, and ends with `SELECT mod, scm FROM col` and a second `check_db` that finds nothing.
+Each uses only existing scenario ops (`db_exec`, `check_db`, `add_note`, `advance`, `answer`, `set_config`, setup) and, as observations, `db_exec` selects and `undo_status`. Unless a row says otherwise, the scenario first sets `usn` 5 on the rows it damages and advances the clock 1 hour, so a stamp shows, and ends with `SELECT mod, scm FROM col` and a second `check_db` that finds nothing. Every row and every `failed` scenario below has its golden.
 
 | Scenario (`maintenance/check-db/`) | Damage and observation |
 |---|---|
@@ -328,3 +328,19 @@ Recorded with the rejection `failed` of `conformance/collection-check` K10 (`dsl
 - An answer submitted during the repair op is committed after it and visible; a card answered after the backup and before the repair op keeps its new scheduling unless a repair applies to its new values.
 - T1 (R1925): a collection opened, studied (200 answers) and closed by Meguri gives the oracle's Check Database zero problems (`tools/mg oracle check`).
 - Bench (R1847): C16's budget.
+
+### C18.4 Written ahead of their goldens (oracle maintainer)
+
+Inactive and without goldens until `tools/mg oracle record maintenance/check-db` records them; each uses existing ops only.
+
+| Scenario (`maintenance/check-db/`) | Damage and observation |
+|---|---|
+| `future-ids-lrt` | a review card (answered Easy) whose only review-log row is given an id two days ahead: the first run writes `lrt` from the old id and re-keys the row to `now_ms` (`card_last_review_time` 1, `future_ids` 1, `scm` set, the card's `mod` and `usn` kept); the second run corrects `lrt` to the new id (`card_last_review_time` 1, `scm` set again); a third finds nothing (C8.7, C10.4's last rule) |
+| `filtered-deck-kept` | a filtered deck row (`conformance/deck-ops#K13`) holding one card whose `odid` is its home deck and one whose `odid` is 777, no deck: nothing counted, no deck 777, `odid`, `odue`, `mod`, `usn` and `scm` unchanged; `col.mod` not observed (deviation `check-db-no-change-keeps-mod`) (C9.2, C9.3) |
+| `meguri-studied-handoff` | live (T1, R1925): Meguri adds four notes with FSRS on, answers them on three days over four with every rating, resets one card, suspends a card of a note it keeps, edits and deletes a note; after `handoff: oracle`, `pragma_integrity_check` reads `ok` and Anki's Check Database counts nothing. It complements C18.3's 200-answer T1 suite, which stays a `tools/mg oracle check` job |
+
+Needs a new op (`conformance/maintenance-ops#M2`, draft, no driver op yet), so not yet in `conformance/`:
+
+| Scenario (`maintenance/check-db/`) | Damage and observation |
+|---|---|
+| `corrupt-page` | a collection with notes and one review; `corrupt_page: {table: revlog}`; `check_db` gives the rejection `corrupt` (C4, C13; `conformance/collection-check` K10); a second `check_db` gives `corrupt` again, since nothing was repaired. Meguri's executor maps its `Corrupt` error to the rejection and moves to `Failed{Corrupt}`, which only C18.3's tests observe |

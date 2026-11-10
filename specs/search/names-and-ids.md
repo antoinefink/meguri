@@ -5,7 +5,7 @@ Requirements: R1050, R1051, R1052, R1053, R1054, R1055, R1056, R1057, R1058, R10
 Anki: 26.09.3
 Scenarios: conformance/scenarios/search/tags/, conformance/scenarios/search/decks/, conformance/scenarios/search/notetypes/, conformance/scenarios/search/ids/, conformance/scenarios/search/dupe/
 
-What the name and id terms match: `tag:`, `deck:`, `preset:`, `note:`, `card:`, `nid:`, `cid:`, `did:`, `mid:` and `dupe:`. The values each term holds are `grammar.md` G8, the scope of each term `query-model.md` Q3 and Q5, and how terms combine `query-model.md` Q1, Q4 and Q7. Every rule here was checked against the oracle; the scenarios each section names pin its examples, except those of N3.3, whose scenario is still to be written (N8).
+What the name and id terms match: `tag:`, `deck:`, `preset:`, `note:`, `card:`, `nid:`, `cid:`, `did:`, `mid:` and `dupe:`. The values each term holds are `grammar.md` G8, the scope of each term `query-model.md` Q3 and Q5, and how terms combine `query-model.md` Q1, Q4 and Q7. Every rule here was checked against the oracle; the scenarios each section names pin its examples (N8), except those of `search/decks/preset-missing`, `search/dupe/entities` and `search/regex/glob-size`, which await their first recording.
 
 ## N1. Shared rules
 
@@ -103,7 +103,7 @@ A card matches when its `did` is a matching deck, or when its `odid` is not 0 an
 - letter case folds with simple case folding: `deck:ÜBER` matches `über`, `deck:straße` does not match `STRASSE`;
 - `deck:**` matches the cards of every existing deck, which differs from `deck:*` only for cards whose deck row is missing.
 
-The scenario `search/decks/names` is to pin these examples; it is not yet written, so no golden holds them today (`search/decks/current` pins only `deck:current` and `deck:default`).
+Scenario: `search/decks/names`.
 
 ### N3.4 `deck:current` (R1055, R1057)
 
@@ -125,7 +125,7 @@ So `deck:current` takes the current deck's subdecks and, through `odid`, the car
 - The preset is the row of `deck_config`, taken in ascending `id` order, whose `name` first equals the value under unicase equality: `preset:fast` and `preset:FAST` find `Fast`, `preset:straße` finds `STRASSE`. When none does, no card matches.
 - The decks using it are the normal decks whose stored preset id, the `config_id` of the normal-deck kind (`decks/deck-presets`), equals that row's id (filtered decks have none). The comparison is literal, with no fallback: a deck whose `config_id` names no existing preset uses the default preset for scheduling but matches no `preset:` search, `preset:Default` included.
 - A card matches when its `did` or its `odid` is one of those decks.
-- Because the value keeps its escapes, a backslash is part of the name: `preset:a\b` finds the preset `a\b`, and `"preset:Japanese \"Core\""` looks for the name `Japanese \"Core\"` with its backslashes, so it does not find a preset named `Japanese "Core"`. A preset whose name contains `"` cannot be found by `preset:`. Code that builds a `preset:` search for a name (U88, U46, U47) must keep this in mind; the oracle confirms it (`search/decks/presets`).
+- Because the value keeps its escapes, a backslash is part of the name: `preset:a\b` finds the preset `a\b`, and `"preset:Japanese \"Core\""` looks for the name `Japanese \"Core\"` with its backslashes, so it does not find a preset named `Japanese "Core"`. A preset whose name contains `"` cannot be found by `preset:`. Code that builds a `preset:` search for a name (U88, U46, U47) must keep this in mind; the oracle confirms it (`search/decks/presets`). A deck whose preset row was deleted is found by no `preset:` search (`search/decks/preset-missing`).
 
 ### N3.7 Cards in filtered decks (R1268)
 
@@ -165,7 +165,7 @@ The term behind the editor's "Show duplicates". G8 gives a note type id and a te
 2. K is the first 4 bytes, read as a big-endian unsigned 32-bit integer, of the SHA-1 digest of the UTF-8 bytes of C as it is: only steps 2 and 3 of `text/checksum-and-sort-field#C4`, with no second H5, no NFC and no control-character removal. H5 is not idempotent (H4 decodes entities, and a second pass removes the tags they produced), so a first field `&lt;b&gt;Cat` has the stored checksum of `<b>Cat`, and `dupe:<id>,&lt;b&gt;Cat` gives C = `<b>Cat` and finds it; hashing H5 of C (`Cat`) would miss it.
 3. A note matches when its `mid` equals the id, its `csum` column equals K, and its stored first field (the text of `notes.flds` before the first U+001F), stripped by H5 without any NFC step, equals C exactly.
 
-So letter case, spaces and sound tags count: `dupe:<id>,Cat` finds `Cat` and `<b>Cat</b>`, not `cat` or `Cat ` (trailing space); `dupe:<id>,Cat[sound:x.mp3]` finds only a first field holding that sound tag; `"dupe:<id>,<img src=\"x.jpg\">Cat"` finds `<img src="x.jpg">Cat` (both strip to ` x.jpg Cat`); `"dupe:<id>,Tom & Jerry"` finds `Tom & Jerry` and `Tom &amp; Jerry`. An empty text finds notes whose first field strips to nothing. Other note types, and text in other fields, never match. The note itself is not excluded (the editor excludes the note being edited when it shows the result, U27, U191). `csum` is read as stored: a note whose stored checksum does not fit its field is not found. Scenario: `search/dupe/first-field`.
+So letter case, spaces and sound tags count: `dupe:<id>,Cat` finds `Cat` and `<b>Cat</b>`, not `cat` or `Cat ` (trailing space); `dupe:<id>,Cat[sound:x.mp3]` finds only a first field holding that sound tag; `"dupe:<id>,<img src=\"x.jpg\">Cat"` finds `<img src="x.jpg">Cat` (both strip to ` x.jpg Cat`); `"dupe:<id>,Tom & Jerry"` finds `Tom & Jerry` and `Tom &amp; Jerry`. An empty text finds notes whose first field strips to nothing. Other note types, and text in other fields, never match. The note itself is not excluded (the editor excludes the note being edited when it shows the result, U27, U191). `csum` is read as stored: a note whose stored checksum does not fit its field is not found. Scenarios: `search/dupe/first-field`, and `search/dupe/entities` for step 2 (`&lt;b&gt;Cat` finds the first field `&lt;b&gt;Cat`, `<b>Cat` finds `Cat` and `<b>Cat`).
 
 Meguri reads the candidates through the index on `notes.csum` (`ix_notes_csum`), then compares the stripped first fields. It reuses the note save path's H5 strip and the save path's hash of an already stripped text (C4 steps 2–3, U20, U27), never a helper that takes a raw first field and strips or normalizes it again.
 
@@ -182,11 +182,12 @@ Meguri reads the candidates through the index on `notes.csum` (`ix_notes_csum`),
 |---|---|
 | `search/tags/hierarchy` | N2.1, N2.2 (AE49 tag part) |
 | `search/tags/regex-and-nc` | N2.3, N2.4, N2.5 |
-| `search/decks/names` (not yet written) | N3.2, N3.3, N3.7 |
+| `search/decks/names` | N3.2, N3.3, N3.7 |
 | `search/decks/current` | N3.4 |
-| `search/decks/presets` | N3.6 |
+| `search/decks/presets`, `preset-missing` (no golden yet) | N3.6 |
 | `search/ids/lists` | N3.5, N5 |
 | `search/notetypes/names` | N4 |
-| `search/dupe/first-field` | N6 |
+| `search/dupe/first-field`, `entities` (no golden yet) | N6 |
+| `search/regex/glob-size` (no golden yet) | N2.2 step 4, N3.3, N4.1, N4.2: glob expressions over the size limit (`text-matching.md` T12.1) |
 
 Filtered decks in these scenarios are rows written with `db_exec` as `specs/conformance/deck-ops.md` K13 (U28) describes (fixed id, deck common `X'08011001'`, the filtered kind blob given there); normal decks with fixed ids copy the default deck's `common` and `kind`. Note, card and note type ids come from the frozen clock (`storage/ids-usn-mtime#I2`): the scenarios pin them with an `ids` observation or a `db_exec` read before the searches that name them.

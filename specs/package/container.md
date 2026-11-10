@@ -3,9 +3,9 @@
 Spec: package/container
 Requirements: R1597, R1598, R1599, R1619 (the latest-format, collection-only part of each), R2004 (atomic package output), R2015 (disk preflight), R1635, R1852, R1638 (data side), R1626, R1627, R1628, R2018 (P16 local media import); supports R2005, R2009 (format half)
 Anki: 26.09.3
-Scenarios: conformance/scenarios/package/collection-package/
+Scenarios: conformance/scenarios/package/collection-package/, conformance/scenarios/package/colpkg/ (P16, P19)
 
-The zip container that collection packages (`.colpkg`) and deck packages (`.apkg`) share, in its latest format, for packages that hold a collection and no media file. It covers how Meguri reads such a package (bounded, into a staging directory), how it writes one (backups U126, server copies U109, and later U124's export without media), and how it inspects one before a restore (U127). The legacy formats are U120's, media entries U122's, the legacy writer U123's (`package/legacy-export`): each extends the sections that name it. P15 defines the narrow RF4 latest-format media writer/verifier used by user collection-file export, without accepting U122/U124 or changing the collection-only writers. P16 extends local collection-file inspection and activation to media; it is Meguri design, not a claim of new foreign behavior. Swapping an inspected package into place is `engine/collection-replace`. The scenario vocabulary is `specs/conformance/package-ops.md`.
+The zip container that collection packages (`.colpkg`) and deck packages (`.apkg`) share, in its latest format, for packages that hold a collection and no media file. It covers how Meguri reads such a package (bounded, into a staging directory), how it writes one (backups U126, server copies U109, and later U124's export without media), and how it inspects one before a restore (U127). The legacy formats are U120's, media entries U122's, the legacy writer U123's (`package/legacy-export`): each extends the sections that name it. P15 defines the narrow RF4 latest-format media writer/verifier used by user collection-file export, without accepting U122/U124 or changing the collection-only writers. P16 extends local collection-file inspection and activation to media; it is Meguri design, not a claim of new foreign behavior. P19 adds the legacy formats to that import (U124). Swapping an inspected package into place is `engine/collection-replace`. The scenario vocabulary is `specs/conformance/package-ops.md`.
 
 ## P1. Formats
 
@@ -319,7 +319,7 @@ this output extension.
 
 ### P16.1 Scope and owned inspection
 
-This extension admits latest-format whole-collection files through the existing local entry flow. It starts no Anki server request. Server work remains frozen. Legacy formats and deck-package merges retain their separate contracts.
+This extension admits latest-format whole-collection files through the existing local entry flow. It starts no Anki server request. Server work remains frozen. Deck-package merges retain their separate contract; a legacy whole-collection file follows P19, which changes only what it names here.
 
 Keep the existing coordinated source lifetime, owned source copy and opaque inspection handle. Bind confirmation to the source SHA-256, destination, engine, collection generation and committed operation sequence. The handle also owns the validated media inventory and bytes. A path or client-supplied count never replaces that authority. Check these guards again after participant flush and before activation; stale confirmation requires a new preview. Preserve the selected source.
 
@@ -377,7 +377,20 @@ Until this entire path is implemented and verified, retain the explicit media-in
 | Entry progress and cancellation | Cancel from the last cancellable phase before rename: restore the old database/media/journal view and generation, or recorded absence. Cancel from the delivered `Committing` callback: activation has occurred, required completion and directory sync still run, and the result is success or a typed activated failure, never `Cancelled`. Cover a post-rename injected failure, retain backup/recovery facts, and verify callback delivery holds neither core nor progress-sink locks. |
 | Native chain | Mac, iPhone and iPad: Files/native import of generated media, rendered image/audio, accepted answer, relaunch without fixture reseed, native export with all media, then independent package comparison of saved reviews, media names and bytes. |
 
+Oracle scenarios (`specs/conformance/package-ops.md` E5): `conformance/scenarios/package/colpkg/media-merge` (the merge of P16.2 against Anki's import: a file with equal bytes kept, files with other bytes of the same or another length replaced by the package's, a removed file written again, an unrelated file kept, and a later collection-only import that changes no media file), `package/colpkg/oracle-made-import` (a live chain: the same merge read from packages Anki wrote, in both formats, so Meguri's reader meets Anki's zstd frames and map encoding) and `package/colpkg/refused-media-member` (a mapped member missing from the archive: `Corrupt`, nothing changed). They observe the folder, never the trash, which only Meguri fills (P16.2), and they avoid the cases of P16.5.
+
 Keep `package/file-export` E7.4 and `fixtures/synthetic-collections` F11.1 independent expected-source rules. Freeze the generated input and any declared pre-launch preparation before the app runs. Derive expected post-import stamps and accepted review facts from their existing contracts and recorded inputs. Never make the app's later state or decoded export its own expected baseline. Existing local focused, kill and native checks remain required; neither this addendum nor export proof closes full U124/U162 or any milestone.
+
+
+### P16.5 Differences from Anki 26.9.3
+
+| Case | Anki 26.9.3 | Meguri | What keeps scenarios from seeing it |
+|---|---|---|---|
+| Reuse test, latest format | keeps a present file when the SHA-1 that its media database holds for the name equals the map's; the database learns of a change by a folder scan that compares modification times in whole seconds (the folder's first, then each file's), so a rewrite that leaves those times as the last scan recorded them goes unseen, and the folder's new bytes stay although they differ from the package's | hashes the file's current bytes (P16.2) | each `media_outside` step whose change the import must see comes after an `advance` (`conformance/package-ops#E2.2`, `conformance/media-ops#F12`) |
+| A mapped member missing or unreadable, in a map of several entries | writes files in map order and fails at that member, so the files before it may already be in the folder; the collection is not replaced | refuses at inspection, before any media write (P16.1) | `package/colpkg/refused-media-member` uses a one-entry map |
+| A replaced file | overwritten; its old bytes are gone | kept in the trash (P16.2) | scenarios observe `media_dir`, never `media_trash` |
+
+A scenario that shows one of these needs a `conformance/deviations.yaml` entry.
 
 ## P17. Legacy formats (U120)
 
@@ -411,3 +424,23 @@ Added for U120. One pure function used by U162's file intake and by the local se
 | `notes.txt` holding text | `Unsupported` |
 
 A file classified `Apkg` or `Colpkg` that is not a valid package fails later, at inspect, with `Corrupt` or `TooNew`.
+
+## P19. Legacy collection-file import (U124)
+
+Added for U124 (R1626, R1627, R1628). A `.colpkg` in legacy 1 or legacy 2 format (P1; its `meta` is absent or names version 1 or 2) is imported through P16's flow. Everything P16 says applies (owned inspection, preflight, exclusive phase, forced backup, publication, recovery, outcomes), with the changes below. Anki 26.9.3 imports these packages the same way except where a bullet says otherwise.
+
+- **Collection.** P17's collection entry, extracted and checked as P12 steps 3 and 4 say. Schema 11 to 17 is upgraded to 18 on the staging copy (`storage/schema-upgrade`); every other refusal of the gate stays. The replace stamps `col.scm` and `col.mod` as for any package (`engine/collection-replace#R7`).
+- **Media map.** P17's JSON map and name rules replace P5 and P6: a name is kept as `text/media-filenames#F1` transforms it, and every P17 refusal is `Corrupt`. The map carries no size and no SHA-1: inspection computes both while it stages each payload, and P8's limits and the 16 GiB total apply to the decoded bytes.
+- **Members.** Every map member's numbered zip member is required: one that is missing, unreadable or past a limit is `Corrupt` before anything changes. A numbered member that no map key names is never opened. Decided 2026-11-10: it is ignored, as Anki ignores it, unlike P16.1's latest-format rule, because legacy keys are free decimal strings (`007` names member `7`, P17), so no member count or spelling is fixed to check against.
+- **Reuse test (R1627).** For each map member, the destination file its kept name resolves to under P16.2's exact-name rule is kept as it is, whatever its content, when it is a regular file whose size in bytes equals the payload's decoded size; the payload is then not written. Otherwise P16.2 applies unchanged: the incoming bytes are written under the kept name and a replaced file goes to the trash. Anki 26.9.3 compares only the size for a legacy package, since its map has no hash, and Meguri does the same, so a present file of the same length and other bytes keeps the folder's bytes.
+- **Errors.** P16.4's outcomes, with P17's and the refusals above as `Corrupt`. `UnsupportedFormat` (P12, P13) is no longer returned for a legacy `.colpkg` once U124 lands; a backup restore (U127) still reads only the latest format.
+
+Example: the folder holds `a.png` (4 bytes `FOUR`) and `b.png` (20 bytes); the package's map names `a.png` (4 bytes `four`), `b.png` (5 bytes) and `c.txt`. After the import `a.png` still holds `FOUR`, `b.png` holds the package's 5 bytes (its 20 bytes in the trash) and `c.txt` is written.
+
+| What | Where |
+|---|---|
+| A legacy 2 package with media, exported with Support older Anki versions: upgraded on staging, the source's rows back, a same-length file kept, a resized file replaced, a removed file written, an unrelated file kept | `conformance/scenarios/package/colpkg/legacy-import` |
+| The same reuse rules against a legacy package Anki wrote (live chain) | `conformance/scenarios/package/colpkg/oracle-made-import` |
+| A missing member, an unreadable member, a member past P8's limits, a name P17 refuses: `Corrupt`, nothing changed; an unnamed numbered member never opened | `core/crates/meguri-package/tests/colpkg.rs` |
+| A schema-11 package upgraded and its `scm` set, the process killed right after the database rename: the reopened collection is schema 18 with the new `scm` (P16.3's recovery finishes the activation) | same file |
+| A legacy 1 package (`collection.anki2`, no `meta`) imports as a legacy 2 one | same file |

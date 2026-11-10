@@ -32,7 +32,7 @@ Let D be the card's `odue` when it is not 0, otherwise its `due` (so a card in a
 | 1 (learning) or 4 (preview) | Q compared with N holds, where Q = (D − next-day-at) ÷ 86400 in 64-bit integers, the quotient truncated toward zero |
 | any other | never |
 
-- Overflow of Q (only for a stored `due` or `odue` near the ends of the signed 64-bit range, from another client or a damaged row): when D − next-day-at falls outside that range, the value is SQLite's: the difference is computed as a 64-bit real and divided by 86400 without truncation, so Q lies beyond ±10^14 and compares below (or above) every 32-bit operand. A learning card with `due` −9223372036854775000 is found by `prop:due<0` and not by `prop:due>=0`. Meguri writes the expression into the statement and lets SQLite compute it, or computes the same result; it never wraps or panics. Decided 2026-10-27 (Anki compatibility; no data is written).
+- Overflow of Q (only for a stored `due` or `odue` near the ends of the signed 64-bit range, from another client or a damaged row): when D − next-day-at falls outside that range, the value is SQLite's: the difference is computed as a 64-bit real and divided by 86400 without truncation, so Q lies beyond ±10^14 and compares below (or above) every 32-bit operand. A learning card with `due` −9223372036854775000 is found by `prop:due<0` and not by `prop:due>=0` (`search/props/due-extremes`). Meguri writes the expression into the statement and lets SQLite compute it, or computes the same result; it never wraps or panics. Decided 2026-10-27 (Anki compatibility; no data is written).
 - New, suspended and buried cards never match, whatever their due.
 - Truncation toward zero puts every learning due less than one day either side of next-day-at at 0: one second before the boundary of day 10, a learning card due 10 minutes later and one due 18 hours earlier are both `prop:due=0`; a learning card due 86400 or 86401 seconds before next-day-at is −1.
 - The wrap is Anki's: with today 11, `prop:due<2147483647` compares review cards with −2147483638 and finds none of them, while learning cards are compared with 2147483647 and all match. Scenarios pin it (`search/props/scheduling`).
@@ -161,6 +161,7 @@ Not Anki behavior. `meguri_card_f32`, `meguri_retrievability`, `meguri_relative_
 | Scenario | Sections |
 |---|---|
 | `search/props/scheduling` | P2, P3, P4, P5 |
+| `search/props/due-extremes` (no golden yet) | P4 (stored `due` and `odue` near the ends of the 64-bit range, 32-bit operand bounds) |
 | `search/props/memory` | P6, P7, P8, P14; `search/card-extractors` X3, X5 |
 | `search/props/custom-data` | P9, P12, P14 |
 | `search/history/dst-paris`, `search/history/dst-new-york` | P4 across a change of UTC offset |

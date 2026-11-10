@@ -35,7 +35,7 @@ The note type's kind (standard or cloze) is not part of the draft; it changes on
 Checked in this order; each writes nothing and records no undo step. Before them all, a draft whose origins repeat or lie outside the base (S1.1) is refused with `InvalidArgument`, which also writes nothing and records no undo step.
 
 1. **`Stale`**: the live aggregate's digest differs from the base token (F2). The draft was made against another version of the note type (a sync, the local API or another window changed it); the caller reloads. The op never re-applies an old draft to a changed note type on its own. Decided 2026-10-27: the token is checked twice: on the planning snapshot, and again as the `engine/op-model` O7 precondition inside the write transaction, after the safety backup (S3 step 5). A mismatch at either check returns `Stale` with no replan; a safety backup already taken stays (T6.2), and the caller's next submission, from the reloaded note type, is a new op that T6.1's coalescing may cover.
-2. **`invalid_notetype`** (`notetypes/validation` V2): no field, no template, or a name the normalization refuses. Removing the last field is refused this way (R922: "Notes require at least one field."), and so is removing the last template (R933).
+2. **`invalid_notetype`** (`notetypes/validation` V2): no field, no template, or a name the normalization refuses. Removing the last field is refused this way (R922: "Notes require at least one field."), and so is removing the last template (R933). Such a draft is never rewritten (S3 step 2). Scenario `notetypes/structure/remove-last`.
 3. **`ProtectedField { field }`**: the draft removes a field whose base `prevent_deletion` is true (R922). Anki's core does not refuse this; its editor never offers it. Meguri refuses it in the core so that no caller (an integration included) removes a Cloze or Image Occlusion field that its notes depend on. No scenario covers it.
 4. **`NoteFieldCountMismatch { note }`**: the save rewrites notes (S5) and a note of the type stores more field values than the base has fields (only a damaged collection holds one; Check Database repairs it, `notes/note-records` F1). Rewriting would drop the extra values, so Meguri refuses instead. A note with fewer values is rewritten, its missing values read as empty. Anki pads and truncates when the field list changes, and refuses the whole save when only the sort field changes; no scenario covers either.
 5. The template checks of `notetypes/validation` V3 when `skip_checks` is false, run on the templates as S4 leaves them.
@@ -66,7 +66,7 @@ The schema reasons decide `col.scm` (G3, G5) and the safety backup (S1.2 item 6)
 ## S3. Order of the save
 
 1. Normalize the draft (`notetypes/records` N4 steps 1 to 5, 7) and classify it (S2).
-2. Rewrite template references for renamed and removed fields (S4).
+2. Rewrite template references for renamed and removed fields (S4). A draft with no field or no template skips this step and steps 3 and 4: nothing is rewritten, and step 5 refuses it (S1.2 item 2). S4.3 therefore always has a first field.
 3. Compute the card requirements from the templates S4 leaves (`notetypes/records` N6; S8).
 4. Sort field: the draft's sort field at its final position. When the draft keeps the base's sort field and that field was removed, `notetypes/records` N4 step 6 applies: the index keeps the base value, lowered to the last position when past the end.
 5. Plan (S10) and run the checks (S1.2 items 1 to 5). For a schema-classified save, take the safety backup (S1.2 item 6). Then, in one write transaction: check the base token again (S1.2 item 1; a mismatch rolls back and returns `Stale`), rewrite the notes (S5), remove and renumber cards (S6), generate cards (S7), write the note type rows (`notetypes/records` N3.2) and, for a schema-classified save, set `col.scm` (G5). `col.mod` moves once.
@@ -123,7 +123,7 @@ Standard note type with fields `Front`, `Back`, `Extra`; the rows that say cloze
 | cloze front `{{Intro}}<br>{{cloze:Text}}` | `Text` removed | `{{Intro}}<br>{{cloze:Intro}}` |
 | cloze back `{{cloze:Text}}<br>{{Extra}}` | `Text` removed | `<br>{{Extra}}{{cloze:Intro}}` |
 
-Scenarios `notetypes/structure/rename-field`, `remove-field`, `cloze-fields` and `rewrite-format` (S16: they await `notetype_templates`).
+Scenarios `notetypes/structure/rename-field`, `remove-field`, `cloze-fields` and `rewrite-format` (S16).
 
 ## S5. Notes (R926, R927)
 
@@ -143,7 +143,7 @@ Runs when fields changed or the sort field changed (S2). Renames, option changes
 | same | `A` removed, sort was `A` | `x`, `007` | `x` (index 0 kept) | `x` |
 | `A B C`, sort `C`; `a`, `b`, `c` | `C` removed | `a`, `b` | `b` (index 2 lowered to 1) | `a` |
 
-Scenarios `notetypes/structure/reorder-fields`, `combined-draft`, `remove-field`.
+Scenarios `notetypes/structure/reorder-fields`, `combined-draft`, `remove-field`; `first-field-duplicates` shows the duplicate check finding notes by the new first field after a move.
 
 ## S6. Cards when templates change
 
@@ -222,13 +222,13 @@ Example: a note type with templates `Forward` and `Reverse` where five notes hav
 - The removal lists the note type in the structure report's `removed`, with reason 4 `notetype_removed` (`engine/change-stream#S2.5`, required; S9).
 - **Undo** restores the rows, removes the graves the removal added, and restores `col.scm`, the removed config keys and `curModel`.
 
-Scenario `notetypes/structure/remove-notetype` (S16: it awaits `remove_notetype`).
+Scenarios `notetypes/structure/remove-notetype` and, for the undo, `undo-removals` (S16).
 
 ## S13. Undo
 
 - A draft apply, a removal and a restore are each one undo step (U25): undo restores every row from its before-image (the note type rows with their stamps, notes with their `mod` and `usn`, renumbered cards, removed cards and notes) and removes the graves the step added; cards the step added are deleted without graves, since they were never synced; `col.scm` returns to its value before the step (G5). Redo applies the after-images. Undo and redo take no safety backup of their own (`package/backup-triggers` T6.1 lists the ops, not their undo).
 - An undo or redo of a large step runs as a job with the same declared write (U25).
-- Anki's undo gives the same results (`Update Note Type`, `Remove Note Type`). Meguri's tests check them; a scenario may add undo legs with `undo` (`specs/conformance/undo-ops.md`).
+- Anki's undo gives the same results (`Update Note Type`, `Remove Note Type`), `col.scm`, the removed `_nt_<id>_` keys and `curModel` included. Scenarios `notetypes/structure/undo-add-template` (a template add: generated cards removed without graves, `nextPos` and `col.scm` back; then redo), `undo-removals` (a template removal and a note type removal) and `undo-restore` (`notetypes/restore-to-default` D6) compare undo and redo with Anki's (`specs/conformance/undo-ops.md`). Meguri's tests cover the rest (S16).
 
 ## S14. Deviations
 
@@ -248,7 +248,7 @@ Scenario `notetypes/structure/remove-notetype` (S16: it awaits `remove_notetype`
 
 ## S16. Scenarios
 
-All under `conformance/scenarios/notetypes/structure/`. Schema changes run as accepted (`specs/conformance/notetype-ops.md` T9). All listed scenarios and recorded goldens are now present. Keep them inactive until their ops and the capabilities of `notetype-ops.md` T10.1 exist. U34 makes active those that need only its own ops and U27's and U29's adapters, after their required checks pass.
+All under `conformance/scenarios/notetypes/structure/`. Schema changes run as accepted (`specs/conformance/notetype-ops.md` T9). Every listed scenario is present; those marked "not yet recorded" (added 2026-11-10) wait for `tools/mg oracle record` and use only ops and observations the oracle already has. Keep them inactive until their ops and the capabilities of `notetype-ops.md` T10.1 exist. U34 makes active those that need only its own ops and U27's and U29's adapters, after their required checks pass.
 
 | Scenario | Covers | Golden | Meguri also needs |
 |---|---|---|---|
@@ -264,7 +264,12 @@ All under `conformance/scenarios/notetypes/structure/`. Schema changes run as ac
 | `cloze-fields` | S4 on a cloze note type: rename inside sections, removal with the cloze append on all four texts | recorded | |
 | `rewrite-format` | F3's skips and text preservation; deviation `template-rewrite-keeps-text` | recorded | |
 | `remove-notetype` | S12 | recorded | |
+| `undo-add-template` | S13: undo of a template add removes its cards without graves and returns the note type, `nextPos` and `col.scm`; redo gives the same cards back | not yet recorded | `undo`, `redo`, `undo_status` (U38's undo adapter) |
+| `undo-removals` | S6, S12, S13: undo of a template removal (cards back, graves gone) and of a note type removal (notes, cards, rows, `_nt_<id>_` keys back; `curModel` moved from the removed note type to `Alpha` and back) | not yet recorded | the same |
+| `undo-restore` | `notetypes/restore-to-default` D6, S13: undo and redo of a structural restore | not yet recorded | the same |
+| `remove-last` | S1.2 item 2: removing the last field, then the last template, refused with `invalid_notetype`, nothing written | not yet recorded | |
+| `first-field-duplicates` | S5: `csum` from the new first field, so the duplicate check (AE34, `notes/field-check` K4) finds notes by it | not yet recorded | `fields_check` (U27) |
 
-The listed scenarios, recorded goldens and stated deviations are now in `conformance/`. The language, schemas and Meguri parser recognize the new interfaces (`specs/conformance/notetype-structure-ops.md` M5). Their adapters and U34 acceptance remain outstanding. Restore to Default's scenarios are listed in `notetypes/restore-to-default` D8. U34 also makes U29's gate scenarios (`notetypes/gate/after-sync`, `notetypes/gate/structure`) active, since they wait for its `update_notetype` edits (`notetypes/schema-changes` G8).
+The listed scenarios, the recorded goldens and the stated deviations are in `conformance/`. The language, schemas and Meguri parser recognize the new interfaces (`specs/conformance/notetype-structure-ops.md` M5). Their adapters and U34 acceptance remain outstanding. Restore to Default's scenarios are listed in `notetypes/restore-to-default` D8. U34 also makes U29's gate scenarios (`notetypes/gate/after-sync`, `notetypes/gate/structure`) active, since they wait for its `update_notetype` edits (`notetypes/schema-changes` G8).
 
 Meguri's own tests (`core/crates/meguri-engine/tests/notetype_structure.rs`) cover what no scenario shows: the refusals of S1.2 and S12; `Stale` against a note type changed after the draft was loaded (a local API styling edit committed in the same second as the previous note type write included), and against one changed while the safety backup runs (`Stale` from the write transaction, the backup kept, nothing written); `InvalidArgument` for repeated origins before `Stale`; a draft that removes one template and adds another at the same count (S2 templates changed, S6 removal with graves, `scm` set, a backup); the sort field reason by identity (a move that keeps the sort field reports none, the removal of the sort field reports it); a local API template update naming an unknown field refused by V3; that no op takes a confirmation input; the safety backup: one before the first write of a schema-classified save, a removal and a structural restore; none for a second schema-classified save or structural restore submitted less than 10 minutes after a safety backup when every commit since it can still be undone (T6.1's coalescing), and one again at 10 minutes or after a commit that left the undo history; one for every removal, coalescing notwithstanding (S12); none for a rename-only, text-only or unchanged save, none for a removal of a missing note type, none on undo and redo, and `SafetyBackupFailed` with an injected disk full leaving the collection unchanged (`package/backup-triggers` T10); one transaction and one undo step per draft with an injected write-phase failure leaving everything unchanged; a rename-only draft giving the same result as the field rename op (S1); undo of a template add on 5,000 notes removing the cards without graves and a kill between plan and commit leaving neither; progress and cancel; notes added and fields edited by the local API while a 50,000-note reorder, a template removal or a note type removal is planning (S5, S6, S12 membership and remap); the AE34 duplicate check after moving a field to position 0 on 5,000 notes; and the removal preview (S11).

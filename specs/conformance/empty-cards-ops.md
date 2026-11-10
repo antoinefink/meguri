@@ -3,7 +3,7 @@
 Spec: conformance/empty-cards-ops
 Requirements: R1883, R952, R1015
 Anki: 26.09.3
-Scenarios: conformance/scenarios/cardgen/empty/
+Scenarios: conformance/scenarios/cardgen/empty/, conformance/scenarios/maintenance/empty-cards/
 
 The two scenario ops of Empty Cards: the scan and the delete, the way the Empty Cards screen uses them (scan, show, then delete what it listed). Both executors implement them with the meanings below. The behavior they exercise is `specs/notes/empty-cards.md`.
 
@@ -29,18 +29,20 @@ The two scenario ops of Empty Cards: the scan and the delete, the way the Empty 
 The Empty Cards screen's Delete, for the cards the latest `empty_cards` step listed.
 
 - **Argument** `{keep_notes: <bool>}`: the "Keep notes with no valid cards" option.
-- **Effect.** The delete of `notes/empty-cards` E4 with every card the remembered scan listed and the option. A `delete_empty_cards` step with no earlier `empty_cards` step is `invalid_scenario`. A second delete for the same scan is allowed: its cards are gone and are skipped. The op takes no safety backup on either executor: U131's maintenance flow takes it before calling the delete (`notes/empty-cards` E6), and its scenarios are U131's.
+- **Effect.** The delete of `notes/empty-cards` E4 with every card the remembered scan listed and the option. A `delete_empty_cards` step with no earlier `empty_cards` step is `invalid_scenario`. A second delete for the same scan is allowed: its cards are gone and are skipped. On Meguri the delete op's descriptor carries the safety class of `notes/empty-cards` E6, so the executor takes U127's backup before the write phase, as for any caller; no observation reads backup files, and U131's tests check the backup and its order. On the oracle there is no backup.
 - **Output** `{delete_empty_cards: {deleted: <count>, kept_valid: <count>}}`: the cards deleted and the listed cards kept because they became valid (E4).
 - **Rejections**: none.
 
 ## Y3. Oracle
 
-- `empty_cards` calls Anki's empty-cards report and keeps it. The report's notes carry their empty card ids (already sorted by ordinal, then id) and the all-empty flag; the oracle reads each card's ordinal and the note's card count from the stored rows and groups the notes under their note type's name, in the report's order.
-- `delete_empty_cards` builds the card list as Anki's Empty Cards screen does from the kept report: for each note, every listed card, except that with `keep_notes` a note flagged all empty leaves out its first listed card. It removes them with Anki's removal of cards and the notes they leave empty, as one undoable operation. `deleted` is the number of cards that operation removed; `kept_valid` is always 0, since Anki deletes listed cards without looking again (E5).
+- `empty_cards` first reopens the collection, which drops Anki's note type cache and empties its undo history, then calls Anki's empty-cards report and keeps it. The report's notes carry their empty card ids (already sorted by ordinal, then id) and the all-empty flag; the oracle reads each card's ordinal and the note's card count from the stored rows and groups the notes under their note type's name, in the report's order.
+- `delete_empty_cards` builds the card list as Anki's Empty Cards screen does from the kept report: for each note, every listed card, except that with `keep_notes` a note flagged all empty leaves out its first listed card. It removes them with Anki's removal of cards and the notes they leave empty, as one undoable operation: the `empty_cards` step of `undo-ops.md` V4. `deleted` is the number of cards that operation removed; `kept_valid` is always 0, since Anki deletes listed cards without looking again (E5).
 
 ## Y4. Status
 
 As of 2026-10-27, the language, schemas and Meguri parser accept both ops. The `cardgen/empty/` scenarios and their recorded goldens are on master. They remain inactive until U35 supplies and verifies the missing adapters. Parser support does not accept U35.
+
+U131's scenarios `maintenance/empty-cards/report`, `undo-redo` and `incremental-sync` (`notes/empty-cards` E7) use these ops, the last two with `undo`, `redo`, `undo_status` and, in the third, actors (`sync-ops.md`); they have no goldens yet. On the oracle the scan's reopen empties Anki's undo history (Y3) and the delete then records one `empty_cards` step (Y3, `undo-ops.md` V4), so an undo after a delete reaches that step on both sides when the scenario has emptied Meguri's history first (V5).
 
 Readiness of the three parts:
 

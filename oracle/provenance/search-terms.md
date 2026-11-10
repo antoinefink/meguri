@@ -23,3 +23,12 @@ Europe/Paris and America/New_York, then the kept scenarios under
 | properties P12, P15 (custom data); card-extractors X3, X5–X7 (the former P10, P11, P11.1, P13) | `rslib/src/storage/sqlite.rs`, `rslib/src/storage/card/data.rs`, `rslib/src/serde.rs`, `fsrs` 6.6.2 `src/inference.rs` (crate, not Anki) | the card data reader (per-key leniency, whole-text failure on a non-string `cd`), the custom-data value text, retrievability elapsed time (u32 casts, saturating subtraction), relative retrievability and its fallback, original position |
 | properties P4.1 | `rslib/src/search/mod.rs` | the browser's Due sort uses another rule |
 | history H1–H8 | `rslib/src/search/parser.rs`, `rslib/src/search/sqlwriter.rs`, `rslib/src/scheduler/mod.rs` (day values from `specs/sched/day-clock.md`, U40) | days raised to 1 except `resched:`, the cutoffs from next-day-at, strict versus inclusive comparisons per term, the answer-button filters, the first-answer test of `introduced:`, the six operator windows of `prop:rated` |
+
+Added 2026-11-10, read at the same tag; the scenarios named here have no golden yet:
+
+| Spec section | Anki file | Read for |
+|---|---|---|
+| names-and-ids N3.6 (deleted preset row; `search/decks/preset-missing`) | `rslib/src/search/sqlwriter.rs`, `rslib/src/storage/deckconfig/mod.rs` | the preset found by name in storage, then decks compared by stored preset id with no fallback |
+| names-and-ids N6 step 2 (`search/dupe/entities`) | `rslib/src/search/sqlwriter.rs`, `rslib/src/notes/mod.rs` | one strip of the dupe text, the checksum of that result without a second strip |
+| history H1 (`search/history/odd-ease`) | `rslib/src/search/sqlwriter.rs` | `ease > 0` for answers, `ease != 0` for the first-answer test, `ease = 0` for manual entries; no `type` condition |
+| properties P4 (`search/props/due-extremes`) | `rslib/src/search/sqlwriter.rs` | the learning-due difference and division written into the statement, evaluated by SQLite (real on 64-bit overflow) |
