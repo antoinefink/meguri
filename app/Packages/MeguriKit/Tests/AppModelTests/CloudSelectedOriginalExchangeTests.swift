@@ -84,7 +84,7 @@ extension ReviewCollectionStartupTests {
             if !earlierAutomaticACK { exchange = Task { try await a.exchange() } }
             try #require(try await serviceAppSignal(held.entered, stage: "selected original Service Saved before ACK"))
             let heldBatch = try #require(await sdk.heldSentBatchID)
-            let beforeACK = try await sourceRole.observe()
+            let beforeACK = try await selectedOriginalObservation(sourceRole, stage: .sourcePreACK)
             try #require(beforeACK.observedSeq == edit.seq && beforeACK.entity.revision == revision)
             try #require(beforeACK.entity.digest == edit.noteDigest && !beforeACK.entity.acknowledged)
             try #require(beforeACK.entity.ackedRevision < revision)
@@ -98,7 +98,7 @@ extension ReviewCollectionStartupTests {
                 try #require(try await serviceAppSignal(joined.stream, stage: "selected earlier automatic ACK joined"))
                 await task.value
                 try await sdk.waitForEventBookkeeping()
-                let earlier = try await sourceRole.observe()
+                let earlier = try await selectedOriginalObservation(sourceRole, stage: .earlierAutomaticACK)
                 try selectedOriginalACK(earlier, edit: edit, receipt: actual)
                 try #require(requests.isEmpty && records.isEmpty)
                 exchange = Task { try await a.exchange() }
@@ -109,7 +109,7 @@ extension ReviewCollectionStartupTests {
             try await sdk.waitForEventBookkeeping()
             try #require(requests.count == 1 && records.count == 1 && requests.first == records.first?.exchange)
             guard case .succeeded = records[0].outcome else { throw ServiceWorkflowFailure.refused }
-            let acknowledged = try await sourceRole.observe()
+            let acknowledged = try await selectedOriginalObservation(sourceRole, stage: .sourcePostExchange)
             try selectedOriginalACK(acknowledged, edit: edit, receipt: actual)
             let ackFacts = try #require(try await backend.workflow.entityFacts(name: acknowledged.entity.recordName))
             try #require(ackFacts.ackedSystemFields == actual.record.systemFields && ackFacts.payloadDigest == ackFacts.ackedPayloadDigest)
@@ -129,10 +129,10 @@ extension ReviewCollectionStartupTests {
             let baseline = try await peerRole.validateOwned() // First binding of independent peer capability.
             try #require(!baseline.qChanged && baseline.noteDigest == peerRole.facts.noteDigest)
             // A's retained native Host is gone. Equal bytes on B do not transfer it.
-            await #expect(throws: (any Error).self) { try await sourceRole.observe() }
+            await #expect(throws: (any Error).self) { try await selectedOriginalObservation(sourceRole, stage: .sourceReboundRefusal) }
             let peerBackend = try b.backend
             let peerSDK = try #require(await b.factory.engines.last)
-            let peerBefore = try await peerRole.observe()
+            let peerBefore = try await selectedOriginalObservation(peerRole, stage: .peerBaseline)
             try #require(peerBefore.appliedSeq == nil && !peerBefore.qChanged)
             var peerExchanges = 0
             peerBackend.onCommands = { commands in
@@ -142,7 +142,7 @@ extension ReviewCollectionStartupTests {
             await b.sync.drainOperations(); await b.sync.waitForInputs()
             try await peerSDK.waitForEventBookkeeping()
             try #require(peerExchanges == 1)
-            let peer = try await peerRole.observe()
+            let peer = try await selectedOriginalObservation(peerRole, stage: .peerPostApply)
             let applied = try #require(peer.appliedSeq)
             // This producer joins actual Incoming run, removed intent/inbox and
             // its held-snapshot WAL receipt. Digest covers canonical metadata,
@@ -150,7 +150,7 @@ extension ReviewCollectionStartupTests {
             try #require(peer.qChanged && applied > 0 && applied == peer.observedSeq && applied <= peer.seq)
             try #require(peer.entity.digest == canonical.noteDigest && peer.entity.digest == acknowledged.entity.digest)
             try #require(peer.entity.ackedEnvelopeDigest == acknowledged.entity.ackedEnvelopeDigest)
-            await #expect(throws: (any Error).self) { try await sourceRole.observe() }
+            await #expect(throws: (any Error).self) { try await selectedOriginalObservation(sourceRole, stage: .sourceAfterPeerRefusal) }
             try #require(peer.entity.mediaBytes == nil && peer.entity.mediaSHA256 == nil)
             try #require(try await CoreNoteService().readNote(id: input.noteID) == sourceRow)
             let durable = try await peerBackend.workflow.durableSnapshot()
@@ -222,7 +222,7 @@ extension ReviewCollectionStartupTests {
             try #require(!app.sync.operationFailed)
             let revision = try #require(edit.localRevision)
             try #require(revision > 0 && edit.updatedNotes == 1 && edit.source == .userUndoable)
-            let current = try await role.observe()
+            let current = try await selectedOriginalObservation(role, stage: .refusalBeforeSend)
             try selectedOriginalNonACK(current, edit: edit)
             let baseline = try #require(baselineSnapshot.entities.first { $0.name == current.entity.recordName })
             try #require(baseline.mark == nil && baseline.localRev == baseline.ackedRev && baseline.ackedRev < revision)
@@ -266,7 +266,7 @@ extension ReviewCollectionStartupTests {
             let batch = try #require(await sdk.heldSentBatchID)
             if mode == "server-record-changed" { try #require(!(await sdk.heldSavedNames).contains(current.entity.recordName)) }
             else { try #require((await sdk.heldSavedNames).contains(current.entity.recordName)) }
-            let whileHeld = try await role.observe()
+            let whileHeld = try await selectedOriginalObservation(role, stage: .refusalHeld)
             try selectedOriginalNonACK(whileHeld, edit: edit)
             try #require(whileHeld.entity.ackedEnvelopeDigest == Data(SHA256.hash(data: baselineSaved.record.envelope)))
             let handed = try #require(try await backend.workflow.entityFacts(name: current.entity.recordName))
@@ -322,7 +322,7 @@ extension ReviewCollectionStartupTests {
             try #require(facts.mark != nil && facts.ackedRev < facts.localRev)
             try #require(await sdk.pendingRecordZoneChanges()[current.entity.recordName] == .save)
             if mode == "server-record-changed" {
-                let refused = try await role.observe()
+                let refused = try await selectedOriginalObservation(role, stage: .refusalAfterFailedACK)
                 try selectedOriginalNonACK(refused, edit: edit)
                 try #require(refused.entity.ackedEnvelopeDigest == whileHeld.entity.ackedEnvelopeDigest)
                 // K10.3/K12.1 retain this durable handed history after failure.
@@ -345,7 +345,7 @@ extension ReviewCollectionStartupTests {
                 try #require(facts.localRev > facts.ackedRev && facts.payloadDigest != facts.ackedPayloadDigest)
                 try #require(facts.inFlight.isEmpty)
                 try #require(observations.contains(.savedPendingRemoved(name: current.entity.recordName, requestID: batch)))
-                await #expect(throws: (any Error).self) { try await role.observe() }
+                await #expect(throws: (any Error).self) { try await selectedOriginalObservation(role, stage: .refusalLaterRewrite) }
             }
             try #require(await app.owner.close())
             let exit = await process.close()
@@ -360,6 +360,21 @@ extension ReviewCollectionStartupTests {
             #expect(exit.diagnostics.isEmpty && !exit.diagnosticLimitExceeded)
             throw error
         }
+    }
+}
+
+private enum SelectedOriginalObservationStage: String {
+    case sourcePreACK, earlierAutomaticACK, sourcePostExchange
+    case sourceReboundRefusal, peerBaseline, peerPostApply, sourceAfterPeerRefusal
+    case refusalBeforeSend, refusalHeld, refusalAfterFailedACK, refusalLaterRewrite
+}
+
+@MainActor private func selectedOriginalObservation(_ role: OriginalCloudRoleInspection,
+    stage: SelectedOriginalObservationStage) async throws -> OriginalCloudObservation {
+    do { return try await role.observe() }
+    catch {
+        print("selectedOriginal.observation.refused stage=\(stage.rawValue)")
+        throw error
     }
 }
 

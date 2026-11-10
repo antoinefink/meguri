@@ -357,106 +357,168 @@ impl Runtime {
         digest: [u8; 32],
         after_read: impl FnOnce(),
     ) -> Result<(workflow::EntityFacts, Option<u64>), RuntimeError> {
-        let account = self.publication_account()?;
-        let decision = self.publication_decision()?;
-        let evidence = collection.open_evidence()?;
-        let guard = {
-            let s = self.state();
-            let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
-            if account != b.binding.facts.account || s.tracking_stopped {
-                return Err(RuntimeError::StaleIncarnation);
+        // Record only predicates already reached by the original short circuit.
+        fn mismatch(mask: &mut u16, bit: u32, value: bool) -> bool {
+            if value {
+                *mask |= 1 << bit;
             }
-            ScanGuard {
-                invalidation: s.invalidation,
-                binding: b.binding.id,
-                open: b.open_counter,
-                generation: b.evidence.generation,
-                file: b.file,
-                incarnation: s.incarnation,
-            }
-        };
-        let (result, binding) = self.with_scan(&guard, collection, |s| {
-            if identity.generation() != guard.generation
-                || identity.native_file() != guard.file.pair()
-                || collection.last_seq() != seq
-                || s.tracking_stopped
-            {
-                return Err(RuntimeError::StaleIncarnation);
-            }
-            let store = s.store.as_ref().ok_or(Error::Database)?;
-            let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
-            let runtime = store.runtime_binding(guard.binding)?;
-            if decision.publication.identity != b.binding.facts.publication
-                || decision.publication.decision != meguri_engine::device_state::PublicationDecision::Clear
-                || evidence != b.evidence
-                || store.binding(guard.binding)?.as_ref() != Some(&b.binding)
-                || runtime.file != Some(guard.file)
-                || runtime.open_counter != guard.open
-            {
-                return Err(RuntimeError::StaleIncarnation);
-            }
-            let name = codec::entity_name(&b.binding.facts.record_key.0, codec::Kind::Note, &codec::id_key(id))
-                .map_err(|_| Error::InvalidData)?;
-            let entity = store.entity_dump(guard.binding, &name)?.ok_or(Error::InvalidData)?;
-            if entity.kind != codec::Kind::Note
-                || entity.key != codec::id_key(id)
-                || entity.tombstone_at.is_some()
-                || entity.observer_open != guard.open
-                || entity.observed_generation != guard.generation.0
-                || entity.observed_seq > seq.0
-                || entity.payload.payload_digest().map_err(|_| Error::InvalidData)? != digest
-            {
-                return Err(Error::InvalidData.into());
-            }
-            let intents = store.apply_intents(guard.binding)?;
-            let inbox = store.inbox(guard.binding)?;
-            let applied = s.incoming.runs.iter().rev().find(|run| {
-                !s.incoming.running
-                    && run.native_file == guard.file
-                    && run.generation == guard.generation.0
-                    && run.seq == entity.observed_seq
-                    && run.seq <= seq.0
-                    && !run.entry_ids.is_empty()
-                    && run.changed_keys.contains(&name)
-                    && !intents.iter().any(|i| i.id == run.intent_id)
-                    && !inbox.iter().any(|e| run.entry_ids.contains(&e.id))
-                    && s.incoming
-                        .receipts
-                        .iter()
-                        .any(|r| r.identity() == identity && r.through().0 >= run.seq)
-            });
-            Ok(((entity, applied.map(|r| r.seq)), b.binding.clone()))
-        })?;
-        after_read();
-        // Provider reads precede the final State/tracking acquisition. The
-        // second with_scan rereads the actual file and publication, then pins
-        // the same invalidation/incarnation/open/generation under State.
-        let final_account = self.publication_account()?;
-        let final_decision = self.publication_decision()?;
-        if final_account != account
-            || final_decision != decision
-            || !collection.is_current()
-            || collection.open_evidence()? != evidence
-            || collection.last_seq() != seq
-        {
-            return Err(RuntimeError::StaleIncarnation);
+            value
         }
-        self.with_scan(&guard, collection, |s| {
-            let store = s.store.as_ref().ok_or(Error::Database)?;
-            let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
-            let runtime = store.runtime_binding(guard.binding)?;
-            if s.tracking_stopped
-                || b.binding != binding
-                || store.binding(guard.binding)?.as_ref() != Some(&binding)
-                || runtime.file != Some(guard.file)
-                || runtime.open_counter != guard.open
-                || collection.last_seq() != seq
+        let mut phase = "initial.account";
+        let mut mismatch_mask = 0u16;
+        let observation = (|| {
+            let account = self.publication_account()?;
+            phase = "initial.decision";
+            let decision = self.publication_decision()?;
+            phase = "initial.openEvidence";
+            let evidence = collection.open_evidence()?;
+            let guard = {
+                let s = self.state();
+                phase = "initial.binding";
+                let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+                phase = "initial.accountTracking";
+                if mismatch(&mut mismatch_mask, 0, account != b.binding.facts.account)
+                    || mismatch(&mut mismatch_mask, 1, s.tracking_stopped)
+                {
+                    return Err(RuntimeError::StaleIncarnation);
+                }
+                ScanGuard {
+                    invalidation: s.invalidation,
+                    binding: b.binding.id,
+                    open: b.open_counter,
+                    generation: b.evidence.generation,
+                    file: b.file,
+                    incarnation: s.incarnation,
+                }
+            };
+            phase = "initial.withScanAuthority";
+            let (result, binding) = self.with_scan(&guard, collection, |s| {
+                phase = "initial.capturedWAL";
+                if mismatch(&mut mismatch_mask, 0, identity.generation() != guard.generation)
+                    || mismatch(&mut mismatch_mask, 1, identity.native_file() != guard.file.pair())
+                    || mismatch(&mut mismatch_mask, 2, collection.last_seq() != seq)
+                    || mismatch(&mut mismatch_mask, 3, s.tracking_stopped)
+                {
+                    return Err(RuntimeError::StaleIncarnation);
+                }
+                phase = "initial.store";
+                let store = s.store.as_ref().ok_or(Error::Database)?;
+                phase = "initial.bound";
+                let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+                phase = "initial.runtimeBindingRead";
+                let runtime = store.runtime_binding(guard.binding)?;
+                phase = "initial.bindingOpen";
+                if mismatch(
+                    &mut mismatch_mask,
+                    0,
+                    decision.publication.identity != b.binding.facts.publication,
+                ) || mismatch(
+                    &mut mismatch_mask,
+                    1,
+                    decision.publication.decision != meguri_engine::device_state::PublicationDecision::Clear,
+                ) || mismatch(&mut mismatch_mask, 2, evidence != b.evidence)
+                    || mismatch(
+                        &mut mismatch_mask,
+                        3,
+                        store.binding(guard.binding)?.as_ref() != Some(&b.binding),
+                    )
+                    || mismatch(&mut mismatch_mask, 4, runtime.file != Some(guard.file))
+                    || mismatch(&mut mismatch_mask, 5, runtime.open_counter != guard.open)
+                {
+                    return Err(RuntimeError::StaleIncarnation);
+                }
+                phase = "entity.name";
+                let name = codec::entity_name(&b.binding.facts.record_key.0, codec::Kind::Note, &codec::id_key(id))
+                    .map_err(|_| Error::InvalidData)?;
+                phase = "entity.read";
+                let entity = store.entity_dump(guard.binding, &name)?;
+                phase = "entity.missing";
+                let entity = entity.ok_or(Error::InvalidData)?;
+                phase = "entity.exact";
+                if mismatch(&mut mismatch_mask, 0, entity.kind != codec::Kind::Note)
+                    || mismatch(&mut mismatch_mask, 1, entity.key != codec::id_key(id))
+                    || mismatch(&mut mismatch_mask, 2, entity.tombstone_at.is_some())
+                    || mismatch(&mut mismatch_mask, 3, entity.observer_open != guard.open)
+                    || mismatch(&mut mismatch_mask, 4, entity.observed_generation != guard.generation.0)
+                    || mismatch(&mut mismatch_mask, 5, entity.observed_seq > seq.0)
+                    || mismatch(
+                        &mut mismatch_mask,
+                        6,
+                        entity.payload.payload_digest().map_err(|_| Error::InvalidData)? != digest,
+                    )
+                {
+                    return Err(Error::InvalidData.into());
+                }
+                phase = "tracking.applyIntents";
+                let intents = store.apply_intents(guard.binding)?;
+                phase = "tracking.inbox";
+                let inbox = store.inbox(guard.binding)?;
+                let applied = s.incoming.runs.iter().rev().find(|run| {
+                    !s.incoming.running
+                        && run.native_file == guard.file
+                        && run.generation == guard.generation.0
+                        && run.seq == entity.observed_seq
+                        && run.seq <= seq.0
+                        && !run.entry_ids.is_empty()
+                        && run.changed_keys.contains(&name)
+                        && !intents.iter().any(|i| i.id == run.intent_id)
+                        && !inbox.iter().any(|e| run.entry_ids.contains(&e.id))
+                        && s.incoming
+                            .receipts
+                            .iter()
+                            .any(|r| r.identity() == identity && r.through().0 >= run.seq)
+                });
+                Ok(((entity, applied.map(|r| r.seq)), b.binding.clone()))
+            })?;
+            after_read();
+            // Provider reads precede the final State/tracking acquisition. The
+            // second with_scan rereads the actual file and publication, then pins
+            // the same invalidation/incarnation/open/generation under State.
+            phase = "final.account";
+            let final_account = self.publication_account()?;
+            phase = "final.decision";
+            let final_decision = self.publication_decision()?;
+            phase = "final.providers";
+            if mismatch(&mut mismatch_mask, 0, final_account != account)
+                || mismatch(&mut mismatch_mask, 1, final_decision != decision)
+                || mismatch(&mut mismatch_mask, 2, !collection.is_current())
+                || mismatch(&mut mismatch_mask, 3, collection.open_evidence()? != evidence)
+                || mismatch(&mut mismatch_mask, 4, collection.last_seq() != seq)
             {
                 return Err(RuntimeError::StaleIncarnation);
             }
-            // Scan progress, feed delivery and ACK bookkeeping are not read
-            // authority and need not remain frozen across this observation.
-            Ok(result)
+            phase = "final.withScanAuthority";
+            self.with_scan(&guard, collection, |s| {
+                phase = "final.store";
+                let store = s.store.as_ref().ok_or(Error::Database)?;
+                phase = "final.bound";
+                let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+                phase = "final.runtimeBindingRead";
+                let runtime = store.runtime_binding(guard.binding)?;
+                phase = "final.bindingOpen";
+                if mismatch(&mut mismatch_mask, 0, s.tracking_stopped)
+                    || mismatch(&mut mismatch_mask, 1, b.binding != binding)
+                    || mismatch(
+                        &mut mismatch_mask,
+                        2,
+                        store.binding(guard.binding)?.as_ref() != Some(&binding),
+                    )
+                    || mismatch(&mut mismatch_mask, 3, runtime.file != Some(guard.file))
+                    || mismatch(&mut mismatch_mask, 4, runtime.open_counter != guard.open)
+                    || mismatch(&mut mismatch_mask, 5, collection.last_seq() != seq)
+                {
+                    return Err(RuntimeError::StaleIncarnation);
+                }
+                // Scan progress, feed delivery and ACK bookkeeping are not read
+                // authority and need not remain frozen across this observation.
+                Ok(result)
+            })
+        })();
+        observation.inspect_err(|error: &RuntimeError| {
+            let (kind, variant) = error.refusal_tags_for_testing();
+            eprintln!(
+                "cloudOriginal.refused phase={phase} errorKind={kind} variant={variant} mismatchMask={mismatch_mask}"
+            );
         })
     }
 

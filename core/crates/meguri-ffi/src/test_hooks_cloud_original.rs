@@ -421,13 +421,22 @@ impl CloudOriginalRole {
         let current = capture(&*snapshot, NoteId(self.baseline.note.id))?;
         let q_changed = self.baseline.compare(&current)?;
         let digest = checked(c::Payload::Note(current.note).payload_digest())?;
-        let (e, applied_seq) = checked(core.original_note_observation_for_testing(
-            &collection,
-            self.baseline.note.id,
-            snapshot.wal_identity(),
-            snapshot.seq(),
-            digest,
-        ))?;
+        let (e, applied_seq) = core
+            .original_note_observation_for_testing(
+                &collection,
+                self.baseline.note.id,
+                snapshot.wal_identity(),
+                snapshot.seq(),
+                digest,
+            )
+            .map_err(|error| {
+                // This module is test-hooks-only. Preserve Internal while retaining
+                // closed variant tags instead of any Runtime error text or payload.
+                let (kind, variant) = error.refusal_tags_for_testing();
+                CoreError::Internal {
+                    message: format!("original role invalid: observation.runtime: errorKind={kind} variant={variant}"),
+                }
+            })?;
         let actual = checked(runtime::host())?;
         if !Arc::ptr_eq(&actual, &host)
             || snapshot.generation() != generation

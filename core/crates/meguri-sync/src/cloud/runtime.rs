@@ -122,6 +122,71 @@ pub enum RuntimeError {
     FileIdentityUnavailable,
     Publication(super::publication::PublicationError),
 }
+// Closed failure tags only. Associated payloads never enter native diagnostics.
+#[cfg(feature = "test-hooks")]
+impl RuntimeError {
+    pub fn refusal_tags_for_testing(&self) -> (&'static str, &'static str) {
+        match self {
+            Self::Tracking(error) => (
+                "Tracking",
+                match error {
+                    Error::Io(_) => "Io",
+                    Error::Database => "Database",
+                    Error::Constraint => "Constraint",
+                    Error::InvalidIdentifier => "InvalidIdentifier",
+                    Error::InvalidData => "InvalidData",
+                    Error::BindingNotFound => "BindingNotFound",
+                    Error::IsolatedBinding => "IsolatedBinding",
+                    Error::RecoveryRequired => "RecoveryRequired",
+                    Error::RecoveryRefused => "RecoveryRefused",
+                    Error::RuntimeSchemaUnsupported => "RuntimeSchemaUnsupported",
+                },
+            ),
+            Self::Engine(error) => (
+                "Engine",
+                match error {
+                    EngineError::ExportSourceChanged => "ExportSourceChanged",
+                    EngineError::ExportSourceInvalid => "ExportSourceInvalid",
+                    EngineError::ExportFormatLimit => "ExportFormatLimit",
+                    EngineError::SyncNote(_) => "SyncNote",
+                    EngineError::DeckOptionsInvalid(_) => "DeckOptionsInvalid",
+                    EngineError::SchedOp(_) => "SchedOp",
+                    EngineError::InvalidTypeAnswerReplacement => "InvalidTypeAnswerReplacement",
+                    EngineError::SessionActive => "SessionActive",
+                    EngineError::CollectionCorrupt => "CollectionCorrupt",
+                    EngineError::InvalidIgnoreBeforeDate { .. } => "InvalidIgnoreBeforeDate",
+                    EngineError::SuspendDeadline { .. } => "SuspendDeadline",
+                    EngineError::NotFound { .. } => "NotFound",
+                    EngineError::DeckRefused(_) => "DeckRefused",
+                    EngineError::NoteNotFound { .. } => "NoteNotFound",
+                    EngineError::Stale { .. } => "Stale",
+                    EngineError::StaleGeneration { .. } => "StaleGeneration",
+                    EngineError::CollectionUnavailable { .. } => "CollectionUnavailable",
+                    EngineError::Busy { .. } => "Busy",
+                    EngineError::UndoUnavailable { .. } => "UndoUnavailable",
+                    EngineError::Cancelled => "Cancelled",
+                    EngineError::SchemaNotMarked { .. } => "SchemaNotMarked",
+                    EngineError::NotetypeRefused(_) => "NotetypeRefused",
+                    EngineError::Open(_) => "Open",
+                    EngineError::Storage(_) => "Storage",
+                    EngineError::SafetyBackupFailed(_) => "SafetyBackupFailed",
+                    EngineError::Media(_) => "Media",
+                    EngineError::CommitCompleted { .. } => "CommitCompleted",
+                    EngineError::MediaCommitPending { .. } => "MediaCommitPending",
+                    EngineError::Panicked { .. } => "Panicked",
+                    EngineError::InvalidArgument { .. } => "InvalidArgument",
+                    EngineError::Unsupported { .. } => "Unsupported",
+                    EngineError::Internal { .. } => "Internal",
+                },
+            ),
+            Self::StaleIncarnation => ("StaleIncarnation", "none"),
+            Self::IdentityUnverified => ("IdentityUnverified", "none"),
+            Self::Incomplete(_) => ("Incomplete", "none"),
+            Self::FileIdentityUnavailable => ("FileIdentityUnavailable", "none"),
+            Self::Publication(_) => ("Publication", "none"),
+        }
+    }
+}
 impl std::fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {

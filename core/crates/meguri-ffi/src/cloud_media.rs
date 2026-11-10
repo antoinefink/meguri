@@ -224,24 +224,44 @@ impl CloudMedia {
         let generation = meguri_engine::Generation(self.generation);
         // Admission touches only the retained Host's lifecycle/registry, never
         // Runtime/Driver, media, a provider or a fresh process owner.
-        let handle = self
+        let admission = self
             .host
             .start_cloud_connection_job(generation, "CloudMedia.next_work", move |job| {
                 let mut authority =
                     PolicyWork::new(&job.cancel).with_generation(owner.host.engine().downgrade(), generation);
-                let value = job
-                    .cancel
-                    .check()
-                    .map_err(CoreError::from)
-                    .and_then(|()| owner.collection())
+                let cancellation = job.cancel.check().map_err(CoreError::from);
+                #[cfg(feature = "test-hooks")]
+                let cancellation = cancellation.inspect_err(|_| {
+                    eprintln!("cloudMedia.refused site=cancelCheck");
+                });
+                let value = cancellation
+                    .and_then(|()| {
+                        let collection = owner.collection();
+                        #[cfg(feature = "test-hooks")]
+                        let collection = collection.inspect_err(|_| {
+                            eprintln!("cloudMedia.refused site=ownerCollection");
+                        });
+                        collection
+                    })
                     .and_then(|collection| {
-                        owner
+                        let prepared = owner
                             .host
-                            .next_cloud_media_work_with_work(&collection, &sdk, &mut authority)
-                            .map_err(preparation_error)
+                            .next_cloud_media_work_with_work(&collection, &sdk, &mut authority);
+                        #[cfg(feature = "test-hooks")]
+                        let prepared = prepared.inspect_err(|error| {
+                            let (kind, variant) = error.refusal_tags_for_testing();
+                            eprintln!("cloudMedia.refused site=runtimePreparation errorKind={kind} variant={variant}");
+                        });
+                        prepared.map_err(preparation_error)
                     })
                     .and_then(|work| {
-                        authority.check().map_err(preparation_error)?;
+                        let checked = authority.check();
+                        #[cfg(feature = "test-hooks")]
+                        let checked = checked.inspect_err(|error| {
+                            let (kind, variant) = error.refusal_tags_for_testing();
+                            eprintln!("cloudMedia.refused site=authorityCheck errorKind={kind} variant={variant}");
+                        });
+                        checked.map_err(preparation_error)?;
                         Ok(CloudMediaPreparedWork {
                             work: work.map(|work| CloudMediaIssuedWork {
                                 request: (&work.request).into(),
@@ -250,7 +270,12 @@ impl CloudMedia {
                         })
                     });
                 completion.finish(value)
-            })?;
+            });
+        #[cfg(feature = "test-hooks")]
+        let admission = admission.inspect_err(|_| {
+            eprintln!("cloudMedia.refused site=admission");
+        });
+        let handle = admission?;
         Ok(CloudMediaNextWorkJob {
             handle: crate::jobs::wrap(handle),
             result: Arc::new(CloudMediaNextWorkResult { cell }),
