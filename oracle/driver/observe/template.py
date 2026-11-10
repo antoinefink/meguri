@@ -10,8 +10,10 @@ Value: [result, ...], one per case in case order:
   {error: {kind, side}}               a template error (T9)
 
 Every case is the backend's legacy uncommitted render (the card layout
-screen's), partial for Python, fill_empty off, with a schema-11 template object
-built from the case. The case's templates are never saved (a save validates
+screen's), partial for Python, with a schema-11 template object built from the
+case and the case's fill_empty (default false, render-ops.md Q1.4 step 0: the
+backend fills the empty values of the note copy it is sent, never a stored
+note). The case's templates are never saved (a save validates
 them).
 
   new-note case  on one scratch collection per worker process (as text.py),
@@ -64,8 +66,8 @@ from ..registry import observation, scenario_check
 from ..session import parse_observation
 
 NOTETYPE_KEYS = {"name", "kind", "fields"}
-NEW_NOTE_KEYS = {"front", "back", "ord", "name", "fields", "tags"}
-CARD_KEYS = {"card", "front", "back"}
+NEW_NOTE_KEYS = {"front", "back", "ord", "name", "fields", "tags", "fill_empty"}
+CARD_KEYS = {"card", "front", "back", "fill_empty"}
 KINDS = ("standard", "cloze")
 MAX_ORD = 499
 CARD_REF = re.compile(r"#c[1-9][0-9]*")
@@ -121,6 +123,7 @@ class Case:
     name: str = ""
     values: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
+    fill_empty: bool = False
 
 
 def _is_int(v: Any) -> bool:
@@ -172,18 +175,25 @@ def _texts(case: dict) -> tuple[str, str]:
     return front, back
 
 
+def _fill_empty(case: dict) -> bool:
+    fill = case.get("fill_empty", False)
+    if not isinstance(fill, bool):
+        raise invalid("a case's fill_empty is a boolean")
+    return fill
+
+
 def _check_case(case: Any, nt: Notetype | None) -> Case:
     if not isinstance(case, dict):
         raise invalid("a template case is a mapping")
     if "card" in case:
         if set(case) - CARD_KEYS:
-            raise invalid("a card case is {card, front, back?}")
+            raise invalid("a card case is {card, front, back?, fill_empty?}")
         ref = case["card"]
         if not isinstance(ref, str) or not CARD_REF.fullmatch(ref):
             raise invalid(f"{ref!r} is not a #c<N> reference")
-        return Case(*_texts(case), card=ref)
+        return Case(*_texts(case), card=ref, fill_empty=_fill_empty(case))
     if set(case) - NEW_NOTE_KEYS:
-        raise invalid("a new-note case is {front, back?, ord?, name?, fields?, tags?}")
+        raise invalid("a new-note case is {front, back?, ord?, name?, fields?, tags?, fill_empty?}")
     front, back = _texts(case)
     ord_ = case.get("ord", 0)
     if not _is_int(ord_) or not 0 <= ord_ <= MAX_ORD:
@@ -205,7 +215,7 @@ def _check_case(case: Any, nt: Notetype | None) -> Case:
     else:
         raise invalid("a case's fields are a list or a mapping")
     tags = _check_strings(case.get("tags", []), "a case's tags")
-    return Case(front, back, ord=ord_, name=name, values=values, tags=tags)
+    return Case(front, back, ord=ord_, name=name, values=values, tags=tags, fill_empty=_fill_empty(case))
 
 
 def check_request(args: Any) -> tuple[Notetype | None, list[Case]]:
@@ -311,13 +321,13 @@ def compose(nodes, front_side: str | None) -> str:
     return "".join(out)
 
 
-def _render(col, note, card_ord: int, template: dict, cloze: bool) -> dict:
+def _render(col, note, card_ord: int, template: dict, cloze: bool, fill_empty: bool) -> dict:
     try:
         out = col._backend.render_uncommitted_card_legacy(
             note=note._to_backend_note(),
             card_ord=card_ord,
             template=to_json_bytes(template),
-            fill_empty=False,
+            fill_empty=fill_empty,
             partial_render=True,
         )
     except anki.errors.TemplateError as exc:
@@ -338,7 +348,7 @@ def _new_note_case(scratch: _Scratch, saved: dict, nt: Notetype, case: Case) -> 
     note.fields = list(case.values)
     note.tags = list(case.tags)
     template = {"name": case.name, "ord": None, "qfmt": case.front, "afmt": case.back}
-    return _render(scratch.col, note, case.ord, template, nt.cloze)
+    return _render(scratch.col, note, case.ord, template, nt.cloze, case.fill_empty)
 
 
 def _card_case(col, card_id: int, case: Case) -> dict:
@@ -350,7 +360,7 @@ def _card_case(col, card_id: int, case: Case) -> dict:
     if not stored:
         raise DriverError("anki_error", op="observe", detail="the card's ordinal has no template in its note type")
     template = {"name": stored[0]["name"], "ord": card.ord, "qfmt": case.front, "afmt": case.back}
-    return _render(col, note, card.ord, template, cloze)
+    return _render(col, note, card.ord, template, cloze, case.fill_empty)
 
 
 # --- errors -------------------------------------------------------------------

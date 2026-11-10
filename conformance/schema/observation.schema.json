@@ -181,6 +181,23 @@
             }
           ]
         },
+        "add_media_from_url": {
+          "description": "specs/conformance/editor-ops.md E4: the name the fetch derived (the oracle) or the stored name (Meguri), or the rejection fetch_failed.",
+          "anyOf": [
+            {
+              "type": "object",
+              "required": ["name"],
+              "additionalProperties": false,
+              "properties": { "name": { "type": "string", "minLength": 1 } }
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/rejection" },
+                { "properties": { "error": { "enum": ["fetch_failed"] } } }
+              ]
+            }
+          ]
+        },
         "media_dir": {
           "description": "media-ops.md F9: the media folder's entries by name: files as {sha1, size}, subdirectories as {dir: true}.",
           "type": "object",
@@ -984,6 +1001,17 @@
             "time_ms": { "type": "integer" }
           }
         },
+        "graph_preferences": {
+          "description": "stats-ops.md H13: the three graph preferences as read now (stats/graphs-common G7), defaults included.",
+          "type": "object",
+          "required": ["calendar_first_day_of_week", "card_counts_separate_inactive", "future_due_show_backlog"],
+          "additionalProperties": false,
+          "properties": {
+            "calendar_first_day_of_week": { "enum": [0, 1, 5, 6] },
+            "card_counts_separate_inactive": { "type": "boolean" },
+            "future_due_show_backlog": { "type": "boolean" }
+          }
+        },
         "studied_today_text": {
           "description": "stats-ops.md H5: the Home studied-today line (stats/studied-today T2), English.",
           "type": "string",
@@ -1253,6 +1281,30 @@
             { "$ref": "#/$defs/op_count" },
             { "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["invalid_flag"] } } }] }
           ]
+        },
+        "find_replace": {
+          "description": "bulk-ops.md X1: notes written (on the oracle every matched note), or the rejection invalid_regex, space_in_replacement or field_count.",
+          "anyOf": [
+            { "$ref": "#/$defs/op_count" },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/rejection" },
+                { "properties": { "error": { "enum": ["invalid_regex", "space_in_replacement", "field_count"] } } }
+              ]
+            }
+          ]
+        },
+        "change_deck": {
+          "description": "bulk-ops.md X2: cards written, or the rejection filtered_deck.",
+          "anyOf": [
+            { "$ref": "#/$defs/op_count" },
+            { "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["filtered_deck"] } } }] }
+          ]
+        },
+        "find_replace_fields": {
+          "description": "bulk-ops.md X3: the field names offered for the notes, in order (browser/find-replace F3).",
+          "type": "array",
+          "items": { "type": "string" }
         },
         "tag_tree": {
           "description": "tag-ops.md G9: top-level nodes of the tag tree (specs/tags/tags.md T13).",

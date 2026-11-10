@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""card_stats and stats (specs/conformance/stats-ops.md H9, H10) through real
-workers. Expected values come from the rows each test writes and the rules of
-stats/card-info C3 and stats/graphs-common G14, graphs-revlog V8 and
-graphs-cards C12, worked by hand; never from the driver."""
+"""card_stats, stats and graph_preferences (specs/conformance/stats-ops.md H9,
+H10, H13) through real workers. Expected values come from the rows each test
+writes and the rules of stats/card-info C3 and stats/graphs-common G7, G14,
+graphs-revlog V8 and graphs-cards C12, worked by hand; never from the
+driver."""
 
 from __future__ import annotations
 
@@ -229,6 +230,58 @@ class GraphData(unittest.TestCase):
         with WorkerProcess(TZ) as w:
             out = run_ok(self, w, scenario("t/stats", TZ, START, steps, notes=2))
         self.assertEqual(out[2], out[4])
+
+
+class GraphPreferences(unittest.TestCase):
+    """graph_preferences (H13): stats/graphs-common G7's readings, worked by hand."""
+
+    KEYS = ("cardCountsSeparateInactive", "futureDueShowBacklog", "firstDayOfWeek")
+
+    @staticmethod
+    def prefs(weekday, separate, backlog):
+        return {"graph_preferences": {
+            "calendar_first_day_of_week": weekday,
+            "card_counts_separate_inactive": separate,
+            "future_due_show_backlog": backlog,
+        }}
+
+    def writes(self, *values):
+        return [{"set_config": {"key": k, "value": v}} for k, v in zip(self.KEYS, values)]
+
+    def test_readings_defaults_and_removal(self):
+        read = {"observe": ["graph_preferences"]}
+        steps = [
+            read,
+            *self.writes(False, False, 1), read,
+            *self.writes(True, True, 5), read,
+            *self.writes(0, "false", 6), read,
+            *self.writes(None, 1, 3), read,
+            *[{"remove_config": {"key": k}} for k in self.KEYS], read,
+        ]
+        with WorkerProcess(TZ) as w:
+            out = run_ok(self, w, scenario("t/prefs", TZ, START, steps))
+        reads = [o for o in out if "graph_preferences" in o]
+        self.assertEqual(reads, [
+            self.prefs(0, True, True),
+            self.prefs(1, False, False),
+            self.prefs(5, True, True),
+            self.prefs(6, True, True),
+            self.prefs(0, True, True),
+            self.prefs(0, True, True),
+        ])
+
+    def test_arguments_are_checked(self):
+        with WorkerProcess(TZ) as w:
+            for spec in ({"graph_preferences": {}}, {"graph_preferences": []}, "graph_preferences(#c1)"):
+                with self.subTest(spec=spec):
+                    err = error_of(w, [{"observe": [spec]}], notes=1)
+                    self.assertEqual((err["kind"], err.get("step")), ("invalid_scenario", 0), err)
+
+    def test_read_only(self):
+        steps = [WARM, {"observe": ["db_dump"]}, {"observe": ["graph_preferences"]}, {"observe": ["db_dump"]}]
+        with WorkerProcess(TZ) as w:
+            out = run_ok(self, w, scenario("t/prefs", TZ, START, steps, notes=1))
+        self.assertEqual(out[1], out[3])
 
 
 if __name__ == "__main__":
