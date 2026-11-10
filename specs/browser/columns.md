@@ -14,12 +14,12 @@ U85a specified C3.1, C7.2, C7.4, C10 and C16 and part of C1; U84 specified the r
 - **Mode.** Cards mode has one row per card, notes mode one row per note (R1115).
 - **Cards of a note.** Every card row of the collection whose `nid` is the note's id, whatever the search matched. Notes-mode values are computed over all of them.
 - **First card.** The note's card with the lowest `id`. Notes-mode values that come from a single card come from the first card. (A note whose cards were created together has its lowest id on ordinal 0 for a standard note type; Anki creates the cards of a cloze note in no set order.)
-- **Card columns.** As stored and read by `model/row-records`: `nid`, `did` (the deck the card is in), `ord` (the template ordinal; for a cloze card, the cloze number minus one), `type` (0 new, 1 learning, 2 review, 3 relearning), `queue` (0 new, 1 learning with `due` a timestamp, 2 review, 3 learning with `due` a day number, 4 preview, −1 suspended, −2 buried with a sibling, −3 buried by the user), `due`, `ivl` (days), `factor` (permille), `reps`, `lapses`, `odid` (the home deck of a card in a filtered deck, 0 otherwise), `odue`, `flags`, `mod`, `data`. A card is **filtered** when `odid` is not 0.
+- **Card columns.** As stored and read by `model/row-records`: `nid`, `did` (the deck the card is in), `ord` (the template ordinal; for a cloze card, the cloze number minus one), `type` (0 new, 1 learning, 2 review, 3 relearning), `queue` (0 new, 1 learning with `due` a timestamp, 2 review, 3 learning with `due` a day number, 4 preview, −1 suspended, −2 buried with a sibling, −3 buried by the user), `due`, `ivl` (days), `factor` (permille), `reps`, `lapses`, `odid` (the home deck of a card in a filtered deck, 0 otherwise), `odue`, `flags`, `mod`, `data`. A card is **filtered** when `odid` is not 0. The cells read these values with the read tolerances of `model/row-records` R4: `due` and `odue` read as 0 when the stored value is not an INTEGER in the `i32` range, `mod` and `ivl` are read as integers, and a card whose columns do not decode makes the row `unreadable` (C3.1). The sort keys read the stored values instead (`browser/sorting` S2), so a cell and its sort key can disagree on such a card.
 - **Home due.** `odue` for a filtered card, `due` otherwise.
 - **Full deck name.** A deck's stored name in its human form, the components joined by `::` (`model/schema11-json` S11), as Browse and the deck list show it: `Japanese::Mining`.
 - **The template** of a card: for a standard note type, the template whose ordinal is the card's `ord`; for a cloze note type, its first template, whatever the card's ordinal (`render/card-render-pipeline` K2).
-- **Card data.** The keys `pos`, `s`, `d`, `decay` and `lrt` of `data`, read as `model/card-data-json` C3 says (absent when missing or unreadable). The sort keys read the same keys through `search/card-extractors` X3.
-- **Memory state.** Present when the card data holds both `s` (stability, days) and `d` (difficulty); both are `f32`.
+- **Card data.** The keys `pos`, `s`, `d`, `decay` and `lrt` of `data`, read as `search/card-extractors` X3 says, its added rules included (absent when missing or unreadable), the reading the sort keys also use. So a `cd` member that is not a JSON string makes the whole text read as no keys: on `{"pos":5,"s":10,"d":5,"cd":5}` a new card's Position is its `due` and its Stability, Difficulty and Retrievability are empty, and a review card shows all four empty. Decided 2026-11-10: this is how Anki reads a card row's `data` for its cells, so the cells follow X3 and not `model/card-data-json` C3, which reads only `cd` as absent there (the open point X3 names).
+- **Memory state.** Present when the card data holds both `s` (stability, days) and `d` (difficulty), as `model/card-data-json` C3 rule 4 says; both are `f32`, possibly infinite (`1e40` reads as +∞) or −0.0.
 - **Counts in days.** A card counts in days when any of these holds: its `type` is not 0 and its home due is at most 365,000; its `queue` is 2 or 3; its `type` is 2 and its `queue` is negative.
 - **Now, today.** `now` is the current instant in whole epoch seconds. `today` is the scheduler's day number (`sched/day-clock`: days elapsed since the collection's creation day). One row request reads each once and uses it for every row.
 - **Local time.** The time zone that also gives the scheduler's day boundaries: the device's zone in the app, the scenario's zone in conformance runs.
@@ -74,8 +74,11 @@ A row request names a mode, a list of ids (card ids in cards mode, note ids in n
 |---|---|
 | `deleted` | the row's own record no longer exists: in cards mode the card, in notes mode the note |
 | `damaged` | in cards mode the card exists but its note, its note type, its deck (`did`), its home deck (`odid`, when not 0) or its template (C1) does not (whatever columns were requested); in notes mode the note exists but has no card, or one of those records is missing for its first card |
+| `unreadable` | a record the row reads exists but does not decode (`model/row-records` R1 and the tolerances of its tables): in cards mode the card, its note, note type, deck or home deck; in notes mode the note, any of its cards, or the note type, deck or home deck of its first card. Examples: a card whose `ivl` is −1, whose `flags` is 300, whose `factor` is outside 0 to 65,535 or not an INTEGER, whose `reps` or `lapses` is negative, or whose `type` or `queue` is not a known value after the low-8-bit reduction; a note whose `tags` or `flds` is not TEXT. It carries the table, the column and the row id of the value that failed |
 
-Check Database repairs damaged rows (U128). A row error never stops the other rows of the request. The UI shows a damaged row disabled (U210).
+- The records are read in this order, and the first that fails gives the error: the row's own record (missing: `deleted`), then in cards mode the card's note, in notes mode all of the note's cards (none: `damaged`), then the note type, the deck, the home deck and the template. So a card whose note does not decode and whose deck is missing is `unreadable`.
+- A row error never stops the other rows of the request. The UI shows a damaged or unreadable row disabled (U210). Check Database repairs damaged rows and the values that make a row unreadable (U128).
+- Anki's table shows the same rows: a record that does not decode fails that row only, shown disabled with the backend's message. The card excerpts call (C16) has no `unreadable` record: such a card fails the whole call (C16.3).
 
 ## C4. Row state (R1149)
 
@@ -107,7 +110,7 @@ So a card flagged red (1) whose note is marked and which is suspended has the re
 
 ## C6. Font and direction
 
-- **Font**: the browser font name and size of the card's template (C1): note type template config `browser_font_name` and `browser_font_size`, schema-11 `bfont` and `bsize`. An empty name or a size of 0 means "no font set". The UI applies it to the cell-font columns (R1150).
+- **Font**: the browser font name and size of the card's template (C1): note type template config `browser_font_name` and `browser_font_size`, schema-11 `bfont` and `bsize`. The two members are independent: the name is absent when empty, the size is absent when 0. A name with size 0 sets the family at the default size; a size with an empty name sets the size in the default family (Anki's table also applies each on its own). The UI applies them to the cell-font columns (R1150).
 - **Sort field direction**: right to left when the note type's sort field (index `sortf`) has the field option `rtl` set; the Sort Field cell is then laid out right to left (R1118). Left to right when the note type has no field at index `sortf` (Decided 2026-10-27, as C7.1). No other cell carries a direction.
 
 ## C7. Cells in cards mode
@@ -124,12 +127,13 @@ C10.
 
 ### C7.3 Card Type (`template`, R1121)
 
-Text: the name of the card's template (C1). For a cloze note type: that name, one U+0020, and the card's ordinal + 1 in decimal: `Cloze 1`, `Cloze 2`, `Cloze 10`.
+Text: the name of the card's template (C1). For a cloze note type: that name, one U+0020, and the card's ordinal + 1 in decimal: `Cloze 1`, `Cloze 2`, `Cloze 10`. The core composes this text; the UI does not (C14).
 
 ### C7.4 Deck (`deck`, R1122, R1268)
 
 Text: the full name of the deck `did` names. When the card is filtered: that name, ` (` (U+0020, U+0028), the full name of the deck `odid` names, `)`: `Filtered 1 (Japanese::Mining)`, `Cram (Spanish::Verbs)`. The deck shown first is the filtered deck the card is in; the one in parentheses is its home deck.
 
+- The core composes this text; the UI does not (C14).
 - Only the two names count. Whether the deck `did` names is itself a filtered deck plays no part, nor do the card's other columns (`odue`, `queue`, `due`).
 - Nothing is shortened: elision is the UI's (C2 shortens deck names in the middle).
 - Examples: a card in `Japanese::Mining` → `Japanese::Mining`; a card in `Default` → `Default`; a card with `did` naming `Filtered 1` and `odid` naming `Japanese::Mining` → `Filtered 1 (Japanese::Mining)`.
@@ -146,7 +150,7 @@ The first that applies:
 
 Then, when `queue` is negative and the value is not empty, the value is **wrapped**. An empty value is never wrapped.
 
-The UI shows an instant as its local date (C12). Rule 4 adds whole multiples of 86,400 seconds to now: it does not step calendar days, so when a daylight-saving change lies between now and the due day, the date shown can differ by one from "today's date plus the days" (scenario `browser/columns/due-dst`).
+The UI shows an instant as its local date (C12). This is the cell's own rule: the Due sort key (`browser/sorting` S6) and the `prop:due` search (`search/properties` P4) compute their own due values, and the three differ by design (a suspended learning card has an empty cell, an S6 key and never matches `prop:due`). Rule 4 adds whole multiples of 86,400 seconds to now: it does not step calendar days, so when a daylight-saving change lies between now and the due day, the date shown can differ by one from "today's date plus the days" (scenario `browser/columns/due-dst`).
 
 | Card (today 0, now 2030-01-15 10:00 UTC) | Value |
 |---|---|
@@ -159,6 +163,8 @@ The UI shows an instant as its local date (C12). Rule 4 adds whole multiples of 
 | learning (`type` 1), suspended (`queue` −1), `due` a timestamp | empty |
 | review in a filtered deck | filtered |
 | new in a filtered deck, buried | filtered, wrapped |
+| review, `due` 1,894,701,600 (epoch seconds stored as a day number, which Check Database repairs) | an instant about 1.6 × 10^14 seconds after the epoch, shown `invalid date` (C12) |
+| review, `due` 3,000,000 | an instant in the year 10243, shown `+10243-…` (C12) |
 
 ### C7.6 Ease (`cardEase`, R1124)
 
@@ -174,7 +180,7 @@ The **count** `reps`, the **count** `lapses`.
 
 ### C7.9 Created, Card Modified, Note Modified (`noteCrt`, `cardMod`, `noteMod`, R1127)
 
-**Date-times**: the note id divided by 1,000 and rounded down (epoch seconds); the card's `mod`; the note's `mod`. The UI shows date and time of day to the minute in local time.
+**Date-times**: the note id divided by 1,000 and truncated toward zero (epoch seconds; a note id of −60,500 gives −60, shown `1969-12-31 @ 23:59` in UTC); the card's `mod`; the note's `mod`. The UI shows date and time of day to the minute in local time. A `mod` written in milliseconds gives a date-time near the year 62000 (C12).
 
 ### C7.10 Note Type, Tags (`note`, `noteTags`, R1128)
 
@@ -182,14 +188,14 @@ Text: the note type's name. Text: the note's tags in stored order (the stored te
 
 ### C7.11 Position (`originalPosition`, R1129)
 
-The card data `pos` when present: the **position** `pos`. Otherwise, when `type` is 0: the **position** `due` (the stored value: a new card in a filtered deck shows its filtered-deck position, such as −100000). Otherwise empty.
+The card data `pos` when present (C1): the **position** `pos`. Otherwise, when `type` is 0: the **position** `due` (the stored value: a new card in a filtered deck shows its filtered-deck position, such as −100000). Otherwise empty.
 
 ### C7.12 Stability, Difficulty, Retrievability (`stability`, `difficulty`, `retrievability`, R1130)
 
 Without a memory state all three are empty (a card whose data holds `s` but no `d` shows nothing here, although `browser/sorting` S4 sorts it by `s`).
 
-- Stability: the **time span** of `s` × 86,400 seconds, the product in `f32`.
-- Difficulty: the **percent** ((`d` − 1) ÷ 9) × 100, each step in `f32`, rounded to the nearest integer, an exact half to the even neighbour: `d` 5.0 → 44, `d` 3.0 → 22, `d` 9.0 → 89.
+- Stability: the **time span** of `s` × 86,400 seconds, the product in `f32`. A negative `s` keeps its sign (`s` −1 → −1 day); `s` +∞ gives a span of +∞.
+- Difficulty: the **percent** ((`d` − 1) ÷ 9) × 100, each step in `f32`, an `f32` shown rounded (C12): `d` 5.0 → 44, `d` 3.0 → 22, `d` 9.0 → 89, `d` 0.99 → `-0`, `d` +∞ → `inf`, `d` −∞ → `-inf`, `d` 1e30 → a 32-digit number.
 - Retrievability: C11.
 
 ## C8. Cells in notes mode
@@ -199,11 +205,11 @@ Without a memory state all three are empty (a card whose data holds `s` but no `
 | Sort Field, Created, Note Modified, Note Type, Tags | as C7 for the note |
 | Question, Answer | C10 for the first card |
 | Cards (`template`) | the **count** of the note's cards |
-| Deck | when the note's cards have more than one distinct `did`: the **deck count**, that number; otherwise C7.4 for the first card |
+| Deck | when the note's cards have more than one distinct `did`: the **deck count**, that number; otherwise C7.4 for the first card. Every distinct `did` counts, also one that names no deck: a note whose first card is in `Lang` and whose second card's deck is missing shows the deck count 2, not `Lang` and not an error (only the first card's records make a row `damaged`, C3.1). The sort key counts only existing decks (`browser/sorting` S5) |
 | Due | among the note's cards that are not filtered, have `type` and `queue` both not 0, and have a non-negative `queue`: the earliest of their C7.5 instants (rules 3 and 4; a card for which neither applies is skipped); empty when there is none. Never wrapped (R1144, AE50) |
 | Avg. Ease | the cards with `type` not 0: none → the **new** marker; otherwise the **percent** ⌊⌊S ÷ n⌋ ÷ 10⌋, where n is their number and S the sum of their `factor` values reduced modulo 65,536 (C13) |
 | Avg. Interval | the cards with `type` 2 or 3: none → empty; otherwise the **time span** of ⌊((sum of their `ivl`) × 86,400 reduced modulo 2^32) ÷ n⌋ seconds as an `f32`, n their number (C13). Learning cards are not counted |
-| Reviews, Lapses | the **count** of the sum over the note's cards |
+| Reviews, Lapses | the **count** of the sum over the note's cards, reduced modulo 2^32 (C13) |
 | Card Modified | the **date-time** of the largest `mod` of the note's cards |
 | Position, Stability, Difficulty, Retrievability | C7.11 and C7.12 for the first card |
 
@@ -216,14 +222,14 @@ Example: a note with a review card (`factor` 2,500, `ivl` 10) and a learning car
 | text | a string (C6 direction for Sort Field) | Sort Field, Question, Answer, Card Type, Deck, Note Type, Tags |
 | count | a non-negative integer | Cards, Reviews, Lapses |
 | deck count | an integer ≥ 2 | notes-mode Deck |
-| percent | an integer | Ease, Difficulty, Retrievability |
+| percent | an integer (Ease); an `f32`, finite or not, shown rounded (Difficulty, Retrievability) | Ease, Difficulty, Retrievability |
 | position | an integer | Position |
-| instant | epoch seconds, shown as a local date | Due |
-| date-time | epoch seconds, shown as local date and time to the minute | Created, Card Modified, Note Modified |
+| instant | epoch seconds (a 64-bit integer, possibly outside the range a date can show), shown as a local date | Due |
+| date-time | epoch seconds (as for instant), shown as local date and time to the minute | Created, Card Modified, Note Modified |
 | new position | an integer, shown as `New #` and the number | Due |
 | filtered | nothing | Due |
 | new marker, learning marker | nothing | Ease, Interval |
-| time span | seconds as an `f32` | Interval, Stability |
+| time span | seconds as an `f32`, negative or infinite for Stability | Interval, Stability |
 | empty | nothing | any column |
 | render outcome | C10 | Question, Answer |
 | deferred | nothing: the cell is not computed yet; `qa_cells` gives it (`browser/result-sets` H7). Distinct from empty and from a row error | Question, Answer, only in a row page |
@@ -264,10 +270,10 @@ The goldens of C16.6 are the reference for these values.
 The cell's elapsed time is its own; the retrievability formula is `search/card-extractors` X5 (notation w as there). E, an unsigned 32-bit number of seconds since the last review:
 
 1. card data `lrt` present: w(now − `lrt`) (an `lrt` after now gives a very large E);
-2. otherwise, when the card counts in days (C1): with T the home due read as epoch seconds when `queue` is 1, otherwise now + (home due − today) × 86,400, and L = T − `ivl` × 86,400, E = now − L, or 0 when that is negative;
+2. otherwise, when the card counts in days (C1): with T the home due read as epoch seconds when `queue` is 1, otherwise now + (home due − today) × 86,400, and L = T − `ivl` × 86,400, E = w(now − L), or 0 when now − L is negative. A review card with `ivl` 60,000 that is due today has now − L = 5,184,000,000 s, so E = 5,184,000,000 − 2^32 = 889,032,704 s (about 10,290 days);
 3. otherwise: w(now − home due).
 
-The value is the **percent** R × 100 in `f32`, rounded to the nearest integer, an exact half to the even neighbour, where R is `search/card-extractors` X5 steps 3 to 5 with E in place of e: the card's memory state (C1) and its data's `decay`, or 0.5 when the data has none. Examples (scenarios `browser/columns/cards-mode` and `notes-mode`): `s` 10, `d` 3, no `lrt`, a review due in 3 days with `ivl` 10 → E = 7 days → 93; due in 4 days with `ivl` 4 → E = 0 → 100.
+The value is the **percent** R × 100, an `f32` shown rounded (C12), where R is `search/card-extractors` X5 steps 3 to 5 with E in place of e: the card's memory state (C1) and its data's `decay`, or 0.5 when the data has none. Examples (scenarios `browser/columns/cards-mode` and `notes-mode`): `s` 10, `d` 3, no `lrt`, a review due in 3 days with `ivl` 10 → E = 7 days → 93; due in 4 days with `ivl` 4 → E = 0 → 100. R is NaN, shown `NaN`, when `s` is 0 and E is 0, and when a negative `s` makes the base negative (X5); `browser/sorting` S7 turns the same NaN into a NULL key.
 
 - When `lrt` is present and lies in 0..now, E is X5's e (an `lrt` that is negative or at least 2^32 can give a different E: X5 wraps each operand before a subtraction floored at 0, rule 1 wraps the difference), so the cell shows the value the `prop:r` search compares and `browser/sorting` S7 sorts by. Without `lrt`, rules 2 and 3 differ from X5 step 2: a relearning card with no `lrt` whose timestamp due is later today shows a very low retrievability here (rule 3 wraps around) while the sort counts 0 elapsed seconds. Both reproduce Anki.
 
@@ -279,15 +285,19 @@ What Anki 26.09.3 shows in English for each value. The conformance observation (
 |---|---|
 | text | the text |
 | count, position, deck count | the decimal number; a deck count in parentheses: `(2)` |
-| percent | the decimal number and `%`: `250%`, `7%` |
-| instant | the local date `YYYY-MM-DD` |
-| date-time | the local date and time `YYYY-MM-DD @ HH:MM` |
+| percent | the number and `%`: `250%`, `7%`, `-0%`, `inf%`, `NaN%` (below) |
+| instant | the local date `YYYY-MM-DD`; years and invalid instants below |
+| date-time | the local date and time `YYYY-MM-DD @ HH:MM`; `invalid date @ invalid date` for an invalid instant |
 | new position | `New #5`, `New #-100000` |
 | filtered | `(filtered)` |
 | new marker, learning marker | `(new)`, `(learning)` |
 | wrapped | the display in parentheses: `(2030-01-17)`, `(New #5)`, `((filtered))` |
 | empty | nothing |
 | time span | amount and unit, as below |
+
+**Percent** of an `f32` p (Difficulty, Retrievability): the exact decimal value of p rounded to an integer, an exact half to the even neighbour, written in full with no exponent and a `-` when p is negative, then `%`. A p from −0.5 to −0.0 is written `-0`. +∞ is `inf`, −∞ `-inf`, NaN `NaN`.
+
+**Years.** The year of a local date is written with four digits, zero-padded, from 0000 to 9999; outside that range with a sign and at least four digits: `+10243-06-02`, `-0001-12-31`. An **invalid instant** is one whose local date-time lies outside −262143-01-01 to +262142-12-31; its date and its time of day each show `invalid date`. Rule 4 of C7.5 reaches it for a review `due` more than about 95,000,000 days from today.
 
 **Time span** of t seconds (an `f32`):
 
@@ -304,8 +314,8 @@ What Anki 26.09.3 shows in English for each value. The conformance observation (
 
    The same thresholds as the answer buttons (`sched/answer-labels` A2): a year is 365 days, a month a twelfth of it.
 2. The amount: q = t ÷ unit length in `f32`. Seconds and days: q rounded to an integer, halves away from zero. Minutes, hours, months and years: round(q × 10) ÷ 10, all in `f32`, halves away from zero. (Minutes keep a decimal here, unlike the answer buttons: 90 s is 1.5 minutes.)
-3. The amount's text: the amount written with two decimals (the `f32` value widened exactly to 64 bits, rounded to two places, an exact half to the even digit), then trailing zeros removed, then a trailing `.` removed: 1.3 → `1.3`, 13 → `13`, 82.2 → `82.2`.
-4. Anki writes `<amount> <unit>`, the unit singular when the amount is exactly 1: `1 day`, `10 days`, `1.3 months`, `82.2 years`, `0 seconds`.
+3. The amount's text: the amount written with two decimals (the `f32` value widened exactly to 64 bits, rounded to two places, an exact half to the even digit), then trailing zeros removed, then a trailing `.` removed: 1.3 → `1.3`, 13 → `13`, 82.2 → `82.2`. The sign is kept (−0.0 → `-0`); +∞ is `inf`, −∞ `-inf`.
+4. Anki writes `<amount> <unit>`, the unit singular when the absolute amount is exactly 1 and plural otherwise, infinite amounts included: `1 day`, `-1 day`, `10 days`, `1.3 months`, `82.2 years`, `0 seconds`, `-0 seconds`, `inf years`.
 
 Examples: `ivl` 10 → 10 days; 40 → 1.3 months; 45 → 1.5 months; 364 → 12 months; 365 → 1 year; 30,000 → 82.2 years; stability 12.5 → 13 days (12.5 days rounds half away from zero).
 
@@ -317,14 +327,15 @@ Meguri computes these exactly as Anki 26.09.3 does, overflow included, so that e
 
 - Avg. Ease sums `factor` values modulo 65,536 before dividing: a note with 27 review cards at 2,500 shows 7, not 250 (scenario `browser/columns/aggregates`).
 - Avg. Interval multiplies the summed days by 86,400 modulo 2^32 before dividing: two review cards with `ivl` 30,000 show 14.1 years, not 82.2.
-- Retrievability takes now − `lrt` and now − due modulo 2^32 (C11).
+- Retrievability takes now − `lrt`, now − L and now − due modulo 2^32 (C11).
+- Reviews and Lapses in notes mode sum `reps` and `lapses` modulo 2^32: two cards with `reps` 3,000,000,000 show 1,705,032,704. The notes-mode sort keys use the exact sums (`browser/sorting` S5).
 - Due adds days as multiples of 86,400 seconds (C7.5).
 
 Decided 2026-10-27: Meguri keeps these results and shows no "true" average. Changing them would be a deliberate deviation, which needs a requirement amendment and a `conformance/deviations.yaml` entry against the scenario's golden.
 
 ## C14. Strings
 
-The UI takes these strings only from this table (role: `docs/process/roles/spec-writer.md`):
+The UI takes these strings only from this table (role: `docs/process/roles/spec-writer.md`). The two rows marked "core" are composed by the core into the cell's text value (C7.3, C7.4), never by the UI; they are listed so that the wording has one source:
 
 | Use | String |
 |---|---|
@@ -333,9 +344,9 @@ The UI takes these strings only from this table (role: `docs/process/roles/spec-
 | Ease or Interval of a new card | `(new)` |
 | Interval of a learning card | `(learning)` |
 | a wrapped Due | `(` value `)` |
-| Deck of a filtered card | deck name, ` (`, home deck name, `)` |
+| Deck of a filtered card (core) | deck name, ` (`, home deck name, `)` |
 | notes-mode Deck spread over decks | `(` count `)` |
-| Card Type of a cloze card | template name, U+0020, number |
+| Card Type of a cloze card (core) | template name, U+0020, number |
 | column labels | C2 |
 
 ## C15. Scenarios
@@ -349,13 +360,13 @@ Observation: `browser_rows` (`specs/conformance/browser-ops.md` B3, B4). Every s
 | `browser/columns/question-answer` | C10: answer prefix removal, FrontSide empty, `<br>` and `<div>` to spaces, image and sound names, TTS and other directives, cloze question and answer, notes mode on the first card |
 | `browser/columns/due-dst` | C7.5 rule 4 across a daylight-saving change; local dates and date-times in a zone with an offset |
 | `browser/columns/aggregates` | C13: the 16-bit ease sum and the 32-bit interval product |
-| `browser/columns/row-errors` | C3.1 in both modes: a deleted card, a deleted note, a note without cards (notes mode `damaged`), a card whose deck is missing |
+| `browser/columns/row-errors` | C3.1 in both modes: a deleted card, a deleted note, a note without cards (notes mode `damaged`), a card whose deck is missing. `unreadable` has no case yet: the observation records Anki's undecodable row as a run error (browser-ops B4) |
 
 - The oracle driver implements `browser_rows`; Meguri's runner does not yet (browser-ops B6). `question-answer` names the cards that `edit_note` adds with `adopt` (browser-ops B5).
 - `browser/modes/rows-current` and `rows-excerpts` (`browser/result-sets` H16, no goldens yet) read `browser_rows` after edits, deletions, a deck rename and a template rename, and compare the cards-mode Question and Deck cells with `card_excerpts` (C16).
 - The cards-mode Question and Deck cells (C7.2, C7.4, C10 steps 1 to 3) and the cards-mode row errors also have the `card_excerpts` scenarios of C16.6, which are active now: `question-deck/browser-format`, `media-line`, `cloze` and `deck` for the cells; `question-deck/missing` for `deleted` (the excerpt's `missing`); `question-deck/damaged` and `damaged-notetype` for `damaged` (a missing deck, home deck, note, note type or template). `row-errors` adds what only Browse rows show: the notes-mode errors (a deleted note, a note without cards).
 
-Not covered by scenarios yet: browser answer formats (`bafmt`) and fonts (`bfont`, `bsize`), which `update_notetype` template edits can set (`notetype-ops.md` T5) but no active observation reads; RTL sort fields (field config); template errors and blank cloze cards in Question and Answer (Anki's cells hold localized messages, R1887). U84's unit tests cover them from this text.
+Not covered by scenarios yet: card data with a non-string `cd` in the cells (C1), `unreadable` rows (C3.1), invalid and five-digit-year instants (C12), non-finite and `-0` percents and time spans (C7.12, C11, C12), the notes-mode Reviews and Lapses wrap (C13), a deck count over a missing deck (C8), browser answer formats (`bafmt`) and fonts (`bfont`, `bsize`), which `update_notetype` template edits can set (`notetype-ops.md` T5) but no active observation reads; RTL sort fields (field config); template errors and blank cloze cards in Question and Answer (Anki's cells hold localized messages, R1887). U84's unit tests cover them from this text.
 
 ## C16. Card excerpts
 

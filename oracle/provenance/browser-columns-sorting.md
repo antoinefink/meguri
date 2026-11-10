@@ -73,3 +73,27 @@ Deleted, NotFound, and Check Database sent as invalid input),
 writes `rollover` when it is missing) and `pylib/anki/_backend.py` (the error
 kinds pylib maps to classes). Their driver notes are `driver-browser.md` and
 `driver-card-excerpts.md`.
+
+## Audit 2026-11-10 (spec session s-20261110T085429Z-165d83d3)
+
+Judged three auditors' findings against the tag 26.09.3 sources below; no
+oracle run (another workflow held it). No code was copied.
+
+| Spec section | Anki files read | Read for |
+|---|---|---|
+| columns C1 (card data) | `rslib/src/storage/card/mod.rs`, `rslib/src/storage/card/data.rs` | the card reader decodes `data` with the same whole-object reader as the SQL extractor functions, so a non-string `cd` gives no keys for the cells too |
+| columns C1, C3.1 (`unreadable`) | `rslib/src/storage/card/mod.rs`, `rslib/src/storage/card/get_card.sql`, `rslib/src/browser_table.rs`, `qt/aqt/browser/table/model.py` | fallible integer reads per card column, type and queue narrowed to 8 bits then checked, `due`/`odue` read as 0 on failure, `mod`/`ivl` cast to integer in the select; the order in which a row reads its records; the desktop table catching the backend error per row and showing that row disabled |
+| columns C6 | `rslib/src/browser_table.rs`, `qt/aqt/browser/table/__init__.py`, `qt/aqt/browser/table/model.py` | font name and size sent separately, each defaulted on its own by the table |
+| columns C7.5, C7.9, C12 (years, invalid instant) | `rslib/src/timestamp.rs`, `rslib/src/browser_table.rs`, `Cargo.lock` (chrono 0.4.41) | the `invalid date` fallback when local conversion fails, `/ 1000` truncating toward zero, the day offset multiplied with saturation then added; the signed `%Y` form outside 0..9999. The exact edge years of the valid range come from the date library's documented range, not from a probe |
+| columns C7.12, C9, C11, C12 (percent, time span) | `rslib/src/browser_table.rs`, `rslib/src/card/mod.rs`, `rslib/src/scheduler/timespan.rs`, `rslib/i18n/src/lib.rs`, `ftl/core/scheduling.ftl`, fsrs 6.6.2 `inference.rs` | percent cells formatted from the `f32` with zero decimals and no finiteness check; unit chosen from the absolute value; number text at two decimals; plural selection by absolute value with non-finite amounts taking the other form; NaN from a zero stability at zero elapsed time (a zero decay gives 1, not NaN) |
+| columns C8 (deck count), C13 (Reviews, Lapses) | `rslib/src/browser_table.rs` | distinct `did` counted over all cards without a deck lookup; the per-note sums of `reps` and `lapses` as unsigned 32-bit sums, wrapping in release builds |
+| columns C11 rule 2 | `rslib/src/browser_table.rs`, `rslib/src/timestamp.rs` | elapsed seconds clamped at 0 as an unsigned 64-bit value, then narrowed to 32 bits |
+| sorting S1 | `qt/aqt/browser/table/model.py`, `pylib/anki/collection.py` | the desktop falls back to `noteCrt` only for an unknown stored key; a known unsortable column gives an unsorted search (already `config-keys` K5.3) |
+| sorting S2, S5, S6 | `rslib/src/search/mod.rs`, `rslib/src/search/note_*_order.sql`, `rslib/src/storage/card/get_card.sql` | order expressions over raw columns with SQLite arithmetic, exact AVG and SUM per note |
+| sorting S5.1 | `qt/aqt/forms/reposition.ui`, `rslib/src/config/mod.rs` | Reposition's start minimum of 0; the next new position defaulting to 0 |
+
+Rejected or forwarded: the plan's U84 text (shared due expression, Retrievability
+test wording, LRU keying, first-direction test, U81 dependency) and
+`specs/conformance/browser-ops.md` B1/B4 (pre-U85 path, filtered-deck clause,
+the `unreadable` mapping) are outside this target's files; the spec now states
+the distinctions those items need.

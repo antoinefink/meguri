@@ -56,3 +56,23 @@ closes with the downgrade and propagates its error; legacy meta version 2,
 (`get_all_config`) and `rslib/src/error/mod.rs` (a serde_json failure is the
 JSON error kind). Session file names are lower case only (storage-ops P8.1),
 so no name reaches `collection.anki2` on a case-insensitive volume.
+
+Audit judgement (spec writer, 2026-11-10, session s-20261110T085429Z-165d83d3):
+three audits of `schema11-downgrade` were checked against 26.09.3 and scratch
+SQLite probes (Python's sqlite3, SQLite 3.54.0, scratch files only; no oracle
+run). Read for it:
+
+| Spec section | Anki files read (26.09.3) | Read for |
+|---|---|---|
+| D3 (seven `col` writes) | `rslib/src/storage/upgrades/mod.rs` (`downgrade_to_schema_11`), `schema18_downgrade.sql`, `schema11_downgrade.sql`, the five `downgrade_*` functions in `rslib/src/storage/{deckconfig,deck,notetype,config,tag}/mod.rs` | `col` written by the graves script, once per JSON column, and last after the drops; probe: an `AFTER UPDATE` trigger on `col` reading a dropped table fails that last update ("no such table: main.decks") |
+| D3 (foreign keys) | `Cargo.toml` (rusqlite 0.36 `bundled`), `Cargo.lock` (libsqlite3-sys 0.34.0), that crate's bundled build flags (docs.rs source of 0.34.0; the local 0.38.2 has the same flag), `rslib/src/storage/sqlite.rs` (no `foreign_keys` pragma) | foreign keys enforced by default; probe: dropping a referenced table cascades, sets NULL, or fails with "FOREIGN KEY constraint failed" |
+| D3.1 (depth) | `rslib/src/storage/config/mod.rs` (`get_all_config`, `upgrade_config_to_schema14`), `rslib/src/storage/notetype/mod.rs`, `deck/mod.rs`, `deckconfig/mod.rs` (column readers of the upgrade), serde_json's recursion check (`de.rs`, local 1.0.154 source; same rule as 1.0.143) | each value parsed alone with a 128-level budget; the upgrade parses whole columns, so a value or `other` member sits deeper there |
+| D3.1 (usn, collapsed, names, ord) | `rslib/src/types.rs` (id/usn newtype `FromSql`: INTEGER only, cast to the inner type), `rslib/src/storage/tag/mod.rs` and `get.sql` (`collapsed` as bool), `notetype/mod.rs`, `deck/mod.rs`, `deckconfig/mod.rs` row readers (names as text, `ord` as u32) | usn keeps its low 32 bits; collapsed any INTEGER; invalid UTF-8 and out-of-range `ord` fail |
+| D3.1 (deck id 0), D7 (note type id 0, `ord`) | `rslib/src/storage/notetype/mod.rs` (`upgrade_notetypes_to_schema15`, `update_notetype_fields`, `update_notetype_templates`), `rslib/src/storage/deck/mod.rs` (`upgrade_decks_to_schema15`, `add_or_update_deck_with_existing_id`) | note type id 0 gets a random id; deck id 0 fails the write; `ord` from list position |
+| D5 (enums, −0.0), D6/D7 (truncation), D5 (deck f32) | `rslib/src/deckconfig/schema11.rs` (output conversion), `rslib/src/deckconfig/mod.rs` (`ensure_f32_valid`), `rslib/src/decks/schema11.rs` (`desired_retention`, `delays`) | enum mapping, IEEE bound compare, f32 product truncated; 35 eases and retention 0.53/0.59 computed by f32 emulation |
+| D12 `downgrade-snapshot` | `rslib/src/import_export/package/apkg/export.rs`, `colpkg/export.rs` | `.apkg` downgrades a temporary collection, `.colpkg` the live one |
+| D2 step 4, D3.2, D3.5, D9 (probes only) | none | unknown collation fails the rename of `graves`, VACUUM INTO and integrity_check; unknown function fails VACUUM INTO and integrity_check but not the rename; `graves_old` name taken fails the rename; `secure_delete` zeroes dropped pages; VACUUM INTO of a WAL source writes header bytes 1, 1 |
+
+Not taken: changes to `durability-and-files` F6, `model/schema11-json` S12,
+`model/row-records` R1/R8 and the plan's U33 row (outside this target);
+listed in the workflow result for their owners.

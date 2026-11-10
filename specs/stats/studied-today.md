@@ -1,7 +1,7 @@
 # Studied today: the Home line and the Stats Today section
 
 Spec: stats/studied-today
-Requirements: R1277, R1278, R1279, R1282, R1288, R1295, R1296, R1297, R1298, R1300, R1369, R1370, R1371, R1372, R1448, R1889, R304, R95
+Requirements: R1269, R1277, R1278, R1279, R1281, R1282, R1288, R1295, R1296, R1297, R1298, R1300, R1369, R1370, R1371, R1372, R1448, R1889, R304, R95
 Anki: 26.09.3
 Scenarios: conformance/scenarios/stats/studied-today/, conformance/scenarios/stats/today/
 
@@ -20,7 +20,7 @@ Days come from `stats/day-buckets`, the rows and the Home line's two numbers fro
 - **N**: `next_day_at`, the start of the next scheduler day in epoch seconds (`stats/day-buckets` B1).
 - **S**: the start of Anki's day 0, `(N − 86,400) × 1,000` epoch milliseconds (`stats/day-buckets` B2).
 - **Deleted card's row**: a row whose `cid` matches no card (N1).
-- Rows hold integers in `type`, `ease` and `time` in every collection Anki or Meguri writes. `lastIvl` can also hold a fractional (REAL) value. Other storage classes are outside this spec.
+- Rows hold integers in `type`, `ease` and `time` in every collection Anki or Meguri writes. `lastIvl` can also hold a fractional (REAL) value. The Today section reads any stored value by T3.5. On the Home line, other storage classes are not covered (T10).
 
 ## T2. The Home line
 
@@ -66,7 +66,7 @@ Decided 2026-11-10: this is the line, not an open question. It is the default th
 
 ### T2.4 Examples
 
-Every row was checked against the oracle at the current pin. Scenario `studied-today/format-table` observes exactly these inputs when it lands (`specs/conformance/stats-ops.md` H8). The last column is the first Today line for the same numbers (T4.2), where it differs or helps.
+Every row was checked against the oracle at the current pin. Scenario `studied-today/format-table` observes exactly these inputs, and its golden holds these lines (`specs/conformance/stats-ops.md` H8). The last column is the first Today line for the same numbers (T4.2), where it differs or helps.
 
 | `cards` | `time_ms` | Home line | First Today line |
 |---|---|---|---|
@@ -113,7 +113,7 @@ Every row was checked against the oracle at the current pin. Scenario `studied-t
 
 The Today section of a scope (T3.2) reads the rows with `id ≥ S`: unlike the Home line, a row stamped exactly `S` counts (R1369). There is no upper end: rows dated after now, or after `N`, count, as on the Home line.
 
-Each row's kind is read from the low byte of `type`: `k = type mod 256` (the remainder from 0 to 255, so −1 gives 255 and 260 gives 4).
+Each row's kind is read from the low byte of `type`: `k = type mod 256` (the remainder from 0 to 255, so −1 gives 255 and 260 gives 4). A `type` not stored as an INTEGER (REAL 1.5, TEXT, BLOB, NULL) reads as Learn (`stats/graphs-common` G4).
 
 | `k` | Kind | Counted |
 |---|---|---|
@@ -127,7 +127,7 @@ Each row's kind is read from the low byte of `type`: `k = type mod 256` (the rem
 
 For every `type` from 0 to 255 this agrees with the Home line's rule. A `type` outside that range can differ: 260 is left out here but counted on the Home line; −1 and 6 are counted by both, here as Learn (scenario `today/odd-values`).
 
-The history control of the Stats screen (last 12 months, all history) never changes these rows (R1369).
+The history control of the Stats screen (last 12 months, all history) never changes which rows count (R1369). It does decide which older rows the request reads, and so whether an unreadable older row fails the section (T3.5).
 
 ### T3.2 Scope
 
@@ -139,8 +139,9 @@ A scope selects which counted rows belong to the section. A row's card is judged
 | Deck `D` | the counted rows of existing cards whose `did` is `D` or a descendant of `D`, or whose `odid` is not 0 and is `D` or a descendant of `D` |
 | Search `q` | the counted rows of the existing cards the search `q` matches (`specs/search/`), when the section is computed |
 
-- The decks of the Deck scope are those of `stats/graphs-common` G2.1: `D` and the decks whose stored name starts with `D`'s stored name followed by the level separator, the names compared under simple case folding as `deck:` compares them (`search/names-and-ids` N3.3). So with decks `Lang` and `lang::Verbs` (a child whose parent part differs in case, written by another client), the scope of `Lang` holds the rows of `lang::Verbs`. The Deck scope covers the cards a `deck:"D"` search matches. A card in a filtered deck therefore counts in its home deck's scope and in the filtered deck's scope. This differs from deck pages' heatmaps, which use only the home deck (`stats/counting-rules` N4). No U97 scenario has a card in a filtered deck.
-- A Deck id that names no deck (deleted by a sync while the screen shows it) gives the error `unknown_deck`, never zeros or the Collection values, as `stats/graphs-common` G8.2's scope error, which U225 shows as it shows that one.
+- The decks of the Deck scope are those of `stats/graphs-common` G2.1: `D` and the decks whose stored name starts with `D`'s stored name followed by the level separator, the names compared under simple case folding as `deck:` compares them (`search/names-and-ids` N3.3). So with decks `Lang` and `lang::Verbs` (a child whose parent part differs in case, written by another client), the scope of `Lang` holds the rows of `lang::Verbs`. These are the cards Anki's `deck:` search matches for `D`'s full name with `\`, `*` and `_` escaped (`stats/graphs-common` G2.1, `stats/browse-queries` Q2.2), apart from the special names of `stats/graphs-common` G13. `deck:` wildcards never apply: the scope of `a_b` holds `a_b` and `a_b::c`, never `axb`. (Anki's Stats screen reaches the same decks through `deck:current`, which matches the current deck's name literally.) A card in a filtered deck therefore counts in its home deck's scope and in the filtered deck's scope. This differs from deck pages' heatmaps, which use only the home deck (`stats/counting-rules` N4). No U97 scenario has a card in a filtered deck.
+- A Deck id that names no deck (deleted by a sync while the screen shows it) gives the error `unknown_deck`, never zeros or the Collection values, as `stats/graphs-common` G8.2's scope error, which U225 shows as it shows that one. This is Meguri's rule: Anki's Deck scope is the search `deck:current`, which, when the current deck id names no deck, reads the deck named `Default` instead and shows that deck's values (T11).
+- A card's state does not matter in a Deck scope: a suspended or buried card, a card made new again by Forget (its earlier rows stay; the Forget's own Manual row is never counted, T3.1) and a card whose note is missing all count. Only that the card exists and its `did` and `odid` matter. A card whose `did` names no deck and whose `odid` is 0 is in the Collection scope and in the search `deck:*`, and in no Deck scope. In a Search scope, only what the search matches matters.
 - A search text that is empty, or holds only characters with the Unicode White_Space property, is the Collection scope: deleted cards' rows count. Any other text is a search, including `deck:*`, which matches every existing card and so leaves deleted cards' rows out (scenario `today/search-scopes`).
 - Moving a card to another deck moves all its rows between Deck scopes at once (scenario `today/deck-subtree`). Deleting a card removes its rows from every Deck and Search scope, and leaves them in the Collection scope (AE53, scenario `today/ae53-deleted-card`).
 
@@ -155,15 +156,24 @@ Over the rows of T3.1 in the scope:
 | `correct` | rows with `ease` greater than 1 |
 | `again` | `answers − correct`: rows rated Again, and rows with `ease` 0 (for example an unrated Filtered row) |
 | `learn`, `review`, `relearn`, `filtered` | rows of each kind (T3.1 table); `filtered` counts the Filtered kind (R1371) |
-| `mature` | rows whose last interval is 21 days or more: `lastIvl` read as an integer (a fractional value truncated toward zero, so 20.9 is 20 and 21.5 is 21), then compared with 21. Negative values (learning steps in seconds) are never mature. The row's kind does not matter. |
+| `mature` | rows whose last interval is 21 days or more: `lastIvl` read as an integer (a fractional value truncated toward zero, so 20.9 is 20 and 21.5 is 21), then compared with 21. Negative values (learning steps in seconds) are never mature. The row's kind does not matter. A `lastIvl` that is NULL, or outside the 32-bit signed range after that conversion (3,000,000,000, REAL 1e10), is never compared: the row is unreadable (T3.5). |
 | `mature_correct` | `mature` rows with `ease` greater than 1 |
 
 - The time rule differs from the Home line: there, negative times and times above 4,294,967,295 ms count as stored (scenario `today/odd-values`).
-- Times are never recomputed or capped (R1279). The `time_ms` sum is kept in 32 unsigned bits, as Anki keeps it: a total above 4,294,967,295 ms wraps around. Decided 2026-10-27: Meguri reproduces the wrap, so the observed values (H7) and the first Today line equal Anki's; a wider sum would be an undeclared difference. Two rows with `time` 3,000,000,000 give `time_ms` 1,705,032,704 (6,000,000,000 − 4,294,967,296), so the first Today line is `Studied 2 cards in 28,417.21 minutes today (852,516.35s/card)`, while the Home line, which sums as stored (T2.1), is `Studied 2 cards in 100000 minutes today (3000000s/card)` (scenario `today/time-wrap`). The counts cannot wrap in practice (2^32 rows in one day).
+- Times are never recomputed or capped (R1279). The `time_ms` sum is kept in 32 unsigned bits, as Anki keeps it: a total above 4,294,967,295 ms wraps around. Decided 2026-10-27: Meguri reproduces the wrap, so the observed values (H7) and the first Today line equal Anki's; a wider sum would be an undeclared difference. Two rows with `time` 3,000,000,000 give `time_ms` 1,705,032,704 (6,000,000,000 − 4,294,967,296), so the first Today line is `Studied 2 cards in 28,417.21 minutes today (852,516.35s/card)`, while the Home line, which sums as stored (T2.1), is `Studied 2 cards in 100000 minutes today (3000000s/card)`. These values follow from T3.3 and T5.1 and are not yet checked against the oracle: scenario `today/time-wrap` is proposed and not yet written (T9). The counts cannot wrap in practice (2^32 rows in one day).
 
 ### T3.4 Read only
 
-Computing the section changes nothing in the collection (R1295).
+Computing the section changes nothing in the collection (R1295). The request reads `N` from the day clock as `stats/graphs-common` G1 says. A write that the day clock's own check makes then (`sched/day-clock` D8: `localOffset`, a rollover's unbury) belongs to the day clock, not to this section, so read-only checks run after a `timing` observation (`specs/conformance/stats-ops.md` H3).
+
+### T3.5 Reading rows
+
+The Today section is a graph of the Stats graph request (T6.2), so it reads rows and cards as `stats/graphs-common` G4 says:
+
+- Each column is read with G4's tolerances: `type` by T3.1, `time` by T3.3 (anything but an INTEGER from 0 to 4,294,967,295 counts 0 ms, a REAL 1.5 included), `lastIvl` after conversion to an integer (T3.3).
+- A row or card that `model/row-records` R10 calls unreadable gives the result `unreadable_row` (`stats/graphs-common` G8.2) and no Today values. For example: an `ease` outside 0 to 255 or not an INTEGER; a `factor` outside 0 to 4,294,967,295; a `usn` outside the 32-bit signed range; an `ivl` or `lastIvl` that is NULL or outside the 32-bit signed range after conversion to an integer; an unreadable card row of the scope. Anki's graph request fails there too, Today included.
+- The rows read are the scope's rows in the history window (`stats/graphs-common` G3), not only today's, and the scope's cards. So a bad row dated 400 days ago fails the section with `allHistory` and not with `last12Months`, while the counted rows are the same for both (T3.1). A bad row of a card outside the scope changes nothing.
+- The Home line reads only `id`, `type` and `time` (T2.1): a row this section calls unreadable for another column still counts there (T4.5).
 
 ## T4. The Today section: lines
 
@@ -228,7 +238,8 @@ Single lines:
 For the same day in the Collection scope:
 
 - the row stamped exactly `S` counts only in the Today section (T3.1; every `today/day-start-*` scenario: Home `Studied 3 cards in 56 seconds today (18.67s/card)`, Today `Studied 4 cards in 1 minute today (15s/card)`);
-- a `type` outside 0 to 255 can count in one and not the other (T3.1), and a time outside 0 to 4,294,967,295 ms counts as stored on the Home line and as 0 in the Today section (T3.3); a Today total above 4,294,967,295 ms wraps around, the Home total does not (T3.3, `today/time-wrap`);
+- a `type` outside 0 to 255 can count in one and not the other (T3.1), and a time outside 0 to 4,294,967,295 ms counts as stored on the Home line and as 0 in the Today section (T3.3); a Today total above 4,294,967,295 ms wraps around, the Home total does not (T3.3);
+- a row that T3.5 calls unreadable (an `ease` of 300, a `factor` of −1) still counts on the Home line, while the Today section returns `unreadable_row`;
 - numbers of 1,000 and more are grouped only in the Today section (`1234 cards`, `1,234 cards`);
 - the two-decimal rounding can differ in the last digit, because the Home line rounds 32-bit values and the Today section rounds the shortest decimal of a 64-bit value: 1 answer of 8,855 ms is `(8.85s/card)` on the Home line and `(8.86s/card)` in the Today section. Such differences come from ordinary totals, not only from extreme ones (16,345 ms and 76,965 ms for 1 answer are two more).
 
@@ -281,16 +292,20 @@ Examples: 1 of 3 is `33.33`, 1 of 32 is `3.13`, 29 of 200 is `14.5`, 0 is `0`, a
 
 The Home payload holds `cards`, `time_ms` and the line (T2). The UI shows the line verbatim (R1448, R1296–R1298): it formats no number and adds no punctuation.
 
-While the resident values do not yet hold the state the read sees (a rebuild or catch-up, `stats/counting-rules` N7 "Reads while the values are not ready"), the result is `building` instead, with no numbers and no line. It is never the zero line. U228 hides the line until a later read returns the payload.
+While the resident values do not yet hold the state the read sees (a rebuild or catch-up, `stats/counting-rules` N7 "Reads while the values are not ready"), the result is `building` instead, with no numbers and no line. It is never the zero line. U228 hides the line until a later read returns the payload. The `studied_today_text` scenario adapter (`specs/conformance/stats-ops.md` H5) waits as N7's adapters do, with the same 60-second failure, so an observation right after `set_config rollover` or `set_clock` never reads `building`.
 
 ### T6.2 Today
 
-For a scope (T3.2), the Today payload holds the values of T3.3 (with `again`) and the lines of T4: one line when `answers` is 0, otherwise four. `filtered` is returned even when the kinds line omits it (R1372). The UI shows the lines verbatim, one per row, under its own `Today` heading. A Deck id that names no deck gives `unknown_deck` instead (T3.2).
+The Today section is the Today graph of the Stats graph request (`stats/graphs-common` G5, G8): a request for a scope (T3.2) and a history (G3) that names Today. Its record holds the values of T3.3 (with `again`) and the lines of T4: one line when `answers` is 0, otherwise four. The lines are this graph's extras in the sense of G6. `filtered` is returned even when the kinds line omits it (R1372). The UI shows the lines verbatim, one per row, under its own `Today` heading.
+
+- The results are those of G8.2: Data; Context changed; the scope error (the search error of `search/errors`, or `unknown_deck` for a Deck id that names no deck, T3.2); `unreadable_row` (T3.5); Cancelled.
+- Every scope, Collection included, reads the review log and the scope's cards from the request's one snapshot (G1). None reads the resident values of `stats/counting-rules` N7: those hold only the Home line's numbers (N6), and the Today values need rows from `S` on, the low byte of `type`, the 32-bit time sum and the kinds.
+- Decided 2026-11-10: U97 lands before U98's request. U97's Today query takes a scope and a history and gives the same values, lines and results, except Context changed (it is a single request with no context token), so U98 serves it as the Today graph unchanged. The `today_stats` observation (`specs/conformance/stats-ops.md` H7) reads it with `last12Months`, which is the oracle's 365 days.
 
 ### T6.3 Text form
 
 - Lines are always English, whatever the device language (R1448; the plan's Open Questions keep these strings verbatim in every locale).
-- No line contains U+2068 or U+2069. Anki wraps each number in that pair of invisible direction marks; Meguri leaves them out.
+- No line contains U+2068 or U+2069. Anki puts that pair of invisible direction marks around each number and around some of the parts of text that hold one: on the Home line also around the time span (`in 13 seconds`); on its Stats page around every inserted part, the card count's words included. The Again line has none, because Anki joins its number to the text without inserting it as a part. Meguri leaves every mark out, and the oracle's normalization (H5, H6) removes every U+2068 and U+2069 wherever it stands, not only around digits.
 - No line contains a line break. Anki's Studied sentence holds two line breaks, after the count and after `today`, which its pages show as spaces; Meguri writes single spaces there.
 
 ### T6.4 What the oracle checks
@@ -332,7 +347,7 @@ Meguri takes these English texts only from this table. `<…>` marks where a num
 
 ## T9. Scenarios
 
-All rows are inserted with `db_exec` on a card id no card has, unless the scenario has notes. Each scenario gets a golden recorded from the oracle under `conformance/goldens/stats/studied-today/` and `conformance/goldens/stats/today/` when the scenarios land (`specs/conformance/stats-ops.md` H8; kinds H5 to H7). The goldens are then authoritative, and their values equal the tables below, which were checked against oracle recordings at the current pin.
+All rows are inserted with `db_exec` on a card id no card has, unless the scenario has notes. Every scenario below except `time-wrap` exists, with a golden recorded from the oracle under `conformance/goldens/stats/studied-today/` and `conformance/goldens/stats/today/` (`specs/conformance/stats-ops.md` H8; kinds H5 to H7). The goldens are authoritative, and their values equal the tables below, which were checked against oracle recordings at the current pin.
 
 `conformance/scenarios/stats/studied-today/`:
 
@@ -354,17 +369,17 @@ All rows are inserted with `db_exec` on a card id no card has, unless the scenar
 | `no-mature` | T4.2 line 4 | Home `Studied 4 cards in 26 seconds today (6.5s/card)`; T4.4 row 2 |
 | `empty` | T4.1 with Manual and Rescheduled rows | Home zero line; Collection all 0 |
 | `odd-values` | T3.1 low byte, T3.3 time and `lastIvl` | Home `Studied 8 cards in 83333.71 minutes today (625002.75s/card)` (8 rows, 5,000,022,000 ms); T4.4 row 3 |
-| `time-wrap` | T3.3 32-bit total | two Review rows with `ease` 3 and `time` 3,000,000,000: Home `Studied 2 cards in 100000 minutes today (3000000s/card)` (2 rows, 6,000,000,000 ms); Collection 2, 1,705,032,704. Its values follow from T3.3 and T5.1; unlike the other rows, they were not yet checked against an oracle recording. |
+| `time-wrap` (proposed, not yet written) | T3.3 32-bit total | two Review rows with `ease` 3, `lastIvl` 5 and `time` 3,000,000,000: Home `Studied 2 cards in 100000 minutes today (3000000s/card)` (2 rows, 6,000,000,000 ms); Collection 2, 1,705,032,704. No scenario file or golden exists yet; these values follow from T3.3 and T5.1 and are unverified until the golden is recorded. |
 | `day-start-utc`, `-kathmandu`, `-st-johns`, `-chatham`, `-paris-dst`, `-los-angeles-dst` | T2.1 against T3.1 at `S`, across zones | Home `Studied 3 cards in 56 seconds today (18.67s/card)` (3 rows, 56,000 ms); Collection 4, 60,000 |
 
 `search-scopes` needs the `deck:` search term (U82, tag `needs-deck`). `refresh`, `ae53-deleted-card`, `search-scopes` and `deck-subtree` need the setup sections `config`, `decks`, `notetypes` and `notes`; `refresh` also needs `answer`, `ae53-deleted-card` `delete_notes`.
 
 ## T10. Not covered
 
-- Today counts above 4,294,967,295 rows. (A Today total above 4,294,967,295 ms is covered: T3.3 and `today/time-wrap`. Two rows another client wrote are enough to reach it, since one row's `time` may be up to that value.)
-- `type`, `ease` or `time` stored as REAL, TEXT or BLOB, and `ease` outside 0 to 255.
+- Today counts above 4,294,967,295 rows. (A Today total above 4,294,967,295 ms is covered by T3.3; its scenario `today/time-wrap` is proposed, T9. Two rows another client wrote are enough to reach it, since one row's `time` may be up to that value.)
+- On the Home line: `type` or `time` stored as REAL, TEXT or BLOB, and a `time` sum outside the signed 64-bit range, where Anki's query fails with an integer overflow instead of giving a line. The Today section reads every stored value by T3.5.
 - A card in a filtered deck in a Deck scope (T3.2 states the rule; U98's scenarios cover it).
-- Search texts that fail to parse: the Stats screen's handling is U98's (R1351).
+- How the Stats screen shows a scope error or `unreadable_row` (T6.2): U225's (R1351).
 
 ## T11. Differences from Anki (R1889)
 
@@ -373,5 +388,6 @@ These differences are deliberate. They change no golden: an observation either d
 | Situation | Anki 26.09.3 | Meguri | Asserted by |
 |---|---|---|---|
 | Kinds line with `filtered` 0 (R1372, T4.2 item 3) | `Learn: 1, Review: 2, Relearn: 3, Filtered: 0` | `Learn: 1, Review: 2, Relearn: 3` | `core/crates/meguri-stats/tests/studied_today_text.rs` |
-| Direction marks around numbers (T6.3) | each number between U+2068 and U+2069 | none (H5 and H6 remove them from the oracle's text) | the same test |
+| Direction marks (T6.3) | U+2068 and U+2069 around numbers and some parts of text; none in the Again line | none (H5 and H6 remove every one from the oracle's text) | the same test |
+| Deck scope whose deck id names no deck (T3.2) | the scope is `deck:current`, which reads the deck named `Default` and shows its values | `unknown_deck` | U97's Today query unit tests (`core/crates/meguri-stats/src/today.rs`) |
 | Line breaks in the Studied sentence (T6.3) | a line break after the count and after `today` | single spaces (H5 and H6 replace them) | the same test |

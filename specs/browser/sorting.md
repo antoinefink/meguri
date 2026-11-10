@@ -22,12 +22,13 @@ How Browse orders the rows of a search for each sortable column, in cards mode a
 | `stability`, `difficulty`, `retrievability` | yes | no | descending |
 
 - This is `browser/config-keys` K3. The first direction is the one the first click on a header uses; the second click reverses (R1139). The iPhone sort menu offers the same columns (R1146).
-- A sort request names a mode, a column key and a direction. A key outside the 19, or a column not sortable in the mode, is refused with kind `unsortable_column`, the kind of `browser/config-keys` K5.2, before anything runs (U85); the conformance observation records it as `unsortable` (`specs/conformance/browser-ops.md` B1). Decided 2026-10-27: sort requests and sort writes share that one refusal kind; the observation keeps `unsortable` so that the goldens recorded with it stay valid. Meguri shows no sort affordance on such headers instead of Anki's message (R1140).
-- A stored sort that is unsortable falls back to `noteCrt` (`browser/config-keys` K5, R1141).
+- A sort request names a mode, a column key and a direction; the core never chooses a direction. The first direction is catalog metadata (`browser/columns` C2), which only the sort-by-column write of `browser/config-keys` K5.2 uses. A key outside the 19, or a column not sortable in the mode, is refused with kind `unsortable_column`, the kind of `browser/config-keys` K5.2, before anything runs (U85); the conformance observation records it as `unsortable` (`specs/conformance/browser-ops.md` B1). Decided 2026-10-27: sort requests and sort writes share that one refusal kind; the observation keeps `unsortable` so that the goldens recorded with it stay valid. Meguri shows no sort affordance on such headers instead of Anki's message (R1140).
+- A stored sort that is unsortable falls back to `noteCrt` (`browser/config-keys` K5.1, R1141). This is Meguri's rule: Anki falls back only for a stored key that names no column, and runs a known column that is unsortable in the mode (`question`, `answer`, notes-mode `stability`, `difficulty`, `retrievability`) as an unsorted search (`browser/config-keys` K5.3).
 
 ## S2. Comparing values
 
-- Keys compare the way SQLite 3 orders values: NULL before everything; then numbers, INTEGER and REAL together by numeric value; then text by the key's collation. Only `sfld` mixes storage classes.
+- Keys compare the way SQLite 3 orders values: NULL before everything; then numbers, INTEGER and REAL together by numeric value; then text by the key's collation; then blobs.
+- Every key reads the value as stored, with SQLite's arithmetic and comparison, not the decoded value the cells use (`browser/columns` C1, `model/row-records` R4). `sfld` mixes storage classes by design (below); the card columns do so only in legacy or damaged rows, and then sort by what they hold: a REAL `ivl` 3.5 sorts after an INTEGER 3 under Interval although both cells show 3; a REAL `mod` or `due` sorts by its value; a `due` outside the `i32` range sorts by its stored value although its cells read 0; a TEXT value sorts after every number.
 - **NOCASE** (SQLite's built-in collation): text compared byte by byte in UTF-8 after mapping the 26 ASCII capital letters to small ones; when one text is a prefix of the other, the shorter comes first. Nothing else is folded: `É` and `é` differ, and `é` sorts after `z` (its first byte is above every ASCII byte).
 - **unicase**: `text/unicode-primitives` U2, the comparison of the `unicase` collation.
 - **binary**: UTF-8 bytes, which is code point order.
@@ -78,8 +79,8 @@ For a note n. Where the table says "or NULL", a note for which the aggregate has
 | `template` (Cards) | the number of n's cards; n's id. Or NULL: no card |
 | `deck` | the number of distinct `did` values among n's cards whose deck exists; the deck rank of the first of those cards (lowest card id); n's id. Or NULL: no card in an existing deck |
 | `cardDue` | the smallest E (S6) among n's cards that have `odid` 0, `type` not 0 and `queue` above 0; n's id. Or NULL: no such card (only new, suspended, buried or filtered cards) |
-| `cardEase` | the average `factor` of n's cards whose `type` is not 0, as a real number; n's id. Or NULL: no such card |
-| `cardIvl` | the average `ivl` of n's cards whose `type` is 2 or 3, as a real number; n's id. Or NULL: no such card |
+| `cardEase` | the average `factor` of n's cards whose `type` is not 0, as a real number, not wrapped; n's id. Or NULL: no such card |
+| `cardIvl` | the average `ivl` of n's cards whose `type` is 2 or 3, as a real number, not wrapped; n's id. Or NULL: no such card |
 | `cardReps` | the sum of `reps` over n's cards; n's id. Or NULL: no card |
 | `cardLapses` | the sum of `lapses`; n's id. Or NULL: no card |
 | `cardMod` | the largest `mod` of n's cards; n's id. Or NULL: no card |
@@ -90,15 +91,16 @@ For a note n. Where the table says "or NULL", a note for which the aggregate has
 | `originalPosition` | P of n's first card (S5.1); n's id. Or NULL: no card |
 
 - Aggregates range over all of n's cards, not only those the search matched (S9).
+- The aggregates are exact SQL averages and sums: the 16-bit ease sum, the 32-bit interval product and the 32-bit Reviews and Lapses sums of the cells (`browser/columns` C13) apply to the cells only. A note with 27 review cards at `factor` 2,500 shows Avg. Ease 7 but sorts at 2,500 (250%).
 - The note id key after an aggregate is Anki's: notes with an equal aggregate keep note id order, reversed when the sort is descending.
 
 ### S5.1 The position value P
 
-P of a card: the card data `pos` when present (`search/card-extractors` X7); otherwise `due` as stored when `type` is 0; otherwise 0. A review card without `pos` has P 0, not NULL, so it sorts before new cards (positions start at 1) and after negative positions such as a filtered new card's −100000.
+P of a card: the card data `pos` when present (`search/card-extractors` X7); otherwise `due` as stored when `type` is 0; otherwise 0. A review card without `pos` has P 0, not NULL, so it sorts before new cards and after negative positions such as a filtered new card's −100000. New positions are normally at least 1, but 0 is possible (Reposition accepts a start of 0, and a collection without `nextPos` gives its first new card 0); a new card at position 0 then has an equal P to a review card without `pos`, so the two form one equal-key run in cards mode (S8) and tie on the aggregate in notes mode.
 
 ## S6. The Due key
 
-E of a card, from its stored `due` and `type` (not its home due), in 64-bit integers:
+E of a card, from its stored `due` and `type` (not its home due), in SQLite arithmetic (S2): 64-bit integers for every `due` in the `i32` range, a REAL result when `due` is REAL or when the product overflows 64 bits:
 
 - `due` when `due` is above 1,000,000,000 or `type` is 0;
 - otherwise (`due` − today) × 86,400 + now.
@@ -116,6 +118,8 @@ New positions, learning timestamps and review days so fall on one scale (R1143):
 | new in a filtered deck, `due` −99999 | −99,999 |
 
 Suspended and buried cards sort by the same E as any other card.
+
+E is the sort's own value: the Due cell (`browser/columns` C7.5, from the home due) and the `prop:due` search (`search/properties` P4) compute theirs differently, by design. A suspended learning card has an E, an empty Due cell, and never matches `prop:due`.
 
 ## S7. The Retrievability key
 
@@ -162,9 +166,9 @@ Observation: `search` with `order` (`specs/conformance/browser-ops.md` B1, B2). 
 | `browser/sort/tags` | binary order of stored tags: capitals before small letters, non-ASCII last, untagged first |
 | `browser/sort/position` | S5.1: `pos`, new positions, review cards without `pos`, a filtered new card, a note whose first card is ordinal 1 |
 | `browser/sort/fsrs` | Stability, Difficulty, Retrievability in cards mode: NULLs, `s` without `d`, cards with and without `lrt`; notes mode refuses all three |
-| `browser/sort/unsortable` | S1: Question and Answer in both modes, unknown and empty keys; parse errors win over `unsortable`, and `unsortable` wins over run errors such as an invalid regex (browser-ops B1) |
+| `browser/sort/unsortable` | S1: Question and Answer in both modes, unknown and empty keys; parse errors win over `unsortable`, and `unsortable` wins over run errors such as an invalid regex (browser-ops B1). Its regex row needs the regex term (U81, tag `needs-text`) |
 | `browser/sort/damaged` | S9: a card without a note dropped by note-column sorts only; a note without cards first ascending |
-| `browser/sort/subset` | S9: aggregates over all of a note's cards under a restricting search |
+| `browser/sort/subset` | S9: aggregates over all of a note's cards under a restricting search. Needs the state and deck terms (U82, tags `needs-state`, `needs-deck`) |
 
 The oracle driver implements `order`; Meguri's runner does not yet (browser-ops B6). `browser/sort/position` and `subset` name the card that `edit_note` adds with `adopt` (browser-ops B5). `browser/sort/damaged` breaks rows with `db_exec` as the active `card_excerpts` scenarios `browser/columns/question-deck/damaged` and `damaged-notetype` do (a missing deck, an ordinal with no template, a deleted note row: the row errors of `browser/columns` C3.1), and also deletes one note's cards; it shows only where such rows sort.
 
