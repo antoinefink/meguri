@@ -459,9 +459,18 @@ class DeliveryTests(unittest.TestCase):
             ({"generated-private-file": {**original, "mode": 0o555}}, "install-entry-mode"),
             ({"generated-private-file": {**original, "mode": 0o555, "sha256": "b" * 64}}, "install-entry-content"),
         ):
-            with self.subTest(reason=reason), self.assertRaises(v.Refused) as failure:
+            with self.subTest(reason=reason), self.assertRaises((v.Refused, install.InstalledModeDifference)) as failure:
                 install.require_installed_inventory(expected, changed)
             self.assertEqual(failure.exception.args, (reason,))
+            diagnostic = install.DeliveryDiagnostic()
+            diagnostic.enter("simulator-readback")
+            report = diagnostic.failure(failure.exception)
+            if reason == "install-entry-mode":
+                self.assertEqual(report["mode_transitions"], [
+                    {"type": "file", "before": 0o755, "after": 0o555, "count": 1}])
+            else:
+                self.assertNotIn("mode_transitions", report)
+            self.assertNotIn("generated-private", json.dumps(report))
 
     def test_lease_wrong_kind_owner_expired_and_old_boot_refuse(self):
         self.simulator()

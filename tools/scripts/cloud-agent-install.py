@@ -627,6 +627,13 @@ DELIVERY_REFUSALS = {"unclassified", "filesystem-refused", "input-shape", "recei
     "profile-expired", "profile-device", "profile-development", "profile-grants", "source-changed"}
 
 
+class InstalledModeDifference(v.Refused):
+    def __init__(self, transitions):
+        super().__init__("install-entry-mode")
+        self.transitions = [{"type": kind, "before": before, "after": after, "count": count}
+                            for (kind, before, after), count in sorted(transitions.items())[:32]]
+
+
 class DeliveryDiagnostic:
     def __init__(self):
         self.stage = "entry"
@@ -637,7 +644,9 @@ class DeliveryDiagnostic:
 
     def failure(self, error):
         code = "unclassified"
-        if isinstance(error, v.Refused) and len(error.args) == 1 and type(error.args[0]) is str:
+        if isinstance(error, InstalledModeDifference):
+            code = "install-entry-mode"
+        elif isinstance(error, v.Refused) and len(error.args) == 1 and type(error.args[0]) is str:
             if error.args[0] in DELIVERY_REFUSALS:
                 code = error.args[0]
         elif isinstance(error, OSError):
@@ -648,7 +657,10 @@ class DeliveryDiagnostic:
             code = "input-shape"
         elif isinstance(error, subprocess.SubprocessError):
             code = "process-refused"
-        return {"stage": self.stage if self.stage in DELIVERY_STAGES else "entry", "refusal": code}
+        result = {"stage": self.stage if self.stage in DELIVERY_STAGES else "entry", "refusal": code}
+        if isinstance(error, InstalledModeDifference):
+            result["mode_transitions"] = error.transitions
+        return result
 
 
 def require_installed_inventory(expected, installed):
@@ -660,13 +672,21 @@ def require_installed_inventory(expected, installed):
     need(not (missing and added), "install-entries-replaced")
     need(not missing, "install-entries-missing")
     need(not added, "install-entries-added")
+    transitions = {}
     for name, original in expected.items():
         actual = installed[name]
         need(isinstance(actual, dict), "install-readback")
         need(actual.get("type") == original["type"], "install-entry-type")
         need({k: v for k, v in actual.items() if k != "mode"} ==
              {k: v for k, v in original.items() if k != "mode"}, "install-entry-content")
-    raise v.Refused("install-entry-mode")
+        before, after = original.get("mode"), actual.get("mode")
+        if before != after:
+            kind = original["type"]
+            need(kind in ("file", "directory") and type(after) is int and 0 <= after <= 0o7777,
+                 "install-readback")
+            key = (kind, before, after)
+            transitions[key] = transitions.get(key, 0) + 1
+    raise InstalledModeDifference(transitions)
 
 
 def deliver(root, directory, parent, child, lease_run, vm, *, checkpoint=None):
