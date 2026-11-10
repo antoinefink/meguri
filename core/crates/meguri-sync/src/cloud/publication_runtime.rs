@@ -536,7 +536,7 @@ impl Runtime {
         if let Some(work) = self.next_adoption_work_with_work(Some(collection), work)? {
             return Ok(PublicationWork::Adoption(work));
         }
-        let Some(op) = self.publication_op()? else {
+        let Some(mut op) = self.publication_op()? else {
             return Ok(PublicationWork::Idle);
         };
         Self::require_supported_publication(&op)?;
@@ -621,7 +621,13 @@ impl Runtime {
         {
             return Ok(PublicationWork::Idle);
         }
-        if with_tracking_access(|| s.store.as_ref().ok_or(Error::Database)?.publication_op())?.as_ref() != Some(&op) {
+        let current = with_tracking_access(|| s.store.as_ref().ok_or(Error::Database)?.publication_op())?;
+        // Entity results may advance this same operation while the provider
+        // reads run. Only that step change preserves the validated snapshot.
+        if op.step == PublishStep::Zones && current.as_ref().is_some_and(|op| op.step == PublishStep::Sent) {
+            op.step = PublishStep::Sent;
+        }
+        if current.as_ref() != Some(&op) {
             return Err(RuntimeError::StaleIncarnation);
         }
         if matches!(op.step, PublishStep::Zones | PublishStep::Sent | PublishStep::Complete)

@@ -1774,10 +1774,11 @@ private actor InitialCloudSDK: CloudKitEngine {
     func receivedUpdates() -> [UInt64] { updates }
     func pendingRecordZoneChanges() async -> [String: CloudPendingChange] { pending }
     func pendingDatabaseChanges() async -> Set<String> { [] }
-    func applyPendingUpdate(_ update: CloudPendingUpdate) async throws {
+    func applyPendingUpdate(_ update: CloudPendingUpdate) async throws -> CloudPendingUpdate {
         updates.append(update.id)
         for name in update.removes { pending.removeValue(forKey: name) }
         pending.merge(update.adds) { _, next in next }
+        return update
     }
     func removePendingDatabaseChanges() async {}
     func prepareSend(zones: [String]) async throws -> CloudKitNetworkEnqueue { throw CloudOwnTransportFailure.unexpectedReply }

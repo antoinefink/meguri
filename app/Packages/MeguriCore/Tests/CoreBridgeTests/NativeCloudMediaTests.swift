@@ -555,13 +555,13 @@ private actor NativeMediaPendingUpdateEngine: CloudKitEngine {
     func failNextPendingUpdate(_ error: any Error) { nextFailure = error }
     func pendingRecordZoneChanges() async -> [String: CloudPendingChange] { await sdk.pendingRecordZoneChanges() }
     func pendingDatabaseChanges() async -> Set<String> { await sdk.pendingDatabaseChanges() }
-    func applyPendingUpdate(_ update: CloudPendingUpdate) async throws {
+    func applyPendingUpdate(_ update: CloudPendingUpdate) async throws -> CloudPendingUpdate {
         if let error = nextFailure {
             nextFailure = nil
             injectedFailures += 1
             throw error
         }
-        await sdk.applyPendingUpdate(update)
+        return await sdk.applyPendingUpdate(update)
     }
     func removePendingDatabaseChanges() async { await sdk.removePendingDatabaseChanges() }
     func waitForEventBookkeeping() async throws { try await sdk.waitForEventBookkeeping() }

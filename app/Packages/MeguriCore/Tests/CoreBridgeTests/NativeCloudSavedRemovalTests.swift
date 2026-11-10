@@ -3,6 +3,18 @@ import Testing
 
 struct NativeCloudSavedRemovalTests {
     @Test
+    func fullPendingUpdateKeepsMatchingEntriesAndAppliesRealChanges() {
+        let pending: [String: CloudPendingChange] = ["kept": .save, "changed": .delete, "readded": .save]
+        let additions: [String: CloudPendingChange] = ["kept": .save, "changed": .save, "readded": .save, "new": .delete]
+        let full = CloudPendingUpdate(id: 1, kind: .full, adds: additions, removes: ["readded", "absent"])
+        let changes = CloudPendingUpdate(id: 2, kind: .changes, adds: additions, removes: ["readded"])
+        let applied = full.mutations(to: pending)
+        #expect(applied.adds == ["changed": .save, "readded": .save, "new": .delete])
+        #expect(applied.removes == ["readded"])
+        #expect(changes.mutations(to: pending) == changes)
+    }
+
+    @Test
     func nativeSavedRemovalRequiresActualAbsenceAfterOriginalIssue() {
         var proof = NativeCloudSavedRemoval()
         let issue = proof.capture(pending: ["n": .save], generation: 7)

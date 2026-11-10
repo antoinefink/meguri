@@ -105,16 +105,19 @@ actor ServiceSDK: CloudKitEngine {
     func pendingRecordZoneChanges() async -> [String: CloudPendingChange] { pending }
     func pendingDatabaseChanges() async -> Set<String> { [] }
     func removePendingDatabaseChanges() async {}
-    func applyPendingUpdate(_ update: CloudPendingUpdate) async throws {
+    func applyPendingUpdate(_ update: CloudPendingUpdate) async throws -> CloudPendingUpdate {
+        let applied = update.mutations(to: pending)
+        guard !applied.adds.isEmpty || !applied.removes.isEmpty else { return applied }
         revision &+= 1
-        for name in update.removes { pending.removeValue(forKey: name); pendingRevision.removeValue(forKey: name) }
-        for (name, change) in update.adds { pending[name] = change; pendingRevision[name] = revision }
-        if !update.adds.isEmpty {
+        for name in applied.removes { pending.removeValue(forKey: name); pendingRevision.removeValue(forKey: name) }
+        for (name, change) in applied.adds { pending[name] = change; pendingRevision[name] = revision }
+        if !applied.adds.isEmpty {
             pendingAdditionUpdates += 1
             let inspect = nextPendingAddition; nextPendingAddition = nil
             inspect?()
             automaticRequested = revision; scheduleAutomaticSend()
         }
+        return applied
     }
     func takeSavedPendingRemovals() async -> [CloudSavedPendingRemoval] {
         let result = savedRemovals

@@ -1993,6 +1993,70 @@ impl meguri_model::clock::Clock for HeldBindProvider {
 }
 
 #[test]
+fn publication_work_uses_sent_step_when_last_entity_result_lands_during_selection() {
+    use std::sync::mpsc;
+
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("device");
+    generated(&dir);
+    let host = open_host(&dir, keys());
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let media = host.media().unwrap();
+    media.store().register_full(|_, _| true).unwrap();
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(44)).unwrap();
+    let p = preview(&host, &mut service);
+    runtime.confirm_connection_publication(&p, &collection).unwrap();
+    own_until_scan(&host, &mut service);
+    runtime
+        .reconcile_binding(&collection, &media, Duration::from_secs(30))
+        .unwrap();
+    let original = runtime.publication_op().unwrap().unwrap();
+    assert_eq!(original.step, PublishStep::Zones);
+    let instance = runtime.instance().unwrap();
+    runtime.start_sdk_instance(&instance).unwrap();
+    let names = entity_names(runtime);
+
+    let (entered, wait) = mpsc::channel();
+    let (release, resume) = mpsc::channel();
+    let clock = Arc::new(HeldBindProvider {
+        random: SeededRandom::new(91),
+        remaining: Mutex::new(None),
+        hold_on_clock: true,
+        clock_armed: std::sync::atomic::AtomicBool::new(true),
+        entered,
+        release: Mutex::new(resume),
+    });
+    runtime.attach_adapter_clock(clock.clone());
+    let request = std::thread::scope(|scope| {
+        let work = scope.spawn(|| runtime.next_publication_work(&collection));
+        wait.recv_timeout(Duration::from_secs(5)).unwrap();
+        // These are real Service saves. Their committed results advance the
+        // original operation while its next-work read has no Runtime lock.
+        for _ in 0..32 {
+            if runtime.publication_op().unwrap().unwrap().step == PublishStep::Sent {
+                break;
+            }
+            let batch = runtime.build_collection_batch(&instance, &collection, &names).unwrap();
+            assert!(!batch.saves.is_empty());
+            assert!(send_actual_batch(&host, &mut service, &batch).is_empty());
+        }
+        release.send(()).unwrap();
+        assert_eq!(runtime.publication_op().unwrap().unwrap().step, PublishStep::Sent);
+        let PublicationWork::Own(request) = work.join().unwrap().unwrap() else {
+            panic!("same publication must offer its complete-epoch save");
+        };
+        request
+    });
+    assert_eq!(request.op, original.id);
+    assert_eq!(request.kind, OwnKind::SaveCompleteEpoch);
+    let (result, _) = execute_publication_request(&mut service, &scope(), &request, runtime, &collection).unwrap();
+    runtime.publication_result(&request, result, &collection).unwrap();
+    assert_eq!(runtime.publication_op().unwrap().unwrap().step, PublishStep::Complete);
+    host.close().unwrap();
+}
+
+#[test]
 fn publication_bind_held_final_providers_refuse_reopen_and_replacement_without_storing_identity() {
     for hold_on_clock in [false, true] {
         for lifecycle in ["reopen", "replace"] {

@@ -263,21 +263,24 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         do { return try NativeCloudKitIdentityValidation.databaseZoneNames(sdk?.state.pendingDatabaseChanges ?? []) }
         catch { failure = error; return [] }
     }
-    func applyPendingUpdate(_ update: CloudPendingUpdate) throws {
+    func applyPendingUpdate(_ update: CloudPendingUpdate) throws -> CloudPendingUpdate {
         if let failure { throw failure }
-        guard let sdk else { return }
+        guard let sdk else { return .init(id: update.id, kind: update.kind, adds: [:], removes: []) }
         do {
             let pending = try validatedPendingRecords()
             savedRemoval.observe(instance: instanceID, pending: pending.byName, generation: networkLifetime.authority())
-            savedRemoval.applicationWillChangePending()
             guard let collectionZone else { throw NativeCloudKitFailure.unsupportedRecord }
-            let removes = pending.removals(names: update.removes)
-            let adds: [CKSyncEngine.PendingRecordZoneChange] = update.adds.map { name, change in
+            let applied = update.mutations(to: pending.byName)
+            let removes = pending.removals(names: applied.removes)
+            let adds: [CKSyncEngine.PendingRecordZoneChange] = applied.adds.map { name, change in
                 let id = recordID(name, zone: NativeCloudMediaBatch.zone(name: name, collection: collectionZone))
                 return change == .save ? .saveRecord(id) : .deleteRecord(id)
             }
+            guard !removes.isEmpty || !adds.isEmpty else { return applied }
+            savedRemoval.applicationWillChangePending()
             sdk.state.remove(pendingRecordZoneChanges: removes)
             sdk.state.add(pendingRecordZoneChanges: adds)
+            return applied
         } catch {
             failure = error
             throw error

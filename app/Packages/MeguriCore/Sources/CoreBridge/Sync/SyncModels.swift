@@ -8,6 +8,17 @@ public struct CloudPendingUpdate: Sendable, Equatable {
     public let kind: CloudUpdateKind
     public var adds: [String: CloudPendingChange]
     public var removes: Set<String>
+
+    func mutations(to pending: [String: CloudPendingChange]) -> Self {
+        var update = self
+        update.removes = removes.intersection(pending.keys)
+        // Full reconciliation keeps entries that already have the right kind.
+        // An explicit change can re-add a name after a result or a later edit.
+        if kind == .full {
+            update.adds = adds.filter { pending[$0.key] != $0.value || update.removes.contains($0.key) }
+        }
+        return update
+    }
 }
 public struct CloudRecord: Sendable, Equatable {
     public let name: String
@@ -95,7 +106,8 @@ public protocol CloudKitEngine: Sendable {
     func pendingRecordZoneChanges() async -> [String: CloudPendingChange]
     func takeSavedPendingRemovals() async -> [CloudSavedPendingRemoval]
     func pendingDatabaseChanges() async -> Set<String>
-    func applyPendingUpdate(_ update: CloudPendingUpdate) async throws
+    /// Returns the record changes the engine applied under the original update ID.
+    func applyPendingUpdate(_ update: CloudPendingUpdate) async throws -> CloudPendingUpdate
     func removePendingDatabaseChanges() async
     /// Joins the original serial event chain and its returned work.
     func waitForEventBookkeeping() async throws

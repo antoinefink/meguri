@@ -141,11 +141,11 @@ private actor PolicyPendingEngine: CloudKitEngine {
         return await sdk.pendingRecordZoneChanges()
     }
     func pendingDatabaseChanges() async -> Set<String> { await sdk.pendingDatabaseChanges() }
-    func applyPendingUpdate(_ update: CloudPendingUpdate) async throws {
+    func applyPendingUpdate(_ update: CloudPendingUpdate) async throws -> CloudPendingUpdate {
         received.append(update)
         if let gate = applyPause { applyPause = nil; await gate.enter(); try Task.checkCancellation() }
         if let error = applyError { applyError = nil; throw error }
-        await sdk.applyPendingUpdate(update)
+        return await sdk.applyPendingUpdate(update)
     }
     func removePendingDatabaseChanges() async { await sdk.removePendingDatabaseChanges() }
     func waitForEventBookkeeping() async throws { try await sdk.waitForEventBookkeeping() }

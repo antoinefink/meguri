@@ -133,3 +133,50 @@ Its publication work reports changed authority with the recovery step still
 at `sent`. Both failures are retained. The next checks must identify the
 pending-list change and the publication authority change at their respective
 boundaries. No full gate or signed round-trip pass is claimed.
+
+## Original save confirmation and concurrent publication progress
+
+Starting commit `0c74cc52`. The manual exchange trace shows two full updates
+reporting the already pending record after the engine built its batch. A full
+update now leaves an entry alone when it already has the requested kind. The
+native adapter and the Service fixture compare against the pending list at the
+point of mutation and report only the changes they applied. The adapter uses
+those facts to clear only affected save-removal guards and records additions
+only if they are present afterward. Explicit changes still run in order, so a
+newer revision can be added again after the original save. The original save
+test still requires both handler return and an actual SDK removal receipt.
+
+The publication work selector samples the operation before reading the account,
+file and clock. The last real entity result can advance the same operation
+from `zones` to `sent` before the selector takes the Runtime lock. The selector
+now accepts that exact durable step advance and uses the new step. It still
+rejects any other difference in the operation and uses the existing account,
+binding, generation, file and cancellation checks.
+
+The new clock-gated test commits actual Service entity results while the
+selector is outside the Runtime lock. It fails with `StaleIncarnation` in
+`core-test/20261110T223015Z-75414`. With the repair, the original work call
+returns the complete-epoch save, and its actual Service result commits the
+`complete` step. Run `core-test/20261110T223120Z-75749` passes all 47
+publication-phase tests.
+
+Run `swift-test/20261110T223245Z-76415` passes all 11 native tests. In app run
+`swift-test/20261110T223358Z-77710`, the manual original-save case passes its
+durable ACK, SDK removal, and peer apply checks. The earlier automatic case
+then reports `revisionMismatch` at `ledgerWrite` in media preparation and
+stalls. The runner and its generated-data service were stopped after that
+failure. The receipt remains failed. A separate app run,
+`swift-test/20261110T223729Z-79399`, passes all four selected tests, including
+phone restoration, original save bookkeeping, and reviews and media through
+reopen and peer adoption.
+
+Run `swift-test/20261110T223904Z-82062` passes the three update-order tests with
+both SDK removal timings. `core-lint/20261110T223849Z-81740` passes after the
+first run identified an unused test import. That import was the only Rust
+change after the publication tests passed.
+
+Direct source review checked the exact publication row comparison, pending
+update order, explicit re-adds, save-removal provenance and the original
+authority checks. No test assertion or timing limit changed. The media
+preparation refusal, the full batch gate and the signed CloudKit round trip
+remain open.

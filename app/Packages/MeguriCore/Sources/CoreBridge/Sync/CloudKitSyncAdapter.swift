@@ -650,18 +650,18 @@ public actor CloudKitSyncAdapter {
                 await instance.engine.removePendingDatabaseChanges()
                 guard await valid(origin) else { return }
             }
-            try await instance.engine.applyPendingUpdate(applied)
+            let mutation = try await instance.engine.applyPendingUpdate(applied)
             guard await valid(origin) else { return }
             let receipts = await instance.engine.takeSavedPendingRemovals()
             await savedPendingRemovalsConfirmed(receipts, origin: origin, engine: instance.engine)
             guard await valid(origin) else { return }
             // A later application mutation ends any still-unconfirmed original
             // ownership. Its absence must never become a delayed Saved proof.
-            let touched = Set(applied.adds.keys).union(applied.removes)
+            let touched = Set(mutation.adds.keys).union(mutation.removes)
             instance.savedRemovalGuards = instance.savedRemovalGuards.filter { $0.value.names.isDisjoint(with: touched) }
             let after = await instance.engine.pendingRecordZoneChanges()
             guard await valid(origin) else { return }
-            let added = update.adds.keys.filter { after[$0] == update.adds[$0] }
+            let added = mutation.adds.keys.filter { after[$0] == mutation.adds[$0] }
             try await core.updateApplied(sdk: origin, id: update.id, added: added)
         }
     }

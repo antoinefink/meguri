@@ -1438,7 +1438,7 @@ private actor CloudThrowingFetchEngine: CloudKitEngine {
     func failNextFetch() { throwFetch = true }
     func pendingRecordZoneChanges() async -> [String: CloudPendingChange] { await sdk.pendingRecordZoneChanges() }
     func pendingDatabaseChanges() async -> Set<String> { await sdk.pendingDatabaseChanges() }
-    func applyPendingUpdate(_ update: CloudPendingUpdate) async throws { await sdk.applyPendingUpdate(update) }
+    func applyPendingUpdate(_ update: CloudPendingUpdate) async throws -> CloudPendingUpdate { await sdk.applyPendingUpdate(update) }
     func removePendingDatabaseChanges() async { await sdk.removePendingDatabaseChanges() }
     func prepareSend(zones: [String]) async throws -> CloudKitNetworkEnqueue {
         try await sdk.prepareSend(zones: zones)

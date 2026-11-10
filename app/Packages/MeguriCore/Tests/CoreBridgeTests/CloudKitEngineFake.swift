@@ -177,10 +177,11 @@ actor CloudKitEngineFake: CloudKitEngine {
 
     // Full updates also remove pending database changes (P4). This is an SDK
     // operation, not implementation of the policy's full comparison.
-    func applyPendingUpdate(_ update: CloudPendingUpdate) {
+    func applyPendingUpdate(_ update: CloudPendingUpdate) -> CloudPendingUpdate {
         for name in update.removes { pending.removeValue(forKey: name) }
         for (name, change) in update.adds { pending[name] = change }
         trace.append(.pendingApplied(update.id, update.removes.sorted(), update.adds.keys.sorted()))
+        return update
     }
 
     func removePendingDatabaseChanges() { pendingDatabase.removeAll() }
