@@ -134,7 +134,7 @@ class AppSetupDiagnostic:
         'freshSend', 'nextCommand', 'holdSend', 'finishSend'))
     CHANNELS = frozenset(('none', 'initial', 'root', 'directories', 'socket', 'events', 'ready',
         'responseWrite', 'commandRead', 'commandParse', 'attributeEvent', 'renameEvent',
-        'deleteEvent', 'revokeEvent', 'otherEvent'))
+        'deleteEvent', 'revokeEvent', 'otherEvent', 'stageAttribute', 'supportAttribute', 'ancestorAttribute'))
 
     @classmethod
     def relay(cls, raw):

@@ -74,3 +74,20 @@ records after its original child joins. Host relay retains the same boundary.
 Raw XCTest text, paths, exception descriptions and account values stay private.
 The directory, socket, event and loaded-product checks remain enabled and
 unchanged. Native compilation and the next setup attempt are still pending.
+
+Setup `20261110T203853Z-2605` compiled and reached the app test. It failed
+before the account read at `observationChannel / attributeEvent`, relayed by
+classifier `20261110T204033Z-6258`. No approval or publication occurred.
+The diagnostic now distinguishes only three directory roles: the private
+stage, the OS support root and its ancestors. It exports no directory name.
+Focused check `20261110T204532Z-8995`, privacy `20261110T204532Z-8978` and
+similarity `20261110T204533Z-9460` pass for that refinement.
+
+Generated VM probe `20261110T204420Z-8505` measured the existing vnode mask.
+Directory and file creation did not yield an attribute event. Setting the
+same mode, changing and restoring permissions, changing and restoring an
+extended attribute, and touching timestamps did. Thus that notification alone
+cannot establish the cause. Earlier probe failures were fixture diagnostics:
+the VM's Python lacks os.setxattr; the corrected probe uses the public Darwin
+interface. No guard was removed or relaxed, and this probe makes no account
+lookup or CloudKit call.

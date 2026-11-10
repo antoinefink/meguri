@@ -170,7 +170,7 @@ class SetupDiagnosticTests(unittest.TestCase):
 
 class GuestDiagnosticTests(unittest.TestCase):
     def test_app_markers_accept_only_closed_fields_with_bounded_lines(self):
-        good={'phase':'observationChannel','channel':'attributeEvent'}
+        good={'phase':'observationChannel','channel':'stageAttribute'}
         prefix=b'MG_OWNER_APP_DIAGNOSTIC '
         invalid=({'phase':'GENERATED_PRIVATE_MARKER','channel':'events'},
                  {**good,'private':'GENERATED_PRIVATE_MARKER'},

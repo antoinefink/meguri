@@ -147,6 +147,7 @@ private enum OwnerSetupPhase: String {
     enum Checkpoint: String {
         case initial, root, directories, socket, events, ready, responseWrite, commandRead, commandParse
         case attributeEvent, renameEvent, deleteEvent, revokeEvent, otherEvent
+        case stageAttribute, supportAttribute, ancestorAttribute
     }
     private(set) var checkpoint = Checkpoint.initial
     private struct Pin: Equatable {
@@ -247,7 +248,14 @@ private enum OwnerSetupPhase: String {
         guard count == 0 else {
             if count == 1 {
                 switch event.fflags {
-                case UInt32(NOTE_ATTRIB): checkpoint = .attributeEvent
+                case UInt32(NOTE_ATTRIB):
+                    if event.ident == directories.last.map({ UInt($0.fd) }) {
+                        checkpoint = .stageAttribute
+                    } else if event.ident == directories.dropLast().last.map({ UInt($0.fd) }) {
+                        checkpoint = .supportAttribute
+                    } else {
+                        checkpoint = .ancestorAttribute
+                    }
                 case UInt32(NOTE_RENAME): checkpoint = .renameEvent
                 case UInt32(NOTE_DELETE): checkpoint = .deleteEvent
                 case UInt32(NOTE_REVOKE): checkpoint = .revokeEvent
