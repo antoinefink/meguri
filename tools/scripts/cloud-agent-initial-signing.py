@@ -354,7 +354,18 @@ def merge_native_request(normal, simulated, requested, role, settings):
     cloud = {'com.apple.developer.icloud-container-identifiers', 'com.apple.developer.icloud-services',
              'com.apple.developer.icloud-container-environment', 'aps-environment'}
     keys = {'com.apple.security.application-groups'} | (cloud if role == 'Meguri' else set())
-    need(set(requested) == keys and typed_entitlements(simulated) == typed_entitlements(requested),
+    native_requests = dict(simulated)
+    if 'application-identifier' in native_requests:
+        # Xcode's measured simulator input also carries its role identity
+        # (MG22050). Validate that one assertion; never treat it as a grant.
+        bundle = 'com.antoinefink.meguri.dev' + ('.widget' if role == 'MeguriWidget' else '')
+        team = settings.get('DEVELOPMENT_TEAM')
+        native_identity = native_requests.pop('application-identifier')
+        need(type(team) is str and re.fullmatch(r'[A-Z0-9]{10}', team) and
+             settings.get('PRODUCT_BUNDLE_IDENTIFIER') == bundle and
+             type(native_identity) is str and native_identity == team + '.' + bundle,
+             'initial-entitlements')
+    need(set(requested) == keys and typed_entitlements(native_requests) == typed_entitlements(requested),
          'initial-entitlements')
     groups = requested.get('com.apple.security.application-groups')
     need(type(groups) is list and groups == ['group.com.antoinefink.meguri.dev'] and

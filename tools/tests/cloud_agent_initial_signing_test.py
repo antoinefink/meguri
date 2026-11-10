@@ -500,6 +500,20 @@ def write_role_inputs(root, role):
 
 
 class NativeRequestGrantTests(unittest.TestCase):
+    def test_native_simulated_identity_is_checked_for_its_own_role_and_never_inherited(self):
+        for role in ('Meguri', 'MeguriWidget'):
+            requested = grant_fixture(role); settings = role_settings(Path('/generated'), role)
+            exact = TEAM + '.' + settings['PRODUCT_BUNDLE_IDENTIFIER']
+            simulated = dict(requested, **{'application-identifier': exact})
+            merged = m.merge_native_request({}, simulated, requested, role, settings)
+            self.assertNotIn('application-identifier', merged)
+            for wrong in (None, True, TEAM, exact + '.other', 'OTHER00000.' + settings['PRODUCT_BUNDLE_IDENTIFIER'],
+                          TEAM + '.com.antoinefink.meguri.dev' + ('' if role == 'MeguriWidget' else '.widget')):
+                changed = dict(simulated, **{'application-identifier': wrong})
+                with self.assertRaises(m.v.Refused): m.merge_native_request({}, changed, requested, role, settings)
+            unknown = dict(simulated, **{'com.apple.application-identifier': exact})
+            with self.assertRaises(m.v.Refused): m.merge_native_request({}, unknown, requested, role, settings)
+
     def test_retained_file_owner_and_group_are_part_of_the_input_pin(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve(); path = root/'input'; path.write_bytes(b'generated')

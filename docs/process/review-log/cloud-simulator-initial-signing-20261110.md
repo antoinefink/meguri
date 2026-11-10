@@ -125,3 +125,20 @@ similarity `20261110T205816Z-19099` pass.
 
 Native simulator signing and a full batch gate remain pending. No unit trailer,
 round-trip pass or release acceptance follows from these generated checks.
+
+Native run `20261110T210002Z-20162` compiled but refused `initial-entitlements`.
+Read-only diagnostic `20261110T210221Z-22050`, bound to that exact clean build,
+showed one extra known field in both simulated xcent files:
+`application-identifier`. The ordinary files were empty; all other simulated
+keys were the role's source requests, with no unknown keys or debugger flags.
+No grant values, account data, signing operation or SDK call were exported by
+that diagnostic. Its temporary MG route was removed afterward.
+
+The preparation now permits that one native identity assertion only after an
+exact typed check against the same role's resolved team and bundle identity.
+It is removed from the source-request comparison, not copied into either role's
+grant map. Existing app-only identity composition remains separate. Wrong team,
+wrong role, wrong type and an unknown alias refuse; unknown grants still refuse.
+Focused run `20261110T210337Z-22365` passed all four affected wrappers. Privacy
+`20261110T210347Z-23038` and similarity `20261110T210342Z-22684` pass. The next
+native build is still pending.
