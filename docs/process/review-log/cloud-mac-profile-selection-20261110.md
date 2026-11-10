@@ -55,3 +55,15 @@ widget and test target and unchanged signing properties; missing/duplicate
 targets in either query remain failures. Real build/freeze scheme and plan are
 unchanged. Independent delta review is clear. Focused check `44089` passed all
 three cases. Native verification follows this correction.
+
+Native `45132` then stopped at `profile-settings`. Read-only maintenance
+`48298`/`49962` identified two app rows in Xcode's all-target output; both had
+the expected app identity and signing intent. Widget query `50559` returned one
+correct widget row with unchanged signing. These were explicit maintenance
+runs on a dirty checkout, with no product mutation or signed evidence.
+
+The repair restores the actual scheme query for the app/test pair and adds an
+explicit widget query for each comparison. Every query retains exact role/count
+checks; it neither deduplicates rows nor permits missing targets. Independent
+delta review is clear. Focused `51545` passed all three cases, including missing,
+duplicate and unexpected-role regressions. Native verification remains pending.

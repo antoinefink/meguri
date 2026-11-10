@@ -17,7 +17,7 @@ class ProfileTests(unittest.TestCase):
   cache=self.home/'Library/Developer/Xcode/UserData/Provisioning Profiles';cache.mkdir(parents=True)
   self.cache=cache/(UUID+'.provisionprofile');self.cache.write_bytes(self.input.read_bytes())
   ent=self.root/'app/request.entitlements';ent.parent.mkdir(parents=True,exist_ok=True);ent.write_bytes(plistlib.dumps(self.f.ent))
-  self.ent=ent;self.changed_other=False;self.target_shape=None
+  self.ent=ent;self.changed_other=False;self.target_shape=None;self.unexpected_role=None
   self.settings=fixtures.settings();self.settings.update(CONFIGURATION='Debug',PLATFORM_NAME='macosx',MEGURI_SIGNING='team',
    DEVELOPMENT_TEAM=fixtures.TEAM,CODE_SIGN_ENTITLEMENTS='request.entitlements')
   for item in (patch.object(m.Path,'home',return_value=self.home),patch.object(m.v,'source',return_value=fixtures.SHA),
@@ -31,17 +31,29 @@ class ProfileTests(unittest.TestCase):
   return subprocess.CompletedProcess(args,0,plistlib.dumps(self.profile),b'')
  def command(self,args,category):
   if args[0]=='/usr/bin/xcodebuild':
-   self.assertIn('-alltargets',args)
-   self.assertIn('-showBuildSettings',args)
-   self.assertEqual(args[args.index('-sdk')+1],'macosx')
+   self.assertIn('-showBuildSettings',args);self.assertNotIn('-alltargets',args)
    self.assertEqual(args[args.index('-configuration')+1],'Debug')
-   self.assertIn('SYMROOT='+str(self.root/'build/app/CloudAgentMacDerivedData/Build/Products'),args)
-   self.assertIn('OBJROOT='+str(self.root/'build/app/CloudAgentMacDerivedData/Build/Intermediates.noindex'),args)
-   for excluded in ('-scheme','-testPlan','-derivedDataPath','build-for-testing'):
-    self.assertNotIn(excluded,args)
+   widget_query='-target' in args
+   if widget_query:
+    self.assertEqual(args[args.index('-target')+1],'MeguriWidget')
+    self.assertEqual(args[args.index('-sdk')+1],'macosx')
+    self.assertIn('SYMROOT='+str(self.root/'build/app/CloudAgentMacDerivedData/Build/Products'),args)
+    self.assertIn('OBJROOT='+str(self.root/'build/app/CloudAgentMacDerivedData/Build/Intermediates.noindex'),args)
+    for excluded in ('-scheme','-testPlan','-derivedDataPath','build-for-testing'):self.assertNotIn(excluded,args)
+   else:
+    self.assertIn('build-for-testing',args)
+    self.assertEqual(args[args.index('-scheme')+1],'Meguri')
+    self.assertEqual(args[args.index('-testPlan')+1],'CloudAgent')
+    self.assertEqual(args[args.index('-destination')+1],'platform=macOS,arch=arm64')
+    self.assertEqual(args[args.index('-derivedDataPath')+1],str(self.root/'build/app/CloudAgentMacDerivedData'))
    custom=any(x.startswith('MEGURI_MAC_AGENT_PROFILE_SPECIFIER=') for x in args)
    app=dict(self.settings,CODE_SIGN_STYLE='Manual' if custom else 'Automatic',PROVISIONING_PROFILE_SPECIFIER=UUID if custom else '')
-   targets=[{'target':'Meguri','buildSettings':app}]+[{'target':name,'buildSettings':{'CODE_SIGN_STYLE':'Manual' if custom and self.changed_other else 'Automatic'}} for name in ('MeguriWidget','MeguriSnapshotTests')]
+   widget={'CODE_SIGN_STYLE':'Manual' if custom and self.changed_other else 'Automatic','TARGET_NAME':'MeguriWidget',
+    'PLATFORM_NAME':'macosx','PRODUCT_BUNDLE_IDENTIFIER':'com.antoinefink.meguri.dev.widget'}
+   agent={'CODE_SIGN_STYLE':'Manual' if custom and self.changed_other else 'Automatic'}
+   targets=[{'target':'MeguriWidget','buildSettings':widget}] if widget_query else [
+    {'target':'Meguri','buildSettings':app},{'target':'MeguriSnapshotTests','buildSettings':agent}]
+   if self.unexpected_role==widget_query:targets.append({'target':'MeguriUITests','buildSettings':{}})
    if self.target_shape is not None:
     target,phase,duplicate=self.target_shape
     if custom==phase:
@@ -68,14 +80,19 @@ class ProfileTests(unittest.TestCase):
   with self.assertRaises(m.v.Refused):m.resolve(str(self.root),str(self.input))
   self.profile=copy.deepcopy(self.f.profile);self.profile['UUID']=UUID;self.changed_other=True
   with self.assertRaises(m.v.Refused):m.resolve(str(self.root),str(self.input))
- def test_all_target_comparison_rejects_missing_or_duplicate_widget_and_agent_in_either_query(self):
-  for target in ('MeguriWidget','MeguriSnapshotTests'):
+ def test_split_queries_reject_missing_or_duplicate_each_named_role_in_either_phase(self):
+  for target in ('Meguri','MeguriWidget','MeguriSnapshotTests'):
    for custom in (False,True):
     for duplicate in (False,True):
      self.target_shape=(target,custom,duplicate)
      with self.subTest(target=target,custom=custom,duplicate=duplicate):
       with self.assertRaisesRegex(m.v.Refused,'profile-target-scope'):
        m.resolve(str(self.root),str(self.input))
+ def test_split_queries_reject_unexpected_role_in_scheme_or_widget_query(self):
+  for widget_query in (False,True):
+   self.unexpected_role=widget_query
+   with self.assertRaisesRegex(m.v.Refused,'profile-target-scope'):
+    m.resolve(str(self.root),str(self.input))
  def test_transient_original_path_substitution_cannot_change_decoded_authority(self):
   admitted=self.input.read_bytes()
   def substitute(args,*,input,capture_output,timeout):

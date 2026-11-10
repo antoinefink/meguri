@@ -66,16 +66,32 @@ def resolve(root,path):
             if candidate.exists():
                 cached.append(v._first_sync_bytes(str(cache),str(candidate)));cache_paths.append((str(cache),str(candidate)))
     need(cached and all(value==raw for value in cached),'profile-cache')
-    # Scope comparison needs the real widget settings even when CloudAgent's
-    # execution scheme selects only the app and app-hosted test bundle.
-    derived=os.path.join(root,'build/app/CloudAgentMacDerivedData/Build')
-    command=['/usr/bin/xcodebuild','-showBuildSettings','-json','-project','app/Meguri.xcodeproj',
-             '-alltargets','-configuration','Debug','-sdk','macosx',
-             'SYMROOT='+derived+'/Products','OBJROOT='+derived+'/Intermediates.noindex','MEGURI_SIGNING=team',
-             'MEGURI_MAC_AGENT_PROFILE_STYLE=Manual','MEGURI_MAC_AGENT_PROFILE_SPECIFIER='+uuid]
-    # The ordinary MG caller runs from the checkout; no profile value is echoed.
-    settings=json.loads(v.command(command,'profile-settings').stdout)
-    baseline=json.loads(v.command(command[:-2],'profile-settings').stdout)
+    # Keep the actual CloudAgent app/host query. The widget needs its own
+    # explicit target query; -alltargets may return two configured app rows.
+    derived=os.path.join(root,'build/app/CloudAgentMacDerivedData')
+    command=['/usr/bin/xcodebuild','build-for-testing','-showBuildSettings','-json','-project','app/Meguri.xcodeproj',
+             '-scheme','Meguri','-testPlan','CloudAgent','-configuration','Debug','-destination','platform=macOS,arch=arm64',
+             '-derivedDataPath',derived,'MEGURI_SIGNING=team']
+    widget_command=['/usr/bin/xcodebuild','-showBuildSettings','-json','-project','app/Meguri.xcodeproj',
+             '-target','MeguriWidget','-configuration','Debug','-sdk','macosx',
+             'SYMROOT='+derived+'/Build/Products','OBJROOT='+derived+'/Build/Intermediates.noindex','MEGURI_SIGNING=team']
+    overrides=['MEGURI_MAC_AGENT_PROFILE_STYLE=Manual','MEGURI_MAC_AGENT_PROFILE_SPECIFIER='+uuid]
+    def query(args,roles):
+        values=json.loads(v.command(args,'profile-settings').stdout)
+        need(isinstance(values,list) and len(values)==len(roles) and
+             all(isinstance(x,dict) and isinstance(x.get('buildSettings'),dict) for x in values),'profile-target-scope')
+        need(all(sum(x.get('target')==role for x in values)==1 for role in roles),'profile-target-scope')
+        return values
+    settings=query(command+overrides,('Meguri','MeguriSnapshotTests'))
+    baseline=query(command,('Meguri','MeguriSnapshotTests'))
+    widgets=query(widget_command+overrides,('MeguriWidget',))
+    baseline_widgets=query(widget_command,('MeguriWidget',))
+    for value in widgets+baseline_widgets:
+        widget=value['buildSettings']
+        need(widget.get('TARGET_NAME')=='MeguriWidget' and widget.get('PLATFORM_NAME')=='macosx'
+             and widget.get('PRODUCT_BUNDLE_IDENTIFIER')=='com.antoinefink.meguri.dev.widget','profile-target-scope')
+    settings+=widgets
+    baseline+=baseline_widgets
     apps=[x['buildSettings'] for x in settings if x.get('target')=='Meguri']
     need(len(apps)==1,'profile-settings');app=apps[0]
     need(app.get('CONFIGURATION')=='Debug' and app.get('PLATFORM_NAME')=='macosx'
