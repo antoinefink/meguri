@@ -825,7 +825,7 @@ fn ffi_retained_media_other_stays_pending_and_saved_returns_validated_count() {
 fn saved_removal_export_requires_original_complete_receipt_and_handler_return() {
     let (fixture, sdk) = published();
     let (_, original) = add_note(&fixture, "Actual removal export".into());
-    let batch = build(&fixture, &sdk, &[original.name.clone()]);
+    let batch = build(&fixture, &sdk, std::slice::from_ref(&original.name));
     let (saved, failed) = results(&fixture, &sdk, &batch);
     assert!(failed.is_empty());
     let names: Vec<_> = saved.iter().map(|r| r.name.clone()).collect();
