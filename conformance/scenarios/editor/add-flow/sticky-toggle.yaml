@@ -1,0 +1,65 @@
+# The collection half of the Add screen's pins (specs/editor/add-flow.md A4):
+# toggling one field's pin is a plain note type save of that field's sticky
+# option (specs/notetypes/records.md N3, N4): the notetypes row is stamped,
+# col.scm stays (specs/notetypes/schema-changes.md G2), and the save is one
+# "Update Note Type" step (specs/conformance/undo-ops.md V4). Undo puts the
+# option and the row's stamps back. Toggle all with no field sticky sets
+# every field in one save and one step; toggle all with a field sticky
+# clears every field in one save and one step. The UI rule that picks set or
+# clear is Meguri's test (add-flow A11); here each save is the one that rule
+# sends. The row is reset to a synced state (usn 5) first, so the stamp
+# shows. The oracle reopens before each update_notetype, which empties both
+# undo histories before that step (specs/conformance/notetype-structure-ops.md
+# M5): the no-op write before the clearing save empties them on both
+# executors, so the last undo leaves nothing to undo on either. Needs
+# update_notetype with field_options
+# (specs/conformance/notetype-ops.md T5), undo and undo_status
+# (specs/conformance/undo-ops.md V1, V2, V5).
+id: editor/add-flow/sticky-toggle
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Trio
+      fields: [Word, Meaning, Example]
+      templates:
+        - {name: Recall, front: "{{Word}}", back: "{{Meaning}}<br>{{Example}}"}
+steps:
+  # Statements that are not a select empty both histories (undo-ops.md V5).
+  - db_exec: {sql: "UPDATE notetypes SET mtime_secs = 1700000000, usn = 5 WHERE name = 'Trio'"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  - observe: [undo_status, {notetype_structure: {notetypes: [Trio]}}]
+  # step 5: one pin on
+  - update_notetype: {notetype: Trio, edits: [{field_options: {field: Meaning, sticky: true}}]}
+  - observe: [undo_status, {notetype_structure: {notetypes: [Trio]}}]
+  - db_exec: {sql: "SELECT n.mtime_secs, n.usn, c.scm = c.ls FROM notetypes n, col c WHERE n.name = 'Trio'"}
+  - advance: 1m
+  # step 9: undo of the pin
+  - undo: {}
+  - observe: [undo_status, {notetype_structure: {notetypes: [Trio]}}]
+  - db_exec: {sql: "SELECT n.mtime_secs, n.usn, c.scm = c.ls FROM notetypes n, col c WHERE n.name = 'Trio'"}
+  - advance: 1m
+  # step 13: toggle all with no field sticky: every field set in one save
+  - update_notetype:
+      notetype: Trio
+      edits:
+        - field_options: {field: Word, sticky: true}
+        - field_options: {field: Meaning, sticky: true}
+        - field_options: {field: Example, sticky: true}
+  - observe: [undo_status, {notetype_structure: {notetypes: [Trio]}}]
+  - advance: 1m
+  # Empties both histories, as the oracle's reopen does (undo-ops.md V5).
+  - db_exec: {sql: "UPDATE notetypes SET usn = usn WHERE 0"}
+  # step 17: toggle all with a field sticky: every field cleared in one save
+  - update_notetype:
+      notetype: Trio
+      edits:
+        - field_options: {field: Word, sticky: false}
+        - field_options: {field: Meaning, sticky: false}
+        - field_options: {field: Example, sticky: false}
+  - observe: [undo_status, {notetype_structure: {notetypes: [Trio]}}]
+  - db_exec: {sql: "SELECT c.scm = c.ls FROM col c"}
+  - advance: 1m
+  # step 21: one undo goes back to every field sticky
+  - undo: {}
+  - observe: [undo_status, {notetype_structure: {notetypes: [Trio]}}]

@@ -1,0 +1,38 @@
+# Bury Note and Bury Card on the queue's head (specs/review/card-actions.md
+# A4; R382, R393). Note type Pair has two templates, so notes #n1 (#c1, #c2)
+# and #n2 (#c3, #c4) each have two new cards in the Default deck, and new
+# siblings are not buried by the default preset. Bury Note on #n1 takes both
+# of its cards out of the queue; Bury Card on #c3 takes that one; undo of
+# the Bury Card brings #c3 back. The first step pins the scheduler day and
+# every op and the undo stay in it (specs/conformance/sched-ops.md J10); the
+# no-op write before the first queue read is the undo scenarios' rule
+# (specs/conformance/undo-ops.md V5).
+# Draft: recorded, not active. Needs bury (specs/conformance/
+# sched-ops.md J2), queue (queue-ops.md Q2), undo and db_exec.
+id: review/actions/bury-note-head
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Reverse, front: "{{Back}}", back: "{{Front}}"}
+  notes:
+    - {notetype: Pair, fields: [apple, red]}
+    - {notetype: Pair, fields: [pear, green]}
+steps:
+  - observe: [timing]
+  - db_exec: {sql: "UPDATE cards SET usn = usn WHERE 0"}
+  - observe: [queue]
+  - advance: 1m
+  - bury: {notes: ["#n1"]}
+  - observe: [queue]
+  - advance: 1m
+  - bury: {cards: ["#c3"]}
+  - observe: [queue]
+  - db_exec: {sql: "SELECT queue FROM cards ORDER BY id"}
+  - undo: {}
+  - observe: [queue]
+  - db_exec: {sql: "SELECT queue FROM cards ORDER BY id"}

@@ -1,0 +1,56 @@
+# R1114, R48, R98, R300, R815, R1615, R1728, R1733, R1786, R1113, R1109; specs/browser/entry-points.md
+# E3, E4 rule 5 and E5 step 3: the text Browse's field shows for each search
+# another screen hands it, and for an empty commit. The deck items of R48
+# (a name with a space, with a `_` and with a level) are built and their
+# R48-style quoted forms put in canonical form; a missed-cards cid: list keeps
+# its order; the heatmap's searches, the note-ids terms of the Add history,
+# an import result line, the Received page, Migaku and guiEditNote, and a
+# deep link's free text are put in canonical form; a commit of has\-cd:x
+# shows has-cd:x (E5 step 3, canonical-form F7). Nothing reads
+# the collection, so there is no setup. Draft: recorded, not in area.yaml;
+# search_build needs U88's adapter (specs/conformance/search-ops.md S4).
+id: browser/entry/texts
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - search_build:
+          # R48: a deck's Browse, by full name
+          - {deck: "Japanese Core"}
+          - {deck: "a_b"}
+          - {deck: "Lang::French"}
+          - {deck: "a*b"}
+          # R1112 and E7: the default search when no text is set
+          - current_deck
+          # R815, R1615, R1728, R1733, R1786, E8: note ids
+          - {note_ids: [1894701600000]}
+          - {note_ids: [5, 3]}
+          - {note_ids: [1894701600004, 1894701600002, 1894701600009]}
+      - canonical_search:
+          # R48 as the requirement writes it
+          - 'deck:"Japanese Core"'
+          - 'deck:"a_b"'
+          - 'deck:"Lang::French"'
+          # R98: missed cards, in first-miss order
+          - 'cid:1894701600003,1894701600001'
+          # R1113 fallback
+          - 'cid:1894701600002'
+          # R300: heatmap days
+          - 'prop:due=0'
+          - 'prop:due=7'
+          - 'prop:rated=0'
+          - 'prop:rated=-3'
+          # R815, R1615, R1728, R1733 and R1786
+          - 'nid:1894701600000'
+          - 'nid:1894701600004,1894701600002,1894701600009'
+          - 'nid:9999999999999999999'
+          # R319: free text from a deep link
+          - 'deck:Japanese is:due'
+          - 'dog cat or  fish'
+          - 'DECK:Japanese   tag:verbs'
+          # E5 step 3: empty and white-space fields; a text that does not
+          # round-trip
+          - ''
+          - '   '
+          - 'has\-cd:x'
+          # E3 rule 4: a deep link that does not parse
+          - 'tag:"wk-lev'

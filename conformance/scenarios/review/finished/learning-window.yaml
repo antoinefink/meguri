@@ -1,0 +1,41 @@
+# The compatibility facts of a finished deck around the end of the day
+# (specs/sched/counts.md C7, specs/decks/deck-list.md H5.2,
+# specs/conformance/queue-ops.md Q4). Win holds two learning cards: one due
+# exactly at the next rollover (2030-01-16 04:00) and one an hour after it.
+# At 10:00 both count in learn_remaining and the seconds come from the
+# earlier one (63,600 s). At 03:40 the earlier card is due at now + 1,200 s,
+# so the queue presents it and the seconds clamp to 60. No step answers it,
+# so after the rollover it is still a queue-1 card, due at 04:00 (now, not
+# ahead): the seconds take the minimum due over every queue-1 card and stay
+# at 60, while the later card (due 05:00) is still outside the window.
+id: review/finished/learning-window
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  decks: [Win]
+  notetypes:
+    - name: Card
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Card, deck: Win, fields: [w1, a]}
+    - {notetype: Card, deck: Win, fields: [w2, a]}
+steps:
+  - observe: [timing]
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = 1, queue = 1, reps = 1, left = 1, due = v.column2
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES (1, 1894766400), (2, 1894770000)) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - set_current_deck: {deck: Win}
+  - observe: [queue, deck_counts, congrats]
+  - set_clock: "2030-01-16T03:40:00"
+  - set_current_deck: {deck: Default}
+  - set_current_deck: {deck: Win}
+  - observe: [queue, deck_counts, congrats]
+  - set_clock: "2030-01-16T04:00:00"
+  - observe: [timing]
+  - set_current_deck: {deck: Default}
+  - set_current_deck: {deck: Win}
+  - observe: [queue, deck_counts, congrats]

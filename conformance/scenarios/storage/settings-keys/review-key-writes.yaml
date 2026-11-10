@@ -1,0 +1,71 @@
+# The stored side of the Settings › Review writes of timeLim, estTimes,
+# hideAudioPlayButtons and interruptAudioWhenAnswering (specs/review/
+# review-preferences.md P3, P4; specs/storage/settings-keys.md S3), through
+# the config API's whole-value write with no undo entry (specs/conformance/
+# record-ops.md W4; specs/storage/config-table.md C4, C5). A new collection
+# stores timeLim 0, estTimes true and dueCounts true and neither audio key
+# (specs/storage/new-collection.md B4); timeLim and estTimes are deleted
+# first so that every key is written over a missing key (row created in
+# compact form, stamped now, col.mod moved), then the same value over its
+# stored row given a server usn (nothing written), then over a value of
+# another type that reads as the default (replaced). dueCounts is never
+# written and keeps its bytes, usn and mtime_secs throughout (P5). The
+# typed reads are review-config-ops R2's planned review-reads scenario. The
+# INSERT, UPDATE and DELETE db_exec steps empty both undo histories
+# (specs/engine/undo.md A2); the config writes then keep the "Update Note"
+# step and empty the redo history (A2, W4).
+# Draft: recorded, inactive.
+id: storage/settings-keys/review-key-writes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: One, front: "{{Front}}", back: "{{Back}}"}
+  decks: [Inbox]
+  notes:
+    - {notetype: Pair, deck: Inbox, fields: [a, b]}
+steps:
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, typeof(val), CAST(val AS TEXT) FROM config WHERE KEY IN ('timeLim', 'estTimes', 'dueCounts', 'hideAudioPlayButtons', 'interruptAudioWhenAnswering') ORDER BY KEY"}
+  - db_exec: {sql: "DELETE FROM config WHERE KEY IN ('timeLim', 'estTimes')"}
+  - advance: 1h
+  # Over a missing key.
+  - set_config: {key: timeLim, value: 600}
+  - set_config: {key: estTimes, value: false}
+  - set_config: {key: hideAudioPlayButtons, value: true}
+  - set_config: {key: interruptAudioWhenAnswering, value: false}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, typeof(val), CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY IN ('timeLim', 'estTimes', 'dueCounts', 'hideAudioPlayButtons', 'interruptAudioWhenAnswering') ORDER BY KEY"}
+  - db_exec: {sql: "UPDATE config SET usn = 5 WHERE KEY IN ('timeLim', 'estTimes', 'hideAudioPlayButtons', 'interruptAudioWhenAnswering')"}
+  - advance: 1h
+  # The value already stored.
+  - set_config: {key: timeLim, value: 600}
+  - set_config: {key: estTimes, value: false}
+  - set_config: {key: hideAudioPlayButtons, value: true}
+  - set_config: {key: interruptAudioWhenAnswering, value: false}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, typeof(val), CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY IN ('timeLim', 'estTimes', 'dueCounts', 'hideAudioPlayButtons', 'interruptAudioWhenAnswering') ORDER BY KEY"}
+  # Values of another type, as another client could leave them; each reads
+  # as its key's default (review-preferences P2).
+  - db_exec: {sql: "INSERT OR REPLACE INTO config (KEY, usn, mtime_secs, val) VALUES ('timeLim', 5, 0, CAST('600.0' AS BLOB))"}
+  - db_exec: {sql: "INSERT OR REPLACE INTO config (KEY, usn, mtime_secs, val) VALUES ('estTimes', 5, 0, CAST('0' AS BLOB))"}
+  - db_exec: {sql: "INSERT OR REPLACE INTO config (KEY, usn, mtime_secs, val) VALUES ('hideAudioPlayButtons', 5, 0, CAST('\"yes\"' AS BLOB))"}
+  - db_exec: {sql: "INSERT OR REPLACE INTO config (KEY, usn, mtime_secs, val) VALUES ('interruptAudioWhenAnswering', 5, 0, CAST('1' AS BLOB))"}
+  - advance: 1h
+  - set_config: {key: timeLim, value: 120}
+  - set_config: {key: estTimes, value: true}
+  - set_config: {key: hideAudioPlayButtons, value: false}
+  - set_config: {key: interruptAudioWhenAnswering, value: true}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, typeof(val), CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY IN ('timeLim', 'estTimes', 'dueCounts', 'hideAudioPlayButtons', 'interruptAudioWhenAnswering') ORDER BY KEY"}
+  # No undo entry: the note edit's step stays on top, and the write empties
+  # the redo history.
+  - advance: 1h
+  - edit_note: {note: "#n1", fields: {Back: b1}}
+  - set_config: {key: estTimes, value: false}
+  - observe: [undo_status]
+  - undo: {}
+  - observe: [undo_status]
+  - advance: 1m
+  - set_config: {key: timeLim, value: 0}
+  - observe: [undo_status]
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, typeof(val), CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY IN ('timeLim', 'estTimes', 'dueCounts', 'hideAudioPlayButtons', 'interruptAudioWhenAnswering') ORDER BY KEY"}
+  - db_exec: {sql: "SELECT flds FROM notes"}

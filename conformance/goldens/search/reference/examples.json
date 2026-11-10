@@ -1,0 +1,681 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "canonical_search": [
+          {
+            "text": "dog cat"
+          },
+          {
+            "text": "dog OR cat"
+          },
+          {
+            "text": "(dog OR cat) fish"
+          },
+          {
+            "text": "-cat"
+          },
+          {
+            "text": "dog -(cat OR fish)"
+          },
+          {
+            "text": "\"a dog\""
+          },
+          {
+            "text": "\"or\""
+          },
+          {
+            "text": "\"-dog\""
+          },
+          {
+            "text": "dog"
+          },
+          {
+            "text": "d*g"
+          },
+          {
+            "text": "d_g"
+          },
+          {
+            "text": "a\\_b"
+          },
+          {
+            "text": "3\\:30"
+          },
+          {
+            "text": "w:dog"
+          },
+          {
+            "text": "nc:uber"
+          },
+          {
+            "text": "re:\\d{3}"
+          },
+          {
+            "text": "sc:capital"
+          },
+          {
+            "text": "front:dog"
+          },
+          {
+            "text": "front:*dog*"
+          },
+          {
+            "text": "front:"
+          },
+          {
+            "text": "front:_*"
+          },
+          {
+            "text": "front:re:^d"
+          },
+          {
+            "text": "front:nc:uber"
+          },
+          {
+            "text": "\"my field:dog\""
+          },
+          {
+            "text": "tag:animal"
+          },
+          {
+            "text": "tag:animal::*"
+          },
+          {
+            "text": "tag:none"
+          },
+          {
+            "text": "tag:re:^ani"
+          },
+          {
+            "text": "deck:Japanese"
+          },
+          {
+            "text": "\"deck:Japanese Core\""
+          },
+          {
+            "text": "deck:current"
+          },
+          {
+            "text": "deck:filtered"
+          },
+          {
+            "text": "deck:*"
+          },
+          {
+            "text": "did:1"
+          },
+          {
+            "text": "preset:Daily"
+          },
+          {
+            "text": "note:Vocabulary"
+          },
+          {
+            "text": "mid:1700000000003"
+          },
+          {
+            "text": "card:1"
+          },
+          {
+            "text": "card:Forward"
+          },
+          {
+            "text": "is:due"
+          },
+          {
+            "text": "is:new"
+          },
+          {
+            "text": "is:learn"
+          },
+          {
+            "text": "is:review"
+          },
+          {
+            "text": "is:suspended"
+          },
+          {
+            "text": "is:buried"
+          },
+          {
+            "text": "is:buried-manually"
+          },
+          {
+            "text": "is:buried-sibling"
+          },
+          {
+            "text": "flag:1"
+          },
+          {
+            "text": "flag:0"
+          },
+          {
+            "text": "prop:ivl>=10"
+          },
+          {
+            "text": "prop:due=1"
+          },
+          {
+            "text": "prop:due<0"
+          },
+          {
+            "text": "prop:reps>10"
+          },
+          {
+            "text": "prop:lapses>3"
+          },
+          {
+            "text": "prop:ease<2.5"
+          },
+          {
+            "text": "prop:pos<=100"
+          },
+          {
+            "text": "prop:s>30"
+          },
+          {
+            "text": "prop:d>0.8"
+          },
+          {
+            "text": "prop:r<0.9"
+          },
+          {
+            "text": "prop:cdn:streak>3"
+          },
+          {
+            "text": "prop:cds:source=web"
+          },
+          {
+            "text": "has-cd:streak"
+          },
+          {
+            "text": "added:7"
+          },
+          {
+            "text": "edited:3"
+          },
+          {
+            "text": "rated:1"
+          },
+          {
+            "text": "rated:7:1"
+          },
+          {
+            "text": "introduced:30"
+          },
+          {
+            "text": "resched:7"
+          },
+          {
+            "text": "prop:rated=-1"
+          },
+          {
+            "text": "prop:resched=0"
+          },
+          {
+            "text": "nid:1700000000000"
+          },
+          {
+            "text": "cid:1700000000001,1700000000002"
+          },
+          {
+            "text": "dupe:1700000000003,dog"
+          }
+        ],
+        "search": [
+          {
+            "ids": ["#c1"]
+          },
+          {
+            "ids": ["#n1"]
+          },
+          {
+            "ids": ["#c1"]
+          },
+          {
+            "ids": ["#n1"]
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": ["#c2", "#c3", "#c4"]
+          },
+          {
+            "ids": ["#n2", "#n3", "#n4"]
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": ["#c1"]
+          },
+          {
+            "ids": ["#n1"]
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": ["#c1"]
+          },
+          {
+            "ids": ["#n1"]
+          },
+          {
+            "ids": ["#c1", "#c3"]
+          },
+          {
+            "ids": ["#n1", "#n3"]
+          },
+          {
+            "ids": ["#c1"]
+          },
+          {
+            "ids": ["#n1"]
+          },
+          {
+            "ids": ["#c2"]
+          },
+          {
+            "ids": ["#n2"]
+          },
+          {
+            "ids": ["#c2"]
+          },
+          {
+            "ids": ["#n2"]
+          },
+          {
+            "ids": ["#c1"]
+          },
+          {
+            "ids": ["#n1"]
+          },
+          {
+            "ids": ["#c2"]
+          },
+          {
+            "ids": ["#n2"]
+          },
+          {
+            "ids": ["#c3"]
+          },
+          {
+            "ids": ["#n3"]
+          },
+          {
+            "ids": ["#c4"]
+          },
+          {
+            "ids": ["#n4"]
+          },
+          {
+            "ids": ["#c1"]
+          },
+          {
+            "ids": ["#n1"]
+          },
+          {
+            "ids": ["#c1"]
+          },
+          {
+            "ids": ["#n1"]
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": ["#c1", "#c2", "#c3"]
+          },
+          {
+            "ids": ["#n1", "#n2", "#n3"]
+          },
+          {
+            "ids": ["#c1", "#c3"]
+          },
+          {
+            "ids": ["#n1", "#n3"]
+          },
+          {
+            "ids": ["#c2"]
+          },
+          {
+            "ids": ["#n2"]
+          },
+          {
+            "ids": ["#c1"]
+          },
+          {
+            "ids": ["#n1"]
+          },
+          {
+            "ids": ["#c1", "#c2"]
+          },
+          {
+            "ids": ["#n1", "#n2"]
+          },
+          {
+            "ids": ["#c2"]
+          },
+          {
+            "ids": ["#n2"]
+          },
+          {
+            "ids": ["#c3"]
+          },
+          {
+            "ids": ["#n3"]
+          },
+          {
+            "ids": ["#c1", "#c2"]
+          },
+          {
+            "ids": ["#n1", "#n2"]
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": ["#c1", "#c2", "#c3", "#c4"]
+          },
+          {
+            "ids": ["#n1", "#n2", "#n3", "#n4"]
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": ["#c1", "#c2", "#c3", "#c4"]
+          },
+          {
+            "ids": ["#n1", "#n2", "#n3", "#n4"]
+          },
+          {
+            "ids": ["#c1", "#c2", "#c3", "#c4"]
+          },
+          {
+            "ids": ["#n1", "#n2", "#n3", "#n4"]
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": ["#c1", "#c2", "#c3", "#c4"]
+          },
+          {
+            "ids": ["#n1", "#n2", "#n3", "#n4"]
+          },
+          {
+            "ids": ["#c1", "#c2", "#c3"]
+          },
+          {
+            "ids": ["#n1", "#n2", "#n3"]
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": ["#c1", "#c2", "#c3", "#c4"]
+          },
+          {
+            "ids": ["#n1", "#n2", "#n3", "#n4"]
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": ["#c1", "#c2", "#c3", "#c4"]
+          },
+          {
+            "ids": ["#n1", "#n2", "#n3", "#n4"]
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": ["#c1", "#c2", "#c3", "#c4"]
+          },
+          {
+            "ids": ["#n1", "#n2", "#n3", "#n4"]
+          },
+          {
+            "ids": ["#c1", "#c2", "#c3", "#c4"]
+          },
+          {
+            "ids": ["#n1", "#n2", "#n3", "#n4"]
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": ["#c1", "#c2", "#c3", "#c4"]
+          },
+          {
+            "ids": ["#n1", "#n2", "#n3", "#n4"]
+          },
+          {
+            "ids": ["#c1", "#c2", "#c3", "#c4"]
+          },
+          {
+            "ids": ["#n1", "#n2", "#n3", "#n4"]
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "1f74ff830687a0af6480a3656e077572b2e1751857b0d0baeec4e5437c5f1f94",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/reference/examples",
+  "scenario_sha256": "0331ad447f656e6d632a16d72bbbc95d798fdb34d71b0a2855e91255447393f2",
+  "tz": "UTC"
+}

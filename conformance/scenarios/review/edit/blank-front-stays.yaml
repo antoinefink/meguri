@@ -1,0 +1,25 @@
+# An edit from review that leaves the current card blank
+# (specs/review/edit-current.md E4; R399). Note #n1 shows its Front on the
+# question side; emptying Front makes #c1 render blank, but the card stays in
+# the study queue and an answer to it is accepted like any other. #c2 of
+# another note is untouched. Draft: recorded, not active. Needs edit_note
+# (specs/conformance/record-ops.md W2), queue (queue-ops.md Q2), answer,
+# render_status (render-ops.md Q4) and card.
+id: review/edit/blank-front-stays
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Single, fields: [question, answer]}
+    - {notetype: Single, fields: [other, x]}
+steps:
+  - observe: [queue, render_status]
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: ["", answer]}
+  - observe: [queue, render_status]
+  - answer: {card: "#c1", rating: good, time_ms: 4000}
+  - observe: ["card(#c1)", queue]

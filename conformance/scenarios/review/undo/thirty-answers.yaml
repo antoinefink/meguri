@@ -1,0 +1,155 @@
+# Every answer is one undo step, and at most 30 are kept
+# (specs/review/answer-flow.md F6.1; R367; engine/undo A2). Default deck,
+# its preset allowing 40 new cards a day; 31 new cards of a one-template note
+# type, so no siblings. Each card is answered Easy at the head, so it leaves
+# the queue. The 31st answer drops the step of the first: 30 undos bring
+# #c31 to #c2 back, newest first, each to the front of the queue, and the
+# 31st undo is refused with nothing_to_undo; #c1 stays answered.
+# The no-op write empties both histories and comes before the queue is held
+# (answer-ops.md H4 rule 5; session-ops.md E3 rules 1 and 7).
+# Draft: recorded, not active.
+id: review/undo/thirty-answers
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Default, new_per_day: 40}
+  notetypes:
+    - name: QX_NT01
+      fields: [QX_F01, QX_F02]
+      templates: [{name: QX_T01, front: "{{QX_F01}}", back: "{{QX_F02}}"}]
+  notes:
+    - {notetype: QX_NT01, fields: [QX_V01, QX_V02]}
+    - {notetype: QX_NT01, fields: [QX_V03, QX_V04]}
+    - {notetype: QX_NT01, fields: [QX_V05, QX_V06]}
+    - {notetype: QX_NT01, fields: [QX_V07, QX_V08]}
+    - {notetype: QX_NT01, fields: [QX_V09, QX_V10]}
+    - {notetype: QX_NT01, fields: [QX_V11, QX_V12]}
+    - {notetype: QX_NT01, fields: [QX_V13, QX_V14]}
+    - {notetype: QX_NT01, fields: [QX_V15, QX_V16]}
+    - {notetype: QX_NT01, fields: [QX_V17, QX_V18]}
+    - {notetype: QX_NT01, fields: [QX_V19, QX_V20]}
+    - {notetype: QX_NT01, fields: [QX_V21, QX_V22]}
+    - {notetype: QX_NT01, fields: [QX_V23, QX_V24]}
+    - {notetype: QX_NT01, fields: [QX_V25, QX_V26]}
+    - {notetype: QX_NT01, fields: [QX_V27, QX_V28]}
+    - {notetype: QX_NT01, fields: [QX_V29, QX_V30]}
+    - {notetype: QX_NT01, fields: [QX_V31, QX_V32]}
+    - {notetype: QX_NT01, fields: [QX_V33, QX_V34]}
+    - {notetype: QX_NT01, fields: [QX_V35, QX_V36]}
+    - {notetype: QX_NT01, fields: [QX_V37, QX_V38]}
+    - {notetype: QX_NT01, fields: [QX_V39, QX_V40]}
+    - {notetype: QX_NT01, fields: [QX_V41, QX_V42]}
+    - {notetype: QX_NT01, fields: [QX_V43, QX_V44]}
+    - {notetype: QX_NT01, fields: [QX_V45, QX_V46]}
+    - {notetype: QX_NT01, fields: [QX_V47, QX_V48]}
+    - {notetype: QX_NT01, fields: [QX_V49, QX_V50]}
+    - {notetype: QX_NT01, fields: [QX_V51, QX_V52]}
+    - {notetype: QX_NT01, fields: [QX_V53, QX_V54]}
+    - {notetype: QX_NT01, fields: [QX_V55, QX_V56]}
+    - {notetype: QX_NT01, fields: [QX_V57, QX_V58]}
+    - {notetype: QX_NT01, fields: [QX_V59, QX_V60]}
+    - {notetype: QX_NT01, fields: [QX_V61, QX_V62]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET usn = usn WHERE 0"}
+  - observe: [queue, undo_status]
+  - answer: {card: "#c1", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c2", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c3", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c4", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c5", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c6", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c7", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c8", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c9", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c10", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c11", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c12", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c13", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c14", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c15", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c16", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c17", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c18", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c19", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c20", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c21", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c22", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c23", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c24", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c25", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c26", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c27", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c28", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c29", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c30", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - answer: {card: "#c31", rating: easy, time_ms: 3000}
+  - advance: 2s
+  - observe: [queue, undo_status]
+  - undo: {}
+  - observe: [queue, undo_status]
+  - undo: {}
+  - observe: [queue, undo_status]
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - observe: [queue, undo_status]
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - observe: [queue, undo_status]
+  - undo: {}
+  - observe: [queue, undo_status]
+  - undo: {}
+  - observe: [queue, undo_status, "card(#c1)"]

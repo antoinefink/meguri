@@ -1,0 +1,248 @@
+# R1093; specs/search/syntax-reference.md Y1, Y11: every example of the
+# search field's syntax reference is its own canonical text and runs with no
+# error, in cards mode and in notes mode, on a collection with a standard
+# note type (with a field whose name holds a space) and a cloze note type.
+# The examples are listed in Y2 to Y9 order. Draft: recorded, not in
+# area.yaml; its tags are every needs-* of specs/conformance/search-ops.md S4.
+id: search/reference/examples
+tags: [needs-text, needs-tag, needs-deck, needs-notetype, needs-template, needs-ids, needs-dupe, needs-state, needs-prop, needs-history]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Memo
+      fields: [Front, Back, my field]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: Gap
+      kind: cloze
+      fields: [Text, Extra]
+      templates: [{name: Cloze, front: "{{cloze:Text}}", back: "{{cloze:Text}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Memo, fields: [dog, a dog and a cat, dog], tags: [animal]}
+    - {notetype: Memo, fields: ["über", "3:30 a_b", ""], tags: ["animal::mammal"]}
+    - {notetype: Memo, fields: [drag, "123", fish]}
+    - {notetype: Gap, fields: ["{{c1::capital}} city", ""], tags: [geo]}
+steps:
+  - observe:
+      - canonical_search:
+          - 'dog cat'
+          - 'dog OR cat'
+          - '(dog OR cat) fish'
+          - '-cat'
+          - 'dog -(cat OR fish)'
+          - '"a dog"'
+          - '"or"'
+          - '"-dog"'
+          - 'dog'
+          - 'd*g'
+          - 'd_g'
+          - 'a\_b'
+          - '3\:30'
+          - 'w:dog'
+          - 'nc:uber'
+          - 're:\d{3}'
+          - 'sc:capital'
+          - 'front:dog'
+          - 'front:*dog*'
+          - 'front:'
+          - 'front:_*'
+          - 'front:re:^d'
+          - 'front:nc:uber'
+          - '"my field:dog"'
+          - 'tag:animal'
+          - 'tag:animal::*'
+          - 'tag:none'
+          - 'tag:re:^ani'
+          - 'deck:Japanese'
+          - '"deck:Japanese Core"'
+          - 'deck:current'
+          - 'deck:filtered'
+          - 'deck:*'
+          - 'did:1'
+          - 'preset:Daily'
+          - 'note:Vocabulary'
+          - 'mid:1700000000003'
+          - 'card:1'
+          - 'card:Forward'
+          - 'is:due'
+          - 'is:new'
+          - 'is:learn'
+          - 'is:review'
+          - 'is:suspended'
+          - 'is:buried'
+          - 'is:buried-manually'
+          - 'is:buried-sibling'
+          - 'flag:1'
+          - 'flag:0'
+          - 'prop:ivl>=10'
+          - 'prop:due=1'
+          - 'prop:due<0'
+          - 'prop:reps>10'
+          - 'prop:lapses>3'
+          - 'prop:ease<2.5'
+          - 'prop:pos<=100'
+          - 'prop:s>30'
+          - 'prop:d>0.8'
+          - 'prop:r<0.9'
+          - 'prop:cdn:streak>3'
+          - 'prop:cds:source=web'
+          - 'has-cd:streak'
+          - 'added:7'
+          - 'edited:3'
+          - 'rated:1'
+          - 'rated:7:1'
+          - 'introduced:30'
+          - 'resched:7'
+          - 'prop:rated=-1'
+          - 'prop:resched=0'
+          - 'nid:1700000000000'
+          - 'cid:1700000000001,1700000000002'
+          - 'dupe:1700000000003,dog'
+      - search:
+          - {query: 'dog cat'}
+          - {query: 'dog cat', kind: notes}
+          - {query: 'dog OR cat'}
+          - {query: 'dog OR cat', kind: notes}
+          - {query: '(dog OR cat) fish'}
+          - {query: '(dog OR cat) fish', kind: notes}
+          - {query: '-cat'}
+          - {query: '-cat', kind: notes}
+          - {query: 'dog -(cat OR fish)'}
+          - {query: 'dog -(cat OR fish)', kind: notes}
+          - {query: '"a dog"'}
+          - {query: '"a dog"', kind: notes}
+          - {query: '"or"'}
+          - {query: '"or"', kind: notes}
+          - {query: '"-dog"'}
+          - {query: '"-dog"', kind: notes}
+          - {query: 'dog'}
+          - {query: 'dog', kind: notes}
+          - {query: 'd*g'}
+          - {query: 'd*g', kind: notes}
+          - {query: 'd_g'}
+          - {query: 'd_g', kind: notes}
+          - {query: 'a\_b'}
+          - {query: 'a\_b', kind: notes}
+          - {query: '3\:30'}
+          - {query: '3\:30', kind: notes}
+          - {query: 'w:dog'}
+          - {query: 'w:dog', kind: notes}
+          - {query: 'nc:uber'}
+          - {query: 'nc:uber', kind: notes}
+          - {query: 're:\d{3}'}
+          - {query: 're:\d{3}', kind: notes}
+          - {query: 'sc:capital'}
+          - {query: 'sc:capital', kind: notes}
+          - {query: 'front:dog'}
+          - {query: 'front:dog', kind: notes}
+          - {query: 'front:*dog*'}
+          - {query: 'front:*dog*', kind: notes}
+          - {query: 'front:'}
+          - {query: 'front:', kind: notes}
+          - {query: 'front:_*'}
+          - {query: 'front:_*', kind: notes}
+          - {query: 'front:re:^d'}
+          - {query: 'front:re:^d', kind: notes}
+          - {query: 'front:nc:uber'}
+          - {query: 'front:nc:uber', kind: notes}
+          - {query: '"my field:dog"'}
+          - {query: '"my field:dog"', kind: notes}
+          - {query: 'tag:animal'}
+          - {query: 'tag:animal', kind: notes}
+          - {query: 'tag:animal::*'}
+          - {query: 'tag:animal::*', kind: notes}
+          - {query: 'tag:none'}
+          - {query: 'tag:none', kind: notes}
+          - {query: 'tag:re:^ani'}
+          - {query: 'tag:re:^ani', kind: notes}
+          - {query: 'deck:Japanese'}
+          - {query: 'deck:Japanese', kind: notes}
+          - {query: '"deck:Japanese Core"'}
+          - {query: '"deck:Japanese Core"', kind: notes}
+          - {query: 'deck:current'}
+          - {query: 'deck:current', kind: notes}
+          - {query: 'deck:filtered'}
+          - {query: 'deck:filtered', kind: notes}
+          - {query: 'deck:*'}
+          - {query: 'deck:*', kind: notes}
+          - {query: 'did:1'}
+          - {query: 'did:1', kind: notes}
+          - {query: 'preset:Daily'}
+          - {query: 'preset:Daily', kind: notes}
+          - {query: 'note:Vocabulary'}
+          - {query: 'note:Vocabulary', kind: notes}
+          - {query: 'mid:1700000000003'}
+          - {query: 'mid:1700000000003', kind: notes}
+          - {query: 'card:1'}
+          - {query: 'card:1', kind: notes}
+          - {query: 'card:Forward'}
+          - {query: 'card:Forward', kind: notes}
+          - {query: 'is:due'}
+          - {query: 'is:due', kind: notes}
+          - {query: 'is:new'}
+          - {query: 'is:new', kind: notes}
+          - {query: 'is:learn'}
+          - {query: 'is:learn', kind: notes}
+          - {query: 'is:review'}
+          - {query: 'is:review', kind: notes}
+          - {query: 'is:suspended'}
+          - {query: 'is:suspended', kind: notes}
+          - {query: 'is:buried'}
+          - {query: 'is:buried', kind: notes}
+          - {query: 'is:buried-manually'}
+          - {query: 'is:buried-manually', kind: notes}
+          - {query: 'is:buried-sibling'}
+          - {query: 'is:buried-sibling', kind: notes}
+          - {query: 'flag:1'}
+          - {query: 'flag:1', kind: notes}
+          - {query: 'flag:0'}
+          - {query: 'flag:0', kind: notes}
+          - {query: 'prop:ivl>=10'}
+          - {query: 'prop:ivl>=10', kind: notes}
+          - {query: 'prop:due=1'}
+          - {query: 'prop:due=1', kind: notes}
+          - {query: 'prop:due<0'}
+          - {query: 'prop:due<0', kind: notes}
+          - {query: 'prop:reps>10'}
+          - {query: 'prop:reps>10', kind: notes}
+          - {query: 'prop:lapses>3'}
+          - {query: 'prop:lapses>3', kind: notes}
+          - {query: 'prop:ease<2.5'}
+          - {query: 'prop:ease<2.5', kind: notes}
+          - {query: 'prop:pos<=100'}
+          - {query: 'prop:pos<=100', kind: notes}
+          - {query: 'prop:s>30'}
+          - {query: 'prop:s>30', kind: notes}
+          - {query: 'prop:d>0.8'}
+          - {query: 'prop:d>0.8', kind: notes}
+          - {query: 'prop:r<0.9'}
+          - {query: 'prop:r<0.9', kind: notes}
+          - {query: 'prop:cdn:streak>3'}
+          - {query: 'prop:cdn:streak>3', kind: notes}
+          - {query: 'prop:cds:source=web'}
+          - {query: 'prop:cds:source=web', kind: notes}
+          - {query: 'has-cd:streak'}
+          - {query: 'has-cd:streak', kind: notes}
+          - {query: 'added:7'}
+          - {query: 'added:7', kind: notes}
+          - {query: 'edited:3'}
+          - {query: 'edited:3', kind: notes}
+          - {query: 'rated:1'}
+          - {query: 'rated:1', kind: notes}
+          - {query: 'rated:7:1'}
+          - {query: 'rated:7:1', kind: notes}
+          - {query: 'introduced:30'}
+          - {query: 'introduced:30', kind: notes}
+          - {query: 'resched:7'}
+          - {query: 'resched:7', kind: notes}
+          - {query: 'prop:rated=-1'}
+          - {query: 'prop:rated=-1', kind: notes}
+          - {query: 'prop:resched=0'}
+          - {query: 'prop:resched=0', kind: notes}
+          - {query: 'nid:1700000000000'}
+          - {query: 'nid:1700000000000', kind: notes}
+          - {query: 'cid:1700000000001,1700000000002'}
+          - {query: 'cid:1700000000001,1700000000002', kind: notes}
+          - {query: 'dupe:1700000000003,dog'}
+          - {query: 'dupe:1700000000003,dog', kind: notes}

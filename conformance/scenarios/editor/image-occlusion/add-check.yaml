@@ -1,0 +1,69 @@
+# specs/editor/image-occlusion-notes.md O7: the field check that Anki's Add
+# runs on image-occlusion drafts, which Meguri's Add runs after its own
+# occlusion check (R994). On the stock Image Occlusion type (its first front
+# uses cloze: on Occlusion only): masks are normal, text labels alone and
+# number-0 masks alone are missing_cloze (Anki asks, Meguri refuses), an empty
+# Occlusion field is empty, and a cloze typed in Header is field_not_cloze. On
+# a clone whose Header is moved to position 0 the empty-first-field state
+# follows Header, masks or not. Then two masks and a label add two cards
+# (AE33). Only scenario-written template text is used; the stock type is
+# observed by name and through the check alone (R1959). Needs fields_check
+# (specs/conformance/note-ops.md N4) and move_field (U34).
+id: editor/image-occlusion/add-check
+description: "the field check on image-occlusion drafts"
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - ensure_io_notetype: {}
+  - clone_notetype: {notetype: Image Occlusion, name: Header First}
+  - update_notetype: {notetype: Header First, edits: [{move_field: {field: Header, to: 0}}]}
+  - observe:
+      - fields_check:
+          cases:
+            # two masks and a label
+            - notetype: Image Occlusion
+              fields:
+                Occlusion: "{{c1::image-occlusion:rect:left=.1:top=.1:width=.2:height=.1:oi=1}}<br>{{c2::image-occlusion:ellipse:left=.5:top=.4:rx=.1:ry=.05:oi=1}}<br>{{c0::image-occlusion:text:left=.4:top=.05:text=Label:scale=1.:fs=.05:oi=1}}<br>"
+                Image: "<img src=\"probe-check.png\">"
+            # a text label only
+            - notetype: Image Occlusion
+              fields:
+                Occlusion: "{{c0::image-occlusion:text:left=.4:top=.05:text=Label:scale=1.:fs=.05:oi=1}}<br>"
+                Image: "<img src=\"probe-check.png\">"
+            # a mask stored with number 0 only
+            - notetype: Image Occlusion
+              fields:
+                Occlusion: "{{c0::image-occlusion:rect:left=.1:top=.1:width=.2:height=.1}}<br>"
+                Image: "<img src=\"probe-check.png\">"
+            # no shape at all
+            - notetype: Image Occlusion
+              fields:
+                Occlusion: ""
+                Image: "<img src=\"probe-check.png\">"
+            # a cloze typed in Header
+            - notetype: Image Occlusion
+              fields:
+                Occlusion: "{{c1::image-occlusion:rect:left=.1:top=.1:width=.2:height=.1}}<br>"
+                Image: "<img src=\"probe-check.png\">"
+                Header: "{{c2::title}}"
+            # Header first and empty, with a mask
+            - notetype: Header First
+              fields:
+                Occlusion: "{{c1::image-occlusion:rect:left=.1:top=.1:width=.2:height=.1}}<br>"
+                Image: "<img src=\"probe-check.png\">"
+            # Header first and filled, with a mask
+            - notetype: Header First
+              fields:
+                Header: "Title"
+                Occlusion: "{{c1::image-occlusion:rect:left=.1:top=.1:width=.2:height=.1}}<br>"
+                Image: "<img src=\"probe-check.png\">"
+            # Header first and filled, no shape
+            - notetype: Header First
+              fields:
+                Header: "Title"
+                Image: "<img src=\"probe-check.png\">"
+  - add_note:
+      notetype: Image Occlusion
+      fields:
+        Occlusion: "{{c1::image-occlusion:rect:left=.1:top=.1:width=.2:height=.1:oi=1}}<br>{{c2::image-occlusion:ellipse:left=.5:top=.4:rx=.1:ry=.05:oi=1}}<br>{{c0::image-occlusion:text:left=.4:top=.05:text=Label:scale=1.:fs=.05:oi=1}}<br>"
+        Image: "<img src=\"probe-check.png\">"
+  - db_exec: {sql: "SELECT c.ord FROM cards c ORDER BY c.ord"}

@@ -1,0 +1,82 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 200,
+          "next_day_at": 1912046400,
+          "now": 1911981600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c2", "#c3", "#c1"],
+          "counts": {
+            "learning": 0,
+            "new": 1,
+            "review": 2
+          },
+          "kinds": ["review", "new", "review"]
+        }
+      },
+      {},
+      {},
+      {
+        "queue": {
+          "cards": ["#c1", "#c2", "#c3"],
+          "counts": {
+            "learning": 0,
+            "new": 2,
+            "review": 1
+          },
+          "kinds": ["new", "review", "new"]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, 0, 1, 4, 1],
+            [2, 2, 199, 4, 0],
+            [0, 0, 3, 0, 0]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["resetCountsReviewer", "false"],
+            ["restorePositionReviewer", "true"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "1f74ff830687a0af6480a3656e077572b2e1751857b0d0baeec4e5437c5f1f94",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "review/actions/forget-requeue",
+  "scenario_sha256": "c25110133c87673d105bd3924bc107b394e92b333fa5f10695f4bf125df62321",
+  "tz": "UTC"
+}

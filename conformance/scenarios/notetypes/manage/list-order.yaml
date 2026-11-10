@@ -1,0 +1,61 @@
+# The Note Types list's order and counts (specs/notetypes/editor-actions.md
+# A2): every note type once, ordered by its stored name under the unicase
+# collation of notetypes.name, with the number of notes whose mid is its id.
+# The note types are the scenario's own; the stock kinds every new collection
+# holds are left out by id, as records/validation does (R1959). The names
+# order differently under unicase and under code points: '_under' before
+# 'alpha' and 'alpha' before 'Zeta' (case folded, '_' is below the letters;
+# by code points 'Zeta' and '_under' come before 'alpha'), 'Straße' before
+# 'Strasse2' (full folding: 'ß' is 'ss'), 'Äbc' last ('ä' is not a folded
+# 'a'). Note types without notes count 0. A case-only rename keeps the order;
+# a removed note type leaves the list and its notes leave the counts.
+# The db_exec reads the table ordered by the name column, as Anki's list does;
+# Meguri's own ordered list read is covered by its engine tests (A19).
+# A draft, recorded and inactive: it waits for remove_notetype's Meguri
+# adapter (U34).
+id: notetypes/manage/list-order
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Zeta
+      fields: [Front]
+      templates: [{name: One, front: "{{Front}}"}]
+    - name: alpha
+      fields: [Front]
+      templates: [{name: One, front: "{{Front}}"}]
+    - name: _under
+      fields: [Front]
+      templates: [{name: One, front: "{{Front}}"}]
+    - name: Strasse2
+      fields: [Front]
+      templates: [{name: One, front: "{{Front}}"}]
+    - name: Straße
+      fields: [Front]
+      templates: [{name: One, front: "{{Front}}"}]
+    - name: Äbc
+      fields: [Front]
+      templates: [{name: One, front: "{{Front}}"}]
+  notes:
+    - {notetype: Zeta, fields: [z1]}
+    - {notetype: Zeta, fields: [z2]}
+    - {notetype: alpha, fields: [a1]}
+    - {notetype: Straße, fields: [s1]}
+    - {notetype: Äbc, fields: [ae1]}
+    - {notetype: Äbc, fields: [ae2]}
+    - {notetype: Äbc, fields: [ae3]}
+steps:
+  - db_exec:
+      sql: >-
+        SELECT nt.name, (SELECT count(*) FROM notes n WHERE n.mid = nt.id)
+        FROM notetypes nt
+        WHERE nt.id > (SELECT id FROM notetypes WHERE name = 'Image Occlusion')
+        ORDER BY nt.name
+  - update_notetype: {notetype: alpha, edits: [{rename: ALPHA}]}
+  - remove_notetype: {notetype: Zeta}
+  - db_exec:
+      sql: >-
+        SELECT nt.name, (SELECT count(*) FROM notes n WHERE n.mid = nt.id)
+        FROM notetypes nt
+        WHERE nt.id > (SELECT id FROM notetypes WHERE name = 'Image Occlusion')
+        ORDER BY nt.name
+  - db_exec: {sql: "SELECT count(*) FROM notes WHERE mid NOT IN (SELECT id FROM notetypes)"}

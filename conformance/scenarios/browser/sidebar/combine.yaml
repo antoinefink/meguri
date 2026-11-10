@@ -1,0 +1,54 @@
+# R1168-R1170, AE43 (sidebar part); specs/browser/sidebar.md S8 (draft, S16:
+# not in browser/area.yaml's active list). The rows of S8.1's modifier table
+# for one sidebar item, and S8.2's Search all selected (AND group) and Search
+# any selected (OR group) with and without modifiers, in the neutral form of
+# specs/conformance/search-ops.md S5: replace (click), join AND (Cmd), join OR
+# (Shift), negate (Option, alone and with Cmd or Shift), replace by kind
+# (Cmd+Shift) and replace with a negated item or a group, which J7 leaves
+# unchanged. Sidebar items here: deck Spanish, tags a and b, the Overdue Today
+# item, a template child, the Flags root. Nothing reads the collection.
+id: browser/sidebar/combine
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - search_build:
+          # click: the item alone; Option-click: the item negated
+          - {deck: Spanish}
+          - {negated: {deck: Spanish}}
+          # multi-selection without modifiers
+          - {group: {joiner: and, items: [{tag: a}, {tag: b}]}}
+          - {group: {joiner: or, items: [{tag: a}, {tag: b}]}}
+          - {negated: {group: {joiner: or, items: [{tag: a}, {tag: b}]}}}
+          # a multi-selection of one item is that item
+          - {group: {joiner: or, items: [{tag: a}]}}
+      - search_join:
+          # Cmd, Shift, Option+Cmd, Option+Shift on one item
+          - {existing: "deck:French is:due", item: {deck: Spanish}, joiner: and, negate: false}
+          - {existing: "deck:French is:due", item: {deck: Spanish}, joiner: or, negate: false}
+          - {existing: "deck:French is:due", item: {deck: Spanish}, joiner: and, negate: true}
+          - {existing: "deck:French is:due", item: {deck: Spanish}, joiner: or, negate: true}
+          # an empty field
+          - {existing: "", item: {deck: Spanish}, joiner: and, negate: false}
+          # a group item (Overdue, a template child)
+          - {existing: "deck:x", item: {group: {joiner: and, items: [{state: due}, {negated: {due_on: 0}}]}}, joiner: and, negate: true}
+          - {existing: "deck:x", item: {group: {joiner: and, items: [{notetype: Memo}, {template: 1}]}}, joiner: or, negate: false}
+          # Search any selected / all selected with Cmd, Shift, Option+Cmd
+          - {existing: "deck:x", item: {group: {joiner: or, items: [{tag: a}, {tag: b}]}}, joiner: and, negate: false}
+          - {existing: "deck:x", item: {group: {joiner: and, items: [{tag: a}, {tag: b}]}}, joiner: or, negate: false}
+          - {existing: "deck:x", item: {group: {joiner: or, items: [{tag: a}, {tag: b}]}}, joiner: and, negate: true}
+          # an existing text that does not parse (S8.3)
+          - {existing: "deck:x (", item: {deck: Spanish}, joiner: and, negate: false}
+      - search_replace:
+          # Cmd+Shift on one item
+          - {existing: "deck:French is:due", item: {deck: Spanish}}
+          - {existing: "deck:French OR (deck:German -tag:a)", item: {deck: Spanish}}
+          - {existing: "added:7 deck:x", item: {added: 1}}
+          # Option+Cmd+Shift: a negated item replaces nothing
+          - {existing: "deck:French is:due", item: {negated: {deck: Spanish}}}
+          # a group (multi-selection, Overdue) replaces nothing
+          - {existing: "tag:c is:due", item: {group: {joiner: or, items: [{tag: a}, {tag: b}]}}}
+          - {existing: "is:due prop:due=0", item: {group: {joiner: and, items: [{state: due}, {negated: {due_on: 0}}]}}}
+          # the Flags root (any flag) is a negation: nothing replaced
+          - {existing: "flag:1 deck:x", item: {flag: any}}
+          # an existing text that does not parse
+          - {existing: "deck:x (", item: {deck: Spanish}}

@@ -1,0 +1,60 @@
+# specs/editor/mask-audio.md A5, A7, A8 and specs/editor/image-occlusion-notes.md
+# O9: per-mask audio fields in an image-occlusion type. A clone of the stock
+# Image Occlusion type gets fields Words, A01, A02 and A03 and its own
+# template, whose front renders Words, A01 and A02 with cloze: but not A03
+# (the back renders A03 too, which the check ignores). A note with masks 1
+# to 3, Words c1 and audio clozes in A01 and A03 gets ordinals 0 to 2. The
+# field check: the stored note is field_not_cloze (A03 holds a cloze the
+# front does not use); without A03's cloze it is normal; a draft with only a
+# text label in Occlusion and an audio cloze in A01 is normal (Anki would
+# add it; Meguri's R994 check refuses it first). Removing masks 2 and 3 from
+# the Occlusion field: Empty Cards lists ordinal 1 only, because A03 still
+# holds c3; once A03 is emptied it lists ordinals 1 and 2. Cards are read
+# with db_exec (one note). Needs fields_check (specs/conformance/note-ops.md
+# N4), empty_cards (empty-cards-ops.md Y1) and U34's add_field.
+id: editor/image-occlusion/audio-fields
+description: "audio clozes in extra fields of an image-occlusion type"
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - ensure_io_notetype: {}
+  - clone_notetype: {notetype: Image Occlusion, name: Audio Probe}
+  - update_notetype:
+      notetype: Audio Probe
+      edits:
+        - {add_field: Words}
+        - {add_field: A01}
+        - {add_field: A02}
+        - {add_field: A03}
+        - template:
+            name: Image Occlusion
+            front: "{{cloze:Occlusion}}{{Image}}<div class=\"probe-hidden\">{{cloze:Words}}{{cloze:A01}}{{cloze:A02}}</div>"
+            back: "{{cloze:Occlusion}}{{Image}}<div class=\"probe-hidden\">{{cloze:Words}}{{cloze:A01}}{{cloze:A02}}{{cloze:A03}}</div>{{Back Extra}}"
+  - add_note:
+      notetype: Audio Probe
+      fields:
+        Occlusion: "{{c1::image-occlusion:rect:left=.1:top=.1:width=.2:height=.1:oi=1}}<br>{{c2::image-occlusion:rect:left=.4:top=.1:width=.2:height=.1:oi=1}}<br>{{c3::image-occlusion:ellipse:left=.7:top=.4:rx=.1:ry=.05:oi=1}}<br>"
+        Image: "<img src=\"probe-audio.png\">"
+        Words: "{{c1::sky}}"
+        A01: "{{c1::[sound:probe-1.mp3]}}"
+        A03: "{{c3::[sound:probe-3.mp3]}}"
+  - db_exec: {sql: "SELECT c.ord FROM cards c ORDER BY c.ord"}
+  - observe:
+      - fields_check:
+          cases:
+            - {note: "#n1"}
+            - {note: "#n1", fields: {A03: ""}}
+            - notetype: Audio Probe
+              fields:
+                Occlusion: "{{c0::image-occlusion:text:left=.4:top=.05:text=Label:scale=1.:fs=.05:oi=1}}<br>"
+                Image: "<img src=\"probe-audio.png\">"
+                A01: "{{c1::[sound:probe-1.mp3]}}"
+  - advance: 1m
+  - edit_note:
+      note: "#n1"
+      fields:
+        Occlusion: "{{c1::image-occlusion:rect:left=.1:top=.1:width=.2:height=.1:oi=1}}<br>"
+  - empty_cards: {}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {A03: ""}}
+  - empty_cards: {}
+  - db_exec: {sql: "SELECT c.ord FROM cards c ORDER BY c.ord"}

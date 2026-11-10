@@ -1,0 +1,45 @@
+# Set Due Date from the review screen, seen through the study queue
+# (specs/review/card-actions.md A7; R384, R385). On day 200 deck Home holds
+# review cards #c1, #c2, #c3 due on days 196, 197 and 198 and #c4 due on day
+# 205, so the queue presents #c1, #c2, #c3 by due date. "0" on the head #c1
+# makes it due today (day 200): the fresh build presents it after #c2 and
+# #c3, not first again. "1" on #c2 takes it out of today's queue.
+# setDueReviewer holds the last text as typed. States follow
+# specs/conformance/queue-ops.md Q5 (logical card numbers, the clock moved to
+# day 200 after setting them) and the ops follow sched-ops.md J10. Draft:
+# recorded, not active. Needs set_due (sched-ops.md J6), queue (queue-ops.md
+# Q2), set_clock, set_current_deck and db_exec.
+id: review/actions/set-due-requeue
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Home]
+  notes:
+    - {notetype: Single, deck: Home, fields: [first, x]}
+    - {notetype: Single, deck: Home, fields: [second, x]}
+    - {notetype: Single, deck: Home, fields: [third, x]}
+    - {notetype: Single, deck: Home, fields: [later, x]}
+steps:
+  - observe: [timing]
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = 2, queue = 2, ivl = 10, factor = 2500, reps = 5, due = v.column2
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES (1, 196), (2, 197), (3, 198), (4, 205)) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - set_clock: "2030-08-03T10:00:00"
+  - observe: [timing]
+  - set_current_deck: {deck: Home}
+  - observe: [queue]
+  - advance: 1m
+  - set_due: {cards: ["#c1"], days: "0", context: reviewer}
+  - observe: [queue]
+  - advance: 1m
+  - set_due: {cards: ["#c2"], days: "1", context: reviewer}
+  - observe: [queue]
+  - db_exec: {sql: "SELECT due, queue FROM cards ORDER BY id"}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'setDueReviewer'"}

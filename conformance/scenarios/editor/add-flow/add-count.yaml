@@ -1,0 +1,47 @@
+# The number of cards an Add-screen add creates, which the Add screen's toast
+# reports (specs/editor/add-flow.md A5 step 6; specs/notes/note-records.md A2:
+# the add returns the count, at least 1). A one-template note gives 1; a
+# two-template note gives 2 with both sides filled and 1 with the second
+# side's field empty; a cloze note with clozes 1, 2 and 3 gives 3 (2 twice is
+# one card); a cloze note with no cloze gives its one fallback card (the
+# missing-cloze add the user confirmed, add-flow A5 step 4). Each add is one
+# "Add Note" step. The counts are read per note by its sort field. Needs
+# add_note, db_exec and undo_status (specs/conformance/note-ops.md N1,
+# specs/conformance/undo-ops.md V2, V5).
+id: editor/add-flow/add-count
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Prompt, Answer]
+      templates:
+        - {name: Ask, front: "{{Prompt}}", back: "{{Answer}}"}
+    - name: Both Ways
+      fields: [Term, Gloss]
+      templates:
+        - {name: Forward, front: "{{Term}}", back: "{{Gloss}}"}
+        - {name: Backward, front: "{{Gloss}}", back: "{{Term}}"}
+    - name: Gaps
+      kind: cloze
+      fields: [Body, Notes]
+      templates:
+        - {name: Gap, front: "{{cloze:Body}}", back: "{{cloze:Body}}<br>{{Notes}}"}
+  decks: [Inbox]
+steps:
+  # Empties both histories (undo-ops.md V5).
+  - db_exec: {sql: "UPDATE notes SET usn = usn WHERE 0"}
+  - add_note: {notetype: Single, deck: Inbox, fields: [one, uno]}
+  - observe: [undo_status]
+  - advance: 1m
+  - add_note: {notetype: Both Ways, deck: Inbox, fields: [two, dos]}
+  - observe: [undo_status]
+  - advance: 1m
+  - add_note: {notetype: Both Ways, deck: Inbox, fields: [half, ""]}
+  - advance: 1m
+  - add_note: {notetype: Gaps, deck: Inbox, fields: ["{{c1::a}} {{c2::b}} {{c3::c}} {{c2::d}}", ""]}
+  - observe: [undo_status]
+  - advance: 1m
+  - add_note: {notetype: Gaps, deck: Inbox, fields: ["no gap here", ""]}
+  - observe: [undo_status]
+  - db_exec: {sql: "SELECT n.sfld, count(c.id) FROM notes n LEFT JOIN cards c ON c.nid = n.id GROUP BY n.id ORDER BY n.id"}
+  - db_exec: {sql: "SELECT n.sfld, c.ord FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord"}

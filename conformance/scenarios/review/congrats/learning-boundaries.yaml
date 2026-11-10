@@ -1,0 +1,47 @@
+# What Anki's congratulations facts report for learning cards that are not due
+# today (R434, R437; specs/review/reviewer-strings.md S8 and S11, the 86,400 s
+# cut-off and the native-versus-compatibility difference; specs/sched/counts.md
+# C7, which asks for this evidence). review/finished/learning-window covers a
+# card due exactly at the end of the day; this scenario covers decks whose
+# learning cards are all past the end of the day, one of them beyond
+# 86,400 s, and a deck that mixes one card due later today with one past the
+# end of the day. The day ends at 2030-01-16T04:00:00 UTC (rollover hour 4);
+# learn-ahead is the default 1,200 s. Learning cards (queue 1) only, #cN in
+# note order:
+#   Beyond  #c1 due one hour after the end of the day (an imported state)
+#   Far     #c2 due two days later, beyond 86,400 s
+#   Both    #c3 due at 12:00 today and #c4 one hour after the end of the day
+# Every queue is empty at 10:00. The native C7 members count only Both's 12:00
+# card as later today; the recorded compatibility facts are what Anki's page
+# reads for each deck. Draft: recorded, not active.
+# Needs db_exec (specs/conformance/record-ops.md W1), set_current_deck and the
+# queue, deck_counts and congrats observations (specs/conformance/queue-ops.md).
+id: review/congrats/learning-boundaries
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  decks: [Beyond, Far, Both]
+  notetypes:
+    - name: Plain
+      fields: [Prompt, Reply]
+      templates: [{name: Ask, front: "{{Prompt}}", back: "{{Reply}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Plain, deck: Beyond, fields: [beyond, a]}
+    - {notetype: Plain, deck: Far, fields: [far, a]}
+    - {notetype: Plain, deck: Both, fields: [noon, a]}
+    - {notetype: Plain, deck: Both, fields: [late, a]}
+steps:
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = 1, queue = 1, reps = 1, left = 1, due = v.column2
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES (1, 1894770000), (2, 1894874400), (3, 1894708800), (4, 1894770000)) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - observe: [timing]
+  - set_current_deck: {deck: Beyond}
+  - observe: [queue, deck_counts, congrats]
+  - set_current_deck: {deck: Far}
+  - observe: [queue, deck_counts, congrats]
+  - set_current_deck: {deck: Both}
+  - observe: [queue, deck_counts, congrats]

@@ -1,0 +1,37 @@
+# After undoing a bury, Anki's rebuilt queue puts a learning card that came
+# due in the meantime before the restored card (specs/review/answer-flow.md
+# F6.1, third row; the Anki side of R365's difference, F6.2). Default deck
+# and preset, learn-ahead 1 200 s, FSRS on, load balancer off.
+# #c1 is a learning card due at 10:00:30; #c2 and #c3 are new.
+# 1. At 10:00:00 the queue is [#c2, #c3, #c1]: #c1 is within learn-ahead but
+#    after the cutoff, so it waits behind the main list.
+# 2. At 10:00:40 #c2 (the head) is buried; the rebuilt queue is [#c1, #c3].
+# 3. At 10:00:50 the bury is undone; the rebuilt queue is [#c1, #c2, #c3]:
+#    #c2 is back but not first.
+# The state db_exec empties both histories and comes before the queue is
+# held (session-ops.md E3 rules 1 and 7). Draft: recorded, not active.
+id: review/undo/bury-position
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  notetypes:
+    - name: QX_NT01
+      fields: [QX_F01, QX_F02]
+      templates: [{name: QX_T01, front: "{{QX_F01}}", back: "{{QX_F02}}"}]
+  notes:
+    - {notetype: QX_NT01, fields: [QX_V01, QX_V02]}
+    - {notetype: QX_NT01, fields: [QX_V03, QX_V04]}
+    - {notetype: QX_NT01, fields: [QX_V05, QX_V06]}
+steps:
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = 1, queue = 1, due = 1894701630, ivl = 0, factor = 2500,
+        reps = 1, left = 1, data = '{"s":1.1,"d":5.5,"lrt":1894701000}'
+        WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1)
+  - observe: [queue, undo_status]
+  - advance: 40s
+  - bury: {cards: ["#c2"]}
+  - observe: [queue, undo_status]
+  - advance: 10s
+  - undo: {}
+  - observe: [queue, undo_status, "card(#c2)"]

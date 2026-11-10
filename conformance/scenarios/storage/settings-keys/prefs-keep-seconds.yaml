@@ -1,0 +1,41 @@
+# A scheduling preferences save of one field keeps the stored seconds of
+# the other rows (specs/review/review-preferences.md P3, P7; specs/sched/
+# deck-options.md O10): collapseTime and timeLim are stored as 90 seconds
+# (1 minute shown, not a whole minute) and rollover as 30 (effective hour
+# 23, specs/sched/day-clock.md D2). Saving the hour 23 writes nothing for
+# rollover, since the effective hour does not change; saving the hour 5
+# writes rollover alone among the three. collapseTime and timeLim keep
+# their bytes, usn and mtime_secs through both saves: Anki's save writes the
+# seconds it read, which are the stored ones; Meguri's leaves an omitted
+# learn-ahead value exactly and never writes timeLim. Only these three
+# keys are read: Anki's save also adds other keys of the preferences
+# screen, and Meguri's may add loadBalancerEnabled (specs/conformance/
+# deck-options-ops.md E5), so col.mod and other rows are not observed. The
+# day number is the same for both hours at 12:00 UTC on the creation day,
+# so no rollover op runs; timing is not observed.
+# Needs set_scheduling_prefs (specs/conformance/deck-options-ops.md E4).
+# Draft: recorded, inactive.
+id: storage/settings-keys/prefs-keep-seconds
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: One, front: "{{Front}}", back: "{{Back}}"}
+  decks: [Inbox]
+  notes:
+    - {notetype: Pair, deck: Inbox, fields: [a, b]}
+steps:
+  - set_config: {key: collapseTime, value: 90}
+  - set_config: {key: timeLim, value: 90}
+  - set_config: {key: rollover, value: 30}
+  - db_exec: {sql: "UPDATE config SET usn = 5 WHERE KEY IN ('collapseTime', 'timeLim', 'rollover')"}
+  - advance: 2h
+  # The effective hour again: nothing written.
+  - set_scheduling_prefs: {rollover: 23}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, typeof(val), CAST(val AS TEXT) FROM config WHERE KEY IN ('collapseTime', 'timeLim', 'rollover') ORDER BY KEY"}
+  - advance: 1m
+  # Another hour: rollover written, the two second counts kept.
+  - set_scheduling_prefs: {rollover: 5}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, typeof(val), CAST(val AS TEXT) FROM config WHERE KEY IN ('collapseTime', 'timeLim', 'rollover') ORDER BY KEY"}

@@ -1,0 +1,6 @@
+# Review scenarios: recorded and inactive; each becomes active once Meguri's
+# executor passes it. actions/: review/card-actions A15; edit/: review/edit-current E9;
+# congrats/, finished/, timing/ and undo/: the specs each scenario's header names
+# (review/reviewer-strings, review/answer-flow, sched/counts, decks/deck-list).
+area: review
+active: []

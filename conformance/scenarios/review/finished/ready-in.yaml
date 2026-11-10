@@ -1,0 +1,52 @@
+# AE3's finished deck pages (R77, R79; specs/decks/deck-list.md H5.3,
+# specs/sched/counts.md C3, C7, specs/sched/queue-building.md B6). Ahead's only
+# card is a learning card due in 1,500 s with the default learn-ahead limit of
+# 1,200 s: its queue is empty at 10:00 and the card is ready in 300 s ("5
+# minutes"); one second before readiness the compatibility seconds clamp to
+# 60; at 10:05:00 the queue presents it. Then collapseTime is set to 0 and
+# Short's only card, due at 10:09:00, is ready in 240 s ("4 minutes") and
+# enters the queue exactly at its due instant.
+# Readiness at L = 1,200 and the switch to collapseTime 0 are already recorded
+# by sched/queue/learn-ahead/ready-in; new here are the 60 s clamp one second
+# before readiness and the L = 0 entry at the exact due instant.
+id: review/finished/ready-in
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  decks: [Ahead, Short]
+  notetypes:
+    - name: Card
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Card, deck: Ahead, fields: [a1, a]}
+    - {notetype: Card, deck: Short, fields: [s1, a]}
+steps:
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = 1, queue = 1, reps = 1, left = 1, due = v.column2
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES (1, 1894703100), (2, 1894702140)) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - set_current_deck: {deck: Ahead}
+  - observe: [queue, deck_counts, congrats]
+  - advance: 4m59s
+  - set_current_deck: {deck: Default}
+  - set_current_deck: {deck: Ahead}
+  - observe: [queue, deck_counts, congrats]
+  - advance: 1s
+  - set_current_deck: {deck: Default}
+  - set_current_deck: {deck: Ahead}
+  - observe: [queue, deck_counts, congrats]
+  - set_config: {key: collapseTime, value: 0}
+  - set_current_deck: {deck: Default}
+  - set_current_deck: {deck: Short}
+  - observe: [queue, deck_counts, congrats]
+  - advance: 3m59s
+  - set_current_deck: {deck: Default}
+  - set_current_deck: {deck: Short}
+  - observe: [queue, deck_counts, congrats]
+  - advance: 1s
+  - set_current_deck: {deck: Default}
+  - set_current_deck: {deck: Short}
+  - observe: [queue, deck_counts, congrats]

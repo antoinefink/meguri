@@ -1,0 +1,111 @@
+# R1159-R1164; specs/browser/sidebar.md S2, S3 (draft, S16: not in
+# browser/area.yaml's active list). The built item behind every fixed sidebar
+# item (section roots with a search, Today, Flags, Card State, Current deck,
+# Untagged) and behind a deck, tag, note type, template and field item, in the
+# neutral form of specs/conformance/search-ops.md S5; then each text run on a
+# small collection, cards mode, and the note type children in notes mode too.
+# Cards: #c1 #c2 Memo note in Lang::French, #c3 #c4 Memo note in Lang, #c5
+# Gloss note in Other, #c6 Gloss note in the default deck. #c2 answered Again
+# (learning), #c6 answered Easy (review), #c1 flag 1, #c3 flag 3, #c4
+# suspended, #c5 buried.
+id: browser/sidebar/item-searches
+tags: [needs-deck, needs-tag, needs-notetype, needs-template, needs-state, needs-history, needs-prop, needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["Lang", "Lang::French", "Other"]
+  notetypes:
+    - name: Memo
+      fields: [Front, Back]
+      templates:
+        - {name: Recall, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Reverse, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+    - name: Gloss
+      fields: [Term, Usage]
+      templates: [{name: Card, front: "{{Term}}", back: "{{Usage}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Memo, deck: "Lang::French", fields: [chien, dog], tags: ["animal::mammal"]}
+    - {notetype: Memo, deck: Lang, fields: [rouge, red], tags: [colour]}
+    - {notetype: Gloss, deck: Other, fields: [oak, ""]}
+    - {notetype: Gloss, fields: [fir, tree], tags: [animal]}
+steps:
+  - set_flag: {cards: ["#c1"], flag: 1}
+  - set_flag: {cards: ["#c3"], flag: 3}
+  - suspend: {cards: ["#c4"]}
+  - bury: {cards: ["#c5"]}
+  - answer: {card: "#c2", rating: again}
+  - answer: {card: "#c6", rating: easy}
+  - observe:
+      - search_build:
+          # section roots with a search
+          - {flag: any}
+          - any_deck
+          - any_notetype
+          - any_tag
+          # Today, in S3.2's order
+          - {due_on: 0}
+          - {added: 1}
+          - {edited: 1}
+          - {answered: {days: 1}}
+          - {introduced: 1}
+          - {rescheduled: 1}
+          - {answered: {days: 1, button: 1}}
+          - {group: {joiner: and, items: [{state: due}, {negated: {due_on: 0}}]}}
+          # Flags
+          - {flag: none}
+          - {flag: 1}
+          - {flag: 7}
+          # Card State
+          - {state: new}
+          - {state: learn}
+          - {state: review}
+          - {state: suspended}
+          - {state: buried}
+          # Decks: Current deck, a top-level deck, a subdeck
+          - current_deck
+          - {deck: Lang}
+          - {deck: "Lang::French"}
+          # Note types: a note type, its template children, its field children
+          - {notetype: Memo}
+          - {group: {joiner: and, items: [{notetype: Memo}, {template: 0}]}}
+          - {group: {joiner: and, items: [{notetype: Memo}, {template: 1}]}}
+          - {group: {joiner: and, items: [{notetype: Memo}, {field_present: Front}]}}
+          - {group: {joiner: and, items: [{notetype: Gloss}, {field_present: Usage}]}}
+          # Tags: Untagged, a parent, a child
+          - untagged
+          - {tag: animal}
+          - {tag: "animal::mammal"}
+      - search:
+          - {query: "-flag:0"}
+          - {query: "deck:_*"}
+          - {query: "note:_*"}
+          - {query: "tag:_*"}
+          - {query: "prop:due=0"}
+          - {query: "added:1"}
+          - {query: "edited:1"}
+          - {query: "rated:1"}
+          - {query: "introduced:1"}
+          - {query: "resched:1"}
+          - {query: "rated:1:1"}
+          - {query: "is:due -prop:due=0"}
+          - {query: "flag:0"}
+          - {query: "flag:1"}
+          - {query: "flag:7"}
+          - {query: "is:new"}
+          - {query: "is:learn"}
+          - {query: "is:review"}
+          - {query: "is:suspended"}
+          - {query: "is:buried"}
+          - {query: "deck:current"}
+          - {query: "deck:Lang"}
+          - {query: "deck:Lang::French"}
+          - {query: "note:Memo"}
+          - {query: "note:Memo card:1"}
+          - {query: "note:Memo card:2"}
+          - {query: "note:Memo Front:_*"}
+          - {query: "note:Gloss Usage:_*"}
+          - {query: "note:Gloss Usage:_*", kind: notes}
+          - {query: "-tag:_*"}
+          - {query: "tag:animal"}
+          - {query: "tag:animal::mammal"}

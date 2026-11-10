@@ -1,0 +1,73 @@
+# R1112, R1109; specs/browser/entry-points.md E2 rule 2 and E5 step 3. A
+# plain open with no default search text runs deck:current: the current deck
+# and its subdecks, on the card's deck or its home deck. Committing an empty
+# field runs the whole collection, written deck:*, which also finds a card
+# whose deck no longer exists; deck:current does not. In notes mode the
+# empty text (a live run) also finds a note without cards, while deck:*
+# (what a commit runs) does not. A stored default text with white space
+# around it runs as stored and finds what the trimmed text finds. Decks are written with fixed ids by copying the default deck's row;
+# the filtered deck Cram (id 100) as specs/conformance/deck-ops.md K13; card
+# 5's deck id 999 names no deck; note 7 loses its card in the last step.
+# Draft: recorded, not in area.yaml.
+id: browser/entry/default-and-empty
+tags: [needs-deck]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Memo
+      fields: [Front, Back]
+      templates: [{name: Recall, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Memo, fields: [default-deck, x]}
+    - {notetype: Memo, fields: [lang, x]}
+    - {notetype: Memo, fields: [lang-french, x]}
+    - {notetype: Memo, fields: [filtered-from-lang, x]}
+    - {notetype: Memo, fields: [other, x]}
+    - {notetype: Memo, fields: [no-deck, x]}
+    - {notetype: Memo, fields: [no-card, x]}
+steps:
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) SELECT 300, 'Lang', mtime_secs, usn, common, kind FROM decks WHERE id = 1"}
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) SELECT 301, 'Lang' || char(31) || 'French', mtime_secs, usn, common, kind FROM decks WHERE id = 1"}
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) SELECT 303, 'Other', mtime_secs, usn, common, kind FROM decks WHERE id = 1"}
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (100, 'Cram', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"}
+  - db_exec: {sql: "UPDATE cards SET did = 300 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}
+  - db_exec: {sql: "UPDATE cards SET did = 301 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"}
+  - db_exec: {sql: "UPDATE cards SET did = 100, odid = 300, odue = due, due = -100000 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"}
+  - db_exec: {sql: "UPDATE cards SET did = 303 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)"}
+  - db_exec: {sql: "UPDATE cards SET did = 999 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5)"}
+  - set_config: {key: curDeck, value: 300}
+  - observe:
+      - search:
+          # E2 rule 2: the open's default search
+          - {query: 'deck:current'}
+          - {query: 'deck:current', kind: notes}
+          # E5 step 3: the committed empty field and its canonical text
+          - {query: ''}
+          - {query: '   '}
+          - {query: 'deck:*'}
+          - {query: '', kind: notes}
+          - {query: 'deck:*', kind: notes}
+          # E2 rule 2: a stored default text runs untrimmed
+          - {query: '  deck:Lang '}
+          - {query: 'deck:Lang'}
+          - {query: '  deck:Lang ', kind: notes}
+      - canonical_search:
+          - ''
+          - '   '
+          - 'deck:current'
+          - '  deck:Lang '
+  - set_config: {key: curDeck, value: 999}
+  - observe:
+      - search:
+          # deck:current when curDeck names no deck (search/names-and-ids N3.4)
+          - {query: 'deck:current'}
+          - {query: ''}
+  # E5 step 3: a note without cards (search/query-model Q6)
+  - db_exec: {sql: "DELETE FROM cards WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 6)"}
+  - observe:
+      - search:
+          - {query: '', kind: notes}
+          - {query: 'deck:*', kind: notes}
+          - {query: ''}
+          - {query: 'deck:*'}

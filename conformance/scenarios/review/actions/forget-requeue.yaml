@@ -1,0 +1,43 @@
+# Forget from the review screen, seen through the study queue
+# (specs/review/card-actions.md A8; R386). On day 200 deck Home holds review
+# cards #c1 (saved position 1) and #c2, both due on day 199, and the new card
+# #c3 at position 3. Forget on #c1 with "Restore original position where
+# possible" on and "Reset repetition and lapse counts" off makes it a new
+# card at position 1: the fresh build presents it again today, among the new
+# cards before #c3, rather than leaving the queue. Both reviewer keys are
+# written. States follow specs/conformance/queue-ops.md Q5 (logical card
+# numbers, card data as JSON text, the clock moved to day 200 after setting
+# them) and the op follows sched-ops.md J10. Draft: recorded, not active.
+# Needs forget (sched-ops.md J7), queue (queue-ops.md Q2), set_clock,
+# set_current_deck and db_exec.
+id: review/actions/forget-requeue
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Home]
+  notes:
+    - {notetype: Single, deck: Home, fields: [reviewed, x]}
+    - {notetype: Single, deck: Home, fields: [other, x]}
+    - {notetype: Single, deck: Home, fields: [fresh, x]}
+steps:
+  - observe: [timing]
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = 2, queue = 2, due = 199, factor = 2500, reps = 4,
+          ivl = v.column2, lapses = v.column3, data = v.column4
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES (1, 6, 1, '{"pos":1}'), (2, 8, 0, '')) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - set_clock: "2030-08-03T10:00:00"
+  - observe: [timing]
+  - set_current_deck: {deck: Home}
+  - observe: [queue]
+  - advance: 1m
+  - forget: {cards: ["#c1"], restore_position: true, reset_counts: false, context: reviewer}
+  - observe: [queue]
+  - db_exec: {sql: "SELECT type, queue, due, reps, lapses FROM cards ORDER BY id"}
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT) FROM config WHERE KEY IN ('resetCountsReviewer', 'restorePositionReviewer') ORDER BY KEY"}
