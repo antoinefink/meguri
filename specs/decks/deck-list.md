@@ -95,7 +95,7 @@ S8's paragraphs, keys and order, with these rules for the deck page. A review se
 | `review.congrats.title` | always |
 | ready-in (`review.congrats.nextLearn.minutes` or `.hours`) | `next_learning_ready_at` is present and after now |
 | `review.congrats.learnRemaining` | exactly with the ready-in line, after a space in the same paragraph; its number is the count of `learning_later_today` |
-| `review.congrats.reviewLimit` | `review_limit_reached`; followed by a Deck Options link while the `.deckOptions` route is attached (R78, U152's registry). The link's text needs its own key in `review/reviewer-strings` S8, which lists none yet; until it does, U155 shows the paragraph without the link |
+| `review.congrats.reviewLimit` | `review_limit_reached`; followed by a Deck Options link, `review.congrats.deckOptionsLink` (`review/reviewer-strings#S8.1`), while the `.deckOptions` route is attached (R78, U152's registry) |
 | `review.congrats.newLimit` | `new_limit_reached`; with the same link |
 | `review.congrats.buried` with `review.congrats.unburyLink` | `sibling_buried` + `user_buried` > 0; the link runs H4's Unbury |
 | deck description | as H4 item 2 |

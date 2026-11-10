@@ -1,11 +1,11 @@
 # Reviewer strings
 
 Spec: review/reviewer-strings
-Requirements: R86, R184, R185, R339, R349, R351, R363, R370, R382, R383, R384, R386, R387, R429, R430, R432, R433, R434, R435, R436, R437, R439, R456, R581, R635, R1981
-Anki: 26.09.3 for S3 to S9 (the wording, plural forms and triggers of Anki desktop's reviewer, congratulations page and unbury dialog, except the differences S11 lists) and for the English values only of S13 and S14 (the reviewer's answer bar and the Forget dialog's two toggles); none for S10, the keys, S13's spoken forms and where S13 and S14 show their strings
+Requirements: R78, R86, R184, R185, R241, R339, R349, R351, R362, R363, R364, R365, R366, R370, R374, R376, R378, R382, R383, R384, R386, R387, R429, R430, R432, R433, R434, R435, R436, R437, R439, R456, R462, R581, R635, R724, R728, R1263, R1981
+Anki: 26.09.3 for S3 to S9 (the wording, plural forms and triggers of Anki desktop's reviewer, congratulations page and unbury dialog, except the differences S11 lists) and for the English values only of S13 and S14 (the reviewer's answer bar and the Forget dialog's two toggles); none for S8.1's link, S10, S15 to S19, the keys, S13's spoken forms and where S13 and S14 show their strings
 Scenarios: conformance/scenarios/review/ (none recorded yet, S12)
 
-The text the review screen shows besides the card: toasts, the timebox prompt, Auto Advance reminders, the congratulations notices, the unbury choices, the grade names and Show Answer, and the Forget choices. U175, U178, U182, U183, U185, U186 and U187 take every such string only from this file (KTD1). U155's finished state and U157's summary reuse S8 and S9 for the same facts. U153's toasts and U159's Edit menu take their undo and redo titles from S5.
+The text the review screen shows besides the card: toasts, the timebox prompt, Auto Advance reminders, the congratulations notices, the unbury choices, the grade names and Show Answer, the Forget choices, the notices of a refused or failed answer, the reasons undo is unavailable, the timer's capped state, the menu titles, and the titles and labels of the dialogs and panels over the review. U175, U177, U178, U179, U182, U183, U185, U186 and U187 take every such string only from this file (KTD1). U155's finished state (`decks/deck-list#H5.2`, S8.1) and U157's summary reuse S8 and S9 for the same facts. U153's toasts and U159's Edit menu take their undo and redo titles from S5.
 
 ## S1. Keys, arguments and plurals
 
@@ -16,12 +16,12 @@ The text the review screen shows besides the card: toasts, the timebox prompt, A
 ## S2. Toasts (R581)
 
 - A toast is non-blocking: it never takes taps on the card or the buttons, it hides after about 2 seconds, and VoiceOver announces its text when it appears. Decided 2026-10-27: one toast at a time; a new toast replaces the one on screen.
-- A toast follows the op's success. An op that fails or is refused shows no toast; its error path applies (R362).
+- A toast follows the op's success. An op that fails or is refused shows no toast; its error path applies (R362). For an answer, that error path's text is S15.
 - An op's undo or redo never shows the op's toast again (S5).
 
 ## S3. After an answer (R363)
 
-No toast follows an answer, except the leech toast.
+No toast follows an accepted answer, except the leech toast. A refused or failed answer shows S15's notice instead.
 
 | Key | English | Shown when |
 |---|---|---|
@@ -79,7 +79,8 @@ No toast follows an answer, except the leech toast.
 | `review.autoAdvance.unavailable` | Auto Advance needs a number of seconds to show the question or the answer in the deck options of this card. | explanation of the disabled toggle, and ⇧A's toast while it is disabled (rule below; R433; Meguri's wording) |
 
 - Decided 2026-10-27: the current card's preset decides, as for every other Auto Advance value (R432). A time (`secondsToShowQuestion`, `secondsToShowAnswer`) is set when it is a finite number above 0. A stored 0, negative or NaN time (`sched/presets` keeps them as stored) is not set, and that countdown does not run. While Auto Advance is off and neither time of the current card's preset is set, the ⋯ item is disabled with `review.autoAdvance.unavailable` as its explanation, and ⇧A shows that text as a toast and changes nothing. While Auto Advance is on, the item stays enabled so that it can be turned off; a card whose preset sets neither time runs no countdown and shows no toast, and the next card with a set time counts down again. Anki never disables the toggle (S11).
-- Not shown: when Auto Advance turns itself off because the app left the foreground or the Mac app deactivated (R433); the ⋯ item's checked state shows it. A reminder shows once per countdown.
+- Not shown: when Auto Advance turns itself off because the app left the foreground or the Mac app deactivated (R433); the ⋯ item's checked state shows it.
+- A reminder shows once per countdown: audio that ends later on that side shows nothing more (`review/auto-advance#A6`). This is Meguri's rule; Anki shows the reminder again each time audio ends on that side after its countdown has run out (S11).
 
 ## S7. Timebox (R86, R429, R430)
 
@@ -95,7 +96,7 @@ No toast follows an answer, except the leech toast.
 - Examples: 1 answer, `timeLim` 600 → "1 card studied in 10 minutes."; 25 answers, `timeLim` 60 → "25 cards studied in 1 minute.".
 - Continue restarts the timebox from 0 with a card count of 0; Finish ends the session into the summary (R430).
 - Decided 2026-10-27: when the crossing answer leaves nothing to present (head `Finished` or `WaitingUntil`), no sheet appears; the congratulations content or the summary follows as usual, and the timebox restarts from 0 with a card count of 0 at that answer, as Continue does.
-- Decided 2026-10-27: time while no card is presented (the congratulations content, the summary) is not timebox time. The timebox's clock stops there and goes on from its value when a card is presented again (Continue, R437; unbury, R435; an undo from congratulations or the summary). A resume from the summary after Finish starts from 0 with a card count of 0.
+- Decided 2026-10-27: time while no card is presented (the congratulations content, the summary) is not timebox time. The timebox's clock stops there and goes on from its value when a card is presented again: the congratulations content's Continue (R437, S8), an unbury there (R435), or an undo or unbury from the congratulations content or from a summary that the queue running out or ✕ opened. The summary's own Continue is not such a resume: it starts a new session on the same deck (U157), whose timebox starts from 0 (`review/timers#T3`). A resume from the summary after Finish, that is an Undo or Unbury on the summary that the timebox sheet's Finish opened, starts from 0 with a card count of 0 (`review/timers#T3`).
 - Decided 2026-10-27: an undo while the sheet is shown closes the sheet and leaves the elapsed time and the card count unchanged (the count rule above), so the next accepted answer shows the sheet again. Esc on the Mac and swiping the sheet down count as Continue.
 - Example: `timeLim` 600; the answer at 610 s leaves only a learning card due in 10 minutes, so no sheet appears and the timebox restarts; 10 minutes on the congratulations content add nothing; after Continue the timebox goes on from 0 s and 0 cards.
 
@@ -119,10 +120,23 @@ Shown in place of a card when the applied head's `terminalState` (`sched/review-
 - The ready-in amount: s = max(60, floor((instant − now) / 1,000)) whole seconds, where instant is the head's `WaitingUntil` instant and both values are in milliseconds; the clamp is Anki's. Below 3,600 the unit is minutes, below 86,400 hours; at 86,400 or more neither line shows. The amount is s divided by the unit's seconds, rounded to the nearest whole number with halves up. Examples: 600 s → "10 minutes"; 90,000 ms → 90 → "2 minutes"; 89,999 ms → 89 → "1 minute"; 3,599 s → "60 minutes"; 5,400 s → "2 hours". With a 1,200 s learn-ahead, a card due in 25 minutes is "ready in 5 minutes".
 - The sentence is the catalog string, redrawn by a system-driven schedule (a timeline with an entry at each instant the shown amount changes and one at the ready instant), never an app timer (R437, R1854). A timer-interval countdown view (`Text(timerInterval:)`, a clock such as 4:59) is not used; this overrides U186's approach. When the instant is reached, the ready-in paragraph goes (both its sentences) and Continue appears.
 - Decided 2026-10-27: the screen follows the applied head (C17.1). `WaitingUntil` shows the ready-in paragraph and later Continue; `Finished` shows neither, whatever C7 reports. Until C7 has been read after the commit, the ready-in sentence shows alone and the C7 paragraphs follow when it is read. When the head turns `Active` while this content is shown (at readiness, or with cards another change made available), the content stays, Continue appears, and the head's item 0 is presented only when Continue is tapped; review never resumes on its own (R437). Continue tapped before the refreshed head is `Active` refetches the head and presents its item 0, or keeps this content while the head is still empty. The one exception is the screen's own unbury (S9): its result head is presented at once when it is `Active` (R435).
-- Decided 2026-10-27: Meguri reads C7's native members (`learning_later_today`, `review_limit_reached`, `new_limit_reached`); the ready instant is the head's, never C7's `next_learning_ready_at`. Anki's page reads the compatibility members (`secs_until_next_learn`, `learning_remaining`, `review_remaining`, `new_remaining`). Those use C7's full named subtree, filtered descendants included, and coarser meanings (every queue-1 card, any due review card, any new card) where the native members use the studied subtree and "excluded by a daily limit", so Meguri's notices can differ from Anki's beyond C7's boundary and imported rows (S11).
-- There is no custom-study paragraph or link (R436). The limit paragraphs carry no link here (R78's Deck Options links are the deck page's, U155).
+- Decided 2026-10-27: Meguri reads C7's native members (`learning_later_today`, `review_limit_reached`, `new_limit_reached`); on the review screen the ready instant is the head's, never C7's `next_learning_ready_at` (the deck page, which has no head, uses it: S8.1). Anki's page reads the compatibility members (`secs_until_next_learn`, `learning_remaining`, `review_remaining`, `new_remaining`). Those use C7's full named subtree, filtered descendants included, and coarser meanings (every queue-1 card, any due review card, any new card) where the native members use the studied subtree and "excluded by a daily limit", so Meguri's notices can differ from Anki's beyond C7's boundary and imported rows (S11).
+- There is no custom-study paragraph or link (R436). The limit paragraphs carry no link on the review screen; R78's Deck Options links are the deck page's (S8.1).
 - The content is computed again on rollover, on any change while shown (R438) and when the session's own pending answers commit.
 - The English **one** form of `review.congrats.learnRemaining` intentionally has no `%lld` (S1).
+
+### S8.1 The deck page (R78, U155)
+
+U155's finished state (`decks/deck-list#H5.1`, H5.2) shows S8's paragraphs, keys and order, with two differences, because the deck page has no session head:
+
+- The ready-in instant is C7's `next_learning_ready_at` from the deck's `DeckStudyState` record, with S8's amount and redraw rules. S8's rule that the instant is the head's, never `next_learning_ready_at`, is the review screen's.
+- `review.congrats.continue` is not shown; the page returns to its normal state instead (`decks/deck-list#H5.3`).
+
+| Key | English | Shown when |
+|---|---|---|
+| `review.congrats.deckOptionsLink` | Deck Options | on the deck page only, after `review.congrats.reviewLimit` and after `review.congrats.newLimit` while the `.deckOptions` route is attached (R78, `decks/deck-list#H5.2`); a link that opens the deck's Deck Options |
+
+- The link's text is Meguri's wording: Anki's congratulations page has no Deck Options link.
 
 ## S9. Unbury choices (R435)
 
@@ -142,7 +156,8 @@ Shown in place of a card when the applied head's `terminalState` (`sched/review-
 |---|---|---|
 | `review.toast.changedElsewhere` | This card was changed elsewhere | the screen applies `CurrentCardChanged{removed}` (`sched/review-session#C13`) |
 
-- Decided 2026-10-27: the screen keys the toast on the event alone and guesses nothing from in-flight ops. It relies on this core contract: an op submitted with the session id (every op of C13's list: bury, suspend, flag, forget, set due date, an edit in the edit panel, and C13.1's Mark and Delete Note) emits no `CurrentCardChanged` for its own commit and reports the change only in its result's head diff, as C13.1 states for Mark and Delete Note; a rollover that drops the current card (C14, R600) reports it through the rebuilt head (`QueueHeadChanged`, or the `Accepted` result with `rolledOver`), never as `CurrentCardChanged{removed}`. `sched/review-session#C13` and C14 do not say so for every op yet; this section is the contract until they do.
+- Decided 2026-10-27: the screen keys the toast on the event alone and guesses nothing from in-flight ops. It relies on this core contract: an op submitted with the session id (every op of C13's list: bury, suspend, flag, forget, set due date, and C13.1's Mark and Delete Note) emits no `CurrentCardChanged` for its own commit and reports the change only in its result's head diff, as C13.1 states for Mark and Delete Note; a rollover that drops the current card (C14, R600) reports it through the rebuilt head (`QueueHeadChanged`, or the `Accepted` result with `rolledOver`), never as `CurrentCardChanged{removed}`. `sched/review-session#C13` and C14 do not say so for every op yet; this section is the contract until they do.
+- Decided 2026-11-10: a save in the edit panel is not one of those ops. It is the editor's note update, which names no session (`review/edit-current#E2`, `editor/field-html`), so the screen meets it as a change made elsewhere: `{eligible}` or `{memoryOnly}`, never `{removed}` (E2), so no toast.
 - So it is not shown for the review screen's own ops, for `{eligible}` or `{memoryOnly}`, or when the card leaves through a rollover. This wording is Meguri's (no Anki text).
 
 ## S11. Differences from Anki
@@ -161,6 +176,11 @@ Shown in place of a card when the applied head's `terminalState` (`sched/review-
 - Anki 26.09.3 titles the dialog behind Forget… "Reset Card"; the review screen's dialog is the Forget dialog, and its title is Meguri's wording (S14). Only its two toggle labels are Anki's.
 - Anki's reviewer has no Show Answer accessibility action, no Magic Tap and no spoken answer labels; Meguri adds them (R349, R185, S13). Anki's grade names and Show Answer are the same words.
 - Anki's congratulations page clamps the ready-in amount to at least 60 seconds, so once the card is ready it still says "ready in 1 minute" until the page refreshes, and the page has no Continue button. Meguri removes the paragraph at the ready instant and shows Continue (R437, S8).
+- Anki's congratulations page has no Deck Options link; Meguri's deck page adds one after each limit paragraph (R78, S8.1).
+- Anki shows an Auto Advance reminder again each time audio ends on that side after its countdown has run out; Meguri shows it once per countdown (S6, `review/auto-advance#A9`).
+- Anki raises an error when an answer meets a card that changed since it was shown; Meguri rebuilds silently and shows "Card changed, please answer again" while the card is still presented (R728, S15).
+- Anki's More menu titles differ from R374's, which Meguri uses (S18): Anki says Flag Card, Reset Card..., Set Due Date..., Options, Create Copy..., Audio -5s and Audio +5s, and its bottom bar says Edit.
+- Anki titles its deck options window "Options for" and the deck's name; Meguri's sheet from review says `Deck Options for %@` (S19). Anki's Set Due Date prompt and hint are not used (S19).
 
 ## S12. Tests and scenarios
 
@@ -170,14 +190,20 @@ The oracle runs the collection library, not Anki's UI, so the text itself is che
 |---|---|
 | `AnswerPathTests` (U175) | S3: both leech keys from `Accepted.leech` and `Accepted.suspended`, none after a redo, the toast together with the timebox sheet |
 | `CardActionPerformerTests` (U182) | S4's keys, counts and absences; the delete toast closing when another step is recorded or undone before Undo, a late Undo tap doing nothing, and the toast staying while VoiceOver runs |
-| `ReviewUndoControllerTests` (U179) | S5's labels and announcements, with no toast |
+| `ReviewUndoControllerTests` (U179) | S5's labels and announcements, with no toast; S16: every `engine/undo#M3` reason maps to its key and a non-empty text, and the disabled Undo item's hint is the text of `peek(Session)`'s reason |
 | `UndoStoreTests` (U159) | S5's named Edit menu titles for a Global step, the disabled plain titles with no step, and the step name alone as the system action name |
 | `AutoAdvanceControllerTests` (U185) | S6: the toasts, the toggle disabled from the current card's preset (0, negative and NaN times), ⇧A while disabled, a 0/0 card while Auto Advance is on |
 | `TimeboxControllerTests` (U185) | S7: the examples, the four message forms, the half-to-even rule, the restart at a crossing with no sheet, no timebox time while no card is presented, undo while the sheet is shown, Esc as Continue |
 | `CongratsModelTests` (U186) | S8: the examples (89,999 ms included), each paragraph's condition, the 86,400 cut-off, the Continue switch from the head, `Finished` with no ready-in line or Continue, and C17.1's two regressions (Easy on the last learning card inside learn-ahead; Again with a 60-minute step) while a committed C7 query disagrees; S9's chooser cases |
 | `ExternalChangeHandlerTests` (U187) | S10: the toast for each applied `{removed}`, none for `{eligible}`, `{memoryOnly}` or a rollover's rebuilt head |
 | `AnswerButtonsTests` (U178) | S13: the four grade names in their fixed order; Show Answer as the button with and without an assistive technology, as the menu command and as the accessibility action; the interval taken from `sched/answer-labels` and never from the catalog; the accessibility label examples, `.one` only for the amount `1` (`1.5` uses `.other`), `less than` for a `<` label, `(end)` spoken as it is; the Voice Control input labels |
-| `ForgetDialogModelTests` (U183) | S14: both labels, their order, and each toggle's starting value from its config key |
+| `ForgetDialogModelTests` (U183) | S14: both labels, their order, and each toggle's starting value from its config key; S19's Forget title and button |
+| `AnswerPathTests` (U175) | S15: `review.toast.cardChanged` for `Stale` and `NotAtHead` while the refused card is presented, and for a `CommitFailed` whose error is the `Stale` precondition; none when the card is no longer presented; `review.banner.commitFailed` for every other `CommitFailed` |
+| `OnScreenTimerTests` (U177) | S17: the capped accessibility value while `capped` is true, and the plain value otherwise |
+| `ReviewMoreMenuTests` (U182) | S18: every title, in R374's order, the same in the ⋯ menu, the context menu and the Mac Card menu; the U+2026 and U+2212 characters |
+| `SetDueDateDialogModelTests` (U183) | S19: the Set Due Date title, prompt, hint and button; `Malformed` and `TooLarge` mapped to their messages, no message for `Empty` |
+| `ReviewPanelHostTests` (U183) | S19: the Current / Previous labels and the Deck Options title with the home deck's name (a filtered deck's card names its original deck) |
+| `DeckPageStoreTests` (U155) | S8.1: the ready-in line from `next_learning_ready_at`, no Continue, the Deck Options link after each limit paragraph only while the route is attached |
 
 Every key must exist in the catalog with exactly this English value (U167's string lint). The counts behind the strings are collection facts; their oracle scenarios (bury counts, the timebox's card count across undo and redo, the C7 ready-in boundaries) are not recorded yet.
 
@@ -218,4 +244,102 @@ Spoken units. Each row is two plain entries, `<stem>.one` and `<stem>.other`, wh
 | `review.forget.resetCounts` | Reset repetition and lapse counts | `resetCountsReviewer`, default false |
 
 - These are the two toggles of the Forget dialog that review's Forget… command opens (U183, R386), in this order, for the two choices of `sched/manual-ops#M6.1`; the op stores both values (M6.4).
-- The dialog's title, its buttons and the whole Set Due Date dialog (prompt, hint, validation messages) are Meguri's wording: R384 and R386 quote no other Anki text. Their results are S4's toasts.
+- The dialog's title, its buttons and the whole Set Due Date dialog (prompt, hint, validation messages) are Meguri's wording, listed in S19: R384 and R386 quote no other Anki text. Their results are S4's toasts.
+
+## S15. Refused and failed answers (R362, R728)
+
+Meguri's wording; Anki has neither notice (S11).
+
+| Key | English | Shown when |
+|---|---|---|
+| `review.toast.cardChanged` | Card changed, please answer again | the answer is refused with `Stale` or `NotAtHead` (`sched/review-session#C10`) and the refused card is still presented, with its fresh states and labels (R728); also for a `CommitFailed` whose error is the `Stale` precondition (C11) when the card is presented again |
+| `review.banner.commitFailed` | Your answer couldn’t be saved. Answer this card again. | every other `CommitFailed(cardId, error)` (C11): the failed card is presented again on its question side (R362) |
+
+- `review.toast.cardChanged` is a toast (S2). Its English is R728's, word for word. When the refused card is no longer presented, nothing is shown; the screen takes the fresh head (C10).
+- `review.banner.commitFailed` is the error banner of R362: VoiceOver announces it when it appears. Its place and how it is dismissed are the design contract's; this file gives its text only. It is one banner however many later answers C11 dropped with the failed one.
+
+## S16. When undo is unavailable (R365, R366, R462)
+
+| Key | English | `engine/undo#M3` reason |
+|---|---|---|
+| `review.undo.unavailable.none` | Nothing to undo in this review | `None` |
+| `review.undo.unavailable.clearedByRollover` | Undo is unavailable after the day changed | `ClearedByRollover` |
+| `review.undo.unavailable.clearedBySync` | Undo is unavailable after changes from another device were applied | `ClearedBySync` |
+| `review.undo.unavailable.clearedByOneWay` | Undo is unavailable after the collection was replaced | `ClearedByOneWay` |
+| `review.undo.unavailable.clearedByNonUndoableOp` | Undo is unavailable after a change that can’t be undone | `ClearedByNonUndoableOp` |
+| `review.undo.unavailable.changedExternally` | Undo is unavailable after the collection was changed elsewhere | `ChangedExternally` |
+| `review.undo.unavailable.alreadyUploaded` | Changes that were already synced can’t be undone | `AlreadyUploaded` |
+| `review.undo.unavailable.uploadPending` | This change is being synced and can be undone again if the sync fails | `UploadPending` |
+
+- The disabled touch Undo item gives the text of `peek(Session(id))`'s reason as its accessibility hint and help text (`review/answer-flow#F6.2`). Where the Mac shows it is F6.2's open point.
+- `ClearedByRollover`'s text is R462's (AE13), word for word. The others are Meguri's wording; U179's plan text fixes only their meaning. None ends with a period, as R462's does not.
+- Every M3 reason has a text. A reason added to M3 later needs a key here before the app can show it.
+- Anki has no such texts: its Undo item is only disabled.
+
+## S17. On-screen timer (R364)
+
+| Key | English | Used for |
+|---|---|---|
+| `review.timer.capped` | `%@, limit reached` | the timer's accessibility value while it is capped (`review/timers#T2`, `capped` true); `%@` is the accessibility value the timer has when it is not capped |
+
+- Meguri's wording; Anki only colours the capped value. The visible cue that does not rely on colour is the design contract's (T2).
+
+## S18. Menu titles (R339, R374, R376, R378)
+
+Meguri's wording, taken from R374, never from Anki's menus (`review/card-actions#A13`, S11). In R374's order:
+
+| Key | English | Notes |
+|---|---|---|
+| `review.menu.editNote` | Edit Note | |
+| (Redo) | S5's `review.redo.named` | iPhone ⋯ menu only, while a step can be redone (R724) |
+| `review.menu.flag` | Flag | the submenu; its rows are the flag names of `tags/flags-and-marked#F4` |
+| `review.menu.markNote` | Mark Note | checked while the note is marked (R376) |
+| `review.menu.buryCard` | Bury Card | |
+| `review.menu.buryNote` | Bury Note | |
+| `review.menu.suspendCard` | Suspend Card | |
+| `review.menu.suspendNote` | Suspend Note | |
+| `review.menu.setDueDate` | Set Due Date… | |
+| `review.menu.forget` | Forget… | |
+| `review.menu.cardInfo` | Card Info | |
+| `review.menu.previousCardInfo` | Previous Card Info | |
+| `review.menu.templateErrors` | Template Errors… | only while shown (R378) |
+| `review.menu.deckOptions` | Deck Options | |
+| `review.menu.replayAudio` | Replay Audio | |
+| `review.menu.pauseAudio` | Pause Audio | |
+| `review.menu.audioBack` | Audio −5 s | |
+| `review.menu.audioForward` | Audio +5 s | |
+| `review.menu.autoAdvance` | Auto Advance | checked while on (R376) |
+| `review.menu.cardZoom` | Card Zoom | the submenu of the next three, in this order |
+| `review.menu.zoomOut` | Zoom Out | |
+| `review.menu.resetZoom` | Reset Zoom | |
+| `review.menu.zoomIn` | Zoom In | |
+| `review.menu.createCopy` | Create Copy | |
+| `review.menu.deleteNote` | Delete Note | destructive, last |
+
+- The ⋯ menu, the card's context menu and the Mac Card menu (R339) use the same titles, which are also the items' accessibility labels. Shortcuts are the system's menu glyphs, never part of a title.
+- `…` is U+2026. In `Audio −5 s` the minus is U+2212, and both audio titles have an ordinary space before `s`, as R374 writes them.
+- The zoom titles are the View menu's names for the same commands (`review/commands#K1`).
+- The Mac Card menu's other review items take their titles from S13 (Show Answer, the grades) and S5 (Undo, Redo).
+
+## S19. Dialogs and panels over the review (R241, R384, R386, R1263)
+
+Meguri's wording (S14, `review/card-actions#A13`).
+
+| Key | English | Used for |
+|---|---|---|
+| `review.setDue.title` | Set Due Date | the Set Due Date dialog's title (`review/card-actions#A7`, A12) |
+| `review.setDue.prompt` | Days until due | the label of its text field |
+| `review.setDue.hint` | 0 is today. Enter a number of days, such as 3, or a range, such as 3-7, for a random day within it. An ending ! is accepted but changes nothing more. | the explanation under the field |
+| `review.setDue.error.malformed` | Enter a number of days, such as 3, or a range, such as 3-7. | the inline message for `Malformed` (`sched/set-due-date#S2`) |
+| `review.setDue.error.tooLarge` | The number of days is too large. | the inline message for `TooLarge` |
+| `review.setDue.apply` | Set | the confirmation button (A7's Apply) |
+| `review.forget.title` | Forget Card | the Forget dialog's title (`review/card-actions#A8`, A12) |
+| `review.forget.apply` | Forget | its confirmation button (A8's Apply) |
+| `review.cardInfo.current` | Current | the first segment of Card Info's switch when opened from review (`review/card-actions#A9`, R1263) |
+| `review.cardInfo.previous` | Previous | the second segment; disabled while there is no previous card (`stats/card-info#C9`) |
+| `review.deckOptions.title` | `Deck Options for %@` | the title of the Deck Options sheet opened from review (`review/card-actions#A10`, R241); `%@` is the human name (`decks/decks`, components joined by `::`) of the current card's home deck, the original deck for a card in a filtered deck |
+
+- `Empty` has no message: Apply stays disabled (A7). Whitespace-only text is `Malformed`.
+- The hint says that `!` changes nothing more: Meguri always sets due dates with FSRS on (`sched/set-due-date#S1`, R702), and there `!` has no effect (S2). R384 still requires the dialog to accept it.
+- Cancel in both dialogs is the system's.
+- The Forget dialog's toggles are S14's.

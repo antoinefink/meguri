@@ -131,7 +131,7 @@ The notice after a leech answer, its two sentences and when each shows: `sched/l
 - **Redo** shows the head that follows, as F6.1's second row (R369), or the congratulations content when nothing follows.
 - **From congratulations or the summary.** An undo there reopens review on the restored card's question side (R371, AE4). This differs from Anki, which stays on the overview (F6.1). R371's "Anki returns from the congrats screen to the reviewer" does not hold for 26.09.3 desktop.
 - **Names.** The touch Undo item's name is "Undo" with the step's name (`review/reviewer-strings#S5`). Meguri announces an undo and a redo instead of showing a tooltip (S5, S11).
-- **When undo is disabled.** The disabled touch Undo item gives `peek`'s reason (`engine/undo#M3`) as its accessibility hint (R365, R366, R462). The texts for the eight reasons are not in `review/reviewer-strings` yet; they have been requested. On the Mac, Edit ▸ Undo is disabled with `review.undo.plain` (S5). Where the Mac gives the reason is not decided: open point for U159 and U179 against the design contract.
+- **When undo is disabled.** The disabled touch Undo item gives `peek`'s reason (`engine/undo#M3`) as its accessibility hint (R365, R366, R462). The texts for the eight reasons are `review/reviewer-strings#S16`. On the Mac, Edit ▸ Undo is disabled with `review.undo.plain` (S5). Where the Mac gives the reason is not decided: open point for U159 and U179 against the design contract.
 - **Limits.** The 30-step limit and the undoable set are the core's (`engine/undo#M1`, `#A2`); the screen never overrides them (R367).
 
 ## F7. A new day during review (R459 to R464)
@@ -146,7 +146,7 @@ The notice after a leech answer, its two sentences and when each shows: `sched/l
 **Meguri.** These rules come from `sched/review-session#C14`, `sched/day-clock#D9` and `sched/app-coordination#A1` (when the app checks). They differ from Anki (R460):
 
 - At `RolledOver` the current card stays, on the side it was on, and gets the new day's states and labels at once. On the answer side, only the buttons redraw; on the question side, nothing visible changes. This is a redraw, so the timer goes on (F2). Anki instead takes the new head on its question side with a new timer.
-- The rollover op empties both histories at once (D9 step 1). So the touch Undo item shows `ClearedByRollover` from then on, and the answer given across the rollover cannot be undone either (C14). R462's text for that reason is one of the reason texts F6.2 has requested.
+- The rollover op empties both histories at once (D9 step 1). So the touch Undo item shows `ClearedByRollover` from then on, and the answer given across the rollover cannot be undone either (C14). R462's text for that reason is `review.undo.unavailable.clearedByRollover` (`review/reviewer-strings#S16`).
 - A time-zone change that changes the day number takes the same path (`sched/day-clock#D12.1`, R464).
 - The session stays one session (R463).
 - `sched/review-session#P11`'s row for this case says Anki does "nothing until the next read". That is true only of the interval above; this has been reported to its owner.

@@ -14,7 +14,11 @@ the native congratulations facts (S8), the single unbury chooser (S9), the
 changed-elsewhere toast (S10), S13's accessibility label, spoken interval and
 unit words, Voice Control input labels and accessibility action (from R185, R349
 and the design contract; Anki's reviewer has none), and S14's dialog title,
-buttons and the Set Due Date dialog's text.
+buttons and the Set Due Date dialog's text. Added 2026-11-10, also Meguri's
+own: S8.1's Deck Options link, S15 (R728's notice word for word, and the
+commit-failure banner), S16 (R462's text word for word, the other seven
+reasons), S17, S18 (R374's titles) and S19; S10's removal of the edit panel
+follows `editor/field-html` and `review/edit-current#E2`.
 
 | Spec section | Anki files read | Read for |
 |---|---|---|
@@ -29,3 +33,7 @@ buttons and the Set Due Date dialog's text.
 | reviewer-strings S13 | `qt/aqt/reviewer.py` (bottom bar: the Show Answer button and the four answer buttons), `ftl/core/studying.ftl` | the four grade names, their order, the Show Answer label, a Show Answer button always shown, no accessibility action (2026-11-10) |
 | reviewer-strings S14 | `qt/aqt/forms/forget.ui`, `ftl/core/scheduling.ftl`, `ftl/core/actions.ftl`, `rslib/src/config/bool.rs` | the two Forget toggles' labels and order, the dialog's Anki title (Reset Card, S11), the two config keys' defaults (true and false; also in `sched-manual-ops.md`'s M6 row) (2026-11-10) |
 | reviewer-strings S11 (S13, S14 bullets) | the files of S13 and S14 | the Anki column of those differences (2026-11-10) |
+| reviewer-strings S6 (reminder once per countdown), S11 (its bullet) | `qt/aqt/reviewer.py` (the audio-end hook that checks again whether a side's countdown has run out; the question and answer countdowns) | Anki shows the reminder again at each later audio end on that side; Meguri's once-per-countdown rule is its own (2026-11-10) |
+| reviewer-strings S8.1, S11 (Deck Options link bullet) | `ts/routes/congrats/CongratsPage.svelte`, `ftl/core/scheduling.ftl` | the congratulations page has no Deck Options link (2026-11-10) |
+| reviewer-strings S11 (stale-answer bullet), S15 | none new; `sched-session.md`'s P11 row | Anki raises an error for a changed card; the notice is R728's (2026-11-10) |
+| reviewer-strings S11 (menu and title bullets), S18, S19 | `qt/aqt/reviewer.py` (the More menu's entries and the bottom bar's Edit), `ftl/core/actions.ftl`, `ftl/core/studying.ftl`, `ftl/core/scheduling.ftl` (the Set Due Date prompt and hint), `qt/aqt/deckoptions.py` (the window title) | Anki's English, for comparison only: no S18 or S19 value is taken from it (2026-11-10) |
