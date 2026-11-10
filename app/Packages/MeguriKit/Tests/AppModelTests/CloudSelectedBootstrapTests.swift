@@ -269,8 +269,10 @@ extension ReviewCollectionStartupTests {
                 a.ownTransport = SelectedConflictTransport(original: ServiceOwnTransport(wire: wire), matching: matching)
                 let replies = SelectedBootstrapReplies()
                 a.observeOwn = { replies.record($0) }
+                if matching { print("selected-start-before failed=\(a.sync.operationFailed) setup=\(a.sync.setupState) diagnostic=\(DebugCloudDiagnostics.latestValue ?? "none")") }
                 await a.owner.start()
                 await a.sync.prepareConnectionAuthority()
+                if matching { print("selected-start-after failed=\(a.sync.operationFailed) setup=\(a.sync.setupState) diagnostic=\(DebugCloudDiagnostics.latestValue ?? "none")") }
                 try await a.owner.prepareCloudConnectionPreview()
                 await a.sync.waitForConnectionPreview()
                 guard case .ready(_, let summary) = a.sync.preview else { throw ServiceWorkflowFailure.wire }
@@ -281,6 +283,8 @@ extension ReviewCollectionStartupTests {
                 let control = try await SelectedCloudControlInspection().current()
                 if matching {
                     print("selected-publication-conflict operationFailed=\(a.sync.operationFailed) status=\(control.status) controlProven=\(control.status == .proven) completePresent=\(control.publicationComplete != nil) donePresent=\(control.publicationDoneActive != nil)")
+                    print("selected-publication-diagnostic \(DebugCloudDiagnostics.latestValue ?? "none")")
+                    print("selected-publication-work tag=\(DebugCloudPreviewProbe.ownWork.latestTag) stage=\(DebugCloudPreviewProbe.ownWork.lastEnteredWorkStageTag ?? "none")")
                     try #require(!a.sync.operationFailed && control.status == .proven)
                     try #require(control.provenance == .runtimeAcceptedPublication)
                     let complete = try #require(control.publicationComplete)
