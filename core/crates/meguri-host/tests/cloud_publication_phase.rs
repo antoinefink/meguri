@@ -1937,6 +1937,7 @@ struct HeldBindProvider {
     remaining: Mutex<Option<usize>>,
     hold_on_clock: bool,
     clock_armed: std::sync::atomic::AtomicBool,
+    skip_first_clock: std::sync::atomic::AtomicBool,
     entered: std::sync::mpsc::Sender<()>,
     release: Mutex<std::sync::mpsc::Receiver<()>>,
 }
@@ -1979,7 +1980,8 @@ impl RandomSource for HeldBindProvider {
 }
 impl meguri_model::clock::Clock for HeldBindProvider {
     fn now_ms(&self) -> i64 {
-        if self.clock_armed.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        use std::sync::atomic::Ordering::SeqCst;
+        if !self.skip_first_clock.swap(false, SeqCst) && self.clock_armed.swap(false, SeqCst) {
             self.hold();
         }
         NOW
@@ -2024,6 +2026,7 @@ fn publication_work_uses_sent_step_when_last_entity_result_lands_during_selectio
         remaining: Mutex::new(None),
         hold_on_clock: true,
         clock_armed: std::sync::atomic::AtomicBool::new(true),
+        skip_first_clock: std::sync::atomic::AtomicBool::new(false),
         entered,
         release: Mutex::new(resume),
     });
@@ -2057,6 +2060,48 @@ fn publication_work_uses_sent_step_when_last_entity_result_lands_during_selectio
 }
 
 #[test]
+fn duplicate_media_feed_does_not_invalidate_prepared_root_read() {
+    use std::sync::{atomic::AtomicBool, mpsc};
+
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("device");
+    generated(&dir);
+    let host = open_host(&dir, keys());
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let media = host.media().unwrap();
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(44)).unwrap();
+    publish_actual_collection(&host, &mut service);
+    assert_eq!(runtime.consume_media_feed(&collection, &media).unwrap(), 0);
+    runtime.resume_cloud_media();
+
+    let (entered, wait) = mpsc::channel();
+    let (release, resume) = mpsc::channel();
+    runtime.attach_adapter_clock(Arc::new(HeldBindProvider {
+        random: SeededRandom::new(91),
+        remaining: Mutex::new(None),
+        hold_on_clock: true,
+        clock_armed: AtomicBool::new(true),
+        // The first clock read commits the initial feed check. The second
+        // occurs after reading the ledger and before committing recovery.
+        skip_first_clock: AtomicBool::new(true),
+        entered,
+        release: Mutex::new(resume),
+    }));
+    let work = std::thread::scope(|scope| {
+        let pending = scope.spawn(|| runtime.cloud_media_work(&collection, &media));
+        wait.recv_timeout(Duration::from_secs(5)).unwrap();
+        let competing = runtime.consume_media_feed(&collection, &media);
+        release.send(()).unwrap();
+        assert_eq!(competing.unwrap(), 0);
+        pending.join().unwrap().unwrap().unwrap()
+    });
+    assert!(matches!(work.request, cloud::media::Request::Root));
+    runtime.validate_cloud_media_work(&collection, &work).unwrap();
+    host.close().unwrap();
+}
+
+#[test]
 fn publication_bind_held_final_providers_refuse_reopen_and_replacement_without_storing_identity() {
     for hold_on_clock in [false, true] {
         for lifecycle in ["reopen", "replace"] {
@@ -2071,6 +2116,7 @@ fn publication_bind_held_final_providers_refuse_reopen_and_replacement_without_s
                     remaining: Mutex::new(None),
                     hold_on_clock,
                     clock_armed: std::sync::atomic::AtomicBool::new(false),
+                    skip_first_clock: std::sync::atomic::AtomicBool::new(false),
                     entered: entered_tx,
                     release: Mutex::new(release_rx),
                 });

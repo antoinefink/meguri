@@ -42,3 +42,46 @@ The original batch gate and signed multi-device work remain due.
 Final lint `core-lint/20261110T130652Z-34191` passes all four checks.
 Final similarity `20261110T130716Z-35993` and privacy
 `20261110T130712Z-35728` pass. The earlier failed lint remains retained.
+
+## An unchanged current feed during media preparation
+
+Starting commit `6129e37c`. The earlier automatic save case in
+`swift-test/20261110T223358Z-77710` reported `revisionMismatch` at `ledgerWrite`
+in media preparation and stalled. Temporary tracing in
+`swift-test/20261110T224119Z-84159` passes both save cases. It shows 79 feed
+writes with unchanged ledger content, but does not reproduce the stall. The
+temporary tracing was removed.
+
+The new test holds root-read preparation after it reads the ledger. It consumes
+the real empty feed on the same binding before releasing that preparation.
+The unchanged feed increments the ledger revision on the starting code, and
+preparation fails with `Tracking(RecoveryRequired)` in
+`core-test/20261110T224349Z-85944`.
+
+The existing no-write rule now accepts the current revision as well as a
+greater valid revision. It still requires the same recorded feed and cursor,
+full ledger equality after reference-age calculation, no file changes and no
+apply commit. It preserves the generic revision check and all authority checks.
+Preparation then issues a root read with valid authority. The focused run
+`core-test/20261110T224432Z-86289` passes all seven tests.
+
+The first wider run `core-test/20261110T224516Z-86944` passes 60 of 62. Both
+failures expected the first empty consumer to increment the revision. Their
+fixtures already prove the feed is current. Both now compare the first
+completion to the full baseline, including the revision, then compare the
+second completion to the first. The gates, deadlines, real consumer calls and
+all other assertions stay in place. Run `core-test/20261110T224553Z-87263`
+passes all 62 publication, media and store tests, including both orders and
+the retained refusals for differing ledger contents and invalid cursors.
+
+`swift-test/20261110T224612Z-87886` completes the case that previously stalled,
+including both manual and automatic save variants. It passes 14 of 15 test
+groups, including review and media adoption. The remaining group fails in both
+variants while waiting for an actual newer edit to update the same SDK pending
+name. Full pending reconciliation in `6129e37c` treats that edit like a repeat
+of the original entry. The tests still require the newer pending revision and
+the refusal of the older removal proof. This is a separate open regression.
+
+Direct source review checked the no-write rule against the existing feed,
+reference age, apply, cursor and authority checks. The combined app suite,
+full batch gate and signed CloudKit round trip remain open.

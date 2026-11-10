@@ -198,8 +198,6 @@ fn consume_pair(first: usize) {
         baseline.ledger["feed"],
         serde_json::json!([baseline.status.feed_id.0, baseline.status.counter])
     );
-    let revision = baseline.ledger["revision"].as_u64().unwrap();
-
     let mut gates = VecDeque::new();
     let mut entered = Vec::new();
     let mut releases = Vec::new();
@@ -259,11 +257,9 @@ fn consume_pair(first: usize) {
             2,
             "readback must not consume clocks"
         );
-        let mut expected = baseline.clone();
-        expected.ledger["revision"] = Value::from(revision + 1);
         assert!(
-            post_first == expected,
-            "first commit increments only the ledger revision once"
+            post_first == baseline,
+            "an already current feed must preserve all persisted state"
         );
         let second = 1 - first;
         releases[second].send(()).unwrap();

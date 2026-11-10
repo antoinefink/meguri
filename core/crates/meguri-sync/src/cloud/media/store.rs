@@ -211,7 +211,9 @@ impl TrackingStore {
         update_blob_reference_age(&tx, binding_id, &mut next_ledger, now_ms)?;
         if file_changes.is_empty() && apply_commit.is_none() {
             let mut current = super::cleanup::ledger(&tx, binding_id)?;
-            if current.revision > next_ledger.revision
+            // An unchanged feed has no effect. In particular, a check of the
+            // current cursor must not invalidate another worker's ledger read.
+            if current.revision >= next_ledger.revision
                 && runtime_store::checked(current.revision).is_ok()
                 && matches!((current.feed, next_ledger.feed), (Some(current), Some(next)) if current == next)
             {
