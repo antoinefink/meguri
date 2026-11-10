@@ -56,7 +56,7 @@ The steps, in this order, on the field's content:
 1. Rich mode: serialization of the content. When the content is inline-only and its last child node is a `<br>` element, that `<br>` is left out. HTML mode: the text is parsed as an HTML fragment as H1 step 2 parses display HTML, but in an inert document (nothing in it runs or loads, F6) and with no `<br>` appended, and the parsed nodes are serialized. Decided 2026-10-27: HTML-mode text is stored parsed, as Anki's HTML input stores it, so `<b>x` is written `<b>x</b>`, a stray end tag is dropped, and a field never stores markup that is not balanced; only `<script>` and `<link>` differ (X1).
 2. Rich mode: every `data-meguri-editor` attribute is removed. It is the only attribute the runtime may add to elements inside field content (U194 keeps an image's display size state in it), and the runtime adds no element other than H1's `<br>`.
 3. Every U+0000 is removed.
-4. Local media names are decoded (`text/media-references` M7), undoing H1's display encoding.
+4. Local media names are decoded (`text/media-references` M7), undoing H1's display encoding. Decided 2026-11-10 (data safety first): each `"` that decoding puts into a name is written `&quot;` instead, since step 1 writes every attribute value in double quotes and a raw `"` would end the value. So the stored `<img src='q"r.png'>`, shown as `<img src='q%22r.png'>` (M6), is written `<img src="q&quot;r.png">` once the field is changed. Its decoded name is still `q"r.png` (M4), and later displays and saves leave it as it is. Anki writes `<img src="q"r.png">`, whose reference reads `q` (X1).
 5. When step 2's result is exactly `<br>` or exactly `<div><br></div>`, the result is the empty string (R830). The test is made on step 2's result, before steps 3 and 4, in Anki's default editor's order: `<br>` followed by U+0000 is stored as `<br>`. No other form is emptied here: `<div></div>`, `<br><br>`, ` ` and `&nbsp;` stay as they are. Whether a field counts as empty for the Add checks is `text/field-emptiness` and `notes/field-check` K3.
 
 The core's save normalization (`notes/note-records` N2) then runs on every field of the note.
@@ -65,7 +65,7 @@ Step 1's serialization rewrites the whole field, the parts the user did not edit
 
 | Content as loaded | After an input at its end and step 1 |
 |---|---|
-| `<span  class="x">a</span><br/>` | `<span class="x">a</span><br>` and the input |
+| `<span  class="x">a</span><br/>` | `<span class="x">a</span><br>` and the input after it: at the end, the caret is on the empty last line that H1 step 2's appended `<br>` makes, so typing `x` gives `<span class="x">a</span><br>x` |
 | `<img src='a.png'>` | `<img src="a.png">` and the input |
 | `<B>a` | `<b>a</b>` with the input inside or after it, as the caret was |
 | `&eacute;&#31169;` | `é私` |
@@ -267,10 +267,11 @@ U192 adds the command messages and U194 the insertion messages. A content change
 - **Remembered states.** Anki remembers collapsed states and modes per note type in each editor window, and reuses collapsed states even when the field count changed. Meguri's memory spans the app session and needs an equal field count (F3).
 - **Font size 0.** Anki's default editor shows a field whose stored `font_size` is 0 at 0 px; Meguri shows it at 20 px (F2).
 - **Descriptions.** Anki drops backslashes from a field description when showing it; Meguri shows the description as stored (F1).
+- **Quotes in media names.** Anki decodes a display-encoded `"` in a media name to a raw `"` after serializing the field, so a changed field holding `<img src='q"r.png'>` is stored as `<img src="q"r.png">`, which names `q` (`text/media-references` M2). Meguri writes `&quot;` there (H3 step 4). Scenario `media-quote` shows Anki's result; it needs the deviation entry `editor-media-quote-entity`.
 
 ## T1. Scenarios for the oracle maintainer
 
-Requested in `conformance/scenarios/editor/field-html/`, with goldens in `conformance/goldens/editor/field-html/` marked `source: observed`. None is written or recorded yet: no runner step and no oracle driver op drives an editor page today. The oracle maintainer builds the quarantined image (E2) and the scenario vocabulary from this list.
+Requested in `conformance/scenarios/editor/field-html/`, with goldens in `conformance/goldens/editor/field-html/` marked `source: observed`. None of the rows below is written or recorded yet: no runner step and no oracle driver op drives an editor page today. The scenarios that observe this file's core half with existing ops are listed in T3. The oracle maintainer builds the quarantined image (E2) and the scenario vocabulary from this list.
 
 **Setup.** One note type `Pair` defined by the scenario (R1959), standard, fields `Front` and `Back`, empty CSS, field options as each row says (default: N5.2's). `closeHTMLTags` is `false` in every scenario, so typed tags are not completed (U192). One note, with the stored fields given; `Back` is empty unless given. Every probe reads the note's `flds` bytes and whether `mod` or `usn` changed since setup.
 
@@ -346,6 +347,7 @@ Media names group (H1, H3, `text/media-references` M6 to M8):
 | `media-space` | `<img src="a b.jpg">` | caret Front end, type `x`, blur, probe |
 | `media-percent` | `<img src="100%25.jpg">` | caret Front end, type `x`, blur, probe |
 | `media-non-ascii` | `<img src="日本.png">` | caret Front end, type `x`, blur, probe |
+| `media-quote` | `<img src='q"r.png'>` | caret Front end, type `x`, blur, probe (X1) |
 
 HTML mode group (H6), with Front's "Use HTML editor by default" set:
 
@@ -369,7 +371,22 @@ Timing and undo group (S1, S2):
 
 ## T2. Meguri tests without goldens
 
-The plan's U190 test scenarios cover what no editor golden shows: AE40's row checks (no op on open and close; an untouched field byte-identical after another field's save), F6 with a handler that would post to the bridge, F4's Tab order and caret restore, F3's session memory and relaunch, H6's quotes and dashes on Mac and iOS, F2's `rtl` with the rendered card unchanged, F1's hidden Image Occlusion fields, F5's routing, S1's timings and background flush, S2's merge at 20 s and split at 61 s, F7's layout switch without reload and its reload after the web content process ends (`baselineHtml`, the example in F7), S2's refusals and failures (`NotFound`, `Stale`, `InvalidArgument`, `CollectionUnavailable`, a storage error) with the restored last sent values, the report and the resend at the next flush, S2's `Stale` reload after a field rename and after a reorder (text kept, matched by `id`) and with a removed field (its text shown), a close or load refused after a failed flush patch, H1 step 7's notice for a row whose field count differs, S1's Add-mode draft when a field is edited back to its baseline (empty `a` then deleted; sticky `x` to `xy` and back), B1's `seq` order and B3's `hold` (input after a held flush is refused until `release`), F5's history cleared by a mode switch, F8 with a field holding `<style>div{display:none}</style>x` (the other fields, labels and tag editor unchanged), `setField`'s new baseline, R1833's open time, and content mode. Each runs on macOS and on the iOS simulator.
+The plan's U190 test scenarios cover what no editor golden shows. Where a T3 scenario records the core half of a case (S2's merge at 20 s and split at 61 s in `patch/merge-window`; an untouched field byte-identical after another field's save in `patch/other-writer`), the Meguri test adds the editor's half: the commits and the patches the host sends. The cases: AE40's row checks (no op on open and close; an untouched field byte-identical after another field's save), F6 with a handler that would post to the bridge, F4's Tab order and caret restore, F3's session memory and relaunch, H6's quotes and dashes on Mac and iOS, F2's `rtl` with the rendered card unchanged, F1's hidden Image Occlusion fields, F5's routing, S1's timings and background flush, S2's merge at 20 s and split at 61 s, F7's layout switch without reload and its reload after the web content process ends (`baselineHtml`, the example in F7), S2's refusals and failures (`NotFound`, `Stale`, `InvalidArgument`, `CollectionUnavailable`, a storage error) with the restored last sent values, the report and the resend at the next flush, S2's `Stale` reload after a field rename and after a reorder (text kept, matched by `id`) and with a removed field (its text shown), a close or load refused after a failed flush patch, H1 step 7's notice for a row whose field count differs, S1's Add-mode draft when a field is edited back to its baseline (empty `a` then deleted; sticky `x` to `xy` and back), B1's `seq` order and B3's `hold` (input after a held flush is refused until `release`), F5's history cleared by a mode switch, F8 with a field holding `<style>div{display:none}</style>x` (the other fields, labels and tag editor unchanged), `setField`'s new baseline, R1833's open time, content mode, and H3 step 4's `&quot;` for a `"` in a media name (stored `<img src='q"r.png'>` and `<img src="q%22r.png">`, each typed `x`, then saved again with no change of the name). Each runs on macOS and on the iOS simulator.
+
+## T3. Core scenarios
+
+Written in `conformance/scenarios/editor/field-html/`, inactive until Meguri's adapters pass them. They use only existing ops (`edit_note`, `db_exec`, `undo`, `undo_status` and the `text` functions `iri_encode` and `iri_decode`) and observe what the Python-library oracle can: the note update a field patch makes, and the display encoding and decoding of media names. Each `edit_note` stands for one patch, whose value is the target H2 and H3 give for the input the scenario's comment names.
+
+| Scenario | Covers |
+|---|---|
+| `patch/other-writer` | S2 and X1's whole-note saves: a patch of Front keeps the other fields and, with no tags member, the stored tags; `notes/note-records` N2 runs on every field, so a field another writer stored decomposed is stored composed; Front's bytes kept through another editor's save of Back and the tags (AE40's core half, `notes/note-records` U3); H3's table row for `<span  class="x">a</span><br/>`; one undo of the patch (`engine/undo` A4) |
+| `patch/revert-to-baseline` | H2, S2 and F7's example: a typed character saved, then the baseline's stored bytes sent and stored again; the two patches 20 s apart are one step; a patch equal to the stored row writes nothing and records no step (`notes/note-records` U2) |
+| `patch/merge-window` | S2: patches of two fields 20 s apart merge into one "Update Note" step; patches 61 s apart are two steps (`engine/undo` A3) |
+| `patch/script-kept` | F6, H3 step 1 and X1: a patch stores a `<script>` element and an `onerror` attribute as given |
+| `display/media-names` | H1 step 1 and H3 step 4 (`text/media-references` M6 to M8): T1's media inputs and others (an `onerror` attribute, a sound tag, a name in two attributes, a `"` in a single-quoted name, `#`, a remote name, an upper-case tag), encoded for display and, as the page writes them back with a typed character, decoded |
+
+- The patch scenarios cannot show the patch's own members: on both executors an `edit_note` reads the live note when its step runs (`conformance/record-ops` W2), so a stale whole note and a patch store the same row. What they fix is the W2 result S2's patch form must equal. Decided 2026-11-10: from U190 on, Meguri's executor runs every `edit_note` step through S2's patch form of the note update. The step's listed or named fields are the patch's (field ordinal, value) pairs; its `tags` are the tags member, only when given; the note type id and the field layout are read from the note when the step runs. With that live layout the patch never refuses with `Stale`, a field count that differs refuses as U1's whole-note form does, and a missing note stays a run error (W2). The results equal the whole-note form's, so no golden changes, and the scenarios run the patch form's apply and save in the engine. S2's refusals, the last sent values, the resend at a flush and the `Stale` reload have no Anki counterpart, since Anki has no patch op: Meguri's tests cover them (T2, D1).
+- `display/media-names` records M7's decode, so its golden decodes `<img src="q%22r.png">x` to `<img src="q"r.png">x`. Meguri's `iri_decode` gives the same. H3 step 4's `&quot;` is the editor's step around M7, and only T1's `media-quote` and Meguri's tests (T2) show it.
 
 ## D1. Follow-ups in files this spec does not own
 

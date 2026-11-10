@@ -67,4 +67,4 @@ Meguri's executor has had a `db_exec` adapter since U22 (`storage-ops.md` P2), w
 - The testkit model: typed arguments for the four ops, `set_config` included.
 - The `db_exec` adapter reads the typed arguments. Once Meguri keeps cached views or an undo history (U24, U25), it clears them after a statement that does not begin with `select` (W1).
 
-Until Meguri's executor implements an op, scenarios that use it are `pending` (`dsl.md` D10): U23's adapters implement `set_config`, the notes area's (U27) `edit_note` and `delete_notes`. Until the testkit model reads `set_config`, T0 reports the scenarios that use it as `invalid`.
+Until Meguri's executor implements an op, scenarios that use it are `pending` (`dsl.md` D10): U23's adapters implement `set_config`, the notes area's (U27) `edit_note` and `delete_notes`. From U190 on, Meguri's `edit_note` adapter runs W2 through the note update's field-patch form, with the layout read when the step runs (`editor/field-html` T3); W2's meaning and results stay as above. Until the testkit model reads `set_config`, T0 reports the scenarios that use it as `invalid`.

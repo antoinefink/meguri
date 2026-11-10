@@ -99,3 +99,140 @@ customColorPickerPalette
 keygen
 text-align
 text-decoration
+# editor/paste-sources, editor/paste-filter: pasteboard and drag data types,
+# HTTP header names and media types the sources read, the image types the
+# page editor accepts, and the HTML elements, attributes and CSS properties
+# the filter tables name that the lines above do not list
+text/html
+text/plain
+text/uri-list
+uri-list
+public.html
+public.url
+public.file-url
+public.utf8-plain-text
+public.plain-text
+public.png
+public.tiff
+public.jpeg
+public.rtf
+com.apple.webarchive
+com.apple.flat-rtfd
+net.meguri.field-html
+Content-Type
+User-Agent
+image/jpeg
+image/png
+image/gif
+image/svg+xml
+image/bmp
+image/webp
+image/avif
+image/x-portable-bitmap
+image/x-portable-graymap
+image/x-portable-pixmap
+image/x-xbitmap
+image/x-xpixmap
+x-portable-bitmap
+x-portable-graymap
+x-portable-pixmap
+x-xbitmap
+x-xpixmap
+audio/mpeg
+audio/ogg
+audio/opus
+audio/wav
+audio/webm
+audio/aac
+application/octet-stream
+octet-stream
+svg+xml
+mso-spacerun
+MsoNormal
+StartFragment
+EndFragment
+sub
+sup
+tbody
+thead
+tfoot
+colgroup
+figcaption
+noscript
+textarea
+h1
+h2
+h3
+h4
+h5
+h6
+ul
+ol
+li
+td
+th
+tr
+br
+img
+onclick
+onerror
+xlink
+kbd
+samp
+abbr
+hr
+mi
+o:p
+o:spt
+w:sdt
+spt
+sdt
+docs-internal-guid
+Mozilla
+Mozilla/5.0
+Accept-Encoding
+Content-Encoding
+gzip
+deflate
+Location
+# editor/paste 2026-11-10 additions: the paste bridge messages and their
+# members, the page's busy attribute, and the Apple pasteboard, drag and
+# keyboard interfaces the rules name
+pasteScan
+pasteFilter
+fieldAt
+setBusy
+fieldDrag
+rewrites
+aria-busy
+GCKeyboard
+NSFilePromiseReceiver
+public.audiovisual-content
+public.mp3
+suggestedName
+# editor/paste-sources S15, S15.1: the driver op (specs/conformance/
+# editor-ops.md), its setup sections and rejection kinds (invalid_url: the
+# dropped draft kind)
+add_media_from_url
+http_fixtures
+url_files
+content_type
+delay_ms
+redirect_to
+fetch_failed
+invalid_url
+# editor/field-html T3, editor/config-keys K7 and K11, conformance/editor-ops
+# E6 and E7 (2026-11-10): scenario ops, observation kinds and text functions
+# the editor scenarios use, the graph preferences field Anki's week-start
+# read returns, and the HTML entity a decoded media name's quote is written as
+editor_config_set
+editor_config
+calendar_first_day_of_week
+iri_encode
+iri_decode
+edit_note
+db_exec
+undo_status
+fields_check
+set_config
+quot
