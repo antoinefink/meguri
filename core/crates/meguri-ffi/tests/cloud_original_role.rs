@@ -1276,16 +1276,6 @@ fn original_edit_reopen_process_entry() {
             );
         } else {
             assert!(role.read_original_ack(witness.clone()).is_err());
-            // An actual new SDK ACK of this same current edit cannot repair the
-            // retained unACKed original row captured before this open's scan.
-            let fresh = ack_original_edit_with_service(&root, &role);
-            assert!(fresh["envelope_digest"].as_array().is_some());
-            assert!(role.observe().unwrap().entity.acknowledged);
-            assert!(role.read_original_ack(witness.clone()).is_err());
-            assert_eq!(
-                role.read_original_edit(witness).unwrap().original_seq,
-                original.original_seq
-            );
         }
         checkpoint(OriginalEditCheckpoint::CompareRowsAndSeq);
         assert_eq!(collection.last_seq(), before_seq);
@@ -1295,6 +1285,33 @@ fn original_edit_reopen_process_entry() {
                 .map(|table| stored_rows(&*reader, table))
         };
         assert_eq!(after, before);
+        if !ack {
+            // An actual new SDK ACK of this same current edit cannot repair the
+            // retained unACKed original row captured before this open's scan.
+            let fresh = ack_original_edit_with_service(&root, &role);
+            assert!(fresh["envelope_digest"].as_array().is_some());
+            assert!(role.observe().unwrap().entity.acknowledged);
+            // The deliberate ACK writes state; snapshot its result separately
+            // to prove the subsequent historical reads remain read-only.
+            let after_ack_seq = collection.last_seq();
+            let after_ack = {
+                let reader = collection.reader(ReaderRole::Query).unwrap();
+                [Table::Col, Table::Notes, Table::Cards, Table::Decks, Table::Revlog]
+                    .map(|table| stored_rows(&*reader, table))
+            };
+            assert!(role.read_original_ack(witness.clone()).is_err());
+            assert_eq!(
+                role.read_original_edit(witness).unwrap().original_seq,
+                original.original_seq
+            );
+            assert_eq!(collection.last_seq(), after_ack_seq);
+            let after_reads = {
+                let reader = collection.reader(ReaderRole::Query).unwrap();
+                [Table::Col, Table::Notes, Table::Cards, Table::Decks, Table::Revlog]
+                    .map(|table| stored_rows(&*reader, table))
+            };
+            assert_eq!(after_reads, after_ack);
+        }
         if ack {
             let workflow = meguri_ffi::sync::CloudWorkflow::new().unwrap();
             workflow

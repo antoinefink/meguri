@@ -107,3 +107,11 @@ The existing edit-only reopen case failed its sequence comparison after the
 new fixture deliberately performed a fresh ACK. That write must be separated
 from the read-only observation checks; all assertions remain required.
 
+Filtered repair `14806` moves the deliberate ACK after the original row/sequence
+comparison and adds a separate comparison around the later historical reads.
+Independent review found no P0–P2 issue and confirmed every original assertion,
+process boundary and limit remains. Formatting `19461` passed. Focused
+`core-test/20261110T163716Z-19458` passed all five tests, including both actual
+writer/kill/reopen cases and the unbound-witness refusal. This is protocol fixture
+evidence; signed CloudKit and unit acceptance remain pending.
+
