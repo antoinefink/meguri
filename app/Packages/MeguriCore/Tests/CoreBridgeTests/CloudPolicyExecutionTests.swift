@@ -845,6 +845,58 @@ extension EventTests {
         }
     }
 
+    @Test(arguments: [false, true])
+    func policySendDuringReplacementCreationUsesNoUnreadyEngine(changeAccount: Bool) async throws {
+        try await withNativePolicyFixture { fixture in
+            let (policy, executor) = try await nativePolicy(fixture)
+            try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: executor)
+            let old = try await fixture.engine()
+            await old.appendFetchScripts([
+                .manual(fetchedZones: ["meguri-root", fixture.zone], records: [fixture.root], group: nil)
+            ])
+            try await fixture.adapter.requestFetch(zones: ["meguri-root", fixture.zone])
+            let send = try #require(try policyCommands(try await policy.input(.foreground))
+                .first { if case .requestSend = $0.action { true } else { false } })
+            let gate = CloudCallbackGate()
+            await fixture.factory.pauseNextCreation(gate)
+            let configure = try #require(try policyCommands(try await policy.input(.settings(.init(enabled: true, paused: false, automatic: false, media: false))))
+                .first { if case .configureAutomatic = $0.action { true } else { false } })
+            try await withCloudTask(gates: [gate], operation: {
+                let result = await executor.execute(configure)
+                #expect((result.error != nil) == changeAccount && !result.deferred)
+            }, whileRunning: {
+                try await gate.waitForArrival()
+                #expect(await fixture.adapter.retainedInstanceIDs().isEmpty)
+                let pending = try await fixture.engine()
+                #expect(pending.instanceID != old.instanceID)
+                let calls = pending.acceptedNetworkCalls.value
+                if changeAccount {
+                    try await fixture.core.accountChanged(sdk: nil, status: .available, identity: Data("synthetic-account-B".utf8))
+                }
+                let result = await executor.execute(send)
+                #expect((result.error != nil) == changeAccount && !result.deferred)
+                #expect(pending.acceptedNetworkCalls.value == calls && calls == 0)
+                #expect(await old.recordedTrace().contains(.released))
+                await gate.open()
+            })
+            if changeAccount { #expect(await fixture.adapter.retainedInstanceIDs().isEmpty) }
+            else {
+                let ready = try await fixture.engine()
+                #expect(await fixture.adapter.retainedInstanceIDs() == [ready.instanceID])
+                await ready.appendFetchScripts([
+                    .manual(fetchedZones: ["meguri-root", fixture.zone], records: [fixture.root], group: nil),
+                    .manual(fetchedZones: ["meguri-root", fixture.zone], records: [], group: nil)
+                ])
+                let command = try #require(try policyCommands(try await policy.input(.syncNowRequested(.command)))
+                    .first { if case .runExchange = $0.action { true } else { false } })
+                let before = try await observePolicyExchange(command)
+                let result = await executor.execute(command)
+                #expect(result.error == nil)
+                try await qualifiedRecordExchange(command, result: result, fixture: fixture, before: before, outcome: .succeeded)
+            }
+        }
+    }
+
     @Test func nativePolicyHeldConfigureRunsAfterQualifiedExchangeEnd() async throws {
         try await withNativePolicyFixture { fixture in
             let (policy, executor) = try await nativePolicy(fixture)

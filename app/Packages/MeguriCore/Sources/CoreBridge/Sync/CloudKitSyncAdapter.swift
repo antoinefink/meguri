@@ -1617,7 +1617,11 @@ public actor CloudKitSyncAdapter {
             return // P4: no engine for this binding when the action starts.
         }
         guard let instance = owned[origin] ?? originals[origin] else {
-            throw BridgeError.cloudPolicy(.staleCommand)
+            // Runtime registration precedes the asynchronous native factory.
+            // This original has no ready SDK object, so P4 permits no network
+            // work. Preserve account/binding/generation revocation checks.
+            try await execution.validateControl()
+            return
         }
         func scope(_ zones: [CloudPolicyZone]) -> [String] {
             zones.map { zone in

@@ -99,3 +99,37 @@ original identity retention, guard revalidation, error precedence, cancellation,
 actor isolation and the unchanged assertion limits. Independent review, a full
 batch gate and the real signed iCloud round trip remain pending. No Unit trailer
 or release acceptance is claimed.
+
+## Native engine creation and final SDK validation
+
+Starting commit `78e67b15`. A registered engine can still be waiting for its
+native factory. The adapter revalidates the original command and returns without
+an SDK call if it has no native instance for that command. The focused test
+holds the replacement factory, checks both unchanged and changed account
+authority, and checks that the ready replacement can run its own Sync Now.
+
+Run `swift-test/20261110T221138Z-63037` exposed the factory gap. Run
+`swift-test/20261110T221205Z-64085` passes the six selected native tests after the
+adapter correction. App run `swift-test/20261110T221311Z-65155` passes six of
+seven tests. The remaining test reaches the final SDK guard while the engine is
+stopping. The FFI now preserves its typed authority error, so the existing
+scheduling path can check the original control before treating it as a no-op.
+An SDK error or a change of account, binding or generation still fails.
+
+Rust run `core-test/20261110T221542Z-67569` passes the typed error check and 283
+other tests. Five asset worker tests fail because the default unit-test build
+compiles out the calls to their installed observers. Enable those three calls
+under `cfg(test)` as well as the existing test-hooks feature. No test assertion
+or timing limit changed. Run `core-test/20261110T221910Z-70332` passes all 289
+selected FFI sync tests. Run `core-lint/20261110T222225Z-70916` passes.
+
+Final native run `swift-test/20261110T222245Z-71219` passes all six selected
+tests against the rebuilt Core. App run `swift-test/20261110T222356Z-72511`
+passes the previously failing fixed-edit test and eight other tests. Two
+failures remain. The manual original-ACK case confirms the durable revision
+and handler return but lacks the original SDK pending-removal receipt. The
+phone restoration test stops before adoption, during its source publication.
+Its publication work reports changed authority with the recovery step still
+at `sent`. Both failures are retained. The next checks must identify the
+pending-list change and the publication authority change at their respective
+boundaries. No full gate or signed round-trip pass is claimed.

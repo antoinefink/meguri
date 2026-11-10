@@ -162,6 +162,12 @@ fn policy_reads_and_sends_have_no_capability_while_the_original_engine_stops() {
     }
     let configure = policy.clone().prepare_execution(configure.handle).unwrap().unwrap();
     configure.retire_original().unwrap();
+    assert!(matches!(
+        fixture.workflow.validate_sdk(sdk.instance_id.clone()),
+        Err(CoreError::CloudConnection {
+            failure: crate::cloud_connection::CloudConnectionFailure::AuthorityChanged
+        })
+    ));
     for command in &operations {
         assert!(
             policy

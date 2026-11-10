@@ -726,7 +726,7 @@ impl CloudAssetReadPass {
         callback::enter("CloudAssetReadPass.start_complete");
         self.owns(&work)?;
         let (handle, cell) = self.start_resource("CloudAssetReadPass.complete", move |owner, mut resource| {
-            #[cfg(feature = "test-hooks")]
+            #[cfg(any(test, feature = "test-hooks"))]
             owner.core.asset_read_resource_body_for_testing(
                 meguri_sync::cloud::testing::IncomingStage::AssetReadCompleteBody,
             );
@@ -766,7 +766,7 @@ impl CloudAssetReadPass {
         callback::enter("CloudAssetReadPass.start_cancel");
         self.owns(&work)?;
         let (handle, cell) = self.start_resource("CloudAssetReadPass.cancel", move |owner, mut resource| {
-            #[cfg(feature = "test-hooks")]
+            #[cfg(any(test, feature = "test-hooks"))]
             owner
                 .core
                 .asset_read_resource_body_for_testing(meguri_sync::cloud::testing::IncomingStage::AssetReadCancelBody);
@@ -782,7 +782,7 @@ impl CloudAssetReadPass {
     pub fn start_finish(self: Arc<Self>) -> Result<CloudAssetReadFinishJob, CoreError> {
         callback::enter("CloudAssetReadPass.start_finish");
         let (handle, cell) = self.start_resource("CloudAssetReadPass.finish", |owner, mut resource| {
-            #[cfg(feature = "test-hooks")]
+            #[cfg(any(test, feature = "test-hooks"))]
             owner
                 .core
                 .asset_read_resource_body_for_testing(meguri_sync::cloud::testing::IncomingStage::AssetReadFinishBody);

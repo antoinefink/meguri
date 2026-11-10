@@ -567,7 +567,7 @@ impl CloudWorkflow {
     }
     pub fn validate_sdk(&self, sdk: String) -> Result<(), CoreError> {
         callback::enter("CloudWorkflow.validate_sdk");
-        self.core.validate_sdk(&sdk).map_err(cloud_error)
+        self.core.validate_sdk(&sdk).map_err(crate::cloud_connection::error)
     }
     pub fn retire_sdk(&self, sdk: String, policy_stop: bool) -> Result<(), CoreError> {
         callback::enter("CloudWorkflow.retire_sdk");
