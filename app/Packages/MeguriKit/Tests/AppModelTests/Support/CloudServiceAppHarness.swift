@@ -92,7 +92,7 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
     private enum DiagnosticKind: String { case error, coreActionFailed, applyDeferred }
     @discardableResult
     private func capture(_ error: any Error, stage: DiagnosticStage, kind: DiagnosticKind = .error,
-                         action: CloudPolicyAction? = nil, sendFailure: String? = nil) -> String {
+                         action: CloudPolicyAction? = nil, sendFailure: String? = nil, latestMedia: String? = nil) -> String {
         let category: String
         switch error {
         case is CancellationError: category = "cancellation"
@@ -170,7 +170,8 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
         let firstSendFailure = sendFailure
         #endif
         let sendSite = firstSendFailure.map { " \($0)" } ?? ""
-        let diagnostic = "\(stage.rawValue).\(kind.rawValue): \(category)\(actionTag) task=\(taskState) close=\(closePhase) cancellation=\(ownership)\(sendSite)"
+        let mediaSite = latestMedia.map { " latestMedia=[\($0)]" } ?? ""
+        let diagnostic = "\(stage.rawValue).\(kind.rawValue): \(category)\(actionTag) task=\(taskState) close=\(closePhase) cancellation=\(ownership)\(sendSite)\(mediaSite)"
         if firstFailureDiagnostic == nil {
             firstFailureDiagnostic = diagnostic
             trace("firstFailure \(diagnostic)", emit: true)
@@ -209,13 +210,13 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
         case .statusChanged: "statusChanged"
         }
     }
-    private func capture(_ output: CloudPolicyOutput, stage: DiagnosticStage, sendFailure: String? = nil) {
+    private func capture(_ output: CloudPolicyOutput, stage: DiagnosticStage, sendFailure: String? = nil, latestMedia: String? = nil) {
         switch output {
         case .coreActionFailed(let error, let commands):
-            capture(error, stage: stage, kind: .coreActionFailed, sendFailure: sendFailure)
+            capture(error, stage: stage, kind: .coreActionFailed, sendFailure: sendFailure, latestMedia: latestMedia)
             onCommands?(commands)
         case .commands(let commands): onCommands?(commands)
-        case .applyDeferred(let error): capture(error, stage: stage, kind: .applyDeferred, sendFailure: sendFailure)
+        case .applyDeferred(let error): capture(error, stage: stage, kind: .applyDeferred, sendFailure: sendFailure, latestMedia: latestMedia)
         case .syncNowUnavailable: break
         }
     }
@@ -242,17 +243,24 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
         await beforeExecution?(command)
         #if DEBUG
         let sendCapture = DebugCloudDiagnostics.SendFailureCapture()
+        let mediaRecorder = DebugCloudDiagnostics.Recorder()
         let result = await DebugCloudDiagnostics.$sendFailureCapture.withValue(sendCapture) {
-            await production.execute(command, corePrepared: corePrepared)
+            await DebugCloudDiagnostics.$mediaRecorder.withValue(mediaRecorder) {
+                await production.execute(command, corePrepared: corePrepared)
+            }
         }
+        // Last retained media failure, not necessarily the first. Absence does
+        // not establish that no media work occurred during this command.
+        let latestMedia = mediaRecorder.latestValue
         let sendFailure = sendCapture.firstValue
         #else
         let result = await production.execute(command, corePrepared: corePrepared)
+        let latestMedia: String? = nil
         let sendFailure: String? = nil
         #endif
         await afterExecution?(command, result)
         trace("command.end ordinal=\(sequence) action=\(label) elapsed_ms=\(serviceAppUptimeMilliseconds() - start) error=\(result.error != nil) deferred=\(result.deferred)")
-        for output in result.outputs { capture(output, stage: .executeOutputs, sendFailure: sendFailure) }
+        for output in result.outputs { capture(output, stage: .executeOutputs, sendFailure: sendFailure, latestMedia: latestMedia) }
         switch command.action {
         case .startEngine: started.yield(result.error == nil && !result.deferred)
         case .runExchange: exchanged.yield(result.error == nil && !result.deferred)
@@ -270,7 +278,7 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
             } catch { mediaCompleted.yield(.init(proof: .failure(error), receipts: await wire.receipts)) }
         }
         if let error = result.error {
-            let diagnostic = capture(error, stage: .executeError, action: command.action, sendFailure: sendFailure)
+            let diagnostic = capture(error, stage: .executeError, action: command.action, sendFailure: sendFailure, latestMedia: latestMedia)
             if !(error is CancellationError && SyncCommandTaskContext.current?.shutdownCancelled == true) {
                 Issue.record("Service app command failed; \(diagnostic)")
             }
