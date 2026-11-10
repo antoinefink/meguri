@@ -1310,14 +1310,27 @@ fn until_active_observing(
     service: &mut Service<SeededRandom>,
     mut observe: impl FnMut(&cloud::runtime::Runtime, &OwnRequest),
 ) -> OwnRequest {
+    until_active_observing_work(host, service, |runtime, work| {
+        if let PublicationWork::Own(request) = work {
+            observe(runtime, request);
+        }
+        None
+    })
+}
+fn until_active_observing_work(
+    host: &CoreHost,
+    service: &mut Service<SeededRandom>,
+    mut observe: impl FnMut(&cloud::runtime::Runtime, &PublicationWork) -> Option<String>,
+) -> OwnRequest {
     let runtime = host.cloud_runtime().unwrap();
     let collection = host.collection().unwrap();
     let mut sdk = false;
     for _ in 0..32 {
-        match runtime.next_publication_work(&collection).unwrap() {
+        let work = runtime.next_publication_work(&collection).unwrap();
+        let selected_sdk = observe(runtime, &work);
+        match work {
             PublicationWork::Local { op, work } => runtime.perform_publication_local(op, work, &collection).unwrap(),
             PublicationWork::Own(request) => {
-                observe(runtime, &request);
                 if request.kind == OwnKind::SaveActive {
                     return *request;
                 }
@@ -1331,7 +1344,7 @@ fn until_active_observing(
                     .unwrap();
             }
             PublicationWork::SendEntities => {
-                let instance = runtime.instance().unwrap();
+                let instance = selected_sdk.unwrap_or_else(|| runtime.instance().unwrap());
                 if !sdk {
                     runtime.start_sdk_instance(&instance).unwrap();
                     sdk = true;
@@ -1340,7 +1353,7 @@ fn until_active_observing(
                     .build_collection_batch(&instance, &collection, &entity_names(runtime))
                     .unwrap();
                 assert!(!batch.saves.is_empty());
-                assert!(send_actual_batch(host, service, &batch).is_empty());
+                assert!(send_actual_batch_with_instance(host, service, &batch, instance).is_empty());
             }
             other => panic!("publication stopped: {other:?}"),
         }
@@ -1349,83 +1362,163 @@ fn until_active_observing(
 }
 
 #[test]
+fn driver_refresh_at_sent_restores_automatic_off_after_real_zones_start() {
+    publication_driver_automatic_terminal(true, false);
+}
+
+#[test]
 fn original_policy_command_survives_real_complete_save_active_row_removal() {
-    use cloud::policy::{ActionKind, ChangeCause, DeviceEvent, DeviceSettings, Lifecycle};
+    publication_driver_automatic_terminal(true, true);
+}
+
+#[test]
+fn driver_refresh_skipping_sent_invalidates_zones_command_at_terminal() {
+    publication_driver_automatic_terminal(false, false);
+}
+
+fn publication_driver_automatic_terminal(observe_sent: bool, observe_complete: bool) {
+    use cloud::policy::{ActionKind, ChangeCause, DeviceEvent, DeviceSettings, Lifecycle, Update};
 
     // Own-operation replies do not project Driver by themselves. Cover both
-    // observing Complete and going from the last Sent projection straight to done.
-    for observe_complete in [false, true] {
-        let temp = tempfile::tempdir().unwrap();
-        let dir = temp.path().join("publication-policy");
-        generated(&dir);
-        let host = open_host(&dir, keys());
-        let runtime = host.cloud_runtime().unwrap();
-        let collection = host.collection().unwrap();
-        host.media().unwrap().store().register_full(|_, _| true).unwrap();
-        host.cloud_policy_input(DeviceEvent::Settings(DeviceSettings {
-            enabled: true,
-            paused: false,
-            automatic: false,
-            media: false,
-        }))
+    // Sent -> None and Complete -> None, plus the non-equivalent Zones -> None.
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("publication-policy");
+    generated(&dir);
+    let host = open_host(&dir, keys());
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    host.media().unwrap().store().register_full(|_, _| true).unwrap();
+    host.cloud_policy_input(DeviceEvent::Settings(DeviceSettings {
+        enabled: true,
+        paused: false,
+        automatic: false,
+        media: false,
+    }))
+    .unwrap();
+    host.cloud_policy_input(DeviceEvent::Account {
+        identity: IdentityStatus::Available(cloud::OpaqueBytes(scope().account.into_bytes())),
+        origin_sdk: None,
+    })
+    .unwrap();
+    host.cloud_policy_input(DeviceEvent::Network { reachable: true })
         .unwrap();
-        host.cloud_policy_input(DeviceEvent::Account {
-            identity: IdentityStatus::Available(cloud::OpaqueBytes(scope().account.into_bytes())),
-            origin_sdk: None,
-        })
-        .unwrap();
-        host.cloud_policy_input(DeviceEvent::Network { reachable: true })
-            .unwrap();
-        let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(708)).unwrap();
-        let preview = actual_preview(&host, &mut service, &scope());
-        runtime.confirm_connection_publication(&preview, &collection).unwrap();
-        let driver = host.cloud_policy_driver().unwrap();
-        let mut original = None;
-        let active = until_active_observing(&host, &mut service, |runtime, request| {
-            let (kind, phase) = if observe_complete {
-                (OwnKind::SaveActive, cloud::policy::PublishStep::Complete)
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(708)).unwrap();
+    let preview = actual_preview(&host, &mut service, &scope());
+    runtime.confirm_connection_publication(&preview, &collection).unwrap();
+    let driver = host.cloud_policy_driver().unwrap();
+    let mut sdk = None;
+    let mut zones_command = None;
+    let mut configure_off = None;
+    let mut configure_count = 0;
+    let mut original = None;
+    let active = until_active_observing_work(&host, &mut service, |runtime, work| {
+        if matches!(work, PublicationWork::SendEntities) && sdk.is_none() {
+            let commands = host
+                .cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Cloud))
+                .unwrap();
+            assert_eq!(runtime.publication_op().unwrap().unwrap().step, PublishStep::Zones);
+            assert_eq!(
+                driver.state().facts.binding.as_ref().unwrap().publish_step,
+                Some(cloud::policy::PublishStep::Zones)
+            );
+            let start = commands
+                .into_iter()
+                .find(|c| matches!(c.action.kind, ActionKind::StartEngine { automatic: true, .. }))
+                .expect("Zones starts the actual engine with automatic scheduling on");
+            let (registered, _, _) = driver.register_native_sdk(&start).unwrap();
+            driver.validate_native_execution(&start, Some(&registered)).unwrap();
+            host.cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Cloud))
+                .unwrap();
+            let state = driver.state();
+            assert!(!state.settings.automatic && state.automatic() && state.engine_runs());
+            assert_eq!(state.engine.as_ref().unwrap().instance, registered);
+            zones_command = Some(start);
+            sdk = Some(registered);
+        }
+        if let PublicationWork::Own(request) = work
+            && ((observe_sent && request.kind == OwnKind::SaveCompleteEpoch)
+                || (observe_complete && request.kind == OwnKind::SaveActive))
+        {
+            let phase = if request.kind == OwnKind::SaveCompleteEpoch {
+                cloud::policy::PublishStep::Sent
             } else {
-                (OwnKind::SaveCompleteEpoch, cloud::policy::PublishStep::Sent)
+                cloud::policy::PublishStep::Complete
             };
-            if request.kind == kind {
-                let (sdk, _, _) = runtime.register_sdk(false).unwrap();
-                let commands = host
-                    .cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Cloud))
-                    .unwrap();
-                assert_eq!(driver.state().facts.binding.as_ref().unwrap().publish_step, Some(phase));
-                assert_eq!(
-                    runtime.publication_op().unwrap().unwrap().step,
-                    if observe_complete {
-                        PublishStep::Complete
-                    } else {
-                        PublishStep::Sent
-                    }
-                );
-                let command = commands
-                    .into_iter()
-                    .find(|c| matches!(c.action.kind, ActionKind::UpdatePending(_)))
-                    .expect("original Driver-issued pending update");
-                driver.validate(&command).unwrap();
-                driver.validate_native_execution(&command, Some(&sdk)).unwrap();
-                original = Some((command, sdk));
+            assert_eq!(
+                runtime.publication_op().unwrap().unwrap().step,
+                if phase == cloud::policy::PublishStep::Sent {
+                    PublishStep::Sent
+                } else {
+                    PublishStep::Complete
+                }
+            );
+            // At Sent, actual ACKs have already settled every initial row.
+            assert!(entity_names(runtime).iter().all(|name| {
+                let entity = runtime.entity_facts(name).unwrap().unwrap();
+                entity.mark.is_none() && entity.acked_rev == entity.local_rev && entity.acked_rev > 0
+            }));
+            let commands = host
+                .cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Cloud))
+                .unwrap();
+            assert_eq!(driver.state().facts.binding.as_ref().unwrap().publish_step, Some(phase));
+            assert!(!driver.state().settings.automatic && !driver.state().automatic());
+            assert!(
+                commands
+                    .iter()
+                    .any(|c| c.action.kind == ActionKind::UpdatePending(Update::Changes)),
+                "the original cloud refresh still runs after the Binding input"
+            );
+            for command in &commands {
+                if command.action.kind == (ActionKind::ConfigureAutomatic { on: false }) {
+                    configure_count += 1;
+                    driver.validate(command).unwrap();
+                    driver.validate_native_execution(command, sdk.as_deref()).unwrap();
+                    assert_eq!(driver.native_origin(command).unwrap(), sdk);
+                    configure_off = Some(command.clone());
+                }
             }
-        });
-        let (original, sdk) = original.expect("command issued before terminal row removal");
-        let guard = original.action.guard.clone();
-        assert_eq!(runtime.publication_op().unwrap().unwrap().step, PublishStep::Complete);
-        let backend = runtime.adapter_guard();
-        let (result, _) = execute_publication_request(&mut service, &scope(), &active, runtime, &collection).unwrap();
-        assert!(matches!(&result, OwnResult::Saved(_)));
-        runtime.publication_result(&active, result, &collection).unwrap();
-        assert!(runtime.publication_op().unwrap().is_none());
-        assert!(runtime.sdk_root_confirmed());
-        let projection = runtime
-            .policy_projection(Lifecycle::Ready, collection.generation().0)
-            .unwrap();
-        assert_eq!(projection.facts.binding.as_ref().unwrap().publish_step, None);
-        assert_eq!(runtime.adapter_guard(), backend);
-        host.cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Cloud))
-            .unwrap();
+            assert_eq!(
+                configure_count, 1,
+                "Sent emits configure-off before terminal own operations"
+            );
+            assert_eq!(driver.state().guard(), zones_command.as_ref().unwrap().action.guard);
+            let command = commands
+                .into_iter()
+                .find(|c| matches!(c.action.kind, ActionKind::UpdatePending(_)))
+                .expect("original Driver-issued pending update");
+            driver.validate(&command).unwrap();
+            driver.validate_native_execution(&command, sdk.as_deref()).unwrap();
+            original = Some(command);
+        }
+        sdk.clone()
+    });
+    let sdk = sdk.expect("Driver-issued Zones engine registered");
+    let zones_command = zones_command.unwrap();
+    let original = original.unwrap_or_else(|| zones_command.clone());
+    let guard = original.action.guard.clone();
+    assert_eq!(runtime.publication_op().unwrap().unwrap().step, PublishStep::Complete);
+    let backend = runtime.adapter_guard();
+    let (result, _) = execute_publication_request(&mut service, &scope(), &active, runtime, &collection).unwrap();
+    assert!(matches!(&result, OwnResult::Saved(_)));
+    runtime.publication_result(&active, result, &collection).unwrap();
+    assert!(runtime.publication_op().unwrap().is_none());
+    assert!(runtime.sdk_root_confirmed());
+    let projection = runtime
+        .policy_projection(Lifecycle::Ready, collection.generation().0)
+        .unwrap();
+    assert_eq!(projection.facts.binding.as_ref().unwrap().publish_step, None);
+    assert_eq!(runtime.adapter_guard(), backend);
+    let terminal_commands = host
+        .cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Cloud))
+        .unwrap();
+    for command in &terminal_commands {
+        if command.action.kind == (ActionKind::ConfigureAutomatic { on: false }) {
+            configure_count += 1;
+            driver.validate_native_execution(command, Some(&sdk)).unwrap();
+            configure_off = Some(command.clone());
+        }
+    }
+    if observe_sent {
         assert_eq!(driver.state().guard(), guard);
         assert_eq!(original.action.guard, guard);
         driver.validate(&original).unwrap();
@@ -1433,12 +1526,44 @@ fn original_policy_command_survives_real_complete_save_active_row_removal() {
         host.execute_cloud_policy_core(&original, Duration::from_secs(10))
             .unwrap();
         assert_eq!(driver.state().guard(), guard);
-        host.close().unwrap();
-        assert!(
-            driver.validate(&original).is_err(),
-            "close still invalidates original work"
+    } else {
+        assert_ne!(
+            driver.state().guard().token,
+            guard.token,
+            "Zones -> None is not terminal guard equivalence"
         );
+        assert!(driver.validate(&zones_command).is_err());
+        assert!(driver.validate_native_execution(&zones_command, Some(&sdk)).is_err());
     }
+    assert_eq!(configure_count, 1, "one actual configure-off across ordinary refreshes");
+    let configure_off = configure_off.expect("Binding progress restores the device setting");
+    driver.validate_native_execution(&configure_off, Some(&sdk)).unwrap();
+    driver.retire_native_sdk(&configure_off, &sdk).unwrap();
+    runtime.release_sdk(&sdk).unwrap();
+    let (replacement, _, _) = driver.register_native_sdk(&configure_off).unwrap();
+    assert_ne!(replacement, sdk);
+    assert!(runtime.validate_sdk(&sdk).is_err());
+    driver
+        .validate_native_execution(&configure_off, Some(&replacement))
+        .unwrap();
+    assert!(
+        !runtime.wants_send(),
+        "actual registration uses the command's automatic=false"
+    );
+    let commands = host
+        .cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Cloud))
+        .unwrap();
+    assert!(
+        !commands
+            .iter()
+            .any(|c| matches!(c.action.kind, ActionKind::ConfigureAutomatic { .. }))
+    );
+    assert!(!driver.state().automatic() && !driver.state().settings.automatic);
+    host.close().unwrap();
+    assert!(
+        driver.validate(&configure_off).is_err(),
+        "close still invalidates original work"
+    );
 }
 
 #[test]

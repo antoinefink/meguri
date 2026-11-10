@@ -634,12 +634,31 @@ impl Driver {
             && owned.state.tracking_stop.is_none()
             && !matches!(event, Event::TrackingWriteFailed { .. });
         if tracking_failed {
+            let mut facts = projection.facts.clone();
+            facts.binding = owned.state.facts.binding.clone();
+            let (state, emitted) = step(
+                owned.state.clone(),
+                Input {
+                    now_ms,
+                    facts: Some(facts),
+                    event: Event::TrackingWriteFailed { no_space: false },
+                },
+            );
+            owned.state = state;
+            actions.extend(emitted);
+        }
+        // Runtime publication progress is a Binding input (P4/P6). Neither a
+        // synthesized session event nor the original trigger may consume the
+        // old binding first: Zones -> Sent must compare effective automatic
+        // scheduling before projected facts replace it. Keep the original
+        // event below, including its operation result and completion handling.
+        if owned.state.facts.binding != projection.facts.binding {
             let (state, emitted) = step(
                 owned.state.clone(),
                 Input {
                     now_ms,
                     facts: Some(projection.facts.clone()),
-                    event: Event::TrackingWriteFailed { no_space: false },
+                    event: Event::Binding(projection.facts.binding.clone()),
                 },
             );
             owned.state = state;
