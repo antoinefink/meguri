@@ -543,12 +543,60 @@ pub(super) struct ReopenNote {
     pub open: u64,
     pub entity: super::super::workflow::EntityFacts,
 }
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HistoricalEdit {
     pub original_generation: u64,
     pub original_seq: u64,
     pub local_revision: u64,
     pub digest: [u8; 32],
+}
+// In-process projection only. This is neither an original callback receipt nor
+// authorization to complete a recovered exchange.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HistoricalAck {
+    pub edit: HistoricalEdit,
+    pub acked_revision: u64,
+    pub acked_envelope_digest: [u8; 32],
+}
+/// The exact live original-role ACK predicate, shared with its FFI observation.
+pub fn original_note_acknowledged_for_testing(e: &super::super::workflow::EntityFacts, digest: [u8; 32]) -> bool {
+    e.local_rev > 0
+        && e.acked_rev == e.local_rev
+        && e.acked_payload_digest == digest
+        && e.mark.is_none()
+        && e.in_flight.is_empty()
+        && e.server_erev > 0
+        && !e.acked_system_fields.is_empty()
+        && !e.acked_envelope.0.is_empty()
+}
+fn original_ack_pair(
+    original: &super::super::workflow::EntityFacts,
+    current: &super::super::workflow::EntityFacts,
+    digest: [u8; 32],
+) -> Result<HistoricalAck, RuntimeError> {
+    if !original_note_acknowledged_for_testing(original, digest)
+        || !original_note_acknowledged_for_testing(current, digest)
+        || original.local_rev != current.local_rev
+        || original.acked_rev != current.acked_rev
+        || original.acked_payload_digest != current.acked_payload_digest
+        || original.server_erev != current.server_erev
+        || original.acked_system_fields != current.acked_system_fields
+        || original.acked_envelope != current.acked_envelope
+        || original.tombstone_at.is_some()
+        || current.tombstone_at.is_some()
+    {
+        return Err(Error::RecoveryRefused.into());
+    }
+    Ok(HistoricalAck {
+        edit: HistoricalEdit {
+            original_generation: original.observed_generation,
+            original_seq: original.observed_seq,
+            local_revision: original.local_rev,
+            digest,
+        },
+        acked_revision: original.acked_rev,
+        acked_envelope_digest: codec::sha256(&original.acked_envelope.0),
+    })
 }
 #[derive(Clone)]
 pub struct RestoredControl {
@@ -704,16 +752,15 @@ impl Runtime {
         self.selected_recheck(collection, &snapshot, &control)?;
         Ok(witness)
     }
-    pub fn read_original_edit_for_testing(
+    fn original_edit_entities(
         &self,
-        collection: &Collection,
+        snapshot: &Snapshot,
         id: i64,
         baseline: [u8; 32],
         witness: [u8; 32],
-    ) -> Result<HistoricalEdit, RuntimeError> {
-        let (snapshot, control) = self.selected_owned_snapshot(collection)?;
+    ) -> Result<(ReopenNote, super::super::workflow::EntityFacts), RuntimeError> {
         let b = snapshot.bound.as_ref().ok_or(Error::RecoveryRefused)?;
-        let original = {
+        let pair = {
             let s = self.state();
             let original = s.selected_reopen_note.as_ref().ok_or(Error::RecoveryRefused)?;
             if original.binding != b.binding
@@ -746,8 +793,19 @@ impl Runtime {
             {
                 return Err(Error::RecoveryRefused.into());
             }
-            original.clone()
+            (original.clone(), current)
         };
+        Ok(pair)
+    }
+    pub fn read_original_edit_for_testing(
+        &self,
+        collection: &Collection,
+        id: i64,
+        baseline: [u8; 32],
+        witness: [u8; 32],
+    ) -> Result<HistoricalEdit, RuntimeError> {
+        let (snapshot, control) = self.selected_owned_snapshot(collection)?;
+        let (original, _) = self.original_edit_entities(&snapshot, id, baseline, witness)?;
         self.selected_recheck(collection, &snapshot, &control)?;
         Ok(HistoricalEdit {
             original_generation: original.entity.observed_generation,
@@ -759,6 +817,65 @@ impl Runtime {
                 .payload_digest()
                 .map_err(|_| Error::InvalidData)?,
         })
+    }
+    /// The caller retains its Query snapshot and current WAL coverage. The
+    /// original edit sequence is historical, never substituted for this frontier.
+    pub fn read_original_ack_for_testing(
+        &self,
+        collection: &Collection,
+        id: i64,
+        baseline: [u8; 32],
+        witness: [u8; 32],
+        held_snapshot: (meguri_engine::WalIdentity, Seq),
+        digest: [u8; 32],
+    ) -> Result<HistoricalAck, RuntimeError> {
+        self.read_original_ack_with_recheck_for_testing(
+            collection,
+            id,
+            (baseline, witness),
+            held_snapshot,
+            digest,
+            || {},
+        )
+    }
+    /// Test-only read boundary; supplies no row or authority and holds no locks.
+    pub fn read_original_ack_with_recheck_for_testing(
+        &self,
+        collection: &Collection,
+        id: i64,
+        edit_correlation: ([u8; 32], [u8; 32]),
+        held_snapshot: (meguri_engine::WalIdentity, Seq),
+        digest: [u8; 32],
+        after_read: impl FnOnce(),
+    ) -> Result<HistoricalAck, RuntimeError> {
+        let (baseline, witness) = edit_correlation;
+        let (identity, seq) = held_snapshot;
+        let (snapshot, control) = self.selected_owned_snapshot(collection)?;
+        let (original, current) = self.original_edit_entities(&snapshot, id, baseline, witness)?;
+        let (owned, _) = self.original_note_observation_for_testing(collection, id, identity, seq, digest)?;
+        if original
+            .entity
+            .payload
+            .payload_digest()
+            .map_err(|_| Error::InvalidData)?
+            != digest
+            || owned != current
+        {
+            return Err(Error::RecoveryRefused.into());
+        }
+        let ack = original_ack_pair(&original.entity, &current, digest)?;
+        after_read();
+        let (reread, _) = self.original_note_observation_for_testing(collection, id, identity, seq, digest)?;
+        let (retained, current_again) = self.original_edit_entities(&snapshot, id, baseline, witness)?;
+        if reread != current
+            || current_again != current
+            || retained.entity != original.entity
+            || original_ack_pair(&retained.entity, &current_again, digest)? != ack
+        {
+            return Err(Error::RecoveryRefused.into());
+        }
+        self.selected_recheck(collection, &snapshot, &control)?;
+        Ok(ack)
     }
     pub fn original_exchange_witness_for_testing(
         &self,
@@ -809,4 +926,133 @@ pub(crate) fn exchange_correlation(
         b"meguri-selected-original-exchange-v1",
         &(binding, file, owner, exchange, source),
     )
+}
+
+#[cfg(test)]
+mod original_ack_tests {
+    use super::*;
+    use crate::cloud::workflow::{EntityFacts, Flight};
+
+    // Predicate-only values; never installed as tracking rows or receipts.
+    fn acked() -> EntityFacts {
+        let payload = codec::Payload::Note(codec::Note {
+            id: 1,
+            ..Default::default()
+        });
+        let digest = payload.payload_digest().unwrap();
+        EntityFacts {
+            name: "predicate-only".into(),
+            kind: codec::Kind::Note,
+            key: codec::id_key(1),
+            origin: [1; 16],
+            sent: true,
+            local_rev: 3,
+            acked_rev: 3,
+            tombstone_at: None,
+            payload: payload.clone(),
+            base_payload: None,
+            mark: None,
+            server_erev: 2,
+            acked_system_fields: vec![1],
+            acked_row_digest: [2; 32],
+            acked_payload_digest: digest,
+            acked_payload: Some(payload),
+            acked_envelope: OpaqueBytes(vec![3]),
+            in_flight: vec![],
+            observer_open: 4,
+            observed_seq: 5,
+            observed_generation: 6,
+        }
+    }
+    #[test]
+    fn original_ack_requires_each_live_predicate_on_both_rows() {
+        let healthy = acked();
+        let digest = healthy.payload.payload_digest().unwrap();
+        for side in ["original", "current"] {
+            for failure in [
+                "zero",
+                "unacked",
+                "digest",
+                "dirty",
+                "flight",
+                "server",
+                "systems",
+                "envelope",
+                "tombstone",
+            ] {
+                let mut bad = healthy.clone();
+                match failure {
+                    "zero" => {
+                        bad.local_rev = 0;
+                        bad.acked_rev = 0;
+                    }
+                    "unacked" => bad.acked_rev -= 1,
+                    "digest" => bad.acked_payload_digest = [9; 32],
+                    "dirty" => {
+                        bad.mark = Some(DirtyMark {
+                            source: DirtySource::Observer,
+                            change_seq: bad.observed_seq,
+                            payload_digest: digest,
+                        })
+                    }
+                    "flight" => bad.in_flight.push(Flight {
+                        local_rev: bad.local_rev,
+                        payload_digest: digest,
+                        row_digest: [2; 32],
+                        payload: bad.payload.clone().into(),
+                        erev: 2,
+                        image_seq: 5,
+                        held: false,
+                        tombstone: false,
+                        tombstone_envelope_digest: None,
+                    }),
+                    "server" => bad.server_erev = 0,
+                    "systems" => bad.acked_system_fields.clear(),
+                    "envelope" => bad.acked_envelope.0.clear(),
+                    "tombstone" => bad.tombstone_at = Some(1),
+                    _ => unreachable!(),
+                }
+                let result = if side == "original" {
+                    original_ack_pair(&bad, &healthy, digest)
+                } else {
+                    original_ack_pair(&healthy, &bad, digest)
+                };
+                assert!(result.is_err(), "{side}: {failure}");
+            }
+        }
+        let projected = original_ack_pair(&healthy, &healthy, digest).unwrap();
+        assert_eq!(projected.edit.original_seq, healthy.observed_seq);
+        assert_eq!(projected.acked_revision, healthy.local_rev);
+        assert_eq!(
+            projected.acked_envelope_digest,
+            codec::sha256(&healthy.acked_envelope.0)
+        );
+    }
+    #[test]
+    fn independently_acked_rows_still_need_identical_revision_system_fields_and_envelope() {
+        let original = acked();
+        let digest = original.payload.payload_digest().unwrap();
+        for changed in ["revision", "server_revision", "system_fields", "envelope"] {
+            let mut current = original.clone();
+            match changed {
+                "revision" => {
+                    current.local_rev += 1;
+                    current.acked_rev += 1;
+                }
+                "server_revision" => current.server_erev += 1,
+                "system_fields" => current.acked_system_fields.push(7),
+                "envelope" => current.acked_envelope.0.push(7),
+                _ => unreachable!(),
+            }
+            assert!(original_note_acknowledged_for_testing(&current, digest));
+            assert!(
+                original_ack_pair(&original, &current, digest).is_err(),
+                "current: {changed}"
+            );
+            assert!(
+                original_ack_pair(&current, &original, digest).is_err(),
+                "original: {changed}"
+            );
+        }
+    }
 }

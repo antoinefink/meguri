@@ -904,7 +904,7 @@ impl OriginalEditDiagnostic {
 // Both subprocess stages stop at a content-free readiness message. The writer
 // sends it only after syncing the real edit observations and witness; the reader
 // sends it only after all historical read/no-mutation assertions have completed.
-fn witnessed_edit_process(root: &Path, stage: &str) {
+fn witnessed_edit_process(root: &Path, stage: &str, ack: bool) {
     use std::{
         io::{BufRead, BufReader, Read},
         process::{Command, Stdio},
@@ -920,6 +920,7 @@ fn witnessed_edit_process(root: &Path, stage: &str) {
         .args(["--exact", "original_edit_reopen_process_entry", "--nocapture"])
         .env("MEGURI_ORIGINAL_EDIT_PROCESS_ROOT", root)
         .env("MEGURI_ORIGINAL_EDIT_PROCESS_STAGE", stage)
+        .env("MEGURI_ORIGINAL_ACK_PROCESS", if ack { "yes" } else { "no" })
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -975,6 +976,15 @@ fn witnessed_edit_process(root: &Path, stage: &str) {
 
 #[test]
 fn bound_original_edit_witness_survives_process_kill_without_a_second_mutation() {
+    bound_original_edit_process(false);
+}
+
+#[test]
+fn bound_original_ack_survives_process_kill_without_a_second_mutation_or_exchange() {
+    bound_original_edit_process(true);
+}
+
+fn bound_original_edit_process(ack: bool) {
     use meguri_model::rng::SeededRandom;
     use meguri_sync::cloud::runtime::{KeyByteSource, KeySourceError};
     use meguri_testkit::cloud::{Config, Scope, Service, coordinator::PublicationRig, devices::IdentityReads};
@@ -1033,16 +1043,20 @@ fn bound_original_edit_witness_survives_process_kill_without_a_second_mutation()
     publisher.close_clean().unwrap();
     publication.unwrap();
     assert_eq!(expected(&live).0, expected(&root.path().join("original")).0);
-    witnessed_edit_process(root.path(), "bound-commit");
+    witnessed_edit_process(root.path(), "bound-commit", ack);
     let committed = expected(&live).0;
     assert_ne!(committed, expected(&root.path().join("original")).0);
     let observations = std::fs::read(root.path().join("original-observations.json")).unwrap();
-    witnessed_edit_process(root.path(), "bound-read");
+    let request_count = service.request_log().unwrap().len();
+    witnessed_edit_process(root.path(), "bound-read", ack);
     assert_eq!(expected(&live).0, committed);
     assert_eq!(
         std::fs::read(root.path().join("original-observations.json")).unwrap(),
         observations
     );
+    if ack {
+        assert_eq!(service.request_log().unwrap().len(), request_count);
+    }
     assert!(root.path().join("historical-read-checked").is_file());
 }
 
@@ -1061,6 +1075,7 @@ fn original_edit_reopen_process_entry() {
     };
     let stage = std::env::var("MEGURI_ORIGINAL_EDIT_PROCESS_STAGE").unwrap();
     let bound = stage == "bound-commit" || stage == "bound-read";
+    let ack = std::env::var("MEGURI_ORIGINAL_ACK_PROCESS").is_ok_and(|value| value == "yes");
     if bound {
         original_edit_child_panic_hook();
     }
@@ -1162,7 +1177,12 @@ fn original_edit_reopen_process_entry() {
         } else {
             assert!(facts.local_revision.is_none() && facts.original_witness.is_none());
         }
-        let observations = serde_json::json!({"committed": facts.seq, "generation": facts.generation,
+        let ack_facts = if ack {
+            Some(ack_original_edit_with_service(&root, &role))
+        } else {
+            None
+        };
+        let observations = serde_json::json!({"ack": ack_facts, "committed": facts.seq, "generation": facts.generation,
             "digest": facts.note_digest, "durable_revision": facts.local_revision,
             "witness": facts.original_witness, "writer_process": std::process::id()});
         checkpoint(OriginalEditCheckpoint::SyncOriginalObservations);
@@ -1213,9 +1233,60 @@ fn original_edit_reopen_process_entry() {
         );
         checkpoint(OriginalEditCheckpoint::RepeatedHistoricalRead);
         assert_eq!(
-            role.read_original_edit(witness).unwrap().original_seq,
+            role.read_original_edit(witness.clone()).unwrap().original_seq,
             original.original_seq
         );
+        for missing in [vec![], vec![0; 31], vec![0; 32]] {
+            assert!(role.read_original_ack(missing).is_err());
+        }
+        if ack {
+            let historical = role.read_original_ack(witness.clone()).unwrap();
+            assert_eq!(historical.original_generation, original.original_generation);
+            assert_eq!(historical.original_seq, original.original_seq);
+            assert_eq!(historical.local_revision, original.local_revision);
+            assert_eq!(historical.acked_revision, original.local_revision);
+            assert_eq!(historical.note_digest, original.note_digest);
+            assert_eq!(historical.generation, collection.generation().0);
+            assert_eq!(
+                historical.acked_envelope_digest,
+                serde_json::from_value::<Vec<u8>>(observations["ack"]["envelope_digest"].clone()).unwrap()
+            );
+            let workflow = meguri_ffi::sync::CloudWorkflow::new().unwrap();
+            let exchange = workflow
+                .exchange_result(observations["ack"]["exchange"].as_u64().unwrap())
+                .unwrap()
+                .unwrap();
+            assert!(matches!(
+                exchange.collection,
+                meguri_ffi::sync::CloudCollectionOutcome::Succeeded
+            ));
+            assert_eq!(
+                exchange.selected_names,
+                serde_json::from_value::<Vec<String>>(observations["ack"]["selected"].clone()).unwrap()
+            );
+            assert_eq!(
+                exchange.acked_names,
+                serde_json::from_value::<Vec<String>>(observations["ack"]["acked"].clone()).unwrap()
+            );
+            assert!(exchange.outstanding_names.is_empty());
+            // Repeated reads admit no SDK, operation or exchange.
+            assert_eq!(
+                role.read_original_ack(witness.clone()).unwrap().acked_envelope_digest,
+                historical.acked_envelope_digest
+            );
+        } else {
+            assert!(role.read_original_ack(witness.clone()).is_err());
+            // An actual new SDK ACK of this same current edit cannot repair the
+            // retained unACKed original row captured before this open's scan.
+            let fresh = ack_original_edit_with_service(&root, &role);
+            assert!(fresh["envelope_digest"].as_array().is_some());
+            assert!(role.observe().unwrap().entity.acknowledged);
+            assert!(role.read_original_ack(witness.clone()).is_err());
+            assert_eq!(
+                role.read_original_edit(witness).unwrap().original_seq,
+                original.original_seq
+            );
+        }
         checkpoint(OriginalEditCheckpoint::CompareRowsAndSeq);
         assert_eq!(collection.last_seq(), before_seq);
         let after = {
@@ -1224,6 +1295,18 @@ fn original_edit_reopen_process_entry() {
                 .map(|table| stored_rows(&*reader, table))
         };
         assert_eq!(after, before);
+        if ack {
+            let workflow = meguri_ffi::sync::CloudWorkflow::new().unwrap();
+            workflow
+                .account_changed(
+                    None,
+                    meguri_ffi::sync::CloudAccountStatus::Available,
+                    Some(b"other-account".to_vec()),
+                )
+                .unwrap();
+            let witness: Vec<u8> = serde_json::from_value(observations["witness"].clone()).unwrap();
+            assert!(role.read_original_ack(witness).is_err());
+        }
         checkpoint(OriginalEditCheckpoint::CloseReader);
         meguri_ffi::lifecycle::close_collection().unwrap();
         checkpoint(OriginalEditCheckpoint::SyncCheckedMarker);
@@ -1234,9 +1317,155 @@ fn original_edit_reopen_process_entry() {
         original_edit_process_ready();
     }
     for missing in [vec![], vec![0; 31], vec![0; 32]] {
-        assert!(role.read_original_edit(missing).is_err());
+        assert!(role.read_original_edit(missing.clone()).is_err());
+        assert!(role.read_original_ack(missing).is_err());
     }
     meguri_ffi::lifecycle::close_collection().unwrap();
+}
+
+// Real Core batch and Service Saved response. This is a protocol fixture, never
+// signed SDK evidence. No tracking row or observer tuple is seeded.
+fn ack_original_edit_with_service(
+    root: &Path,
+    role: &std::sync::Arc<meguri_ffi::test_hooks::CloudOriginalRole>,
+) -> serde_json::Value {
+    use meguri_ffi::sync::{CloudCollectionOutcome, CloudRecord, CloudWorkflow};
+    use meguri_model::rng::SeededRandom;
+    use meguri_testkit::cloud::{
+        Caller, Config, Field, Mutation, MutationSuccess, Operation, Record, RecordInput, Reply, RequestedFields,
+        Scope, Service, SystemFields,
+    };
+    let scope = Scope {
+        container: "synthetic-u114".into(),
+        environment: "development".into(),
+        account: "synthetic-account-A".into(),
+    };
+    let mut service = Service::open(root, Config::default(), SeededRandom::new(812)).unwrap();
+    let workflow = CloudWorkflow::new().unwrap();
+    let registration = workflow.register_sdk(false).unwrap();
+    let sdk = registration.instance_id;
+    let caller = Caller {
+        device: Some("original-ack-fixture".into()),
+        instance: Some(sdk.clone()),
+        own_operation: None,
+    };
+    let project = |record: Record, zone: &str| -> CloudRecord {
+        let Some(Field::EncryptedBytes(envelope)) = record.fields.get("e") else {
+            panic!("Service must return its actual encrypted record");
+        };
+        CloudRecord {
+            name: record.name,
+            envelope: envelope.clone(),
+            system_fields: Some(record.system_fields.bytes().to_vec()),
+            record_type: Some(record.record_type),
+            zone: Some(zone.into()),
+            asset_path: None,
+        }
+    };
+    let exchange = workflow.begin_exchange(sdk.clone()).unwrap();
+    let fetch = workflow.begin_fetch(sdk.clone(), vec!["meguri-root".into()]).unwrap();
+    let group = format!("meguri-{fetch}");
+    workflow.will_fetch(sdk.clone(), group.clone(), true).unwrap();
+    workflow
+        .fetch_zone(sdk.clone(), "meguri-root".into(), true, false)
+        .unwrap();
+    let root_reply = service
+        .request(
+            &scope,
+            caller.clone(),
+            Operation::Read {
+                zone: "meguri-root".into(),
+                name: "active".into(),
+                fields: RequestedFields::All,
+            },
+        )
+        .unwrap();
+    let Reply::Record(active) = root_reply.result.unwrap() else {
+        panic!("actual Active read")
+    };
+    workflow
+        .fetched(
+            sdk.clone(),
+            "meguri-root".into(),
+            vec![project(active, "meguri-root")],
+            vec![],
+        )
+        .unwrap();
+    workflow
+        .fetch_zone(sdk.clone(), "meguri-root".into(), false, false)
+        .unwrap();
+    workflow.did_fetch(sdk.clone(), group, true).unwrap();
+    let fetched = workflow.finish_fetch(sdk.clone(), fetch).unwrap();
+    assert!(fetched);
+    workflow.exchange_fetched(sdk.clone(), fetched).unwrap();
+    let mut pending = std::collections::HashMap::new();
+    for update in workflow.take_pending_updates(sdk.clone()).unwrap() {
+        if matches!(update.kind, meguri_ffi::sync::CloudUpdateKind::Full) {
+            pending.clear();
+        }
+        for name in update.removes {
+            pending.remove(&name);
+        }
+        let added = update.adds.keys().cloned().collect();
+        pending.extend(update.adds);
+        workflow.update_applied(sdk.clone(), update.id, added).unwrap();
+    }
+    let batch = workflow
+        .build_batch(sdk.clone(), registration.collection_zone.clone(), pending)
+        .unwrap()
+        .unwrap();
+    assert!(!batch.saves.is_empty() && batch.deletes.is_empty());
+    let response = service
+        .request(
+            &scope,
+            caller,
+            Operation::Modify {
+                zone: registration.collection_zone.clone(),
+                atomic: false,
+                changes: batch
+                    .saves
+                    .iter()
+                    .map(|record| Mutation::Save {
+                        record: RecordInput::encrypted(&record.name, "MGEntity", record.envelope.clone()),
+                        if_unchanged: record.system_fields.clone().map(SystemFields::from_bytes),
+                    })
+                    .collect(),
+            },
+        )
+        .unwrap();
+    let Reply::Modified(results) = response.result.unwrap() else {
+        panic!("actual Modify result")
+    };
+    let saved: Vec<_> = results
+        .into_iter()
+        .map(|result| {
+            let MutationSuccess::Saved(record) = result.result.unwrap() else {
+                panic!("actual Saved result")
+            };
+            project(record, &registration.collection_zone)
+        })
+        .collect();
+    let names = saved.iter().map(|record| record.name.clone()).collect();
+    let count = u32::try_from(saved.len()).unwrap();
+    workflow
+        .sent(sdk.clone(), batch.id, saved, vec![], vec![], vec![], count)
+        .unwrap();
+    workflow.handler_returned(sdk.clone()).unwrap();
+    workflow.sdk_saved_removed(sdk.clone(), batch.id, names).unwrap();
+    workflow
+        .state_update(sdk.clone(), b"original-ack-protocol-fixture-state".to_vec())
+        .unwrap();
+    let result = workflow
+        .complete_exchange(sdk, exchange, fetched, false, false)
+        .unwrap();
+    assert!(matches!(result.collection, CloudCollectionOutcome::Succeeded));
+    assert!(!result.selected_names.is_empty());
+    assert_eq!(result.selected_names, result.acked_names);
+    assert!(result.outstanding_names.is_empty());
+    let observed = role.observe().unwrap();
+    assert!(observed.entity.acknowledged);
+    serde_json::json!({ "exchange": exchange, "selected": result.selected_names, "acked": result.acked_names,
+                        "envelope_digest": observed.entity.acked_envelope_digest })
 }
 
 fn original_edit_process_ready() -> ! {

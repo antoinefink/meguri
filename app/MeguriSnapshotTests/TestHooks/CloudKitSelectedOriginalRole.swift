@@ -32,6 +32,15 @@ import Foundation
             throw error
         }
     }
+    func readOriginalAck(witness: Data, generation: UInt64) async throws -> HistoricalOriginalCloudAck {
+        try source.revalidate()
+        do {
+            let result = try await reader.readOriginalAck(witness: witness)
+            try source.revalidate()
+            guard result.generation == generation else { throw AgentFailure.execution }
+            return result
+        } catch { try source.revalidate(); throw error }
+    }
     func readOriginalEdit(witness: Data, generation: UInt64) async throws -> HistoricalOriginalCloudEdit {
         try source.revalidate()
         do {

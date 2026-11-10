@@ -52,6 +52,17 @@ public struct HistoricalOriginalCloudEdit: Sendable {
     public let noteDigest: Data
 }
 
+// Test-only, in-process ACK projection. It supplies no journal or recovery proof.
+public struct HistoricalOriginalCloudAck: Sendable {
+    public let generation: UInt64
+    public let originalGeneration: UInt64
+    public let originalSeq: UInt64
+    public let localRevision: UInt64
+    public let noteDigest: Data
+    public let ackedRevision: UInt64
+    public let ackedEnvelopeDigest: Data
+}
+
 // Native record correlation stays in process. Only the bounded canonical
 // digest and sequence facts may be projected into the agent journal.
 public struct OriginalCloudObservation: Sendable {
@@ -115,6 +126,15 @@ public actor OriginalCloudRoleInspection: CustomStringConvertible, CustomDebugSt
         return try await QueryLane.shared.call(.cloudOriginalRoleValidateOwned) {
             let r = try raw.validateOwned()
             return OriginalCloudOwnedFacts(generation: r.generation, seq: r.seq, noteDigest: r.noteDigest, qChanged: r.qChanged)
+        }
+    }
+    public func readOriginalAck(witness: Data) async throws -> HistoricalOriginalCloudAck {
+        let raw = raw
+        return try await QueryLane.shared.call(.cloudOriginalRoleReadOriginalAck) {
+            let r = try raw.readOriginalAck(witness: witness)
+            return .init(generation: r.generation, originalGeneration: r.originalGeneration,
+                         originalSeq: r.originalSeq, localRevision: r.localRevision, noteDigest: r.noteDigest,
+                         ackedRevision: r.ackedRevision, ackedEnvelopeDigest: r.ackedEnvelopeDigest)
         }
     }
     public func readOriginalEdit(witness: Data) async throws -> HistoricalOriginalCloudEdit {

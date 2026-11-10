@@ -454,19 +454,14 @@ impl CloudOriginalRole {
             applied_seq,
             entity: super::CloudSmokeEntity {
                 label: "n1".into(),
-                record_name: e.name,
+                record_name: e.name.clone(),
                 revision: e.local_rev,
                 acked_revision: e.acked_rev,
                 digest: digest.to_vec(),
                 acked_envelope_digest: c::sha256(&e.acked_envelope.0).to_vec(),
-                acknowledged: e.local_rev > 0
-                    && e.acked_rev == e.local_rev
-                    && e.acked_payload_digest == digest
-                    && e.mark.is_none()
-                    && e.in_flight.is_empty()
-                    && e.server_erev > 0
-                    && !e.acked_system_fields.is_empty()
-                    && !e.acked_envelope.0.is_empty(),
+                acknowledged: meguri_sync::cloud::selected_observation::original_note_acknowledged_for_testing(
+                    &e, digest,
+                ),
                 media_bytes: None,
                 media_sha256: None,
                 blob_present: false,
@@ -756,6 +751,17 @@ pub struct CloudHistoricalOriginalEdit {
     pub local_revision: u64,
     pub note_digest: Vec<u8>,
 }
+// Envelope correlation stays in process and is never exported to the journal.
+#[derive(Clone, uniffi::Record)]
+pub struct CloudHistoricalOriginalAck {
+    pub generation: u64,
+    pub original_generation: u64,
+    pub original_seq: u64,
+    pub local_revision: u64,
+    pub note_digest: Vec<u8>,
+    pub acked_revision: u64,
+    pub acked_envelope_digest: Vec<u8>,
+}
 impl CloudOriginalRole {
     pub(crate) fn read_original_edit_inner(&self, witness: Vec<u8>) -> Result<CloudHistoricalOriginalEdit, CoreError> {
         let witness = witness.as_slice().try_into().map_err(|_| invalid())?;
@@ -837,6 +843,94 @@ impl CloudOriginalRole {
             original_seq: historical.original_seq,
             local_revision: historical.local_revision,
             note_digest: digest.to_vec(),
+        })
+    }
+    pub(crate) fn read_original_ack_inner(&self, witness: Vec<u8>) -> Result<CloudHistoricalOriginalAck, CoreError> {
+        let witness = witness.as_slice().try_into().map_err(|_| invalid())?;
+        let host = runtime::host()?;
+        let collection = host.cloud_connection_collection()?;
+        let generation = collection.generation();
+        // Re-establish this newly prepared baseline's current owned mapping.
+        let owned = self.validate_owned_inner()?;
+        if owned.generation != generation.0 || !owned.q_changed {
+            return Err(invalid());
+        }
+        {
+            let owner = self.owner.lock().unwrap_or_else(PoisonError::into_inner);
+            let (bound, bound_generation) = owner.as_ref().ok_or_else(invalid)?;
+            if *bound_generation != generation || !bound.upgrade().is_some_and(|h| Arc::ptr_eq(&h, &host)) {
+                return Err(invalid());
+            }
+        }
+        let core = host.cloud_runtime().ok_or_else(invalid)?;
+        // Current durability is independently checked; this receipt is NOT the
+        // original operation's post-flush receipt.
+        let wait = std::time::Duration::from_secs(5);
+        collection.flush_wal(wait)?;
+        let reader = collection.reader(ReaderRole::Query)?;
+        let snapshot = reader.snapshot()?;
+        let current = capture(&*snapshot, NoteId(self.baseline.note.id))?;
+        let note = snapshot.note(NoteId(self.baseline.note.id))?.ok_or_else(invalid)?;
+        let digest = checked(c::Payload::Note(current.note.clone()).payload_digest())?;
+        let integrity = snapshot.smoke_integrity()?;
+        let baseline = self
+            .facts
+            .baseline_digest
+            .as_slice()
+            .try_into()
+            .map_err(|_| invalid())?;
+        let historical = checked(core.read_original_ack_for_testing(
+            &collection,
+            self.baseline.note.id,
+            baseline,
+            witness,
+            (snapshot.wal_identity(), snapshot.seq()),
+            digest,
+        ))?;
+        if !self.baseline.compare(&current)?
+            || note.usn.0 != -1
+            || digest != historical.edit.digest
+            || !integrity.integrity_ok
+            || !integrity.schema_ok
+            || integrity.missing_card_notes != 0
+            || integrity.missing_card_decks != 0
+            || integrity.missing_note_types != 0
+            || integrity.missing_field_types != 0
+            || integrity.wrong_field_counts != 0
+        {
+            return Err(invalid());
+        }
+        match collection.wait_wal_covered(snapshot.wal_identity(), snapshot.seq(), wait)? {
+            meguri_engine::WalCoverage::Covered(r)
+                if r.identity() == snapshot.wal_identity() && r.through() >= snapshot.seq() => {}
+            _ => return Err(invalid()),
+        }
+        let reread = checked(core.read_original_ack_for_testing(
+            &collection,
+            self.baseline.note.id,
+            baseline,
+            witness,
+            (snapshot.wal_identity(), snapshot.seq()),
+            digest,
+        ))?;
+        if reread != historical
+            || reread.edit.digest != digest
+            || !Arc::ptr_eq(&runtime::host()?, &host)
+            || !collection.is_current()
+            || collection.last_seq() != snapshot.seq()
+            || snapshot.generation() != generation
+            || host.cloud_connection_generation()? != generation
+        {
+            return Err(invalid());
+        }
+        Ok(CloudHistoricalOriginalAck {
+            generation: generation.0,
+            original_generation: historical.edit.original_generation,
+            original_seq: historical.edit.original_seq,
+            local_revision: historical.edit.local_revision,
+            note_digest: digest.to_vec(),
+            acked_revision: historical.acked_revision,
+            acked_envelope_digest: historical.acked_envelope_digest.to_vec(),
         })
     }
 }

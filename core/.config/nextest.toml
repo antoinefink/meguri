@@ -160,6 +160,10 @@ filter = 'package(meguri-ffi) and binary(cloud_original_role) and test(=fixed_ed
 threads-required = "num-test-threads"
 
 [[profile.default.overrides]]
+filter = 'package(meguri-ffi) and binary(cloud_original_role) and test(/^bound_original_(edit_witness|ack)_survives_process_kill/)'
+threads-required = "num-test-threads"
+
+[[profile.default.overrides]]
 filter = 'package(meguri-ffi) and binary(cloud_original_observation)'
 threads-required = "num-test-threads"
 
