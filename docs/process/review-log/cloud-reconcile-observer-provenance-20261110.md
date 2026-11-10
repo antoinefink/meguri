@@ -1,11 +1,23 @@
 # Guarded whole-scan observer provenance
 
-Latest root result: `core-test/20261110T114633Z-28443` ran 17 cases; 16 passed.
-The reopened unchanged-row proof now passes. The new current-opening history
-phase retains real nonempty pending history but fails its unchanged-counter
-assertion (8 versus 7). No asynchronous drain is proved missing: the observer
-is synchronous. Keep the assertion and diagnose the exact changed entity.
-All selected held-scan, newer-write, old reopening and original-role tests pass.
+Current status: R4 passed all 17 focused Rust cases.
+Root's `core-test/20261110T114633Z-28443` (line 4506) and
+`core-test/20261110T120154Z-84907` (line 4595) fail **before scanning** at
+`assert_eq!(collection.last_seq().0, seq)`: current 8 versus held snapshot 7.
+Those failures show a sequence mismatch, not a counter change. They give no
+evidence of another production defect.
+Phase A's reopened unchanged-row proof passes in the supplied root results.
+
+R4 retains Phase B's real ordinary edit and `capture_cloud` barrier with its
+nonempty flagged-history assertion, then drops the original snapshot, hold and
+lease at block end. One fresh ordinary Cloud snapshot samples the actual
+post-barrier seq/generation and is released before the one actual Phase B scan.
+O1.1/O4 require a new seq even for the barrier's no-row commit, after its held
+snapshot. Every original assertion remains, including the pre-scan last_seq
+check, exact history/depth/UploadPending, counter/full EntityFacts, cursor and
+SDK validity. Phase A and the original selected proof remain unchanged.
+The all-kind/capture-proof diagnostics from the mistaken boundary are removed.
+No production fix, extra writer, retry or scan is justified or added.
 
 WIP: root R2 source review is clear. Focused Docker run
 `core-test/20261110T113706Z-8882` passed ten cases and failed the new Host
@@ -135,3 +147,56 @@ this runner. Production, diagnostic, store tests, old selection regression and
 held-scan refusals are unchanged. Root owns compilation, focused checks,
 independent review and provenance/privacy/similarity verification. No unit,
 gate or signed acceptance is claimed.
+
+
+## R4 post-barrier baseline handoff
+
+Recorded fixer, filtered source-only runner; starting baseline is the supplied
+current clean master (root retains its exact commit record). Original batch base:
+`1416a520542a8c5daa38a23bfe398da704c3d6c9`. Root independently confirmed the
+exact source/spec diagnosis. Prior failed receipts above remain historical
+evidence. Removed the local FixtureFacts pagination/report helpers, before/after
+all-kind reads, capture-proof booleans and counterMismatch block; restored the
+existing `runtime.status().unwrap().change_counter` baseline call.
+
+Exact focused 17-case nextest selection for root (not executed here):
+
+```text
+(package(meguri-ffi) & binary(cloud_original_role)) |
+(package(meguri-host) & binary(cloud_publication_phase) &
+ (test(=prior_open_observation_does_not_block_reopened_batch_or_sync_now_selection) |
+  test(=whole_scan_after_actual_reopen_refreshes_acknowledged_row_provenance_without_tracking_changes))) |
+(package(meguri-sync) & binary(meguri_sync) &
+ (test(=cloud::workflow_store::tests::guarded_scan_equal_payload_preserves_pending_facts_and_retained_flight) |
+  test(=cloud::workflow_store::tests::guarded_changed_scan_marks_snapshot_revision_and_rejects_older_or_invalid_open))) |
+(package(meguri-host) & binary(cloud_runtime) &
+ (test(=paused_snapshot_scan_allows_a_real_note_op_and_preserves_its_newer_capture) |
+  test(=account_event_while_scan_paused_prevents_page_and_cursor_commit) |
+  test(=suspend_resume_during_pre_snapshot_pause_invalidates_same_generation_scan) |
+  test(=creation_fact_mismatch_during_pause_prevents_scan_completion) |
+  test(=mid_capture_write_failure_rolls_back_every_tracking_row_but_not_collection_commit)))
+```
+
+This selects eight original-role, two reopen Host, two store and five runtime
+cases. Include the `cloud_runtime` target and both store names; `guarded_scan_`
+alone omits the changed-payload case. The additional existing same-open boundary
+selector listed above is preserved. Root also owns both native positive variants,
+compilation, independent review and provenance/privacy/similarity verification.
+One source-only consistency check; no build/test execution or passing receipt
+in this runner. No Unit, gate, signed-product or acceptance claim.
+
+Consistency-check outcome: the one source-only checker confirmed all original
+Host assertions unchanged, then stopped on its own overbroad Phase A comparison:
+it included the intentionally removed helper definitions before the fixture.
+This is a checker-boundary error, not evidence of a Phase A change. It was not
+rerun; its later Release-equivalence and diagnostic-field checks did not execute.
+Root must independently review/compile/verify the exported source.
+
+## Root verification
+
+`core-test/20261110T121804Z-53563` passed all 17 selected cases with no skips.
+This includes both store cases, actual reopening and current history, the
+same-open boundary, held-scan refusals and the original-role tests.
+Independent source review is clear of P0–P2 findings. Similarity
+`20261110T122011Z-59171` passed. The failed prior receipts remain above.
+No Unit or integration gate is accepted.

@@ -4,8 +4,11 @@ Root evidence supersedes the supplied history diagnosis below.
 `core-test/20261110T120154Z-84907` failed before scanning, at the exact
 collection-sequence assertion: current sequence 8, held snapshot 7. The barrier
 commits after taking that snapshot. No counter change is established. The
-next fixture correction will use a fresh post-barrier scan baseline and remove
-the unnecessary all-kind diagnostic helpers, preserving every assertion.
+R4 fixture correction now uses a fresh post-barrier scan baseline and removes
+the unnecessary Host all-kind/capture-proof diagnostics after the exact-line
+correction, preserving every original assertion. All 17 focused Rust cases pass in
+`core-test/20261110T121804Z-53563`.
+The Core invocation/SDK fixed-tag diagnostics below remain unchanged.
 
 `swift-test/20261110T120258Z-86282` compiled. Its manual Core/Service variant
 completed; automatic sending failed with `sdkLocked check=stopping`, followed
@@ -43,16 +46,17 @@ mask has bits 0=generation, 1=binding, 2=token. No values or provider reads are
 added. A later existing caller failure uses `check=callerValidation` and the
 Runtime classifier. Release retains the original short-circuit expression.
 
-Root supplied focused Host result `28443`: 17 run, 16 pass, one failure.
-Reopen Phase A now passes; Phase B's single whole scan changes the global counter
-after a real ordinary edit/capture and valid current history. Cause remains
-unproved. Only
+Prior Host diagnosis was wrong:
+root supplied focused Host result `28443`: 17 run, 16 pass, one failure.
+The claim that Phase B's scan changed the counter was a misread: it never
+reached that scan. No counter difference has been observed. The now-removed
+Host diagnostics were added on that incorrect premise. Only
 `meguri-host --test cloud_publication_phase`'s
 `whole_scan_after_actual_reopen_refreshes_acknowledged_row_provenance_without_tracking_changes`
-gains fixture inspections. All existing assertions, including both counters and
+gained fixture inspections in that superseded patch. All existing assertions, including both counters and
 full equality except actual provenance, remain unchanged.
 
-After the real edit/capture, the test retains the existing pre-scan status and
+That superseded diagnostic patch retained the existing pre-scan status and
 reads complete public `entity_facts_page` pagination for all nine kinds, bounded
 to fewer than 100 rows per kind. Only on counter mismatch does it read after
 facts and emit `cloudHistoryScan.counterMismatch`: closed kind and aggregate
@@ -67,7 +71,7 @@ absence does not distinguish missing from nonmatching proof. No API was added.
 No names, IDs, payloads, digests, counter values, settings, reasons or freeform
 errors enter the new diagnostics.
 
-One source-only consistency check verified SDK short circuit/one guard sample,
+That earlier patch's source-only consistency check verified SDK short circuit/one guard sample,
 invocation order, bounded pagination, scan count, retained counter/full-equality
 assertions and diagnostic interpolation allowlist. Its final format-count check
 expected 16 but found 17: six FFI, five SDK, three Driver and three Host formats.

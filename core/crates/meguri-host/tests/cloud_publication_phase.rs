@@ -4392,86 +4392,6 @@ fn whole_scan_after_actual_reopen_refreshes_acknowledged_row_provenance_without_
     use meguri_model::ids::NoteId;
     use meguri_storage::{ReaderRole, RowKey, Table};
 
-    // Read only this small, fully owned generated fixture. Never print keys or
-    // images; exhaust the public pagination and refuse an oversized inspection.
-    type FixtureFacts = BTreeMap<Kind, BTreeMap<Vec<u8>, cloud::workflow::EntityFacts>>;
-    fn fixture_facts(runtime: &cloud::runtime::Runtime) -> Option<FixtureFacts> {
-        let mut all = BTreeMap::new();
-        for kind in [
-            Kind::Note,
-            Kind::Card,
-            Kind::Revlog,
-            Kind::Deck,
-            Kind::Preset,
-            Kind::Notetype,
-            Kind::Tag,
-            Kind::Config,
-            Kind::MediaName,
-        ] {
-            let mut rows = BTreeMap::new();
-            let mut after: Option<Vec<u8>> = None;
-            loop {
-                let page = runtime.entity_facts_page(kind, after.as_deref()).ok()?;
-                if page.is_empty() {
-                    break;
-                }
-                if rows.len() + page.len() >= 100 {
-                    return None;
-                }
-                after = page.last().map(|row| row.key.clone());
-                for row in page {
-                    if rows.insert(row.key.clone(), row).is_some() {
-                        return None;
-                    }
-                }
-            }
-            all.insert(kind, rows);
-        }
-        Some(all)
-    }
-
-    fn report_fixture_changes(before: Option<FixtureFacts>, after: Option<FixtureFacts>) {
-        let (Some(before), Some(after)) = (before, after) else {
-            eprintln!("cloudHistoryScan.counterMismatch inspectionComplete=false");
-            return;
-        };
-        for (kind, previous) in before {
-            let current = &after[&kind];
-            let new = current.keys().filter(|key| !previous.contains_key(*key)).count();
-            let missing = previous.keys().filter(|key| !current.contains_key(*key)).count();
-            let mut payload_changed = 0;
-            let mut provenance_only = 0;
-            let mut mark_source_change = 0;
-            for (key, old) in previous {
-                let Some(row) = current.get(&key) else { continue };
-                payload_changed += usize::from(old.payload != row.payload);
-                mark_source_change +=
-                    usize::from(old.mark.as_ref().map(|mark| mark.source) != row.mark.as_ref().map(|mark| mark.source));
-                if old != *row {
-                    let mut normalized = old;
-                    normalized.observer_open = row.observer_open;
-                    normalized.observed_seq = row.observed_seq;
-                    normalized.observed_generation = row.observed_generation;
-                    provenance_only += usize::from(normalized == *row);
-                }
-            }
-            let kind = match kind {
-                Kind::Note => "Note",
-                Kind::Card => "Card",
-                Kind::Revlog => "Revlog",
-                Kind::Deck => "Deck",
-                Kind::Preset => "Preset",
-                Kind::Notetype => "Notetype",
-                Kind::Tag => "Tag",
-                Kind::Config => "Config",
-                Kind::MediaName => "MediaName",
-            };
-            eprintln!(
-                "cloudHistoryScan.counterMismatch kind={kind} new={new} missing={missing} payloadChanged={payload_changed} provenanceOnly={provenance_only} markSourceChange={mark_source_change}"
-            );
-        }
-    }
-
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("acknowledged-scan-provenance");
     generated(&dir);
@@ -4561,10 +4481,16 @@ fn whole_scan_after_actual_reopen_refreshes_acknowledged_row_provenance_without_
     };
     edit_workflow_note(&collection, note, "new pending history within reopened collection");
     let touched = (Table::Notes, RowKey::Id(NoteId(note.id).0));
-    let (seq, generation) = {
+    {
         let mut lease = collection.reader(ReaderRole::Cloud).unwrap();
-        let (snapshot, hold) = lease.capture_cloud(&collection, vec![touched.clone()]).unwrap();
+        let (_snapshot, hold) = lease.capture_cloud(&collection, vec![touched.clone()]).unwrap();
         assert!(!hold.flagged.is_empty(), "the real barrier must flag the new edit");
+    }
+    // O1.1/O4: the no-row barrier commits after its held snapshot and takes a
+    // new sequence. Sample the distinct post-barrier frontier for this scan.
+    let (seq, generation) = {
+        let lease = collection.reader(ReaderRole::Cloud).unwrap();
+        let snapshot = lease.snapshot().unwrap();
         (snapshot.seq().0, snapshot.generation().0)
     };
     let history = collection.cloud_pending_keys().unwrap();
@@ -4580,16 +4506,7 @@ fn whole_scan_after_actual_reopen_refreshes_acknowledged_row_provenance_without_
         UndoStatus::Unavailable(DisabledReason::UploadPending)
     ));
     let before = runtime.entity_facts_page(Kind::Note, None).unwrap();
-    let before_status = runtime.status().unwrap();
-    let counter = before_status.change_counter;
-    let inspection_before = fixture_facts(runtime);
-    // This existing API filters for the supplied actual snapshot seq/generation.
-    let capture = runtime.capture_proof(meguri_engine::Seq(seq), meguri_engine::Generation(generation));
-    let capture_present = capture.is_some();
-    let capture_persisted = capture.as_ref().is_some_and(|proof| proof.persisted);
-    let capture_matches_current = capture
-        .as_ref()
-        .is_some_and(|proof| proof.observed_seq.0 == seq && proof.generation.0 == generation);
+    let counter = runtime.status().unwrap().change_counter;
     let current_open = runtime.stored_state_for_testing().unwrap().open_counter;
     assert_eq!(current_open, open);
     assert_eq!(collection.last_seq().0, seq);
@@ -4599,14 +4516,6 @@ fn whole_scan_after_actual_reopen_refreshes_acknowledged_row_provenance_without_
     let status = runtime.status().unwrap();
     assert_eq!(status.binding.as_ref(), Some(&binding));
     assert!(!status.scan_required && !status.tracking_stopped);
-    if status.change_counter != counter {
-        let tracking_stopped = before_status.tracking_stopped;
-        let scan_required = before_status.scan_required;
-        eprintln!(
-            "cloudHistoryScan.counterMismatch beforeTrackingStopped={tracking_stopped} beforeScanRequired={scan_required} capturePresent={capture_present} capturePersisted={capture_persisted} captureMatchesCurrent={capture_matches_current}"
-        );
-        report_fixture_changes(inspection_before, fixture_facts(runtime));
-    }
     assert_eq!(status.change_counter, counter);
     let stored = runtime.stored_state_for_testing().unwrap();
     assert_eq!(stored.open_counter, current_open);
