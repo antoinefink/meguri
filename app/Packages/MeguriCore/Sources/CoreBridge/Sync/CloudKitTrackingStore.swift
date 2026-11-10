@@ -181,6 +181,12 @@ public actor CoreCloudWorkflowService {
         let raw = try await owner()
         return try await MaintenanceLane.shared.call(.cloudWorkflowHandlerReturned) { try raw.handlerReturned(sdk: sdk) }
     }
+    func savedPendingRemoved(_ receipt: CloudSavedPendingRemoval) async throws {
+        let raw = try await owner()
+        try await MaintenanceLane.shared.call(.cloudWorkflowSdkSavedRemoved) {
+            try raw.sdkSavedRemoved(sdk: receipt.instanceID, requestId: receipt.requestID, names: receipt.names.sorted())
+        }
+    }
      func trackingFailure(sdk: String) async throws {
         let raw = try await owner()
         try await MaintenanceLane.shared.call(.cloudWorkflowTrackingFailure) { try raw.trackingFailure(sdk: sdk) }

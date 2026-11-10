@@ -6,6 +6,52 @@ import Testing
 
 // The existing suite serializes the process-global Core owner.
 extension ReviewCollectionStartupTests {
+    @Test
+    func serviceSDKSavedRemovalRequiresOriginalHandlerReturnAndActualBookkeeping() async throws {
+        try await withAutomaticServiceApp { app, fixture, wire in
+            let sdk = try #require(await app.factory.engines.last)
+            let zone = try #require(fixture.records.first?.zone)
+            let seed = try #require(fixture.notes.sorted { $0.id < $1.id }.first { !$0.fields.isEmpty })
+            let handler = ServiceAutomaticGate()
+            var original: CloudKitNetworkOperation?
+            do {
+                await sdk.holdNextSentHandlerReturn { await handler.hold() }
+                try await automaticServiceEdit(app, id: seed.id, suffix: " Saved removal boundary")
+                original = try await sdk.prepareSend(zones: [zone]).enqueue(validate: {})
+                try #require(try await serviceAppSignal(handler.entered, stage: "original Saved handler held before SDK removal"))
+                let request = try #require(await sdk.heldSentBatchID)
+                let names = await sdk.heldSavedNames
+                try #require(!names.isEmpty)
+                let workflow = try app.backend.workflow
+                let before = try await workflow.observations()
+                let receipts = await wire.receipts
+                for name in names {
+                    let ack = try #require(try await workflow.entityFacts(name: name))
+                    let actual = try #require(receipts.last { $0.zone == zone && $0.record.name == name })
+                    try #require(ack.ackedRev == ack.localRev && ack.ackedPayloadDigest == ack.payloadDigest)
+                    try #require(ack.ackedSystemFields == actual.record.systemFields)
+                    try #require(await sdk.pendingRecordZoneChanges()[name] == .save)
+                    try #require(!before.contains(.savedPendingRemoved(name: name, requestID: request)))
+                }
+                try #require(!before.contains(.handlerReturned(requestID: request)))
+                await handler.release()
+                try await original?.drain()
+                try await sdk.waitForEventBookkeeping()
+                let after = try await workflow.observations()
+                let returned = try #require(after.firstIndex(of: .handlerReturned(requestID: request)))
+                for name in names {
+                    let removed = try #require(after.firstIndex(of: .savedPendingRemoved(name: name, requestID: request)))
+                    try #require(returned < removed)
+                    try #require(await sdk.pendingRecordZoneChanges()[name] == nil)
+                }
+            } catch {
+                await handler.release()
+                await original?.cancelAndDrain()
+                throw error
+            }
+        }
+    }
+
     @Test(arguments: [false, true])
     func serviceSDKAutomaticSendUsesAdditionalOriginalBatchesForHandedBackRevision(automatic: Bool) async throws {
         try await withAutomaticServiceApp { app, fixture, wire in
@@ -89,6 +135,10 @@ extension ReviewCollectionStartupTests {
                 await joined?.value
                 await app.sync.waitForInputs()
                 try #require(!app.sync.operationFailed)
+                let removalObservations = try await backend.workflow.observations()
+                for name in names {
+                    try #require(removalObservations.contains(.savedPendingRemoved(name: name, requestID: firstBatch)))
+                }
                 let delivered = await sdk.deliveredSentBatches.filter { $0.zone == zone }
                 try #require(delivered.contains { $0.id == firstBatch })
                 let receipts = await wire.receipts

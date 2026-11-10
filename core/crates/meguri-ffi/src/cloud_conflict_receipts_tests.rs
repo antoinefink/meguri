@@ -820,3 +820,42 @@ fn ffi_retained_media_other_stays_pending_and_saved_returns_validated_count() {
         ack_base(&fixture, &sdk, &note.name);
     }
 }
+
+#[test]
+fn saved_removal_export_requires_original_complete_receipt_and_handler_return() {
+    let (fixture, sdk) = published();
+    let (_, original) = add_note(&fixture, "Actual removal export".into());
+    let batch = build(&fixture, &sdk, &[original.name.clone()]);
+    let (saved, failed) = results(&fixture, &sdk, &batch);
+    assert!(failed.is_empty());
+    let names: Vec<_> = saved.iter().map(|r| r.name.clone()).collect();
+    assert_eq!(names, vec![original.name]);
+    assert_eq!(deliver(&fixture, &sdk, &batch, saved, failed), 1);
+    assert!(fixture.workflow.sdk_saved_removed(sdk.instance_id.clone(), batch.id, names.clone()).is_err());
+    fixture.workflow.handler_returned(sdk.instance_id.clone()).unwrap();
+    assert!(fixture.workflow.sdk_saved_removed("foreign-sdk".into(), batch.id, names.clone()).is_err());
+    assert!(fixture.workflow.sdk_saved_removed(sdk.instance_id.clone(), batch.id + 100, names.clone()).is_err());
+    assert!(fixture.workflow.sdk_saved_removed(sdk.instance_id.clone(), batch.id, vec![]).is_err());
+    assert!(fixture.workflow.sdk_saved_removed(sdk.instance_id.clone(), batch.id, vec!["foreign-name".into()]).is_err());
+    fixture.workflow.sdk_saved_removed(sdk.instance_id.clone(), batch.id, names.clone()).unwrap();
+    let observations = fixture.workflow.core.observations();
+    for name in &names {
+        assert!(observations.contains(&meguri_sync::cloud::workflow::Observation::SavedPendingRemoved {
+            name: name.clone(), request_id: batch.id,
+        }));
+    }
+    assert!(fixture.workflow.sdk_saved_removed(sdk.instance_id.clone(), batch.id, names.clone()).is_err());
+    // Leave a second real result unconfirmed, then change the SDK authority.
+    // This must fail because its current guard changed, not as a duplicate.
+    let (_, next) = add_note(&fixture, "Changed authority removal export".into());
+    let next_batch = build(&fixture, &sdk, &[next.name]);
+    let (next_saved, next_failed) = results(&fixture, &sdk, &next_batch);
+    assert!(next_failed.is_empty());
+    let next_names = next_saved.iter().map(|r| r.name.clone()).collect();
+    assert_eq!(deliver(&fixture, &sdk, &next_batch, next_saved, next_failed), 1);
+    fixture.workflow.handler_returned(sdk.instance_id.clone()).unwrap();
+    fixture.workflow.account_changed(
+        Some(sdk.instance_id.clone()), CloudAccountStatus::TemporarilyUnavailable, None,
+    ).unwrap();
+    assert!(fixture.workflow.sdk_saved_removed(sdk.instance_id, next_batch.id, next_names).is_err());
+}

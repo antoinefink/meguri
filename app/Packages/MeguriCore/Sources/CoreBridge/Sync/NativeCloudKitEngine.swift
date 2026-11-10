@@ -225,6 +225,7 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
     private var networkEventWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
     private var batches: [String: UInt64] = [:]
     private var pendingBatch: UInt64?
+    private var savedRemoval = NativeCloudSavedRemoval()
     private var failure: (any Error)?
     private func fetchedPayloadStaging() throws -> CloudMediaStaging {
         try CloudMediaStaging.sharedDefault()
@@ -249,6 +250,14 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         do { return try validatedPendingRecords().byName }
         catch { failure = error; return [:] }
     }
+    func takeSavedPendingRemovals() async -> [CloudSavedPendingRemoval] {
+        guard failure == nil, sdk != nil else { return [] }
+        do {
+            savedRemoval.observe(instance: instanceID, pending: try validatedPendingRecords().byName,
+                                 generation: networkLifetime.authority())
+            return savedRemoval.take(generation: networkLifetime.authority())
+        } catch { failure = error; return [] }
+    }
     func pendingDatabaseChanges() -> Set<String> {
         guard failure == nil else { return [] }
         do { return try NativeCloudKitIdentityValidation.databaseZoneNames(sdk?.state.pendingDatabaseChanges ?? []) }
@@ -259,6 +268,8 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         guard let sdk else { return }
         do {
             let pending = try validatedPendingRecords()
+            savedRemoval.observe(instance: instanceID, pending: pending.byName, generation: networkLifetime.authority())
+            savedRemoval.applicationWillChangePending()
             guard let collectionZone else { throw NativeCloudKitFailure.unsupportedRecord }
             let removes = pending.removals(names: update.removes)
             let adds: [CKSyncEngine.PendingRecordZoneChange] = update.adds.map { name, change in
@@ -406,6 +417,7 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         networkLifetime.retire()
         await cancelOperations()
         sdk = nil
+        savedRemoval = NativeCloudSavedRemoval()
     }
     private func fields(_ record: CKRecord) throws -> Data {
         try NativeCloudKitSystemFields.encode(record)
@@ -420,9 +432,14 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         NativeCloudKitSendError.code(error)
     }
     func handleEvent(_ event: CKSyncEngine.Event, syncEngine: CKSyncEngine) async {
+        guard sdk === syncEngine else { return }
         if activeEvent { await withCheckedContinuation { eventWaiters.append($0) } }
         else { activeEvent = true; networkLifetime.beginEvent() }
         if let returnedWork { await returnedWork.value }
+        if sdk === syncEngine {
+            let receipts = await takeSavedPendingRemovals()
+            if !receipts.isEmpty { await delegate.savedPendingRemovalsConfirmed(receipts, engine: self) }
+        }
         // Stage before the delivery gate can suspend. Keep all native leases
         // through original callback completion, including any suspended wait.
         let staged = Result<NativeCloudFetchedPayloads?, any Error> {
@@ -475,6 +492,7 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
                         zone: id.zoneID.zoneName, nativeCode: Int64(error.code.rawValue),
                         retryAfterMilliseconds: NativeCloudOwnRecords.retryDuration(error).flatMap { Int64(exactly: $0) })
                 }
+                savedRemoval.sent(batch, names: Set(saved.map(\.name) + sent.deletedRecordIDs.map(\.recordName)))
                 forwarded = .sent(batchID: batch, saved: saved, failed: failed, deleted: sent.deletedRecordIDs.map(\.recordName), failedDeletes: failedDeletes)
             case .willFetchChanges(let will): forwarded = .willFetch(groupID: will.context.options.operationGroup.name ?? "", reason: will.context.reason == .manual ? .manual : .scheduled)
             case .willFetchRecordZoneChanges(let will):
@@ -514,9 +532,10 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         await delegate.eventBookkeepingCompleted(event, engine: self)
     }
     func nextRecordZoneChangeBatch(_ context: CKSyncEngine.SendChangesContext, syncEngine: CKSyncEngine) async -> CKSyncEngine.RecordZoneChangeBatch? {
-        guard failure == nil, let collectionZone else { return nil }
+        guard failure == nil, sdk === syncEngine, let collectionZone else { return nil }
         if let returnedWork { await returnedWork.value }
         let pending = pendingRecordZoneChanges()
+        let removalIssue = savedRemoval.capture(pending: pending, generation: networkLifetime.authority())
         guard failure == nil else { return nil }
         // Scope each request to one zone, retaining collection-before-media
         // order whenever the original SDK request permits both zones.
@@ -543,6 +562,7 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         do {
             try NativeCloudMediaBatch.validate(batch, zone: batchZone)
             let saves = try batch.saves.map { try encode($0, zone: batchZone) }
+            savedRemoval.handed(batch.id, names: Set(batch.saves.map(\.name) + batch.deletes), issue: removalIssue)
             pendingBatch = batch.id
             for save in saves { batches[save.recordID.recordName] = batch.id }
             for name in batch.deletes { batches[name] = batch.id }

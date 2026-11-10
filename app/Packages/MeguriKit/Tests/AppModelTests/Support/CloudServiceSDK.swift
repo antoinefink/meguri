@@ -48,6 +48,7 @@ actor ServiceSDK: CloudKitEngine {
     private let collectionZone: String
     private var pendingRevision: [String: UInt64] = [:]
     private var revision: UInt64 = 0
+    private var savedRemovals: [CloudSavedPendingRemoval] = []
     // This is the SDK's network slot, not the application's policy/input lane.
     private var networkActive = false
     private var networkWaiters: [CheckedContinuation<Void, Never>] = []
@@ -111,10 +112,19 @@ actor ServiceSDK: CloudKitEngine {
             automaticRequested = revision; scheduleAutomaticSend()
         }
     }
-    private func removePending(_ names: [String], issued: [String: UInt64]) {
-        for name in names where pendingRevision[name] == issued[name] {
+    func takeSavedPendingRemovals() async -> [CloudSavedPendingRemoval] {
+        let result = savedRemovals
+        savedRemovals.removeAll()
+        return cancelled || released ? [] : result
+    }
+    @discardableResult
+    private func removePending(_ names: [String], issued: [String: UInt64]) -> Set<String> {
+        var removed = Set<String>()
+        for name in names where issued[name] != nil && pendingRevision[name] == issued[name] {
+            removed.insert(name)
             pending.removeValue(forKey: name); pendingRevision.removeValue(forKey: name)
         }
+        return removed
     }
     private func scheduleAutomaticSend() {
         guard automaticallySync, automaticRequested != nil, automaticRun == nil,
@@ -165,18 +175,28 @@ actor ServiceSDK: CloudKitEngine {
         else { networkWaiters.removeFirst().resume() }
     }
     private func deliver(_ event: CloudEngineEvent, removing: [String] = [], issued: [String: UInt64] = [:],
+                         removalGeneration: UInt64? = nil,
                          beforeReturn: (@Sendable () async -> Void)? = nil) async throws {
         guard let delegate else { throw ServiceWorkflowFailure.refused }
         if eventActive { await withCheckedContinuation { eventWaiters.append($0) } }
         else { eventActive = true; lifetime.beginEvent() }
         await delegate.eventWillDeliver(engine: self)
         await delegate.handleEvent(event, engine: self)
-        if case .sent = event, let hold = nextSentHandlerReturn {
+        if case .sent(let request, let saved, _, _, _) = event, let hold = nextSentHandlerReturn {
+            heldSentBatchID = request
+            heldSavedNames = saved.map(\.name)
             nextSentHandlerReturn = nil
             await hold()
         }
         // SDK successful removals happen after the original handler returns.
-        removePending(removing, issued: issued)
+        let removed = removePending(removing, issued: issued)
+        if case .sent(let request, let saved, _, let deleted, _) = event {
+            let expected = Set(saved.map(\.name) + deleted)
+            if !cancelled, !released, removalGeneration == lifetime.authority(),
+               !expected.isEmpty, expected.isSubset(of: removed) {
+                savedRemovals.append(.init(instanceID: instanceID, requestID: request, names: expected))
+            }
+        }
         await delegate.eventHandlerReturned(event, engine: self)
         await beforeReturn?()
         if eventWaiters.isEmpty {
@@ -273,6 +293,7 @@ actor ServiceSDK: CloudKitEngine {
             batchRequests += 1
             let scoped = pending.filter { NativeCloudMediaBatch.zone(name: $0.key, collection: collectionZone) == zone }
             let issued = pendingRevision
+            let issuedGeneration = lifetime.authority()
             if let batch = await delegate.nextRecordZoneChangeBatch(pending: scoped, zone: zone, engine: self) {
                 try requireNetwork()
                 guard !batch.saves.isEmpty || !batch.deletes.isEmpty else { throw ServiceWorkflowFailure.wire }
@@ -327,7 +348,7 @@ actor ServiceSDK: CloudKitEngine {
                     await held.hold()
                 }
                 try await deliver(.sent(batchID: batch.id, saved: saved, failed: failed, deleted: deleted),
-                    removing: saved.map(\.name) + deleted, issued: issued)
+                    removing: saved.map(\.name) + deleted, issued: issued, removalGeneration: issuedGeneration)
                 deliveredSentBatches.append(.init(zone: zone, id: batch.id))
                 if !failed.isEmpty { result = .failed }
             } else {

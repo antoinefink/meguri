@@ -891,6 +891,12 @@ impl CloudWorkflow {
         callback::enter("CloudWorkflow.handler_returned");
         self.core.return_sent_handler(&sdk).map(|_| ()).map_err(cloud_error)
     }
+    /// Actual SDK bookkeeping only, after the original sent handler returned.
+    pub fn sdk_saved_removed(&self, sdk: String, request_id: u64, names: Vec<String>) -> Result<(), CoreError> {
+        callback::enter("CloudWorkflow.sdk_saved_removed");
+        self.core.validate_sdk(&sdk).map_err(cloud_error)?;
+        self.core.sdk_saved_removed(&sdk, request_id, &names).map_err(cloud_error)
+    }
     pub fn tracking_failure(&self, sdk: String) -> Result<(), CoreError> {
         callback::enter("CloudWorkflow.tracking_failure");
         self.core.adapter_tracking_failure(&sdk).map_err(cloud_error)

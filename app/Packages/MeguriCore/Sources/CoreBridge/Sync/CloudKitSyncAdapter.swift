@@ -12,6 +12,9 @@ private actor CloudSDKDelegate: CloudKitEngineDelegate {
     func eventHandlerReturned(_ event: CloudEngineEvent, engine: any CloudKitEngine) async {
         await adapter?.eventHandlerReturned(event, origin: origin)
     }
+    func savedPendingRemovalsConfirmed(_ receipts: [CloudSavedPendingRemoval], engine: any CloudKitEngine) async {
+        await adapter?.savedPendingRemovalsConfirmed(receipts, origin: origin, engine: engine)
+    }
     func eventBookkeepingCompleted(_ event: CloudEngineEvent, engine: any CloudKitEngine) async {
         await adapter?.eventBookkeepingCompleted(event, origin: origin)
     }
@@ -98,6 +101,7 @@ public actor CloudKitSyncAdapter {
         var networks = 0
         var applying = false
         var batches: [UInt64: UInt32] = [:]
+        var savedRemovalGuards: [UInt64: (guardValue: CloudGuard, names: Set<String>)] = [:]
         var failed = false
         var operationSaved: UInt64 = 0
         var observationOrdinal: UInt64 = 0
@@ -610,6 +614,13 @@ public actor CloudKitSyncAdapter {
             }
             try await instance.engine.applyPendingUpdate(applied)
             guard await valid(origin) else { return }
+            let receipts = await instance.engine.takeSavedPendingRemovals()
+            await savedPendingRemovalsConfirmed(receipts, origin: origin, engine: instance.engine)
+            guard await valid(origin) else { return }
+            // A later application mutation ends any still-unconfirmed original
+            // ownership. Its absence must never become a delayed Saved proof.
+            let touched = Set(applied.adds.keys).union(applied.removes)
+            instance.savedRemovalGuards = instance.savedRemovalGuards.filter { $0.value.names.isDisjoint(with: touched) }
             let after = await instance.engine.pendingRecordZoneChanges()
             guard await valid(origin) else { return }
             let added = update.adds.keys.filter { after[$0] == update.adds[$0] }
@@ -688,7 +699,10 @@ public actor CloudKitSyncAdapter {
             case .stateUpdate(let state): try await core.stateUpdate(sdk: origin, state: state)
             case .fetched(let zone, let records, let deleted): try await core.fetched(sdk: origin, zone: zone, records: records, deleted: deleted)
             case .sent(let id, let saved, let failed, let deleted, let failedDeletes):
+                let removalGuard = try await core.currentGuard()
+                guard await valid(origin), owned[origin] === instance else { return }
                 let actualSaved = try await core.sent(sdk: origin, batchID: id, saved: saved, failed: failed, deleted: deleted, failedDeletes: failedDeletes, batchCount: instance.batches[id] ?? UInt32(saved.count + failed.count + deleted.count + failedDeletes.count))
+                if !saved.isEmpty || !deleted.isEmpty { instance.savedRemovalGuards[id] = (removalGuard, Set(saved.map(\.name) + deleted)) }
                 instance.operationSaved += actualSaved
                 let receipt = CloudMediaSendReceipt(failed: failed, failedDeletes: failedDeletes)
                 if let diagnostic = receipt.diagnostic { lastFailure = diagnostic }
@@ -725,7 +739,11 @@ public actor CloudKitSyncAdapter {
     fileprivate func eventHandlerReturned(_ event: CloudEngineEvent, origin: String) async {
         guard let instance = owned[origin] else { return }
         if case .sent = event, await valid(origin), !instance.failed {
-            do { try await core.handlerReturned(sdk: origin) }
+            do {
+                try await core.handlerReturned(sdk: origin)
+                let receipts = await instance.engine.takeSavedPendingRemovals()
+                await savedPendingRemovalsConfirmed(receipts, origin: origin, engine: instance.engine)
+            }
             catch { lastFailure = error; instance.failed = true }
         }
         if !instance.failed, await valid(origin), owned[origin] === instance {
@@ -749,6 +767,23 @@ public actor CloudKitSyncAdapter {
             }
         }
     }
+    fileprivate func savedPendingRemovalsConfirmed(_ receipts: [CloudSavedPendingRemoval], origin: String,
+                                                   engine: any CloudKitEngine) async {
+        guard let instance = owned[origin], !instance.failed, engine.instanceID == origin,
+              (instance.engine as AnyObject) === (engine as AnyObject) else { return }
+        for receipt in receipts {
+            guard receipt.instanceID == origin, !receipt.names.isEmpty,
+                  let original = instance.savedRemovalGuards[receipt.requestID], receipt.names == original.names,
+                  await valid(origin), owned[origin] === instance, !instance.failed else { continue }
+            do {
+                guard try await core.currentGuard() == original.guardValue,
+                      await valid(origin), owned[origin] === instance else { continue }
+                try await core.savedPendingRemoved(receipt)
+                instance.savedRemovalGuards.removeValue(forKey: receipt.requestID)
+            } catch { lastFailure = error; instance.failed = true }
+        }
+    }
+
     // Runs only after the original engine has updated its event slot/lifetime.
     // This notification only marks/enqueues; returnedWork must never join us.
     fileprivate func eventBookkeepingCompleted(_ event: CloudEngineEvent, origin: String) {

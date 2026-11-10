@@ -80,9 +80,20 @@ public enum CloudEngineEvent: Sendable, Equatable {
     case didFetch(groupID: String, reason: CloudFetchReason)
     case willSend(zone: String), didSend(zone: String)
 }
+/// Facts retained by the original SDK before a newer pending update can hide
+/// which request owned the removed entries. ACKs are not removal receipts.
+public struct CloudSavedPendingRemoval: Sendable, Equatable {
+    public let instanceID: String
+    public let requestID: UInt64
+    public let names: Set<String>
+    public init(instanceID: String, requestID: UInt64, names: Set<String>) {
+        self.instanceID = instanceID; self.requestID = requestID; self.names = names
+    }
+}
 public protocol CloudKitEngine: Sendable {
     var instanceID: String { get }
     func pendingRecordZoneChanges() async -> [String: CloudPendingChange]
+    func takeSavedPendingRemovals() async -> [CloudSavedPendingRemoval]
     func pendingDatabaseChanges() async -> Set<String>
     func applyPendingUpdate(_ update: CloudPendingUpdate) async throws
     func removePendingDatabaseChanges() async
@@ -103,8 +114,16 @@ public protocol CloudKitEngineDelegate: Sendable {
     func eventHandlerReturned(_ event: CloudEngineEvent, engine: any CloudKitEngine) async
     /// Notification only: queue work and return; never join network work here.
     func eventBookkeepingCompleted(_ event: CloudEngineEvent, engine: any CloudKitEngine) async
+    /// Actual facts from a later original-SDK bookkeeping boundary.
+    func savedPendingRemovalsConfirmed(_ receipts: [CloudSavedPendingRemoval], engine: any CloudKitEngine) async
     func nextRecordZoneChangeBatch(pending: [String: CloudPendingChange], zone: String, engine: any CloudKitEngine) async -> CloudEngineBatch?
     func nextFetchChangesOptions(_ options: CloudFetchOptions, engine: any CloudKitEngine) async -> CloudFetchOptions
+}
+extension CloudKitEngine {
+    public func takeSavedPendingRemovals() async -> [CloudSavedPendingRemoval] { [] }
+}
+extension CloudKitEngineDelegate {
+    public func savedPendingRemovalsConfirmed(_ receipts: [CloudSavedPendingRemoval], engine: any CloudKitEngine) async {}
 }
 public struct CloudResolvedAccount: Sendable {
     public let status: CloudAccountStatus
