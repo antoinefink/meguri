@@ -407,7 +407,14 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 guard !quiescing else { throw CancellationError() }
             }
             switch command.action {
-            case .updatePending, .applyReady, .recordExchange, .recordQuietPoint, .probeTracking, .statusChanged:
+            case .updatePending:
+                outputs.append(try await policy.executeCore(command))
+                // Core validates the original command and queues its ordered
+                // updates. The adapter validates the SDK and defers application
+                // until any active handler has returned, then acknowledges
+                // only the additions the SDK actually retained.
+                try await adapter.consumePendingUpdates()
+            case .applyReady, .recordExchange, .recordQuietPoint, .probeTracking, .statusChanged:
                 outputs.append(try await policy.executeCore(command))
             case .startEngine, .stopEngine, .configureAutomatic:
                 guard let execution = try await policy.prepareExecution(command) else {

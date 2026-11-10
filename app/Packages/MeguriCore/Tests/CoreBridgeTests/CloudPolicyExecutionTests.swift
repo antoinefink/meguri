@@ -110,6 +110,257 @@ private struct CancelledPolicyGate: CloudPolicyExchangeGate {
     func waitBeforeCapture(_ command: CloudPolicyCommand) async throws -> CloudPolicyEarlyEnd? { .cancelled }
 }
 
+private func pendingCommand(_ policy: CoreCloudPolicyService, cause: CloudPolicyChangeCause = .local) async throws -> CloudPolicyCommand {
+    let commands = try policyCommands(try await policy.input(.refresh(cause)))
+    let updates = commands.filter { if case .updatePending = $0.action { true } else { false } }
+    try #require(updates.count == 1)
+    return try #require(updates.first)
+}
+
+private func addPendingDeck(_ fixture: CloudKitBridgeFixture, name: String) async throws {
+    let added = try await CoreDeckService().addDeck(name: name)
+    try await fixture.core.awaitTracking(generation: added.summary.generation, seq: added.summary.seq)
+}
+
+/// Faults and pauses only SDK operations. The original Core command, pending
+/// take, update application and acknowledgement all use production code.
+private actor PolicyPendingEngine: CloudKitEngine {
+    nonisolated let instanceID: String
+    private let sdk: CloudKitEngineFake
+    private var applyError: (any Error)?
+    private var snapshotPause: CloudCallbackGate?
+    private var applyPause: CloudCallbackGate?
+    private var received: [CloudPendingUpdate] = []
+    init(_ sdk: CloudKitEngineFake) { self.sdk = sdk; instanceID = sdk.instanceID }
+    func failNextApply(_ error: any Error) { applyError = error }
+    func pauseNextSnapshot(_ gate: CloudCallbackGate) { snapshotPause = gate }
+    func pauseNextApply(_ gate: CloudCallbackGate) { applyPause = gate }
+    func receivedUpdates() -> [CloudPendingUpdate] { received }
+    func pendingRecordZoneChanges() async -> [String: CloudPendingChange] {
+        if let gate = snapshotPause { snapshotPause = nil; await gate.enter() }
+        return await sdk.pendingRecordZoneChanges()
+    }
+    func pendingDatabaseChanges() async -> Set<String> { await sdk.pendingDatabaseChanges() }
+    func applyPendingUpdate(_ update: CloudPendingUpdate) async throws {
+        received.append(update)
+        if let gate = applyPause { applyPause = nil; await gate.enter(); try Task.checkCancellation() }
+        if let error = applyError { applyError = nil; throw error }
+        await sdk.applyPendingUpdate(update)
+    }
+    func removePendingDatabaseChanges() async { await sdk.removePendingDatabaseChanges() }
+    func waitForEventBookkeeping() async throws { try await sdk.waitForEventBookkeeping() }
+    func prepareSend(zones: [String]) async throws -> CloudKitNetworkEnqueue { try await sdk.prepareSend(zones: zones) }
+    func prepareFetch(options: CloudFetchOptions) async throws -> CloudKitNetworkEnqueue { try await sdk.prepareFetch(options: options) }
+    func sendChanges(zones: [String]) async throws { try await sdk.sendChanges(zones: zones) }
+    func fetchChanges(options: CloudFetchOptions) async throws { try await sdk.fetchChanges(options: options) }
+    func cancelOperations() async { await sdk.cancelOperations() }
+    func release() async { await sdk.release() }
+}
+
+private struct PolicyPendingApplyFailure: Error {}
+
+extension EventTests {
+    @Test(arguments: [false, true], [CloudPolicyChangeCause.local, .cloud])
+    func nativeUpdatePendingDeliversCoreAdditionsWithoutNetworkCall(automatic: Bool, cause: CloudPolicyChangeCause) async throws {
+        try await withNativePolicyFixture { f in
+            let (policy, executor) = try await nativePolicy(f)
+            if automatic {
+                try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: executor)
+            }
+            let engine = try await f.engine()
+            let before = await engine.pendingRecordZoneChanges()
+            let emitted = try await f.core.emittedUpdateIDs()
+            let calls = engine.acceptedNetworkCalls.value
+            try await addPendingDeck(f, name: "Ordinary pending addition")
+            let command = try await pendingCommand(policy, cause: cause)
+            let kind: CloudUpdateKind = cause == .local ? .full : .changes
+            let expectedUpdate: CloudPolicyUpdate = cause == .local ? .full : .changes
+            guard case .updatePending(let update) = command.action else { Issue.record("Expected UpdatePending"); return }
+            #expect(update == expectedUpdate)
+            let delivered = Mutex<[CloudPolicyOutput]>([])
+            let result = await executor.execute(command, corePrepared: {}, acknowledgeOutputs: { values in
+                delivered.withLock { $0.append(contentsOf: values) }
+            })
+            #expect(result.error == nil && !result.deferred && result.afterOutputs == nil)
+            // Local Core output still belongs to the original coordinator ACK.
+            #expect(result.outputs.count == 1 && result.acknowledgedOutputCount == 0)
+            #expect(delivered.withLock { $0.isEmpty })
+            _ = try policyCommands(try #require(result.outputs.first))
+            let ids = try await f.core.emittedUpdateIDs().filter { !emitted.contains($0) }
+            try #require(ids.count == 1)
+            let id = try #require(ids.first)
+            let after = await engine.pendingRecordZoneChanges()
+            let added = Set(after.keys).subtracting(before.keys)
+            try #require(added.count == 1, "The real local deck must reach the idle SDK")
+            #expect(after == (try await f.core.trackingSendables()))
+            let observations = try await f.core.observations()
+            #expect(observations.contains(.corePendingEmitted(kind: kind, actionID: id)))
+            for name in added {
+                #expect(after[name] == .save)
+                #expect(observations.contains(.pendingAdded(name: name, actionID: id)))
+            }
+            let expectedAdds = kind == .full ? after.keys.sorted() : added.sorted()
+            #expect(await engine.recordedTrace().contains(.pendingApplied(id, [], expectedAdds)))
+            #expect(engine.acceptedNetworkCalls.value == calls && engine.automaticallySync == automatic)
+        }
+    }
+
+    @Test func nativeUpdatePendingApplyFailureRetainsCoreOutputBeforeRefresh() async throws {
+        try await withNativePolicyFixture { f in
+            let wrapped = Mutex<PolicyPendingEngine?>(nil)
+            await f.factory.wrapNextEngine { sdk in
+                let engine = PolicyPendingEngine(sdk); wrapped.withLock { $0 = engine }; return engine
+            }
+            let (policy, executor) = try await nativePolicy(f)
+            let engine = try #require(wrapped.withLock { $0 })
+            let sdk = try await f.engine()
+            let before = await sdk.pendingRecordZoneChanges()
+            let received = await engine.receivedUpdates().count
+            try await addPendingDeck(f, name: "Pending apply failure")
+            let command = try await pendingCommand(policy)
+            await engine.failNextApply(PolicyPendingApplyFailure())
+            let deliveries = Mutex(0)
+            let inputs = Mutex(0)
+            let result = await CloudPolicyOutputAcknowledgement.$current.withValue({ outputs in
+                deliveries.withLock { $0 += outputs.count }
+            }) {
+                await CloudPolicyOutputAcknowledgement.$input.withValue({ work in
+                    inputs.withLock { $0 += 1 }; return try await work()
+                }) { await executor.execute(command) }
+            }
+            #expect(result.error is PolicyPendingApplyFailure)
+            #expect(result.outputs.count == 1 && result.acknowledgedOutputCount == 0 && !result.deferred)
+            _ = try policyCommands(try #require(result.outputs.first))
+            #expect(deliveries.withLock { $0 } == 0 && inputs.withLock { $0 } == 0)
+            let update = try #require(await engine.receivedUpdates().dropFirst(received).first)
+            let additions = Set(update.adds.keys).subtracting(before.keys)
+            try #require(additions.count == 1)
+            #expect(await sdk.pendingRecordZoneChanges() == before)
+            let observations = try await f.core.observations()
+            for name in additions { #expect(!observations.contains(.pendingAdded(name: name, actionID: update.id))) }
+            let followup = try #require(result.afterOutputs)
+            let refreshed = await followup()
+            #expect(refreshed.error == nil && refreshed.outputs.count == 1 && refreshed.acknowledgedOutputCount == 1)
+            #expect(inputs.withLock { $0 } == 1 && deliveries.withLock { $0 } == 0)
+            #expect(sdk.acceptedNetworkCalls.value == 0)
+        }
+    }
+
+    @Test func nativeUpdatePendingCancellationDoesNotAcknowledgeUnappliedAdditions() async throws {
+        try await withNativePolicyFixture { f in
+            let wrapped = Mutex<PolicyPendingEngine?>(nil)
+            await f.factory.wrapNextEngine { sdk in
+                let engine = PolicyPendingEngine(sdk); wrapped.withLock { $0 = engine }; return engine
+            }
+            let (policy, executor) = try await nativePolicy(f)
+            let engine = try #require(wrapped.withLock { $0 })
+            let sdk = try await f.engine()
+            let before = await sdk.pendingRecordZoneChanges()
+            let received = await engine.receivedUpdates().count
+            try await addPendingDeck(f, name: "Cancelled pending apply")
+            let command = try await pendingCommand(policy)
+            let gate = CloudCallbackGate()
+            await engine.pauseNextApply(gate)
+            let running = Task {
+                let result = await executor.execute(command)
+                _ = await gate.operationSucceeded()
+                return result
+            }
+            do {
+                try await gate.waitForArrival()
+                running.cancel()
+                await gate.open()
+                let result = await running.value
+                #expect(result.error is CancellationError)
+                #expect(result.outputs.count >= 1 && !result.deferred)
+                _ = try policyCommands(try #require(result.outputs.first))
+                let update = try #require(await engine.receivedUpdates().dropFirst(received).first)
+                let observations = try await f.core.observations()
+                for name in Set(update.adds.keys).subtracting(before.keys) {
+                    #expect(!observations.contains(.pendingAdded(name: name, actionID: update.id)))
+                }
+                #expect(await sdk.pendingRecordZoneChanges() == before)
+                #expect(await gate.pendingWaiterCount() == 0 && sdk.acceptedNetworkCalls.value == 0)
+            } catch { running.cancel(); await gate.open(); _ = await running.value; throw error }
+        }
+    }
+
+    @Test func nativeUpdatePendingRejectsOriginalGuardAndRetiredSDK() async throws {
+        try await withNativePolicyFixture { f in
+            let wrapped = Mutex<PolicyPendingEngine?>(nil)
+            await f.factory.wrapNextEngine { sdk in
+                let engine = PolicyPendingEngine(sdk); wrapped.withLock { $0 = engine }; return engine
+            }
+            let (policy, executor) = try await nativePolicy(f)
+            let engine = try #require(wrapped.withLock { $0 })
+            let sdk = try await f.engine()
+            let before = await sdk.pendingRecordZoneChanges()
+            try await addPendingDeck(f, name: "Pending authority race")
+            let command = try await pendingCommand(policy)
+            let gate = CloudCallbackGate()
+            await engine.pauseNextSnapshot(gate)
+            try await withCloudTask(gates: [gate], operation: {
+                let result = await executor.execute(command)
+                #expect(result.error == nil && result.outputs.count == 1)
+            }, whileRunning: {
+                try await gate.waitForArrival()
+                // Invalidate the actual owner while the adapter awaits SDK state.
+                try await f.core.retireSDK(sdk.instanceID, policyStop: false)
+                await gate.open()
+            })
+            #expect(await sdk.pendingRecordZoneChanges() == before)
+            _ = try await policy.input(.settings(.init(enabled: true, paused: true, automatic: false, media: false)))
+            let emitted = try await f.core.emittedUpdateIDs()
+            let trace = await sdk.recordedTrace()
+            let stale = await executor.execute(command)
+            #expect(stale.error as? BridgeError == .cloudPolicy(.staleCommand))
+            #expect(try await f.core.emittedUpdateIDs() == emitted)
+            #expect(await sdk.recordedTrace() == trace && sdk.acceptedNetworkCalls.value == 0)
+        }
+    }
+
+    @Test func nativeUpdatePendingDefersOrderedListsUntilOriginalCallbackReturns() async throws {
+        try await withNativePolicyFixture { f in
+            let (policy, executor) = try await nativePolicy(f)
+            let engine = try await f.engine()
+            let before = await engine.pendingRecordZoneChanges()
+            let emitted = try await f.core.emittedUpdateIDs()
+            let gate = CloudCallbackGate()
+            await engine.pauseNextCallback(gate)
+            try await withCloudTask(gates: [gate], operation: {
+                await engine.emitRetained(.stateUpdate(Data([0x70, 0x34])), label: "pendingBridge")
+            }, whileRunning: {
+                try await gate.waitForArrival()
+                for cause in [CloudPolicyChangeCause.local, .cloud] {
+                    try await addPendingDeck(f, name: "Deferred pending \(cause)")
+                    let command = try await pendingCommand(policy, cause: cause)
+                    let result = await executor.execute(command)
+                    #expect(result.error == nil && result.outputs.count == 1 && result.acknowledgedOutputCount == 0)
+                }
+                #expect(await engine.pendingRecordZoneChanges() == before)
+                await gate.open()
+            })
+            let ids = try await f.core.emittedUpdateIDs().filter { !emitted.contains($0) }
+            try #require(ids.count == 2)
+            let trace = await engine.recordedTrace()
+            let returned = try #require(trace.firstIndex(of: .eventReturned("pendingBridge")))
+            let applied = trace.compactMap { event -> UInt64? in
+                if case .pendingApplied(let id, _, _) = event, ids.contains(id) { id } else { nil }
+            }
+            #expect(applied == ids)
+            #expect(!trace[..<returned].contains { if case .pendingApplied(let id, _, _) = $0 { ids.contains(id) } else { false } })
+            let after = await engine.pendingRecordZoneChanges()
+            let additions = Set(after.keys).subtracting(before.keys)
+            #expect(additions.count == 2)
+            let observations = try await f.core.observations()
+            for name in additions {
+                #expect(observations.contains { if case .pendingAdded(let added, let id) = $0 { added == name && ids.contains(id) } else { false } })
+            }
+            #expect(await gate.pendingWaiterCount() == 0 && engine.acceptedNetworkCalls.value == 0)
+        }
+    }
+}
+
 extension EventTests {
     @Test func nativePolicySetupRejectsLocalOnlyOpeningBeforeSDKCreation() async throws {
         try await withCloudKitFixture(startAdapter: false) { fixture in
