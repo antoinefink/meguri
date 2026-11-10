@@ -313,3 +313,28 @@ Integrator verification after the repair:
 The earlier initial-publication failure remains retained and unexplained.
 Historical Mac ACK recovery, full runtime/corruption coverage, signed execution
 and the original-base integration gate remain pending. No unit acceptance.
+
+## Held snapshot argument-count follow-up, source only
+
+Main-checkout starting commit: `aaf27d2efbd80dae1c8c6bc20b757e8ad020b1c7`.
+Filtered export: `cleanroom/20261110T144241Z-6120`; synthetic baseline
+`dacbee21e40eb6f52e5869358a0f376b0be10602`.
+For `core-lint/20261110T144134Z-98404`, grouped only the caller-held
+WalIdentity and snapshot Seq into one tuple parameter, destructured inside
+`original_edit_witness_for_testing`. The actual edit Seq remains separate.
+Both existing internal Rust callers, including the stale-frontier regression,
+now pass that tuple. Guards, control flow, FFI/public DTO/API surfaces,
+test assertions and timeouts are unchanged; no lint suppression was added.
+
+One source-only diff/callsite consistency inspection precedes export.
+Verification remains pending with the integrator: no builds or tests ran here,
+and the failed lint receipt remains retained. No passing lint or acceptance
+claim is made by this follow-up.
+
+Integrator evidence: `core-test/20261110T144351Z-10957` passes all three
+process/frontier cases; `similarity/20261110T144420Z-14331` passes. The first
+lint run `20261110T144419Z-14189` passes clippy but fails formatting. Standard
+`core-format/20261110T144459Z-18071` changes only the equivalent helper call
+layout. Final `core-lint/20261110T144503Z-18070` passes all four checks.
+Independent tuple follow-up review finds no P0–P2 issues; no public ABI, guard,
+assertion or timing change. The retained earlier failures remain in place.

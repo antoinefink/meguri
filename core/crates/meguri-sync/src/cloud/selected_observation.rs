@@ -689,18 +689,12 @@ impl Runtime {
         collection: &Collection,
         id: i64,
         baseline: [u8; 32],
-        identity: meguri_engine::WalIdentity,
-        snapshot_seq: Seq,
+        held_snapshot: (meguri_engine::WalIdentity, Seq),
         edit_seq: Seq,
         digest: [u8; 32],
     ) -> Result<[u8; 32], RuntimeError> {
-        let (entity, _) = self.original_note_observation_for_testing(
-            collection,
-            id,
-            identity,
-            snapshot_seq,
-            digest,
-        )?;
+        let (identity, snapshot_seq) = held_snapshot;
+        let (entity, _) = self.original_note_observation_for_testing(collection, id, identity, snapshot_seq, digest)?;
         let (snapshot, control) = self.selected_owned_snapshot(collection)?;
         let b = snapshot.bound.as_ref().ok_or(Error::RecoveryRefused)?;
         if entity.observed_seq != edit_seq.0 || entity.local_rev == 0 || entity.observer_open != b.open_counter {
