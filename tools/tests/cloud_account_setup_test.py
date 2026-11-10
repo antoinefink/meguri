@@ -13,6 +13,7 @@ import plistlib
 from pathlib import Path
 import re
 import stat
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -20,6 +21,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("generated_cloud_account_setup", ROOT / "tools/scripts/cloud-account-setup.py")
 p = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = p
 spec.loader.exec_module(p)
 CONTAINER = "iCloud.generated.setup"
 CANDIDATE = [41, 12, 255]  # Synthetic test data only.
@@ -164,6 +166,67 @@ class SetupDiagnosticTests(unittest.TestCase):
             p.perform("acct1",source,terminal,transport,lambda current=None:None,diagnostic)
         self.assertEqual(diagnostic.phase,"capture");self.assertEqual(terminal.prompts,[])
         source.publish.assert_not_called();self.assertEqual(transport.actions,["capture"])
+
+
+class GuestDiagnosticTests(unittest.TestCase):
+    def test_guest_errno_and_refusal_emit_only_closed_fields(self):
+        for error,code in ((OSError(p.errno.EPIPE,"GENERATED_PRIVATE_MARKER"),"os-broken-pipe"),
+                           (p.v.Refused("transport-frame"),"transport-frame")):
+            diagnostic=p.SetupDiagnostic();diagnostic.enter("guest-app-receive");out=io.StringIO()
+            with contextlib.redirect_stderr(out):diagnostic.emit(error,guest=True)
+            self.assertNotIn("GENERATED_PRIVATE_MARKER",out.getvalue())
+            value=json.loads(out.getvalue().removeprefix("MG_OWNER_GUEST_DIAGNOSTIC "))
+            self.assertEqual(value["phase"],"guest-app-receive");self.assertEqual(value["refusal"],code)
+    def test_relay_rejects_private_unknown_fields_and_raw_stream(self):
+        good={"phase":"guest-original-proof","refusal":"os-reset","kind":"os-error"}
+        bad={**good,"phase":"GENERATED_PRIVATE_MARKER"}
+        wire=b"GENERATED_PRIVATE_MARKER\n"+b"MG_OWNER_GUEST_DIAGNOSTIC "+json.dumps(bad).encode()+b"\n"
+        wire+=b"MG_OWNER_GUEST_DIAGNOSTIC "+json.dumps(good).encode()+b"\n"
+        out=io.StringIO()
+        with contextlib.redirect_stderr(out):p.relay_guest_diagnostic(wire)
+        self.assertNotIn("GENERATED_PRIVATE_MARKER",out.getvalue())
+        self.assertEqual(json.loads(out.getvalue().removeprefix("MG_OWNER_GUEST_DIAGNOSTIC ")),good)
+    def test_close_relays_only_after_original_supervisor_join(self):
+        value={"phase":"guest-app-receive","refusal":"transport-frame","kind":"refused"}
+        for failure in (False,True):
+            transport=p.Transport.__new__(p.Transport);transport.closed=False;transport.err=tempfile.TemporaryFile()
+            transport.err.write(b"MG_OWNER_GUEST_DIAGNOSTIC "+json.dumps(value).encode()+b"\n");transport.err.flush()
+            events=[]
+            def joined(instance):
+                events.append("join");instance.closed=True;instance.err.close()
+                if failure:raise OSError("GENERATED_PRIVATE_MARKER")
+            with mock.patch.object(p.s.Transport,"close",joined),mock.patch.object(p,"relay_guest_diagnostic",side_effect=lambda raw:events.append("relay")):
+                if failure:
+                    with self.assertRaises(OSError):transport.close()
+                    self.assertEqual(events,["join"])
+                else:
+                    transport.close();self.assertEqual(events,["join","relay"])
+    def test_closed_stderr_and_cancellation_still_call_original_close(self):
+        transport=p.Transport.__new__(p.Transport);transport.closed=False;transport.err=tempfile.TemporaryFile();transport.err.close()
+        calls=[]
+        def cancelled(instance):
+            calls.append("original-close");instance.closed=True;raise p.v.Refused("setup-cancelled")
+        with mock.patch.object(p.s.Transport,"close",cancelled),mock.patch.object(p,"relay_guest_diagnostic") as relay:
+            with self.assertRaises(p.v.Refused):transport.close()
+            self.assertEqual(calls,["original-close"]);relay.assert_not_called()
+    def test_actual_serialized_guest_refuses_before_any_native_or_account_operation(self):
+        wire=p.i.raw_json({"action":"wrong","bytes":0});out,err=io.StringIO(),io.StringIO()
+        with mock.patch.object(p.sys,"stdin",mock.Mock(buffer=io.BytesIO(wire))), \
+             mock.patch.object(p.signal,"signal"),contextlib.redirect_stdout(out),contextlib.redirect_stderr(err):
+            with self.assertRaises(SystemExit) as stopped:exec(compile(p.guest_source(),"generated-guest","exec"),{})
+        self.assertEqual(stopped.exception.code,1);self.assertEqual(out.getvalue(),"")
+        self.assertEqual(json.loads(err.getvalue().removeprefix("MG_OWNER_GUEST_DIAGNOSTIC ")),
+                         {"phase":"guest-initial","refusal":"setup-order","kind":"refused"})
+    def test_relay_line_budget_rejects_excess_without_raw_contamination(self):
+        value={"phase":"guest-app-receive","refusal":"transport-frame","kind":"refused"}
+        line=b"MG_OWNER_GUEST_DIAGNOSTIC "+json.dumps(value).encode()+b"\n";out=io.StringIO()
+        with contextlib.redirect_stderr(out):p.relay_guest_diagnostic(line*5)
+        self.assertEqual(out.getvalue(),"")
+    def test_serialized_guest_keeps_closed_diagnostic_and_original_join(self):
+        source=p.guest_source().decode();ast.parse(source)
+        self.assertIn("diagnostic.emit(error,guest=True)",source)
+        self.assertIn('diagnostic.enter("guest-app-receive")',source)
+        self.assertIn("h.setup_join(child)",source)
 
 
 class Producer(unittest.TestCase):

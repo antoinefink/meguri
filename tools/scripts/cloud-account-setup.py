@@ -7,6 +7,7 @@ private duplex transport and process memory. No candidate file or attachment.
 import argparse
 import contextlib
 import ctypes
+import errno
 import fcntl
 import importlib.util
 import inspect
@@ -58,7 +59,10 @@ class SetupDiagnostic:
     PHASES = frozenset(('initial', 'terminal', 'vm-context', 'native-build', 'product-input',
         'product-check', 'approved-source', 'copy-products', 'path-preflight', 'support-authority',
         'owner-launch', 'loaded-owner-proof', 'capture-precheck', 'capture', 'capture-proof',
-        'terminal-approval', 'fresh-precheck', 'fresh', 'fresh-proof', 'publish', 'finish'))
+        'terminal-approval', 'fresh-precheck', 'fresh', 'fresh-proof', 'publish', 'finish',
+        'guest-initial', 'guest-owner-root', 'guest-owner-plan', 'guest-native-launch', 'guest-accept',
+        'guest-hello', 'guest-host-command', 'guest-original-proof', 'guest-app-send', 'guest-app-receive',
+        'guest-final-join'))
     CODES = frozenset(('setup-interactive-terminal', 'setup-terminal-changed', 'setup-context',
         'setup-lease', 'setup-info', 'setup-container', 'setup-source', 'setup-directory', 'setup-writer',
         'setup-source-changed', 'setup-source-invalid', 'setup-directory-changed', 'setup-writer-changed',
@@ -70,7 +74,11 @@ class SetupDiagnostic:
         'setup-original-changed', 'setup-plan', 'setup-environment', 'setup-write-readback',
         'product-signature', 'product-profile', 'product-schema', 'profile-device', 'source-changed',
         'source-dirty', 'setup-observation', 'setup-bundle', 'setup-image-path', 'setup-loaded-binding',
-        'setup-images', 'setup-image', 'setup-original-bytes', 'setup-missing-image', 'setup-support-root'))
+        'setup-images', 'setup-image', 'setup-original-bytes', 'setup-missing-image', 'setup-support-root',
+        'transport-ended', 'transport-frame', 'transport-size', 'transport-truncated', 'transport-timeout',
+        'os-broken-pipe', 'os-reset', 'os-bad-fd', 'os-would-block', 'os-timeout'))
+    ERRNOS = {errno.EPIPE: 'os-broken-pipe', errno.ECONNRESET: 'os-reset', errno.EBADF: 'os-bad-fd',
+        errno.EAGAIN: 'os-would-block', errno.ETIMEDOUT: 'os-timeout'}
 
     def __init__(self):
         self.phase = 'initial'
@@ -78,15 +86,18 @@ class SetupDiagnostic:
     def enter(self, phase):
         self.phase = phase if type(phase) is str and phase in self.PHASES else 'unknown'
 
-    def emit(self, error):
+    def emit(self, error, guest=False):
         try:
             code = error.args[0] if (isinstance(error, v.Refused) and len(error.args) == 1 and
                 type(error.args[0]) is str and error.args[0] in self.CODES) else 'unknown'
+            if isinstance(error, OSError):
+                code = self.ERRNOS.get(error.errno, 'unknown')
             kind = next((name for cls, name in ((v.Refused, 'refused'), (subprocess.TimeoutExpired, 'timeout'),
                 (OSError, 'os-error'), (ValueError, 'value-error'), (TypeError, 'type-error'),
                 (KeyError, 'key-error'), (KeyboardInterrupt, 'interrupted')) if isinstance(error, cls)), 'other')
             phase = self.phase if type(self.phase) is str and self.phase in self.PHASES else 'unknown'
-            print('MG_OWNER_SETUP_DIAGNOSTIC ' + json.dumps({'phase': phase, 'refusal': code,
+            prefix = 'MG_OWNER_GUEST_DIAGNOSTIC ' if guest is True else 'MG_OWNER_SETUP_DIAGNOSTIC '
+            print(prefix + json.dumps({'phase': phase, 'refusal': code,
                 'kind': kind}, sort_keys=True), file=sys.stderr)
         except (OSError, ValueError, TypeError, AttributeError):
             pass
@@ -402,8 +413,10 @@ def setup_plan(manifest, path):
     return raw, plistlib.dumps(expand(plan))
 
 
-def guest_setup():
+def guest_setup(diagnostic=None):
     """Original VM supervisor: private socket, original app, original join."""
+    diagnostic = diagnostic or SetupDiagnostic()
+    diagnostic.enter("guest-initial")
     request, raw = s.frame_read(sys.stdin.buffer)
     need(request.pop("action") == "launch" and not raw, "setup-order")
     manifest, support = request["manifest"], request["support"]
@@ -411,6 +424,7 @@ def guest_setup():
     child, peer, server = None, None, None
     with contextlib.ExitStack() as held:
         held.callback(base.close)
+        diagnostic.enter("guest-owner-root")
         need(h.root_state(base, support["path"]) == support, "setup-root")
         # Trusted OS Application Support is canonical before private creation.
         name = ".meguri-account-" + os.urandom(16).hex()
@@ -419,6 +433,7 @@ def guest_setup():
         directory = h.Directory(path)
         held.callback(directory.close)
         need(stat.S_IMODE(os.fstat(directory.fd).st_mode) == 0o700, "setup-directory")
+        diagnostic.enter("guest-owner-plan")
         original, plan = setup_plan(manifest, path)
         h.write_new(directory.fd, "owner.xctestrun", plan)
         server = held.enter_context(socket.socket(socket.AF_UNIX, socket.SOCK_STREAM))
@@ -436,11 +451,13 @@ def guest_setup():
         try:
             environment = {k: val for k, val in os.environ.items()
                            if not k.startswith(("TEST_RUNNER_", "MEGURI_CLOUD_AGENT_", "MEGURI_CLOUD_ACCOUNT_"))}
+            diagnostic.enter("guest-native-launch")
             with h.setup_launch():
                 child = subprocess.Popen(["/usr/bin/xcodebuild", "test-without-building", "-xctestrun", path + "/owner.xctestrun",
                     "-destination", "platform=macOS", "-only-testing:MeguriSnapshotTests/CloudKitAccountSetupTests/testOwnerSetup",
                     "-parallel-testing-enabled", "NO", "-collect-test-diagnostics", "never", "-resultBundlePath", path + "/owner.xcresult"],
                     env=environment, stdout=out, stderr=err, start_new_session=True)
+            diagnostic.enter("guest-accept")
             peer, _ = server.accept()
             held.callback(peer.close)
             peer.settimeout(WAIT)
@@ -450,12 +467,15 @@ def guest_setup():
             need(pid > 1, "setup-peer")
             stream = peer.makefile("rwb")
             held.callback(stream.close)
+            diagnostic.enter("guest-hello")
             hello, payload = s.frame_read(stream)
             need(not payload and set(hello) == {"pid", "observation", "container"} and hello["pid"] == pid, "setup-peer")
             s.frame_write(sys.stdout.buffer, hello)
             phase = 0
             while True:
+                diagnostic.enter("guest-host-command")
                 request, raw = s.frame_read(sys.stdin.buffer)
+                diagnostic.enter("guest-original-proof")
                 need(not raw and child.poll() is None, "setup-original-ended")
                 os.kill(pid, 0)
                 base.check()
@@ -465,11 +485,14 @@ def guest_setup():
                 action = request["action"]
                 need((phase == 0 and action == "capture") or (phase == 1 and action == "fresh") or
                      (phase == 2 and action in ("hold", "finish")), "setup-order")
+                diagnostic.enter("guest-app-send")
                 s.frame_write(stream, {"action": action})
+                diagnostic.enter("guest-app-receive")
                 reply, value = s.frame_read(stream)
                 need(not value, "setup-wire")
                 if action == "finish":
                     need(reply == {"finished": True}, "setup-finish")
+                    diagnostic.enter("guest-final-join")
                     child.wait(timeout=WAIT)
                     need(child.returncode == 0, "setup-test-failed")
                     summary = strict(h.setup_command(["/usr/bin/xcrun", "xcresulttool", "get", "test-results", "summary",
@@ -487,23 +510,74 @@ def guest_setup():
 
 
 def guest_source():
-    definitions = (v.Refused, v.need, v.digest, v.identity, h.directory_pin, h.file_pin, i.strict, i.raw_json,
+    definitions = (v.Refused, v.need, v.digest, v.identity, h.directory_pin, h.file_pin, i.strict, i.raw_json, SetupDiagnostic,
         h.Directory, h.write_new, h.root_state, h.checked_raw, h.setup_cancel, h.setup_launch,
         h.setup_join, h.setup_command, s.frame_read, s.frame_write, setup_plan, guest_setup)
     names = ("Directory", "write_new", "root_state", "checked_raw", "setup_cancel", "setup_launch", "setup_join", "setup_command")
-    preamble = ("import os,sys,stat,json,re,hashlib,contextlib,signal,subprocess,tempfile,plistlib,socket\n"
+    preamble = ("import os,sys,stat,json,re,hashlib,contextlib,signal,subprocess,tempfile,plistlib,socket,errno\n"
                 "from types import SimpleNamespace\nCAP=16*1024*1024\nWAIT=600\nTREE_CAP=128*1024*1024\n")
     return (preamble + "\n".join(inspect.getsource(f) for f in definitions) +
         "\nv=SimpleNamespace(digest=digest,identity=identity,Refused=Refused)\ni=SimpleNamespace(raw_json=raw_json)\n" +
         "h=SimpleNamespace(**{k:globals()[k] for k in " + repr(names) + "})\n" +
         "s=SimpleNamespace(frame_read=frame_read,frame_write=frame_write)\n" +
         "for n in (signal.SIGINT,signal.SIGTERM,signal.SIGHUP): signal.signal(n,setup_cancel)\n"
-        "try: guest_setup()\nexcept BaseException: sys.exit(1)\n").encode()
+        "diagnostic=SetupDiagnostic()\ntry: guest_setup(diagnostic)\n"
+        "except BaseException as error: diagnostic.emit(error,guest=True); sys.exit(1)\n").encode()
+
+
+def relay_guest_diagnostic(raw):
+    """Relay only closed records from the original, already joined guest."""
+    prefix = b'MG_OWNER_GUEST_DIAGNOSTIC '
+    if len(raw) > CAP:
+        return
+    lines = [line for line in raw.splitlines() if line.startswith(prefix)]
+    if len(lines) > 4:
+        return
+    for line in lines:
+        if len(line) > 4096:
+            continue
+        try:
+            value = strict(line[len(prefix):])
+            if (type(value) is not dict or set(value) != {'phase', 'refusal', 'kind'} or
+                    not all(type(item) is str for item in value.values()) or
+                    value['phase'] not in SetupDiagnostic.PHASES | {'unknown'} or
+                    value['refusal'] not in SetupDiagnostic.CODES | {'unknown'} or
+                    value['kind'] not in {'refused', 'timeout', 'os-error', 'value-error',
+                                         'type-error', 'key-error', 'interrupted', 'other'}):
+                continue
+            print(prefix.decode() + json.dumps(value, sort_keys=True), file=sys.stderr)
+        except (v.Refused, OSError, ValueError, TypeError, KeyError, AttributeError):
+            pass
 
 
 class Transport(s.Transport):
     def source(self):
         return guest_source()
+
+    def close(self):
+        if self.closed:
+            return
+        descriptor = None
+        try:
+            descriptor = os.dup(self.err.fileno())
+        except (OSError, ValueError, AttributeError):
+            pass
+        joined = False
+        try:
+            super().close()
+            joined = True
+        finally:
+            try:
+                if joined and descriptor is not None:
+                    relay_guest_diagnostic(os.pread(descriptor, CAP + 1, 0))
+            except (OSError, ValueError, TypeError):
+                pass
+            finally:
+                if descriptor is not None:
+                    try:
+                        os.close(descriptor)
+                    except OSError:
+                        pass
 
 
 def perform(label, source, terminal, transport, check, diagnostic=None):

@@ -36,3 +36,22 @@ Independent review found no P0–P2 issue. Focused Swift run `59381` passed all 
 tests, including direct shared-comparison system-load and product-mutation
 regressions. Final source privacy and similarity checks passed. Actual setup
 with these corrections remains pending.
+
+Corrected actual attempt `61606` still failed before approval. Read-only run
+`65080` extracted only its closed private diagnostic: `capture`, `os-error`,
+`unknown`. This locates the host-side failure during the original capture
+transport request, after loaded-product proof, but does not identify a syscall
+or guest predicate. It is not a declared missing-account result.
+
+The next diagnostic adds a closed guest phase and known errno categories. The
+transport keeps a duplicate of its original private stderr descriptor, invokes
+the unchanged supervisor close/join, and only then relays bounded validated
+closed records. No raw stream is printed and the diagnostic never affects
+admission or public results. Independent review found no P0–P2 issue.
+
+Focused run `68028` exposed a generated-loader defect: its module was not in
+`sys.modules`, so class source inspection failed. Registering that module before
+execution restores normal loading without changing assertions. Independent
+review cleared that two-line fix. Focused tooling run `68701` then passed,
+including actual serialized guest execution and the new lifetime/privacy cases.
+Actual setup with this diagnostic remains pending.
