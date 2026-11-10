@@ -23,4 +23,4 @@ setup:
 steps:
   - http:
       body: {json: {action: changeDeck, version: 6, params: {cards: ["#c2"], deck: "Lang::New"}}}
-  - observe: [{db_dump: {tables: [cards, decks]}}]
+  - observe: [{db_dump: {tables: [notes, cards, decks]}}]

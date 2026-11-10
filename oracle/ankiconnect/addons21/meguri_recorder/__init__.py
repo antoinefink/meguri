@@ -27,6 +27,12 @@
 #                             cards are the real ids by logical number
 #   now {}                    Anki's clock (time.time() under libfaketime), so
 #                             the recorder sees when an advance has reached it
+#   gui {}                    whether Anki's windows are settled before an
+#                             exchange -> {settled, window}: the Browse window,
+#                             when open, has run the search its search box
+#                             shows and its editor has no save pending
+#                             (AnkiConnect's guiBrowse replies before Anki runs
+#                             that search, after the editor's save: C9.12)
 #
 # The driver works on a Session built around mw.col (never its own
 # collection). Ops are never run, and an observation that would reopen the
@@ -171,7 +177,33 @@ def _now(_req: dict) -> int:
     return int(time.time())
 
 
-OPS = {"setup": _setup, "snapshot": _snapshot, "observe": _observe, "now": _now}
+# The Browse window and its search box text when its last search ran
+# (browser_will_search fires inside every table search, after search_for has
+# set the box). Read-only: the hook never changes the search.
+_searched: tuple | None = None
+
+
+def _on_will_search(context) -> None:
+    global _searched
+    browser = getattr(context, "browser", None)
+    if browser is not None:
+        _searched = (browser, browser.current_search())
+
+
+def _gui(_req: dict) -> dict:
+    import aqt
+
+    browser = aqt.dialogs._dialogs.get("Browser", (None, None))[1]
+    if browser is None:
+        return {"settled": True, "window": None}
+    text = browser.current_search()
+    searched = _searched is not None and _searched[0] is browser and text in (_searched[1], browser._lastSearchTxt)
+    editor = getattr(browser, "editor", None)
+    saving = bool(getattr(editor, "_saved_callbacks", None))
+    return {"settled": searched and not saving, "window": "browse"}
+
+
+OPS = {"setup": _setup, "snapshot": _snapshot, "observe": _observe, "now": _now, "gui": _gui}
 
 
 def _control() -> None:
@@ -215,3 +247,4 @@ _timer = QTimer(mw)
 _timer.timeout.connect(_poll)
 _timer.start(50)
 gui_hooks.profile_did_open.append(_on_profile_open)
+gui_hooks.browser_will_search.append(_on_will_search)

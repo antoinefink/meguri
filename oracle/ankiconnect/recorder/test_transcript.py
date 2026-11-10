@@ -372,5 +372,41 @@ class Clock(unittest.TestCase):
             self.assertEqual(cm.exception.kind, "clock_escaped")
 
 
+class GuiSettled(unittest.TestCase):
+    """The wait before each exchange (T16): the Browse window's deferred
+    search (C9.12) must have run before guiSelectedNotes reads its selection."""
+
+    def fake_clock(self):
+        now = [0.0]
+        return now, (lambda secs: now.__setitem__(0, now[0] + secs)), (lambda: now[0])
+
+    def test_no_window_is_one_read(self):
+        reads = []
+        now, sleep, mono = self.fake_clock()
+        self.assertEqual(tx.wait_gui_settled(lambda: reads.append(1) or {"settled": True, "window": None}, 2,
+                                             sleep=sleep, monotonic=mono), 1)
+        self.assertEqual(now[0], 0.0)
+
+    def test_waits_for_the_deferred_search(self):
+        states = iter([{"settled": False, "window": "browse"}] * 3 + [{"settled": True, "window": "browse"}])
+        now, sleep, mono = self.fake_clock()
+        self.assertEqual(tx.wait_gui_settled(lambda: next(states), 2, sleep=sleep, monotonic=mono), 4)
+        self.assertAlmostEqual(now[0], 3 * tx.GUI_POLL_SECS)
+
+    def test_bounded(self):
+        now, sleep, mono = self.fake_clock()
+        with self.assertRaises(RunError) as cm:
+            tx.wait_gui_settled(lambda: {"settled": False, "window": "browse"}, 2, limit=1.0,
+                                sleep=sleep, monotonic=mono)
+        self.assertEqual(cm.exception.kind, "timeout")
+        self.assertEqual(cm.exception.to_json()["step"], 2)
+        self.assertLessEqual(now[0], 1.0 + 2 * tx.GUI_POLL_SECS)
+
+    def test_only_true_settles(self):
+        now, sleep, mono = self.fake_clock()
+        with self.assertRaises(RunError):
+            tx.wait_gui_settled(lambda: {"settled": 1}, 0, limit=0.2, sleep=sleep, monotonic=mono)
+
+
 if __name__ == "__main__":
     unittest.main()

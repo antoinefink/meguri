@@ -424,6 +424,40 @@ class ClockCheck:
                                        detail="a mod is outside clock.start..now", **where)
 
 
+# --- Anki's windows before an exchange (T16) ----------------------------------------
+
+GUI_SETTLE_SECS = 10.0
+GUI_POLL_SECS = 0.05
+
+
+def wait_gui_settled(read: Callable[[], dict], step: int, limit: float = GUI_SETTLE_SECS,
+                     sleep: Callable[[float], None] | None = None,
+                     monotonic: Callable[[], float] | None = None) -> int:
+    """Until the add-on's `gui` op reports Anki's windows settled: the Browse
+    window, when open, has run the search its search box shows and its editor
+    has no save pending. AnkiConnect's guiBrowse replies before that search
+    runs (Anki runs it after the editor's save), so without the wait a later
+    guiSelectedNotes could read the selection before or after it (C9.12 of
+    servers/ankiconnect-clients). It never sends a request and changes no
+    state. Returns the number of reads; a window still busy after `limit`
+    seconds is the run error `timeout`."""
+    import time
+
+    sleep = sleep or time.sleep
+    monotonic = monotonic or time.monotonic
+    deadline = monotonic() + limit
+    reads = 0
+    while True:
+        state = read()
+        reads += 1
+        if state.get("settled") is True:
+            return reads
+        if monotonic() > deadline:
+            raise RunError("timeout", step=step, window=state.get("window"),
+                           detail="Anki's Browse window did not finish its search before the exchange")
+        sleep(GUI_POLL_SECS)
+
+
 # --- the recorder build (T9) ------------------------------------------------------
 
 # The recorder's own files in oracle/ankiconnect/: (path, skip test_ files).

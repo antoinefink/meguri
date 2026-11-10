@@ -14,8 +14,10 @@ Runs in a fresh oracle/ankiconnect container (entrypoint `record`):
 3. Wait for the meguri_recorder add-on's `ready` and for AnkiConnect's
    listening socket, then ask the add-on (file channel, `control`) to run the
    setup on Anki's open collection with the driver's setup sections (T5).
-4. Run the steps in order. An exchange is written as raw bytes on a fresh
-   socket (T6.2) and read back (T8); then the add-on's snapshot of notes,
+4. Run the steps in order. Before an exchange the recorder waits until the
+   add-on reports Anki's windows settled (T16: the Browse window has run the
+   search guiBrowse left pending). An exchange is written as raw bytes on a
+   fresh socket (T6.2) and read back (T8); then the add-on's snapshot of notes,
    cards, decks and note types moves the tokens (T10.1) and the reply is
    normalized (T10). `observe` runs the driver's observations in the add-on.
    Every snapshot is checked against the frozen clock (ClockCheck): a clock
@@ -339,6 +341,7 @@ def run(scenario: dict, sha: str) -> dict:
             if "http" in step:
                 http = step["http"]
                 data = tx.request_bytes(http, env, index)
+                tx.wait_gui_settled(lambda: control.call("gui", step=index), index)
                 reply = exchange(data, index)
                 snap = control.call("snapshot", step=index)
                 clock_check.check(snap, now, index)

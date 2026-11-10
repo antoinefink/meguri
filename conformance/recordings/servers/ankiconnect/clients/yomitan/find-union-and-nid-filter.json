@@ -44,7 +44,7 @@
     },
     "anki_version": "26.9.3",
     "ankiconnect_lock_sha256": "db0b6e483d450f46150a9e80294f651a2b7ea4babda9af460e4e28df45e90561",
-    "driver_sha256": "0d286cef21d420f6430265c6a53a863325d9052860797488173ace46eb0ac622",
+    "driver_sha256": "3c9dae739cb15762cf8f5f458ce081706ec8dd2773d384b8c86b1d3e1caf085a",
     "image": "meguri-oracle-ankiconnect:recorder",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
