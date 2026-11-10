@@ -180,3 +180,34 @@ update order, explicit re-adds, save-removal provenance and the original
 authority checks. No test assertion or timing limit changed. The media
 preparation refusal, the full batch gate and the signed CloudKit round trip
 remain open.
+
+## A newer edit to a save already handed to the SDK
+
+Starting commit `40231c3a`. App run `swift-test/20261110T224612Z-87886`
+completes the earlier stalled media case. The original-send test fails in
+both variants while waiting for a later durable edit to update the same
+pending name before the first result. The prior full update compared only
+the pending change kind, which is still `save` for the newer edit.
+
+For a full update, Core compares each pending record that the current SDK
+has already been handed with its latest outstanding handed revision. Core
+marks a save for addition when the tracked revision is greater. Swift
+applies that addition even when the SDK already lists the same name and kind.
+Matching entries without a newer revision still keep their original identity.
+The existing add-backs after results and the update order stay in place.
+
+Run `core-test/20261110T225328Z-91550` passes all 55 selected Rust checks,
+including the adapter's held edits, send results, re-adds and policy guards.
+
+Run `swift-test/20261110T225440Z-92232` passes all 15 app tests. Both manual
+and automatic variants observe the newer pending revision before the first
+result, and refuse the old removal proof. Both original-save variants and
+the review and media adoption test pass in the same run.
+
+Run `swift-test/20261110T225815Z-94917` passes all 14 selected Swift tests for
+pending updates, revision and deletion order, and removal evidence. Rust
+lint passes in `core-lint/20261110T225548Z-94067`. Direct review checked that
+the new field contains only names already selected for addition and that
+only flights of the current SDK can cause a full update to re-add a name.
+No existing assertion or timing limit changed. The full batch gate and
+signed CloudKit round trip remain pending.

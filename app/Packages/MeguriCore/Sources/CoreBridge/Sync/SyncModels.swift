@@ -8,14 +8,17 @@ public struct CloudPendingUpdate: Sendable, Equatable {
     public let kind: CloudUpdateKind
     public var adds: [String: CloudPendingChange]
     public var removes: Set<String>
+    var forcedAdditions: Set<String> = []
 
     func mutations(to pending: [String: CloudPendingChange]) -> Self {
         var update = self
         update.removes = removes.intersection(pending.keys)
-        // Full reconciliation keeps entries that already have the right kind.
-        // An explicit change can re-add a name after a result or a later edit.
+        // Full reconciliation keeps matching entries unless Core found a
+        // newer revision than the save already handed to this engine.
         if kind == .full {
-            update.adds = adds.filter { pending[$0.key] != $0.value || update.removes.contains($0.key) }
+            update.adds = adds.filter { name, change in
+                pending[name] != change || update.removes.contains(name) || forcedAdditions.contains(name)
+            }
         }
         return update
     }
@@ -209,7 +212,10 @@ extension CloudUpdateKind {
     var raw: MeguriCoreBindings.CloudUpdateKind { self == .full ? .full : .changes }
 }
 extension CloudPendingUpdate {
-    init(_ r: MeguriCoreBindings.CloudPendingUpdate) { id = r.id; kind = .init(r.kind); adds = r.adds.mapValues(CloudPendingChange.init); removes = Set(r.removes) }
+    init(_ r: MeguriCoreBindings.CloudPendingUpdate) {
+        id = r.id; kind = .init(r.kind); adds = r.adds.mapValues(CloudPendingChange.init)
+        removes = Set(r.removes); forcedAdditions = Set(r.forcedAdditions)
+    }
 }
 extension CloudEntityFacts {
     init(_ r: MeguriCoreBindings.CloudEntityFacts) {

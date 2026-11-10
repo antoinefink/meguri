@@ -265,7 +265,7 @@ impl Runtime {
         &self,
         s: &mut State,
         kind: UpdateKind,
-        force: BTreeSet<String>,
+        mut force: BTreeSet<String>,
     ) -> Result<PendingUpdate, RuntimeError> {
         s.media.observed_now_ms = self.pending_clock.load(std::sync::atomic::Ordering::Relaxed);
         if kind == UpdateKind::Full {
@@ -288,7 +288,41 @@ impl Runtime {
             }
             Ok(())
         })?;
-        let snapshot = with_tracking_access(|| Self::sendables_locked(s))?;
+        let snapshot = with_tracking_access(|| -> Result<_, RuntimeError> {
+            let snapshot = Self::sendables_locked(s)?;
+            if kind == UpdateKind::Full
+                && let Some(sdk) = s.adapter.sdk.as_ref().filter(|sdk| !sdk.stopping)
+                && let Some(bound) = &s.bound
+            {
+                // A full update can keep an already queued save only while it
+                // represents the same work. An edit after handoff needs a new
+                // pending addition even while the SDK still holds that name.
+                let mut handed = BTreeMap::new();
+                for ((owner, _), records) in &s.actions.request_flights {
+                    if owner != &sdk.id {
+                        continue;
+                    }
+                    for (name, flight) in records {
+                        if snapshot.0.get(name) == Some(&PendingChange::Save) {
+                            handed
+                                .entry(name)
+                                .and_modify(|rev: &mut u64| *rev = (*rev).max(flight.local_rev))
+                                .or_insert(flight.local_rev);
+                        }
+                    }
+                }
+                let store = s.store.as_ref().ok_or(Error::Database)?;
+                for (name, revision) in handed {
+                    if store
+                        .entity_header(bound.binding.id, name)?
+                        .is_some_and(|header| header.facts.local_rev > revision)
+                    {
+                        force.insert(name.clone());
+                    }
+                }
+            }
+            Ok(snapshot)
+        })?;
         Ok(s.actions.update(kind, snapshot, force))
     }
     pub fn pending_transition(

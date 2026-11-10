@@ -100,6 +100,7 @@ pub struct CloudPendingUpdate {
     pub kind: CloudUpdateKind,
     pub adds: HashMap<String, CloudPendingChange>,
     pub removes: Vec<String>,
+    pub forced_additions: Vec<String>,
 }
 impl From<w::PendingUpdate> for CloudPendingUpdate {
     fn from(v: w::PendingUpdate) -> Self {
@@ -108,6 +109,7 @@ impl From<w::PendingUpdate> for CloudPendingUpdate {
             kind: v.kind.into(),
             adds: v.adds.into_iter().map(|(n, v)| (n, v.into())).collect(),
             removes: v.removes.into_iter().collect(),
+            forced_additions: v.forced_additions.into_iter().collect(),
         }
     }
 }

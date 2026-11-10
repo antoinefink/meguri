@@ -32,6 +32,8 @@ pub struct PendingUpdate {
     pub kind: UpdateKind,
     pub adds: BTreeMap<String, PendingChange>,
     pub removes: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub forced_additions: BTreeSet<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Observation {
@@ -497,7 +499,12 @@ impl Actions {
             self.automatic = old.automatic;
         }
     }
-    pub fn update(&mut self, kind: UpdateKind, snapshot: PendingSnapshot, force: BTreeSet<String>) -> PendingUpdate {
+    pub fn update(
+        &mut self,
+        kind: UpdateKind,
+        snapshot: PendingSnapshot,
+        mut force: BTreeSet<String>,
+    ) -> PendingUpdate {
         self.next += 1;
         let id = self.next;
         let removes = self
@@ -517,12 +524,14 @@ impl Actions {
                 .map(|(n, v)| (n.clone(), *v))
                 .collect()
         };
+        force.retain(|name| kind == UpdateKind::Full && adds.contains_key(name));
         self.desired = snapshot.0;
         let update = PendingUpdate {
             id,
             kind,
             adds,
             removes,
+            forced_additions: force,
         };
         self.observations
             .push(Observation::CorePendingEmitted { kind, action_id: id });
