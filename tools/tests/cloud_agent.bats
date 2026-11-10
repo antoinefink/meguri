@@ -88,6 +88,10 @@ REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
     xcodebuild() { printf "[{\"target\":\"Meguri\",\"buildSettings\":{\"CONFIGURATION\":\"Debug\"}}]\n"; }
     python3() {
       case "$*" in
+        *"cloud-agent-initial-signing.py"*"--source-commit fixture-source"*"--xctestrun"*"--settings"*)
+          printf "initial-signing-before-freeze\n" >&2
+          return 0
+          ;;
         *"--freeze-build"*"--source-commit fixture-source"*"--platform ios-sim"*"--xctestrun"*"--manifest"*) ;;
         *) return 8 ;;
       esac
@@ -99,6 +103,7 @@ REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
     mg_app_agent_freeze ios-sim fixture-source
   ' _ "$REPO_ROOT" "$BATS_TEST_TMPDIR"
   [ "$status" -eq 0 ]
+  [[ "$output" == *"initial-signing-before-freeze"* ]]
   [[ "$output" == *"artifact:directory:Products"* ]]
   [[ "$output" == *"artifact:json:agent-build.json"* ]]
   [[ "$output" == *"artifact:json:agent-cloud-settings.json"* ]]

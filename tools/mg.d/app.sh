@@ -1042,12 +1042,23 @@ mg_app_agent_freeze() {
       "MEGURI_MAC_AGENT_PROFILE_SPECIFIER=$(jq -r .uuid <<<"$MG_CLOUD_AGENT_MAC_PROFILE_BINDING")")
     settings_command=(mg_app_mac_agent_private_settings xcodebuild)
   fi
+  [ "$platform" != ios-sim ] || profile_settings=("CODE_SIGN_IDENTITY=Apple Development")
   products="$MG_ROOT/$MG_APP_DD/Build/Products"
   xctestrun="$(MG_APP_TEST_SCHEME=Meguri mg__vm_xctestrun CloudAgent "$sdk" Debug)"
   if [ -z "$xctestrun" ] || ! "${settings_command[@]}" build-for-testing -showBuildSettings -json -project app/Meguri.xcodeproj \
       -scheme Meguri -testPlan CloudAgent -configuration Debug -sdk "$sdk" -derivedDataPath "$MG_APP_DD" \
       MEGURI_SIGNING=team ${profile_settings[0]+"${profile_settings[@]}"} >"$settings"; then
     mg_failure agent-build "CloudAgent build inputs or resolved settings are missing"
+    mg_status fail
+    return 1
+  fi
+  # Initial simulator signing is part of this native build, before its first
+  # manifest. Keep every final Mac and simulator verifier unchanged.
+  if [ "$platform" = ios-sim ] && ! python3 -B -I "$MG_TOOLS/scripts/cloud-agent-initial-signing.py" \
+      --root "$MG_ROOT" --run-directory "$MG_RUN_DIR" --source-commit "$source_commit" \
+      --products "$products" --xctestrun "$xctestrun" --settings "$settings"; then
+    rm -f "$settings"
+    mg_failure agent-build "Initial simulator development signing refused; no frozen proof created"
     mg_status fail
     return 1
   fi
