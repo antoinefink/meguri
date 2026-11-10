@@ -721,9 +721,10 @@ extension ReviewCollectionStartupTests {
             var held = false, returned = false, waited = false, admitted = false
             let starts = harness.factory.created.count
             let accountReads = harness.factory.accountReads
-            backend.beforeExecution = { command in
+            backend.beforeReturn = { command, result in
                 guard case .statusChanged(let status) = command.action,
                       status.controls.userPaused == true, !held else { return }
+                #expect(result.error == nil && !result.deferred)
                 held = true
                 await withCheckedContinuation {
                     releaseCommand = $0
@@ -737,12 +738,12 @@ extension ReviewCollectionStartupTests {
                 #expect(result.error == nil && !result.deferred)
                 returned = true
             }
-            // Hold an actual Core-issued command before native admission.
-            // Unpausing may issue more work; none may cross the Resume boundary.
+            // Hold the actual command after its native Core body returns, before
+            // the original policy result is ACKed. The input lane can then
+            // observe the pending operation instead of waiting on its own gate.
             harness.sync.setDeviceSettings(paused: true, automatic: false, media: true)
             try await initialCloudSignal(entered.stream, stage: "resume-preissued-status")
             harness.sync.setDeviceSettings(paused: false, automatic: false, media: true)
-            await harness.sync.waitForInputs()
             harness.sync.observeResumePolicyDrain = { stage in
                 switch stage {
                 case .waiting:
@@ -761,6 +762,7 @@ extension ReviewCollectionStartupTests {
                 }
             }
             await harness.sync.confirmResume()
+            await harness.sync.waitForInputs()
             #expect(waited && returned && admitted == !pauseDuringDrain)
             #expect(harness.sync.preview == nil && harness.sync.connectionFailure == nil)
             #expect(!harness.sync.operationFailed && harness.sync.failureRevision == 0)
@@ -777,7 +779,7 @@ extension ReviewCollectionStartupTests {
                 #expect(harness.sync.status?.controls.bindingActive == true)
             }
             harness.sync.observeResumePolicyDrain = nil
-            backend.beforeExecution = nil; backend.afterExecution = nil
+            backend.beforeReturn = nil; backend.afterExecution = nil
             #expect(await harness.owner.close())
         } catch {
             releaseCommand?.resume(); releaseCommand = nil
@@ -797,6 +799,7 @@ extension ReviewCollectionStartupTests {
         defer {
             releaseCommand?.resume()
             target?.actionTrace = nil; harness.factory.actionTrace = nil
+            harness.factory.beforeAccountReturn = nil
             #if DEBUG
             harness.sync.observeCausalBoundary = nil
             #endif
@@ -804,6 +807,8 @@ extension ReviewCollectionStartupTests {
         }
         let entered = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         let waiting = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let nativeEntry = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        var holdArmed = false
         var heldCommand: CloudPolicyCommand?
         var returned = false, waited = false, admitted = false
         var starts = 0, reads = 0, verified = 0
@@ -856,14 +861,27 @@ extension ReviewCollectionStartupTests {
             case .resume:
                 #expect(priorMatchingProcessProof, "\(trace.diagnostic)")
             }
-            backend.beforeExecution = { command in
-                guard case .statusChanged = command.action, heldCommand == nil else { return }
+            // Let the actual resolver start before the held status command.
+            // A status held before read admission would block that admission.
+            harness.factory.beforeAccountReturn = {
+                guard !holdArmed else { return }
+                holdArmed = true
+                harness.sync.setDeviceSettings(paused: false, automatic: false, media: false)
+                harness.sync.setDeviceSettings(paused: false, automatic: false, media: true)
+                try await initialCloudSignal(nativeEntry.stream, stage: "first-proof-issued-status-entry") {
+                    await trace.diagnostic
+                }
+            }
+            backend.beforeReturn = { command, result in
+                guard case .statusChanged = command.action, holdArmed, heldCommand == nil else { return }
+                #expect(result.error == nil && !result.deferred)
                 heldCommand = command
                 if !released {
                     await withCheckedContinuation {
                         releaseCommand = $0
                         trace.record("target.status.hold.enter", command: trace.commandOrdinal(command))
                         entered.continuation.yield(())
+                        nativeEntry.continuation.yield(())
                     }
                 }
             }
@@ -942,7 +960,8 @@ extension ReviewCollectionStartupTests {
                 #expect(backend.starts.isEmpty && harness.factory.created.count == starts, "\(trace.diagnostic)")
                 #expect(!harness.sync.settings.enabled && harness.persistedEnabled == false, "\(trace.diagnostic)")
             }
-            backend.beforeExecution = nil; backend.afterExecution = nil
+            backend.beforeReturn = nil; backend.afterExecution = nil
+            harness.factory.beforeAccountReturn = nil
             harness.configureBackend = nil; harness.sync.observeAccountPolicyDrain = nil
             harness.sync.observeResumePolicyDrain = nil
             #expect(await harness.owner.close(), "\(trace.diagnostic)")
@@ -954,7 +973,8 @@ extension ReviewCollectionStartupTests {
             releaseCommand?.resume(); releaseCommand = nil
             harness.release()
             _ = try? await original?.value
-            target?.beforeExecution = nil; target?.afterExecution = nil
+            target?.beforeReturn = nil; target?.afterExecution = nil
+            harness.factory.beforeAccountReturn = nil
             harness.configureBackend = nil; harness.sync.observeAccountPolicyDrain = nil
             harness.sync.observeResumePolicyDrain = nil
             await harness.cleanup()
@@ -972,14 +992,26 @@ extension ReviewCollectionStartupTests {
             try await harness.prepareStoppedResume()
             let backend = try #require(harness.backends.last)
             let waiting = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let entered = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let cancelled = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
             var heldCommand: CloudPolicyCommand?
             var returned = false, admitted = false
             let starts = harness.factory.created.count, reads = harness.factory.accountReads
-            backend.beforeExecution = { command in
+            backend.beforeReturn = { command, result in
                 guard case .statusChanged(let status) = command.action,
                       status.controls.userPaused == true, heldCommand == nil else { return }
+                #expect(result.error == nil && !result.deferred)
                 heldCommand = command
-                if !releaseState.released { await withCheckedContinuation { releaseCommand = $0 } }
+                if !releaseState.released {
+                    await withTaskCancellationHandler {
+                        await withCheckedContinuation {
+                            releaseCommand = $0
+                            entered.continuation.yield(())
+                        }
+                    } onCancel: {
+                        cancelled.continuation.yield(())
+                    }
+                }
             }
             backend.afterExecution = { command, result in
                 guard heldCommand?.raw === command.raw else { return }
@@ -987,7 +1019,7 @@ extension ReviewCollectionStartupTests {
                 returned = true
             }
             harness.sync.setDeviceSettings(paused: true, automatic: false, media: true)
-            await harness.sync.waitForInputs()
+            try await initialCloudSignal(entered.stream, stage: "close-resume-issued-status-entry")
             harness.sync.setDeviceSettings(paused: false, automatic: false, media: true)
             harness.sync.observeResumePolicyDrain = { stage in
                 switch stage {
@@ -1001,11 +1033,12 @@ extension ReviewCollectionStartupTests {
             let quiescing = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
             backend.observeQuiesce = { quiescing.continuation.yield(()) }
             closing = Task { await harness.sync.cancelAndDrain() }
-            try await initialCloudSignal(quiescing.stream, stage: "resume-drain-close-ownership")
-            // Close has cancelled the retained originals and entered quiesce.
-            // Only the actual held command is released; Resume is never forced.
+            try await initialCloudSignal(cancelled.stream, stage: "resume-drain-original-cancelled")
+            // Close cancels the original before joining its Core phase. Release
+            // that original before checking the later native quiesce boundary.
             releaseState.released = true
             releaseCommand?.resume(); releaseCommand = nil
+            try await initialCloudSignal(quiescing.stream, stage: "resume-drain-close-ownership")
             await confirmation?.value
             #expect(await closing?.value == true)
             backend.observeQuiesce = nil
@@ -1013,7 +1046,7 @@ extension ReviewCollectionStartupTests {
             #expect(!harness.sync.settings.enabled && harness.persistedEnabled == false)
             #expect(harness.factory.accountReads == reads && harness.factory.created.count == starts)
             #expect(harness.factory.live.isEmpty && !harness.sync.operationFailed && harness.sync.failureRevision == 0)
-            backend.beforeExecution = nil; backend.afterExecution = nil
+            backend.beforeReturn = nil; backend.afterExecution = nil
             harness.sync.observeResumePolicyDrain = nil
             #expect(await harness.owner.close())
         } catch {
@@ -1510,6 +1543,7 @@ private nonisolated enum InitialCloudCommandCorrelation {
     var own: CloudOwnExecutor? { backend.own }
     var actionTrace: InitialCloudActionTrace?
     var beforeExecution: (@MainActor (CloudPolicyCommand) async -> Void)?
+    var beforeReturn: (@MainActor (CloudPolicyCommand, SyncCommandResult) async -> Void)?
     var afterExecution: (@MainActor (CloudPolicyCommand, SyncCommandResult) -> Void)?
     var observeQuiesce: (@MainActor () -> Void)?
     let workflow: CoreCloudWorkflowService
@@ -1616,6 +1650,7 @@ private nonisolated enum InitialCloudCommandCorrelation {
         }
         trace?.record("native.execute.return", command: ordinal)
         trace?.issued(result.outputs, source: "commandReturn", parent: ordinal)
+        await beforeReturn?(command, result)
         afterExecution?(command, result)
         if case .deleteZones = command.action { lastZoneDeletion = command; zoneDeletions.continuation.yield(()) }
         if case .statusChanged = command.action { lastStatusCommand = command }
@@ -1682,6 +1717,7 @@ private nonisolated enum InitialCloudCommandCorrelation {
 @MainActor private final class InitialCloudSDKFactory: CloudKitEngineFactory {
     var actionTrace: InitialCloudActionTrace?
     var account = CloudResolvedAccount(status: .available, identity: Data("synthetic-initial-account".utf8))
+    var beforeAccountReturn: (@MainActor () async throws -> Void)?
     private(set) var accountReads = 0
     private(set) var accountReadsAtCreation: [Int] = []
     let fixture: InitialCloudFixture
@@ -1699,6 +1735,7 @@ private nonisolated enum InitialCloudCommandCorrelation {
     func resolveAccount() async throws -> CloudResolvedAccount? {
         actionTrace?.record("sdk.account.resolve.entry")
         accountReads += 1
+        try await beforeAccountReturn?()
         actionTrace?.record("sdk.account.resolve.return")
         return account
     }

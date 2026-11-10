@@ -994,6 +994,17 @@ public final class SyncCoordinator {
 
     private func enqueue(_ input: Input) {
         inputQueue.append(input)
+        #if DEBUG
+        // These admissions can wait behind a Core phase before their reducer
+        // runs. Observe that existing wait without changing queue eligibility.
+        if !corePhase.isEmpty {
+            switch input {
+            case .resumeBinding: observeResumePolicyDrain?(.waiting)
+            case .completeAccount: observeAccountPolicyDrain?(.waiting)
+            default: break
+            }
+        }
+        #endif
         guard inputTask == nil else { return }
         inputTask = Task {
             defer { inputTask = nil }

@@ -146,18 +146,23 @@ extension ReviewCollectionStartupTests {
         let harness = try PublicationPresentationHarness(realAccountProof: true)
         var releaseCommand: CheckedContinuation<Void, Never>?
         var commandReturned = false, heldStatus = false
+        let hold = PublicationStatusHold()
         var heldCommand: CloudPolicyCommand?
         var stage = "retain-publication"
         let waiting = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let entered = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
         defer { harness.removeStorage() }
         do {
             let operationID = try await harness.retainPublicationAndClose()
             let proof = harness.accounts.holdNextRead()
             harness.beforeExecution = { command in
-                guard case .statusChanged = command.action, !heldStatus else { return }
+                guard case .statusChanged = command.action, hold.armed, !heldStatus else { return }
                 heldStatus = true
                 heldCommand = command
-                await withCheckedContinuation { releaseCommand = $0 }
+                await withCheckedContinuation {
+                    releaseCommand = $0
+                    entered.continuation.yield(true)
+                }
             }
             harness.afterExecution = { command, result in
                 guard heldCommand?.raw === command.raw else { return }
@@ -172,6 +177,11 @@ extension ReviewCollectionStartupTests {
             await harness.owner.start()
             stage = "startup-account-proof-admission"
             try await proof.waitForAdmission(stage: "startup-account-proof-admission")
+            // The real resolver is admitted first; hold a later actual status.
+            hold.armed = true
+            harness.sync.setDeviceSettings(paused: false, automatic: false, media: false)
+            harness.sync.setDeviceSettings(paused: false, automatic: false, media: true)
+            try #require(try await publicationSignal(entered.stream, stage: "startup-issued-status-entry"))
             #expect(harness.sync.recovery?.step == .bound)
             #expect(harness.transport.zones.enqueues == 0 && harness.transport.save.enqueues == 0)
             #expect(!harness.sync.connectionOperationActive)
@@ -562,4 +572,8 @@ private nonisolated final class PublicationOwnObservations: Sendable {
 }
 private nonisolated struct PublicationUnusedMediaTransport: CloudMediaTransport {
     func prepare(_ request: CloudMediaRequest) throws -> any CloudPreparedMediaRead { throw CloudOwnTransportFailure.unexpectedReply }
+}
+
+@MainActor private final class PublicationStatusHold {
+    var armed = false
 }
