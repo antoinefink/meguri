@@ -25,18 +25,18 @@
       {
         "db_dump": {
           "cards": {
-            "1894698000000": {
+            "#c1": {
               "data": "{}",
-              "did": 1894698000001,
+              "did": "#d2",
               "due": 1,
               "factor": 0,
               "flags": 0,
-              "id": 1894698000000,
+              "id": "#c1",
               "ivl": 0,
               "lapses": 0,
               "left": 0,
               "mod": 1894698000,
-              "nid": 1894698000000,
+              "nid": "#n1",
               "odid": 0,
               "odue": 0,
               "ord": 0,
@@ -45,18 +45,18 @@
               "type": 0,
               "usn": -1
             },
-            "1894698000001": {
+            "#c2": {
               "data": "{}",
-              "did": 1894698000000,
+              "did": "#d1",
               "due": 2,
               "factor": 0,
               "flags": 0,
-              "id": 1894698000001,
+              "id": "#c2",
               "ivl": 0,
               "lapses": 0,
               "left": 0,
               "mod": 1894698000,
-              "nid": 1894698000001,
+              "nid": "#n2",
               "odid": 0,
               "odue": 0,
               "ord": 0,
@@ -67,27 +67,27 @@
             }
           },
           "notes": {
-            "1894698000000": {
+            "#n1": {
               "csum": 3195417371,
               "data": "",
               "flags": 0,
               "flds": "alpha\u001f\u001ffirst\u001f\u001f",
               "guid": "#random",
-              "id": 1894698000000,
-              "mid": 1894698000006,
+              "id": "#n1",
+              "mid": "#m7",
               "mod": 1894698000,
               "sfld": "alpha",
               "tags": " asb extra mined ",
               "usn": -1
             },
-            "1894698000001": {
+            "#n2": {
               "csum": 2727731389,
               "data": "",
               "flags": 0,
               "flds": "beta\u001f\u001fsecond\u001f\u001f",
               "guid": "#random",
-              "id": 1894698000001,
-              "mid": 1894698000006,
+              "id": "#n2",
+              "mid": "#m7",
               "mod": 1894698000,
               "sfld": "beta",
               "tags": " asb extra ",
@@ -104,7 +104,8 @@
       "sha256": "cf75820e00ebc28ba0cdcaedbbf646cac3a745121dc9de33b99020ca61a658da"
     },
     "anki_version": "26.9.3",
-    "driver_sha256": "a60739e009ed2f2363ce95f72c5dd60fe780979db10609a63913767414322c12",
+    "ankiconnect_lock_sha256": "db0b6e483d450f46150a9e80294f651a2b7ea4babda9af460e4e28df45e90561",
+    "driver_sha256": "0d286cef21d420f6430265c6a53a863325d9052860797488173ace46eb0ac622",
     "image": "meguri-oracle-ankiconnect:recorder",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },

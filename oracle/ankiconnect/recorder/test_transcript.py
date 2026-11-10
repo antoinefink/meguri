@@ -190,8 +190,173 @@ class Normalization(unittest.TestCase):
                                     decks=[(1, "Default"), (MS, "Lang")], notetypes=[(MS, "A"), (MS + 1, "B")]))
         self.assertEqual(self.tokens.token("n", MS + 1), "#n3")
         self.assertIsNone(self.tokens.token("c", MS + 1))
-        with self.assertRaises(RunError):
+        with self.assertRaises(RunError) as cm:  # #n2's last id is #n3's now
             self.tokens.real("#n2")
+        self.assertEqual((cm.exception.kind, cm.exception.fields["ref"]), ("reused_ref", "#n2"))
+        self.assertEqual(self.tokens.real("#c2"), MS + 1)  # retired, its id free among cards
+
+    def test_retired_token_keeps_last_id(self):
+        # T17: addNote #n1, deleteNotes [#n1], then notesInfo [#n1] sends the deleted id.
+        self.tokens.update(snapshot(notes=[(MS, "g1")], cards=[(MS, MS, 0)],
+                                    decks=[(1, "Default"), (MS, "Lang")], notetypes=[(MS + 1, "B"), (MS, "A")]))
+        self.assertIsNone(self.tokens.token("n", MS + 1))
+        self.assertEqual(self.tokens.real("#n2"), MS + 1)
+        env = env_with(self.tokens)
+        self.assertEqual(tx.substitute_json({"notes": ["#n2"]}, env, 0), {"notes": [MS + 1]})
+        self.assertEqual(tx.substitute("nid:${#c2}", env, 0), f"nid:{MS + 1}")
+        with self.assertRaises(RunError) as cm:
+            self.tokens.real("#n3")
+        self.assertEqual(cm.exception.kind, "unknown_ref")
+        # The next note takes the freed id: the retired token is reused_ref now.
+        self.tokens.update(snapshot(notes=[(MS, "g1"), (MS + 1, "g3")], cards=[(MS, MS, 0), (MS + 1, MS + 1, 0)],
+                                    decks=[(1, "Default"), (MS, "Lang")], notetypes=[(MS + 1, "B"), (MS, "A")]))
+        self.assertEqual(self.tokens.token("n", MS + 1), "#n3")
+        self.assertEqual(self.tokens.token("c", MS + 1), "#c3")
+        with self.assertRaises(RunError) as cm:
+            tx.substitute_json({"notes": ["#n2"]}, env, 4)
+        self.assertEqual((cm.exception.kind, cm.exception.fields["step"]), ("reused_ref", 4))
+
+    def test_retired_last_wins(self):
+        live = dict(decks=[(1, "Default"), (MS, "Lang")], notetypes=[(MS + 1, "B"), (MS, "A")])
+        self.tokens.update(snapshot(notes=[(MS, "g1")], cards=[(MS, MS, 0)], **live))            # #n2 gone
+        self.tokens.update(snapshot(notes=[(MS, "g1"), (MS + 1, "g3")], cards=[(MS, MS, 0)], **live))  # #n3 there
+        self.tokens.update(snapshot(notes=[(MS, "g1")], cards=[(MS, MS, 0)], **live))            # #n3 gone
+        self.assertEqual(self.tokens.retired_token("n", MS + 1), "#n3")
+        self.assertEqual(self.tokens.real("#n2"), MS + 1)
+
+    def test_card_compared_by_note_token(self):
+        # deleteNotes then addNote inside one multi: the new note has #n1's id,
+        # its card #c1's id and ord. Both are new entities.
+        self.tokens.update(snapshot(notes=[(MS, "g7"), (MS + 1, "g2")], cards=[(MS, MS, 0), (MS + 1, MS + 1, 0)],
+                                    decks=[(1, "Default"), (MS, "Lang")], notetypes=[(MS + 1, "B"), (MS, "A")]))
+        self.assertEqual(self.tokens.token("n", MS), "#n3")
+        self.assertEqual(self.tokens.token("c", MS), "#c3")
+        self.assertEqual(self.tokens.token("c", MS + 1), "#c2")
+        # A card that moves to another live note is new too; an unchanged one keeps its token.
+        self.tokens.update(snapshot(notes=[(MS, "g7"), (MS + 1, "g2")], cards=[(MS, MS + 1, 0), (MS + 1, MS + 1, 0)],
+                                    decks=[(1, "Default"), (MS, "Lang")], notetypes=[(MS + 1, "B"), (MS, "A")]))
+        self.assertEqual(self.tokens.token("c", MS), "#c4")
+        self.assertEqual(self.tokens.token("c", MS + 1), "#c2")
+
+    def test_error_strings_retired(self):
+        self.tokens.update(snapshot(notes=[(MS, "g1")], cards=[(MS, MS, 0)],
+                                    decks=[(1, "Default"), (MS, "Lang")], notetypes=[(MS + 1, "B"), (MS, "A")]))
+        value, _ = self.reply({"result": None, "error": f"Note was not found: {MS + 1}"}, {"action": "x", "version": 6})
+        self.assertEqual(value["error"], "Note was not found: #n2")
+        # The kind comes from the message's start; an id no entity ever had stays.
+        value, _ = self.reply({"result": None, "error": f"note {MS} {MS + 1} 1000000000001"}, {"action": "x", "version": 6})
+        self.assertEqual(value["error"], "note #n1 #n2 1000000000001")
+        # Any other message: MS + 1 is a live note type (#m2) and a retired note and card.
+        value, _ = self.reply({"result": None, "error": f"x {MS + 1}"}, {"action": "x", "version": 6})
+        self.assertEqual(value["error"], "x #m2")
+        # A live entity wins over a retired one with the same id.
+        self.tokens.update(snapshot(notes=[(MS, "g1"), (MS + 1, "g3")], decks=[(1, "Default"), (MS, "Lang")],
+                                    notetypes=[(MS + 1, "B"), (MS, "A")]))
+        value, _ = self.reply({"result": None, "error": f"Note was not found: {MS + 1}"}, {"action": "x", "version": 6})
+        self.assertEqual(value["error"], "Note was not found: #n3")
+        value, _ = self.reply({"result": None, "error": f"x {MS + 2}"}, {"action": "x", "version": 6})
+        self.assertEqual(value["error"], f"x {MS + 2}")
+
+    def test_error_strings_retired_any_kind(self):
+        t = tx.Tokens()
+        t.start(snapshot(notes=[(MS + 7, "g")], cards=[(MS + 8, MS + 7, 0)]), [MS + 7], [MS + 8])
+        t.update(snapshot())
+        norm = tx.Normalizer(env_with(t))
+        out, _ = norm.reply({"status": 200, "headers": {}, "body": {"json": {"result": None, "error": f"x {MS + 7} {MS + 8}"}},
+                             "closed": True}, {"action": "x", "version": 6})
+        self.assertEqual(out["body"]["json"]["error"], "x #n1 #c1")
+
+
+class Observations(unittest.TestCase):
+    def setUp(self):
+        self.tokens = base_tokens()
+        self.norm = tx.Normalizer(env_with(self.tokens))
+
+    def test_db_dump_ids(self):
+        # #n2 and #c2 deleted, then a note added at #n2's id with no token (as
+        # inside one addNotes): its key stays decimal, its id column #unknown.
+        self.tokens.update(snapshot(notes=[(MS, "g1")], cards=[(MS, MS, 0)],
+                                    decks=[(1, "Default"), (MS, "Lang")], notetypes=[(MS + 1, "B"), (MS, "A")]))
+        dump = {
+            "notes": {str(MS): {"id": MS, "mid": MS + 1, "mod": MS // 1000, "flds": f"{MS}"},
+                      str(MS + 5): {"id": MS + 5, "mid": MS, "mod": 0}},
+            "cards": {str(MS): {"id": MS, "nid": MS, "did": MS, "odid": 0, "due": 1},
+                      "7": {"id": 7, "nid": MS, "did": 1, "odid": MS + 9}},
+            "revlog": {str(MS): {"id": MS, "cid": MS}},
+            "graves": {f"{MS + 1},0": {"oid": MS + 1, "type": 0, "usn": -1},
+                       f"{MS + 1},1": {"oid": MS + 1, "type": 1, "usn": -1},
+                       f"{MS + 3},1": {"oid": MS + 3, "type": 1, "usn": -1},
+                       f"{MS},2": {"oid": MS, "type": 2, "usn": -1}},
+            "decks": {"1": {"id": 1, "name": "Default"}, str(MS): {"id": MS, "name": "Lang"}},
+            "fields": {f"{MS},0": {"ntid": MS, "ord": 0}},
+            "tags": {"t1": {"tag": "t1"}},
+        }
+        out = self.norm.observation({"db_dump": dump})["db_dump"]
+        self.assertEqual(out["notes"], {
+            "#n1": {"id": "#n1", "mid": "#m2", "mod": MS // 1000, "flds": f"{MS}"},
+            str(MS + 5): {"id": "#unknown", "mid": "#m1", "mod": 0}})
+        self.assertEqual(out["cards"], {
+            "#c1": {"id": "#c1", "nid": "#n1", "did": "#d1", "odid": 0, "due": 1},
+            "7": {"id": 7, "nid": "#n1", "did": 1, "odid": "#unknown"}})
+        self.assertEqual(out["revlog"], {str(MS): {"id": MS, "cid": "#c1"}})
+        self.assertEqual(out["graves"], {
+            "#c2,0": {"oid": "#c2", "type": 0, "usn": -1},
+            "#n2,1": {"oid": "#n2", "type": 1, "usn": -1},
+            f"{MS + 3},1": {"oid": "#unknown", "type": 1, "usn": -1},
+            "#d1,2": {"oid": "#d1", "type": 2, "usn": -1}})  # a live deck when no retired one has the id
+        self.assertEqual(out["decks"], {"1": {"id": 1, "name": "Default"}, "#d1": {"id": "#d1", "name": "Lang"}})
+        self.assertEqual(out["fields"], {"#m1,0": {"ntid": "#m1", "ord": 0}})
+        self.assertEqual(out["tags"], {"t1": {"tag": "t1"}})
+
+    def test_graves_prefer_retired(self):
+        # #n2 deleted, #n3 at its id deleted too: the grave names the one retired last.
+        live = dict(decks=[(1, "Default"), (MS, "Lang")], notetypes=[(MS + 1, "B"), (MS, "A")])
+        self.tokens.update(snapshot(notes=[(MS, "g1")], cards=[(MS, MS, 0)], **live))
+        self.tokens.update(snapshot(notes=[(MS, "g1"), (MS + 1, "g3")], cards=[(MS, MS, 0)], **live))
+        grave = {f"{MS + 1},1": {"oid": MS + 1, "type": 1, "usn": -1}}
+        out = self.norm.observation({"db_dump": {"graves": grave}})["db_dump"]["graves"]
+        self.assertEqual(out, {"#n2,1": {"oid": "#n2", "type": 1, "usn": -1}})  # retired before the live #n3
+        self.tokens.update(snapshot(notes=[(MS, "g1")], cards=[(MS, MS, 0)], **live))
+        out = self.norm.observation({"db_dump": {"graves": grave}})["db_dump"]["graves"]
+        self.assertEqual(out, {"#n3,1": {"oid": "#n3", "type": 1, "usn": -1}})
+
+    def test_decks_kind_and_strings(self):
+        out = self.norm.observation({"decks": {"Lang": {"id": MS, "name": "Lang"}, "Default": {"id": 1}},
+                                     "media_dir": {"a.mp3": {"size": 4}},
+                                     "card": {"x": "/scratch/anki/oracle/collection.media"}})
+        self.assertEqual(out, {"decks": {"Lang": {"id": "#d1", "name": "Lang"}, "Default": {"id": 1}},
+                               "media_dir": {"a.mp3": {"size": 4}}, "card": {"x": "<media-dir>"}})
+
+
+class Build(unittest.TestCase):
+    def test_recorder_sha256(self):
+        import hashlib
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            files = {"driver/a.py": b"a", "driver/ops/b.py": b"b",
+                     "home/recorder/transcript.py": b"t", "home/recorder/test_transcript.py": b"x",
+                     "home/recorder/__pycache__/t.pyc": b"x", "home/addons21/meguri_recorder/__init__.py": b"i",
+                     "home/addons21/meguri_recorder/test_x.py": b"y", "home/launch.py": b"l",
+                     "home/entrypoint.sh": b"e", "home/ADDON_PIN": b"x", "home/requirements.lock": b"x"}
+            for rel, data in files.items():
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                (root / rel).write_bytes(data)
+            driver = [root / "driver/a.py", root / "driver/ops/b.py"]
+            got = tx.recorder_sha256(root / "driver", driver, root / "home")
+
+            def line(label, data):
+                return label.encode() + b"\0" + hashlib.sha256(data).hexdigest().encode() + b"\n"
+
+            want = hashlib.sha256(b"".join([
+                line("driver/a.py", b"a"), line("driver/ops/b.py", b"b"),
+                line("ankiconnect/addons21/meguri_recorder/__init__.py", b"i"),
+                line("ankiconnect/addons21/meguri_recorder/test_x.py", b"y"),
+                line("ankiconnect/entrypoint.sh", b"e"), line("ankiconnect/launch.py", b"l"),
+                line("ankiconnect/recorder/transcript.py", b"t")])).hexdigest()
+            self.assertEqual(got, want)
 
 
 class Clock(unittest.TestCase):

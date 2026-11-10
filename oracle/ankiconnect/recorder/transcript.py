@@ -8,10 +8,12 @@ scenario, without Anki or sockets.
 - request_bytes: T6.2 and T6.3.
 - parse_reply: T8 from the raw reply bytes.
 - Normalizer: T10.3 (environment values), then T10.1 (ids at T10.5's
-  positions, error strings), and the T10.1 warnings for ids left in place.
+  positions in replies and T10.6's in observations, error strings), and the
+  T10.1 warnings for ids left in place.
+- recorder_sha256: T9's oracle.driver_sha256 over the given files.
 
 Errors are RunError(kind, ...): `invalid_scenario`, `unknown_ref`,
-`unsupported_step` (a form the recorder does not run yet) and the run errors
+`reused_ref`, `unsupported_step` (a form the recorder does not run yet) and the run errors
 of T7.4. Their fields are recorder-authored, never Anki's text.
 """
 
@@ -93,6 +95,7 @@ ID_POSITIONS: dict[str, list[tuple[str, str]]] = {
 MODEL_LISTS = ("findModelsById", "findModelsByName")
 MODEL_ONE = ("createModel",)
 BIDI_MARKS = {0x2068: None, 0x2069: None}
+_GONE = object()
 
 
 class RunError(Exception):
@@ -294,49 +297,58 @@ def addon_config(scenario: dict, defaults: dict) -> dict:
 
 class Tokens:
     """Per kind, the tokened entities in token order: [real id, identity,
-    alive]. A token is never reused; an entity that is gone or whose identity
-    changed loses its token, and its id may get a new one."""
+    retired]. retired is None for a live entity, else a sequence number that
+    orders the retirements. A token is never reused (T10.1 "Retired tokens"):
+    a retired token still names the real id its entity had when retired, and
+    a new entity at that id gets a new token."""
 
     def __init__(self) -> None:
         self.entries: dict[str, list[list]] = {k: [] for k in KINDS}
-
-    @staticmethod
-    def identities(snapshot: dict) -> dict[str, dict[int, Any]]:
-        return {
-            "n": {row[0]: row[1] for row in snapshot["notes"]},
-            "c": {row[0]: [row[1], row[2]] for row in snapshot["cards"]},
-            "d": {row[0]: row[1] for row in snapshot["decks"]},
-            "m": {row[0]: row[1] for row in snapshot["notetypes"]},
-        }
+        self._retired = 0
 
     def start(self, snapshot: dict, setup_notes: list[int], setup_cards: list[int]) -> None:
         """After setup: its notes and cards in creation order (conformance/dsl
         D7.1), then everything else in ascending id order."""
-        ids = self.identities(snapshot)
-        for kind, created in (("n", setup_notes), ("c", setup_cards)):
-            for real in created:
-                if real not in ids[kind]:
-                    raise RunError("internal_error", detail=f"a setup {KIND_NAMES[kind]} is not in the collection")
-                self.entries[kind].append([real, ids[kind][real], True])
-        self._add_new(ids)
+        self._resolve("n", self._notes(snapshot), setup_notes)
+        self._resolve("c", self._cards(snapshot), setup_cards)
+        self._resolve("d", self._named(snapshot["decks"]))
+        self._resolve("m", self._named(snapshot["notetypes"]))
 
     def update(self, snapshot: dict) -> None:
-        """After an exchange: retire what is gone or changed, then number what
-        has no token, in ascending id order per kind."""
-        ids = self.identities(snapshot)
-        for kind in KINDS:
-            for entry in self.entries[kind]:
-                if entry[2] and ids[kind].get(entry[0], object()) != entry[1]:
-                    entry[2] = False
-        self._add_new(ids)
+        """After an exchange: per kind, retire what is gone or changed, then
+        number what has no token, in ascending id order. Notes first: a card's
+        identity holds its note's token after this exchange's notes got
+        theirs, so a card of a replaced note is a new card (T10.1)."""
+        self.start(snapshot, [], [])
 
-    def _add_new(self, ids: dict[str, dict[int, Any]]) -> None:
-        for kind in KINDS:
-            alive = {e[0] for e in self.entries[kind] if e[2]}
-            for real in sorted(i for i in ids[kind] if i not in alive and i >= ID_MIN):
-                self.entries[kind].append([real, ids[kind][real], True])
+    @staticmethod
+    def _notes(snapshot: dict) -> dict[int, Any]:
+        return {row[0]: row[1] for row in snapshot["notes"]}
+
+    def _cards(self, snapshot: dict) -> dict[int, Any]:
+        return {row[0]: (self.token("n", row[1]) or ("id", row[1]), row[2]) for row in snapshot["cards"]}
+
+    @staticmethod
+    def _named(rows: list) -> dict[int, Any]:
+        return {row[0]: row[1] for row in rows}
+
+    def _resolve(self, kind: str, ids: dict[int, Any], created: list[int] = ()) -> None:
+        entries = self.entries[kind]
+        for entry in entries:
+            if entry[2] is None and ids.get(entry[0], _GONE) != entry[1]:
+                self._retired += 1
+                entry[2] = self._retired
+        for real in created:
+            if real not in ids:
+                raise RunError("internal_error", detail=f"a setup {KIND_NAMES[kind]} is not in the collection")
+            entries.append([real, ids[real], None])
+        alive = {e[0] for e in entries if e[2] is None}
+        for real in sorted(i for i in ids if i not in alive and i >= ID_MIN):
+            entries.append([real, ids[real], None])
 
     def real(self, token: str) -> int:
+        """T10.2: a live token's id; a retired token's last id, unless a live
+        entity of its kind now has that id (reused_ref)."""
         m = TOKEN.match(token)
         if not m:
             raise invalid(f"{token!r} is not a token")
@@ -344,25 +356,40 @@ class Tokens:
         entries = self.entries[kind]
         if n > len(entries):
             raise RunError("unknown_ref", ref=token)
-        if not entries[n - 1][2]:
-            raise RunError("unknown_ref", ref=token, detail="that entity no longer exists")
-        return entries[n - 1][0]
+        real, _, retired = entries[n - 1]
+        if retired is not None and self.token(kind, real):
+            raise RunError("reused_ref", ref=token, now=self.token(kind, real),
+                           detail="a live entity of that kind has the retired entity's last id")
+        return real
 
     def token(self, kind: str, real: int) -> str | None:
-        for n, (rid, _, alive) in enumerate(self.entries[kind], 1):
-            if alive and rid == real:
+        """The live entity's token at real."""
+        for n, (rid, _, retired) in enumerate(self.entries[kind], 1):
+            if retired is None and rid == real:
                 return f"#{kind}{n}"
         return None
+
+    def retired_token(self, kind: str, real: int) -> str | None:
+        """Among retired entities of kind whose last id is real, the token of
+        the one retired last."""
+        best = None
+        for n, (rid, _, retired) in enumerate(self.entries[kind], 1):
+            if retired is not None and rid == real and (best is None or retired > best[0]):
+                best = (retired, f"#{kind}{n}")
+        return best[1] if best else None
 
     def any_kind(self, real: int) -> list[str]:
         return [t for t in (self.token(k, real) for k in KINDS) if t]
 
+    def any_kind_retired(self, real: int) -> list[str]:
+        return [t for t in (self.retired_token(k, real) for k in KINDS) if t]
+
     def alive_ids(self) -> set[int]:
-        return {e[0] for k in KINDS for e in self.entries[k] if e[2]}
+        return {e[0] for k in KINDS for e in self.entries[k] if e[2] is None}
 
     def logical(self, kind: str) -> list[int]:
-        """Real ids by token number (gone ones keep their last id), for the
-        driver's #nN/#cN references in observations."""
+        """Real ids by token number (retired ones keep their last id), for the
+        driver's #nN/#cN references in observations (T10.6)."""
         return [e[0] for e in self.entries[kind]]
 
 
@@ -395,6 +422,46 @@ class ClockCheck:
                     if not (_is_int(mod) and self.start <= mod <= now):
                         raise RunError("clock_escaped", entity=KIND_NAMES[kind], mod=mod, clock=now,
                                        detail="a mod is outside clock.start..now", **where)
+
+
+# --- the recorder build (T9) ------------------------------------------------------
+
+# The recorder's own files in oracle/ankiconnect/: (path, skip test_ files).
+RECORDER_FILES = (("recorder", True), ("addons21/meguri_recorder", False), ("launch.py", False),
+                  ("entrypoint.sh", False))
+
+
+def _compiled(rel: str) -> bool:
+    return "__pycache__" in rel.split("/") or rel.endswith((".pyc", ".pyo"))
+
+
+def recorder_sha256(driver_dir, driver_files, home) -> str:
+    """T9 oracle.driver_sha256: one line per file, `<label>` NUL `<hex sha256>`
+    LF; first `driver/<path>` for the base driver's files in their order
+    (meta.driver_files, as its own driver_sha256), then `ankiconnect/<path>`
+    sorted by path for the recorder's files (tests and compiled caches
+    excluded from recorder/, compiled caches from the rest)."""
+    from pathlib import Path
+
+    driver_dir, home = Path(driver_dir), Path(home)
+    h = hashlib.sha256()
+
+    def line(label: str, path) -> None:
+        h.update(label.encode("utf-8") + b"\0" + hashlib.sha256(Path(path).read_bytes()).hexdigest().encode("ascii") + b"\n")
+
+    for p in driver_files:
+        line("driver/" + Path(p).relative_to(driver_dir).as_posix(), p)
+    files = []
+    for rel, skip_tests in RECORDER_FILES:
+        root = home / rel
+        found = [root] if root.is_file() else sorted(root.rglob("*"))
+        for p in found:
+            path = p.relative_to(home).as_posix()
+            if p.is_file() and not _compiled(path) and not (skip_tests and p.name.startswith("test_")):
+                files.append((path, p))
+    for path, p in sorted(files):
+        line("ankiconnect/" + path, p)
+    return h.hexdigest()
 
 
 # --- requests (T6.2, T6.3, T10.2) --------------------------------------------------
@@ -649,9 +716,85 @@ class Normalizer:
         return _walk(value, fn)
 
     def observation(self, value: Any) -> Any:
-        """observe outputs: their own rules (the driver's) and T10.3's fixture
-        and media folder strings; T10.5 names no position in them."""
-        return self._strings(value)
+        """observe outputs: their own rules (the driver's), T10.3's fixture
+        and media folder strings, then T10.1 at T10.6's positions."""
+        value = self._strings(value)
+        if not isinstance(value, dict):
+            return value
+        out = dict(value)
+        if isinstance(out.get("db_dump"), dict):
+            out["db_dump"] = self._db_dump(out["db_dump"])
+        if isinstance(out.get("decks"), dict):
+            out["decks"] = {name: ({**deck, "id": self._id(deck["id"], "d")} if isinstance(deck, dict) and "id" in deck else deck)
+                            for name, deck in out["decks"].items()}
+        return out
+
+    # T10.6: per db_dump table, (key part kinds, {column: kind}). A key part
+    # kind of None stays; "graves" takes the kind from the row's type.
+    DUMP_IDS: dict[str, tuple[tuple, dict[str, str]]] = {
+        "notes": (("n",), {"id": "n", "mid": "m"}),
+        "cards": (("c",), {"id": "c", "nid": "n", "did": "d", "odid": "d"}),
+        "decks": (("d",), {"id": "d"}),
+        "notetypes": (("m",), {"id": "m"}),
+        "fields": (("m", None), {"ntid": "m"}),
+        "templates": (("m", None), {"ntid": "m"}),
+        "revlog": ((None,), {"cid": "c"}),
+        "graves": (("graves", None), {"oid": "graves"}),
+    }
+    GRAVE_KINDS = {0: "c", 1: "n", 2: "d"}
+
+    def _db_dump(self, dump: dict) -> dict:
+        out = {}
+        for table, rows in dump.items():
+            if table not in self.DUMP_IDS or not isinstance(rows, dict):
+                out[table] = rows
+                continue
+            key_kinds, columns = self.DUMP_IDS[table]
+            new_rows: dict[str, Any] = {}
+            for key, row in rows.items():
+                grave = None
+                if table == "graves":
+                    kind_of = row.get("type") if isinstance(row, dict) else None
+                    if not _is_int(kind_of):
+                        parts = key.split(",")
+                        kind_of = int(parts[1]) if len(parts) == 2 and parts[1].isdigit() else None
+                    grave = self.GRAVE_KINDS.get(kind_of)
+                parts = key.split(",")
+                if len(parts) == len(key_kinds):
+                    parts = [self._key_part(p, grave if k == "graves" else k, k == "graves") if k else p
+                             for p, k in zip(parts, key_kinds)]
+                new_key = ",".join(parts)
+                if isinstance(row, dict):
+                    row = dict(row)
+                    for column, kind in columns.items():
+                        if column not in row:
+                            continue
+                        if kind == "graves":
+                            row[column] = self._grave_id(row[column], grave) if grave else row[column]
+                        else:
+                            row[column] = self._id(row[column], kind)
+                if new_key in new_rows:
+                    raise RunError("internal_error", detail=f"two {table} rows normalize to one key (T10.6)")
+                new_rows[new_key] = row
+            out[table] = new_rows
+        return out
+
+    def _key_part(self, part: str, kind: str | None, grave: bool) -> str:
+        """A row key's id part: the token text, or the decimal id when no
+        entity of the kind has a token there (T10.6)."""
+        if kind is None or not part.isdigit() or part != str(int(part)):
+            return part
+        real = int(part)
+        tokens = self.env.tokens
+        token = (tokens.retired_token(kind, real) or tokens.token(kind, real)) if grave else tokens.token(kind, real)
+        return token or part
+
+    def _grave_id(self, v: Any, kind: str) -> Any:
+        """A grave's oid: retired entities of the kind first (the one retired
+        last), then live ones, then T10.1's rule (T10.6)."""
+        if not _is_int(v):
+            return v
+        return self.env.tokens.retired_token(kind, v) or self._id(v, kind)
 
     def reply(self, reply: dict, request: Any) -> tuple[dict, list[str]]:
         """The normalized reply and the pointers (into the body) of integers
@@ -768,10 +911,12 @@ class Normalizer:
             kind = None
 
         def repl(m: re.Match) -> str:
+            # Live entities first; only when none has the id, retired ones,
+            # with the same kind rule (T10.1 "Inside error strings").
             real = int(m.group(0))
             if kind is not None:
-                return tokens.token(kind, real) or m.group(0)
-            found = tokens.any_kind(real)
+                return tokens.token(kind, real) or tokens.retired_token(kind, real) or m.group(0)
+            found = tokens.any_kind(real) or tokens.any_kind_retired(real)
             return found[0] if len(found) == 1 else m.group(0)
 
         return _DIGITS.sub(repl, text)

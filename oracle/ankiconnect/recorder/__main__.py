@@ -56,7 +56,6 @@ CONTROL = SCRATCH / "recorder"
 ANKI_BASE = SCRATCH / "anki"
 ANKI_LOG = SCRATCH / "anki.log"
 ADDON_DIR = HOME / "addons21" / "2055492159"
-RECORDER_FILES = ("recorder", "addons21/meguri_recorder", "launch.py", "entrypoint.sh")
 START_SECS = 180.0
 REPLY_SECS = 60.0  # T6.4
 CONTROL_SECS = 120.0
@@ -81,32 +80,15 @@ def addon_pin() -> dict:
     return values
 
 
-def recorder_sha256() -> str:
-    """The driver's files (meta.driver_files) and the recorder's own, as
-    meta.driver_sha256 hashes the driver alone."""
-    h = hashlib.sha256()
-    for p in meta.driver_files():
-        h.update(b"driver/" + p.relative_to(meta.DRIVER_DIR).as_posix().encode() + b"\0")
-        h.update(hashlib.sha256(p.read_bytes()).hexdigest().encode() + b"\n")
-    files = []
-    for rel in RECORDER_FILES:
-        root = HOME / rel
-        found = [root] if root.is_file() else sorted(root.rglob("*"))
-        files += [p for p in found if p.is_file() and "__pycache__" not in p.parts and not p.name.startswith("test_")]
-    for p in sorted(files, key=lambda p: p.relative_to(HOME).as_posix()):
-        h.update(b"ankiconnect/" + p.relative_to(HOME).as_posix().encode() + b"\0")
-        h.update(hashlib.sha256(p.read_bytes()).hexdigest().encode() + b"\n")
-    return h.hexdigest()
-
-
 def oracle_identity() -> dict:
     pin = addon_pin()
     return {
         "anki_version": meta.anki_version(),
         "lock_sha256": meta.lock_sha256(),
+        "ankiconnect_lock_sha256": hashlib.sha256((HOME / "requirements.lock").read_bytes()).hexdigest(),
         "addon": {"build": pin.get("build", ADDON_BUILD), "sha256": pin["archive_sha256"]},
         "image": os.environ.get("ORACLE_ANKICONNECT_IMAGE", "unknown"),
-        "driver_sha256": recorder_sha256(),
+        "driver_sha256": tx.recorder_sha256(meta.DRIVER_DIR, meta.driver_files(), HOME),
     }
 
 

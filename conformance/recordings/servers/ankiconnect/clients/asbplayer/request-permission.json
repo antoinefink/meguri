@@ -34,7 +34,8 @@
       "sha256": "cf75820e00ebc28ba0cdcaedbbf646cac3a745121dc9de33b99020ca61a658da"
     },
     "anki_version": "26.9.3",
-    "driver_sha256": "a60739e009ed2f2363ce95f72c5dd60fe780979db10609a63913767414322c12",
+    "ankiconnect_lock_sha256": "db0b6e483d450f46150a9e80294f651a2b7ea4babda9af460e4e28df45e90561",
+    "driver_sha256": "0d286cef21d420f6430265c6a53a863325d9052860797488173ace46eb0ac622",
     "image": "meguri-oracle-ankiconnect:recorder",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
