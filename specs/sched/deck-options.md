@@ -1,7 +1,7 @@
 # Deck options and scheduling preferences
 
 Spec: sched/deck-options
-Requirements: R636, R665, R686, R690, R730, R731, R732, R733, R734, R735, R736, R737, R738, R739, R740, R741, R742, R743, R744, R745, R746, R747, R748, R749, R750, R751, R752, R753, R760, R761, R1476, R2008, R2053 (preset removal side)
+Requirements: R636, R665, R686, R690, R719, R730, R731, R732, R733, R734, R735, R736, R737, R738, R739, R740, R741, R742, R743, R744, R745, R746, R747, R748, R749, R750, R751, R752, R753, R760, R761, R1476, R2008, R2053 (preset removal side)
 Anki: 26.09.3
 Scenarios: conformance/scenarios/sched/options/
 
@@ -26,7 +26,7 @@ The snapshot's shape (O2) and the validation codes (O4) are Meguri's own, from t
 - **Target preset**: the preset selected in the draft when it is saved; the target deck gets it.
 - For a normal deck and a save: its **previous preset** is the preset its `config_id` named before the save (none when it named no preset); its **current preset** is the one it uses after the save.
 - **Today** is the day clock's day number at the read or the save (`sched/day-clock`), and **today's date** the local calendar date of that day's start: the local date of `next_day_at` − 86,400 s.
-- **Built-in defaults**: `decks/deck-presets#P2`. An option's **default** is its built-in default (O3); it is what "restore default" puts back (R734).
+- **Built-in defaults**: `decks/deck-presets#P2`. An option's **default** is its built-in default (O3); it is what "restore default" puts back (R734). The three tabbed rows (New cards/day, Maximum reviews/day, Desired retention) restore by O14.7.
 - Floating-point options are stored as `f32`. Two values are **equal** when their `f32` values are equal; step lists are equal when they have the same length and equal elements.
 
 ## O2. The snapshot (Meguri-defined shape)
@@ -51,12 +51,12 @@ The screen holds no scheduling rule of its own (U232): ranges, defaults, warning
 |---|---|---|---|---|---|
 | Daily Limits | New cards/day | `new_per_day` | 20 | integer 0 to 9999 | |
 | Daily Limits | Maximum reviews/day | `reviews_per_day` | 200 | integer 0 to 9999 | `reviews_below_ten_times_new` |
-| Daily Limits | This deck: new, reviews | deck `new_limit`, `review_limit` | none | integer 0 to 9999, or none | (as above) |
-| Daily Limits | Today only: new, reviews | deck `new_limit_today`, `review_limit_today` | none | integer 0 to 9999, or none | (as above) |
+| Daily Limits | This deck: new, reviews | deck `new_limit`, `review_limit` | none stored; restore by O14.7 | integer 0 to 9999, or none (O14.1) | (as above) |
+| Daily Limits | Today only: new, reviews | deck `new_limit_today`, `review_limit_today` | none stored; restore by O14.7 | integer 0 to 9999, or none (O14.1) | (as above) |
 | Daily Limits | New cards ignore review limit (global) | `newCardsIgnoreReviewLimit` | false | boolean | |
 | Daily Limits | Limits start from top (global) | `applyAllParentLimits` | false | boolean | |
 | FSRS | Desired retention | `desired_retention` | 0.90 | 0.70 to 0.99 | `retention_low`, `retention_high` |
-| FSRS | Desired retention, This deck | deck `desired_retention` | none | 0.70 to 0.99, or none | (as above) |
+| FSRS | Desired retention, This deck | deck `desired_retention` | none stored; restore by O14.7 | 0.70 to 0.99, or none (O14.1) | (as above) |
 | New Cards | Learning steps | `learn_steps` | `1m 10m` | step text (O5) | `steps_one_day_or_more` |
 | New Cards | Insertion order | `new_card_insert_order` | 0 Sequential | 0 Sequential, 1 Random | |
 | Lapses | Relearning steps | `relearn_steps` | `10m` | step text (O5) | `steps_one_day_or_more` |
@@ -179,7 +179,7 @@ Selecting a preset makes it the target preset; the save assigns it to the target
 
 Edits change the draft's values for the selected preset. Values of other presets edited earlier in the same draft are kept and saved too. The deck values and the global options are edited directly.
 
-The limit tabs (R740, Anki's rule, for U232): the editor opens on the most specific tab that is set, Today only when the snapshot's Today-only limit is active, else This deck when set, else Preset. Using a tab sets that tab's value and clears the more specific ones in the draft (choosing This deck clears the Today-only limit; choosing Preset clears both); less specific tabs keep their snapshot values. Opening the Today-only tab while its stored limit is not active offers the stored `limit` again. The same holds for Desired retention's Preset and This deck tabs. What the save writes for each state is O9.
+The limit tabs (R740, Anki's rule, for U232): the editor opens on the most specific tab that is set, Today only when the snapshot's Today-only limit is active, else This deck when set, else Preset. Using a tab sets that tab's value and clears the more specific ones in the draft (choosing This deck clears the Today-only limit; choosing Preset clears both); less specific tabs go back to their opening values (O14.2), which for Preset need not be the snapshot's. Opening the Today-only tab while its stored limit is not active offers the stored `limit` again. The same holds for Desired retention's Preset and This deck tabs. What the save writes for each state is O9. The value each tab shows when it becomes active, and what happens to edits on a tab the user leaves, are in O14.
 
 ### O6.3 Add and Clone (R732)
 
@@ -201,8 +201,8 @@ Renames the selected preset in the draft, following `decks/deck-presets#P7` (no 
 
 ### O6.6 Unsaved changes and defaults (R734)
 
-- The draft has unsaved changes when, compared with the snapshot under O1's equality, a preset's value or name differs, a preset was staged or removed, another preset is selected, or a deck value or global option differs. Dismissing the screen then asks Discard or Keep editing.
-- An option shows its restore-default control when its draft value differs from its default (O2 item 5). Restoring puts the default into the draft.
+- The draft has unsaved changes when, compared with the draft's starting point under O1's equality, a preset's value or name differs, a preset was staged or removed, another preset is selected, or a deck value or global option differs. The starting point is the snapshot with O14.3's opening state applied: a stored Today-only limit that is not active is none there, so it is not a change. The check first commits the field being edited (O15.3). Dismissing the screen then asks Discard or Keep editing.
+- An option shows its restore-default control when its draft value differs from its default (O2 item 5). Restoring puts the default into the draft. The three tabbed rows follow O14.7 instead.
 
 ## O7. The save (R737)
 
@@ -301,6 +301,11 @@ The screen's labels, help texts and warning wording are Meguri's (R734, U232); t
 - **Step text** (O5.2): for a step of an exact multiple of 43,800 minutes that is not a multiple of 525,600, Anki shows a rounded number of days; Meguri shows exact hours.
 - **Load balancer** toggle on the deck options screen and in the settings (R665); Anki's desktop shows none.
 - **Preset removal** (O6.5): Anki's screen warns before the first schema change since a sync that the next sync must upload the whole collection; Meguri asks nothing and takes a safety backup before the save (`notetypes/schema-changes#G9`).
+- **Minimum interval under FSRS** (R745): Anki's screen hides Minimum interval while FSRS is on, because FSRS does not use it (`sched/fsrs-transitions#T2.5`). Meguri, always under FSRS, shows it in Lapses as R745 asks; the stored value is still written and read by SM-2 clients. Added 2026-11-10; see O16.
+- **Opening from a review** (R730, O15.1): Anki asks which deck when the studied deck is not the card's own deck; Meguri opens the card's home deck without asking.
+- **After a save during a review** (O15.2): Anki's reviewer moves to the rebuilt queue's next card, which can be another card when the save changed order options; Meguri keeps the shown card first (`sched/review-session#C4`, recorded in `sched/review-session#P11`).
+- **Insertion order Random**: Anki warns whenever Random is selected that, with its current scheduler, Sequential plus a New card gather order is the better way to get random new cards. No Product Contract requirement asks for this warning (R743 and R744 do not), so O4 has no code for it. The screen's R744 footer about re-sorting is a different note. Added 2026-11-10.
+- **Restore Default visibility** (O6.6, O14.7): Anki compares a number with its default after rounding both to 2 decimal places; Meguri uses O1's equality.
 
 None of these shows in a scenario's golden; scenarios avoid them (O13).
 
@@ -321,3 +326,116 @@ None of these shows in a scenario's golden; scenarios avoid them (O13).
 | `sched/options/prefs-rollover` | O10 | awaits the driver (`conformance/deck-options-ops#E4`) |
 
 Meguri's own tests (no oracle): O2's snapshot on a collection with an out-of-range preset (V3 replacements shown), a missing preset (`preset_missing`), use counts and order; O4's every code and the "changed values only" rule; O5's two tables and round trips; O6's staging (add, clone with unsaved edits, rename, remove with `scm <= ls` committing with no confirmation input, selection after removal, use counts); the safety backup before a save that removes an existing preset, and none before one that only drops a staged preset; O7.1's refusals each writing nothing; O7's undo restoring presets, decks, cards and `scm`; O7.2 step 7 not adding missing keys; O10's ranges, its undo step and the day clock recomputing. Swift tests in CoreBridge cover the snapshot and validation API (U49 Verification).
+
+## O14. Limit and retention tabs in detail (R740, R742)
+
+Added 2026-11-10 for U233. Anki's rule, which decides what a save sends for the five deck values (O9). It refines O6.2 and O6.6; where their short wording differs, this section decides.
+
+The tab state (the active tab, each tab's remembered and opening values, the fallback) is screen state, kept by U233's limit tabs, not by the core draft. The core draft holds only the values of O14.2's "Draft value" column, and the screen writes each of them as a plain field edit. O6.2's short rule (set the active tab's value, clear the more specific ones) is not enough for a switch: it does not put a less specific tab back to its opening value.
+
+### O14.1 Tabs and their values
+
+- New cards/day and Maximum reviews/day each have three tabs, from least to most specific: Preset, This deck, Today only. Desired retention has two: Preset, This deck. Each row's tabs are independent of the other rows'.
+- Each tab keeps a **remembered value**, a number or none, for as long as the screen is open. At opening it starts as:
+  - Preset: the opening preset's value of the option; never none. O14.4 replaces it when another preset is selected. It is not tied to the draft afterwards: after an edit on Preset and a switch to a more specific tab, Preset remembers the edit while the draft holds its opening value (O14.2).
+  - This deck: the deck value (O2 item 3) when set, else none.
+  - Today only: the stored Today-only `limit` when it is active (O2 item 3), else none.
+- Today only also has a **fallback**: the stored Today-only `limit` whatever its day, or none when the deck has no Today-only limit stored.
+- Exactly one tab is **active**. The row shows and edits the active tab's remembered value. Editing changes that remembered value.
+- The active tab always holds a number (O14.3 gives it one when it becomes active). The user cannot enter none: emptying the field, or entering text that is not a number, changes nothing, and the field shows the remembered value again when it is committed (Anki keeps the previous value). A tab is none in the draft only when it is more specific than the active tab (O14.2).
+
+### O14.2 What the draft holds
+
+With tab A active, the draft holds for each tab of the row:
+
+| Tab | Draft value |
+|---|---|
+| A | A's remembered value |
+| a tab less specific than A | its **opening value**: for This deck, its value when the screen opened; for Preset, the preset's draft value when that preset was selected (at opening, or by O14.4) |
+| a tab more specific than A | none |
+
+So a value edited on a tab and then left behind by choosing a more specific tab is not saved. The tab still remembers it: choosing that tab again shows the edited value and puts it back in the draft. Choosing a less specific tab clears the more specific ones in the draft without losing what they remember.
+
+### O14.3 Opening and switching
+
+- **Opening.** The active tab is the most specific tab whose remembered value is not none. O14.2 then applies at once: a stored Today-only limit that is not active is none in the draft from the start. This opening state is the draft's starting point and is not an unsaved change (O6.6). A save from an untouched screen therefore sends it, and O9 turns it into: a future Today-only limit removed, a past one kept as it is.
+- **Switching.** When the user makes tab T active, T's remembered value is kept if it has one. Otherwise it becomes T's fallback (Today only only), else the value the row showed just before the switch. That value is T's remembered value from then on, and goes into the draft by O14.2. Choosing the active tab again changes nothing.
+
+### O14.4 Selecting another preset
+
+Selecting another preset (O6.1, O6.3, O6.5) gives the Preset tab of each row the newly selected preset's draft value as both its remembered and its opening value. The active tab stays as it is, and This deck and Today only keep their remembered values. When Preset is active, the row shows the new preset's value.
+
+The Preset tab's old remembered value is dropped. A Preset edit left behind by a more specific tab (O14.2) is therefore lost once another preset is selected, also when the user then selects the first preset again: its draft value, which is its opening value, is what the tab remembers then.
+
+### O14.5 Examples (New cards/day)
+
+Preset value 20 at opening unless the row says otherwise. Today is day 100.
+
+| Stored deck values | User actions | Row shows | Save sends (then O9) |
+|---|---|---|---|
+| none | open | Preset, 20 | This deck none, Today only none |
+| none | open, choose This deck | This deck, 20 | This deck 20 |
+| This deck 5 | open | This deck, 5 | This deck 5 |
+| This deck 5, Today only 10 for day 100 | open | Today only, 10 | This deck 5, Today only 10 |
+| This deck 5, Today only 10 for day 100 | open, choose Preset | Preset, 20 | both none: `new_limit` removed, Today-only limit kept with day 99 |
+| Today only 10 for day 97 | open | Preset, 20 | Today only none: the stored limit stays as it is |
+| Today only 10 for day 97 | open, choose Today only | Today only, 10 (the fallback) | Today only 10 for day 100 |
+| none | open, edit Preset to 30, choose This deck | This deck, 30 | preset 20 (unchanged), This deck 30 |
+| none | open, edit Preset to 30, choose This deck, choose Preset | Preset, 30 | preset 30, This deck none |
+| This deck 5 | open, choose Today only, edit to 8, choose This deck | This deck, 5 | This deck 5, Today only none |
+| This deck 5 | the same, then choose Today only again | Today only, 8 | This deck 5, Today only 8 for day 100 |
+| none | open, edit Preset to 30, choose This deck, select preset B (value 25), select the first preset again, choose Preset | Preset, 20 | first preset 20, This deck none |
+
+Desired retention follows the same rules with its two tabs. This deck has no fallback, so choosing This deck when the deck has no value of its own shows the preset's value just shown.
+
+### O14.6 Warnings and tests
+
+- The warnings of O4.3 read the values the rows show: `reviews_below_ten_times_new` compares the two rows' shown values, and `retention_low` and `retention_high` the shown desired retention.
+- Meguri's tests (no oracle; the screen state is not core output): every row of O14.5 and O14.7, the same for Maximum reviews/day and for Desired retention's two tabs, O14.4 with each tab active, an emptied field on each tab, and the opening state not counting as an unsaved change. What each sent state writes is covered by O9's scenario `sched/options/deck-limits`.
+
+### O14.7 Restore Default on the tabbed rows (R734)
+
+- Each tabbed row has one Restore Default control, whichever tab is active. It compares the value the row shows (the active tab's remembered value) with the preset option's built-in default: 20 for New cards/day, 200 for Maximum reviews/day, 0.90 for Desired retention, under O1's equality. It shows when they differ.
+- Restoring sets the active tab's remembered value to that default, as an edit on that tab would. The active tab stays active and O14.2 puts the value into the draft. Restoring never sets a tab to none and never switches tabs.
+
+| Stored deck values | User actions | Row shows | Save sends (then O9) |
+|---|---|---|---|
+| none, preset value 30 | open | Preset, 30, with Restore Default | nothing changed |
+| none, preset value 30 | open, Restore Default | Preset, 20, no Restore Default | preset 20, This deck none |
+| This deck 5 | open, Restore Default | This deck, 20 | This deck 20 (`new_limit` 20) |
+| Today only 10 for day 100 | open, Restore Default | Today only, 20 | Today only 20 for day 100 |
+| This deck 20 | open | This deck, 20, no Restore Default | This deck 20 |
+
+## O15. Opening the screen and leaving it (R730, R734, R719)
+
+Added 2026-11-10 for U232. The screen's placement, layout, wording and dismissal are Meguri's (`docs/design/native-interface-contract.md` N11.9 and the screen contract `deckOptions.options`). This section states which deck the screen opens for and the save and leave rules Meguri shares with Anki; sentences marked "for information" describe Anki only and require nothing.
+
+### O15.1 Which deck
+
+| Entry point | Target deck (O1) |
+|---|---|
+| a deck's menu in the deck list, the deck page | that deck |
+| the key O on the deck list and the deck page (R223) | the selected or shown deck |
+| Deck ▸ Deck Options… (⌥⌘O, R283), outside a review | the selected deck |
+| during a review: the review session's menu, Deck ▸ Deck Options… (Mac), and the key O (R241, R421) | the current card's home deck: its `odid` when that is not 0, else its `did` (`sched/card-data#K2`) |
+| the finished state's limit text (U155) | the deck that finished |
+
+- During a review with no current card (the session waits or has finished), Anki opens the deck being studied. Meguri does the same: the review entries target the deck the session studies, when it is a normal deck (a filtered deck has no options screen, O1).
+- A filtered deck has no deck options screen (O1). For a filtered deck, Anki's Options command opens that deck's own filtered-deck settings instead. Which screen Meguri opens for a filtered deck is the entry point's contract, never this one.
+- For information: in a review, Anki asks which deck when the card's home deck or current deck differs from the deck being studied (for example when a parent deck or a filtered deck is studied), offering those decks with normal decks first. Meguri does not ask (R730, O12).
+
+### O15.2 After a save during a review
+
+The save rebuilds the study queue (O7.2). The review continues by `sched/review-session#C4`: the shown card stays first while the rebuilt queue still presents it. A save that changes nothing records no step and does not rebuild (O7.2). For information: Anki's reviewer moves to the rebuilt queue's next card instead (O12).
+
+### O15.3 Saving and leaving
+
+- Before a save, and before the unsaved-changes check when the screen closes, the field being edited is committed first, as Anki does. A value typed but not yet committed is therefore saved, and counts as a change when the screen closes. This holds for Meguri's Save button, ⌘S, ⌘↩ and every leave of O6.6's check.
+- Anki saves with Control+Enter, which its macOS build shows and takes as ⌘↩. Meguri takes ⌘↩ and ⌘S (R734).
+- For information: Anki's screen closes after a successful save. What Meguri's screen does after a save is the screen contract's (`deckOptions.options`, N11.9, U232).
+- In Anki, closing the screen with unsaved changes asks whether to discard them: confirming closes without saving and cancelling keeps the screen open. Meguri's Discard / Keep editing prompt (R734) is the same choice. O6.6 decides what counts as an unsaved change. Values are compared as `f32` (O1), so a typed value that rounds to the stored `f32` is not a change.
+- The save's undo step is named "Deck Options" (O7, R719). Undo after closing the screen restores every row the save changed (O7.2) and rebuilds the queue.
+
+## O16. Options Anki's screen shows only without FSRS
+
+Added 2026-11-10. Anki's FSRS screen hides the SM-2 options that R752 hides. It also hides Minimum interval (Lapses), which R745 keeps in Meguri. FSRS never reads that value (`sched/fsrs-transitions#T2.5`). The control only edits the stored `lapse.minInt` that SM-2 clients use. Anki shows the relearning-steps warning against Minimum interval only without FSRS, so Meguri has no such warning. O12 records the difference. R745 keeps the row.

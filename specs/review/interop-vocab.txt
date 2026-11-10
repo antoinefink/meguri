@@ -9,3 +9,29 @@ review_remaining
 new_remaining
 restorePositionReviewer
 resetCountsReviewer
+# Wave 8: preset keys the timers and auto advance read, the legacy deck and
+# collection keys the answer flow names, card columns, the reviewer page's
+# type-answer and indicator hooks, and the web platform names key routing uses.
+show_timer
+stop_timer_on_answer
+cap_answer_time_to_secs
+seconds_to_show_question
+seconds_to_show_answer
+wait_for_audio
+question_action
+answer_action
+curDeck
+maxTaken
+estTimes
+activeDecks
+setDueReviewer
+flagLabels
+odid
+did
+typeans
+_typeAnsPress
+_drawFlag
+_drawMark
+preventDefault
+contenteditable
+textarea

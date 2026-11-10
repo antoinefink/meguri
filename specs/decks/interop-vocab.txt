@@ -49,3 +49,8 @@ sortType
 noteFld
 timeLim
 localOffset
+# Wave 8 (deck-list): the deck description's Markdown key and the card's
+# deck columns.
+md
+odid
+did
