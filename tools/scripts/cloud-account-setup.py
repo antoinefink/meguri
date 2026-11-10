@@ -76,7 +76,7 @@ class SetupDiagnostic:
         'source-dirty', 'setup-observation', 'setup-bundle', 'setup-image-path', 'setup-loaded-binding',
         'setup-images', 'setup-image', 'setup-original-bytes', 'setup-missing-image', 'setup-support-root',
         'transport-ended', 'transport-frame', 'transport-size', 'transport-truncated', 'transport-timeout',
-        'os-broken-pipe', 'os-reset', 'os-bad-fd', 'os-would-block', 'os-timeout'))
+        'os-broken-pipe', 'os-reset', 'os-bad-fd', 'os-would-block', 'os-timeout')) | frozenset(errno.errorcode.values())
     ERRNOS = {errno.EPIPE: 'os-broken-pipe', errno.ECONNRESET: 'os-reset', errno.EBADF: 'os-bad-fd',
         errno.EAGAIN: 'os-would-block', errno.ETIMEDOUT: 'os-timeout'}
 
@@ -91,7 +91,7 @@ class SetupDiagnostic:
             code = error.args[0] if (isinstance(error, v.Refused) and len(error.args) == 1 and
                 type(error.args[0]) is str and error.args[0] in self.CODES) else 'unknown'
             if isinstance(error, OSError):
-                code = self.ERRNOS.get(error.errno, 'unknown')
+                code = self.ERRNOS.get(error.errno, errno.errorcode.get(error.errno, 'unknown'))
             kind = next((name for cls, name in ((v.Refused, 'refused'), (subprocess.TimeoutExpired, 'timeout'),
                 (OSError, 'os-error'), (ValueError, 'value-error'), (TypeError, 'type-error'),
                 (KeyError, 'key-error'), (KeyboardInterrupt, 'interrupted')) if isinstance(error, cls)), 'other')
@@ -101,6 +101,29 @@ class SetupDiagnostic:
                 'kind': kind}, sort_keys=True), file=sys.stderr)
         except (OSError, ValueError, TypeError, AttributeError):
             pass
+
+
+def emit_setup_site(error):
+    """Host-only code identity and public line number; no traceback rendering."""
+    try:
+        functions = ((s.Transport.request, 'transport-request'), (h.Original.check, 'original-check'),
+                     (h.Directory.check, 'directory-check'), (v.command, 'native-command'))
+        sites = []
+        for function, label in functions:
+            code = getattr(function, '__code__', None)
+            if type(code) is type(emit_setup_site.__code__):
+                sites.append((code, label))
+        trace, found, depth = error.__traceback__, None, 0
+        while trace is not None and depth < 64:
+            code, line = trace.tb_frame.f_code, trace.tb_lineno
+            label = next((label for actual, label in sites if code is actual), None)
+            if label is not None and type(line) is int and 0 < code.co_firstlineno <= line <= min(100000, code.co_firstlineno + 512):
+                found = {'site': label, 'line': line}
+            trace, depth = trace.tb_next, depth + 1
+        if found is not None:
+            print('MG_OWNER_SETUP_SITE ' + json.dumps(found, sort_keys=True), file=sys.stderr)
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
 
 
 class PublicationUncertain(v.Refused):
@@ -762,6 +785,7 @@ def main():
         code = 78 if outcome == "implementation_missing" else 1
     except BaseException as error:
         diagnostic.emit(error)
+        emit_setup_site(error)
         if completed:
             category = "publication-uncertain"
         # Never echo exception/SDK/private path/candidate data.

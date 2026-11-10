@@ -55,3 +55,16 @@ execution restores normal loading without changing assertions. Independent
 review cleared that two-line fix. Focused tooling run `68701` then passed,
 including actual serialized guest execution and the new lifetime/privacy cases.
 Actual setup with this diagnostic remains pending.
+
+Actual guest-diagnostic attempt `69573` still stopped at capture. Read-only
+run `72576` found one host record and no guest record; the OS error was outside
+the five initial categories. No underlying cause is claimed from that evidence.
+
+Diagnostics now cover the OS's public errno names, keeping the five earlier
+aliases. A separate host-only record identifies only an actual known code
+object and a bounded public source line. No filename, exception text, argument,
+local value or raw traceback is emitted. Guest serialization does not depend on
+that host helper. Independent review confirmed strict object-identity matching
+and unchanged failure/privacy boundaries. Four tests exercise real transport
+lease/write errors and the closed output. Focused run `74544` passed; privacy
+passed after only a new test name was rephrased. Assertions stayed unchanged.

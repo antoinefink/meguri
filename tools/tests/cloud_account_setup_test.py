@@ -229,6 +229,57 @@ class GuestDiagnosticTests(unittest.TestCase):
         self.assertIn("h.setup_join(child)",source)
 
 
+class HostSiteDiagnosticTests(unittest.TestCase):
+    def test_every_public_errno_is_closed_and_preserves_existing_aliases(self):
+        for number,name in p.errno.errorcode.items():
+            diagnostic=p.SetupDiagnostic();diagnostic.enter('capture');out=io.StringIO()
+            with contextlib.redirect_stderr(out):diagnostic.emit(OSError(number,'GENERATED_PRIVATE_MARKER'))
+            value=json.loads(out.getvalue().removeprefix('MG_OWNER_SETUP_DIAGNOSTIC '))
+            self.assertEqual(value['refusal'],p.SetupDiagnostic.ERRNOS.get(number,name))
+            self.assertIn(value['refusal'],p.SetupDiagnostic.CODES)
+            self.assertNotIn('GENERATED_PRIVATE_MARKER',out.getvalue())
+    def test_actual_transport_request_maps_lease_and_write_without_private_data(self):
+        lines=[]
+        for mode,number in (('lease',p.errno.ENOENT),('write',p.errno.EIO)):
+            error=OSError(number,'GENERATED_PRIVATE_MARKER')
+            with tempfile.TemporaryFile() as stream:
+                transport=p.s.Transport.__new__(p.s.Transport);transport.closed=False;transport.buffer=bytearray()
+                transport.vm=mock.Mock();transport.child=mock.Mock();transport.child.poll.return_value=None
+                transport.child.stdin=stream
+                if mode=='lease':transport.vm.lease_check.side_effect=error
+                out=io.StringIO();diagnostic=p.SetupDiagnostic();diagnostic.enter('capture')
+                with mock.patch.object(p.s.select,'select',return_value=([],[stream],[])), \
+                     mock.patch.object(p.s.os,'write',side_effect=error) as writer,contextlib.redirect_stderr(out):
+                    try:transport.request('capture')
+                    except OSError as caught:
+                        self.assertIs(caught,error);diagnostic.emit(caught);p.emit_setup_site(caught)
+                    else:self.fail('original OSError must propagate')
+                    if mode=='lease':writer.assert_not_called()
+                records=out.getvalue().splitlines();self.assertEqual(len(records),2)
+                public=json.loads(records[0].removeprefix('MG_OWNER_SETUP_DIAGNOSTIC '))
+                site=json.loads(records[1].removeprefix('MG_OWNER_SETUP_SITE '))
+                self.assertEqual(public['refusal'],p.errno.errorcode[number]);self.assertEqual(site['site'],'transport-request')
+                self.assertEqual(set(site),{'site','line'});self.assertGreaterEqual(site['line'],p.s.Transport.request.__code__.co_firstlineno)
+                self.assertLessEqual(site['line'],p.s.Transport.request.__code__.co_firstlineno+512)
+                self.assertNotIn('GENERATED_PRIVATE_MARKER',out.getvalue());lines.append(site['line'])
+        self.assertNotEqual(lines[0],lines[1])
+    def test_other_frames_produce_no_site_record(self):
+        out=io.StringIO()
+        try:raise OSError(p.errno.EIO,'GENERATED_PRIVATE_MARKER')
+        except OSError as error:
+            with contextlib.redirect_stderr(out):p.emit_setup_site(error)
+        self.assertEqual(out.getvalue(),'')
+    def test_serialized_guest_never_needs_host_site_function(self):
+        source=p.guest_source();self.assertNotIn(b'emit_setup_site',source)
+        wire=p.i.raw_json({'action':'wrong','bytes':0});out,err=io.StringIO(),io.StringIO()
+        with mock.patch.object(p.sys,'stdin',mock.Mock(buffer=io.BytesIO(wire))), \
+             mock.patch.object(p.signal,'signal'),contextlib.redirect_stdout(out),contextlib.redirect_stderr(err):
+            with self.assertRaises(SystemExit):exec(compile(source,'generated-guest','exec'),{})
+        self.assertEqual(out.getvalue(),'');self.assertNotIn('MG_OWNER_SETUP_SITE',err.getvalue())
+        self.assertEqual(json.loads(err.getvalue().removeprefix('MG_OWNER_GUEST_DIAGNOSTIC ')),
+                         {'phase':'guest-initial','refusal':'setup-order','kind':'refused'})
+
+
 class Producer(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
