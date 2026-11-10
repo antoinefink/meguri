@@ -31,6 +31,71 @@ MEDIA = {"media-upload-pending", "media-download-pending", "media-missing", "med
          "media-remaining-download-ms", "media-root-acked", "media-zone-missing", "media-no-space"}
 
 
+
+# Closed public vocabulary: no exception text or caller-selected labels escape.
+PREFLIGHT_STAGES = {"entry", "source", "vm-context", "vm-observation", "lease-acquire", "lease-input",
+    "lease-retain", "lease-release", "simulator-pins", "simulator-lease", "simulator-device", "simulator-runtime",
+    "simulator-os", "simulator-receipt", "destination-freeze", "fixtures", "execution"}
+PREFLIGHT_REFUSALS = {"unclassified", "filesystem-refused", "input-shape", "receipt-invalid", "process-refused",
+    "source-dirty", "machine-observation", "child-failed", "child-binding", "child-outcome", "receipt-in-progress",
+    "lease-changed", "lease-owner-kind", "lease-expired-or-restarted", "lease-target", "lease-receipt-changed",
+    "simulator-kind", "simulator-target", "simulator-kind-state", "simulator-runtime", "vm-simctl", "vm-lease",
+    "destination-selected-map", "destination-frozen-selected", "destination-frozen-map", "destination-envelope",
+    "destination-entry", "private-authority", "private-changed", "receipt-source", "receipt-outcome",
+    "artifact-declaration"}
+
+
+class Diagnostic:
+    def __init__(self): self.stage = "entry"
+
+    def enter(self, stage):
+        need(stage in PREFLIGHT_STAGES, "selected-diagnostic-stage")
+        self.stage = stage
+
+    def failure(self, error):
+        code = "unclassified"
+        if isinstance(error, v.Refused) and len(error.args) == 1 and type(error.args[0]) is str:
+            if error.args[0] in PREFLIGHT_REFUSALS:
+                code = error.args[0]
+        elif isinstance(error, OSError): code = "filesystem-refused"
+        elif isinstance(error, v.Invalid): code = "receipt-invalid"
+        elif isinstance(error, (ValueError, TypeError, KeyError, IndexError, AttributeError, UnicodeError, RecursionError)):
+            code = "input-shape"
+        elif isinstance(error, s.subprocess.SubprocessError): code = "process-refused"
+        return {"scope": SCOPE, "selection": "sync_now", "outcome": "failed_evidence",
+                "category": "selected-refused", "signed_execution": False,
+                "stage": self.stage if self.stage in PREFLIGHT_STAGES else "entry", "refusal": code}
+
+
+def sanitized_failure(value, cleanup=None):
+    generic = {"scope": SCOPE, "selection": "sync_now", "outcome": "failed_evidence",
+               "category": "selected-refused", "signed_execution": False}
+    if (isinstance(value, dict) and set(value) == {*generic, "stage", "refusal"} and
+            all(type(value[key]) is type(wanted) and value[key] == wanted for key, wanted in generic.items()) and
+            type(value["stage"]) is str and value["stage"] in PREFLIGHT_STAGES and
+            type(value["refusal"]) is str and value["refusal"] in PREFLIGHT_REFUSALS):
+        result = {**generic, "stage": value["stage"], "refusal": value["refusal"]}
+    else:
+        result = generic
+    if cleanup is not None:
+        result["cleanup"] = sanitized_cleanup(cleanup)
+    return result
+
+
+
+def sanitized_cleanup(value):
+    unconfirmed = {"drain": "unconfirmed", "reservation": "retained-or-unconfirmed"}
+    if not isinstance(value, dict): return unconfirmed
+    if (set(value) == {"scope", "outcome"} and value.get("scope") == SCOPE and
+            type(value.get("outcome")) is str and value["outcome"] in {"reservation-released", "no-reservation"}):
+        return {"drain": "joined", "reservation": "released" if value["outcome"] == "reservation-released" else "none"}
+    clean = sanitized_failure(value)
+    if "stage" in clean:
+        return {"drain": "joined", "reservation": "retained-or-unconfirmed",
+                "stage": clean["stage"], "refusal": clean["refusal"]}
+    return unconfirmed
+
+
 def command_bytes(header_raw):
     header = strict(header_raw)
     need(header.get("selection") == "sync_now" and header.get("device_kind") in PROGRAMS, "selected-program")
@@ -453,33 +518,44 @@ class Session:
             s.close_appends(self.local)
 
 
-def run_selected(root, parent_run, context):
+def run_selected(root, parent_run, context, diagnostic=None):
+    diagnostic = Diagnostic() if diagnostic is None else diagnostic
     need(v.MG_RUN_ID.fullmatch(parent_run), "selected-parent")
+    diagnostic.enter("source")
     sha = v.source(root)
     directory = os.path.join(root, "build/mg/cloudkit-signed", parent_run)
+    diagnostic.enter("vm-context")
     with s.owned_context(root, parent_run, context) as (vm, lease_check), contextlib.ExitStack() as held:
         local = h.Directory(directory)
         held.callback(local.close)
+        diagnostic.enter("vm-observation")
         observed = i.machine(vm)
+        diagnostic.enter("lease-acquire")
         lease_ref = s.child(root, "sim", ["acquire", "iphone", "--holder", "cloud-selected", "--ttl-min", "120"],
                             sha, context, context_key="MG_CLOUD_AGENT_SELECTED_CONTEXT_FD")
+        diagnostic.enter("lease-input")
         lease = i.lease_input(root, {"device_kind": "iphone", "source_commit": sha}, lease_ref["run_id"])
         # Release remains under this same VM owner, after both supervisors have
         # joined and the shell's checked orphan drain has completed.
+        diagnostic.enter("lease-retain")
         h.write_new(local.fd, "selected-lease.json", i.raw_json(lease_ref))
         os.fsync(local.fd)
+        diagnostic.enter("simulator-pins")
         pins = v.json_input(root, root + "/tools/sim-devices.json")
         simulator_build = pins["runtime"]["build"]
         sim_expected = {"device_kind": "iphone", "source_commit": sha, "os_build": simulator_build}
-        i.live_simulator(vm, root, sim_expected, lease, observed)
+        i.live_simulator(vm, root, sim_expected, lease, observed, checkpoint=diagnostic.enter)
         destinations = {"mac1": {"device_kind": "mac", "vm": vm.selection["name"],
                                  "vm_instance": observed["vm_instance"], "simulator": None},
                         "phone1": {"device_kind": "iphone", "vm": vm.selection["name"],
                                    "vm_instance": observed["vm_instance"], "simulator": {
                                        "udid": lease["udid"], "lease_receipt": lease["lease_receipt"]}}}
+        diagnostic.enter("destination-freeze")
         with i.freeze_destinations(parent_run, sha, destinations) as map_check:
+            diagnostic.enter("fixtures")
             fixtures = s.child(root, "fixtures", ["cloud-small", "--seed", "1"], sha, context,
                                context_key="MG_CLOUD_AGENT_SELECTED_CONTEXT_FD")
+            diagnostic.enter("execution")
             receipt_path = os.path.join(root, "build/mg/fixtures", fixtures["run_id"], "result.json")
             receipt = h.Original(receipt_path)
             held.callback(receipt.close)
@@ -572,24 +648,29 @@ def run_selected(root, parent_run, context):
 
 
 
-def release_lease(root, parent_run, context):
+def release_lease(root, parent_run, context, diagnostic=None):
     """Called only after the parent's checked drain under the same VM lease."""
+    diagnostic = Diagnostic() if diagnostic is None else diagnostic
     need(v.MG_RUN_ID.fullmatch(parent_run), "selected-parent")
     path = os.path.join(root, "build/mg/cloudkit-signed", parent_run, "selected-lease.json")
     if not os.path.lexists(path):
         return {"scope": SCOPE, "outcome": "no-reservation"}
+    diagnostic.enter("vm-context")
     with s.owned_context(root, parent_run, context) as (vm, check), contextlib.ExitStack() as held:
         original = h.Original(path)
         held.callback(original.close)
         ref = original.value
         need(isinstance(ref, dict) and set(ref) == {"job", "run_id"} and ref["job"] == "sim", "selected-lease")
         sha = v.source(root)
+        diagnostic.enter("lease-input")
         lease = i.lease_input(root, {"device_kind": "iphone", "source_commit": sha}, ref["run_id"])
+        diagnostic.enter("vm-observation")
         observed = i.machine(vm)
         pins = v.json_input(root, root + "/tools/sim-devices.json")
         expected = {"device_kind": "iphone", "source_commit": sha, "os_build": pins["runtime"]["build"]}
-        i.live_simulator(vm, root, expected, lease, observed)
+        i.live_simulator(vm, root, expected, lease, observed, checkpoint=diagnostic.enter)
         original.check(); check()
+        diagnostic.enter("lease-release")
         s.child(root, "sim", ["release", lease["udid"]], sha, context,
                 context_key="MG_CLOUD_AGENT_SELECTED_CONTEXT_FD")
         original.check(); check()
@@ -602,11 +683,32 @@ def main():
     parser.add_argument("--parent-run", required=True)
     parser.add_argument("--install-child", action="store_true")
     parser.add_argument("--release-lease", action="store_true")
+    parser.add_argument("--sanitize-failure", action="store_true")
     parser.add_argument("--run-id")
     parser.add_argument("--run-directory")
     parser.add_argument("--source-commit")
     parser.add_argument("--lease-run")
     args = parser.parse_args()
+    diagnostic = Diagnostic()
+    if args.sanitize_failure:
+        value = None
+        try:
+            need(v.MG_RUN_ID.fullmatch(args.parent_run) and not any((args.install_child, args.release_lease,
+                 args.run_id, args.run_directory, args.source_commit, args.lease_run)), "selected-arguments")
+            path = os.path.join(args.root, "build/mg/cloudkit-signed", args.parent_run, "selected-report.json")
+            original = h.Original(path)
+            try: value = original.value
+            finally: original.close()
+        except (v.Refused, v.Invalid, OSError, ValueError, TypeError, KeyError, UnicodeError):
+            pass
+        cleanup = None
+        try:
+            with os.fdopen(os.dup(3), "rb") as private:
+                cleanup = strict(private.read(s.CAP + 1))
+        except (v.Refused, OSError, ValueError, TypeError, UnicodeError):
+            cleanup = {}
+        print(json.dumps(sanitized_failure(value, cleanup), sort_keys=True))
+        return 0
     try:
         with os.fdopen(os.dup(3), "rb") as private:
             context = strict(private.read(s.CAP + 1))
@@ -620,7 +722,7 @@ def main():
             print(json.dumps(report, sort_keys=True))
             return 0
         need(not any((args.run_id, args.run_directory, args.source_commit, args.lease_run)), "selected-arguments")
-        report = release_lease(args.root, args.parent_run, context) if args.release_lease else run_selected(args.root, args.parent_run, context)
+        report = release_lease(args.root, args.parent_run, context, diagnostic) if args.release_lease else run_selected(args.root, args.parent_run, context, diagnostic)
         code = 0
     except a.InputFailure as error:
         report, code = {"scope": SCOPE, "selection": "sync_now", "signed_execution": False, **error.public_outcome()}, 1
@@ -633,8 +735,8 @@ def main():
     except i.Queued:
         report, code = {"scope": SCOPE, "outcome": "queued", "category": "vm-unavailable", "signed_execution": False}, 75
     except (v.Refused, v.Invalid, OSError, ValueError, TypeError, KeyError, IndexError, AttributeError,
-            UnicodeError, RecursionError, s.subprocess.SubprocessError):
-        report, code = {"scope": SCOPE, "outcome": "failed_evidence", "category": "selected-refused", "signed_execution": False}, 1
+            UnicodeError, RecursionError, s.subprocess.SubprocessError) as error:
+        report, code = diagnostic.failure(error), 1
     print(json.dumps(report, sort_keys=True))
     return code
 

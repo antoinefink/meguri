@@ -435,8 +435,10 @@ def lease_input(root, expected, run):
             "result": result, "sha256": hashed}
 
 
-def live_simulator(vm, root, expected, lease, observed):
+def live_simulator(vm, root, expected, lease, observed, *, checkpoint=None):
     """Pool's exact ownership/kind/expiry + pinned live simctl checks, no acquire/reset."""
+    checkpoint = (lambda stage: None) if checkpoint is None else checkpoint
+    checkpoint("simulator-lease")
     udid, detail = lease["udid"], lease["result"]["details"]
     actual = vm.guest("lease", udid)
     need(actual == detail["lease"], "lease-changed")
@@ -450,6 +452,7 @@ def live_simulator(vm, root, expected, lease, observed):
          "lease-expired-or-restarted")
     need(detail["device"].get("udid") == udid and
          detail["device"].get("kind") == expected["device_kind"], "lease-target")
+    checkpoint("simulator-device")
     pins = v.json_input(root, os.path.join(root, "tools/sim-devices.json"))
     device_type = [d["device_type"] for d in pins["devices"] if d["kind"] == expected["device_kind"]]
     need(len(device_type) == 1, "simulator-kind")
@@ -462,6 +465,7 @@ def live_simulator(vm, root, expected, lease, observed):
          device.get("deviceTypeIdentifier") == device_type[0] and
          re.fullmatch(r"Meguri-Pool-" + expected["device_kind"] + r"-[0-9]+", device.get("name", "")),
          "simulator-kind-state")
+    checkpoint("simulator-runtime")
     runtimes = strict(vm.call("simctl", "list", "runtimes", "--json"))
     selected = [r for r in runtimes["runtimes"] if r.get("identifier") == runtime]
     need(len(selected) == 1 and selected[0].get("isAvailable") is True and
@@ -469,8 +473,10 @@ def live_simulator(vm, root, expected, lease, observed):
          selected[0].get("buildversion") == pins["runtime"]["build"] == expected["os_build"],
          "simulator-runtime")
     # Observe the booted runtime too, rather than relying only on its inventory.
+    checkpoint("simulator-os")
     running = vm.call("simctl", "spawn", udid, "/usr/bin/sw_vers", "-buildVersion").decode().strip()
     need(running == expected["os_build"], "simulator-runtime")
+    checkpoint("simulator-receipt")
     need(v.receipt(root, os.path.join(root, "build/mg"), lease["lease_receipt"],
                    expected["source_commit"])[1] == lease["sha256"], "lease-receipt-changed")
 

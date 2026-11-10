@@ -463,6 +463,7 @@ mg_cloudkit_signed_selected() {
   fi
   private="$(mktemp -d "${TMPDIR:-/tmp}/meguri-cloud-selected-parent.XXXXXX")" || return 1
   chmod 700 "$private" || return 1
+  jq -nc '{scope:"SELECTED-GENERATED",outcome:"cleanup-unconfirmed",signed_execution:false}' >"$private/cleanup.json"
   (umask 077; mg_cloudkit_signed_selected_private "$private" "$report") >"$private/helpers.log" 2>&1
   rc=$?
   mg_detail lane '"cloud-signed"'
@@ -499,7 +500,14 @@ mg_cloudkit_signed_selected() {
       ;;
   esac
   case "$rc" in 0|75|76|78) ;; *)
-    jq -nc '{scope:"SELECTED-GENERATED",selection:"sync_now",outcome:"failed_evidence",category:"selected-refused",signed_execution:false}' >"$report"
+    python3 -B -I "$MG_TOOLS/scripts/cloud-agent-selected.py" --sanitize-failure \
+      --root "$MG_ROOT" --parent-run "$MG_RUN_ID" 3<"$private/cleanup.json" \
+      >"$private/public-failure.json" 2>"$private/sanitize.err"
+    if [ "$?" -eq 0 ]; then
+      cat "$private/public-failure.json" >"$report"
+    else
+      jq -nc '{scope:"SELECTED-GENERATED",selection:"sync_now",outcome:"failed_evidence",category:"selected-refused",signed_execution:false}' >"$report"
+    fi
     mg_detail outcome '"failed_evidence"'
     mg_failure selected-evidence "Selected QA failed original input, callback, comparison or joined-process validation"
     mg_status fail

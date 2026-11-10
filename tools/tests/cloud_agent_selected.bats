@@ -28,3 +28,24 @@ REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   [ "$status" -eq 0 ]
   [ "$output" = $'cloudkit-signed\ncloudkit-agent-install\nselected-source\nfail' ]
 }
+
+@test "CloudAgent selected failure retains fixed preflight and cleanup codes without private strings" {
+  local parent=20261110T000000Z-100
+  local fixture="$BATS_TEST_TMPDIR/public-root"
+  mkdir -p "$fixture/build/mg/cloudkit-signed/$parent"
+  run bash -c '
+    MG_ROOT="$1" MG_RUN_ID="$2" MG_RUN_DIR="$1/build/mg/cloudkit-signed/$2" MG_TOOLS="$3/tools"
+    MG_JOB=cloudkit-signed MG_COMMIT_DIRTY=false
+    mg_job() { :; }; mg_detail() { :; }; mg_failure() { :; }; mg_status() { :; }; mg_message() { :; }; mg_artifact() { :; }
+    source "$3/tools/mg.d/cloud-agent.sh"
+    mg_cloudkit_signed_selected_private() {
+      jq -nc '\''{scope:"SELECTED-GENERATED",selection:"sync_now",outcome:"failed_evidence",category:"selected-refused",signed_execution:false,stage:"simulator-os",refusal:"vm-simctl"}'\'' >"$2"
+      jq -nc '\''{scope:"SELECTED-GENERATED",selection:"sync_now",outcome:"failed_evidence",category:"selected-refused",signed_execution:false,stage:"simulator-lease",refusal:"lease-changed"}'\'' >"$1/cleanup.json"
+      return 1
+    }
+    mg_cloudkit_signed --selected
+    jq -ce '\''{stage,refusal,cleanup,signed_execution}'\'' "$MG_RUN_DIR/selected-report.json"
+  ' _ "$fixture" "$parent" "$REPO_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"stage":"simulator-os","refusal":"vm-simctl","cleanup":{"drain":"joined","refusal":"lease-changed","reservation":"retained-or-unconfirmed","stage":"simulator-lease"},"signed_execution":false}' ]
+}

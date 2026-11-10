@@ -136,6 +136,42 @@ def admitted(kind, through=6, mutate=None):
 
 
 class SelectedTests(unittest.TestCase):
+    def test_preflight_diagnostics_export_only_closed_stage_and_refusal_values(self):
+        diagnostic = c.Diagnostic()
+        diagnostic.enter("simulator-os")
+        known = diagnostic.failure(s.v.Refused("vm-simctl"))
+        self.assertEqual(known["stage"], "simulator-os")
+        self.assertEqual(known["refusal"], "vm-simctl")
+        self.assertFalse(known["signed_execution"])
+        for error in (s.v.Refused("generated-private-path-value"), KeyError("generated-private-field"),
+                      OSError("generated-private-filesystem-value")):
+            exported = diagnostic.failure(error)
+            self.assertNotIn("generated-private", json.dumps(exported))
+            self.assertIn(exported["refusal"], c.PREFLIGHT_REFUSALS)
+        for mutation in ({"stage": "generated-private-stage"}, {"refusal": "generated-private-code"},
+                         {"extra": "generated-private-context"}, {"signed_execution": True}):
+            self.assertEqual(c.sanitized_failure({**known, **mutation}), c.sanitized_failure(None))
+        self.assertEqual(c.sanitized_failure(known), known)
+        with self.assertRaises(s.v.Refused): diagnostic.enter("generated-private-stage")
+
+    def test_cleanup_diagnostics_do_not_hide_primary_refusal_or_unknown_ownership(self):
+        diagnostic = c.Diagnostic(); diagnostic.enter("simulator-os")
+        primary = diagnostic.failure(s.v.Refused("vm-simctl"))
+        cleanup = diagnostic.failure(s.v.Refused("lease-changed"))
+        exported = c.sanitized_failure(primary, cleanup)
+        self.assertEqual(exported["refusal"], "vm-simctl")
+        self.assertEqual(exported["cleanup"], {"drain": "joined", "reservation": "retained-or-unconfirmed",
+                                              "stage": "simulator-os", "refusal": "lease-changed"})
+        self.assertEqual(c.sanitized_cleanup({"scope": c.SCOPE, "outcome": "reservation-released"}),
+                         {"drain": "joined", "reservation": "released"})
+        self.assertEqual(c.sanitized_cleanup({"scope": c.SCOPE, "outcome": "no-reservation"}),
+                         {"drain": "joined", "reservation": "none"})
+        self.assertEqual(c.sanitized_cleanup({**cleanup, "extra": "generated-private-value"}),
+                         {"drain": "unconfirmed", "reservation": "retained-or-unconfirmed"})
+        self.assertNotIn("generated-private", json.dumps(c.sanitized_failure(primary, {"extra": "generated-private-value"})))
+        self.assertEqual(c.sanitized_cleanup({"scope": c.SCOPE, "outcome": ["generated-private-value"]}),
+                         {"drain": "unconfirmed", "reservation": "retained-or-unconfirmed"})
+
     def test_exact_six_commands_have_no_payload_or_recovery_expectations(self):
         for kind in c.PROGRAMS:
             commands = [json.loads(line) for line in c.command_bytes(raw(header(kind)))]

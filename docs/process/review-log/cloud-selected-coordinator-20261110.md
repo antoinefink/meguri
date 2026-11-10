@@ -41,3 +41,24 @@ No real VM, CloudKit, account, device or Apple execution ran in this task.
 Signed execution and the full batch gate remain required. Interruption recovery
 is outside this uninterrupted coordinator; it never relaunches or replays a
 command.
+
+## Actual preflight failure and bounded diagnostics
+
+Starting commit: `b678b6246c809691374d58af5550aaf16e197911`.
+Actual selected run `20261110T144620Z-22782` failed before fixtures/build/install
+or agent execution. Passing acquire `20261110T144623Z-23274` and its retained
+reference narrow the unknown failure to simulator validation or destination
+freezing. This is not a CloudKit exchange result. The original cause is unknown.
+
+Added fixed preflight stage/refusal diagnostics and a strict public sanitizer,
+including separate cleanup outcome. Unknown values stay private. Existing live
+checks, runtime pins, assertions and acceptance scope remain unchanged.
+
+Status `20261110T145249Z-56830` proved the original reservation unchanged and its
+process exited. After root's checked no-orphans fence, exact standard MG release
+`20261110T145329Z-60298` passed with `released=true`. No second acquire occurred.
+Focused Docker receipts `20261110T145452Z-69562` (5/5) and
+`20261110T145520Z-70904` passed. No real selected rerun occurred in this repair.
+Independent review finds no concrete P0–P2 issues in the diagnostic delta;
+the reviewer verified final source hashes after the cleanup type guard changed.
+The next instrumented actual attempt remains pending. No acceptance is claimed.

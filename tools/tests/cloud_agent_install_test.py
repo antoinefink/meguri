@@ -383,6 +383,27 @@ class DeliveryTests(unittest.TestCase):
         self.assertNotEqual(deployment["xctestrun"]["path"], str(sibling))
         self.assertFalse(any("test-without-building" in str(args) for _, args in self.vm.events))
 
+    def test_simulator_live_checkpoints_observe_existing_guards_without_changing_them(self):
+        self.simulator()
+        expected = self.fixture.expected
+        lease = install.lease_input(str(self.root), expected, self.lease_run)
+        stages = []
+        install.live_simulator(self.vm, str(self.root), expected, lease, self.observed, checkpoint=stages.append)
+        self.assertEqual(stages, ["simulator-lease", "simulator-device", "simulator-runtime", "simulator-os", "simulator-receipt"])
+        original_call = self.vm.call
+        for output in (None, b"generated-wrong-build"):
+            stages = []
+            def fail_spawn(operation, *args, **kwargs):
+                if args[:1] == ("spawn",):
+                    if output is None: raise v.Refused("vm-simctl")
+                    return output
+                return original_call(operation, *args, **kwargs)
+            with patch.object(self.vm, "call", side_effect=fail_spawn):
+                with self.subTest(command_failed=output is None), self.assertRaisesRegex(v.Refused, "vm-simctl|simulator-runtime"):
+                    install.live_simulator(self.vm, str(self.root), expected, lease, self.observed, checkpoint=stages.append)
+            self.assertEqual(stages[-1], "simulator-os")
+            self.assertNotIn("simulator-receipt", stages)
+
     def test_simulator_real_install_control_flow_observation_bound_to_product(self):
         self.simulator()
         self.freeze()
