@@ -608,17 +608,63 @@ def validate_destinations(value, parent, sha):
                  v.MG_RUN_ID.fullmatch(receipt["run_id"]), "destination-entry")
 
 
-def deliver(root, directory, parent, child, lease_run, vm):
+# Fixed diagnostics only; never export exception text or private destination data.
+DELIVERY_STAGES = {"entry", "source", "header", "vm-context", "vm-observation",
+    "destination-observation", "destination-freeze", "recheck-vm", "recheck-build",
+    "copy", "copy-readback", "simulator-install", "simulator-readback",
+    "final-readback", "deployment", "source-recheck"}
+DELIVERY_REFUSALS = {"unclassified", "filesystem-refused", "input-shape", "receipt-invalid",
+    "process-refused", "source-dirty", "receipt-source", "receipt-outcome", "receipt-in-progress",
+    "artifact-declaration", "device-label", "deployment-producer", "machine-observation",
+    "destination-os-build", "destination-envelope", "destination-map", "destination-entry",
+    "destination-frozen-selected", "destination-frozen-map", "private-authority", "private-changed",
+    "vm-instance-changed", "vm-ssh", "vm-copy", "vm-simctl", "input-changed", "copy-readback",
+    "copy-readback-changed", "copy-source", "product-size", "install-observation", "install-readback",
+    "product-changed", "agent-binding", "agent-environment", "build-signature", "build-signing",
+    "product-cloud-grants", "profile-team", "profile-identity", "profile-signer-platform",
+    "profile-expired", "profile-device", "profile-development", "profile-grants", "source-changed"}
+
+
+class DeliveryDiagnostic:
+    def __init__(self):
+        self.stage = "entry"
+
+    def enter(self, stage):
+        need(stage in DELIVERY_STAGES, "delivery-diagnostic-stage")
+        self.stage = stage
+
+    def failure(self, error):
+        code = "unclassified"
+        if isinstance(error, v.Refused) and len(error.args) == 1 and type(error.args[0]) is str:
+            if error.args[0] in DELIVERY_REFUSALS:
+                code = error.args[0]
+        elif isinstance(error, OSError):
+            code = "filesystem-refused"
+        elif isinstance(error, v.Invalid):
+            code = "receipt-invalid"
+        elif isinstance(error, (ValueError, TypeError, KeyError, IndexError, AttributeError, UnicodeError, RecursionError)):
+            code = "input-shape"
+        elif isinstance(error, subprocess.SubprocessError):
+            code = "process-refused"
+        return {"stage": self.stage if self.stage in DELIVERY_STAGES else "entry", "refusal": code}
+
+
+def deliver(root, directory, parent, child, lease_run, vm, *, checkpoint=None):
+    checkpoint = (lambda stage: None) if checkpoint is None else checkpoint
+    checkpoint("source")
     boundary = os.path.join(root, "build")
     path = os.path.join(directory, "run.json")
     sha = v.source(root)
+    checkpoint("header")
     expected = v.header(root, path, parent, sha)
     need(isinstance(expected["device"], str) and
          re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", expected["device"]), "device-label")
     need(expected["deployment_receipt"] == {"job": "cloudkit-agent-install", "run_id": child},
          "deployment-producer")
     header_ref = v.file_reference(boundary, path)
+    checkpoint("vm-observation")
     observed = machine(vm)
+    checkpoint("destination-observation")
     lease = lease_input(root, expected, lease_run)
     if lease is None:
         need(expected["os_build"] == observed["os_build"], "destination-os-build")
@@ -627,11 +673,14 @@ def deliver(root, directory, parent, child, lease_run, vm):
     destination = {"device_kind": expected["device_kind"], "vm": vm.selection["name"],
                    "vm_instance": observed["vm_instance"], "simulator": None if lease is None else
                    {"udid": lease["udid"], "lease_receipt": lease["lease_receipt"]}}
+    checkpoint("destination-freeze")
     with destinations(parent, sha, expected["device"], destination):
         def recheck():
+            checkpoint("recheck-vm")
             need(machine(vm) == observed, "vm-instance-changed")
             if lease is not None:
                 live_simulator(vm, root, expected, lease, observed)
+            checkpoint("recheck-build")
             admitted = v.admit_build(root, os.path.join(root, "build/mg"), path, parent,
                                      observed["provisioning_udid"] if lease is None else None)
             need(v.file_reference(boundary, path) == header_ref and
@@ -642,7 +691,9 @@ def deliver(root, directory, parent, child, lease_run, vm):
         build_ref = build["details"]["agent_build"]
         products = manifest["products"]["path"]
         # Hold host source and guest parent authority through MG SSH transport.
+        checkpoint("copy")
         vm.copy(root, products, frozen[0])
+        checkpoint("copy-readback")
         delivered = vm.guest("inventory", boundary, products)
         need(isinstance(delivered, dict) and set(delivered) == {"path", "entries"} and
              delivered["path"] == products and delivered["entries"] == frozen[0], "copy-readback")
@@ -656,6 +707,7 @@ def deliver(root, directory, parent, child, lease_run, vm):
         if lease is not None:
             product = os.path.join(products, manifest["app"]["path"])
             before = v.snapshot(boundary, product)
+            checkpoint("simulator-install")
             vm.call("simctl", "install", lease["udid"], product)
             installed = vm.call("simctl", "get_app_container", lease["udid"],
                                 manifest["app"]["bundle_id"], "app").decode().strip()
@@ -663,6 +715,7 @@ def deliver(root, directory, parent, child, lease_run, vm):
             # It stays private; only relative installed inventory is exported.
             need(installed.startswith("/") and os.path.normpath(installed) == installed and
                  ".." not in installed.split("/") and "\x00" not in installed, "install-observation")
+            checkpoint("simulator-readback")
             installed_proof = vm.guest("inventory", os.path.dirname(installed), installed)
             need(isinstance(installed_proof, dict) and set(installed_proof) == {"path", "entries"}
                  and installed_proof["path"] == installed and installed_proof["entries"] == before[0],
@@ -674,6 +727,7 @@ def deliver(root, directory, parent, child, lease_run, vm):
                 "build_manifest": build_ref, "entries": installed_proof["entries"]}))
         recheck()
         # A second guest readback detects post-copy/install replacement as well.
+        checkpoint("final-readback")
         need(vm.guest("inventory", boundary, products) == delivered, "copy-readback-changed")
         xpath = os.path.join(products, v.relative(manifest["xctestrun"]["path"]))
         xref = v.file_reference(products, xpath)
@@ -684,8 +738,10 @@ def deliver(root, directory, parent, child, lease_run, vm):
                       "header_sha256": header_ref["sha256"], "build_receipt": expected["build_receipt"],
                       "build_receipt_sha256": expected["build_receipt_sha256"], "build_manifest": build_ref,
                       "delivered_manifest": delivered_ref, "xctestrun": xref, "installation": installation}
+        checkpoint("deployment")
         deployment_ref = create(boundary, os.path.join(directory, "agent-deployment.json"), raw_json(deployment))
         recheck()
+    checkpoint("source-recheck")
     need(v.source(root) == sha, "source-changed")
     # This is handoff metadata, not an in-flight MG receipt or scenario result.
     return {"scope": "DELIVERY-ONLY", "outcome": "delivery_only", "signed_execution": False,

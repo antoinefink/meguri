@@ -137,3 +137,24 @@ physical signing. Temporary read-only probe source remains under build only.
 Independent review finds no P0–P2 issues and binds the frozen source hashes.
 Root's exact focused native simulator build/freeze proof remains required before
 another parent selected run. No signing acceptance yet.
+
+## Mac smoke delivery diagnostics
+
+Starting commit: `88ac5644cd0fb73c679a9026488913783ebd1f5f`.
+Actual smoke18578 failed before install completion or cloud execution; Mac
+build19423 passed, and install23297 retained only its generic refusal. The
+public artifacts show a frozen header and no copied-product or deployment
+receipt. The original cause is not yet known.
+
+Delivery now accepts an optional fixed checkpoint observer. The smoke install
+child includes only a closed stage and refusal vocabulary on failure. Unknown
+exception arguments and raw filesystem/process diagnostics remain private. All
+existing identity, profile, path, copy, source and receipt guards remain in
+place. Default delivery and successful smoke results keep their existing shape.
+
+Focused Docker MG selftest `20261110T154521Z-41753` passed 2/2 Bats cases
+(complete generated delivery and smoke Python suites). It verifies an actual
+synthetic provisioning refusal before copy and rejects private exception text
+from the install-child report. Independent review finds no P0–P2 issues and
+confirms the frozen source hashes. One instrumented actual Mac delivery remains
+required; no real delivery or CloudKit pass is claimed.

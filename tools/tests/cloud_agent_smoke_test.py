@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Generated parent/transport tests only. No signed, VM, SDK or smoke evidence."""
+import contextlib
 import copy
 import hashlib
 import importlib.util
@@ -625,6 +626,41 @@ class ParentTransport:
 
     def close(self):
         self.events.append("original-transport-joined")
+
+
+class InstallDiagnosticTests(unittest.TestCase):
+    def invoke(self, failure):
+        output = io.StringIO()
+        def deliver(*args, checkpoint):
+            checkpoint("recheck-build")
+            raise failure
+        argv = ["cloud-agent-smoke.py", "--root", "/generated", "--parent-run", RUN,
+                "--install-child", "--run-id", RUN, "--source-commit", SHA,
+                "--run-directory", "/generated/build/mg/cloudkit-agent-install/" + RUN]
+        with patch.object(sys, "argv", argv), patch.object(s.os, "dup", return_value=900), \
+                patch.object(s.os, "fdopen", return_value=io.BytesIO(raw({}))), \
+                patch.object(s.v, "source", return_value=SHA), \
+                patch.object(s, "owned_context", return_value=contextlib.nullcontext((object(), lambda: None))), \
+                patch.object(s.i, "deliver", side_effect=deliver), contextlib.redirect_stdout(output):
+            self.assertEqual(s.main(), 1)
+        return json.loads(output.getvalue())
+
+    def test_install_child_preserves_only_fixed_delivery_stage_and_refusal(self):
+        report = self.invoke(s.v.Refused("profile-device"))
+        self.assertEqual(report, {"scope": "SMOKE", "outcome": "failed_evidence",
+            "category": "smoke-refused", "signed_execution": False,
+            "stage": "recheck-build", "refusal": "profile-device"})
+
+    def test_unknown_refusals_and_exception_payloads_never_enter_public_report(self):
+        for failure, category in [(s.v.Refused("generated-private-path"), "unclassified"),
+                                  (s.v.Refused("profile-device", "generated-private-value"), "unclassified"),
+                                  (OSError("generated-private-path"), "filesystem-refused"),
+                                  (ValueError("generated-private-value"), "input-shape")]:
+            with self.subTest(kind=type(failure).__name__):
+                report = self.invoke(failure)
+                self.assertEqual(report["refusal"], category)
+                self.assertEqual(report["stage"], "recheck-build")
+                self.assertNotIn("generated-private", json.dumps(report))
 
 
 class ParentTests(unittest.TestCase):

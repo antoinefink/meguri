@@ -1330,14 +1330,17 @@ def main():
     parser.add_argument("--run-directory")
     parser.add_argument("--source-commit")
     args = parser.parse_args()
+    diagnostic = i.DeliveryDiagnostic() if args.install_child else None
     try:
         with os.fdopen(os.dup(3), "rb") as private:
             context = strict(private.read(CAP + 1))
         if args.install_child:
             need(args.run_id and args.run_directory and args.source_commit == v.source(args.root), "install-source")
             need(args.run_directory == os.path.join(args.root, "build/mg/cloudkit-agent-install", args.run_id), "install-run")
+            diagnostic.enter("vm-context")
             with owned_context(args.root, args.parent_run, context) as (vm, lease_check):
-                report = i.deliver(args.root, args.run_directory, args.parent_run, args.run_id, None, vm)
+                report = i.deliver(args.root, args.run_directory, args.parent_run, args.run_id, None, vm,
+                                   checkpoint=diagnostic.enter)
                 lease_check()
             print(json.dumps(report, sort_keys=True))
             return 0
@@ -1361,9 +1364,11 @@ def main():
         report, code = {"scope": "SMOKE", "outcome": "queued", "category": "vm-unavailable",
                         "signed_execution": False}, 75
     except (v.Refused, v.Invalid, OSError, ValueError, TypeError, KeyError, IndexError, AttributeError,
-            UnicodeError, RecursionError, subprocess.SubprocessError):
+            UnicodeError, RecursionError, subprocess.SubprocessError) as error:
         report, code = {"scope": "SMOKE", "outcome": "failed_evidence", "category": "smoke-refused",
                         "signed_execution": False}, 1
+        if diagnostic is not None:
+            report.update(diagnostic.failure(error))
     print(json.dumps(report, sort_keys=True))
     return code
 

@@ -245,8 +245,12 @@ class DeliveryTests(unittest.TestCase):
     def test_provisioning_permission_uses_separate_udid_and_rechecks_it(self):
         self.freeze()
         self.fixture.profile["ProvisionedDevices"] = [INSTANCE]
-        with self.assertRaisesRegex(v.Refused, "profile-device"):
-            self.deliver()
+        diagnostic = install.DeliveryDiagnostic()
+        with self.assertRaisesRegex(v.Refused, "profile-device") as failure:
+            install.deliver(str(self.root), str(self.directory), fixtures.RUN,
+                            fixtures.INSTALL_RUN, self.lease_run, self.vm, checkpoint=diagnostic.enter)
+        self.assertEqual(diagnostic.failure(failure.exception),
+                         {"stage": "recheck-build", "refusal": "profile-device"})
         self.assertNotIn("copy", [a for a, _ in self.vm.events])
         self.fixture.profile["ProvisionedDevices"] = [PROVISIONING]
         changed = dict(self.observed, provisioning_udid="GENERATED-OTHER-PROVISIONING")
