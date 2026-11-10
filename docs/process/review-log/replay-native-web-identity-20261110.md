@@ -187,3 +187,11 @@ real removal, newer revisions, cancellation and release. The two selected
 sync variants still failed: peer-baseline observer provenance, and exchange
 capture tracking error. Their evidence is retained separately. VM execution
 remains required. R3 privacy and similarity passed after the note rewrite.
+
+The first Mac build `mac-ui/20261110T112617Z-77944` rejected the generic AX
+geometry pointer. Its type now requires `BitwiseCopyable`; both callers are
+CGPoint/CGSize, with the same AX type checks. Independent review confirmed
+this compiler correction. `mac-ui/20261110T112758Z-80949` then built and ran
+one VM test, which failed at `Native replay host binding unavailable`.
+It reached no native presses or hierarchy attachments. The export correctly
+failed for absent evidence. Readiness publication remains under diagnosis.

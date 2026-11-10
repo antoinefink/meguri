@@ -566,7 +566,7 @@ final class NativeWebCapture {
                          "AXTable": "table", "AXRow": "tableRow", "AXCell": "cell", "AXOutline": "outline",
                          "AXScrollBar": "scrollBar", "AXMenu": "menu", "AXMenuItem": "menuItem",
                          "AXTabGroup": "tabGroup", "AXProgressIndicator": "progressIndicator"]
-            func geometry<T>(_ attribute: String, type: AXValueType, initial: T) throws -> T {
+            func geometry<T: BitwiseCopyable>(_ attribute: String, type: AXValueType, initial: T) throws -> T {
                 let (raw, error) = Self.read(element, attribute, deadline: deadline)
                 guard error == .success, let raw, CFGetTypeID(raw) == AXValueGetTypeID() else {
                     throw Failure("Native AX geometry unavailable: \(attribute)")
