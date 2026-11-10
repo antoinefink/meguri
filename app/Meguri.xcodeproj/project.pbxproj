@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		4D4547555249000000000114 /* libXCTestBundleInject.dylib in Embed CloudAgent injection */ = {isa = PBXBuildFile; fileRef = 4D4547555249000000000025 /* libXCTestBundleInject.dylib */; platformFilters = (macos, ); settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		4D4547555249000000000114 /* libXCTestBundleInject.dylib in Embed CloudAgent injection */ = {isa = PBXBuildFile; fileRef = 4D4547555249000000000025 /* libXCTestBundleInject.dylib */; platformFilters = (ios, macos, ); settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		4D4547555249000000000110 /* MeguriKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4D4547555249000000000510 /* MeguriKit */; };
 		4D4547555249000000000111 /* CoreBridge in Frameworks */ = {isa = PBXBuildFile; productRef = 4D4547555249000000000511 /* CoreBridge */; };
 		4D4547555249000000000112 /* MeguriWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 4D4547555249000000000021 /* MeguriWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };

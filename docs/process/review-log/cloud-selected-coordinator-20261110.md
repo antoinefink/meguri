@@ -106,3 +106,13 @@ injection case passed 13/14 Python tests and retained its sole expected failure
 for the missing native simulator xcconfig composition. No assertion is skipped
 or weakened. This tools WIP is unaccepted until the app seed, full focused
 composition checks, combined independent review and actual build/run pass.
+
+The exact prepared project/config seed was validated unchanged by filtered fixer
+`cleanroom/20261110T151752Z-82067` from starting commit `7122df96` and applied.
+It adds only the simulator Debug embed conditional and `ios` to the existing
+native CopyFiles entry, preserving CodeSignOnCopy and default exclusions.
+`selftest/20261110T151901Z-83856` passes all six focused cases, including the
+previously failing native composition check. Independent combined review finds
+no P0–P2 issues and binds the applied app files to the prepared/exported seed.
+Actual native simulator embedding, final signed freezing and selected execution
+remain pending. The verifier and failed original receipts remain unchanged.
