@@ -20,13 +20,15 @@ spec.loader.exec_module(stage)
 
 NAME = "libXCTestBundleInject.dylib"
 SOURCE = "Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib/" + NAME
+SOURCES = {"mac": SOURCE, "ios-sim": "Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/" + NAME}
+DESTINATIONS = {"platform=macOS,arch=arm64": "mac", "generic/platform=iOS Simulator": "ios-sim"}
 LIMIT = 64 * 1024 * 1024
 
 
 def enabled(env):
     flag = env.get("MEGURI_CLOUD_AGENT_INJECTION", "NO")
     stage.need(flag in ("NO", "YES"))
-    return flag == "YES" and env.get("PLATFORM_NAME") == "macosx" and env.get("CONFIGURATION") == "Debug"
+    return flag == "YES" and env.get("PLATFORM_NAME") in ("macosx", "iphonesimulator") and env.get("CONFIGURATION") == "Debug"
 
 
 def read_exact(fd, expected):
@@ -52,14 +54,16 @@ def bound_file(directory, name, fd, original, raw):
 
 
 @contextlib.contextmanager
-def prepare(run):
+def prepare(run, *, platform="mac"):
+    stage.need(platform in SOURCES)
+    source = SOURCES[platform]
     # Each invocation gets an exclusive private stage; never adopt old inputs.
     with stage.Directory(run) as run_dir:
         private_path = tempfile.mkdtemp(prefix="cloud-agent-input-", dir=run)
         run_dir.check()
         with stage.Directory(private_path) as private, stage.selected_source(private) as selected:
             developer, bundle, authority = selected
-            with stage.Directory(bundle.path + "/" + SOURCE.rsplit("/", 1)[0]) as source_dir:
+            with stage.Directory(bundle.path + "/" + source.rsplit("/", 1)[0]) as source_dir:
                 # Check every original ancestor using the same installed-source
                 # authority, including OS-owned group-writable Xcode entries.
                 stage.need(source_dir.check()[:len(bundle.bindings)] == bundle.check())
@@ -135,13 +139,16 @@ def cleanup(env):
 def build(run, frameworks, args):
     stage.need(args and args[0] == "build-for-testing")
     for flag, value in (("-project", "app/Meguri.xcodeproj"), ("-scheme", "Meguri"),
-                        ("-testPlan", "CloudAgent"), ("-configuration", "Debug"),
-                        ("-destination", "platform=macOS,arch=arm64")):
+                        ("-testPlan", "CloudAgent"), ("-configuration", "Debug")):
         stage.need(args.count(flag) == 1 and args.index(flag) + 1 < len(args) and
                    args[args.index(flag) + 1] == value)
+    stage.need(args.count("-destination") == 1 and args.index("-destination") + 1 < len(args))
+    destination = args[args.index("-destination") + 1]
+    stage.need(destination in DESTINATIONS)
+    platform = DESTINATIONS[destination]
     stage.need(not any(arg.startswith(("MEGURI_CLOUD_AGENT_", "EXCLUDED_SOURCE_FILE_NAMES=",
                                        "COPY_PHASE_STRIP=")) for arg in args))
-    with prepare(run) as prepared:
+    with prepare(run, platform=platform) as prepared:
         remove(frameworks)
         env = dict(os.environ)
         for key in ("DEVELOPER_DIR", "SDKROOT", "TOOLCHAINS"):

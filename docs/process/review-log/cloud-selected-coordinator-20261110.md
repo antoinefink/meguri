@@ -85,3 +85,24 @@ process exited. With root's checked no-orphans fence, exact standard MG release
 `20261110T150308Z-98264` passed 6/6 selected/delivery/handoff cases.
 Independent source review finds no P0–P2 issues and confirms the two frozen
 source hashes. The next actual selected run and full gate remain pending.
+
+## Simulator native injection preparation WIP
+
+Starting commit: `ef39c65ae6a157ca0d72c2f3804da2d4d0601793`.
+Actual selected run9498 stopped after fixtures and passing Mac build12778.
+Simulator build16963 compiled, then final freeze correctly refused missing
+`__TESTHOST__/Frameworks/libXCTestBundleInject.dylib`. The generated loader
+strings match the captured fixture exactly; the verifier remains unchanged.
+
+Tools now select the fixed simulator library from the verified selected Xcode
+for explicit ios-sim Debug CloudAgent native preparation. Existing authority,
+native signing order and original-process joins remain. No signed-product or
+xctestrun repair occurs. Root owns the separately prepared two-file app/config
+seed enabling the existing native CopyFiles phase on the simulator; it is not
+applied here.
+
+Focused Docker receipt `20261110T151457Z-62130`: 5/6 Bats cases passed. The
+injection case passed 13/14 Python tests and retained its sole expected failure
+for the missing native simulator xcconfig composition. No assertion is skipped
+or weakened. This tools WIP is unaccepted until the app seed, full focused
+composition checks, combined independent review and actual build/run pass.

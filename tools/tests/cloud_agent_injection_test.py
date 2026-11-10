@@ -61,6 +61,24 @@ class Preparation(unittest.TestCase):
         self.assertEqual(self.events, ["selected-verified", "selected-rechecked"])
         self.facts.assert_called_once()
 
+    def test_simulator_uses_only_its_selected_xcode_library_and_rejects_other_platforms(self):
+        simulator_source = self.bundle / m.SOURCES["ios-sim"]
+        simulator_source.parent.mkdir(parents=True)
+        simulator_source.write_bytes(b"generated simulator injection bytes")
+        with patch.object(m.stage, "selected_source", self.selected):
+            with m.prepare(str(self.run), platform="ios-sim") as prepared:
+                copied = Path(prepared) / m.NAME
+                self.assertEqual(copied.read_bytes(), simulator_source.read_bytes())
+                self.assertNotEqual(copied.read_bytes(), self.source.read_bytes())
+            for platform in ("ios-device", "unknown", "iphonesimulator"):
+                with self.subTest(platform=platform), self.assertRaises(m.stage.Refused):
+                    with m.prepare(str(self.run), platform=platform): pass
+            saved = simulator_source.with_name("saved.dylib")
+            simulator_source.rename(saved)
+            simulator_source.symlink_to(saved)
+            with self.assertRaises((m.stage.Refused, OSError)):
+                with m.prepare(str(self.run), platform="ios-sim"): pass
+
     def test_source_symlink_hardlink_oversize_and_parent_substitution_refuse(self):
         for mutation_case in ("source-link", "source-alias", "source-size", "parent-link"):
             with self.subTest(mutation_case), tempfile.TemporaryDirectory() as scratch_path:
@@ -309,7 +327,8 @@ class NativeContract(unittest.TestCase):
         events = []
 
         @contextlib.contextmanager
-        def prepared(run):
+        def prepared(run, *, platform):
+            self.assertEqual(platform, "mac")
             self.assertEqual(run, "/generated/run")
             events.append("prepare")
             yield "/generated/exclusive-input"
@@ -342,11 +361,37 @@ class NativeContract(unittest.TestCase):
                                      [*NATIVE_ARGS, "MEGURI_SIGNING=team"]), 23)
         self.assertEqual(events, ["prepare", "remove-stale", "native-joined", "source-and-destination-rechecked"])
 
+    def test_simulator_native_build_retains_exact_platform_source_until_join(self):
+        args = list(NATIVE_ARGS)
+        args[args.index("-destination") + 1] = "generic/platform=iOS Simulator"
+        events = []
+        @contextlib.contextmanager
+        def prepared(run, *, platform):
+            self.assertEqual(platform, "ios-sim")
+            self.assertEqual(run, "/generated/run")
+            events.append("simulator-source-held")
+            yield "/generated/simulator-input"
+            events.append("simulator-source-rechecked")
+        class Child:
+            def wait(self): events.append("native-joined"); return 0
+        with patch.object(m, "prepare", prepared), patch.object(m, "remove") as remove, \
+             patch.object(m.subprocess, "Popen", return_value=Child()) as launch, patch.object(m.stage, "join_original"):
+            self.assertEqual(m.build("/generated/run", "/generated/product/Frameworks", args), 0)
+        self.assertEqual(events, ["simulator-source-held", "native-joined", "simulator-source-rechecked"])
+        remove.assert_called_once_with("/generated/product/Frameworks")
+        self.assertEqual(launch.call_args.args[0], ["/usr/bin/xcodebuild", *args,
+            "MEGURI_CLOUD_AGENT_INJECTION=YES", "MEGURI_CLOUD_AGENT_INJECTION_DIR=/generated/simulator-input"])
+        for invalid in ([*args, "-destination", "platform=macOS,arch=arm64"],
+                        [*args, "MEGURI_CLOUD_AGENT_EMBED=YES"]):
+            with patch.object(m, "prepare") as prepare, self.assertRaises(m.stage.Refused):
+                m.build("/generated/run", "/generated/product/Frameworks", invalid)
+            prepare.assert_not_called()
+
     def test_cleanup_matrix_and_conflicting_native_settings_refuse(self):
         for flag in ("NO", "YES"):
             for platform in ("macosx", "iphonesimulator"):
                 for config in ("Debug", "Profile"):
-                    active = flag == "YES" and platform == "macosx" and config == "Debug"
+                    active = flag == "YES" and platform in ("macosx", "iphonesimulator") and config == "Debug"
                     env = {"MEGURI_CLOUD_AGENT_INJECTION": flag, "MEGURI_CLOUD_AGENT_EMBED": "YES" if active else "NO",
                            "PLATFORM_NAME": platform, "CONFIGURATION": config,
                            "TARGET_BUILD_DIR": "/generated/Debug", "FRAMEWORKS_FOLDER_PATH": "Meguri.app/Contents/Frameworks"}
@@ -368,9 +413,9 @@ class NativeContract(unittest.TestCase):
                     m.build("/generated/run", "/generated/Frameworks", override)
             command.assert_not_called()
 
-    def test_non_agent_non_mac_non_debug_builds_never_prepare(self):
+    def test_non_agent_physical_and_non_debug_builds_never_prepare(self):
         for flag, value in (("-testPlan", "UI"), ("-configuration", "Profile"),
-                            ("-destination", "generic/platform=iOS Simulator"), ("-scheme", "Meguri-Profile")):
+                            ("-destination", "generic/platform=iOS"), ("-scheme", "Meguri-Profile")):
             args = list(NATIVE_ARGS)
             args[args.index(flag) + 1] = value
             with self.subTest(flag=flag), patch.object(m, "prepare") as prepare, \
@@ -384,7 +429,7 @@ class NativeContract(unittest.TestCase):
                 for build_configuration in ("Debug", "Profile", "Release", "AppStore"):
                     build_environment = {"MEGURI_CLOUD_AGENT_INJECTION": injection_setting, "PLATFORM_NAME": target_platform,
                                          "CONFIGURATION": build_configuration}
-                    self.assertEqual(m.enabled(build_environment), injection_setting == "YES" and target_platform == "macosx" and build_configuration == "Debug")
+                    self.assertEqual(m.enabled(build_environment), injection_setting == "YES" and target_platform in ("macosx", "iphonesimulator") and build_configuration == "Debug")
         with self.assertRaises(m.stage.Refused):
             m.enabled({"MEGURI_CLOUD_AGENT_INJECTION": "fixture-invalid-setting"})
 
@@ -402,7 +447,10 @@ class NativeContract(unittest.TestCase):
         self.assertIn("MEGURI_CLOUD_AGENT_EMBED[config=Debug][sdk=macosx*] = $(MEGURI_CLOUD_AGENT_INJECTION)", config)
         self.assertIn("EXCLUDED_SOURCE_FILE_NAMES = $(inherited) $(MEGURI_CLOUD_AGENT_EXCLUDE_$(MEGURI_CLOUD_AGENT_EMBED))", config)
         self.assertIn("COPY_PHASE_STRIP = NO", (ROOT / "app/Config/Base.xcconfig").read_text())
-        self.assertIn('"$platform/$config/$plan/$scheme" = mac/Debug/CloudAgent/Meguri', app)
+        self.assertIn('"$config/$plan/$scheme" = Debug/CloudAgent/Meguri', app)
+        self.assertIn('case "$platform" in mac|ios-sim) build_command=(mg_app_cloud_agent_build)', app)
+        self.assertIn("MEGURI_CLOUD_AGENT_EMBED[config=Debug][sdk=iphonesimulator*] = $(MEGURI_CLOUD_AGENT_INJECTION)", config)
+        self.assertIn("platformFilters = (ios, macos, );", project)
         jobs = app.split("mg_build_app() {", 1)[1]
         self.assertLess(jobs.index('mg_app_build "$platform"'), jobs.index('mg_app_agent_freeze "$platform"'))
         # The verifier's existing inventory must freeze final nested signatures.

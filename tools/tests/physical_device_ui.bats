@@ -196,11 +196,7 @@ EOF
       called "^xcodebuild build-for-testing .* -testPlan CloudAgent -configuration Debug .* -derivedDataPath build/app/$dd "
       [ "$(field .details.build.test_plan)" = CloudAgent ]
       [ "$(field .details.build.action)" = build-for-testing ]
-      if [ "$platform" = mac ]; then
-        called '^cloud-agent-prepare$'
-      else
-        not_called '^cloud-agent-prepare$'
-      fi
+      called '^cloud-agent-prepare$'
       not_called 'input-digest|test-without-building|^(sim-|vm-test|host-lease|open)|xcrun (simctl|devicectl)'
     done
   done

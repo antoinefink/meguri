@@ -67,8 +67,13 @@ mg_app_build() {
 
 # Only the explicit native-test build caller selects this preparation boundary.
 mg_app_cloud_agent_build() {
-  python3 -B -I "$MG_TOOLS/scripts/cloud-agent-injection.py" --build "$MG_RUN_DIR" \
-    "$(mg_app_products mac Debug)/Meguri.app/Contents/Frameworks" -- "$@"
+  local frameworks
+  case "$platform" in
+    mac) frameworks="$(mg_app_products mac Debug)/Meguri.app/Contents/Frameworks" ;;
+    ios-sim) frameworks="$(mg_app_products ios-sim Debug)/Meguri.app/Frameworks" ;;
+    *) return 1 ;;
+  esac
+  python3 -B -I "$MG_TOOLS/scripts/cloud-agent-injection.py" --build "$MG_RUN_DIR" "$frameworks" -- "$@"
 }
 
 # Explicit action keeps every nested UI/snapshot/perf caller on its test plan.
@@ -157,8 +162,8 @@ mg_app_build_action() {
   if [ "$platform" = mac ]; then
     mg_app_remove_embedded_widget "$config" || return 1
   fi
-  if [ "$action" = build-for-testing ] && [ "$platform/$config/$plan/$scheme" = mac/Debug/CloudAgent/Meguri ]; then
-    build_command=(mg_app_cloud_agent_build)
+  if [ "$action" = build-for-testing ] && [ "$config/$plan/$scheme" = Debug/CloudAgent/Meguri ]; then
+    case "$platform" in mac|ios-sim) build_command=(mg_app_cloud_agent_build) ;; esac
   fi
   result="$MG_RUN_DIR/build-$platform-$config-$plan.xcresult"
   log="$MG_RUN_DIR/build-$platform-$config-$plan.log"
