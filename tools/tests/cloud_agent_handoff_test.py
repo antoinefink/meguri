@@ -124,7 +124,7 @@ class HandoffTests(unittest.TestCase):
         # only for this control-flow double; test exited() independently below.
         patch.object(h.os, "kill", side_effect=ProcessLookupError).start()
 
-    def prepare(self, simulator=False, kind="iphone", preflight=True):
+    def prepare(self, simulator=False, kind="iphone", preflight=True, selection=None):
         if simulator:
             self.case.simulator()
             if kind == "ipad":
@@ -149,7 +149,9 @@ class HandoffTests(unittest.TestCase):
                              struct.pack("<2I", 0x1b, 24) + bytes([n]) * 16)
         self.fixture.expected["executable_sha256"] = v.digest(paths[0].read_bytes())
         plan = plistlib.loads(self.fixture.xctestrun.read_bytes())
-        plan["TestConfigurations"][0]["TestTargets"][0]["OnlyTestIdentifiers"] = ["CloudKitSoakTests"] + (["CloudKitPathPreflightTests"] if preflight else [])
+        plan["TestConfigurations"][0]["TestTargets"][0]["OnlyTestIdentifiers"] = (
+            copy.deepcopy(selection) if selection is not None else
+            ["CloudKitSoakTests"] + (["CloudKitPathPreflightTests"] if preflight else []))
         self.fixture.xctestrun.write_bytes(plistlib.dumps(plan))
         self.case.manifest = self.fixture.refresh_manifest()
         self.case.vm.delivered = copy.deepcopy(self.case.manifest["products"])
@@ -548,6 +550,36 @@ class HandoffTests(unittest.TestCase):
             self.assert_no_publication()
         self.vm.observation_mutation = None
         self.assertEqual(self.handoff()["outcome"], "product_evidence_delivered")
+
+    def test_both_required_selections_in_source_order_reach_preflight_and_handoff(self):
+        self.prepare(selection=["CloudKitSoakTests", "CloudKitPathPreflightTests"])
+        self.assertEqual(self.handoff()["outcome"], "product_evidence_delivered")
+        actions = [action for action, _ in self.vm.setup_events]
+        self.assertEqual(actions[0], "preflight")
+        self.assertEqual(actions.count("preflight"), 1)
+        self.assertTrue(actions[1:])
+        self.assertEqual(set(actions[1:]), {"support"})
+
+    def test_both_required_selections_in_native_order_reach_preflight_and_handoff(self):
+        self.prepare(selection=["CloudKitPathPreflightTests", "CloudKitSoakTests"])
+        self.assertEqual(self.handoff()["outcome"], "product_evidence_delivered")
+        actions = [action for action, _ in self.vm.setup_events]
+        self.assertEqual(actions[0], "preflight")
+        self.assertEqual(actions.count("preflight"), 1)
+        self.assertTrue(actions[1:])
+        self.assertEqual(set(actions[1:]), {"support"})
+
+    def test_extra_missing_duplicate_and_malformed_selection_never_reach_setup(self):
+        for selection in (["CloudKitSoakTests", "CloudKitSoakTests"],
+                          ["CloudKitPathPreflightTests"],
+                          ["CloudKitSoakTests", "GeneratedOtherTests"],
+                          ["CloudKitSoakTests", "CloudKitPathPreflightTests", "CloudKitSoakTests"],
+                          "CloudKitSoakTests,CloudKitPathPreflightTests"):
+            with self.subTest(selection=selection):
+                with self.assertRaises(v.Refused):
+                    self.prepare(selection=selection)
+                self.assertEqual(self.vm.setup_events, [])
+                self.assert_no_publication()
 
     def test_missing_mac_preflight_is_missing_code_without_mirror_or_setup_step(self):
         self.prepare(preflight=False)

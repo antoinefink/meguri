@@ -919,9 +919,12 @@ def handoff_product_evidence(root, parent_run, install_run, vm, lease_check, con
                 xpath = os.path.join(products, manifest["xctestrun"]["path"])
                 plan = plistlib.loads(v._first_sync_bytes(products, xpath))
                 selected = plan["TestConfigurations"][0]["TestTargets"][0].get("OnlyTestIdentifiers")
-                if selected != ["CloudKitSoakTests", "CloudKitPathPreflightTests"]:
+                if selected == ["CloudKitSoakTests"]:
                     return {"scope": "PRODUCT-EVIDENCE-ONLY", "outcome": "implementation_missing",
                             "category": "mac-path-preflight-entrypoint", "signed_execution": False}
+                need(isinstance(selected, list) and len(selected) == 2 and
+                     all(isinstance(name, str) for name in selected) and
+                     set(selected) == {"CloudKitSoakTests", "CloudKitPathPreflightTests"}, "agent-selection")
                 setup = vm.setup("preflight", manifest)
                 support = admit_preflight(root, manifest, expected, setup)
                 support_state = vm.setup("support", {"root": support})
