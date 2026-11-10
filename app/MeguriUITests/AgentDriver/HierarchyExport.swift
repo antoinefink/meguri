@@ -381,19 +381,20 @@ enum HierarchyExport {
 }
 
 #if os(macOS)
-/// Poll observations only. A missing publication can wait; an invalid
-/// observation throws immediately. No action is performed or retried here.
+/// Poll observations only. Nil means ownership publication is pending, never
+/// verified link absence. Invalid observations throw immediately. No action is
+/// performed or retried here.
 @MainActor
 enum NativeReplayWait {
     static func until(id: String, timeout: TimeInterval, gone: Bool,
                       now: () -> Date = { Date() },
                       pause: (TimeInterval) -> Void = { RunLoop.current.run(until: Date().addingTimeInterval($0)) },
-                      observe: (Date) throws -> Bool) throws {
+                      observe: (Date) throws -> Bool?) throws {
         let deadline = now().addingTimeInterval(timeout)
         while now() < deadline {
             let present = try observe(deadline)
             guard now() <= deadline else { break }
-            if present != gone { return }
+            if let present, present != gone { return }
             let remaining = deadline.timeIntervalSince(now())
             if remaining > 0 { pause(min(0.05, remaining)) }
         }
@@ -407,6 +408,8 @@ enum NativeReplayWait {
 @MainActor
 final class NativeWebCapture {
     private struct PublicationPending: Error {}
+    typealias AXRead = (AXUIElement, String) -> (CFTypeRef?, AXError)
+    typealias AXAttributes = (AXUIElement) -> ([String]?, AXError)
     nonisolated struct Failure: Error, CustomStringConvertible {
         let description: String
         init(_ description: String) { self.description = description }
@@ -464,15 +467,71 @@ final class NativeWebCapture {
         guard error == .success, let value, CFGetTypeID(value) == CFStringGetTypeID() else { return nil }
         return value as? String
     }
+    private static func attributes(_ element: AXUIElement, deadline: Date) -> ([String]?, AXError) {
+        let remaining = deadline.timeIntervalSinceNow
+        guard remaining > 0,
+              AXUIElementSetMessagingTimeout(element, Float(min(0.25, remaining))) == .success else {
+            return (nil, .cannotComplete)
+        }
+        var names: CFArray?
+        let error = AXUIElementCopyAttributeNames(element, &names)
+        return (names as? [String], error)
+    }
+
+    private static func supportedAttributes(_ element: AXUIElement, attributes: AXAttributes) throws -> [String] {
+        let (names, error) = attributes(element)
+        guard error == .success, let names, names.count <= 4096 else {
+            throw Failure("Native AX supported attributes unavailable or wrong-type: error=\(error.rawValue)")
+        }
+        return names
+    }
+
     private static func children(_ element: AXUIElement, _ attribute: String = kAXChildrenAttribute,
-                                 deadline: Date? = nil) throws -> [AXUIElement] {
-        let (value, error) = read(element, attribute, deadline: deadline)
-        if error == .attributeUnsupported || error == .noValue { return [] }
+                                 read: AXRead, attributes: AXAttributes,
+                                 knownAttributes: [String]? = nil) throws -> [AXUIElement] {
+        if attribute == kAXChildrenAttribute {
+            let names = try knownAttributes ?? supportedAttributes(element, attributes: attributes)
+            // Public attribute discovery establishes a leaf without a role map.
+            // Once advertised, AXChildren is mandatory; failed reads cannot
+            // establish an empty subtree. AXWindows is always mandatory.
+            if !names.contains(kAXChildrenAttribute) { return [] }
+        }
+        let (value, error) = read(element, attribute)
         guard error == .success, let value, CFGetTypeID(value) == CFArrayGetTypeID(),
               let children = value as? [AXUIElement], children.count <= 4096 else {
             throw Failure("Native AX children unavailable or truncated: \(attribute) error=\(error.rawValue)")
         }
         return children
+    }
+
+    static func ownedPage(in application: AXUIElement, binding: Binding, deadline: Date,
+                          now: () -> Date = { Date() },
+                          read: AXRead, attributes: AXAttributes) throws -> AXUIElement {
+        var visited: [AXUIElement] = []
+        var roots: [AXUIElement] = []
+        func find(_ element: AXUIElement, depth: Int) throws {
+            guard now() < deadline, depth <= 64, visited.count < 4096 else { throw Failure("Native AX traversal exceeded bound") }
+            if visited.contains(where: { CFEqual($0, element) }) { return }
+            visited.append(element)
+            let names = try supportedAttributes(element, attributes: attributes)
+            if names.contains(kAXIdentifierAttribute) {
+                let (value, error) = read(element, kAXIdentifierAttribute)
+                guard error == .success, let value, CFGetTypeID(value) == CFStringGetTypeID(),
+                      let identifier = value as? String else {
+                    throw Failure("Native AX ownership identifier unavailable or wrong-type: error=\(error.rawValue)")
+                }
+                if identifier == binding.page { roots.append(element); return }
+            }
+            for child in try children(element, read: read, attributes: attributes, knownAttributes: names) {
+                try find(child, depth: depth + 1)
+            }
+        }
+        for window in try children(application, kAXWindowsAttribute, read: read, attributes: attributes) {
+            try find(window, depth: 0)
+        }
+        if roots.isEmpty { throw PublicationPending() }
+        guard roots.count == 1, let owned = roots.first else { throw Failure("Exact owned native page root ambiguous") }
+        return owned
     }
 
     init(app: XCUIApplication, binding: Binding, window: CGRect,
@@ -487,19 +546,11 @@ final class NativeWebCapture {
         let remaining = deadline.timeIntervalSinceNow
         guard remaining > 0 else { throw Failure("Native AX observation deadline expired") }
         guard AXUIElementSetMessagingTimeout(applicationAX, Float(min(0.25, remaining))) == .success else { throw Failure("Native AX timeout unavailable") }
+        let axRead: AXRead = { Self.read($0, $1, deadline: deadline) }
+        let axAttributes: AXAttributes = { Self.attributes($0, deadline: deadline) }
+        let owned = try Self.ownedPage(in: applicationAX, binding: binding, deadline: deadline,
+            read: axRead, attributes: axAttributes)
         var visited: [AXUIElement] = []
-        var roots: [AXUIElement] = []
-        func find(_ element: AXUIElement, depth: Int) throws {
-            guard Date() < deadline, depth <= 64, visited.count < 4096 else { throw Failure("Native AX traversal exceeded bound") }
-            if visited.contains(where: { CFEqual($0, element) }) { return }
-            visited.append(element)
-            if Self.string(element, kAXIdentifierAttribute, deadline: deadline) == binding.page { roots.append(element); return }
-            for child in try Self.children(element, deadline: deadline) { try find(child, depth: depth + 1) }
-        }
-        for ownedWindow in try Self.children(applicationAX, kAXWindowsAttribute, deadline: deadline) { try find(ownedWindow, depth: 0) }
-        if roots.isEmpty { throw PublicationPending() }
-        guard roots.count == 1, let owned = roots.first else { throw Failure("Exact owned native page root ambiguous") }
-        visited.removeAll()
         var retained: [(AXUIElement, HierarchyExport.Node)] = []
         func capture(_ element: AXUIElement, depth: Int) throws -> HierarchyExport.Node {
             guard Date() < deadline, depth <= 64, visited.count < 4096,
@@ -529,9 +580,11 @@ final class NativeWebCapture {
             let frame = CGRect(origin: point, size: size)
             let visible = frame.intersection(window)
             let (rawID, idError) = Self.read(element, kAXIdentifierAttribute, deadline: deadline)
-            let (rawDOM, domError) = Self.read(element, kAXDOMIdentifierAttribute, deadline: deadline)
+            // Public AXWebConstants.h: kAXDOMIdentifierAttribute is
+            // CFSTR("AXDOMIdentifier"); no Swift macro import is required.
+            let (rawDOM, domError) = Self.read(element, "AXDOMIdentifier", deadline: deadline)
             let domIsString = rawDOM.map { CFGetTypeID($0) == CFStringGetTypeID() } ?? false
-            let children = try Self.children(element, deadline: deadline).map { try capture($0, depth: depth + 1) }
+            let children = try Self.children(element, read: axRead, attributes: axAttributes).map { try capture($0, depth: depth + 1) }
             var node = HierarchyExport.Node(type: types[role] ?? role,
                 identifier: idError == .success ? (rawID as? String ?? "") : "",
                 label: Self.string(element, kAXDescriptionAttribute, deadline: deadline).flatMap { $0.isEmpty ? nil : $0 }
@@ -560,8 +613,9 @@ final class NativeWebCapture {
         bindingAtEnd = current
     }
 
-    /// A genuinely absent candidate is pending. Published malformed candidates
-    /// fail closed; names, positions and raw AXIdentifier never select a leaf.
+    /// An absent candidate under a successfully owned root is verified absence.
+    /// Malformed candidates fail; names, positions and raw AXIdentifier never
+    /// select a leaf.
     static func publishedLinkIndex(_ id: String, binding: Binding,
                                    nodes: [HierarchyExport.Node]) throws -> Int? {
         guard binding.generatedIDs.filter({ $0 == id }).count == 1 else { throw Failure("Replay ID lacks trusted ownership") }
@@ -594,19 +648,30 @@ final class NativeWebCapture {
                      timeout: TimeInterval, gone: Bool,
                      observed: (Bool) -> Void = { _ in }) throws {
         try NativeReplayWait.until(id: id, timeout: timeout, gone: gone) { deadline in
-            guard try Self.binding(in: app) == binding else { throw Failure("Stale native replay wait binding") }
-            let present: Bool
-            do {
+            let present = try Self.linkObservation(id, binding: binding, currentBinding: { try Self.binding(in: app) }) {
                 let fresh = try NativeWebCapture(app: app, binding: binding,
                     window: app.windows.firstMatch.frame, deadline: deadline)
-                present = try Self.publishedLinkIndex(id, binding: binding, nodes: fresh.elements.map(\.1)) != nil
-            } catch is PublicationPending {
-                present = false
+                return fresh.elements.map(\.1)
             }
-            guard try Self.binding(in: app) == binding else { throw Failure("Stale native replay wait binding") }
-            observed(present)
+            if let present { observed(present) }
             return present
         }
+    }
+
+    /// Only a successful capture of the uniquely owned page can prove absence.
+    /// Keep the live binding checks even when page publication is pending.
+    static func linkObservation(_ id: String, binding: Binding,
+                                currentBinding: () throws -> Binding?,
+                                capture: () throws -> [HierarchyExport.Node]) throws -> Bool? {
+        guard try currentBinding() == binding else { throw Failure("Stale native replay wait binding") }
+        let present: Bool?
+        do {
+            present = try publishedLinkIndex(id, binding: binding, nodes: capture()) != nil
+        } catch is PublicationPending {
+            present = nil
+        }
+        guard try currentBinding() == binding else { throw Failure("Stale native replay wait binding") }
+        return present
     }
 
     func press(_ id: String, in app: XCUIApplication) throws {

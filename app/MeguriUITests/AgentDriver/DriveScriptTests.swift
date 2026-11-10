@@ -2,13 +2,15 @@ import Foundation
 import XCTest
 
 #if os(macOS)
+import ApplicationServices
+
 /// Exercise the production polling and candidate classifier with a controlled
 /// publication clock. These are observations, never activation retries.
 @MainActor
 final class NativeReplayWaitTests: XCTestCase {
     private let id = "review.card.replay.q1"
     private var binding: NativeWebCapture.Binding {
-        .init(page: "review.card.page.a", document: "synthetic-document", card: 1,
+        .init(page: "review.card.page.a", document: "00000000-0000-0000-0000-000000000001", card: 1,
               generation: 2, side: "question", root: "meguri-media://media/",
               generatedIDs: [id])
     }
@@ -23,6 +25,107 @@ final class NativeReplayWaitTests: XCTestCase {
         node.axDOMIdentifierError = error
         node.axDOMIdentifierWrongType = wrongType
         return node
+    }
+
+    /// Inject public AX results into the production ownership traversal and
+    /// wait observation. These AX handles are tokens; no process is queried.
+    private func ownedObservation(deadline: Date, published: Bool = true,
+                                  faultAttribute: String? = nil, error: AXError = .success,
+                                  value: CFTypeRef? = nil, nodes: [HierarchyExport.Node]) throws -> Bool? {
+        let application = AXUIElementCreateApplication(10001)
+        let window = AXUIElementCreateApplication(10002)
+        let leaf = AXUIElementCreateApplication(10003)
+        let page = AXUIElementCreateApplication(10004)
+        return try NativeWebCapture.linkObservation(id, binding: binding, currentBinding: { self.binding }) {
+            _ = try NativeWebCapture.ownedPage(in: application, binding: self.binding, deadline: deadline,
+                now: { deadline.addingTimeInterval(-0.001) },
+                read: { element, attribute in
+                    if attribute == faultAttribute { return (value, error) }
+                    if CFEqual(element, application), attribute == kAXWindowsAttribute {
+                        return ([window] as CFArray, .success)
+                    }
+                    if CFEqual(element, window), attribute == kAXChildrenAttribute {
+                        return ((published ? [leaf, page] : [leaf]) as CFArray, .success)
+                    }
+                    if CFEqual(element, window), attribute == kAXIdentifierAttribute {
+                        return ("fixture.window" as CFString, .success)
+                    }
+                    if CFEqual(element, page), attribute == kAXIdentifierAttribute {
+                        return (self.binding.page as CFString, .success)
+                    }
+                    XCTFail("Unexpected mandatory AX read: \(attribute)")
+                    return (nil, .attributeUnsupported)
+                }, attributes: { element in
+                    if CFEqual(element, window) { return ([kAXIdentifierAttribute, kAXChildrenAttribute], .success) }
+                    if CFEqual(element, page) { return ([kAXIdentifierAttribute], .success) }
+                    // A leaf is established by successful attribute discovery,
+                    // without inventing a role-to-child mapping.
+                    return ([], .success)
+                })
+            return nodes
+        }
+    }
+
+    func testUnavailableOwnershipCannotPassGoneWaitWithValidLiveBinding() {
+        for attribute in [kAXWindowsAttribute, kAXChildrenAttribute, kAXIdentifierAttribute] {
+            for error in [AXError.attributeUnsupported, .noValue, .cannotComplete, .success] {
+                var pauses = 0
+                var observations = 0
+                // Success with a string is wrong-type for traversal arrays;
+                // an array is wrong-type for the ownership identifier.
+                let wrongValue: CFTypeRef = attribute == kAXIdentifierAttribute ? [] as CFArray : "wrong-type" as CFString
+                XCTAssertThrowsError(try NativeReplayWait.until(id: id, timeout: 0.3, gone: true,
+                    pause: { _ in pauses += 1 }) { deadline in
+                    observations += 1
+                    return try self.ownedObservation(deadline: deadline, faultAttribute: attribute,
+                        error: error, value: error == .success ? wrongValue : nil, nodes: [])
+                }) { failure in
+                    XCTAssertTrue(String(describing: failure).contains("unavailable"))
+                }
+                XCTAssertEqual(observations, 1)
+                XCTAssertEqual(pauses, 0)
+            }
+        }
+    }
+
+    func testMissingOwnedPageCannotProveDisappearance() {
+        let start = Date()
+        var now = start
+        var observations = 0
+        XCTAssertThrowsError(try NativeReplayWait.until(id: id, timeout: 0.12, gone: true,
+            now: { now }, pause: { now = now.addingTimeInterval($0) }) { deadline in
+            observations += 1
+            let observed = try self.ownedObservation(deadline: deadline, published: false, nodes: [])
+            XCTAssertNil(observed)
+            return observed
+        })
+        XCTAssertGreaterThan(observations, 1)
+        XCTAssertEqual(now, start.addingTimeInterval(0.12))
+    }
+
+    func testAppearanceAwaitsOwnedPagePublicationWithinRequestedTimeout() throws {
+        let start = Date()
+        var now = start
+        var pending = 0
+        try NativeReplayWait.until(id: id, timeout: 0.3, gone: false,
+            now: { now }, pause: { now = now.addingTimeInterval($0) }) { deadline in
+            let observed = try self.ownedObservation(deadline: deadline,
+                published: now.timeIntervalSince(start) >= 0.09, nodes: [self.link()])
+            if observed == nil { pending += 1 }
+            return observed
+        }
+        XCTAssertGreaterThan(pending, 0)
+        XCTAssertLessThan(now.timeIntervalSince(start), 0.3)
+    }
+
+    func testExactOwnedPageWithZeroLinksProvesDisappearance() throws {
+        var observations = 0
+        try NativeReplayWait.until(id: id, timeout: 0.3, gone: true,
+            pause: { _ in XCTFail("Verified absence needs no polling") }) { deadline in
+            observations += 1
+            return try self.ownedObservation(deadline: deadline, nodes: [])
+        }
+        XCTAssertEqual(observations, 1)
     }
 
     func testGoneWaitObservesPresentThenActualRemoval() throws {

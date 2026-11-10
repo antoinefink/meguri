@@ -133,3 +133,57 @@ identifier getter. Its return is a String, so integration removed the optional
 binding on macOS. The next build `swift-test/20261110T111214Z-53351`
 reached a missing `kAXLinkRole` import in the test. No test case ran.
 Native presses, wait behavior and UI evidence remain unverified.
+
+## R3 bounded repair (source only)
+
+Runner baseline: `01bedc87`; original batch base remains
+`1416a520542a8c5daa38a23bfe398da704c3d6c9`.
+Replace the unavailable Swift web-role macro with the exact public `AXLink`
+literal and use the public `AXDOMIdentifier` literal in both native readers,
+with short AXWebConstants.h provenance. The baseline's nonoptional macOS
+identifier getter and optional iOS getter are preserved; no library or control
+semantics change.
+
+Ownership traversal now requires successful, correctly typed windows,
+advertised child arrays and advertised ownership identifiers. Successful public
+attribute discovery can establish a leaf with no AXChildren attribute; no role
+map is invented. An unavailable mandatory read fails rather than producing an
+empty subtree. A successfully traversed tree without the exact owned page is
+pending publication, represented separately from verified link absence. Both
+live binding checks still bracket observations. Pending ownership cannot pass a
+gone wait; appearance may await publication within the same requested deadline.
+Zero links can prove absence only after a successful uniquely owned page capture.
+
+New tests cover unavailable AX reads, wrong types, pending publication and
+verified absence through the production helpers. Original coverage remains.
+
+One source consistency inspection completed. No git, network, build, test or UI
+execution occurred in this runner. Root owns compilation/runtime, independent
+review and provenance/privacy/similarity checks. No native value, press, signed
+build, Unit or gate pass is claimed.
+
+Exact next root checks, in order (not run here):
+
+- `tools/mg swift-test --package MeguriKit -- --filter 'ReplayAccessibilityTests/native_generated_replay_controls_are_named_and_identified_in_webkit_hierarchy'`
+  to compile and execute the package proof; confirm the case actually runs.
+- `tools/mg swift-test --package MeguriKit -- --filter 'ReplayAccessibilityTests/native_generated_replay_controls_use_catalog_localization'`.
+- `tools/mg ui-test --platform mac --suite NativeReplayWaitTests` for the
+  injected ownership-error, pending-publication and retained candidate cases.
+- `tools/mg ui-test --platform mac --suite MacReplayAccessibilityTests` for
+  actual hide/restore and the original twenty-command/four-stage native proof.
+- `tools/mg mac-ui --suite replay-native` for the original one-case exporter,
+  all 90 hierarchy/screenshot pairs and source-tagged ordinary findings.
+- `tools/mg ui-test --platform mac --suite DriveScriptTests`, plus the existing
+  agent-driver checks identified above. The prior 189 image-tool and five MG
+  wrapper passes remain root evidence; those sources are unchanged here.
+
+Root must retain failures and resolve compiler/native proof issues before
+acceptance. All remaining original gates and final evidence remain required.
+
+Root R3 review is clear. `swift-test/20261110T112045Z-67751` compiled.
+The replay case failed at its own-window AX child read. No native press was
+proved. All three Service SDK functions passed, including five cases for
+real removal, newer revisions, cancellation and release. The two selected
+sync variants still failed: peer-baseline observer provenance, and exchange
+capture tracking error. Their evidence is retained separately. VM execution
+remains required. R3 privacy and similarity passed after the note rewrite.

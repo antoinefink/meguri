@@ -116,11 +116,15 @@ extension WebKitSuites.CardRuntimeSuites {
                 seen.append(node)
                 let role = try string(node, kAXRoleAttribute)
                 let identifier = try string(node, kAXIdentifierAttribute)
-                let (dom, error) = try read(node, kAXDOMIdentifierAttribute)
+                // Public AXWebConstants.h: kAXDOMIdentifierAttribute is
+                // CFSTR("AXDOMIdentifier"); use its exact public attribute name.
+                let (dom, error) = try read(node, "AXDOMIdentifier")
                 let isString = dom.map { CFGetTypeID($0) == CFStringGetTypeID() } ?? false
                 let domID = error == .success && isString ? dom as? String : nil
                 observation.nodes.append("role=\(role ?? "nil") AXIdentifier=\(identifier.debugDescription) AXDOMIdentifier=\(domID.debugDescription) DOMError=\(error.rawValue) DOMWrongType=\(error == .success && !isString)")
-                if role == kAXLinkRole {
+                // Public AXWebConstants.h: kAXLinkRole is CFSTR("AXLink");
+                // that C macro is not imported by ApplicationServices in Swift.
+                if role == "AXLink" {
                     observation.links.append(PublicAXLink(element: node, rawIdentifier: identifier,
                         rawDOMIdentifier: domID, domError: error, domWrongType: error == .success && !isString,
                         label: try string(node, kAXDescriptionAttribute), title: try string(node, kAXTitleAttribute)))
