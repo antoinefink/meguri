@@ -1002,12 +1002,36 @@ public actor CloudKitSyncAdapter {
     }
     private func send(zones: [String], origin: String, execution: CoreCloudPolicyExecution? = nil,
                       requireMediaAdmission: Bool = false) async throws {
-        guard !quiescing, !suspended, !suspending else { throw CancellationError() }
-        guard let instance = owned[origin], await valid(origin) else {
-            if execution != nil { throw BridgeError.cloudPolicy(.staleCommand) }; return
+        #if DEBUG
+        let diagnostic = DebugCloudDiagnostics.sendFailureCapture
+        var site = DebugCloudDiagnostics.SendFailureSite.sendAdmission
+        #endif
+        guard !quiescing, !suspended, !suspending else {
+            #if DEBUG
+            diagnostic?.record(.sendAdmission, error: CancellationError())
+            #endif
+            throw CancellationError()
         }
+        guard let instance = owned[origin], await valid(origin) else {
+            if execution != nil {
+                #if DEBUG
+                diagnostic?.record(.sendAdmission, error: BridgeError.cloudPolicy(.staleCommand))
+                #endif
+                throw BridgeError.cloudPolicy(.staleCommand)
+            }; return
+        }
+        #if DEBUG
+        do { try await consumePendingUpdates(origin: origin) }
+        catch { diagnostic?.record(.pendingUpdateApplication, error: error); throw error }
+        #else
         try await consumePendingUpdates(origin: origin)
-        guard await valid(origin) else { throw BridgeError.cloudPolicy(.staleCommand) }
+        #endif
+        guard await valid(origin) else {
+            #if DEBUG
+            diagnostic?.record(.sendAdmission, error: BridgeError.cloudPolicy(.staleCommand))
+            #endif
+            throw BridgeError.cloudPolicy(.staleCommand)
+        }
         var call: UInt64?
         var finalizationAttempted = false
         var networkStarted = false
@@ -1018,10 +1042,14 @@ public actor CloudKitSyncAdapter {
             repeat {
                 if requireMediaAdmission { try checkMediaSendOwner(origin, instance: instance) }
                 let returned = instance.sentHandlerReturns
+                #if DEBUG
+                site = .beginSend
+                #endif
                 if let execution { call = try await execution.beginSend() }
                 else { call = try await core.beginSend(sdk: origin) }
                 #if DEBUG
                 if let call { sendCallObserver?(origin, call, false) }
+                site = .admissionValidation
                 #endif
                 if requireMediaAdmission { try checkMediaSendOwner(origin, instance: instance) }
                 #if DEBUG
@@ -1059,6 +1087,9 @@ public actor CloudKitSyncAdapter {
                 // prepareSend still joins SDK event bookkeeping before enqueue.
             } while true
             guard let call else { break sendWork }
+            #if DEBUG
+            site = .pendingUpdateApplication
+            #endif
             if zones.contains("meguri-media") { try await consumePendingUpdates(origin: origin) }
             guard await valid(origin) else { break sendWork }
             instance.networks += 1; networkStarted = true; changed()
@@ -1067,27 +1098,62 @@ public actor CloudKitSyncAdapter {
             var sendError: (any Error)?
             let invocationOutputs = CloudPolicyInvocationOutputs()
             do {
+                #if DEBUG
+                site = .sendValidation
+                #endif
                 if let execution { try await execution.validate() }
                 guard await valid(origin) else { throw BridgeError.cloudPolicy(.staleCommand) }
                 instance.operationSaved = 0
                 instance.mediaSendFailure = nil
+                #if DEBUG
+                site = .sdkAuthorization
+                #endif
                 let validateSDK = try await core.finalSDKAuthorization(origin)
+                #if DEBUG
+                site = .sdkPreparation
+                #endif
                 let prepared = try await instance.engine.prepareSend(zones: zones.filter { $0 == instance.zone || $0 == "meguri-media" })
+                #if DEBUG
+                site = .sendValidation
+                #endif
                 guard current == origin, owned[origin] === instance, !instance.stopping else { throw BridgeError.cloudPolicy(.staleCommand) }
                 guard !quiescing else { throw CancellationError() }
+                #if DEBUG
+                site = .enqueue
+                #endif
                 let operation = try prepared.enqueue(prepare: {
+                    #if DEBUG
+                    do {
+                        if let execution { invocationOutputs.append(try await execution.reportInvocation(zones: reportedZones, kind: .send)) }
+                    } catch { diagnostic?.record(.invocationReport, error: error); throw error }
+                    #else
                     if let execution { invocationOutputs.append(try await execution.reportInvocation(zones: reportedZones, kind: .send)) }
+                    #endif
                 }, validate: {
+                    #if DEBUG
+                    do { try validateSDK() }
+                    catch { diagnostic?.record(.enqueueSDKAuthorization, error: error); throw error }
+                    do { try execution?.validateForEnqueue() }
+                    catch { diagnostic?.record(.enqueueExecutionValidation, error: error); throw error }
+                    #else
                     try validateSDK()
                     try execution?.validateForEnqueue()
+                    #endif
                 })
+                #if DEBUG
+                site = .drain
+                #endif
                 try await operation.drain()
+                #if DEBUG
+                site = .postDrainValidation
+                #endif
                 if let execution { try await execution.validate() }
             }
             catch {
                 CloudMediaCancellationContext.current?.observe(error)
                 sendError = error
                 #if DEBUG
+                diagnostic?.record(site, error: error)
                 if CloudMediaCancellationContext.current != nil, let action = CloudMediaCancellationContext.selectedAction {
                     DebugCloudDiagnostics.record(.policyExecute, action: action, error: error)
                 }
@@ -1098,7 +1164,12 @@ public actor CloudKitSyncAdapter {
 
             if let failure = instance.mediaSendFailure {
                 CloudMediaCancellationContext.current?.observe(failure)
-                if sendError == nil { sendError = failure }
+                if sendError == nil {
+                    #if DEBUG
+                    diagnostic?.record(.completion, error: failure)
+                    #endif
+                    sendError = failure
+                }
             }
             // SDK delivery has returned. Join its original first-read/apply work
             // before finishSend observes pending changes and decides another round.
@@ -1106,25 +1177,54 @@ public actor CloudKitSyncAdapter {
             if sendError == nil, Task.isCancelled {
                 let cancellation = CancellationError()
                 CloudMediaCancellationContext.current?.observe(cancellation)
+                #if DEBUG
+                diagnostic?.record(.completion, error: cancellation)
+                #endif
                 sendError = cancellation
             }
+            #if DEBUG
+            site = .completion
+            #endif
             if await valid(origin) {
                 try await reportOperation(execution, zones: reportedZones, kind: .send, started: false, error: sendError, saved: instance.operationSaved)
             }
             guard await valid(origin) else { if let sendError { throw sendError }; break sendWork }
+            #if DEBUG
+            site = .deferredUpdates
+            #endif
             try await waitForDeferredUpdates(origin: origin)
+            #if DEBUG
+            site = .sendValidation
+            #endif
             if let execution { try await execution.validate() }
             guard await valid(origin) else { throw BridgeError.cloudPolicy(.staleCommand) }
+            #if DEBUG
+            site = .deferredUpdates
+            #endif
             try await waitForDeferredUpdates(origin: origin)
+            #if DEBUG
+            site = .sendValidation
+            #endif
             if let execution { try await execution.validate() }
             guard await valid(origin) else { throw BridgeError.cloudPolicy(.staleCommand) }
             let pending = await instance.engine.pendingRecordZoneChanges()
             guard await valid(origin) else { break sendWork }
             finalizationAttempted = true
+            #if DEBUG
+            site = .finish
+            #endif
             try await finishSend(origin: origin, call: call, pending: pending)
+            #if DEBUG
+            site = .pendingUpdateApplication
+            #endif
             try await consumePendingUpdates(origin: origin)
             if let sendError { throw sendError }
-        } catch { CloudMediaCancellationContext.current?.observe(error); operationError = error }
+        } catch {
+            #if DEBUG
+            diagnostic?.record(site, error: error)
+            #endif
+            CloudMediaCancellationContext.current?.observe(error); operationError = error
+        }
         // Admission owns only this original call, even when later work returns
         // early or throws. Normal finalization consumes its single attempt too.
         if requireMediaAdmission, let call, !finalizationAttempted {
@@ -1132,6 +1232,9 @@ public actor CloudKitSyncAdapter {
             let pending = await instance.engine.pendingRecordZoneChanges()
             do { try await finishSend(origin: origin, call: call, pending: pending) }
             catch {
+                #if DEBUG
+                diagnostic?.record(.finish, error: error)
+                #endif
                 CloudMediaCancellationContext.current?.observe(error)
                 lastFailure = error
                 if operationError == nil { operationError = error }
@@ -1372,7 +1475,19 @@ public actor CloudKitSyncAdapter {
         return false
     }
     func executePolicyOperation(_ command: CloudPolicyCommand, execution: CoreCloudPolicyExecution) async throws {
-        guard let origin = try await execution.originalSDK(), let instance = owned[origin] else {
+        #if DEBUG
+        let original: String?
+        do { original = try await execution.originalSDK() }
+        catch {
+            if case .requestSend = command.action {
+                DebugCloudDiagnostics.sendFailureCapture?.record(.originalSDK, error: error)
+            }
+            throw error
+        }
+        #else
+        let original = try await execution.originalSDK()
+        #endif
+        guard let origin = original, let instance = owned[origin] else {
             throw BridgeError.cloudPolicy(.staleCommand)
         }
         func scope(_ zones: [CloudPolicyZone]) -> [String] {
@@ -1494,25 +1609,55 @@ public actor CloudKitSyncAdapter {
     }
     private func runCapturedExchange(origin: String, zone: String, id: UInt64, execution: CoreCloudPolicyExecution? = nil) async throws -> CloudExchangeResult {
         let zones = ["meguri-root", zone]
+        #if DEBUG
+        let diagnostic = DebugCloudDiagnostics.sendFailureCapture
+        var site = DebugCloudDiagnostics.SendFailureSite.exchangeFetch
+        #endif
         var fetched = false
         var operationError: (any Error)?
         do {
             try Task.checkCancellation()
             fetched = try await fetch(zones: zones, origin: origin, execution: execution)
             try Task.checkCancellation()
+            #if DEBUG
+            site = .exchangeFetched
+            #endif
             try await core.exchangeFetched(sdk: origin, complete: fetched)
             if fetched {
                 repeat {
                     try Task.checkCancellation()
+                    #if DEBUG
+                    site = .exchangeSend
+                    #endif
                     try await send(zones: [zone], origin: origin, execution: execution)
+                    #if DEBUG
+                    site = .exchangeSendDue
+                    #endif
                 } while try await core.sendDue(sdk: origin)
+                #if DEBUG
+                site = .exchangeFetch
+                #endif
                 fetched = try await fetch(zones: zones, origin: origin, execution: execution)
             }
             try Task.checkCancellation()
-        } catch { operationError = error }
+        } catch {
+            #if DEBUG
+            diagnostic?.record(site, error: error)
+            #endif
+            operationError = error
+        }
+        #if DEBUG
+        let result: CloudExchangeResult
+        do {
+            result = try await core.completeExchange(sdk: origin, id: id, fetched: fetched,
+                cancelled: cloudOperationWasCancelled(operationError),
+                failed: operationError != nil && !cloudOperationWasCancelled(operationError))
+        } catch { diagnostic?.record(.nativeExchangeCompletion, error: error); throw error }
+        #else
         let result = try await core.completeExchange(sdk: origin, id: id, fetched: fetched,
                                                      cancelled: cloudOperationWasCancelled(operationError),
                                                      failed: operationError != nil && !cloudOperationWasCancelled(operationError))
+        #endif
         exchangeRunning = false
         if execution == nil, let held = heldAutomatic {
             heldAutomatic = nil

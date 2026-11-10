@@ -15,6 +15,37 @@ public enum DebugCloudDiagnostics {
         case policyInput, backendReplacement, closeDrain
     }
 
+    /// One command-scoped observation, inherited by its existing child tasks.
+    /// Enqueue callbacks explicitly capture it because SDK admission is detached.
+    @TaskLocal public static var sendFailureCapture: SendFailureCapture?
+
+    enum SendFailureSite: String, Sendable {
+        case executeAdmission, executeCore, prepareExecution, requestExecution, policyRefresh
+        case originalSDK, sendAdmission, pendingUpdateApplication, beginSend, admissionValidation
+        case sendValidation, sdkAuthorization, sdkPreparation, enqueue, invocationReport
+        case enqueueSDKAuthorization, enqueueExecutionValidation, drain, postDrainValidation
+        case completion, deferredUpdates, finish
+        case exchangeReadiness, exchangeGate, exchangePreparation, exchangeReservation
+        case exchangeCapture, exchangeRun, exchangeCompletion, exchangeEndBeforeCapture, heldConfiguration
+        case exchangeFetch, exchangeFetched, exchangeSend, exchangeSendDue, nativeExchangeCompletion
+    }
+
+    public final class SendFailureCapture: Sendable {
+        private struct Value: Sendable {
+            let site: SendFailureSite
+            let category: String
+            var formatted: String { "firstSite=\(site.rawValue) firstCategory=\(category)" }
+        }
+        private let first = Mutex<Value?>(nil)
+        public init() {}
+        public var firstValue: String? { first.withLock { $0?.formatted } }
+        // Classify immediately; retain neither the error nor any associated payload.
+        func record(_ site: SendFailureSite, error: any Error) {
+            let value = Value(site: site, category: DebugCloudDiagnostics.failureTag(error))
+            first.withLock { if $0 == nil { $0 = value } }
+        }
+    }
+
     private static let logger = Logger(subsystem: "app.meguri", category: "CloudDiagnostics")
     private static let recorder = Recorder()
 
