@@ -387,6 +387,23 @@ class NativeContract(unittest.TestCase):
                 m.build("/generated/run", "/generated/product/Frameworks", invalid)
             prepare.assert_not_called()
 
+    def test_native_simulator_certificate_argument_is_forwarded_before_native_signing(self):
+        args = list(NATIVE_ARGS)
+        args[args.index("-destination") + 1] = "generic/platform=iOS Simulator"
+        args += ["MEGURI_SIGNING=team", "CODE_SIGN_IDENTITY=Apple Development"]
+        @contextlib.contextmanager
+        def prepared(run, *, platform):
+            self.assertEqual(platform, "ios-sim")
+            yield "/generated/verified-input"
+        class Child:
+            def wait(self): return 0
+        with patch.object(m, "prepare", prepared), patch.object(m, "remove"), \
+             patch.object(m.subprocess, "Popen", return_value=Child()) as launch, patch.object(m.stage, "join_original"):
+            self.assertEqual(m.build("/generated/run", "/generated/product/Frameworks", args), 0)
+        self.assertEqual(launch.call_args.args[0], ["/usr/bin/xcodebuild", *args,
+            "MEGURI_CLOUD_AGENT_INJECTION=YES", "MEGURI_CLOUD_AGENT_INJECTION_DIR=/generated/verified-input"])
+        self.assertTrue(launch.call_args.kwargs["start_new_session"])
+
     def test_cleanup_matrix_and_conflicting_native_settings_refuse(self):
         for flag in ("NO", "YES"):
             for platform in ("macosx", "iphonesimulator"):

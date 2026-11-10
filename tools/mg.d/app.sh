@@ -136,6 +136,11 @@ mg_app_build_action() {
   fi
   if [ "$signing" = team ]; then
     settings=(${settings[0]+"${settings[@]}"} MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration)
+    if [ "$action/$platform/$config/$plan/$scheme" = build-for-testing/ios-sim/Debug/CloudAgent/Meguri ]; then
+      # Xcode otherwise selects simulator ad-hoc signing despite team settings.
+      # Keep certificate selection inside the explicit signed agent build.
+      settings=(${settings[0]+"${settings[@]}"} "CODE_SIGN_IDENTITY=Apple Development")
+    fi
   fi
   if [ "$personal" = true ]; then
     # A command-line setting applies to every target before compilation/signing.

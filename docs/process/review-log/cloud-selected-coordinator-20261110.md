@@ -116,3 +116,24 @@ previously failing native composition check. Independent combined review finds
 no P0–P2 issues and binds the applied app files to the prepared/exported seed.
 Actual native simulator embedding, final signed freezing and selected execution
 remain pending. The verifier and failed original receipts remain unchanged.
+
+## Explicit team simulator certificate selection
+
+Starting commit: `e6b2b93f070b4370227c896fbe59c0022f20144a`.
+Actual selected run `20261110T152140Z-88676` stopped before installation or cloud
+execution. Mac build91219 passed; simulator build92974 passed loader inputs but
+strict freeze refused `build-signature`. Cleanup joined and released its lease.
+
+Read-only MG probe `20261110T152633Z-3684` confirmed app and agent native
+verification passes but their signatures are ad-hoc with no Authority or valid
+team identifier. The verifier remains strict and unchanged. The tools patch adds
+`CODE_SIGN_IDENTITY=Apple Development` only to the explicit team, ios-sim, Debug,
+CloudAgent, Meguri build-for-testing route. Other builds and profiles stay as
+before. Native Xcode owns signing; no frozen product is modified.
+
+Focused Docker receipt `20261110T152752Z-4833` passed 9/9 cases, including the
+scope matrix, exact native argument forwarding, ordinary/nested opt-in and
+physical signing. Temporary read-only probe source remains under build only.
+Independent review finds no P0–P2 issues and binds the frozen source hashes.
+Root's exact focused native simulator build/freeze proof remains required before
+another parent selected run. No signing acceptance yet.

@@ -265,6 +265,30 @@ EOF
   done
 }
 
+@test "build-app team CloudAgent simulator certificate selection stays scoped" {
+  trace_app_build
+  local mode platform plan config expected selection
+  for mode in team adhoc; do
+    export MEGURI_APP_SIGNING="$mode"
+    for selection in 'ios-sim CloudAgent Debug yes' 'mac CloudAgent Debug no' 'ios-sim UI Debug no' 'ios-sim UI Profile no'; do
+      read -r platform plan config expected <<<"$selection"
+      : >"$STUB_LOG"
+      # Fail the generated compiler double before freezing: inspect the real
+      # native argv without fabricating signed products or an acceptance pass.
+      FX_BUILD_RC=1 mg build-app --platform "$platform" --config "$config" --test-plan "$plan"
+      [ "$status" -eq 1 ]
+      [ "$(field '.failures[0].id')" = build ]
+      if [ "$mode/$expected" = team/yes ]; then
+        called '^xcodebuild build-for-testing .* -testPlan CloudAgent .* MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration CODE_SIGN_IDENTITY=Apple Development$'
+        [ "$(grep '^xcodebuild build-for-testing ' "$STUB_LOG" | grep -o 'CODE_SIGN_IDENTITY=' | wc -l | tr -d ' ')" -eq 1 ]
+      else
+        not_called 'CODE_SIGN_IDENTITY='
+      fi
+      not_called 'test-without-building|^(sim-|vm-test|host-lease|open)|xcrun (simctl|devicectl)'
+    done
+  done
+}
+
 @test "build-app CloudAgent rejects preview modes in either option order before build work" {
   trace_app_build
   local platform preview config order
