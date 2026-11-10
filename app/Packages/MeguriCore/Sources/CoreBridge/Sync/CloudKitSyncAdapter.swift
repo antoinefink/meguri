@@ -46,6 +46,17 @@ struct CloudMediaSendReceipt {
 }
 
 public actor CloudKitSyncAdapter {
+    private enum StopReason: String {
+        case registrationFailure, configureAutomatic, heldPolicyStop, finalStop
+        case pendingActionsInvalid, handlerFailed, handlerInvalid, postReturnUpdatesFailed
+        case nextBatchFailed, policyStop, policyConfigureAutomatic
+    }
+    #if DEBUG
+    private enum FailurePhase: String {
+        case handleEvent, handlerReturned, savedPendingRemovals, postReturnUpdates
+        case nextBatchPreparation, nextBatchBuild
+    }
+    #endif
     private final class AssetReadRequest {
         let id: UUID
         let retry: (CloudPolicyCommand, CoreCloudPolicyExecution)?
@@ -103,6 +114,19 @@ public actor CloudKitSyncAdapter {
         var batches: [UInt64: UInt32] = [:]
         var savedRemovalGuards: [UInt64: (guardValue: CloudGuard, names: Set<String>)] = [:]
         var failed = false
+        #if DEBUG
+        private(set) var firstFailure: (phase: FailurePhase, tag: String)?
+        var firstStopRecorded = false
+        func recordFailure(_ phase: FailurePhase, error: any Error) {
+            guard firstFailure == nil else { return }
+            // Value uses the existing private failureTag classifier and drops
+            // associated payloads. Retain only its fixed failure tag.
+            firstFailure = (phase, DebugCloudDiagnostics.Value(.commandResult, error: error).failure)
+        }
+        func recordDeliveryFailure() {
+            if firstFailure == nil { firstFailure = (.handleEvent, "deliveryFailed") }
+        }
+        #endif
         var operationSaved: UInt64 = 0
         var observationOrdinal: UInt64 = 0
         var mediaSendFailure: CloudKitSDKOperationFailure?
@@ -318,7 +342,7 @@ public actor CloudKitSyncAdapter {
         } catch {
             let operationError = error
             if published {
-                do { try await stopInstance(registration.instanceID, policyStop: false) }
+                do { try await stopInstance(registration.instanceID, reason: .registrationFailure, policyStop: false) }
                 catch { lastFailure = error }
                 throw operationError
             }
@@ -338,7 +362,7 @@ public actor CloudKitSyncAdapter {
         requestedRunning = true
         intentGeneration &+= 1
         let intent = intentGeneration
-        if let origin = current { try await stopInstance(origin, policyStop: false) }
+        if let origin = current { try await stopInstance(origin, reason: .configureAutomatic, policyStop: false) }
         try checkIntent(intent)
         try await start(automaticallySync: enabled)
     }
@@ -414,12 +438,12 @@ public actor CloudKitSyncAdapter {
         // that command itself belongs to the coordinator's drain.
         while let held = heldStops.first {
             if let original = try await held.execution.originalSDK(), owned[original] != nil {
-                try await stopInstance(original, policyStop: false, execution: held.execution, final: true)
+                try await stopInstance(original, reason: .heldPolicyStop, policyStop: false, execution: held.execution, final: true)
             } else { try await held.execution.retireOriginal() }
             policyOperationOutputs.append(try await held.policy.input(.refresh(.cloud)))
             heldStops.removeFirst()
         }
-        let stopping = current.flatMap { beginStop($0, policyStop: true, final: true) }
+        let stopping = current.flatMap { beginStop($0, reason: .finalStop, policyStop: true, final: true) }
         suspended = false; suspending = false; changed()
         let pendingStops = Array(stopTasks.values)
         let reads = identityReads
@@ -434,12 +458,20 @@ public actor CloudKitSyncAdapter {
             catch { throw error }
         }
     }
-    private func beginStop(_ origin: String, policyStop: Bool, execution: CoreCloudPolicyExecution? = nil, final: Bool = false) -> Task<Void, any Error>? {
+    private func beginStop(_ origin: String, reason: StopReason, policyStop: Bool, execution: CoreCloudPolicyExecution? = nil, final: Bool = false) -> Task<Void, any Error>? {
         // Callback/creation error paths must preserve original authority during
         // the same required-effect drain as the issued StopEngine command.
         guard !quiescing || final else { return nil }
         if let task = stopTasks[origin] { return task }
         guard let instance = owned[origin] else { return nil }
+        #if DEBUG
+        if !instance.firstStopRecorded {
+            instance.firstStopRecorded = true
+            let phase = instance.firstFailure?.phase.rawValue ?? "none"
+            let tag = instance.firstFailure?.tag ?? "none"
+            print("cloudNative.firstStop reason=\(reason.rawValue) policyStop=\(policyStop) final=\(final) firstFailurePhase=\(phase) firstFailureTag=\(tag)")
+        }
+        #endif
         instance.stopping = true
         instance.rootReadAdmission?.setOpen(false)
         instance.cancelRootReadIdentity()
@@ -457,8 +489,8 @@ public actor CloudKitSyncAdapter {
         changed()
         return task
     }
-    private func stopInstance(_ origin: String, policyStop: Bool, execution: CoreCloudPolicyExecution? = nil, final: Bool = false) async throws {
-        if let task = beginStop(origin, policyStop: policyStop, execution: execution, final: final) { try await task.value }
+    private func stopInstance(_ origin: String, reason: StopReason, policyStop: Bool, execution: CoreCloudPolicyExecution? = nil, final: Bool = false) async throws {
+        if let task = beginStop(origin, reason: reason, policyStop: policyStop, execution: execution, final: final) { try await task.value }
     }
     private func drainInstance(_ origin: String, policyStop: Bool, execution: CoreCloudPolicyExecution?, final: Bool) async throws {
         guard let instance = owned[origin] else { return }
@@ -586,7 +618,7 @@ public actor CloudKitSyncAdapter {
         try await executePendingActions()
     }
     public func executePendingActions() async throws {
-        if let origin = current, !(await valid(origin)) { try await stopInstance(origin, policyStop: false) }
+        if let origin = current, !(await valid(origin)) { try await stopInstance(origin, reason: .pendingActionsInvalid, policyStop: false) }
         else { try await consumePendingUpdates() }
     }
     public func consumePendingUpdates() async throws {
@@ -695,6 +727,9 @@ public actor CloudKitSyncAdapter {
             case .deliveryFailed:
                 try await core.trackingFailure(sdk: origin)
                 instance.failed = true
+                #if DEBUG
+                instance.recordDeliveryFailure()
+                #endif
             case .databaseChanges: break
             case .stateUpdate(let state): try await core.stateUpdate(sdk: origin, state: state)
             case .fetched(let zone, let records, let deleted): try await core.fetched(sdk: origin, zone: zone, records: records, deleted: deleted)
@@ -705,7 +740,12 @@ public actor CloudKitSyncAdapter {
                 if !saved.isEmpty || !deleted.isEmpty { instance.savedRemovalGuards[id] = (removalGuard, Set(saved.map(\.name) + deleted)) }
                 instance.operationSaved += actualSaved
                 let receipt = CloudMediaSendReceipt(failed: failed, failedDeletes: failedDeletes)
-                if let diagnostic = receipt.diagnostic { lastFailure = diagnostic }
+                if let diagnostic = receipt.diagnostic {
+                    lastFailure = diagnostic
+                    #if DEBUG
+                    instance.recordFailure(.handleEvent, error: diagnostic)
+                    #endif
+                }
                 // A prior blocking result in this same SDK operation remains
                 // blocking even when a later callback reports normal absence.
                 if let failure = receipt.blocking { instance.mediaSendFailure = failure }
@@ -734,6 +774,9 @@ public actor CloudKitSyncAdapter {
         } catch {
             lastFailure = error
             instance.failed = true
+            #if DEBUG
+            instance.recordFailure(.handleEvent, error: error)
+            #endif
         }
     }
     fileprivate func eventHandlerReturned(_ event: CloudEngineEvent, origin: String) async {
@@ -744,7 +787,12 @@ public actor CloudKitSyncAdapter {
                 let receipts = await instance.engine.takeSavedPendingRemovals()
                 await savedPendingRemovalsConfirmed(receipts, origin: origin, engine: instance.engine)
             }
-            catch { lastFailure = error; instance.failed = true }
+            catch {
+                lastFailure = error; instance.failed = true
+                #if DEBUG
+                instance.recordFailure(.handlerReturned, error: error)
+                #endif
+            }
         }
         if !instance.failed, await valid(origin), owned[origin] === instance {
             await observeEvent?(.init(origin: origin, ordinal: instance.observationOrdinal, event: event, phase: .returned))
@@ -759,11 +807,20 @@ public actor CloudKitSyncAdapter {
         if instance.failed || !live {
             // This owned task starts only after the forwarding handler returned;
             // cancellation may need the SDK call that delivered us to unwind.
-            _ = beginStop(origin, policyStop: false)
+            _ = beginStop(origin, reason: instance.failed ? .handlerFailed : .handlerInvalid, policyStop: false)
         } else {
+            #if DEBUG
+            // The existing public drain selects current, which may have changed
+            // while this original callback was suspended. Attribute its error
+            // only to the instance whose updates it actually consumes.
+            let pendingInstance = current.flatMap { owned[$0] }
+            #endif
             do { try await consumePendingUpdates() }
             catch { lastFailure = error; instance.failed = true
-                _ = beginStop(origin, policyStop: false)
+                #if DEBUG
+                pendingInstance?.recordFailure(.postReturnUpdates, error: error)
+                #endif
+                _ = beginStop(origin, reason: .postReturnUpdatesFailed, policyStop: false)
             }
         }
     }
@@ -780,7 +837,12 @@ public actor CloudKitSyncAdapter {
                       await valid(origin), owned[origin] === instance else { continue }
                 try await core.savedPendingRemoved(receipt)
                 instance.savedRemovalGuards.removeValue(forKey: receipt.requestID)
-            } catch { lastFailure = error; instance.failed = true }
+            } catch {
+                lastFailure = error; instance.failed = true
+                #if DEBUG
+                instance.recordFailure(.savedPendingRemovals, error: error)
+                #endif
+            }
         }
     }
 
@@ -984,6 +1046,9 @@ public actor CloudKitSyncAdapter {
         guard await valid(origin), let instance = owned[origin], (zone == instance.zone || zone == "meguri-media") else { return nil }
         await delegateWorkValidated()
         guard !quiescing, !suspended, !suspending, current == origin, owned[origin] === instance, !instance.stopping else { return nil }
+        #if DEBUG
+        var failurePhase = FailurePhase.nextBatchPreparation
+        #endif
         do {
             var pending = pending
             if let reads = instance.assetDispatch {
@@ -994,6 +1059,9 @@ public actor CloudKitSyncAdapter {
                 pending = await instance.engine.pendingRecordZoneChanges()
                 guard await valid(origin), !quiescing, !suspended, !suspending else { return nil }
             }
+            #if DEBUG
+            failurePhase = .nextBatchBuild
+            #endif
             let batch = try await core.buildBatch(sdk: origin, zone: zone, pending: pending)
             guard await valid(origin), !quiescing, !suspended, !suspending else { return nil }
             if let batch {
@@ -1002,7 +1070,13 @@ public actor CloudKitSyncAdapter {
                 guard await valid(origin), owned[origin] === instance, !quiescing, !suspended, !suspending else { return nil }
             }
             return batch
-        } catch { lastFailure = error; instance.failed = true; _ = beginStop(origin, policyStop: false); return nil }
+        } catch {
+            lastFailure = error; instance.failed = true
+            #if DEBUG
+            instance.recordFailure(failurePhase, error: error)
+            #endif
+            _ = beginStop(origin, reason: .nextBatchFailed, policyStop: false); return nil
+        }
     }
     fileprivate func fetchOptions(origin: String, options: CloudFetchOptions) async -> CloudFetchOptions {
         guard await valid(origin), let instance = owned[origin] else { return .init(zones: [], priorityZones: [], groupID: options.groupID) }
@@ -1482,7 +1556,7 @@ public actor CloudKitSyncAdapter {
                 heldStops.append((command, execution, policy))
                 return true
             }
-            if let original { try await stopInstance(original, policyStop: false, execution: execution) }
+            if let original { try await stopInstance(original, reason: .policyStop, policyStop: false, execution: execution) }
             else { try await execution.retireOriginal() }
             if quiescing, let original, let instance = owned[original], !instance.authorityRetired {
                 heldStops.append((command, execution, policy))
@@ -1498,7 +1572,7 @@ public actor CloudKitSyncAdapter {
             let intent = intentGeneration
             self.automatic = automatic
             if case .configureAutomatic = command.action {
-                if let original { try await stopInstance(original, policyStop: false, execution: execution) }
+                if let original { try await stopInstance(original, reason: .policyConfigureAutomatic, policyStop: false, execution: execution) }
                 else { try await execution.retireOriginal() }
             }
             try checkIntent(intent)
