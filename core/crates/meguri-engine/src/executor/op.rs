@@ -423,6 +423,10 @@ pub struct OpResult<T> {
     pub value: T,
     pub seq: Seq,
     pub changes: Arc<ChangeSet>,
+    /// The S5 `col.mod` requested by this commit, including when the stored
+    /// bytes already matched. `None` when storage did not request a stamp;
+    /// this is independent of the journal's collection delta.
+    pub col_mod: Option<EpochMillis>,
     pub undo: Option<UndoMeta>,
     /// The pre-drop Cloud held run, if incoming/re-key targets hit it (M9.8).
     pub cloud_detached_run: Option<crate::undo::holdback::HeldBackRun>,

@@ -58,6 +58,7 @@ mod tests {
             seq: meguri_engine::Seq(101),
             generation: meguri_engine::Generation(7),
             changes: std::sync::Arc::new(changes),
+            col_mod: Some(meguri_model::time::EpochMillis(1234)),
             undo: None,
             cloud_detached_run: None,
             past_cancel_point: false,

@@ -104,7 +104,7 @@ pub struct CloudOriginalRole {
 struct EditState {
     attempted: bool,
     // Actual executor result, including native change keys, stays in Rust.
-    committed: Option<meguri_engine::OpResult<(meguri_engine::notes::Updated, i64)>>,
+    committed: Option<meguri_engine::OpResult<(meguri_engine::notes::Updated, c::Note)>>,
     facts: Option<CloudOriginalEditFacts>,
 }
 #[derive(Clone, Debug, uniffi::Record)]
@@ -534,7 +534,6 @@ impl CloudOriginalRole {
                     if !Arc::ptr_eq(&actual, &owner) {
                         return Err(meguri_engine::EngineError::from(invalid_category("pre_write.owner")));
                     }
-                    let now = ctx.now().0;
                     let scope = ctx.scope();
                     // Read and validate inside the real write boundary: a
                     // concurrent edit cannot be overwritten by prepared fields.
@@ -580,14 +579,19 @@ impl CloudOriginalRole {
                             },
                         )));
                     }
-                    Ok((updated, now))
+                    // Retain the actual canonical after-image, including the
+                    // updater's independently sampled note stamp.
+                    Ok((updated, after.note))
                 })?;
                 // Keep the real committed provenance even if flush/readback
                 // fails. Such a failure returns no successful edit facts.
                 let seq = result.seq;
-                let now = result.value.1;
+                let committed_note = result.value.1.clone();
+                let col_mod = result.col_mod;
                 let summary = crate::mutations::MutationSummary::of(&result);
                 self.edit.lock().unwrap_or_else(PoisonError::into_inner).committed = Some(result);
+                let col_mod =
+                    col_mod.ok_or_else(|| invalid_category("postcommit.metadata.collection_stamp_missing"))?;
                 // Use the existing generation-bound WAL path off the writer.
                 // The lifecycle control lane can be draining this very job;
                 // acquiring that lane here would deadlock close/suspend.
@@ -612,13 +616,16 @@ impl CloudOriginalRole {
                 if snapshot.seq() < seq {
                     return Err(invalid_category("postcommit.metadata.seq"));
                 }
-                if note.mtime.0 != now.div_euclid(1000) {
-                    return Err(invalid_category("postcommit.metadata.mtime"));
+                if current.note != committed_note {
+                    return Err(invalid_category("postcommit.metadata.note_afterimage"));
                 }
                 if note.usn.0 != -1 {
                     return Err(invalid_category("postcommit.metadata.usn"));
                 }
-                if snapshot.col()?.modified.0 != now {
+                // Later unrelated commits may legitimately advance col.mod.
+                // The original stamp remains owned by the retained OpResult;
+                // an exact-seq snapshot must still match it exactly.
+                if snapshot.seq() == seq && snapshot.col()?.modified != col_mod {
                     return Err(invalid_category("postcommit.metadata.collection_modified"));
                 }
                 if summary.changes.source != crate::changes::OpSource::UserUndoable {
@@ -649,7 +656,7 @@ impl CloudOriginalRole {
                     }
                     _ => return Err(invalid_category("wal.coverage.not_covered")),
                 }
-                let digest = checked(c::Payload::Note(current.note).payload_digest())?;
+                let digest = checked(c::Payload::Note(committed_note).payload_digest())?;
                 let local_revision = if let Some(core) = retained.cloud_runtime() {
                     let status = checked(core.status())?;
                     match status.binding {

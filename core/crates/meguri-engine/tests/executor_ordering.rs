@@ -15,7 +15,7 @@ use meguri_engine::executor::catalog;
 use meguri_engine::{ChangeObserver, EngineError, EventKind, ObservedCommit, OpSpec, Ports, monotonic};
 use meguri_model::changes::OpSource;
 use meguri_model::ids::NoteId;
-use meguri_storage::ReadRows;
+use meguri_storage::{ReadRows, Record};
 
 /// Records the seq of every commit it observes.
 #[derive(Default)]
@@ -98,6 +98,7 @@ fn an_op_that_writes_nothing_has_an_empty_change_set_no_event_and_the_same_col_m
         })
         .unwrap();
     assert!(empty.changes.is_empty());
+    assert_eq!(empty.col_mod, None);
     assert_eq!(empty.undo, None);
     assert_eq!(col_mod(&h.collection), before);
 
@@ -105,6 +106,98 @@ fn an_op_that_writes_nothing_has_an_empty_change_set_no_event_and_the_same_col_m
     assert!(next.seq > empty.seq);
     let events = drain(&subscription, Duration::from_millis(100));
     assert_eq!(change_seqs(&events), [next.seq.0], "only the real op published");
+}
+
+#[test]
+fn op_result_keeps_the_commit_stamp_separate_from_the_note_stamp_and_later_writes() {
+    use meguri_engine::notes::{self, UpdateNote};
+    use meguri_model::time::{EpochMillis, EpochSecs};
+
+    let h = Harness::open();
+    let mid = common::notes::kind(&h, false, &["Q", "A"], &["{{Q}}"]);
+    let nid = common::notes::add(&h, common::notes::input(mid, &["before", "back"])).id;
+    let other = common::notes::add(&h, common::notes::input(mid, &["unrelated", "back"])).id;
+    h.clock.set_now_ms(common::NOW_MS + 999);
+    let clock = h.clock.clone();
+    let result = h
+        .collection
+        .run(
+            OpSpec::named(meguri_engine::undo::names::UPDATE_NOTE, OpSource::UserUndoable)
+                .undo_step(meguri_engine::undo::names::UPDATE_NOTE, meguri_engine::StepKind::Other),
+            move |ctx| {
+                let before_update = ctx.now();
+                clock.step_ms(1); // Cross a second before storage stamps the note.
+                let updated = notes::update_in(
+                    ctx.scope(),
+                    &UpdateNote {
+                        id: nid,
+                        fields: vec!["after".into(), "back".into()],
+                        tags: Vec::new(),
+                    },
+                )?;
+                let after = ctx.scope().note(nid)?.unwrap();
+                clock.step_ms(1); // S5 samples separately, after the updater.
+                Ok((before_update, updated, after))
+            },
+        )
+        .unwrap();
+    assert_eq!(result.value.0, EpochMillis(common::NOW_MS + 999));
+    assert!(result.value.1.written);
+    assert!(result.value.1.cards.is_empty());
+    assert_eq!(result.value.2.mtime, EpochSecs(common::NOW_MS / 1000 + 1));
+    assert_eq!(result.value.2.usn.0, -1);
+    assert_eq!(result.col_mod, Some(EpochMillis(common::NOW_MS + 1001)));
+    assert_eq!(col_mod(&h.collection), result.col_mod.unwrap().0);
+    assert_eq!(result.changes.notes.len(), 1);
+    assert_eq!(result.changes.source, OpSource::UserUndoable);
+    assert_eq!(result.undo.unwrap().name, meguri_engine::undo::names::UPDATE_NOTE);
+
+    h.clock.step_ms(2000);
+    let later = notes::update(
+        &h.collection,
+        UpdateNote {
+            id: other,
+            fields: vec!["later unrelated edit".into(), "back".into()],
+            tags: Vec::new(),
+        },
+        OpSource::UserUndoable,
+    )
+    .unwrap();
+    assert!(later.seq > result.seq);
+    assert_eq!(col_mod(&h.collection), later.col_mod.unwrap().0);
+    assert_ne!(later.col_mod, result.col_mod);
+    assert_eq!(result.col_mod, Some(EpochMillis(common::NOW_MS + 1001)));
+    let reader = h.collection.reader(meguri_storage::ReaderRole::Query).unwrap();
+    assert_eq!(reader.note(nid).unwrap().unwrap().to_cells(), result.value.2.to_cells());
+}
+
+#[test]
+fn fixed_clock_op_result_keeps_a_requested_stamp_without_a_collection_row_delta() {
+    use meguri_engine::notes::{self, UpdateNote};
+    use meguri_model::time::EpochMillis;
+
+    let h = Harness::open();
+    let mid = common::notes::kind(&h, false, &["Q", "A"], &["{{Q}}"]);
+    let nid = common::notes::add(&h, common::notes::input(mid, &["before", "back"])).id;
+    assert_eq!(col_mod(&h.collection), common::NOW_MS);
+    let result = notes::update(
+        &h.collection,
+        UpdateNote {
+            id: nid,
+            fields: vec!["after".into(), "back".into()],
+            tags: Vec::new(),
+        },
+        OpSource::UserUndoable,
+    )
+    .unwrap();
+    assert!(result.value.written);
+    assert!(result.value.cards.is_empty());
+    assert_eq!(result.col_mod, Some(EpochMillis(common::NOW_MS)));
+    assert_eq!(
+        result.timing.rows, 1,
+        "only the note changed; col.mod bytes already matched"
+    );
+    assert_eq!(col_mod(&h.collection), common::NOW_MS);
 }
 
 #[test]

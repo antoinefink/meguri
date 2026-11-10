@@ -762,6 +762,7 @@ fn run_op<T>(
         value,
         seq,
         changes: change_set,
+        col_mod: committed.col_mod,
         undo,
         cloud_detached_run,
         generation,

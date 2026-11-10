@@ -286,13 +286,20 @@ fn fixed_edit_uses_real_owned_host_and_normal_update_with_committed_readback_and
         notes::{self, UpdateNoteRequest},
     };
     use std::{
-        sync::{Arc, mpsc},
+        sync::{
+            Arc,
+            atomic::{AtomicI64, Ordering},
+            mpsc,
+        },
         time::Duration,
     };
-    struct Clock;
+    struct Clock {
+        next: AtomicI64,
+        step: i64,
+    }
     impl HostClock for Clock {
         fn now_ms(&self) -> i64 {
-            cloud_small::NOW_MS + 60_000
+            self.next.fetch_add(self.step, Ordering::SeqCst)
         }
         fn offset_from_utc(&self, _: i64) -> i32 {
             0
@@ -318,6 +325,11 @@ fn fixed_edit_uses_real_owned_host_and_normal_update_with_committed_readback_and
     for (mode, swapped) in [
         ("success", false),
         ("success", true),
+        ("advancing", false),
+        ("second-boundary", true),
+        ("unrelated", true),
+        ("wrong-mtime", true),
+        ("wrong-usn", true),
         ("changed", true),
         ("failed", true),
         ("cancelled", true),
@@ -325,6 +337,14 @@ fn fixed_edit_uses_real_owned_host_and_normal_update_with_committed_readback_and
         ("stale", true),
     ] {
         let temp = tempfile::tempdir().unwrap();
+        let clock = Arc::new(Clock {
+            next: AtomicI64::new(cloud_small::NOW_MS + 60_000),
+            step: match mode {
+                "advancing" => 1,
+                "second-boundary" => 1001,
+                _ => 0,
+            },
+        });
         let original = temp.path().join("original");
         let live = temp.path().join("live");
         generate(&original);
@@ -358,7 +378,7 @@ fn fixed_edit_uses_real_owned_host_and_normal_update_with_committed_readback_and
             app_group_snapshot: temp.path().join("widget.snapshot").to_string_lossy().into_owned(),
             manual_transfer_directory: temp.path().join("manual").to_string_lossy().into_owned(),
         };
-        let open = || collection::start_open(location.clone(), Arc::new(Clock), Arc::new(Space), 7).unwrap();
+        let open = || collection::start_open(location.clone(), clock.clone(), Arc::new(Space), 7).unwrap();
         assert_eq!(wait(open().id), JobOutcome::Succeeded);
         let collection = meguri_ffi::test_hooks::collection_for_testing().unwrap();
         let (first, card_rows, deck_rows) = {
@@ -463,7 +483,68 @@ fn fixed_edit_uses_real_owned_host_and_normal_update_with_committed_readback_and
                 meguri_model::faultpoint::Fault::IoError(std::io::ErrorKind::Other),
             );
         }
+        // Pause only after the real commit, before the job receives its
+        // OpResult. Capture the actual operation's stamps and queue a later
+        // interactive op before the job's background WAL flush/readback.
+        let mut committed_barrier = None;
+        let mut continue_writer = None;
+        if matches!(
+            mode,
+            "advancing" | "second-boundary" | "unrelated" | "wrong-mtime" | "wrong-usn"
+        ) {
+            let (entered, reached) = mpsc::channel();
+            let (tx, rx) = mpsc::channel();
+            collection.after_next_commit(move |seq| {
+                entered.send(seq).unwrap();
+                let _ = rx.recv();
+            });
+            committed_barrier = Some(reached);
+            continue_writer = Some(tx);
+        }
         let edit = role.clone().start_fixed_edit().unwrap();
+        let mut operation_image = None;
+        let mut later = None;
+        if let Some(reached) = committed_barrier {
+            let seq = reached.recv_timeout(Duration::from_secs(20)).unwrap();
+            let reader = collection.reader(ReaderRole::Query).unwrap();
+            let snapshot = reader.snapshot().unwrap();
+            assert_eq!(snapshot.seq(), seq);
+            operation_image = Some((
+                seq,
+                snapshot.note(first.id).unwrap().unwrap(),
+                snapshot.col().unwrap().modified,
+            ));
+            drop(snapshot);
+            drop(reader);
+            if matches!(mode, "unrelated" | "wrong-mtime" | "wrong-usn") {
+                clock.next.fetch_add(2000, Ordering::SeqCst);
+                let target = if mode == "unrelated" { lower.id } else { first.id };
+                let stamp = if mode == "unrelated" {
+                    meguri_storage::StampMode::Local
+                } else {
+                    meguri_storage::StampMode::CallerSupplied
+                };
+                later = Some(
+                    collection.submit(
+                        meguri_engine::OpSpec::named("post fixed-edit mutation", meguri_engine::OpSource::LocalApi)
+                            .stamp(stamp),
+                        move |ctx| {
+                            let mut note = ctx.scope().note(target)?.unwrap();
+                            match mode {
+                                "unrelated" => note.data = "later unrelated data".into(),
+                                "wrong-mtime" => note.mtime.0 += 1,
+                                "wrong-usn" => note.usn.0 = 77,
+                                _ => unreachable!(),
+                            }
+                            ctx.scope().put(&note)?;
+                            Ok(())
+                        },
+                    ),
+                );
+            }
+            continue_writer.take().unwrap().send(()).unwrap();
+        }
+        let later = later.map(|pending| pending.wait().unwrap());
         if let Some(release) = release {
             edit.handle.cancel.cancel().unwrap();
             release.send(()).unwrap();
@@ -474,7 +555,7 @@ fn fixed_edit_uses_real_owned_host_and_normal_update_with_committed_readback_and
             meguri_model::faultpoint::disarm("storage.commit.before");
         }
         let result = edit.result.result();
-        if mode == "success" {
+        if matches!(mode, "success" | "advancing" | "second-boundary" | "unrelated") {
             assert_eq!(outcome, JobOutcome::Succeeded);
             let committed = result.unwrap().unwrap();
             assert_eq!(committed.generation, collection.generation().0);
@@ -494,13 +575,39 @@ fn fixed_edit_uses_real_owned_host_and_normal_update_with_committed_readback_and
             expected.fields = fields.join("\u{1f}");
             expected.sort_field = meguri_text::checksum::sort_text_of(&fields, 0).into_owned();
             expected.checksum = meguri_text::checksum::note_checksum(&fields[0]);
-            expected.mtime = meguri_model::time::EpochSecs((cloud_small::NOW_MS + 60_000) / 1000);
+            expected.mtime = operation_image.as_ref().map_or(
+                meguri_model::time::EpochSecs((cloud_small::NOW_MS + 60_000) / 1000),
+                |(_, note, _)| note.mtime,
+            );
             expected.usn = meguri_model::usn::Usn(-1);
             assert_eq!(
                 after, expected,
                 "every saved field, GUID, type, tag, flag/data and derived stamp"
             );
-            assert_eq!(snapshot.col().unwrap().modified.0, cloud_small::NOW_MS + 60_000);
+            if let Some((seq, stamped_note, col_mod)) = &operation_image {
+                assert_eq!(seq.0, committed.seq);
+                assert_eq!(
+                    after, *stamped_note,
+                    "readback keeps the actual operation's exact metadata"
+                );
+                if mode == "second-boundary" {
+                    assert!(
+                        col_mod.0 >= stamped_note.mtime.0 * 1000 + 1001,
+                        "the advancing clock crosses a second between note and commit samples"
+                    );
+                }
+                if let Some(later) = &later {
+                    assert!(later.seq.0 > committed.seq);
+                    assert_ne!(later.col_mod, Some(*col_mod));
+                    assert_eq!(snapshot.col().unwrap().modified, later.col_mod.unwrap());
+                } else {
+                    assert_eq!(snapshot.col().unwrap().modified, *col_mod);
+                }
+            } else {
+                // Earlier local work set these exact bytes already: the fixed
+                // edit must succeed even without a collection journal delta.
+                assert_eq!(snapshot.col().unwrap().modified.0, cloud_small::NOW_MS + 60_000);
+            }
             assert_eq!(stored_rows(&*snapshot, Table::Cards), card_rows);
             assert_eq!(stored_rows(&*snapshot, Table::Decks), deck_rows);
             // Maintenance stamped the extra row, so compare the original role
@@ -508,7 +615,8 @@ fn fixed_edit_uses_real_owned_host_and_normal_update_with_committed_readback_and
             let current_lower = snapshot.note(lower.id).unwrap().unwrap();
             assert_eq!(current_lower.fields, lower.fields);
             assert_eq!(current_lower.guid, lower.guid);
-            assert_eq!(snapshot.seq().0, committed.seq);
+            let through = later.as_ref().map_or(committed.seq, |r| r.seq.0);
+            assert_eq!(snapshot.seq().0, through);
             let view = row_payload::ReadView(&*snapshot);
             let layout = row_payload::notetype(
                 &view,
@@ -530,7 +638,7 @@ fn fixed_edit_uses_real_owned_host_and_normal_update_with_committed_readback_and
             assert_ne!(edited.note_digest, baseline.note_digest);
             assert_eq!(role.facts().unwrap(), baseline);
             assert!(role.clone().start_fixed_edit().is_err());
-            assert_eq!(collection.last_seq().0, committed.seq);
+            assert_eq!(collection.last_seq().0, through);
             meguri_ffi::lifecycle::close_collection().unwrap();
             assert_eq!(wait(open().id), JobOutcome::Succeeded);
             let reopened = meguri_ffi::test_hooks::collection_for_testing().unwrap();
@@ -542,6 +650,30 @@ fn fixed_edit_uses_real_owned_host_and_normal_update_with_committed_readback_and
             assert!(
                 role.clone().start_fixed_edit().is_err(),
                 "old owner cannot mutate reopened Host"
+            );
+        } else if matches!(mode, "wrong-mtime" | "wrong-usn") {
+            assert_ne!(outcome, JobOutcome::Succeeded);
+            let message = format!("{:?}", result.unwrap_err());
+            let category = if mode == "wrong-mtime" {
+                "postcommit.metadata.note_afterimage"
+            } else {
+                "postcommit.metadata.usn"
+            };
+            assert!(message.contains(category), "{message}");
+            let (seq, mut expected, _) = operation_image.unwrap();
+            if mode == "wrong-mtime" {
+                expected.mtime.0 += 1;
+            } else {
+                expected.usn.0 = 77;
+            }
+            assert_eq!(
+                collection.reader(ReaderRole::Query).unwrap().note(first.id).unwrap(),
+                Some(expected)
+            );
+            assert!(later.unwrap().seq > seq);
+            assert!(
+                role.clone().start_fixed_edit().is_err(),
+                "a refused proof cannot repeat its committed edit"
             );
         } else {
             assert_ne!(outcome, JobOutcome::Succeeded);

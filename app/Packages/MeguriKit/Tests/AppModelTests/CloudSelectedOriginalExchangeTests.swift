@@ -165,9 +165,13 @@ extension ReviewCollectionStartupTests {
             try #require(exit.diagnostics.isEmpty && !exit.diagnosticLimitExceeded)
         } catch {
             await held.release()
-            if let active { await active.cleanupAfterServiceFailure() }
-            else { #expect(await process.cancel().joined) }
+            // This fixture still owns a live Service. Let normal owner shutdown
+            // cancel and drain accepted work before closing its transport.
+            if let active { #expect(await active.owner.close()) }
             _ = try? await exchange?.value
+            let exit = await process.close()
+            #expect(exit.status == 0 && exit.joined && !exit.unexpectedOutput && !exit.ioFailed)
+            #expect(exit.diagnostics.isEmpty && !exit.diagnosticLimitExceeded)
             throw error
         }
     }
@@ -350,8 +354,10 @@ extension ReviewCollectionStartupTests {
         } catch {
             await held.release(); await operation?.cancelAndDrain()
             _ = try? await drain?.value
-            if let active { await active.cleanupAfterServiceFailure() }
-            else { #expect(await process.cancel().joined) }
+            if let active { #expect(await active.owner.close()) }
+            let exit = await process.close()
+            #expect(exit.status == 0 && exit.joined && !exit.unexpectedOutput && !exit.ioFailed)
+            #expect(exit.diagnostics.isEmpty && !exit.diagnosticLimitExceeded)
             throw error
         }
     }
