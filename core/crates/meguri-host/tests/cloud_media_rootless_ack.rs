@@ -1,4 +1,6 @@
 //! Rootless media ACK regressions require the Host composition root.
+#[path = "support/media_identical_feed.rs"]
+mod identical_feed;
 #[path = "support/media_rootless_ack.rs"]
 mod rootless_ack;
 

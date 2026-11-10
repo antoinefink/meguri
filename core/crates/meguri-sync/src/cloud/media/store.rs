@@ -209,6 +209,18 @@ impl TrackingStore {
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let mut next_ledger = next_ledger.clone();
         update_blob_reference_age(&tx, binding_id, &mut next_ledger, now_ms)?;
+        if file_changes.is_empty() && apply_commit.is_none() {
+            let mut current = super::cleanup::ledger(&tx, binding_id)?;
+            if current.revision > next_ledger.revision
+                && runtime_store::checked(current.revision).is_ok()
+                && matches!((current.feed, next_ledger.feed), (Some(current), Some(next)) if current == next)
+            {
+                current.revision = next_ledger.revision;
+                if current == next_ledger {
+                    return Ok(false);
+                }
+            }
+        }
         if let Some((_, proposals, _)) = apply_commit {
             for (prior, candidate) in proposals {
                 if workflow_store::entity(&tx, binding_id, candidate.kind, &candidate.key)? != *prior {

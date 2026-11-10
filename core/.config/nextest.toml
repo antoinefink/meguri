@@ -162,3 +162,8 @@ threads-required = "num-test-threads"
 [[profile.default.overrides]]
 filter = 'package(meguri-ffi) and binary(cloud_original_observation)'
 threads-required = "num-test-threads"
+
+# Two real consumers rendezvous at terminal Runtime time with ten-second bounds.
+[[profile.default.overrides]]
+filter = 'package(meguri-host) and binary(cloud_media_rootless_ack) and (test(=identical_feed::two_real_empty_feed_consumers_coalesce_in_first_started_order) or test(=identical_feed::two_real_empty_feed_consumers_coalesce_in_second_started_order))'
+threads-required = "num-test-threads"

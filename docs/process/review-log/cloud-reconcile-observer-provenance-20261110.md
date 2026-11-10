@@ -200,3 +200,8 @@ same-open boundary, held-scan refusals and the original-role tests.
 Independent source review is clear of P0–P2 findings. Similarity
 `20261110T122011Z-59171` passed. The failed prior receipts remain above.
 No Unit or integration gate is accepted.
+
+The separate rollback fault case omitted by the 17-case selector also passes:
+`core-test/20261110T124827Z-16062`,
+`mid_capture_write_failure_rolls_back_every_tracking_row_but_not_collection_commit`.
+This completes 18 distinct focused cases; the omitted case was run once.

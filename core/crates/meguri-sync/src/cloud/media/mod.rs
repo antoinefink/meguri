@@ -2,6 +2,8 @@ pub mod blob;
 pub(crate) mod cleanup;
 pub(crate) mod io;
 pub(crate) mod store;
+#[cfg(test)]
+mod store_tests;
 use super::{entity_codec as c, runtime::NativeFileIdentity, *};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::PathBuf};
