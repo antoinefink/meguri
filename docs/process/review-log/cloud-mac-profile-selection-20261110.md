@@ -90,3 +90,9 @@ now checks those certificate facts directly and retains its one-candidate rule.
 Regressions cover a person suffix different from the team, wrong DER team/name,
 expiry and ambiguity. Independent review is clear; focused `83778` passed all
 three tooling cases. Native verification remains pending.
+
+Native build `84622` passed with zero errors/warnings and produced its first
+frozen CloudAgent build manifest. The frozen app-profile inventory hash and size
+match the approved input bytes. The matching-slice core was reused unchanged.
+This proves the native build/profile path; VM delivery and CloudKit execution
+remain required and unproven.
