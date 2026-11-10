@@ -39,7 +39,7 @@ def signing_command(args):
         os.umask(previous)
 
 
-def prepare_install_modes(boundary, products, app_path, original):
+def prepare_install_modes(boundary, products, app_path, loadable, original):
     """Use native simulator bundle permissions inside the generated app only."""
     entries, pins = original
     expected = dict(entries)
@@ -48,8 +48,11 @@ def prepare_install_modes(boundary, products, app_path, original):
             if not path.startswith(app_path + '/'):
                 continue
             mode = entry.get('mode')
-            standard = {0o600: 0o644, 0o700: 0o755}.get(mode)
-            if standard is None:
+            if path in loadable and mode in (0o700, 0o755):
+                standard = 0o644
+            else:
+                standard = {0o600: 0o644, 0o700: 0o755}.get(mode, mode)
+            if standard == mode:
                 continue
             directory = entry['type'] == 'directory'
             identity = v.directory_identity if directory else v.identity
@@ -625,8 +628,13 @@ def initial_sign(root, directory, sha, products, xctestrun, settings_path, widge
         app_path = os.path.join(products, app['path'])
         agent_path = os.path.join(products, agent['path'])
         boundary = os.path.join(root, 'build')
-        before = prepare_install_modes(boundary, products, app['path'], v.snapshot(boundary, products))
+        before = v.snapshot(boundary, products)
         paths, bundles = native_plan(products, app, agent, before[0])
+        # The simulator installs dylibs and the XCTest bundle executable as
+        # loadable files. The app and widget remain independently executable.
+        loadable = {os.path.relpath(path, products) for path in paths if path not in bundles}
+        loadable.add(agent['path'] + '/' + agent['executable'])
+        before = prepare_install_modes(boundary, products, app['path'], loadable, before)
         need(all(target_settings[target].get('PRODUCT_BUNDLE_IDENTIFIER') == item['bundle_id']
                  for target, item in (('Meguri', app), ('MeguriSnapshotTests', agent))), 'initial-settings')
         role_grants = {}

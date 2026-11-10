@@ -185,3 +185,17 @@ delivery `40169` refused at `simulator-readback/install-readback`. The
 installed inventory did not match the frozen product. The runner joined
 its work and released the simulator reservation. No CloudKit operation ran.
 The two existing Mac widget cleanup tests passed in `37066`.
+
+## Simulator install permissions
+
+Starting commit `0822afee`. Install `48272` shows identical entry names,
+types and content with a mode difference. The generated host bundle used
+owner-only modes. The signed simulator producer now prepares normal modes
+inside the generated app before initial signing. The containing directory
+keeps its existing mode. Focused checks `49987` passed four wrappers.
+
+Install `63737` still saw a mode difference. The fixed diagnostic counted six
+files changing from 0755 to 0644. The signing plan identifies six loadable
+files and two standalone executables in that product. The next build prepares
+the loadable files with 0644. The frozen, copied and installed inventory
+comparisons remain exact. A fresh signed install must confirm the mapping.
