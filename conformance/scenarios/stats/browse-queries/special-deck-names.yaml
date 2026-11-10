@@ -1,0 +1,60 @@
+# stats/browse-queries Q2.2 (names deck: reads specially or cannot give back):
+# decks current and filtered take deck:"Current" and deck:"Filtered", which
+# deck: reads as ordinary names (search/names-and-ids N3.2), so they find that
+# deck and its subdecks, not curDeck's cards nor every filtered deck's cards.
+# Names no deck: text gives back take did:<ids>: a level holding U+00A0
+# (id 300, child 301), a level holding :: (302) and a level starting with a
+# space (303), written with db_exec as stored names; the deck: texts of those
+# names find other decks or nothing. curDeck is 300; the filtered deck Cram
+# (id 100, specs/conformance/deck-ops.md K13) holds a card from Other.
+# Search only: the oracle's Deck scope for these names is not the deck's own
+# (stats/graphs-common G13, G14), so that these texts give exactly the Deck
+# scope's cards, and the scope text stats_browse_scope writes for each name,
+# are Meguri-only tests (Q8).
+id: stats/browse-queries/special-deck-names
+tags: ["needs-deck", "needs-state"]
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["current", "current::a", "x::current", "filtered", "filtered::b", "a b", "Other"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}], "css": ".card { margin: 0; }"}
+  notes:
+    - {"notetype": "Pair", "deck": "current", "fields": ["n1", "x"]}
+    - {"notetype": "Pair", "deck": "current::a", "fields": ["n2", "x"]}
+    - {"notetype": "Pair", "deck": "x::current", "fields": ["n3", "x"]}
+    - {"notetype": "Pair", "deck": "filtered", "fields": ["n4", "x"]}
+    - {"notetype": "Pair", "deck": "filtered::b", "fields": ["n5", "x"]}
+    - {"notetype": "Pair", "deck": "a b", "fields": ["n6", "x"]}
+    - {"notetype": "Pair", "deck": "Other", "fields": ["n7", "x"]}
+    - {"notetype": "Pair", "deck": "Other", "fields": ["cram", "x"]}
+    - {"notetype": "Pair", "fields": ["raw1", "x"]}
+    - {"notetype": "Pair", "fields": ["raw2", "x"]}
+    - {"notetype": "Pair", "fields": ["raw3", "x"]}
+    - {"notetype": "Pair", "fields": ["raw4", "x"]}
+steps:
+  - {"db_exec": {"sql": "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) SELECT 300, 'a' || char(160) || 'b', mtime_secs, usn, common, kind FROM decks WHERE id = 1"}}
+  - {"db_exec": {"sql": "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) SELECT 301, 'a' || char(160) || 'b' || char(31) || 'c', mtime_secs, usn, common, kind FROM decks WHERE id = 1"}}
+  - {"db_exec": {"sql": "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) SELECT 302, 'p::q', mtime_secs, usn, common, kind FROM decks WHERE id = 1"}}
+  - {"db_exec": {"sql": "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) SELECT 303, ' lead', mtime_secs, usn, common, kind FROM decks WHERE id = 1"}}
+  - {"db_exec": {"sql": "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (100, 'Cram', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET odid = did, did = 100, odue = due, due = -100000 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 7)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET did = 300 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 8)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET did = 301 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 9)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET did = 302 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 10)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET did = 303 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 11)"}}
+  - {"set_config": {"key": "curDeck", "value": 300}}
+  - observe:
+      - search:
+          - {query: '(deck:"Current") AND "is:new"'}
+          - {query: 'deck:current'}
+          - {query: '(deck:"x::current") AND "is:new"'}
+          - {query: '(deck:"Filtered") AND "is:new"'}
+          - {query: 'deck:filtered'}
+          - {query: '(did:300,301) AND "is:new"'}
+          - {query: '(deck:"a b") AND "is:new"'}
+          - {query: "deck:\"a\u00a0b\""}
+          - {query: '(did:302) AND "is:new"'}
+          - {query: 'deck:"p::q"'}
+          - {query: '(did:303) AND "is:new"'}
+          - {query: 'deck:" lead"'}

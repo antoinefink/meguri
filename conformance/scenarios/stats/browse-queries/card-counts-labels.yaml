@@ -1,0 +1,100 @@
+# stats/browse-queries Q8 (Q4.1, Q3, R1393, AE60): each Card Counts label's
+# text, plain and with the separating suffix, for Collection (the item
+# alone), for Deck Lang (`(deck:"Lang") AND <item>`) and for Search
+# `tag:p or tag:q` (`(tag:p or tag:q) AND <item>`), finds exactly the cards
+# its card_counts entry counts in that scope. Deck Lang holds: new, learning,
+# relearning, young (ivl 20), mature (ivl 21), suspended review (ivl 30),
+# sibling-buried new, user-buried learning, user-buried young review (ivl 10),
+# suspended new, suspended learning, suspended relearning, user-buried
+# relearning, and a young review (ivl 15) now in the filtered deck Cram (id
+# 100, specs/conformance/deck-ops.md K13) with odid Lang, which the Deck scope
+# keeps (stats/graphs-common G2.1). Deck Other holds a new and a mature
+# (ivl 40) card, outside the Deck scope. Tag p is on Lang's new, relearning,
+# mature, suspended review, sibling-buried new and suspended new cards, tag q
+# on Other's new card. Suspended and Buried take no suffix (Q4.1).
+# Separating on gives the excluding_inactive set, off the including_inactive
+# set.
+id: stats/browse-queries/card-counts-labels
+tags: ["needs-deck", "needs-state", "needs-prop", "needs-tag"]
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["Lang", "Other"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}], "css": ".card { margin: 0; }"}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n1", "x"], "tags": ["p"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n2", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n3", "x"], "tags": ["p"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n4", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n5", "x"], "tags": ["p"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n6", "x"], "tags": ["p"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n7", "x"], "tags": ["p"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n8", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n9", "x"]}
+    - {"notetype": "Pair", "deck": "Other", "fields": ["o1", "x"], "tags": ["q"]}
+    - {"notetype": "Pair", "deck": "Other", "fields": ["o2", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n10", "x"], "tags": ["p"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n11", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n12", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n13", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n14", "x"]}
+steps:
+  - {"db_exec": {"sql": "UPDATE cards SET type = 1, queue = 1, due = 1791800000, left = 1 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 3, queue = 1, ivl = 3, due = 1791800000, left = 1, lapses = 1 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 20, due = 5 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 21, due = 5 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = -1, ivl = 30, due = 5 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET queue = -2 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 6)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 1, queue = -3, due = 1791800000, left = 1 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 7)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = -3, ivl = 10, due = 5 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 8)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 40, due = 5 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 10)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET queue = -1 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 11)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 1, queue = -1, due = 1791800000, left = 1 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 12)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 3, queue = -1, ivl = 3, due = 1791800000, left = 1, lapses = 1 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 13)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 3, queue = -3, ivl = 3, due = 1791800000, left = 1, lapses = 1 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 14)"}}
+  - {"db_exec": {"sql": "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (100, 'Cram', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 15, odid = did, did = 100, odue = 5, due = -100000 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 15)"}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["card_counts"]}, {"scope": {"deck": "Lang"}, "history": "year", "parts": ["card_counts"]}, {"scope": {"search": "tag:p or tag:q"}, "history": "year", "parts": ["card_counts"]}]}]}
+  - observe:
+      - search:
+          - {query: '"is:new"'}
+          - {query: '(-"is:review" AND "is:learn")'}
+          - {query: '("is:review" AND "is:learn")'}
+          - {query: '("is:review" AND -"is:learn") AND "prop:ivl<21"'}
+          - {query: '("is:review" AND -"is:learn") AND "prop:ivl>=21"'}
+          - {query: '"is:new" AND -("is:buried" OR "is:suspended")'}
+          - {query: '(-"is:review" AND "is:learn") AND -("is:buried" OR "is:suspended")'}
+          - {query: '("is:review" AND "is:learn") AND -("is:buried" OR "is:suspended")'}
+          - {query: '("is:review" AND -"is:learn") AND "prop:ivl<21" AND -("is:buried" OR "is:suspended")'}
+          - {query: '("is:review" AND -"is:learn") AND "prop:ivl>=21" AND -("is:buried" OR "is:suspended")'}
+          - {query: '"is:suspended"'}
+          - {query: '"is:buried"'}
+  - observe:
+      - search:
+          - {query: '(deck:"Lang") AND "is:new"'}
+          - {query: '(deck:"Lang") AND (-"is:review" AND "is:learn")'}
+          - {query: '(deck:"Lang") AND ("is:review" AND "is:learn")'}
+          - {query: '(deck:"Lang") AND ("is:review" AND -"is:learn") AND "prop:ivl<21"'}
+          - {query: '(deck:"Lang") AND ("is:review" AND -"is:learn") AND "prop:ivl>=21"'}
+          - {query: '(deck:"Lang") AND "is:new" AND -("is:buried" OR "is:suspended")'}
+          - {query: '(deck:"Lang") AND (-"is:review" AND "is:learn") AND -("is:buried" OR "is:suspended")'}
+          - {query: '(deck:"Lang") AND ("is:review" AND "is:learn") AND -("is:buried" OR "is:suspended")'}
+          - {query: '(deck:"Lang") AND ("is:review" AND -"is:learn") AND "prop:ivl<21" AND -("is:buried" OR "is:suspended")'}
+          - {query: '(deck:"Lang") AND ("is:review" AND -"is:learn") AND "prop:ivl>=21" AND -("is:buried" OR "is:suspended")'}
+          - {query: '(deck:"Lang") AND "is:suspended"'}
+          - {query: '(deck:"Lang") AND "is:buried"'}
+  - observe:
+      - search:
+          - {query: '(tag:p or tag:q) AND "is:new"'}
+          - {query: '(tag:p or tag:q) AND (-"is:review" AND "is:learn")'}
+          - {query: '(tag:p or tag:q) AND ("is:review" AND "is:learn")'}
+          - {query: '(tag:p or tag:q) AND ("is:review" AND -"is:learn") AND "prop:ivl<21"'}
+          - {query: '(tag:p or tag:q) AND ("is:review" AND -"is:learn") AND "prop:ivl>=21"'}
+          - {query: '(tag:p or tag:q) AND "is:new" AND -("is:buried" OR "is:suspended")'}
+          - {query: '(tag:p or tag:q) AND (-"is:review" AND "is:learn") AND -("is:buried" OR "is:suspended")'}
+          - {query: '(tag:p or tag:q) AND ("is:review" AND "is:learn") AND -("is:buried" OR "is:suspended")'}
+          - {query: '(tag:p or tag:q) AND ("is:review" AND -"is:learn") AND "prop:ivl<21" AND -("is:buried" OR "is:suspended")'}
+          - {query: '(tag:p or tag:q) AND ("is:review" AND -"is:learn") AND "prop:ivl>=21" AND -("is:buried" OR "is:suspended")'}
+          - {query: '(tag:p or tag:q) AND "is:suspended"'}
+          - {query: '(tag:p or tag:q) AND "is:buried"'}

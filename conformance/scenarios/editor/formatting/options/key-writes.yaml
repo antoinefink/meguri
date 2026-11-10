@@ -1,0 +1,80 @@
+# The stored side of the editor's option and palette keys (specs/editor/
+# formatting.md F12; specs/editor/config-keys.md K1, K8, K9), through the
+# config API's whole-value write with no undo entry (specs/conformance/
+# record-ops.md W4; specs/storage/config-table.md C4, C5). This is the stored
+# half of config-keys K11's option-write and palette-write; K11's typed reads
+# and Meguri's palette arithmetic need the editor_config_set op and
+# editor_config observation of K7, so the later scenarios there may reuse or
+# retire this one. A new collection stores none of the three keys. Each key
+# is written over a missing key (the row is created in compact form, stamped
+# now, col.mod moved), then the same value over its stored row given a
+# server usn (nothing written: usn, mtime_secs and col.mod stay), then over a
+# value of another type stored as BLOB (replaced). The 16-string palette is a
+# literal; its last write is K9's result for the add of #0000ff over
+# ["red","#12345","#abc",7] (kept slots as stored, #abc as #aabbcc, empty
+# slots #ffffff), but the oracle stores whatever it is given, so the golden
+# fixes only bytes and stamps. A stored TEXT value is left to U23's Rust tests
+# (C4: Anki fails that write). The INSERT and UPDATE db_exec steps empty both
+# undo histories (specs/engine/undo.md A2); the config writes then keep the
+# "Update Note" step and empty the redo history (A2, W4).
+id: editor/formatting/options/key-writes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: One, front: "{{Front}}", back: "{{Back}}"}
+  decks: [Inbox]
+  notes:
+    - {notetype: Pair, deck: Inbox, fields: [a, b]}
+steps:
+  - db_exec: {sql: "SELECT KEY FROM config WHERE KEY IN ('shrinkEditorImages', 'closeHTMLTags', 'customColorPickerPalette') ORDER BY KEY"}
+  - advance: 1h
+  # Over a missing key.
+  - set_config: {key: shrinkEditorImages, value: false}
+  - set_config: {key: closeHTMLTags, value: false}
+  - set_config:
+      key: customColorPickerPalette
+      value: ["#0000ff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff"]
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, typeof(val), CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY IN ('shrinkEditorImages', 'closeHTMLTags', 'customColorPickerPalette') ORDER BY KEY"}
+  - db_exec: {sql: "UPDATE config SET usn = 5 WHERE KEY IN ('shrinkEditorImages', 'closeHTMLTags', 'customColorPickerPalette')"}
+  - advance: 1h
+  # The value already stored.
+  - set_config: {key: shrinkEditorImages, value: false}
+  - set_config: {key: closeHTMLTags, value: false}
+  - set_config:
+      key: customColorPickerPalette
+      value: ["#0000ff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff"]
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, typeof(val), CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY IN ('shrinkEditorImages', 'closeHTMLTags', 'customColorPickerPalette') ORDER BY KEY"}
+  # Values of another type, as another client could leave them.
+  - db_exec: {sql: "INSERT OR REPLACE INTO config (KEY, usn, mtime_secs, val) VALUES ('shrinkEditorImages', 5, 0, CAST('\"no\"' AS BLOB))"}
+  - db_exec: {sql: "INSERT OR REPLACE INTO config (KEY, usn, mtime_secs, val) VALUES ('closeHTMLTags', 5, 0, CAST('1' AS BLOB))"}
+  - db_exec: {sql: "INSERT OR REPLACE INTO config (KEY, usn, mtime_secs, val) VALUES ('customColorPickerPalette', 5, 0, CAST('\"red\"' AS BLOB))"}
+  - advance: 1h
+  - set_config: {key: shrinkEditorImages, value: false}
+  - set_config: {key: closeHTMLTags, value: false}
+  - set_config:
+      key: customColorPickerPalette
+      value: ["#0000ff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff"]
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, typeof(val), CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY IN ('shrinkEditorImages', 'closeHTMLTags', 'customColorPickerPalette') ORDER BY KEY"}
+  # The palette over another client's array (K9's kept slots).
+  - db_exec: {sql: "INSERT OR REPLACE INTO config (KEY, usn, mtime_secs, val) VALUES ('customColorPickerPalette', 5, 0, CAST('[\"red\", \"#12345\", \"#abc\", 7]' AS BLOB))"}
+  - advance: 1h
+  - set_config:
+      key: customColorPickerPalette
+      value: ["red", "#12345", "#aabbcc", "#0000ff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff"]
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, typeof(val), CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY IN ('shrinkEditorImages', 'closeHTMLTags', 'customColorPickerPalette') ORDER BY KEY"}
+  # No undo entry: the note edit's step stays on top, and the write empties
+  # the redo history.
+  - advance: 1h
+  - edit_note: {note: "#n1", fields: {Back: b1}}
+  - set_config: {key: closeHTMLTags, value: true}
+  - observe: [undo_status]
+  - undo: {}
+  - observe: [undo_status]
+  - advance: 1m
+  - set_config: {key: shrinkEditorImages, value: true}
+  - observe: [undo_status]
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, typeof(val), CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY IN ('shrinkEditorImages', 'closeHTMLTags', 'customColorPickerPalette') ORDER BY KEY"}
+  - db_exec: {sql: "SELECT flds FROM notes"}

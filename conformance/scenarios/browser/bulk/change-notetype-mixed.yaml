@@ -1,0 +1,29 @@
+# Change Note Type on a mixed selection (R1189; specs/browser/bulk-
+# actions.md B8; notetypes/change-notetype M4). A selection whose notes use
+# Vocab and Plain is refused with multiple_notetypes before the screen
+# opens, also when the Plain note comes first; a selection whose first note
+# was deleted is not_found. Nothing changes. Needs change_notetype_info
+# (specs/conformance/change-notetype-ops.md H1), delete_notes and db_exec.
+id: browser/bulk/change-notetype-mixed
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Vocab
+      fields: [Word, Meaning]
+      templates: [{name: Recall, front: "{{Word}}", back: "{{Meaning}}"}]
+    - name: Plain
+      fields: [Text, Extra]
+      templates: [{name: Card, front: "{{Text}}", back: "{{Extra}}"}]
+    - name: Other
+      fields: [Q, A]
+      templates: [{name: Ask, front: "{{Q}}", back: "{{A}}"}]
+  notes:
+    - {notetype: Vocab, fields: [w, m]}
+    - {notetype: Plain, fields: [t, e]}
+    - {notetype: Plain, fields: [gone, e]}
+steps:
+  - delete_notes: {notes: ["#n3"]}
+  - change_notetype_info: {notes: ["#n1", "#n2"], notetype: Other}
+  - change_notetype_info: {notes: ["#n2", "#n1"], notetype: Other}
+  - change_notetype_info: {notes: ["#n3", "#n2"], notetype: Other}
+  - db_exec: {sql: "SELECT mid = (SELECT id FROM notetypes WHERE name = 'Vocab'), flds FROM notes ORDER BY id"}

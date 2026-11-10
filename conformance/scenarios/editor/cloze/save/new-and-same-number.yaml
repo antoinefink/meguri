@@ -1,0 +1,54 @@
+# What the two cloze commands' results do once saved (specs/editor/cloze-wrap.md
+# W3, W4, W7; plan U192's cloze test), on cloze-wrap W9's note type. Extra
+# holds {{c2::x}}, so H is 2: Cloze Deletion on "word " writes {{c3::word}}
+# with the space outside, and Same Number on "b" then reuses 3. A cloze
+# note's numbers are the union over every field, cloze field or not
+# (notes/card-generation G4, R785), so Extra's c2 already gives the card of
+# ord 1 at setup, next to ord 0 for c1; the first save adds only ord 2 (G7)
+# and the Same Number save adds none. Extra is no cloze field, so the field
+# check still reports its cloze (notes/field-check K3): field_not_cloze comes
+# before missing_cloze, so Text without a cloze while Extra keeps {{c2::x}}
+# is field_not_cloze, and missing_cloze only once Extra has none either.
+# Cloze cards an edit adds have no logical id and one cloze note's cards are
+# created in hash order: they are read by ord with db_exec. The cloze
+# requests show how card 3 reads the final text.
+id: editor/cloze/save/new-and-same-number
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Gap
+      kind: cloze
+      fields: [Text, Extra, Note]
+      templates:
+        - {name: Cloze, front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Extra}}"}
+  decks: [Inbox]
+  notes:
+    - {notetype: Gap, deck: Inbox, fields: ["{{c1::a}} word b", "{{c2::x}}", ""]}
+steps:
+  - db_exec: {sql: "SELECT ord, queue, type FROM cards ORDER BY ord"}
+  - observe:
+      - fields_check:
+          cases:
+            - {note: "#n1"}
+            - {note: "#n1", fields: {Text: "{{c1::a}} {{c3::word}} b"}}
+            - {note: "#n1", fields: {Extra: "x"}}
+            - {note: "#n1", fields: {Text: "a word b"}}
+            - {note: "#n1", fields: {Text: "a word b", Extra: "x"}}
+  - advance: 1h
+  # Cloze Deletion, selection "word " (W4: the trailing space stays outside).
+  - edit_note: {note: "#n1", fields: {Text: "{{c1::a}} {{c3::word}} b"}}
+  - db_exec: {sql: "SELECT ord, queue, type FROM cards ORDER BY ord"}
+  - advance: 1h
+  # Cloze Deletion (Same Number), selection "b".
+  - edit_note: {note: "#n1", fields: {Text: "{{c1::a}} {{c3::word}} {{c3::b}}"}}
+  - db_exec: {sql: "SELECT ord, queue, type FROM cards ORDER BY ord"}
+  - db_exec: {sql: "SELECT flds FROM notes"}
+  - observe:
+      - cloze:
+          fns: [numbers]
+          inputs: ["{{c1::a}} {{c3::word}} {{c3::b}}", "{{c2::x}}"]
+      - cloze:
+          fns: [front, back]
+          inputs:
+            - ["{{c1::a}} {{c3::word}} {{c3::b}}", 1]
+            - ["{{c1::a}} {{c3::word}} {{c3::b}}", 3]

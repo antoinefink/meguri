@@ -1,0 +1,90 @@
+# specs/browser/result-sets.md H9, H11 (R1116): every request builds its own
+# context when it starts, so a toggle whose context differs from its handle's
+# on a value the plan read is a run with the new context. The observations
+# are plain search runs (specs/conformance/search-ops.md S1): they give the
+# sets such a toggle must equal; whether Meguri derives or runs it is its own
+# test (H16). Two context values change. The current deck, read by
+# deck:current (specs/search/names-and-ids.md N3.4), changes through
+# set_current_deck, which commits. Today, read by is:due and prop:due
+# (specs/search/query-model.md Q8), changes when the clock passes the day
+# boundary (2030-01-16 04:00 UTC, rollover 4) with no op committed in
+# between, so only the context comparison can force that run. #n1 (Duo) has
+# #c1 in Lang and #c2 in Other; #n2's #c3 is in Lang::Sub; #n3's #c4 in Other
+# (review, due day 10); #n4's #c5 in the default deck; #n5's #c6 in Lang
+# (review, due day 0, today at the start); #n6's #c7 in Other (review, due day
+# 1); #n7's #c8 is a filtered card (specs/conformance/browser-ops.md B5): its
+# did is the ordinary deck Cram and its odid its home deck Lang, so
+# deck:current matches it while Lang is current. In notes mode #n1 is
+# returned by both deck:current and -deck:current, since each of its cards is
+# tested on its own (specs/search/query-model.md Q4). Needs the deck, state
+# and prop terms (U82).
+id: browser/modes/toggle-context
+tags: [needs-deck, needs-state, needs-prop]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Lang, "Lang::Sub", Other, Cram]
+  notetypes:
+    - name: Duo
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Reverse, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+    - name: Solo
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Duo, deck: Lang, fields: [dog, x]}
+    - {notetype: Solo, deck: "Lang::Sub", fields: [cat, y]}
+    - {notetype: Solo, deck: Other, fields: [eel, z]}
+    - {notetype: Solo, fields: [ant, w]}
+    - {notetype: Solo, deck: Lang, fields: [fig, v]}
+    - {notetype: Solo, deck: Other, fields: [gnu, u]}
+    - {notetype: Solo, deck: Lang, fields: [hen, t]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET did = (SELECT id FROM decks WHERE name = 'Other') WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 0) AND ord = 1"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 10, ivl = 3, factor = 2500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 2)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 3, factor = 2500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 4)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 1, ivl = 3, factor = 2500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 5)"}
+  - db_exec: {sql: "UPDATE cards SET odid = did, odue = 7, did = (SELECT id FROM decks WHERE name = 'Cram'), due = -99999 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 6)"}
+  - set_current_deck: {deck: Lang}
+  - observe:
+      - search:
+          - {query: 'deck:current'}
+          - {query: 'deck:current', kind: notes}
+          - {query: '-deck:current'}
+          - {query: '-deck:current', kind: notes}
+          - {query: 'deck:current is:new'}
+          - {query: 'deck:current is:new', kind: notes}
+          - {query: 'is:due'}
+          - {query: 'is:due', kind: notes}
+          - {query: 'prop:due=0'}
+          - {query: 'prop:due=0', kind: notes}
+          - {query: 'prop:due=1'}
+          - {query: 'prop:due=1', kind: notes}
+  - set_current_deck: {deck: Other}
+  - observe:
+      - search:
+          - {query: 'deck:current'}
+          - {query: 'deck:current', kind: notes}
+          - {query: '-deck:current'}
+          - {query: '-deck:current', kind: notes}
+          - {query: 'deck:current is:new'}
+          - {query: 'deck:current is:new', kind: notes}
+          - {query: 'deck:current is:due'}
+          - {query: 'deck:current is:due', kind: notes}
+  - advance: 18h
+  - observe:
+      - search:
+          - {query: 'is:due'}
+          - {query: 'is:due', kind: notes}
+          - {query: 'prop:due=0'}
+          - {query: 'prop:due=0', kind: notes}
+          - {query: 'prop:due=1'}
+          - {query: 'prop:due=1', kind: notes}
+          - {query: 'prop:due=-1'}
+          - {query: 'prop:due=-1', kind: notes}
+          - {query: 'deck:current is:due'}
+          - {query: 'deck:current is:due', kind: notes}

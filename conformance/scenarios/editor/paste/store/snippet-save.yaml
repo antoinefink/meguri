@@ -1,0 +1,33 @@
+# The save's decoding of pasted snippets and the references the saved field
+# holds (specs/editor/paste-sources.md S7; specs/editor/paste.md P3, P16;
+# specs/text/media-references.md M4, M6, M7). Inputs are the snippet forms
+# the host editor (and Meguri) and the page editor write for the same stored
+# names, a fetched src written raw (a%41.png), a relative src from external
+# HTML, a sound snippet, and the stored forms, whose display encoding the
+# third function shows.
+id: editor/paste/store/snippet-save
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - text:
+          fns: [iri_decode, media_refs, iri_encode]
+          inputs:
+            - '<img src="a%26b%20c.png">'
+            - '<img src="a&amp;b%20c.png">'
+            - '<img src="%E6%97%A5%E6%9C%AC.png">'
+            - '<img src="100%25.jpg">'
+            - '<img src="a%2541.png">'
+            - '<img src="a%23b.png">'
+            - '<img src="a#b.png">'
+            - '<img src="it%27s%20%281%29.png">'
+            - '<img src="it''s%20(1).png">'
+            - '[sound:clip&amp;1.mp3]'
+            - '<img src="a%41.png">'
+            - '<img src="x%20y.png">'
+            - '<img src="paste-732a7d8e88c3e13b9bf99563845fadf9d4b23473.jpg">'
+            - '<img src="a&b c.png">'
+            - '<img src="a&amp;b c.png">'
+            - '<img src="日本.png">'
+            - '<img src="100%.jpg">'
+            - '<img src="it''s (1).png">'
+            - '<img src="a%26b%20c.png"><img src="paste-732a7d8e88c3e13b9bf99563845fadf9d4b23473.jpg">[sound:clip&amp;1.mp3]'

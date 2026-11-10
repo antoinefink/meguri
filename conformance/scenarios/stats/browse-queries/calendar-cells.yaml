@@ -1,0 +1,43 @@
+# stats/browse-queries Q8 (Q4.2, Q3): a Calendar cell's item "prop:rated=<d>"
+# finds the cards answered (ease 1 or above) in search day d (search/history
+# H8), which is not the cell's count (rows of every counted kind by B3's day).
+# N = 1791856800, S = N - 86,400 s = 1791770400. Cards in Lang::日本語:
+#   c1 a Review row at S exactly: Reviews day -1, found by prop:rated=0;
+#   c2 a Review row at S + 1 s (day 0) and one at N + 1.5 days (day 1: no query);
+#   c3 Review rows at N - 2.5 days (day -2) and N - 3.5 days (day -3);
+#   c4 a Manual row with ease 0 today: counted nowhere, found by no prop:rated;
+#   c5 an unrated Learn row (ease 0) today: counted on day 0, not found;
+#   c6 a Review row at S - 1 ms: day -1, found by prop:rated=-1.
+# c7 in Other has a Review row on day -1, outside the Deck scope. A future
+# cell's "prop:rated=1" is refused by the search (Q4.2, Q7), so it has no query.
+id: stats/browse-queries/calendar-cells
+tags: ["needs-deck", "needs-history"]
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["Lang::日本語", "Other"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}], "css": ".card { margin: 0; }"}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang::日本語", "fields": ["n1", "x"]}
+    - {"notetype": "Pair", "deck": "Lang::日本語", "fields": ["n2", "x"]}
+    - {"notetype": "Pair", "deck": "Lang::日本語", "fields": ["n3", "x"]}
+    - {"notetype": "Pair", "deck": "Lang::日本語", "fields": ["n4", "x"]}
+    - {"notetype": "Pair", "deck": "Lang::日本語", "fields": ["n5", "x"]}
+    - {"notetype": "Pair", "deck": "Lang::日本語", "fields": ["n6", "x"]}
+    - {"notetype": "Pair", "deck": "Other", "fields": ["o1", "x"]}
+steps:
+  - {"db_exec": {"sql": "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT 1791770400000, id, -1, 3, 1, 5, 2500, 4000, 1 FROM (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0) UNION ALL SELECT 1791770401000, id, -1, 3, 1, 5, 2500, 4000, 1 FROM (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1) UNION ALL SELECT 1791986400000, id, -1, 3, 1, 5, 2500, 4000, 1 FROM (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1) UNION ALL SELECT 1791640800000, id, -1, 3, 1, 5, 2500, 4000, 1 FROM (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2) UNION ALL SELECT 1791554400000, id, -1, 3, 1, 5, 2500, 4000, 1 FROM (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2) UNION ALL SELECT 1791774000000, id, -1, 0, 1, 5, 2500, 4000, 4 FROM (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3) UNION ALL SELECT 1791777600000, id, -1, 0, 1, 5, 2500, 4000, 0 FROM (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4) UNION ALL SELECT 1791770399999, id, -1, 3, 1, 5, 2500, 4000, 1 FROM (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5) UNION ALL SELECT 1791766800000, id, -1, 3, 1, 5, 2500, 4000, 1 FROM (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 6)"}}
+  - {"observe": ["timing"]}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["reviews"]}, {"scope": {"deck": "Lang::日本語"}, "history": "year", "parts": ["reviews"]}]}]}
+  - observe:
+      - search:
+          - {query: '"prop:rated=0"'}
+          - {query: '"prop:rated=-1"'}
+          - {query: '"prop:rated=-2"'}
+          - {query: '"prop:rated=-3"'}
+          - {query: '(deck:"Lang::日本語") AND "prop:rated=0"'}
+          - {query: '(deck:"Lang::日本語") AND "prop:rated=-1"'}
+          - {query: '(deck:"Lang::日本語") AND "prop:rated=-2"'}
+          - {query: '(deck:"Lang::日本語") AND "prop:rated=-3"'}
+          - {query: '"prop:rated=1"'}

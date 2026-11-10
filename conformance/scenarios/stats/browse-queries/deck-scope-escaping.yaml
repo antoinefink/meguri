@@ -1,0 +1,50 @@
+# stats/browse-queries Q8 (Q2.2, Q3): the Deck scope text is deck:"<E>", E the
+# full name with \ " * _ escaped, so read back it matches only that deck and
+# its subdecks, never a wildcard. One new card in each deck; deck x "y" also
+# holds a sibling-buried new card, found by its Q3 row
+# (deck:"x \"y\"") AND "is:buried". The parent 日本語, which setup creates for
+# 日本語::子, is searched too and finds the child's card; a\b finds a\b::c's.
+# card_counts per Deck scope gives the same cards (stats/graphs-common G2.1).
+id: stats/browse-queries/deck-scope-escaping
+tags: ["needs-deck", "needs-state"]
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["a_b", "axb", "a*b", "ab", "a\"b", "a\\b", "a\\b::c", "(x)", "-x", "a_b*", "a_bc", "日本語::子", "x \"y\""]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}], "css": ".card { margin: 0; }"}
+  notes:
+    - {"notetype": "Pair", "deck": "a_b", "fields": ["n1", "x"]}
+    - {"notetype": "Pair", "deck": "axb", "fields": ["n2", "x"]}
+    - {"notetype": "Pair", "deck": "a*b", "fields": ["n3", "x"]}
+    - {"notetype": "Pair", "deck": "ab", "fields": ["n4", "x"]}
+    - {"notetype": "Pair", "deck": "a\"b", "fields": ["n5", "x"]}
+    - {"notetype": "Pair", "deck": "a\\b", "fields": ["n6", "x"]}
+    - {"notetype": "Pair", "deck": "a\\b::c", "fields": ["n7", "x"]}
+    - {"notetype": "Pair", "deck": "(x)", "fields": ["n8", "x"]}
+    - {"notetype": "Pair", "deck": "-x", "fields": ["n9", "x"]}
+    - {"notetype": "Pair", "deck": "a_b*", "fields": ["n10", "x"]}
+    - {"notetype": "Pair", "deck": "a_bc", "fields": ["n11", "x"]}
+    - {"notetype": "Pair", "deck": "日本語::子", "fields": ["n12", "x"]}
+    - {"notetype": "Pair", "deck": "x \"y\"", "fields": ["n13", "x"]}
+    - {"notetype": "Pair", "deck": "x \"y\"", "fields": ["buried", "x"]}
+steps:
+  - {"db_exec": {"sql": "UPDATE cards SET queue = -2 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 13)"}}
+  - observe:
+      - search:
+          - {query: '(deck:"a\_b") AND "is:new"'}
+          - {query: '(deck:"axb") AND "is:new"'}
+          - {query: '(deck:"a\*b") AND "is:new"'}
+          - {query: '(deck:"ab") AND "is:new"'}
+          - {query: '(deck:"a\"b") AND "is:new"'}
+          - {query: '(deck:"a\\b") AND "is:new"'}
+          - {query: '(deck:"a\\b::c") AND "is:new"'}
+          - {query: '(deck:"(x)") AND "is:new"'}
+          - {query: '(deck:"-x") AND "is:new"'}
+          - {query: '(deck:"a\_b\*") AND "is:new"'}
+          - {query: '(deck:"a\_bc") AND "is:new"'}
+          - {query: '(deck:"日本語::子") AND "is:new"'}
+          - {query: '(deck:"x \"y\"") AND "is:new"'}
+          - {query: '(deck:"日本語") AND "is:new"'}
+          - {query: '(deck:"x \"y\"") AND "is:buried"'}
+  - {"observe": [{"stats": [{"scope": {"deck": "a_b"}, "history": "year", "parts": ["card_counts"]}, {"scope": {"deck": "axb"}, "history": "year", "parts": ["card_counts"]}, {"scope": {"deck": "a*b"}, "history": "year", "parts": ["card_counts"]}, {"scope": {"deck": "ab"}, "history": "year", "parts": ["card_counts"]}, {"scope": {"deck": "a\"b"}, "history": "year", "parts": ["card_counts"]}, {"scope": {"deck": "a\\b"}, "history": "year", "parts": ["card_counts"]}, {"scope": {"deck": "a\\b::c"}, "history": "year", "parts": ["card_counts"]}, {"scope": {"deck": "(x)"}, "history": "year", "parts": ["card_counts"]}, {"scope": {"deck": "-x"}, "history": "year", "parts": ["card_counts"]}, {"scope": {"deck": "a_b*"}, "history": "year", "parts": ["card_counts"]}, {"scope": {"deck": "a_bc"}, "history": "year", "parts": ["card_counts"]}, {"scope": {"deck": "日本語::子"}, "history": "year", "parts": ["card_counts"]}, {"scope": {"deck": "x \"y\""}, "history": "year", "parts": ["card_counts"]}, {"scope": {"deck": "日本語"}, "history": "year", "parts": ["card_counts"]}]}]}

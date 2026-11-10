@@ -1,0 +1,83 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {},
+      {
+        "browser_rows": [
+          {
+            "cells": {
+              "deck": {
+                "text": "Lang"
+              },
+              "question": {
+                "text": "cow"
+              }
+            },
+            "tint": "suspended"
+          },
+          {
+            "error": "deleted"
+          },
+          {
+            "cells": {
+              "deck": {
+                "text": "Default"
+              },
+              "question": {
+                "text": "doe"
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "deck": {
+                "text": "Cram (Lang)"
+              },
+              "question": {
+                "text": "cat"
+              }
+            },
+            "tint": "none"
+          }
+        ],
+        "card_excerpts": [
+          {
+            "deck": "Lang",
+            "question": "cow"
+          },
+          {
+            "error": "missing"
+          },
+          {
+            "deck": "Default",
+            "question": "doe"
+          },
+          {
+            "deck": "Cram (Lang)",
+            "question": "cat"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "63d7ee8c9340e3db90caf514e2a5cf52640d1eb70a16e0a8f09d231f6ffcc50f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "browser/modes/rows-excerpts",
+  "scenario_sha256": "21904e30f6c778d13f00d70253bf8eae8668a7c64777501d62fd2d5e0d71bf2b",
+  "tz": "UTC"
+}

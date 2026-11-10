@@ -1,0 +1,29 @@
+# Toggle Mark (R1192; specs/browser/bulk-actions.md B6, tags/flags-and-
+# marked M1, M2). The current note n1 is unmarked, so marking adds marked to
+# n1, n2 and n3: the registered row Marked lends its spelling, n2 already
+# has it and is not written (count 2), and n3 keeps its Marked::x. With n1
+# now marked, the toggle removes marked from all three: Marked and its
+# descendant Marked::x go (count 3); the rows stay. Steps "Update Tag" and
+# "Remove Tag". Needs add_note_tags and remove_note_tags
+# (specs/conformance/tag-ops.md G1, G2), db_exec and undo_status.
+id: browser/bulk/mark
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Plain
+      fields: [Text, Extra]
+      templates: [{name: Card, front: "{{Text}}", back: "{{Extra}}"}]
+  notes:
+    - {notetype: Plain, fields: [n1, x]}
+    - {notetype: Plain, fields: [n2, x], tags: [Marked]}
+    - {notetype: Plain, fields: [n3, x], tags: ["Marked::x", other]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - advance: 1m
+  - add_note_tags: {notes: ["#n1", "#n2", "#n3"], tags: marked}
+  - db_exec: {sql: "SELECT tags, mod, usn FROM notes ORDER BY id"}
+  - observe: [undo_status]
+  - advance: 1m
+  - remove_note_tags: {notes: ["#n1", "#n2", "#n3"], tags: marked}
+  - db_exec: {sql: "SELECT tags, mod, usn FROM notes ORDER BY id"}
+  - observe: [{db_dump: {tables: [tags]}}, undo_status]

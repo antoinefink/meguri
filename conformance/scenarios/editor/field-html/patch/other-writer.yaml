@@ -1,0 +1,52 @@
+# The core write a field patch makes (specs/editor/field-html.md S2, X1
+# whole-note saves), from rows read fresh at each step: edit_note loads the
+# stored note when its step runs (specs/conformance/record-ops.md W2), so on
+# the oracle a patch of Front and a whole-note save of the fresh note give
+# the same row. The stale whole note Anki's editor would send cannot be
+# reproduced here; a patch that keeps an unlisted field another writer
+# changed is the engine test of field-html D1 and T2. What the golden shows:
+# the note update replaces the listed field, keeps the stored tags without a
+# tags member, and still normalizes every field (notes/note-records N2, U3):
+# the sync writes Extra decomposed (e + U+0301), and the Front patch stores it
+# composed. The Browse save of Back and the tags is read back before the
+# sync, so Front's bytes are seen kept through a save of other fields (AE40's
+# core half, notes/note-records U3). The patch value is H3's table row for
+# Front: the stored <br/> serialized as <br> and the character typed on the
+# empty last line after it. Undoing the patch puts back the row exactly as it
+# was just before it, server usn and decomposed Extra included
+# (specs/engine/undo.md A4, col.mod A7); the db_exec writes have emptied both
+# histories, so no undo step remains below it (A2). The note's usn is set to
+# a server value first, as after a sync.
+id: editor/field-html/patch/other-writer
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Trio
+      fields: [Front, Back, Extra]
+      templates:
+        - {name: One, front: "{{Front}}", back: "{{Back}}<br>{{Extra}}"}
+  decks: [Inbox]
+  notes:
+    - notetype: Trio
+      deck: Inbox
+      fields: ["<span  class=\"x\">a</span><br/>", "t", "e"]
+      tags: [kept]
+steps:
+  - db_exec: {sql: "UPDATE notes SET usn = 7"}
+  - db_exec: {sql: "SELECT hex(flds), tags, mod, usn, (SELECT mod FROM col) FROM notes"}
+  - advance: 1h
+  # Another editor (Browse) saves Back and the tags.
+  - edit_note: {note: "#n1", fields: {Back: t2}, tags: [kept, other]}
+  - db_exec: {sql: "SELECT hex(flds), tags, mod, usn, (SELECT mod FROM col) FROM notes"}
+  - advance: 1h
+  # A sync writes Extra into the row directly, in decomposed form.
+  - db_exec: {sql: "UPDATE notes SET flds = '<span  class=\"x\">a</span><br/>' || char(31) || 't2' || char(31) || 'syn' || char(101, 769), usn = 8"}
+  - db_exec: {sql: "SELECT hex(flds), tags, mod, usn, (SELECT mod FROM col) FROM notes"}
+  - advance: 1h
+  # The editor's patch: Front only, no tags member.
+  - edit_note: {note: "#n1", fields: {Front: "<span class=\"x\">a</span><br>x"}}
+  - db_exec: {sql: "SELECT hex(flds), tags, mod, usn, (SELECT mod FROM col) FROM notes"}
+  - observe: [undo_status]
+  - undo: {}
+  - db_exec: {sql: "SELECT hex(flds), tags, mod, usn, (SELECT mod FROM col) FROM notes"}
+  - observe: [undo_status]

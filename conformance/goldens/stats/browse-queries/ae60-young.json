@@ -1,0 +1,79 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-12T12:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "stats": [
+          {
+            "card_counts": {
+              "excluding_inactive": {
+                "mature": 1,
+                "relearn": 1,
+                "suspended": 1,
+                "young": 3
+              },
+              "including_inactive": {
+                "mature": 1,
+                "relearn": 1,
+                "young": 4
+              }
+            }
+          }
+        ]
+      },
+      {
+        "search": [
+          {
+            "ids": ["#c1", "#c3", "#c4"]
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "63d7ee8c9340e3db90caf514e2a5cf52640d1eb70a16e0a8f09d231f6ffcc50f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/browse-queries/ae60-young",
+  "scenario_sha256": "e96c3494b361141b27cb8b015511027370f3ba7aed50938315b11850e4164c61",
+  "tz": "Europe/Paris"
+}

@@ -1,0 +1,31 @@
+# Delete Notes from Browse (R1212; specs/browser/bulk-actions.md B11;
+# notes/note-records D1). Deleting n1 (two cards), n2 and n3 removes the
+# three notes and their four cards with their graves in one "Delete Note"
+# step; n4 stays. One undo puts every row back as it was and removes the
+# graves. Needs delete_notes (specs/conformance/record-ops.md W3), db_exec,
+# undo and undo_status.
+id: browser/bulk/delete-notes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Reverse, front: "{{Back}}", back: "{{Front}}"}
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, fields: [a, a2]}
+    - {notetype: Single, fields: [b, x]}
+    - {notetype: Single, fields: [c, x]}
+    - {notetype: Single, fields: [d, x]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - advance: 1m
+  - observe: [{db_dump: {tables: [notes, cards, graves]}}]
+  - delete_notes: {notes: ["#n1", "#n2", "#n3"]}
+  - observe: [{db_dump: {tables: [notes, cards, graves, col]}}, undo_status]
+  - undo: {}
+  - observe: [{db_dump: {tables: [notes, cards, graves, col]}}, undo_status]

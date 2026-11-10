@@ -1,0 +1,49 @@
+# specs/browser/result-sets.md H5, H8 (R1142): one query sorted by each
+# mode's default column in both modes and both directions. A new collection
+# sorts cards mode by noteFld ascending and notes mode by noteCrt ascending
+# (specs/browser/config-keys.md K1, K5.1); both columns are requested in both
+# modes. The notes are added out of alphabetical order, Pair notes have two
+# cards, and no two rows share every key (specs/browser/sorting.md S4, S5), so
+# no list has an equal-key run (specs/conformance/browser-ops.md B2) and each
+# descending list is exactly its ascending list reversed, as reverse() must
+# give. -tag:skip leaves #n5 out. tag:skip -tag:skip matches nothing: an
+# empty sorted result in each mode and direction (H4: FirstPage with no ids,
+# then Complete with count 0, on Meguri's side). Ties under NOCASE in both
+# directions are browser/sort/sort-field's.
+id: browser/modes/sorted-both-modes
+tags: [needs-tag]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Solo
+      fields: [Word, Gloss]
+      templates:
+        - {name: Recall, front: "{{Word}}", back: "{{Gloss}}"}
+      css: ".card { margin: 0; }"
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Backward, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, fields: [plum, a]}
+    - {notetype: Solo, fields: [apple, b]}
+    - {notetype: Pair, fields: [kiwi, c]}
+    - {notetype: Solo, fields: [cherry, d]}
+    - {notetype: Solo, fields: [banana, e], tags: [skip]}
+steps:
+  - observe:
+      - search:
+          - {query: '-tag:skip', order: {column: noteFld}}
+          - {query: '-tag:skip', order: {column: noteFld, reverse: true}}
+          - {query: '-tag:skip', order: {column: noteCrt}}
+          - {query: '-tag:skip', order: {column: noteCrt, reverse: true}}
+          - {query: '-tag:skip', kind: notes, order: {column: noteCrt}}
+          - {query: '-tag:skip', kind: notes, order: {column: noteCrt, reverse: true}}
+          - {query: '-tag:skip', kind: notes, order: {column: noteFld}}
+          - {query: '-tag:skip', kind: notes, order: {column: noteFld, reverse: true}}
+          - {query: 'tag:skip -tag:skip', order: {column: noteFld}}
+          - {query: 'tag:skip -tag:skip', order: {column: noteFld, reverse: true}}
+          - {query: 'tag:skip -tag:skip', kind: notes, order: {column: noteCrt}}
+          - {query: 'tag:skip -tag:skip', kind: notes, order: {column: noteCrt, reverse: true}}

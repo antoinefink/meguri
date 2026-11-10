@@ -1,0 +1,21 @@
+# The names a paste gives image bytes, as the media store keeps them
+# (specs/editor/paste-sources.md S8; specs/editor/paste.md P4, P7, P14.2).
+# 732a7d8e... is the SHA-1 of "pasted bitmap one", bde96ed1... of
+# "inline gif bytes" (what data:image/gif;base64,aW5saW5lIGdpZiBieXRlcw==
+# decodes to), c5b30388... of "pasted bitmap two", da39a3ee... of no bytes.
+# A bitmap pasted twice reuses its file; the same bytes as PNG get their own
+# file; a paste-<sha1> name already holding other bytes gets the hash suffix;
+# the last add is the empty file Anki adds for image data it cannot decode.
+id: editor/paste/store/image-names
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  media_files:
+    - {name: paste-c5b303888699820a794115e329e7eb9e66cf7717.jpg, text: "something else"}
+steps:
+  - add_media: {name: paste-732a7d8e88c3e13b9bf99563845fadf9d4b23473.jpg, text: "pasted bitmap one"}
+  - add_media: {name: paste-732a7d8e88c3e13b9bf99563845fadf9d4b23473.jpg, text: "pasted bitmap one"}
+  - add_media: {name: paste-732a7d8e88c3e13b9bf99563845fadf9d4b23473.png, text: "pasted bitmap one"}
+  - add_media: {name: paste-bde96ed1fbd958a421a14ce5cedd73191801c63d.gif, text: "inline gif bytes"}
+  - add_media: {name: paste-c5b303888699820a794115e329e7eb9e66cf7717.jpg, text: "pasted bitmap two"}
+  - add_media: {name: paste-da39a3ee5e6b4b0d3255bfef95601890afd80709.jpg, text: ""}
+  - observe: [media_dir]

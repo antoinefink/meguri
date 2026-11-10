@@ -1,0 +1,96 @@
+# specs/browser/result-sets.md H11 (R1080, R1116) on a sound collection: the
+# set a Cards/Notes toggle gives is the run of the same text in the other
+# mode. One query per scope (card, note, card and note, either) in both modes.
+# The observations are plain search runs (specs/conformance/search-ops.md S1):
+# they give the sets H11's derived toggle must equal; the derived toggle
+# itself is Meguri's test against them (H16). #n1 (Trio) has
+# three cards: #c1 a review card, #c2 a suspended new card, #c3 new. #n2 (Duo):
+# #c4 new, #c5 review. #n3 (Solo): #c6 new. #n4 (Duo): #c7 a suspended review
+# card, #c8 new with flag 1. Note and card ids come from the frozen clock
+# (specs/storage/ids-usn-mtime.md I2); the first observation pins them: #n1 is
+# 1894701600000, #n4 1894701600003. After the tag edit of #n4 the toggle must
+# run again (H11: an op committed after the match seq), so the last step
+# repeats the queries that read tags. Needs the plain-text, regex, tag, note
+# type, template, state and id terms (U81, U82).
+id: browser/modes/toggle-sets
+tags: [needs-text, needs-tag, needs-notetype, needs-template, needs-state, needs-ids]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Trio
+      fields: [Word, Gloss, Hint]
+      templates:
+        - {name: Read, front: "{{Word}}", back: "{{Gloss}}"}
+        - {name: Write, front: "{{Gloss}}", back: "{{Word}}"}
+        - {name: Guess, front: "{{Hint}}", back: "{{Word}}"}
+      css: ".card { margin: 0; }"
+    - name: Duo
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Reverse, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+    - name: Solo
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Trio, fields: [dog, hund, paw], tags: [t1]}
+    - {notetype: Duo, fields: [cat, katze], tags: [t2]}
+    - {notetype: Solo, fields: [dove, taube], tags: [t1, t2]}
+    - {notetype: Duo, fields: [eel, aal]}
+steps:
+  - observe: [ids]
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 10, ivl = 3, factor = 2500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 0) AND ord = 0"}
+  - db_exec: {sql: "UPDATE cards SET queue = -1 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 0) AND ord = 1"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 12, ivl = 4, factor = 2500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 1) AND ord = 1"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = -1, due = 14, ivl = 5, factor = 2500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 3) AND ord = 0"}
+  - db_exec: {sql: "UPDATE cards SET flags = 1 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 3) AND ord = 1"}
+  - observe:
+      - search:
+          - {query: 'is:suspended'}
+          - {query: 'is:suspended', kind: notes}
+          - {query: 'is:review'}
+          - {query: 'is:review', kind: notes}
+          - {query: '-is:suspended'}
+          - {query: '-is:suspended', kind: notes}
+          - {query: 'card:2'}
+          - {query: 'card:2', kind: notes}
+          - {query: 'flag:1'}
+          - {query: 'flag:1', kind: notes}
+          - {query: 'is:suspended is:review'}
+          - {query: 'is:suspended is:review', kind: notes}
+          - {query: 'tag:t1'}
+          - {query: 'tag:t1', kind: notes}
+          - {query: '-tag:t1'}
+          - {query: '-tag:t1', kind: notes}
+          - {query: 'do*'}
+          - {query: 'do*', kind: notes}
+          - {query: 'note:Duo'}
+          - {query: 'note:Duo', kind: notes}
+          - {query: '"re:^d"'}
+          - {query: '"re:^d"', kind: notes}
+          - {query: 'is:suspended tag:t1'}
+          - {query: 'is:suspended tag:t1', kind: notes}
+          - {query: 'is:review or tag:t2'}
+          - {query: 'is:review or tag:t2', kind: notes}
+          - {query: '-is:suspended note:Duo'}
+          - {query: '-is:suspended note:Duo', kind: notes}
+          - {query: 'card:1 do*'}
+          - {query: 'card:1 do*', kind: notes}
+          - {query: ''}
+          - {query: '', kind: notes}
+          - {query: 'nid:1894701600000,1894701600003'}
+          - {query: 'nid:1894701600000,1894701600003', kind: notes}
+          - {query: '-nid:1894701600000'}
+          - {query: '-nid:1894701600000', kind: notes}
+  - edit_note: {note: "#n4", tags: [t1]}
+  - observe:
+      - search:
+          - {query: 'tag:t1'}
+          - {query: 'tag:t1', kind: notes}
+          - {query: '-tag:t1'}
+          - {query: '-tag:t1', kind: notes}
+          - {query: 'is:suspended tag:t1'}
+          - {query: 'is:suspended tag:t1', kind: notes}

@@ -1,0 +1,28 @@
+# stats/widget-snapshot W4 (studied-today instant, fall-back night):
+# Europe/Paris, rollover 4, built 2026-10-24 21:00 +02:00 with three answers
+# that day. at(2026-10-25) is local midnight (+02:00) plus four hours of
+# elapsed time: 03:00 +01:00 = 02:00Z (W4's table), while Anki's day
+# 2026-10-25 starts at 04:00 +01:00 = 03:00Z, which is e(D): the widget's
+# upcoming[0] holds the zero line although at 02:00Z Anki still counts the
+# answers of 10-24. The 21:00 build's day ends at 04:00 +02:00 = 02:00Z and
+# Anki would keep that boundary after the offset change at 01:00Z, while
+# Meguri recomputes (sched/day-clock D6, D12.1); the reopen at 01:30Z makes
+# both compute afresh under +01:00 (D14.2). Observed at the reopen, then one
+# second before and at both instants.
+id: stats/widget/day-start-fall-back
+clock: {tz: Europe/Paris, start: "2026-10-24T21:00:00"}
+steps:
+  - {"set_config": {"key": "rollover", "value": 4}}
+  - {"db_exec": {"sql": "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1792836000000, 1000, -1, 3, 10, 5, 2500, 4000, 1), (1792857600000, 1000, -1, 3, 10, 5, 2500, 6000, 1), (1792866600000, 1000, -1, 3, 10, 5, 2500, 8000, 1)"}}
+  - {"observe": ["timing", "studied_today_raw", "studied_today_text"]}
+  - {"set_clock": "2026-10-25T01:30:00Z"}
+  - reopen: {}
+  - {"observe": ["timing", "studied_today_raw", "studied_today_text"]}
+  - {"set_clock": "2026-10-25T01:59:59Z"}
+  - {"observe": ["timing", "studied_today_raw", "studied_today_text"]}
+  - {"set_clock": "2026-10-25T02:00:00Z"}
+  - {"observe": ["timing", "studied_today_raw", "studied_today_text"]}
+  - {"set_clock": "2026-10-25T02:59:59Z"}
+  - {"observe": ["timing", "studied_today_raw", "studied_today_text"]}
+  - {"set_clock": "2026-10-25T03:00:00Z"}
+  - {"observe": ["timing", "studied_today_raw", "studied_today_text"]}

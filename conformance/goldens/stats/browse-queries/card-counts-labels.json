@@ -1,0 +1,273 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-12T12:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "stats": [
+          {
+            "card_counts": {
+              "excluding_inactive": {
+                "buried": 4,
+                "learn": 1,
+                "mature": 2,
+                "newCards": 2,
+                "relearn": 1,
+                "suspended": 4,
+                "young": 2
+              },
+              "including_inactive": {
+                "learn": 3,
+                "mature": 3,
+                "newCards": 4,
+                "relearn": 3,
+                "young": 3
+              }
+            }
+          },
+          {
+            "card_counts": {
+              "excluding_inactive": {
+                "buried": 4,
+                "learn": 1,
+                "mature": 1,
+                "newCards": 1,
+                "relearn": 1,
+                "suspended": 4,
+                "young": 2
+              },
+              "including_inactive": {
+                "learn": 3,
+                "mature": 2,
+                "newCards": 3,
+                "relearn": 3,
+                "young": 3
+              }
+            }
+          },
+          {
+            "card_counts": {
+              "excluding_inactive": {
+                "buried": 1,
+                "mature": 1,
+                "newCards": 2,
+                "relearn": 1,
+                "suspended": 2
+              },
+              "including_inactive": {
+                "mature": 2,
+                "newCards": 4,
+                "relearn": 1
+              }
+            }
+          }
+        ]
+      },
+      {
+        "search": [
+          {
+            "ids": ["#c1", "#c7", "#c10", "#c12"]
+          },
+          {
+            "ids": ["#c2", "#c8", "#c13"]
+          },
+          {
+            "ids": ["#c3", "#c14", "#c15"]
+          },
+          {
+            "ids": ["#c4", "#c9", "#c16"]
+          },
+          {
+            "ids": ["#c5", "#c6", "#c11"]
+          },
+          {
+            "ids": ["#c1", "#c10"]
+          },
+          {
+            "ids": ["#c2"]
+          },
+          {
+            "ids": ["#c3"]
+          },
+          {
+            "ids": ["#c4", "#c16"]
+          },
+          {
+            "ids": ["#c5", "#c11"]
+          },
+          {
+            "ids": ["#c6", "#c12", "#c13", "#c14"]
+          },
+          {
+            "ids": ["#c7", "#c8", "#c9", "#c15"]
+          }
+        ]
+      },
+      {
+        "search": [
+          {
+            "ids": ["#c1", "#c7", "#c12"]
+          },
+          {
+            "ids": ["#c2", "#c8", "#c13"]
+          },
+          {
+            "ids": ["#c3", "#c14", "#c15"]
+          },
+          {
+            "ids": ["#c4", "#c9", "#c16"]
+          },
+          {
+            "ids": ["#c5", "#c6"]
+          },
+          {
+            "ids": ["#c1"]
+          },
+          {
+            "ids": ["#c2"]
+          },
+          {
+            "ids": ["#c3"]
+          },
+          {
+            "ids": ["#c4", "#c16"]
+          },
+          {
+            "ids": ["#c5"]
+          },
+          {
+            "ids": ["#c6", "#c12", "#c13", "#c14"]
+          },
+          {
+            "ids": ["#c7", "#c8", "#c9", "#c15"]
+          }
+        ]
+      },
+      {
+        "search": [
+          {
+            "ids": ["#c1", "#c7", "#c10", "#c12"]
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": ["#c3"]
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": ["#c5", "#c6"]
+          },
+          {
+            "ids": ["#c1", "#c10"]
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": ["#c3"]
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": ["#c5"]
+          },
+          {
+            "ids": ["#c6", "#c12"]
+          },
+          {
+            "ids": ["#c7"]
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "63d7ee8c9340e3db90caf514e2a5cf52640d1eb70a16e0a8f09d231f6ffcc50f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/browse-queries/card-counts-labels",
+  "scenario_sha256": "b021c639f89c8ded97f0f376b4e7c424de23da74869765a37bfad57fbe2228d6",
+  "tz": "Europe/Paris"
+}

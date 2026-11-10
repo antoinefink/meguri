@@ -1,0 +1,74 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {},
+      {},
+      {
+        "undo_status": {
+          "redo": null,
+          "undo": "update_note"
+        }
+      },
+      {},
+      {},
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["a3\u001fb1", 1894708881, -1, 1894708881000]
+          ]
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["a2\u001fb1", 1894708820, -1, 1894708820000]
+          ]
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["a1\u001fb1", 1894705220, -1, 1894705220000]
+          ]
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["a\u001fb", 1894701600, 7, 1894701600000]
+          ]
+        }
+      },
+      {
+        "undo_status": {
+          "redo": "update_note",
+          "undo": null
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "63d7ee8c9340e3db90caf514e2a5cf52640d1eb70a16e0a8f09d231f6ffcc50f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "editor/field-html/patch/merge-window",
+  "scenario_sha256": "7e81b053c27a73ad185963ae1ae1e52da873e043a7a44f6aa1e60d5070b27d54",
+  "tz": "UTC"
+}

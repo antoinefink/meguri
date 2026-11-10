@@ -1,0 +1,42 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "change_notetype_info": {
+          "error": "multiple_notetypes"
+        }
+      },
+      {
+        "change_notetype_info": {
+          "error": "multiple_notetypes"
+        }
+      },
+      {
+        "change_notetype_info": {
+          "error": "not_found"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1, "w\u001fm"],
+            [0, "t\u001fe"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "7f79bcaf52df07a8d17be399cedca996e4913eb30293a31f847df801a0ba4e38",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "browser/bulk/change-notetype-mixed",
+  "scenario_sha256": "7815894168231cdce112334db2082aa784ccbff10a2d603ab73e2bc4d2fd86aa",
+  "tz": "UTC"
+}

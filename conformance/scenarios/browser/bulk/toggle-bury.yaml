@@ -1,0 +1,40 @@
+# Toggle Bury from Browse (R1194; specs/browser/bulk-actions.md B4). The
+# current card #c1 is buried by the scheduler, so the toggle runs the
+# unsuspend-and-unbury operation on #c1, #c2 and #c3: #c1 gets its review
+# queue back, the suspended #c2 is unsuspended too (Anki restores both with
+# one operation), and the active #c3 is left unwritten. Later, with the
+# current card #c4 active, the toggle buries by hand: #c4 goes to -3, the
+# scheduler-buried #c1 to -3, and the suspended #c2 is left alone. Needs
+# unsuspend and bury (specs/conformance/sched-ops.md J2, J4), db_exec and
+# undo_status.
+id: browser/bulk/toggle-bury
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Home]
+  notes:
+    - {notetype: Single, deck: Home, fields: [a, x]}
+    - {notetype: Single, deck: Home, fields: [b, x]}
+    - {notetype: Single, deck: Home, fields: [c, x]}
+    - {notetype: Single, deck: Home, fields: [d, x]}
+steps:
+  - observe: [timing]
+  # #c1 a review card buried by the scheduler; #c2 new and suspended;
+  # #c4 a review card.
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = -2, ivl = 4, due = 2, factor = 2500, reps = 3 WHERE nid = (SELECT id FROM notes WHERE sfld = 'a')"}
+  - db_exec: {sql: "UPDATE cards SET queue = -1 WHERE nid = (SELECT id FROM notes WHERE sfld = 'b')"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, ivl = 6, due = 3, factor = 2500, reps = 2 WHERE nid = (SELECT id FROM notes WHERE sfld = 'd')"}
+  - db_exec: {sql: "UPDATE cards SET usn = 0"}
+  - advance: 1m
+  - unsuspend: {cards: ["#c1", "#c2", "#c3"]}
+  - observe: ["card(#c1, #c2, #c3)", undo_status]
+  # Back to the first state for #c1 and #c2 (a raw write: it also empties
+  # the undo history).
+  - db_exec: {sql: "UPDATE cards SET queue = -2 WHERE nid = (SELECT id FROM notes WHERE sfld = 'a')"}
+  - db_exec: {sql: "UPDATE cards SET queue = -1 WHERE nid = (SELECT id FROM notes WHERE sfld = 'b')"}
+  - advance: 1m
+  - bury: {cards: ["#c4", "#c2", "#c1"]}
+  - observe: [card, undo_status]

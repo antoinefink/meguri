@@ -1,0 +1,73 @@
+# specs/browser/result-sets.md H12 (R1113, R1116, R1117, R1154): the sets
+# that selection mapping and resolution must give, seen through plain id
+# searches (specs/conformance/search-ops.md S1). The oracle runs only those
+# searches; map_selection, resolve_selection and index_of themselves are
+# Meguri's tests (H16). #n1 (Trio) has #c1, #c2 (suspended) and #c3; #n2
+# (Duo) #c4 and #c5; #n3 (Solo) #c6. Cards #c1 and #c3 selected map to #n1 in
+# notes mode (cid: in notes mode); #n1 selected maps back to all three of its
+# cards (nid: in cards mode). Into -is:suspended handles: the notes-mode one
+# holds #n1 (through #c1 and #c3) and the cards-mode one leaves #c2 out, so
+# #n1 mapped to cards mode gives #c1 and #c3 (nid: with -is:suspended), and
+# #c2 mapped to notes mode gives #n1: the note of the selected card,
+# intersected with the notes-mode -is:suspended set. That mapping is not a
+# notes-mode search for the card under the same query: 'cid:<#c2>
+# -is:suspended' in notes mode tests only the pair (#c2, #n1) and is empty
+# (specs/search/query-model.md Q4). #n1 and #n2 resolve to five card ids; a
+# card id looked up on a notes-mode handle gives its note; mapping into a
+# re-search keeps only the ids the new search holds. After #n3 is deleted its
+# card id and its note id find nothing in either mode. Ids come from the
+# frozen clock (specs/storage/ids-usn-mtime.md I2), pinned by the first
+# observation: notes from 1894701600000 (#n1), cards from 1894701600000
+# (#c1). Needs the id and state terms (U82).
+id: browser/modes/selection-sets
+tags: [needs-ids, needs-state]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Trio
+      fields: [Word, Gloss, Hint]
+      templates:
+        - {name: Read, front: "{{Word}}", back: "{{Gloss}}"}
+        - {name: Write, front: "{{Gloss}}", back: "{{Word}}"}
+        - {name: Guess, front: "{{Hint}}", back: "{{Word}}"}
+      css: ".card { margin: 0; }"
+    - name: Duo
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Reverse, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+    - name: Solo
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Trio, fields: [dog, hund, paw]}
+    - {notetype: Duo, fields: [cat, katze]}
+    - {notetype: Solo, fields: [eel, aal]}
+steps:
+  - observe: [ids]
+  - db_exec: {sql: "UPDATE cards SET queue = -1 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 0) AND ord = 1"}
+  - observe:
+      - search:
+          - {query: 'cid:1894701600000,1894701600002', kind: notes}
+          - {query: 'nid:1894701600000'}
+          - {query: 'nid:1894701600000,1894701600001'}
+          - {query: 'cid:1894701600000,1894701600003,1894701600004', kind: notes}
+          - {query: 'cid:1894701600004'}
+          - {query: 'cid:1894701600004', kind: notes}
+          - {query: 'is:suspended'}
+          - {query: 'is:suspended', kind: notes}
+          - {query: '-is:suspended'}
+          - {query: '-is:suspended', kind: notes}
+          - {query: 'nid:1894701600000 -is:suspended'}
+          - {query: 'cid:1894701600001 -is:suspended', kind: notes}
+          - {query: 'cid:1894701600000,1894701600005 -nid:1894701600002'}
+  - delete_notes: {notes: ["#n3"]}
+  - observe:
+      - search:
+          - {query: 'cid:1894701600005'}
+          - {query: 'cid:1894701600005', kind: notes}
+          - {query: 'nid:1894701600002'}
+          - {query: 'nid:1894701600002', kind: notes}

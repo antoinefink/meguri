@@ -1,0 +1,44 @@
+# A field edited and then reverted (specs/editor/field-html.md H2, S2 and
+# F7's example). The first patch stores the serialized field with the typed
+# character; when the user removes it again the field is unchanged, so the
+# next patch sends its baseline's stored HTML and the original bytes, double
+# space included, come back. The two patches, 20 s apart, are one "Update
+# Note" step, and one undo puts back the row from before the first (S2,
+# specs/engine/undo.md A3). A patch whose field equals the stored value
+# writes nothing (notes/note-records U2) and records no step. The note's usn
+# is set to a server value first, as after a sync; the undo writes it back
+# with the rest of the row (specs/engine/undo.md A4, col.mod A7), and since
+# that db_exec emptied both histories no step remains below the merged one
+# (A2). Like its siblings, this shows the W2 semantics of edit_note
+# (specs/conformance/record-ops.md), which S2's patch form must match.
+id: editor/field-html/patch/revert-to-baseline
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: One, front: "{{Front}}", back: "{{Back}}"}
+  decks: [Inbox]
+  notes:
+    - {notetype: Pair, deck: Inbox, fields: ["<span  class=\"x\">a</span>", t]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET usn = 7"}
+  - db_exec: {sql: "SELECT hex(flds), mod, usn, (SELECT mod FROM col) FROM notes"}
+  - advance: 1h
+  # Idle commit after typing x at the end of Front.
+  - edit_note: {note: "#n1", fields: {Front: "<span class=\"x\">a</span>x"}}
+  - db_exec: {sql: "SELECT hex(flds), mod, usn, (SELECT mod FROM col) FROM notes"}
+  - advance: 20s
+  # x deleted again: the field is unchanged and sends its baseline's bytes.
+  - edit_note: {note: "#n1", fields: {Front: "<span  class=\"x\">a</span>"}}
+  - db_exec: {sql: "SELECT hex(flds), mod, usn, (SELECT mod FROM col) FROM notes"}
+  - observe: [undo_status]
+  - undo: {}
+  - db_exec: {sql: "SELECT hex(flds), mod, usn, (SELECT mod FROM col) FROM notes"}
+  - observe: [undo_status]
+  - advance: 1h
+  # A patch whose field equals the stored bytes.
+  - edit_note: {note: "#n1", fields: {Front: "<span  class=\"x\">a</span>"}}
+  - db_exec: {sql: "SELECT hex(flds), mod, usn, (SELECT mod FROM col) FROM notes"}
+  - observe: [undo_status]

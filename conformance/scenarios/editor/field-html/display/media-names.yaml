@@ -1,0 +1,45 @@
+# The editor's media name round trip, without a page (specs/editor/field-html.md
+# H1 step 1 and H3 step 4; specs/text/media-references.md M6 to M8; plan
+# U190's media test). The first inputs are stored fields: iri_encode gives
+# the display HTML the page receives. The rest are display HTML after the
+# page's H3 steps 1 and 2 with a character typed at the end: iri_decode gives
+# what the field stores. The space, percent and non-ASCII inputs are field-html
+# T1's media group; the handler and sound inputs are from its serialization
+# group; the others are additions. A name with a space comes back raw;
+# 100%25.jpg displays as itself and is stored as 100%.jpg once the field is
+# edited (M8 condition 1); non-ASCII names, sound tags, remote names and
+# event handler attributes such as onerror are left alone, while another
+# attribute holding the same name is encoded and decoded with it (M6 step 2,
+# M7 step 2). A # is encoded as %23. A name holding " stored in single
+# quotes displays as q%22r.png; the page writes the attribute with double
+# quotes, so decoding then stores the broken markup src="q"r.png" (H3 step 1
+# runs before step 4). An upper-case IMG tag is encoded as stored; the page
+# writes it lower-case.
+id: editor/field-html/display/media-names
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - text:
+          fns: [iri_encode, iri_decode]
+          inputs:
+            # Stored.
+            - "<img src=\"a b.jpg\">"
+            - "<img src=\"100%25.jpg\">"
+            - "<img src=\"日本.png\">"
+            - "<img src=\"a.png\" onerror=\"f()\">b"
+            - "[sound:a b.mp3]x"
+            - "<img src=\"a b.jpg\" title=\"a b.jpg\">"
+            - "<img src='q\"r.png'>"
+            - "<img src=\"a#b.png\">"
+            - "<img src=\"https://e.org/a b.png\">"
+            - "<IMG SRC=\"a b.jpg\">"
+            # Display HTML with the typed character.
+            - "<img src=\"a%20b.jpg\">x"
+            - "<img src=\"100%25.jpg\">x"
+            - "<img src=\"日本.png\">x"
+            - "<img src=\"a.png\" onerror=\"f()\">bx"
+            - "[sound:a b.mp3]xy"
+            - "<img src=\"a%20b.jpg\" title=\"a%20b.jpg\">x"
+            - "<img src=\"q%22r.png\">x"
+            - "<img src=\"a%23b.png\">x"
+            - "<img src=\"https://e.org/a b.png\">x"

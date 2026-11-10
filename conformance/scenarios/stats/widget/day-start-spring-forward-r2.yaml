@@ -1,0 +1,23 @@
+# stats/widget-snapshot W4 (rollover instant in a gap, studied-today instant):
+# Europe/Paris, rollover 2, built 2026-03-28 21:00 +01:00 with two answers that
+# day. 02:00 local does not exist on 2026-03-29, so at(2026-03-29) is 03:00
+# +02:00 = 01:00Z (W4's table). Hour 2 under +02:00 would be 00:00Z, but at
+# 00:00Z the offset is still +01:00, so Anki's day 2026-03-29 starts at
+# 02:00 +01:00 = 01:00Z, which is at(D) = e(D). The 21:00 build's next_day_at
+# is that same 01:00Z and stays valid until then, so the oracle's cached day
+# and a fresh computation agree at every instant here. Observed around 00:00Z
+# (the old day's values) and at 01:00Z (the zero line).
+id: stats/widget/day-start-spring-forward-r2
+clock: {tz: Europe/Paris, start: "2026-03-28T21:00:00"}
+steps:
+  - {"set_config": {"key": "rollover", "value": 2}}
+  - {"db_exec": {"sql": "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1774688400000, 1000, -1, 3, 10, 5, 2500, 5000, 1), (1774717200000, 1000, -1, 3, 10, 5, 2500, 7000, 1)"}}
+  - {"observe": ["timing", "studied_today_raw", "studied_today_text"]}
+  - {"set_clock": "2026-03-28T23:59:59Z"}
+  - {"observe": ["timing", "studied_today_raw", "studied_today_text"]}
+  - {"set_clock": "2026-03-29T00:00:00Z"}
+  - {"observe": ["timing", "studied_today_raw", "studied_today_text"]}
+  - {"set_clock": "2026-03-29T00:59:59Z"}
+  - {"observe": ["timing", "studied_today_raw", "studied_today_text"]}
+  - {"set_clock": "2026-03-29T01:00:00Z"}
+  - {"observe": ["timing", "studied_today_raw", "studied_today_text"]}

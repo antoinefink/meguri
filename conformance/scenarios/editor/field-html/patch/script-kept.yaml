@@ -1,0 +1,32 @@
+# The core half of plan U190's script and handler test: a patch of a field
+# holding a <script> element or an event handler attribute stores them as
+# given (specs/editor/field-html.md F6, H3 step 1 and X1: Meguri's page keeps
+# them through serialization; notes/note-records N2 and U3 change neither).
+# Front holds a script and gets a character typed after it; Back holds an
+# image with onerror and gets a character typed at its end. Anki's own
+# editor removes the script before saving (X1, scenario script-untouched of
+# field-html T1); the note update does not, so this golden is Meguri's
+# stored result too. Like its siblings, this shows the W2 semantics of
+# edit_note (specs/conformance/record-ops.md), which S2's patch form must
+# match.
+id: editor/field-html/patch/script-kept
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: One, front: "{{Front}}", back: "{{Back}}"}
+  decks: [Inbox]
+  notes:
+    - notetype: Pair
+      deck: Inbox
+      fields: ["<b>a</b><script>var n=1</script>", "<img src=\"a.png\" onerror=\"f()\">b"]
+steps:
+  - db_exec: {sql: "SELECT hex(flds), mod, usn FROM notes"}
+  - advance: 1h
+  - edit_note: {note: "#n1", fields: {Front: "<b>a</b><script>var n=1</script>x"}}
+  - db_exec: {sql: "SELECT hex(flds), mod, usn FROM notes"}
+  - advance: 1h
+  - edit_note: {note: "#n1", fields: {Back: "<img src=\"a.png\" onerror=\"f()\">bx"}}
+  - db_exec: {sql: "SELECT hex(flds), mod, usn FROM notes"}

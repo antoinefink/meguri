@@ -1,0 +1,72 @@
+# specs/browser/result-sets.md H11 (R1080, R1116) with lone rows
+# (specs/search/query-model.md Q5, Q6): #c2 loses its note (#n2) and #n3
+# loses its card (#c3). The observations are plain search runs
+# (specs/conformance/search-ops.md S1); the derived toggle that must equal
+# them is Meguri's test (H16). The runs give the "plus" rows of H11's table: a
+# cards-to-notes toggle of a note-scope query adds the notes without cards it
+# matches, a notes-to-cards toggle of a card-scope query adds the cards
+# without a note it matches, and a card-and-note query tests pairs only. The
+# new cards get distinct positions (#c2 1, #c4 2, #c1 3, #c6 4); #c5 is a
+# review card. Ids come from the frozen clock (specs/storage/ids-usn-mtime.md
+# I2), pinned by the first observation: #n2 is 1894701600001, #n3
+# 1894701600002. browser/modes/sorted-damaged sorts this collection. Needs the
+# plain-text, tag, deck, state and id terms (U81, U82).
+id: browser/modes/toggle-damaged
+tags: [needs-text, needs-tag, needs-deck, needs-state, needs-ids]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Solo
+      fields: [Word, Gloss]
+      templates:
+        - {name: Recall, front: "{{Word}}", back: "{{Gloss}}"}
+      css: ".card { margin: 0; }"
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Backward, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Solo, fields: [dog, g]}
+    - {notetype: Solo, fields: [cat, g]}
+    - {notetype: Solo, fields: [fish, g]}
+    - {notetype: Pair, fields: [bee, x]}
+    - {notetype: Solo, fields: [ant, g]}
+steps:
+  - observe: [ids]
+  - db_exec: {sql: "UPDATE cards SET due = 3 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 0)"}
+  - db_exec: {sql: "UPDATE cards SET due = 1 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 1)"}
+  - db_exec: {sql: "UPDATE cards SET due = 2 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 3) AND ord = 0"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 10, ivl = 3, factor = 2500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 3) AND ord = 1"}
+  - db_exec: {sql: "UPDATE cards SET due = 4 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 4)"}
+  - db_exec: {sql: "DELETE FROM cards WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 2)"}
+  - db_exec: {sql: "DELETE FROM notes WHERE id = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 1)"}
+  - observe:
+      - search:
+          - {query: 'is:new'}
+          - {query: 'is:new', kind: notes}
+          - {query: '-is:review'}
+          - {query: '-is:review', kind: notes}
+          - {query: 'deck:*'}
+          - {query: 'deck:*', kind: notes}
+          - {query: 'dog'}
+          - {query: 'dog', kind: notes}
+          - {query: '-dog'}
+          - {query: '-dog', kind: notes}
+          - {query: 'fish'}
+          - {query: 'fish', kind: notes}
+          - {query: 'tag:none'}
+          - {query: 'tag:none', kind: notes}
+          - {query: 'is:new or fish'}
+          - {query: 'is:new or fish', kind: notes}
+          - {query: 'is:new -dog'}
+          - {query: 'is:new -dog', kind: notes}
+          - {query: ''}
+          - {query: '', kind: notes}
+          - {query: 'nid:1894701600001'}
+          - {query: 'nid:1894701600001', kind: notes}
+          - {query: 'nid:1894701600002'}
+          - {query: 'nid:1894701600002', kind: notes}
+          - {query: '-nid:1894701600000'}
+          - {query: '-nid:1894701600000', kind: notes}

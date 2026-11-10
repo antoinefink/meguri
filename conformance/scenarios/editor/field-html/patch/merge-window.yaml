@@ -1,0 +1,42 @@
+# Field patches of one note from the editor (specs/editor/field-html.md S2;
+# plan U190's merge test at 20 s and 61 s). The point this adds to
+# undo/edit-note-merge (0, 30, 59 s merged, 60 s split) and
+# undo/edit-note-new-card (a tag or card step blocks the merge): saves that
+# each change a different field of one note, Front then Back 20 s apart, are
+# still one "Update Note" step; two saves 61 s apart are two steps
+# (specs/engine/undo.md A3, R821). Each undo is read back through the stored
+# row: A4 writes it back exactly, server usn included, and A7 gives col.mod.
+# The first db_exec empties both histories (A2), so after the last undo
+# nothing remains to undo. Like its siblings, this shows the W2 semantics of
+# edit_note (specs/conformance/record-ops.md), which S2's patch form must
+# match.
+id: editor/field-html/patch/merge-window
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: One, front: "{{Front}}", back: "{{Back}}"}
+  decks: [Inbox]
+  notes:
+    - {notetype: Pair, deck: Inbox, fields: [a, b]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET usn = 7"}
+  - advance: 1h
+  - edit_note: {note: "#n1", fields: {Front: a1}}
+  - advance: 20s
+  - edit_note: {note: "#n1", fields: {Back: b1}}
+  - observe: [undo_status]
+  - advance: 1h
+  - edit_note: {note: "#n1", fields: {Front: a2}}
+  - advance: 61s
+  - edit_note: {note: "#n1", fields: {Front: a3}}
+  - db_exec: {sql: "SELECT flds, mod, usn, (SELECT mod FROM col) FROM notes"}
+  - undo: {}
+  - db_exec: {sql: "SELECT flds, mod, usn, (SELECT mod FROM col) FROM notes"}
+  - undo: {}
+  - db_exec: {sql: "SELECT flds, mod, usn, (SELECT mod FROM col) FROM notes"}
+  - undo: {}
+  - db_exec: {sql: "SELECT flds, mod, usn, (SELECT mod FROM col) FROM notes"}
+  - observe: [undo_status]

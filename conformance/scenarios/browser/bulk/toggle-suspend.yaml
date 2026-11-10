@@ -1,0 +1,41 @@
+# Toggle Suspend from Browse (R1193, AE45; specs/browser/bulk-actions.md
+# B3). The current card #c1 is not suspended, so the toggle suspends all
+# three selected cards: one "Suspend" step, and one undo restores all three,
+# stamps included. Then #c1 is suspended and is the current card of a
+# selection with an active card (#c2) and a card buried by the user (#c4):
+# the toggle runs the unsuspend-and-unbury operation, which restores #c1 and
+# also unburies #c4, and leaves #c2 unwritten. No review-log row. Needs
+# suspend and unsuspend (specs/conformance/sched-ops.md J3, J4), db_exec,
+# undo and undo_status.
+id: browser/bulk/toggle-suspend
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Home]
+  notes:
+    - {notetype: Single, deck: Home, fields: [a, x]}
+    - {notetype: Single, deck: Home, fields: [b, x]}
+    - {notetype: Single, deck: Home, fields: [c, x]}
+    - {notetype: Single, deck: Home, fields: [d, x]}
+steps:
+  - observe: [timing]
+  # #c2 a review card; #c4 buried by the user.
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, ivl = 4, due = 2, factor = 2500, reps = 3 WHERE nid = (SELECT id FROM notes WHERE sfld = 'b')"}
+  - db_exec: {sql: "UPDATE cards SET queue = -3 WHERE nid = (SELECT id FROM notes WHERE sfld = 'd')"}
+  - db_exec: {sql: "UPDATE cards SET usn = 0"}
+  - advance: 1m
+  # AE45: current #c1 active, three selected.
+  - suspend: {cards: ["#c1", "#c2", "#c3"]}
+  - observe: ["card(#c1, #c2, #c3)", undo_status]
+  - undo: {}
+  - observe: ["card(#c1, #c2, #c3)", undo_status]
+  - advance: 1m
+  - suspend: {cards: ["#c1"]}
+  - advance: 1m
+  # Current #c1 suspended: restore #c1, #c2 and #c4.
+  - unsuspend: {cards: ["#c1", "#c2", "#c4"]}
+  - observe: ["card(#c1, #c2, #c4)", undo_status]
+  - db_exec: {sql: "SELECT count(*) FROM revlog"}

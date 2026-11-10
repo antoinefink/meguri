@@ -1,0 +1,35 @@
+# specs/browser/result-sets.md H7 with specs/browser/columns.md C16 (U85a):
+# the Question and Deck cells of Browse rows equal the card excerpts of the
+# same cards, after a suspend, a note edit, a note deletion and a filtered
+# card's deck change (specs/conformance/card-excerpt-ops.md). #c1 is
+# suspended; #n1 is edited; #n2 is deleted, so #c2 is the row error
+# "deleted" (specs/browser/columns.md C3.1) and the excerpt "missing"
+# (card-excerpt-ops E2); #c4 is a filtered card (did the ordinary deck Cram,
+# odid its home deck Lang, specs/conformance/browser-ops.md B5). Cards mode
+# only: card_excerpts scenarios never set browserTableShowNotesMode
+# (card-excerpt-ops E3).
+id: browser/modes/rows-excerpts
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Lang, Cram]
+  notetypes:
+    - name: Solo
+      fields: [Word, Gloss]
+      templates:
+        - {name: Recall, front: "{{Word}}", back: "{{Gloss}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Solo, deck: Lang, fields: [dog, a]}
+    - {notetype: Solo, deck: Lang, fields: [dove, b]}
+    - {notetype: Solo, fields: [doe, c]}
+    - {notetype: Solo, deck: Lang, fields: [cat, d]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET odid = did, odue = 4, did = (SELECT id FROM decks WHERE name = 'Cram'), due = -99999 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 3)"}
+  - suspend: {cards: ["#c1"]}
+  - edit_note: {note: "#n1", fields: [cow]}
+  - delete_notes: {notes: ["#n2"]}
+  - observe:
+      - browser_rows:
+          columns: [question, deck]
+          rows: ["#c1", "#c2", "#c3", "#c4"]
+      - card_excerpts: ["#c1", "#c2", "#c3", "#c4"]

@@ -1,0 +1,281 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "browser_rows": [
+          {
+            "cells": {
+              "cardDue": {
+                "new_position": 1
+              },
+              "deck": {
+                "text": "Lang"
+              },
+              "noteFld": {
+                "text": "dog"
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "cardDue": {
+                "new_position": 2
+              },
+              "deck": {
+                "text": "Lang"
+              },
+              "noteFld": {
+                "text": "dove"
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "cardDue": {
+                "new_position": 3
+              },
+              "deck": {
+                "text": "Default"
+              },
+              "noteFld": {
+                "text": "doe"
+              }
+            },
+            "tint": "none"
+          }
+        ],
+        "search": [
+          {
+            "ids": ["#c1", "#c2", "#c3"]
+          },
+          {
+            "ids": ["#c1", "#c2", "#c3"]
+          }
+        ]
+      },
+      {},
+      {
+        "browser_rows": [
+          {
+            "cells": {
+              "cardDue": {
+                "new_position": 1,
+                "wrapped": true
+              },
+              "deck": {
+                "text": "Lang"
+              },
+              "noteFld": {
+                "text": "dog"
+              }
+            },
+            "tint": "suspended"
+          },
+          {
+            "cells": {
+              "cardDue": {
+                "new_position": 2,
+                "wrapped": true
+              },
+              "deck": {
+                "text": "Lang"
+              },
+              "noteFld": {
+                "text": "dove"
+              }
+            },
+            "tint": "suspended"
+          },
+          {
+            "cells": {
+              "cardDue": {
+                "new_position": 3,
+                "wrapped": true
+              },
+              "deck": {
+                "text": "Default"
+              },
+              "noteFld": {
+                "text": "doe"
+              }
+            },
+            "tint": "suspended"
+          }
+        ],
+        "search": [
+          {
+            "ids": []
+          },
+          {
+            "ids": ["#c1", "#c2", "#c3", "#c4"]
+          }
+        ]
+      },
+      {},
+      {
+        "browser_rows": [
+          {
+            "cells": {
+              "noteFld": {
+                "text": "cow"
+              }
+            },
+            "tint": "suspended"
+          }
+        ],
+        "search": [
+          {
+            "ids": ["#c2", "#c3"]
+          }
+        ]
+      },
+      {},
+      {
+        "browser_rows": [
+          {
+            "cells": {
+              "deck": {
+                "text": "Lang"
+              },
+              "noteFld": {
+                "text": "cow"
+              }
+            },
+            "tint": "suspended"
+          },
+          {
+            "error": "deleted"
+          },
+          {
+            "cells": {
+              "deck": {
+                "text": "Default"
+              },
+              "noteFld": {
+                "text": "doe"
+              }
+            },
+            "tint": "suspended"
+          }
+        ]
+      },
+      {
+        "rename_deck": {
+          "name": "Idiom"
+        }
+      },
+      {
+        "browser_rows": [
+          {
+            "cells": {
+              "deck": {
+                "text": "Idiom"
+              },
+              "template": {
+                "text": "Recall"
+              }
+            },
+            "tint": "suspended"
+          },
+          {
+            "cells": {
+              "deck": {
+                "text": "Default"
+              },
+              "template": {
+                "text": "Recall"
+              }
+            },
+            "tint": "suspended"
+          }
+        ]
+      },
+      {
+        "update_notetype": {
+          "name": "Solo"
+        }
+      },
+      {
+        "browser_rows": [
+          {
+            "cells": {
+              "deck": {
+                "text": "Idiom"
+              },
+              "template": {
+                "text": "Prompt"
+              }
+            },
+            "tint": "suspended"
+          },
+          {
+            "cells": {
+              "deck": {
+                "text": "Default"
+              },
+              "template": {
+                "text": "Prompt"
+              }
+            },
+            "tint": "suspended"
+          }
+        ]
+      },
+      {},
+      {
+        "browser_rows": [
+          {
+            "cells": {
+              "deck": {
+                "text": "Idiom"
+              },
+              "noteFld": {
+                "text": "cow"
+              },
+              "template": {
+                "count": 1
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "error": "deleted"
+          },
+          {
+            "cells": {
+              "deck": {
+                "text": "Default"
+              },
+              "noteFld": {
+                "text": "doe"
+              },
+              "template": {
+                "count": 1
+              }
+            },
+            "tint": "none"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "63d7ee8c9340e3db90caf514e2a5cf52640d1eb70a16e0a8f09d231f6ffcc50f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "browser/modes/rows-current",
+  "scenario_sha256": "9c521d2cfee85b682c0fc29e53904cdda7957e4ca269919a9b1a5f65c7594e4c",
+  "tz": "UTC"
+}

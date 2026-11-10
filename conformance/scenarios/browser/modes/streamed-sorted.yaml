@@ -1,0 +1,57 @@
+# specs/browser/result-sets.md H3, H5 (R1241) with
+# specs/search/query-model.md Q10 on a sound collection: a plan with a slow
+# term (re:) may stream, and its membership and order are those of the plan
+# run whole. The regex term under NOT, under OR with a cheap term, and inside
+# a negated group, run unsorted and sorted in both modes and both directions.
+# The observations are search runs (specs/conformance/search-ops.md S1,
+# browser-ops.md B1): a membership and order check that holds whichever path
+# Meguri's executor takes; that the streamed path gives these lists is
+# Meguri's own test (H16). browser/modes/streamed-damaged adds lone rows and
+# card terms. #n1 and #n4 (Pair) have two cards each. Needs the regex and tag
+# terms (U81, U82).
+id: browser/modes/streamed-sorted
+tags: [needs-text, needs-tag]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Solo
+      fields: [Word, Gloss]
+      templates:
+        - {name: Recall, front: "{{Word}}", back: "{{Gloss}}"}
+      css: ".card { margin: 0; }"
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Backward, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, fields: [bat, one], tags: [wild]}
+    - {notetype: Solo, fields: [cab, two]}
+    - {notetype: Solo, fields: [bee, three], tags: [wild]}
+    - {notetype: Pair, fields: [ant, four]}
+    - {notetype: Solo, fields: [bun, five]}
+    - {notetype: Solo, fields: [dew, six], tags: [wild]}
+steps:
+  - observe:
+      - search:
+          - {query: '"re:^b"'}
+          - {query: '"re:^b"', kind: notes}
+          - {query: '-"re:^b"'}
+          - {query: '-"re:^b"', kind: notes}
+          - {query: '-"re:^b"', order: {column: noteFld}}
+          - {query: '-"re:^b"', order: {column: noteFld, reverse: true}}
+          - {query: '-"re:^b"', kind: notes, order: {column: noteCrt}}
+          - {query: '-"re:^b"', kind: notes, order: {column: noteCrt, reverse: true}}
+          - {query: '"re:^b" or tag:wild'}
+          - {query: '"re:^b" or tag:wild', kind: notes}
+          - {query: '"re:^b" or tag:wild', order: {column: noteFld}}
+          - {query: '"re:^b" or tag:wild', order: {column: noteFld, reverse: true}}
+          - {query: '"re:^b" or tag:wild', kind: notes, order: {column: noteFld}}
+          - {query: '"re:^b" or tag:wild', kind: notes, order: {column: noteFld, reverse: true}}
+          - {query: '-("re:^b" tag:wild)'}
+          - {query: '-("re:^b" tag:wild)', kind: notes}
+          - {query: '-("re:^b" tag:wild)', order: {column: noteCrt}}
+          - {query: '-("re:^b" tag:wild)', order: {column: noteCrt, reverse: true}}
+          - {query: '-("re:^b" tag:wild)', kind: notes, order: {column: noteFld}}
+          - {query: '-("re:^b" tag:wild)', kind: notes, order: {column: noteFld, reverse: true}}
