@@ -76,6 +76,24 @@ mg_app_cloud_agent_build() {
   python3 -B -I "$MG_TOOLS/scripts/cloud-agent-injection.py" --build "$MG_RUN_DIR" "$frameworks" -- "$@"
 }
 
+# Private app-only Mac CloudAgent profile input, never a public MG argument.
+mg_app_mac_agent_profile_scope() {
+  [ "$#" -eq 6 ] && [ "$1" = team ] && [ "$2" = build-for-testing ] &&
+    [ "$3" = mac ] && [ "$4" = Debug ] && [ "$5" = CloudAgent ] && [ "$6" = Meguri ]
+}
+
+mg_app_mac_agent_profile_check() {
+  local profile
+  [ -n "${MG_CLOUD_AGENT_MAC_PROFILE_BINDING:-}" ] || return 0
+  profile="$(jq -r .file <<<"$MG_CLOUD_AGENT_MAC_PROFILE_BINDING")" || return 1
+  printf '%s\n' "$MG_CLOUD_AGENT_MAC_PROFILE_BINDING" | python3 -B -I \
+    "$MG_TOOLS/scripts/cloud-agent-mac-profile.py" --root "$MG_ROOT" --file "$profile" --check
+}
+
+mg_app_mac_agent_private_settings() {
+  "$@" 2>"$MG_CLOUD_AGENT_MAC_PROFILE_PRIVATE/resolved-settings.log"
+}
+
 # Explicit action keeps every nested UI/snapshot/perf caller on its test plan.
 # Only explicit preview actions select build; no ambient switch changes callers.
 mg_app_build_action() {
@@ -147,6 +165,21 @@ mg_app_build_action() {
     # Do not change the Release defaults or export an override to nested jobs.
     settings=(${settings[0]+"${settings[@]}"} MEGURI_BUNDLE_ID_SUFFIX=.dev MEGURI_CLOUD_CONFIGURATION=development)
   fi
+  if mg_app_mac_agent_profile_scope "$signing" "$action" "$platform" "$config" "$plan" "$scheme" &&
+      [ -n "${MEGURI_CLOUD_AGENT_MAC_PROFILE_FILE:-}" ]; then
+    MG_CLOUD_AGENT_MAC_PROFILE_PRIVATE="$(mktemp -d "${TMPDIR:-/tmp}/meguri-mac-agent-profile.XXXXXX")" || return 1
+    chmod 700 "$MG_CLOUD_AGENT_MAC_PROFILE_PRIVATE" || return 1
+    mg_on_exit "rm -rf $(mvl_q "$MG_CLOUD_AGENT_MAC_PROFILE_PRIVATE")"
+    if ! MG_CLOUD_AGENT_MAC_PROFILE_BINDING="$(python3 -B -I "$MG_TOOLS/scripts/cloud-agent-mac-profile.py" \
+        --root "$MG_ROOT" --file "$MEGURI_CLOUD_AGENT_MAC_PROFILE_FILE" \
+        2>"$MG_CLOUD_AGENT_MAC_PROFILE_PRIVATE/validation.log")"; then
+      mg_failure agent-profile "Approved app-only Mac CloudAgent profile validation refused"
+      mg_status fail
+      return 1
+    fi
+    settings=(${settings[0]+"${settings[@]}"} MEGURI_MAC_AGENT_PROFILE_STYLE=Manual
+      "MEGURI_MAC_AGENT_PROFILE_SPECIFIER=$(jq -r .uuid <<<"$MG_CLOUD_AGENT_MAC_PROFILE_BINDING")")
+  fi
   mg_lint_ui_first || return 1
   if ! mg__xcframework "$MG_RUN_DIR/xcframework.json" --configuration "$config" ${core_args[0]+"${core_args[@]}"}; then
     mg_failure xcframework "building the core XCFramework failed; see log.txt" "tools/mg core-xcframework"
@@ -172,27 +205,35 @@ mg_app_build_action() {
   fi
   result="$MG_RUN_DIR/build-$platform-$config-$plan.xcresult"
   log="$MG_RUN_DIR/build-$platform-$config-$plan.log"
+  [ -z "${MG_CLOUD_AGENT_MAC_PROFILE_BINDING:-}" ] || log="$MG_CLOUD_AGENT_MAC_PROFILE_PRIVATE/native-build.log"
   rm -rf "$result"
   echo "$MG_JOB: xcodebuild $action ($platform, $config)" >&2
   "${build_command[@]}" "$action" -project app/Meguri.xcodeproj -scheme "$scheme" ${test_args[0]+"${test_args[@]}"} -configuration "$config" \
     -destination "$dest" -derivedDataPath "$MG_APP_DD" -resultBundlePath "$result" ${settings[0]+"${settings[@]}"} >"$log" 2>&1
   rc=$?
-  mg_artifact log "$log" "xcodebuild $action ($platform, $config)"
+  if [ -z "${MG_CLOUD_AGENT_MAC_PROFILE_BINDING:-}" ]; then
+    mg_artifact log "$log" "xcodebuild $action ($platform, $config)"
+  fi
   counts="$(xcrun xcresulttool get build-results --path "$result" 2>/dev/null |
     jq -c '{errors: .errorCount, warnings: .warningCount, messages: [(.errors[]?, .warnings[]?) | .message] | .[:10]}')" || counts=null
+  [ -z "${MG_CLOUD_AGENT_MAC_PROFILE_BINDING:-}" ] || counts="$(jq -c 'del(.messages)' <<<"${counts:-null}")"
   mg_detail build "$(jq -nc --arg p "$platform" --arg c "$config" --arg app "$(mg_app_products "$platform" "$config")/Meguri.app" \
     --arg action "$action" --arg plan "$plan" --arg dd "$MG_APP_DD" --argjson personal "$personal" --argjson counts "${counts:-null}" \
     '{platform: $p, config: $c, app: $app, action: $action, test_plan: $plan, standalone: ($action == "build" and ($personal | not)), personal_preview: $personal, derived_data: $dd} + ($counts // {})')"
   if [ "$rc" -ne 0 ]; then
     [ "$plan" != CloudAgent ] || plan_arg=" --test-plan $plan"
-    if [ "$platform" = ios-device ]; then
+    if [ "$platform" = ios-device ] || [ -n "${MG_CLOUD_AGENT_MAC_PROFILE_BINDING:-}" ]; then
       # Signing diagnostics can include selected-device identities and paths.
       mg_failure build "physical development build failed; diagnostics remain in the private build log"
     else
       mg_failure build "xcodebuild $action failed ($platform, $config): $(grep -E 'error:' "$log" | head -n 3 | tr '\n' ' ')" \
         "tools/mg build-app --platform $platform --config $config$standalone_arg$plan_arg"
     fi
-    mg_message "$MG_JOB: the $platform $config build failed; see $log"
+    if [ -n "${MG_CLOUD_AGENT_MAC_PROFILE_BINDING:-}" ]; then
+      mg_message "$MG_JOB: scoped Mac build failed; native diagnostics remain private"
+    else
+      mg_message "$MG_JOB: the $platform $config build failed; see $log"
+    fi
     mg_status fail
     return 1
   fi
@@ -972,7 +1013,7 @@ mg_app_quit_mac() {
 # Freeze only actual team-signed CloudAgent products, after all build mutations.
 # Ad-hoc or initially dirty builds compile without agent_build proof.
 mg_app_agent_freeze() {
-  local platform="$1" source_commit="$2" sdk=iphonesimulator products xctestrun
+  local platform="$1" source_commit="$2" sdk=iphonesimulator products xctestrun profile_settings=() settings_command=(xcodebuild)
   local settings="$MG_RUN_DIR/agent-settings.json" policy="$MG_RUN_DIR/agent-cloud-settings.json"
   local manifest="$MG_RUN_DIR/agent-build.json" reference="$MG_RUN_DIR/agent-build-reference.json"
   if [ "${MEGURI_APP_SIGNING-adhoc}" != team ] || [ -z "$source_commit" ]; then
@@ -980,11 +1021,21 @@ mg_app_agent_freeze() {
     return 0
   fi
   [ "$platform" != mac ] || sdk=macosx
+  if [ -n "${MG_CLOUD_AGENT_MAC_PROFILE_BINDING:-}" ]; then
+    if [ "$platform" != mac ] || ! mg_app_mac_agent_profile_check; then
+      mg_failure agent-profile "App-only Mac CloudAgent profile changed before freezing"
+      mg_status fail
+      return 1
+    fi
+    profile_settings=(MEGURI_MAC_AGENT_PROFILE_STYLE=Manual
+      "MEGURI_MAC_AGENT_PROFILE_SPECIFIER=$(jq -r .uuid <<<"$MG_CLOUD_AGENT_MAC_PROFILE_BINDING")")
+    settings_command=(mg_app_mac_agent_private_settings xcodebuild)
+  fi
   products="$MG_ROOT/$MG_APP_DD/Build/Products"
   xctestrun="$(MG_APP_TEST_SCHEME=Meguri mg__vm_xctestrun CloudAgent "$sdk" Debug)"
-  if [ -z "$xctestrun" ] || ! xcodebuild build-for-testing -showBuildSettings -json -project app/Meguri.xcodeproj \
+  if [ -z "$xctestrun" ] || ! "${settings_command[@]}" build-for-testing -showBuildSettings -json -project app/Meguri.xcodeproj \
       -scheme Meguri -testPlan CloudAgent -configuration Debug -sdk "$sdk" -derivedDataPath "$MG_APP_DD" \
-      MEGURI_SIGNING=team >"$settings"; then
+      MEGURI_SIGNING=team ${profile_settings[0]+"${profile_settings[@]}"} >"$settings"; then
     mg_failure agent-build "CloudAgent build inputs or resolved settings are missing"
     mg_status fail
     return 1
@@ -1014,6 +1065,11 @@ mg_app_agent_freeze() {
     mg_status fail
     return 1
   fi
+  if ! mg_app_mac_agent_profile_check; then
+    mg_failure agent-profile "App-only Mac CloudAgent profile changed during first freeze"
+    mg_status fail
+    return 1
+  fi
   mg_artifact directory "$products" "frozen CloudAgent build inputs"
   mg_artifact json "$manifest" "CloudAgent app, agent, xctestrun and product inventory"
   mg_artifact json "$policy" "CloudAgent cloud/debug policy settings"
@@ -1025,6 +1081,7 @@ mg_build_app() {
   # Bash dynamic scope constrains this override to this CLI build and its
   # product lookup; later/nested test jobs retain the default DerivedData.
   local MG_APP_DD="$MG_APP_DD"
+  local MG_CLOUD_AGENT_MAC_PROFILE_BINDING="" MG_CLOUD_AGENT_MAC_PROFILE_PRIVATE=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --platform)

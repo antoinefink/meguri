@@ -115,3 +115,10 @@ process boundary and limit remains. Formatting `19461` passed. Focused
 writer/kill/reopen cases and the unbound-witness refusal. This is protocol fixture
 evidence; signed CloudKit and unit acceptance remain pending.
 
+Additional integration evidence: Rust lint `20929`, similarity `21264` and
+privacy `25644` passed. Mac CloudAgent build `23490` passed after rebuilding
+matching Rust slices and generated bindings; this compiles the new Swift seam
+but does not execute it. Its parent smoke `22453` stopped at delivery `26978`
+because the embedded profile omitted the VM. No CloudKit exchange, historical
+Mac recovery or signed acceptance follows from these results.
+

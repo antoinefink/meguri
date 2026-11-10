@@ -51,6 +51,12 @@ INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphone*] = YES
 INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
 INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
 
+// The explicit Mac CloudAgent route can pin an installed profile for this app only.
+MEGURI_MAC_AGENT_PROFILE_STYLE = $(MEGURI_CODE_SIGN_STYLE_$(MEGURI_SIGNING))
+MEGURI_MAC_AGENT_PROFILE_SPECIFIER =
+CODE_SIGN_STYLE[sdk=macosx*] = $(MEGURI_MAC_AGENT_PROFILE_STYLE)
+PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*] = $(MEGURI_MAC_AGENT_PROFILE_SPECIFIER)
+
 // Entitlements (R2041, KTD22). Mac: Meguri-macOS[-Dev][-AdHoc].entitlements,
 // -Dev for hook builds, -AdHoc without a signing team (Signing.xcconfig).
 CODE_SIGN_ENTITLEMENTS[sdk=iphone*] = Meguri/Meguri-iOS.entitlements

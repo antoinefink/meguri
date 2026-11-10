@@ -1,0 +1,41 @@
+# Mac CloudAgent development profile selection
+
+Starting commit: `94cf6e71`. Infrastructure work within the pending iCloud batch;
+the integration base remains `1416a520542a8c5daa38a23bfe398da704c3d6c9`.
+No unit or signed-sync acceptance is claimed.
+
+Antoine delegated the profile setup and approved saving it. Read-only check
+`16270` verifies the installed file for the host, VM, app and certificate.
+Setup `13422` installed it but its subsequent
+verification failed because its temporary wrapper reused an exhausted input
+descriptor. That failure is retained; fresh-descriptor verification did not
+repeat the cache write.
+
+Actual smoke `22453` built Mac product `23490` successfully, including the new
+Rust/Swift bridge. Delivery `26978` still refused at
+`recheck-build/profile-device`: Xcode's automatic selection embedded the older
+profile. Installed-profile readiness therefore did not establish build or
+delivery readiness. No cloud operation ran.
+
+The filtered app configuration export `29397` adds only app-target macOS style
+and profile settings with unchanged defaults. The tooling selects them only for
+an explicit team-signed Mac Debug CloudAgent build-for-testing. An optional
+private profile file must match its installed copy. Checks cover the host, app
+identity, entitlements and certificate.
+The same app-only selection reaches the build and first-freeze settings; profile
+and source checks remain required. Widget/test settings and ordinary/mobile
+routes remain unchanged. Existing final signature, profile and delivery guards
+are unchanged. No actual profile, account or connection values are recorded here.
+
+Focused tooling check `32927` passed both cases. Independent review found one
+P2: CMS decoding reopened the profile path after its bytes had been captured.
+The repair must decode those exact bytes and add a substitution regression while
+retaining cache/source checks. Further focused checks and actual signed execution
+remain pending.
+
+The repair decodes captured bytes on stdin, with bounded timeout/output and
+fixed refusal messages. It adds transient and persistent input substitution
+cases and native decode failures. Independent delta review is clear of P0–P2
+findings. `selftest/20261110T165508Z-34326` passed all 27 affected CloudAgent
+tooling checks. Actual native profile selection and cloud execution remain
+pending; fixture checks do not establish either.
