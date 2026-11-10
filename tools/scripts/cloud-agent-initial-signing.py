@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import plistlib
 from pathlib import Path
 import re
 import signal
@@ -289,6 +290,82 @@ def signing_metadata(path):
     return identifiers[0], None if not raw else v.plist(raw, 'initial-entitlements')
 
 
+def typed_entitlements(value):
+    return plistlib.dumps(value, fmt=plistlib.FMT_BINARY, sort_keys=True)
+
+
+def app_identity_entitlements(original, team, bundle):
+    need(type(original) is dict and isinstance(team, str) and re.fullmatch(r'[A-Z0-9]{10}', team)
+         and bundle == 'com.antoinefink.meguri.dev', 'initial-entitlements')
+    expected = dict(original)
+    identity = team + '.' + bundle
+    for key, value in (('com.apple.developer.team-identifier', team),
+                       ('application-identifier', identity), ('com.apple.application-identifier', identity)):
+        need(key not in original or type(original[key]) is str and original[key] == value,
+             'initial-entitlements')
+    expected.setdefault('com.apple.developer.team-identifier', team)
+    expected.setdefault('application-identifier', identity)
+    return expected
+
+
+@contextlib.contextmanager
+def private_entitlements_input(directory, value):
+    raw = plistlib.dumps(value, fmt=plistlib.FMT_XML, sort_keys=True)
+    need(0 < len(raw) <= 16 * 1024 * 1024, 'initial-entitlements')
+    run_witness = {}
+    with v.authority(directory, run_witness), tempfile.TemporaryDirectory(
+            prefix='initial-app-entitlements-', dir=directory) as temporary:
+        run_witness['check']()
+        private_witness = {}
+        with v.authority(temporary, private_witness) as parent:
+            info = os.fstat(parent)
+            need(info.st_uid == os.getuid() and stat.S_IMODE(info.st_mode) == 0o700, 'initial-entitlements')
+            fd = os.open('entitlements.plist', os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                         0o600, dir_fd=parent)
+            try:
+                os.fchmod(fd, 0o600)
+                remaining = memoryview(raw)
+                while remaining:
+                    count = os.write(fd, remaining)
+                    need(count > 0, 'initial-entitlements')
+                    remaining = remaining[count:]
+                os.fsync(fd)
+                pin = v.identity(os.fstat(fd))
+                def check():
+                    run_witness['check']()
+                    private_witness['check']()
+                    info = os.fstat(fd)
+                    need(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid() and
+                         stat.S_IMODE(info.st_mode) == 0o600 and info.st_nlink == 1 and
+                         v.identity(info) == pin == v.identity(os.stat(
+                             'entitlements.plist', dir_fd=parent, follow_symlinks=False)) and
+                         os.pread(fd, len(raw) + 1, 0) == raw, 'initial-entitlements')
+                check()
+                try:
+                    yield os.path.join(temporary, 'entitlements.plist'), check
+                finally:
+                    check()
+            finally:
+                os.close(fd)
+
+
+def sign_initial_code(directory, path, signer, metadata, app_identity=None):
+    identifier, entitlements = metadata
+    arguments = ['/usr/bin/codesign', '--force', '--sign', signer, '--timestamp=none']
+    if app_identity is None:
+        signing_command(arguments + ['--preserve-metadata=identifier,entitlements', path])
+        return None
+    team, bundle = app_identity
+    need(identifier == bundle, 'initial-metadata')
+    expected = app_identity_entitlements(entitlements, team, bundle)
+    expected_raw = typed_entitlements(expected)
+    with private_entitlements_input(directory, expected) as (input_path, check):
+        check()
+        signing_command(arguments + ['--preserve-metadata=identifier', '--entitlements', input_path, path])
+        check()
+    return expected_raw
+
+
 def compare_product_files(before, after, executable, signature_root, native_result):
     entries, pins = before
     final, new_pins = after
@@ -362,8 +439,10 @@ def initial_sign(root, directory, sha, products, xctestrun, settings_path):
             parent=executable_parents[path];name=os.path.basename(executable)
             original_bytes=code_bytes(parent,name)
             original_code=code_fingerprint(original_bytes)
-            signing_command(['/usr/bin/codesign', '--force', '--sign', signer, '--timestamp=none',
-                             '--preserve-metadata=identifier,entitlements', path])
+            # choose_identity already bound this team to the selected DER/private key;
+            # only the exact resolved and metadata-validated app gets identity composition.
+            expected_app_entitlements = sign_initial_code(directory, path, signer, (identifier, entitlements),
+                (team, app['bundle_id']) if path == app_path else None)
             for witness in witnesses:
                 witness['check']()
             native_result = v.identity(os.stat(os.path.basename(executable), dir_fd=executable_parents[path], follow_symlinks=False))
@@ -375,7 +454,12 @@ def initial_sign(root, directory, sha, products, xctestrun, settings_path):
             if not same_code:
                 write_code_difference(directory, os.path.relpath(path, products), original_bytes, final_bytes)
             need(same_code,'initial-code-changed')
-            need(signing_metadata(path) == (identifier, entitlements), 'initial-entitlements-changed')
+            final_metadata = signing_metadata(path)
+            if path == app_path:
+                need(final_metadata[0] == identifier and typed_entitlements(final_metadata[1]) ==
+                     expected_app_entitlements, 'initial-entitlements-changed')
+            else:
+                need(final_metadata == (identifier, entitlements), 'initial-entitlements-changed')
             v.command(['/usr/bin/codesign', '--verify', '--deep', '--strict', path], 'initial-signature')
             with tempfile.TemporaryDirectory(prefix='meguri-initial-signed-') as temporary:
                 temporary = os.path.realpath(temporary)

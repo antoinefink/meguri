@@ -191,6 +191,77 @@ class SignatureAllocationTests(unittest.TestCase):
         self.rejects(before,bytes(overlap))
 
 
+class AppIdentityEntitlementsTests(unittest.TestCase):
+    BUNDLE='com.antoinefink.meguri.dev'
+    def grants(self):
+        return {'get-task-allow':True,'com.apple.developer.icloud-container-identifiers':['iCloud.generated.dev'],
+                'com.apple.developer.icloud-services':['CloudKit'],'aps-environment':'development',
+                'keychain-access-groups':['generated.group'],'data':b'fixture'}
+    def test_missing_one_or_both_fields_and_correct_alias_preserve_every_original_grant(self):
+        for present in ((),('application-identifier',),('com.apple.developer.team-identifier',),
+                        ('application-identifier','com.apple.developer.team-identifier'),
+                        ('com.apple.application-identifier',)):
+            original=self.grants()
+            for key in present:original[key]=TEAM if key=='com.apple.developer.team-identifier' else TEAM+'.'+self.BUNDLE
+            before=m.typed_entitlements(original);expected=m.app_identity_entitlements(original,TEAM,self.BUNDLE)
+            self.assertEqual(m.typed_entitlements(original),before)
+            self.assertEqual(expected['application-identifier'],TEAM+'.'+self.BUNDLE)
+            self.assertEqual(expected['com.apple.developer.team-identifier'],TEAM)
+            self.assertEqual(set(expected)-set(original),{'application-identifier','com.apple.developer.team-identifier'}-set(original))
+            for key in original:self.assertEqual(m.typed_entitlements({key:expected[key]}),m.typed_entitlements({key:original[key]}))
+    def test_wrong_alias_canonical_value_or_type_never_overwrites(self):
+        for key in ('application-identifier','com.apple.application-identifier','com.apple.developer.team-identifier'):
+            for value in (True,1,None,[],{},'', 'WRONG00000.wrong.app'):
+                original=self.grants();original[key]=value
+                with self.subTest(key=key,kind=type(value).__name__):
+                    with self.assertRaises(m.v.Refused):m.app_identity_entitlements(original,TEAM,self.BUNDLE)
+        for team,bundle in (('bad',self.BUNDLE),(TEAM,'wrong.app')):
+            with self.assertRaises(m.v.Refused):m.app_identity_entitlements(self.grants(),team,bundle)
+    def test_typed_final_comparison_detects_bool_integer_and_arbitrary_grant_changes(self):
+        expected=m.app_identity_entitlements(self.grants(),TEAM,self.BUNDLE)
+        for mutate in ('type','add','remove','value'):
+            changed=copy.deepcopy(expected)
+            if mutate=='type':changed['get-task-allow']=1
+            elif mutate=='add':changed['extra']=True
+            elif mutate=='remove':del changed['keychain-access-groups']
+            else:changed['aps-environment']='production'
+            self.assertNotEqual(m.typed_entitlements(changed),m.typed_entitlements(expected))
+    def test_app_signing_private_input_is_pinned_and_nonapp_arguments_stay_unchanged(self):
+        captured=[]
+        def native(arguments):
+            captured.append(arguments)
+            if '--entitlements' in arguments:
+                path=Path(arguments[arguments.index('--entitlements')+1]);self.assertEqual(path.stat().st_mode&0o777,0o600)
+                self.assertEqual(plistlib.loads(path.read_bytes())['application-identifier'],TEAM+'.'+self.BUNDLE)
+        with tempfile.TemporaryDirectory() as temporary,patch.object(m,'signing_command',side_effect=native):
+            root=str(Path(temporary).resolve())
+            expected=m.sign_initial_code(root,'app','fixture',(self.BUNDLE,self.grants()),(TEAM,self.BUNDLE))
+            self.assertEqual(expected,m.typed_entitlements(m.app_identity_entitlements(self.grants(),TEAM,self.BUNDLE)))
+            private=Path(captured[0][captured[0].index('--entitlements')+1]);self.assertFalse(private.exists())
+            self.assertIsNone(m.sign_initial_code(root,'agent','fixture',('agent',None)))
+            self.assertIn('--preserve-metadata=identifier,entitlements',captured[1]);self.assertNotIn('--entitlements',captured[1])
+    def test_actual_metadata_identifier_mismatch_refuses_before_signing(self):
+        with patch.object(m,'signing_command') as native:
+            with self.assertRaises(m.v.Refused):m.sign_initial_code('unused','app','fixture',('wrong.app',self.grants()),(TEAM,self.BUNDLE))
+            native.assert_not_called()
+    def test_private_input_replacement_or_mutation_refuses_after_original_call(self):
+        for replacement in (False,True):
+            def native(arguments):
+                path=Path(arguments[arguments.index('--entitlements')+1]);raw=path.read_bytes()
+                if replacement:path.unlink()
+                path.write_bytes(raw if replacement else b'changed')
+            with tempfile.TemporaryDirectory() as temporary,patch.object(m,'signing_command',side_effect=native):
+                with self.assertRaises(m.v.Refused):m.sign_initial_code(str(Path(temporary).resolve()),'app','fixture',(self.BUNDLE,self.grants()),(TEAM,self.BUNDLE))
+    def test_cancel_keeps_input_alive_until_native_call_unwinds(self):
+        captured=[]
+        def native(arguments):
+            path=Path(arguments[arguments.index('--entitlements')+1]);captured.append(path);self.assertTrue(path.is_file())
+            raise m.stage.Cancelled()
+        with tempfile.TemporaryDirectory() as temporary,patch.object(m,'signing_command',side_effect=native):
+            with self.assertRaises(m.stage.Cancelled):m.sign_initial_code(str(Path(temporary).resolve()),'app','fixture',(self.BUNDLE,self.grants()),(TEAM,self.BUNDLE))
+        self.assertFalse(captured[0].exists())
+
+
 class SignerTests(unittest.TestCase):
     def fake(self, args, category):
         if args[1] == 'find-identity':

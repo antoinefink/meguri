@@ -69,3 +69,21 @@ Independent review found no P0–P2 issue. Focused tooling run `41267` passed bo
 cases with five new generated allocation tests, including both measured slices
 and the fat layout, plus mutation and malformed-input refusals. The final source
 privacy scan passed. Actual native signing remains pending for this repair.
+
+Actual native build `42000` passed allocation comparison and reached the
+unchanged final verifier, which refused `product-signature`. Read-only run
+`45021` proved a valid development signature and the expected certificate/team,
+but the signed app and native entitlement input lacked the team/application
+identity fields. Existing CloudKit, container, environment and push grants
+matched. This was not a certificate failure.
+
+Independent review approved app-only identity composition as a J2.1 pipeline
+refinement before the first freeze. It derives only the two missing identity
+assertions from the already verified signer and exact resolved app identity.
+Wrong types, wrong values or conflicting aliases fail. Every original service
+grant stays in the expected map; typed binary-plist comparison also distinguishes
+Boolean from integer values. A private no-follow input is pinned through the
+original joined signing call. Other code paths and final verifiers stay unchanged.
+Focused combined tooling run `58031` passed all three cases, including seven new
+identity/input-lifetime tests. The source privacy scan passed. Actual native
+verification of this composition remains pending.
