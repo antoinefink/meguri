@@ -7,3 +7,6 @@
 - Opaque commands must be actual issued handles; replace only their execution with a fake.
 - Real command fixtures use ServiceAppHarness startup; raw registerSDK alone does not establish policy engine-start authority.
 - No-follow file fixtures use POSIX `realpath` on the trusted OS temp root before creating their run directory. Foundation's `resolvingSymlinksInPath` can retain `/var`'s alias. Do not normalize runtime input paths to bypass a guard.
+
+- `selectedBootstrapSource` uses the system clock. Harnesses opening its bytes must use `clock: .system` when checking edit stamps.
+- With a healthy Service, join and close the owner before stopping its helper. `cleanupAfterServiceFailure` is for a broken transport.
