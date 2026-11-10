@@ -5,6 +5,70 @@ import Testing
 
 @MainActor
 struct SyncCoordinatorTests {
+    @Test func readyBeforeOpenReturnWaitsForRetainedHostThenStillReplacesAndReopens() async {
+        let original = SyncOwnerFake(), successor = SyncOwnerFake(), reopened = SyncOwnerFake()
+        let openReturn = SyncOwnerGate()
+        var factories = 0, hostRetained = false
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in
+            #expect(hostRetained, "Ready alone must never admit backend or SDK work")
+            factories += 1
+            switch factories {
+            case 1: return original
+            case 2:
+                #expect(original.closed && original.closeCount == 1)
+                return successor
+            default:
+                #expect(factories == 3 && successor.closed)
+                return reopened
+            }
+        }, defaults: nil)
+        let owner = ReviewCollection(configuration: LaunchConfiguration(), navigation: AppNavigation(), sync: sync)
+        await sync.preparePlatform()
+        // Hold the simulated open return, deliver Ready on the production
+        // owner's lifecycle path, and fully join the input/replacement lanes.
+        let completion = Task {
+            await openReturn.hold()
+            hostRetained = true
+            await sync.completeOpenedHost(generation: 4)
+        }
+        await openReturn.waitUntilHeld()
+        owner.receiveLifecycle(.opening)
+        owner.receiveLifecycle(.ready(generation: 4))
+        sync.collectionReplaced(4)
+        await sync.waitForReplacement()
+        #expect(owner.lifecycle == .ready(generation: 4) && owner.generation == 4)
+        #expect(sync.generation == 4 && sync.setupState == .prepared && !sync.operationFailed)
+        #expect(factories == 0 && original.events.isEmpty && original.accountReads == 0)
+        openReturn.release()
+        await completion.value
+        await sync.prepareConnectionAuthority()
+        #expect(factories == 1 && original.accountReads == 1)
+        #expect(sync.setupState == .attached && !sync.operationFailed)
+        owner.receiveLifecycle(.ready(generation: 4))
+        await sync.waitForReplacement()
+        #expect(factories == 1)
+
+        owner.receiveLifecycle(.ready(generation: 5))
+        sync.collectionReplaced(5)
+        await sync.waitForReplacement(); await sync.prepareConnectionAuthority()
+        #expect(factories == 2 && successor.accountReads == 1)
+        #expect(sync.generation == 5 && sync.setupState == .attached && !sync.operationFailed)
+        #expect(await sync.cancelAndDrain())
+
+        // A new open after a successful close needs retention admission again.
+        hostRetained = false
+        await sync.preparePlatform()
+        owner.receiveLifecycle(.ready(generation: 6))
+        await sync.waitForReplacement()
+        #expect(factories == 2 && reopened.events.isEmpty && reopened.accountReads == 0)
+        hostRetained = true
+        await sync.completeOpenedHost(generation: 6)
+        await sync.prepareConnectionAuthority()
+        #expect(factories == 3 && reopened.accountReads == 1)
+        #expect(sync.generation == 6 && sync.setupState == .attached && !sync.operationFailed)
+        #expect(await sync.cancelAndDrain())
+    }
+
     @Test func visibleMediaReplaysOnRetriedBackendWithoutAnotherScreenUpdate() async {
         let original = SyncOwnerFake(), successor = SyncOwnerFake()
         var factories = 0

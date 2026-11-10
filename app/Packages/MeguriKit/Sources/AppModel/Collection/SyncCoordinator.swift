@@ -233,6 +233,9 @@ public final class SyncCoordinator {
     @ObservationIgnored private let directory: URL?
     @ObservationIgnored private let observeSignals: Bool
     private var platformPrepared = false
+    // Ready can arrive inside open, before FFI retains the Host. Only the
+    // retained-open completion admits the first backend for this Host lifetime.
+    private var retainedHostAdmitted = false
     private var platformTask: Task<Void, Never>?
     private var backend: (any SyncCoordinatorBackend)?
     private var inputQueue: [Input] = []
@@ -363,6 +366,7 @@ public final class SyncCoordinator {
             return
         }
         guard generation >= self.generation else { return }
+        retainedHostAdmitted = true
         if backend != nil || replacing { enqueue(.replaced(generation)); return }
         hostRevision &+= 1
         let revision = hostRevision
@@ -1168,7 +1172,7 @@ public final class SyncCoordinator {
             hostRevision &+= 1
             // Local collection generations still advance without an iCloud
             // installation. Only successful platform preparation admits an owner.
-            guard platformPrepared else { return }
+            guard platformPrepared, retainedHostAdmitted else { return }
             replacing = true
             initialOwnAdmission.setOpen(false)
             awaitingResumeProof = false
@@ -1610,7 +1614,7 @@ public final class SyncCoordinator {
                 backend = nil; suspended = false; awaitingResumeProof = false; networkMonitor = nil; status = nil; preview = nil; recovery = nil
                 desiredVisibleMedia = nil; deliveredVisibleMedia = nil
                 hasDeferredNativeWork = false
-                hostRevision &+= 1; drained = true; platformPrepared = false
+                hostRevision &+= 1; drained = true; platformPrepared = false; retainedHostAdmitted = false
                 return true
             } catch {
                 #if DEBUG

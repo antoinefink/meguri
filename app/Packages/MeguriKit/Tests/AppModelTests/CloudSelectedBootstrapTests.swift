@@ -2,6 +2,7 @@
 @testable import AppModel
 @testable import CoreBridge
 import Foundation
+import Observation
 import Synchronization
 import Testing
 
@@ -27,7 +28,11 @@ extension ReviewCollectionStartupTests {
             defer { harness.defaults.removePersistentDomain(forName: harness.suite) }
             try FileManager.default.createDirectory(at: harness.root, withIntermediateDirectories: false)
             try bytes.write(to: harness.root.appending(path: "collection.anki2"))
+            let replies = SelectedBootstrapReplies()
+            harness.observeOwn = { replies.record($0) }
+            replies.observeFailure(harness.sync)
             await harness.owner.start(); await harness.sync.prepareConnectionAuthority()
+            replies.observeOriginalBackend(harness.sync)
             try await harness.owner.prepareCloudConnectionPreview()
             await harness.sync.waitForConnectionPreview(); await harness.sync.drainOperations()
             guard case .ready(_, let summary) = harness.sync.preview else { throw ServiceWorkflowFailure.wire }
@@ -60,12 +65,15 @@ extension ReviewCollectionStartupTests {
             #expect(before.publicationComplete == nil && before.publicationDoneActive == nil)
             gate.release()
             await publication?.value
+            try await replies.waitForOriginalTerminal()
             await harness.sync.waitForInputs(); await harness.sync.drainOperations()
             #expect(acknowledged && localStepsAfterHeld > 0 && !harness.sync.operationFailed)
             let published = try await SelectedCloudControlInspection().current()
             #expect(published.status == .proven && published.provenance == .runtimeAcceptedPublication)
             #expect(published.bindingMatchesEpoch == .proven && published.requiredScanComplete)
-            try #require(published.publicationComplete != nil && published.publicationDoneActive != nil)
+            let complete = try #require(published.publicationComplete)
+            let done = try #require(published.publicationDoneActive)
+            try replies.requireOriginalCommit(complete, before: done)
             backend.beforeExecution = nil; harness.sync.observeCausalBoundary = nil
             try #require(await harness.owner.close())
             let exit = await process.close()
@@ -105,6 +113,7 @@ extension ReviewCollectionStartupTests {
             }
             let replies = SelectedBootstrapReplies()
             a.observeOwn = { replies.record($0) }
+            replies.observeFailure(a.sync)
             await a.factory.inspectCreation { _ in
                 let control = try await SelectedCloudControlInspection().current()
                 try #require(control.requiredScanComplete)
@@ -117,11 +126,13 @@ extension ReviewCollectionStartupTests {
             active = a
             await a.owner.start()
             await a.sync.prepareConnectionAuthority()
+            replies.observeOriginalBackend(a.sync)
             try await a.owner.prepareCloudConnectionPreview()
             await a.sync.waitForConnectionPreview()
             guard case .ready(let offered, let summary) = a.sync.preview else { throw ServiceWorkflowFailure.wire }
             try #require(summary.decision == .confirmUpload && summary.manifestCounts == nil)
             await a.sync.confirmPublication()
+            try await replies.waitForOriginalTerminal()
             await a.sync.waitForConnectionPreview()
             await a.sync.waitForInputs()
             try #require(!a.sync.operationFailed && a.sync.preview == nil)
@@ -267,17 +278,20 @@ extension ReviewCollectionStartupTests {
                 try FileManager.default.createDirectory(at: a.root, withIntermediateDirectories: false)
                 try input.bytes.write(to: a.root.appending(path: "collection.anki2"))
                 a.ownTransport = SelectedConflictTransport(original: ServiceOwnTransport(wire: wire), matching: matching)
-                let replies = SelectedBootstrapReplies()
+                let replies = SelectedBootstrapReplies(terminalKind: matching ? .doneActive : .completeEpoch)
                 a.observeOwn = { replies.record($0) }
+                replies.observeFailure(a.sync)
                 if matching { print("selected-start-before failed=\(a.sync.operationFailed) setup=\(a.sync.setupState) diagnostic=\(DebugCloudDiagnostics.latestValue ?? "none")") }
                 await a.owner.start()
                 await a.sync.prepareConnectionAuthority()
+                replies.observeOriginalBackend(a.sync)
                 if matching { print("selected-start-after failed=\(a.sync.operationFailed) setup=\(a.sync.setupState) diagnostic=\(DebugCloudDiagnostics.latestValue ?? "none")") }
                 try await a.owner.prepareCloudConnectionPreview()
                 await a.sync.waitForConnectionPreview()
                 guard case .ready(_, let summary) = a.sync.preview else { throw ServiceWorkflowFailure.wire }
                 try #require(summary.decision == .confirmUpload)
                 await a.sync.confirmPublication()
+                try await replies.waitForOriginalTerminal()
                 await a.sync.waitForConnectionPreview()
                 await a.sync.waitForInputs()
                 let control = try await SelectedCloudControlInspection().current()
@@ -387,17 +401,25 @@ extension ReviewCollectionStartupTests {
 }
 
 @MainActor private func selectedBootstrapPublish(_ a: ServiceAppHarness) async throws {
+    let replies = SelectedBootstrapReplies()
+    a.observeOwn = { replies.record($0) }
+    replies.observeFailure(a.sync)
     await a.owner.start()
     await a.sync.prepareConnectionAuthority()
+    replies.observeOriginalBackend(a.sync)
     try await a.owner.prepareCloudConnectionPreview()
     await a.sync.waitForConnectionPreview()
     guard case .ready(_, let summary) = a.sync.preview else { throw ServiceWorkflowFailure.wire }
     try #require(summary.decision == .confirmUpload)
     await a.sync.confirmPublication()
+    try await replies.waitForOriginalTerminal()
     await a.sync.waitForConnectionPreview()
     await a.sync.waitForInputs()
     let control = try await SelectedCloudControlInspection().current()
     try #require(!a.sync.operationFailed && control.status == .proven && control.requiredScanComplete)
+    let complete = try #require(control.publicationComplete)
+    let done = try #require(control.publicationDoneActive)
+    try replies.requireOriginalCommit(complete, before: done)
 }
 
 private nonisolated final class SelectedAdoptionPageDelivery: Sendable {
@@ -501,12 +523,71 @@ private nonisolated final class SelectedConflictOperation: CloudPreparedOwnOpera
 
 private nonisolated final class SelectedBootstrapReplies: Sendable {
     private let values = Mutex<[CloudOwnObservation]>([])
+    private let terminalKind: SelectedCloudPublicationEvent.Kind
+    // Installed before backend creation; a fast original commit stays buffered
+    // until the test waits. This observes progress and supplies no authority.
+    private let terminal = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+    init(terminalKind: SelectedCloudPublicationEvent.Kind = .doneActive) { self.terminalKind = terminalKind }
+    deinit { terminal.continuation.finish() }
     var count: Int { values.withLock { $0.count } }
-    func record(_ value: CloudOwnObservation) { values.withLock { $0.append(value) } }
+    func record(_ value: CloudOwnObservation) {
+        values.withLock { $0.append(value) }
+        switch value.phase {
+        case .committed where value.publicationEvent?.kind == terminalKind:
+            terminal.continuation.yield(true)
+            terminal.continuation.finish()
+        case .enqueued(false), .replied(.failed), .replied(.notStarted), .replied(.retryAfter):
+            terminal.continuation.finish()
+        default: break
+        }
+    }
+    @MainActor func observeFailure(_ sync: SyncCoordinator) {
+        if sync.operationFailed { terminal.continuation.finish(); return }
+        // The sticky failure has no successful reset. Any original failure
+        // ends this wait through serviceAppSignal's existing missing-reply path.
+        withObservationTracking { _ = sync.operationFailed } onChange: { [self] in
+            terminal.continuation.finish()
+        }
+    }
+    @MainActor func observeOriginalBackend(_ sync: SyncCoordinator) {
+        guard sync.connectionService != nil else { terminal.continuation.finish(); return }
+        // Cancellation/drain or replacement ends the original backend lifetime.
+        withObservationTracking { _ = sync.connectionService } onChange: { [self] in
+            terminal.continuation.finish()
+        }
+    }
+    func waitForOriginalTerminal() async throws {
+        do {
+            try #require(try await serviceAppSignal(terminal.stream, stage: "selected original publication Core result"))
+        } catch {
+            let workflow = CoreCloudWorkflowService()
+            if let snapshot = try? await workflow.durableSnapshot() {
+                let rows = snapshot.entities
+                print("selected-terminal-rows total=\(rows.count) marked=\(rows.filter { $0.mark != nil }.count) ackedBehind=\(rows.filter { $0.ackedRev < $0.localRev }.count) blocked=\(rows.filter { $0.mark != nil || $0.ackedRev < $0.localRev }.count) inFlightRows=\(rows.filter { !$0.inFlight.isEmpty }.count) inbox=\(snapshot.inboxNames.count) stopped=\(snapshot.trackingStopped)")
+            }
+            if let connection = try? await workflow.connection(), let recovery = try? await connection.recoveryStatus() {
+                print("selected-terminal-recovery step=\(recovery.step) switchConflict=\(recovery.switchConflict) retryPresent=\(recovery.retryAfterMilliseconds != nil)")
+            }
+            if let policy = try? await workflow.policy(), let status = try? await policy.status() {
+                print("selected-terminal-policy pending=\(status.pending) held=\(status.heldBack) inFlight=\(status.inFlight) incoming=\(status.incomingWaiting) uploadFiles=\(String(describing: status.media.uploadFiles)) missing=\(String(describing: status.media.missingNames)) unknown=\(String(describing: status.media.unknownBlobs))")
+            }
+            if let control = try? await SelectedCloudControlInspection().current() {
+                print("selected-terminal-control status=\(control.status) scan=\(control.requiredScanComplete)")
+            }
+            print("selected-terminal-work tag=\(DebugCloudPreviewProbe.ownWork.latestTag) stage=\(DebugCloudPreviewProbe.ownWork.lastEnteredWorkStageTag ?? "none") diagnostic=\(DebugCloudDiagnostics.latestValue ?? "none")")
+            throw error
+        }
+    }
     func requireConflictWithoutCompletion() throws {
         try values.withLock { values in
-            try #require(values.contains { value in
+            let conflict = try #require(values.first { value in
                 if case .replied(.conflict) = value.phase { return value.publicationEvent?.kind == .completeEpoch }; return false
+            })
+            try #require(values.contains { value in
+                if case .committed = value.phase {
+                    return value.identity == conflict.identity && value.publicationEvent == conflict.publicationEvent
+                }
+                return false
             })
             #expect(!values.contains { $0.publicationEvent?.kind == .doneActive })
         }
