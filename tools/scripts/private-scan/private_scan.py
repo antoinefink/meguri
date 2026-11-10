@@ -759,6 +759,12 @@ PUBLIC_VENDOR_ARTIFACTS = {
 PUBLIC_SOURCE_LINES = {
     'core/vendor/askama_derive/Cargo.toml': {'a97a68a2ebcede836802fcf90cf07a563d1d43027f264cdd12ad820dd826d681'},
     'core/vendor/askama_derive/src/config.rs': {'e8aacfc627844473e382f3b486bd3b18803abc3ca21dbbdbf1c1aeb45e7ad8f9'},
+    # Public PyPI requirement lines (two web-server dependencies of aqt), resolved by
+    # uv pip compile as oracle/ankiconnect/README.md gives it; approved by Antoine 2026-11-10.
+    'oracle/ankiconnect/requirements.lock': {
+        'bded52ab3d5848e756965150abffebe4d577025193a5c714a339048862b12a27',
+        'e8395f4881a04b8053c459130571cd8f05c1abe1477f65c2e5f2299cb77eca12',
+    },
 }
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
 
