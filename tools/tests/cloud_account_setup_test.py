@@ -125,6 +125,47 @@ class OwnerSetupPlanSelectionTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), raw)
 
 
+class SetupDiagnosticTests(unittest.TestCase):
+    def test_only_closed_phase_code_kind_can_reach_private_diagnostic(self):
+        for error in (p.v.Refused("setup-peer"), p.v.Refused("GENERATED_PRIVATE_MARKER"),
+                      OSError("GENERATED_PRIVATE_MARKER"), TypeError("GENERATED_PRIVATE_MARKER")):
+            diagnostic=p.SetupDiagnostic();diagnostic.enter("GENERATED_PRIVATE_MARKER")
+            out=io.StringIO()
+            with contextlib.redirect_stderr(out):diagnostic.emit(error)
+            prefix="MG_OWNER_SETUP_DIAGNOSTIC "
+            self.assertTrue(out.getvalue().startswith(prefix));value=json.loads(out.getvalue()[len(prefix):])
+            self.assertEqual(set(value),{"phase","refusal","kind"});self.assertEqual(value["phase"],"unknown")
+            self.assertNotIn("GENERATED_PRIVATE_MARKER",out.getvalue())
+            self.assertEqual(value["refusal"],"setup-peer" if isinstance(error,p.v.Refused) and error.args==("setup-peer",) else "unknown")
+
+    def test_main_preserves_public_failure_while_retaining_exact_closed_stage(self):
+        def failed(root,run,label,context,diagnostic):
+            diagnostic.enter("owner-launch");raise p.v.Refused("setup-peer")
+        out,err=io.StringIO(),io.StringIO()
+        with mock.patch.object(p.sys,"argv",["generated","--root","/generated","--run-id","20261102T000000Z-1","--label","acct1"]), \
+             mock.patch.object(p.os,"dup",return_value=3), \
+             mock.patch.object(p.os,"fdopen",return_value=contextlib.nullcontext(io.BytesIO(b"{}"))), \
+             mock.patch.object(p.signal,"signal"),mock.patch.object(p,"run",side_effect=failed), \
+             contextlib.redirect_stdout(out),contextlib.redirect_stderr(err):
+            self.assertEqual(p.main(),1)
+        self.assertEqual(json.loads(out.getvalue()),{"scope":"SETUP-ONLY","outcome":"failed_evidence","category":"setup-refused","label":"acct1","signed_execution":False})
+        self.assertEqual(json.loads(err.getvalue().removeprefix("MG_OWNER_SETUP_DIAGNOSTIC ")),
+                         {"phase":"owner-launch","refusal":"setup-peer","kind":"refused"})
+
+    def test_diagnostic_output_failure_cannot_replace_original_outcome(self):
+        diagnostic=p.SetupDiagnostic()
+        with mock.patch.object(p.sys.stderr,"write",side_effect=OSError("GENERATED_PRIVATE_MARKER")):
+            diagnostic.emit(p.v.Refused("setup-peer"))
+
+    def test_perform_failure_keeps_original_exception_and_does_not_approve(self):
+        diagnostic=p.SetupDiagnostic();terminal=Terminal();transport=Transport(fail="capture")
+        source=mock.Mock()
+        with self.assertRaisesRegex(OSError,"GENERATED_PRIVATE_SDK_MARKER"):
+            p.perform("acct1",source,terminal,transport,lambda current=None:None,diagnostic)
+        self.assertEqual(diagnostic.phase,"capture");self.assertEqual(terminal.prompts,[])
+        source.publish.assert_not_called();self.assertEqual(transport.actions,["capture"])
+
+
 class Producer(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

@@ -53,6 +53,45 @@ def approved(raw, container):
     return value
 
 
+class SetupDiagnostic:
+    """Closed private diagnostics only; never account or exception text."""
+    PHASES = frozenset(('initial', 'terminal', 'vm-context', 'native-build', 'product-input',
+        'product-check', 'approved-source', 'copy-products', 'path-preflight', 'support-authority',
+        'owner-launch', 'loaded-owner-proof', 'capture-precheck', 'capture', 'capture-proof',
+        'terminal-approval', 'fresh-precheck', 'fresh', 'fresh-proof', 'publish', 'finish'))
+    CODES = frozenset(('setup-interactive-terminal', 'setup-terminal-changed', 'setup-context',
+        'setup-lease', 'setup-info', 'setup-container', 'setup-source', 'setup-directory', 'setup-writer',
+        'setup-source-changed', 'setup-source-invalid', 'setup-directory-changed', 'setup-writer-changed',
+        'setup-root-authority', 'setup-loaded-changed', 'setup-account-read', 'setup-capture', 'setup-peer',
+        'setup-order', 'setup-selection', 'setup-original-ended', 'setup-wire', 'setup-plan-changed',
+        'setup-machine-changed', 'setup-product-changed', 'setup-product-authority-changed',
+        'setup-delivery', 'setup-delivery-changed', 'setup-root', 'setup-test-failed', 'setup-test-result',
+        'setup-original-join', 'setup-declined', 'setup-cancelled', 'setup-identity', 'setup-fresh-changed',
+        'setup-original-changed', 'setup-plan', 'setup-environment', 'setup-write-readback',
+        'product-signature', 'product-profile', 'product-schema', 'profile-device', 'source-changed',
+        'source-dirty', 'setup-observation', 'setup-bundle', 'setup-image-path', 'setup-loaded-binding',
+        'setup-images', 'setup-image', 'setup-original-bytes', 'setup-missing-image', 'setup-support-root'))
+
+    def __init__(self):
+        self.phase = 'initial'
+
+    def enter(self, phase):
+        self.phase = phase if type(phase) is str and phase in self.PHASES else 'unknown'
+
+    def emit(self, error):
+        try:
+            code = error.args[0] if (isinstance(error, v.Refused) and len(error.args) == 1 and
+                type(error.args[0]) is str and error.args[0] in self.CODES) else 'unknown'
+            kind = next((name for cls, name in ((v.Refused, 'refused'), (subprocess.TimeoutExpired, 'timeout'),
+                (OSError, 'os-error'), (ValueError, 'value-error'), (TypeError, 'type-error'),
+                (KeyError, 'key-error'), (KeyboardInterrupt, 'interrupted')) if isinstance(error, cls)), 'other')
+            phase = self.phase if type(self.phase) is str and self.phase in self.PHASES else 'unknown'
+            print('MG_OWNER_SETUP_DIAGNOSTIC ' + json.dumps({'phase': phase, 'refusal': code,
+                'kind': kind}, sort_keys=True), file=sys.stderr)
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
+
+
 class PublicationUncertain(v.Refused):
     pass
 
@@ -467,10 +506,13 @@ class Transport(s.Transport):
         return guest_source()
 
 
-def perform(label, source, terminal, transport, check):
+def perform(label, source, terminal, transport, check, diagnostic=None):
     """The generated-test boundary. Production callbacks below are actual only."""
+    diagnostic = diagnostic or SetupDiagnostic()
+    diagnostic.enter("capture-precheck")
     source.check()
     check()
+    diagnostic.enter("capture")
     reply, raw = transport.request("capture")
     need(not raw and set(reply) == {"status", "identity", "observation"}, "setup-capture")
     if reply["status"] == "no-account":
@@ -478,18 +520,23 @@ def perform(label, source, terminal, transport, check):
     need(reply["status"] == "available", "setup-account-read")
     candidate = identity(reply["identity"])
     observation = reply["observation"]
+    diagnostic.enter("capture-proof")
     check(observation)
     source.check()
     proposed = source.proposed(label, candidate)
     changed = label in source.accounts and source.accounts[label] != candidate
+    diagnostic.enter("terminal-approval")
     if not terminal.approve(label, source.container, changed):
         raise v.Refused("setup-declined")
+    diagnostic.enter("fresh-precheck")
     source.check()
     check()
+    diagnostic.enter("fresh")
     fresh, raw = transport.request("fresh")
     need(not raw and set(fresh) == {"status", "identity", "observation"} and
          fresh["status"] == "available" and identity(fresh["identity"]) == candidate and
          fresh["observation"] == observation, "setup-fresh-changed")
+    diagnostic.enter("fresh-proof")
     check(fresh["observation"])
     source.check()
     def retained():
@@ -497,26 +544,33 @@ def perform(label, source, terminal, transport, check):
         reply, raw = transport.request("hold")
         need(not raw and reply == {"observation": observation}, "setup-original-changed")
         check(reply["observation"])
+    diagnostic.enter("publish")
     source.publish(proposed, retained)
     try:
+        diagnostic.enter("finish")
         reply, raw = transport.request("finish")
         need(not raw and reply == {"joined": True}, "setup-original-join")
     except BaseException:
         raise PublicationUncertain("publication-uncertain") from None
 
 
-def run(root, run_id, label, context):
+def run(root, run_id, label, context, diagnostic=None):
     need(label in ("acct1", "acct2") and v.MG_RUN_ID.fullmatch(run_id), "setup-arguments")
     # Refuse noninteractive callers before building or obtaining any candidate.
+    diagnostic = diagnostic or SetupDiagnostic()
+    diagnostic.enter("terminal")
     terminal = Terminal()
     source = None
     try:
         with contextlib.ExitStack() as held:
             held.callback(terminal.close)
+            diagnostic.enter("vm-context")
             vm, lease = held.enter_context(owned_vm(root, run_id, context))
             machine = i.machine(vm)
             sha = v.source(root)
+            diagnostic.enter("native-build")
             reference = s.child(root, "build-app", ["--platform", "mac", "--config", "Debug", "--test-plan", "CloudAgent"], sha)
+            diagnostic.enter("product-input")
             results = os.path.join(root, "build/mg")
             receipt, receipt_hash = v.receipt(root, results, reference, sha)
             manifest = v.json_input(os.path.join(root, "build"), v.declared_reference(root, receipt, receipt["details"]["agent_build"]))
@@ -550,27 +604,33 @@ def run(root, run_id, label, context):
                 need(actual[3] == product_pin, "setup-product-authority-changed")
                 return actual[3]
             try:
+                diagnostic.enter("product-check")
                 frozen = product_check()
             except v.Refused as error:
                 if error.args == ("product-schema",):
                     raise s.UserStep("cloudkit-dev-container") from None
                 raise
+            diagnostic.enter("approved-source")
             source = Source(a._platform_application_support_root(), container)
             held.callback(source.close)
             if label == "acct2" and "acct1" not in source.accounts:
                 raise s.UserStep("cloudkit-test-accounts")
+            diagnostic.enter("copy-products")
             vm.copy(root, products, frozen[0])
             delivered = vm.guest("inventory-pins", os.path.join(root, "build"), products)
             need(isinstance(delivered, dict) and set(delivered) == {"path", "entries", "pins"} and
                  delivered["path"] == products and delivered["entries"] == frozen[0] and
                  isinstance(delivered["pins"], dict) and set(delivered["pins"]) == {"", *frozen[0]}, "setup-delivery")
             product_check()
+            diagnostic.enter("path-preflight")
             preparation = vm.setup("preflight", manifest)
             support_path = h.admit_preflight(root, manifest, expected, preparation)
+            diagnostic.enter("support-authority")
             support = vm.setup("support", {"root": support_path})
             need(support == {"path": support_path, "chain": preparation["application_support_chain"]}, "setup-root-authority")
             transport = Transport(vm)
             held.callback(transport.close)
+            diagnostic.enter("owner-launch")
             hello, raw = transport.request("launch", manifest=manifest, support=support)
             need(not raw and set(hello) == {"pid", "observation", "container"} and hello["container"] == container,
                  "setup-hello")
@@ -583,9 +643,10 @@ def run(root, run_id, label, context):
                     need(current == observation, "setup-loaded-changed")
                 # Independent live Mach-O UUID/hash binding before either SDK read.
                 need(h.admit_preflight(root, manifest, expected, observation) == support_path, "setup-root-changed")
+            diagnostic.enter("loaded-owner-proof")
             check(observation)
             try:
-                perform(label, source, terminal, transport, check)
+                perform(label, source, terminal, transport, check, diagnostic)
                 need(transport.child.wait(timeout=WAIT) == 0, "setup-transport-join")
                 lease()
             except BaseException:
@@ -602,6 +663,7 @@ def run(root, run_id, label, context):
 def main():
     outcome, category, code, label = "failed_evidence", "setup-refused", 1, None
     completed = False
+    diagnostic = SetupDiagnostic()
     try:
         parser = argparse.ArgumentParser(add_help=False)
         parser.add_argument("--root", required=True)
@@ -613,7 +675,7 @@ def main():
             signal.signal(number, h.setup_cancel)
         with os.fdopen(os.dup(3), "rb") as stream:
             context = strict(stream.read(CAP + 1))
-        result = run(args.root, args.run_id, label, context)
+        result = run(args.root, args.run_id, label, context, diagnostic)
         completed = True
         print(json.dumps(result, sort_keys=True))
         return 0
@@ -624,7 +686,8 @@ def main():
     except a.InputFailure as error:
         outcome, category = error.outcome, error.category
         code = 78 if outcome == "implementation_missing" else 1
-    except BaseException:
+    except BaseException as error:
+        diagnostic.emit(error)
         if completed:
             category = "publication-uncertain"
         # Never echo exception/SDK/private path/candidate data.
