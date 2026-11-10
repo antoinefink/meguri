@@ -366,6 +366,176 @@ extension ReviewCollectionStartupTests {
 }
 
 extension ReviewCollectionStartupTests {
+    #if DEBUG
+    @Test func corePhaseJoinsOriginalResultsAndFollowupsBeforeNextPolicyInput() async throws {
+        try await withP4OrderingCommands { commands in
+            let backend = SyncOwnerFake(), first = SyncOwnerGate(), followup = SyncOwnerGate()
+            let originalError = NSError(domain: "synthetic-p4-core-result", code: 37)
+            var order: [String] = [], returned: SyncCommandResult?
+            backend.executeCommand = { command in
+                if command.raw === commands.status.raw {
+                    await first.hold()
+                    let result = SyncCommandResult(outputs: [.commands([commands.record]), .syncNowUnavailable(.paused)],
+                        error: originalError, deferred: true)
+                    returned = result
+                    return result
+                }
+                #expect(command.raw === commands.record.raw)
+                order.append("followup.begin")
+                await followup.hold()
+                return .init(outputs: [], error: nil, deferred: false)
+            }
+            let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: nil)
+            await sync.preparePlatform(); await sync.completeOpenedHost(generation: 701)
+            await sync.prepareConnectionAuthority()
+            sync.observeCausalBoundary = { boundary, command in
+                guard let command else { return }
+                let label = command.raw === commands.status.raw ? "first" : "followup"
+                switch boundary {
+                case .commandResultEnqueue: order.append("\(label).enqueue")
+                case .commandAcknowledgementJoined: order.append("\(label).ack")
+                default: break
+                }
+            }
+            backend.routeInput = { event in
+                if case .network(false) = event { order.append("next.input") }
+                if case .refresh = event { return .commands([commands.status]) }
+                return .commands([])
+            }
+            sync.receive(.refresh(.cloud))
+            await first.waitUntilHeld()
+            sync.receive(.network(reachable: false))
+            // The result must cross the real queued ACK path, including its
+            // required core follow-up, before the already queued next input.
+            first.release()
+            await followup.waitUntilHeld()
+            #expect(!order.contains("next.input"))
+            followup.release()
+            await sync.waitForInputs(); await sync.drainOperations()
+            #expect(order == ["first.enqueue", "first.ack", "followup.begin", "followup.enqueue", "followup.ack", "next.input"])
+            #expect(sync.operationFailed && sync.failureRevision == 1 && sync.hasDeferredNativeWork)
+            #expect(sync.syncNowUnavailable == .paused)
+            let actual = try #require(returned)
+            #expect((actual.error as? NSError) === originalError && actual.outputs.count == 2)
+            if case .commands(let values) = actual.outputs[0] {
+                #expect(values.count == 1 && values.first?.raw === commands.record.raw)
+            } else { Issue.record("Original core follow-up lost") }
+            sync.observeCausalBoundary = nil
+            #expect(await sync.cancelAndDrain())
+        }
+    }
+
+    @Test func longFetchPreservesListOrderWhileLaterCoreAndImmediateStopProgress() async throws {
+        try await withP4OrderingCommands { commands in
+            let backend = SyncOwnerFake(), fetch = SyncOwnerGate(), terminal = SyncOwnerGate()
+            var order: [String] = [], stopRequested = false
+            let cancelled = SyncCommandResult(outputs: [.syncNowUnavailable(.paused)], error: CancellationError(), deferred: false)
+            backend.executeCommand = { command in
+                if command.raw === commands.fetch.raw {
+                    order.append("fetch.begin")
+                    await fetch.hold()
+                    #expect(stopRequested)
+                    order.append("fetch.cancelled")
+                    // Keep the original cancelled callback outstanding after
+                    // Stop has returned; no successor can overtake that return.
+                    await terminal.hold()
+                    order.append("fetch.return")
+                    return cancelled
+                } else if command.raw === commands.update.raw { order.append("list.successor") }
+                else if command.raw === commands.status.raw { order.append("later.core") }
+                else if command.raw === commands.stop.raw {
+                    order.append("stop.begin"); stopRequested = true; fetch.release()
+                }
+                else { Issue.record("Unexpected command identity") }
+                return .init(outputs: [], error: nil, deferred: false)
+            }
+            let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: nil)
+            await sync.preparePlatform(); await sync.completeOpenedHost(generation: 702)
+            await sync.prepareConnectionAuthority()
+            backend.nextCommands = [commands.fetch, commands.update]
+            sync.receive(.refresh(.cloud))
+            await fetch.waitUntilHeld()
+            backend.nextCommands = [commands.status]
+            sync.receive(.refresh(.cloud))
+            await sync.waitForInputs()
+            #expect(order == ["fetch.begin", "later.core"])
+            let stopped = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            sync.observeCausalBoundary = { boundary, command in
+                if case .commandAcknowledgementJoined = boundary, let command, command.raw === commands.stop.raw {
+                    stopped.continuation.yield(true)
+                }
+            }
+            backend.nextCommands = [commands.stop]
+            sync.receive(.network(reachable: false))
+            do {
+                try #require(try await serviceAppSignal(stopped.stream, stage: "P4 immediate stop"))
+            } catch {
+                fetch.release(); terminal.release()
+                _ = await sync.cancelAndDrain()
+                stopped.continuation.finish(); sync.observeCausalBoundary = nil
+                throw error
+            }
+            await terminal.waitUntilHeld()
+            #expect(order.contains("stop.begin") && !order.contains("fetch.return") && !order.contains("list.successor"))
+            terminal.release()
+            await sync.drainOperations()
+            let stoppedAt = try #require(order.firstIndex(of: "stop.begin"))
+            let returnedAt = try #require(order.firstIndex(of: "fetch.return"))
+            let successorAt = try #require(order.firstIndex(of: "list.successor"))
+            #expect(stoppedAt < returnedAt && returnedAt < successorAt)
+            stopped.continuation.finish(); sync.observeCausalBoundary = nil
+            #expect(cancelled.error is CancellationError && cancelled.outputs.count == 1)
+            // The scheduler preserves this unqualified original failure; it
+            // does not infer a successful result from the Stop action.
+            #expect(sync.operationFailed && sync.failureRevision == 1 && sync.syncNowUnavailable == .paused)
+            #expect(await sync.cancelAndDrain())
+        }
+    }
+
+    @Test func cleanupCorePreparationReleasesInputsButRetainsOriginalInventoryResultAndDrain() async throws {
+        try await withP4OrderingCommands { commands in
+            let backend = SyncOwnerFake(), inventory = SyncOwnerGate()
+            var order: [String] = []
+            backend.executeCoreCommand = { command, corePrepared in
+                #expect(command.raw === commands.cleanup.raw)
+                order.append("cleanup.local.return")
+                await corePrepared()
+                await inventory.hold()
+                order.append("inventory.return")
+                return .init(outputs: [.syncNowUnavailable(.notConnected)], error: nil, deferred: false)
+            }
+            backend.routeInput = { event in
+                if case .network(false) = event { order.append("later.input") }
+                if case .refresh = event { return .commands([commands.cleanup]) }
+                return .commands([])
+            }
+            let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: nil)
+            // Install routing after startup, so only the controlled input issues work.
+            let route = backend.routeInput; backend.routeInput = nil
+            await sync.preparePlatform(); await sync.completeOpenedHost(generation: 703)
+            await sync.prepareConnectionAuthority(); backend.routeInput = route
+            sync.observeCausalBoundary = { boundary, command in
+                if case .commandAcknowledgementJoined = boundary, let command, command.raw === commands.cleanup.raw {
+                    order.append("cleanup.final.ack")
+                }
+            }
+            sync.receive(.refresh(.cloud))
+            await inventory.waitUntilHeld()
+            sync.receive(.network(reachable: false)); await sync.waitForInputs()
+            #expect(order == ["cleanup.local.return", "later.input"])
+            backend.onClose = { order.append("close") }
+            let close = Task { await sync.cancelAndDrain() }
+            await backend.waitForQuiesce()
+            #expect(!backend.closed && !order.contains("inventory.return"))
+            inventory.release()
+            #expect(await close.value)
+            #expect(order == ["cleanup.local.return", "later.input", "inventory.return", "cleanup.final.ack", "close"])
+            #expect(sync.syncNowUnavailable == .notConnected && !sync.operationFailed)
+            sync.observeCausalBoundary = nil
+        }
+    }
+    #endif
+
     @Test(arguments: [false, true])
     func nativeMediaCancellationQualifierMappingPreservesOriginalResult(qualified: Bool) throws {
         let original = NSError(domain: "synthetic-media-result", code: 20)
@@ -533,4 +703,38 @@ extension ReviewCollectionStartupTests {
         throw error
     }
 }
+
+#if DEBUG
+private struct P4OrderingCommands {
+    let status: CloudPolicyCommand, record: CloudPolicyCommand, cleanup: CloudPolicyCommand
+    let fetch: CloudPolicyCommand, update: CloudPolicyCommand, stop: CloudPolicyCommand
+}
+
+// Actual issued handles, retained by the live harness. The fake replaces only
+// execution to control causal order; these tests make no native-admission claim.
+@MainActor private func withP4OrderingCommands(_ body: (P4OrderingCommands) async throws -> Void) async throws {
+    try await withShutdownHarness { harness in
+        let backend = try harness.backend
+        var observed: [CloudPolicyCommand] = []
+        backend.onCommands = { observed.append(contentsOf: $0) }
+        defer { backend.onCommands = nil }
+        try await harness.exchange(phase: .aBaseline)
+        await harness.sync.drainOperations()
+        harness.sync.setDeviceSettings(paused: false, automatic: true, media: true)
+        harness.sync.receive(.foreground)
+        await harness.sync.drainOperations()
+        harness.sync.setDeviceSettings(paused: true, automatic: true, media: true)
+        await harness.sync.drainOperations()
+        backend.onCommands = nil
+        let commands = P4OrderingCommands(
+            status: try #require(observed.first { if case .statusChanged = $0.action { true } else { false } }),
+            record: try #require(observed.first { if case .recordExchange = $0.action { true } else { false } }),
+            cleanup: try #require(observed.first { if case .runCleanup = $0.action { true } else { false } }),
+            fetch: try #require(observed.first { if case .requestFetch = $0.action { true } else { false } }),
+            update: try #require(observed.first { if case .updatePending = $0.action { true } else { false } }),
+            stop: try #require(observed.first { if case .stopEngine = $0.action { true } else { false } }))
+        try await body(commands)
+    }
+}
+#endif
 #endif

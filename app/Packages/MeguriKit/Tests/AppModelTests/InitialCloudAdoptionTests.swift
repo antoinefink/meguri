@@ -818,6 +818,7 @@ extension ReviewCollectionStartupTests {
                 case .commandAcknowledgementJoined: trace.record("command.ack.join.return", command: ordinal)
                 case .proofResultReduced: trace.record("proof.result.reduced")
                 case .proofAcknowledgementSending: trace.record("proof.ack.send")
+                case .ownCoreStarted: break
                 }
             }
             #endif

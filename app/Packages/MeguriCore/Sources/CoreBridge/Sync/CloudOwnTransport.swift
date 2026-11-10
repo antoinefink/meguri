@@ -329,6 +329,7 @@ public actor CloudOwnExecutor {
     }
 
     public func runNext(admission: CloudOwnWorkAdmission? = nil,
+                        performCore: @escaping @Sendable (@escaping @Sendable () async throws -> Void) async throws -> Void = { try await $0() },
                         beforeActivation: (@Sendable () async throws -> Void)? = nil,
                         afterActivation: (@Sendable () async -> Void)? = nil) async throws -> CloudConnectionProgress {
         #if DEBUG
@@ -340,7 +341,8 @@ public actor CloudOwnExecutor {
             debugWorkAttempt = probeAttempt
             defer { if debugWorkAttempt == probeAttempt { debugWorkAttempt = nil } }
             #endif
-            let progress = try await run { try await self.executeNext(admission: admission, beforeActivation: beforeActivation, afterActivation: afterActivation) }
+            let progress = try await run { try await self.executeNext(admission: admission, performCore: performCore,
+                beforeActivation: beforeActivation, afterActivation: afterActivation) }
             #if DEBUG
             DebugCloudPreviewProbe.ownWork.finish(probeAttempt, progress: progress)
             #endif
@@ -462,6 +464,7 @@ public actor CloudOwnExecutor {
     }
     #endif
     private func executeNext(admission: CloudOwnWorkAdmission?,
+                             performCore: @Sendable (@escaping @Sendable () async throws -> Void) async throws -> Void,
                              beforeActivation: (@Sendable () async throws -> Void)?,
                              afterActivation: (@Sendable () async -> Void)?) async throws -> CloudConnectionProgress {
         #if DEBUG
@@ -482,7 +485,7 @@ public actor CloudOwnExecutor {
             #if DEBUG
             recordWorkStage(.performLocal)
             #endif
-            try await core.performLocal(handle)
+            try await performCore { [core] in try await core.performLocal(handle) }
         case .own(let request, let command, _, let metadata):
             let identity = UUID()
             let observation = observe
@@ -632,7 +635,7 @@ public actor CloudOwnExecutor {
                 #if DEBUG
                 recordWorkStage(.adoptionValidation)
                 #endif
-                try await core.performAdoptionLocal(handle)
+                try await performCore { [core] in try await core.performAdoptionLocal(handle) }
             case .activate:
                 #if DEBUG
                 if beforeActivation != nil { recordWorkStage(.beforeActivation) }
@@ -644,7 +647,7 @@ public actor CloudOwnExecutor {
                     #if DEBUG
                     recordWorkStage(.adoptionActivation)
                     #endif
-                    try await core.performAdoptionLocal(handle)
+                    try await performCore { [core] in try await core.performAdoptionLocal(handle) }
                 } catch {
                     #if DEBUG
                     if afterActivation != nil { recordWorkStage(.afterActivation) }

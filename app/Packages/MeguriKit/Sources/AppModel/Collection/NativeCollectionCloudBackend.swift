@@ -100,7 +100,10 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
         return .commands(commands)
     }
     func execute(_ command: CloudPolicyCommand) async -> SyncCommandResult {
-        async let native = executor.execute(command)
+        await execute(command, corePrepared: {})
+    }
+    func execute(_ command: CloudPolicyCommand, corePrepared: @escaping @MainActor @Sendable () async -> Void) async -> SyncCommandResult {
+        async let native = executor.execute(command, corePrepared: corePrepared)
         if case .cancelBackgroundFlush = command.action { await own?.interruptAndDrain() }
         let result = await native
         return SyncCommandResult(result)

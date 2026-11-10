@@ -330,6 +330,9 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
         try await adapterDrain
     }
     public func execute(_ command: CloudPolicyCommand) async -> CloudPolicyNativeResult {
+        await execute(command, corePrepared: {})
+    }
+    public func execute(_ command: CloudPolicyCommand, corePrepared: @escaping @Sendable () async -> Void) async -> CloudPolicyNativeResult {
         var outputs: [CloudPolicyOutput] = []
         if !mediaHookInstalled {
             mediaHookInstalled = true
@@ -375,7 +378,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 outputs.append(try await policy.input(.refresh(.cloud)))
             case .runCleanup:
                 guard cleanupRun == nil else { throw CloudOwnTransportFailure.busy }
-                let task = Task { await self.performCleanup(command) }
+                let task = Task { await self.performCleanup(command, corePrepared: corePrepared) }
                 cleanupRun = task
                 defer { cleanupRun = nil; cleanupSDK = nil }
                 return await withTaskCancellationHandler {
@@ -487,7 +490,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
             return .init(outputs: outputs, error: error, deferred: false)
         }
     }
-    private func performCleanup(_ command: CloudPolicyCommand) async -> CloudPolicyNativeResult {
+    private func performCleanup(_ command: CloudPolicyCommand, corePrepared: @Sendable () async -> Void) async -> CloudPolicyNativeResult {
         do {
             try Task.checkCancellation()
             guard let worker = cleanupWorker else { throw BridgeError.cloudPolicy(.coreCapabilityUnavailable) }
@@ -497,6 +500,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
             // A failure here is a required-computation failure. Only a pass
             // returned by this exact qualified port permits the observation.
             let pass = try await permit.beginCleanupPass()
+            await corePrepared()
             var inventoryFailure: (any Error)?
             do { try await worker.run(pass) }
             catch { inventoryFailure = error }

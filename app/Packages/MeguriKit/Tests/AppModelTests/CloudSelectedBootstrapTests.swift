@@ -8,6 +8,80 @@ import Testing
 // Real CoreHost, coordinator, adapter and Service. Generated local data only;
 // transport execution uses the Service's actual original replies, never verdicts.
 extension ReviewCollectionStartupTests {
+    @Test func selectedPublicationRebindWaitsForOriginalStatusCoreAcknowledgement() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "synthetic-p4-publication-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bytes = try await selectedBootstrapSource(root: root).bytes
+        let service = root.appending(path: "service")
+        try FileManager.default.createDirectory(at: service, withIntermediateDirectories: false)
+        let process = try await CloudServiceProcess.open(stateDirectory: service)
+        let gate = SyncOwnerGate()
+        let statusHeld = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        defer { statusHeld.continuation.finish() }
+        var active: ServiceAppHarness?, publication: Task<Void, Never>?
+        do {
+            let wire = try ServiceWorkflowWire(process: process, directory: root.appending(path: "transport"))
+            let harness = try ServiceAppHarness(root: root.appending(path: "collection"), wire: wire)
+            active = harness
+            defer { harness.defaults.removePersistentDomain(forName: harness.suite) }
+            try FileManager.default.createDirectory(at: harness.root, withIntermediateDirectories: false)
+            try bytes.write(to: harness.root.appending(path: "collection.anki2"))
+            await harness.owner.start(); await harness.sync.prepareConnectionAuthority()
+            try await harness.owner.prepareCloudConnectionPreview()
+            await harness.sync.waitForConnectionPreview(); await harness.sync.drainOperations()
+            guard case .ready(_, let summary) = harness.sync.preview else { throw ServiceWorkflowFailure.wire }
+            try #require(summary.decision == .confirmUpload)
+            let backend = try harness.backend
+            var held: CloudPolicyCommand?, acknowledged = false, localStepsAfterHeld = 0
+            backend.beforeExecution = { command in
+                if case .statusChanged = command.action, held == nil {
+                    held = command
+                    statusHeld.continuation.yield(true)
+                    await gate.hold()
+                }
+            }
+            harness.sync.observeCausalBoundary = { boundary, command in
+                switch boundary {
+                case .commandAcknowledgementJoined:
+                    if let held, let command, command.raw === held.raw { acknowledged = true }
+                case .ownCoreStarted:
+                    if held != nil {
+                        localStepsAfterHeld += 1
+                        #expect(acknowledged, "Original StatusChanged ACK must precede publication's next local mutation")
+                    }
+                default: break
+                }
+            }
+            publication = Task { await harness.sync.confirmPublication() }
+            try #require(try await serviceAppSignal(statusHeld.stream, stage: "P4 original publication status held"))
+            #expect(!acknowledged && localStepsAfterHeld == 0)
+            let before = try await SelectedCloudControlInspection().current()
+            #expect(before.publicationComplete == nil && before.publicationDoneActive == nil)
+            gate.release()
+            await publication?.value
+            await harness.sync.waitForInputs(); await harness.sync.drainOperations()
+            #expect(acknowledged && localStepsAfterHeld > 0 && !harness.sync.operationFailed)
+            let published = try await SelectedCloudControlInspection().current()
+            #expect(published.status == .proven && published.provenance == .runtimeAcceptedPublication)
+            #expect(published.bindingMatchesEpoch == .proven && published.requiredScanComplete)
+            try #require(published.publicationComplete != nil && published.publicationDoneActive != nil)
+            backend.beforeExecution = nil; harness.sync.observeCausalBoundary = nil
+            try #require(await harness.owner.close())
+            let exit = await process.close()
+            try #require(exit.status == 0 && exit.joined && !exit.unexpectedOutput && !exit.ioFailed)
+            try #require(exit.diagnostics.isEmpty && !exit.diagnosticLimitExceeded)
+        } catch {
+            gate.release(); await publication?.value
+            if let active { await active.cleanupAfterServiceFailure() }
+            else {
+                let exit = await process.cancel()
+                #expect(exit.joined)
+            }
+            throw error
+        }
+    }
+
     @Test func selectedPublicationAndExistingPeerAdoptionUseOriginalControlsAndOwnedReplacement() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "synthetic-selected-bootstrap-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)

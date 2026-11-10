@@ -154,6 +154,9 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
         }
     }
     func execute(_ command: CloudPolicyCommand) async -> SyncCommandResult {
+        await execute(command, corePrepared: {})
+    }
+    func execute(_ command: CloudPolicyCommand, corePrepared: @escaping @MainActor @Sendable () async -> Void) async -> SyncCommandResult {
         commandSequence += 1
         let sequence = commandSequence
         let start = serviceAppUptimeMilliseconds()
@@ -161,7 +164,7 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
         trace("command.begin ordinal=\(sequence) action=\(label) elapsed_ms=0")
         if case .retryAssetEntries = command.action { assetRetryStarted += 1 }
         await beforeExecution?(command)
-        let result = await production.execute(command)
+        let result = await production.execute(command, corePrepared: corePrepared)
         await afterExecution?(command, result)
         trace("command.end ordinal=\(sequence) action=\(label) elapsed_ms=\(serviceAppUptimeMilliseconds() - start) error=\(result.error != nil) deferred=\(result.deferred)")
         for output in result.outputs { capture(output, stage: .executeOutputs) }

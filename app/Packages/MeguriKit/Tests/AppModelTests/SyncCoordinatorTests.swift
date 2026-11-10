@@ -779,6 +779,7 @@ final class SyncOwnerFake: SyncCoordinatorBackend {
     var routeInput: (@MainActor (CloudPolicyEvent) async throws -> CloudPolicyOutput)?
     var nextCommands: [CloudPolicyCommand] = []
     var executeCommand: (@MainActor (CloudPolicyCommand) async -> SyncCommandResult)?
+    var executeCoreCommand: (@MainActor (CloudPolicyCommand, @escaping @MainActor @Sendable () async -> Void) async -> SyncCommandResult)?
     private let executions = AsyncStream<Void>.makeStream()
     func waitForExecution() async { for await _ in executions.stream { return } }
     private let closes = AsyncStream<Void>.makeStream()
@@ -814,6 +815,10 @@ final class SyncOwnerFake: SyncCoordinatorBackend {
         let result = await executeCommand?(command) ?? .init(outputs: [], error: nil, deferred: false)
         executions.continuation.yield(())
         return result
+    }
+    func execute(_ command: CloudPolicyCommand, corePrepared: @escaping @MainActor @Sendable () async -> Void) async -> SyncCommandResult {
+        if let executeCoreCommand { return await executeCoreCommand(command, corePrepared) }
+        return await execute(command)
     }
     func beginAccountRead(transition: Bool) async throws -> UInt64 { UInt64(accountReads + 1) }
     func readAccount(_ read: UInt64) async -> SyncCommandResult {
