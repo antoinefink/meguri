@@ -290,3 +290,69 @@ One read-only reviewer, implementer view, against cloudkit-agent J3-J7, acceptan
 - J5.1: (1) each per-record result and own landed save needs its image seq (or whether it is at or above S_c) and the held flag; (2) define "while the exchange ran" as the original instance's records between the capture and the terminal result, in `record_seq` order; (3) state that every pair among those records must show the result first or the recovery check fails with `engine_order_not_shown`; also name batches as in J4.1 (1).
 
 Preserved and confirmed: no signed reset, no waiver, no product choice, `recovery_check` = `sync_now.exchange`, J5's account fences and deadlines, the fresh close order, original callback namespaces, and Q5 never filled from fresh accounting, durable rows, a `done` line or a new exchange. This is a review record, not an approval.
+
+## Second settling pass (2026-11-10, spec writer)
+
+Session `s-20261110T085429Z-165d83d3`, implementer view, at `origin/master` `927a7d19`. Uncommitted. Input: the HOLD list above and the master agent's decisions. Kept unchanged: no fresh SDK accounting import, no signed reset, `recovery_check` = `sync_now.exchange`, every account fence and deadline, the fresh close (cancellation/drain, join, `close.integrity`, Core close, `close.joined`), original callback namespaces. No waiver, signed-pass claim or `core/`/`app/` change. Both Status lines still read Under review; an independent check decides.
+
+Changed file: `specs/conformance/cloudkit-agent.md` (J4.1 and J5.1 only). Not changed: `cloudkit-acceptance.md`, `sync/policy.md`, `interop-vocab.txt` (`engine_order_not_shown` is already listed; no new interface name), and every pointer sentence.
+
+### J4.1
+
+| HOLD item | Applied | Where |
+|---|---|---|
+| (1) pairs per batch | A batch is the records of one sent-record-zone-changes event. Each per-record result carries its send's operation label and its batch label. A state save names batches (send and batch label). A pair is a result of batch B and the first state save of the same engine instance that names B; a save that names only other batches forms no pair with B's results. | J4.1 "Batches", "Pairs" first bullet |
+| (2) one derivation | The only derivation: inside the state-update handling, the agent reads the engine's pending record-zone changes. The save names B when that list no longer holds at least one record of B, not counting a record that the adapter removed through `UpdatePending` after the core built B. Journal order, nearby records, instants and later state never supply the list. | J4.1 "Reflected batches" |
+| (3) empty-list exemption, A6 `holds` | A result with no naming save needs no order only when no state save of its engine instance follows it in append order (for example, a kill). Any other unpaired result has a missing order and fails with `engine_order_not_shown`. A6 is `holds` only when its step logs show at least one pair, each with the result first. | J4.1 "Pairs" second bullet; "A6's entry" |
+| (4) reversed-order evidence source | Master's choice: in the signed test evidence path, the agent durably appends each engine observation, with the actual facts of that callback, before the delegate callback returns. This applies to the agent's step journal only. It changes no production callback timing, locking or journal. Append order is delivery order by construction. The J7-check gate is gone: a reversed pair is A6 `false`. | J4.1 "Shown order", "Reversed order" |
+| (5) ledger wording | A failed evidence check fills no ledger value. It is never `holds` or `false`, and Q7.6 allows no `unverified` for A6, so the run fails (Q7.4). The old wording, in which "A6's ledger entry" fails, is gone. | J4.1 "Failure", "A6's entry" |
+| (6) scope of "shows order" | Now "shows the order of two engine observations only when both belong to one engine instance". | J4.1 "Engine instances" |
+| (7) label nit | The HOLD list does not spell this out. Taken as making all label uniqueness rules use the same words: engine-instance, operation and batch labels are each never reused within one journal. This replaces "An operation label names one send only within one journal". | J4.1 "Batches" |
+| missing or reversed required pair | `engine_order_not_shown` when a required pair is missing or reversed, when an unpaired result has a missing order, or when a failed evidence check applies. A reversed pair is also A6's `false`. | J4.1 "Failure" |
+| buffering example | Now "one whose callback a kill ended before its append". | J4.1 "No order" third bullet |
+| J7 cases | Changed to batches. Added: a later batch after a save that names only an earlier batch; an unpaired result followed by a later save; a reused batch label; a journal with no pair. | J4.1 last paragraph |
+
+### J5.1
+
+| HOLD item | Applied | Where |
+|---|---|---|
+| (1) image seq or at-or-above-S_c fact, held flag | Each per-record result and own landed save that acknowledges an image carries the image's seq, or whether the image is at or above S_c, and whether the image was held. An entity counts as acknowledged only when that fact puts the image at or above S_c. It is held back when the held flag says so (P12.4's first row). | J5.1 "Q5 `results`" evidence list; item 1 |
+| (2) "while the exchange ran" | The original `agent_instance`'s records after its capture record and before its terminal-result record, in `record_seq` order. The clause "when the original process journaled it" is dropped: a missing capture already fails the check. | J5.1 "Q5 `results`" second sentence |
+| (3) required pairs, batches | Every pair that a per-record result among those records requires must show the result first. Otherwise the recovery check fails with `engine_order_not_shown`. State saves and per-record results name batches. | J5.1 "Q5 `results`", end of first paragraph; "What the original process leaves" paragraph |
+| (3) P12.4-row facts in the missing-records clause | The failure clause now also covers: a missing own landed save; the image seq (or at-or-above-S_c fact) or held flag of a counted acknowledgement; the facts that place a selected entity in its other P12.4 row, or an incoming entry in its row. | J5.1, paragraph after item 2 |
+| J7 cases | Added: an acknowledgement without its image seq or held flag; a missing or reversed required pair. | J5.1 last paragraph |
+
+### Pointer sentences
+
+The HOLD list names no pointer nit. The independent check found the J4, J3.2, Q7.3, Q7.5 and Q7.6 pointers approvable together with their targets. They and both Status lines are unchanged.
+
+### Choices made within the direction (for the independent check)
+
+- J5.1 pairs: the state save that a result in the exchange window needs may come after the terminal-result record. It is taken from the original process's records, not only from the window. Otherwise an exchange whose last state save follows its terminal result would fail.
+- A6's "at least one pair" is judged over all the step logs that the entry is judged from in that run (Q7.6). It is not judged per leg.
+
+### Open: needs a decision, not applied
+
+1. **Batches that no derivation names (likely to fail valid runs).** Under item (2)'s derivation, no state save names a batch while every record of that batch is still in, or back in, the engine's pending list when the state update is read. Two causes:
+   - every result of the batch is an error the engine retries itself (K12.4 "Failed saves": for example `networkUnavailable` or `requestRateLimited`);
+   - the adapter added every name back before that read (a Saved result that leaves the entity pending, or a `batchRequestFailed` or `limitExceeded` add-back, K12.3 and K12.4).
+
+   Under item (3), such a result in an engine instance that saves state again fails with `engine_order_not_shown`. The `engine` leg's manual calls with the VM offline and while throttled (Q7.5) are likely to produce such results. Options:
+   - (a) such a batch needs no pair, because its results leave nothing in the saved state to reflect;
+   - (b) keep the failure;
+   - (c) choose another derivation.
+
+   Each one decides what A6 evidence counts, so it is not a wording fix.
+2. **Delivery order "by construction".** The append-before-return rule gives delivery order only if one engine instance delivers its next callback after the previous one has returned. A6 says the callback "may await durable persistence before returning", but no contract text says that delivery is serial. If it is not, a statement or an assumption is needed. That is a contract addition, not made here.
+3. **Item (7).** The interpretation above needs confirmation from the reviewer who raised it.
+
+## Independent check of the second settling pass (2026-11-10): HOLD
+
+One read-only reviewer, implementer view (plus the CloudKit SDK headers for event delivery). Resolved from the first HOLD: J4.1 batches, the reversed-order evidence (append before the callback returns, signed test path only, J7 gate removed), the shown-order scope; J5.1 image seq or at-or-above-S_c fact, held flag, the capture-to-terminal window and required pairs. Pointer sentences and both Status lines: approvable together with their targets. Still blocking:
+
+- B1 (J4.1, inherited by J5.1; owner choice): batches no state save names make valid runs fail: all results are errors the engine keeps pending (K12.4), adapter add-backs after the sent handler, and, read literally, the `UpdatePending` exclusion also catches a cleanly Saved name, so an ordinary batch may never be named. Proposed fix: (a) count a name removed through `UpdatePending` only if the engine's list still held it at removal; (b) do count a record the list holds only because of an adapter add made after B's sent event returned; (c) a batch whose every result is an error the engine keeps pending needs no pair.
+- B2 (J4.1 "A6's entry"): a reversed pair is both A6 `false` and a failed check with no value; say `engine_order_not_shown` other than a reversed pair fills no value, and a reversed pair is `false`.
+- B3 (J4.1 "A6's entry"): "at least one pair" fails valid `--leg` runs without engine sends; require the pair in the `engine` leg's step logs only, a run without that leg fills no A6 value, other legs only add pairs.
+- Minor, same pass: M1 cite `sync/cloudkit-recovery` V3.1 rule 2 and V10.2 after "by construction" (serial delivery is in force, so the remaining gap is not an assumption); M2 classify a reused engine-instance, operation or batch label as a failed evidence check; M3 J5.1 "other P12.4 outcomes (clean, dropped unsent, blocked, outstanding)". Risk to note: the live pending list may change before the state serialization, which J7's adapter-event-order test should exercise.
+
+Nothing is approved; all named parts stay Under review (R2066).
