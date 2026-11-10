@@ -270,3 +270,46 @@ The initial publication SDK reconfiguration failure remains open.
 Full admitted-runtime recovery, historical Mac ACK, process exchange recovery,
 append-failure handling, corruption checks and signed execution remain pending.
 No Unit or gate acceptance is claimed.
+
+## Held Query snapshot repair, source only
+
+Main-checkout starting commit: `a6f79affa517316f609f8a414a3cbaa9fa3ae3b5`.
+Filtered export: `cleanroom/20261110T143613Z-11104`; its synthetic baseline
+is `96736b65ca128c838d994a1c9eb6af99e8b4c419`.
+The fixed-edit witness helper now accepts the caller's actual held snapshot
+WalIdentity and Seq instead of reacquiring the single Query reader or sampling
+last_seq for its observation input. The FFI caller supplies its existing identity
+and snapshot.seq(); the actual edit Seq still comes separately from OpResult.
+The caller retains its reader/snapshot, and WAL, native-file, sequence,
+generation, binding, owner, payload, revision, digest and final rechecks remain.
+All internal callsites were updated. A focused case reuses the existing fixture
+to retain a Query snapshot across a real later commit and require stale-frontier
+refusal without changing that snapshot or the committed sequence.
+Verification is pending: no builds or tests ran in this repair. The integrator
+owns the existing process positive/negative and new focused case, MG checks,
+independent review and provenance/privacy/similarity checks. No pass is claimed.
+
+Integrator verification after the repair:
+
+- `core-test/20261110T143812Z-39202`: all three selected cases pass. The
+  bound original-edit process-kill case completes in 0.335 seconds; the retained
+  failure took 20 seconds at waitEdit. Unwitnessed recovery still refuses, and
+  the held Query snapshot refuses a later committed frontier.
+- `swift-test/20261110T143852Z-55903`: both real Core/Service fresh-owner
+  recovery cases pass, including exact issued exchange accounting and retained
+  peer adoption. Initial publication succeeds in this run; that does not prove
+  the earlier SDK reconfiguration failure's cause or repair.
+- `swift-test/20261110T144053Z-91766`: five tests pass, including both manual
+  and earlier-automatic ACK cases of the original peer-apply regression, plus
+  the restoration parser and Mac exchange-recovery refusal.
+- Independent reader-cycle repair review finds no P0–P2 issues. Both independent
+  coordinator reviews are separate from these source checks.
+- `private/20261110T144005Z-75764` passes for source and coordinator inputs.
+- `similarity/20261110T144134Z-98823` passes for the three changed Rust files.
+- `core-lint/20261110T144134Z-98404` fails: the helper now exceeds the
+  argument-count limit. A follow-up will group the held snapshot identity and
+  sequence; no lint suppression is authorized or needed.
+
+The earlier initial-publication failure remains retained and unexplained.
+Historical Mac ACK recovery, full runtime/corruption coverage, signed execution
+and the original-base integration gate remain pending. No unit acceptance.

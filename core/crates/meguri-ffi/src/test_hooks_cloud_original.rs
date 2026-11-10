@@ -720,6 +720,8 @@ impl CloudOriginalRole {
                                             .as_slice()
                                             .try_into()
                                             .map_err(|_| invalid())?,
+                                        identity,
+                                        snapshot.seq(),
                                         seq,
                                         digest,
                                     ),

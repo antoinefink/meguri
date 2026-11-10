@@ -394,6 +394,46 @@ fn original_observation_rechecks_file_account_publication_and_runtime_guard_afte
 }
 
 #[test]
+fn original_edit_witness_refuses_a_held_snapshot_frontier_after_a_commit() {
+    let fixture = Fixture::new();
+    {
+        let reader = fixture.collection.reader(ReaderRole::Query).unwrap();
+        let snapshot = reader.snapshot().unwrap();
+        let identity = snapshot.wal_identity();
+        let snapshot_seq = snapshot.seq();
+        let digest = payload(&*snapshot, fixture.id).payload_digest().unwrap();
+        let edited = meguri_engine::notes::update(
+            &fixture.collection,
+            meguri_engine::notes::UpdateNote {
+                id: fixture.id,
+                fields: vec!["Later committed question".into(), "Original answer".into()],
+                tags: vec!["retained-tag".into()],
+            },
+            meguri_engine::OpSource::UserUndoable,
+        )
+        .unwrap();
+        assert!(edited.value.written);
+        assert!(edited.seq > snapshot_seq);
+        assert!(matches!(
+            fixture.runtime.original_edit_witness_for_testing(
+                &fixture.collection,
+                fixture.id.0,
+                fixture.original.payload_digest().unwrap(),
+                identity,
+                snapshot_seq,
+                edited.seq,
+                digest,
+            ),
+            Err(RuntimeError::StaleIncarnation)
+        ));
+        assert_eq!(snapshot.seq(), snapshot_seq);
+        assert_eq!(payload(&*snapshot, fixture.id).payload_digest().unwrap(), digest);
+        assert_eq!(fixture.collection.last_seq(), edited.seq);
+    }
+    fixture.host.close().unwrap();
+}
+
+#[test]
 fn incoming_read_uses_durable_receipt() {
     let fixture = Fixture::new();
     fixture.collection.pause_automatic_wal_flush_for_testing(true);

@@ -682,25 +682,28 @@ impl Runtime {
         )
     }
     /// Only the actual fixed-edit post-flush path calls this with its actual
-    /// receipt seq and baseline capability. No product decision consumes it.
+    /// edit seq, baseline capability and held snapshot facts. The caller retains
+    /// its reader/snapshot through this read. No product decision consumes it.
     pub fn original_edit_witness_for_testing(
         &self,
         collection: &Collection,
         id: i64,
         baseline: [u8; 32],
-        seq: Seq,
+        identity: meguri_engine::WalIdentity,
+        snapshot_seq: Seq,
+        edit_seq: Seq,
         digest: [u8; 32],
     ) -> Result<[u8; 32], RuntimeError> {
         let (entity, _) = self.original_note_observation_for_testing(
             collection,
             id,
-            collection.reader(ReaderRole::Query)?.snapshot()?.wal_identity(),
-            collection.last_seq(),
+            identity,
+            snapshot_seq,
             digest,
         )?;
         let (snapshot, control) = self.selected_owned_snapshot(collection)?;
         let b = snapshot.bound.as_ref().ok_or(Error::RecoveryRefused)?;
-        if entity.observed_seq != seq.0 || entity.local_rev == 0 || entity.observer_open != b.open_counter {
+        if entity.observed_seq != edit_seq.0 || entity.local_rev == 0 || entity.observer_open != b.open_counter {
             return Err(Error::RecoveryRefused.into());
         }
         let witness = Self::edit_correlation(&b.binding, b.file, &entity, baseline)?;
