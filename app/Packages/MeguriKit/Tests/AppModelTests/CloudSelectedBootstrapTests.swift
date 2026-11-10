@@ -175,6 +175,9 @@ extension ReviewCollectionStartupTests {
             await b.owner.waitForCloudActivation()
             await b.sync.prepareConnectionAuthority()
             await b.sync.waitForInputs()
+            if b.sync.operationFailed || b.owner.generation == old {
+                print("selected-adoption-progress \(DebugCloudPreviewProbe.ownWork.adoptionProgressTag) stage=\(DebugCloudPreviewProbe.ownWork.lastEnteredWorkStageTag ?? "none")")
+            }
             try #require(b.owner.state == .ready && b.owner.generation > old && !b.sync.operationFailed)
             let adopted = try await SelectedCloudControlInspection().current()
             try #require(adopted.generation == b.owner.generation && adopted.status == .proven)

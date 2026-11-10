@@ -44,6 +44,19 @@ actor ServiceSDK: CloudKitEngine {
     private let wire: ServiceWorkflowWire
     private let lifetime = CloudKitNetworkLifetime()
     private var serialization: Serialization
+    private let automaticallySync: Bool
+    private let collectionZone: String
+    private var pendingRevision: [String: UInt64] = [:]
+    private var revision: UInt64 = 0
+    // This is the SDK's network slot, not the application's policy/input lane.
+    private var networkActive = false
+    private var networkWaiters: [CheckedContinuation<Void, Never>] = []
+    private var automaticRequested = false
+    private var automaticRun: (id: UUID, drain: Task<Void, Never>)?
+    private(set) var automaticRuns = 0
+    private(set) var batchRequests = 0
+    private(set) var emptyBatchRequests = 0
+    private nonisolated enum SendResult: Sendable, Equatable { case empty, sent, failed }
     private var pending: [String: CloudPendingChange] = [:]
     private var eventActive = false
     private var eventWaiters: [CheckedContinuation<Void, Never>] = []
@@ -51,6 +64,11 @@ actor ServiceSDK: CloudKitEngine {
     private var cancelled = false
     private var released = false
     private var nextSentResult: (zone: String?, hold: @Sendable () async -> Void)?
+    private var nextSentHandlerReturn: (@Sendable () async -> Void)?
+    private var nextCancellation: (@Sendable () -> Void)?
+    func holdNextSentHandlerReturn(_ hold: @escaping @Sendable () async -> Void) { nextSentHandlerReturn = hold }
+    func inspectNextCancellation(_ inspect: @escaping @Sendable () -> Void) { nextCancellation = inspect }
+    var automaticSchedulingEnabled: Bool { automaticallySync }
     private(set) var deliveredSentBatches: [ServiceSentBatch] = []
     private(set) var heldSentBatchID: UInt64?
     private(set) var heldSentZone: String?
@@ -62,27 +80,87 @@ actor ServiceSDK: CloudKitEngine {
     }
     init(configuration: CloudEngineConfiguration, delegate: any CloudKitEngineDelegate, wire: ServiceWorkflowWire) throws {
         instanceID = configuration.instanceID; self.delegate = delegate; self.wire = wire
+        automaticallySync = configuration.automaticallySync
+        collectionZone = configuration.collectionZone
         serialization = try configuration.serialization.map { try JSONDecoder().decode(Serialization.self, from: $0) } ?? Serialization()
         for (name, value) in serialization.pending {
             guard value == "save" || value == "delete" else { throw ServiceWorkflowFailure.wire }
             pending[name] = value == "save" ? .save : .delete
+            pendingRevision[name] = 0
         }
     }
     func pendingRecordZoneChanges() async -> [String: CloudPendingChange] { pending }
     func pendingDatabaseChanges() async -> Set<String> { [] }
     func removePendingDatabaseChanges() async {}
     func applyPendingUpdate(_ update: CloudPendingUpdate) async throws {
-        for name in update.removes { pending.removeValue(forKey: name) }
-        pending.merge(update.adds) { _, next in next }
+        revision &+= 1
+        for name in update.removes { pending.removeValue(forKey: name); pendingRevision.removeValue(forKey: name) }
+        for (name, change) in update.adds { pending[name] = change; pendingRevision[name] = revision }
+        if !update.adds.isEmpty { automaticRequested = true; scheduleAutomaticSend() }
     }
-    private func deliver(_ event: CloudEngineEvent, removing: [String] = []) async throws {
+    private func removePending(_ names: [String], issued: [String: UInt64]) {
+        for name in names where pendingRevision[name] == issued[name] {
+            pending.removeValue(forKey: name); pendingRevision.removeValue(forKey: name)
+        }
+    }
+    private func scheduleAutomaticSend() {
+        guard automaticallySync, automaticRequested, automaticRun == nil,
+              !eventActive, !networkActive, !cancelled, !released, delegate != nil else { return }
+        let generation = lifetime.authority(), id = UUID()
+        do {
+            // admit owns a detached task: no SDK-handler task locals reach Core
+            // or the wire. Cancellation joins this original task and callbacks.
+            let operation = try lifetime.admit(cancelSDK: { await self.cancelSDKCalls() }) {
+                try await self.runAutomaticSend(generation: generation)
+            }
+            let drain = Task.detached { [self] in
+                _ = try? await operation.drain()
+                await automaticFinished(id)
+            }
+            automaticRuns += 1
+            automaticRun = (id, drain)
+        } catch { automaticRequested = false }
+    }
+    private func runAutomaticSend(generation: UInt64) async throws {
+        // A successful real batch is progress; nil or any failure ends the run.
+        // Never poll pending names or retry failed records on a clock.
+        defer { automaticRequested = false }
+        while true {
+            automaticRequested = false
+            let result = try await invokeSend(zones: [collectionZone, "meguri-media"],
+                generation: generation, prepare: {}, validate: {})
+            guard result == .sent, !pending.isEmpty else { return }
+        }
+    }
+    private func automaticFinished(_ id: UUID) {
+        guard automaticRun?.id == id else { return }
+        automaticRun = nil
+        scheduleAutomaticSend() // only an actual update arriving after the run ended
+    }
+    // Observation joins the original SDK run; it never starts one.
+    func waitForAutomaticSend() async { await automaticRun?.drain.value }
+    private func acquireNetwork() async throws {
+        if networkActive { await withCheckedContinuation { networkWaiters.append($0) } }
+        else { networkActive = true }
+        do { try requireNetwork() }
+        catch { releaseNetwork(); throw error }
+    }
+    private func releaseNetwork() {
+        if networkWaiters.isEmpty { networkActive = false }
+        else { networkWaiters.removeFirst().resume() }
+    }
+    private func deliver(_ event: CloudEngineEvent, removing: [String] = [], issued: [String: UInt64] = [:]) async throws {
         guard let delegate else { throw ServiceWorkflowFailure.refused }
         if eventActive { await withCheckedContinuation { eventWaiters.append($0) } }
         else { eventActive = true; lifetime.beginEvent() }
         await delegate.eventWillDeliver(engine: self)
         await delegate.handleEvent(event, engine: self)
+        if case .sent = event, let hold = nextSentHandlerReturn {
+            nextSentHandlerReturn = nil
+            await hold()
+        }
         // SDK successful removals happen after the original handler returns.
-        for name in removing { pending.removeValue(forKey: name) }
+        removePending(removing, issued: issued)
         await delegate.eventHandlerReturned(event, engine: self)
         if eventWaiters.isEmpty {
             eventActive = false; lifetime.endEvent()
@@ -90,6 +168,7 @@ actor ServiceSDK: CloudKitEngine {
             for waiter in waiting { waiter.resume() }
         } else { eventWaiters.removeFirst().resume() }
         await delegate.eventBookkeepingCompleted(event, engine: self)
+        scheduleAutomaticSend()
     }
     func waitForEventBookkeeping() async throws {
         while eventActive { await withCheckedContinuation { bookkeepingWaiters.append($0) } }
@@ -97,24 +176,37 @@ actor ServiceSDK: CloudKitEngine {
     }
     func prepareSend(zones: [String]) async throws -> CloudKitNetworkEnqueue {
         try await waitForEventBookkeeping()
+        guard !released else { throw ServiceWorkflowFailure.refused }
         cancelled = false
         let lifetime = lifetime, generation = lifetime.authority()
         return CloudKitNetworkEnqueue { prepare, validate in
             try lifetime.admit(cancelSDK: { await self.cancelSDKCalls() }) {
-                try await self.invokeSend(zones: zones, generation: generation, prepare: prepare, validate: validate)
+                _ = try await self.invokeSend(zones: zones, generation: generation, prepare: prepare, validate: validate)
             }
         }
     }
     private func invokeSend(zones: [String], generation: UInt64, prepare: @Sendable () async throws -> Void,
-                            validate: @Sendable () throws -> Void) async throws {
+                            validate: @Sendable () throws -> Void) async throws -> SendResult {
+        try await waitForEventBookkeeping()
+        try await acquireNetwork()
+        var outcome: SendResult?
+        defer {
+            if outcome == .sent { automaticRequested = true }
+            else { automaticRequested = false }
+            releaseNetwork()
+            scheduleAutomaticSend()
+        }
         repeat { try await waitForEventBookkeeping() } while eventActive
         try await prepare()
         repeat { try await waitForEventBookkeeping() } while eventActive
         try lifetime.enqueue(generation: generation, validate: validate, begin: {})
-        try await sendChanges(zones: zones)
+        let result = try await sendPass(zones: zones)
+        outcome = result
+        return result
     }
     func prepareFetch(options: CloudFetchOptions) async throws -> CloudKitNetworkEnqueue {
         try await waitForEventBookkeeping()
+        guard !released else { throw ServiceWorkflowFailure.refused }
         cancelled = false
         let lifetime = lifetime, generation = lifetime.authority()
         return CloudKitNetworkEnqueue { prepare, validate in
@@ -125,22 +217,38 @@ actor ServiceSDK: CloudKitEngine {
     }
     private func invokeFetch(options: CloudFetchOptions, generation: UInt64, prepare: @Sendable () async throws -> Void,
                              validate: @Sendable () throws -> Void) async throws {
+        try await waitForEventBookkeeping()
+        try await acquireNetwork()
+        defer { releaseNetwork(); scheduleAutomaticSend() }
         repeat { try await waitForEventBookkeeping() } while eventActive
         try await prepare()
         repeat { try await waitForEventBookkeeping() } while eventActive
         try lifetime.enqueue(generation: generation, validate: validate, begin: {})
-        try await fetchChanges(options: options)
+        try await fetchPass(options: options)
     }
     private func requireNetwork() throws {
         guard !eventActive, !cancelled, !released, delegate != nil else { throw ServiceWorkflowFailure.refused }
         try Task.checkCancellation()
     }
     func sendChanges(zones: [String]) async throws {
+        let prepared = try await prepareSend(zones: zones)
+        try await prepared.enqueue(validate: {}).drain()
+    }
+    private func sendPass(zones: [String]) async throws -> SendResult {
         try requireNetwork()
+        var result = SendResult.empty
         let delegate = try serviceRequired(delegate)
-        for zone in zones {
+        for zone in zones where zone == collectionZone || zone == "meguri-media" {
+            try requireNetwork()
             try await deliver(.willSend(zone: zone))
-            if let batch = await delegate.nextRecordZoneChangeBatch(pending: pending, zone: zone, engine: self) {
+            try requireNetwork()
+            batchRequests += 1
+            let scoped = pending.filter { NativeCloudMediaBatch.zone(name: $0.key, collection: collectionZone) == zone }
+            let issued = pendingRevision
+            if let batch = await delegate.nextRecordZoneChangeBatch(pending: scoped, zone: zone, engine: self) {
+                try requireNetwork()
+                guard !batch.saves.isEmpty || !batch.deletes.isEmpty else { throw ServiceWorkflowFailure.wire }
+                if result != .failed { result = .sent }
                 if zone == "meguri-media" {
                     guard let admission = batch.mediaAdmission, try await admission.deliver(batch) != nil else {
                         throw ServiceWorkflowFailure.refused
@@ -149,6 +257,7 @@ actor ServiceSDK: CloudKitEngine {
                 let changes = try await batch.saves.asyncServiceInputs(wire: wire) + batch.deletes.map {
                     ServiceJSON.object(["Delete": .object(["name": .string($0)])])
                 }
+                try requireNetwork()
                 let original = try await wire.modify(zone: zone, changes: changes, instance: instanceID)
                 var saved: [CloudRecord] = [], failed: [CloudRecordFailure] = [], deleted: [String] = []
                 var leases: [CloudMediaStagedAsset] = []
@@ -176,7 +285,9 @@ actor ServiceSDK: CloudKitEngine {
                             server = row.record(zone: zone, lease: lease)
                         }
                         failed.append(.init(name: name, code: code, zone: zone, serverRecord: server))
-                        pending.removeValue(forKey: name)
+                        // Service's per-record errors are non-retained SDK
+                        // outcomes; Core may hand the name back after ACK.
+                        removePending([name], issued: issued)
                     } else { throw ServiceWorkflowFailure.wire }
                 }
                 try await wire.recordReceipts(original, zone: zone)
@@ -187,18 +298,26 @@ actor ServiceSDK: CloudKitEngine {
                     heldSavedNames = saved.map(\.name)
                     await held.hold()
                 }
-                try await deliver(.sent(batchID: batch.id, saved: saved, failed: failed, deleted: deleted), removing: saved.map(\.name) + deleted)
+                try await deliver(.sent(batchID: batch.id, saved: saved, failed: failed, deleted: deleted),
+                    removing: saved.map(\.name) + deleted, issued: issued)
                 deliveredSentBatches.append(.init(zone: zone, id: batch.id))
-            }
+                if !failed.isEmpty { result = .failed }
+            } else { emptyBatchRequests += 1 }
             try await deliver(.didSend(zone: zone))
+            if result == .failed { break }
         }
         try await saveSerialization()
+        return result
     }
     private func saveSerialization() async throws {
         serialization.pending = pending.mapValues { $0 == .save ? "save" : "delete" }
         try await deliver(.stateUpdate(JSONEncoder().encode(serialization)))
     }
     func fetchChanges(options: CloudFetchOptions) async throws {
+        let prepared = try await prepareFetch(options: options)
+        try await prepared.enqueue(validate: {}).drain()
+    }
+    private func fetchPass(options: CloudFetchOptions) async throws {
         try requireNetwork()
         let delegate = try serviceRequired(delegate)
         let scoped = await delegate.nextFetchChangesOptions(options, engine: self)
@@ -206,6 +325,7 @@ actor ServiceSDK: CloudKitEngine {
         try await deliver(.willFetch(groupID: scoped.groupID, reason: .manual))
         var moreDatabase = true
         while moreDatabase {
+            try requireNetwork()
             let original = try await wire.database(cursor: serialization.database, instance: instanceID)
             let page = try serviceRequired(try original.ok()["DatabaseChanges"])
             let changes = try serviceRequired(page["changes"]?.items)
@@ -222,6 +342,7 @@ actor ServiceSDK: CloudKitEngine {
             try await deliver(.willFetchZone(zone: zone))
             var more = true, zoneError: CloudEngineErrorCode?
             while more {
+                try requireNetwork()
                 let original = try await wire.fetch(zone: zone, cursor: serialization.zones[zone], instance: instanceID)
                 if let error = original.result["Err"] { zoneError = try Self.errorCode(error); break }
                 let page = try serviceRequired(try original.ok()["ZoneChanges"])
@@ -256,12 +377,19 @@ actor ServiceSDK: CloudKitEngine {
         default: throw ServiceWorkflowFailure.wire
         }
     }
-    private func cancelSDKCalls() { cancelled = true }
+    private func cancelSDKCalls() {
+        cancelled = true
+        let inspect = nextCancellation; nextCancellation = nil
+        inspect?()
+    }
     func cancelOperations() async {
         let originals = lifetime.beginCancellation()
         defer { lifetime.endCancellation() }
         cancelSDKCalls()
+        automaticRequested = false
+        let automatic = automaticRun?.drain
         for operation in originals { await operation.cancelAndDrain() }
+        await automatic?.value
     }
     func release() async {
         lifetime.retire()
