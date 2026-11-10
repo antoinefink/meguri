@@ -366,3 +366,11 @@ id
 aria-label
 aria-hidden
 focusable
+
+# Public Apple native accessibility interfaces used by D4/D12; Anki: none.
+AXIdentifier
+AXDOMIdentifier
+AXUIElementCopyAttributeValue
+kAXDOMIdentifierAttribute
+AXUIElementPerformAction
+kAXPressAction

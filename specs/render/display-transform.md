@@ -47,6 +47,24 @@ ID uses `review.card.replay.` followed by the displayed document side (`q` or `a
 
 `Play audio` is Meguri's own default accessible copy for the standalone display transform. In the native card page, use the existing CardRendering `CardBehavior.xcstrings` catalog and `String(localized:table:bundle:)` pipeline to supply its localized form through the narrow `CardRuntime.pageDocument` configuration. The runtime applies that label only to controls positively identified as transform-generated through transform/host metadata or an equally safe existing ownership mechanism. The `data-meguri-replay` marker is a locator, not ownership proof. Authored lookalikes remain untouched even when they use matching classes, markers or ID prefixes. Apply the final generated-control labels before card readiness, interaction or accessibility exposure. Use text/attribute assignment, not HTML interpolation. Do not add a locale subsystem to `RenderHost`, rewrite user-authored controls or create a new page-world global. The SVG is decorative; its geometry contributes no separate accessible name or focus target.
 
+On macOS, identify each actual native WebKit replay link through its public
+`AXDOMIdentifier`, read with `AXUIElementCopyAttributeValue` and
+`kAXDOMIdentifierAttribute`. Require a successful string value equal to the
+trusted transform-emitted ID and exactly one matching link in the owned page.
+This is a native AX observation, not a JavaScript DOM lookup. Retain raw
+`AXIdentifier` and raw `AXDOMIdentifier` separately; the former may be empty.
+Never alias, fill or normalize either field from the other. Names, ordinals,
+frames and hit points cannot substitute for identity. An unsupported, missing,
+wrong-type, duplicate or stale native web identity fails the check.
+
+Capture and revalidate the actual page/card/generation/side binding under
+`render/card-behaviors` B1/B3. Generated ownership still requires D4's trusted
+metadata; marker classes and ID prefixes do not prove it. Native activation
+uses `AXUIElementPerformAction` with `kAXPressAction` on that same actual AX link,
+with existing document/frame/origin and bridge checks intact. Add no proxy leaf,
+JavaScript activation or action retry. This macOS observation rule establishes
+no iOS/iPadOS mapping and changes none of their native identity obligations.
+
 These attributes extend only Meguri-generated replay markup. Keep the existing classes, graphic, card CSS and native play action. Preserve AV lists, exact command text (including repeated commands and leading zeroes), marker order, TTS replacement and hidden-button behavior. Comparable render HTML and user-authored styling remain unchanged. This is required control naming/identification, not the optional VoiceOver cursor/speech follow-up. R1965 hierarchy checks remain in force; this change grants no ruby, geometry, hit-target, missing-ID or card-content audit exception.
 
 ACTION:
@@ -134,4 +152,16 @@ Focused generated-control checks:
 - `generated_replay_controls_have_names_and_unique_deterministic_ids`: verify nonempty default labels, decorative SVG and per-document IDs on both platforms, including repeated identical markers, FrontSide repeated twice, leading-zero commands and authored-ID collision. Rerendering preserves IDs and exact play-command order.
 - `generated_replay_accessibility_preserves_display_contract`: hidden controls and TTS create no replay element; comparable HTML, user-authored HTML/IDs/styles, AV lists, graphic and native messages remain unchanged. Preserve the existing no-backtick/no-`${` checks for generated display markup.
 - `native_generated_replay_controls_use_catalog_localization`: the final native page exposes catalog-localized names before readiness; quote/ampersand/non-ASCII copy stays plain attribute text and creates no extra HTML or script. Preserve authored marker-lookalike anchors with matching replay classes, `data-meguri-replay` and reserved-looking IDs; only positively identified transform-generated controls receive localized labels.
-- `native_generated_replay_controls_are_named_and_identified_in_webkit_hierarchy`: with multiple sounds and repeated FrontSide, verify distinct stable identifiers, meaningful localized labels and activation of the exact intended command in the actual native WebKit accessibility hierarchy. DOM `id` or `aria-label` assertions alone do not establish R1964 compliance. Keep the hierarchy checker and its ruby/geometric findings unchanged; classify unrelated findings separately.
+- `native_generated_replay_controls_are_named_and_identified_in_webkit_hierarchy`: with multiple sounds and repeated FrontSide, verify distinct stable identifiers, meaningful localized labels and activation of the exact intended command in the actual native WebKit accessibility hierarchy. DOM `id` or `aria-label` assertions alone do not establish R1964 compliance. On macOS use D4's exact native web-identity rule and the same AX link's native press; preserve twenty exact command activations over question/answer/question/answer, including repeated commands, leading zeroes and authored-ID collision/name preservation. Keep the existing bounded publication readiness, localized names, keyboard ownership and all geometry/ruby/hit-target checks.
+
+The macOS native hierarchy export and structural driver must expose and consume
+that same raw web-identity field, alongside the actual raw AXIdentifier/XCTest
+identifier. Report the observed XCTest value verbatim and read the native tree
+from AX, never from the DOM. The checker must enforce exact unique trusted identity through
+this named native-web rule; no missing-ID exemption or label/ordinal/geometry
+fallback is permitted. This corrects only the assumption that a WebKit DOM ID
+must populate AXIdentifier. Preserve all other checker rules and findings,
+other controls and mobile requirements. Capture the actual native hierarchy
+and screenshots before and after each action; classify unrelated findings
+separately. Retained failures 7686 and 93192 remain failures: neither establishes
+AXDOMIdentifier availability or successful native activation on its destination.
