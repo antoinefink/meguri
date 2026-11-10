@@ -1,7 +1,7 @@
 # Undo ops: undo, redo, config writes with an undo step, the undo status
 
 Spec: conformance/undo-ops
-Requirements: R1883, R370, R719, R720, R1887
+Requirements: R1883, R370, R719, R720, R1887; R1727 (the Meguri-only move step)
 Anki: 26.09.3
 Scenarios: conformance/scenarios/undo/
 
@@ -52,7 +52,7 @@ Both forms, like every operation, empty the redo history even when they write no
 
 ## V4. Step ids and names
 
-The closed list of step ids that `undo_status` reports, with Anki's English name of each step (R370, R719). Meguri names its steps with these names exactly; the ids are the conformance language's own. A name that several Anki operations share has one id.
+The closed list of step ids that `undo_status` reports, with Anki's English name of each step (R370, R719). Meguri names its steps with these names exactly; the ids are the conformance language's own. A name that several Anki operations share has one id. A row marked "Meguri only" is a step that no Anki operation records: its name is Meguri's, the oracle never reports it, and only Meguri's executor and tests see it.
 
 | Id | Name | Made by (scenario op today) |
 |---|---|---|
@@ -75,6 +75,7 @@ The closed list of step ids that `undo_status` reports, with Anki's English name
 | `grade_now` | Grade Now | `grade_now` (`sched-ops.md` J8) |
 | `image_occlusion` | Image Occlusion | |
 | `import` | Import | |
+| `move_received_card` | Move Received Card | (Meguri only: a move from Migaku's Recently received, `servers/migaku-received-log` L13, whatever the number of rows) |
 | `preferences` | Preferences | `set_scheduling_prefs` (`deck-options-ops.md` E4) |
 | `remove_note_type` | Remove Note Type | |
 | `remove_tag` | Remove Tag | |

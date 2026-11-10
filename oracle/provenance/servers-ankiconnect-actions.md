@@ -1,0 +1,63 @@
+# AnkiConnect collection actions (U142)
+
+Spec-writer notes for `specs/servers/ankiconnect-actions.md` A1-A21
+(session s-20261110T085429Z-165d83d3, wave `servers`, package
+`ankiconnect-actions`). No code was copied and no oracle probe was run: the
+U136 recorder does not exist yet, so every reply in A20 comes from reading the
+sources below, and the goldens U136 records are the authority. The add-on
+build of 2025-11-09 was not available; its closest public source (below) was
+read instead, and A21 Q6 leaves the final word to U136's `ADDON_PIN`
+recording.
+
+Sources:
+
+- AnkiConnect add-on (GPL-3.0-or-later, third party, read only): public
+  repository `https://git.sr.ht/~foosoft/anki-connect`, cloned into the
+  session scratchpad, checked out at commit
+  `532a3c8` (2025-11-06, "Added guiPlayAudio"), the last public commit before
+  the installed build's date of 2025-11-09 (the next one is 2025-12-05). The
+  installed build itself was not available on this machine; A21 Q6 asks U136
+  to confirm the match with `ADDON_PIN`. Upstream `master` (2026-10) has moved
+  to a different API generation and was not used.
+- Anki at tag 26.09.3 (`refs/anki-26.09.3`), for what the add-on's calls do.
+- `local-data/research/09-ankiconnect.md` §1, §2, §4, §5 (action list, client
+  inventory); no private collection content was used.
+- The plan: Product Contract R1734-R1801, units U141, U142, U143, U136;
+  `docs/plans/research/coverage/servers.md`.
+
+| Spec section | Sources read | Read for |
+|---|---|---|
+| A1, A2 | AnkiConnect `plugin/__init__.py` (request handler, note and card lookups), `plugin/util.py`; Anki `pylib/anki/errors.py`, `pylib/anki/notes.py` (`remove_tag`), `pylib/anki/tags.py` (`in_list`) | missing-key errors surfacing as Python `KeyError` text, `str(list)` of errors, the not-found texts with capital `Note`/`Card` and their origin in the backend error's message; the lower-case form (Python `str.lower()` on both sides) behind A1's "match ignoring case" |
+| A3.1 | AnkiConnect `plugin/__init__.py` (every `@util.api` signature) | which parameters have defaults (`cardsToo`, `add`, `complete`, `suspend`, `css`, `isCloze`, `query`, `notes`); whether a parameter is required, types and null handling are Meguri's (`servers/ankiconnect-envelope#E12.2`) |
+| A3 | AnkiConnect `plugin/__init__.py` (every `@util.api` method) | parameter names and defaults (`suspend`, `add`, `cardsToo`, `complete`, `css`, `isCloze`), return values (`null` for most writes, `true` for `setDueDate`), which actions write |
+| A4 | AnkiConnect `getProfiles`, `getActiveProfile`, `loadProfile`, `reloadCollection` | result shapes |
+| A5.1, A5.2 | AnkiConnect `deckNames`, `deckNamesAndIds`; Anki `pylib/anki/decks.py` (`all_names_and_ids`, `id`), `rslib/src/decks/service.rs`, `rslib/src/decks/name.rs`, `rslib/src/storage/deck/mod.rs` | all decks including an empty Default and filtered decks, ordered by stored name |
+| A5.3, A5.7 | AnkiConnect `getDecks`, `deckNameFromId`; Anki `pylib/anki/decks.py` (`get` with its default-deck fallback) | unknown card and deck ids answered with the default deck's name |
+| A5.4, A5.5 | AnkiConnect `createDeck`, `changeDeck`; Anki `pylib/anki/decks.py` (`id` creating missing decks), `pylib/anki/scheduler/legacy.py` (return from filtered decks) | create-or-return-id, creation of the target deck, raw `did` rewrite of every listed card |
+| A5.6 | AnkiConnect `deleteDecks` | the `cardsToo` error text, exact-name filter re-evaluated per deck, one removal per deck |
+| A5.8 | AnkiConnect `getDeckStats` and its tree helpers; Anki `pylib/anki/scheduler/base.py` (`deck_due_tree`), `proto/anki/decks.proto` (`DeckTreeNode`), `rslib/src/decks/tree.rs`, `rslib/src/storage/deck/due_counts.sql` | members, node name as the last component, limited counts, `total_in_deck` as all cards of the deck without children, preorder, decimal-string keys, deck creation for unknown names |
+| A6 | AnkiConnect model actions; Anki `pylib/anki/models.py` (`by_name`, `get`, `new`, `new_field`, `new_template`, `add`, `ensure_name_unique`, `_mutate_after_write`, `all_names_and_ids`), `rslib/src/notetype/service.rs` (`get_notetype_names`, no sort), `rslib/src/storage/notetype/mod.rs`, `rslib/src/storage/notetype/get_notetype_names.sql` (no `ORDER BY`), `rslib/src/storage/upgrades/schema15_upgrade.sql` (`name ... COLLATE unicase`, unique index `idx_notetypes_name`) | name lookup under `unicase`; names in `unicase` name order, because SQLite answers the unordered two-column query from the covering name index (a reviewer reproduced the plan with `EXPLAIN QUERY PLAN` on that schema; the golden confirms); legacy dict returned after the add, the clash suffix, template default names counting every position, the three `createModel` errors; `rslib/src/notetype/mod.rs` (`check_templates`) for templates Anki refuses at save |
+| A6.1 | AnkiConnect `modelFieldsOnTemplates` | which simple tags are listed (body without `#`, `/`, `}`, lazy match, so `{` may be inside), every brace removed before the last-colon cut, FrontSide and question-side exclusions; the table rows were worked out from that reading |
+| A7 | AnkiConnect note creation and its duplicate check, `addNote`, `addNotes`, `canAdd*`; Anki `pylib/anki/notes.py` (`fields_check`, `__contains__`, no `__len__`), `pylib/anki/collection.py` (`addNote`, `add_note`), `rslib/src/notes/mod.rs` and `rslib/src/notetype/cardgen.rs` (a note always gets a card, so the add-on's "empty question on all cards" error never fires), `rslib/src/template.rs` | step order of A7.2 (model member, model lookup, deck member, deck lookup, tags, fields, attachments, options, check), field matching by lower-case forms (the add-on lower-cases both names; it differs from `unicase` for `Straße`/`STRASSE`), default check through the field-check states including the "unknown reason" states, scoped check on raw first field with checksum only and card decks (an unknown scope deck making nothing a duplicate), option type errors, no type check on `duplicateScopeOptions` or its `deckName`, attachments before the check, add-then-delete rollback of `addNotes`, `canAdd*` hiding every error. The A7.3 outcome table was derived from these rules, not recorded |
+| A8 | AnkiConnect `updateNoteFields`, `updateNote`, `updateNoteTags`, `getNoteTags`, `notesModTime`, `deleteNotes`; Anki `pylib/anki/tags.py` (`bulk_add`, `bulk_remove`, `split`) | case-sensitive field names, the `updateNote` and tags error texts, tag replacement by remove-all then add-each |
+| A9 | AnkiConnect `findNotes`, `notesInfo`; Anki `pylib/anki/collection.py` (`find_notes` without order) | `[]` for a missing query, `{}` in place, cards by template ordinal, profile member; a note without cards raising an uncaught missing-key error (`ankiconnect-notesinfo-no-cards`) |
+| A10 | AnkiConnect tag actions; Anki `pylib/anki/tags.py` (`all`, legacy `registerNotes`, `bulkAdd`, `in_list`), `pylib/anki/notes.py` (`has_tag`, `remove_tag`, `add_tag`), `rslib/src/tags/register.rs` (`canonify_tags` splitting each item and dropping empty pieces), `rslib/src/storage/tag/get.sql`, `rslib/src/storage/upgrades/schema17_upgrade.sql` | registry order (primary key under `unicase`), clear-unused mapping, whole-tag replacement with Python `str.lower()` on both sides, a replacement item split at separators on save |
+| A11 | AnkiConnect `findCards`, `cardsInfo`, `cardsModTime`, `cardsToNotes`; Anki `pylib/anki/cards.py` (`question`, `answer`), `pylib/anki/template.py` (render output, style prefix, error output with empty CSS, the `card_did_render` hook run outside the browser), `rslib/src/template.rs` (blank notices in both sides), `pylib/anki/latex.py` (the only render hook), `pylib/anki/collection.py` (installs the LaTeX hook at import) | members and their columns, `fieldOrder` equal to `ord`, the composition of question and answer, next-state labels, LaTeX rewritten to image tags in AnkiConnect's replies (`ankiconnect-cardsinfo-latex`) |
+| A12 | AnkiConnect `suspend`, `unsuspend`, `suspended`, `areSuspended`, `areDue`, `getIntervals`; Anki `pylib/anki/scheduler/base.py`, `rslib/src/scheduler/bury_and_suspend.rs` | the result of `suspend`: the add-on removes already-matching cards from the list while looping over it, which skips the element after each removal, so a list of two or more never empties (A12.1) and, in `unsuspend`, a buried card after a removed one survives the filter and is restored with the others (`ankiconnect-unsuspend-buried`); `unsuspend` returning nothing; the card states behind A12.4 (a new-card search, the latest review-log row, the 1200-second threshold, a due search); `IndexError` text for cards without review-log rows. The A12.4 example table was derived from these rules |
+| A13 | AnkiConnect `forgetCards`, `setDueDate`; Anki `pylib/anki/scheduler/base.py` (`set_due_date`) | Reset with restore position on, counts kept, no context; Set Due Date without config key; `true` result |
+| A14 | AnkiConnect `getNumCardsReviewedToday`, `getNumCardsReviewedByDay` | the strict window start, every row counted, local dates shifted by the cutoff's local hour, newest first |
+| A15 | Meguri design (R1789, R1790, `engine/op-model`), no AnkiConnect source | one op per write, snapshot reads |
+| A16 | AnkiConnect search actions; Anki `pylib/anki/collection.py` (`find_cards`, `find_notes`) | no ordering requested, raw search text |
+| A17 | Meguri design (proposed wording), no Anki or AnkiConnect source | |
+| A18 | the rows above; Anki `pylib/anki/latex.py`, `pylib/anki/collection.py` for `ankiconnect-cardsinfo-latex`; AnkiConnect `setDueDate`, `createDeck` (Anki error texts passed through) for `ankiconnect-error-text` | where Meguri differs |
+| A19 | `local-data/research/09-ankiconnect.md` §4; `specs/servers/ankiconnect-clients.md` C2, C3 | the client inventory, agent sessions and scripts included |
+| A20 | Meguri design from the sections above and the plan's U142 test scenarios; the scenario note types `Pair`, `Gap`, `Rev` are Meguri's own (R1959); tokens per `specs/servers/transcripts.md` T10.1 | expected replies derived from reading, not recorded |
+| A21 | the plan's Product Contract (R1738, R1758, R1762, R1767, R1774) against the add-on's behavior | the open decisions |
+
+Similarity: run `tools/mg similarity` from the main checkout against the
+AnkiConnect corpus U136 adds before merging; this worktree has no corpus.
+
+Review fixes (same session): the ordered branch tables of A12.4/A12.5, the
+scoped duplicate steps of A7.3 and the pattern wording of A6.1 were recast as
+card-state rules, rules plus outcome tables, and template-tag rules; the
+add-on's internal mechanisms they summarize are recorded here only.
