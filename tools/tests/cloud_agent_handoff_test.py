@@ -590,7 +590,13 @@ class HandoffTests(unittest.TestCase):
         self.assert_no_publication()
 
     def test_mac_preflight_uses_exact_verified_selection_and_private_attachment_only(self):
-        self.prepare()
+        self.assert_guest_preflight_selection(["CloudKitSoakTests", "CloudKitPathPreflightTests"])
+
+    def test_actual_mac_guest_preflight_accepts_native_selection_order(self):
+        self.assert_guest_preflight_selection(["CloudKitPathPreflightTests", "CloudKitSoakTests"])
+
+    def assert_guest_preflight_selection(self, selection):
+        self.prepare(selection=selection)
         manifest = self.case.manifest
         original = self.fixture.xctestrun.read_bytes()
         observation = self.vm.setup("preflight", manifest)
@@ -627,6 +633,29 @@ class HandoffTests(unittest.TestCase):
             self.assertEqual(h.guest_preflight(manifest), observation)
         self.assertEqual(len(calls), 3)
         self.assertEqual(self.fixture.xctestrun.read_bytes(), original)
+        self.assert_no_publication()
+
+    def test_actual_guest_preflight_refuses_incomplete_duplicate_extra_and_malformed_full_sets(self):
+        self.prepare()
+        original = self.fixture.xctestrun.read_bytes()
+        for selection in (["CloudKitSoakTests"], ["CloudKitPathPreflightTests"],
+                          ["CloudKitSoakTests", "CloudKitSoakTests"],
+                          ["CloudKitPathPreflightTests", "CloudKitPathPreflightTests"],
+                          ["CloudKitSoakTests", "GeneratedOtherTests"],
+                          ["CloudKitSoakTests", "CloudKitPathPreflightTests", "GeneratedOtherTests"],
+                          [], "CloudKitSoakTests", ["CloudKitSoakTests", {}]):
+            with self.subTest(selection=selection):
+                plan = plistlib.loads(original)
+                plan["TestConfigurations"][0]["TestTargets"][0]["OnlyTestIdentifiers"] = selection
+                raw = plistlib.dumps(plan)
+                self.fixture.xctestrun.write_bytes(raw)
+                manifest = copy.deepcopy(self.case.manifest)
+                manifest["xctestrun"].update(sha256=v.digest(raw), bytes=len(raw))
+                with patch.object(h, "setup_command") as command:
+                    with self.assertRaisesRegex(v.Refused, "setup-selection"):
+                        h.guest_preflight(manifest)
+                    command.assert_not_called()
+                self.assertEqual(self.fixture.xctestrun.read_bytes(), raw)
         self.assert_no_publication()
 
     def test_mobile_data_variant_cannot_be_the_app_bundle(self):

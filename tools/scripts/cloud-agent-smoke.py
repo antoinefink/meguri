@@ -770,11 +770,13 @@ def smoke_plan(manifest, run_path, *, selected=False):
          {k: manifest["xctestrun"][k] for k in ("sha256", "bytes")}, "launch-template")
     plan = plistlib.loads(raw)
     targets = plan["TestConfigurations"][0]["TestTargets"]
-    admitted = [["CloudKitSoakTests", "CloudKitPathPreflightTests"]]
-    if selected:
-        admitted.append(["CloudKitSoakTests"])
-    need(len(targets) == 1 and targets[0]["OnlyTestIdentifiers"] in admitted, "launch-selection")
+    need(len(targets) == 1, "launch-selection")
     target = targets[0]
+    selection = target["OnlyTestIdentifiers"]
+    complete = (isinstance(selection, list) and len(selection) == 2 and
+                all(isinstance(name, str) for name in selection) and
+                set(selection) == {"CloudKitSoakTests", "CloudKitPathPreflightTests"})
+    need(complete or (selected and selection == ["CloudKitSoakTests"]), "launch-selection")
     target["OnlyTestIdentifiers"] = ["CloudKitSoakTests"]
     for key in ("EnvironmentVariables", "TestingEnvironmentVariables"):
         need(not any(k.startswith(("MEGURI_CLOUD_AGENT_", "TEST_RUNNER_")) for k in target.get(key, {})),

@@ -341,7 +341,9 @@ def setup_plan(manifest, path):
     target = plan["TestConfigurations"][0]["TestTargets"][0]
     need(len(plan["TestConfigurations"]) == 1 and len(plan["TestConfigurations"][0]["TestTargets"]) == 1 and
          target["BlueprintName"] == "MeguriSnapshotTests" and
-         target["OnlyTestIdentifiers"] == ["CloudKitSoakTests", "CloudKitPathPreflightTests"] and
+         isinstance(target["OnlyTestIdentifiers"], list) and len(target["OnlyTestIdentifiers"]) == 2 and
+         all(isinstance(name, str) for name in target["OnlyTestIdentifiers"]) and
+         set(target["OnlyTestIdentifiers"]) == {"CloudKitSoakTests", "CloudKitPathPreflightTests"} and
          not target.get("SkipTestIdentifiers"), "setup-selection")
     target["OnlyTestIdentifiers"] = ["CloudKitAccountSetupTests/testOwnerSetup"]
     for key in ("EnvironmentVariables", "TestingEnvironmentVariables"):

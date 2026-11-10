@@ -7,6 +7,7 @@ import importlib.util
 import io
 import json
 import os
+import plistlib
 from pathlib import Path
 import sys
 import tempfile
@@ -804,6 +805,73 @@ class ParentTests(unittest.TestCase):
             s.materialize_private(str(self.support), self.header.raw, self.projection.private_bytes())
         Path(original.path).write_bytes(private(self.header.raw).replace(b"103", b"104"))
         with self.assertRaises(s.v.Refused): original.check()
+
+
+class SmokePlanSelectionTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.products = Path(self.temp.name).resolve()
+        self.path = self.products / "original.xctestrun"
+
+    def fixture(self, selection):
+        target = {"BlueprintName": "MeguriSnapshotTests", "OnlyTestIdentifiers": copy.deepcopy(selection),
+                  "TestHostPath": "__TESTROOT__/Meguri.app", "EnvironmentVariables": {}, "TestingEnvironmentVariables": {}}
+        raw = plistlib.dumps({"TestConfigurations": [{"TestTargets": [target]}]})
+        self.path.write_bytes(raw)
+        manifest = {"products": {"path": str(self.products)}, "xctestrun": {
+            "path": self.path.name, "sha256": s.v.digest(raw), "bytes": len(raw)}}
+        return manifest, raw
+
+    def test_actual_smoke_plan_accepts_both_full_orders_without_changing_original(self):
+        for selection in (["CloudKitSoakTests", "CloudKitPathPreflightTests"],
+                          ["CloudKitPathPreflightTests", "CloudKitSoakTests"]):
+            for selected in (False, True):
+                with self.subTest(selection=selection, selected=selected):
+                    manifest, original = self.fixture(selection)
+                    raw, private = s.smoke_plan(manifest, "/generated/private-run", selected=selected)
+                    self.assertEqual(raw, original)
+                    self.assertEqual(self.path.read_bytes(), original)
+                    target = plistlib.loads(private)["TestConfigurations"][0]["TestTargets"][0]
+                    self.assertEqual(target["OnlyTestIdentifiers"], ["CloudKitSoakTests"])
+                    self.assertEqual(target["EnvironmentVariables"]["MEGURI_CLOUD_AGENT_RUN_DIRECTORY"], "/generated/private-run")
+                    self.assertEqual(target["TestHostPath"], str(self.products / "Meguri.app"))
+
+    def test_legacy_soak_only_is_selected_scope_only(self):
+        manifest, original = self.fixture(["CloudKitSoakTests"])
+        with self.assertRaisesRegex(s.v.Refused, "launch-selection"):
+            s.smoke_plan(manifest, "/generated/private-run")
+        raw, private = s.smoke_plan(manifest, "/generated/private-run", selected=True)
+        self.assertEqual(raw, original)
+        self.assertEqual(plistlib.loads(private)["TestConfigurations"][0]["TestTargets"][0]["OnlyTestIdentifiers"], ["CloudKitSoakTests"])
+        self.assertEqual(self.path.read_bytes(), original)
+
+    def test_actual_smoke_plan_refuses_extra_missing_duplicate_and_malformed_sets_in_both_scopes(self):
+        for selection in (["CloudKitPathPreflightTests"], ["CloudKitSoakTests", "CloudKitSoakTests"],
+                          ["CloudKitPathPreflightTests", "CloudKitPathPreflightTests"],
+                          ["CloudKitSoakTests", "GeneratedOtherTests"],
+                          ["CloudKitSoakTests", "CloudKitPathPreflightTests", "GeneratedOtherTests"],
+                          [], "CloudKitSoakTests", ["CloudKitSoakTests", {}]):
+            for selected in (False, True):
+                with self.subTest(selection=selection, selected=selected):
+                    manifest, original = self.fixture(selection)
+                    with self.assertRaisesRegex(s.v.Refused, "launch-selection"):
+                        s.smoke_plan(manifest, "/generated/private-run", selected=selected)
+                    self.assertEqual(self.path.read_bytes(), original)
+
+    def test_actual_smoke_plan_keeps_hash_and_environment_refusals(self):
+        manifest, original = self.fixture(["CloudKitPathPreflightTests", "CloudKitSoakTests"])
+        manifest["xctestrun"]["sha256"] = "0" * 64
+        with self.assertRaisesRegex(s.v.Refused, "launch-template"):
+            s.smoke_plan(manifest, "/generated/private-run")
+        for key in ("EnvironmentVariables", "TestingEnvironmentVariables"):
+            plan = plistlib.loads(original)
+            plan["TestConfigurations"][0]["TestTargets"][0][key]["TEST_RUNNER_GENERATED"] = "generated"
+            raw = plistlib.dumps(plan); self.path.write_bytes(raw)
+            manifest["xctestrun"].update(sha256=s.v.digest(raw), bytes=len(raw))
+            with self.assertRaisesRegex(s.v.Refused, "launch-environment"):
+                s.smoke_plan(manifest, "/generated/private-run")
+            self.assertEqual(self.path.read_bytes(), raw)
 
 
 class GuestSupervisorTests(unittest.TestCase):

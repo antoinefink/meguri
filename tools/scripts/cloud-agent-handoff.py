@@ -576,7 +576,9 @@ def guest_preflight(manifest):
     plan = plistlib.loads(raw)
     targets = plan["TestConfigurations"][0]["TestTargets"]
     need(len(targets) == 1 and targets[0]["BlueprintName"] == "MeguriSnapshotTests" and
-         targets[0]["OnlyTestIdentifiers"] == ["CloudKitSoakTests", "CloudKitPathPreflightTests"], "setup-selection")
+         isinstance(targets[0]["OnlyTestIdentifiers"], list) and len(targets[0]["OnlyTestIdentifiers"]) == 2 and
+         all(isinstance(name, str) for name in targets[0]["OnlyTestIdentifiers"]) and
+         set(targets[0]["OnlyTestIdentifiers"]) == {"CloudKitSoakTests", "CloudKitPathPreflightTests"}, "setup-selection")
     # Private derived selection, from this exact verified original. Frozen build
     # inputs remain unchanged. No newest-xctestrun search or normal fixture route.
     plan = copy.deepcopy(plan)

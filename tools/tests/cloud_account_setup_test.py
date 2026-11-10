@@ -8,6 +8,8 @@ import importlib.util
 import io
 import json
 import os
+import copy
+import plistlib
 from pathlib import Path
 import re
 import stat
@@ -52,6 +54,75 @@ class Transport:
         if action == "finish":
             return {"joined": True}, b""
         raise AssertionError(action)
+
+
+class OwnerSetupPlanSelectionTests(unittest.TestCase):
+    """Only pure plan derivation; never owner CLI, account capture or SDK work."""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.products = Path(self.temp.name).resolve()
+        self.path = self.products / "original.xctestrun"
+
+    def fixture(self, selection):
+        target = {"BlueprintName": "MeguriSnapshotTests", "OnlyTestIdentifiers": copy.deepcopy(selection),
+                  "TestHostPath": "__TESTROOT__/Meguri.app", "EnvironmentVariables": {}, "TestingEnvironmentVariables": {}}
+        return self.store({"TestConfigurations": [{"TestTargets": [target]}]})
+
+    def store(self, plan):
+        raw = plistlib.dumps(plan); self.path.write_bytes(raw)
+        return {"products": {"path": str(self.products)}, "xctestrun": {
+            "path": self.path.name, "sha256": p.v.digest(raw), "bytes": len(raw)}}, raw
+
+    def test_actual_owner_plan_accepts_both_full_orders_and_preserves_frozen_bytes(self):
+        for selection in (["CloudKitSoakTests", "CloudKitPathPreflightTests"],
+                          ["CloudKitPathPreflightTests", "CloudKitSoakTests"]):
+            with self.subTest(selection=selection):
+                manifest, original = self.fixture(selection)
+                raw, private = p.setup_plan(manifest, "/generated/private-owner-run")
+                self.assertEqual(raw, original)
+                self.assertEqual(self.path.read_bytes(), original)
+                target = plistlib.loads(private)["TestConfigurations"][0]["TestTargets"][0]
+                self.assertEqual(target["OnlyTestIdentifiers"], ["CloudKitAccountSetupTests/testOwnerSetup"])
+                self.assertEqual(target["EnvironmentVariables"]["MEGURI_CLOUD_ACCOUNT_SETUP"], "1")
+                self.assertEqual(target["EnvironmentVariables"]["MEGURI_CLOUD_ACCOUNT_DIRECTORY"], "/generated/private-owner-run")
+                self.assertEqual(target["TestHostPath"], str(self.products / "Meguri.app"))
+
+    def test_actual_owner_plan_refuses_legacy_missing_extra_duplicate_and_malformed_sets(self):
+        for selection in (["CloudKitSoakTests"], ["CloudKitPathPreflightTests"],
+                          ["CloudKitSoakTests", "CloudKitSoakTests"],
+                          ["CloudKitPathPreflightTests", "CloudKitPathPreflightTests"],
+                          ["CloudKitSoakTests", "GeneratedOtherTests"],
+                          ["CloudKitSoakTests", "CloudKitPathPreflightTests", "GeneratedOtherTests"],
+                          [], "CloudKitSoakTests", ["CloudKitSoakTests", {}]):
+            with self.subTest(selection=selection):
+                manifest, original = self.fixture(selection)
+                with self.assertRaisesRegex(p.v.Refused, "setup-selection"):
+                    p.setup_plan(manifest, "/generated/private-owner-run")
+                self.assertEqual(self.path.read_bytes(), original)
+
+    def test_owner_plan_keeps_target_configuration_skip_environment_and_hash_guards(self):
+        _, original = self.fixture(["CloudKitPathPreflightTests", "CloudKitSoakTests"])
+        mutations = [lambda x: x["TestConfigurations"].append(copy.deepcopy(x["TestConfigurations"][0])),
+                     lambda x: x["TestConfigurations"][0]["TestTargets"].append(copy.deepcopy(x["TestConfigurations"][0]["TestTargets"][0])),
+                     lambda x: x["TestConfigurations"][0]["TestTargets"][0].update(BlueprintName="GeneratedOtherTests"),
+                     lambda x: x["TestConfigurations"][0]["TestTargets"][0].update(SkipTestIdentifiers=["CloudKitSoakTests"])]
+        for mutate in mutations:
+            plan = plistlib.loads(original); mutate(plan); manifest, raw = self.store(plan)
+            with self.assertRaisesRegex(p.v.Refused, "setup-selection"):
+                p.setup_plan(manifest, "/generated/private-owner-run")
+            self.assertEqual(self.path.read_bytes(), raw)
+        for key in ("EnvironmentVariables", "TestingEnvironmentVariables"):
+            plan = plistlib.loads(original)
+            plan["TestConfigurations"][0]["TestTargets"][0][key]["MEGURI_CLOUD_ACCOUNT_GENERATED"] = "generated"
+            manifest, raw = self.store(plan)
+            with self.assertRaisesRegex(p.v.Refused, "setup-environment"):
+                p.setup_plan(manifest, "/generated/private-owner-run")
+            self.assertEqual(self.path.read_bytes(), raw)
+        manifest, raw = self.store(plistlib.loads(original)); manifest["xctestrun"]["sha256"] = "0" * 64
+        with self.assertRaisesRegex(p.v.Refused, "setup-plan"):
+            p.setup_plan(manifest, "/generated/private-owner-run")
+        self.assertEqual(self.path.read_bytes(), raw)
 
 
 class Producer(unittest.TestCase):
