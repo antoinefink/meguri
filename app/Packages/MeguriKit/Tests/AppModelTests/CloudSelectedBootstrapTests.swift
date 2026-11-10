@@ -16,7 +16,7 @@ extension ReviewCollectionStartupTests {
         let bytes = try await selectedBootstrapSource(root: root).bytes
         let service = root.appending(path: "service")
         try FileManager.default.createDirectory(at: service, withIntermediateDirectories: false)
-        let process = try await CloudServiceProcess.open(stateDirectory: service)
+        let process = try await CloudServiceProcess.open(stateDirectory: service, pageSize: 32)
         let gate = SyncOwnerGate()
         let statusHeld = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
         defer { statusHeld.continuation.finish() }
@@ -100,7 +100,7 @@ extension ReviewCollectionStartupTests {
         let peerRole = try await OriginalCloudRoleInspection.inspect(main: originalBytes, wal: nil)
         let serviceDirectory = root.appending(path: "service")
         try FileManager.default.createDirectory(at: serviceDirectory, withIntermediateDirectories: false)
-        let process = try await CloudServiceProcess.open(stateDirectory: serviceDirectory)
+        let process = try await CloudServiceProcess.open(stateDirectory: serviceDirectory, pageSize: 32)
         var active: ServiceAppHarness?
         do {
             let wire = try ServiceWorkflowWire(process: process, directory: root.appending(path: "transport"))
@@ -207,7 +207,7 @@ extension ReviewCollectionStartupTests {
         let original = try await OriginalCloudRoleInspection.inspect(main: input.bytes, wal: nil)
         let serviceDirectory = root.appending(path: "service")
         try FileManager.default.createDirectory(at: serviceDirectory, withIntermediateDirectories: false)
-        let process = try await CloudServiceProcess.open(stateDirectory: serviceDirectory)
+        let process = try await CloudServiceProcess.open(stateDirectory: serviceDirectory, pageSize: 32)
         var active: ServiceAppHarness?
         do {
             let wire = try ServiceWorkflowWire(process: process, directory: root.appending(path: "transport"))
@@ -271,7 +271,7 @@ extension ReviewCollectionStartupTests {
             let input = try await selectedBootstrapSource(root: root)
             let serviceDirectory = root.appending(path: "service")
             try FileManager.default.createDirectory(at: serviceDirectory, withIntermediateDirectories: false)
-            let process = try await CloudServiceProcess.open(stateDirectory: serviceDirectory)
+            let process = try await CloudServiceProcess.open(stateDirectory: serviceDirectory, pageSize: 32)
             var active: ServiceAppHarness?
             do {
                 let wire = try ServiceWorkflowWire(process: process, directory: root.appending(path: "transport"))
@@ -328,7 +328,7 @@ extension ReviewCollectionStartupTests {
             let peerRole = try await OriginalCloudRoleInspection.inspect(main: input.bytes, wal: nil)
             let serviceDirectory = root.appending(path: "service")
             try FileManager.default.createDirectory(at: serviceDirectory, withIntermediateDirectories: false)
-            let process = try await CloudServiceProcess.open(stateDirectory: serviceDirectory)
+            let process = try await CloudServiceProcess.open(stateDirectory: serviceDirectory, pageSize: 32)
             let delivery = SelectedAdoptionPageDelivery(mode: mode)
             var active: ServiceAppHarness?
             var confirmation: Task<Void, Never>?

@@ -4,6 +4,76 @@ import Foundation
 import Testing
 
 @Suite nonisolated struct CloudServiceProcessTests {
+    @Test func explicitPageSizeUsesOriginalServicePaginationAndPreservesDefault() async throws {
+        for binary in [false, true] {
+            let transport: CloudServiceTransport = binary ? .binaryAssetsV1 : .legacy
+            for explicit in [false, true] {
+                let root = try makeRoot()
+                defer { try? FileManager.default.removeItem(at: root) }
+                let size = explicit ? 32 : 200
+                let count = explicit ? 41 : 201
+                let client = try await CloudServiceProcess.open(stateDirectory: root, transport: transport,
+                                                               pageSize: explicit ? 32 : nil)
+                var expected: [ServiceRecord] = []
+                let first: ServiceZonePage
+                let updated: ServiceRecord
+                do {
+                    try await createZone(client)
+                    for index in 0..<count {
+                        expected.append(try await save(client, name: String(format: "r%04d", index),
+                                                       bytes: [UInt8(index), 0, 255]))
+                    }
+                    first = try await zonePage(client)
+                    #expect(first.more)
+                    #expect(first.changes.map(\.Saved) == Array(expected.prefix(size)))
+                    let last = try required(expected.last)
+                    updated = try await save(client, name: last.name, bytes: [99, 128, 0],
+                                             ifUnchanged: last.system_fields)
+                    #expect(updated.system_fields != last.system_fields)
+                    let read = try await readRecord(client, name: last.name)
+                    #expect(read == updated)
+                    expectClean(await client.close())
+                } catch { _ = await client.cancel(); throw error }
+
+                // No override on reopen: retain the original snapshot and stored size.
+                let reopened = try await CloudServiceProcess.open(stateDirectory: root, transport: transport)
+                do {
+                    let second = try await zonePage(reopened, token: first.token)
+                    #expect(!second.more)
+                    #expect(second.changes.map(\.Saved) == Array(expected.dropFirst(size)))
+                    let replay = try await zonePage(reopened, token: first.token)
+                    #expect(replay.more == second.more)
+                    #expect(replay.changes.map(\.Saved) == second.changes.map(\.Saved))
+                    let sameToken = try normalized(replay.token) == normalized(second.token)
+                    #expect(sameToken)
+                    let delta = try await zonePage(reopened, token: second.token)
+                    #expect(!delta.more)
+                    #expect(delta.changes.map(\.Saved) == [updated])
+                    let fresh = try await zonePage(reopened)
+                    #expect(fresh.more && fresh.changes.count == size)
+                    expectClean(await reopened.close())
+                } catch { _ = await reopened.cancel(); throw error }
+            }
+        }
+    }
+
+    @Test func invalidPageSizeIsRefusedBeforeProcessLaunch() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let transports: [CloudServiceTransport] = [.legacy, .binaryAssetsV1]
+        for transport in transports {
+            for size in [Int.min, -1, 0, 201, Int.max] {
+                do {
+                    let client = try await CloudServiceProcess.open(stateDirectory: root, transport: transport, pageSize: size)
+                    _ = await client.cancel()
+                    Issue.record("accepted invalid initial page size")
+                } catch CloudServiceProcessFailure.configuration {} catch { throw error }
+                let contents = try FileManager.default.contentsOfDirectory(atPath: root.path)
+                #expect(contents.isEmpty)
+            }
+        }
+    }
+
     @Test(arguments: [false, true])
     func binaryAssetsPreparedCancellationDrainsBodiesAndConcurrentFramesStayAligned(typed: Bool) async throws {
         try await withService(transport: .binaryAssetsV1) { client in
@@ -378,6 +448,13 @@ private nonisolated struct RecordReply: Decodable, Sendable { let Record: Servic
 private nonisolated struct SavedReply: Decodable, Sendable { let Saved: ServiceRecord }
 private nonisolated struct MutationReply: Decodable, Sendable { let result: ServiceResult<SavedReply> }
 private nonisolated struct ModifiedReply: Decodable, Sendable { let Modified: [MutationReply] }
+private nonisolated struct ServiceSavedChange: Decodable, Sendable { let Saved: ServiceRecord }
+private nonisolated struct ServiceZonePage: Decodable, Sendable {
+    let changes: [ServiceSavedChange]
+    let token: ServiceJSON
+    let more: Bool
+}
+private nonisolated struct ServiceZoneReply: Decodable, Sendable { let ZoneChanges: ServiceZonePage }
 private typealias ServiceModified = ServiceResponse<ModifiedReply>
 private nonisolated enum ServiceSmokeFailure: Error { case wire, missing }
 
@@ -402,6 +479,12 @@ private nonisolated func createZone(_ client: CloudServiceProcess) async throws 
     let response = try decode(ServiceResponse<String>.self,
                              await client.request(frame(["CreateZone": ["zone": "z"]])))
     #expect(response.result.Ok == "Done")
+}
+private nonisolated func zonePage(_ client: CloudServiceProcess, token: ServiceJSON? = nil) async throws -> ServiceZonePage {
+    let tokenValue: Any = try token.map { try JSONSerialization.jsonObject(with: $0.encoded()) } ?? NSNull()
+    let response = try decode(ServiceResponse<ServiceZoneReply>.self,
+                              await client.request(frame(["FetchZone": ["zone": "z", "token": tokenValue]])))
+    return try required(response.result.Ok?.ZoneChanges)
 }
 private nonisolated func assetMessage(_ payload: Data, fields: [String: ServiceJSON]? = nil,
     ifUnchanged: Data? = nil) -> ServiceJSON {

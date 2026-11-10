@@ -24,12 +24,19 @@ pub fn main(args: &[String]) -> i32 {
         eprintln!("cloud service startup-error: arguments");
         return 1;
     };
-    let binary_assets = args.get(2).is_some_and(|arg| arg == binary::FLAG);
-    if !(args.len() == 2 || (args.len() == 3 && binary_assets)) || args[0].is_empty() {
+    let Some((binary_assets, page_size)) = startup_options(&args[2..]) else {
+        eprintln!("cloud service startup-error: arguments");
+        return 1;
+    };
+    if args[0].is_empty() {
         eprintln!("cloud service startup-error: arguments");
         return 1;
     }
-    let Ok(mut service) = Service::open(Path::new(&args[0]), Config::default(), SeededRandom::new(seed)) else {
+    let config = Config {
+        page_size: page_size.unwrap_or(Config::default().page_size),
+        ..Config::default()
+    };
+    let Ok(mut service) = Service::open(Path::new(&args[0]), config, SeededRandom::new(seed)) else {
         eprintln!("cloud service startup-error: storage");
         return 1;
     };
@@ -45,6 +52,30 @@ pub fn main(args: &[String]) -> i32 {
             2
         }
     }
+}
+
+fn startup_options(args: &[String]) -> Option<(bool, Option<usize>)> {
+    let mut binary_assets = false;
+    let mut page_size = None;
+    let mut options = args.iter();
+    while let Some(option) = options.next() {
+        match option.as_str() {
+            binary::FLAG if !binary_assets => binary_assets = true,
+            "--page-size" if page_size.is_none() => {
+                let value = options.next()?;
+                if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+                    return None;
+                }
+                let value = value.parse::<usize>().ok()?;
+                if !(1..=200).contains(&value) {
+                    return None;
+                }
+                page_size = Some(value);
+            }
+            _ => return None,
+        }
+    }
+    Some((binary_assets, page_size))
 }
 
 fn serve(

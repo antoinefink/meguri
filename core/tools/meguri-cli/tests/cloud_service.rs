@@ -45,10 +45,19 @@ impl Client {
         Self::open_transport(directory, true)
     }
     fn open_transport(directory: &Path, binary: bool) -> Self {
+        Self::open_with_page_size(directory, binary, None, false)
+    }
+    fn open_with_page_size(directory: &Path, binary: bool, page_size: Option<usize>, page_size_first: bool) -> Self {
         let mut command = command();
         command.arg(directory).arg("18446744073709551615");
+        if page_size_first && let Some(size) = page_size {
+            command.arg("--page-size").arg(size.to_string());
+        }
         if binary {
             command.arg("--binary-assets-v1");
+        }
+        if !page_size_first && let Some(size) = page_size {
+            command.arg("--page-size").arg(size.to_string());
         }
         let mut child = command
             .stdin(Stdio::piped())
@@ -311,6 +320,183 @@ fn retained_service_preserves_payloads_conflicts_atomicity_and_reopens_after_eof
     let logs = service.request_log().unwrap();
     assert!(logs.windows(2).all(|pair| pair[0].request_id < pair[1].request_id));
     assert!(logs.iter().all(|log| log.scope == scope() && log.caller == caller()));
+}
+
+#[test]
+fn explicit_page_size_preserves_original_zone_pages_tokens_and_reopen() {
+    for binary in [false, true] {
+        for page_size_first in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let mut client = Client::open_with_page_size(directory.path(), binary, Some(32), page_size_first);
+            client.create("z");
+            let sent: Vec<_> = (0..41)
+                .map(|i| {
+                    let mut record = input(&format!("r{i:04}"), &[i, 0, 255]);
+                    // Keep real assets on both pages within the binary attachment budget.
+                    if i == 0 || i == 40 {
+                        record
+                            .fields
+                            .insert("pa".into(), Field::Asset(Asset::synthetic(vec![255, i, 10, 0])));
+                    }
+                    record
+                })
+                .collect();
+            let expected: Vec<_> = client
+                .modify(true, sent.iter().cloned().map(|r| save(r, None)).collect())
+                .iter()
+                .map(saved)
+                .collect();
+            assert_eq!(expected.len(), 41);
+            for (record, sent) in expected.iter().zip(&sent) {
+                matches_input(record, sent);
+            }
+            let first = client.page(None);
+            assert!(first.more);
+            assert_eq!(
+                first.changes,
+                expected[..32]
+                    .iter()
+                    .cloned()
+                    .map(RecordChange::Saved)
+                    .collect::<Vec<_>>()
+            );
+            let last = expected.last().unwrap();
+            let mut replacement = sent.last().unwrap().clone();
+            replacement
+                .fields
+                .insert("e".into(), Field::EncryptedBytes(vec![99, 128, 0]));
+            let updated =
+                saved(&client.modify(true, vec![save(replacement.clone(), Some(last.system_fields.clone()))])[0]);
+            matches_input(&updated, &replacement);
+            assert_eq!(client.read(&last.name), updated);
+            assert!(client.finish(0).is_empty());
+
+            // No new override: the persisted size and original snapshot survive.
+            let mut client = Client::open_transport(directory.path(), binary);
+            let second = client.page(Some(first.token.clone()));
+            assert!(!second.more);
+            assert_eq!(
+                second.changes,
+                expected[32..]
+                    .iter()
+                    .cloned()
+                    .map(RecordChange::Saved)
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(client.page(Some(first.token)), second);
+            let delta = client.page(Some(second.token));
+            assert!(!delta.more);
+            assert_eq!(delta.changes, vec![RecordChange::Saved(updated.clone())]);
+            // A fresh snapshot also proves reopening retained 32 rather than 200.
+            let fresh = client.page(None);
+            assert!(fresh.more);
+            assert_eq!(fresh.changes.len(), 32);
+            assert!(client.finish(0).is_empty());
+
+            // A conflicting initial option also must not reconfigure this store.
+            let mut client = Client::open_with_page_size(directory.path(), binary, Some(1), !page_size_first);
+            let tail = client.page(Some(fresh.token));
+            assert!(!tail.more);
+            let mut current_tail = expected[32..].to_vec();
+            *current_tail.last_mut().unwrap() = updated;
+            assert_eq!(
+                tail.changes,
+                current_tail.into_iter().map(RecordChange::Saved).collect::<Vec<_>>()
+            );
+            let fresh = client.page(None);
+            assert!(fresh.more);
+            assert_eq!(fresh.changes.len(), 32);
+            assert!(client.finish(0).is_empty());
+        }
+    }
+}
+
+#[test]
+fn page_size_arguments_are_bounded_and_classified_before_storage() {
+    for binary in [false, true] {
+        for page_size_first in [false, true] {
+            for size in [1, 200] {
+                let directory = tempfile::tempdir().unwrap();
+                let mut client = Client::open_with_page_size(directory.path(), binary, Some(size), page_size_first);
+                client.create("z");
+                let expected: Vec<_> = client
+                    .modify(
+                        true,
+                        (0..=size)
+                            .map(|i| save(input(&format!("r{i:04}"), &[0, 255]), None))
+                            .collect(),
+                    )
+                    .iter()
+                    .map(saved)
+                    .collect();
+                let first = client.page(None);
+                assert!(first.more);
+                assert_eq!(
+                    first.changes,
+                    expected[..size]
+                        .iter()
+                        .cloned()
+                        .map(RecordChange::Saved)
+                        .collect::<Vec<_>>()
+                );
+                let last = client.page(Some(first.token));
+                assert!(!last.more);
+                assert_eq!(last.changes, vec![RecordChange::Saved(expected[size].clone())]);
+                assert!(client.finish(0).is_empty());
+            }
+        }
+    }
+    let mut invalid = vec![
+        vec!["--page-size"],
+        vec!["--page-size", "32", "--page-size", "32"],
+        vec!["--binary-assets-v1", "--binary-assets-v1"],
+        vec!["--page-size", "32", "--binary-assets-v1", "--page-size", "1"],
+        vec!["--binary-assets-v1", "--page-size", "32", "--binary-assets-v1"],
+        vec!["--page-size", "32", SENTINEL],
+        vec!["--page-size", "32", "--unknown-option"],
+        vec!["--page-size", "--binary-assets-v1"],
+    ];
+    for value in [
+        "",
+        "0",
+        "201",
+        "-1",
+        "+1",
+        "1.0",
+        " 1",
+        "1 ",
+        "1\n",
+        "\t1",
+        "１",
+        "١",
+        "184467440737095516160000",
+        SENTINEL,
+    ] {
+        invalid.push(vec!["--page-size", value]);
+        invalid.push(vec!["--binary-assets-v1", "--page-size", value]);
+        invalid.push(vec!["--page-size", value, "--binary-assets-v1"]);
+    }
+    for options in invalid {
+        let directory = tempfile::tempdir().unwrap();
+        // Even an existing directory must remain empty: Service::open must not run.
+        let output = command()
+            .arg(directory.path())
+            .arg("1")
+            .args(&options)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+        assert_eq!(output.stderr.as_slice(), b"cloud service startup-error: arguments\n");
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+        // A nonexistent sentinel path must classify as arguments, never storage.
+        let missing = directory.path().join(SENTINEL);
+        let output = command().arg(&missing).arg("1").args(&options).output().unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+        assert_eq!(output.stderr.as_slice(), b"cloud service startup-error: arguments\n");
+        assert!(!missing.exists());
+    }
 }
 
 #[test]

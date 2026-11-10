@@ -18,7 +18,7 @@ extension ReviewCollectionStartupTests {
         let peerRole = try await OriginalCloudRoleInspection.inspect(main: input.bytes, wal: nil)
         let service = root.appending(path: "service")
         try FileManager.default.createDirectory(at: service, withIntermediateDirectories: false)
-        let process = try await CloudServiceProcess.open(stateDirectory: service)
+        let process = try await CloudServiceProcess.open(stateDirectory: service, pageSize: 32)
         var active: ServiceAppHarness?, exchange: Task<Void, any Error>?
         let held = SelectedOriginalReplyGate()
         do {
@@ -175,7 +175,7 @@ extension ReviewCollectionStartupTests {
         let role = try await OriginalCloudRoleInspection.inspect(main: input.bytes, wal: nil)
         let service = root.appending(path: "service")
         try FileManager.default.createDirectory(at: service, withIntermediateDirectories: false)
-        let process = try await CloudServiceProcess.open(stateDirectory: service)
+        let process = try await CloudServiceProcess.open(stateDirectory: service, pageSize: 32)
         var active: ServiceAppHarness?, operation: CloudKitNetworkOperation?
         let held = SelectedOriginalReplyGate()
         do {

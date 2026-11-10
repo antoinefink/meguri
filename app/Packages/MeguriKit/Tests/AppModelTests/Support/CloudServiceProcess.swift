@@ -28,11 +28,12 @@ nonisolated final class CloudServiceProcess: Sendable {
         self.worker = worker; self.transport = transport
     }
 
-    static func open(stateDirectory: URL, transport: CloudServiceTransport = .legacy) async throws -> CloudServiceProcess {
+    static func open(stateDirectory: URL, transport: CloudServiceTransport = .legacy,
+                     pageSize: Int? = nil) async throws -> CloudServiceProcess {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global().async {
                 do {
-                    let worker = try CloudServiceProcessWorker(stateDirectory: stateDirectory, transport: transport)
+                    let worker = try CloudServiceProcessWorker(stateDirectory: stateDirectory, transport: transport, pageSize: pageSize)
                     worker.startDiagnostics()
                     continuation.resume(returning: CloudServiceProcess(worker: worker, transport: transport))
                 } catch { continuation.resume(throwing: error) }
@@ -200,8 +201,9 @@ private nonisolated final class CloudServiceProcessWorker: @unchecked Sendable {
     private let frameLimit = 1_048_576
     private let diagnosticLimit = 16_384
 
-    init(stateDirectory: URL, transport: CloudServiceTransport) throws {
+    init(stateDirectory: URL, transport: CloudServiceTransport, pageSize: Int?) throws {
         self.transport = transport
+        if let pageSize, !(1...200).contains(pageSize) { throw CloudServiceProcessFailure.configuration }
         guard let path = ProcessInfo.processInfo.environment["MEGURI_CLOUD_SERVICE_CLI"],
               path.hasPrefix("/"),
               let attributes = try? FileManager.default.attributesOfItem(atPath: path),
@@ -212,6 +214,7 @@ private nonisolated final class CloudServiceProcessWorker: @unchecked Sendable {
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = ["internal-cloud-service", stateDirectory.path, "18446744073709551615"]
         if case .binaryAssetsV1 = transport { process.arguments?.append("--binary-assets-v1") }
+        if let pageSize { process.arguments?.append(contentsOf: ["--page-size", String(pageSize)]) }
         process.standardInput = input
         process.standardOutput = output
         process.standardError = error
