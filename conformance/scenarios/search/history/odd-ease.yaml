@@ -1,0 +1,52 @@
+# R1069, R1072, R1073; specs/search/history.md H1, H5, H6, H7, H8. Review-log
+# entries another client may write with an ease outside 0-4: for rated: and
+# prop:rated without a button an answer is any ease above 0 (5 and 7 count,
+# -1 does not); for introduced: a first-answer candidate is any ease other
+# than 0 (-1 counts); resched: and prop:resched take ease 0 only. Entries are
+# matched by card whatever their type column holds (c6: type 9). Same day
+# layout as search/history/answers: UTC rollover 4, day 0 starts
+# 2030-01-15 04:00, day 2 at B2 = 2030-01-17 04:00; observed on day 2. Card
+# ids come from the frozen clock (1894701600000 + note number - 1).
+id: search/history/odd-ease
+tags: [needs-history]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Memo
+      fields: [Front, Back]
+      templates: [{name: Recall, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Memo, fields: [c1, "ease 5 on day 2"]}
+    - {notetype: Memo, fields: [c2, "ease -1 on day 2"]}
+    - {notetype: Memo, fields: [c3, "ease -1 on day 0, ease 3 on day 2"]}
+    - {notetype: Memo, fields: [c4, "ease 0 on day 2 only"]}
+    - {notetype: Memo, fields: [c5, "ease 7 on day 0"]}
+    - {notetype: Memo, fields: [c6, "ease 3 with type 9 on day 2"]}
+    - {notetype: Memo, fields: [c7, "no entries"]}
+steps:
+  - observe: [ids]
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1894852801000, 1894701600000, 0, 5, 1, 0, 2500, 1000, 1)"}
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1894852802000, 1894701600001, 0, -1, 1, 0, 2500, 1000, 1)"}
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1894701601000, 1894701600002, 0, -1, 1, 0, 2500, 1000, 1)"}
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1894852803000, 1894701600002, 0, 3, 1, 0, 2500, 1000, 1)"}
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1894852804000, 1894701600003, 0, 0, 1, 0, 2500, 1000, 4)"}
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1894701605000, 1894701600004, 0, 7, 1, 0, 2500, 1000, 1)"}
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1894852806000, 1894701600005, 0, 3, 1, 0, 2500, 1000, 9)"}
+  - set_clock: "2030-01-17T10:00:00"
+  - observe:
+      - timing
+      - search:
+          - {query: 'rated:1'}
+          - {query: 'rated:1:3'}
+          - {query: 'rated:3'}
+          - {query: 'resched:1'}
+          - {query: 'resched:3'}
+          - {query: 'introduced:1'}
+          - {query: '-introduced:1'}
+          - {query: 'introduced:3'}
+          - {query: 'prop:rated=0'}
+          - {query: 'prop:rated=-2'}
+          - {query: 'prop:rated!=0'}
+          - {query: 'prop:rated=0:3'}
+          - {query: 'prop:resched=0'}

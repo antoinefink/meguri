@@ -1,0 +1,51 @@
+# R1067; specs/search/properties.md P4. prop:due for stored due values near
+# the ends of the signed 64-bit range (another client's data or a damaged
+# row). For a learning or preview card, due (or odue) minus the next day
+# boundary leaves the 64-bit range only below it; SQLite then computes the
+# difference and the division as reals, so the day lies far below every
+# 32-bit operand: found by prop:due<0, not by prop:due>=0. A huge positive
+# due stays an integer day far above every operand. Review cards compare the
+# stored day with operand + today in wrapping 32-bit arithmetic. Day 10
+# (2030-01-25, rollover 4 UTC), one second before the boundary of 2030-01-26
+# 04:00 UTC. Card ids come from the frozen clock (1894701600000 + note
+# number - 1).
+id: search/props/due-extremes
+tags: [needs-prop]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Memo
+      fields: [Front, Back]
+      templates: [{name: Recall, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Memo, fields: [c1, "learning, due near the 64-bit minimum"]}
+    - {notetype: Memo, fields: [c2, "learning, due near the 64-bit maximum"]}
+    - {notetype: Memo, fields: [c3, "preview, due near the 64-bit minimum"]}
+    - {notetype: Memo, fields: [c4, "learning, odue near the 64-bit minimum, due 10 minutes later"]}
+    - {notetype: Memo, fields: [c5, "review due day 9"]}
+    - {notetype: Memo, fields: [c6, "review due at the 32-bit minimum"]}
+    - {notetype: Memo, fields: [c7, "new"]}
+steps:
+  - observe: [ids]
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 1, due = -9223372036854775000, odue = 0 WHERE id = 1894701600000"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 1, due = 9223372036854775000, odue = 0 WHERE id = 1894701600001"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 4, due = -9223372036854775000, odue = 0 WHERE id = 1894701600002"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 1, due = 1895630999, odue = -9223372036854775000 WHERE id = 1894701600003"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 9, odue = 0, ivl = 10 WHERE id = 1894701600004"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = -2147483648, odue = 0, ivl = 10 WHERE id = 1894701600005"}
+  - db_exec: {sql: "UPDATE cards SET type = 0, queue = 0, due = 1, odue = 0 WHERE id = 1894701600006"}
+  - set_clock: "2030-01-26T03:59:59"
+  - observe:
+      - timing
+      - search:
+          - {query: 'prop:due<0'}
+          - {query: 'prop:due>=0'}
+          - {query: 'prop:due>0'}
+          - {query: 'prop:due=0'}
+          - {query: 'prop:due!=0'}
+          - {query: '-prop:due<0'}
+          - {query: 'prop:due<-2147483648'}
+          - {query: 'prop:due>2147483647'}
+          - {query: 'prop:due<2147483647'}
+          - {query: 'prop:due>-2147483648'}

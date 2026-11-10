@@ -1,0 +1,39 @@
+# R1058; specs/search/names-and-ids.md N3.6. preset: compares a deck's stored
+# preset id with the found preset's id, with no fallback: after the preset
+# Slow is deleted, the deck Lane still names it, so no preset: search finds
+# Lane's cards, preset:Default included (Lane uses the default preset for
+# scheduling, which search does not look at). Searching the deleted name
+# finds nothing. The preset row is removed with db_exec.
+id: search/decks/preset-missing
+tags: [needs-deck]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  presets:
+    - {name: Slow}
+    - {name: Fast}
+  decks:
+    - {name: Lane, preset: Slow}
+    - {name: Speed, preset: Fast}
+  notetypes:
+    - name: Memo
+      fields: [Front, Back]
+      templates: [{name: Recall, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Memo, deck: Lane, fields: [lane, x]}
+    - {notetype: Memo, deck: Speed, fields: [speed, x]}
+    - {notetype: Memo, fields: [default, x]}
+steps:
+  - observe:
+      - search:
+          - {query: 'preset:slow'}
+          - {query: 'preset:default'}
+  - db_exec: {sql: "DELETE FROM deck_config WHERE name = 'Slow'"}
+  - db_exec: {sql: "SELECT name FROM deck_config ORDER BY id"}
+  - observe:
+      - search:
+          - {query: 'preset:slow'}
+          - {query: 'preset:default'}
+          - {query: 'preset:fast'}
+          - {query: '-preset:default'}
+          - {query: 'deck:lane'}

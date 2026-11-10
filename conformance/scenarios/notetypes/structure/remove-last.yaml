@@ -1,0 +1,30 @@
+# Removing the last field or the last template is refused
+# (specs/notetypes/structure-changes.md S1.2 item 2; notetypes/validation.md
+# V2; R922, R933). Each save is refused with invalid_notetype and writes
+# nothing: the note type keeps its field and template, the note and its card
+# stay with their stamps, no grave is written and col.scm is unchanged. The
+# refusal comes before any template rewrite (S3 step 2). Needs
+# update_notetype with U34's remove_field and remove_template
+# (specs/conformance/notetype-ops.md T7, T10.1).
+id: notetypes/structure/remove-last
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Solo
+      fields: [Only]
+      templates:
+        - {name: Single, front: "{{Only}}", back: "{{Only}}"}
+  notes:
+    - {notetype: Solo, fields: [one]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE cards SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  - update_notetype: {notetype: Solo, edits: [{remove_field: Only}], skip_checks: true}
+  - update_notetype: {notetype: Solo, edits: [{remove_template: Single}]}
+  - observe:
+      - {notetype_structure: {notetypes: [Solo]}}
+      - {notetype_templates: {notetypes: [Solo]}}
+      - {db_dump: {tables: [notes, cards, graves]}}
+  - db_exec: {sql: "SELECT scm = ls FROM col"}

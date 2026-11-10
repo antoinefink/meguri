@@ -1,0 +1,49 @@
+# R1042, R1038; specs/search/text-matching.md T3.2, T5.1, T6, T8.3, T10.1,
+# T12.1; fields.md F4, F6: the combining-free transform runs on the nc:
+# pattern after the wildcard conversion, so characters whose NFKD is a
+# backslash (U+FF3C, U+FE68) become the pattern's escape character, and those
+# whose NFKD is `_` (U+FE33, U+FE4D) or `%` (U+FE6A) become wildcards.
+# nc:a＼ escapes the closing `%`, so it finds only a sort text or field string
+# ending in `a%` (the note a%, through its sort text). An escape before U+001F
+# matches the separator itself; one at the very end of a field pattern makes
+# it match nothing (Back is the last field). With ignoreAccentsInSearch on, w:
+# puts its whole expression through the transform, so U+FF3C followed by x
+# becomes the start of a hexadecimal escape that does not parse.
+id: search/text/nc-escapes
+tags: [needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Single, fields: [ab, x]}
+    - {notetype: Single, fields: ["a＼b", x]}
+    - {notetype: Single, fields: ['a\b', x]}
+    - {notetype: Single, fields: [a, x]}
+    - {notetype: Single, fields: ["a%", x]}
+    - {notetype: Single, fields: [x, a]}
+steps:
+  - db_exec: {sql: "SELECT sfld, flds FROM notes ORDER BY id"}
+  - observe:
+      - search:
+          - {query: 'nc:a＼b', kind: notes}
+          - {query: 'nc:a﹨b', kind: notes}
+          - {query: 'nc:a＼＼b', kind: notes}
+          - {query: 'nc:a＼', kind: notes}
+          - {query: 'nc:a︳b', kind: notes}
+          - {query: 'nc:a﹍b', kind: notes}
+          - {query: 'nc:a﹪b', kind: notes}
+          - {query: 'front:nc:a＼', kind: notes}
+          - {query: 'back:nc:a＼', kind: notes}
+          - {query: 'front:nc:a', kind: notes}
+          - {query: 'back:nc:a', kind: notes}
+          - {query: 'a＼b', kind: notes}
+          - {query: 'w:＼x', kind: notes}
+  - set_config: {key: ignoreAccentsInSearch, value: true}
+  - observe:
+      - search:
+          - {query: 'a＼b', kind: notes}
+          - {query: 'w:＼x', kind: notes}

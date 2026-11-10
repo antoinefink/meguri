@@ -1,0 +1,30 @@
+# U131's report cases (specs/notes/empty-cards.md E1, E2, E7), with the
+# scenario's own note types. A two-way note whose Back is cleared keeps a
+# valid card 1 and lists card 2 (its front shows only Back). A cloze note made
+# with c1, c2 and c3 whose text then loses c2 lists the ordinal 1 card alone.
+# The edits generate no card and remove none. Neither note is all empty.
+# Note types come in unicase name order (Gaps before Two Way).
+id: maintenance/empty-cards/report
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Two Way
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Reverse, front: "{{Back}}", back: "{{Front}}"}
+    - name: Gaps
+      kind: cloze
+      fields: [Text, Notes]
+      templates:
+        - {name: Cloze, front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Notes}}"}
+  decks: [Words]
+  notes:
+    - {notetype: Two Way, deck: Words, fields: [river, rio]}
+    - {notetype: Gaps, deck: Words, fields: ["{{c1::red}} sky, {{c2::blue}} sea, {{c3::green}} hill", ""]}
+steps:
+  - empty_cards: {}
+  - edit_note: {note: "#n1", fields: {Back: ""}}
+  - edit_note: {note: "#n2", fields: {Text: "{{c1::red}} sky, {{c3::green}} hill"}}
+  - db_exec: {sql: "SELECT (SELECT name FROM notetypes WHERE id = n.mid), c.ord FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord"}
+  - empty_cards: {}

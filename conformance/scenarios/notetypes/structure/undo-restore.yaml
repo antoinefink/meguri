@@ -1,0 +1,58 @@
+# Undo of Restore to Default (specs/notetypes/restore-to-default.md D4 to D6;
+# specs/notetypes/structure-changes.md S13). Plain is made from scratch
+# (original_stock_kind 1), so a restore without a kind gives Basic: two
+# fields and one template by position, so every note loses its Extra value,
+# every Card 2 card goes with a grave and the note that had only that card is
+# left with none; a schema change. The restore is one "Update Note Type"
+# step: undo gives back the three fields and two templates (names, options
+# and requirements), every note's three values and stamps, the Card 2 cards
+# with their ids and scheduling, removes the graves and returns col.scm; redo
+# restores again. The restored state is observed only with
+# notetype_structure, notes, cards and graves (R908, R1959). Needs
+# restore_notetype (notetype-structure-ops.md M2), undo, redo and undo_status
+# (specs/conformance/undo-ops.md V1, V2, V5).
+id: notetypes/structure/undo-restore
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Plain
+      fields: [Q, Back, Extra]
+      templates:
+        - {name: Card 1, front: "{{Q}}", back: "{{Back}}"}
+        - {name: Card 2, front: "{{Back}}{{Extra}}", back: "{{Q}}"}
+  notes:
+    - {notetype: Plain, fields: [a, b, c]}
+    - {notetype: Plain, fields: ["", y, z]}
+steps:
+  # A statement that is not a select empties both histories (undo-ops V5).
+  - db_exec: {sql: "UPDATE notes SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 30, ivl = 5, factor = 2500, mod = 1700000000, usn = 5 WHERE ord = 1"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  - observe:
+      - {notetype_structure: {notetypes: [Plain]}}
+      - {db_dump: {tables: [notes, cards, graves]}}
+  # step 5
+  - restore_notetype: {notetype: Plain}
+  - observe:
+      - undo_status
+      - {notetype_structure: {notetypes: [Plain]}}
+      - {db_dump: {tables: [notes, cards, graves]}}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - advance: 1m
+  # step 9
+  - undo: {}
+  - observe:
+      - undo_status
+      - {notetype_structure: {notetypes: [Plain]}}
+      - {db_dump: {tables: [notes, cards, graves]}}
+  - db_exec: {sql: "SELECT scm = ls FROM col"}
+  - db_exec: {sql: "SELECT count(*) FROM fields WHERE ntid = (SELECT id FROM notetypes WHERE name = 'Plain')"}
+  - advance: 1m
+  # step 14
+  - redo: {}
+  - observe:
+      - undo_status
+      - {notetype_structure: {notetypes: [Plain]}}
+      - {db_dump: {tables: [notes, cards, graves]}}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}

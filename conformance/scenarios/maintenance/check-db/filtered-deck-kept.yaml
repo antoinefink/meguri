@@ -1,0 +1,39 @@
+# C9.3 and C9.2 of specs/maintenance/check-database.md: cards whose did names
+# a filtered deck are left alone, whatever their odid names. A filtered deck F
+# (a db_exec row, specs/conformance/deck-ops.md K13) holds the card of note
+# one, whose odid is its home deck Inbox, and the card of note two, whose odid
+# names no deck (777). Nothing is counted, no deck 777 is created (C9.2 looks
+# at did only), odid, odue, mod and usn stay, scm stays. col.mod is not
+# observed: no row changes (deviation check-db-no-change-keeps-mod). The
+# reopen after the decks write drops Anki's deck cache. A second run finds
+# nothing. Unlike a build (deck-ops K13), the cards keep their due and odue
+# takes it: a build gives each card its place in F as due, which C10.3 reads
+# for these new cards and would answer with a nextPos write, and this
+# scenario wants no row to change. Their queue is as a rescheduling build
+# leaves it.
+id: maintenance/check-db/filtered-deck-kept
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [one, uno]}
+    - {notetype: Single, deck: Inbox, fields: [two, dos]}
+steps:
+  - db_exec:
+      sql: >-
+        INSERT INTO decks (id, name, mtime_secs, usn, common, kind)
+        VALUES (100, 'F', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')
+  - db_exec: {sql: "UPDATE cards SET odid = did, odue = due, did = 100, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'one')"}
+  - db_exec: {sql: "UPDATE cards SET odid = 777, odue = due, did = 100, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'two')"}
+  - reopen: {}
+  - advance: 1h
+  - db_exec: {sql: "SELECT scm FROM col"}
+  - check_db: {}
+  - db_exec: {sql: "SELECT n.sfld, c.did, c.odid = (SELECT id FROM decks WHERE name = 'Inbox'), c.odid, c.odue, c.mod, c.usn FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.sfld"}
+  - db_exec: {sql: "SELECT count(*) FROM decks WHERE id = 777"}
+  - db_exec: {sql: "SELECT scm FROM col"}
+  - check_db: {}

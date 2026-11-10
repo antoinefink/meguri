@@ -1,0 +1,74 @@
+# Undo and redo of Change Note Type (specs/notetypes/change-notetype.md M9:
+# "one undo step, Change Note Type"; specs/notetypes/schema-changes.md G5).
+# Moving Pair notes to Pair Reverse creates the Card 2 of the note with a Back;
+# undo deletes that card without a grave, gives the notes back their note
+# type, fields, csum and synced stamps, and returns col.scm; redo makes the
+# change again with the same card. Then moving the notes back to Pair drops
+# Card 2 with a grave; undo restores the card with its id and scheduling and
+# removes the grave. The unselected note is never touched. Needs
+# change_notetype_info and change_notetype (change-notetype-ops.md H1, H2),
+# undo, redo and undo_status (specs/conformance/undo-ops.md V1, V2, V5).
+id: notetypes/change/undo
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Back}}"}
+    - name: Pair Reverse
+      fields: [Front, Back, Extra]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Card 2, front: "{{Back}}", back: "{{Front}}"}
+  decks: [German]
+  notes:
+    - {notetype: Pair, deck: German, fields: [Hund, dog]}
+    - {notetype: Pair, deck: German, fields: [Katze, ""]}
+    - {notetype: Pair, deck: German, fields: [Maus, mouse]}
+steps:
+  # A statement that is not a select empties both histories (undo-ops V5).
+  - db_exec: {sql: "UPDATE notes SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE cards SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1h
+  - observe: [{db_dump: {tables: [notes, cards, graves]}}]
+  # step 5
+  - change_notetype_info: {notes: ["#n1", "#n2"], notetype: Pair Reverse}
+  - change_notetype: {}
+  - observe:
+      - undo_status
+      - {db_dump: {tables: [notes, cards, graves]}}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - advance: 1m
+  # step 10
+  - undo: {}
+  - observe:
+      - undo_status
+      - {db_dump: {tables: [notes, cards, graves]}}
+  - db_exec: {sql: "SELECT n.sfld, t.name FROM notes n JOIN notetypes t ON t.id = n.mid ORDER BY n.id"}
+  - db_exec: {sql: "SELECT scm = ls FROM col"}
+  - advance: 1m
+  # step 15
+  - redo: {}
+  - observe:
+      - undo_status
+      - {db_dump: {tables: [notes, cards, graves]}}
+  - db_exec: {sql: "SELECT n.sfld, t.name FROM notes n JOIN notetypes t ON t.id = n.mid ORDER BY n.id"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 30, ivl = 5, factor = 2500, mod = 1700000000, usn = 5 WHERE ord = 1"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 21: back to Pair; Card 2 is dropped
+  - change_notetype_info: {notes: ["#n1", "#n2"], notetype: Pair}
+  - change_notetype: {}
+  - observe:
+      - undo_status
+      - {db_dump: {tables: [notes, cards, graves]}}
+  - advance: 1m
+  # step 25
+  - undo: {}
+  - observe:
+      - undo_status
+      - {db_dump: {tables: [notes, cards, graves]}}
+  - db_exec: {sql: "SELECT n.sfld, t.name FROM notes n JOIN notetypes t ON t.id = n.mid ORDER BY n.id"}
+  - db_exec: {sql: "SELECT scm = ls FROM col"}

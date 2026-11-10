@@ -1,0 +1,459 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "empty_cards": [
+          {
+            "notes": [
+              {
+                "all_empty": false,
+                "cards": 2,
+                "note": "#n1",
+                "ords": [1]
+              },
+              {
+                "all_empty": true,
+                "cards": 2,
+                "note": "#n2",
+                "ords": [0, 1]
+              }
+            ],
+            "notetype": "Optional"
+          }
+        ]
+      },
+      {
+        "delete_empty_cards": {
+          "deleted": 3,
+          "kept_valid": 0
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 3
+            }
+          },
+          "col": {
+            "1": {
+              "conf": "",
+              "crt": 1894680000,
+              "dconf": "",
+              "decks": "",
+              "dty": 0,
+              "id": 1,
+              "ls": 0,
+              "mod": 1894705200000,
+              "models": "",
+              "scm": 1894701600000,
+              "tags": "",
+              "usn": 0,
+              "ver": 18
+            }
+          },
+          "graves": {
+            "1894701600001,0": {
+              "oid": 1894701600001,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600001,1": {
+              "oid": 1894701600001,
+              "type": 1,
+              "usn": -1
+            },
+            "1894701600002,0": {
+              "oid": 1894701600002,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600003,0": {
+              "oid": 1894701600003,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "notes": {
+            "1894701600000": {
+              "csum": 2264392759,
+              "data": "",
+              "flags": 0,
+              "flds": "a\u001fA\u001f",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "a",
+              "tags": "",
+              "usn": 3
+            }
+          }
+        },
+        "undo_status": {
+          "redo": null,
+          "undo": "empty_cards"
+        }
+      },
+      {},
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {},
+            "did": "Words",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": 3
+          },
+          "#c2": {
+            "data": {},
+            "did": "Words",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 1,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": 3
+          },
+          "#c3": {
+            "data": {},
+            "did": "Words",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c3",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": 3
+          },
+          "#c4": {
+            "data": {},
+            "did": "Words",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 1,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": 3
+          }
+        },
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 3
+            },
+            "1894701600001": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600001,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 3
+            },
+            "1894701600002": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600002,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600001,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 3
+            },
+            "1894701600003": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600003,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600001,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 3
+            }
+          },
+          "col": {
+            "1": {
+              "conf": "",
+              "crt": 1894680000,
+              "dconf": "",
+              "decks": "",
+              "dty": 0,
+              "id": 1,
+              "ls": 0,
+              "mod": 1894701600000,
+              "models": "",
+              "scm": 1894701600000,
+              "tags": "",
+              "usn": 0,
+              "ver": 18
+            }
+          },
+          "graves": {},
+          "notes": {
+            "1894701600000": {
+              "csum": 2264392759,
+              "data": "",
+              "flags": 0,
+              "flds": "a\u001fA\u001f",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "a",
+              "tags": "",
+              "usn": 3
+            },
+            "1894701600001": {
+              "csum": 3923189598,
+              "data": "",
+              "flags": 0,
+              "flds": "\u001fB\u001f",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "b",
+              "tags": "",
+              "usn": 3
+            }
+          }
+        },
+        "undo_status": {
+          "redo": "empty_cards",
+          "undo": null
+        }
+      },
+      {},
+      {},
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 3
+            }
+          },
+          "col": {
+            "1": {
+              "conf": "",
+              "crt": 1894680000,
+              "dconf": "",
+              "decks": "",
+              "dty": 0,
+              "id": 1,
+              "ls": 0,
+              "mod": 1894705200000,
+              "models": "",
+              "scm": 1894701600000,
+              "tags": "",
+              "usn": 0,
+              "ver": 18
+            }
+          },
+          "graves": {
+            "1894701600001,0": {
+              "oid": 1894701600001,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600001,1": {
+              "oid": 1894701600001,
+              "type": 1,
+              "usn": -1
+            },
+            "1894701600002,0": {
+              "oid": 1894701600002,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600003,0": {
+              "oid": 1894701600003,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "notes": {
+            "1894701600000": {
+              "csum": 2264392759,
+              "data": "",
+              "flags": 0,
+              "flds": "a\u001fA\u001f",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "a",
+              "tags": "",
+              "usn": 3
+            }
+          }
+        },
+        "undo_status": {
+          "redo": null,
+          "undo": "empty_cards"
+        }
+      },
+      {
+        "empty_cards": []
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "f10b3fbfa80664e6e78893185d28ae464f9aee3722a2473391b90ca2c16d7cfa",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "maintenance/empty-cards/undo-redo",
+  "scenario_sha256": "1eef22e3fad8de58c0b226689c28a16accca88940cc12044cd2add39cb5013b5",
+  "tz": "UTC"
+}

@@ -1,0 +1,41 @@
+# N6.6 of specs/maintenance/check-database-notes.md (R1644): a template that
+# became non-empty for a note gets its card. A note of Gated has only its Main
+# card while Extra is empty; a raw write fills Extra (no card generation), so
+# its Bonus template now requires a card, and Check Database adds it in the
+# deck of its sibling (notes/deck-placement-and-position D3 item 2), at its
+# sibling's position (P2 item 1), with local stamps. A cloze note whose text gains c2 by a raw
+# write gets its ordinal 1 card the same way (notes/card-generation G4); its
+# sort field and checksum are written again without stamps. The second Gated
+# note keeps its single card. Nothing is counted, nextPos and scm stay. A
+# second run finds nothing.
+id: maintenance/check-db-notes/template-now-nonempty
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Gated
+      fields: [Front, Back, Extra]
+      templates:
+        - {name: Main, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Bonus, front: "{{#Extra}}{{Extra}}{{/Extra}}", back: "{{Front}}"}
+    - name: Gaps
+      kind: cloze
+      fields: [Text, Notes]
+      templates:
+        - {name: Cloze, front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Notes}}"}
+  decks: [Side, Inbox]
+  notes:
+    - {notetype: Gated, deck: Side, fields: [one, uno, ""]}
+    - {notetype: Gated, deck: Inbox, fields: [two, dos, ""]}
+    - {notetype: Gaps, deck: Side, fields: ["{{c1::red}} sky", ""]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET flds = 'one' || char(31) || 'uno' || char(31) || 'more', usn = 5 WHERE id = (SELECT id FROM notes WHERE sfld = 'one')"}
+  - db_exec: {sql: "UPDATE notes SET flds = '{{c1::red}} sky, {{c2::blue}} sea' || char(31), usn = 5 WHERE mid = (SELECT id FROM notetypes WHERE name = 'Gaps')"}
+  - db_exec: {sql: "SELECT (SELECT name FROM notetypes WHERE id = n.mid), c.ord FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord"}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT (SELECT name FROM notetypes WHERE id = n.mid), c.ord, c.type, c.queue, c.due, c.mod, c.usn, (SELECT name FROM decks WHERE id = c.did) FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord"}
+  - db_exec: {sql: "SELECT sfld, csum, mod, usn FROM notes ORDER BY id"}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

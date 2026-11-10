@@ -1,0 +1,26 @@
+# N6.6 of specs/maintenance/check-database-notes.md, the filtered branch:
+# deck 1 made a filtered deck by db_exec (the kind of
+# specs/conformance/deck-ops.md K13) while no card is in it, and a note whose
+# only card was deleted, its note type with no last deck. Anki finds no
+# usable deck for the card it must generate and its Check Database stops,
+# changing nothing (collection-check.md K10 failed); Meguri leaves deck 1 as
+# it is, does not generate the card, counts nothing and finishes (deviation
+# check-db-default-deck-filtered). The reopen after the decks write drops
+# Anki's deck cache. No second run.
+id: maintenance/check-db-notes/default-deck-filtered
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes: [{notetype: Single, deck: Inbox, fields: [one, uno]}]
+steps:
+  - db_exec: {sql: "DELETE FROM cards"}
+  - db_exec: {sql: "DELETE FROM config WHERE KEY LIKE '\\_nt\\_%\\_lastDeck' ESCAPE '\\'"}
+  - db_exec: {sql: "UPDATE decks SET kind = X'12130801120a0a066465636b3a78106428d804383c', usn = 5 WHERE id = 1"}
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT) FROM config WHERE KEY IN ('curDeck', 'activeDecks') ORDER BY KEY"}
+  - reopen: {}
+  - advance: 1h
+  - check_db: {}

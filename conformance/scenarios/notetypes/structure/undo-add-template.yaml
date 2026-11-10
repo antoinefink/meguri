@@ -1,0 +1,60 @@
+# Undo and redo of a template add (specs/notetypes/structure-changes.md S7,
+# S13; specs/notetypes/schema-changes.md G5; specs/engine/undo.md). The add
+# is one "Update Note Type" step. It gives the note with a new Forward card a
+# Reverse card at the same position, the note whose card is in review the next
+# counter value, and the note with an empty Back none, and sets col.scm. Undo
+# deletes the generated cards without a grave, gives the note type back its
+# one template and requirement, and returns col.scm and nextPos to their
+# values before the add; nothing else changes. Redo puts the template and the
+# same cards (same ids, positions and stamps) back. Needs update_notetype with
+# U34's add_template (specs/conformance/notetype-ops.md T10.1), undo, redo and
+# undo_status (specs/conformance/undo-ops.md V1, V2, V5).
+id: notetypes/structure/undo-add-template
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+  notes:
+    - {notetype: Pair, fields: [sun, sol]}
+    - {notetype: Pair, fields: [moon, luna]}
+    - {notetype: Pair, fields: [star, ""]}
+steps:
+  # A statement that is not a select empties both histories (undo-ops V5).
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 30, ivl = 5, factor = 2500 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}
+  - db_exec: {sql: "UPDATE cards SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  - observe: [undo_status, {db_dump: {tables: [cards, graves]}}]
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  # step 6
+  - update_notetype: {notetype: Pair, edits: [{add_template: {name: Reverse, front: "{{Back}}", back: "{{Front}}"}}]}
+  - observe:
+      - undo_status
+      - {db_dump: {tables: [cards, graves]}}
+      - {notetype_structure: {notetypes: [Pair]}}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - advance: 1m
+  # step 11
+  - undo: {}
+  - observe:
+      - undo_status
+      - {db_dump: {tables: [cards, graves]}}
+      - {notetype_structure: {notetypes: [Pair]}}
+      - {notetype_templates: {notetypes: [Pair]}}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - db_exec: {sql: "SELECT scm = ls FROM col"}
+  - db_exec: {sql: "SELECT count(*) FROM templates WHERE ntid = (SELECT id FROM notetypes WHERE name = 'Pair')"}
+  - advance: 1m
+  # step 17
+  - redo: {}
+  - observe:
+      - undo_status
+      - {db_dump: {tables: [cards, graves]}}
+      - {notetype_structure: {notetypes: [Pair]}}
+      - {notetype_templates: {notetypes: [Pair]}}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}

@@ -1,0 +1,31 @@
+# AE42 (core part), R1107, R1108; specs/search/errors.md E1, E2,
+# grammar.md G3 (unclosed quote), canonical-form.md F4 (deck:Japanese
+# tag:wk-lev), editing-services.md D2, D7. The text of AE42 committed with
+# its quote still open fails with unclosed_quote, as a canonical text and as
+# a search; the text before the typed term, and the same term with its quote
+# closed, are valid. The error's range (from the quote to the end) is
+# Meguri's only and not observed.
+id: search/errors/ae42
+tags: [needs-deck, needs-tag]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Japanese]
+  notetypes:
+    - name: Memo
+      fields: [Front, Back]
+      templates: [{name: Recall, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Memo, deck: Japanese, fields: [one, x], tags: ["wk-lev::sub"]}
+    - {notetype: Memo, deck: Japanese, fields: [two, x], tags: [wk-lev]}
+    - {notetype: Memo, fields: [three, x], tags: [wk-lev]}
+steps:
+  - observe:
+      - canonical_search:
+          - 'deck:Japanese'
+          - 'deck:Japanese tag:"wk-lev'
+          - 'deck:Japanese tag:"wk-lev"'
+      - search:
+          - {query: 'deck:Japanese', kind: notes}
+          - {query: 'deck:Japanese tag:"wk-lev', kind: notes}
+          - {query: 'deck:Japanese tag:"wk-lev"', kind: notes}

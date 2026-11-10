@@ -1,0 +1,44 @@
+# The duplicate check after another field moves to position 0
+# (specs/notetypes/structure-changes.md S5: csum from the new first field;
+# specs/notes/field-check.md K4; AE34). Before the move the first field is
+# Word: the two notes sharing a Word are duplicates of each other, and the two
+# notes sharing a Meaning are not. Moving Meaning to the front rewrites every
+# note's csum from its Meaning, so the check, which looks notes up by their
+# stored csum, now finds the notes sharing a Meaning and no longer those
+# sharing a Word, for stored notes and for a new note's draft alike. Needs
+# update_notetype with U34's move_field (specs/conformance/notetype-ops.md
+# T10.1) and the fields_check observation (note-ops.md N4).
+id: notetypes/structure/first-field-duplicates
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Lex
+      fields: [Word, Meaning]
+      templates:
+        - {name: Recall, front: "{{Word}}", back: "{{Meaning}}"}
+  notes:
+    - {notetype: Lex, fields: [sun, light]}
+    - {notetype: Lex, fields: [sun, star]}
+    - {notetype: Lex, fields: [moon, night]}
+    - {notetype: Lex, fields: ["<b>sky</b>", night]}
+steps:
+  - observe:
+      - fields_check:
+          cases:
+            - {note: "#n1"}
+            - {note: "#n3"}
+            - {notetype: Lex, fields: [sun, x]}
+            - {notetype: Lex, fields: [night, x]}
+  - advance: 1m
+  # step 2
+  - update_notetype: {notetype: Lex, edits: [{move_field: {field: Meaning, to: 0}}], skip_checks: true}
+  - observe:
+      - {db_dump: {tables: [notes]}}
+      - fields_check:
+          cases:
+            - {note: "#n1"}
+            - {note: "#n3"}
+            - {note: "#n4"}
+            - {notetype: Lex, fields: [sun, x]}
+            - {notetype: Lex, fields: ["<i>night</i>", x]}
+  - db_exec: {sql: "SELECT count(*) FROM notes WHERE csum = (SELECT csum FROM notes WHERE sfld = 'moon')"}

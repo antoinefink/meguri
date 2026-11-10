@@ -1,0 +1,40 @@
+# U131 (specs/notes/empty-cards.md E4's last paragraph; specs/engine/undo.md):
+# the Empty Cards delete is one undo step, Empty Cards. Raw writes clear Add
+# Reverse of note a (its card 2 empty) and Front and Add Reverse of note b
+# (both cards empty); they also give the rows server usns and empty both undo
+# histories (specs/conformance/undo-ops.md V5), so no edit step sits under the
+# delete. The delete with keep off removes three cards and note b, with a
+# grave for each. Undo inserts them again as they were, server usns
+# included, and removes the graves; redo removes them again and adds the
+# graves back. Undo puts col.mod back to its value before the delete and
+# redo to the delete's (specs/engine/undo.md A7), not to the step's time.
+id: maintenance/empty-cards/undo-redo
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Optional
+      fields: [Front, Back, Add Reverse]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Card 2, front: "{{#Add Reverse}}{{Back}}{{/Add Reverse}}", back: "{{Front}}"}
+  decks: [Words]
+  notes:
+    - {notetype: Optional, deck: Words, fields: [a, A, y]}
+    - {notetype: Optional, deck: Words, fields: [b, B, y]}
+steps:
+  # Server usns, as after a sync; field edits without card generation.
+  - db_exec: {sql: "UPDATE cards SET usn = 3"}
+  - db_exec: {sql: "UPDATE notes SET usn = 3"}
+  - db_exec: {sql: "UPDATE notes SET flds = 'a' || char(31) || 'A' || char(31) WHERE sfld = 'a'"}
+  - db_exec: {sql: "UPDATE notes SET flds = char(31) || 'B' || char(31) WHERE sfld = 'b'"}
+  - advance: 1h
+  - empty_cards: {}
+  - delete_empty_cards: {keep_notes: false}
+  - observe: [undo_status, {db_dump: {tables: [col, notes, cards, graves]}}]
+  - advance: 1h
+  - undo: {}
+  - observe: [undo_status, {db_dump: {tables: [col, notes, cards, graves]}}, "card(#c1, #c2, #c3, #c4)"]
+  - advance: 1h
+  - redo: {}
+  - observe: [undo_status, {db_dump: {tables: [col, notes, cards, graves]}}]
+  - empty_cards: {}

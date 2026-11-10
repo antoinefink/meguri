@@ -1,0 +1,31 @@
+# C10.4's last rule of specs/maintenance/check-database.md, with C8.7: a
+# review card whose only review-log row has an id two days after the clock.
+# The first run writes the card's lrt from that row's old id (C8.7 runs
+# before C10.4: card_last_review_time 1), then gives the row the new id
+# now_ms (future_ids 1); scm set, the card's mod and usn kept. The second
+# run's C8.7 finds the lrt no longer matching the re-keyed row and corrects it
+# (card_last_review_time 1, scm set again). A third run finds nothing.
+id: maintenance/check-db/future-ids-lrt
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes: [{notetype: Single, deck: Inbox, fields: [one, uno]}]
+steps:
+  - answer: {card: "#c1", rating: easy}
+  - db_exec: {sql: "UPDATE revlog SET id = 1894878000000, usn = 5"}
+  - db_exec: {sql: "UPDATE cards SET usn = 5"}
+  - db_exec: {sql: "SELECT type, json_extract(data, '$.lrt') FROM cards"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT id, cid, usn FROM revlog"}
+  - db_exec: {sql: "SELECT json_extract(data, '$.lrt'), mod, usn FROM cards"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - advance: 1m
+  - check_db: {}
+  - db_exec: {sql: "SELECT json_extract(data, '$.lrt'), mod, usn FROM cards"}
+  - db_exec: {sql: "SELECT scm FROM col"}
+  - check_db: {}

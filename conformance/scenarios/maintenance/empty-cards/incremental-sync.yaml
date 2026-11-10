@@ -1,0 +1,54 @@
+# U131 (R1654; specs/notes/empty-cards.md E4's last paragraphs): the Empty
+# Cards delete is not a schema change, so the manual Anki transfer after it is
+# incremental and carries the deletions as card and note graves. The Meguri
+# actor uploads a collection where note a's card 2 and both cards of note b
+# are empty; client_c downloads it. The Meguri actor then scans and deletes
+# with keep off: three card graves and one note grave, scm still equal to ls.
+# Its next normal sync runs to the end (no_changes, no one-way sync) and
+# sends the graves; client_c's normal sync then removes the three cards and
+# note b. The clock advances before each actor's block (sync-ops.md S4.3).
+# Only the read before the sync shows scm unchanged: the full upload left ls
+# equal to scm, and a normal sync's finish sets ls to the server's later
+# time, so no scm = ls read after a sync could tell. No observation reads
+# note types, db_dump or converge, so the stock note types Meguri's new
+# collection uploads (sync-ops.md S12) never reach the golden.
+id: maintenance/empty-cards/incremental-sync
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [meguri, client_c]
+setup:
+  decks: [Words]
+  notetypes:
+    - name: Optional
+      fields: [Front, Back, Add Reverse]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Card 2, front: "{{#Add Reverse}}{{Back}}{{/Add Reverse}}", back: "{{Front}}"}
+  notes:
+    - {notetype: Optional, deck: Words, fields: [a, A, y]}
+    - {notetype: Optional, deck: Words, fields: [b, B, y]}
+    - {notetype: Optional, deck: Words, fields: [c, C, y]}
+steps:
+  - edit_note: {note: "#n1", fields: {Add Reverse: ""}}
+  - edit_note: {note: "#n2", fields: {Front: "", Add Reverse: ""}}
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_upload}
+  - actor: client_c
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_download}
+  - db_exec: {sql: "SELECT count(*) FROM cards"}
+  - actor: meguri
+  - advance: 1m
+  - empty_cards: {}
+  - delete_empty_cards: {keep_notes: false}
+  - db_exec: {sql: "SELECT type, usn, count(*) FROM graves GROUP BY type, usn ORDER BY type"}
+  - db_exec: {sql: "SELECT scm = ls FROM col"}
+  - advance: 1m
+  - sync: {kind: normal}
+  - db_exec: {sql: "SELECT type, usn = -1, count(*) FROM graves GROUP BY type, usn = -1 ORDER BY type"}
+  - actor: client_c
+  - advance: 1m
+  - sync: {kind: normal}
+  - db_exec: {sql: "SELECT n.sfld, c.ord FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.sfld, c.ord"}
+  - db_exec: {sql: "SELECT count(*) FROM notes"}

@@ -1,0 +1,28 @@
+# A first field whose markup is entity-encoded is stripped once
+# (specs/notes/field-check.md K2 "Comparison text", K4; AE34; the
+# &lt;b&gt;Cat row of K4's table). The stored note's first field and the
+# draft's both strip to "<b>Cat", whose checksum is the stored csum, so the
+# draft is a duplicate of that note; stripping the comparison text a second
+# time would give "Cat" and miss it. A draft "<b>Cat</b>" strips to "Cat" and
+# finds nothing, and the stored note is not its own duplicate. Needs the
+# fields_check observation (specs/conformance/note-ops.md N4).
+id: notes/fields-check/entity-markup
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Kaishi
+      fields: [Word, Meaning]
+      templates:
+        - {name: Recognize, front: "{{Word}}", back: "{{Meaning}}"}
+  decks: [Inbox]
+  notes:
+    - {notetype: Kaishi, deck: Inbox, fields: ["&lt;b&gt;Cat", I]}
+steps:
+  - observe:
+      - fields_check:
+          cases:
+            - {notetype: Kaishi, fields: ["&lt;b&gt;Cat", I]}
+            - {notetype: Kaishi, fields: ["<b>Cat</b>", I]}
+            - {notetype: Kaishi, fields: [Cat, I]}
+            - {note: "#n1"}
+  - db_exec: {sql: "SELECT sfld FROM notes"}

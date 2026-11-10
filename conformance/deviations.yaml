@@ -136,6 +136,23 @@ deviations:
     scenarios: [search/regex/invalid-unreached]
     pointer: /steps/*/search/*
     transform: {replace: {error: invalid_regex}}
+  # specs/search/text-matching.md T3.3, T12.3: the pattern size limit has the
+  # same timing difference. Two entries, so that the dog search of step 3 and
+  # the search of step 5 (search_failed on both sides) keep their golden.
+  - id: search-pattern-limit-unreached
+    requirement: R1075
+    summary: A field pattern over the 50,000-byte limit is search_failed even on a collection without notes; Anki returns no ids.
+    test: search/text/pattern-limit-unreached
+    scenarios: [search/text/pattern-limit-unreached]
+    pointer: /steps/0/search/0
+    transform: {replace: {error: search_failed}}
+  - id: search-pattern-limit-unreached-runs
+    requirement: R1075
+    summary: An excluded-field run pattern over the 50,000-byte limit is search_failed even when only a note type without notes has it; Anki returns no ids.
+    test: search/text/pattern-limit-unreached
+    scenarios: [search/text/pattern-limit-unreached]
+    pointer: /steps/3/search/0
+    transform: {replace: {error: search_failed}}
   # specs/decks/decks.md D6 step 4, D15.1 (R62): Meguri refuses to rename a
   # deck under one of its own descendants; Anki renames it there and creates
   # new empty decks for the names the subtree left.
@@ -1156,6 +1173,13 @@ deviations:
     scenarios: [maintenance/check-db-notes/default-deck-missing]
     pointer: /steps/6/check_db
     transform: {replace: {"card_last_review_time": 0, "card_properties": 0, "cards_without_note": 0, "cards_without_template": 0, "decks_missing": 1, "duplicate_card_ords": 0, "field_counts": 0, "future_ids": 0, "new_positions_too_high": 0, "notes_invalid_utf8": 0, "notetypes_recovered": 0, "revlog_properties": 0}}
+  - id: check-db-default-deck-filtered
+    requirement: R1644
+    summary: With deck 1 filtered, the card the notes stage would generate for a note without cards is skipped, nothing is counted and Check Database finishes; Anki stops with an error, changing nothing (specs/maintenance/check-database-notes.md N6.6).
+    test: maintenance/check-db-notes/default-deck-filtered
+    scenarios: [maintenance/check-db-notes/default-deck-filtered]
+    pointer: /steps/6/check_db
+    transform: {replace: {"card_last_review_time": 0, "card_properties": 0, "cards_without_note": 0, "cards_without_template": 0, "decks_missing": 0, "duplicate_card_ords": 0, "field_counts": 0, "future_ids": 0, "new_positions_too_high": 0, "notes_invalid_utf8": 0, "notetypes_recovered": 0, "revlog_properties": 0}}
   # specs/maintenance/check-media.md C20: Check Media differences, with the
   # goldens of C22 (Linux oracle, case-sensitive volume).
   - id: check-media-rename-trashes-old

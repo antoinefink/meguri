@@ -1,0 +1,29 @@
+# Cloze fields are matched to the first front's cloze references under
+# unicase (specs/notes/field-check.md K2 "Cloze fields", K3; the Gap3 row of
+# K3's table). Gap3's first front is "{{cloze:text}}" while its field is
+# Text: the field still counts as a cloze field, so a cloze in Text is
+# normal, a cloze in Extra is in a field that is not a cloze field, and no
+# cloze at all is a missing cloze. The front is written with db_exec
+# (protobuf field 1 of templates.config; a later occurrence replaces the
+# earlier one) and the collection reopened, as notes/fields-check/states does,
+# since the template checks refuse the case-different name. Needs the
+# fields_check observation (specs/conformance/note-ops.md N4).
+id: notes/fields-check/cloze-unicase
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Gap3
+      kind: cloze
+      fields: [Text, Extra]
+      templates:
+        - {name: Gap, front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Extra}}"}
+steps:
+  # Gap3's front becomes "{{cloze:text}}".
+  - db_exec: {sql: "UPDATE templates SET config = CAST(config || X'0a0e7b7b636c6f7a653a746578747d7d' AS BLOB) WHERE ntid = (SELECT id FROM notetypes WHERE name = 'Gap3') AND ord = 0"}
+  - reopen: {}
+  - observe:
+      - fields_check:
+          cases:
+            - {notetype: Gap3, fields: ["{{c1::x}}", ""]}
+            - {notetype: Gap3, fields: [x, "{{c1::y}}"]}
+            - {notetype: Gap3, fields: [x, ""]}

@@ -1,0 +1,60 @@
+# Live (T1, R1925; specs/maintenance/check-database.md C18.4): a collection
+# that Meguri creates and studies with FSRS on, across learning steps, study
+# on three days over four, a Reset, a suspension (#c2, of a kept note and not
+# answered again, so the file Anki checks holds it), a note edit and a note
+# deletion, then closes. Anki
+# opens the file, finds it sound and its Check Database finds nothing to
+# repair: every count 0, in particular no card_last_review_time, which checks
+# the lrt Meguri's answers and Reset wrote (C8.7, sched/memory-state M6). The
+# golden is the oracle running both segments. The 200-answer T1 suite of C18.3
+# stays the job of tools/mg oracle check.
+id: maintenance/check-db/meguri-studied-handoff
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Reverse, front: "{{Back}}", back: "{{Front}}"}
+  decks: [Words, "Words::Sub"]
+  notes:
+    - {notetype: Pair, deck: Words, fields: [river, rio]}
+    - {notetype: Pair, deck: Words, fields: [lake, lago]}
+    - {notetype: Pair, deck: "Words::Sub", fields: [sun, sol]}
+    - {notetype: Pair, deck: "Words::Sub", fields: [star, estrella]}
+steps:
+  - answer: {card: "#c1", rating: good}
+  - answer: {card: "#c2", rating: again}
+  - answer: {card: "#c3", rating: easy}
+  - answer: {card: "#c4", rating: hard}
+  - answer: {card: "#c5", rating: good}
+  - advance: 10m
+  - answer: {card: "#c2", rating: good}
+  - answer: {card: "#c4", rating: good}
+  - answer: {card: "#c5", rating: good}
+  - advance: 1d
+  - answer: {card: "#c1", rating: good}
+  - answer: {card: "#c2", rating: good}
+  - answer: {card: "#c4", rating: again}
+  - answer: {card: "#c6", rating: good}
+  - advance: 10m
+  - answer: {card: "#c4", rating: good}
+  - answer: {card: "#c6", rating: good}
+  - forget: {cards: ["#c3"]}
+  - suspend: {cards: ["#c2"]}
+  - advance: 3d
+  - answer: {card: "#c1", rating: hard}
+  - answer: {card: "#c3", rating: good}
+  - answer: {card: "#c5", rating: easy}
+  - answer: {card: "#c6", rating: again}
+  - advance: 10m
+  - answer: {card: "#c3", rating: good}
+  - answer: {card: "#c6", rating: good}
+  - edit_note: {note: "#n2", fields: {Back: "lago (es)"}}
+  - delete_notes: {notes: ["#n4"]}
+  - advance: 1h
+  - handoff: oracle
+  - db_exec: {sql: "SELECT * FROM pragma_integrity_check"}
+  - check_db: {}

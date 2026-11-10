@@ -1,0 +1,59 @@
+# U35 test 5's undo, with "Keep notes with no valid cards" on
+# (specs/notes/empty-cards.md E4 step 3 and its "one undo step, Empty Cards"
+# paragraph). Card 2 of the first note goes with a card grave. The second
+# note's only card is empty and stays. The third note has both cards empty:
+# its card of ordinal 0 stays and card 2 goes with a card grave. No note
+# grave, every note kept, the review-log row of a deleted card kept. Undo
+# puts both deleted cards back with their ids, stamps and scheduling and
+# removes the two graves; redo deletes them again. A scan after a second
+# undo lists the same cards as the first one. U131's
+# maintenance/empty-cards/undo-redo covers the same step with keep off.
+# Needs empty_cards and delete_empty_cards (specs/conformance/empty-cards-ops.md
+# Y1, Y2), undo, redo and undo_status (specs/conformance/undo-ops.md V1, V2,
+# V5).
+id: cardgen/empty/undo
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Optional
+      fields: [Front, Back, Add Reverse]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Card 2, front: "{{#Add Reverse}}{{Back}}{{/Add Reverse}}", back: "{{Front}}"}
+  decks: [Words]
+  notes:
+    - {notetype: Optional, deck: Words, fields: [a, A, y]}
+    - {notetype: Optional, deck: Words, fields: ["", B, y]}
+    - {notetype: Optional, deck: Words, fields: [c, C, y]}
+steps:
+  - edit_note: {note: "#n1", fields: {Add Reverse: ""}}
+  - edit_note: {note: "#n2", fields: {Add Reverse: ""}}
+  - edit_note: {note: "#n3", fields: {Front: "", Add Reverse: ""}}
+  # A statement that is not a select empties both histories (undo-ops V5).
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 30, ivl = 5, factor = 2500, mod = 1700000000, usn = 5 WHERE ord = 1"}
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT 1894700000000, id, -1, 3, 5, 0, 2500, 6000, 0 FROM cards WHERE ord = 1 AND nid = (SELECT id FROM notes WHERE sfld = 'a')"}
+  - advance: 1h
+  - observe: [{db_dump: {tables: [notes, cards, graves]}}]
+  - empty_cards: {}
+  - delete_empty_cards: {keep_notes: true}
+  - observe:
+      - undo_status
+      - card
+      - {db_dump: {tables: [notes, graves]}}
+  - db_exec: {sql: "SELECT count(*) FROM revlog"}
+  - advance: 1m
+  - undo: {}
+  - observe:
+      - undo_status
+      - card
+      - {db_dump: {tables: [notes, cards, graves]}}
+  - db_exec: {sql: "SELECT count(*) FROM revlog"}
+  - advance: 1m
+  - redo: {}
+  - observe:
+      - undo_status
+      - card
+      - {db_dump: {tables: [notes, cards, graves]}}
+  - advance: 1m
+  - undo: {}
+  - empty_cards: {}

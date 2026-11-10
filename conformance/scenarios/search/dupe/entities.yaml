@@ -1,0 +1,41 @@
+# R1074; specs/search/names-and-ids.md N6 steps 1-3. The dupe: text is
+# stripped once (HTML removed, entities decoded, media names kept) and its
+# checksum is taken of that result as it is, never stripped again. A first
+# field written with entities, &lt;b&gt;Cat, strips to the text <b>Cat and is
+# stored with the checksum of <b>Cat, so dupe: with the same entity text
+# finds it, and the tag text <b>Cat (which strips to Cat) finds the plain
+# notes instead. The Other note with the same first field never matches
+# (step 3: dupe: names Word's id). The note type ids come from the frozen clock
+# (specs/storage/ids-usn-mtime.md I2); the first db_exec pins them.
+id: search/dupe/entities
+tags: [needs-dupe]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Word
+      fields: [Front, Back]
+      templates: [{name: Recall, front: "{{Front}}{{Back}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: Other
+      fields: [Front, Back]
+      templates: [{name: Recall, front: "{{Front}}{{Back}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Word, fields: ["&lt;b&gt;Cat", x]}
+    - {notetype: Word, fields: ["<b>Cat", x]}
+    - {notetype: Word, fields: [Cat, x]}
+    - {notetype: Word, fields: ["&amp;lt;b&amp;gt;Cat", x]}
+    - {notetype: Word, fields: ["&lt;i&gt;", x]}
+    - {notetype: Other, fields: ["&lt;b&gt;Cat", x]}
+steps:
+  - db_exec: {sql: "SELECT id, name FROM notetypes WHERE name IN ('Word', 'Other') ORDER BY id"}
+  - db_exec: {sql: "SELECT csum, flds FROM notes ORDER BY id"}
+  - observe:
+      - search:
+          - {query: 'dupe:1894701600006,&lt;b&gt;Cat', kind: notes}
+          - {query: 'dupe:1894701600006,<b>Cat', kind: notes}
+          - {query: 'dupe:1894701600006,Cat', kind: notes}
+          - {query: 'dupe:1894701600006,&amp;lt;b&amp;gt;Cat', kind: notes}
+          - {query: 'dupe:1894701600006,&lt;i&gt;', kind: notes}
+          - {query: 'dupe:1894701600006,<i>', kind: notes}
+          - {query: 'dupe:1894701600006,', kind: notes}

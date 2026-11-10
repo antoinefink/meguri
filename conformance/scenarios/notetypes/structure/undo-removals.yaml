@@ -1,0 +1,84 @@
+# Undo of a template removal and of a note type removal
+# (specs/notetypes/structure-changes.md S6, S12, S13). Removing Reverse
+# removes its cards with card graves, renumbers nothing and leaves the note
+# that had only its Reverse card with no card; undo puts the cards back with
+# their ids, stamps and scheduling, removes the graves and returns col.scm.
+# The last setup note is Pair's, so curModel names Pair. Removing the note
+# type Pair then removes its notes and cards with graves, its _nt_<id>_ config
+# keys and its rows, and moves curModel to the note type whose name sorts
+# first (Alpha); undo brings all of it back, curModel (Pair again) and the
+# keys included, and returns col.scm. Alpha's note is never touched. Needs
+# update_notetype with U34's remove_template (specs/conformance/notetype-ops.md
+# T10.1), remove_notetype (notetype-structure-ops.md M1), undo, redo and
+# undo_status (specs/conformance/undo-ops.md V1, V2, V5).
+id: notetypes/structure/undo-removals
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Reverse, front: "{{Back}}", back: "{{Front}}"}
+    - name: Alpha
+      fields: [Text]
+      templates:
+        - {name: Only, front: "{{Text}}", back: ""}
+  notes:
+    - {notetype: Pair, fields: [a, b]}
+    - {notetype: Alpha, fields: [s]}
+    - {notetype: Pair, fields: ["", y]}
+steps:
+  # A statement that is not a select empties both histories (undo-ops V5).
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 30, ivl = 5, factor = 2500, mod = 1700000000, usn = 5 WHERE ord = 1"}
+  - db_exec: {sql: "UPDATE notes SET mod = 1700000000, usn = 5"}
+  - db_exec:
+      sql: >-
+        INSERT INTO config (KEY, usn, mtime_secs, val)
+        SELECT '_nt_' || id || '_custom_0', 0, 0, CAST('1' AS BLOB) FROM notetypes WHERE name = 'Pair'
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  - observe: [{db_dump: {tables: [notes, cards, graves]}}]
+  # step 6
+  - update_notetype: {notetype: Pair, edits: [{remove_template: Reverse}]}
+  - observe:
+      - undo_status
+      - card
+      - {db_dump: {tables: [graves]}}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - advance: 1m
+  # step 10
+  - undo: {}
+  - observe:
+      - undo_status
+      - card
+      - {db_dump: {tables: [notes, cards, graves]}}
+      - {notetype_structure: {notetypes: [Pair]}}
+  - db_exec: {sql: "SELECT scm = ls FROM col"}
+  - advance: 1m
+  - db_exec: {sql: "SELECT n.name FROM notetypes n, config c WHERE c.KEY = 'curModel' AND CAST(c.val AS TEXT) = CAST(n.id AS TEXT)"}
+  # Pair's _nt_<id>_ keys, without the id
+  - db_exec: {sql: "SELECT substr(c.KEY, length('_nt_' || n.id || '_') + 1) FROM config c, notetypes n WHERE n.name = 'Pair' AND c.KEY LIKE '\\_nt\\_' || n.id || '\\_%' ESCAPE '\\' ORDER BY 1"}
+  # step 16
+  - remove_notetype: {notetype: Pair}
+  - observe:
+      - undo_status
+      - {db_dump: {tables: [notes, cards, graves]}}
+  - db_exec: {sql: "SELECT n.name FROM notetypes n, config c WHERE c.KEY = 'curModel' AND CAST(c.val AS TEXT) = CAST(n.id AS TEXT)"}
+  # config keys _nt_<id>_ whose id names no note type
+  - db_exec: {sql: "SELECT count(*) FROM config c WHERE c.KEY LIKE '\\_nt\\_%' ESCAPE '\\' AND NOT EXISTS (SELECT 1 FROM notetypes n WHERE c.KEY LIKE '\\_nt\\_' || n.id || '\\_%' ESCAPE '\\')"}
+  - db_exec: {sql: "SELECT count(*) FROM notetypes WHERE name = 'Pair'"}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - advance: 1m
+  # step 23
+  - undo: {}
+  - observe:
+      - undo_status
+      - card
+      - {db_dump: {tables: [notes, cards, graves]}}
+      - {notetype_structure: {notetypes: [Pair]}}
+      - {notetype_templates: {notetypes: [Pair]}}
+  - db_exec: {sql: "SELECT n.name FROM notetypes n, config c WHERE c.KEY = 'curModel' AND CAST(c.val AS TEXT) = CAST(n.id AS TEXT)"}
+  # Pair's _nt_<id>_ keys, without the id
+  - db_exec: {sql: "SELECT substr(c.KEY, length('_nt_' || n.id || '_') + 1) FROM config c, notetypes n WHERE n.name = 'Pair' AND c.KEY LIKE '\\_nt\\_' || n.id || '\\_%' ESCAPE '\\' ORDER BY 1"}
+  - db_exec: {sql: "SELECT scm = ls FROM col"}
