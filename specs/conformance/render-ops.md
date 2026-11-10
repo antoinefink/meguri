@@ -19,6 +19,7 @@ Three observation kinds (`observations.md` O4). `template` (Q1) evaluates the te
           - {front: "{{Front}}", back: "{{FrontSide}}<hr>{{Back}}", fields: [ein, zwei]}
           - {front: "{{Back}}", ord: 1, name: Reverse, fields: {Back: zwei}, tags: [de]}
           - {card: "#c1", front: "{{Deck}}"}
+          - {front: "{{Front}}", back: "{{Back}}", fields: [ein], fill_empty: true}
 ```
 
 - `cases`: a non-empty list; each case is a **new-note case** or a **card case**.
@@ -31,28 +32,32 @@ Three observation kinds (`observations.md` O4). `template` (Q1) evaluates the te
 
 ### Q1.2 New-note case
 
-`{front, back?, ord?, name?, fields?, tags?}`: a note of `notetype` that is not added to any collection, and its card at ordinal `ord` that does not exist either (template preview of a new note, U71).
+`{front, back?, ord?, name?, fields?, tags?, fill_empty?}`: a note of `notetype` that is not added to any collection, and its card at ordinal `ord` that does not exist either (template preview of a new note, U71).
 
 - `front`, `back`: the question and answer template texts (`back` defaults to empty). They are evaluated as given: no save, no validation, so templates that a note type save would refuse (unknown fields, structural errors) are fine.
 - `ord`: the card ordinal, an integer from 0 to 499 (default 0). For a cloze note type it is the cloze number minus one.
 - `name`: the template name, the `Card` special's value; a non-empty string, default `Card ` followed by `ord` + 1 (`Card 1`).
 - `fields`: the note's field values as in `add_note` (`dsl.md` D7.2): a list in field order (missing trailing values are empty) or a mapping of field name to value (missing fields are empty). Values are used exactly as given: no save normalization, so emptiness is `text/field-emptiness#E1` on the given text.
 - `tags`: the note's tags, a list of strings (default none), used as given and in that order.
+- `fill_empty`: a boolean (default `false`): when `true`, empty values are filled before evaluation (Q1.4 step 0).
 - The special values are a new card's (`special-fields.md` P3): `Type` is `notetype.name`, `Card` is `name`, `Tags` the tags joined by one space, `Deck` and `Subdeck` `(Deck)`, `CardFlag` `flag0`, `CardID` `0`, and `c<ord+1>` is `1`, each unless a field of the same name exists.
 
 ### Q1.3 Card case
 
-`{card: #cN, front, back?}`: card #cN as stored in the scenario's collection, rendered with the given template texts instead of its stored ones.
+`{card: #cN, front, back?, fill_empty?}`: card #cN as stored in the scenario's collection, rendered with the given template texts instead of its stored ones.
 
 - The note, its note type (name, fields, kind), the card's ordinal and the card itself (`did`, `odid`, `flags`, `id`) come from the collection at this step, so every special has its real value (P3).
 - `Card` is the stored template's name: for a standard note type the template at the card's ordinal, for a cloze note type the first template.
+- `fill_empty`: as in Q1.2. The fill changes only the values this evaluation uses; the stored note keeps its values.
 - `ord`, `name`, `fields` and `tags` are not allowed in a card case.
 - Any request containing a card case needs the `template.card` observation capability in addition to `template` (`dsl.md` D8). An executor declares it only when it implements these collection-backed cases; support for new-note cases alone is insufficient.
+- Any request containing a case with `fill_empty: true` needs the `template.fill_empty` observation capability in addition to `template` (and to `template.card` when it has a card case). A case with `fill_empty: false` needs nothing more.
 
 ### Q1.4 Evaluation
 
 For each case, independently:
 
+0. When `fill_empty` is `true`, the note's values are filled as `specs/render/preview.md` V6 says, with `front` as the question template and V7's sample text, `This is a {{c1::sample}} cloze deletion.` (the final period included). `back`, the note type's kind and the special values play no part; a `front` with a structural error (`template-syntax.md` T6) fills nothing.
 1. Build the field map (`special-fields.md` P2).
 2. Render `front` on the question side (`template-syntax.md` T1–T8). On an error, the case's value is that error with side `question`.
 3. Apply the blank check (T10) to the note type's kind and the field map. When blank, the value is the question output with `answer` null and `empty` true. The answer template is not evaluated.
@@ -74,7 +79,7 @@ No message text appears (R1887). Results are compared exactly (O7).
 
 ### Q1.6 Invalid requests
 
-A request that breaks Q1.1–Q1.3 is `invalid_scenario`: a wrong type, a missing `notetype`, a name or field name outside its rules, a field mapping naming no field, more values than fields, `ord` out of range, a card case with new-note keys. A card case naming a card that does not exist yet is `unknown_ref`. A card whose ordinal has no template in its standard note type is a run error; scenarios avoid it.
+A request that breaks Q1.1–Q1.3 is `invalid_scenario`: a wrong type (a `fill_empty` that is not a boolean included), a missing `notetype`, a name or field name outside its rules, a field mapping naming no field, more values than fields, `ord` out of range, a card case with new-note keys. A card case naming a card that does not exist yet is `unknown_ref`. A card whose ordinal has no template in its standard note type is a run error; scenarios avoid it.
 
 Nothing in the scenario's collection changes. New-note cases never read it.
 
@@ -87,6 +92,7 @@ Nothing in the scenario's collection changes. New-note cases never read it.
 - The oracle driver implements the kind: every scenario under `conformance/scenarios/render/` has its golden, recorded with `tools/mg oracle record render`.
 - Meguri's executor (the testkit's `template` adapter, U60) runs new-note cases with meguri-template and a field map built as Q1.2 says. New-note cases of a cloze note type (the blank check of T10, `render/cloze#C15`) and templates that use the `cloze` or `cloze-only` filter run with U61's cloze module (`render/cloze/blank-check`, `render/cloze/templates`).
 - Card cases also need notes, cards, decks and note types in the collection (the `notes`, `decks` and `notetypes` setup sections and the `ids` observation: U27, U28, U29) and, for a cloze card, the cloze blank check (U61). U62 adds card cases to the adapter, declares `template.card` and activates `special-fields/cards` and the template-card leg of `preservation/render/every-card`. Until then these card-case scenarios are `pending`, even when their other capabilities exist. `template/legacy-req` needs the `legacy_update` and `legacy_json` adapters and a note type save that recomputes each template's requirement (`template-syntax.md` T11.3); U36 activates it independently. meguri-template's golden-pair tests check the engine's part against the goldens (`conformance/scenarios/render/area.yaml`).
+- U71 adds the `fill_empty` case key to the testkit's scenario model and `template` adapter (Q1.4 step 0), declares `template.fill_empty` and activates `preview/*` in `conformance/scenarios/render/area.yaml`. `render/preview/fill-empty` and `render/preview/fill-empty-cards` and their recorded goldens join `conformance/scenarios/render/preview/` once the scenario model accepts the key. Until U71, the `render/preview` scenarios are inactive.
 
 ## Q4. `render_status`
 

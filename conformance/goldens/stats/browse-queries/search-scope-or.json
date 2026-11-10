@@ -1,0 +1,92 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-12T12:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "search": [
+          {
+            "ids": ["#c1", "#c3"]
+          },
+          {
+            "ids": ["#c1", "#c2", "#c3"]
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": ["#c1"]
+          },
+          {
+            "ids": ["#c1", "#c3", "#c5"]
+          }
+        ]
+      },
+      {
+        "stats": [
+          {
+            "card_counts": {
+              "excluding_inactive": {
+                "newCards": 2,
+                "young": 2
+              },
+              "including_inactive": {
+                "newCards": 2,
+                "young": 2
+              }
+            }
+          },
+          {
+            "card_counts": {
+              "excluding_inactive": {
+                "newCards": 1,
+                "young": 1
+              },
+              "including_inactive": {
+                "newCards": 1,
+                "young": 1
+              }
+            }
+          },
+          {
+            "card_counts": {
+              "excluding_inactive": {
+                "newCards": 3,
+                "young": 3
+              },
+              "including_inactive": {
+                "newCards": 3,
+                "young": 3
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "63d7ee8c9340e3db90caf514e2a5cf52640d1eb70a16e0a8f09d231f6ffcc50f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/browse-queries/search-scope-or",
+  "scenario_sha256": "38352d93a7cef0863d56986c5b1df1746d62138b032204e5c5b2c82f1b712370",
+  "tz": "Europe/Paris"
+}

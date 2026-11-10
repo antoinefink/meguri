@@ -1,0 +1,205 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "add_media": {
+          "name": "pic.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "pic-08811aba945e9bf73dd3e12f16d85ceb8863779e.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "img.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "paste"
+        }
+      },
+      {
+        "add_media": {
+          "name": "paste.jpg"
+        }
+      },
+      {
+        "add_media": {
+          "name": "x.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "paste.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "a.png#top"
+        }
+      },
+      {
+        "add_media": {
+          "name": "b.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "ab.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "ab-bee1e6c9fbdfd6ea5572502b4ae589d5e8df2e37.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "a b.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "日.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "�.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "y.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": ".hidden.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "a._"
+        }
+      },
+      {
+        "add_media": {
+          "name": "play.weba"
+        }
+      },
+      {
+        "add_media": {
+          "name": "play"
+        }
+      },
+      {
+        "add_media": {
+          "name": "b c.jpg"
+        }
+      },
+      {
+        "media_dir": {
+          ".hidden.png": {
+            "sha1": "6cc7c54ae3ddb2cafaa7989ddf8a1a7b0bc12cc6",
+            "size": 12
+          },
+          "a b.png": {
+            "sha1": "6ef0590d1513b84b87598099995f4e1498b2dd89",
+            "size": 11
+          },
+          "a._": {
+            "sha1": "0f8b46d3bba4adbb2850cf0d9a7b818e1e1580eb",
+            "size": 18
+          },
+          "a.png#top": {
+            "sha1": "afa2f4dad7b772ddc28608144a3b73fa489d5a8f",
+            "size": 14
+          },
+          "ab-bee1e6c9fbdfd6ea5572502b4ae589d5e8df2e37.png": {
+            "sha1": "bee1e6c9fbdfd6ea5572502b4ae589d5e8df2e37",
+            "size": 16
+          },
+          "ab.png": {
+            "sha1": "2aca8212be6c43953fb0569224b3b7484597f85b",
+            "size": 16
+          },
+          "b c.jpg": {
+            "sha1": "8397f04bbd0682ad9696c6d29f3c4cdc6f0b5758",
+            "size": 14
+          },
+          "b.png": {
+            "sha1": "92f4d03a964a2e89c17dc6fbe37cc2436130c7f9",
+            "size": 16
+          },
+          "img.png": {
+            "sha1": "5f5c4434c7db88c44ad5289b64fdf9fda9daa40b",
+            "size": 15
+          },
+          "paste": {
+            "sha1": "ee75f8f3e7e0e8c916dc8fd66ea796a66db2f883",
+            "size": 15
+          },
+          "paste.jpg": {
+            "sha1": "ee75f8f3e7e0e8c916dc8fd66ea796a66db2f883",
+            "size": 15
+          },
+          "paste.png": {
+            "sha1": "611828aaa34dde5fd0f6ede6b2754816835efd50",
+            "size": 13
+          },
+          "pic-08811aba945e9bf73dd3e12f16d85ceb8863779e.png": {
+            "sha1": "08811aba945e9bf73dd3e12f16d85ceb8863779e",
+            "size": 18
+          },
+          "pic.png": {
+            "sha1": "327545d78e3325cc215de4e50374855ca4c76526",
+            "size": 18
+          },
+          "play": {
+            "sha1": "925c4709b6b50983c2e92135f2dddc0d48524803",
+            "size": 11
+          },
+          "play.weba": {
+            "sha1": "0a5ae014d6196eecaa5e001b447327017c9f4cfa",
+            "size": 10
+          },
+          "x.png": {
+            "sha1": "e3b4628281e4e5c40a9f1abd1b44289ed8ecab8c",
+            "size": 11
+          },
+          "y.png": {
+            "sha1": "ceb4b3b6eb963e0fd15ff515bd91e88c09de6e58",
+            "size": 12
+          },
+          "日.png": {
+            "sha1": "324a04a2d806c8dbe19b1ee6b9bd0cf859e90ec9",
+            "size": 11
+          },
+          "�.png": {
+            "sha1": "4febcb759852628ac2f36c43f8701a885819ba71",
+            "size": 17
+          }
+        },
+        "text": {
+          "media_filename": ["ab.png", "ab.png", "a.png#top", "a._", ".hidden.png", "paste", "play.weba", "�.png", "日.png", "a b.png", "a%41.png"]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "ae5229735e53880825c7395c19f571a9b7b3a2ae926de53994a3c131897605ea",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "editor/paste/store/fetched-names",
+  "scenario_sha256": "ea7a6a66c06af06485c69f85672b1ad74e99824475309c7690c5c1fd4ca26eae",
+  "tz": "UTC"
+}

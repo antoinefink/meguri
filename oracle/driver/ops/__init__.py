@@ -4,6 +4,7 @@
 from . import (  # noqa: F401
     backups,
     browser,
+    bulk,
     change_notetype,
     check_media,
     clock,
@@ -32,4 +33,5 @@ from . import (  # noqa: F401
     sync_server,
     tags,
     undo,
+    url_media,
 )

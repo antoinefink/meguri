@@ -1,0 +1,123 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "search": [
+          {
+            "ids": ["#c1", "#c2", "#c3", "#c4", "#c5", "#c6"]
+          },
+          {
+            "ids": ["#c3", "#c4", "#c5", "#c6", "#c1", "#c2"]
+          },
+          {
+            "ids": ["#n1", "#n2", "#n3"]
+          },
+          {
+            "ids": ["#n1", "#n2", "#n3"]
+          },
+          {
+            "ids": ["#c1", "#c2", "#c5", "#c6"]
+          },
+          {
+            "ids": ["#c5", "#c6", "#c1", "#c2"]
+          },
+          {
+            "ids": ["#n1", "#n3"]
+          },
+          {
+            "ids": ["#n1", "#n3"]
+          },
+          {
+            "error": "unclosed_group"
+          },
+          {
+            "error": "unclosed_group"
+          },
+          {
+            "error": "unclosed_group"
+          },
+          {
+            "error": "unclosed_group"
+          },
+          {
+            "context": "nid:",
+            "error": "invalid_id_list"
+          },
+          {
+            "context": "nid:",
+            "error": "invalid_id_list"
+          },
+          {
+            "context": "nid:",
+            "error": "invalid_id_list"
+          },
+          {
+            "context": "nid:",
+            "error": "invalid_id_list"
+          },
+          {
+            "error": "invalid_regex"
+          },
+          {
+            "error": "invalid_regex"
+          },
+          {
+            "error": "invalid_regex"
+          },
+          {
+            "error": "invalid_regex"
+          },
+          {
+            "error": "invalid_state",
+            "provided": "😴"
+          },
+          {
+            "error": "invalid_state",
+            "provided": "😴"
+          },
+          {
+            "error": "invalid_state",
+            "provided": "😴"
+          },
+          {
+            "error": "invalid_state",
+            "provided": "😴"
+          },
+          {
+            "context": "ivl>𝟙",
+            "error": "invalid_positive_whole_number",
+            "provided": "𝟙"
+          },
+          {
+            "context": "ivl>𝟙",
+            "error": "invalid_positive_whole_number",
+            "provided": "𝟙"
+          },
+          {
+            "context": "ivl>𝟙",
+            "error": "invalid_positive_whole_number",
+            "provided": "𝟙"
+          },
+          {
+            "context": "ivl>𝟙",
+            "error": "invalid_positive_whole_number",
+            "provided": "𝟙"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "63d7ee8c9340e3db90caf514e2a5cf52640d1eb70a16e0a8f09d231f6ffcc50f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "browser/modes/one-shot",
+  "scenario_sha256": "eaebc0d131a80e8930f2618940b602813d6f0dbcce2b4dcdc3af58ed48dfc424",
+  "tz": "UTC"
+}

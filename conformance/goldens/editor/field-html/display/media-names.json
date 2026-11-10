@@ -1,0 +1,24 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "text": {
+          "iri_decode": ["<img src=\"a b.jpg\">", "<img src=\"100%.jpg\">", "<img src=\"日本.png\">", "<img src=\"a.png\" onerror=\"f()\">b", "[sound:a b.mp3]x", "<img src=\"a b.jpg\" title=\"a b.jpg\">", "<img src='q\"r.png'>", "<img src=\"a#b.png\">", "<img src=\"https://e.org/a b.png\">", "<IMG SRC=\"a b.jpg\">", "<img src=\"a b.jpg\">x", "<img src=\"100%.jpg\">x", "<img src=\"日本.png\">x", "<img src=\"a.png\" onerror=\"f()\">bx", "[sound:a b.mp3]xy", "<img src=\"a b.jpg\" title=\"a b.jpg\">x", "<img src=\"q\"r.png\">x", "<img src=\"a#b.png\">x", "<img src=\"https://e.org/a b.png\">x"],
+          "iri_encode": ["<img src=\"a%20b.jpg\">", "<img src=\"100%25.jpg\">", "<img src=\"日本.png\">", "<img src=\"a.png\" onerror=\"f()\">b", "[sound:a b.mp3]x", "<img src=\"a%20b.jpg\" title=\"a%20b.jpg\">", "<img src='q%22r.png'>", "<img src=\"a%23b.png\">", "<img src=\"https://e.org/a b.png\">", "<IMG SRC=\"a%20b.jpg\">", "<img src=\"a%20b.jpg\">x", "<img src=\"100%25.jpg\">x", "<img src=\"日本.png\">x", "<img src=\"a.png\" onerror=\"f()\">bx", "[sound:a b.mp3]xy", "<img src=\"a%20b.jpg\" title=\"a%20b.jpg\">x", "<img src=\"q%22r.png\">x", "<img src=\"a%23b.png\">x", "<img src=\"https://e.org/a b.png\">x"]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "63d7ee8c9340e3db90caf514e2a5cf52640d1eb70a16e0a8f09d231f6ffcc50f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "editor/field-html/display/media-names",
+  "scenario_sha256": "24d81e680f50008c14202b024479130054959a1cf992671d6cdeb64011afb65c",
+  "tz": "UTC"
+}

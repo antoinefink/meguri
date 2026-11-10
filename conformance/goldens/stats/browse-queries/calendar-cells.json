@@ -1,0 +1,148 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-12T12:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1791856800,
+          "now": 1791799200,
+          "utc_offset_secs": 7200
+        }
+      },
+      {
+        "stats": [
+          {
+            "reviews": {
+              "count": {
+                "-1": {
+                  "young": 3
+                },
+                "-2": {
+                  "young": 1
+                },
+                "-3": {
+                  "young": 1
+                },
+                "0": {
+                  "learn": 1,
+                  "young": 1
+                },
+                "1": {
+                  "young": 1
+                }
+              },
+              "time": {
+                "-1": {
+                  "young": 12000
+                },
+                "-2": {
+                  "young": 4000
+                },
+                "-3": {
+                  "young": 4000
+                },
+                "0": {
+                  "learn": 4000,
+                  "young": 4000
+                },
+                "1": {
+                  "young": 4000
+                }
+              }
+            }
+          },
+          {
+            "reviews": {
+              "count": {
+                "-1": {
+                  "young": 2
+                },
+                "-2": {
+                  "young": 1
+                },
+                "-3": {
+                  "young": 1
+                },
+                "0": {
+                  "learn": 1,
+                  "young": 1
+                },
+                "1": {
+                  "young": 1
+                }
+              },
+              "time": {
+                "-1": {
+                  "young": 8000
+                },
+                "-2": {
+                  "young": 4000
+                },
+                "-3": {
+                  "young": 4000
+                },
+                "0": {
+                  "learn": 4000,
+                  "young": 4000
+                },
+                "1": {
+                  "young": 4000
+                }
+              }
+            }
+          }
+        ]
+      },
+      {
+        "search": [
+          {
+            "ids": ["#c1", "#c2"]
+          },
+          {
+            "ids": ["#c6", "#c7"]
+          },
+          {
+            "ids": ["#c3"]
+          },
+          {
+            "ids": ["#c3"]
+          },
+          {
+            "ids": ["#c1", "#c2"]
+          },
+          {
+            "ids": ["#c6"]
+          },
+          {
+            "ids": ["#c3"]
+          },
+          {
+            "ids": ["#c3"]
+          },
+          {
+            "context": "rated=1",
+            "error": "invalid_negative_whole_number",
+            "provided": "1"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "63d7ee8c9340e3db90caf514e2a5cf52640d1eb70a16e0a8f09d231f6ffcc50f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/browse-queries/calendar-cells",
+  "scenario_sha256": "c9290c45cc9d338d61fd7bbb0466bf90b95b252cfff12aed365401df7b95c89d",
+  "tz": "Europe/Paris"
+}

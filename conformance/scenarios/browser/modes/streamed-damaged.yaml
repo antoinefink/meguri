@@ -1,0 +1,89 @@
+# specs/browser/result-sets.md H3, H5 (R1241) with
+# specs/search/query-model.md Q5, Q6 and Q10 on a damaged collection: the
+# rows a plan with a slow term (re:) returns are those of the original
+# query's scope, whatever the relaxed query's scope would be (Q10 step 2),
+# and in notes mode with card or card-and-note scope a note is kept only when
+# one of its card-and-note pairs makes the query true (Q10 step 4). The
+# observations are search runs (specs/conformance/search-ops.md S1); whether
+# Meguri's executor takes the streamed path for them is its own concern
+# (H16), so these lists are what the streamed path must give. #n1 (Pair,
+# wild) "bat": #c1 new, #c2 review. #n2 "cab": #c3 new. #n3 (wild) "bee": #c4
+# review. #n4 (Pair, wild) "ant": #c5 new, #c6 review. #n5 "bun" loses its
+# note row, so #c7 (new) has no note. #n6 (wild) "bog" and #n7 "dew" lose
+# their cards. "re:^b" (note scope) matches the notes whose first field
+# starts with b. Relaxed, -"re:^b" becomes -FALSE and "re:^b" or is:new
+# becomes TRUE or is:new, both of whole-collection scope, which would list
+# #c7; -("re:^b" is:review) becomes TRUE; the regex in -(-"re:^b" tag:wild)
+# is under two negations and becomes TRUE. New cards get distinct positions
+# (#c3 1, #c5 2, #c1 3, #c7 4). Needs the regex, tag and state terms (U81,
+# U82).
+id: browser/modes/streamed-damaged
+tags: [needs-text, needs-tag, needs-state]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Solo
+      fields: [Word, Gloss]
+      templates:
+        - {name: Recall, front: "{{Word}}", back: "{{Gloss}}"}
+      css: ".card { margin: 0; }"
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Backward, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, fields: [bat, one], tags: [wild]}
+    - {notetype: Solo, fields: [cab, two]}
+    - {notetype: Solo, fields: [bee, three], tags: [wild]}
+    - {notetype: Pair, fields: [ant, four], tags: [wild]}
+    - {notetype: Solo, fields: [bun, five]}
+    - {notetype: Solo, fields: [bog, six], tags: [wild]}
+    - {notetype: Solo, fields: [dew, seven]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET due = 3 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 0) AND ord = 0"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 10, ivl = 3, factor = 2500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 0) AND ord = 1"}
+  - db_exec: {sql: "UPDATE cards SET due = 1 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 1)"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 12, ivl = 4, factor = 2500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 2)"}
+  - db_exec: {sql: "UPDATE cards SET due = 2 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 3) AND ord = 0"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 14, ivl = 5, factor = 2500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 3) AND ord = 1"}
+  - db_exec: {sql: "UPDATE cards SET due = 4 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 4)"}
+  - db_exec: {sql: "DELETE FROM cards WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 5)"}
+  - db_exec: {sql: "DELETE FROM cards WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 6)"}
+  - db_exec: {sql: "DELETE FROM notes WHERE id = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 4)"}
+  - observe:
+      - search:
+          - {query: '"re:^b"'}
+          - {query: '"re:^b"', kind: notes}
+          - {query: '"re:^b"', order: {column: cardDue}}
+          - {query: '"re:^b"', kind: notes, order: {column: noteCrt}}
+          - {query: '-"re:^b"'}
+          - {query: '-"re:^b"', kind: notes}
+          - {query: '-"re:^b"', order: {column: noteFld}}
+          - {query: '-"re:^b"', order: {column: cardDue, reverse: true}}
+          - {query: '-"re:^b"', kind: notes, order: {column: noteCrt}}
+          - {query: '-"re:^b"', kind: notes, order: {column: noteFld, reverse: true}}
+          - {query: '"re:^b" or is:new'}
+          - {query: '"re:^b" or is:new', kind: notes}
+          - {query: '"re:^b" or is:new', order: {column: noteFld}}
+          - {query: '"re:^b" or is:new', order: {column: cardDue}}
+          - {query: '"re:^b" or is:new', order: {column: cardDue, reverse: true}}
+          - {query: '"re:^b" or is:new', kind: notes, order: {column: noteCrt}}
+          - {query: '"re:^b" or is:new', kind: notes, order: {column: noteFld, reverse: true}}
+          - {query: '"re:^b" is:review'}
+          - {query: '"re:^b" is:review', kind: notes}
+          - {query: '"re:^b" is:review', order: {column: cardDue}}
+          - {query: '"re:^b" is:review', kind: notes, order: {column: noteFld}}
+          - {query: '-("re:^b" is:review)'}
+          - {query: '-("re:^b" is:review)', kind: notes}
+          - {query: '-("re:^b" is:review)', order: {column: noteFld}}
+          - {query: '-("re:^b" is:review)', order: {column: cardDue, reverse: true}}
+          - {query: '-("re:^b" is:review)', kind: notes, order: {column: noteCrt}}
+          - {query: '-("re:^b" is:review)', kind: notes, order: {column: noteCrt, reverse: true}}
+          - {query: '-(-"re:^b" tag:wild)'}
+          - {query: '-(-"re:^b" tag:wild)', kind: notes}
+          - {query: '-(-"re:^b" tag:wild)', order: {column: noteFld}}
+          - {query: '-(-"re:^b" tag:wild)', order: {column: cardDue}}
+          - {query: '-(-"re:^b" tag:wild)', kind: notes, order: {column: noteCrt}}
+          - {query: '-(-"re:^b" tag:wild)', kind: notes, order: {column: noteFld, reverse: true}}

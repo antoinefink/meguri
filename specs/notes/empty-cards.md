@@ -3,7 +3,7 @@
 Spec: notes/empty-cards
 Requirements: R952; supports R1015, R1473, R1652, R1653, R1654, R2008
 Anki: 26.09.3
-Scenarios: conformance/scenarios/cardgen/empty/
+Scenarios: conformance/scenarios/cardgen/empty/; U131's maintenance/empty-cards/ (E7)
 
 Finding the cards whose template or cloze number no longer generates a card, and deleting them as one undoable step. The maintenance flow around it (the report screen data, paging, the safety backup before the delete) is U131's; the screen is U163's; the scenario ops are `specs/conformance/empty-cards-ops.md`. Which ordinals a note requires is `notes/card-generation` G2 to G4 (U27's evaluator).
 
@@ -85,7 +85,7 @@ With no change between the scan and the delete, the result is Anki's: the same c
 
 ## E5. Difference from Anki: the delete looks again
 
-Anki 26.09.3 deletes the cards its scan listed, as listed: a card that became valid between the scan and the delete is deleted with the rest, and "keep notes" keeps a card of every note the scan marked all empty. Meguri's delete re-evaluates each card against live rows (E4 steps 2 and 3) and keeps the cards that became valid (plan U35, the write-phase rule of U24). Scenario `cardgen/empty/recheck` shows it; its golden is transformed by the deviation entries `empty-cards-recheck`, `empty-cards-recheck-cards`, `empty-cards-recheck-review-log` and `empty-cards-recheck-graves` (R952), which `conformance/deviations.yaml` gets together with that golden (`empty-cards-ops` Y4).
+Anki 26.09.3 deletes the cards its scan listed, as listed: a card that became valid between the scan and the delete is deleted with the rest, and "keep notes" keeps a card of every note the scan marked all empty. Meguri's delete re-evaluates each card against live rows (E4 steps 2 and 3) and keeps the cards that became valid (plan U35, the write-phase rule of U24). Scenario `cardgen/empty/recheck` shows it; its golden is transformed by the deviation entries `empty-cards-recheck`, `empty-cards-recheck-cards`, `empty-cards-recheck-review-log` and `empty-cards-recheck-graves` (R952), which `conformance/deviations.yaml` holds with that golden (`empty-cards-ops` Y4).
 
 The message differs too (E4 Result): for a listed card that vanished before the delete, Anki's "Deleted N cards." counts it and Meguri's does not. No scenario observes the message: the ops' `deleted` is the delete's own count, which skips such a card on both sides, so this needs no deviation entry.
 
@@ -98,12 +98,15 @@ The message differs too (E4 Result): for a listed card that vanished before the 
 
 | Scenario | Covers | Golden |
 |---|---|---|
-| `cardgen/empty/scan` | E1 (optional reverse, both empty, a special-name front, a card without a template, cloze numbers), E2 (order, all-empty flag, card count), an empty scan | not yet in `conformance/`: awaits the ops (`empty-cards-ops` Y4) |
-| `cardgen/empty/keep-notes` | E4 with keep on: the card kept per note, graves, notes kept, review log kept, a scan after the delete | the same |
-| `cardgen/empty/delete-notes` | E4 with keep off: notes left without cards deleted with note graves | the same |
-| `cardgen/empty/recheck` | E4 steps 1 and 2, E5: a note whose Add Reverse is set again and one whose Back is filled keep their card 2 and its review log, a deleted note's cards are skipped; deviation `empty-cards-recheck` | the same |
-| `cardgen/empty/occlusion` | E1 for a cloze note and an image-occlusion note whose third mask was removed (R1015), E4 | the same |
+| `cardgen/empty/scan` | E1 (optional reverse, both empty, a special-name front, a card without a template, cloze numbers), E2 (order, all-empty flag, card count), an empty scan | recorded |
+| `cardgen/empty/keep-notes` | E4 with keep on: the card kept per note, graves, notes kept, review log kept, a scan after the delete | recorded |
+| `cardgen/empty/delete-notes` | E4 with keep off: notes left without cards deleted with note graves | recorded |
+| `cardgen/empty/recheck` | E4 steps 1 and 2, E5: a note whose Add Reverse is set again and one whose Back is filled keep their card 2 and its review log, a deleted note's cards are skipped; deviation `empty-cards-recheck` | recorded, with E5's four deviation entries |
+| `cardgen/empty/occlusion` | E1 for a cloze note and an image-occlusion note whose third mask was removed (R1015), E4 | recorded |
+| `maintenance/empty-cards/report` | U131's report cases with its own note types: a two-way note whose Back is cleared lists card 2; a cloze note made with c1 to c3 whose text loses c2 lists the ordinal 1 card (E1, E2) | written, not yet recorded |
+| `maintenance/empty-cards/undo-redo` | E4's undo paragraph: one "Empty Cards" step; undo restores the cards and note with their stored `usn` and removes the graves, redo deletes them again (U131) | written, not yet recorded |
+| `maintenance/empty-cards/incremental-sync` | E4's sync paragraphs: after the delete `scm` still equals `ls`, the next manual Anki transfer is incremental and the other client loses the cards and the note (U131, R1654; actors, `conformance/sync-ops`) | written, not yet recorded |
 
-Decided 2026-10-27: the scenarios are specified here and in `empty-cards-ops` but are not in `conformance/` until both executors have the two ops; Y4 gives the order.
+Decided 2026-10-27, done since: the `cardgen/empty/` scenarios entered `conformance/` with the two ops and have goldens at the current pin (`empty-cards-ops` Y4). They stay inactive until U35's adapters pass; the `maintenance/empty-cards/` scenarios until U131's flow and a recording.
 
-The scan's progress and cancellation, the 150,000-card scan off the writer (U35's verification), undo and redo of the delete, and a delete whose list is entirely gone are tested in U35's Rust tests (`core/crates/meguri-engine/tests/empty_cards.rs`).
+The scan's progress and cancellation, the 150,000-card scan off the writer (U35's verification), undo and redo of the delete (also `maintenance/empty-cards/undo-redo`), and a delete whose list is entirely gone are tested in U35's Rust tests (`core/crates/meguri-engine/tests/empty_cards.rs`).

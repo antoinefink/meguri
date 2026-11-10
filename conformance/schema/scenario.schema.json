@@ -208,8 +208,50 @@
           "description": "media-ops.md F3: files and empty subdirectories created directly in the media folder, after every other setup section; names must differ after NFC under the unicase comparison (checked when the scenario loads).",
           "type": "array",
           "items": { "$ref": "#/$defs/media_entry" }
+        },
+        "http_fixtures": {
+          "description": "Draft (editor-ops.md E2): responses a loopback HTTP server serves for the scenario's add_media_from_url steps; a path once each, a redirect_to naming another entry's path (checked when the setup runs).",
+          "type": "array",
+          "items": { "$ref": "#/$defs/http_fixture" }
+        },
+        "url_files": {
+          "description": "Draft (editor-ops.md E3): files written to the folder that {files} names, after every other setup section; each name once.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/media_file" }
         }
       }
+    },
+    "http_fixture": {
+      "description": "editor-ops.md E2: one response; a request matches the path up to its first ?, byte for byte.",
+      "type": "object",
+      "required": ["path"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "$ref": "#/$defs/http_fixture_path" },
+        "status": { "type": "integer", "minimum": 200, "maximum": 599 },
+        "content_type": { "type": "string", "minLength": 1, "pattern": "^[!-~]([ -~]*[!-~])?$" },
+        "text": { "type": "string" },
+        "fill": { "$ref": "#/$defs/media_fill" },
+        "delay_ms": { "type": "integer", "minimum": 0, "maximum": 35000 },
+        "byte_delay_ms": { "type": "integer", "minimum": 0, "maximum": 15000 },
+        "redirect_to": { "$ref": "#/$defs/http_fixture_path" }
+      },
+      "not": { "required": ["text", "fill"] },
+      "allOf": [
+        {
+          "if": { "required": ["redirect_to"] },
+          "then": { "properties": { "status": { "enum": [301, 302, 303, 307, 308] } } }
+        },
+        {
+          "if": { "required": ["status"], "properties": { "status": { "const": 204 } } },
+          "then": { "not": { "anyOf": [{ "required": ["fill"] }, { "required": ["text"], "properties": { "text": { "minLength": 1 } } }] } }
+        }
+      ]
+    },
+    "http_fixture_path": {
+      "description": "editor-ops.md E2: a request path as clients send it: printable ASCII from /, without ? and #.",
+      "type": "string",
+      "pattern": "^/[!-\"$-/0-9:;<=>@-~]*$"
     },
     "deck_limit_value": {
       "description": "deck-options-ops.md E1: a deck limit the save sets (an integer 0 to 9999) or clears (null).",
@@ -327,6 +369,11 @@
           "pattern": "^\\s*(studied_today_raw|studied_today_text)\\s*$"
         },
         {
+          "description": "stats-ops.md H13: graph_preferences takes no references.",
+          "type": "string",
+          "pattern": "^\\s*graph_preferences\\s*$"
+        },
+        {
           "type": "object",
           "minProperties": 1,
           "maxProperties": 1,
@@ -402,6 +449,15 @@
                     }
                   }
                 }
+              }
+            },
+            "find_replace_fields": {
+              "description": "bulk-ops.md X3: the field names Find and Replace's In list offers for these notes (browser/find-replace F3); at most one request per step.",
+              "type": "object",
+              "required": ["notes"],
+              "additionalProperties": false,
+              "properties": {
+                "notes": { "type": "array", "items": { "$ref": "#/$defs/note_ref" }, "minItems": 1, "uniqueItems": true }
               }
             },
             "add_defaults": {
@@ -580,6 +636,7 @@
             "digest": { "type": "null" },
             "studied_today_raw": { "description": "stats-ops.md H2.", "type": "null" },
             "studied_today_text": { "description": "stats-ops.md H5.", "type": "null" },
+            "graph_preferences": { "description": "stats-ops.md H13.", "type": "null" },
             "studied_today_format": {
               "description": "stats-ops.md H6: [cards, time_ms] pairs.",
               "type": "object",
@@ -1178,7 +1235,8 @@
                   "ord": { "type": "integer", "minimum": 0, "maximum": 499 },
                   "name": { "type": "string", "minLength": 1 },
                   "fields": { "$ref": "#/$defs/fields" },
-                  "tags": { "type": "array", "items": { "type": "string" } }
+                  "tags": { "type": "array", "items": { "type": "string" } },
+                  "fill_empty": { "type": "boolean", "description": "Q1.4 step 0; needs template.fill_empty when true." }
                 }
               },
               {
@@ -1189,7 +1247,8 @@
                 "properties": {
                   "card": { "$ref": "#/$defs/card_ref" },
                   "front": { "type": "string" },
-                  "back": { "type": "string" }
+                  "back": { "type": "string" },
+                  "fill_empty": { "type": "boolean", "description": "Q1.4 step 0; needs template.fill_empty when true." }
                 }
               }
             ]
@@ -1803,6 +1862,13 @@
           },
           "oneOf": [{ "required": ["text"] }, { "required": ["fill"] }]
         },
+        "add_media_from_url": {
+          "description": "Draft (editor-ops.md E4): one fetch and the add of its bytes; url starts with {fixture}/ (the scenario's fixture server) or {files}/ (its url_files folder), never a host.",
+          "type": "object",
+          "required": ["url"],
+          "additionalProperties": false,
+          "properties": { "url": { "type": "string", "pattern": "^\\{(fixture|files)\\}/" } }
+        },
         "trash_media": {
           "description": "Stable (media-ops.md F6): move these files to the media trash.",
           "type": "object",
@@ -2070,6 +2136,40 @@
           "required": ["keep_notes"],
           "additionalProperties": false,
           "properties": { "keep_notes": { "type": "boolean" } }
+        },
+        "find_replace": {
+          "description": "bulk-ops.md X1: Browse's Find and Replace on the listed notes, or on all notes when notes is missing; in all (All Fields), tags, or {field: <name>} (matched under unicase); regex false and ignore_case true when missing; rejections invalid_regex, space_in_replacement, field_count.",
+          "type": "object",
+          "required": ["find", "replace"],
+          "additionalProperties": false,
+          "properties": {
+            "notes": { "type": "array", "items": { "$ref": "#/$defs/note_ref" }, "minItems": 1, "uniqueItems": true },
+            "find": { "type": "string" },
+            "replace": { "type": "string" },
+            "regex": { "type": "boolean" },
+            "ignore_case": { "type": "boolean" },
+            "in": {
+              "oneOf": [
+                { "enum": ["all", "tags"] },
+                {
+                  "type": "object",
+                  "required": ["field"],
+                  "additionalProperties": false,
+                  "properties": { "field": { "type": "string", "minLength": 1 } }
+                }
+              ]
+            }
+          }
+        },
+        "change_deck": {
+          "description": "bulk-ops.md X2: Browse's Change Deck of the cards to the deck (stored name in human form; a filtered deck a db_exec inserted included); rejection filtered_deck.",
+          "type": "object",
+          "required": ["cards", "deck"],
+          "additionalProperties": false,
+          "properties": {
+            "cards": { "$ref": "#/$defs/distinct_card_refs" },
+            "deck": { "type": "string", "minLength": 1 }
+          }
         },
         "remove_notetype": {
           "description": "notetype-structure-ops.md M1: removes the named note type with its notes and cards; output none.",

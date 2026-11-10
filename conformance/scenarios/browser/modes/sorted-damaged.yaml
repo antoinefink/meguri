@@ -1,0 +1,58 @@
+# specs/browser/result-sets.md H5, H8, H11 with specs/browser/sorting.md S9,
+# on the collection of browser/modes/toggle-damaged: #c2 has no note row, #n3
+# no card. The card-scope query is:new matches #c1, #c2, #c4 and #c6 in cards
+# mode. Sorted by any of the six note-column sorts (noteFld, template,
+# noteCrt, noteMod, note, noteTags) #c2 is left out; sorted by cardDue or
+# cardMod it is listed, by cardDue first ascending (position 1). Equal keys
+# (shared note types, no tags, one frozen instant) are compared as runs
+# (specs/conformance/browser-ops.md B2). In notes mode is:new
+# tests card-and-note pairs, so neither #c2's missing note nor #n3 appears.
+# Meguri's derived toggles and resorts on this collection (browse_handles.rs)
+# must list exactly these runs. Needs the state term (U82).
+id: browser/modes/sorted-damaged
+tags: [needs-state]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Solo
+      fields: [Word, Gloss]
+      templates:
+        - {name: Recall, front: "{{Word}}", back: "{{Gloss}}"}
+      css: ".card { margin: 0; }"
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Backward, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Solo, fields: [dog, g]}
+    - {notetype: Solo, fields: [cat, g]}
+    - {notetype: Solo, fields: [fish, g]}
+    - {notetype: Pair, fields: [bee, x]}
+    - {notetype: Solo, fields: [ant, g]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET due = 3 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 0)"}
+  - db_exec: {sql: "UPDATE cards SET due = 1 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 1)"}
+  - db_exec: {sql: "UPDATE cards SET due = 2 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 3) AND ord = 0"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 10, ivl = 3, factor = 2500 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 3) AND ord = 1"}
+  - db_exec: {sql: "UPDATE cards SET due = 4 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 4)"}
+  - db_exec: {sql: "DELETE FROM cards WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 2)"}
+  - db_exec: {sql: "DELETE FROM notes WHERE id = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 1)"}
+  - observe:
+      - search:
+          - {query: 'is:new'}
+          - {query: 'is:new', order: {column: noteFld}}
+          - {query: 'is:new', order: {column: noteFld, reverse: true}}
+          - {query: 'is:new', order: {column: template}}
+          - {query: 'is:new', order: {column: noteCrt}}
+          - {query: 'is:new', order: {column: noteMod}}
+          - {query: 'is:new', order: {column: note}}
+          - {query: 'is:new', order: {column: noteTags}}
+          - {query: 'is:new', order: {column: cardDue}}
+          - {query: 'is:new', order: {column: cardDue, reverse: true}}
+          - {query: 'is:new', order: {column: cardMod}}
+          - {query: 'is:new', kind: notes}
+          - {query: 'is:new', kind: notes, order: {column: noteFld}}
+          - {query: 'is:new', kind: notes, order: {column: noteFld, reverse: true}}
+          - {query: 'is:new', kind: notes, order: {column: cardDue}}

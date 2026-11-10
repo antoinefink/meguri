@@ -50,3 +50,15 @@ card_excerpts
 # SQLite collation that orders sort fields (browser/sorting S2).
 browser_rows
 nocase
+# U86 and U87: undo step ids of specs/conformance/undo-ops.md V4 that
+# browser/find-replace F9 and browser/bulk-actions B16 name and no other
+# vocab file lists. The scenario ops, their argument and rejection kinds and
+# the field-names observation are in specs/conformance/interop-vocab.txt.
+find_and_replace
+update_tag
+remove_tag
+set_flag
+suspend
+clear_unused_tags
+delete_note
+change_note_type

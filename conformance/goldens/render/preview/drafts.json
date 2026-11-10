@@ -1,0 +1,135 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "ids": {
+          "#c1": 1894701600000,
+          "#c2": 1894701600001,
+          "#n1": 1894701600000
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "template": [
+          {
+            "answer": "chat<hr id=answer><i>cat</i>",
+            "empty": false,
+            "question": "chat"
+          },
+          {
+            "answer": "cat|Backward|Langues::Vocab|Vocab|flag2|animals|chat",
+            "empty": false,
+            "question": "cat|Backward|Langues::Vocab|Vocab|flag2|animals"
+          },
+          {
+            "answer": "chat ()",
+            "empty": false,
+            "question": "chat ()"
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "answer"
+            }
+          },
+          {
+            "error": {
+              "kind": "unclosed_conditional",
+              "side": "question"
+            }
+          }
+        ]
+      },
+      {
+        "template": [
+          {
+            "answer": "hola|E<hr id=answer>hello",
+            "empty": false,
+            "question": "hola|E"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "hola|E"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "hola|-"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "hola|draft es::a1|(Deck)|flag0|0|Lexeme Draft|Forward"
+          },
+          {
+            "answer": "hello|Backward|1|hola",
+            "empty": false,
+            "question": "hello|Backward|1"
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": ""
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": ""
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "Static "
+          },
+          {
+            "error": {
+              "kind": "unopened_conditional",
+              "side": "question"
+            }
+          }
+        ]
+      },
+      {
+        "template": [
+          {
+            "answer": null,
+            "empty": true,
+            "question": ""
+          },
+          {
+            "answer": "<span class=\"cloze\" data-ordinal=\"1\">Lyon</span> et <span class=\"cloze-inactive\" data-ordinal=\"2\">Paris</span><br>",
+            "empty": false,
+            "question": "<span class=\"cloze\" data-cloze=\"Lyon\" data-ordinal=\"1\">[...]</span> et <span class=\"cloze-inactive\" data-ordinal=\"2\">Paris</span>"
+          },
+          {
+            "answer": "<span class=\"cloze-inactive\" data-ordinal=\"1\">Lyon</span> et <span class=\"cloze\" data-ordinal=\"2\">Paris</span><br>",
+            "empty": false,
+            "question": "<span class=\"cloze-inactive\" data-ordinal=\"1\">Lyon</span> et <span class=\"cloze\" data-cloze=\"Paris\" data-ordinal=\"2\">[...]</span>"
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": ""
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "f10b3fbfa80664e6e78893185d28ae464f9aee3722a2473391b90ca2c16d7cfa",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/preview/drafts",
+  "scenario_sha256": "893ee66335bd10fb7675c7169003c7cc9dd8091c93141430b1f815ee5d1c84e6",
+  "tz": "UTC"
+}

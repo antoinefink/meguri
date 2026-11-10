@@ -207,6 +207,56 @@ class TemplateObservation(unittest.TestCase):
         # Q1.6: nothing in the scenario's collection changes.
         self.assertEqual(out[2]["db_dump"], out[0]["db_dump"])
 
+    def test_fill_empty_on_new_notes(self):
+        # render-ops.md Q1.4 step 0, render/preview V6 and V7: every empty
+        # value (E1 on the given text) is filled, the question's cloze
+        # references with the sample cloze, the others with "(" name ")".
+        sample_q = 'This is a <span class="cloze" data-cloze="sample" data-ordinal="1">[...]</span> cloze deletion.'
+        sample_a = 'This is a <span class="cloze" data-ordinal="1">sample</span> cloze deletion.'
+        values = self.values([
+            {"front": "{{Front}}", "back": "{{FrontSide}}|{{Back}}|{{Extra}}", "fields": ["neko"], "fill_empty": True},
+            {"front": "{{Back}}", "fill_empty": True},
+            {"front": "{{#Extra}}E{{Extra}}{{/Extra}}{{^Extra}}none{{/Extra}}", "fields": ["f"], "fill_empty": True},
+            {"front": "{{cloze:Front}}|{{Back}}", "back": "{{cloze:Front}}", "fill_empty": True},
+            {"front": "{{cloze-only:Front}}|{{Front}}", "fill_empty": True},
+            {"front": "{{Front}}", "back": "{{cloze:Front}}", "fill_empty": True},
+            {"front": "{{Front}}|{{Back}}", "fields": ["<br>", "&nbsp;"], "fill_empty": True},
+            {"front": "{{Front}}", "back": "{{FrontSide}}|{{Back}}|{{Extra}}", "fields": ["neko"], "fill_empty": False},
+            {"front": "{{Back}}"},
+        ], {"name": "Probe", "fields": ["Front", "Back", "Extra"]})
+        self.assertEqual(values, [
+            ok("neko", "neko|(Back)|(Extra)"),
+            ok("(Back)", ""),
+            ok("E(Extra)", ""),
+            ok(sample_q + "|(Back)", sample_a),
+            ok("|(Front)", ""),
+            # An answer-only cloze reference is no reference: "(Front)" holds
+            # no cloze, so the cloze filter gives nothing (cloze.md C6).
+            ok("(Front)", ""),
+            ok("(Front)|&nbsp;", ""),
+            ok("neko", "neko||"),
+            blank(""),
+        ])
+
+    def test_fill_empty_on_a_card_case_leaves_the_stored_note(self):
+        setup = {
+            "decks": ["Lang"],
+            "notetypes": [{"name": "Vocab", "fields": ["Word", "Meaning"],
+                           "templates": [{"name": "Recognition", "front": "{{Word}}", "back": "{{Meaning}}"}]}],
+            "notes": [{"notetype": "Vocab", "deck": "Lang", "fields": ["neko", ""]}],
+        }
+        steps = [
+            {"observe": ["db_dump"]},
+            {"observe": [request([
+                {"card": "#c1", "front": "{{Word}}|{{Deck}}|{{Card}}", "back": "{{Meaning}}", "fill_empty": True},
+                {"card": "#c1", "front": "{{Word}}", "back": "{{Meaning}}"},
+            ], notetype=None)]},
+            {"observe": ["db_dump"]},
+        ]
+        out = self.run_steps(steps, setup)
+        self.assertEqual(out[1]["template"], [ok("neko|Lang|Recognition", "(Meaning)"), ok("neko", "")])
+        self.assertEqual(out[2]["db_dump"], out[0]["db_dump"])
+
     def test_a_card_that_does_not_exist_yet_is_an_unknown_ref(self):
         with self.assertRaises(DriverError) as ctx:
             self.run_steps([{"observe": [request([{"card": "#c1", "front": "x"}], notetype=None)]}])
@@ -237,6 +287,10 @@ class TemplateObservation(unittest.TestCase):
             request([{"front": "x", "tags": "a"}]),
             request([{"front": "x", "tags": [1]}]),
             request([{"front": "x", "unknown": 1}]),
+            request([{"front": "x", "fill_empty": 1}]),
+            request([{"front": "x", "fill_empty": "true"}]),
+            request([{"front": "x", "fill_empty": None}]),
+            request([{"card": "#c1", "front": "x", "fill_empty": 0}], notetype=None),
             request([good], {"name": "", "fields": ["F"]}),
             request([good], {"name": 'Pro"be', "fields": ["F"]}),
             request([good], {"name": "Cafe\u0301", "fields": ["F"]}),

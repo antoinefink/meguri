@@ -290,7 +290,7 @@ The formatting rows keep data the user did not ask to remove (data safety first)
 
 ## F17. Scenarios for the oracle maintainer
 
-Requested in `conformance/scenarios/editor/formatting/`, with goldens in `conformance/goldens/editor/formatting/` marked `source: observed`, recorded as `editor/field-html` E2 and T1 say. None is written or recorded: no runner step and no oracle driver op drives an editor page today.
+Requested in `conformance/scenarios/editor/formatting/`, with goldens in `conformance/goldens/editor/formatting/` marked `source: observed`, recorded as `editor/field-html` E2 and T1 say. None of the rows below is written or recorded: no runner step and no oracle driver op drives an editor page today. One core scenario is written there with existing ops: `options/key-writes`, the stored side of F12's option and palette writes (`editor/config-keys` K8, K9 and K11), inactive until Meguri's adapters pass it.
 
 **Setup.** `editor/field-html` T1's note type `Pair` and note. Each row gives Front's stored HTML with the selection in F1's notation; the maintainer opens Edit Current, focuses Front, sets that selection and runs the commands with Anki's own key (Ctrl on the image's platform) or, for commands without a key, its toolbar control. `type "…"` types as native key events. Last colours are set in the profile before the editor opens. Every scenario ends with blur and probe (Front's stored HTML), and Meguri's run compares the same probe.
 

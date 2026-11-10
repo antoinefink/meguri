@@ -19,7 +19,7 @@ What `added:`, `edited:`, `introduced:`, `rated:`, `resched:`, `prop:rated` and 
 | `prop:rated<op>D`, `prop:rated<op>D:B` | card | the card's review log |
 | `prop:resched<op>D` | card | the card's review log |
 
-The review log is the `revlog` table: `id` (the instant of the entry in epoch milliseconds), `cid` (the card), `ease` (the button: 1–4 for an answer, 0 for an entry the user or the scheduler wrote without an answer: Set Due Date, Forget, rescheduling, `specs/sched/` U44, U48). An entry with `ease` 0 is a **manual entry**. Another client can write any integer in `ease`, so the two other kinds are defined on the whole range: for `rated:N` and `prop:rated` without `:B`, an **answer** is an entry with `ease` > 0 (5 and above count, negative values do not); for `introduced:N`, a **first-answer candidate** is an entry with `ease` ≠ 0 (negative values count). Entries are matched by `cid` only, whatever their `type`.
+The review log is the `revlog` table: `id` (the instant of the entry in epoch milliseconds), `cid` (the card), `ease` (the button: 1–4 for an answer, 0 for an entry the user or the scheduler wrote without an answer: Set Due Date, Forget, rescheduling, `specs/sched/` U44, U48). An entry with `ease` 0 is a **manual entry**. Another client can write any integer in `ease`, so the two other kinds are defined on the whole range: for `rated:N` and `prop:rated` without `:B`, an **answer** is an entry with `ease` > 0 (5 and above count, negative values do not); for `introduced:N`, a **first-answer candidate** is an entry with `ease` ≠ 0 (negative values count). Entries are matched by `cid` only, whatever their `type` (`search/history/odd-ease`).
 
 ## H2. Days
 
@@ -103,6 +103,7 @@ At B3 − 1 s nothing changes; at B3 the window moves a day: `rated:1` keeps onl
 |---|---|
 | `search/history/answers` | H5, H6, H7, H8, H9 |
 | `search/history/added-edited` | H3, H4 |
+| `search/history/odd-ease` (no golden yet) | H1, H5, H6, H7, H8 (`ease` outside 0–4, any `type`) |
 | `search/history/dst-paris` | H2, H3, H4, H5, H8; `properties.md` P4; `state-and-flags.md` S1, S7 |
 | `search/history/dst-new-york` | H2, H3, H4, H5, H8; `properties.md` P4 |
 

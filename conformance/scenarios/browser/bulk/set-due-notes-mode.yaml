@@ -1,0 +1,39 @@
+# Set Due Date from Browse in notes mode (R1117, R1196, R1197;
+# specs/browser/bulk-actions.md B1, B10; sched/set-due-date S3 to S6).
+# Selecting n1 (two cards) and n2 (one card) targets three cards; "3-7!"
+# on day 0 makes each a review card due between day 3 and day 7 (its own
+# draw, read only as membership): the new cards get interval 0 and the
+# starting ease, the review card without lrt shifts its interval by the
+# change of its due day (ivl - due stays 5). One manual review-log row per
+# card, whose ivl is the card's. setDueBrowser stores the text as typed, in
+# the "Set Due Date" step. Needs set_due (specs/conformance/sched-ops.md J6,
+# J10), db_exec and undo_status.
+id: browser/bulk/set-due-notes-mode
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Reverse, front: "{{Back}}", back: "{{Front}}"}
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Home]
+  notes:
+    - {notetype: Pair, deck: Home, fields: [a, a2]}
+    - {notetype: Single, deck: Home, fields: [b, b2]}
+    - {notetype: Single, deck: Home, fields: [c, c2]}
+steps:
+  - observe: [timing]
+  # n1's Reverse card is a review card due today, interval 5, without lrt.
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, ivl = 5, due = 0, factor = 2500, reps = 3 WHERE nid = (SELECT id FROM notes WHERE sfld = 'a') AND ord = 1"}
+  - db_exec: {sql: "UPDATE cards SET usn = 0"}
+  - advance: 1m
+  - set_due: {cards: ["#c1", "#c2", "#c3"], days: "3-7!", context: browser}
+  - db_exec: {sql: "SELECT due BETWEEN 3 AND 7, type, queue, CASE WHEN reps > 0 THEN ivl - due ELSE ivl END, factor, mod, usn FROM cards ORDER BY id"}
+  - db_exec: {sql: "SELECT r.cid = c.id, r.ivl = c.ivl, r.ease, r.lastIvl, r.factor, r.time, r.type, r.usn FROM revlog r JOIN cards c ON c.id = r.cid ORDER BY r.id"}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT), usn FROM config WHERE KEY = 'setDueBrowser'"}
+  - observe: [undo_status]

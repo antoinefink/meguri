@@ -1,9 +1,9 @@
-# Stats specs (U95, U97 to U101, U226, U92)
+# Stats specs (U95, U97 to U101, U226, U227, U92)
 
 Spec-writer notes for the files of `specs/stats/`: `day-buckets`,
 `counting-rules`, `heatmap-config`, `studied-today`, `heatmap-addon`,
 `graphs-common`, `browse-queries`, `card-info`, `graphs-revlog`,
-`graphs-cards` and `graph-presentation`, and for `specs/conformance/stats-ops.md`.
+`graphs-cards`, `graph-presentation` and `heatmap-presentation`, and for `specs/conformance/stats-ops.md`.
 Read at tag 26.09.3 (`refs/anki-26.09.3`); no code was copied, and every rule
 was restated in the spec writers' words. `stats/widget-snapshot` is Meguri's own
 format and has no Anki source (its `Anki:` line says so).
@@ -94,6 +94,7 @@ against the oracle image gave the values in `studied-today` T9.
 | graphs-cards C9 | `rslib/src/stats/graphs/retrievability.rs`, `rslib/src/card/mod.rs`, fsrs 6.6.2 `inference.rs` (MIT/BSD, not Anki) | elapsed seconds from the card's own columns, the retrievability value, bins and sums per card and per note, NaN handling |
 | graphs-cards C10 | `rslib/src/stats/graphs/added.rs` | the added day of a card from its id |
 | graphs-cards C11, C12 | `proto/anki/stats.proto` | the record members and their protobuf names |
+| stats-ops H13 (driver `graph_preferences`) | `rslib/src/stats/graphs/mod.rs` (graph-preferences read), `rslib/src/stats/service.rs`, `rslib/src/config/bool.rs` (keys that default to true), `rslib/src/config/mod.rs` (weekday key and its four stored values), `proto/anki/stats.proto` (`GraphPreferences`) | the backend call the oracle makes and the three members it reports; `browser_links_supported` always set |
 
 ## Graph presentation (U226)
 
@@ -105,7 +106,7 @@ against the oracle image gave the values in `studied-today` T9.
 | graph-presentation P4 | `ts/routes/graphs/histogram-graph.ts`, `ts/routes/graphs/intervals.ts`, `ts/routes/graphs/future-due.ts`, `package.json` (`d3` 7), the d3 7 scale, tick, bin and quantile modules (ISC, not Anki) | step and ticks, the nice domain, bins, zero-width last bins, quantiles, the bar count, the numbers inside bar queries |
 | graph-presentation P5 | `ts/routes/graphs/GraphRangeRadios.svelte`, `ts/routes/graphs/graph-helpers.ts` | the ranges per graph, their defaults, the reset when the history changes |
 | graph-presentation P6 | `ts/routes/graphs/future-due.ts`, `ts/routes/graphs/FutureDue.svelte` | bins, table rows, backlog toggle, bar queries |
-| graph-presentation P7 | `ts/routes/graphs/calendar.ts`, `ts/routes/graphs/CalendarGraph.svelte` | the shown year, which dates are drawn and filled |
+| graph-presentation P7 | `ts/routes/graphs/calendar.ts`, `ts/routes/graphs/CalendarGraph.svelte`, `ts/lib/tslib/i18n/utils.ts` | the shown year, which dates are drawn and filled; the tooltip date written in the UI languages with long weekday and month names (revised 2026-11-10: it was recorded as English only) |
 | graph-presentation P8 | `ts/routes/graphs/reviews.ts`, `ts/routes/graphs/ReviewsGraph.svelte` | counts and times per kind, tooltip and table lines |
 | graph-presentation P9 | `ts/routes/graphs/card-counts.ts`, `ts/routes/graphs/CardCounts.svelte` | labels, percentages, the table |
 | graph-presentation P10 | `ts/routes/graphs/intervals.ts`, `ts/routes/graphs/IntervalsGraph.svelte`, `ts/routes/graphs/StabilityGraph.svelte` | interval and stability bins, the percentile ranges, bar queries, median |
@@ -148,3 +149,34 @@ specs give arithmetic and text only, and colours, layout and accessibility
 | card-info C11 | `rslib/src/stats/card.rs` | the errors for a missing card, note, note type or deck |
 | card-info C12 | `ftl/core/card-stats.ftl` | the English strings |
 | card-info C13.1, C13.3 | `pylib/anki/collection.py` (card stats data), `rslib/src/stats/card.rs`, `rslib/src/storage/revlog/time_of_last_review.sql`, `rslib/src/card/mod.rs` (card data) | the oracle call; Anki writing the card row back with an `lrt` taken from the review log when the data has none, `mod` and `usn` kept |
+
+## Heatmap grid presentation (U227)
+
+`stats/heatmap-presentation` was written 2026-11-10 (session
+s-20261110T085429Z-165d83d3) from the plan's requirements, the add-on's
+installed copy in the project's private local data (Review Heatmap 1.0.1,
+add-on id 1771074083; third-party, AGPL, read only, nothing copied) and Anki
+at tag 26.09.3. No code, CSS, colour value, asset or identifier of either was
+carried into the spec: it gives layout arithmetic, text and Meguri's own
+palette rules (R1960). Sections the table does not list (M1, M5's trailing
+weeks for the widget, M7.2's pitch rule, M7.3's label fitting, M7.4's
+hit-testing, M8.2's palette rules and measurement, M8.4, M11.5, M12's
+tooltip panel and delay rule, M13 to M16, M17's Meguri strings, M19, M20)
+are Meguri's own design.
+
+| Spec section | Source files read | Read for |
+|---|---|---|
+| heatmap-presentation M2, M3 | add-on `web/anki-review-heatmap.js` (the bundled calendar library's day, week and year placement, its week-start option and dynamic column count) | rows by weekday from a Monday week start, week columns from January 1's offset, 53 or 54 columns per year, slots outside the year not drawn, no weekday labels and the year label below in year mode |
+| heatmap-presentation M4 | add-on `web/anki-review-heatmap.js` (month domain, day labels, label options, the add-on's view script that sets the nine-month range and start), `config.py` (mode table) | month blocks with split weeks, the gap between blocks, the short month name and two-digit year label below each block, one column of single-letter weekday labels before the first block |
+| heatmap-presentation M6, M8.3 | Anki `ts/routes/graphs/calendar.ts`, `ts/lib/tslib/i18n/utils.ts` (narrow weekday label, localized date), `ftl/core/statistics.ftl` (`statistics-reviews`) | the calendar's week columns per week start, narrow weekday labels before the grid and their click to set the week start, undrawn dates, the square-root scale and its capped blue range, the week axis of 53 positions with a 54th column drawn in the right margin, the tooltip placed at the pointer and the cells drawn without hover or selection outlines |
+| heatmap-presentation M7.1, M7.3 | add-on `web/anki-review-heatmap.js` (cell size and padding, sharp corners, label position) | the add-on's 10 px cells and 2 px spacing that M7.2's ratio follows; square cells; labels centred below |
+| heatmap-presentation M8.1, M8.2 | add-on `web/anki-review-heatmap.js` (its bundled style sheet: theme ramps, forecast greys, night-mode reversed order, empty-cell fill), `renderer.py` (level classes, inverted forecast legend) | ten history steps light to dark, reversed at night; ten forecast greys darker for more due in day mode and lighter at night; an empty fill; no legend. No colour value was taken |
+| heatmap-presentation M9 | add-on `web/anki-review-heatmap.js` (today and clicked-day highlights, hover stroke, the click handler resetting the highlight to today) | today's outline, a second outline for the clicked day kept with today's, a thin hover outline, an empty-day click leaving only today highlighted |
+| heatmap-presentation M10.1, M10.2, M10.3 | add-on `web/anki-review-heatmap.js` (the add-on's tooltip formatter, the library's day date format, connector and number format) | the four tooltip forms and their bold parts, `card` for a count of 1, the minus sign removed from forecast counts, the empty wording chosen by wall clock against the cell's midnight, the English long date without a comma after the weekday, grouped counts |
+| heatmap-presentation M11 | add-on `web_content.py` (control row and button titles), `web/anki-review-heatmap.js` (the add-on's navigation handlers, the library's next, previous, jump and rewind with minimum and maximum dates) | Back, Today and Forward centred above the grid; one period per click; Shift-click to the first or last period; Shift-click on Today switching the mode; options and support buttons; no disabled state; the sliding nine-month window clipped at the bounds |
+| heatmap-presentation M12 | add-on `web/anki-review-heatmap.js` (tooltip placement and its delayed fade-in), `web_content.py` | the tooltip above the cell, centred, appearing after about a third of a second; a click on a day with data opening the Browser, on an empty day only re-highlighting today |
+| heatmap-presentation M18 | the files of the rows above; add-on `activity.py` (report start, stop and today), `finder.py` (the Browser hook for the review-id range), `views.py` (deck-page scope), `web/anki-review-heatmap.js` (the bundled library's year-domain column placement and dynamic column count, its tooltip show and hide on each cell, the stylesheet's empty-cell fills and transparent domain background); Anki `rslib/src/search/parser.rs` (an unknown search key read as a field search) | the add-on and Anki column of each difference: the window start from the wall clock and the day-of-month overflow of its month arithmetic, the first-history bound and the sixth-month bound counted from the report's today, the click searches (review-id range for history days, not recognised after the current-deck term on deck pages; due-day property for forecast days), the empty first column and lost last week in Monday-starting years, the fade-in restarted on every cell, the tooltip always above, grey empty cells |
+
+The add-on's tooltip wording (M10.1) is user-visible text R1320 asks Meguri
+to reproduce; it is listed in M17 as R1320 words it. Its long date is not
+reproduced (M10.2, M18).

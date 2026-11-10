@@ -374,3 +374,7 @@ AXUIElementCopyAttributeValue
 kAXDOMIdentifierAttribute
 AXUIElementPerformAction
 kAXPressAction
+# render/preview: the template observation's fill-empty case key (Anki's
+# uncommitted-render request field of the same name) and its finer capability.
+fill_empty
+template.fill_empty

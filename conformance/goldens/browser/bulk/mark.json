@@ -1,0 +1,87 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "add_note_tags": {
+          "count": 2
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [" Marked ", 1894701660, -1],
+            [" Marked ", 1894701600, 0],
+            [" Marked Marked::x other ", 1894701660, -1]
+          ]
+        }
+      },
+      {
+        "undo_status": {
+          "redo": null,
+          "undo": "update_tag"
+        }
+      },
+      {},
+      {
+        "remove_note_tags": {
+          "count": 3
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["", 1894701720, -1],
+            ["", 1894701720, -1],
+            [" other ", 1894701720, -1]
+          ]
+        }
+      },
+      {
+        "db_dump": {
+          "tags": {
+            "Marked": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "Marked",
+              "usn": -1
+            },
+            "Marked::x": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "Marked::x",
+              "usn": -1
+            },
+            "other": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "other",
+              "usn": -1
+            }
+          }
+        },
+        "undo_status": {
+          "redo": null,
+          "undo": "remove_tag"
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "7f79bcaf52df07a8d17be399cedca996e4913eb30293a31f847df801a0ba4e38",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "browser/bulk/mark",
+  "scenario_sha256": "f0dbd6d92b9155711dc5d270d235f5f4597fa20ec11077beb66b455aa339bff0",
+  "tz": "UTC"
+}

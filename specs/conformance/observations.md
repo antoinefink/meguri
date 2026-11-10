@@ -66,7 +66,8 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `card_extractors` | `{inputs: [{id, data, due, ivl, today, now}, ...]}`, at most once per observe step | `{rows: [{id, s, d, dr, r, rr, pos}, ...]}`: the card-data SQL functions of `specs/search/card-extractors.md` on given SQL values, one row per input (`extractor-ops.md` E1–E3); never reads or changes the scenario's collection |
 | `db_dump` | none or `{tables?: [...], raw?: bool}` | `{<table>: {<key>: <row>}}`: the stored rows of the collection's tables, normalized (O8), or raw (`normalized-dump.md` N4) |
 | `stats` | `[{scope, history, parts}, ...]` | draft (stats; the oracle implements it): `[{<part>: <graph data>} \| {error}, ...]`, the Stats screen's graph data per request (`stats-ops.md` H10) |
-| `stats_presentation` | `[{scope, history, graph, controls}, ...]` | draft (stats): `[{data, page}, ...]`, a graph's data and what the graphs page presents from it: no-data state, bins with tooltips and click queries, table rows (`stats/graph-presentation` P22) |
+| `stats_presentation` | `[{scope, history, graph, controls}, ...]` | draft (stats; oracle: the graphs-page image): `[{data, page}, ...]`, a graph's data and what the graphs page presents from it: no-data state, bins with tooltips and click queries, table rows (`stats/graph-presentation` P22, `stats-ops.md` H14) |
+| `graph_preferences` | none | draft (stats; the oracle implements it): `{calendar_first_day_of_week, card_counts_separate_inactive, future_due_show_backlog}`, the three graph preferences as read now, defaults included (`stats-ops.md` H13); never changes the collection |
 | `card_stats` | a non-empty list of card references, each once | draft (stats; the oracle implements it): `{"#cN": <stats>}`, the raw values of Card Info (`stats-ops.md` H9) |
 | `heatmap_totals` | none, or `{decks: [<name>, ...]}` | draft (stats): `{home: {<YYYY-MM-DD>: <count>}, decks?: {<name>: {...}}}`, the heatmap's review count per day for Home and the listed decks (`stats-ops.md` H1; oracle: the add-on image, H4) |
 | `studied_today_raw` | none | `{cards, time_ms}`: the count and time the Home studied-today line is built from (`stats-ops.md` H2) |
@@ -90,6 +91,7 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `package_listing` | `{name}` (a package in the session directory) or `{fixture}` (a fixture package) | `{entries, meta_version, sqlite}`: the archive's entries with their compression methods, the `meta` version, and for each raw SQLite entry its `ver`, row counts, journal mode and whether the executor opens it (`package-ops.md` E3); never changes the collection |
 | `text` | `{fns: [<function>, ...], inputs: [<input>, ...]}` | `{<function>: [<output>, ...], ...}`: pure text functions (O9); never reads or changes the scenario's collection |
 | `tag_complete` | `{cases: [{input, limit}, ...]}`, `limit` from 1 to 2^32, at most one request per step | `[[<tag name>, ...], ...]`, one list of completions per case, in the order returned (`tags/complete` C7); never changes the collection |
+| `find_replace_fields` | `{notes: [#nN, ...]}`, distinct references, at most one request per step | `[<field name>, ...]`: the field names Find and Replace's In list offers for those notes, in order (`bulk-ops.md` X3, `browser/find-replace` F3); deleted notes add nothing; never changes the collection; draft: the oracle implements it, Meguri's executor pending |
 | `tag_tree` | none | `[{name, collapsed, children}, ...]`: the tag tree of `specs/tags/tags.md` T13, top-level nodes first (`tag-ops.md` G9) |
 | `undo_status` | none | `{undo, redo}`: the step an `undo` and a `redo` would apply now, each a step id or `null` (`undo-ops.md` V2, V4); reading it changes neither history |
 | `cloze` | `{fns: [<function>, ...], inputs: [<input>, ...]}` | `{<function>: [<output>, ...], ...}`: cloze numbers, `cloze:` and `cloze-only:` output and type-in extraction (`cloze-ops.md` Z1); never reads or changes the scenario's collection |
@@ -101,6 +103,7 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `media_pending` | none | `{<name>: <sha1> \| null}`: after a full registration of the folder, the entries pending for the next media sync, `null` for a deletion (`media-ops.md` F11) |
 | `media_quick_check` | none | `{<name>: <sha1> \| null}`: after the change check a media sync begins with, which lists nothing while the folder's time equals its marker, the entries pending for the next media sync (`media-sync-ops.md` V1) |
 | `browser_config` | none | `{<key>: <value>, ...}`: the 23 browser and search config keys as Anki's own reads give them, defaults included (`browser-config-ops.md` B2) |
+| `editor_config` | none | draft (editor): `{pasteImagesAsPng, pasteStripsFormatting, addToCur, firstDayOfWeek}`, Anki's own typed reads of the editing keys, defaults included (`editor-ops.md` E7); never changes the collection |
 | `card_excerpts` | a list of card references, repeats allowed; at most once per observe step | `[{question, deck} \| {error: missing \| damaged}, ...]`, one entry per reference in request order: the cards' Question and Deck cells from the card excerpts call of `specs/browser/columns.md` C16 (`card-excerpt-ops.md` E1, E2); never changes the collection |
 | `backup_files` | none | `[<file name>, ...]`: the regular files of the scenario's backups folder, sorted by their UTF-8 bytes (`backup-ops.md` F5); never changes the folder |
 | `backup_settings` | none | `{daily, weekly, monthly, minimum_interval_mins}`: the backup limits as read now, defaults included (`backup-ops.md` F6); never writes |
@@ -136,6 +139,7 @@ The runner compares the golden's observations (expected) with the executor's (ac
   | `stability` and `difficulty` in any `memory_state` inside `next_states` | 1e-5 |
   | the stability and difficulty columns (1, 2, 4, 5, 7, 8, 10, 11) of `fsrs_next` rows | 1e-5 |
   | any number inside `stats` | 1e-6 |
+  | any number inside the `data` member of a `stats_presentation` value, and `value`, `x0`, `x1` in its `bins` and the items of its `sectors` (`stats/graph-presentation` P22) | 1e-6 |
   | `stability` and `difficulty` in any `memory_state`, and `fsrs_retrievability`, inside `card_stats` (`stats/card-info` C13.2) | 1e-5 |
   | `r` and `rr` in `card_extractors` rows (`extractor-ops.md` E4) | 1e-5 |
 

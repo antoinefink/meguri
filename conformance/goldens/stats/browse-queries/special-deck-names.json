@@ -1,0 +1,109 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-12T12:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "search": [
+          {
+            "ids": ["#c1", "#c2"]
+          },
+          {
+            "ids": ["#c9", "#c10"]
+          },
+          {
+            "ids": ["#c3"]
+          },
+          {
+            "ids": ["#c4", "#c5"]
+          },
+          {
+            "ids": ["#c8"]
+          },
+          {
+            "ids": ["#c9", "#c10"]
+          },
+          {
+            "ids": ["#c6"]
+          },
+          {
+            "ids": ["#c6"]
+          },
+          {
+            "ids": ["#c11"]
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": ["#c12"]
+          },
+          {
+            "ids": []
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "63d7ee8c9340e3db90caf514e2a5cf52640d1eb70a16e0a8f09d231f6ffcc50f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/browse-queries/special-deck-names",
+  "scenario_sha256": "86566173204eae1d3266505aa7967a23418ff10d29ef1c655e295a78f425526b",
+  "tz": "Europe/Paris"
+}

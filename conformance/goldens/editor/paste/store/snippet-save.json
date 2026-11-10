@@ -1,0 +1,45 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "text": {
+          "iri_decode": ["<img src=\"a&b c.png\">", "<img src=\"a&amp;b c.png\">", "<img src=\"日本.png\">", "<img src=\"100%.jpg\">", "<img src=\"a%41.png\">", "<img src=\"a#b.png\">", "<img src=\"a#b.png\">", "<img src=\"it's (1).png\">", "<img src=\"it's (1).png\">", "[sound:clip&amp;1.mp3]", "<img src=\"aA.png\">", "<img src=\"x y.png\">", "<img src=\"paste-732a7d8e88c3e13b9bf99563845fadf9d4b23473.jpg\">", "<img src=\"a&b c.png\">", "<img src=\"a&amp;b c.png\">", "<img src=\"日本.png\">", "<img src=\"100%.jpg\">", "<img src=\"it's (1).png\">", "<img src=\"a&b c.png\"><img src=\"paste-732a7d8e88c3e13b9bf99563845fadf9d4b23473.jpg\">[sound:clip&amp;1.mp3]"],
+          "iri_encode": ["<img src=\"a%26b%20c.png\">", "<img src=\"a&amp;b%20c.png\">", "<img src=\"%E6%97%A5%E6%9C%AC.png\">", "<img src=\"100%25.jpg\">", "<img src=\"a%2541.png\">", "<img src=\"a%23b.png\">", "<img src=\"a%23b.png\">", "<img src=\"it%27s%20%281%29.png\">", "<img src=\"it's%20(1).png\">", "[sound:clip&amp;1.mp3]", "<img src=\"a%41.png\">", "<img src=\"x%20y.png\">", "<img src=\"paste-732a7d8e88c3e13b9bf99563845fadf9d4b23473.jpg\">", "<img src=\"a&b%20c.png\">", "<img src=\"a&amp;b%20c.png\">", "<img src=\"日本.png\">", "<img src=\"100%.jpg\">", "<img src=\"it's%20(1).png\">", "<img src=\"a%26b%20c.png\"><img src=\"paste-732a7d8e88c3e13b9bf99563845fadf9d4b23473.jpg\">[sound:clip&amp;1.mp3]"],
+          "media_refs": [
+            ["a%26b%20c.png"],
+            ["a&b%20c.png"],
+            ["%E6%97%A5%E6%9C%AC.png"],
+            ["100%25.jpg"],
+            ["a%2541.png"],
+            ["a%23b.png"],
+            ["a#b.png"],
+            ["it%27s%20%281%29.png"],
+            ["it's%20(1).png"],
+            ["clip&1.mp3"],
+            ["a%41.png"],
+            ["x%20y.png"],
+            ["paste-732a7d8e88c3e13b9bf99563845fadf9d4b23473.jpg"],
+            ["a&b c.png"],
+            ["a&b c.png"],
+            ["日本.png"],
+            ["100%.jpg"],
+            ["it's (1).png"],
+            ["a%26b%20c.png", "paste-732a7d8e88c3e13b9bf99563845fadf9d4b23473.jpg", "clip&1.mp3"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "ae5229735e53880825c7395c19f571a9b7b3a2ae926de53994a3c131897605ea",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "editor/paste/store/snippet-save",
+  "scenario_sha256": "372d68e6fbd7ddc5700c3fe33cc9b74b9045b1b6e477b37070a9678561595537",
+  "tz": "UTC"
+}

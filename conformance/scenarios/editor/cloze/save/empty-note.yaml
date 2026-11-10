@@ -1,0 +1,42 @@
+# The save side of a cloze command with no selection on an empty note
+# (specs/editor/cloze-wrap.md W3 to W5; plan U192's "no selection" test), on
+# cloze-wrap W9's note type. The empty note has the card of ord 0 from its
+# add (notes/card-generation G6), and the field check reports the empty first
+# field before the missing cloze (notes/field-check K3). Cloze Deletion with a
+# collapsed caret writes {{c1::}} (N = 1, W3); saved as it is (the user
+# leaves the field at once), it is read for card generation (G4, G7) and the
+# field check; typing z inside it then saves {{c1::z}}. The read-back of both
+# texts' numbers and fronts is editor/cloze/output/read-back. Cards are read
+# by ord with db_exec.
+id: editor/cloze/save/empty-note
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Gap
+      kind: cloze
+      fields: [Text, Extra, Note]
+      templates:
+        - {name: Cloze, front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Extra}}"}
+  decks: [Inbox]
+  notes:
+    - {notetype: Gap, deck: Inbox, fields: ["", "", ""]}
+steps:
+  - db_exec: {sql: "SELECT ord, queue, type FROM cards ORDER BY ord"}
+  - observe:
+      - fields_check:
+          cases:
+            - {note: "#n1"}
+            - {note: "#n1", fields: {Text: "{{c1::}}"}}
+  - advance: 1h
+  # Cloze Deletion with no selection, then blur.
+  - edit_note: {note: "#n1", fields: {Text: "{{c1::}}"}}
+  - db_exec: {sql: "SELECT ord, queue, type FROM cards ORDER BY ord"}
+  - observe:
+      - fields_check:
+          cases:
+            - {note: "#n1"}
+  - advance: 1h
+  # z typed at the caret, before the closing braces.
+  - edit_note: {note: "#n1", fields: {Text: "{{c1::z}}"}}
+  - db_exec: {sql: "SELECT ord, queue, type FROM cards ORDER BY ord"}
+  - db_exec: {sql: "SELECT hex(flds) FROM notes"}

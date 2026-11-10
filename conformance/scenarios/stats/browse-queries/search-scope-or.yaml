@@ -1,0 +1,37 @@
+# stats/browse-queries Q8 (Q3, Q7, Q2.3): a Search scope is bracketed and
+# joined with AND. Notes tagged a (new, review), b (new, review), c (new) and
+# an untagged review note. (tag:a or tag:b) AND "is:new" finds the new cards
+# of a and b, the cards card_counts counts as new for Search tag:a or tag:b;
+# Anki's own join ` tag:a or tag:b "is:new"` (Q7) also finds a's review card.
+# A Search text is trimmed (Q2.3): scope "  tag:a  " joins as
+# (tag:a) AND "is:new", and a text of spaces only is the Collection scope,
+# where the item stands alone. Every query here is a literal text that both
+# sides search alike: this scenario pins Anki's reading of the joined texts
+# and needs no deviation; Meguri's own join output (Q3's table) is asserted by
+# the Meguri-only tests of Q6.
+id: stats/browse-queries/search-scope-or
+tags: ["needs-tag", "needs-state"]
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4}
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}], "css": ".card { margin: 0; }"}
+  notes:
+    - {"notetype": "Pair", "fields": ["a-new", "x"], "tags": ["a"]}
+    - {"notetype": "Pair", "fields": ["a-review", "x"], "tags": ["a"]}
+    - {"notetype": "Pair", "fields": ["b-new", "x"], "tags": ["b"]}
+    - {"notetype": "Pair", "fields": ["b-review", "x"], "tags": ["b"]}
+    - {"notetype": "Pair", "fields": ["c-new", "x"], "tags": ["c"]}
+    - {"notetype": "Pair", "fields": ["untagged-review", "x"]}
+steps:
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 5, due = 5 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 5, due = 5 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 5, due = 5 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5)"}}
+  - observe:
+      - search:
+          - {query: '(tag:a or tag:b) AND "is:new"'}
+          - {query: ' tag:a or tag:b "is:new"'}
+          - {query: '(tag:a or tag:b) AND "is:buried"'}
+          - {query: '(tag:a) AND "is:new"'}
+          - {query: '"is:new"'}
+  - {"observe": [{"stats": [{"scope": {"search": "tag:a or tag:b"}, "history": "year", "parts": ["card_counts"]}, {"scope": {"search": "  tag:a  "}, "history": "year", "parts": ["card_counts"]}, {"scope": {"search": "   "}, "history": "year", "parts": ["card_counts"]}]}]}

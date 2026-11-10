@@ -1,0 +1,54 @@
+# How Anki reads the text the cloze commands write (specs/editor/cloze-wrap.md
+# W3 to W5, through specs/render/cloze.md). The numbers request holds W3's
+# table of session values, its hidden Occlusion mask included, and the
+# results of W9's number-zero, number-nested, two-in-a-row and cut-marker
+# rows: W3 counts by a text search, so where
+# these numbers differ from W3's H (a marker with several numbers, a capital
+# C, an unclosed or attribute marker, 0, a number above 65535) the command
+# still uses W3's rule. The front and back pairs are W4's and W5's After
+# column: the outer whitespace and non-breaking spaces stay outside the
+# cloze, an empty cloze from a collapsed selection, and nested clozes, each
+# for the cards they make.
+id: editor/cloze/output/read-back
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - cloze:
+          fns: [numbers]
+          inputs:
+            - "{{c2::x}}"
+            - "{{c0::x}}"
+            - "{{c01::a}}"
+            - "{{c01::a}} {{c2::b}}"
+            - "{{c1::a {{c4::b}}}}"
+            - "{{c1::a {{c4::b}}}} {{c5::c}}"
+            - "{{c3::open"
+            - "<img alt=\"{{c5::\">"
+            - "{{c1,3::x}}"
+            - "{{C2::x}}"
+            - "{{c7::image-occlusion:rect:left=.1:top=.1:width=.2:height=.2}}"
+            - "{{c65536::x}}"
+            - "{{c1::}}"
+            - "{{c0::a}} {{c1::b}}"
+            - "{{c0::{{c1::a}}}} {{c1::b}}"
+            - "{{c1::a}} {{c2::b}}"
+            - "{{c1::a{{c2::b}}c}}"
+      - cloze:
+          fns: [front, back]
+          inputs:
+            - ["a {{c1::word}} b", 1]
+            - ["{{c1::}}", 1]
+            - ["{{c1::z}}", 1]
+            - ["ab{{c3::}}", 3]
+            - ["{{c2::word}} ", 2]
+            - ["<b>{{c1::bold}}</b>", 1]
+            - ["{{c1::<b>bold</b>}}", 1]
+            - ["a&nbsp;{{c1::b}}&nbsp;c", 1]
+            - ["a{{c1::x&nbsp;y}}b", 1]
+            - ["{{c1::a {{c2::b}} c}}", 1]
+            - ["{{c1::a {{c2::b}} c}}", 2]
+            - ["{{c2::x {{c1::y}}}}", 1]
+            - ["{{c2::x {{c1::y}}}}", 2]
+            - ["{{c1::a{{c2::b}}c}}", 1]
+            - ["{{c1::a{{c2::b}}c}}", 2]
+            - ["{{c0::{{c1::a}}}} {{c1::b}}", 1]

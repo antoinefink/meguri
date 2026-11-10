@@ -1,0 +1,33 @@
+# Reset from Browse (R1198; specs/browser/bulk-actions.md B10;
+# sched/manual-ops M6). Restore original position on, reset counts off,
+# in the selection's order #c1, #c2, #c3: the review card with pos 2 goes
+# back to position 2, the new card keeps its position, and the review card
+# without pos takes the next free position. reps and lapses stay; s, d and
+# pos go, other data keys stay. One Reset marker row per card. The two
+# browser keys are stored in the "Reset Card" step. Needs forget
+# (specs/conformance/sched-ops.md J7, J10), db_exec and undo_status.
+id: browser/bulk/reset-browser
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Home]
+  notes:
+    - {notetype: Single, deck: Home, fields: [a, x]}
+    - {notetype: Single, deck: Home, fields: [b, x]}
+    - {notetype: Single, deck: Home, fields: [c, x]}
+steps:
+  - observe: [timing]
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 5, factor = 2500, reps = 4, lapses = 1, data = ? WHERE nid = (SELECT id FROM notes WHERE sfld = 'a')"
+      params: ['{"pos":2,"s":3.0,"d":5.0,"dr":0.9,"lrt":1894700000}']
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, ivl = 3, due = 2, factor = 2300, reps = 2 WHERE nid = (SELECT id FROM notes WHERE sfld = 'c')"}
+  - db_exec: {sql: "UPDATE cards SET usn = 0"}
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT) FROM config WHERE KEY IN ('nextPos', 'restorePositionBrowser', 'resetCountsBrowser') ORDER BY KEY"}
+  - advance: 1m
+  - forget: {cards: ["#c1", "#c2", "#c3"], restore_position: true, reset_counts: false, context: browser}
+  - observe: [card, revlog, undo_status]
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT) FROM config WHERE KEY IN ('nextPos', 'restorePositionBrowser', 'resetCountsBrowser') ORDER BY KEY"}

@@ -21,6 +21,7 @@ How content gets into a rich-text field: attaching files, camera and photo-libra
 - **Media extensions**: R850's lists. Image: `jpg`, `jpeg`, `png`, `gif`, `svg`, `webp`, `ico`, `avif`. Audio and video: `3gp`, `aac`, `avi`, `flac`, `flv`, `m4a`, `mkv`, `mov`, `mp3`, `mp4`, `mpeg`, `mpg`, `oga`, `ogg`, `ogv`, `ogx`, `opus`, `spx`, `swf`, `wav`, `webm`. A name's extension is what follows its last `.` (the whole name when it has no `.`), compared ASCII case-insensitively.
 - **Content hash**: SHA-1 of the bytes as 40 lower-case hex digits (`media/media-files` M2).
 - **Text whitespace** (P13): the Unicode White_Space characters plus U+001C to U+001F, that is U+0009 to U+000D, U+001C to U+001F, U+0020, U+0085, U+00A0, U+1680, U+2000 to U+200A, U+2028, U+2029, U+202F, U+205F and U+3000.
+- **Percent-decoding** (P10, P13): each `%` followed by two hex digits (either case) stands for that byte, every other character for its UTF-8 bytes, and a `%` not followed by two hex digits is kept as it is; `+` is not decoded. The bytes are then read as UTF-8, each maximal ill-formed subsequence becoming one U+FFFD (the WHATWG UTF-8 decoder's rule). Examples: `a%20b` → `a b`; `100%.jpg` → `100%.jpg`; `a+b` → `a+b`; `%E6%97` → U+FFFD; `%FF%FE` → U+FFFD U+FFFD. Decided 2026-11-10.
 - **Trim** (P13, P15): remove from both ends every character of this set: U+0009 to U+000D, U+0020, U+00A0, U+1680, U+2000 to U+200A, U+2028, U+2029, U+202F, U+205F, U+3000 and U+FEFF (the web platform's trim). U+0085 and U+001C to U+001F are not trimmed.
 
 ## P3. Snippets (R849, R850, R851)
@@ -42,7 +43,7 @@ The snippet is chosen from the extension of the name the add returned (the store
 
 Every file this spec puts into media goes through one importer (U194), which calls U31's add (`media/media-files` M3) on the maintenance lane and uses the name it returns.
 
-- **Desired name**: a file from disk or a file URL: its last path component. A download: P10.3. Re-encoded bitmaps: P7. A recording: P20. A pasted audio item: its suggested name.
+- **Desired name**: a file from disk or a file URL: its last path component. A download: P10.3. Re-encoded bitmaps: P7. A recording: P20. A pasted audio item: its name (P12).
 - M3 then applies the transform, the same-content reuse across case variants, lowercasing and hash names. With present files A and B of different content, and `<B>` the hash of B:
 
   | Present | Desired name, bytes | Stored | Written |
@@ -93,9 +94,16 @@ Applies to every image that Meguri decodes and writes again: P6's photos and P11
 
 ## P8. Choosing the mode (R866, R139, `editor/config-keys` K3)
 
-- A paste is in keep mode when `pasteStripsFormatting` reads `false`, in strip mode when it reads `true`; Shift held inverts it. So ⌘V uses the setting; ⇧⌘V and ⌥⇧⌘V (Edit › Paste and Match Style) use the other mode. The key is read at each paste.
-- The context menu's second paste item (P19) and the Edit menu's other-mode item use the other mode too.
-- A drop uses the setting, inverted when Shift is held at the moment of the drop (P17).
+- A paste is in keep mode when `pasteStripsFormatting` reads `false`, in strip mode when it reads `true`; Shift held inverts it. So ⌘V uses the setting; ⇧⌘V and ⌥⇧⌘V use the other mode. The key is read at each paste.
+- **Commands.** Decided 2026-11-10. Two commands, bound once with U158's registry in context `editor.richText` (`editor/formatting` F14):
+
+  | Command | Label when `pasteStripsFormatting` is `false` | Label when `true` | Key shown in the menu | Other keys | Mode |
+  |---|---|---|---|---|---|
+  | Paste | Paste | Paste | ⌘V | | the setting's |
+  | Other-mode paste | Paste and Match Style | Paste With Formatting | ⌥⇧⌘V | ⇧⌘V | the other one |
+
+  On macOS both are Edit menu items; the second takes the place of the system's Paste and Match Style item, and its label is read each time the menu is shown, so it always names what it does (as P19's label). On iPad the same two commands are in the Edit menu of the menu system with the same keys; ⇧⌘V is a key command with no menu entry, so the ⌘ overlay shows ⌥⇧⌘V only (F14's rule for other keys). On iPhone and iPad the edit menu of a field (long press, secondary click) is P19's menu. The context menu's second paste item (P19) runs the other-mode command.
+- A drop uses the setting, inverted when Shift is held at the moment of the drop (P17). On macOS Shift is read from the drop's own modifier flags. On iPhone and iPad it is the hardware keyboard's Shift state as the system reports it when the drop is performed (the Game Controller framework's `GCKeyboard`); with no hardware keyboard, or when that state cannot be read, Shift counts as not held and the setting's mode applies. Decided 2026-11-10.
 - The mode changes only P13 (text tokens) and P15 (filter of pasted HTML). File, URL, image and audio items (P10 to P12) are handled the same in both modes.
 - Paste into a field's HTML source editor (⇧⌘X, U190) is not this pipeline: it inserts the pasteboard's plain text verbatim. With no field focused, paste does nothing.
 
@@ -104,7 +112,7 @@ Applies to every image that Meguri decodes and writes again: P6's photos and P11
 The first step that yields non-empty markup wins; later steps are not tried. Step 2 is the exception below: it wins as soon as its type is present. Step 3 has two orders.
 
 1. **Internal content.** The pasteboard holds Meguri's private field-content type (written by Meguri's copy and cut in a field, and by Copy Image, P19): its HTML is used in internal mode. Meguri writes that type with every copy from a field, holding the copied HTML in storage form (editor-only attributes removed, names decoded as at save), so nothing in it needs rewriting. Any later copy elsewhere replaces the whole pasteboard and so removes it. Decided 2026-10-27: the type's identifier is `net.meguri.field-html`, the same in every build variant, declared by the app as an exported type conforming to `public.data`; its value is the copied fragment as UTF-8 HTML with no byte order mark. U194 defines the constant (it writes the type first, P19), and U197 reads it.
-2. **HTML.** The first present of: `public.html`; the main resource of a web archive (`com.apple.webarchive`) when its type is `text/html`; RTF or RTFD (`public.rtf`, `com.apple.flat-rtfd`) converted to HTML by the system's attributed-string HTML export. Its result is external HTML: P14 then P15 in the paste's mode. Decided 2026-10-27: RTF counts as HTML, as for Anki on macOS, where its toolkit offers RTF content as HTML; there is no golden for it (P1). A present HTML representation ends the search, as in Anki, even when it is empty or P14 and P15 leave nothing of it; P16's empty-result rule then applies, and the later steps are not tried. So `public.html` `<style>p{}</style>` with the text `hello` pastes nothing.
+2. **HTML.** The first present of: `public.html`; the main resource of a web archive (`com.apple.webarchive`) when its type is `text/html`; RTF or RTFD (`public.rtf`, `com.apple.flat-rtfd`) converted to HTML by the system's attributed-string HTML export. Its result is external HTML: P14 then P15 in the paste's mode. Decided 2026-10-27: RTF counts as HTML, as for Anki on macOS, where its toolkit offers RTF content as HTML; there is no golden for it (P1). A present HTML representation ends the search, as in Anki, even when it is empty or P14 and P15 leave nothing of it; P16's empty-result rule then applies, and the later steps are not tried. So `public.html` `<style>p{}</style>` with the text `hello` pastes nothing. Decided 2026-11-10, the text of each source: `public.html` bytes are read as UTF-8 (a leading byte order mark removed, ill-formed sequences as U+FFFD), and a `<meta charset>` inside is ignored; a web archive's main resource is read in its own text encoding (its IANA name; UTF-8 when absent or unknown); RTF and RTFD are read by the system into an attributed string and written as HTML by P9.1, not by the system's HTML export, which puts the formatting into a style sheet and class names that P14.1 and P15 remove.
 3. Then, when the pasteboard's first URL is a `file://` URL: **URLs** (P10), **image** (P11), **audio** (P12). Otherwise: **image**, **audio**, **URLs**.
 4. **Text** (P13).
 5. Nothing yields markup: the paste does nothing.
@@ -117,12 +125,36 @@ Pasteboard kinds, by platform:
 |---|---|---|
 | URLs | the items' `public.file-url` and `public.url` values, in item order | the same types, plus **file items**: an item provider that offers a file representation of a type with a media extension (P2), or of a type that is neither image nor audio nor video, counts as a `file://` URL to that file, named by its suggested name (the type's preferred extension appended when the name has none) |
 | image | the first item with image data the system can decode, preferring `public.png`, then `public.tiff`, then `public.jpeg`, then any other image type | the same; an image item whose type has no media extension (HEIC, TIFF, BMP) is image data, so P7 converts it |
-| audio | an item with audio or video data whose suggested name has an audio or video extension (P2) | the same |
+| audio | a file promise item (`NSFilePromiseReceiver`) whose promised file name has an audio or video extension (P2): the file is received into a temporary folder and its name is the received file's name. Audio or video data that comes with no file name (a bare `public.mp3` representation) is not an audio item | an item provider offering a type that conforms to `public.audiovisual-content`, whose `suggestedName`, with that type's preferred extension appended when it has none, has an audio or video extension (P2); the bytes are that type's file representation. Such an item is also a file item of the URLs row; whichever of the two steps comes first in step 3 takes it, with the same result |
 | text | `public.utf8-plain-text`, else `public.plain-text` | the same |
+
+**Item selection.** Decided 2026-11-10. HTML (step 2): the first item, in item order, that has one of step 2's types, and within it step 2's order. Image: the first item that has image data the system can decode, and within it the preference above, then its other image types in the item's own type order. Audio: the first item that qualifies by the audio row. Text: the first item that has `public.utf8-plain-text` or `public.plain-text`, and within it the former. URLs: every item's, in item order. Example: item 1 offers `public.tiff`, item 2 offers `public.png` and `public.utf8-plain-text`: the image step takes item 1's TIFF.
 
 Decided 2026-10-27: on iPhone and iPad a file item without a media extension (a PDF from Files) is added (P4) and gets its bare-name snippet, as Attach does, instead of P10.1's link: a link to an app's temporary file path would be useless in the field. On macOS P10.1 applies, as in Anki.
 
 Examples: HTML and text → the HTML. Text plus a `file://` URL list → the files. An image plus an `https` URL → the image. A Finder copy (file URL, its icon as TIFF, its name as text) → the file. An address-bar copy (`public.url` and text) → a link, in both modes.
+
+### P9.1 RTF to HTML
+
+Decided 2026-11-10. Meguri's converter writes the attributed string of P9 step 2's RTF or RTFD as HTML. Its result is external HTML, so P14 and P15 then run in the paste's mode: strip mode keeps only the `div` and `br` elements.
+
+| In the attributed string | HTML |
+|---|---|
+| a paragraph (text up to LF, CR LF, CR or U+2029) | `<div>…</div>`; an empty paragraph is `<div><br></div>` |
+| U+2028 | `<br>` |
+| text | `&`, `<` and `>` escaped; spaces, TAB and U+00A0 as they are |
+| bold trait | `<b>` |
+| italic trait | `<i>` |
+| any underline style | `<u>` |
+| foreground color, converted to sRGB, other than black | `color: rgb(R, G, B);` |
+| background color, converted to sRGB | `background-color: rgb(R, G, B);` |
+| superscript, or a positive baseline offset; subscript, or a negative one | `<sup>`; `<sub>` |
+| link | `<a href="URL">`, `href` escaped as P10.1 says |
+| attachments, fonts, sizes, alignment, lists, strikethrough, shadows | nothing |
+
+- R, G and B are 0 to 255, rounded half away from zero; alpha is ignored. Colors go into one `<span style="…">`, `color` first.
+- Nesting, outermost first: `a`, `span`, `b`, `i`, `u`, `sup` or `sub`. Adjacent runs with the same attributes are one run, so an element never closes and reopens between them.
+- Example: a TextEdit line "Meet **today** at noon" with "noon" in pure red: `<div>Meet <b>today</b> at <span style="color: rgb(255, 0, 0);">noon</span></div>` in keep mode, `<div>Meet today at noon</div>` in strip mode.
 
 ## P10. URL items (R867, R870)
 
@@ -130,24 +162,28 @@ Examples: HTML and text → the HTML. Text plus a `file://` URL list → the fil
 
 Each URL is taken up to its first line break; an empty URL is skipped. The snippets and links of all URLs are joined with nothing between them.
 
-- **Media URL**: the URL text, lowercased, ends with `.` and a media extension (P2). The test is on the whole text, query included, so `https://ex.com/a.mp3?x=1` is not a media URL, while `https://ex.com/A.MP3` and `file:///Users/me/b%20c.JPG` are.
+- **Media URL**: the URL text, lowercased, ends with `.` and a media extension (P2). The test is on the whole text, query included, so `https://ex.com/a.mp3?x=1` is not a media URL, while `https://ex.com/A.MP3` and `file:///Users/me/b%20c.JPG` are. Both Anki editors test this way. The plan's U197 test scenario that downloads `a.mp3` from `https://ex.com/a.mp3?x=1` pasted as text is superseded by this rule: that text becomes a link (P13). R870's "query string dropped" is about naming (P10.3), not about this test.
 - A media URL is fetched (P10.2). On success the bytes are added (P4) with the desired name of P10.3, and the item becomes the snippet of the stored name (P3). On failure, or when it is not a media URL, it becomes a link.
-- **Link**: `<a href="URL">TEXT</a>`. TEXT is the URL with `%XX` sequences decoded as UTF-8 (invalid sequences become U+FFFD), then `&`, `<`, `>`, `"` and `'` escaped. In the `href` value Meguri escapes `&` and `"`. Example: `https://ex.com/a%20b?x=1&y=2` → `<a href="https://ex.com/a%20b?x=1&amp;y=2">https://ex.com/a b?x=1&amp;y=2</a>`.
-- A `file://` URL to a file without a media extension (a PDF, a HEIC photo, a folder) becomes a link to the local path; nothing is copied. Decided 2026-10-27: as Anki, on macOS; iPhone and iPad file items follow P9's decision instead.
+- **Link**: `<a href="URL">TEXT</a>`. TEXT is the URL percent-decoded (P2), then `&`, `<`, `>`, `"` and `'` escaped. In the `href` value Meguri escapes `&` and `"`. Example: `https://ex.com/a%20b?x=1&y=2` → `<a href="https://ex.com/a%20b?x=1&amp;y=2">https://ex.com/a b?x=1&amp;y=2</a>`.
+- A `file://` URL to a file without a media extension (a PDF, a HEIC photo, a folder) becomes the link above, with the file URL as `href` and its decoded form as TEXT; nothing is copied: `file:///Users/me/notes%20v2.pdf` → `<a href="file:///Users/me/notes%20v2.pdf">file:///Users/me/notes v2.pdf</a>`. Decided 2026-10-27: as Anki, on macOS; iPhone and iPad file items follow P9's decision instead.
 
 ### P10.2 Fetching
 
-- `file://` URLs: the file is read from disk. A file the app cannot read (sandbox, missing) is a failure.
-- `http://` and `https://` URLs: one GET that follows redirects, with User-Agent `Mozilla/5.0 (compatible; Meguri)`. It fails when no data arrives for 30 seconds, on a network error, or when the final status is not 200. Decided 2026-10-27: Meguri does not name Anki in its User-Agent.
+- **One implementation.** Decided 2026-11-10: the fetch rules of this section and P10.3's name are a service of the Rust core. `RemoteMediaFetcher` calls it through the FFI and adds the busy state, Cancel and alerts below; the conformance executor calls the same service (`specs/conformance/editor-ops.md` E4), so its goldens test the code the app runs.
+- `file://` URLs: the URL's path, without query and fragment (an unencoded `?` or `#` starts them), is percent-decoded to bytes. Bytes that are not UTF-8 fail with no disk lookup; otherwise the file at that path is read. An encoded `%23` is part of the name: `…/a%23b.png` reads `a#b.png`. A file the app cannot read (sandbox, missing) is a failure.
+- `http://` and `https://` URLs: the URL is parsed as the WHATWG URL standard does (dot segments removed, spaces and non-ASCII characters percent-encoded), and that URL is requested with one GET, with User-Agent `Mozilla/5.0 (compatible; Meguri)` and `Accept-Encoding: gzip, deflate`; a body sent with `Content-Encoding` `gzip` or `deflate` is stored decoded. Redirects (301, 302, 303, 307 and 308 with a `Location`) are followed, up to 10; an 11th redirect, or a redirect to a scheme other than `http` or `https`, is a failure. The fetch fails when no data arrives for 30 seconds, on a network error, or when the final status is not 200 (so also on a 3xx that is not followed). Decided 2026-10-27: Meguri does not name Anki in its User-Agent. Decided 2026-11-10: the redirect limit, the schemes, the parsing and the compression, as Anki's page editor and its default editor do between them.
 - `ftp://` URLs always fail, as in Anki, whose fetch has no FTP support either: the failure alert below, then the fallback.
-- While fetches run the field shows a progress indicator and takes no input; the insertion happens when every fetch of the paste has ended. Fetches run one after another, in pasteboard order.
+- Fetches run one after another, in pasteboard or document order; the insertion happens when every fetch of the paste or drop has ended.
+- **Busy state.** Decided 2026-11-10. While fetches run, the target field is busy (P25 `setBusy`): it takes no input. The editor shows a native indeterminate progress indicator with the text "Getting Media…" and a Cancel button; its placement is the screen contract's (`docs/design`). Cancel stops the running fetch and every remaining one of that paste or drop: each stopped item takes its fallback with no alert, files already added stay, and the insertion then happens with what is ready. While a field is busy, paste and drop do nothing anywhere in that editor and their commands are disabled; typing and other commands in other fields go on. Loading another note or closing the editor cancels as Cancel does, and P25's target rule then inserts nothing.
 - Each failure shows one alert (P21) naming the URL and its cause, then the paste goes on with the failed item's fallback (a link, or P14's unchanged `src`).
 - No limit on size beyond P4's warning, which follows the fetch.
 
 ### P10.3 Name of a fetched file
 
+The name comes from the URL as written, before P10.2's parsing and before any redirect; the media type of step 4 comes from the final response. So `https://ex.com/moved`, redirected to an `image/png` response, is `moved.png`.
+
 1. Take the URL without its query (from the first `?`) and its fragment (from the first `#`).
-2. Decode its `%XX` sequences as UTF-8 (invalid sequences become U+FFFD), then take what follows its last `/`. Decoding comes first, as in Anki, so an encoded slash splits the name: `https://ex.com/dir/a%2Fb.png` gives `b.png`.
+2. Percent-decode it (P2), then take what follows its last `/`. Decoding comes first, as in Anki, so an encoded slash splits the name: `https://ex.com/dir/a%2Fb.png` gives `b.png`.
 3. If that is empty or only text whitespace (P2), use `paste`.
 4. For an `http` or `https` fetch whose name has no extension (no `.` after its leading dots), append the extension for the response's media type: the `Content-Type` header up to its first `;`, trimmed and ASCII-lowercased:
 
@@ -172,17 +208,17 @@ Examples: `https://ex.com/dir/Pic.PNG?size=2` → `Pic.PNG` (M3 stores `pic.png`
 
 ## P11. Image data (R868)
 
-The image is decoded, encoded by P7 (`pasteImagesAsPng` read at this paste), added (P4) and becomes its `<img>` snippet. No size limit applies (P6's applies only to photos). Example: a PNG screenshot pasted with the default setting → `<img src="paste-<40 hex>.jpg">`, the hex being the SHA-1 of the stored file.
+The image is decoded, encoded by P7 (`pasteImagesAsPng` read at this paste), added (P4) and becomes its `<img>` snippet. No size limit applies (P6's applies only to photos). Decided 2026-11-10: when the system cannot decode the image data, the image step yields nothing and P9 tries the next step; no file is added (Anki adds and inserts an empty `paste-da39a3ee5e6b4b0d3255bfef95601890afd80709.jpg`, `editor/paste-sources` S8; P23). Example: a PNG screenshot pasted with the default setting → `<img src="paste-<40 hex>.jpg">`, the hex being the SHA-1 of the stored file.
 
 ## P12. Audio item (R867)
 
-The item's bytes are added under its suggested name and become its `[sound:…]` snippet, playing once (P3). Without a suggested name with an audio or video extension the step yields nothing.
+The item's bytes are added under its name (P9's audio row: the received file's name on macOS, the suggested name on iPhone and iPad) and become its `[sound:…]` snippet, playing once (P3). Without such a name with an audio or video extension the step yields nothing.
 
 ## P13. Plain text (R869, R870)
 
 The text is split into lines at each LF (U+000A); CR is not a line break and stays in the converted text, so CRLF text gives a CR before each `<br>`. P15.3's HTML parse then turns each CR into LF, as `editor/field-html` H3's table shows, so the field holds `a` LF `<br>b` for `a` CR LF `b`. Each line is split into alternating runs of text-whitespace (P2) and other characters. Lines are joined with `<br>`; nothing follows the last line, so a text ending in LF ends with `<br>`.
 
-- **Whitespace run and ordinary token.** Escape `&`, `<`, `>`, `"` and `'`, then turn each TAB into four spaces, then rewrite each run of two or more U+0020 spaces as (run length − 1) × `&nbsp;` followed by one space. A single space stays a space; other whitespace characters (U+00A0, U+3000, CR) stay as they are.
+- **Whitespace run and ordinary token.** Escape `&`, `<`, `>`, `"` and `'`, then turn each TAB into four spaces, then rewrite each run of two or more U+0020 spaces as (run length − 1) × `&nbsp;` followed by one space. A single space stays a space; other whitespace characters (U+00A0, U+3000, CR) stay as they are. The no-break spaces come first and the plain space last, as in Anki; R869's "every space after the first in a run" gives the count (n − 1 of n spaces), not the order.
 - **Keep mode only.** A non-whitespace token that starts with `data:image/` becomes the snippet of P14.2 (or stays text, P14.2). A token that starts with `http://`, `https://`, `ftp://` or `file://` (ASCII case-insensitive) is a URL and becomes what P10.1 makes of it: a snippet or a link.
 - In strip mode every token is escaped text.
 - The result then goes through P15.3, whose trim (P2) removes whitespace at both ends.
@@ -198,11 +234,11 @@ The text is split into lines at each LF (U+000A); CR is not a line break and sta
 | `see https://ex.com/page now` | strip | `see https://ex.com/page now` |
 | `https://ex.com/a.mp3` | keep | `[sound:a.mp3]` after a successful fetch |
 
-The plan's U197 example writes the TAB as four plain spaces; by this rule it is `&nbsp;&nbsp;&nbsp; `. The goldens of P24 `text-plain` decide the exact layout.
+The plan's U197 example writes the TAB as four plain spaces; by this rule it is `&nbsp;&nbsp;&nbsp; `. The goldens of P24 `text-plain` decide the exact layout. The plan's example `https://ex.com/a.mp3?x=1` → `[sound:a.mp3]` is superseded too: that token is not a media URL (P10.1), so keep mode makes it a link.
 
 ## P14. Pre-pass on external HTML (R870, R871)
 
-External HTML (P9 step 2) is parsed once as an HTML fragment into an inert document; P14 and P15 work on that tree, and it is serialized once at the end.
+External HTML (P9 step 2) is parsed as an HTML fragment into an inert document (no scripts run, nothing loads); P14 and P15 work on that tree, and it is serialized once at the end. Decided 2026-11-10, the split between host and page (P25): the host sends the HTML with `pasteScan`, and the page parses it, applies P14.1 and lists the `img` sources; the host does P14.2's fetches and decodes; then `pasteFilter` parses the same text again with the same parser, so it builds the same tree, applies P14.1, sets the `src` values the host rewrote, runs P15 in the page's CSS object model (P15.4) and returns the serialized result, which the host inserts with `insert`.
 
 ### P14.1 Elements
 
@@ -217,7 +253,7 @@ For each `img` with a `src`, in document order:
 - Decided 2026-10-27: a `data:image/…` source of another type, or one that does not decode, is left unchanged; a P13 token of that kind stays as escaped text.
 - Any other `src` (a relative name, `about:`, `blob:`) is left unchanged.
 
-This runs in both modes, so strip mode also brings remote and inline images into media.
+This runs in both modes, so strip mode also brings remote and inline images into media. Decided 2026-11-10: R870's keep-mode condition applies to P13's text tokens only; this pre-pass (R871, which has no mode condition) and P10's URL items run in both modes, as in both Anki editors. Example, strip mode: `<p>see <img alt="d" src="data:image/png;base64,aW5saW5lIGdpZiBieXRlcw=="></p>` adds `paste-bde96ed1fbd958a421a14ce5cedd73191801c63d.png` and inserts `<div>see <img alt="d" src="paste-bde96ed1fbd958a421a14ce5cedd73191801c63d.png"></div>`.
 
 ## P15. Filters (R872 to R875)
 
@@ -249,7 +285,7 @@ The strip-mode table, plus:
 | `tr` | `rowspan` |
 | `span` | `style`, filtered below |
 
-- **`span` style.** Every other attribute is removed. Within `style`, each declared property (shorthands are first expanded into their longhands, as the CSS object model does) is kept only if listed: light appearance keeps `color`, `background-color` unless its value is exactly `transparent`, `font-weight`, `font-style` and `text-decoration-line`; dark appearance (the editor's effective appearance at paste time) keeps only `font-weight`, `font-style` and `text-decoration-line` (R875). A `style` left with no property stays as `style=""`. Example, light: `<span class="x" style="font-size: 12px; font-weight: bold; color: #000">` → `<span style="font-weight: bold; color: rgb(0, 0, 0);">`; dark: `<span style="font-weight: bold;">`. A shorthand keeps the listed longhands it expands to, so `font: bold 12px Arial` leaves `font-style` and `font-weight` (the golden records their order).
+- **`span` style.** Every other attribute is removed. Within `style`, each declared property (shorthands are first expanded into their longhands, as the CSS object model does) is kept only if listed: light appearance keeps `color`, `background-color` unless its serialized value is `transparent` (`editor/paste-filter` X5.1), `font-weight`, `font-style` and `text-decoration-line`; dark appearance (the editor's effective appearance at paste time) keeps only `font-weight`, `font-style` and `text-decoration-line` (R875). A `style` left with no property stays as `style=""`. Example, light: `<span class="x" style="font-size: 12px; font-weight: bold; color: #000">` → `<span style="font-weight: bold; color: rgb(0, 0, 0);">`; dark: `<span style="font-weight: bold;">`. A shorthand keeps the listed longhands it expands to, so `font: bold 12px Arial` leaves `font-style` and `font-weight` (the golden records their order).
 - Decided 2026-10-27: in dark appearance `font` loses its `color` too, as R875 asks (keep mode drops color in dark appearance so pasted text stays readable). Anki keeps `<font color>` in night mode (P23). Example, dark: `<font color="#000" face="Arial">x</font>` → `<font>x</font>`.
 - Elements not listed (`h4` to `h6`, `tbody`, `thead`, `section`, `hr`) follow the strip table's last two rows.
 - After the tree is serialized, the text is trimmed (P2); whitespace runs are kept.
@@ -268,7 +304,7 @@ Style values are written as the CSS object model serializes them (`name: value;`
 ## P16. Insertion and what the field holds
 
 - An empty filter result inserts nothing: the field is unchanged and nothing is an input.
-- Before insertion, P3's src encoding is applied, once, to each `img` `src` that holds a name Meguri itself wrote: a P3 snippet (P10 to P13), a P14.2 rewrite to a stored name, and every local (`text/media-references` M5) `src` of internal content (P9 step 1, P17's drags from a field), which holds storage-form names. The save decodes it again.
+- P3's src encoding is applied, once, by the host, to each `img` `src` that holds a name Meguri itself wrote: a P3 snippet (P10 to P13), a P14.2 rewrite to a stored name, and every local (`text/media-references` M5) `src` of internal content (P9 step 1, P17's drags from a field), which holds storage-form names. The host builds P3 snippets already encoded, and passes the other two as `pasteFilter`'s rewrites (P25), so the encoding happens before the filter: strip mode's whitespace collapse (P15.1) never meets a raw stored name, and a fetch stored as `a  b.png` is inserted as `src="a%20%20b.png"`. The save decodes it again.
 - Any other `src` of external HTML (a relative name the source wrote, such as `x%20y.png`, or one P14.2 left unchanged) is inserted as parsed, with no encoding. The save then decodes it like any name (M7), so `<img src="x%20y.png">` is stored as `<img src="x y.png">`, as in Anki.
 - A non-empty result replaces the focused field's selection at its caret as one field-history entry, and is an input of the field (`editor/field-html` E1). The host sends it with P25's `insert`, under P25's target rule, since fetches and alerts can outlast the field's focus. Meguri's page inserts the parsed nodes itself, never through WebKit's own paste or insert commands, and must produce the field HTML the goldens record, starting from an empty field and from a field with text and the caret at its end.
 - The note is saved by U190's pipeline (`editor/field-html` H3, S1): snippets as P3 says, names raw (decoded by `text/media-references` M7), `data-meguri-editor` removed, `<br>` or `<div><br></div>` alone stored as empty.
@@ -276,9 +312,10 @@ Style values are written as the CSS object model serializes them (`name: value;`
 
 ## P17. Drop (R876, R877)
 
-- Meguri first finds the field under the drop point. Not a field, a collapsed field, or a field whose note type hides it (image occlusion, U206): the drop does nothing, and no file is added. Decided 2026-10-27: the target is checked before any item is processed (P23).
+- Meguri first finds the field under the drop point, by asking the page (P25 `fieldAt`). Not a field, a collapsed field, or a field whose note type hides it (image occlusion, U206; the page has no such field): the drop does nothing, and no file is added. Decided 2026-10-27: the target is checked before any item is processed (P23).
 - That field is focused. If only its HTML source editor is showing, its rich-text view is shown first. The content goes at the end of the field, as in Anki, which puts the caret there.
-- Content dragged from a Meguri field (the private type of P9 step 1 is present on the drag pasteboard) is inserted in internal mode (P15.3), with no pre-pass (R877).
+- **Drags from a field.** Decided 2026-11-10. When a drag starts from a selection in a rich field, the page sends `fieldDrag` (P25) with the selection's HTML in storage form, as P9 step 1's copy writes it, and the app keeps it as the current field drag until that drag session ends. The private type of P9 step 1 is not written to the drag pasteboard, which the web view builds. A drop that belongs to the current field drag's session (macOS: the drag's source is a Meguri editor web view; iPhone and iPad: the drop session has a local drag session) inserts the kept HTML in internal mode (P15.3), with no pre-pass (R877), into a field of this editor or of another one, and ignores the drag pasteboard.
+- **Copy, not move.** Decided 2026-11-10. A drag from a field copies, as in Anki's default editor, whose host takes every drop from its web view: the source field keeps its content. The page cancels the web view's own drop handling, so WebKit never moves the selection. A drop into the same field also copies, at the end of the field. The insertion is one field-history entry of the target field and an input of it; the source field is not changed and gets no entry.
 - Anything else goes through P9 from step 2 with the mode of P8 (Shift held at drop inverts it), then P14 to P16. On macOS this covers Finder files, browser images, text and links; on iPhone and iPad, drags from other apps.
 
 ## P18. Images in the editor (R878, R879, R880)
@@ -329,7 +366,9 @@ Meguri's own wording, for the String Catalog. Anki's English is given where an i
 | Image controls | Float Left · No Float · Float Right · Actual Size · Restore Original Size | Float left · No float · Float right · Toggle actual size · Restore original size |
 | Image label | `(double-click to expand)` · `(double-tap to expand)` · `W×H` · ` (Original: w×h)` | `(double-click to expand)` · `W×H` · ` (Original: w×h)` |
 | Size warning (P4) | title "This File Won't Sync"; message "“NAME” is SIZE. Files this size don't sync to your other devices."; buttons "Add Anyway" and "Cancel" | none |
-| Fetch failure (P10.2) | title "Couldn't Get Media"; message "URL" then on its own line the cause: "The server answered with status N." or the system's error description | "An error occurred while opening" followed by the cause; "Unexpected response code:" followed by the status |
+| Edit menu (P8) | "Paste" · "Paste and Match Style" (setting `false`) · "Paste With Formatting" (setting `true`) | none |
+| Fetch progress (P10.2) | "Getting Media…"; button "Cancel"; accessibility label of the indicator "Getting Media" | none |
+| Fetch failure (P10.2) | title "Couldn't Get Media"; message "URL" then on its own line the cause: "The server answered with status N." or the system's error description | an alert naming the error, or giving the status code |
 | Add failure (P4) | title "Couldn't Add “NAME”"; message the cause | none |
 | Attach (P5) | toolbar control "Attach"; Format menu item "Attach…"; sources "Choose File…" · "Photo Library" · "Take Photo" | "Attach pictures/audio/video" |
 | Record (P20) | toolbar control and Format menu item "Record Audio…"; panel title "Record Audio"; timer `m:ss` or `h:mm:ss`; buttons "Save" and "Cancel"; stopped message "Recording stopped."; denied: title "Microphone Access Is Off", message "To record audio, allow Meguri to use the microphone in Settings.", buttons "Open Settings" and "Cancel"; failure alert title "Couldn't Record Audio", message the cause; microphone usage description (`NSMicrophoneUsageDescription`) "Meguri records audio for your notes when you choose Record Audio." | "Record audio" |
@@ -338,7 +377,7 @@ SIZE is the system byte-count format (decimal units). The screen contract (`docs
 
 ## P22. Decisions
 
-Each is stated where it applies; listed here so a reviewer finds them. Decided 2026-10-27: P1 (oracle), P4 (empty files warn; Cancel skips one file), P5 (one file), P6 (photo naming), P9 (private type identifier; RTF as HTML; iOS file items), P20 (recorder states), P25 (target rule), P10.1 (non-media file URLs as links), P10.2 (User-Agent), P14.2 (unsupported data images left in place), P15.2 (`javascript:` links; no `font` color in dark appearance), P17 (target first, end of field), P18 (small images resize with shrink on), P19 (second paste item's label; image items on every image). The order of concerns: data safety, then the plan's requirements, then Anki compatibility, then simplicity.
+Each is stated where it applies; listed here so a reviewer finds them. Decided 2026-10-27: P1 (oracle), P4 (empty files warn; Cancel skips one file), P5 (one file), P6 (photo naming), P9 (private type identifier; RTF as HTML; iOS file items), P20 (recorder states), P25 (target rule), P10.1 (non-media file URLs as links), P10.2 (User-Agent), P14.2 (unsupported data images left in place), P15.2 (`javascript:` links; no `font` color in dark appearance), P17 (target first, end of field), P18 (small images resize with shrink on), P19 (second paste item's label; image items on every image). Decided 2026-11-10: P2 (percent-decoding), P8 (menu commands and labels; Shift at a drop on iPhone and iPad), P9 (item selection; the text decoding of HTML sources), P9.1 (RTF converter), P10.2 (one core fetch service; redirects, schemes, parsing and compression; `file://` decoding; busy state and Cancel), P10.3 (name from the URL as written), P11 (undecodable image data yields nothing), P14 and P25 (the host and page split), P14.2 (both modes), P16 (encoding before the filter), P17 (drags from a field: kept HTML, copy, not move). The order of concerns: data safety, then the plan's requirements, then Anki compatibility, then simplicity.
 
 ## P23. Differences from Anki
 
@@ -347,6 +386,7 @@ Proposed `conformance/deviations.yaml` ids, to be entered with the goldens that 
 | Situation | Anki 26.09.3 (default editor) | Meguri | Deviation |
 |---|---|---|---|
 | Bitmap re-encoding | Qt's encoder; JPEG drops alpha (transparent pixels usually turn black) | Apple's encoder; alpha drawn over white; other bytes, so another `paste-<hash>` name | `editor-paste-image-bytes` |
+| Image data the system cannot decode | an empty `paste-<hash of no bytes>.jpg` is added and inserted | the image step yields nothing and P9 tries the next step (P11) | `editor-paste-undecodable-image` |
 | URL with a fragment | the fragment stays in the fetched file's name | removed | `editor-paste-url-fragment` |
 | `Content-Type` with parameters | no extension appended | the media type before `;` decides | `editor-paste-mime-params` |
 | `data:image/webp;base64,…` or other types; base64 with inner whitespace or bad data | `src` emptied; a text token dropped; bad data fails the paste with an error | left unchanged; whitespace ignored | `editor-paste-data-url-kept` |
@@ -383,7 +423,7 @@ Requested from the oracle maintainer, in `conformance/scenarios/editor/paste/`, 
 | `fetch-names` | P10.3: the examples, including `Content-Type` with parameters, a URL with a fragment and `https://ex.com/dir/a%2Fb.png` |
 | `media-naming` | P4: file URLs `Photo.JPG` against a present `photo.jpg` with the same and with other bytes; `Diagram.PNG`; names with `&`, spaces and non-ASCII characters |
 | `snippets` | P3, P10.3: through the editor's media insert for `.jpg`, `.mp3` and `.webm` names; a media URL `…/play?f=a.mp3` answered with `audio/webm` and with `application/octet-stream` (`editor-paste-bare-name`) |
-| `drop` | P17: a file onto the second field (content at its end), onto a collapsed field, Shift-drop of rich HTML, HTML dragged from another field |
+| `drop` | P17: a file onto the second field (content at its end), onto a collapsed field, Shift-drop of rich HTML, HTML dragged from another field, a selection dragged within one field (Anki's default editor copies it) |
 | `image-resize` | P18: drag to below 5 px for a wide image with r = 2.5 and a tall image, a drag on the width and on the height, restore, an image with a `height` attribute and one with only a `width` attribute (the label), an image with inline `style` width and height, a drag while shrunk, a drag on an image of at most 250 × 125 with shrink on |
 | `image-float-shrink` | P18: each float, No Float with other styles present; double-click toggling with shrink on and off, including a double-click on a 1000×800 image with shrink off and turning the option off after toggling an image to shrunk (the label); the stored HTML after each |
 | `corpus` | P9 to P16: each payload under `conformance/corpora/paste/` (Word, Google Docs, Safari, Chrome, Yomitan, plain text: U197's corpus) replayed in strip and keep mode, in light and dark appearance; observed: the stored HTML and the media folder. The payloads are captured once as an M2 user step (the plan's U197 execution note); until then this scenario has no input |
@@ -392,11 +432,16 @@ Meguri-only behavior (P4's size warning, its Cancel and Add Anyway, P6, P9's RTF
 
 ## P25. Bridge messages and the target field
 
-Additions to `editor/field-html` B2 and B3 (U194's insertion and image messages), same rules (B1); `editor/formatting` F13 points here.
+Additions to `editor/field-html` B2 and B3 (U194's insertion and image messages; U197's `pasteScan`, `pasteFilter`, `fieldAt`, `setBusy` and `fieldDrag`), same rules (B1); `editor/formatting` F13 points here.
 
 | Direction | Type | Members | Reply or when |
 |---|---|---|---|
-| host to page | `insert` | `loadId`, `ord`, `html`, `at` (`selection` or `end`) | `changed` (boolean). `html` is final: P3 snippets, or P16's filtered result, with P3's and P16's src encoding already applied by the host; the page inserts it as `editor/formatting` F10 says and adds nothing. `selection` replaces the field's selection; `end` puts the nodes at the end of the field (P17) |
+| host to page | `insert` | `loadId`, `ord`, `html`, `at` (`selection` or `end`) | `changed` (boolean). `html` is final: P3 snippets (attach, photos, recordings), or `pasteFilter`'s result, with P16's src encoding already applied by the host; the page inserts it as `editor/formatting` F10 says and adds nothing. `selection` replaces the field's selection; `end` puts the nodes at the end of the field (P17) |
+| host to page | `pasteScan` | `loadId`, `html`, `mode` (`strip`, `keep` or `internal`) | `sources`: one entry per `img` element of the parsed tree, in document order, after P14.1's removals unless `mode` is `internal`: its `src` attribute's value, or null when it has none. The page parses `html` as P14 says and changes nothing |
+| host to page | `pasteFilter` | `loadId`, `html` (the text `pasteScan` got), `mode`, `dark` (boolean: the effective appearance, P15.2), `rewrites` (a list of `{index, src}`, `index` into `pasteScan`'s list, `src` already encoded) | `html`: the page parses `html` again, applies P14.1 unless `mode` is `internal`, sets the `src` attribute of each rewritten `img` to its `src` exactly, runs P15 in `mode` (its whitespace and trim steps included) and returns the serialized result, which the host sends in `insert` unchanged. The content of steps 3 and 4 of P9 comes here too, as `internal` with no rewrites. An `index` out of range is refused as B1 says |
+| host to page | `fieldAt` | `loadId`, `x`, `y` (CSS pixels in the page's viewport) | `field`: null when no shown field is at that point, else `{ord, collapsed, mode}` (P17) |
+| host to page | `setBusy` | `loadId`, `ord`, `busy` (boolean) | done. While `busy` the field takes no input (keys, paste, drop, commands) and carries `aria-busy="true"`; the host shows P10.2's indicator |
+| page to host | `fieldDrag` | `loadId`, `ord`, `html` (storage form, as P9 step 1) | when a drag starts from a selection in a rich field (P17) |
 | page to host | `contextTarget` | `loadId`, `ord`, `kind` (`text`, `selection` or `image`); for `image` also `src` (the attribute's value as the page holds it, display-encoded), `loaded` (boolean: the image has loaded and decoded), `naturalWidth` and `naturalHeight` (CSS pixels, 0 when not loaded) | on a context-menu press in a rich field (secondary click, long press), before the host shows P19's menu |
 
 The host decodes `contextTarget`'s `src` by `text/media-references` M7 before it tells remote from local (M5) and resolves the file. The page refuses `insert` for an `ord` that is not the focused rich field and replies `changed: false`, like `format` (`editor/formatting` F13).

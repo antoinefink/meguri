@@ -21,3 +21,11 @@ characters; the kept ones are under `conformance/scenarios/search/{text,fields,f
 | text-matching T12 | `rslib/src/storage/sqlite.rs`, `rslib/src/error/db.rs`, `rslib/src/error/mod.rs`, `Cargo.lock` (`regex` 1.11.2) | lazy compilation in the SQL functions, parse errors versus other compile errors, default builder limits |
 | fields F1–F7 | `rslib/src/search/parser.rs`, `rslib/src/search/sqlwriter.rs`, `rslib/src/text.rs` | mode prefixes, all-fields names, name resolution (unicase equality or case-insensitive pattern), runs of matching positions and their patterns, nc and regex modes |
 | case-folding C2–C6 | `rslib/src/search/sqlwriter.rs`, `rslib/src/text.rs`, `regex-syntax` 0.8.6 tables | which comparisons use `LIKE` (ASCII) and which a case-insensitive regular expression; the simple folding table version |
+
+Added 2026-11-10, read at the same tag; the scenarios named here have no golden yet:
+
+| Spec section | Anki file | Read for |
+|---|---|---|
+| text-matching T8.3 (escape characters made by the transform; `search/text/nc-escapes`) | `rslib/src/search/sqlwriter.rs` | the transform applied after the wildcard conversion in unqualified and field `nc:` patterns, and to the whole `w:` expression under ignore accents |
+| text-matching T12.1 (glob expressions over the size limit; `search/regex/glob-size`), fields F2 | `rslib/src/search/sqlwriter.rs`, `rslib/src/storage/sqlite.rs`, `rslib/src/error/db.rs`, `rslib/src/text.rs` | deck, note type, template and tag expressions tested in SQL (a compile failure there is a database error, not a parse error); the field-name pattern compiled in Rust with an unwrap (a panic, so no scenario) |
+| text-matching T12.3 (`search/text/pattern-limit-unreached`) | `rslib/src/search/sqlwriter.rs` | the per-note-type clauses that SQLite evaluates only for rows of that note type |

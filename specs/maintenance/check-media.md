@@ -313,7 +313,7 @@ The ops `check_media`, `delete_unused_media` and `tag_missing_media`, their outp
 
 ## C22. Scenarios (for the oracle maintainer)
 
-Under `conformance/scenarios/maintenance/check-media/`, each with its own note type, with C21's rules (a `reopen` after a `db_exec` on note type rows). "Seed" means `media_files`, then `media_pending` (so Anki has registered the files, `conformance/media-ops#F6`), then the step.
+Under `conformance/scenarios/maintenance/check-media/`, each with its own note type, with C21's rules (a `reopen` after a `db_exec` on note type rows). Every scenario below has its golden, recorded on the Linux oracle (`conformance/goldens/maintenance/check-media/`), and the C20 entries those goldens need are in `conformance/deviations.yaml` (`check-media-pending-not-missing`, `check-media-ignored-names` and `check-media-no-change-no-mod` are shown by no golden, so they have none); they stay inactive until U130's adapter runs the Check Media ops (`conformance/media-ops#F14`, still draft in `dsl.md` D7.2). "Seed" means `media_files`, then `media_pending` (so Anki has registered the files, `conformance/media-ops#F6`), then the step.
 
 | Scenario | Setup and steps | Pins |
 |---|---|---|

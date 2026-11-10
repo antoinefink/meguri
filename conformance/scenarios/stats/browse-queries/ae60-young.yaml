@@ -1,0 +1,34 @@
+# stats/browse-queries Q8, AE60 (Q3, Q4.1): Deck Japanese, separating on.
+# Japanese holds four young review cards (ivl 3, 7, 12 and 20), the one with
+# ivl 7 suspended, plus a mature card (ivl 21) and a relearning card (ivl 5);
+# deck Other holds a young card (ivl 4). The AE60 text finds the three young
+# cards that are not suspended, and Deck Japanese's excluding_inactive young
+# count is 3.
+id: stats/browse-queries/ae60-young
+tags: ["needs-deck", "needs-state", "needs-prop"]
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["Japanese", "Other"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}], "css": ".card { margin: 0; }"}
+  notes:
+    - {"notetype": "Pair", "deck": "Japanese", "fields": ["j1", "x"]}
+    - {"notetype": "Pair", "deck": "Japanese", "fields": ["j2", "x"]}
+    - {"notetype": "Pair", "deck": "Japanese", "fields": ["j3", "x"]}
+    - {"notetype": "Pair", "deck": "Japanese", "fields": ["j4", "x"]}
+    - {"notetype": "Pair", "deck": "Japanese", "fields": ["j5", "x"]}
+    - {"notetype": "Pair", "deck": "Japanese", "fields": ["j6", "x"]}
+    - {"notetype": "Pair", "deck": "Other", "fields": ["o1", "x"]}
+steps:
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 3, due = 3 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = -1, ivl = 7, due = 7 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 12, due = 12 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 20, due = 20 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 21, due = 21 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 3, queue = 1, ivl = 5, due = 1791800000, left = 1, lapses = 1 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 4, due = 4 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 6)"}}
+  - {"observe": [{"stats": [{"scope": {"deck": "Japanese"}, "history": "year", "parts": ["card_counts"]}]}]}
+  - observe:
+      - search:
+          - {query: '(deck:"Japanese") AND ("is:review" AND -"is:learn") AND "prop:ivl<21" AND -("is:buried" OR "is:suspended")'}

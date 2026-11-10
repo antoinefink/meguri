@@ -3,7 +3,7 @@
 Spec: search/editing-services
 Requirements: R1086, R1087, R1088, R1089, R1094, R1095, R1096, R1097, R1098, R1099, R1100, R1101, R1102, R1103, R1104, R1107, R1108, R1109; AE42 (core part)
 Anki: none (Meguri design; it reads text by the 26.09.3 grammar)
-Scenarios: none; tests in `core/crates/meguri-search/tests/edit_services.rs`
+Scenarios: conformance/scenarios/search/errors/ae42.yaml (the commit error kind only); tests in `core/crates/meguri-search/tests/edit_services.rs`
 
 The core services behind Browse's search field (U88): canonical text for a commit, token spans for chips, edits of one token, classification of the text at the cursor while the user types, and suggestions. Anki's search field has none of these; the grammar they read is `grammar.md`, the errors `errors.md`, the text they write `canonical-form.md` and `join-and-replace.md` J3–J5. The field itself is U214, the suggestion list U215, the query pipeline U210. Swift never reads search text by its own rules: every token, tail and suggestion comes from here.
 
@@ -313,10 +313,10 @@ Examples:
 
 ## D7. Tests
 
-No oracle scenario applies: Anki has none of these services. `core/crates/meguri-search/tests/edit_services.rs` covers every example table of D3–D6 and these cases:
+No oracle scenario applies to the services themselves: Anki has none of them. `core/crates/meguri-search/tests/edit_services.rs` covers every example table of D3–D6 and these cases:
 
 - `spans` over every kind of D3.1, negated and grouped, with error texts of D3.3; FFI offsets in UTF-16 for text holding characters above U+FFFF; `invalid_offset` for a cursor inside a surrogate pair.
 - `edit`: each action and each removal rule of D4.3, on terms, groups, runs and negated operator words; `replace_with` of a negation item (any flag, untagged, a negated item) on a negated and on a plain target; every result parses, reads back (`grammar.md`) to the query it was written from, and equals its own canonical text, except the empty text. Like `join-and-replace.md` J8, these checks exclude inputs holding one of `canonical-form.md` F7's first three shapes, and for its fourth shape check the meaning only.
-- `classify_tail`: each form of D5.1 at, before and after the cursor; AE42 (core part): the D5.2 row, then `canonicalize` of the same text gives `unclosed_quote` with the range from the `"`.
+- `classify_tail`: each form of D5.1 at, before and after the cursor; AE42 (core part): the D5.2 row, then `canonicalize` of the same text gives `unclosed_quote` with the range from the `"`. The error kind itself (not its range) is Anki's too, pinned by `conformance/scenarios/search/errors/ae42.yaml` (`canonical_search` and `search`).
 - `suggest`: each context of D6.3, the scope of D6.4 (an AND-run, an OR between runs, an enclosing group, a negated `note:`, and `note:Kaishx card:` with no note type `Kaishx`, which gives only `as_typed`), the order of D6.5 with and without `recent` (decks `a::b`, `a b` and `a-b` for `deck:a`), the cut at `limit`, the insertions of D6.6, an escaped field key (`my\:field:` gives the forms of field `my:field`), and `deck:Cur` offering `current`. For each deck and note type candidate, and each tag candidate whose name J3 writes exactly (in NFC), the field text after acceptance, run on the fixture collection, finds that object and none of its look-alikes (`a_b*` next to `axb`; `a` U+00A0 `b` next to `axb`, inserted as `did:`; R1103). For the other tag names (`join-and-replace.md` J10), the expected rows are those `names-and-ids.md` N2 gives for the inserted text; the fixture holds at least one such name.
 - The micro-benchmark of D6.7.

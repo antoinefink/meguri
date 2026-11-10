@@ -1,0 +1,69 @@
+# Previews of unsaved note type and note drafts (specs/render/preview.md V3-V5,
+# R938) through the template observation (render-ops.md Q1): a stored card
+# rendered with draft templates keeps its own special values; a new note's
+# unsaved values are used as given, without save normalization; a note type
+# with no notes previews an empty note; drafts that a save would refuse render
+# as template errors. Card cases need template.card (Q1.3).
+id: render/preview/drafts
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["Langues::Vocab"]
+  notetypes:
+    - name: Lexeme
+      fields: [Word, Gloss, Extra]
+      templates:
+        - {name: Forward, front: "{{Word}}", back: "{{FrontSide}}<hr id=answer>{{Gloss}}"}
+        - {name: Backward, front: "{{Gloss}}", back: "{{FrontSide}}<hr id=answer>{{Word}}"}
+      css: ".card { color: teal; }"
+  notes:
+    - {notetype: Lexeme, deck: "Langues::Vocab", fields: [chat, cat, ""], tags: [animals]}
+steps:
+  - observe: [ids]
+  - db_exec:
+      sql: "UPDATE cards SET flags = 2 WHERE ord = 1"
+  - observe:
+      - template:
+          cases:
+            # A draft back template, not saved, for the opened note's cards
+            - {card: "#c1", front: "{{Word}}", back: "{{FrontSide}}<hr id=answer><i>{{Gloss}}</i>{{#Extra}}<br>{{Extra}}{{/Extra}}"}
+            - {card: "#c2", front: "{{Gloss}}|{{Card}}|{{Deck}}|{{Subdeck}}|{{CardFlag}}|{{Tags}}", back: "{{FrontSide}}|{{Word}}"}
+            # A draft question that references a field the stored one does not
+            - {card: "#c1", front: "{{Word}} ({{Extra}})", back: "{{FrontSide}}"}
+            # Draft errors a save would refuse
+            - {card: "#c1", front: "{{Word}}", back: "{{Nope}}"}
+            - {card: "#c1", front: "{{#Word}}{{Word}}", back: "{{Gloss}}"}
+  - observe:
+      - template:
+          notetype: {name: Lexeme Draft, fields: [Word, Gloss, Extra]}
+          cases:
+            # Unsaved editor values (an Add draft), used exactly as given
+            - front: "{{Word}}|{{#Extra}}E{{/Extra}}{{^Extra}}-{{/Extra}}"
+              back: "{{FrontSide}}<hr id=answer>{{Gloss}}"
+              name: Forward
+              fields: [hola, hello, "\u0001"]
+            - front: "{{Word}}|{{#Extra}}E{{/Extra}}{{^Extra}}-{{/Extra}}"
+              name: Forward
+              fields: [hola, hello, "<b\rr>"]
+            - front: "{{Word}}|{{#Extra}}E{{/Extra}}{{^Extra}}-{{/Extra}}"
+              name: Forward
+              fields: [hola, hello, "<br>\n"]
+            - front: "{{Word}}|{{Tags}}|{{Deck}}|{{CardFlag}}|{{CardID}}|{{Type}}|{{Card}}"
+              name: Forward
+              fields: [hola]
+              tags: [draft, "es::a1"]
+            # The second template of a draft, previewed for a new note
+            - {front: "{{Gloss}}|{{Card}}|{{c2}}", back: "{{FrontSide}}|{{Word}}", ord: 1, name: Backward, fields: [hola, hello]}
+            # No notes of the type: every value empty, no tags
+            - {front: "{{Word}}", back: "{{FrontSide}}<hr id=answer>{{Gloss}}", name: Forward}
+            - {front: "{{Word}}", back: "{{Nope}}", name: Forward}
+            - {front: "Static {{#Word}}{{Word}}{{/Word}}", back: "{{Gloss}}", name: Forward}
+            - {front: "{{Word}}{{/Gloss}}", back: "{{Gloss}}", name: Forward}
+  - observe:
+      - template:
+          notetype: {name: Gap Draft, kind: cloze, fields: [Text, Extra]}
+          cases:
+            # A cloze draft with no notes, and with unsaved text
+            - {front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Extra}}", name: Gap}
+            - {front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Extra}}", name: Gap, fields: ["{{c1::Lyon}} et {{c2::Paris}}"]}
+            - {front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Extra}}", name: Gap, ord: 1, fields: ["{{c1::Lyon}} et {{c2::Paris}}"]}
+            - {front: "{{cloze:Text}}", back: "{{cloze:Text}}", name: Gap, ord: 2, fields: ["{{c1::Lyon}} et {{c2::Paris}}"]}

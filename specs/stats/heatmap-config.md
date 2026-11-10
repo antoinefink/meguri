@@ -43,7 +43,7 @@ The settings a user who never changed them has: `{"colors":"lime","limcdel":fals
    - `mode` other than `"year"` or `"months"` reads as `"year"`;
    - for `limdecks`, a value that is not an array reads as `[]`, and array entries that are not integers are skipped. Duplicate ids are allowed.
 
-   The add-on writes only the types in K2, so no oracle scenario covers rule 3. It is Meguri's rule for values other writers may leave.
+   The add-on writes only the types in K2, so no oracle scenario covers rule 3's type rules. They are Meguri's rule for values other writers may leave. Duplicate ids are a value the add-on reads too: `stats/heatmap-totals/deck-names` lists one id twice in `limdecks` (`stats/counting-rules` N9).
 4. Range rules for `limhist`, `limfcst` and `limdate` (negative values, a date in the future) are U96's (`stats/heatmap-addon`).
 5. Reading never writes. Opening a collection, building the aggregates and querying them leave an absent key absent and a present key byte for byte as it was (R1337, R1295). The add-on does write on its first read (K5).
 6. Readers take the key's value as it is now: after any change to it (a local write, an incoming CloudKit change, a manual Anki transfer or package import that replaces the collection, a raw write, another process), the next query uses the new values (`stats/counting-rules` N7).

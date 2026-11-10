@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Card Info and Stats-screen graph data (specs/conformance/stats-ops.md H9,
-H10; stats/card-info C3, C6.1, C13; stats/graphs-common G14, graphs-revlog V8,
-graphs-cards C12). Observations only; no op.
+"""Card Info, Stats-screen graph data and graph preferences
+(specs/conformance/stats-ops.md H9, H10, H13; stats/card-info C3, C6.1, C13;
+stats/graphs-common G7, G14, graphs-revlog V8, graphs-cards C12).
+Observations only; no op.
 
 {card_stats: [#cN, ...]} -> {"#cN": <stats>}: the backend's card-stats
   response for each card, every member written (null for an unset optional),
@@ -24,6 +25,11 @@ graphs-cards C12). Observations only; no op.
   and list written, empty or not) gives the same text, since Anki sets every
   message and its lists always hold 24 or 4 items. With history year the
   all_time members of true_retention, hours and buttons are dropped (V8).
+
+graph_preferences -> {calendar_first_day_of_week, card_counts_separate_inactive,
+  future_due_show_backlog}: the backend's graph-preferences read (H13), the
+  weekday as its number; browser_links_supported, which Anki always sets, is
+  left out.
 
 Neither reads nor writes display text (R1887): the Python-side stats backend
 returns numbers and names only.
@@ -185,6 +191,21 @@ def stats(session, args):
             continue
         out.append({part: _part(resp, part, history) for part in parts})
     return out
+
+
+# --- graph preferences -----------------------------------------------------------
+
+
+@observation("graph_preferences")
+def graph_preferences(session, args):
+    if args is not None:
+        raise invalid("graph_preferences takes no arguments")
+    prefs = session.col._backend.get_graph_preferences()
+    return {
+        "calendar_first_day_of_week": int(prefs.calendar_first_day_of_week),
+        "card_counts_separate_inactive": bool(prefs.card_counts_separate_inactive),
+        "future_due_show_backlog": bool(prefs.future_due_show_backlog),
+    }
 
 
 # --- card stats ----------------------------------------------------------------

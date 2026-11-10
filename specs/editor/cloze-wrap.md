@@ -102,7 +102,7 @@ The NBSP change keeps text the user did not ask to change (data safety first).
 
 ## W9. Scenarios for the oracle maintainer
 
-Requested in `conformance/scenarios/editor/cloze/`, with goldens in `conformance/goldens/editor/cloze/` marked `source: observed`, recorded as `editor/field-html` E2 and T1 say. None is written or recorded: no runner step and no oracle driver op drives an editor page today.
+Requested in `conformance/scenarios/editor/cloze/`, with goldens in `conformance/goldens/editor/cloze/` marked `source: observed`, recorded as `editor/field-html` E2 and T1 say. None of the rows below is written or recorded: no runner step and no oracle driver op drives an editor page today. The scenarios that observe how Anki reads and saves the commands' results with existing ops are listed in W10.
 
 **Setup.** One cloze note type `Gap` defined by the scenario (R1959): fields `Text`, `Extra` and `Note`; front template `{{cloze:Text}}`, back template `{{cloze:Text}}<br>{{Extra}}`, empty CSS. One note with the stored fields given (others empty). The maintainer opens Edit Current, focuses the field named, sets the selection in `editor/formatting` F1's notation and presses Anki's key (Ctrl+Shift+C, Ctrl+Alt+Shift+C). Each scenario ends with blur and probe: every field's stored HTML, and the caret's place for the collapsed cases (a `type "z"` before blur shows it).
 
@@ -132,3 +132,13 @@ Requested in `conformance/scenarios/editor/cloze/`, with goldens in `conformance
 | `two-in-a-row` | Text `[a] b` | Cloze Deletion, then select `b`, Cloze Deletion |
 
 Meguri tests without goldens (plan U192): W2's shown, hidden and disabled states for a standard note type, a cloze note type, a cloze note type whose front is `{{Text}}`, an image occlusion note type and a note type change in the Add screen; W6 with a template that makes Header a cloze field; W3's saturation; and the keys in the registry test (`editor/formatting` F14).
+
+## W10. Core scenarios
+
+Written in `conformance/scenarios/editor/cloze/`, on W9's note type `Gap`, inactive until Meguri's adapters pass them. They use only existing ops (`edit_note`, `db_exec`, the `fields_check` and `cloze` observations) and observe what the Python-library oracle can: how the text the commands write is saved and read. The number itself (W3), W4's split and caret, W6 and W8 are computed in the editor page, so W9's goldens and Meguri's tests cover them. Each `edit_note` stands for the field's save after a command, with the text W3 to W5 give.
+
+| Scenario | Covers |
+|---|---|
+| `save/new-and-same-number` | W3, W4 and W7: with `{{c2::x}}` in Extra, Cloze Deletion on `word ` writes `{{c3::word}}` with the space outside, and Same Number on `b` reuses 3. Extra's number already gives a card at setup, since a cloze note's numbers come from every field (`notes/card-generation` G4); the first save adds only the card of ordinal 2 and the second none (G7). The field check reports Extra's cloze (`notes/field-check` K3); the saved text's numbers and its card 3 front and back |
+| `save/empty-note` | W3 and W4 with a collapsed caret on an empty note: `{{c1::}}` saved and read for card generation and the field check, then `{{c1::z}}` (the caret's place, W9's `new-empty-note`) |
+| `output/read-back` | how `render/cloze` reads W3's table of session values, the results of W9's `number-zero`, `number-nested`, `two-in-a-row` and `cut-marker` rows, and W4's and W5's After column, front and back for each card. Where the numbers it reads differ from W3's H (a marker with several numbers, a capital `C`, an unclosed or attribute marker, 0, a number above 65535), the commands still use W3's rule |

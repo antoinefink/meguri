@@ -1,0 +1,47 @@
+# The names fetched files are added under (specs/editor/paste-sources.md S6,
+# S6.1; specs/editor/paste.md P10.3), as the media store keeps them: each
+# desired name is one that the host editor, the page editor or Meguri
+# derives from a URL in S6's table. Pic.PNG is stored lower-cased; pic.png
+# then holding other bytes gets the hash suffix; the page editor's a/b.png and
+# a?b.png (from an encoded slash or question mark) lose the character, the
+# second meeting ab.png with other bytes; a. gets the trailing underscore.
+# The text request shows the transform alone on the lowercase-invariant names.
+id: editor/paste/store/fetched-names
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - add_media: {name: Pic.PNG, text: "remote image bytes"}
+  - add_media: {name: pic.png, text: "other remote bytes"}
+  - add_media: {name: img.png, text: "img query bytes"}
+  - add_media: {name: paste, text: "root jpeg bytes"}
+  - add_media: {name: paste.jpg, text: "root jpeg bytes"}
+  - add_media: {name: x.png, text: "typed bytes"}
+  - add_media: {name: paste.png, text: "dir png bytes"}
+  - add_media: {name: "a.png#top", text: "fragment bytes"}
+  - add_media: {name: b.png, text: "slash host bytes"}
+  - add_media: {name: a/b.png, text: "slash page bytes"}
+  - add_media: {name: "a?b.png", text: "query mark bytes"}
+  - add_media: {name: "a b.png", text: "space bytes"}
+  - add_media: {name: 日.png, text: "kanji bytes"}
+  - add_media: {name: "\uFFFD.png", text: "replacement bytes"}
+  - add_media: {name: y.png, text: "dotdot bytes"}
+  - add_media: {name: .hidden.png, text: "hidden bytes"}
+  - add_media: {name: "a.", text: "trailing dot bytes"}
+  - add_media: {name: play.weba, text: "weba bytes"}
+  - add_media: {name: play, text: "octet bytes"}
+  - add_media: {name: "b c.JPG", text: "file url bytes"}
+  - observe:
+      - media_dir
+      - text:
+          fns: [media_filename]
+          inputs:
+            - "a/b.png"
+            - "a?b.png"
+            - "a.png#top"
+            - "a."
+            - ".hidden.png"
+            - "paste"
+            - "play.weba"
+            - "\uFFFD.png"
+            - "日.png"
+            - "a b.png"
+            - "a%41.png"

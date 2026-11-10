@@ -1,0 +1,14 @@
+# stats/widget-snapshot W4 (no offset change): Europe/Paris, rollover 4,
+# built 2026-10-12 12:00 +02:00 with two answers that day. at(2026-10-13) =
+# e(D) = 04:00 +02:00 = 02:00Z, Anki's own next_day_at. Observed one second
+# before and at it.
+id: stats/widget/day-start-summer
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+steps:
+  - {"set_config": {"key": "rollover", "value": 4}}
+  - {"db_exec": {"sql": "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1791795600000, 1000, -1, 3, 10, 5, 2500, 3000, 1), (1791799200000, 1000, -1, 3, 10, 5, 2500, 9000, 1)"}}
+  - {"observe": ["timing", "studied_today_raw", "studied_today_text"]}
+  - {"set_clock": "2026-10-13T01:59:59Z"}
+  - {"observe": ["timing", "studied_today_raw", "studied_today_text"]}
+  - {"set_clock": "2026-10-13T02:00:00Z"}
+  - {"observe": ["timing", "studied_today_raw", "studied_today_text"]}

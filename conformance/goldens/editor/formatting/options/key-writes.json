@@ -1,0 +1,138 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["closeHTMLTags", -1, 1894705200, "blob", "false", 1894705200000],
+            ["customColorPickerPalette", -1, 1894705200, "blob", "[\"#0000ff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\"]", 1894705200000],
+            ["shrinkEditorImages", -1, 1894705200, "blob", "false", 1894705200000]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["closeHTMLTags", 5, 1894705200, "blob", "false", 1894705200000],
+            ["customColorPickerPalette", 5, 1894705200, "blob", "[\"#0000ff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\"]", 1894705200000],
+            ["shrinkEditorImages", 5, 1894705200, "blob", "false", 1894705200000]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["closeHTMLTags", -1, 1894712400, "blob", "false", 1894712400000],
+            ["customColorPickerPalette", -1, 1894712400, "blob", "[\"#0000ff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\"]", 1894712400000],
+            ["shrinkEditorImages", -1, 1894712400, "blob", "false", 1894712400000]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["closeHTMLTags", -1, 1894712400, "blob", "false", 1894716000000],
+            ["customColorPickerPalette", -1, 1894716000, "blob", "[\"red\",\"#12345\",\"#aabbcc\",\"#0000ff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\"]", 1894716000000],
+            ["shrinkEditorImages", -1, 1894712400, "blob", "false", 1894716000000]
+          ]
+        }
+      },
+      {},
+      {},
+      {},
+      {
+        "undo_status": {
+          "redo": null,
+          "undo": "update_note"
+        }
+      },
+      {},
+      {
+        "undo_status": {
+          "redo": "update_note",
+          "undo": null
+        }
+      },
+      {},
+      {},
+      {
+        "undo_status": {
+          "redo": null,
+          "undo": null
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["closeHTMLTags", -1, 1894719600, "blob", "true", 1894719660000],
+            ["customColorPickerPalette", -1, 1894716000, "blob", "[\"red\",\"#12345\",\"#aabbcc\",\"#0000ff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\",\"#ffffff\"]", 1894719660000],
+            ["shrinkEditorImages", -1, 1894719660, "blob", "true", 1894719660000]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["a\u001fb"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "63d7ee8c9340e3db90caf514e2a5cf52640d1eb70a16e0a8f09d231f6ffcc50f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "editor/formatting/options/key-writes",
+  "scenario_sha256": "57eb1a98a80dbc2f34f1e8512a427ad795d9bf7aab8bdc58902d4911b51edae5",
+  "tz": "UTC"
+}

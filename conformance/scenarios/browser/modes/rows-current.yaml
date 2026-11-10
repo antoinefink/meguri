@@ -1,0 +1,75 @@
+# specs/browser/result-sets.md H7, H10 (R1155, R1156; AE45's data part): the
+# rows of listed cards and notes show the collection as it is at each observe
+# step, which is what the rows of a held handle must equal (H7). browser_rows
+# takes references, not a search (specs/conformance/browser-ops.md B3), so
+# the handle itself (rows read at the call rather than from its snapshot,
+# pruning, refetch indexes) is Meguri's test (H16). -is:suspended lists #c1,
+# #c2 and #c3; after the suspend op their rows show the suspended tint while a
+# new search no longer matches them (a Meguri handle keeps them until the
+# next search, H10). An edited note shows its new text in a row the search no
+# longer matches; a deleted note's rows are the row error "deleted"
+# (specs/browser/columns.md C3.1). A deck rename and a template rename reach
+# the Deck and Card Type cells of rows whose cards no change set lists, which
+# is why H10 refetches every row for them. The last step reads the same notes
+# in notes mode. browser/modes/rows-excerpts compares these cells with the
+# card excerpts call. Needs the plain-text and state terms (U81, U82).
+id: browser/modes/rows-current
+tags: [needs-text, needs-state]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Lang]
+  notetypes:
+    - name: Solo
+      fields: [Word, Gloss]
+      templates:
+        - {name: Recall, front: "{{Word}}", back: "{{Gloss}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Solo, deck: Lang, fields: [dog, a]}
+    - {notetype: Solo, deck: Lang, fields: [dove, b]}
+    - {notetype: Solo, fields: [doe, c]}
+    - {notetype: Solo, fields: [cat, d]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET queue = -1 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 3)"}
+  - observe:
+      - search:
+          - {query: '-is:suspended'}
+          - {query: 'do*'}
+      - browser_rows:
+          columns: [noteFld, deck, cardDue]
+          rows: ["#c1", "#c2", "#c3"]
+  - suspend: {cards: ["#c1", "#c2", "#c3"]}
+  - observe:
+      - search:
+          - {query: '-is:suspended'}
+          - {query: 'is:suspended'}
+      - browser_rows:
+          columns: [noteFld, deck, cardDue]
+          rows: ["#c1", "#c2", "#c3"]
+  - edit_note: {note: "#n1", fields: [cow]}
+  - observe:
+      - search:
+          - {query: 'do*'}
+      - browser_rows:
+          columns: [noteFld]
+          rows: ["#c1"]
+  - delete_notes: {notes: ["#n2"]}
+  - observe:
+      - browser_rows:
+          columns: [noteFld, deck]
+          rows: ["#c1", "#c2", "#c3"]
+  - rename_deck: {deck: Lang, name: Idiom}
+  - observe:
+      - browser_rows:
+          columns: [deck, template]
+          rows: ["#c1", "#c3"]
+  - update_notetype: {notetype: Solo, edits: [{rename_template: {from: Recall, to: Prompt}}]}
+  - observe:
+      - browser_rows:
+          columns: [deck, template]
+          rows: ["#c1", "#c3"]
+  - set_config: {key: browserTableShowNotesMode, value: true}
+  - observe:
+      - browser_rows:
+          columns: [noteFld, deck, template]
+          rows: ["#n1", "#n2", "#n3"]

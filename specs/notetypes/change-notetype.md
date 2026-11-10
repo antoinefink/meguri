@@ -173,15 +173,16 @@ Anki 26.09.3's backend takes any mapping its screen sends. Given other inputs (n
 
 | Scenario | Covers | Golden |
 |---|---|---|
-| `notetypes/change/default-maps` | M2, M3, M4 refusals, M5, M6 for the default maps, M7 | not yet in `conformance/`: awaits the ops (`change-notetype-ops` H4) |
-| `notetypes/change/info-counts` | M5 field content and card counts (10 notes, 7 with text in Back; `<br>` and a space count) | the same |
-| `notetypes/change/to-reversed` | M9 with default maps, D3 shared deck, P2 shared position, stamps, `col.scm`, result | the same |
-| `notetypes/change/swap-fields` | M9 note rewrite on the same note type, cards untouched | the same |
-| `notetypes/change/cloze` | M9.2, M9.3, cloze generation after the change | the same |
-| `notetypes/change/template-map` | M9.1 renumbering, dropping, regeneration of a dropped template | the same |
-| `notetypes/change/placement` | M9 step 3 placement: the new note type's last deck, G6 after every card was dropped, P2 counter for a reviewed note | the same |
-| `notetypes/change/refusals` | M8 checks 3 and 4: `schema_changed` and `not_found` write nothing; a fresh info query then succeeds | the same |
+| `notetypes/change/default-maps` | M2, M3, M4 refusals, M5, M6 for the default maps, M7 | recorded |
+| `notetypes/change/info-counts` | M5 field content and card counts (10 notes, 7 with text in Back; `<br>` and a space count) | recorded |
+| `notetypes/change/to-reversed` | M9 with default maps, D3 shared deck, P2 shared position, stamps, `col.scm`, result | recorded |
+| `notetypes/change/swap-fields` | M9 note rewrite on the same note type, cards untouched | recorded |
+| `notetypes/change/cloze` | M9.2, M9.3, cloze generation after the change | recorded |
+| `notetypes/change/template-map` | M9.1 renumbering, dropping, regeneration of a dropped template | recorded |
+| `notetypes/change/placement` | M9 step 3 placement: the new note type's last deck, G6 after every card was dropped, P2 counter for a reviewed note | recorded |
+| `notetypes/change/refusals` | M8 checks 3 and 4: `schema_changed` and `not_found` write nothing; a fresh info query then succeeds | recorded |
+| `notetypes/change/undo` | M9's undo step: undo of a change that created a card (deleted without a grave, notes back with their note type, fields and stamps, `col.scm` back), redo, and undo of a change that dropped a card (the card back with its scheduling, the grave gone) | not yet recorded (added 2026-11-10; it needs `undo`, `redo` and `undo_status` on Meguri) |
 
-Decided 2026-10-27: the scenarios are specified here and in `change-notetype-ops` but are not in `conformance/` until both executors have the two ops; H4 gives the order.
+The scenarios marked recorded and their goldens are in `conformance/` (`change-notetype-ops` H4); `notetypes/change/undo` uses only ops the oracle already has and waits for `tools/mg oracle record`. All stay inactive until U35's adapters pass their required checks.
 
 U35's Rust tests (`core/crates/meguri-engine/tests/change_notetype.rs`) cover, against expectations built from this spec: undo and redo of the change, `col.scm` included; that the change takes no confirmation input and commits at once while `scm <= ls`; the safety backup (taken after the checks and before the write transaction, none for a refused `no_changes` or a stale stamp found by the first run of checks 3 and 4, T6.1's coalescing, `SafetyBackupFailed` writing nothing); the shape check, with an empty list and a missing old or new note type id (also at the info query, M5); a missing listed note other than the first (`multiple_notetypes` at the info query, `not_found` at the change); `multiple_notetypes` at the change; duplicates in the selection; a cloze note type to itself with the identity field map refused with `no_changes` (M7); a card without a template at a renumbering's target deleted with its grave and counted by M6, and one at another ordinal kept (M9.1); a note whose every card is dropped kept, with its G6 card in the new note type's last deck, and `nextPos` in the change set (M9 step 3); every selected note stamped when only the template map changes (M9 step 3); progress; and the structure report (M10; its `op_catalog.rs` test, `engine/change-stream#S2.5`): reason 6 and the `type_changes` entry between two standard note types, from a cloze note type (an empty template map), from a standard note type to a cloze one (the identity list of the old template count), and to the same note type (old id = new id).

@@ -1,0 +1,26 @@
+# Grade Now from Browse (R1199; specs/browser/bulk-actions.md B10;
+# sched/manual-ops M7). Good on the selected #c2 (a review card) and #c1
+# (new), in that order: each is answered with its next state, with a
+# review-log row of time 0, ids now and now + 1 in the selection's order.
+# The unselected #c3 is untouched. One "Grade Now" step. Needs grade_now
+# (specs/conformance/sched-ops.md J8, J10), db_exec and undo_status.
+id: browser/bulk/grade-now
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Home]
+  notes:
+    - {notetype: Single, deck: Home, fields: [a, x]}
+    - {notetype: Single, deck: Home, fields: [b, x]}
+    - {notetype: Single, deck: Home, fields: [c, x]}
+steps:
+  - observe: [timing]
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, ivl = 3, due = 0, factor = 2500, reps = 2 WHERE nid = (SELECT id FROM notes WHERE sfld = 'b')"}
+  - db_exec: {sql: "UPDATE cards SET usn = 0"}
+  - advance: 1m
+  - grade_now: {cards: ["#c2", "#c1"], rating: good}
+  - observe: [card, revlog, undo_status]

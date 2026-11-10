@@ -1,0 +1,52 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "type_answer": {
+          "compare": ["<code id=typeans><span class=typeBad>s</span><span class=typeGood>ample</span><br><span id=typearrow>&darr;</span><br><span class=typeMissed>ex</span><span class=typeGood>ample</span></code>"],
+          "compare_nc": ["<code id=typeans><span class=typeBad>s</span><span class=typeGood>ample</span><br><span id=typearrow>&darr;</span><br><span class=typeMissed>ex</span><span class=typeGood>ample</span></code>"]
+        }
+      },
+      {
+        "template": [
+          {
+            "answer": "ねこ<br>[[type:Romaji]]<hr id=answer>neko",
+            "empty": false,
+            "question": "ねこ<br>[[type:Romaji]]"
+          },
+          {
+            "answer": "[[type:Romaji]]",
+            "empty": false,
+            "question": "[[type:Romaji]][[type:Kana]]"
+          },
+          {
+            "answer": "ねこ[[type:Romaji]]<hr id=answer>[[type:nc:Romaji]]",
+            "empty": false,
+            "question": "ねこ[[type:Romaji]]"
+          }
+        ]
+      },
+      {
+        "template": [
+          {
+            "answer": "<span class=\"cloze\" data-ordinal=\"1\">tora</span> here<hr id=answer>[[type:cloze:Text]]",
+            "empty": false,
+            "question": "<span class=\"cloze\" data-cloze=\"tora\" data-ordinal=\"1\">[...]</span> here[[type:cloze:Text]]"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "f10b3fbfa80664e6e78893185d28ae464f9aee3722a2473391b90ca2c16d7cfa",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/preview/type-in",
+  "scenario_sha256": "8f098f11a47d9457d83dac1277ea41e059aacb1db449dd5f3059bb43e3c39ca2",
+  "tz": "UTC"
+}

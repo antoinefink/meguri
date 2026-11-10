@@ -87,7 +87,7 @@ When the note's `mod` is above `now_s`, it becomes `now_s`. Its `usn` stays. Not
 - The note is written only when that row differs from the stored one in any column (`storage/ids-usn-mtime#S4`). Each column is compared as SQLite would store the new value: `sfld` after the column's INTEGER affinity (`text/checksum-and-sort-field` C3, so the computed text `123` equals a stored integer 123 and `1.5` a stored real 1.5), `csum` and the other integer columns as integers, and the text columns by storage class and bytes (a blob never equals a text). So a note whose sort field reads as a number and that nothing else changed is not written. The write does not stamp: `mod` and `usn` keep their values, whatever changed (scenario `notes/fields/count-repair`).
 - Then the note's cards are generated as for an existing note: `notes/card-generation` G6 and G7 (only additions; a note with no card gets ordinal 0), placed and positioned by `notes/deck-placement-and-position` D3 and P2. New cards are rows of `notes/card-generation#G10`, with local stamps. Not counted. So a template that became non-empty, or a card a raw write deleted, gets its card here (R1644).
 - A note left with no card (a raw delete, or N6.2 and N6.3 removed them all) also takes D3's list, as Anki does: item 1 for a card its template generates (never for G6's card 0, which has no override), no candidate from item 2, then items 3 and 4. Its position is P2 item 2's.
-- When a card generated here finds no usable deck in its list (D3's or the one above) because no deck has id 1 (D1), a normal deck with id 1 is created first: name `Default` with `decks/decks#D2`'s unique-name rule (`Default+` when that name is taken), `decks/decks#D4`'s records, local stamps; it is counted in `decks_missing`, and the card goes there. When deck 1 exists but is filtered, the card is not generated, the op goes on and nothing is counted. Anki stops the whole Check Database with an error in both cases, changing nothing. Decided 2026-10-27, data safety: the check always finishes, a missing Default deck is restored so later adds work again (D1), and a filtered deck 1 is left as it is. Deviation `check-db-default-deck-restored` (N9).
+- When a card generated here finds no usable deck in its list (D3's or the one above) because no deck has id 1 (D1), a normal deck with id 1 is created first: name `Default` with `decks/decks#D2`'s unique-name rule (`Default+` when that name is taken), `decks/decks#D4`'s records, local stamps; it is counted in `decks_missing`, and the card goes there. When deck 1 exists but is filtered, the card is not generated, the op goes on and nothing is counted. Anki stops the whole Check Database with an error in both cases, changing nothing. Decided 2026-10-27, data safety: the check always finishes, a missing Default deck is restored so later adds work again (D1), and a filtered deck 1 is left as it is. Deviations `check-db-default-deck-restored` and, for a filtered deck 1, `check-db-default-deck-filtered` (N9).
 
 ## N7. After the notes
 
@@ -109,7 +109,8 @@ Each is a deviation entry in `conformance/deviations.yaml`, added with the scena
 | `check-db-io-unchanged-skip` | writes every Image Occlusion note type with notes on every run (N5) | writes it only when a field's config changes |
 | `check-db-recover-invalid-utf8` | stops with an error when the first note of a missing note type is not valid UTF-8 (N4) | counts the fields from the bytes and recovers |
 | `check-db-basic-stamped` | adds the fallback Basic note type with `mtime_secs` 0 and `usn` 0 (N7) | local stamps (`usn` -1, `mtime_secs` `now_s`) |
-| `check-db-default-deck-restored` | stops with an error when a card it generates has no usable deck because deck 1 is missing or filtered (N6.6) | creates deck 1 as `Default` and counts it in `decks_missing`; with deck 1 filtered, skips that card |
+| `check-db-default-deck-restored` | stops with an error when a card it generates has no usable deck because deck 1 is missing (N6.6) | creates deck 1 as `Default`, counts it in `decks_missing` and generates the card there |
+| `check-db-default-deck-filtered` | stops with an error when a card it generates has no usable deck because deck 1 is filtered (N6.6; `default-deck-filtered`, N10.4) | skips the card, counts nothing and finishes: every count 0 |
 
 N6.6 matches Anki: Anki writes every note, but a note whose row would not change is the same row either way.
 
@@ -122,7 +123,9 @@ N6.6 matches Anki: Anki writes every note, but a note whose row would not change
 | `notes/fields/count-repair` | N6.4 with `notes/note-records#F1`'s table: `db-check` tag, no stamp |
 | `notetypes/records/stock-handoff`, `notetypes/records/stock-render-handoff`, `storage/new-collection/handoff` | live (T1): Meguri's collections give Anki's Check Database no problem |
 
-### N10.2 To record (oracle maintainer)
+### N10.2 Recorded from these descriptions
+
+Every scenario below has its golden under `conformance/goldens/maintenance/check-db-notes/`, recorded at the current pin; N9's entries are in `conformance/deviations.yaml` (except `check-db-recover-invalid-utf8`, which no golden shows, and `check-db-default-deck-filtered`, N10.4). They stay inactive until U129's adapter runs `check_db` with the notes stage; that change adds `check-db-notes/*` to `conformance/scenarios/maintenance/area.yaml`.
 
 In `conformance/scenarios/maintenance/check-db-notes/`, with existing scenario ops only (`db_exec`, `check_db`, `add_note`, `set_tag_collapsed`, `ensure_io_notetype`, `reopen`, `advance`, setup; `io-field-tags` also `update_notetype`) and the observations `db_exec`, `notetype_structure`, `tag_tree` and `db_dump`. A scenario that recovers a note type (`recover-*`, `all-notes`) or creates a missing parent deck never observes `undo_status` (`maintenance/check-database` C14). Each damages rows by `db_exec`, sets `usn` 5 on them and advances 1 hour so stamps show, observes the rows and `SELECT mod, scm FROM col`, and ends with a second `check_db` that finds nothing.
 
@@ -161,3 +164,15 @@ Decided 2026-10-27: `io-field-tags` changes the Header field's `prevent_deletion
 - N6.1: a note whose `flds` is the blob `x'61'` gives `CheckFailed{notes}` and no change; one whose `sfld` alone is a blob of valid UTF-8 gets the computed `sfld` (bound as text, `text/checksum-and-sort-field` C3), not counted.
 - N6.6 with deck 1 missing: `Default` created with id 1, counted in `decks_missing`; with deck 1 filtered: the card is not generated and the run completes.
 - The structure report of a run that recovers a note type: reason 10 (`engine/change-stream#S2.5`, approved 2026-10-27 with R2066).
+
+### N10.4 Written ahead of their goldens (oracle maintainer)
+
+Inactive and without goldens until `tools/mg oracle record maintenance/check-db-notes` records them; existing ops only, N10.2's conventions.
+
+| Scenario (`maintenance/check-db-notes/`) | Damage and observation |
+|---|---|
+| `template-now-nonempty` | a note type whose second template is `{{#Extra}}{{Extra}}{{/Extra}}`, a note of it with `Extra` filled by `db_exec` (no card generation), a second note left empty, and a cloze note whose text gains `c2` by `db_exec`: N6.6 generates the second template's card and the cloze's ordinal 1 card in their siblings' deck (`notes/deck-placement-and-position` D3 item 2) at the siblings' position (P2 item 1), local stamps; the cloze note's `sfld` and `csum` written again without stamps; nothing counted, `nextPos` and `scm` unchanged (the plan's "newly non-empty template" case, R1644) |
+
+Recorded with the rejection `failed` on Anki's side, with no second `check_db`:
+
+- `default-deck-filtered`: deck 1 made filtered by `db_exec` (the kind of `conformance/deck-ops#K13`) while no card is in it, and a note whose only card was deleted, its note type with no last deck. Anki `failed`; Meguri leaves deck 1, generates no card and counts nothing (every count 0). Deviation `check-db-default-deck-filtered` (N9): pointer `/steps/6/check_db`, replaced by the twelve counts at 0. `conformance/deviations.yaml` gets the entry with the golden.

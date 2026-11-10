@@ -1,0 +1,76 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "add_media": {
+          "name": "paste-732a7d8e88c3e13b9bf99563845fadf9d4b23473.jpg"
+        }
+      },
+      {
+        "add_media": {
+          "name": "paste-732a7d8e88c3e13b9bf99563845fadf9d4b23473.jpg"
+        }
+      },
+      {
+        "add_media": {
+          "name": "paste-732a7d8e88c3e13b9bf99563845fadf9d4b23473.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "paste-bde96ed1fbd958a421a14ce5cedd73191801c63d.gif"
+        }
+      },
+      {
+        "add_media": {
+          "name": "paste-c5b303888699820a794115e329e7eb9e66cf7717-c5b303888699820a794115e329e7eb9e66cf7717.jpg"
+        }
+      },
+      {
+        "add_media": {
+          "name": "paste-da39a3ee5e6b4b0d3255bfef95601890afd80709.jpg"
+        }
+      },
+      {
+        "media_dir": {
+          "paste-732a7d8e88c3e13b9bf99563845fadf9d4b23473.jpg": {
+            "sha1": "732a7d8e88c3e13b9bf99563845fadf9d4b23473",
+            "size": 17
+          },
+          "paste-732a7d8e88c3e13b9bf99563845fadf9d4b23473.png": {
+            "sha1": "732a7d8e88c3e13b9bf99563845fadf9d4b23473",
+            "size": 17
+          },
+          "paste-bde96ed1fbd958a421a14ce5cedd73191801c63d.gif": {
+            "sha1": "bde96ed1fbd958a421a14ce5cedd73191801c63d",
+            "size": 16
+          },
+          "paste-c5b303888699820a794115e329e7eb9e66cf7717-c5b303888699820a794115e329e7eb9e66cf7717.jpg": {
+            "sha1": "c5b303888699820a794115e329e7eb9e66cf7717",
+            "size": 17
+          },
+          "paste-c5b303888699820a794115e329e7eb9e66cf7717.jpg": {
+            "sha1": "637828c03aae38af639cc721200f2584864e8797",
+            "size": 14
+          },
+          "paste-da39a3ee5e6b4b0d3255bfef95601890afd80709.jpg": {
+            "sha1": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+            "size": 0
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "ae5229735e53880825c7395c19f571a9b7b3a2ae926de53994a3c131897605ea",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "editor/paste/store/image-names",
+  "scenario_sha256": "38f9e073eb578fea627c5b184a336e8ce045eb10cecf9f32d755480716a2379c",
+  "tz": "UTC"
+}

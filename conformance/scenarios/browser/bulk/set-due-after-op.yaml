@@ -1,0 +1,36 @@
+# The remembered Set Due Date text inside its step (R1196;
+# specs/browser/bulk-actions.md B10; sched/set-due-date S6). After a
+# "Suspend" step, Set Due Date "5" from Browse writes setDueBrowser in its
+# own "Set Due Date" step, never as a separate write that would drop the
+# history: undo_status names it, its undo removes the key (it was missing)
+# and puts #c2 back, and the "Suspend" step is still undoable below it.
+# Needs suspend, set_due (specs/conformance/sched-ops.md J3, J6), db_exec,
+# undo and undo_status.
+id: browser/bulk/set-due-after-op
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Home]
+  notes:
+    - {notetype: Single, deck: Home, fields: [a, x]}
+    - {notetype: Single, deck: Home, fields: [b, x]}
+steps:
+  - observe: [timing]
+  - db_exec: {sql: "UPDATE cards SET usn = 0"}
+  - advance: 1m
+  - suspend: {cards: ["#c1"]}
+  - advance: 1m
+  - set_due: {cards: ["#c2"], days: "5", context: browser}
+  - observe: [undo_status]
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'setDueBrowser'"}
+  - undo: {}
+  - observe: [undo_status]
+  - db_exec: {sql: "SELECT count(*) FROM config WHERE KEY = 'setDueBrowser'"}
+  - db_exec: {sql: "SELECT type, queue, due, ivl, mod, usn FROM cards ORDER BY id"}
+  - undo: {}
+  - observe: [undo_status]
+  - db_exec: {sql: "SELECT type, queue, due, ivl, mod, usn FROM cards ORDER BY id"}

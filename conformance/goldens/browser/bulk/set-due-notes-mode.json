@@ -1,0 +1,70 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [1, 2, 2, 0, 2500, 1894701660, -1],
+            [1, 2, 2, 5, 2500, 1894701660, -1],
+            [1, 2, 2, 0, 2500, 1894701660, -1],
+            [1, 0, 0, 0, 0, 1894701600, 0]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1, 1, 0, 0, 2500, 0, 4, -1],
+            [1, 1, 0, 5, 2500, 0, 4, -1],
+            [1, 1, 0, 0, 2500, 0, 4, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["\"3-7!\"", -1]
+          ]
+        }
+      },
+      {
+        "undo_status": {
+          "redo": null,
+          "undo": "set_due_date"
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "7f79bcaf52df07a8d17be399cedca996e4913eb30293a31f847df801a0ba4e38",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "browser/bulk/set-due-notes-mode",
+  "scenario_sha256": "dc27875a8c2f6df53673b16e47fd3135a3b294926075cc733344bbb2211b1d30",
+  "tz": "UTC"
+}

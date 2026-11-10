@@ -1,0 +1,32 @@
+# The simulated type-in of a template preview (specs/render/preview.md V9,
+# specs/render/type-answer.md A11.1, R941): the type-in markers a draft's
+# question and answer carry before the simulation, and the comparison of the
+# fixed inputs, expected "example" and typed "sample", in both modes.
+id: render/preview/type-in
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - type_answer:
+          fns: [compare, compare_nc]
+          inputs:
+            - ["example", "sample"]
+  - observe:
+      - template:
+          notetype: {name: Romaji Draft, fields: [Kana, Romaji]}
+          cases:
+            - front: "{{Kana}}<br>{{type:Romaji}}"
+              back: "{{FrontSide}}<hr id=answer>{{Romaji}}"
+              name: Reading
+              fields: ["ねこ", neko]
+            # Two boxes, and an answer without the rule
+            - front: "{{type:Romaji}}{{type:Kana}}"
+              back: "{{type:Romaji}}"
+              name: Reading
+              fields: ["ねこ", neko]
+            # A new note with empty fields still has its markers
+            - {front: "{{Kana}}{{type:Romaji}}", back: "{{FrontSide}}<hr id=answer>{{type:nc:Romaji}}", name: Reading, fields: ["ねこ"]}
+  - observe:
+      - template:
+          notetype: {name: Gap Type Draft, kind: cloze, fields: [Text]}
+          cases:
+            - {front: "{{cloze:Text}}{{type:cloze:Text}}", back: "{{cloze:Text}}<hr id=answer>{{type:cloze:Text}}", name: Gap, fields: ["{{c1::tora}} here"]}

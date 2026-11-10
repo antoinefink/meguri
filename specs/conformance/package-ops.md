@@ -1,9 +1,9 @@
 # Package ops and observations for scenarios
 
 Spec: conformance/package-ops
-Requirements: R1597, R1598, R1599, R1619, R1626 (stamps), R1628, R2005, R2009 (format half)
+Requirements: R1597, R1598, R1599, R1619, R1626 (stamps), R1627 (E2.2, U124), R1628, R2005, R2009 (format half)
 Anki: 26.09.3
-Scenarios: conformance/scenarios/package/collection-package/
+Scenarios: conformance/scenarios/package/collection-package/, conformance/scenarios/package/colpkg/
 
 The scenario vocabulary for collection packages (U124a): the collection-package form of `export`, the collection-package forms of `import`, the observation `package_listing`, and the fixture packages under `conformance/fixtures/package/`. `export` and `import` belong to the package area (`dsl.md` D7.2); the forms this file does not fix stay draft for U120, U122, U123 and U124, and the legacy package form of `export` stays as `model-ops.md` L6 fixes it. The behavior observed is `specs/package/container.md` and `specs/engine/collection-replace.md`.
 
@@ -33,9 +33,14 @@ E6 to E11 fix the deck-package forms and options that U120, U122, U123 and U124 
 Replaces the scenario's collection with the package's, as a restore of a backup does.
 
 - Oracle: Anki's collection package import into the session's `collection.anki2`, with the session's media folder and media database. It needs the collection closed: the driver closes it, imports, and opens `collection.anki2` again, after a refusal too.
-- Meguri: inspect (`package/container#P12`), then the verified replace with the reason `Restore` (`engine/collection-replace`), which reopens the collection and restarts its day clock (`engine/lifecycle#L8`).
+- Meguri: the adapter picks its path from what inspection reads in the package. Before U124 only the first path exists (a legacy package is `UnsupportedFormat`, E2.3; a package with media is refused by P16's media-input refusal); once U124 lands:
+  - a latest-format package whose media map has no entry, or that has no `media` entry (a collection-only package, the `collection-package/` scenarios, and `plain.colpkg` of `colpkg/media-merge`): inspect (`package/container#P12`), then the verified replace with the reason `Restore` (`engine/collection-replace`);
+  - a latest-format package whose map has at least one entry: the flow of `package/container#P16` with the reason `ColpkgImport`;
+  - a legacy package (no `meta`, or version 1 or 2), with or without media: `package/container#P19` with the reason `ColpkgImport`.
+
+  Each replace reopens the collection and restarts its day clock (`engine/lifecycle#L8`). Both reasons apply the same stamps (`engine/collection-replace#R7`) and set the publication fence, so the goldens do not tell the paths apart. P16's forced backup goes to the scenario's backups folder (`backup-ops.md` F1), which no `colpkg/` scenario observes.
 - On success the collection holds the package's rows, upgraded when older, with `col.scm` and `col.mod` set to the current instant in milliseconds (`engine/collection-replace#R7`); the undo history is empty. A collection-only package leaves the media folder unchanged on both sides.
-- Package with media (draft, U124). Oracle: Anki writes each of the package's files into the media folder under its name, replacing a file of that name whose bytes differ, and leaves every other file in place. Meguri: the merge of `package/container#P16`, which also keeps the replaced bytes in the trash, so a scenario that replaces a file observes `media_trash` only with a deviation. Until U124 lands Meguri refuses such a package, so a scenario imports one only in a segment the oracle runs (a live chain after `handoff: oracle`, `package/apkg-export#A17`, `package/legacy-export#L14`); U124 lifts this rule here.
+- Package with media (U124). Oracle: Anki writes each of the package's files into the media folder under its name, replacing a file of that name whose bytes differ (latest format: the SHA-1 its media database holds for the name after a folder scan; legacy: the file's size alone), and leaves every other file in place. Meguri: the merge of `package/container#P16` (latest) or `#P19` (legacy), with replace reason `ColpkgImport` (`engine/collection-replace#R1`), which also keeps the replaced bytes in the trash, so a scenario that replaces a file observes `media_trash` only with a deviation. Advance the clock before a `media_outside` step whose change the import must see (`media-ops.md` F12): Anki's scan finds a changed file by its time. The scenarios of `package/colpkg/` (U124's, E5) import such packages on both executors and stay inactive until U124's adapter lands; any other scenario imports one only in a segment the oracle runs (a live chain after `handoff: oracle`, `package/apkg-export#A17`, `package/legacy-export#L14`). `colpkg/oracle-made-import` is the live chain the other way: Anki writes both formats with media and Meguri imports them, so Meguri's readers meet Anki's zstd frames, map encoding and JSON map spelling.
 - For the runner's schema guard (`storage/schema-18#S6.2`) a successful import counts as an open: the baseline becomes `sqlite_master` of the imported file, upgrade included. A refused import keeps the baseline.
 - **Output**: none; the step records `{}`.
 
@@ -49,7 +54,8 @@ Replaces the scenario's collection with the package's, as a restore of a backup 
 | `corrupt` | any other error Anki's collection package import raises before it replaces the collection: its "not a valid file" import error (a missing collection entry, a collection it cannot open or whose integrity check fails, an unsafe media name), a protobuf decode error, an archive that does not read as zip, an error while reading or decoding an entry | `Corrupt`, `SchemaUnsupported` |
 
 - The oracle tells its two import errors apart through the backend's own translations (`oracle/AGENTS.md` rule for messages), never by literal text. Any other failure (the driver's own, the worker's) stays a run error.
-- Meguri's `UnsupportedFormat` (a legacy package before U120), `InsufficientSpace`, `DiskFull` and `Io` are run errors. No scenario of this file imports a legacy-format package. Draft (U120, U124): Anki imports a legacy `.colpkg` (`package/container#P17`); until U124 gives Meguri's side, a scenario imports one only in a segment the oracle runs, as E2.2 says for a package with media.
+- Meguri's `UnsupportedFormat` (a legacy package before U124), `InsufficientSpace`, `DiskFull` and `Io` are run errors. Anki imports a legacy `.colpkg` (`package/container#P17`); Meguri's side is `package/container#P19` (U124). Only `package/colpkg/legacy-import` and `package/colpkg/oracle-made-import` import one in a Meguri segment; any other scenario imports one only in a segment the oracle runs, as E2.2 says for a package with media.
+- Draft (U124, E4.1): a media map that names a member the archive lacks. Anki fails with its generic invalid-input error, not an import error, before it replaces the collection, having written no file for a one-entry map (with more entries, the files before the missing one may already be written, `package/container#P16.5`). The oracle driver does not map that error yet: its `corrupt` list holds protobuf, I/O and sync-other errors only, so a new mapping of the invalid-input error of a collection-package import to `corrupt` is needed. Meguri: `Corrupt` (`package/container#P16.1`). Scenario `package/colpkg/refused-media-member`, once the fixture and that mapping exist.
 - A v1-scheduler collection inside a package: Meguri refuses (`SchemaUnsupported`, recorded `corrupt`), Anki imports it. No scenario carries one; one that did would need a deviation like `storage-v1-scheduler-refused`.
 
 ### E2.4 Scenario rules
@@ -116,6 +122,17 @@ The layout of a package: what an importer finds before it decodes anything.
 
 The deck-package fixtures (`package/apkg/`) come from the same maker (`oracle/fixtures/package/apkg.py`, run by `make.sh` after the collection packages; the two 2.1.26 packages from `oldclient.py` in the storage maker's legacy image, with the clocks frozen and `random` seeded, so they too have the same bytes on every run). The maker checks that no fixture holds stock note type text (the storage maker's `stock-check`, on every SQLite entry of every package, raw or in one of its own frames, and on the collection of `backup/standard.colpkg` after Anki imports it into a scratch profile).
 
+### E4.1 Fixtures still to make
+
+Scenarios not yet recorded name these; the oracle maintainer adds them to the maker (`oracle/fixtures/package/apkg.py` and the collection-package maker) with E4's archive rules, and the scenarios are recorded after.
+
+| Fixture | Recipe | Scenario |
+|---|---|---|
+| `package/variants/media-member-missing.colpkg` | the backup entries with `media` = zstd of a media map with one entry: name `x.jpg`, size 3, the 20-byte SHA-1 of `abc`; no entry `0` | `package/colpkg/refused-media-member` |
+| `package/apkg/media-subdir.apkg` | as `apkg/meta-version-4.apkg` with `meta` `08 03`, plus an entry `0` = zstd of the 3 bytes `abc` before `media`; `media` = zstd of a media map with one entry: name `a/b.jpg`, size 3, the SHA-1 of `abc` | `package/apkg-import/media-map-variants` |
+| `package/apkg/legacy-subdir.apkg` | as `apkg/legacy-traversal.apkg` with `media` the JSON map `{"0": "a/b.jpg"}` | the same |
+| `package/apkg/legacy-no-media-map.apkg` | as `apkg/legacy-traversal.apkg` without the entry `0` and without `media` | the same |
+
 ## E5. Scenarios and what runs them
 
 | Scenario | Shows | Needs on Meguri |
@@ -127,9 +144,13 @@ The deck-package fixtures (`package/apkg/`) come from the same maker (`oracle/fi
 | `upgrade-on-import` | a schema-11 collection in a latest-format package, upgraded on the staging copy | as `restore-backup` |
 | `refused-meta`, `refused-entries`, `refused-collection`, `refused-media-map` | each refusal kind, collection unchanged | `open`, `timing`, `import.colpkg`, `db_dump` |
 | `missing-media-map` | Meguri imports, Anki refuses (deviation `package-latest-missing-media-map`) | `open`, `timing`, `import.colpkg` |
+| `colpkg/media-merge` (U124) | a latest package with media imported over an edited collection and changed folder: rows back with the R7 stamps; files whose bytes differ replaced, a removed one written, an equal and an unrelated one kept; then a collection-only import leaves the folder as it is (`package/container#P16.2`) | `open`, `timing`, `media_outside`, `db_exec`, `export.colpkg`, `export.colpkg.media`, `import.colpkg`, `db_dump`, `media_dir` |
+| `colpkg/legacy-import` (U124) | a legacy package with media, upgraded on staging; a present file of the payload's length kept whatever its bytes (`package/container#P19`) | as `colpkg/media-merge`, with `export.colpkg.legacy` and `schema_objects` |
+| `colpkg/oracle-made-import` (U124, live, T1) | Anki's latest and legacy packages with media, imported by Meguri over an edited collection and changed folder: the rows and files of `colpkg/media-merge` and `colpkg/legacy-import`, read from packages Anki wrote | `open`, `timing`, `media_outside`, `db_exec`, `import.colpkg`, `db_dump`, `schema_objects`, `media_dir`, `handoff` (Anki runs the exports) |
+| `colpkg/refused-media-member` (U124, draft) | a mapped member missing: `corrupt`, rows and folder unchanged (E2.3, E4.1) | `open`, `timing`, `media_outside`, `import.colpkg`, `db_dump`, `media_dir` |
 
 - **Capabilities** (`dsl.md` D8). An `export` step needs the op `export` and the capability of its form: `export.colpkg` (E1), `export.apkg_legacy` (`model-ops.md` L6), `export.apkg` (E7, U122) or `export.apkg` and `export.apkg.legacy` (E8, U123: E8 is E7's form plus a key, so it needs both); a `colpkg` export with `media: true` also needs `export.colpkg.media` and one with `legacy: true` also needs `export.colpkg.legacy` (E9, U124). Capabilities compare by exact string: `export.apkg_legacy` (L6's whole-collection form) and `export.apkg.legacy` (`package/legacy-export#L14`'s deck form) are two capabilities that differ only in a separator, and the vocabulary scan's separator folding never applies to capability names. A collection-package `import` step needs `import` and `import.colpkg`; a deck-package one needs `import` and `import.apkg` (E6, U120). The observations `package_media` (E10) and `package_db_dump` (E11) are kinds of their own. Meguri declares `export`, `export.colpkg`, `import`, `import.colpkg` and the kind `package_listing` with U124a's adapter (`core/crates/meguri-testkit/src/exec/package.rs`). The oracle implements E1 to E3 and E6 to E11; E8 and E9 are stable typed language with execution pending; Meguri's executor has none of E6 to E11 yet.
-- The testkit model reads E1 to E3's shapes with the load-time rules above (E2.4 included). Every scenario of this table has a golden, recorded with `tools/mg oracle record package/collection-package`; the deck-package scenarios (E6 to E11) are recorded with `tools/mg oracle record <filter>` for `package/apkg-import`, `package/apkg-export`, `package/notetype-merge` and `package/legacy-export`.
+- The testkit model reads E1 to E3's shapes with the load-time rules above (E2.4 included). Every `collection-package/` scenario of this table has a golden, recorded with `tools/mg oracle record package/collection-package`; the `colpkg/` ones (U124) are new and inactive, to be recorded with `tools/mg oracle record package/colpkg` (`refused-media-member` once its E4.1 fixture and E2.3's mapping exist); the deck-package scenarios (E6 to E11) are recorded with `tools/mg oracle record <filter>` for `package/apkg-import`, `package/apkg-export`, `package/notetype-merge` and `package/legacy-export`.
 
 ## E6. `import`, deck package form
 
@@ -214,7 +235,7 @@ E1's form with the two options of `package/apkg-export#A14` (U124).
   - Meguri: A14's writer on the live collection; nothing closes.
 - **Output**: none (`{}`).
 - **Rejections**: none. Every error on either side, Meguri's `LegacyConversion` and `VerificationFailed` (`package/legacy-export#L11`) included, is a run error; scenarios give the media folder only regular files whose names `package/container#P6` accepts.
-- The package's bytes are not observable: observe it with E3, E10 and E11, or import it with E2 in a segment the oracle runs (E2.2, E2.3; the live chains of `package/apkg-export#A17` and `package/legacy-export#L14`). A scenario that observes the collection after a legacy export observes only the package, or carries the deviation of `package/legacy-export#L13`.
+- The package's bytes are not observable: observe it with E3, E10 and E11, or import it with E2 in a segment the oracle runs (E2.2, E2.3; the live chains of `package/apkg-export#A17` and `package/legacy-export#L14`), except in the `package/colpkg/` scenarios of E5, which import it on both executors (E2.2). A scenario that observes the collection after a legacy export observes only the package, or carries the deviation of `package/legacy-export#L13`, until a successful collection-package import replaces the collection with the package's: from then on the collection is the package's on both sides, and observations are free again.
 
 ## E10. `package_media` (observation kind)
 

@@ -169,7 +169,7 @@ The desired count of P4.1 is at most 70 for every histogram (the 70-bin rule), a
 
 A number inside a bar query is written as the shortest decimal that reads back as the same binary64 value, with `-` for negative values, no grouping and no exponent: `0.07`, `-500`, `124.5`. Every bar query is Anki search syntax only (P10 decides the one case where Anki's page writes a query its search rejects) and parses with the core's parser (R1420, `stats/browse-queries` Q6). The Browser receives it through `stats/browse-queries` Q3 (R1417).
 
-Decided 2026-10-27: bar queries are written by these rules as plain text and joined only by `StatsBrowseLink` (`stats/browse-queries` intro, Q3). They never go through U88's builder, its `join` or the canonical writer; the plan's U226 line "Bar queries built through U88's builder" is superseded. Its expected texts still hold (`"prop:ivl>=3" "prop:ivl<=5"`, `<=` on Difficulty's last bar, `added:` bounds).
+Decided 2026-10-27: bar queries are written by these rules as plain text and joined only by `StatsBrowseLink` (`stats/browse-queries` intro, Q3). They never go through U88's builder, its `join` or the canonical writer; the plan's U226 line "Bar queries built through U88's builder" is superseded. Its expected texts still hold (`"prop:ivl>=3" "prop:ivl<=5"`, `<=` on Difficulty's last bar, `added:` bounds). The first is the writer's text for an Intervals bin [3, 6), which P10 never makes: Intervals thresholds are 1 + k × s for a whole step s of 1, 2, 5, 10 and so on, so a bin from 3 has its next edge at 4 or 5. So it is a Meguri unit test of the query writer (P23), not a value a golden can hold.
 
 ## P5. Ranges and controls
 
@@ -249,14 +249,14 @@ More bins: 1 year without backlog gives [0, 5) `In 0-4 days` … [360, 365) `In 
 
 ## P7. Calendar
 
-The grid is U227's component, defined in `stats/heatmap-presentation`, which U227's spec writer writes before U227 is built (the plan's execution note for U227); it is not in the tree yet. A cell's date is the cell's own date (`stats/graphs-revlog` V3.2, V3.3, R1384): a date that two day indices share is one cell with the summed count, and no date is computed from a day index. This section gives what the Calendar adds; "today" is the record's `today_date`.
+The grid is U227's component, defined in `stats/heatmap-presentation` (its Calendar layout M6, colours M8.3, accessibility M15.6). A cell's date is the cell's own date (`stats/graphs-revlog` V3.2, V3.3, R1384): a date that two day indices share is one cell with the summed count, and no date is computed from a day index. This section gives what the Calendar adds; "today" is the record's `today_date`.
 
-Decided 2026-10-27: the Calendar box's drawing (grid, palette, colour stops, empty colour) and its `AXChartDescriptor` (P18.3) wait for `stats/heatmap-presentation`; U226 builds them only after it lands. The rules below (years, drawn dates, tooltip, query) do not wait and are tested now (P23).
+Decided 2026-10-27: the Calendar box's drawing (grid, palette, colour stops, empty colour) and its `AXChartDescriptor` (P18.3) come from `stats/heatmap-presentation`, written 2026-11-10; U226 builds them from it. The rules below (years, drawn dates, tooltip, query) do not wait and are tested now (P23).
 
 - **Years.** The year shown starts at the current year (the year of `today_date`). Back stops at the previous year with `last12Months` and at 2000 with `allHistory`; forward never passes the current year (R1380). When the history changes to `last12Months` while an earlier year is shown, the shown year becomes the previous year.
 - **Cells.** A date of the shown year is drawn when it is not after today and either it has reviews, or the history is `allHistory`, or it is after the same date one year ago (today's date with the year one less, a 02-29 date read as 03-01) (R1380). So with `last12Months` an empty date one year old or older is not drawn, and a date after today is never drawn, even with reviews from clock skew (P21). Every date of the year can be drawn, 31 December of a leap year included. Decided 2026-10-27: Anki compares each date's midnight with the current time one year back, which gives the same dates except at exactly midnight, and it fills only the first 365 dates of a year, so it never draws an empty 31 December of a leap year (P21).
 - **Colour.** A day with reviews takes a square-root scale over [0, `max_count`] (all years, dates after today included); a day without reviews takes the empty colour (R1382). The palette is U227's.
-- **Tooltip.** Two lines: the date as `<weekday>, <month> <day>, <year>` with English names (`Monday, October 12, 2026`), then `<count> review(s)` (R1383).
+- **Tooltip.** Two lines: the localized long date of `stats/heatmap-presentation` M10.2 (English: `Monday, October 12, 2026`), then `<count> review(s)` (R1383). Its placement and timing are `stats/heatmap-presentation` M12 and M13.
 - **Query.** The cell's item text, when its record cell carries one (`stats/graphs-revlog` V3.4, `stats/browse-queries` Q4.2). A drawn date without a record cell has none.
 - **No data** (P16.5) when the record has no cell, whatever the year shown.
 
@@ -488,7 +488,7 @@ A drawn bin without data still shows its tooltip (with 0), but has no query.
 
 ### P16.2 Mac
 
-- Hovering a drawn bin selects it, highlights its column and shows its tooltip next to the pointer; leaving the plot hides it (R1365).
+- Hovering a drawn bin selects it, highlights its column and shows its tooltip next to the pointer; leaving the plot hides it (R1365). The Calendar is the exception: its hover, tooltip placement and outlines are `stats/heatmap-presentation` M9 and M12.
 - Clicking a clickable item opens the Browser at once with its joined query (`stats/browse-queries` Q3, Q5; R1418). Clicking anything else does nothing.
 
 ### P16.3 iPhone and iPad
@@ -496,6 +496,7 @@ A drawn bin without data still shows its tooltip (with 0), but has no query.
 - A tap, or touch-and-hold, on a drawn bin selects it and shows its tooltip (R1365, R1418). Dragging across the plot moves the selection from bin to bin (`chartXSelection`).
 - The tooltip of a clickable item adds a `Show in Browser` button, which opens the Browser with its joined query (`stats/browse-queries` Q5). Non-clickable graphs never show the button.
 - Tapping outside the plot, or another range, clears the selection.
+- The Calendar is the exception: its tap, callout, scrub and swipe rules are `stats/heatmap-presentation` M13 (a drag without a hold pages or scrolls; it does not move the selection).
 
 ### P16.4 Tooltip content
 
@@ -553,10 +554,11 @@ Example (P6's data with a daily load of 3, Deck `Japanese`): `Future Due. The nu
 - Clickable items expose `Show in Browser` as a named accessibility action that opens the Browser as P16 does. Non-clickable graphs expose no such action.
 - Bins are grouped in runs of ten consecutive drawn bins (the last run may be shorter), each run a container labelled `<first bin's name> to <last bin's name>` with the bin names of P18.5, so a 70-bar chart can be skimmed by run and then explored (R1440). Example, Reviews over 1 month (P8): the first run reads `30 days ago to 21 days ago`. A run of one bin reads that bin's name alone.
 - Card Counts sectors and rows, Retention rows, Hourly bars and Answer Buttons bars are elements labelled with their row or tooltip text.
+- The Calendar is the exception to the runs of ten: its day elements sit in month containers (`stats/heatmap-presentation` M15.1, M15.4), each labelled with its tooltip lines joined with `, ` as above.
 
 ### P18.3 Audio Graphs
 
-Each chart with marks publishes an `AXChartDescriptor` (R1439): an x axis of categories, one per drawn bin, hour or bar, named by its bin name (P18.5); a numeric y axis named by its unit (cards, reviews, minutes, percent); one data series per stacked kind (Reviews), per bar and line (Hourly), or one series. The Calendar's descriptor is U227's. Retention, a table, has none.
+Each chart with marks publishes an `AXChartDescriptor` (R1439): an x axis of categories, one per drawn bin, hour or bar, named by its bin name (P18.5); a numeric y axis named by its unit (cards, reviews, minutes, percent); one data series per stacked kind (Reviews), per bar and line (Hourly), or one series. The Calendar's descriptor is U227's (`stats/heatmap-presentation` M15.6). Retention, a table, has none.
 
 ### P18.4 Text size and motion
 
@@ -577,7 +579,7 @@ The short name of a drawn bin [a, b), a bar or a sector, used by the run labels 
 | Hourly Breakdown | `<h>:00`, h by F | `9:00`, `23:00` |
 | Answer Buttons | `<group>, <button name>` (P14's group labels and button names) | `Young, Good` |
 | Card Counts | the row label (P9) | `Suspended` |
-| Calendar | `stats/heatmap-presentation` (P7) | |
+| Calendar | `stats/heatmap-presentation` M15.6 | `Oct 12` |
 
 ## P19. Strings
 
@@ -661,34 +663,57 @@ The text differences are one pending `conformance/deviations.yaml` entry, `stats
 
 ## P22. Observation for scenarios
 
-A draft observation kind, `stats_presentation` (`conformance/observations` O4), for the oracle-maintainer. None exists yet: no executor and no graphs-page image.
+A draft observation kind, `stats_presentation` (`conformance/observations` O4, `conformance/stats-ops` H14), for the oracle-maintainer. As of 2026-11-10 its scenarios are in the tree (P23), inactive and without goldens; no executor has the kind and the graphs-page image does not exist yet.
 
-- **Request.** `{stats_presentation: [<request>, ...]}`. A request is `{scope, history, graph, controls}`: `scope` and `history` as `stats/graphs-common` G14; `graph` one key of P1 other than `today`; `controls` an object with only the members the graph has: `range` (Anki's wording of a P19 range label: `1 month`, `3 months`, `1 year`, `all`, `50%`, `95%`, `100%`), `backlog`, `time`, `separate` (booleans), `mode` (`young`, `mature` or `all`), `year` (an integer).
-- **Value.** One object per request: `data`, the graph's parts as `stats/graphs-common` G14 and the graph specs write them, and `page`, the presentation: `{no_data, bins, table}`, where `bins` lists every bin in axis order as `{x0, x1, value, drawn, tooltip, query}` (`drawn` is x1 > x0 computed from the recorded edges, never from the page's bar or hover width, P4.4; `tooltip` a list of lines, a label-value line as `[label, value]`; `query` the item text or null), and `table` lists rows as `[label, value, ...]`. Retention's `page` has its table only; Card Counts' adds the sectors' values.
-- **Oracle.** The graphs-page image runs the pinned page against Anki's Python-side stats backend for the request's search and days (G14's mapping), sets the controls, and reads for each bin its edges, value, tooltip text (line breaks between lines, the marks of P21 removed) and the query a click sends, the table rows, and whether the no-data overlay shows. The page and its assets stay in the image (R1960).
-- **Meguri.** U226's Swift tests load `data` into the graph's record, run the presentation with `controls`, and compare with `page`. The core is not involved; the core's `data` is checked by the `stats` kind.
-- Text compares exactly; numbers inside `value` and `x0`, `x1` with the 1e-6 tolerance of `conformance/observations` O6.
+- **Request.** `{stats_presentation: [<request>, ...]}`, a non-empty list. A request is `{scope, history, graph, controls}`: `scope` and `history` as `stats/graphs-common` G14; `graph` one key of P1 other than `today`; `controls` an object with exactly the members its graph has:
+
+  | Member | Graphs | Value |
+  |---|---|---|
+  | `range` | `future_due`, `reviews`, `intervals`, `stability`, `difficulty`, `retrievability`, `hours`, `buttons`, `added` | one of the graph's P5.1 options in Anki's wording: `1 month`, `3 months`, `1 year`, `all`, `50%`, `95%`, `100%` |
+  | `backlog` | `future_due` | boolean: the stored `futureDueShowBacklog` value the graph is drawn with (P6) |
+  | `time` | `reviews` | boolean: the Time toggle (P8) |
+  | `separate` | `card_counts` | boolean: the stored `cardCountsSeparateInactive` value the graph is drawn with (P9) |
+  | `mode` | `retention` | `young`, `mature` or `all` (P12) |
+  | `year` | `calendar` | an integer, the year shown (P7) |
+
+  `backlog` and `separate` are preference values, not clicks: the graph is drawn as if the collection held that value (`stats/graphs-common` G7), whether or not the toggle is shown. Backlog's toggle is hidden whenever have backlog is false (P5.1), and the oracle never clicks a hidden control. A scenario that also wants the stored key to agree writes it with `set_config` before the observation and passes the same value (`future-due-ranges`).
+- **Value.** One object per request, in order: `{data, page}`.
+  - `data`: the `stats` parts (G14, `conformance/stats-ops` H10) of the request's scope and history that the graph is built from, as an object with one member per part:
+
+    | `graph` | Parts |
+    |---|---|
+    | `future_due` | `future_due` |
+    | `calendar` | `reviews` (the Calendar's dates, `max_count` and item texts are not in `stats`, H10) |
+    | `reviews` | `reviews` |
+    | `card_counts` | `card_counts` |
+    | `intervals`, `stability`, `difficulty`, `retrievability`, `hours`, `buttons`, `added` | the part of the same name |
+    | `retention` | `true_retention` |
+
+  - `page`: what the page presents, `{no_data, bins, table}`. `no_data` is whether the no-data state shows (P16.5). `bins` lists every bin in axis order as `{x0, x1, value, drawn, tooltip, query}`: `drawn` is x1 > x0 computed from the recorded edges, never from the page's bar or hover width (P4.4); `tooltip` is the list of the bin's tooltip lines, each a string or, for a label-value line, `[label, value]`; `query` is the item text a click sends, or `null`. `table` lists the table's rows in order, each `[label, value, ...]`. Card Counts' `page` adds `sectors`, the seven sector values in row order (P9). Retention's `page` is `{table}` only, and the Calendar's `{no_data}` only: its cells and tooltips are Meguri-only tests (P7, P21, P23).
+- **Oracle.** The graphs-page image (`stats/graphs-common` G12, decision 2; `oracle/graphs-page/`) runs the pinned page against Anki's Python-side stats backend for the request's search and days (G14's mapping), gives it the preference values of `controls`, sets the other controls, and reads for each bin its edges, value, tooltip text (one entry per line, with U+2068, U+2069, U+200E and the Hourly lines' leading emoji and space removed, P21) and the query a click sends, the table rows, the sector values and whether the no-data overlay shows. The observation changes nothing in the collection (G11): no preference the page would write reaches it. The page and its assets stay in the image (R1960).
+- **Meguri.** U226's Swift tests load `data` into the graph's record, with `backlog` and `separate` as its `futureDueShowBacklog` and `cardCountsSeparateInactive` and `history` as its history value (P1), run the presentation with the other controls, and compare with `page`. The core is not involved; the core's `data` is checked by the `stats` kind.
+- **Comparison.** Before comparing, Meguri's page drops what P21 makes Meguri's own: the Card Counts `Notes` row. The memory-state footnote (P10, P11) and Answer Buttons' second label line (P14) are not members of `page`. Text compares exactly, booleans and `null` exactly; numbers inside `data` as the `stats` kind, and `value`, `x0`, `x1` and the sector values with the 1e-6 relative tolerance of `conformance/observations` O7.
 
 ## P23. Scenarios and tests
 
-`conformance/scenarios/stats/presentation/`, for the oracle-maintainer with the kind of P22. None exists yet. All in Europe/Paris, rollover 4, `fsrs` true.
+`conformance/scenarios/stats/presentation/`, for the oracle-maintainer with the kind of P22. As of 2026-11-10 all sixteen are in the tree, inactive; the fifteen below have no golden (P22). All in Europe/Paris, rollover 4, and every scenario that observes `stats_presentation` sets `fsrs` true in `setup.config`. The sixteenth, `preferences-read`, observes `graph_preferences` and `stats` only, sets `fsrs` itself and has its golden; it is listed with `stats/graphs-common` G15's scenarios (G7), not in the table below.
 
 | Scenario | Pins | Requests |
 |---|---|---|
-| `future-due-ranges` | P6, P4.3, P4.4 | the P6 example cards; every range, Backlog on and off; and cards due only from tomorrow (the {1: 45} example, have backlog false), 1 month, `futureDueShowBacklog` true and false |
-| `future-due-large-backlog` | P4.1 steps | overdue to −500 days; 1 month, Backlog on |
-| `reviews-ranges` | P8 domain steps 1 to 4 | the P8 example rows, count and Time, every range with `all` history |
-| `reviews-aligned-start` | P8 step 2 | oldest row 403 days ago, all |
-| `reviews-table` | P8 table, Days studied percent | 30 of 31 days, 364 of 365, every day |
+| `future-due-ranges` | P6, P4.3, P4.4 | the P6 example cards, every range, Backlog on and off; then 45 cards due tomorrow (the {1: 45} example, have backlog false), 1 month, `futureDueShowBacklog` true and false; each observation first writes `futureDueShowBacklog` with `set_config` and passes the same `backlog` |
+| `future-due-large-backlog` | P4.1 steps, P6 | overdue down to −500 days and due on 0, 5, 20 and 31; 1 month with Backlog on and off, 1 year and all with Backlog on |
+| `reviews-ranges` | P8 domain steps 1 to 4, table | the P8 example rows, every range, Time off and on, `all` history; then rows on −1,000 and 0 only; then day 0 only |
+| `reviews-aligned-start` | P8 step 2 | oldest row 403 days ago, all, `all` history |
+| `reviews-table` | P8 table, Days studied percent | 30 of 31 days and 364 of 365, then every day, then 4,000 of 4,001; 1 month, 1 year and all, Time off and on, `all` history |
 | `card-counts-table` | P9 | one card per state, separating on and off |
 | `intervals-quantiles` | P10, P4.5 Q | the P10 example map, every range |
-| `stability-quantiles` | P10 Stability | the same map as stabilities |
+| `stability-quantiles` | P10 Stability | the same map as stabilities, every range |
 | `difficulty-ranges` | P11, P4.5 E | the P11 50% example, every range |
-| `retrievability-narrow` | P11 step 3 and 4 | keys {40: 5, 42: 1} and {11: 1, 87: 1}, 100% |
-| `retention-tables` | P12 | rows in each period, with and without all history, each mode |
-| `hours-text` | P13 | answers at 09:30 and 23:10, 1 year |
-| `buttons-text` | P14 | each button in each group, 1 year |
+| `retrievability-narrow` | P11 steps 3 and 4 | Difficulty and Retrievability at 100% on the maps {40: 5, 42: 1}, {11: 1, 87: 1}, {13: 1, 87: 1} and {40: 5} |
+| `retention-tables` | P12 | rows in each period, each mode, `year` and `all` history |
+| `hours-text` | P13 | answers at 09:30 and 23:10, and a winter 09:30 answer read in hour 10; 1 month and 1 year, and all with `all` history |
+| `buttons-text` | P14 | each button in each group, a Manual row in none, older Young and Mature rows; 1 month and 1 year |
 | `added-ranges` | P15 | the P15 example cards, every range |
-| `empty-collection` | P16.5 | every graph |
+| `empty-collection` | P16.5 | every graph at its default range, the Calendar for 2026 (its no-data state only) |
 
-Meguri-only tests (no oracle): P2's writers and spans and P3's labels from their tables; P4.1 and P4.2 from their tables; range memory and history following (P5.2, P5.3); the Calendar's year bounds, drawn cells and future dates (P7); selection, tooltips and the Browser hand-off (P16, U226 UI tests); the summary, element tree and actions of a 70-bar chart (P18), with the run labels and P18.5's bin names for every graph; the P21 Meguri additions; every bar query parsed by the core's parser (P4.7); the fractional Intervals edge of P10 (keys 1, 2, 3, 4, 50%: `"prop:ivl=4"`, which parses and finds interval 4); the Calendar's empty dates around one year ago and 31 December of a leap year (P7); re-binning the largest Reviews and Intervals records within 16 ms with no core call (R1290); the quantile rules computed from cumulative counts with no per-card array (R1293).
+Meguri-only tests (no oracle): P2's writers and spans and P3's labels from their tables; P4.1 and P4.2 from their tables; range memory and history following (P5.2, P5.3); the Calendar's year bounds, drawn cells, tooltips, future dates and the AE58 presentation (P7); selection, tooltips and the Browser hand-off (P16, U226 UI tests); the summary, element tree and actions of a 70-bar chart (P18), with the run labels and P18.5's bin names for every graph; the P21 Meguri additions; every bar query parsed by the core's parser (P4.7), and the query writer on P4.7's example texts, which no recorded bin gives; the fractional Intervals edge of P10 (keys 1, 2, 3, 4, 50%: `"prop:ivl=4"`, which parses and finds interval 4); the Calendar's empty dates around one year ago and 31 December of a leap year (P7); re-binning the largest Reviews and Intervals records within 16 ms with no core call (R1290); the quantile rules computed from cumulative counts with no per-card array (R1293).

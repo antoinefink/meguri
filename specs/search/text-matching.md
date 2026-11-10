@@ -5,7 +5,7 @@ Requirements: R1033, R1034, R1035, R1037, R1038, R1039, R1040, R1041, R1042, R10
 Anki: 26.09.3
 Scenarios: conformance/scenarios/search/text/, conformance/scenarios/search/regex/
 
-What the text terms match: plain text, `nc:`, `sc:`, `w:` and `re:`, and the pattern rules that field searches (`fields.md`) share. Letter case is `case-folding.md`; how terms combine, the modes and the plan are `query-model.md`; the values a term holds are `grammar.md` G7 and G8. Every rule here was checked against the oracle; the scenarios each section names pin its examples, except the examples of T6 and T8.3, whose scenarios are still to be written (T17). Pattern conventions (shortest match, "any character", word characters) are `text/strip-html#H1`.
+What the text terms match: plain text, `nc:`, `sc:`, `w:` and `re:`, and the pattern rules that field searches (`fields.md`) share. Letter case is `case-folding.md`; how terms combine, the modes and the plan are `query-model.md`; the values a term holds are `grammar.md` G7 and G8. Every rule here was checked against the oracle; the scenarios each section names pin its examples (T17), except those of `search/text/nc-escapes`, `search/text/pattern-limit-unreached` and `search/regex/glob-size`, which await their first recording. Pattern conventions (shortest match, "any character", word characters) are `text/strip-html#H1`.
 
 ## T1. Terms
 
@@ -102,7 +102,7 @@ When ignore accents is on:
 - Not affected: `nc:` (always combining-free), `re:`, field searches in every mode, all-fields searches (`fields.md` F7).
 - The fold mode still applies after the transform (`case-folding.md` C2).
 
-Examples with the key on, which the scenario `search/text/ignore-accents` is to pin; it is not yet written, so only `uber` finding `ÜBER` is pinned today (`search/folding/ignore-accents`): `uber`, `über`, `w:uber` and `w:ÜBER` find `über`, `ÜBER`, `uber` and the cloze note `{{c1::über}} all`; `sc:uber` finds the cloze `{{c1::über}}`; `front:uber`, `re:uber` and `*:uber` find only `uber`; `strasse` finds nothing next to `Straße` and `strase` finds it (T8.2).
+Examples with the key on, pinned by `search/text/ignore-accents` (the results that depend on the fold mode, such as `привет` finding `Привет`, are `search/folding/ignore-accents`): `uber`, `über`, `w:uber` and `w:ÜBER` find `über`, `ÜBER`, `uber` and the cloze note `{{c1::über}} all`; `sc:uber` finds the cloze `{{c1::über}}`; `front:uber`, `re:uber` and `*:uber` find only `uber`; `strasse` finds nothing next to `Straße` and `strase` finds it (T8.2).
 
 ## T7. Excluded fields (R1039)
 
@@ -170,7 +170,7 @@ Every other character is kept. NFKD folds compatibility forms: fullwidth `ｄｏ
 
 ### T8.3 Match
 
-The pattern is `%`, T3.1 of the value, `%`, then put through T8.1 as a whole. The sort text and field string are put through T8.1 too, and the test is T5.1 (or T7.2). Because the pattern is transformed after T3.1, a character whose NFKD is a pattern character becomes one: U+FF05 and U+FE6A become `%` (any run), U+FF3F, U+FE33, U+FE34 and U+FE4D–U+FE4F become `_` (one character), U+FF3C and U+FE68 become `\` (escape). `nc:a％b` therefore finds `a％b`, `azb` and `þaw ayakkabı €xit` (`search/text/nc`; `nc:uber` is pinned by `search/folding/umlaut`, the transform through other terms by `search/tags/regex-and-nc` and `search/fields/modes`).
+The pattern is `%`, T3.1 of the value, `%`, then put through T8.1 as a whole. The sort text and field string are put through T8.1 too, and the test is T5.1 (or T7.2). Because the pattern is transformed after T3.1, a character whose NFKD is a pattern character becomes one: U+FF05 and U+FE6A become `%` (any run), U+FF3F, U+FE33, U+FE34 and U+FE4D–U+FE4F become `_` (one character), U+FF3C and U+FE68 become `\` (escape). `nc:a％b` therefore finds `a％b`, `azb` and `þaw ayakkabı €xit` (`search/text/nc`; `nc:uber` is pinned by `search/folding/umlaut`, the transform through other terms by `search/tags/regex-and-nc` and `search/fields/modes`). An escape made this way follows T3.2: `nc:a＼b` finds `ab` and not `a＼b` (the `\` escapes the `b`), `nc:a＼＼b` finds `a＼b` and `a\b`, and `nc:a＼` escapes the closing `%`, so it finds only a sort text or field string ending in `a%`; in a field pattern an escape before U+001F matches the separator itself, so `front:nc:a＼` (Front the first of two fields) finds a Front of exactly `a`, while `back:nc:a＼` (Back the last field) ends in `\` and finds nothing (`search/text/nc-escapes`).
 
 | Search | Stored | Matches? |
 |---|---|---|
@@ -269,14 +269,14 @@ Scenario: `search/regex/basics`. An empty `re:` matches every note.
 
 ### T12.1 Kinds
 
-Every regular expression a query builds is compiled as T11.1 says, at plan time (T12.2): `re:`, field `re:` (`fields.md` F5), the all-fields expressions (F7), `w:` (T10.1), `tag:re:` (`names-and-ids.md` N2.3), and also the expressions built by glob conversion or escaping: field-name patterns (`fields.md` F2 step 3), normal and `nc:` tag values (N2.2 step 4, N2.4), deck names and `deck:current` (N3.3, N3.4), and note type and template names with wildcards (N4.1, N4.2). The second group can never have a syntax error, since every metacharacter is escaped, but a long run of wildcards can pass the size limit (each `_` of a deck name becomes a Unicode `.`, each `*` of a tag value a Unicode `\S*`): `deck:` followed by 30,000 `_` is `search_failed (expression too large)`, never a panic or an empty result. Its range is the whole term.
+Every regular expression a query builds is compiled as T11.1 says, at plan time (T12.2): `re:`, field `re:` (`fields.md` F5), the all-fields expressions (F7), `w:` (T10.1), `tag:re:` (`names-and-ids.md` N2.3), and also the expressions built by glob conversion or escaping: field-name patterns (`fields.md` F2 step 3), normal and `nc:` tag values (N2.2 step 4, N2.4), deck names and `deck:current` (N3.3, N3.4), and note type and template names with wildcards (N4.1, N4.2). The second group can never have a syntax error, since every metacharacter is escaped, but a long run of wildcards can pass the size limit (each `_` of a deck name becomes a Unicode `.`, each `_` of a tag value a Unicode `\S`, each `*` a Unicode `\S*`): `deck:` followed by 30,000 `_` is `search_failed (expression too large)`, never a panic or an empty result. Its range is the whole term. The same holds for `note:`, `card:` (by name) and `tag:` values with 30,000 `_` (`search/regex/glob-size`). Anki also reports `search_failed` for these when a card row reaches the term, since it tests the names in SQL (the scenario holds a note); on a collection where no row does, whether SQLite compiles the expression depends on its plan (`-deck:` with 30,000 `_` and no cards gives no ids), a further case of T12.3's timing difference that no scenario observes; for a field-name pattern over the limit (`fields.md` F2 step 3) Anki panics instead, so no scenario holds one and Meguri's `search_failed` there is tested only by U81's matcher tests.
 
 - A syntax error, nesting beyond the limit included, is `invalid_regex` (`errors.md` E1). `"re:("`, `re:[`, `re:a{2,1}`, `re:\p{Nope}` and `re:*` are syntax errors. With the `(?i)` prefix, 249 nested groups are accepted and 250 are an error.
 - An expression that parses but whose compiled form exceeds the size limit (`re:a{1000}{1000}`) is `search_failed`.
 - `w:` values become literal text, so `w:[` is a valid search (with ignore accents on, T8.1 can still make an invalid expression, for example from U+FF3C).
 - An unquoted `re:(` is `unclosed_group`, a grammar error (`errors.md` E3).
 
-Scenario: `search/regex/invalid`.
+Scenarios: `search/regex/invalid`, `search/regex/glob-size`.
 
 ### T12.2 When Meguri reports them
 
@@ -284,7 +284,7 @@ Meguri compiles every expression of the query while it builds the plan, before a
 
 ### T12.3 Deviation from Anki
 
-Anki compiles an expression the first time a row reaches its test, and returns results when no row does. In `search/regex/invalid-unreached` it returns no ids for `re:[` and `front:re:[` on a collection without notes and for `nosuchfield:re:[` with a note; Meguri reports `invalid_regex` for each (deviation `search-invalid-regex-unreached`, `conformance/deviations.yaml`). The pattern size limit (T3.3) has the same timing difference, a second deviation, `search-pattern-limit-unreached`: on a collection without notes, `front:` followed by 49,999 `a` (a `Front` that is the first of two fields) returns no ids in Anki and `search_failed (pattern too long)` in Meguri; so does a T7.2 run pattern over the limit that only a note type without notes has. Decided 2026-10-27: Meguri keeps the build-time check (one rule for every pattern, no error that depends on which rows exist). Its `conformance/deviations.yaml` entry and that scenario are still to be added; `search-invalid-regex-unreached` covers regular expressions only.
+Anki compiles an expression the first time a row reaches its test, and returns results when no row does. In `search/regex/invalid-unreached` it returns no ids for `re:[` and `front:re:[` on a collection without notes and for `nosuchfield:re:[` with a note; Meguri reports `invalid_regex` for each (deviation `search-invalid-regex-unreached`, `conformance/deviations.yaml`). The pattern size limit (T3.3) has the same timing difference, a second deviation, `search-pattern-limit-unreached`: on a collection without notes, `front:` followed by 49,999 `a` (a `Front` that is the first of two fields) returns no ids in Anki and `search_failed (pattern too long)` in Meguri; so does a T7.2 run pattern over the limit that only a note type without notes has. Decided 2026-10-27: Meguri keeps the build-time check (one rule for every pattern, no error that depends on which rows exist). The scenario is `search/text/pattern-limit-unreached`; its `conformance/deviations.yaml` entry `search-pattern-limit-unreached` (Meguri's `search_failed` at `/steps/0/search/0` and `/steps/3/search/0` only, not the `dog` search) is still to be added before the scenario becomes active. `search-invalid-regex-unreached` covers regular expressions only. The glob expressions of T12.1 have the same timing difference on a collection without cards; Meguri reports `search_failed` there too, and no scenario observes it, so no entry covers it.
 
 ## T13. Glob conversion to a regular expression
 
@@ -359,15 +359,18 @@ The range of each is the whole term that failed (`errors.md` E5).
 | `search/text/html-and-sort-field` | T2, T5 |
 | `search/text/field-separator` | T3.2, T5 |
 | `search/text/normalization` | T4 |
-| `search/text/ignore-accents` (not yet written; `search/folding/ignore-accents` pins `uber` only) | T6 |
+| `search/text/ignore-accents` | T6 |
 | `search/text/excluded-fields` | T7.2, T7.3 |
 | `search/text/excluded-all` | T7.2, T7.3 |
 | `search/text/no-searchable-field` | T7.2 |
-| `search/text/nc` (not yet written) | T8 |
+| `search/text/nc` | T8 |
+| `search/text/nc-escapes` (no golden yet) | T3.2, T5.1, T6, T8.3, T10.1, T12.1; `fields.md` F4, F6 |
 | `search/text/sc`, `sc-no-cloze-type` | T9 |
 | `search/text/word` | T10 |
 | `search/text/pattern-limit` | T3.3 |
+| `search/text/pattern-limit-unreached` (no golden yet) | T3.3, T7.2, T12.3; `fields.md` F4 |
 | `search/regex/basics` | T11 |
 | `search/regex/invalid`, `invalid-unreached` | T12 |
+| `search/regex/glob-size` (no golden yet) | T12.1; `names-and-ids.md` N2.2 step 4, N3.3, N4.1, N4.2 |
 
 All result scenarios carry the tag `needs-text` (`specs/conformance/search-ops.md` S4). Several set field options and the sort field with `legacy_update` (`specs/conformance/model-ops.md` L2) before adding notes, so Meguri's executor needs that op for note types.

@@ -1,0 +1,208 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-12T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "canonical_search": [
+          {
+            "text": "is:new"
+          },
+          {
+            "text": "is:new OR is:due"
+          },
+          {
+            "text": "(deck:Lang) (is:new OR is:due)"
+          },
+          {
+            "text": "(deck:Japanese) (is:review -is:learn) prop:ivl<21 -(is:buried OR is:suspended)"
+          },
+          {
+            "text": "(deck:a\\_b\\*) is:new"
+          },
+          {
+            "text": "(\"deck:x \\\"y\\\"\") is:buried"
+          },
+          {
+            "text": "(deck:a\\\\b::c) is:new"
+          },
+          {
+            "text": "(deck:Lang::日本語) prop:rated=-3"
+          },
+          {
+            "text": "(deck:Current) is:suspended"
+          },
+          {
+            "text": "(did:1700000000001,1700000000002) is:suspended"
+          },
+          {
+            "text": "(tag:a OR tag:b) is:buried"
+          },
+          {
+            "text": "(is:due) is:new"
+          },
+          {
+            "text": "-is:review is:learn"
+          },
+          {
+            "text": "is:review is:learn"
+          },
+          {
+            "text": "(is:review -is:learn) prop:ivl<21"
+          },
+          {
+            "text": "(is:review -is:learn) prop:ivl>=21"
+          },
+          {
+            "text": "is:new -(is:buried OR is:suspended)"
+          },
+          {
+            "text": "(-is:review is:learn) -(is:buried OR is:suspended)"
+          },
+          {
+            "text": "(is:review is:learn) -(is:buried OR is:suspended)"
+          },
+          {
+            "text": "(is:review -is:learn) prop:ivl<21 -(is:buried OR is:suspended)"
+          },
+          {
+            "text": "(is:review -is:learn) prop:ivl>=21 -(is:buried OR is:suspended)"
+          },
+          {
+            "text": "is:suspended"
+          },
+          {
+            "text": "is:buried"
+          },
+          {
+            "text": "(deck:Lang) is:new"
+          },
+          {
+            "text": "(deck:Lang) (-is:review is:learn)"
+          },
+          {
+            "text": "(deck:Lang) (is:review is:learn)"
+          },
+          {
+            "text": "(deck:Lang) (is:review -is:learn) prop:ivl<21"
+          },
+          {
+            "text": "(deck:Lang) (is:review -is:learn) prop:ivl>=21"
+          },
+          {
+            "text": "(deck:Lang) is:new -(is:buried OR is:suspended)"
+          },
+          {
+            "text": "(deck:Lang) (-is:review is:learn) -(is:buried OR is:suspended)"
+          },
+          {
+            "text": "(deck:Lang) (is:review is:learn) -(is:buried OR is:suspended)"
+          },
+          {
+            "text": "(deck:Lang) (is:review -is:learn) prop:ivl<21 -(is:buried OR is:suspended)"
+          },
+          {
+            "text": "(deck:Lang) (is:review -is:learn) prop:ivl>=21 -(is:buried OR is:suspended)"
+          },
+          {
+            "text": "(deck:Lang) is:suspended"
+          },
+          {
+            "text": "(deck:Lang) is:buried"
+          },
+          {
+            "text": "(tag:a OR tag:b) is:new"
+          },
+          {
+            "text": "(tag:a OR tag:b) (-is:review is:learn)"
+          },
+          {
+            "text": "(tag:a OR tag:b) (is:review is:learn)"
+          },
+          {
+            "text": "(tag:a OR tag:b) (is:review -is:learn) prop:ivl<21"
+          },
+          {
+            "text": "(tag:a OR tag:b) (is:review -is:learn) prop:ivl>=21"
+          },
+          {
+            "text": "(tag:a OR tag:b) is:new -(is:buried OR is:suspended)"
+          },
+          {
+            "text": "(tag:a OR tag:b) (-is:review is:learn) -(is:buried OR is:suspended)"
+          },
+          {
+            "text": "(tag:a OR tag:b) (is:review is:learn) -(is:buried OR is:suspended)"
+          },
+          {
+            "text": "(tag:a OR tag:b) (is:review -is:learn) prop:ivl<21 -(is:buried OR is:suspended)"
+          },
+          {
+            "text": "(tag:a OR tag:b) (is:review -is:learn) prop:ivl>=21 -(is:buried OR is:suspended)"
+          },
+          {
+            "text": "(tag:a OR tag:b) is:suspended"
+          },
+          {
+            "text": "prop:rated=0"
+          },
+          {
+            "text": "prop:rated=-7304"
+          },
+          {
+            "text": "(deck:Lang) prop:rated=0"
+          },
+          {
+            "text": "(tag:a OR tag:b) prop:rated=-1"
+          },
+          {
+            "text": "(deck:a\\_b) is:new"
+          },
+          {
+            "text": "(deck:a\\*b) is:new"
+          },
+          {
+            "text": "(deck:a\\\"b) is:new"
+          },
+          {
+            "text": "(deck:a\\\\b) is:new"
+          },
+          {
+            "text": "(\"deck:(x)\") is:new"
+          },
+          {
+            "text": "(deck:-x) is:new"
+          },
+          {
+            "text": "(deck:x::current) is:new"
+          },
+          {
+            "text": "(deck:Filtered) is:new"
+          },
+          {
+            "text": "(deck:Current) is:new"
+          },
+          {
+            "text": "(deck:日本語::子) is:new"
+          },
+          {
+            "text": "(\"deck:a b\") is:new"
+          },
+          {
+            "text": "(did:1700000000001) is:new"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "63d7ee8c9340e3db90caf514e2a5cf52640d1eb70a16e0a8f09d231f6ffcc50f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/browse-queries/parse-all",
+  "scenario_sha256": "dfaf911f540eb7da8d0c98bd4dbd519d9c357de847e442fbd67dc52abf70b243",
+  "tz": "UTC"
+}

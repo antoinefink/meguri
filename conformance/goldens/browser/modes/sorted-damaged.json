@@ -1,0 +1,102 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "search": [
+          {
+            "ids": ["#c1", "#c2", "#c4", "#c6"]
+          },
+          {
+            "ids": ["#c6", "#c4", "#c1"]
+          },
+          {
+            "ids": ["#c1", "#c4", "#c6"]
+          },
+          {
+            "ids": ["#c4", "#c1", "#c6"]
+          },
+          {
+            "ids": ["#c1", "#c4", "#c6"]
+          },
+          {
+            "ids": ["#c1", "#c4", "#c6"]
+          },
+          {
+            "ids": ["#c4", "#c1", "#c6"]
+          },
+          {
+            "ids": ["#c1", "#c4", "#c6"]
+          },
+          {
+            "ids": ["#c2", "#c4", "#c1", "#c6"]
+          },
+          {
+            "ids": ["#c6", "#c1", "#c4", "#c2"]
+          },
+          {
+            "ids": ["#c1", "#c2", "#c4", "#c6"]
+          },
+          {
+            "ids": ["#n1", "#n4", "#n5"]
+          },
+          {
+            "ids": ["#n5", "#n4", "#n1"]
+          },
+          {
+            "ids": ["#n1", "#n4", "#n5"]
+          },
+          {
+            "ids": ["#n1", "#n5", "#n4"]
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "63d7ee8c9340e3db90caf514e2a5cf52640d1eb70a16e0a8f09d231f6ffcc50f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "browser/modes/sorted-damaged",
+  "scenario_sha256": "b1a514c7a8e1cc15200e202d8ccfeaa47e4e31a85245eef59cbde7f491d2e854",
+  "tz": "UTC"
+}

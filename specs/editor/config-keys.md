@@ -89,7 +89,7 @@ It changes only these defaults. An add from the Add screen writes the keys of `n
 
 ## K7. Scenarios
 
-The four K4 scenarios in `conformance/scenarios/editor/config-keys/` (`add-defaults-current-deck`, `add-defaults-by-notetype`, `first-notetype-fallback`, `notetype-change`) are recorded at the current oracle pin, with matching repeat comparisons. They use `add_defaults` and `notetype_last_deck` of `notes/add-defaults` D7 and need no additional operation. They remain inactive until Meguri implements those observations. The separate `editor_config_set` op (a whole-value set of one of the four keys, no undo entry) and `editor_config` observation kind (the four typed reads with defaults), modeled on `conformance/browser-config-ops` B1 and B2, remain requested for the other cases. K4.2's Add-screen behaviour (which deck stays selected) has no oracle counterpart; Meguri's Add screen model tests cover it (`notes/add-defaults` D7).
+The four K4 scenarios in `conformance/scenarios/editor/config-keys/` (`add-defaults-current-deck`, `add-defaults-by-notetype`, `first-notetype-fallback`, `notetype-change`) are recorded at the current oracle pin, with matching repeat comparisons. They use `add_defaults` and `notetype_last_deck` of `notes/add-defaults` D7 and need no additional operation. They remain inactive until Meguri implements those observations. The other three need the `editor_config_set` op (a whole-value write of one of the four keys, or of K8's two, with no undo entry) and the `editor_config` observation kind (the four typed reads with defaults), modelled on `conformance/browser-config-ops` B1 and B2. `conformance/editor-ops` E6 and E7 specify them; they have no driver op yet (E8), so `bool-defaults`, `first-day-of-week` and `write-scalar` are not written yet. K4.2's Add-screen behaviour (which deck stays selected) has no oracle counterpart; Meguri's Add screen model tests cover it (`notes/add-defaults` D7).
 
 | Scenario | Covers |
 |---|---|
@@ -143,13 +143,13 @@ Example: with the stored value `["#ff0000","#ffffff","#00FF00"]`, adding `#0000f
 
 ## K11. Scenarios for K8 and K9
 
-Requested from the oracle maintainer, in `conformance/scenarios/editor/config-keys/`, with the ops K7 asks for (an `editor_config_set` that also covers these keys, and an `editor_config` observation that adds them); none is recorded yet.
+Decided 2026-11-10: Anki reads these three keys only in its editor page (K10), so its collection library gives no read of them to compare, and `editor_config` (`conformance/editor-ops` E7) does not report them. What the oracle can show is the stored side of a write. Scenario `editor/formatting/options/key-writes` records it for all three keys with `set_config` (`conformance/record-ops` W4): each key written over a missing key, over the same value and over a value of another type, and the palette over `["red","#12345","#abc",7]` with K9's result for an add of `#0000ff` (the example above), with the stored bytes, `usn`, `mtime_secs`, `col.mod` and the undo status. It takes the place of the stored half of the earlier requests `option-write` and `palette-write`, which are not written:
 
-| Scenario | Covers |
+| Requested earlier | Now |
 |---|---|
-| `option-bool-defaults` | K8: each key missing, stored `true`, `false`, `1`, `0`, `"false"`, `null` and as TEXT; the value read |
-| `option-write` | K8: writing each key over a missing key, over the same value and over a value of another type; stored bytes, `usn`, `mtime_secs`, `col.mod` |
-| `palette-read` | K9: the table's stored values; the slots read |
-| `palette-write` | K9: a Meguri write after an add and after a removal, also over `["red","#12345","#abc",7]` (kept slots); the stored bytes and that the oracle's config read returns the 16 strings |
+| `option-bool-defaults` (K8: each key missing, stored `true`, `false`, `1`, `0`, `"false"`, `null` and as TEXT; the value read) | Meguri's tests: K8's strict read, by K1's rules |
+| `option-write` (K8: writes over a missing key, the same value and another type) | stored half: `key-writes`; the read after each write: Meguri's tests. Once `editor_config_set` exists (it covers K8's keys), a scenario may run these writes through it to check Meguri's own write op against the same stored bytes |
+| `palette-read` (K9: the table's stored values; the slots read) | Meguri's tests: K9's table |
+| `palette-write` (K9: an add, a removal, kept slots) | stored half: `key-writes`; the add and remove arithmetic: Meguri's tests, from K9's rules and examples |
 
 In the quarantined editor image (`editor/field-html` E2), the oracle maintainer also records Anki's palette value after a colour is picked in a fresh profile (the default slots of K9) and after loading `["red","#12345","#abc"]`.

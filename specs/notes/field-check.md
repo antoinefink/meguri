@@ -57,7 +57,7 @@ Examples (scenario `notes/fields-check/states`), with a standard type Std (Front
 | Gap2 (empty), `{{c1::y}}` | `empty` |
 | a cloze type whose first front does not parse: `{{c1::x}}`, (empty) | `field_not_cloze` |
 | the same type: `x`, (empty) | `missing_cloze` |
-| Gap3 (Text, Extra), first front `{{cloze:text}}`: `{{c1::x}}`, (empty) | `normal` (unicase match; requested for the scenario, not yet recorded) |
+| Gap3 (Text, Extra), first front `{{cloze:text}}`: `{{c1::x}}`, (empty) | `normal` (unicase match; scenario `notes/fields-check/cloze-unicase`) |
 
 ## K4. Duplicates (R807, R808)
 
@@ -83,7 +83,7 @@ Examples (AE34, scenario `notes/fields-check/duplicates`), with stored Kaishi no
 | `cafe` U+0301, key off | `normal` |
 | `Café` | `normal` (case counts) |
 | the stored note `私` itself | `normal` (itself excluded), or `duplicate` once another Kaishi note `<b>私</b>` exists |
-| `&lt;b&gt;Cat`, with a stored Kaishi note `&lt;b&gt;Cat` | `duplicate` | that note (both strip once to `<b>Cat`; requested for the scenario, not yet recorded) |
+| `&lt;b&gt;Cat`, with a stored Kaishi note `&lt;b&gt;Cat` | `duplicate` | that note (both strip once to `<b>Cat`; scenario `notes/fields-check/entity-markup`) |
 
 A duplicate never blocks adding (R808): the Add flow shows the state and adds the note when asked. Decided 2026-10-27: the "Show Duplicates" link of R807 opens Browse on a note-ids item (`search/join-and-replace` J3) holding exactly the duplicates of the last check, which never include the draft's own note (`search/names-and-ids` N6). It does not build a `dupe:` search, so no text is stripped twice and the J3.4 refusal cannot leave the link without a result. Anki opens a `dupe:` search on the raw first field, which also lists the edited note; Meguri's Browse shows the same other notes, with a note-ids search text.
 
@@ -96,5 +96,8 @@ A duplicate never blocks adding (R808): the Add flow shows the state and adds th
 
 | Scenario | Covers | Golden |
 |---|---|---|
-| `notes/fields-check/states` | K2, K3 | recorded, with the `fields_check` observation (`specs/conformance/note-ops.md` N4); the Gap3 row (unicase cloze reference) is requested from the oracle maintainer |
-| `notes/fields-check/duplicates` | K2, K4, AE34 | recorded; the `&lt;b&gt;Cat` row (entity-encoded markup, one strip only) is requested from the oracle maintainer |
+| `notes/fields-check/states` | K2, K3 | recorded, with the `fields_check` observation (`specs/conformance/note-ops.md` N4) |
+| `notes/fields-check/cloze-unicase` | K2 cloze fields under unicase, K3's Gap3 row | not yet recorded (added 2026-11-10; it uses only `db_exec`, `reopen` and `fields_check`) |
+| `notes/fields-check/duplicates` | K2, K4, AE34 | recorded |
+| `notes/fields-check/entity-markup` | K2, K4's `&lt;b&gt;Cat` row: entity-encoded markup, one strip only | not yet recorded (added 2026-11-10) |
+| `notetypes/structure/first-field-duplicates` | K4 and AE34 after another field moves to position 0 (`notetypes/structure-changes` S5) | not yet recorded (added 2026-11-10) |
