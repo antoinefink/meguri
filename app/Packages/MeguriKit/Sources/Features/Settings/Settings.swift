@@ -13,6 +13,7 @@ public struct SettingsView: View {
                 NavigationLink(value: Destination.settingsPage(page)) {
                     SettingsPageLabel(page: page)
                 }
+                .accessibilityIdentifier("settings.root.\(page.rawValue)")
             }
         }
         .navigationTitle(Text("Settings", bundle: .module))
