@@ -2195,13 +2195,10 @@ impl Runtime {
         let id = s.actions.next.max(next_durable).max(next_closed);
         // Pending updates remain gated by root proof. Capture the durable local
         // selection independently so the first fetch cannot lose preproof edits.
-        let names = with_tracking_access(|| Self::pending_selection_locked(&s))?
-            .0
-            .into_keys()
-            .collect::<BTreeSet<_>>();
         let bound = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
         let b = bound.binding.id;
         let open = bound.open_counter;
+        let names = with_tracking_access(|| s.store.as_ref().ok_or(Error::Database)?.policy_pending_names(b))?;
         let revs = with_tracking_access(|| -> Result<BTreeMap<String, u64>, RuntimeError> {
             let store = s.store.as_ref().ok_or(Error::Database)?;
             let mut revs = BTreeMap::new();

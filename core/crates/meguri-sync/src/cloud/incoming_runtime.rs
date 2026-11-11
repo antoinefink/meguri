@@ -312,6 +312,21 @@ impl Runtime {
         let s = self.state();
         with_tracking_access(|| Ok(s.store.as_ref().ok_or(Error::Database)?.inbox(binding)?))
     }
+    #[cfg(feature = "test-hooks")]
+    pub fn set_inbox_reason_for_testing(
+        &self,
+        binding: BindingId,
+        id: i64,
+        reason: InboxReason,
+    ) -> Result<(), RuntimeError> {
+        let mut s = self.state();
+        with_tracking_access(|| {
+            Ok(s.store
+                .as_mut()
+                .ok_or(Error::Database)?
+                .park_incoming(binding, id, reason)?)
+        })
+    }
     pub fn refused_entries(&self, binding: BindingId) -> Result<Vec<RefusedEntry>, RuntimeError> {
         let s = self.state();
         with_tracking_access(|| Ok(s.store.as_ref().ok_or(Error::Database)?.refused_entries(binding)?))

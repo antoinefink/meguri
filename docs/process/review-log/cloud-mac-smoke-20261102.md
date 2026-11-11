@@ -337,3 +337,37 @@ Signed selected run `38952` built and installed both development products.
 It ended `awaiting_user` because the approved account source is absent.
 Its `signed_execution` is false. Exchange replay, the signed round trip and
 the full integration gate remain open.
+
+## Incoming records in the original exchange result
+
+Starting commit `336f56e1`. Runtime now classifies the incoming rows when
+it ends an exchange. Generation, reference and structure waits permit
+success once selected work is satisfied. Ready rows still require application. Format, asset
+and apply failures prevent success. The completed Runtime row retains
+these counts, and policy uses them when it records that result. Later
+incoming work cannot replace them. Older rows decode with no retained
+counts and use the existing fallback.
+
+Direct review checked classification precedence, the guarded tracking read,
+the durable commit and legacy decoding. Rust run `61215` passes the new
+regression across all eight reason variants. Run `61945` passes 28 Host
+policy and policy-store checks. The regression changes each inbox reason
+after completion and checks the original result through policy persistence.
+
+Review also found that capture used sendability filters. It now reads all
+dirty entity names before those filters. The original revision checks and
+capture gate still apply. A local edit waiting behind incoming generation,
+reference or structure work stays selected and outstanding.
+
+Run `65126` passes 28 checks and fails the new test at its early cached-list
+read. The same assertion now follows capture's actual pending update.
+Run `65853` passes that corrected test across the three waiting reasons,
+checking preserved local data, selection and incomplete-result accounting.
+
+Swift run `66499` passes both production publication, exchange and reopen
+tests against the final source. Core lint run `67958` and similarity run
+`67677` pass.
+
+Blocked-entity classification still needs work. Held, newer-pending and
+media counts also need original evidence for interrupted-exchange replay.
+The signed round trip and full integration gate remain open.

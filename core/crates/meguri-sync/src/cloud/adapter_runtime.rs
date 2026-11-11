@@ -1127,7 +1127,7 @@ impl Runtime {
         }
         let binding = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
         let live = Self::sdk_locked(&s, sdk).is_ok();
-        let inbox_empty = with_tracking_access(|| -> Result<bool, RuntimeError> {
+        let incoming = with_tracking_access(|| -> Result<ExchangeIncoming, RuntimeError> {
             let store = s.store.as_ref().ok_or(Error::Database)?;
             for name in std::mem::take(&mut result.outstanding_names) {
                 if !store
@@ -1137,7 +1137,15 @@ impl Runtime {
                     result.outstanding_names.insert(name);
                 }
             }
-            Ok(store.inbox(binding)?.is_empty())
+            let mut incoming = ExchangeIncoming::default();
+            for entry in store.inbox(binding)? {
+                match entry.entry.reason {
+                    InboxReason::Ready => incoming.ready += 1,
+                    InboxReason::Generation | InboxReason::Reference | InboxReason::Structure => incoming.waiting += 1,
+                    InboxReason::Format | InboxReason::Asset | InboxReason::ApplyFailed { .. } => incoming.blocked += 1,
+                }
+            }
+            Ok(incoming)
         })?;
         let outcome = if s
             .bound
@@ -1151,7 +1159,7 @@ impl Runtime {
             outcome
         } else if !fetched {
             CollectionOutcome::WaitingNoAccount
-        } else if result.outstanding_names.is_empty() && inbox_empty {
+        } else if result.outstanding_names.is_empty() && incoming.ready == 0 && incoming.blocked == 0 {
             CollectionOutcome::Succeeded
         } else {
             CollectionOutcome::Incomplete
@@ -1160,6 +1168,7 @@ impl Runtime {
             id,
             collection: outcome,
             result,
+            incoming: Some(incoming),
         };
         let mut durable = s.adapter.durable.clone();
         durable.exchanges.insert(id, completed.clone());
@@ -1652,6 +1661,7 @@ impl Runtime {
                         id,
                         collection: CollectionOutcome::Cancelled,
                         result,
+                        incoming: None,
                     },
                 ),
             );

@@ -34,6 +34,14 @@ pub struct CompletedExchange {
     pub id: u64,
     pub collection: CollectionOutcome,
     pub result: ExchangeResult,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub incoming: Option<ExchangeIncoming>,
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExchangeIncoming {
+    pub ready: u64,
+    pub waiting: u64,
+    pub blocked: u64,
 }
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default)]

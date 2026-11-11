@@ -701,6 +701,206 @@ fn completed_runtime_exchange_uses_accepted_end_clock_not_projection_time() {
     rig.host.close().unwrap();
 }
 
+#[test]
+fn exchange_incoming_reasons_keep_their_original_accounting_after_completion() {
+    use meguri_sync::cloud::{
+        ApplyFailure, InboxReason,
+        adapter::{CollectionOutcome, CompletedExchange, ExchangeIncoming},
+    };
+    let reasons = [
+        (InboxReason::Ready, false, 1, 0, 0),
+        (InboxReason::Generation, true, 0, 1, 0),
+        (InboxReason::Reference, true, 0, 1, 0),
+        (InboxReason::Structure, true, 0, 1, 0),
+        (InboxReason::Format, false, 0, 0, 1),
+        (InboxReason::Asset, false, 0, 0, 1),
+        (
+            InboxReason::ApplyFailed {
+                failure: ApplyFailure::Apply,
+                error: OpaqueBytes(vec![1]),
+            },
+            false,
+            0,
+            0,
+            1,
+        ),
+        (
+            InboxReason::ApplyFailed {
+                failure: ApplyFailure::Rekey,
+                error: OpaqueBytes(vec![2]),
+            },
+            false,
+            0,
+            0,
+            1,
+        ),
+    ];
+    for (reason, succeeded, ready, waiting, blocked) in reasons {
+        let rig = rig();
+        let runtime = rig.host.cloud_runtime().unwrap();
+        let driver = rig.host.cloud_policy_driver().unwrap();
+        let run = command(
+            rig.host
+                .cloud_policy_input(DeviceEvent::SyncNowRequested(Source::Command))
+                .unwrap(),
+            |kind| matches!(kind, ActionKind::RunExchange { .. }),
+        );
+        let ActionKind::RunExchange { exchange, .. } = run.action.kind else {
+            unreachable!()
+        };
+        let native = driver.capture_exchange(&run, &rig.host.collection().unwrap()).unwrap();
+        let (deck, original, _) = incoming_deck(&rig);
+        let binding = runtime.status().unwrap().binding.unwrap().id;
+        let entries = runtime.inbox_entries(binding).unwrap();
+        assert_eq!(entries.len(), 1);
+        runtime
+            .set_inbox_reason_for_testing(binding, entries[0].id, reason.clone())
+            .unwrap();
+        let completed = runtime.adapter_complete_exchange(&rig.sdk, native, true, None).unwrap();
+        assert!(completed.result.selected_names.is_empty());
+        assert_eq!(
+            completed.incoming,
+            Some(ExchangeIncoming {
+                ready,
+                waiting,
+                blocked
+            }),
+            "{reason:?}"
+        );
+        assert_eq!(
+            completed.collection,
+            if succeeded {
+                CollectionOutcome::Succeeded
+            } else {
+                CollectionOutcome::Incomplete
+            },
+            "{reason:?}"
+        );
+        assert_eq!(runtime.adapter_exchange_result(native), Some(completed.clone()));
+        let encoded = serde_json::to_value(&completed).unwrap();
+        assert_eq!(
+            serde_json::from_value::<CompletedExchange>(encoded.clone()).unwrap(),
+            completed
+        );
+        let mut legacy = encoded;
+        legacy.as_object_mut().unwrap().remove("incoming");
+        assert_eq!(
+            serde_json::from_value::<CompletedExchange>(legacy).unwrap().incoming,
+            None
+        );
+
+        // A later intake classification must not rewrite the ended exchange.
+        runtime
+            .set_inbox_reason_for_testing(
+                binding,
+                entries[0].id,
+                if succeeded {
+                    InboxReason::Format
+                } else {
+                    InboxReason::Generation
+                },
+            )
+            .unwrap();
+        let action = command(
+            driver
+                .complete_exchange(exchange, rig.host.engine().state(), rig.host.engine().generation())
+                .unwrap(),
+            |kind| matches!(kind, ActionKind::RecordExchange(_)),
+        );
+        let ActionKind::RecordExchange(record) = &action.action.kind else {
+            unreachable!()
+        };
+        match &record.outcome {
+            ExchangeOutcome::Succeeded {
+                selected,
+                incoming_waiting,
+                ..
+            } => {
+                assert!(succeeded);
+                assert_eq!(*selected, 0);
+                assert_eq!(*incoming_waiting, waiting);
+            }
+            ExchangeOutcome::Incomplete {
+                outstanding,
+                blocked: actual,
+            } => {
+                assert!(!succeeded);
+                assert_eq!(*outstanding, 0);
+                assert_eq!(*actual, blocked);
+            }
+            other => panic!("unexpected exchange outcome: {other:?}"),
+        }
+        rig.host
+            .execute_cloud_policy_core(&action, Duration::from_secs(10))
+            .unwrap();
+        assert_eq!(deck_row(&rig, deck), original);
+        assert_eq!(runtime.inbox_entries(binding).unwrap().len(), 1);
+        rig.host.close().unwrap();
+    }
+}
+
+#[test]
+fn exchange_selection_retains_local_edits_waiting_for_incoming_work() {
+    use meguri_sync::cloud::{InboxReason, adapter::CollectionOutcome};
+    for reason in [InboxReason::Generation, InboxReason::Reference, InboxReason::Structure] {
+        let rig = rig();
+        let collection = rig.host.collection().unwrap();
+        meguri_engine::decks::rename(&collection, rig.baseline_deck, "Local waiting change".into()).unwrap();
+        let local = deck_row(&rig, rig.baseline_deck.0);
+        let runtime = rig.host.cloud_runtime().unwrap();
+        let (deck, _, _) = incoming_deck(&rig);
+        assert_eq!(deck, rig.baseline_deck.0);
+        let binding = runtime.status().unwrap().binding.unwrap().id;
+        let entries = runtime.inbox_entries(binding).unwrap();
+        assert_eq!(entries.len(), 1);
+        let entry = &entries[0];
+        runtime
+            .set_inbox_reason_for_testing(binding, entry.id, reason.clone())
+            .unwrap();
+        let driver = rig.host.cloud_policy_driver().unwrap();
+        let run = command(
+            rig.host
+                .cloud_policy_input(DeviceEvent::SyncNowRequested(Source::Command))
+                .unwrap(),
+            |kind| matches!(kind, ActionKind::RunExchange { .. }),
+        );
+        let ActionKind::RunExchange { exchange, .. } = run.action.kind else {
+            unreachable!()
+        };
+        let native = driver.capture_exchange(&run, &collection).unwrap();
+        let captured = runtime.exchange_result(native).unwrap();
+        assert!(!runtime.tracking_sendables().contains_key(&entry.entry.record_name));
+        assert_eq!(captured.selected_names, [entry.entry.record_name.clone()].into());
+        assert_eq!(captured.outstanding_names, captured.selected_names);
+        let completed = runtime.adapter_complete_exchange(&rig.sdk, native, true, None).unwrap();
+        assert_eq!(completed.collection, CollectionOutcome::Incomplete, "{reason:?}");
+        assert_eq!(completed.result.outstanding_names, captured.selected_names);
+        assert!(completed.result.acked_names.is_empty());
+        let action = command(
+            driver
+                .complete_exchange(exchange, rig.host.engine().state(), rig.host.engine().generation())
+                .unwrap(),
+            |kind| matches!(kind, ActionKind::RecordExchange(_)),
+        );
+        let ActionKind::RecordExchange(record) = &action.action.kind else {
+            unreachable!()
+        };
+        assert_eq!(
+            record.outcome,
+            ExchangeOutcome::Incomplete {
+                outstanding: 1,
+                blocked: 0
+            }
+        );
+        assert_eq!(deck_row(&rig, deck), local);
+        assert_eq!(runtime.inbox_entries(binding).unwrap()[0].entry.reason, reason);
+        rig.host
+            .execute_cloud_policy_core(&action, Duration::from_secs(10))
+            .unwrap();
+        rig.host.close().unwrap();
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 enum CompletionClockEffect {
     Read,

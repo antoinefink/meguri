@@ -1291,7 +1291,10 @@ impl Driver {
                 selected: completed.result.selected_names.len() as u64,
                 held_back: projection.held_pending.union(&completed.result.held_back_names).count() as u64,
                 newer_pending: summary.pending_unheld,
-                incoming_waiting: summary.incoming_waiting,
+                incoming_waiting: completed
+                    .incoming
+                    .as_ref()
+                    .map_or(summary.incoming_waiting, |i| i.waiting),
                 media: summary.media.clone(),
             },
             CollectionOutcome::WaitingNoAccount => ExchangeOutcome::Waiting {
@@ -1300,7 +1303,10 @@ impl Driver {
             },
             CollectionOutcome::Incomplete => ExchangeOutcome::Incomplete {
                 outstanding: completed.result.outstanding_names.len() as u64,
-                blocked: summary.incoming_waiting,
+                blocked: completed
+                    .incoming
+                    .as_ref()
+                    .map_or(summary.incoming_waiting, |i| i.blocked),
             },
             CollectionOutcome::Failed => ExchangeOutcome::Failed {
                 class: owned
