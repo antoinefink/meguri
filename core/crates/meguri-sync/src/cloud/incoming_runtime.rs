@@ -1151,6 +1151,25 @@ impl Runtime {
                         && let Some((_, exchange)) = &mut s.actions.exchange
                     {
                         exchange.record_ack(&key.name, image);
+                        #[cfg(feature = "test-hooks")]
+                        if s.actions.smoke_acks.enabled
+                            && let Some(sdk) = &guard.sdk
+                        {
+                            let acknowledgements = &mut s.actions.smoke_acks;
+                            if acknowledgements.fetched.len() == 4096 {
+                                acknowledgements.overflow = true;
+                            } else {
+                                acknowledgements
+                                    .fetched
+                                    .push(super::super::workflow::SmokeHistoricalAck {
+                                        sdk: sdk.clone(),
+                                        name: key.name.clone(),
+                                        envelope_digest: codec::sha256(&e.acked_envelope.0),
+                                        image_seq: image.seq,
+                                        held: image.held,
+                                    });
+                            }
+                        }
                     }
                     if let Some(image) = flights
                         .iter()

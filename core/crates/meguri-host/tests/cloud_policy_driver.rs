@@ -1215,10 +1215,16 @@ fn lost_save_credits_its_original_image_through_conflict_and_fetch() {
                 before_capture
             );
             meguri_engine::decks::rename(&collection, rig.baseline_deck, "Local edit after capture".into()).unwrap();
-
-            if discover_by_fetch {
+            runtime.enable_smoke_acknowledgements_for_testing();
+            let server_digest = codec::sha256(&server.envelope);
+            let observations = if discover_by_fetch {
                 runtime.adapter_fetched(&rig.sdk, &rig.zone, &[server], &[]).unwrap();
-                runtime.drain_incoming(&collection, Duration::from_secs(10)).unwrap();
+                runtime
+                    .drain_native_incoming(&collection, &rig.sdk, Duration::from_secs(10))
+                    .unwrap();
+                let found = runtime.smoke_acknowledgements_for_testing(None).unwrap();
+                assert!(runtime.smoke_acknowledgements_for_testing(None).unwrap().is_empty());
+                found
             } else {
                 let retry = runtime.build_collection_batch(&rig.sdk, &collection, &names).unwrap();
                 assert_eq!(retry.saves.len(), 1);
@@ -1229,8 +1235,30 @@ fn lost_save_credits_its_original_image_through_conflict_and_fetch() {
                         .unwrap(),
                     1
                 );
+                let found = runtime
+                    .smoke_acknowledgements_for_testing(Some((&rig.sdk, retry.id)))
+                    .unwrap();
+                assert!(
+                    runtime
+                        .smoke_acknowledgements_for_testing(Some((&rig.sdk, batch.id)))
+                        .is_err()
+                );
                 runtime.return_sent_handler(&rig.sdk).unwrap();
-            }
+                assert!(
+                    runtime
+                        .smoke_acknowledgements_for_testing(Some((&rig.sdk, retry.id)))
+                        .is_err()
+                );
+                found
+            };
+            let [observation] = observations.as_slice() else {
+                panic!("expected one original acknowledgement")
+            };
+            assert_eq!(&observation.name, name);
+            assert_eq!(observation.sdk, rig.sdk);
+            assert_eq!(observation.envelope_digest, server_digest);
+            assert_eq!(observation.image_seq, flight.image_seq);
+            assert_eq!(observation.held, flight.held);
             let tracked = runtime.entity_facts(name).unwrap().unwrap();
             assert_eq!(tracked.acked_rev, flight.local_rev);
             assert!(tracked.local_rev > tracked.acked_rev && tracked.mark.is_some());

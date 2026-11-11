@@ -32,8 +32,11 @@ SEND = re.compile(r"send([1-9][0-9]*)(?:-batch([1-9][0-9]*))?(?:-entity([1-9][0-
 DELETE_COUNT = re.compile(r"batch([1-9][0-9]*)-delete-count")
 # Public CKError.Code values kept in the engine's pending list.
 KEPT_CODES = {3, 4, 6, 7, 9, 23, 36}
+SERVER_RECORD_CHANGED = 14
 SENT_PHASE = re.compile(r"sdk[1-9][0-9]*-sent-batch([1-9][0-9]*)-(committed|returned)")
-SAVED_IMAGE = re.compile(r"send([1-9][0-9]*)-batch([1-9][0-9]*)-entity([1-9][0-9]*)-image-(held|live)")
+SAVED_IMAGE = re.compile(r"send([1-9][0-9]*)-batch([1-9][0-9]*)-entity([1-9][0-9]*)-(?:(conflict)-)?image-(held|live)")
+FETCHED_MEMBER = re.compile(r"sdk([1-9][0-9]*)-fetched-entity([1-9][0-9]*)")
+OWN_LANDED = re.compile(r"sdk([1-9][0-9]*)-own-landed-entity([1-9][0-9]*)-(held|live)")
 PENDING = re.compile(r"entity([1-9][0-9]*)-(added|removed-held|removed-absent)")
 STATE_BATCHES = re.compile(r"sdk([1-9][0-9]*)-state-batches")
 CAPTURE_MEMBER = re.compile(r"exchange-selected-entity[1-9][0-9]*")
@@ -163,12 +166,15 @@ class Evidence(s.SmokeEvidence):
         self.pending = {}
         self.reflected = {}
         self.position = 0
+        self.fetched_members = {}
+        self.landed = {}
 
     @staticmethod
     def trace(item):
         operation = item.get("operation", "")
         return bool(s.TRACE.fullmatch(operation) or FETCH.fullmatch(operation) or SEND.fullmatch(operation) or
                     DELETE_COUNT.fullmatch(operation) or SAVED_IMAGE.fullmatch(operation) or
+                    FETCHED_MEMBER.fullmatch(operation) or OWN_LANDED.fullmatch(operation) or
                     pending_fact(operation) or state_batch_fact(operation) or operation in {
             "normal-adoption-generation-joined", "required-scan-before-native-sdk"})
 
@@ -204,13 +210,32 @@ class Evidence(s.SmokeEvidence):
             return True
         image = SAVED_IMAGE.fullmatch(operation)
         if image:
-            send, batch, entity, held = image.groups()
+            send, batch, entity, conflict, held = image.groups()
             s.evidence_shape(item, "engineCallback", engine=True)
             info = self.native_batches.get(batch)
+            expected = (f"save-error-{SERVER_RECORD_CHANGED}", self.position, SERVER_RECORD_CHANGED) if conflict else ("saved", self.position, None)
             need(info is not None and info["send"] == send and info["engine"] == item["engine"] and
-                 info["results"].get(entity) == ("saved", self.position, None) and entity not in info["images"],
+                 info["results"].get(entity) == expected and entity not in info["images"],
                  "selected-saved-image")
             info["images"][entity] = (item["count"], held == "held")
+            return True
+        member = FETCHED_MEMBER.fullmatch(operation)
+        landed = OWN_LANDED.fullmatch(operation)
+        if member or landed:
+            sdk, entity = (member or landed).groups()[:2]
+            callback = self.sdk.get(sdk)
+            need(callback is not None and callback[0] == "fetched" and callback[3] == item.get("engine"),
+                 "selected-own-landed")
+            key = (sdk, entity)
+            if member:
+                exact(item, "engineCallback", ("engine", "operation"))
+                need(len(callback[2]) == 2 and key not in self.fetched_members, "selected-fetched-member")
+                self.fetched_members[key] = self.position
+            else:
+                exact(item, "applied", ("count", "engine", "operation"))
+                need(len(callback[2]) == 3 and self.fetched_members.get(key, self.position) < self.position and
+                     key not in self.landed, "selected-own-landed")
+                self.landed[key] = (item["count"], landed[3] == "held")
             return True
         native = SEND.fullmatch(operation)
         if native is not None:
@@ -305,6 +330,13 @@ class Evidence(s.SmokeEvidence):
                      item["engine"] == facts[0]["engine"], "selected-result-group")
                 if phase == "saved" and self.batches[batch]["kind"] == "collection-handoff":
                     need(entity in self.native_batches[batch]["images"], "selected-saved-image")
+
+    def check_fetch_group(self, facts):
+        first = facts[0].get("operation", "")
+        for item in facts:
+            member = FETCHED_MEMBER.fullmatch(item.get("operation", ""))
+            if member:
+                need(first == "sdk" + member[1] + "-fetched-committed", "selected-fetched-member")
 
     def check_pending_group(self, facts):
         pending = [item for item in facts if pending_fact(item.get("operation", ""))]
@@ -439,10 +471,14 @@ class Journal(s.Journal):
         for record in self.records:
             for item in record["facts"] + [f for check in record["checks"] for f in check["facts"]]:
                 label = item.get("operation")
+                if OWN_LANDED.fullmatch(label or ""):
+                    exchange = 5 if self.kind == "mac" else 4
+                    need(record["kind"] == "observation" and record["command_seq"] == exchange, "selected-own-landed")
                 traced = s.TRACE.fullmatch(label or "")
                 need(label is None or label in labels or label in TERMINAL_LABELS or ACK.fullmatch(label) or
                      FETCH.fullmatch(label) or SEND.fullmatch(label) or DELETE_COUNT.fullmatch(label) or SAVED_IMAGE.fullmatch(label) or
                      pending_fact(label) or state_batch_fact(label) or CAPTURE_MEMBER.fullmatch(label) or
+                     FETCHED_MEMBER.fullmatch(label) or OWN_LANDED.fullmatch(label) or
                      (traced and (traced.group(2) is None or traced.group(2) in s.OWN_KINDS)),
                      "selected-public-fact")
         return complete, terminal
@@ -465,6 +501,7 @@ class Journal(s.Journal):
                 evidence.check_pending_group(record["facts"])
                 evidence.check_state_batch_group(record["facts"])
                 evidence.check_sent_group(record["facts"])
+                evidence.check_fetch_group(record["facts"])
             checks = self.done_checks.get(number)
             wanted = {1: ["integrity"], 2: ["coordinatorResult"], 3: ["coordinatorResult"],
                       4: ["localDurability"] if self.kind == "mac" else ["coordinatorResult"],
@@ -545,6 +582,11 @@ class Journal(s.Journal):
         capture = captures[0]
         need(source["record_seq"] < capture["record_seq"] < terminal["record_seq"] and
              source["agent_instance"] == capture["agent_instance"] == terminal["agent_instance"], "selected-exchange-capture")
+        for record in records:
+            landed = [item for item in record["facts"] if OWN_LANDED.fullmatch(item.get("operation", ""))]
+            if landed:
+                need(landed == record["facts"] and capture["record_seq"] < record["record_seq"] < terminal["record_seq"] and
+                     record["agent_instance"] == source["agent_instance"], "selected-own-landed")
         marker, boundary, *members = capture["facts"]
         exact(marker, "syncResult", count=issued["count"], operation="exchange-capture")
         exact(boundary, "syncResult", ("count",), operation="exchange-boundary")

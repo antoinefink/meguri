@@ -20,8 +20,8 @@ import Synchronization
         return try latest()
     }
 
-    func record(_ event: CloudSDKObservation) {
-        evidence.sdk(event)
+    func record(_ event: CloudSDKObservation, historical: [SmokeHistoricalAck] = []) {
+        evidence.sdk(event, historical: historical)
         flush(event: event)
     }
 
@@ -134,6 +134,7 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
         var saved: Set<String> = []
         var savedRecords: [String: Data] = [:]
         var results: [String: RecordResult] = [:]
+        var conflicts: [String: Data] = [:]
         var stateDigest: Data?
         var received: [String: Data] = [:]
         var zone: String?
@@ -461,7 +462,8 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
             } catch { s.failed = true }
         }
     }
-    func sdk(_ observation: CloudSDKObservation, current: SmokeCloudObservation? = nil) {
+    func sdk(_ observation: CloudSDKObservation, current: SmokeCloudObservation? = nil,
+             historical: [SmokeHistoricalAck] = []) {
         state.withLock { s in
             do {
                 guard !s.failed, !s.joined, let generation = s.generation else { throw AgentFailure.execution }
@@ -472,6 +474,7 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
                 let kind: String
                 let batch: EngineKey?
                 let saved: [CloudRecord]
+                var conflicts: [String: Data] = [:]
                 var results: [String: RecordResult] = [:]
                 var received: [String: Data] = [:]
                 var stateDigest: Data?
@@ -493,6 +496,9 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
                     for failure in failures {
                         guard let code = failure.nativeCode, code > 0,
                               results.updateValue(.saveError(code), forKey: failure.name) == nil else { throw AgentFailure.execution }
+                        if failure.code == .serverRecordChanged, let server = failure.serverRecord, server.name == failure.name {
+                            conflicts[failure.name] = Self.hash(server.envelope)
+                        }
                     }
                     for failure in failedDeletes {
                         guard let code = failure.nativeCode, code > 0,
@@ -514,18 +520,22 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
                     kind = "fetch-end"; batch = nil; saved = []; group = id
                 default: return
                 }
+                guard historical.isEmpty || kind == "sent" && observation.phase == .committed,
+                      Set(historical.map(\.name)).count == historical.count,
+                      historical.allSatisfy({ $0.sdk == origin && conflicts[$0.name] == $0.envelopeDigest })
+                else { throw AgentFailure.execution }
                 let savedRecords = Dictionary(uniqueKeysWithValues: saved.map { ($0.name, Self.hash($0.envelope)) })
                 if case .delivered = observation.phase {
                     guard s.callbacks.count < 1024, observation.ordinal > s.lastOrdinals[origin, default: 0],
                           s.callbacks.values.allSatisfy({ $0.engine != engine || $0.phase == 3 }) else { throw AgentFailure.execution }
                     s.lastOrdinals[origin] = observation.ordinal
                     var cb = Callback(alias: "sdk\(s.callbacks.count + 1)", engine: engine, kind: kind, batch: batch)
-                    cb.savedRecords = savedRecords; cb.results = results; cb.stateDigest = stateDigest
+                    cb.savedRecords = savedRecords; cb.results = results; cb.conflicts = conflicts; cb.stateDigest = stateDigest
                     cb.received = received; cb.zone = zone; cb.group = group
                     s.callbacks[key] = cb
                 }
                 guard var cb = s.callbacks[key], cb.kind == kind, cb.batch == batch,
-                      cb.savedRecords == savedRecords, cb.results == results, cb.stateDigest == stateDigest,
+                      cb.savedRecords == savedRecords, cb.results == results, cb.conflicts == conflicts, cb.stateDigest == stateDigest,
                       cb.received == received, cb.zone == zone, cb.group == group else { throw AgentFailure.execution }
                 let expected: Int
                 let suffix: String
@@ -549,6 +559,13 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
                 s.append(kind == "state" && expected == 1 ? .stateSaved : .engineCallback,
                          cb.alias + "-" + kind + batchLabel + "-" + suffix, engine: engine)
                 let callbackTick = s.tick
+                if kind == "fetched" && expected == 1 {
+                    for name in received.keys.sorted() {
+                        let entity = s.entity(name)
+                        s.facts.append(.init(name: .engineCallback, engine: engine,
+                                             operation: "\(cb.alias)-fetched-\(entity)"))
+                    }
+                }
                 if kind == "state" && expected == 1 {
                     if let pending = observation.pendingNames {
                         try s.reflectState(pending, engine: engine, callback: cb, callbackKey: key)
@@ -566,6 +583,10 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
                                 s.facts.append(.init(name: .engineCallback, count: image.imageSeq, engine: engine,
                                                      operation: label + (image.held ? "-image-held" : "-image-live")))
                             }
+                            if let image = historical.first(where: { $0.name == name }) {
+                                s.facts.append(.init(name: .engineCallback, count: image.imageSeq, engine: engine,
+                                                     operation: label + (image.held ? "-conflict-image-held" : "-conflict-image-live")))
+                            }
                             handed.open.remove(name)
                             handed.reported.insert(name)
                         }
@@ -582,6 +603,24 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
                 }
                 s.callbacks[key] = cb
             } catch { s.failed = true }
+        }
+    }
+    func fetchedAcknowledgementFacts(_ acknowledgements: [SmokeHistoricalAck]) throws -> [AgentFact] {
+        try state.withLock { s in
+            guard !s.failed, !s.joined else { throw AgentFailure.execution }
+            var operations = Set<String>()
+            return try acknowledgements.map { image in
+                let received = s.callbacks.values.filter {
+                    $0.kind == "fetched" && $0.phase == 3 && $0.engine == s.engineLabels[image.sdk] &&
+                        $0.received[image.name] == image.envelopeDigest
+                }
+                guard received.count == 1, let callback = received.first, let entity = s.entities[image.name]
+                else { throw AgentFailure.execution }
+                let label = "\(callback.alias)-own-landed-\(entity)"
+                guard operations.insert(label).inserted else { throw AgentFailure.execution }
+                return .init(name: .applied, count: image.imageSeq, engine: callback.engine,
+                             operation: label + (image.held ? "-held" : "-live"))
+            }
         }
     }
     func batch(origin: String, batch: CloudEngineBatch, proof: SmokeBatchProof?, current: SmokeCloudObservation,

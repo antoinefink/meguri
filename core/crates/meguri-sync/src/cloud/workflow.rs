@@ -128,6 +128,23 @@ pub struct SmokeBatchProof {
     pub images: Vec<SmokeReviewImage>,
     pub save_images: Vec<SmokeReviewImage>,
 }
+#[cfg(feature = "test-hooks")]
+#[derive(Clone)]
+pub struct SmokeHistoricalAck {
+    pub sdk: String,
+    pub name: String,
+    pub envelope_digest: [u8; 32],
+    pub image_seq: u64,
+    pub held: bool,
+}
+#[cfg(feature = "test-hooks")]
+#[derive(Default)]
+pub(crate) struct SmokeHistoricalAcks {
+    pub enabled: bool,
+    pub conflicts: Vec<SmokeHistoricalAck>,
+    pub fetched: Vec<SmokeHistoricalAck>,
+    pub overflow: bool,
+}
 /// Compact test evidence; historical images never cross this API.
 #[cfg(feature = "test-hooks")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -539,6 +556,8 @@ pub(crate) struct MediaBatch {
 pub(crate) struct Actions {
     #[cfg(feature = "test-hooks")]
     pub smoke_batches: BTreeMap<(String, u64), Option<SmokeBatchProof>>,
+    #[cfg(feature = "test-hooks")]
+    pub smoke_acks: SmokeHistoricalAcks,
     pub request_flights: BTreeMap<(String, u64), BTreeMap<String, HandedSave>>,
     pub payload_uploads: BTreeMap<(String, u64), Vec<tempfile::TempPath>>,
     pub payload_upload_sends: BTreeMap<(String, u64), BTreeSet<u64>>,

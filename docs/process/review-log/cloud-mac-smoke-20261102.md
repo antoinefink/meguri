@@ -295,3 +295,20 @@ order and compatibility with older exchange rows. Rust run `29406` passes
 29 tests, including both discovery paths on either side of the capture.
 Core lint run `30752` passes. The signed journal still
 needs the original conflict and fetch acknowledgement facts for replay.
+
+## Original evidence for lost saves
+
+Starting commit `96dfaf5b`. The selected test reads Core's conflict
+acknowledgement only while its sent handler still owns the exact batch. The
+app checks the original reply before writing the image sequence and held
+flag in the callback's record. A fetched save is recorded only after its
+incoming settle. The app matches it to a completed fetch of the same
+envelope, then appends it before the original exchange result.
+
+Direct review checked original batch ownership, fetch member identity and
+journal order. The host refuses a conflict image attached to a successful
+save, an applied acknowledgement for the wrong fetch member, and one
+written after the exchange result. Rust run `32033` passes both focused
+checks. Mac VM run `32306`, host run `33874` and core lint run `35377` pass.
+Swift instrumentation run `36196` passes seven tests.
+Replay and the signed round trip remain open.

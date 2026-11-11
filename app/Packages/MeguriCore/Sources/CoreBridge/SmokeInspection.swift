@@ -72,6 +72,13 @@ public struct SmokeBatchProof: Sendable {
         saveImages = r.saveImages.map(SmokeReviewImage.init)
     }
 }
+public struct SmokeHistoricalAck: Sendable {
+    public let sdk: String
+    public let name: String
+    public let envelopeDigest: Data
+    public let imageSeq: UInt64
+    public let held: Bool
+}
 public actor CoreSmokeInspection {
     public init() {}
     public nonisolated static func samePreview(_ lhs: CloudConnectionPreview, _ rhs: CloudConnectionPreview) -> Bool {
@@ -80,6 +87,13 @@ public actor CoreSmokeInspection {
     public func batch(sdk: String, id: UInt64) async throws -> SmokeBatchProof {
         try await QueryLane.shared.call(.testCloudSmokeBatch) {
             try SmokeBatchProof(MeguriCoreBindings.testCloudSmokeBatch(sdk: sdk, batchId: id))
+        }
+    }
+    public func historicalAcknowledgements(sdk: String? = nil, batch: UInt64? = nil) async throws -> [SmokeHistoricalAck] {
+        try await QueryLane.shared.call(.testCloudSmokeAcknowledgements) {
+            try MeguriCoreBindings.testCloudSmokeAcknowledgements(sdk: sdk, batchId: batch).map {
+                .init(sdk: $0.sdk, name: $0.name, envelopeDigest: $0.envelopeDigest, imageSeq: $0.imageSeq, held: $0.held)
+            }
         }
     }
     public func review(sdk: String, cardID: Int64, revlogID: Int64) async throws -> SmokeBatchProof {

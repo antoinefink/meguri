@@ -593,11 +593,18 @@ import Foundation
                     try evidence.admitSDK(origin: configuration.instanceID, control: control, replacement: replacement)
                 }, failed: { [evidence] in evidence.fail() })
             }
+            let observeHistorical = program != .smoke
             let production = try await NativeCollectionCloudBackend.make(workflow: workflow,
                 factory: factory, ownTransport: ownTransport, mediaTransport: mediaTransport, persisted: persisted,
                 observeEvent: { [evidence, callbackJournal] event in
-                    await callbackJournal.record(event)
                     do {
+                        let historical: [SmokeHistoricalAck]
+                        if observeHistorical, case .committed = event.phase,
+                           case .sent(let batch, _, let failed, _, _) = event.event,
+                           failed.contains(where: { $0.code == .serverRecordChanged }) {
+                            historical = try await CoreSmokeInspection().historicalAcknowledgements(sdk: event.origin, batch: batch)
+                        } else { historical = [] }
+                        await callbackJournal.record(event, historical: historical)
                         let current = try await CoreSmokeInspection().cloud()
                         evidence.validate(origin: event.origin, current: current)
                     } catch { evidence.fail() }
@@ -606,7 +613,7 @@ import Foundation
                     await self?.backend?.recordCapture(command, runtimeID: runtimeID, evidence: evidence)
                 })
             try admission.revalidate()
-            let wrapper = CloudKitSmokeBackend(production: production, workflow: workflow)
+            let wrapper = CloudKitSmokeBackend(production: production, workflow: workflow, evidence: evidence)
             backend = wrapper
             return wrapper
         }, defaults: nil, clock: .system, directory: data, observeSignals: false)
@@ -841,6 +848,7 @@ import Foundation
 @MainActor private final class CloudKitSmokeBackend: SyncCoordinatorBackend {
     let production: NativeCollectionCloudBackend
     let workflow: CoreCloudWorkflowService
+    private let evidence: CloudKitSmokeEvidence
     var watchPublication = false
     private(set) var publicationOperations: [SmokeCloudObservation] = []
     var connection: CoreCloudConnectionService? { production.connection }
@@ -850,8 +858,8 @@ import Foundation
     private var requestedExchange: UInt64?
     var observeOriginalIssuance: ((AgentFact) throws -> Void)?
     var observeOriginalTerminal: AgentObservationWriter?
-    init(production: NativeCollectionCloudBackend, workflow: CoreCloudWorkflowService) {
-        self.production = production; self.workflow = workflow
+    init(production: NativeCollectionCloudBackend, workflow: CoreCloudWorkflowService, evidence: CloudKitSmokeEvidence) {
+        self.production = production; self.workflow = workflow; self.evidence = evidence
     }
     private func observePublication() async throws {
         guard watchPublication else { return }
@@ -899,7 +907,11 @@ import Foundation
         let result = await production.execute(command)
         if result.error == nil, !result.deferred, case .recordExchange(let record) = command.action {
             if record.exchange == requestedExchange, let observeOriginalTerminal {
-                do { try observeOriginalTerminal(CloudKitSelectedSyncProof.terminalExchangeFacts(record)) }
+                do {
+                    let applied = try await CoreSmokeInspection().historicalAcknowledgements()
+                    if !applied.isEmpty { try observeOriginalTerminal(evidence.fetchedAcknowledgementFacts(applied)) }
+                    try observeOriginalTerminal(CloudKitSelectedSyncProof.terminalExchangeFacts(record))
+                }
                 catch { exchanges.fail((error as? AgentFailure) ?? .journal) }
             }
         }

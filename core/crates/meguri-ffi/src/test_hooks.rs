@@ -889,7 +889,7 @@ mod cloud_smoke;
 pub use cloud_smoke::{
     CloudSelectedControlObservation, CloudSelectedMissing, CloudSelectedProof, CloudSelectedProvenance,
     CloudSelectedPublicationEvent, CloudSelectedPublicationKind, CloudSelectedReplyOrigin, CloudSmokeEntity,
-    CloudSmokeObservation, SmokeBatchProof, SmokeIntegrityObservation, SmokeReviewImage,
+    CloudSmokeHistoricalAck, CloudSmokeObservation, SmokeBatchProof, SmokeIntegrityObservation, SmokeReviewImage,
 };
 
 #[uniffi::export]
@@ -914,6 +914,19 @@ pub fn test_cloud_selected_publication_event(
 pub fn test_cloud_smoke_batch(sdk: String, batch_id: u64) -> Result<SmokeBatchProof, CoreError> {
     callback::enter("test_cloud_smoke_batch");
     cloud_smoke::batch(sdk, batch_id)
+}
+#[uniffi::export]
+pub fn test_cloud_smoke_acknowledgements(
+    sdk: Option<String>,
+    batch_id: Option<u64>,
+) -> Result<Vec<CloudSmokeHistoricalAck>, CoreError> {
+    callback::enter("test_cloud_smoke_acknowledgements");
+    let callback = match (sdk.as_deref(), batch_id) {
+        (Some(sdk), Some(batch)) => Some((sdk, batch)),
+        (None, None) => None,
+        _ => return Err(crate::sync::cloud_error("invalid acknowledgement scope")),
+    };
+    cloud_smoke::acknowledgements(callback)
 }
 
 /// Fixed Card/Revlog eligible projection for the current real review session.

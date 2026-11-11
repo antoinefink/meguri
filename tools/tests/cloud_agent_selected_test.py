@@ -154,6 +154,8 @@ def journal_bytes(kind, checks, observations, through=6, header_value=None):
             return "capture"
         if label.endswith("-state-committed") or c.state_batch_fact(label):
             return label.split("-")[0]
+        if label.endswith("-fetched-committed") or c.FETCHED_MEMBER.fullmatch(label):
+            return label.split("-")[0]
         callback = c.SENT_PHASE.fullmatch(label)
         if callback:
             return callback.groups()
@@ -236,8 +238,8 @@ class SelectedTests(unittest.TestCase):
         evidence.acknowledged(ack)
         evidence.joined([fact("ownedWorkJoined", "own-joined", 0), fact("ownedWorkJoined", "sdk-joined", 3)])
 
-    def test_delete_results_require_their_own_batch_and_state(self):
-        for phase in ("delete-error-3", "deleted", "delete-error-11", "saved"):
+    def test_results_require_their_own_batch_and_state(self):
+        for phase in ("delete-error-3", "deleted", "delete-error-11", "saved", "save-error-14"):
             evidence = c.Evidence()
 
             def group(*labels, name="engineCallback"):
@@ -251,9 +253,12 @@ class SelectedTests(unittest.TestCase):
                 evidence.check_state_batch_group(items)
 
             group("required-scan-before-native-sdk", "batch1-media-handoff", name="applied")
-            evidence.ingest(fact("applied", "batch1-save-count", 0, engine=True))
-            evidence.ingest(fact("applied", "batch1-delete-count", 1, engine=True))
-            group("send1-batch1-manual-build", "send1-batch1-entity1-delete-member", name="applied")
+            conflict = phase == "save-error-14"
+            evidence.ingest(fact("applied", "batch1-save-count", int(conflict), engine=True))
+            member = "send1-batch1-entity1-member" if conflict else "send1-batch1-entity1-delete-member"
+            if not conflict:
+                evidence.ingest(fact("applied", "batch1-delete-count", 1, engine=True))
+            group("send1-batch1-manual-build", member, name="applied")
             group("sdk1-sent-batch1-delivered")
             result = "send1-batch1-entity1-" + phase
             if phase == "saved":
@@ -261,6 +266,11 @@ class SelectedTests(unittest.TestCase):
                     group("sdk1-sent-batch1-committed", result)
                 continue
             group("sdk1-sent-batch1-committed", result)
+            if conflict:
+                image = fact("engineCallback", "send1-batch1-entity1-conflict-image-held", 9, engine=True)
+                evidence.ingest(image)
+                evidence.check_sent_group([fact("engineCallback", "sdk1-sent-batch1-committed", engine=True), image])
+                self.assertEqual(evidence.native_batches["1"]["images"]["1"], (9, True))
             group("sdk1-sent-batch1-returned", "send1-batch1-batch-returned")
             own = fact("ownedWorkJoined", "own-joined", 0)
             if phase != "delete-error-3":
@@ -417,6 +427,47 @@ class SelectedTests(unittest.TestCase):
         for mutate in (missing, wrong_member):
             with self.assertRaisesRegex(s.v.Refused, "selected-saved-image"):
                 admitted("mac", mutate=mutate)
+
+    def test_landed_save_requires_the_original_fetched_member(self):
+        def original_fetch(checks, observations):
+            items = observations[4]
+            trace = [item for item in items if c.FETCH.fullmatch(item.get("operation", ""))]
+            fetched = next(item for item in trace if item["operation"].endswith("-fetched-committed"))
+            sdk = fetched["operation"].split("-")[0]
+            trace.insert(trace.index(fetched) + 1, fact("engineCallback", sdk + "-fetched-entity1", engine=True))
+            trace.append(fact("applied", sdk + "-own-landed-entity1-held", 9, engine=True))
+            items = [item for item in items if not c.FETCH.fullmatch(item.get("operation", ""))]
+            terminal = next(i for i, item in enumerate(items) if item.get("operation") in c.TERMINAL_LABELS)
+            observations[4] = items[:terminal] + trace + items[terminal:]
+
+        admitted("iphone", mutate=original_fetch)
+
+        def wrong_member(checks, observations):
+            original_fetch(checks, observations)
+            for item in observations[4]:
+                if c.OWN_LANDED.fullmatch(item.get("operation", "")):
+                    item["operation"] = item["operation"].replace("entity1", "entity2")
+
+        with self.assertRaisesRegex(s.v.Refused, "selected-own-landed"):
+            admitted("iphone", mutate=wrong_member)
+
+        def late(checks, observations):
+            original_fetch(checks, observations)
+            items = observations[4]
+            index = next(i for i, item in enumerate(items) if c.OWN_LANDED.fullmatch(item.get("operation", "")))
+            items.append(items.pop(index))
+
+        with self.assertRaisesRegex(s.v.Refused, "selected-own-landed"):
+            admitted("iphone", mutate=late)
+
+    def test_conflict_image_cannot_borrow_a_successful_save(self):
+        def wrong_result(checks, observations):
+            for item in observations[5]:
+                if item.get("operation") == "send1-batch1-entity1-image-live":
+                    item["operation"] = "send1-batch1-entity1-conflict-image-live"
+
+        with self.assertRaisesRegex(s.v.Refused, "selected-saved-image"):
+            admitted("mac", mutate=wrong_result)
 
     def test_acknowledgement_requires_its_actual_saved_batch_member(self):
         def substitute(checks, observations):

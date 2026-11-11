@@ -165,6 +165,38 @@ import Testing
             #expect(facts.dropLast().last?.operation == "send1-batch1-entity1-saved")
         }
     }
+    @Test func originalConflictAndFetchKeepTheirHistoricalImage() throws {
+        let origin = "generated-engine"
+        let name = entity("n1").recordName
+        let landed = CloudRecord(name: name, envelope: Data([1]), systemFields: Data([2]))
+        let retry = CloudRecord(name: name, envelope: Data([3]), systemFields: Data([2]))
+        let original = SmokeHistoricalAck(sdk: origin, name: name, envelopeDigest: Data(SHA256.hash(data: landed.envelope)),
+                                          imageSeq: 9, held: true)
+        let conflict = try ledger(selected: true)
+        try conflict.admitSmokeSDK(origin: origin)
+        let operation = CloudNativeSendOperation(identity: UUID(), reason: .manual)
+        conflict.batch(origin: origin, batch: .init(id: 1, saves: [retry], deletes: []),
+                       proof: nil, current: current(), operation: operation)
+        let failure = CloudRecordFailure(name: name, code: .serverRecordChanged, nativeCode: 14, serverRecord: landed)
+        let sent = CloudEngineEvent.sent(batchID: 1, saved: [], failed: [failure], deleted: [])
+        conflict.sdk(.init(origin: origin, ordinal: 1, event: sent, phase: .delivered), current: current())
+        conflict.sdk(.init(origin: origin, ordinal: 1, event: sent, phase: .committed), current: current(), historical: [original])
+        try conflict.check()
+        #expect(conflict.drain().last == .init(name: .engineCallback, count: 9, engine: "engine1",
+                                               operation: "send1-batch1-entity1-conflict-image-held"))
+
+        let fetched = try ledger(selected: true)
+        try fetched.admitSmokeSDK(origin: origin)
+        let page = CloudEngineEvent.fetched(zone: "generated-zone", records: [landed], deleted: [])
+        for phase in [CloudSDKObservationPhase.delivered, .committed] {
+            fetched.sdk(.init(origin: origin, ordinal: 1, event: page, phase: phase), current: current())
+        }
+        #expect(fetched.drain().contains(.init(name: .engineCallback, engine: "engine1", operation: "sdk1-fetched-entity1")))
+        #expect(throws: AgentFailure.execution) { try fetched.fetchedAcknowledgementFacts([original]) }
+        fetched.sdk(.init(origin: origin, ordinal: 1, event: page, phase: .returned), current: current())
+        #expect(try fetched.fetchedAcknowledgementFacts([original]) ==
+                [.init(name: .applied, count: 9, engine: "engine1", operation: "sdk1-own-landed-entity1-held")])
+    }
     @Test func originalOwnAttemptRequiresPrepareEnqueueReplyThenCommit() throws {
         let identity = UUID()
         let metadata = CloudOwnMetadata(operationID: Data([1]), attempt: 4, kind: .createZones)

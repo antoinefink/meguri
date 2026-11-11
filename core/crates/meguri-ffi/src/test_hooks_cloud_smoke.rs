@@ -266,6 +266,32 @@ pub struct SmokeBatchProof {
     pub images: Vec<SmokeReviewImage>,
     pub save_images: Vec<SmokeReviewImage>,
 }
+#[derive(uniffi::Record)]
+pub struct CloudSmokeHistoricalAck {
+    pub sdk: String,
+    pub name: String,
+    pub envelope_digest: Vec<u8>,
+    pub image_seq: u64,
+    pub held: bool,
+}
+pub fn acknowledgements(callback: Option<(&str, u64)>) -> Result<Vec<CloudSmokeHistoricalAck>, CoreError> {
+    let host = runtime::host()?;
+    let core = host
+        .cloud_runtime()
+        .ok_or_else(|| cloud_error("cloud fixture unavailable"))?;
+    Ok(core
+        .smoke_acknowledgements_for_testing(callback)
+        .map_err(cloud_error)?
+        .into_iter()
+        .map(|ack| CloudSmokeHistoricalAck {
+            sdk: ack.sdk,
+            name: ack.name,
+            envelope_digest: ack.envelope_digest.to_vec(),
+            image_seq: ack.image_seq,
+            held: ack.held,
+        })
+        .collect())
+}
 impl From<meguri_sync::cloud::workflow::SmokeBatchProof> for SmokeBatchProof {
     fn from(v: meguri_sync::cloud::workflow::SmokeBatchProof) -> Self {
         Self {

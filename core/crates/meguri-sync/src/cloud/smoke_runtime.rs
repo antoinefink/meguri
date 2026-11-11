@@ -8,6 +8,28 @@ use crate::cloud::{
 use meguri_engine::undo::holdback::HeldBackRun;
 
 impl Runtime {
+    pub fn enable_smoke_acknowledgements_for_testing(&self) {
+        self.state().actions.smoke_acks.enabled = true;
+    }
+
+    pub fn smoke_acknowledgements_for_testing(
+        &self,
+        callback: Option<(&str, u64)>,
+    ) -> Result<Vec<SmokeHistoricalAck>, RuntimeError> {
+        let mut state = self.state();
+        if let Some((sdk, request)) = callback {
+            Self::caller_locked(&state, sdk)?;
+            if state.actions.handler != Some(request) {
+                return Err(Error::InvalidData.into());
+            }
+            return Ok(state.actions.smoke_acks.conflicts.clone());
+        }
+        if state.actions.smoke_acks.overflow {
+            return Err(Error::InvalidData.into());
+        }
+        Ok(std::mem::take(&mut state.actions.smoke_acks.fetched))
+    }
+
     pub(super) fn smoke_project_image(
         &self,
         guard: &ScanGuard,

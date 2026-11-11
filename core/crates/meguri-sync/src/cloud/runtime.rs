@@ -1499,7 +1499,7 @@ impl Runtime {
         instance: &str,
         id: u64,
     ) -> Result<(u64, Vec<String>), RuntimeError> {
-        let state = self.state();
+        let mut state = self.state();
         Self::caller_locked(&state, instance)?;
         let (_, capture) = state
             .actions
@@ -1507,7 +1507,9 @@ impl Runtime {
             .as_ref()
             .filter(|(active, _)| *active == id)
             .ok_or(RuntimeError::StaleIncarnation)?;
-        Ok((capture.boundary_seq, capture.selected_names.iter().cloned().collect()))
+        let result = (capture.boundary_seq, capture.selected_names.iter().cloned().collect());
+        state.actions.smoke_acks.enabled = true;
+        Ok(result)
     }
 
     /// Counts actual workflow entity body materializations on the last observer callback.

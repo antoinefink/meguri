@@ -461,12 +461,17 @@ impl Runtime {
     pub fn enter_sent_handler(&self, instance: &str, request_id: u64) -> Result<(), RuntimeError> {
         let mut s = self.state();
         Self::caller_locked(&s, instance)?;
-        Ok(s.actions.begin_handler(request_id)?)
+        s.actions.begin_handler(request_id)?;
+        #[cfg(feature = "test-hooks")]
+        s.actions.smoke_acks.conflicts.clear();
+        Ok(())
     }
     pub fn return_sent_handler(&self, instance: &str) -> Result<u64, RuntimeError> {
         let mut s = self.state();
         Self::caller_locked(&s, instance)?;
         let request = s.actions.end_handler()?;
+        #[cfg(feature = "test-hooks")]
+        s.actions.smoke_acks.conflicts.clear();
         let key = (instance.to_owned(), request);
         s.actions.request_flights.remove(&key);
         s.policy.flights.remove(&key);
@@ -2005,6 +2010,16 @@ impl Runtime {
                     Self::acknowledge_sent_locked(&mut s, collection, server, received, at_ms, &mut force, None)?;
                     if let Some(image) = image {
                         acknowledged.push((&server.name, image));
+                        #[cfg(feature = "test-hooks")]
+                        if s.actions.smoke_acks.enabled {
+                            s.actions.smoke_acks.conflicts.push(SmokeHistoricalAck {
+                                sdk: instance.to_owned(),
+                                name: server.name.clone(),
+                                envelope_digest: codec::sha256(&server.envelope),
+                                image_seq: image.seq,
+                                held: image.held,
+                            });
+                        }
                     }
                     saved_count += 1;
                 } else {
