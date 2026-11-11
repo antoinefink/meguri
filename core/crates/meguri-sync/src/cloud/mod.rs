@@ -5,6 +5,7 @@
 //! recovery protocol and active-epoch collection adoption. Structural
 //! generations remain refused before replacement; media uses its own durable executor.
 
+mod acknowledgement_store;
 pub mod adapter;
 mod adapter_store;
 pub mod adoption;

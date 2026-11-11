@@ -105,6 +105,7 @@ impl TrackingStore {
     /// A missing extension installs an empty one; no ack is inferred. A future
     /// extension is refused before any DDL or data mutation.
     pub(super) fn install_runtime(&mut self) -> Result<(), Error> {
+        super::acknowledgement_store::validate(&self.connection)?;
         let exists = check_version(&self.connection)?;
         if !exists {
             let transaction = self.connection.transaction()?;

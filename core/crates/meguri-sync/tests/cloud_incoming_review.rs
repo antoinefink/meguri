@@ -15,6 +15,77 @@ use meguri_testkit::cloud::{
 };
 use support::*;
 
+fn closed_ack_sequence(directory: &std::path::Path, name: &str) -> (u64, u64) {
+    use meguri_sync::cloud::{BuildScope, ContainerId, Environment, OpenOutcome, TrackingStore};
+    let build = BuildScope {
+        container: ContainerId::new(scope().container).unwrap(),
+        environment: Environment::Development,
+    };
+    meguri_sync::cloud::runtime::with_tracking_access(|| {
+        let store = match TrackingStore::open(directory, build).unwrap() {
+            OpenOutcome::Opened(store) => store,
+            _ => panic!("expected intact tracking after close"),
+        };
+        let binding = store.selected_binding().unwrap().unwrap().id;
+        (
+            store.binding_acknowledgement_sequence(binding).unwrap(),
+            store
+                .entity_acknowledgement_sequence(binding, name)
+                .unwrap()
+                .expect("actual ACK must have a durable sequence"),
+        )
+    })
+}
+
+#[test]
+fn actual_save_and_incoming_apply_advance_durable_ack_sequences_but_replayed_fetch_does_not() {
+    let mut pair = Pair::adopted();
+    let sender_dir = pair.root.path().join("sender");
+    let note = notes(&mut pair.sender).into_iter().next().unwrap();
+    let binding = pair.sender.facts().unwrap().current.unwrap();
+    let name = meguri_sync::cloud::entity_codec::entity_name(
+        &binding.facts.record_key.0,
+        meguri_sync::cloud::entity_codec::Kind::Note,
+        &meguri_sync::cloud::entity_codec::id_key(note.id),
+    )
+    .unwrap();
+    pair.close();
+    let sender_before = closed_ack_sequence(&sender_dir, &name);
+    let receiver_before = closed_ack_sequence(&pair.receiver_dir, &name);
+    assert!(sender_before.1 > 0 && sender_before.1 <= sender_before.0);
+    assert!(receiver_before.1 > 0 && receiver_before.1 <= receiver_before.0);
+
+    pair.sender = online(&sender_dir, false);
+    pair.receiver = online(&pair.receiver_dir, false);
+    pair.sender.advance_clock_ms(7_000).unwrap();
+    pair.sender
+        .driver()
+        .edit_note_fields(note.id, &["sequence edited question", "sequence edited answer"])
+        .unwrap();
+    pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    assert_eq!(notes(&mut pair.sender), notes(&mut pair.receiver));
+    assert!(
+        notes(&mut pair.receiver)
+            .iter()
+            .any(|row| row.id == note.id && row.flds == b"sequence edited question\x1fsequence edited answer")
+    );
+    pair.close();
+    let sender_after = closed_ack_sequence(&sender_dir, &name);
+    let receiver_after = closed_ack_sequence(&pair.receiver_dir, &name);
+    assert!(sender_after.0 > sender_before.0 && sender_after.1 > sender_before.1);
+    assert!(receiver_after.0 > receiver_before.0 && receiver_after.1 > receiver_before.1);
+    assert!(sender_after.1 <= sender_after.0 && receiver_after.1 <= receiver_after.0);
+
+    pair.sender = online(&sender_dir, false);
+    pair.receiver = online(&pair.receiver_dir, false);
+    pair.sender.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    pair.close();
+    assert_eq!(closed_ack_sequence(&sender_dir, &name), sender_after);
+    assert_eq!(closed_ack_sequence(&pair.receiver_dir, &name), receiver_after);
+}
+
 fn history(rig: &mut PublicationRig) -> Vec<Revlog> {
     rig.driver()
         .collection_rows()

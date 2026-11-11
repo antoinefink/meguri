@@ -62,6 +62,8 @@ fn remove_op(tx: &Transaction<'_>, scope: &BuildScope, id: [u8; 16]) -> Result<(
 // Binding work owned by the current storage representations (V17.6).
 // Expiry reads this same inventory; it must never call remove_work.
 pub(super) const WORK_TABLES: &[&str] = &[
+    "cloud_ack_entities",
+    "cloud_ack_bindings",
     "cloud_refused",
     "cloud_absence_seen",
     "cloud_absence_result",

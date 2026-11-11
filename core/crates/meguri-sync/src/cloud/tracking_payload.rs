@@ -365,6 +365,7 @@ pub(super) fn put_header(tx: &Transaction<'_>, b: BindingId, h: &Header) -> Resu
         tx.execute("INSERT INTO cloud_runtime_entities(binding,kind,key,content) VALUES(?1,?2,?3,?4) ON CONFLICT(binding,kind,key) DO UPDATE SET content=excluded.content",
             params![b.0.as_slice(), e.kind as i64, &e.key, encode(&Stored { value: &e, payload_images: h.images.clone() })?])?;
     }
+    super::acknowledgement_store::observe(tx, b, e, old_text.as_deref())?;
     if let Some(old) = old_images {
         collect(
             tx,
@@ -466,6 +467,7 @@ pub(super) fn collect_removed(
     name: &str,
     images: Option<Images>,
 ) -> Result<(), Error> {
+    super::acknowledgement_store::forget(tx, b, name)?;
     if let Some(images) = images {
         collect(tx, b, name, images.all())?;
     }

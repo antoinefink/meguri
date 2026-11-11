@@ -634,3 +634,35 @@ cloudkit-recovery V10.2 still needs work. Exact journal cause, historical
 close authority, the host relaunch path, signed round trip and full batch
 gate also remain open. Mac recovered completion stays disabled. No Unit or
 release acceptance is claimed.
+
+## Durable acknowledgement sequences
+
+Starting commit `78e70299`; batch base remains `1416a520`.
+The shared entity-header write now assigns each new stored ACK version a
+per-binding sequence and retains that entity's latest value. Header, counter
+and caller's tracking changes share one transaction. Duplicate ACKs, local
+edits and scans do not advance it. Installing the additive extension leaves
+old headers unchanged and gives their historical ACKs no invented position.
+Binding cleanup includes both new metadata tables.
+
+Run `42540` fails for the missing counter table. The final primitive test
+calls the counter writer directly; it proves transactional storage, not a
+native save. Run `45090` passes eight cases, including the actual Service
+publication/adoption, edit, save, incoming apply and reopen path. It checks
+the closed tracking file after both peers stop, then proves unchanged fetch
+replay leaves both sequences intact. Scope refusal, rollback, overflow,
+legacy installation and future-version refusal also pass.
+
+The broader run `45399` passes 490 of 491 tests. The large-note restart case
+exceeds its 300 MB heap limit. Baseline run `45887`, with all tracked changes
+temporarily restored to `78e70299`, reproduces the exact 587714692-byte peak.
+All prepared files were then restored byte for byte. The failure stays open;
+no assertion, limit or enabled test changed. Lint `46264`, source privacy
+`46535` and similarity `46823` pass.
+
+Direct review checked schema installation, write/rollback order, scoped reads,
+duplicate handling and cleanup. No independent review ran. Confirmation marks
+and the all-selected recovery proof do not yet consume these sequences.
+Historical close authority, host relaunch, the full batch gate and the real
+signed round trip remain open. Mac recovered completion stays disabled;
+this is unaccepted implementation progress, with no Unit trailer.

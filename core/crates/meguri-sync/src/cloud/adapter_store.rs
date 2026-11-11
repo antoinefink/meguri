@@ -147,6 +147,7 @@ impl TrackingStore {
 // Runtime V3 adds metadata only: ordinary entity JSON and every older inbox stay intact.
 // Triggers cover all binding writers, including recovery and explicit state deletion.
 pub(super) fn install(c: &Connection) -> Result<(), Error> {
+    super::acknowledgement_store::install(c)?;
     c.execute_batch("CREATE TABLE IF NOT EXISTS cloud_adapter_state(binding BLOB PRIMARY KEY REFERENCES bindings(id), content TEXT NOT NULL CHECK(json_valid(content)));
         CREATE TABLE IF NOT EXISTS cloud_absence_seen(binding BLOB NOT NULL REFERENCES bindings(id), name TEXT NOT NULL, pass BLOB NOT NULL CHECK(length(pass)=16), PRIMARY KEY(binding,name));
         CREATE TABLE IF NOT EXISTS cloud_absence_result(binding BLOB PRIMARY KEY REFERENCES bindings(id), pass BLOB NOT NULL CHECK(length(pass)=16), zone TEXT NOT NULL, completed_at_ms INTEGER NOT NULL, names TEXT NOT NULL CHECK(json_valid(names)));
