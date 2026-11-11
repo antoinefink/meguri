@@ -187,6 +187,7 @@ nonisolated final class CloudServicePreparedFrame: Sendable {
 private nonisolated final class CloudServiceProcessWorker: @unchecked Sendable {
     let queue = DispatchQueue(label: "Meguri.CloudServiceProcess.stdio")
     private let process = Process()
+    private let processCompletion = DispatchSemaphore(value: 0)
     private let input = Pipe()
     private let output = Pipe()
     private let error = Pipe()
@@ -222,6 +223,8 @@ private nonisolated final class CloudServiceProcessWorker: @unchecked Sendable {
         guard fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1) != -1 else {
             throw CloudServiceProcessFailure.configuration
         }
+        // Retain an early completion signal without capturing this worker or process.
+        process.terminationHandler = { [processCompletion] _ in processCompletion.signal() }
         do { try process.run() }
         catch { throw CloudServiceProcessFailure.launch }
         input.fileHandleForReading.closeFile()
@@ -374,7 +377,8 @@ private nonisolated final class CloudServiceProcessWorker: @unchecked Sendable {
             if drained > frameLimit { stop() }
         }
         output.fileHandleForReading.closeFile()
-        process.waitUntilExit()
+        // Launch occurs on another queue; join its callback before reading status.
+        processCompletion.wait()
         diagnosticJoin.wait()
         let diagnostic = diagnostics.withLock { $0 }
         let exit = CloudServiceProcessExit(status: process.terminationStatus, diagnostics: diagnostic.bytes,
