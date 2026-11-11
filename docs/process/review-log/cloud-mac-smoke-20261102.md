@@ -525,3 +525,30 @@ opaque labels and matching SDK evidence. No independent agent review ran,
 following Antoine's instruction to work in this session. The full recovery
 implementation, signed round trip and full batch gate remain open. No Unit
 trailer or current signed acceptance is claimed.
+
+## Read original work after restart
+
+Starting commit `54cae2cc`. The selected restart reader now requires exactly
+one original work record between capture and terminal result, under the
+same process and command. It reads the closed outcome partition, held and
+unheld sets, incoming-entry reasons and observed media fields. It compares
+their counts with the original terminal accounting. Unknown media stays
+absent; overlapping held-pending and held-ACK names count once.
+
+Run `7734` runs 7 tests and records 19 failed expectations: the reader
+accepted absent, late, foreign and inconsistent original work. After the
+fix, run `9196` passes 16 restoration and program tests. Run `10639` passes
+45 tests. Coverage includes two entries for one incoming name, missing
+ordinals, overlapping outcomes, held-set union, absent media fields and
+invalid media flags.
+VM-hosted run `12377` builds the shared support file in the actual Snapshot
+target and executes the completion-refusal test once, with no skips or
+failures. Similarity `11722` and the source privacy scan pass.
+
+Direct review checked original ownership and ordering, exact fact shapes,
+closed labels, disjoint outcomes, incoming ordinals and optional-field
+equality. This parser returns historical inputs, not an ACK or recovery
+verdict. The Mac recovery gate remains unchanged: it still refuses completion
+and close until original SDK ordering, revision proof and current durable
+cross-checks are implemented. No independent review, Unit completion, full
+batch gate or signed acceptance is claimed.

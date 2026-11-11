@@ -5,7 +5,11 @@ import Testing
 @Suite struct AgentSelectedRestorationTests {
     @MainActor private func state(phone: Bool = false, completed: Int = 3, pending: Bool = false,
                                   editGeneration: UInt64 = 7, recordTerminal: Bool = true,
-                                  recordCapture: Bool = true) throws -> AgentRestoration {
+                                  recordCapture: Bool = true, recordWork: Bool = true,
+                                  workAfterTerminal: Bool = false, incomingWaiting: UInt64 = 0,
+                                  terminalHeld: UInt64 = 0, terminalNewer: UInt64 = 0,
+                                  terminalMedia: [AgentFact] = [],
+                                  workFacts: [AgentFact] = [.init(name: .syncResult, operation: "work-selected-clean-entity1")]) throws -> AgentRestoration {
         var object = try #require(JSONSerialization.jsonObject(with: CloudKitAgentProtocolTests.header) as? [String: Any])
         object["selection"] = "sync_now"; object["device_kind"] = phone ? "iphone" : "mac"
         let headerBytes = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
@@ -50,16 +54,25 @@ import Testing
                     .init(name: .syncResult, operation: "exchange-selected-entity1")
                 ])
             }
+            func appendWork() {
+                if command.action == .syncNow && recordWork {
+                    append(.observation, command: command, facts: [
+                        .init(name: .syncResult, count: 1, operation: "exchange-work")
+                    ] + workFacts)
+                }
+            }
+            if !workAfterTerminal { appendWork() }
             if command.action == .syncNow && recordTerminal {
                 append(.observation, command: command, facts: [
                     .init(name: .syncResult, count: 1, operation: "terminal-exchange-succeeded"),
                     .init(name: .syncResult, count: 30, operation: "terminal-ended-ms"),
                     .init(name: .syncResult, count: 1, operation: "terminal-selected"),
-                    .init(name: .syncResult, count: 0, operation: "terminal-held-back"),
-                    .init(name: .syncResult, count: 0, operation: "terminal-newer-pending"),
-                    .init(name: .syncResult, count: 0, operation: "terminal-incoming-waiting")
-                ])
+                    .init(name: .syncResult, count: terminalHeld, operation: "terminal-held-back"),
+                    .init(name: .syncResult, count: terminalNewer, operation: "terminal-newer-pending"),
+                    .init(name: .syncResult, count: incomingWaiting, operation: "terminal-incoming-waiting")
+                ] + terminalMedia)
             }
+            if workAfterTerminal { appendWork() }
             if command.command_seq <= completed { append(.done, command: command) }
         }
         return .init(header: header, commands: commands, records: records)
@@ -137,6 +150,88 @@ import Testing
             #expect(throws: AgentFailure.recovery) {
                 try AgentSelectedRestoration(.init(header: original.header, commands: original.commands, records: records))
             }
+        }
+    }
+    @MainActor @Test func interruptedExchangeNeedsOriginalWorkBeforeItsTerminalResult() throws {
+        #expect(throws: AgentFailure.recovery) {
+            try AgentSelectedRestoration(state(completed: 4, pending: true, recordWork: false))
+        }
+        #expect(throws: AgentFailure.recovery) {
+            try AgentSelectedRestoration(state(completed: 4, pending: true, workAfterTerminal: true))
+        }
+        let original = try state(completed: 4, pending: true)
+        var records = original.records
+        let index = try #require(records.firstIndex { $0.facts.first?.operation == "exchange-work" })
+        var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(records[index])) as? [String: Any])
+        json["agent_instance"] = "fresh2"
+        records[index] = try AgentRecord.read(JSONSerialization.data(withJSONObject: json))
+        #expect(throws: AgentFailure.recovery) {
+            try AgentSelectedRestoration(.init(header: original.header, commands: original.commands, records: records))
+        }
+    }
+    @MainActor @Test func originalWorkMustPartitionTheSelectionAndMatchTerminalCounts() throws {
+        for labels in [[], ["work-selected-clean-entity2"],
+                       ["work-selected-clean-entity1", "work-selected-acked-entity1"],
+                       ["work-selected-clean-entity1", "work-selected-clean-entity1"],
+                       ["work-selected-blocked-entity1"], ["work-selected-outstanding-entity1"],
+                       ["work-selected-clean-entity1", "work-held-acked-entity1"],
+                       ["work-selected-clean-entity1", "work-held-pending-entity2", "work-pending-unheld-entity2"],
+                       ["work-selected-clean-entity1", "work-pending-unheld-entity2"],
+                       ["work-selected-clean-entity1", "work-incoming1-entity2-ready"],
+                       ["work-selected-clean-entity1", "work-incoming1-entity2-apply-failed"]] {
+            #expect(throws: AgentFailure.recovery) {
+                try AgentSelectedRestoration(state(completed: 4, pending: true,
+                    workFacts: labels.map { .init(name: .syncResult, operation: $0) }))
+            }
+        }
+        #expect(throws: AgentFailure.recovery) {
+            try AgentSelectedRestoration(state(completed: 4, pending: true, workFacts: [
+                .init(name: .syncResult, operation: "work-selected-clean-entity1"),
+                .init(name: .syncResult, count: 1, operation: "work-media-upload-pending")]))
+        }
+    }
+    @MainActor @Test func originalIncomingCountsEntriesAndKeepsOnlyWaitingReasonsForSuccess() throws {
+        let labels = ["work-selected-clean-entity1", "work-incoming1-entity2-generation", "work-incoming2-entity2-reference"]
+        let facts = labels.map { AgentFact(name: .syncResult, operation: $0) }
+        let restored = try AgentSelectedRestoration(state(completed: 4, pending: true, incomingWaiting: 2, workFacts: facts))
+        let accounting = try #require(restored.exchange?.accounting)
+        #expect(accounting.outcomes[.clean] == ["entity1"])
+        #expect(accounting.incoming.map(\.entity) == ["entity2", "entity2"])
+        #expect(accounting.incoming.map(\.reason) == [.generation, .reference])
+        #expect(accounting.media.isEmpty)
+        for invalid in [Array(facts.dropLast()), facts + [facts[1]], [facts[0], facts[2]],
+                        [facts[0], facts[1], .init(name: .syncResult, operation: "work-incoming2-entity2-asset")]] {
+            #expect(throws: AgentFailure.recovery) {
+                try AgentSelectedRestoration(state(completed: 4, pending: true, incomingWaiting: 2, workFacts: invalid))
+            }
+        }
+    }
+    @MainActor @Test func originalHeldUnionAndObservedMediaRemainSeparate() throws {
+        let members = ["work-selected-acked-entity1", "work-held-acked-entity1",
+                       "work-held-pending-entity1", "work-held-pending-entity2", "work-pending-unheld-entity3"]
+            .map { AgentFact(name: .syncResult, operation: $0) }
+        let media = [AgentFact(name: .syncResult, count: 0, operation: "work-media-upload-pending"),
+                     .init(name: .syncResult, count: 1, operation: "work-media-root-acked")]
+        let terminalMedia = try media.map { fact in
+            let operation = try #require(fact.operation)
+            return AgentFact(name: .syncResult, count: fact.count, operation: "terminal-" + String(operation.dropFirst(5)))
+        }
+        let original = try AgentSelectedRestoration(state(completed: 4, pending: true, terminalHeld: 2,
+            terminalNewer: 1, terminalMedia: terminalMedia, workFacts: members + media))
+        let accounting = try #require(original.exchange?.accounting)
+        #expect(accounting.heldPending == ["entity1", "entity2"])
+        #expect(accounting.heldAcknowledged == ["entity1"] && accounting.pendingUnheld == ["entity3"])
+        #expect(accounting.media == ["media-upload-pending": 0, "media-root-acked": 1])
+        #expect(accounting.media["media-download-pending"] == nil)
+        #expect(throws: AgentFailure.recovery) {
+            try AgentSelectedRestoration(state(completed: 4, pending: true, terminalHeld: 3,
+                terminalNewer: 1, terminalMedia: terminalMedia, workFacts: members + media))
+        }
+        #expect(throws: AgentFailure.recovery) {
+            try AgentSelectedRestoration(state(completed: 4, pending: true, terminalHeld: 2,
+                terminalNewer: 1, terminalMedia: terminalMedia, workFacts: members + [
+                    .init(name: .syncResult, count: 0, operation: "work-media-upload-pending"),
+                    .init(name: .syncResult, count: 2, operation: "work-media-root-acked")]))
         }
     }
 }
