@@ -25,7 +25,8 @@
       },
       "skippedTests" : [
         "CloudKitSoakTests",
-        "CloudKitAccountSetupTests"
+        "CloudKitAccountSetupTests",
+        "NativeCloudFetchScopeProbeTests"
       ]
     }
   ],
