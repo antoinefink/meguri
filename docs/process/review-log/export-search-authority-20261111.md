@@ -31,5 +31,14 @@ The formatter changed line wrapping only.
   checks pass on the formatted source.
 - Lint `20261111T095722Z-22577` and similarity `20261111T095724Z-22860` pass.
 
-Signed-app export verification and the required integration gate remain open.
-No Unit or acceptance is claimed.
+Signed standalone build `build-app/20261111T100044Z-31227` passes on clean
+`29d8f246`. Its executable matches the recorded hash; signature and development
+iCloud configuration checks pass. The older preview quit normally before the
+build.
+
+In that exact app, File → Export Collection → Prepare Export reaches Ready to
+Save. The native Save panel then saves a 22,536,947-byte collection package under
+ignored `build/`; the sheet reports Saved. The package remains private and is
+not committed. This verifies the original sandbox failure through the interface.
+
+The required integration gate remains open. No Unit or acceptance is claimed.
