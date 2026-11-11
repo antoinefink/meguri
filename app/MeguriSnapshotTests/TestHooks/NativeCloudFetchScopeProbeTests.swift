@@ -1,13 +1,14 @@
 #if DEBUG && MEGURI_TEST_HOOKS && os(macOS)
 import AppModel
 import CloudKit
+import CoreBridge
 import Foundation
 import Synchronization
 import Testing
 
 // Explicit mac-hosted-test selection only; Snapshot skips this suite. This is
 // an SDK diagnostic, with no Meguri workflow or signed-lane acceptance authority.
-@Suite final class NativeCloudFetchScopeProbeTests {
+@Suite @MainActor final class NativeCloudFetchScopeProbeTests {
     @Test func observeSavedStateFetchScopes() async {
         var report = ScopeProbeReport()
         var phase = ScopeProbePhase.configuration
@@ -77,7 +78,7 @@ import Testing
 
         // Every operation above has returned and every original engine has
         // cancel/drained before deletion. Also run this in a cancelled test task:
-        // CK operations below join their terminal callback and have SDK budgets.
+        // CK operations below inspect results at completion and have SDK budgets.
         if let (database, zoneID) = cleanupTarget {
             report.cleanupAttempted = true
             do {
@@ -128,6 +129,7 @@ private struct ScopeProbeCounts: Sendable {
     var fetchOptionsCallbacks = 0
     var batchRequests = 0
     var callbackErrors = 0
+    var signIns = 0
     var sawExpectedBytes = false
     var statePresent = false
     var unexpectedActivity = false
@@ -140,7 +142,8 @@ private struct ScopeProbeCounts: Sendable {
         "\"zoneCallbacks\":\(zoneCallbacks),\"didFetchZone\":\(didFetchZone)," +
         "\"generatedRecordModifications\":\(generatedRecordModifications)," +
         "\"fetchOptionsCallbacks\":\(fetchOptionsCallbacks),\"batchRequests\":\(batchRequests)," +
-        "\"callbackErrors\":\(callbackErrors),\"sawExpectedBytes\":\(sawExpectedBytes)," +
+        "\"callbackErrors\":\(callbackErrors),\"signIns\":\(signIns)," +
+        "\"sawExpectedBytes\":\(sawExpectedBytes)," +
         "\"statePresent\":\(statePresent),\"unexpectedActivity\":\(unexpectedActivity)," +
         "\"fetchCompleted\":\(fetchCompleted),\"drained\":\(drained)}"
     }
@@ -224,7 +227,17 @@ private actor ScopeProbeObserver: CKSyncEngineDelegate {
             counts.didFetchZone += 1
             if did.zoneID != recordID.zoneID { counts.unexpectedActivity = true }
             if did.error != nil { counts.callbackErrors += 1 }
-        case .accountChange, .willSendChanges, .didSendChanges, .sentDatabaseChanges, .sentRecordZoneChanges:
+        case .accountChange(let change):
+            switch change.changeType {
+            case .signIn:
+                counts.signIns += 1
+                if counts.signIns > 1 { counts.unexpectedActivity = true }
+            case .signOut, .switchAccounts:
+                counts.unexpectedActivity = true
+            @unknown default:
+                counts.unexpectedActivity = true
+            }
+        case .willSendChanges, .didSendChanges, .sentDatabaseChanges, .sentRecordZoneChanges:
             counts.unexpectedActivity = true
         default: break
         }
@@ -326,7 +339,6 @@ private final class ScopeProbeItems<Value: Sendable>: Sendable {
         state.withLock { $0.terminal = terminal.mapError { ScopeProbeFailure.category($0) } }
     }
 
-    // Called by CKOperation's completionBlock, after its terminal result block.
     func joined() -> Result<[Value], ScopeProbeFailure> {
         state.withLock { value in
             if let failure = value.failure { return .failure(failure) }
