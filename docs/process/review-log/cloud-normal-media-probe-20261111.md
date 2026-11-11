@@ -343,3 +343,36 @@ discovery. No cause, pass, fix or acceptance is claimed. Only one
 `git diff --check` consistency check is performed here; no other verification,
 builds or tests. Integration owns native build, independent review and actual
 comparison.
+
+## Native scope result — 2026-11-11
+
+Role: fixer. Session: `s-20261110T214025Z-20fa15fd`.
+Main starting commit: `a470996e`. Supplied filtered baseline, recorded separately:
+`1a4317bbc4dc8b1f60318f95e9731903bf19f511`.
+
+Experiment author `cleanroom/20261111T203553Z-42844`; independent read-only
+review `cleanroom/20261111T203728Z-44575` found no P0–P2.
+`swift-test/20261111T203732Z-44902` passed 44 tests in two suites; static
+`20261111T203844Z-46551` and similarity `20261111T203846Z-46889` passed.
+Normal signed phone `run/20261111T203906Z-47227` passed at `a470996e`;
+its build log confirms `NativeCloudKitEngine.swift` was freshly compiled.
+
+After normal cold launch, only the empty test deck was renamed from
+`Sync Check 95439 Cold` to `Sync Check 95439 Scope` on the unchanged Mac.
+Original Mac totals were Saved 8, failures 0, pending 0 and in-flight 0,
+with normal completion `1794429653251`.
+Native `drive/20261111T204052Z-49329` completed all ten interactions with
+verified continuity; 77 hierarchy issues kept the overall result failed.
+Later `drive/20261111T204249Z-51091` completed all six interactions with
+verified continuity; 49 hierarchy issues kept the overall result failed.
+The phone still showed the old name despite new successful completion
+`1794429739163`: `will=6 zoneC=0 modC=0 coreC=0 db=0 dbC=0 unC=0`,
+with cut, refusal and zone failure all zero.
+
+The change left the original receive failure unchanged. Its seven DEBUG lines
+were removed. Integration compared the whole native file with `6f9a68dc`;
+both Git blob hashes are equal. Existing assertions and limits remain intact.
+No second variant was added. This result establishes no internal SDK cause.
+The dispatch thread, delegate filtering and retained state remain unproven.
+The filtered runner performed one `git diff --check`; it ran no builds or tests.
+No gate or acceptance claim is made.

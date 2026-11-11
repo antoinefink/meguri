@@ -435,13 +435,6 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         guard let sdk else { throw CancellationError() }
         let group = CKOperationGroup(); group.name = options.groupID
         var native = CKSyncEngine.FetchChangesOptions(scope: .zoneIDs(options.zones.map(zone)), operationGroup: group)
-        #if DEBUG
-        // Temporary startup-discovery experiment.
-        if let collectionZone, collectionZone != "meguri-root",
-           Set(options.zones) == Set(["meguri-root", collectionZone]) {
-            native.scope = .all
-        }
-        #endif
         native.prioritizedZoneIDs = options.priorityZones.map(zone)
         let prepared = native
         let lifetime = networkLifetime
