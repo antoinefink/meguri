@@ -215,3 +215,58 @@ independent review and provenance/privacy/similarity checks remain unrun here
 and belong to integration. Only one git diff --check consistency check is run
 before export. No native calls or private inputs were used; no cause or pass
 claim is made.
+
+## Verified native media arrival
+
+The exact 10,240-byte synthetic file reached the physical phone. Original
+read-back `cloud-media-probe/20261111T200841Z-23463` passes with
+`peer-byte-match`, `transfer_verified: true` and `source_action: prepare-ui`.
+The source and peer have SHA-256
+`e2c029cdd55a4bab91c3dd165b84110538d7954221945f2429aa4084a72128d0`.
+The helper required successful native copy-from and exact bytes, size and hash.
+It never copied bytes to the phone. Original source and native evidence stay in
+private diagnostic storage. `signed_lane_acceptance` remains false.
+
+This occurred after a real Home/return and normal Sync Now, not after a
+production transport fix. Comparison `drive/20261111T200531Z-22459` retains the
+successful cold completion with no collection-zone callbacks before that cycle.
+All ten interactions completed with verified process continuity; 119 hierarchy
+issues keep its overall result red. Later observation
+`20261111T200925Z-23739` shows the renamed empty test deck on the phone and
+`zoneC=1 modC=8 coreC=8 dbC=1 unC=1`, without refusal or zone failure. Its six
+interactions completed; 44 hierarchy issues remain. The latest attempt is
+incomplete, and the existing 2,389 missing files remain reported. This proves
+one fresh file and the test deck arrived; it establishes neither reliable cold
+startup, complete scheduling equality nor full sync acceptance.
+
+## Focused verification and sender evidence
+
+The external-file retained-binding test passes in
+`swift-test/20261111T194156Z-9321`, one case in 6.913 seconds. Independent review
+`cleanroom/20261111T194319Z-11172` finds no P0–P2. Static checks
+`194526Z-13675` and similarity `194523Z-13349` pass. The earlier Swift CLI usage
+rejection ran no tests. The unchanged privacy guard passed after note rewording.
+
+Native counters pass 44 focused cases in `swift-test/20261111T195215Z-16052`.
+Independent review `cleanroom/20261111T195345Z-17701` finds no P0–P2. Privacy
+`195213Z-15782`, static checks `195435Z-18121` and similarity `195435Z-18366`
+pass. Signed normal Mac build `build-app/20261111T195436Z-18579` and normal
+phone preparation `run/20261111T195536Z-20063` pass on `73429492`.
+
+The Mac starts with all sender counters zero. After only the disposable empty
+deck's rename, original native counters show two collection Saved callbacks
+and no failed saves. A later snapshot has pending and in-flight zero and a
+successful completion at `1794427115841`. These are process-wide observations,
+not selected-leg proof. The phone runs matching counter code. Before its real
+foreground return, its completed fetch still has no collection callbacks;
+normal process restart alone had not resolved that condition. The launch and
+foreground discovery difference remains the next investigation. No gate,
+unit or milestone acceptance is added.
+
+## Retained collection after native arrival
+
+Read-only local summary `drive/20261111T201327Z-24603` shows 1,001 notes,
+1,001 cards, 49 reviews and 566 media files. The preview was cancelled, then
+Decks was restored. All 12 interactions completed with verified continuity;
+227 hierarchy issues keep the overall result red. No replacement or grade
+was submitted. The Mac study overview was restored and visually inspected.
