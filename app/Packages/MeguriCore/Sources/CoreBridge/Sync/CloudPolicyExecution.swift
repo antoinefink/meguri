@@ -557,7 +557,15 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 guard exchange == nil else { throw BridgeError.cloudPolicy(.unqualifiedCompletion) }
                 exchange = id
                 defer { exchange = nil }
-                let task = Task { await self.performExchange(command, id: id, acknowledgeOutputs: acknowledgeOutputs) }
+                let task = Task {
+                    #if DEBUG
+                    return await CloudMediaCancellationContext.$selectedAction.withValue(command.action) {
+                        await self.performExchange(command, id: id, acknowledgeOutputs: acknowledgeOutputs)
+                    }
+                    #else
+                    return await self.performExchange(command, id: id, acknowledgeOutputs: acknowledgeOutputs)
+                    #endif
+                }
                 nativeExchangeTask = task
                 defer { nativeExchangeTask = nil }
                 return await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }

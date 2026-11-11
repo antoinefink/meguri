@@ -511,6 +511,12 @@ extension EventTests {
         try await withNativePolicyFixture { fixture in
             let (policy, executor) = try await nativePolicy(fixture)
             let engine = try await fixture.engine()
+            let originalAtSend = Mutex<UInt64?>(nil)
+            await engine.observeNextSendFinalEntry { _ in
+                if case .some(.runExchange(let exchange, .command)) = CloudMediaCancellationContext.selectedAction {
+                    originalAtSend.withLock { $0 = exchange }
+                }
+            }
             await engine.appendFetchScripts([
                 .manual(fetchedZones: ["meguri-root", fixture.zone], records: [fixture.root], group: nil),
                 .manual(fetchedZones: ["meguri-root", fixture.zone], records: [], group: nil),
@@ -520,6 +526,7 @@ extension EventTests {
             let before = try await observePolicyExchange(command)
             let result = await executor.execute(command)
             #expect(result.error == nil)
+            #expect(originalAtSend.withLock { $0 } == before.policyExchange)
             let completed = try await qualifiedRecordExchange(command, result: result, fixture: fixture, before: before, outcome: .succeeded)
             #expect(!completed.selectedNames.isEmpty)
             let policyOutputCommands: [CloudPolicyCommand] = try result.outputs.flatMap(policyCommands)

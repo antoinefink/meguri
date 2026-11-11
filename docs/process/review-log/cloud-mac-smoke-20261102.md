@@ -779,3 +779,21 @@ This is an evidence-reader step, not signed acceptance. Manual-operation
 causal linking, integration with the current source ACK read, historical close
 and Mac recovered completion remain open. No independent review, full batch
 gate or new signed attempt ran.
+
+## Original command context at native send entry
+
+Starting commit `734ea527`. Debug exchange execution now carries its actual
+issued action through the existing diagnostic task context. The network
+lifetime already preserves that context across its detached worker. The real
+native executor test observes the original policy exchange at send entry;
+an expected command id is not installed by the observer.
+
+Red run `3056` shows the context missing at that entry. Run `5601` passes
+13 focused tests covering actual capture/completion, cancellation and network
+ownership. UI lint and similarity `7331` pass. Release execution is unchanged. Native
+send-label binding and signed recovery remain unimplemented; this context
+alone proves neither a callback's cause nor a successful cloud exchange.
+
+Next, test the ordinary live review and sync workflow in a bounded session.
+Keep the unfinished recovery work and its failed receipts. This trial cannot
+supply final acceptance.
