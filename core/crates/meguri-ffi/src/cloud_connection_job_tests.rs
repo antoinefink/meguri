@@ -332,6 +332,7 @@ fn connection_post_claim_cancel_preserves_actual_followup_and_temporary_failure_
     for temporary in [false, true] {
         let fixture = Fixture::new(Keys::new([]));
         let (connection, handle, active, _) = adoption(&fixture);
+        let expected_active = active.clone();
         let events = fixture.workflow.host.engine().stream().subscribe();
         let (claimed, reached) = mpsc::channel();
         let (release, resume) = mpsc::channel();
@@ -363,12 +364,17 @@ fn connection_post_claim_cancel_preserves_actual_followup_and_temporary_failure_
             assert_eq!(outcome, JobOutcome::Succeeded);
             assert!(job.result.result().unwrap().unwrap().applied);
         }
-        let CloudPublicationWork::Adoption {
-            action: CloudAdoptionAction::Read { target },
-            ..
-        } = connection.next_publication_work().unwrap()
-        else {
+        let CloudPublicationWork::Adoption { action, .. } = connection.next_publication_work().unwrap() else {
             panic!("followup retained");
+        };
+        let target = match (temporary, action) {
+            (true, CloudAdoptionAction::ReadActive { target, expected }) => {
+                assert_eq!(expected.encrypted, expected_active.encrypted);
+                assert_eq!(expected.system_fields, expected_active.system_fields);
+                target
+            }
+            (false, CloudAdoptionAction::Read { target }) => target,
+            _ => panic!("followup retained"),
         };
         assert_eq!(target.name, if temporary { "active" } else { "epoch" });
         fixture.workflow.host.close().unwrap();

@@ -1247,6 +1247,7 @@ const Q6_CHECKPOINT: &str = "Q6_RESUME_ABSENCE_CHECKPOINT ";
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Q6LocalFacts {
     note_id: i64,
+    note_name: String,
     edited_fields: Vec<u8>,
     review_id: i64,
     reviewed_card: i64,
@@ -1578,6 +1579,7 @@ fn sign_out_resume_real_adoption_300_pairs_survive_first_page_apply_process_kill
     };
     let facts = Q6LocalFacts {
         note_id: note.id,
+        note_name: original.name.clone(),
         edited_fields,
         review_id,
         reviewed_card,
@@ -2058,10 +2060,11 @@ fn cloud_q6_resume_absence_child_checkpoint() {
     assert!(runtime.incoming_engine_state_for_testing(binding.id).unwrap().is_none());
     assert!(runtime.apply_intents(binding.id).unwrap().is_empty());
     assert!(!runtime.status().unwrap().scan_required);
-    assert!(runtime.entity_facts_page(Kind::Note, None).unwrap().iter().any(
-        |e| matches!(&e.payload, Payload::Note(n) if n.id == facts.note_id && n.flds == facts.edited_fields)
-            && e.mark.is_some()
-    ));
+    let edited_note = runtime.entity_facts(&facts.note_name).unwrap().unwrap();
+    assert!(
+        matches!(&edited_note.payload, Payload::Note(n) if n.id == facts.note_id && n.flds == facts.edited_fields)
+            && edited_note.mark.is_some()
+    );
     assert!(!runtime.entity_facts_page(Kind::Revlog, None).unwrap().is_empty());
     let (sdk, state, zone) = admit(&host);
     assert!(state.is_none(), "explicit Resume must start a cursorless SDK");

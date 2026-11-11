@@ -245,6 +245,21 @@ pub(super) fn adopt(dir: &Path, service: &mut Service<SeededRandom>) -> CoreHost
     use cloud::adoption::{AdoptionReply, AdoptionTask as T, StagingRecord};
     std::fs::create_dir_all(dir).unwrap();
     assert!(!dir.join("collection.anki2").exists());
+    let service_config = service.config(&scope()).unwrap();
+    assert!(matches!(
+        service
+            .request(
+                &scope(),
+                Caller::default(),
+                Operation::Configure(Config {
+                    page_size: 32,
+                    ..service_config.clone()
+                }),
+            )
+            .unwrap()
+            .result,
+        Ok(Reply::Done)
+    ));
     let config = config(dir, Arc::new(Account));
     let process = meguri_host::ProcessCore::new(config.engine.clone()).unwrap();
     let host = process.prepare_cloud_connection(config).unwrap();
@@ -254,6 +269,18 @@ pub(super) fn adopt(dir: &Path, service: &mut Service<SeededRandom>) -> CoreHost
         if host.cloud_runtime().unwrap().adoption_op().unwrap().is_none() {
             assert!(host.collection().is_ok());
             assert_eq!(host.engine().slot_holder(), None);
+            assert!(matches!(
+                service
+                    .request(
+                        &scope(),
+                        Caller::default(),
+                        Operation::Configure(service_config.clone())
+                    )
+                    .unwrap()
+                    .result,
+                Ok(Reply::Done)
+            ));
+            assert_eq!(service.config(&scope()).unwrap(), service_config);
             return host;
         }
         let PublicationWork::Adoption(work) = host.next_cloud_publication_work().unwrap() else {
@@ -294,6 +321,7 @@ pub(super) fn adopt(dir: &Path, service: &mut Service<SeededRandom>) -> CoreHost
                         RecordChange::Deleted { name, .. } => deleted.push(name),
                     }
                 }
+                assert!(records.len() + deleted.len() <= 32, "native adoption page limit");
                 AdoptionReply::Page {
                     records,
                     deleted,
