@@ -1,6 +1,9 @@
 import CoreBridge
 import CoreFoundation
 import Foundation
+#if DEBUG
+import OSLog
+#endif
 import WebKit
 
 public nonisolated enum CardBridgeAction: Equatable, Sendable {
@@ -13,6 +16,10 @@ public nonisolated enum CardBridgeAction: Equatable, Sendable {
 /// The only route from WebKit messages to a page. The controller retains this
 /// router keeps weak page references.
 public final class CardBridge: NSObject, WKScriptMessageHandlerWithReply {
+#if DEBUG
+    private static let startupLogger = Logger(subsystem: "Meguri", category: "ReviewStartup")
+#endif
+
     /// Fixed technical labels only; never derive a reason from message content.
     public nonisolated enum RejectionReason: String, CaseIterable, Sendable {
         case legacyPlatform, world, body, bodySize, legacyValue, card
@@ -33,6 +40,18 @@ public final class CardBridge: NSObject, WKScriptMessageHandlerWithReply {
         let origin = message.frameInfo.securityOrigin
         guard message.frameInfo.isMainFrame, origin.protocol == MediaOrigin.scheme, origin.host == MediaOrigin.host,
               origin.port == 0, let url = message.frameInfo.request.url, MediaOrigin.path(url) == "/" else {
+#if DEBUG
+            Self.startupLogger.notice("bridge.originRejected")
+            if origin.protocol.isEmpty && origin.host.isEmpty {
+                Self.startupLogger.notice("bridge.originOpaque")
+            }
+            if message.frameInfo.isMainFrame {
+                Self.startupLogger.notice("bridge.mainFrame")
+            }
+            if let url = message.frameInfo.request.url, MediaOrigin.path(url) == "/" {
+                Self.startupLogger.notice("bridge.rootPath")
+            }
+#endif
             page.diagnostics.record("bridgeOrigin", update: page.update)
             return
         }
@@ -43,7 +62,12 @@ public final class CardBridge: NSObject, WKScriptMessageHandlerWithReply {
     /// tests with ordinary values instead of WKFrameInfo objects.
     func receive(name: String, world: String?, body: Any, page: CardPage) {
         guard let update = page.update, let payload = page.payload, !page.closed else { return }
-        func reject(_ reason: RejectionReason) { page.diagnostics.record("bridgeRejected", update: update, bridgeRejectionReason: reason) }
+        func reject(_ reason: RejectionReason) {
+#if DEBUG
+            Self.startupLogger.notice("bridge.rejected")
+#endif
+            page.diagnostics.record("bridgeRejected", update: update, bridgeRejectionReason: reason)
+        }
         if name == "cb" || name == "meguri" {
             guard page.platform != .mac else { reject(.legacyPlatform); return }
             guard world == WKContentWorld.page.name else { reject(.world); return }
@@ -155,6 +179,14 @@ public final class CardBridge: NSObject, WKScriptMessageHandlerWithReply {
         guard isCurrent(generation, side: side) else { return }
         switch signal {
         case "settled", "shown", "updateFailed":
+#if DEBUG
+            switch signal {
+            case "settled": Self.startupLogger.notice("bridge.settled")
+            case "shown": Self.startupLogger.notice("bridge.shown")
+            case "updateFailed": Self.startupLogger.notice("bridge.updateFailed")
+            default: break
+            }
+#endif
             page.signal(signal, body: dictionary)
         case "visible":
             guard let token = Self.integer(dictionary["token"]), UInt64(token) == page.visibleToken else { reject(.signalValue); return }
