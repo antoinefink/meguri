@@ -3114,10 +3114,17 @@ log = {'script':'physical-drive','path':'','platform':'ios','steps':[],
        'kept_running':bool(os.environ.get('FX_PRESERVE_FIXTURE')),
        'activation_completed':bool(os.environ.get('FX_PRESERVE_FIXTURE'))}
 attachments = []
-for index, kind, phase in [(1, 'launch', 'after'), (2, 'snapshot', 'initial')]:
-    name = f'drive-{index:02}-{kind}-{phase}'
+captures = [(1, 'launch', 'after'), (2, 'snapshot', 'initial')]
+if os.environ.get('FX_DRIVE_FOREGROUND_CYCLE'):
+    captures = [(1, 'launch', 'after'), (2, 'foregroundCycle', 'before'), (2, 'foregroundCycle', 'after')]
+for index, kind, phase in captures:
+    capture_kind = 'foreground-cycle' if kind == 'foregroundCycle' else kind
+    name = f'drive-{index:02}-{capture_kind}-{phase}'
     capture = {'phase':phase, 'hierarchy':name+'.json', 'screenshot':name+'.png'}
-    log['steps'].append({'index':index,'kind':kind,'status':'ok','captures':[capture], 'started':0,'ended':1})
+    if log['steps'] and log['steps'][-1]['index'] == index:
+        log['steps'][-1]['captures'].append(capture)
+    else:
+        log['steps'].append({'index':index,'kind':kind,'status':'ok','captures':[capture], 'started':0,'ended':1})
     for ext in ('.json', '.png'):
         (out / (name+ext)).write_text('{}' if ext == '.json' else 'synthetic-png')
         attachments.append({'suggestedHumanReadableName':name+ext, 'exportedFileName':name+ext})
@@ -3479,6 +3486,78 @@ PYCODE
   mg screenshot --physical-device "$PHONE" --route sample/sheet
   [ "$status" -eq 2 ]
   [ ! -s "$STUB_LOG" ]
+}
+
+@test "recorded foreground cycles refuse at the common drive entry before discovery runner or recorder without payload leaks" {
+  physical_drive_facts
+  cat >>"$SB/tools/mg.d/zz-physical-fakes.sh" <<'FAKES'
+# Bypass the CLI to exercise the entry used by callers such as mac-ui.
+mg_job foreground-cycle-entry host fx_foreground_cycle_entry "Synthetic common drive entry"
+fx_foreground_cycle_entry() { mg_drive__job "$1" "$2" "" Debug yes; }
+mg_app_build() { echo unexpected-build >>"$STUB_LOG"; return 1; }
+mg_mac_ui_begin() { echo unexpected-mac-discovery >>"$STUB_LOG"; return 1; }
+mg_sim_lease() { echo unexpected-sim-lease >>"$STUB_LOG"; return 1; }
+mg_drive_run() { echo unexpected-runner >>"$STUB_LOG"; return 1; }
+mg_record__start_recorder() { echo unexpected-recorder >>"$STUB_LOG"; return 1; }
+mg_drive__screen_start() { echo unexpected-screen-recorder >>"$STUB_LOG"; return 1; }
+FAKES
+  local step kind entry
+  for step in '{"foregroundCycle":true}' '{"foregroundCycle":false}' \
+      '{"foregroundCycle":null}' '{"foregroundCycle":"PRIVATE_SENTINEL"}' \
+      '{"foregroundCycle":true,"transition":"PRIVATE_SENTINEL"}' \
+      '{"foregroundCycle":true,"tap":"PRIVATE_SENTINEL"}' \
+      '{"\u0066oregroundCycle":{}}'; do
+    printf '{"name":"PRIVATE_SENTINEL","steps":[{"launch":{}},%s]}' "$step" >"$FX_DRIVE_SCRIPT"
+    for kind in iphone mac; do
+      for entry in drive foreground-cycle-entry; do
+        : >"$STUB_LOG"
+        if [ "$entry" = drive ]; then
+          mg drive "$FX_DRIVE_SCRIPT" --platform "$kind" --record
+        else
+          mg foreground-cycle-entry "$FX_DRIVE_SCRIPT" "$kind"
+        fi
+        [ "$status" -eq 2 ]
+        [ "$(field .status)" = error ]
+        [ "$(field '.failures[0].id')" = usage ]
+        [[ "$output$stderr$(cat "$result")" != *PRIVATE_SENTINEL* ]]
+        [ ! -s "$STUB_LOG" ]
+      done
+    done
+  done
+}
+
+@test "physical drive accepts a literal true foreground cycle with kept-running continuity" {
+  physical_preservation_facts
+  printf '%s\n' '{"name":"physical-inspect","steps":[{"launch":{}},{"foregroundCycle":true}]}' >"$FX_DRIVE_SCRIPT"
+  FX_DRIVE_FOREGROUND_CYCLE=1 physical_drive --keep-app-running
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(field .details.continuity)" = verified ]
+  [ "$(field .details.activated_existing)" = true ]
+  [ "$(field '.details.drive.steps[1].kind')" = foregroundCycle ]
+  [ "$(jq -c '.steps[1]' "$(dirname "$result")/physical-script.json")" = '{"foregroundCycle":true}' ]
+  called '^inline-transport-verified$'
+  called '^physical-helper complete$'
+  not_called 'build-for-testing|bootstrap-install|normal-final-launch|^(sim-|vm-)|xcrun (simctl|devicectl)'
+}
+
+@test "physical drive refuses malformed foreground cycles before discovery or runner work" {
+  physical_drive_facts
+  local value extra
+  for value in false 0 1 1.0 -1 '"true"' '{}' '[]' null; do
+    printf '{"name":"PRIVATE_SENTINEL","steps":[{"launch":{}},{"foregroundCycle":%s}]}' "$value" >"$FX_DRIVE_SCRIPT"
+    physical_drive
+    [ "$status" -eq 2 ]
+    [[ "$output$stderr$(cat "$result")" != *PRIVATE_SENTINEL* ]]
+    [ ! -s "$STUB_LOG" ]
+  done
+  for extra in '"extra":null' '"tap":"x"' '"transition":"cycle"' '"launch":{}'; do
+    printf '{"name":"PRIVATE_SENTINEL","steps":[{"launch":{}},{"foregroundCycle":true,%s}]}' "$extra" >"$FX_DRIVE_SCRIPT"
+    physical_drive
+    [ "$status" -eq 2 ]
+    [[ "$output$stderr$(cat "$result")" != *PRIVATE_SENTINEL* ]]
+    [ ! -s "$STUB_LOG" ]
+  done
 }
 
 @test "physical drive rejects model OS and nonphysical destinations and queues unavailable without fallback" {

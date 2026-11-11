@@ -91,7 +91,7 @@ try:
     steps = root.get("steps")
     if not isinstance(steps, list) or not steps or not isinstance(steps[0], dict) or "launch" not in steps[0]:
         raise ValueError()
-    actions = {"launch", "tap", "type", "swipe", "scroll", "wait", "snapshot"}
+    actions = {"launch", "tap", "type", "swipe", "scroll", "wait", "snapshot", "foregroundCycle"}
     def string(value, empty=False):
         return isinstance(value, str) and (empty or bool(value))
 
@@ -104,6 +104,8 @@ try:
         if "launch" in step and (not isinstance(step["launch"], dict) or step["launch"]):
             raise ValueError()
         key, value = next(iter(step.items()))
+        if key == "foregroundCycle" and value is not True:
+            raise ValueError()
         if key == "tap" and not string(value):
             raise ValueError()
         if key == "type" and not (fields(value, ("id", "text")) and string(value["id"]) and string(value["text"], True)):
@@ -696,6 +698,12 @@ mg_drive__publish_completion() {
 mg_drive__job() {
   local script="$1" kind="$2" udid="$3" config="$4" record="$5" platform physical="${6:-}"
   local MG_UI_PHYSICAL_DEVICE=""
+  # Whole-drive recorders would capture Home. Check key presence even when
+  # the action value/shape is invalid; callers keep scripts frozen during jobs.
+  if [ "$record" = yes ] && ! jq -e 'all(.. | objects; has("foregroundCycle") | not)' "$script" >/dev/null 2>&1; then
+    mg_drive__usage "recording requires valid JSON without foregroundCycle"
+    return 0
+  fi
   if [ -n "$physical" ]; then
     platform=ios-device
     udid="$physical"

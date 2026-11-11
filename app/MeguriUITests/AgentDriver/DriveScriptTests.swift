@@ -249,7 +249,8 @@ final class DriveScriptTests: XCTestCase {
           {"wait": "home.placeholder.title"},
           {"wait": {"id": "sample.sheet.title", "timeout": 2.5, "gone": true}},
           {"snapshot": "home-after-dismiss"},
-          {"resize": "1000x700"}
+          {"resize": "1000x700"},
+          {"foregroundCycle": true}
         ]}
         """)
         var launch = DriveScript.Launch()
@@ -275,8 +276,28 @@ final class DriveScriptTests: XCTestCase {
             .init(action: .wait(id: "sample.sheet.title", timeout: 2.5, gone: true)),
             .init(action: .snapshot(name: "home-after-dismiss")),
             .init(action: .resize(size: "1000x700")),
+            .init(action: .foregroundCycle),
         ]))
-        XCTAssertEqual(script.steps.map(\.action.kind), ["launch", "tap", "type", "swipe", "scroll", "wait", "wait", "snapshot", "resize"])
+        XCTAssertEqual(script.steps.map(\.action.kind), ["launch", "tap", "type", "swipe", "scroll", "wait", "wait", "snapshot", "resize", "foregroundCycle"])
+    }
+
+    func testForegroundCycleRequiresLiteralTrueAndNoExtraKeys() throws {
+        let json = #"{"name":"x","steps":[{"launch":{}},{"foregroundCycle":true}]}"#
+        XCTAssertEqual(try parse(json).steps.last?.action, .foregroundCycle)
+        guard case let .inline(script)? = try DriveScriptInput.load(inline(Data(json.utf8)), physical: true) else {
+            return XCTFail("physical foreground cycle missing")
+        }
+        XCTAssertEqual(script.steps.last?.action, .foregroundCycle)
+        for value in ["false", "0", "1", "1.0", "-1", #""true""#, "{}", "[]", "null"] {
+            let malformed = "{\"name\":\"x\",\"steps\":[{\"launch\":{}},{\"foregroundCycle\":\(value)}]}"
+            XCTAssertTrue(error(malformed).contains("foregroundCycle takes only literal true"), value)
+            refused(inline(Data(malformed.utf8)), .grammar)
+        }
+        for extra in [#""extra":null"#, #""tap":"x""#, #""transition":"cycle""#] {
+            let malformed = "{\"name\":\"x\",\"steps\":[{\"launch\":{}},{\"foregroundCycle\":true,\(extra)}]}"
+            XCTAssertThrowsError(try parse(malformed), extra)
+            refused(inline(Data(malformed.utf8)), extra.contains("transition") ? .policy : .grammar)
+        }
     }
 
     func testTheExampleScriptsParse() throws {
@@ -447,6 +468,73 @@ final class DriveScriptTests: XCTestCase {
                     XCTAssertNoThrow(try complete())
                 }
                 XCTAssertEqual(terminations, preserve ? 0 : 1)
+            }
+        }
+    }
+
+    @MainActor
+    func testForegroundCycleRefusesNonForegroundWithoutHomeOrActivation() {
+        let states: [XCUIApplication.State] = [.unknown, .notRunning, .runningBackground, .runningBackgroundSuspended]
+        for state in states {
+            var calls: [String] = []
+            XCTAssertThrowsError(try DriveAppLifecycle.foregroundCycle(state: { state },
+                home: { calls.append("home") }, waitForBackground: { calls.append("background"); return true },
+                activate: { calls.append("activate") }, waitForForeground: { calls.append("foreground"); return true })) {
+                XCTAssertNotNil($0 as? AgentDriver.StepFailure)
+            }
+            XCTAssertEqual(calls, [])
+        }
+    }
+
+    @MainActor
+    func testForegroundCycleNeverActivatesAfterBackgroundFailureOrStoppedProcess() {
+        let cases: [(Bool, XCUIApplication.State)] = [
+            (false, .runningBackground), (false, .notRunning),
+            (true, .notRunning), (true, .unknown), (true, .runningForeground),
+        ]
+        for (completed, afterWait) in cases {
+            var state: XCUIApplication.State = .runningForeground
+            var calls: [String] = []
+            XCTAssertThrowsError(try DriveAppLifecycle.foregroundCycle(state: { state }, home: {
+                calls.append("home")
+                state = .runningBackground
+            }, waitForBackground: {
+                calls.append("background")
+                state = afterWait
+                return completed
+            },
+                activate: { calls.append("activate") }, waitForForeground: { calls.append("foreground"); return true })) {
+                XCTAssertNotNil($0 as? AgentDriver.StepFailure)
+            }
+            XCTAssertEqual(calls, ["home", "background"])
+        }
+    }
+
+    @MainActor
+    func testForegroundCycleActivatesOnceFromEitherRunningBackgroundStateAndBoundsReturn() throws {
+        let backgrounds: [XCUIApplication.State] = [.runningBackground, .runningBackgroundSuspended]
+        let returns: [(Bool, XCUIApplication.State)] = [
+            (true, .runningForeground), (false, .runningBackground), (true, .notRunning),
+        ]
+        for background in backgrounds {
+            for (completed, returned) in returns {
+                var state: XCUIApplication.State = .runningForeground
+                var calls: [String] = []
+                func cycle() throws {
+                    try DriveAppLifecycle.foregroundCycle(state: { state }, home: {
+                        calls.append("home")
+                        state = background
+                    }, waitForBackground: { calls.append("background"); return true }, activate: {
+                        calls.append("activate")
+                        state = returned
+                    }, waitForForeground: { calls.append("foreground"); return completed })
+                }
+                if completed && returned == .runningForeground {
+                    try cycle()
+                } else {
+                    XCTAssertThrowsError(try cycle()) { XCTAssertNotNil($0 as? AgentDriver.StepFailure) }
+                }
+                XCTAssertEqual(calls, ["home", "background", "activate", "foreground"])
             }
         }
     }

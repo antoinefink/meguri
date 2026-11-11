@@ -37,6 +37,8 @@ struct DriveScript: Equatable {
         case snapshot(name: String)
         /// Mac: `minimum`, `default`, `large` or `<width>x<height>`.
         case resize(size: String)
+        /// iOS: Home then activate the same still-running app.
+        case foregroundCycle
 
         var kind: String {
             switch self {
@@ -48,6 +50,7 @@ struct DriveScript: Equatable {
             case .wait: "wait"
             case .snapshot: "snapshot"
             case .resize: "resize"
+            case .foregroundCycle: "foregroundCycle"
             }
         }
     }
@@ -60,7 +63,7 @@ struct DriveScript: Equatable {
     var name: String
     var steps: [Step]
 
-    static let actionKeys = ["launch", "tap", "type", "swipe", "scroll", "wait", "snapshot", "resize"]
+    static let actionKeys = ["launch", "tap", "type", "swipe", "scroll", "wait", "snapshot", "resize", "foregroundCycle"]
     static let defaultWaitTimeout: TimeInterval = 10
 
     init(name: String, steps: [Step]) {
@@ -167,6 +170,11 @@ struct DriveScript: Equatable {
                 throw DriveScriptError("\(at): snapshot names use lowercase letters, digits and '-', got '\(name)'")
             }
             action = .snapshot(name: name)
+        case "foregroundCycle":
+            guard keys == ["foregroundCycle"], isBoolean(value), value as? Bool == true else {
+                throw DriveScriptError("\(at): foregroundCycle takes only literal true and no other keys")
+            }
+            action = .foregroundCycle
         default: // resize
             let size = try string(value, at, key)
             guard ["minimum", "default", "large"].contains(size) || size.wholeMatch(of: /[1-9][0-9]*x[1-9][0-9]*/) != nil else {

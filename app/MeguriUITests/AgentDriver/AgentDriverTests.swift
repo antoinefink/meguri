@@ -92,6 +92,29 @@ enum DriveAppLifecycle {
     static func finish(preserve: Bool, terminate: () -> Void) {
         if !preserve { terminate() }
     }
+
+    /// No launch fallback: a failed Home transition or stopped process must
+    /// leave activation untouched. The driver supplies bounded XCTest waits.
+    @MainActor
+    static func foregroundCycle(state: () -> XCUIApplication.State, home: () -> Void,
+                                waitForBackground: () -> Bool, activate: () -> Void,
+                                waitForForeground: () -> Bool) throws {
+        guard state() == .runningForeground else {
+            throw AgentDriver.StepFailure(message: "foregroundCycle requires the running foreground app")
+        }
+        home()
+        guard waitForBackground() else {
+            throw AgentDriver.StepFailure(message: "the app did not reach the background within 10 s")
+        }
+        let background = state()
+        guard background == .runningBackground || background == .runningBackgroundSuspended else {
+            throw AgentDriver.StepFailure(message: "the original app is no longer running in the background")
+        }
+        activate()
+        guard waitForForeground(), state() == .runningForeground else {
+            throw AgentDriver.StepFailure(message: "the app did not return to the foreground within 10 s")
+        }
+    }
 }
 
 /// Runs one agent drive script (U8, R1961, R1965). `tools/mg drive` passes the
@@ -322,13 +345,21 @@ final class AgentDriver {
         let kind = step.action.kind
         var record = StepRecord(index: index, kind: kind, transition: step.transition, started: Date().timeIntervalSince1970)
         let failuresBefore = test.testRun?.totalFailureCount ?? 0
-        let base = String(format: "drive-%02d-%@", index, kind)
+        let foregroundCycle = step.action == .foregroundCycle
+        // Keep attachment names within the physical export's lowercase guard.
+        let base = String(format: "drive-%02d-%@", index, foregroundCycle ? "foreground-cycle" : kind)
         var failed = false
         var sampler: FrameSampler?
         do {
             switch step.action {
             case .launch, .snapshot:
                 break
+            case .foregroundCycle:
+                #if os(iOS)
+                record.captures.append(try capture(base, phase: "before", foregroundOnly: true))
+                #else
+                throw Unavailable(reason: "foregroundCycle is iOS only")
+                #endif
             default:
                 try prepareInput(step.action)
                 record.captures.append(try capture(base, phase: "before"))
@@ -352,12 +383,14 @@ final class AgentDriver {
             record.frames = attachFrames(sampler, base: base)
             record.framesTruncated = sampler.truncated ? true : nil
         }
-        if app != nil {
+        // A failed Home cycle may leave the app in the background or dead.
+        // Do not query its hierarchy or capture the screen in that state.
+        if app != nil, !foregroundCycle || (Self.platform == "ios" && app?.state == .runningForeground) {
             do {
                 if case let .snapshot(name) = step.action {
                     record.captures.append(try capture("\(base)-\(name)", phase: name))
                 } else {
-                    record.captures.append(try capture(base, phase: "after"))
+                    record.captures.append(try capture(base, phase: "after", foregroundOnly: foregroundCycle))
                 }
             } catch {
                 if !failed {
@@ -439,7 +472,31 @@ final class AgentDriver {
             _ = try running()
         case let .resize(size):
             try resize(size)
+        case .foregroundCycle:
+            try foregroundCycle()
         }
+    }
+
+    private func foregroundCycle() throws {
+        #if os(iOS)
+        let app = try running()
+        tree = nil
+        try DriveAppLifecycle.foregroundCycle(state: { app.state }, home: {
+            XCUIDevice.shared.press(.home)
+        }, waitForBackground: {
+            let background = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                let state = app.state
+                return state == .runningBackground || state == .runningBackgroundSuspended
+            }, object: nil)
+            return XCTWaiter().wait(for: [background], timeout: 10) == .completed
+        }, activate: {
+            app.activate()
+        }, waitForForeground: {
+            app.wait(for: .runningForeground, timeout: 10)
+        })
+        #else
+        throw Unavailable(reason: "foregroundCycle is iOS only")
+        #endif
     }
 
     private func launch(_ options: DriveScript.Launch) throws {
@@ -627,7 +684,7 @@ final class AgentDriver {
     private func startSampler(for step: DriveScript.Step) throws -> FrameSampler? {
         guard sampleFrames, step.transition != nil else { return nil }
         switch step.action {
-        case .launch, .resize, .snapshot:
+        case .launch, .resize, .snapshot, .foregroundCycle:
             return nil
         default:
             let sampler = FrameSampler(window: try currentTree().window)
@@ -651,18 +708,21 @@ final class AgentDriver {
 
     /// Attaches the hierarchy and a screenshot as `<base>-<phase>.json` and
     /// `.png`, and keeps the tree for the next step's hit points.
-    private func capture(_ base: String, phase: String) throws -> Capture {
+    private func capture(_ base: String, phase: String, foregroundOnly: Bool = false) throws -> Capture {
         let app = try running()
-        if privateInput, app.state != .runningForeground {
+        if privateInput || foregroundOnly, app.state != .runningForeground {
             throw StepFailure(message: "drive capture unavailable")
         }
         let tree = try HierarchyExport.tree(app)
+        if foregroundOnly, app.state != .runningForeground {
+            throw StepFailure(message: "drive capture unavailable")
+        }
         self.tree = tree
         #if os(macOS)
         let screenshot = app.windows.firstMatch.screenshot()
         let origin = tree.window.origin
         #else
-        let screenshot = privateInput ? app.screenshot() : XCUIScreen.main.screenshot()
+        let screenshot = (privateInput || foregroundOnly) ? app.screenshot() : XCUIScreen.main.screenshot()
         let origin = CGPoint.zero
         #endif
         let png = screenshot.pngRepresentation
