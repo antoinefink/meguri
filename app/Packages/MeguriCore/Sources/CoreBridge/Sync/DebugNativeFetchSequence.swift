@@ -3,7 +3,21 @@ import Synchronization
 
 extension DebugCloudDiagnostics {
     static let nativeFetchSequence = NativeFetchSequence()
-    public static var nativeFetchSequenceValue: String { nativeFetchSequence.formatted }
+    /// Independently sampled curated values; proximity proves neither causality nor error attribution.
+    public static var nativeFetchSequenceValue: String {
+        formatNativeFetchSequenceValue(latest: latestValue, sequence: nativeFetchSequence.formatted)
+    }
+
+    // Internal composition seam, not a sanitizer. Production uses only the two curated sources above.
+    // Cap only the fault fragment: 180 + 8 wrapper bytes + <=284 sequence bytes stays below 512.
+    static func formatNativeFetchSequenceValue(latest: String?, sequence: String) -> String {
+        var fault = ""
+        for scalar in (latest ?? "none").unicodeScalars {
+            if fault.utf8.count + scalar.utf8.count > 180 { break }
+            fault.unicodeScalars.append(scalar)
+        }
+        return "fault{\(fault)} \(sequence)"
+    }
 
     struct FetchInclusion: Equatable, Sendable {
         var root = false
