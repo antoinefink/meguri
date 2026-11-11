@@ -738,7 +738,15 @@ public actor CloudKitSyncAdapter {
                 #endif
             case .databaseChanges: break
             case .stateUpdate(let state): try await core.stateUpdate(sdk: origin, state: state)
-            case .fetched(let zone, let records, let deleted): try await core.fetched(sdk: origin, zone: zone, records: records, deleted: deleted)
+            case .fetched(let zone, let records, let deleted):
+                try await core.fetched(sdk: origin, zone: zone, records: records, deleted: deleted)
+                #if DEBUG
+                // Original admission guards and successful intake precede this
+                // process total; it establishes no current-owner/convergence proof.
+                if zone == instance.zone {
+                    DebugCloudDiagnostics.fetchRecorder.record(.coreC, count: UInt64(records.count))
+                }
+                #endif
             case .sent(let id, let saved, let failed, let deleted, let failedDeletes):
                 let removalGuard = try await core.currentGuard()
                 guard await valid(origin), owned[origin] === instance else { return }

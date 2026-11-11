@@ -49,6 +49,58 @@ public enum DebugCloudDiagnostics {
     private static let logger = Logger(subsystem: "app.meguri", category: "CloudDiagnostics")
     private static let recorder = Recorder()
     private static let policyStatusTrace = PolicyStatusTrace()
+    static let fetchRecorder = FetchRecorder()
+
+    /// All original callbacks in this PROCESS, across owners/instances. These
+    /// totals prove neither current-owner delivery nor convergence or cause.
+    public static var processFetchValue: String { fetchRecorder.formatted }
+
+    enum FetchZone: Equatable, Sendable { case collection, root, other }
+    enum FetchCounter: Int, CaseIterable, Sendable {
+        case will, zoneC, modC, modR, coreC, refused, zoneFail
+        var label: String {
+            switch self {
+            case .will: "will"
+            case .zoneC: "zoneC"
+            case .modC: "modC"
+            case .modR: "modR"
+            case .coreC: "coreC"
+            case .refused: "refused"
+            case .zoneFail: "zoneFail"
+            }
+        }
+    }
+
+    /// Only a fixed number of scalar counts and an overflow flag survive.
+    /// will/zoneC count native starts; modC/modR count original modifications
+    /// before conversion. coreC counts records after successful core intake.
+    /// refused counts native fetched callbacks reaching the existing catch;
+    /// zoneFail counts original failed zone results (all zones). No new sink.
+    final class FetchRecorder: Sendable {
+        private struct State: Sendable {
+            var counts: [UInt64]
+            var overflow = false
+        }
+        private let state: Mutex<State>
+        // Scalar seed allows overflow testing without changing the process recorder.
+        init(initialCount: UInt64 = 0) {
+            state = Mutex(State(counts: Array(repeating: initialCount, count: FetchCounter.allCases.count)))
+        }
+        func record(_ counter: FetchCounter, count: UInt64 = 1) {
+            state.withLock { state in
+                let sum = state.counts[counter.rawValue].addingReportingOverflow(count)
+                state.counts[counter.rawValue] = sum.overflow ? .max : sum.partialValue
+                state.overflow = state.overflow || sum.overflow
+            }
+        }
+        var formatted: String {
+            state.withLock { state in
+                let counts = FetchCounter.allCases.map { "\($0.label)=\(state.counts[$0.rawValue])" }
+                    .joined(separator: " ")
+                return "processAll{\(counts) overflow=\(state.overflow ? 1 : 0)}"
+            }
+        }
+    }
 
     public static var latestValue: String? { recorder.latestValue }
     public static func policyStatusValue(generation: UInt64, hostRevision: UInt64) -> String? {

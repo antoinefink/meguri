@@ -5,6 +5,14 @@ import Foundation
 public enum NativeCloudKitFailure: Error { case invalidSerialization, invalidSystemFields, unsupportedRecord, unsupportedAsset }
 
 enum NativeCloudKitIdentityValidation {
+    #if DEBUG
+    // Compare original full zone identity in memory; retain only a finite class.
+    static func debugFetchZone(_ id: CKRecordZone.ID, collectionZone: String?) -> DebugCloudDiagnostics.FetchZone {
+        guard id.ownerName == CKCurrentUserDefaultName else { return .other }
+        if let collectionZone, id.zoneName == collectionZone { return .collection }
+        return id.zoneName == "meguri-root" ? .root : .other
+    }
+    #endif
     static func requireCurrentOwner(_ id: CKRecordZone.ID) throws {
         guard id.ownerName == CKCurrentUserDefaultName else { throw NativeCloudKitFailure.unsupportedRecord }
     }
@@ -484,6 +492,29 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
     }
     func handleEvent(_ event: CKSyncEngine.Event, syncEngine: CKSyncEngine) async {
         guard sdk === syncEngine else { return }
+        #if DEBUG
+        // Process-wide original callback facts, after SDK admission and before
+        // conversion can throw. No current-owner or convergence authority.
+        switch event {
+        case .willFetchChanges:
+            DebugCloudDiagnostics.fetchRecorder.record(.will)
+        case .willFetchRecordZoneChanges(let will):
+            if NativeCloudKitIdentityValidation.debugFetchZone(will.zoneID, collectionZone: collectionZone) == .collection {
+                DebugCloudDiagnostics.fetchRecorder.record(.zoneC)
+            }
+        case .fetchedRecordZoneChanges(let fetched):
+            for modification in fetched.modifications {
+                switch NativeCloudKitIdentityValidation.debugFetchZone(modification.record.recordID.zoneID, collectionZone: collectionZone) {
+                case .collection: DebugCloudDiagnostics.fetchRecorder.record(.modC)
+                case .root: DebugCloudDiagnostics.fetchRecorder.record(.modR)
+                case .other: break
+                }
+            }
+        case .didFetchRecordZoneChanges(let did):
+            if did.error != nil { DebugCloudDiagnostics.fetchRecorder.record(.zoneFail) }
+        default: break
+        }
+        #endif
         if activeEvent { await withCheckedContinuation { eventWaiters.append($0) } }
         else { activeEvent = true; networkLifetime.beginEvent() }
         if let returnedWork { await returnedWork.value }
@@ -582,6 +613,9 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
                 returnedWork = Task { await self.returned(forwarded) }
             }
         } catch {
+            #if DEBUG
+            if case .fetchedRecordZoneChanges = event { DebugCloudDiagnostics.fetchRecorder.record(.refused) }
+            #endif
             failure = error
             // A native decoding failure is terminal; it cannot be followed by
             // a successful opaque-state persistence through this instance.

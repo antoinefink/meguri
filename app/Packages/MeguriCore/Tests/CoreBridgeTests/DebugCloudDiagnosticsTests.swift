@@ -8,6 +8,52 @@ import Testing
 struct DebugCloudDiagnosticsTests {
     private typealias Value = DebugCloudDiagnostics.Value
 
+    @Test func processFetchCountsStartAtZeroAndKeepBoundariesIndependent() {
+        let recorder = DebugCloudDiagnostics.FetchRecorder()
+        #expect(recorder.formatted == "processAll{will=0 zoneC=0 modC=0 modR=0 coreC=0 refused=0 zoneFail=0 overflow=0}")
+        recorder.record(.will)
+        recorder.record(.zoneC)
+        recorder.record(.modC, count: 3)
+        recorder.record(.modR, count: 2)
+        recorder.record(.coreC, count: 2)
+        recorder.record(.refused)
+        recorder.record(.zoneFail)
+        recorder.record(.coreC, count: 0)
+        #expect(recorder.formatted == "processAll{will=1 zoneC=1 modC=3 modR=2 coreC=2 refused=1 zoneFail=1 overflow=0}")
+        #expect(DebugCloudDiagnostics.FetchRecorder().formatted == "processAll{will=0 zoneC=0 modC=0 modR=0 coreC=0 refused=0 zoneFail=0 overflow=0}")
+    }
+
+    @Test func processFetchCountsSaturateEveryBoundaryAndKeepOverflowSticky() {
+        for counter in DebugCloudDiagnostics.FetchCounter.allCases {
+            let recorder = DebugCloudDiagnostics.FetchRecorder(initialCount: .max - 1)
+            recorder.record(counter)
+            #expect(recorder.formatted.contains("\(counter.label)=\(UInt64.max) "))
+            #expect(recorder.formatted.hasSuffix("overflow=0}"))
+            recorder.record(counter)
+            #expect(recorder.formatted.contains("\(counter.label)=\(UInt64.max) "))
+            #expect(recorder.formatted.hasSuffix("overflow=1}"))
+            recorder.record(counter, count: .max)
+            recorder.record(counter, count: 0)
+            #expect(recorder.formatted.contains("\(counter.label)=\(UInt64.max) "))
+            #expect(recorder.formatted.hasSuffix("overflow=1}"))
+        }
+        let bounded = DebugCloudDiagnostics.FetchRecorder(initialCount: .max)
+        for counter in DebugCloudDiagnostics.FetchCounter.allCases { bounded.record(counter) }
+        let original = bounded.formatted
+        for _ in 0..<1_000 {
+            for counter in DebugCloudDiagnostics.FetchCounter.allCases { bounded.record(counter) }
+        }
+        #expect(bounded.formatted == original && original.utf8.count < 256)
+    }
+
+    @Test func processFetchCountsSynchronizeConcurrentOriginalBoundaries() {
+        let recorder = DebugCloudDiagnostics.FetchRecorder()
+        DispatchQueue.concurrentPerform(iterations: 256) { _ in
+            for counter in DebugCloudDiagnostics.FetchCounter.allCases { recorder.record(counter) }
+        }
+        #expect(recorder.formatted == "processAll{will=256 zoneC=256 modC=256 modR=256 coreC=256 refused=256 zoneFail=256 overflow=0}")
+    }
+
     @Test func pageEpochStagesMapAndFormatOnlyFiniteTags() {
         let cases: [(CloudAdoptionFailureDiagnostic.Stage, String)] = [
             (.init(.pageEpochShape), "pageEpochShape"),

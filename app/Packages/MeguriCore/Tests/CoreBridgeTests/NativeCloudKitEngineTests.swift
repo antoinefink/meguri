@@ -1,9 +1,41 @@
 #if canImport(CloudKit)
 import CloudKit
+import Foundation
 import Testing
 @testable import CoreBridge
 
 struct NativeCloudKitEngineTests {
+    #if DEBUG
+    @Test func processFetchClassificationUsesOriginalFullZoneAndRetainsNoAssociatedData() {
+        let sentinel = UUID().uuidString
+        let collection = CKRecordZone.ID(zoneName: sentinel, ownerName: CKCurrentUserDefaultName)
+        let root = CKRecordZone.ID(zoneName: "meguri-root", ownerName: CKCurrentUserDefaultName)
+        let cases: [(CKRecordZone.ID, String?, DebugCloudDiagnostics.FetchZone)] = [
+            (collection, sentinel, .collection),
+            (collection, nil, .other),
+            (.init(zoneName: sentinel, ownerName: "foreign-owner"), sentinel, .other),
+            (.init(zoneName: sentinel + "-other", ownerName: CKCurrentUserDefaultName), sentinel, .other),
+            (root, sentinel, .root), (root, nil, .root),
+            (.init(zoneName: "meguri-root", ownerName: "foreign-owner"), sentinel, .other),
+            (.init(zoneName: "meguri-media", ownerName: CKCurrentUserDefaultName), sentinel, .other)
+        ]
+        let recorder = DebugCloudDiagnostics.FetchRecorder()
+        for (id, registered, expected) in cases {
+            let classification = NativeCloudKitIdentityValidation.debugFetchZone(id, collectionZone: registered)
+            #expect(classification == expected)
+            switch classification {
+            case .collection: recorder.record(.modC)
+            case .root: recorder.record(.modR)
+            case .other: break
+            }
+        }
+        #expect(recorder.formatted == "processAll{will=0 zoneC=0 modC=1 modR=2 coreC=0 refused=0 zoneFail=0 overflow=0}")
+        for excluded in [sentinel, "foreign-owner", "meguri-root", "meguri-media"] {
+            #expect(!recorder.formatted.contains(excluded))
+        }
+    }
+    #endif
+
     @Test func fetchedRecordsAndDeletionsRouteToTheirActualZones() throws {
         let root = CKRecordZone.ID(zoneName: "meguri-root", ownerName: CKCurrentUserDefaultName)
         let collection = CKRecordZone.ID(zoneName: "meguri-collection", ownerName: CKCurrentUserDefaultName)

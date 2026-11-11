@@ -39,7 +39,7 @@ struct SyncStatusRows: View {
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("settings.accountSync.status")
             #if DEBUG
-            .accessibilityValue([sync.debugPolicyStatusValue, DebugCloudDiagnostics.latestValue]
+            .accessibilityValue([DebugCloudDiagnostics.processFetchValue, sync.debugPolicyStatusValue, DebugCloudDiagnostics.latestValue]
                 .compactMap { $0 }.joined(separator: " "))
             #endif
             if let status = sync.status {

@@ -77,7 +77,7 @@ struct DebugCloudPolicyStatusTraceTests {
         }
     }
 
-    @Test func policyFirstAccessibilityValueKeepsRealSizeLatestFrameWithinInspectionLimit() throws {
+    @Test func processFirstAccessibilityValueKeepsRealSizeLatestFrameWithinInspectionLimit() throws {
         let completed = policyRecord(.succeeded(selected: 1842, heldBack: 12, newerPending: 13,
             incomingWaiting: 14, media: policyMedia), ended: 1794398400000)
         let attempt = policyRecord(.incomplete(outstanding: 21, blocked: 22), ended: 1794398460000)
@@ -88,11 +88,21 @@ struct DebugCloudPolicyStatusTraceTests {
         let policyValue = try #require(trace.value(generation: 7, hostRevision: 8))
         let failureValue = DebugCloudDiagnostics.Value(.policyExchange,
             error: BridgeError.cloudPolicy(.unqualifiedCompletion)).formatted
-        // Match SyncStatusRows' policy-first composition, with a real formatted failure after it.
-        let accessibilityValue = [policyValue, failureValue].joined(separator: " ")
+        let process = DebugCloudDiagnostics.FetchRecorder()
+        process.record(.will, count: 12)
+        process.record(.zoneC, count: 11)
+        process.record(.modC, count: 1842)
+        process.record(.modR, count: 2)
+        process.record(.coreC, count: 1840)
+        process.record(.refused)
+        process.record(.zoneFail, count: 3)
+        // Match SyncStatusRows: all-process counts, current-owner policy, failure.
+        let values: [String?] = [process.formatted, policyValue, failureValue]
+        let accessibilityValue = values.compactMap { $0 }.joined(separator: " ")
         let latestFrame = "policy{latest={pending=12 heldBack=3 inFlight=4 incomingWaiting=5 bindingActive=true bindingUsable=false accountMatchesBinding=true lastCompleted={endedMilliseconds=1794398400000 outcome=succeeded selected=1842 heldBack=12 newerPending=13 incomingWaiting=14} lastAttempt={endedMilliseconds=1794398460000 outcome=incomplete outstanding=21 blocked=22}}"
         #expect(accessibilityValue.count > 512)
-        #expect(String(accessibilityValue.prefix(512)).hasPrefix(latestFrame))
+        #expect(String(accessibilityValue.prefix(512)).hasPrefix("\(process.formatted) \(latestFrame)"))
+        #expect(accessibilityValue.hasSuffix(failureValue))
     }
 
     @Test func policyTraceStaysBoundedAndDiscardsUnrequestedAssociatedPayloads() throws {
