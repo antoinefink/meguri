@@ -276,3 +276,22 @@ missing and wrong-member image evidence. Mac VM run `21548` verifies both
 values of the held flag at the original result. The historical conflict and
 fetched own-save paths still need exact image accounting and journal evidence.
 The signed round trip and full gate remain open.
+
+## Lost replies in Sync Now accounting
+
+Starting commit `8ae6b5ba`. A conflict can acknowledge its matching retained
+flight after Core records the result. A fetch can do the same after the
+incoming settle commits. Each path credits the exchange only when Core can
+link the flight to a handoff in the current opening and its image meets the
+capture sequence. An older result still updates tracking and leaves a newer
+local change pending.
+
+The exchange keeps the held flag from a qualifying acknowledgement. An
+unheld acknowledgement satisfies that entity without a held flag. The
+reported held count also includes pending held names, once per name.
+
+Direct review checked the binding, the final batch guard, durable receipt
+order and compatibility with older exchange rows. Rust run `29406` passes
+29 tests, including both discovery paths on either side of the capture.
+Core lint run `30752` passes. The signed journal still
+needs the original conflict and fetch acknowledgement facts for replay.

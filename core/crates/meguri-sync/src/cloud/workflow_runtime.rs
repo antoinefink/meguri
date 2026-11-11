@@ -1526,7 +1526,6 @@ impl Runtime {
                 tombstone: flight.tombstone,
                 envelope_digest: codec::sha256(&envelope),
                 image_seq: flight.image_seq,
-                #[cfg(feature = "test-hooks")]
                 held: flight.held,
             };
             let image = (
@@ -1536,6 +1535,7 @@ impl Runtime {
                 flight.image_seq,
                 flight.held,
             );
+            let identity = flight.identity();
             let committed = self.with_scan(&guard, collection, |s| {
                 Self::caller_locked(s, instance)?;
                 if Self::gate_locked(s).is_err() || s.cloud.incoming_seq > snapshot.seq().0 {
@@ -1553,7 +1553,9 @@ impl Runtime {
                 {
                     return Ok(false);
                 }
-                store.persist_flight(guard.binding, &name, flight)?;
+                if store.persist_flight(guard.binding, &name, flight)? {
+                    s.cloud.remember_flight(guard.binding, name.clone(), identity);
+                }
                 Ok(true)
             })?;
             if !committed {
@@ -1564,7 +1566,7 @@ impl Runtime {
                 uploads.push(upload);
             }
             flights.insert(name.clone(), handed);
-            images.push(image);
+            images.push((image, identity));
             saves.push(SaveInput {
                 name,
                 envelope,
@@ -1602,16 +1604,16 @@ impl Runtime {
                     return Ok(empty());
                 }
             }
-            for (name, erev, digest, seq, held) in images {
+            for ((name, erev, digest, seq, held), _) in &images {
                 s.cloud
                     .handed_images
-                    .entry((name.clone(), erev, digest))
-                    .and_modify(|v| *v = (*v).max(seq))
-                    .or_insert(seq);
-                if held {
-                    s.policy.held_images.insert(name);
+                    .entry((name.clone(), *erev, *digest))
+                    .and_modify(|v| *v = (*v).max(*seq))
+                    .or_insert(*seq);
+                if *held {
+                    s.policy.held_images.insert(name.clone());
                 } else {
-                    s.policy.held_images.remove(&name);
+                    s.policy.held_images.remove(name);
                 }
             }
             if s.last_capture
@@ -1621,6 +1623,9 @@ impl Runtime {
                 s.cloud.deferred.extend(deferred);
             }
             let pending = Self::sendables_locked(s)?;
+            for ((name, ..), identity) in images {
+                s.cloud.mark_flight_handed(guard.binding, &name, identity);
+            }
             s.actions.update(UpdateKind::Changes, pending, BTreeSet::new());
             let _covered = &receipt;
             s.actions.batch += 1;
@@ -1688,7 +1693,7 @@ impl Runtime {
         instance: &str,
         request: u64,
         record: &Saved,
-    ) -> Result<(codec::Received, u64), RuntimeError> {
+    ) -> Result<(codec::Received, FlightImage), RuntimeError> {
         let binding = &s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding;
         let store = s.store.as_ref().ok_or(Error::Database)?;
         let handed = s
@@ -1740,7 +1745,13 @@ impl Runtime {
         }
         // Identical bytes can be handed again later. The request, not the
         // durable digest alone, says which image this callback accepted.
-        Ok((received, handed.image_seq))
+        Ok((
+            received,
+            FlightImage {
+                seq: handed.image_seq,
+                held: handed.held,
+            },
+        ))
     }
     /// Resolve Engine's retained overlap against the current binding, never
     /// cached record names or the rest of a step's touched rows. No journals
@@ -1866,6 +1877,7 @@ impl Runtime {
         s.cloud
             .handed_images
             .retain(|(name, erev, _), _| name != &image_key.0 || *erev > image_key.1);
+        s.cloud.retire_flights(&saved.name, image_key.1);
         Self::settle_cloud_uploaded_locked(s, collection)?;
         Ok(())
     }
@@ -1966,7 +1978,7 @@ impl Runtime {
             let saved_ack_body_reads_before = super::workflow_store::body_reads();
             let mut references = media::cleanup::SavedReferences::default();
             for saved in saved {
-                let (received, image_seq) = Self::decode_saved_record_locked(&s, instance, request_id, saved)?;
+                let (received, image) = Self::decode_saved_record_locked(&s, instance, request_id, saved)?;
                 Self::acknowledge_sent_locked(
                     &mut s,
                     collection,
@@ -1976,10 +1988,8 @@ impl Runtime {
                     &mut force,
                     Some(&mut references),
                 )?;
-                if s.actions.exchange.as_ref().is_some_and(|(_, exchange)| {
-                    image_seq >= exchange.boundary_seq && exchange.selected_names.contains(&saved.name)
-                }) {
-                    acknowledged.push(saved.name.clone());
+                if s.actions.exchange.is_some() {
+                    acknowledged.push((&saved.name, image));
                 }
                 saved_count += 1;
             }
@@ -1991,8 +2001,11 @@ impl Runtime {
             // behavior; no reference snapshot crosses into those mutating paths.
             drop(references);
             for server in conflicts {
-                if let Some(received) = Self::decode_save_conflict_locked(&s, instance, request_id, server)? {
+                if let Some((received, image)) = Self::decode_save_conflict_locked(&s, instance, request_id, server)? {
                     Self::acknowledge_sent_locked(&mut s, collection, server, received, at_ms, &mut force, None)?;
+                    if let Some(image) = image {
+                        acknowledged.push((&server.name, image));
+                    }
                     saved_count += 1;
                 } else {
                     let key = s
@@ -2080,18 +2093,6 @@ impl Runtime {
                 force.insert(name.clone());
             }
         }
-        with_tracking_access(|| -> Result<(), RuntimeError> {
-            let store = s.store.as_ref().ok_or(Error::Database)?;
-            for saved in conflicts {
-                if let Some(selected) = s.actions.selected_revs.get(&saved.name) {
-                    let e = store.entity_header(b, &saved.name)?.ok_or(Error::InvalidData)?.facts;
-                    if e.acked_rev >= *selected {
-                        acknowledged.push(saved.name.clone());
-                    }
-                }
-            }
-            Ok(())
-        })?;
         let terminal_names = absent_revisions
             .into_iter()
             .filter(|(name, revision)| {
@@ -2103,9 +2104,8 @@ impl Runtime {
             .map(|(name, _)| name)
             .collect::<Vec<_>>();
         if let Some((_, exchange)) = &mut s.actions.exchange {
-            for name in acknowledged {
-                exchange.acked_names.insert(name.clone());
-                exchange.outstanding_names.remove(&name);
+            for (name, image) in acknowledged {
+                exchange.record_ack(name, image);
             }
             // Storage proved absence for this handed revision. Keep it out of
             // the ACK set and leave every other selected revision outstanding.
@@ -2215,6 +2215,7 @@ impl Runtime {
                 boundary_seq: boundary,
                 selected_names: names.clone(),
                 acked_names: BTreeSet::new(),
+                held_back_names: BTreeSet::new(),
                 outstanding_names: names,
             },
         ));

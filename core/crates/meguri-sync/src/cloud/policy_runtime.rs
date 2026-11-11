@@ -66,6 +66,7 @@ impl Runtime {
         };
         let mut binding = None;
         let mut evidence = Evidence::default();
+        let mut held_pending = BTreeSet::new();
         with_tracking_access(|| -> Result<(), RuntimeError> {
             if let (Some(b), Some(store)) = (&s.bound, &s.store) {
                 let publish = store.publication_op()?;
@@ -97,7 +98,8 @@ impl Runtime {
                     .chain(&s.policy.held_images)
                     .cloned()
                     .collect();
-                summary.held = pending.intersection(&held).count() as u64;
+                held_pending = pending.intersection(&held).cloned().collect();
+                summary.held = held_pending.len() as u64;
                 summary.pending_unheld = pending.difference(&held).count() as u64;
                 summary.sendable = store
                     .dirty_names(b.binding.id)?
@@ -205,6 +207,7 @@ impl Runtime {
             Ok(())
         })?;
         Ok(Projection {
+            held_pending,
             facts: CoreFacts {
                 lifecycle,
                 generation,

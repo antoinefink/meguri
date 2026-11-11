@@ -508,15 +508,9 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         tx.commit()?;
         Ok(())
     }
-    pub(super) fn persist_flight(&mut self, b: BindingId, name: &str, flight: Flight) -> Result<(), Error> {
+    pub(super) fn persist_flight(&mut self, b: BindingId, name: &str, flight: Flight) -> Result<bool, Error> {
         let mut h = self.entity_header(b, name)?.ok_or(Error::InvalidData)?;
-        let exists = h.facts.in_flight.iter().any(|f| {
-            f.local_rev == flight.local_rev
-                && f.payload_digest == flight.payload_digest
-                && f.erev == flight.erev
-                && f.tombstone == flight.tombstone
-                && f.tombstone_envelope_digest == flight.tombstone_envelope_digest
-        });
+        let exists = h.facts.in_flight.iter().any(|f| f.identity() == flight.identity());
         if !exists && h.facts.in_flight.len() >= 250 {
             return Err(Error::InvalidData);
         }
@@ -527,7 +521,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         }
         super::tracking_payload::put_header(&tx, b, &h)?;
         tx.commit()?;
-        Ok(())
+        Ok(!exists)
     }
     pub(super) fn acknowledge(
         &mut self,

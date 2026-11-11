@@ -1138,6 +1138,20 @@ impl Runtime {
                         .entity_header(i.binding, &key.name)?
                         .ok_or(Error::InvalidData)?
                         .facts;
+                    let landed = flights.iter().find(|flight| {
+                        flight.local_rev == *rev
+                            && flight.erev == e.server_erev
+                            && flight.payload_digest == e.acked_payload_digest
+                            && flight
+                                .tombstone_envelope_digest
+                                .is_none_or(|digest| digest == codec::sha256(&e.acked_envelope.0))
+                    });
+                    if let Some(image) = landed.and_then(|flight| s.cloud.flight_image(i.binding, &key.name, flight))
+                        && guard.recovery.is_none()
+                        && let Some((_, exchange)) = &mut s.actions.exchange
+                    {
+                        exchange.record_ack(&key.name, image);
+                    }
                     if let Some(image) = flights
                         .iter()
                         .filter(|f| f.local_rev == *rev && f.payload_digest == e.acked_payload_digest)
@@ -1154,8 +1168,10 @@ impl Runtime {
                     s.cloud
                         .handed_images
                         .retain(|(name, erev, _), _| name != &key.name || *erev > e.server_erev);
+                    s.cloud.retire_flights(&key.name, e.server_erev);
                 } else {
                     s.cloud.handed_images.retain(|(name, _, _), _| name != &key.name);
+                    s.cloud.open_flights.remove(&key.name);
                 }
             }
             if guard.recovery.is_none() {

@@ -1184,6 +1184,65 @@ fn pre_capture_save_does_not_ack_an_identical_later_handoff() {
 }
 
 #[test]
+fn lost_save_credits_its_original_image_through_conflict_and_fetch() {
+    for discover_by_fetch in [false, true] {
+        for before_capture in [false, true] {
+            let rig = rig();
+            let runtime = rig.host.cloud_runtime().unwrap();
+            let collection = rig.host.collection().unwrap();
+            meguri_engine::decks::rename(&collection, rig.baseline_deck, "First upload".into()).unwrap();
+            let names: std::collections::BTreeSet<_> = runtime.tracking_sendables().into_keys().collect();
+            assert_eq!(names.len(), 1);
+            let name = names.first().unwrap();
+            let mut exchange = (!before_capture).then(|| first_manual_capture(&rig));
+            let batch = runtime.build_collection_batch(&rig.sdk, &collection, &names).unwrap();
+            let [input] = batch.saves.as_slice() else {
+                panic!("expected one real upload")
+            };
+            let server = Saved {
+                name: input.name.clone(),
+                envelope: input.envelope.clone(),
+                system_fields: b"landed-version".to_vec(),
+            };
+            let flight = runtime.entity_facts(name).unwrap().unwrap().in_flight.remove(0);
+            if before_capture {
+                meguri_engine::decks::select(&collection, rig.baseline_deck).unwrap();
+                exchange = Some(first_manual_capture(&rig));
+            }
+            let id = exchange.unwrap();
+            assert_eq!(
+                flight.image_seq < runtime.exchange_result(id).unwrap().boundary_seq,
+                before_capture
+            );
+            meguri_engine::decks::rename(&collection, rig.baseline_deck, "Local edit after capture".into()).unwrap();
+
+            if discover_by_fetch {
+                runtime.adapter_fetched(&rig.sdk, &rig.zone, &[server], &[]).unwrap();
+                runtime.drain_incoming(&collection, Duration::from_secs(10)).unwrap();
+            } else {
+                let retry = runtime.build_collection_batch(&rig.sdk, &collection, &names).unwrap();
+                assert_eq!(retry.saves.len(), 1);
+                runtime.enter_sent_handler(&rig.sdk, retry.id).unwrap();
+                assert_eq!(
+                    runtime
+                        .sent_results_with_conflicts(&rig.sdk, &collection, retry.id, &[], &[server], &[], 1)
+                        .unwrap(),
+                    1
+                );
+                runtime.return_sent_handler(&rig.sdk).unwrap();
+            }
+            let tracked = runtime.entity_facts(name).unwrap().unwrap();
+            assert_eq!(tracked.acked_rev, flight.local_rev);
+            assert!(tracked.local_rev > tracked.acked_rev && tracked.mark.is_some());
+            let result = runtime.exchange_result(id).unwrap();
+            assert_eq!(result.acked_names.contains(name), !before_capture);
+            assert_eq!(result.outstanding_names.contains(name), before_capture);
+            rig.host.close().unwrap();
+        }
+    }
+}
+
+#[test]
 fn saved_flight_during_real_reconcile_scan_preserves_newer_edit_and_capture_accounting() {
     use meguri_sync::cloud::runtime::ScanPausePoint;
     use std::sync::mpsc;

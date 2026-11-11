@@ -22,6 +22,7 @@ pub(crate) struct RuntimeEvidenceState {
 /// Atomically read Runtime/tracking projection. Session is the real ReviewService registry value.
 pub struct Projection {
     pub facts: CoreFacts,
+    pub(crate) held_pending: std::collections::BTreeSet<String>,
     pub evidence: Evidence,
     pub engine: Option<Engine>,
     pub tracking_stopped: bool,

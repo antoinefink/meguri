@@ -1,5 +1,5 @@
 //! Production pending actions and conditional sends for a verified stable binding.
-use super::{Error, OpaqueBytes, entity_codec as c, runtime::DirtyMark};
+use super::{BindingId, Error, OpaqueBytes, entity_codec as c, runtime::DirtyMark};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -159,6 +159,30 @@ pub struct Flight {
     /// Exact handed ordinary tombstone; an empty payload cannot identify it.
     #[serde(default)]
     pub tombstone_envelope_digest: Option<[u8; 32]>,
+}
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct FlightIdentity {
+    pub erev: u64,
+    local_rev: u64,
+    payload_digest: [u8; 32],
+    tombstone: bool,
+    tombstone_envelope_digest: Option<[u8; 32]>,
+}
+impl Flight {
+    pub(crate) fn identity(&self) -> FlightIdentity {
+        FlightIdentity {
+            erev: self.erev,
+            local_rev: self.local_rev,
+            payload_digest: self.payload_digest,
+            tombstone: self.tombstone,
+            tombstone_envelope_digest: self.tombstone_envelope_digest,
+        }
+    }
+}
+#[derive(Clone, Copy)]
+pub(crate) struct FlightImage {
+    pub seq: u64,
+    pub held: bool,
 }
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EntityFacts {
@@ -406,7 +430,23 @@ pub struct ExchangeResult {
     pub boundary_seq: u64,
     pub selected_names: BTreeSet<String>,
     pub acked_names: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub held_back_names: BTreeSet<String>,
     pub outstanding_names: BTreeSet<String>,
+}
+impl ExchangeResult {
+    pub(crate) fn record_ack(&mut self, name: &str, image: FlightImage) {
+        if image.seq < self.boundary_seq || !self.selected_names.contains(name) {
+            return;
+        }
+        // A later unheld image can satisfy a name whose earlier ACK was held.
+        if self.acked_names.insert(name.to_owned()) && image.held {
+            self.held_back_names.insert(name.to_owned());
+        } else if !image.held {
+            self.held_back_names.remove(name);
+        }
+        self.outstanding_names.remove(name);
+    }
 }
 /// Opening-local undo authority. No Collection/Runtime strong references.
 #[derive(Default)]
@@ -424,7 +464,53 @@ pub(crate) struct CloudFrontier {
     // A persisted flight from an earlier process has no authority over this
     // opening's undo ids, even if its numeric image seq happens to match.
     pub handed_images: BTreeMap<(String, u64, [u8; 32]), u64>,
+    pub(crate) open_flight_binding: Option<BindingId>,
+    pub(crate) open_flights: BTreeMap<String, BTreeMap<FlightIdentity, bool>>,
     pub incoming_seq: u64,
+}
+impl CloudFrontier {
+    pub(crate) fn remember_flight(&mut self, binding: BindingId, name: String, flight: FlightIdentity) {
+        if self.open_flight_binding != Some(binding) {
+            self.open_flights.clear();
+            self.open_flight_binding = Some(binding);
+        }
+        // Persistence precedes the final guard check for a batch handoff.
+        self.open_flights
+            .entry(name)
+            .or_default()
+            .entry(flight)
+            .or_insert(false);
+    }
+    pub(crate) fn mark_flight_handed(&mut self, binding: BindingId, name: &str, flight: FlightIdentity) {
+        if self.open_flight_binding == Some(binding)
+            && let Some(handed) = self
+                .open_flights
+                .get_mut(name)
+                .and_then(|flights| flights.get_mut(&flight))
+        {
+            *handed = true;
+        }
+    }
+    pub(crate) fn flight_image(&self, binding: BindingId, name: &str, flight: &Flight) -> Option<FlightImage> {
+        (self.open_flight_binding == Some(binding)
+            && self
+                .open_flights
+                .get(name)
+                .and_then(|flights| flights.get(&flight.identity()))
+                == Some(&true))
+        .then_some(FlightImage {
+            seq: flight.image_seq,
+            held: flight.held,
+        })
+    }
+    pub(crate) fn retire_flights(&mut self, name: &str, through: u64) {
+        if let Some(flights) = self.open_flights.get_mut(name) {
+            flights.retain(|flight, _| flight.erev > through);
+            if flights.is_empty() {
+                self.open_flights.remove(name);
+            }
+        }
+    }
 }
 
 /// Action ordering lives in production. SDK implementations execute complete lists
@@ -438,7 +524,6 @@ pub(crate) struct HandedSave {
     pub tombstone: bool,
     pub envelope_digest: [u8; 32],
     pub image_seq: u64,
-    #[cfg(feature = "test-hooks")]
     pub held: bool,
 }
 pub(crate) enum MissingSaveDisposition {
@@ -677,3 +762,59 @@ pub enum FetchPhase {
 
 macro_rules! opaque_debug {($($name:ty),+)=>{$(impl std::fmt::Debug for $name {fn fmt(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(stringify!($name))}})+};}
 opaque_debug!(Flight, EntityFacts, SaveInput, BuiltBatch, Saved);
+
+#[cfg(test)]
+mod exchange_tests {
+    use super::*;
+
+    #[test]
+    fn historical_image_needs_a_handoff_in_its_binding() {
+        let mut frontier = CloudFrontier::default();
+        let binding = BindingId([1; 16]);
+        let flight = Flight {
+            local_rev: 1,
+            payload_digest: [2; 32],
+            row_digest: [3; 32],
+            payload: FlightPayload::Image {
+                kind: c::Kind::Card,
+                key: vec![1],
+                digest: [2; 32],
+            },
+            erev: 4,
+            image_seq: 8,
+            held: true,
+            tombstone: false,
+            tombstone_envelope_digest: None,
+        };
+        frontier.mark_flight_handed(binding, "card", flight.identity());
+        assert!(frontier.flight_image(binding, "card", &flight).is_none());
+        frontier.remember_flight(binding, "card".into(), flight.identity());
+        assert!(frontier.flight_image(binding, "card", &flight).is_none());
+        frontier.mark_flight_handed(binding, "card", flight.identity());
+        let image = frontier.flight_image(binding, "card", &flight).unwrap();
+        assert_eq!(image.seq, 8);
+        assert!(image.held);
+        assert!(frontier.flight_image(BindingId([2; 16]), "card", &flight).is_none());
+        frontier.retire_flights("card", flight.erev);
+        assert!(frontier.flight_image(binding, "card", &flight).is_none());
+    }
+
+    #[test]
+    fn qualifying_held_ack_is_reported_until_an_unheld_ack() {
+        let mut result = ExchangeResult {
+            boundary_seq: 9,
+            selected_names: ["card".to_owned()].into(),
+            outstanding_names: ["card".to_owned()].into(),
+            ..ExchangeResult::default()
+        };
+        result.record_ack("card", FlightImage { seq: 8, held: false });
+        assert!(result.outstanding_names.contains("card"));
+        result.record_ack("card", FlightImage { seq: 9, held: true });
+        assert!(result.outstanding_names.is_empty());
+        assert!(result.held_back_names.contains("card"));
+        result.record_ack("card", FlightImage { seq: 10, held: false });
+        result.record_ack("card", FlightImage { seq: 11, held: true });
+        assert!(result.acked_names.contains("card"));
+        assert!(result.held_back_names.is_empty());
+    }
+}

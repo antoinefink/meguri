@@ -1289,7 +1289,7 @@ impl Driver {
         let outcome = match completed.collection {
             CollectionOutcome::Succeeded => ExchangeOutcome::Succeeded {
                 selected: completed.result.selected_names.len() as u64,
-                held_back: summary.held,
+                held_back: projection.held_pending.union(&completed.result.held_back_names).count() as u64,
                 newer_pending: summary.pending_unheld,
                 incoming_waiting: summary.incoming_waiting,
                 media: summary.media.clone(),

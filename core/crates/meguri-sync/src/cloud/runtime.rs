@@ -887,6 +887,7 @@ impl Runtime {
         state.cloud.acked_images.clear();
         if !retained_sdk {
             state.cloud.handed_images.clear();
+            state.cloud.open_flights.clear();
         }
         state.bound = None;
         #[cfg(feature = "test-hooks")]

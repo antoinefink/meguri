@@ -571,6 +571,7 @@ impl Runtime {
             )?;
             s.cloud.acked_images.remove(&r.old_name);
             s.cloud.handed_images.retain(|(name, _, _), _| name != &r.old_name);
+            s.cloud.open_flights.remove(&r.old_name);
             Ok(())
         })?;
         drop(snapshot);

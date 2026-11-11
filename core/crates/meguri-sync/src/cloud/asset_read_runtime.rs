@@ -3,7 +3,7 @@ use super::*;
 use crate::cloud::{
     adapter::collection_zone,
     incoming::*,
-    workflow::{FetchedRecord, Saved},
+    workflow::{FetchedRecord, FlightImage, Saved},
 };
 use std::collections::BTreeMap;
 
@@ -865,7 +865,7 @@ impl Runtime {
         sdk: &str,
         request_id: u64,
         server: &Saved,
-    ) -> Result<Option<codec::Received>, RuntimeError> {
+    ) -> Result<Option<(codec::Received, Option<FlightImage>)>, RuntimeError> {
         let b = &s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding;
         let store = s.store.as_ref().ok_or(Error::Database)?;
         let handed = s
@@ -958,7 +958,10 @@ impl Runtime {
                             return Err(Error::InvalidData.into());
                         }
                     }
-                    return Ok(Some(received));
+                    // Retained flights survive process restarts; their sequence
+                    // numbers qualify only within the opening that made them.
+                    let image = s.cloud.flight_image(b.id, &server.name, flight);
+                    return Ok(Some((received, image)));
                 }
             }
         }
