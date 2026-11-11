@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Generated files only; Apple calls are doubles, never real app/account data."""
 
+import builtins
 import contextlib
 import copy
 import importlib.util
@@ -136,10 +137,156 @@ class ProbeTests(unittest.TestCase):
         report = self.stage()
         return self.receipt("cloud-media-probe", STAGE, ["stage", "--preview-build", BUILD], {"probe": report})
 
+    def prepare_ui(self, run=STAGE):
+        with contextlib.ExitStack() as held:
+            private = p.new_private(held, self.home, run)
+            return p.prepare_ui(p.Inputs(held, self.root), run, BUILD, private)
+
+    def prepared_receipt(self):
+        report = self.prepare_ui()
+        return self.receipt("cloud-media-probe", STAGE, ["prepare-ui", "--preview-build", BUILD], {"probe": report})
+
+    @contextlib.contextmanager
+    def deny_app_data(self):
+        # Catch attempts (including dir_fd-relative opens and mere stat calls),
+        # rather than just asserting that the final fixture bytes did not change.
+        forbidden = str(self.home / "Library/Containers")
+        opened = {}
+        real_open = os.open
+
+        def guarded(function):
+            def call(path, *args, **kwargs):
+                if isinstance(path, int):
+                    candidate = opened[path]
+                else:
+                    parent = opened[kwargs["dir_fd"]] if kwargs.get("dir_fd") is not None else os.getcwd()
+                    candidate = os.path.normpath(os.path.join(parent, os.fspath(path)))
+                self.assertFalse(candidate == forbidden or candidate.startswith(forbidden + "/"),
+                                 "prepare-ui attempted app-data access: " + candidate)
+                result = function(path, *args, **kwargs)
+                if function is real_open:
+                    opened[result] = candidate
+                return result
+            return call
+
+        with contextlib.ExitStack() as held:
+            for owner, name in ((os, "open"), (os, "stat"), (os, "mkdir"), (os, "listdir"),
+                                (os, "scandir"), (builtins, "open"), (io, "open")):
+                held.enter_context(patch.object(owner, name, side_effect=guarded(getattr(owner, name))))
+            yield
+
     def verify(self):
         with contextlib.ExitStack() as held:
             private = p.new_private(held, self.home, VERIFY)
             return p.verify_phone(p.Inputs(held, self.root), self.home, STAGE, PREP, private)
+
+    def test_prepare_ui_freezes_fresh_independent_files_without_any_app_data_access(self):
+        media_before = (list(self.media.iterdir()), self.media.stat().st_mtime_ns)
+        with self.deny_app_data():
+            first = self.prepare_ui()
+            second = self.prepare_ui(VERIFY)
+        self.assertEqual((list(self.media.iterdir()), self.media.stat().st_mtime_ns), media_before)
+        hashes = []
+        for run, report in ((STAGE, first), (VERIFY, second)):
+            private = p.private_path(self.home, run)
+            source, ui_copy = private / "source.bin", private / p.filename(run)
+            raw = source.read_bytes()
+            self.assertEqual(len(raw), 10240)
+            self.assertEqual(ui_copy.read_bytes(), raw)
+            self.assertEqual(source.stat().st_nlink, 1)
+            self.assertEqual(ui_copy.stat().st_nlink, 1)
+            self.assertNotEqual(source.stat().st_ino, ui_copy.stat().st_ino)
+            self.assertEqual(source.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(ui_copy.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(report, p.public("prepared-only", filename=p.filename(run), size=p.SIZE,
+                             sha256=p.digest(raw), build_receipt=report["build_receipt"]))
+            self.assertFalse(report["transfer_verified"])
+            self.assertFalse(report["signed_lane_acceptance"])
+            self.assertNotIn(str(self.home), json.dumps(report))
+            self.assertNotIn(str(self.root), json.dumps(report))
+            hashes.append(report["sha256"])
+        self.assertNotEqual(*hashes)
+        self.assertEqual(len(self.calls), 2)  # Only the two preview signature checks.
+
+    def test_prepared_source_requires_exact_phone_bytes_without_publication_claim(self):
+        self.prepared_receipt()
+        report = self.verify()
+        self.assertEqual(report["source_action"], "prepare-ui")
+        self.assertEqual(report["outcome"], "peer-byte-match")
+        self.assertTrue(report["transfer_verified"])
+        self.assertFalse(report["signed_lane_acceptance"])
+        self.assertNotIn("published", report)
+        self.assertEqual(len(self.calls), 3)
+        self.assertEqual(list(self.media.iterdir()), [self.existing])
+
+    def test_prepared_source_retains_all_peer_and_native_failure_refusals(self):
+        self.prepared_receipt()
+        for mode in ("wrong-hash", "short", "missing", "symlink", "directory", "json-fail", "fail"):
+            with self.subTest(mode=mode):
+                self.copy_mode = mode
+                with self.assertRaises((p.Refused, OSError)):
+                    self.verify()
+                import shutil
+                shutil.rmtree(p.private_path(self.home, VERIFY))
+
+    def test_prepared_source_tampering_or_hardlink_refused_before_device_copy(self):
+        self.prepared_receipt()
+        source = p.private_path(self.home, STAGE) / "source.bin"
+        raw = source.read_bytes()
+        source.write_bytes(b"x" * p.SIZE)
+        with self.assertRaisesRegex(p.Refused, "source-refused"):
+            self.verify()
+        import shutil
+        shutil.rmtree(p.private_path(self.home, VERIFY))
+        source.write_bytes(raw)
+        os.link(source, source.with_name("hardlink.bin"))
+        with self.assertRaisesRegex(p.Refused, "path-refused"):
+            self.verify()
+        self.assertFalse(any("devicectl" in call for call in self.calls))
+
+    def test_preparation_receipt_cannot_claim_stage_transfer_or_extra_fields(self):
+        original = self.prepared_receipt()
+        for changes in ({"outcome": "staged-only"}, {"outcome": "peer-byte-match", "transfer_verified": True},
+                        {"transfer_verified": True}, {"signed_lane_acceptance": True}, {"published": True},
+                        {"filename": "../../private-file"}):
+            with self.subTest(changes=changes):
+                mutated = copy.deepcopy(original)
+                mutated["details"]["probe"].update(changes)
+                self.save("cloud-media-probe", STAGE, mutated)
+                with self.assertRaisesRegex(p.Refused, "receipt-refused"):
+                    self.verify()
+                import shutil
+                shutil.rmtree(p.private_path(self.home, VERIFY))
+        self.assertEqual(len(self.calls), 1)
+        # A prepared-only report also cannot masquerade as an original stage.
+        original["args"][0] = "stage"
+        self.save("cloud-media-probe", STAGE, original)
+        with self.assertRaisesRegex(p.Refused, "receipt-refused"):
+            self.verify()
+
+    def test_prepared_source_binding_change_during_copy_is_refused(self):
+        self.prepared_receipt()
+        real = self.native_double
+
+        def replace_source(command, **kwargs):
+            result = real(command, **kwargs)
+            if "devicectl" in command:
+                source = p.private_path(self.home, STAGE) / "source.bin"
+                source.rename(source.with_name("retained-original.bin"))
+                source.write_bytes(source.with_name("retained-original.bin").read_bytes())
+            return result
+
+        with patch.object(p.subprocess, "run", side_effect=replace_source), self.assertRaises(p.Refused):
+            self.verify()
+
+    def test_prepare_ui_failed_signature_creates_no_source_or_copy(self):
+        with patch.object(p.subprocess, "run", return_value=SimpleNamespace(returncode=1)), \
+                self.assertRaisesRegex(p.Refused, "native-command-failed"):
+            self.prepare_ui()
+        private = p.private_path(self.home, STAGE)
+        self.assertFalse((private / "source.bin").exists())
+        self.assertFalse((private / p.filename(STAGE)).exists())
+        self.assertEqual(list(self.media.iterdir()), [self.existing])
 
     def test_stage_retains_fresh_exact_payload_and_staged_only_evidence(self):
         first = self.stage()
@@ -326,6 +473,9 @@ class ProbeTests(unittest.TestCase):
 
     def test_cli_linux_and_invalid_inputs_are_inert_and_private(self):
         for arguments in (["stage", "--preview-build", BUILD], ["stage", "--preview-build", "../../" + SECRET],
+                          ["prepare-ui", "--preview-build", BUILD], ["prepare-ui"],
+                          ["prepare-ui", "--preview-build", "../../" + SECRET],
+                          ["prepare-ui", "--preview-build", BUILD, "--filename", SECRET],
                           ["verify-phone", "--stage", STAGE, "--preparation", PREP, "--filename", SECRET]):
             out, err = io.StringIO(), io.StringIO()
             with patch.object(p.sys, "platform", "linux"), patch.object(p.pwd, "getpwuid") as home_query, \

@@ -3,6 +3,8 @@
 
 No account queries, app launches, database access or device writes. CLI inputs
 are MG run IDs only. Native output never enters the public report.
+prepare-ui freezes private files only; authorized Finder publication and normal
+app sync are separate observations. A peer byte match is diagnostic, not Q7.
 """
 
 import argparse
@@ -289,6 +291,21 @@ def stage(inputs, held, home, run, preview_run, private):
     return public("staged-only", filename=filename(run), size=SIZE, sha256=digest(raw), build_receipt=ref)
 
 
+def prepare_ui(inputs, run, preview_run, private):
+    # No app-data path is constructed or accessed. Publication belongs to the
+    # separately authorized Finder workflow, never an automatic stage fallback.
+    _, ref = admit_preview(inputs, preview_run, Path(private.path))
+    raw = os.urandom(SIZE)
+    write_new(private, "source.bin", raw)
+    source = inputs.read(Path(private.path) / "source.bin", SIZE)
+    need(len(source.raw) == SIZE and source.raw == raw, "source-refused")
+    write_new(private, filename(run), source.raw)
+    ui_copy = inputs.read(Path(private.path) / filename(run), SIZE)
+    need(ui_copy.raw == source.raw and ui_copy.pin[:2] != source.pin[:2], "source-refused")
+    inputs.check(); private.check()
+    return public("prepared-only", filename=filename(run), size=SIZE, sha256=digest(source.raw), build_receipt=ref)
+
+
 def admit_preparation(inputs, run, bundle):
     value, ref = inputs.receipt("run", run)
     opts = options(value["args"], ("--platform", "--config", "--physical-device"))
@@ -313,11 +330,13 @@ def admit_preparation(inputs, run, bundle):
 
 def verify_phone(inputs, home, stage_run, preparation_run, private):
     value, stage_ref = inputs.receipt("cloud-media-probe", stage_run)
-    need(value["args"][:1] == ["stage"] and len(value["args"]) == 3 and
+    need(value["args"][:1] in (["stage"], ["prepare-ui"]) and len(value["args"]) == 3 and
          value["args"][1] == "--preview-build", "receipt-refused")
+    source_action = value["args"][0]
+    expected_outcome = "staged-only" if source_action == "stage" else "prepared-only"
     staged = value["details"]["probe"]
     build_run = run_id(value["args"][2])
-    need(staged == public("staged-only", filename=filename(stage_run), size=SIZE,
+    need(staged == public(expected_outcome, filename=filename(stage_run), size=SIZE,
                          sha256=staged.get("sha256"), build_receipt=staged.get("build_receipt")), "receipt-refused")
     bundle, build_ref = admit_preview(inputs, build_run, Path(private.path))
     need(staged["build_receipt"] == build_ref, "receipt-refused")
@@ -342,7 +361,8 @@ def verify_phone(inputs, home, stage_run, preparation_run, private):
          "peer-byte-mismatch")
     inputs.check()
     return public("peer-byte-match", filename=filename(stage_run), size=SIZE, sha256=staged["sha256"],
-                  stage_receipt=stage_ref, preparation_receipt=preparation_ref, build_receipt=build_ref)
+                  source_action=source_action, stage_receipt=stage_ref,
+                  preparation_receipt=preparation_ref, build_receipt=build_ref)
 
 
 class Parser(argparse.ArgumentParser):
@@ -356,14 +376,15 @@ def main(argv=None):
         parser.add_argument("--root", required=True)
         parser.add_argument("--run-id", required=True)
         sub = parser.add_subparsers(dest="action", required=True, parser_class=Parser)
-        stage_parser = sub.add_parser("stage")
-        stage_parser.add_argument("--preview-build", required=True)
+        for action in ("stage", "prepare-ui"):
+            source_parser = sub.add_parser(action)
+            source_parser.add_argument("--preview-build", required=True)
         verify_parser = sub.add_parser("verify-phone")
         verify_parser.add_argument("--stage", required=True)
         verify_parser.add_argument("--preparation", required=True)
         args = parser.parse_args(argv)
         run_id(args.run_id)
-        for value in ([args.preview_build] if args.action == "stage" else [args.stage, args.preparation]):
+        for value in ([args.preview_build] if args.action in ("stage", "prepare-ui") else [args.stage, args.preparation]):
             run_id(value)
         # Linux/Docker cannot reach home/app data or launch any Apple tool.
         need(sys.platform == "darwin", "platform-refused")
@@ -372,8 +393,12 @@ def main(argv=None):
         with contextlib.ExitStack() as held:
             private = new_private(held, home, args.run_id)
             inputs = Inputs(held, args.root)
-            report = (stage(inputs, held, home, args.run_id, args.preview_build, private) if args.action == "stage"
-                      else verify_phone(inputs, home, args.stage, args.preparation, private))
+            if args.action == "stage":
+                report = stage(inputs, held, home, args.run_id, args.preview_build, private)
+            elif args.action == "prepare-ui":
+                report = prepare_ui(inputs, args.run_id, args.preview_build, private)
+            else:
+                report = verify_phone(inputs, home, args.stage, args.preparation, private)
         print(json.dumps(report, sort_keys=True))
         return 0
     except Refused as error:

@@ -6,14 +6,14 @@ REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   python3 -B "$REPO_ROOT/tools/tests/cloud_media_probe_test.py"
 }
 
-@test "normal media probe dry-run is inert for both actions and missing arguments" {
+@test "normal media probe dry-run is inert for all actions and missing arguments" {
   local sb="$BATS_TEST_TMPDIR/repo" result
   mkdir -p "$sb"
   cp -R "$REPO_ROOT/tools" "$sb/tools"
   # If dispatch invokes the helper, the dry-run fails. No Apple tool or host
-  # data is needed, even with plausible run IDs and either operation.
+  # data is needed, even with plausible run IDs and any operation.
   printf '%s\n' 'raise RuntimeError("dry run invoked helper")' >"$sb/tools/scripts/cloud-media-probe.py"
-  for action in 'stage --preview-build 20261111T010101Z-1' 'verify-phone --stage 20261111T010102Z-2 --preparation 20261111T010103Z-3' ''; do
+  for action in 'stage --preview-build 20261111T010101Z-1' 'prepare-ui --preview-build 20261111T010101Z-1' 'verify-phone --stage 20261111T010102Z-2 --preparation 20261111T010103Z-3' ''; do
     run "$sb/tools/mg" cloud-media-probe --dry-run $action
     [ "$status" -eq 0 ]
     result="$output"
@@ -44,14 +44,20 @@ parser.add_argument("--root", required=True)
 parser.add_argument("--run-id", required=True)
 sub = parser.add_subparsers(dest="action", required=True)
 sub.add_parser("stage").add_argument("--preview-build", required=True)
+sub.add_parser("prepare-ui").add_argument("--preview-build", required=True)
 verify = sub.add_parser("verify-phone")
 verify.add_argument("--stage", required=True)
 verify.add_argument("--preparation", required=True)
 args = parser.parse_args()
 # Retain effective values without opening any caller-selected root or path.
 (sandbox / "helper-parsed.json").write_text(json.dumps(vars(args)))
-print(json.dumps({"scope": "NORMAL-APP-MEDIA-PROBE", "signed_lane_acceptance": False,
-                  "outcome": "staged-only" if args.action == "stage" else "peer-byte-match"}))
+report = {"scope": "NORMAL-APP-MEDIA-PROBE", "signed_lane_acceptance": False,
+          "transfer_verified": args.action == "verify-phone",
+          "outcome": {"stage": "staged-only", "prepare-ui": "prepared-only", "verify-phone": "peer-byte-match"}[args.action]}
+override = sandbox / "report-override.json"
+if override.exists():
+    report.update(json.loads(override.read_text()))
+print(json.dumps(report))
 PY
 }
 
@@ -84,6 +90,10 @@ assert_media_probe_cli_refused() {
   assert_media_probe_cli_refused --root "$sb/untrusted-cli-sentinel" --run-id 20261111T010199Z-9 stage --preview-build 20261111T010101Z-1
   assert_media_probe_cli_refused --root="$sb/untrusted-cli-sentinel" verify-phone --stage 20261111T010102Z-2 --preparation 20261111T010103Z-3
   assert_media_probe_cli_refused --run-id=20261111T010199Z-9 verify-phone --stage 20261111T010102Z-2 --preparation 20261111T010103Z-3
+  assert_media_probe_cli_refused --root "$sb/untrusted-cli-sentinel" prepare-ui --preview-build 20261111T010101Z-1
+  assert_media_probe_cli_refused --run-id 20261111T010199Z-9 prepare-ui --preview-build 20261111T010101Z-1
+  assert_media_probe_cli_refused --root="$sb/untrusted-cli-sentinel" prepare-ui --preview-build 20261111T010101Z-1
+  assert_media_probe_cli_refused --run-id=20261111T010199Z-9 prepare-ui --preview-build 20261111T010101Z-1
 }
 
 @test "normal media probe refuses extra flags after valid actions without executing helper" {
@@ -91,10 +101,12 @@ assert_media_probe_cli_refused() {
   media_probe_cli_sandbox
   for flag in --root --run-id --filename --path --unknown --preview-build; do
     assert_media_probe_cli_refused stage --preview-build 20261111T010101Z-1 "$flag" untrusted-cli-sentinel
+    assert_media_probe_cli_refused prepare-ui --preview-build 20261111T010101Z-1 "$flag" untrusted-cli-sentinel
     assert_media_probe_cli_refused verify-phone --stage 20261111T010102Z-2 --preparation 20261111T010103Z-3 "$flag" untrusted-cli-sentinel
   done
   assert_media_probe_cli_refused verify-phone --stage 20261111T010102Z-2 --preparation 20261111T010103Z-3 --stage 20261111T010102Z-2
   assert_media_probe_cli_refused stage --preview-build 20261111T010101Z-1 --help
+  assert_media_probe_cli_refused prepare-ui --preview-build 20261111T010101Z-1 --help
 }
 
 @test "normal media probe refuses empty unknown incomplete and path arguments without executing helper" {
@@ -105,11 +117,15 @@ assert_media_probe_cli_refused() {
   assert_media_probe_cli_refused untrusted-cli-sentinel
   assert_media_probe_cli_refused stage
   assert_media_probe_cli_refused stage --preview-build
+  assert_media_probe_cli_refused prepare-ui
+  assert_media_probe_cli_refused prepare-ui --preview-build
+  assert_media_probe_cli_refused prepare-ui --preview 20261111T010101Z-1
   assert_media_probe_cli_refused verify-phone --stage 20261111T010102Z-2
   assert_media_probe_cli_refused verify-phone --stage 20261111T010102Z-2 --stage 20261111T010103Z-3
   assert_media_probe_cli_refused stage --preview 20261111T010101Z-1
   for value in '' untrusted-cli-sentinel /untrusted-cli-sentinel ../untrusted-cli-sentinel 20261111T010101Z-1.bin $'20261111T010101Z-1\n'; do
     assert_media_probe_cli_refused stage --preview-build "$value"
+    assert_media_probe_cli_refused prepare-ui --preview-build "$value"
     assert_media_probe_cli_refused verify-phone --stage "$value" --preparation 20261111T010103Z-3
     assert_media_probe_cli_refused verify-phone --stage 20261111T010102Z-2 --preparation "$value"
   done
@@ -119,6 +135,7 @@ assert_media_probe_cli_refused() {
   local sb action result
   media_probe_cli_sandbox
   for action in 'stage --preview-build 20261111T010101Z-1' \
+                'prepare-ui --preview-build 20261111T010101Z-1' \
                 'verify-phone --stage 20261111T010102Z-2 --preparation 20261111T010103Z-3' \
                 'verify-phone --preparation 20261111T010103Z-3 --stage 20261111T010102Z-2'; do
     rm -f "$sb/helper-calls.jsonl" "$sb/helper-parsed.json"
@@ -128,12 +145,30 @@ assert_media_probe_cli_refused() {
     jq -e '.status == "pass" and .dry_run == false and .placement == "host" and
            .details.probe.scope == "NORMAL-APP-MEDIA-PROBE" and
            .details.probe.signed_lane_acceptance == false and
-           .details.probe.outcome == (if .args[0] == "stage" then "staged-only" else "peer-byte-match" end)' "$result"
+           .details.probe.outcome == (if .args[0] == "stage" then "staged-only"
+                                     elif .args[0] == "prepare-ui" then "prepared-only" else "peer-byte-match" end) and
+           (if .args[0] == "prepare-ui" then .details.probe.transfer_verified == false and
+               (.message | contains("PREPARATION")) else true end)' "$result"
     jq -se --slurpfile receipt "$result" 'length == 1 and
       .[0] == (["--root", $receipt[0].root, "--run-id", $receipt[0].run_id] + $receipt[0].args)' "$sb/helper-calls.jsonl"
     jq -e --arg root "$sb" --slurpfile receipt "$result" '
       .root == $root and .run_id == $receipt[0].run_id and
-      (if .action == "stage" then .preview_build == "20261111T010101Z-1"
+      (if .action == "stage" or .action == "prepare-ui" then .preview_build == "20261111T010101Z-1"
        else .stage == "20261111T010102Z-2" and .preparation == "20261111T010103Z-3" end)' "$sb/helper-parsed.json"
+  done
+}
+
+@test "normal media probe preparation cannot report successful transfer" {
+  local sb report result
+  media_probe_cli_sandbox
+  for report in '{"transfer_verified":true}' \
+                '{"outcome":"staged-only"}' \
+                '{"outcome":"peer-byte-match","transfer_verified":true}'; do
+    printf '%s\n' "$report" >"$sb/report-override.json"
+    run "$sb/tools/mg" cloud-media-probe prepare-ui --preview-build 20261111T010101Z-1
+    [ "$status" -eq 1 ]
+    result="$output"
+    jq -e '.status == "fail" and .failures[0].id == "media-probe" and
+           (.message | contains("PREPARATION") | not)' "$result"
   done
 }

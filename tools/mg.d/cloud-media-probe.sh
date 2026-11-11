@@ -1,6 +1,6 @@
 # Explicit normal-app diagnostic; never a signed-agent or gate acceptance run.
 mg_job cloud-media-probe host mg_cloud_media_probe \
-  "NORMAL-APP-MEDIA-PROBE: stage --preview-build RUN_ID | verify-phone --stage RUN_ID --preparation RUN_ID; staged-only or peer-byte-match, never signed acceptance"
+  "NORMAL-APP-MEDIA-PROBE: stage|prepare-ui --preview-build RUN_ID | verify-phone --stage RUN_ID --preparation RUN_ID; prepare-ui is private PREPARATION only, Finder copy/sync separate; diagnostic, never Q7/signed acceptance"
 
 mg_cloud_media_probe() {
   local report="$MG_RUN_DIR/probe-report.json" rc
@@ -8,7 +8,7 @@ mg_cloud_media_probe() {
   # Admit the bounded public grammar before Python can parse duplicate internal
   # globals. Both verify flag orders are supported; values must be run IDs.
   case "${1:-}" in
-    stage)
+    stage|prepare-ui)
       if [ "$#" -eq 3 ] && [ "$2" = "--preview-build" ] && [[ "$3" =~ $run_pattern ]]; then
         admitted=true
       fi
@@ -22,7 +22,7 @@ mg_cloud_media_probe() {
       ;;
   esac
   if [ "$admitted" != true ]; then
-    mg_failure usage "usage: tools/mg cloud-media-probe stage --preview-build RUN_ID | verify-phone --stage RUN_ID --preparation RUN_ID" "tools/mg --list"
+    mg_failure usage "usage: tools/mg cloud-media-probe stage|prepare-ui --preview-build RUN_ID | verify-phone --stage RUN_ID --preparation RUN_ID" "tools/mg --list"
     mg_status fail
     return 0
   fi
@@ -37,8 +37,14 @@ mg_cloud_media_probe() {
   fi
   mg_detail probe "$(cat "$report")"
   mg_artifact json "$report" "normal app synthetic media diagnostic only"
-  if [ "$rc" -eq 0 ] && jq -e '.outcome == "staged-only" or .outcome == "peer-byte-match"' "$report" >/dev/null; then
-    mg_message "normal media probe: $(jq -r .outcome "$report"); signed-lane acceptance false"
+  if [ "$rc" -eq 0 ] && jq -e --arg action "$1" '
+      if $action == "prepare-ui" then .outcome == "prepared-only" and .transfer_verified == false
+      else .outcome == "staged-only" or .outcome == "peer-byte-match" end' "$report" >/dev/null; then
+    if [ "$1" = "prepare-ui" ]; then
+      mg_message "normal media probe PREPARATION: prepared-only; transfer verified false; signed-lane acceptance false"
+    else
+      mg_message "normal media probe: $(jq -r .outcome "$report"); signed-lane acceptance false"
+    fi
     mg_status pass
   else
     mg_failure media-probe "normal media probe failed; see fixed category in probe report"

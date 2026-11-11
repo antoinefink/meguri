@@ -6,6 +6,7 @@
 
 - Antoine's temporary macOS-first pass (2026-10-25) permits direct host Xcode MCP build/run/debug/UI feedback. Keep it scoped to Meguri; defer VM/mobile iterations without counting them as passes. Required integration gates still use MG. A Mac-only Xcode build can extract partial-platform catalog edits: preserve them separately for review rather than committing mobile entries marked stale.
 - Probe signatures and entitlements with host access. Restricted `codesign` probes can report an invalid blob with exit 0 even when the unchanged product verifies on the host; compare executable hashes before changing signing.
+- A readable stat/signature does not grant app-data access. Preserve privacy refusals; normal-app media diagnostics use explicit `prepare-ui` plus an authorized Finder copy, never a raw-container fallback.
 
 - For long jobs, save stdout/stderr to a file. Lost session handle: check PID/result before relaunching.
 - Use `NSUnbufferedIO=YES` for `swift-test` diagnostics so active test cases and failures remain visible during a stalled run.

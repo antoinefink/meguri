@@ -50,3 +50,54 @@ change first and retain the marker failure, then apply the wrapper fix and run
 the same filter. No native calls or real home/app/device/private inputs were
 used. Focused verification and independent/provenance/privacy/similarity review
 remain with integration.
+
+## Explicit Finder preparation extension — 2026-11-11
+
+Role: fixer. Requested start: `cb241e15`; filtered source baseline:
+`c3215329da10b496117e4a180de3f49a361d5191` (upstream history unavailable).
+Spec: media/media-journal#J2, media/media-journal#J6,
+sync/cloudkit-records#K9.4, R1952, R1953.
+
+Operator-supplied runtime evidence: stage run
+`cloud-media-probe/20261111T181033Z-68316` failed before `source.bin` or any
+media payload was created. Codesign completed with empty diagnostics. A scoped
+read-only open check reached the Mac app container's `Data` directory and got
+EPERM (errno 1); every preceding directory component opened. Preserve this
+privacy refusal: readable stat/signature evidence is not app-data permission.
+No permission broadening, alternate raw-container access or automatic fallback
+is added; the stage function, guards and original assertions are retained.
+
+The operator reports that the authorized ordinary Finder workflow opened the
+exact existing `collection.media` folder and showed 565 items. This is folder
+access evidence, not evidence that the generated file was copied or synced.
+The explicit run-ID-only `prepare-ui --preview-build RUN_ID` operation admits
+the same development preview, exclusively creates the private diagnostic
+directory and freezes 10,240 fresh random bytes as `source.bin` plus an
+independent same-byte `filename(current_run)` file for Finder. Neither file is a
+hardlink. Preparation accesses no app-data directory, reports `prepared-only`,
+`transfer_verified: false` and `signed_lane_acceptance: false`, and emits no
+absolute private path. It claims neither publication nor a GUI action.
+
+Phone verification accepts only the exact report shape/outcome derived from
+the original `stage` or `prepare-ui` action, retaining original source hash,
+bytes and binding checks, normal phone preparation, the fixed remote filename
+and one-way copy-from with byte/SDK refusal checks. Peer evidence records
+`source_action`; it does not assert programmatic publication of a prepared
+source. Exact phone bytes plus separately observed authorized Finder copy and
+normal app sync are diagnostic evidence, never Q7 or signed-lane acceptance.
+There are no copy-to-device commands.
+
+Generated Docker fixture tests cover untouched media/database and refusal on
+even attempted app-data access, fresh independent source/UI-copy files, public
+preparation-only reporting, strict action/outcome binding, exact peer bytes,
+tampering/binding changes and native failures. CLI positives and invalid inputs
+extend the existing wrapper tests; no CLI test-home bypass is introduced.
+Integration owns `tools/mg selftest --filter '^normal media probe'`, independent
+review and provenance/privacy/similarity checks. The filtered session performs
+one `git diff --check` consistency check only, recorded in the handoff.
+
+Pending live checks: actual preview/preparation admission, explicit preparation
+under the real privacy boundary, separately observed exact-file Finder copy,
+normal app sync and exact phone copy-from/SDK evidence. Actual data, Finder
+access and iCloud transfer were not tested in this filtered run; no acceptance
+is claimed.
