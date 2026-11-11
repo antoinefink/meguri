@@ -246,6 +246,17 @@ pub struct SmokeReviewImage {
     pub image_seq: u64,
     pub held: bool,
 }
+impl From<meguri_sync::cloud::workflow::SmokeReviewImage> for SmokeReviewImage {
+    fn from(i: meguri_sync::cloud::workflow::SmokeReviewImage) -> Self {
+        Self {
+            name: i.name,
+            envelope_digest: i.envelope_digest.map(|d| d.to_vec()),
+            digest: i.digest.map(|d| d.to_vec()),
+            image_seq: i.image_seq,
+            held: i.held,
+        }
+    }
+}
 #[derive(Clone, uniffi::Record)]
 pub struct SmokeBatchProof {
     pub generation: u64,
@@ -253,6 +264,7 @@ pub struct SmokeBatchProof {
     pub session: Option<u64>,
     pub saves: u64,
     pub images: Vec<SmokeReviewImage>,
+    pub save_images: Vec<SmokeReviewImage>,
 }
 impl From<meguri_sync::cloud::workflow::SmokeBatchProof> for SmokeBatchProof {
     fn from(v: meguri_sync::cloud::workflow::SmokeBatchProof) -> Self {
@@ -261,17 +273,8 @@ impl From<meguri_sync::cloud::workflow::SmokeBatchProof> for SmokeBatchProof {
             seq: v.seq,
             session: v.session,
             saves: v.saves,
-            images: v
-                .images
-                .into_iter()
-                .map(|i| SmokeReviewImage {
-                    name: i.name,
-                    envelope_digest: i.envelope_digest.map(|d| d.to_vec()),
-                    digest: i.digest.map(|d| d.to_vec()),
-                    image_seq: i.image_seq,
-                    held: i.held,
-                })
-                .collect(),
+            images: v.images.into_iter().map(Into::into).collect(),
+            save_images: v.save_images.into_iter().map(Into::into).collect(),
         }
     }
 }

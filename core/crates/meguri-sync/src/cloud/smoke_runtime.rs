@@ -55,14 +55,10 @@ impl Runtime {
         Self::caller_locked(s, instance)?;
         let binding = &s.bound.as_ref().ok_or(Error::InvalidData)?.binding;
         let store = s.store.as_ref().ok_or(Error::Database)?;
+        let flights = s.actions.request_flights.get(&(instance.to_owned(), id));
         for image in &mut images {
             let input = saves.iter().find(|v| v.name == image.name).ok_or(Error::InvalidData)?;
-            let handed = s
-                .actions
-                .request_flights
-                .get(&(instance.to_owned(), id))
-                .and_then(|v| v.get(&image.name))
-                .ok_or(Error::InvalidData)?;
+            let handed = flights.and_then(|v| v.get(&image.name)).ok_or(Error::InvalidData)?;
             let header = store
                 .entity_header(binding.id, &image.name)?
                 .ok_or(Error::InvalidData)?;
@@ -101,12 +97,26 @@ impl Runtime {
                 return Err(Error::InvalidData.into());
             }
         }
+        let mut save_images = Vec::with_capacity(saves.len());
+        for input in saves {
+            let handed = flights
+                .and_then(|records| records.get(&input.name))
+                .ok_or(Error::InvalidData)?;
+            save_images.push(SmokeReviewImage {
+                name: input.name.clone(),
+                envelope_digest: Some(handed.envelope_digest),
+                digest: Some(handed.payload_digest),
+                image_seq: handed.image_seq,
+                held: handed.held,
+            });
+        }
         Ok(SmokeBatchProof {
             generation,
             seq,
             session,
             saves: saves.len() as u64,
             images,
+            save_images,
         })
     }
 
@@ -177,6 +187,7 @@ impl Runtime {
             session: Some(session),
             saves: 0,
             images,
+            save_images: Vec::new(),
         })
     }
 }

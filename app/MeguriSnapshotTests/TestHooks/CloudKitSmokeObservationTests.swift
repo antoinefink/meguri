@@ -143,6 +143,28 @@ import Testing
             try evidence.captureFacts(exchange: 3, capture: .init(boundarySeq: 9, selectedNames: [name, name]))
         }
     }
+    @Test func collectionSaveRecordsTheHandedSequenceAndHeldFlag() throws {
+        let origin = "generated-engine"
+        let record = CloudRecord(name: entity("n1").recordName, envelope: Data([1]), systemFields: Data([2]))
+        for held in [true, false] {
+            let evidence = try ledger()
+            try evidence.admitSmokeSDK(origin: origin)
+            let image = SmokeReviewImage(name: record.name, envelopeDigest: Data(SHA256.hash(data: record.envelope)),
+                                         digest: Data(repeating: 2, count: 32), imageSeq: 13, held: held)
+            let proof = SmokeBatchProof(generation: 11, seq: 20, session: nil, saves: 1, images: [], saveImages: [image])
+            let operation = CloudNativeSendOperation(identity: UUID(), reason: .manual)
+            evidence.batch(origin: origin, batch: .init(id: 1, saves: [record], deletes: []),
+                           proof: proof, current: current(), operation: operation)
+            let sent = CloudEngineEvent.sent(batchID: 1, saved: [record], failed: [], deleted: [])
+            evidence.sdk(.init(origin: origin, ordinal: 1, event: sent, phase: .delivered), current: current())
+            let label = "send1-batch1-entity1-image-\(held ? "held" : "live")"
+            #expect(!evidence.drain().contains { $0.operation == label })
+            evidence.sdk(.init(origin: origin, ordinal: 1, event: sent, phase: .committed), current: current())
+            let facts = evidence.drain()
+            #expect(facts.last == .init(name: .engineCallback, count: 13, engine: "engine1", operation: label))
+            #expect(facts.dropLast().last?.operation == "send1-batch1-entity1-saved")
+        }
+    }
     @Test func originalOwnAttemptRequiresPrepareEnqueueReplyThenCommit() throws {
         let identity = UUID()
         let metadata = CloudOwnMetadata(operationID: Data([1]), attempt: 4, kind: .createZones)

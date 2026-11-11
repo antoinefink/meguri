@@ -1121,13 +1121,24 @@ impl Runtime {
         if s.incarnation != owner.2 || s.adapter.exchange_owner.as_ref() != Some(&owner) {
             return Err(RuntimeError::StaleIncarnation);
         }
-        let (active_id, result) = s.actions.exchange.clone().ok_or(Error::InvalidData)?;
+        let (active_id, mut result) = s.actions.exchange.clone().ok_or(Error::InvalidData)?;
         if active_id != id {
             return Err(Error::InvalidData.into());
         }
         let binding = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
         let live = Self::sdk_locked(&s, sdk).is_ok();
-        let inbox_empty = with_tracking_access(|| s.store.as_ref().ok_or(Error::Database)?.inbox(binding))?.is_empty();
+        let inbox_empty = with_tracking_access(|| -> Result<bool, RuntimeError> {
+            let store = s.store.as_ref().ok_or(Error::Database)?;
+            for name in std::mem::take(&mut result.outstanding_names) {
+                if !store
+                    .entity_header(binding, &name)?
+                    .is_some_and(|header| header.facts.server_erev > 0 && header.facts.mark.is_none())
+                {
+                    result.outstanding_names.insert(name);
+                }
+            }
+            Ok(store.inbox(binding)?.is_empty())
+        })?;
         let outcome = if s
             .bound
             .as_ref()

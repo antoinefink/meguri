@@ -101,6 +101,7 @@ def generated(kind):
             upload.append(event("engineCallback", "sdk%d-sent-batch1-%s" % (sdk, phase), True))
             if phase == "committed":
                 upload.append(event("engineCallback", "send1-batch1-entity1-saved", True))
+                upload.append(fact("engineCallback", "send1-batch1-entity1-image-live", 9, engine=True))
         returned, sent_sdk = tick, sdk
         upload.append(event("engineCallback", "send1-batch1-batch-returned", True))
         upload.append(event("applied", "send1-manual-returned", True))
@@ -156,6 +157,9 @@ def journal_bytes(kind, checks, observations, through=6, header_value=None):
         callback = c.SENT_PHASE.fullmatch(label)
         if callback:
             return callback.groups()
+        image = c.SAVED_IMAGE.fullmatch(label)
+        if image:
+            return (image[2], "committed")
         send = c.SEND.fullmatch(label)
         if send:
             _, batch, _, phase = send.groups()
@@ -399,6 +403,19 @@ class SelectedTests(unittest.TestCase):
 
         for mutate in (omit, lose_member):
             with self.assertRaisesRegex(s.v.Refused, "selected-exchange-capture"):
+                admitted("mac", mutate=mutate)
+
+    def test_collection_save_requires_its_image_in_the_result_group(self):
+        def missing(checks, observations):
+            observations[5] = [item for item in observations[5] if not c.SAVED_IMAGE.fullmatch(item.get("operation", ""))]
+
+        def wrong_member(checks, observations):
+            for item in observations[5]:
+                if item.get("operation") == "send1-batch1-entity1-image-live":
+                    item["operation"] = "send1-batch1-entity2-image-live"
+
+        for mutate in (missing, wrong_member):
+            with self.assertRaisesRegex(s.v.Refused, "selected-saved-image"):
                 admitted("mac", mutate=mutate)
 
     def test_acknowledgement_requires_its_actual_saved_batch_member(self):

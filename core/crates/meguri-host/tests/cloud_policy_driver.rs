@@ -1101,6 +1101,89 @@ fn first_manual_capture_before_root_selects_pending_revisions_without_admitting_
 }
 
 #[test]
+fn pre_capture_save_does_not_ack_an_identical_later_handoff() {
+    use meguri_sync::cloud::adapter::CollectionOutcome;
+
+    for newer_edit in [false, true] {
+        let rig = rig();
+        let runtime = rig.host.cloud_runtime().unwrap();
+        let collection = rig.host.collection().unwrap();
+        meguri_engine::decks::rename(&collection, rig.baseline_deck, "Before manual capture".into()).unwrap();
+        let pending = runtime.tracking_sendables().into_keys().collect();
+        let original = runtime.build_collection_batch(&rig.sdk, &collection, &pending).unwrap();
+        assert_eq!(original.saves.len(), 1);
+        let saved = &original.saves[0];
+        let name = &saved.name;
+        let earlier = runtime.entity_facts(name).unwrap().unwrap().in_flight[0].image_seq;
+
+        // Selecting the deck advances the boundary without changing its image.
+        meguri_engine::decks::select(&collection, rig.baseline_deck).unwrap();
+        let id = first_manual_capture(&rig);
+        let selection = runtime.exchange_result(id).unwrap();
+        assert!(earlier < selection.boundary_seq);
+        assert!(selection.selected_names.contains(name));
+        assert_eq!(selection.selected_names.len(), 2);
+        let later = runtime
+            .build_collection_batch(&rig.sdk, &collection, &selection.selected_names)
+            .unwrap();
+        assert_eq!(later.saves.len(), 2);
+        let repeated = later.saves.iter().find(|input| &input.name == name).unwrap();
+        assert_eq!(repeated.envelope, saved.envelope);
+        let first_image = runtime.smoke_batch_for_testing(&rig.sdk, original.id).unwrap();
+        let later_image = runtime.smoke_batch_for_testing(&rig.sdk, later.id).unwrap();
+        assert_eq!(first_image.save_images[0].image_seq, earlier);
+        let repeated_image = later_image
+            .save_images
+            .iter()
+            .find(|image| &image.name == name)
+            .unwrap();
+        assert_eq!(repeated_image.image_seq, selection.boundary_seq);
+        assert!(!first_image.save_images[0].held && !repeated_image.held);
+        if newer_edit {
+            meguri_engine::decks::rename(&collection, rig.baseline_deck, "After manual capture".into()).unwrap();
+        }
+
+        let reply = Saved {
+            name: name.clone(),
+            envelope: saved.envelope.clone(),
+            system_fields: b"original-save-reply".to_vec(),
+        };
+        runtime.enter_sent_handler(&rig.sdk, original.id).unwrap();
+        runtime
+            .sent_results(&rig.sdk, &collection, original.id, &[reply], &[], 1)
+            .unwrap();
+        runtime.return_sent_handler(&rig.sdk).unwrap();
+        let result = runtime.exchange_result(id).unwrap();
+        assert!(result.acked_names.is_empty());
+        assert_eq!(result.outstanding_names, selection.selected_names);
+
+        let other = later.saves.iter().find(|input| &input.name != name).unwrap();
+        let reply = Saved {
+            name: other.name.clone(),
+            envelope: other.envelope.clone(),
+            system_fields: b"later-save-reply".to_vec(),
+        };
+        runtime.enter_sent_handler(&rig.sdk, later.id).unwrap();
+        runtime
+            .sent_results(&rig.sdk, &collection, later.id, &[reply], &[], 2)
+            .unwrap();
+        runtime.return_sent_handler(&rig.sdk).unwrap();
+        let completed = runtime.adapter_complete_exchange(&rig.sdk, id, true, None).unwrap();
+        assert_eq!(completed.result.acked_names, [other.name.clone()].into());
+        assert_eq!(completed.result.outstanding_names.contains(name), newer_edit);
+        assert_eq!(
+            completed.collection,
+            if newer_edit {
+                CollectionOutcome::Incomplete
+            } else {
+                CollectionOutcome::Succeeded
+            }
+        );
+        rig.host.close().unwrap();
+    }
+}
+
+#[test]
 fn saved_flight_during_real_reconcile_scan_preserves_newer_edit_and_capture_accounting() {
     use meguri_sync::cloud::runtime::ScanPausePoint;
     use std::sync::mpsc;

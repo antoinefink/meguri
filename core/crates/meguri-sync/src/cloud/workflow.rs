@@ -126,6 +126,7 @@ pub struct SmokeBatchProof {
     pub session: Option<u64>,
     pub saves: u64,
     pub images: Vec<SmokeReviewImage>,
+    pub save_images: Vec<SmokeReviewImage>,
 }
 /// Compact test evidence; historical images never cross this API.
 #[cfg(feature = "test-hooks")]
@@ -436,6 +437,9 @@ pub(crate) struct HandedSave {
     pub payload_digest: [u8; 32],
     pub tombstone: bool,
     pub envelope_digest: [u8; 32],
+    pub image_seq: u64,
+    #[cfg(feature = "test-hooks")]
+    pub held: bool,
 }
 pub(crate) enum MissingSaveDisposition {
     Outstanding,

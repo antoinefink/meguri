@@ -48,6 +48,12 @@ public struct SmokeReviewImage: Sendable {
     public let digest: Data?
     public let imageSeq: UInt64
     public let held: Bool
+    init(_ r: MeguriCoreBindings.SmokeReviewImage) {
+        name = r.name; envelopeDigest = r.envelopeDigest; digest = r.digest; imageSeq = r.imageSeq; held = r.held
+    }
+    init(name: String, envelopeDigest: Data?, digest: Data?, imageSeq: UInt64, held: Bool) {
+        self.name = name; self.envelopeDigest = envelopeDigest; self.digest = digest; self.imageSeq = imageSeq; self.held = held
+    }
 }
 public struct SmokeBatchProof: Sendable {
     public let generation: UInt64
@@ -55,12 +61,15 @@ public struct SmokeBatchProof: Sendable {
     public let session: UInt64?
     public let saves: UInt64
     public let images: [SmokeReviewImage]
-    init(generation: UInt64, seq: UInt64, session: UInt64?, saves: UInt64, images: [SmokeReviewImage]) {
+    public let saveImages: [SmokeReviewImage]
+    init(generation: UInt64, seq: UInt64, session: UInt64?, saves: UInt64, images: [SmokeReviewImage], saveImages: [SmokeReviewImage] = []) {
         self.generation = generation; self.seq = seq; self.session = session; self.saves = saves; self.images = images
+        self.saveImages = saveImages
     }
     init(_ r: MeguriCoreBindings.SmokeBatchProof) {
         generation = r.generation; seq = r.seq; session = r.session; saves = r.saves
-        images = r.images.map { .init(name: $0.name, envelopeDigest: $0.envelopeDigest, digest: $0.digest, imageSeq: $0.imageSeq, held: $0.held) }
+        images = r.images.map(SmokeReviewImage.init)
+        saveImages = r.saveImages.map(SmokeReviewImage.init)
     }
 }
 public actor CoreSmokeInspection {

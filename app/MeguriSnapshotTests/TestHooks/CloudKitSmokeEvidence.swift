@@ -560,7 +560,12 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
                             let candidates = s.batches.filter { $0.key.origin == origin && $0.value.open.contains(name) }
                             guard candidates.count == 1, candidates[batch] != nil,
                                   let entity = s.entities[name], let result = results[name] else { throw AgentFailure.execution }
-                            s.append(.engineCallback, "\(send)-\(handed.alias)-\(entity)-\(result.label)", engine: engine)
+                            let label = "\(send)-\(handed.alias)-\(entity)"
+                            s.append(.engineCallback, "\(label)-\(result.label)", engine: engine)
+                            if result == .saved, let image = handed.proof?.saveImages.first(where: { $0.name == name }) {
+                                s.facts.append(.init(name: .engineCallback, count: image.imageSeq, engine: engine,
+                                                     operation: label + (image.held ? "-image-held" : "-image-live")))
+                            }
                             handed.open.remove(name)
                             handed.reported.insert(name)
                         }
@@ -596,6 +601,14 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
                               image.digest?.count == 32 && image.imageSeq <= proof.seq &&
                               batch.saves.contains { $0.name == image.name && Self.hash($0.envelope) == image.envelopeDigest }
                           }) else { throw AgentFailure.execution }
+                    if s.needsPendingEvidence || !proof.saveImages.isEmpty {
+                        guard proof.saveImages.count == batch.saves.count,
+                              Set(proof.saveImages.map(\.name)).count == proof.saveImages.count,
+                              proof.saveImages.allSatisfy({ image in
+                                  image.digest?.count == 32 && image.imageSeq <= proof.seq &&
+                                  batch.saves.contains { $0.name == image.name && Self.hash($0.envelope) == image.envelopeDigest }
+                              }) else { throw AgentFailure.execution }
+                    }
                 }
                 let alias = "batch\(s.nextBatch)"
                 let send = try operation.map { try s.send($0, engine: engine).alias }

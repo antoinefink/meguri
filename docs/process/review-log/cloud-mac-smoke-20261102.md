@@ -255,3 +255,24 @@ selected protocol and restoration tests. Swift run `12111` passes the seven
 instrumentation registry tests. The capture supplies one input
 for replay. Image sequences, held flags and the full outcome computation
 still need coverage before Mac exchange recovery can pass.
+
+## Collection images accepted by CloudKit
+
+Starting commit `2143b730`. A successful collection save uses the image
+sequence of its own native request when deciding whether it covers the Sync
+Now capture. Identical bytes handed later do not change that request's
+sequence. A selected entity that has become clean by completion counts as
+done even if its last save predates the capture.
+
+The selected test reads the image sequence and held flag from the original
+Core request. It checks the envelope before appending those facts. The host
+requires the image in the same journal record as its matching result.
+
+Direct review checked the receipt authority, the clean-state check and the
+matching journal group. Rust run `20603` passes all 23 policy-driver tests.
+The new case verifies two identical handoffs across the capture and both a
+clean and a pending outcome. Host run `14523` passes five wrappers including
+missing and wrong-member image evidence. Mac VM run `21548` verifies both
+values of the held flag at the original result. The historical conflict and
+fetched own-save paths still need exact image accounting and journal evidence.
+The signed round trip and full gate remain open.

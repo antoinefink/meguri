@@ -33,6 +33,7 @@ DELETE_COUNT = re.compile(r"batch([1-9][0-9]*)-delete-count")
 # Public CKError.Code values kept in the engine's pending list.
 KEPT_CODES = {3, 4, 6, 7, 9, 23, 36}
 SENT_PHASE = re.compile(r"sdk[1-9][0-9]*-sent-batch([1-9][0-9]*)-(committed|returned)")
+SAVED_IMAGE = re.compile(r"send([1-9][0-9]*)-batch([1-9][0-9]*)-entity([1-9][0-9]*)-image-(held|live)")
 PENDING = re.compile(r"entity([1-9][0-9]*)-(added|removed-held|removed-absent)")
 STATE_BATCHES = re.compile(r"sdk([1-9][0-9]*)-state-batches")
 CAPTURE_MEMBER = re.compile(r"exchange-selected-entity[1-9][0-9]*")
@@ -167,7 +168,7 @@ class Evidence(s.SmokeEvidence):
     def trace(item):
         operation = item.get("operation", "")
         return bool(s.TRACE.fullmatch(operation) or FETCH.fullmatch(operation) or SEND.fullmatch(operation) or
-                    DELETE_COUNT.fullmatch(operation) or
+                    DELETE_COUNT.fullmatch(operation) or SAVED_IMAGE.fullmatch(operation) or
                     pending_fact(operation) or state_batch_fact(operation) or operation in {
             "normal-adoption-generation-joined", "required-scan-before-native-sdk"})
 
@@ -200,6 +201,16 @@ class Evidence(s.SmokeEvidence):
             s.evidence_shape(item, "applied" if pending_fact(operation) else "stateSaved", engine=True)
             self.tick += 1
             need(item["count"] == self.tick <= 4096, "selected-pending-order")
+            return True
+        image = SAVED_IMAGE.fullmatch(operation)
+        if image:
+            send, batch, entity, held = image.groups()
+            s.evidence_shape(item, "engineCallback", engine=True)
+            info = self.native_batches.get(batch)
+            need(info is not None and info["send"] == send and info["engine"] == item["engine"] and
+                 info["results"].get(entity) == ("saved", self.position, None) and entity not in info["images"],
+                 "selected-saved-image")
+            info["images"][entity] = (item["count"], held == "held")
             return True
         native = SEND.fullmatch(operation)
         if native is not None:
@@ -247,7 +258,7 @@ class Evidence(s.SmokeEvidence):
             need(handoff is not None and handoff["engine"] == engine and batch not in self.native_batches,
                  "selected-native-batch")
             self.native_batches[batch] = {"engine": engine, "send": send, "members": {}, "open": set(),
-                                          "results": {}, "callback": None, "returned": None}
+                                          "results": {}, "images": {}, "callback": None, "returned": None}
             return
         info = self.native_batches.get(batch)
         need(info is not None and info["engine"] == engine and info["send"] == send, "selected-native-batch")
@@ -277,16 +288,23 @@ class Evidence(s.SmokeEvidence):
             info["open"].clear()
 
     def check_sent_group(self, facts):
+        callback = SENT_PHASE.fullmatch(facts[0].get("operation", ""))
         for item in facts:
-            match = SEND.fullmatch(item.get("operation", ""))
+            label = item.get("operation", "")
+            image = SAVED_IMAGE.fullmatch(label)
+            if image:
+                need(callback is not None and callback.groups() == (image[2], "committed"), "selected-result-group")
+                continue
+            match = SEND.fullmatch(label)
             if match is None:
                 continue
-            _, batch, _, phase = match.groups()
+            _, batch, entity, phase = match.groups()
             if send_result(phase) or phase == "batch-returned":
-                callback = SENT_PHASE.fullmatch(facts[0].get("operation", ""))
                 expected = "returned" if phase == "batch-returned" else "committed"
                 need(callback is not None and callback.groups() == (batch, expected) and
                      item["engine"] == facts[0]["engine"], "selected-result-group")
+                if phase == "saved" and self.batches[batch]["kind"] == "collection-handoff":
+                    need(entity in self.native_batches[batch]["images"], "selected-saved-image")
 
     def check_pending_group(self, facts):
         pending = [item for item in facts if pending_fact(item.get("operation", ""))]
@@ -423,7 +441,7 @@ class Journal(s.Journal):
                 label = item.get("operation")
                 traced = s.TRACE.fullmatch(label or "")
                 need(label is None or label in labels or label in TERMINAL_LABELS or ACK.fullmatch(label) or
-                     FETCH.fullmatch(label) or SEND.fullmatch(label) or DELETE_COUNT.fullmatch(label) or
+                     FETCH.fullmatch(label) or SEND.fullmatch(label) or DELETE_COUNT.fullmatch(label) or SAVED_IMAGE.fullmatch(label) or
                      pending_fact(label) or state_batch_fact(label) or CAPTURE_MEMBER.fullmatch(label) or
                      (traced and (traced.group(2) is None or traced.group(2) in s.OWN_KINDS)),
                      "selected-public-fact")

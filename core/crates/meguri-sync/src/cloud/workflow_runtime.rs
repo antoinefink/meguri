@@ -1525,6 +1525,9 @@ impl Runtime {
                 payload_digest: flight.payload_digest,
                 tombstone: flight.tombstone,
                 envelope_digest: codec::sha256(&envelope),
+                image_seq: flight.image_seq,
+                #[cfg(feature = "test-hooks")]
+                held: flight.held,
             };
             let image = (
                 name.clone(),
@@ -1685,7 +1688,7 @@ impl Runtime {
         instance: &str,
         request: u64,
         record: &Saved,
-    ) -> Result<codec::Received, RuntimeError> {
+    ) -> Result<(codec::Received, u64), RuntimeError> {
         let binding = &s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding;
         let store = s.store.as_ref().ok_or(Error::Database)?;
         let handed = s
@@ -1735,7 +1738,9 @@ impl Runtime {
         {
             return Err(Error::InvalidData.into());
         }
-        Ok(received)
+        // Identical bytes can be handed again later. The request, not the
+        // durable digest alone, says which image this callback accepted.
+        Ok((received, handed.image_seq))
     }
     /// Resolve Engine's retained overlap against the current binding, never
     /// cached record names or the rest of a step's touched rows. No journals
@@ -1928,6 +1933,7 @@ impl Runtime {
         }
         let mut force = BTreeSet::new();
         let mut saved_count = 0;
+        let mut acknowledged = Vec::new();
         with_tracking_access(|| -> Result<(), RuntimeError> {
             // Validate the whole receipt before committing any ACK, but retain
             // no decoded payload across records. Malformed tails cannot partly
@@ -1960,7 +1966,7 @@ impl Runtime {
             let saved_ack_body_reads_before = super::workflow_store::body_reads();
             let mut references = media::cleanup::SavedReferences::default();
             for saved in saved {
-                let received = Self::decode_saved_record_locked(&s, instance, request_id, saved)?;
+                let (received, image_seq) = Self::decode_saved_record_locked(&s, instance, request_id, saved)?;
                 Self::acknowledge_sent_locked(
                     &mut s,
                     collection,
@@ -1970,6 +1976,11 @@ impl Runtime {
                     &mut force,
                     Some(&mut references),
                 )?;
+                if s.actions.exchange.as_ref().is_some_and(|(_, exchange)| {
+                    image_seq >= exchange.boundary_seq && exchange.selected_names.contains(&saved.name)
+                }) {
+                    acknowledged.push(saved.name.clone());
+                }
                 saved_count += 1;
             }
             #[cfg(feature = "test-hooks")]
@@ -2069,18 +2080,17 @@ impl Runtime {
                 force.insert(name.clone());
             }
         }
-        let acknowledged = with_tracking_access(|| -> Result<Vec<String>, RuntimeError> {
+        with_tracking_access(|| -> Result<(), RuntimeError> {
             let store = s.store.as_ref().ok_or(Error::Database)?;
-            let mut done = Vec::new();
-            for saved in saved.iter().chain(conflicts) {
+            for saved in conflicts {
                 if let Some(selected) = s.actions.selected_revs.get(&saved.name) {
                     let e = store.entity_header(b, &saved.name)?.ok_or(Error::InvalidData)?.facts;
                     if e.acked_rev >= *selected {
-                        done.push(saved.name.clone());
+                        acknowledged.push(saved.name.clone());
                     }
                 }
             }
-            Ok(done)
+            Ok(())
         })?;
         let terminal_names = absent_revisions
             .into_iter()
