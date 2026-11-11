@@ -666,3 +666,25 @@ and the all-selected recovery proof do not yet consume these sequences.
 Historical close authority, host relaunch, the full batch gate and the real
 signed round trip remain open. Mac recovered completion stays disabled;
 this is unaccepted implementation progress, with no Unit trailer.
+
+## Restart inspector memory repair
+
+Starting commit `a03d51e9`. The retained restart note used the full diagnostic
+loader, which expanded all historical flight payloads. The existing eight
+40 MiB revision test measured a 587714692-byte peak on both baseline and the
+preceding change. The inspector now uses the ordinary entity loader: it keeps
+the exact current row and ACK state, with flights as validated image references.
+Original role selection, digests, revisions and ownership checks are unchanged.
+
+Run `48754` passes all three payload-memory cases with the unchanged 300 MB
+limit. Full CloudKit Rust run `49448` passes all 491 cases, closing the failure
+retained above. Run `49853` passes 17 original-role and observation cases,
+including actual process-kill edit and ACK recovery without another mutation
+or exchange. The earlier run `49104` selected zero tests because its required
+feature was absent; it supplies no evidence. Native Service run `50202` passes
+both source and adopted-peer recovery tests. Lint `50648`, similarity `50755`
+and source privacy `52467` pass.
+
+Direct review traced both loaders and the original edit/ACK callers.
+No independent review, full batch gate or signed acceptance ran. The broader
+recovery and real signed round-trip work remains open.

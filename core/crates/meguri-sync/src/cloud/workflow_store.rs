@@ -353,8 +353,9 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         };
         super::tracking_payload::load_entity(&self.connection, b, kind, &text).map(Some)
     }
-    // Fixed small-role capture only; role selection remains the independently
-    // verified immutable baseline. A different first current key cannot match it.
+    // Retain the exact row, with historical flights as image references. This
+    // opening inspection must not expand every unacknowledged payload. Role
+    // selection still requires the independently verified immutable baseline.
     #[cfg(feature = "test-hooks")]
     pub(super) fn selected_reopen_note(&self, binding: BindingId) -> Result<Option<EntityFacts>, Error> {
         self.binding(binding)?.ok_or(Error::BindingNotFound)?;
@@ -367,7 +368,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
             )
             .optional()?;
         content
-            .map(|text| super::tracking_payload::dump_entity(&self.connection, binding, codec::Kind::Note, &text))
+            .map(|text| super::tracking_payload::load_entity(&self.connection, binding, codec::Kind::Note, &text))
             .transpose()
     }
     /// Explicit full-image diagnostic; normal storage callers use entity_facts.
