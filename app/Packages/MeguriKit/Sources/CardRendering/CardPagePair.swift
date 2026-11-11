@@ -189,6 +189,10 @@ public final class CardPagePair {
     /// An absent/failing host leaves probes unavailable without failing render.
     @discardableResult
     public func prepare(_ payload: CardPayload) async throws -> CardUpdate {
+        #if DEBUG
+        let startupLogger = Logger(subsystem: "Meguri", category: "ReviewStartup")
+        startupLogger.notice("prepare.begin")
+        #endif
         guard !closed, !suspended, !lifecycleSuspended else { throw CardPage.Failure.closed }
         generation += 1
         let update = CardUpdate(card: payload.cardID, generation: generation, side: .question)
@@ -206,12 +210,32 @@ public final class CardPagePair {
                     guard target.update == update, !closed else { throw CardPage.Failure.superseded }
                     if let hostSource { try await target.hostReports.install(hostSource) }
                 }
+                #if DEBUG
+                startupLogger.notice("pageStart.begin")
+                #endif
                 try await target.start(html: payload.question, answer: payload.answer, update: update)
+                #if DEBUG
+                startupLogger.notice("pageStart.end")
+                startupLogger.notice("settle.begin")
+                #endif
                 try await target.waitForSettled(update)
+                #if DEBUG
+                startupLogger.notice("settle.end")
+                startupLogger.notice("refresh.begin")
+                #endif
                 try await target.refreshAppearance()
+                #if DEBUG
+                startupLogger.notice("refresh.end")
+                #endif
                 try Task.checkCancellation()
                 guard target.update == update, target.settled else { throw CardPage.Failure.superseded }
+                #if DEBUG
+                startupLogger.notice("hostPublish.begin")
+                #endif
                 await target.hostReports.publish()
+                #if DEBUG
+                startupLogger.notice("hostPublish.end")
+                #endif
                 try Task.checkCancellation()
                 guard !closed, !suspended, !lifecycleSuspended, target.update == update, target.settled else { throw CardPage.Failure.superseded }
             } onCancel: {
@@ -219,8 +243,14 @@ public final class CardPagePair {
                     if target?.update == update { target?.cancelUpdate() }
                 }
             }
+            #if DEBUG
+            startupLogger.notice("prepare.complete")
+            #endif
             return update
         } catch {
+            #if DEBUG
+            startupLogger.notice("prepare.failed")
+            #endif
             if target.update == update { target.invalidate(); audio.cancelPreparation(update) }
             throw error
         }

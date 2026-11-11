@@ -251,8 +251,14 @@ public final class CardPage: NSObject, WKNavigationDelegate {
             self.renderedHTML = html
             let identityArguments: [String: Any] = ["keyboardAllowed": self.webView.reviewOwnsFocus && !reconstruction,
                                                      "card": update.card, "generation": update.generation]
+            #if DEBUG
+            Self.startupLogger.notice("identity.begin")
+            #endif
             try await self.run("meguriCardLayout.bind(); meguriCard.setFocusOwnership(keyboardAllowed); meguriCard.identity(card, generation);",
                                arguments: identityArguments, world: Self.world)
+            #if DEBUG
+            Self.startupLogger.notice("identity.end")
+            #endif
             guard !self.closed, self.update == update else { throw Failure.superseded }
             var entry: [String: Any] = ["flag": self.payload?.flag ?? 0, "mark": self.payload?.marked ?? false]
             entry["replayIDs"] = update.side == .question ? self.payload?.questionReplayIDs ?? [] : self.payload?.answerReplayIDs ?? []
@@ -262,11 +268,23 @@ public final class CardPage: NSObject, WKNavigationDelegate {
                 entry["q"] = html
                 entry["a"] = answer ?? ""
                 entry["classes"] = bodyStyle
+                #if DEBUG
+                Self.startupLogger.notice("question.begin")
+                #endif
                 try await self.run("_showQuestion(q, a, classes, replayIDs); _drawFlag(flag); _drawMark(mark);", arguments: entry)
+                #if DEBUG
+                Self.startupLogger.notice("question.end")
+                #endif
             } else {
                 entry["a"] = html
                 entry["classes"] = reconstruction ? bodyStyle : ""
+                #if DEBUG
+                Self.startupLogger.notice("answer.begin")
+                #endif
                 try await self.run("_showAnswer(a, classes, replayIDs); _drawFlag(flag); _drawMark(mark);", arguments: entry)
+                #if DEBUG
+                Self.startupLogger.notice("answer.end")
+                #endif
             }
         }
         operations = rendering
