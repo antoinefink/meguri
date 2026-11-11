@@ -318,3 +318,28 @@ continuity; 29 hierarchy issues keep the overall result red. The two newly
 fetched records reached Core, and the fresh rename is visible. This narrows the
 comparison to initial discovery versus a real foreground return; it does not
 establish the SDK's internal cause. Production behavior remains unchanged.
+
+## Temporary startup-discovery experiment — 2026-11-11
+
+Role: fixer. Session: `s-20261110T214025Z-20fa15fd`.
+Original main starting commit: `6f9a68dc`. Supplied filtered baseline:
+`c497552b4448348637693c325c6d8ea235523bf3`.
+Contract: sync/cloudkit-records#K12.5.
+
+One reversible DEBUG-only experiment changes prepareFetch's initial native scope
+to `.all` only when the registered collection zone differs from `meguri-root`
+and the requested zone set is exactly root plus that collection. Root-only,
+other scopes, nil registration and Release retain existing behavior. Delegate
+options construction, filtering, order, operationGroup, lifetime, validation,
+cancellation, authority and error logic are unchanged. No toggles, entry points,
+private values, fixtures, settings, resets, caches, API or logging are added;
+tests, assertions and timing limits are untouched.
+
+The unchanged signed apps' fresh rename missed collection/database callbacks
+after restart and completed Sync Now, then arrived after a real Home/return
+without another Sync Now. Cause remains unknown. The real failing fresh-change
+comparison is the experimental instrument; a fake cannot prove native SDK
+discovery. No cause, pass, fix or acceptance is claimed. Only one
+`git diff --check` consistency check is performed here; no other verification,
+builds or tests. Integration owns native build, independent review and actual
+comparison.
