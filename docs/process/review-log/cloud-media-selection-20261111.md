@@ -26,9 +26,31 @@ count. It does not measure SDK latency or prove live media delivery.
 - Format `core-format/20261111T074721Z-5494`: passes; no further source changes.
 - Lint `core-lint/20261111T074736Z-6181` and privacy
   `private/20261111T074755Z-6511` pass.
+- Similarity `20261111T074756Z-6816` passes.
 
 Direct diff review confirms that later upload candidates can still replace the
 selected download as before. Selected-download validation remains in selection
 and admission. No independent reviewer was used, following the request to work
 without another agent. Independent review, the integration gate and live
 verification remain open. No Unit or milestone completion is claimed.
+
+## Normal Mac preview
+
+Signed standalone build `build-app/20261111T074824Z-7870` passes on clean
+`882e0b39`. Its normal development signature, cloud configuration and executable
+hash are verified. The new process opens the retained collection, resumes
+sync after the temporary pause, and shows further media progress and a newer
+last-sync time. The missing-cloud-media warning remains. No review was graded,
+and no two-device review or complete media result is claimed.
+
+Normal quit of the older preview did not finish. Pausing transfers and another
+normal quit also returned to the app. After that, a scoped SIGTERM stopped only
+the exact standalone development-preview process. A process check confirms the
+sampled older process is gone before crediting the reopened preview. The new
+preview remains running with sync resumed.
+
+The normal-quit failure remains open. `quitAfterLocalFlush` waits for all
+operation tasks before `cancelAndDrain`, including a running media round;
+whether that alone explains the observed refusal still needs a focused check.
+It is outside this selection repair. No additional VM setup was needed for
+the local trial.
