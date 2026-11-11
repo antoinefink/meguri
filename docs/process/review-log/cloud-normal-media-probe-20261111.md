@@ -270,3 +270,51 @@ Read-only local summary `drive/20261111T201327Z-24603` shows 1,001 notes,
 Decks was restored. All 12 interactions completed with verified continuity;
 227 hierarchy issues keep the overall result red. No replacement or grade
 was submitted. The Mac study overview was restored and visually inspected.
+
+## Fresh change after normal restart
+
+The signed normal phone preparation `run/20261111T202156Z-29828` passes
+on unchanged app/core source. The earlier restricted checks returned no devices;
+host inventory `ui-test/20261111T202127Z-29564` showed the connected phone.
+Restricted execution did not establish the physical connection state.
+Host doctor `20261111T202327Z-32105` reports warn, with no technical failure;
+Docker and the dedicated VM are available. Optional setup evidence remains
+unverified. No owner setup was run.
+
+The first cold UI script reached Settings root, then waited for the detail page
+without opening it. Preserve `drive/20261111T202310Z-31828` as failed. The
+observed route was corrected by opening Account & Sync. The four interactions
+in `20261111T202522Z-33904` completed; 32 hierarchy issues keep it red. That
+baseline shows the prior test name, four native fetch starts and no collection
+or database callbacks.
+
+Only the disposable empty deck was then renamed to `Sync Check 95439 Cold`.
+Original Mac totals were Saved 3 before the edit and Saved 5 afterward; failure 0.
+Pending and in-flight counts settled to zero. Normal Sync Now completed at
+`1794428847316`. The Mac study overview was restored and visually checked.
+
+The phone's six interactions in `20261111T202742Z-35548` completed with verified
+continuity; 50 hierarchy issues remain. A later read,
+`20261111T202916Z-37145`, still shows the prior test name, despite a new successful
+completion at `1794428942552`. Native totals are `will=6 zoneC=0 modC=0 coreC=0
+db=0 dbC=0 unC=0`, with no cut, refusal or zone failure. Its six interactions
+completed; 49 hierarchy issues keep it red. Thus a previous successful foreground
+transfer does not make the next normal process restart discover fresh changes.
+This is a reproducible missing receive, not an inference from an early snapshot.
+No transport fix or reset has been applied.
+
+One real Home/return without another Sync Now is retained in
+`20261111T203108Z-38689`. All seven interactions completed with verified
+continuity; 83 hierarchy issues remain. Its immediate snapshot still has the
+cold counts. A later read remains required; the immediate snapshot establishes
+no recovery. XCUITest activation can affect lifecycle, so this is not proof of
+an untouched user launch.
+
+Later foreground-only observation `drive/20261111T203246Z-40039` shows the
+fresh test name on the phone. Native totals are `will=9 zoneC=1 modC=2 coreC=2
+db=1 dbC=1 unC=1`; no cut, refusal, zone failure or additional manual request.
+Pending and in-flight remain zero. All four interactions completed with verified
+continuity; 29 hierarchy issues keep the overall result red. The two newly
+fetched records reached Core, and the fresh rename is visible. This narrows the
+comparison to initial discovery versus a real foreground return; it does not
+establish the SDK's internal cause. Production behavior remains unchanged.
