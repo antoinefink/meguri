@@ -154,3 +154,35 @@ The preview is cancelled and the phone returns to Decks.
 No transport or merge implementation changed to produce this arrival. The next
 work is launch/foreground discovery and the reverse transfer. Cold-start behavior,
 fresh media transfer and full acceptance remain unverified.
+
+
+## Reverse review on the physical phone
+
+Starting commit: `5a4b06e8`. Signed Mac build
+`build-app/20261111T154046Z-5094` passes. Its signature and cloud configuration
+verify; the executable hash matches the receipt. The older app quits normally.
+
+Phone drive `154249Z-8092` records one Good, advances, and ends the session.
+Its first 15 steps pass. Step 16 fails because the deck detail has no sync
+button. No second grade is recorded. Drive `155132Z-15765` requests Sync Now
+through Account & Sync. All six steps pass with verified process continuity;
+its overall result fails 97 hierarchy checks. The immediate snapshot still
+has three pending changes and three in-flight records. It proves no completion.
+
+Drive `155821Z-18484` later reads a new succeeded completion at
+`1794412378228`, with no pending, held, in-flight or waiting changes. All six
+steps pass with verified continuity; overall hierarchy verification fails
+99 findings. Its selected-zero outcome does not prove the remote row contents.
+Drive `160152Z-19720` then reads 48 local reviews, 1,001 notes, 1,001 cards and
+565 media files. All seven steps pass with verified continuity; overall
+hierarchy verification fails 117 findings. The preview is cancelled and the
+phone returns to Decks. The original publication header is not a live count
+of incremental cloud changes.
+
+The latest Mac launch has a live process but cannot yet expose its window.
+A bounded stack sample places its main thread in macOS sandbox initialization,
+before app code. Computer-use inspection of the system notification app was
+refused because it could expose unrelated private notifications. No notification
+contents were inspected. The owner was asked to check only the Meguri prompt.
+The phone-to-Mac row transfer, cold-start discovery and fresh media transfer
+remain unverified. No new production sync fix or acceptance is claimed.
