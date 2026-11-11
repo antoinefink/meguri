@@ -155,7 +155,7 @@ nonisolated struct AgentSelectedRestoration {
                 else { throw AgentFailure.recovery }
                 let accounting = try AgentOriginalExchangeAccounting(records: state.records, capture: captured,
                     terminal: terminal, selected: selected, exchange: id)
-                let sdk = try AgentOriginalExchangeSDK(records: state.records, capture: captured, terminal: terminal,
+                let sdk = try AgentOriginalExchangeSDK(records: state.records, issuance: issued.0, capture: captured, terminal: terminal,
                     boundary: boundary, selected: selected, accounting: accounting)
                 exchange = .init(exchange: id, witness: witness, boundary: boundary, selected: selected,
                                  terminal: terminal.facts, accounting: accounting, sdk: sdk)

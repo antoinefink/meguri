@@ -15,8 +15,30 @@ nonisolated struct AgentOriginalExchangeSDK {
     }
     let acknowledgements: [String: [Image]]
 
-    init(records: [AgentRecord], capture: AgentRecord, terminal: AgentRecord,
+    struct EarlierAutomaticAcknowledgement {
+        let image: Image
+        let operation: String
+        let callbackReturned: UInt64
+    }
+    private let earlierAutomatic: [EarlierAutomaticAcknowledgement]
+
+    func earlierAutomaticAcknowledgement(envelopeDigest: String) throws -> EarlierAutomaticAcknowledgement {
+        guard AgentJSON.digest(envelopeDigest) else { throw AgentFailure.recovery }
+        let matches = earlierAutomatic.filter { $0.image.envelopeDigest == envelopeDigest }
+        guard Set(matches.map { $0.image.entity }).count == 1,
+              let latest = matches.max(by: { $0.image.record < $1.image.record }) else { throw AgentFailure.recovery }
+        return latest
+    }
+
+    init(records: [AgentRecord], issuance: AgentRecord, capture: AgentRecord, terminal: AgentRecord,
          boundary: UInt64, selected: Set<String>, accounting: AgentOriginalExchangeAccounting) throws {
+        guard issuance.kind == .observation, issuance.agent_instance == capture.agent_instance,
+              issuance.header_sha256 == capture.header_sha256, issuance.command_seq == capture.command_seq,
+              issuance.command_sha256 == capture.command_sha256, issuance.record_seq < capture.record_seq,
+              let issued = issuance.facts.first, let witness = issued.digest, AgentJSON.digest(witness),
+              let exchange = capture.facts.first?.count, exchange > 0,
+              issuance.facts == [.init(name: .syncResult, count: exchange, digest: witness,
+                                      operation: "original-exchange-issued")] else { throw AgentFailure.recovery }
         var ledger = Ledger()
         for record in records where record.kind == .observation && record.agent_instance == capture.agent_instance &&
             record.record_seq < terminal.record_seq {
@@ -42,6 +64,25 @@ nonisolated struct AgentOriginalExchangeSDK {
             }) else { throw AgentFailure.recovery }
         }
         self.acknowledgements = acknowledged
+        // This proves only a completed earlier automatic operation. A manual
+        // build or a later result is not attributed to this exchange by time.
+        self.earlierAutomatic = ledger.images.compactMap { image in
+            guard !image.held, image.record < issuance.record_seq,
+                  let key = image.batch, ledger.handoffs[key]?.collection == true,
+                  let batch = ledger.batches[key], batch.engine == image.engine,
+                  let send = ledger.sends[batch.send], send.engine == image.engine, !send.manual,
+                  let result = batch.results[image.entity], result.record == image.record,
+                  let callback = ledger.callbacks[image.callback], callback.engine == image.engine,
+                  callback.phases.count == 3, let returned = callback.phases.last,
+                  returned.record < issuance.record_seq,
+                  let reflected = batch.reflected, result.record < reflected.record, result.tick < reflected.tick,
+                  let state = ledger.callbacks.values.first(where: {
+                      $0.engine == image.engine && $0.event == "state" && $0.phases.count == 3 &&
+                          $0.phases[1].record == reflected.record
+                  }), let stateReturned = state.phases.last, stateReturned.record < issuance.record_seq
+            else { return nil }
+            return .init(image: image, operation: batch.send, callbackReturned: returned.tick)
+        }
     }
 
     private struct Position {

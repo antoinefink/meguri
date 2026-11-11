@@ -9,6 +9,7 @@ import Testing
                                   workAfterTerminal: Bool = false, incomingWaiting: UInt64 = 0,
                                   terminalHeld: UInt64 = 0, terminalNewer: UInt64 = 0,
                                   terminalMedia: [AgentFact] = [],
+                                  earlierSDKFacts: [[AgentFact]] = [],
                                   sdkFacts: [[AgentFact]] = [],
                                   workFacts: [AgentFact] = [.init(name: .syncResult, operation: "work-selected-clean-entity1")]) throws -> AgentRestoration {
         var object = try #require(JSONSerialization.jsonObject(with: CloudKitAgentProtocolTests.header) as? [String: Any])
@@ -35,6 +36,9 @@ import Testing
         }
         for command in commands.prefix(completed + (pending ? 1 : 0)) {
             append(.started, command: command)
+            if command.action == .syncNow {
+                for facts in earlierSDKFacts { append(.observation, command: command, facts: facts) }
+            }
             var facts: [AgentFact] = []
             if command.command_seq == 3 {
                 facts = [.init(name: .applied, digest: String(repeating: "2", count: 64), operation: "canonical-active"),
@@ -317,6 +321,40 @@ import Testing
             }
             return fact
         } }
+    }
+    @MainActor private func automaticSDKSave(held: Bool = false) -> [[AgentFact]] {
+        originalSDKSave(held: held).map { group in group.compactMap { original in
+            var fact = original
+            if fact.operation == "send1-manual-returned" { return nil }
+            if fact.operation == "send1-batch1-manual-build" { fact.operation = "send1-batch1-scheduled-build" }
+            return fact
+        } }
+    }
+    @MainActor @Test func earlierAutomaticSourceAcknowledgementNeedsItsExactOriginalOperationAndCompletedState() throws {
+        let digest = String(repeating: "8", count: 64)
+        let restored = try AgentSelectedRestoration(state(completed: 4, pending: true, earlierSDKFacts: automaticSDKSave()))
+        let sdk = try #require(restored.exchange?.sdk)
+        let source = try sdk.earlierAutomaticAcknowledgement(envelopeDigest: digest)
+        #expect(source.operation == "send1" && source.image.entity == "entity1")
+        #expect(source.image.engine == "engine1" && source.image.callback == "sdk1" && source.image.batch == "batch1")
+        #expect(source.image.envelopeDigest == digest && !source.image.held && source.callbackReturned > 0)
+        #expect(sdk.acknowledgements.isEmpty) // Earlier ACK is not counted again in this exchange.
+        #expect(throws: AgentFailure.recovery) {
+            try sdk.earlierAutomaticAcknowledgement(envelopeDigest: String(repeating: "9", count: 64))
+        }
+        for groups in [originalSDKSave(), automaticSDKSave(held: true),
+                       automaticSDKSave().map { $0.filter { $0.operation != "sdk2-state-returned" } },
+                       automaticSDKSave().map { $0.filter { $0.operation != "send1-batch1-entity1-image-live" } }] {
+            let changed = try AgentSelectedRestoration(state(completed: 4, pending: true, earlierSDKFacts: groups))
+            #expect(throws: AgentFailure.recovery) {
+                try changed.exchange?.sdk.earlierAutomaticAcknowledgement(envelopeDigest: digest)
+            }
+        }
+        let later = try AgentSelectedRestoration(state(completed: 4, pending: true,
+            sdkFacts: automaticSDKSave(), workFacts: [.init(name: .syncResult, operation: "work-selected-acked-entity1")]))
+        #expect(throws: AgentFailure.recovery) {
+            try later.exchange?.sdk.earlierAutomaticAcknowledgement(envelopeDigest: digest)
+        }
     }
     @MainActor @Test func originalResultOrderNeedsTheActualReflectedBatchOfTheSameEngine() throws {
         let work = [AgentFact(name: .syncResult, operation: "work-selected-acked-entity1")]

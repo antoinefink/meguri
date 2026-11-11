@@ -759,3 +759,23 @@ witness ownership and repeated current-opening guards. No independent review,
 full batch gate or signed round-trip acceptance ran. Source-cause proof,
 historical close and Mac exchange recovery remain open; Mac recovered
 completion stays disabled. No Unit is claimed.
+
+## Earlier automatic source acknowledgement
+
+Starting commit `d9c38e71`. The original SDK reader now retains a typed proof
+of a completed earlier automatic acknowledgement. It requires the exact
+envelope digest, one entity, a scheduled operation, the original result and
+returned callback, and that batch's later committed and returned state save.
+Those records must precede the original exchange issuance. It never counts
+that acknowledgement again in the manual exchange's accounting. Manual,
+later, held, missing-image and incomplete-state candidates cannot supply it.
+
+Red Swift run `86177` fails on the missing reader. Final run `93714` passes
+all 20 restoration tests. VM producer runs `91066` and `96793` each execute
+one passing automatic or manual journal-reader check, with zero skips or
+failures. Similarity `94899` passes; the Apple jobs' UI lint passes too.
+
+This is an evidence-reader step, not signed acceptance. Manual-operation
+causal linking, integration with the current source ACK read, historical close
+and Mac recovered completion remain open. No independent review, full batch
+gate or new signed attempt ran.
