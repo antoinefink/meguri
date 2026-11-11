@@ -244,3 +244,16 @@
   unchanged. No variant result is claimed. No builds/tests or SDK calls; one
   `git diff --check` before prompt export. Integration command:
   `tools/mg selftest --filter '^cloud-fetch-probe-host '`.
+
+## Host results
+
+- Host-tool review `85191` found one P1. Review `88265` clears the repair.
+  Docker wrapper `89146` passed. Gate plan `88638` passed; its 47 rows exclude
+  this utility. Planning is not gate execution.
+- Host run `89533`: one executed pass, zero skips; four stages received the
+  expected bytes. Cleanup succeeded. The result is diagnostic warn.
+- Variant review `92733`: no P0–P2. Docker wrapper `91627` and Swift lint
+  `91927` passed. Host run `93169`: one executed pass, zero skips; all six
+  stages received the expected bytes. Cleanup succeeded.
+- Neither priority zones nor reconstruction reproduces the receive failure
+  in this Mac test. No product behavior changed and no sync acceptance follows.
