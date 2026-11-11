@@ -24,6 +24,14 @@ struct DebugNativeFetchSequenceTests {
         #expect(value == "fault{none} nf{l=0 a=0 r=0 o=0|}")
     }
 
+    @Test func unrelatedDatabaseDeletionHasItsOwnObservationTag() {
+        let recorder = Recorder()
+        let ordinal = recorder.register(automatic: false, restored: false)
+        recorder.record(.database, ordinal: ordinal)
+        recorder.record(.unrelatedDatabaseDeletion, ordinal: ordinal)
+        #expect(recorder.formatted == "nf{l=1 a=0 r=0 o=0|1:C00,1:B,1:U}")
+    }
+
     @Test func longFaultPreservesLargestSequenceAndLatestTailWithinByteBound() {
         let recorder = Recorder(lastAllocatedOrdinal: .max - 1)
         let ordinal = recorder.register(automatic: true, restored: true)
@@ -132,7 +140,7 @@ struct DebugNativeFetchSequenceTests {
         let inclusions = flags.flatMap { root in
             flags.map { Inclusion(root: root, collection: $0) }
         }
-        var events: [Event] = [.invoke, .returned, .cancel, .release, .database,
+        var events: [Event] = [.invoke, .returned, .cancel, .release, .database, .unrelatedDatabaseDeletion,
             .willZone(.root), .willZone(.collection), .willZone(.other)]
         for automatic in flags {
             for restored in flags { events.append(.configured(automatic: automatic, restored: restored)) }

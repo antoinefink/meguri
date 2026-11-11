@@ -5,6 +5,57 @@ import Testing
 @testable import CoreBridge
 
 struct NativeCloudKitEngineTests {
+    @Test func unrelatedDatabaseDeletionsAndEmptyListsAreAccepted() throws {
+        let unrelated = ["unrelated-zone", "another-zone", "meguri-root-extra", "meguri-media-extra",
+            "Meguri-root", "Meguri-media", "C-epoch", "path/meguri-root", "path/c-epoch"]
+            .map { CKRecordZone.ID(zoneName: $0, ownerName: CKCurrentUserDefaultName) }
+        for registered in [nil, "bound-collection"] as [String?] {
+            try NativeCloudKitIdentityValidation.validateDatabaseDeletions([], collectionZone: registered)
+            for id in unrelated {
+                try NativeCloudKitIdentityValidation.validateDatabaseDeletions([id], collectionZone: registered)
+            }
+            try NativeCloudKitIdentityValidation.validateDatabaseDeletions(unrelated, collectionZone: registered)
+        }
+    }
+
+    @Test func reservedAndBoundDatabaseDeletionsStillRefuseIncludingMixedLists() {
+        let unrelated = CKRecordZone.ID(zoneName: "unrelated-zone", ownerName: CKCurrentUserDefaultName)
+        for registered in [nil, "unusual-bound-zone"] as [String?] {
+            var names = ["meguri-root", "meguri-media", "c-", "c-current", "c-other-epoch"]
+            if let registered { names.append(registered) }
+            for name in names {
+                let id = CKRecordZone.ID(zoneName: name, ownerName: CKCurrentUserDefaultName)
+                for ids in [[id], [unrelated, id], [id, unrelated]] {
+                    expectUnsupportedDatabaseDeletions(ids, collectionZone: registered)
+                }
+            }
+        }
+    }
+
+    @Test func foreignOwnerDatabaseDeletionsAlwaysRefuse() {
+        let unrelated = CKRecordZone.ID(zoneName: "unrelated-zone", ownerName: CKCurrentUserDefaultName)
+        for registered in [nil, "unusual-bound-zone"] as [String?] {
+            for name in ["unrelated-zone", "meguri-root", "meguri-media", "c-", "c-other-epoch", "unusual-bound-zone"] {
+                let foreign = CKRecordZone.ID(zoneName: name, ownerName: "foreign-owner")
+                for ids in [[foreign], [unrelated, foreign], [foreign, unrelated]] {
+                    expectUnsupportedDatabaseDeletions(ids, collectionZone: registered)
+                }
+            }
+        }
+    }
+
+    private func expectUnsupportedDatabaseDeletions(_ ids: [CKRecordZone.ID], collectionZone: String?) {
+        do {
+            try NativeCloudKitIdentityValidation.validateDatabaseDeletions(ids, collectionZone: collectionZone)
+            Issue.record("Expected NativeCloudKitFailure.unsupportedRecord")
+        } catch {
+            switch error {
+            case NativeCloudKitFailure.unsupportedRecord: break
+            default: Issue.record("Expected NativeCloudKitFailure.unsupportedRecord")
+            }
+        }
+    }
+
     #if DEBUG
     @Test func processSentRecordRoutingUsesFullZoneIDsAndRetainsOnlyNumericTotals() {
         let collection = CKRecordZone.ID(zoneName: UUID().uuidString, ownerName: CKCurrentUserDefaultName)

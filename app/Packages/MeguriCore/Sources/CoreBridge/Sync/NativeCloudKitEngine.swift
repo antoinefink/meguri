@@ -34,6 +34,20 @@ enum NativeCloudKitIdentityValidation {
         for id in ids { try requireCurrentOwner(id) }
         return ids.map(\.zoneName)
     }
+    static func validateDatabaseDeletions(_ ids: [CKRecordZone.ID], collectionZone: String?) throws {
+        for id in ids { try requireCurrentOwner(id) }
+        var reserved = ["meguri-root", "meguri-media"].map {
+            CKRecordZone.ID(zoneName: $0, ownerName: CKCurrentUserDefaultName)
+        }
+        if let collectionZone {
+            reserved.append(CKRecordZone.ID(zoneName: collectionZone, ownerName: CKCurrentUserDefaultName))
+        }
+        // Recognized zone-loss translation to Core remains unfinished. Keep
+        // refusing it; unrelated database metadata has no collection effect.
+        guard !ids.contains(where: { reserved.contains($0) || $0.zoneName.hasPrefix("c-") }) else {
+            throw NativeCloudKitFailure.unsupportedRecord
+        }
+    }
     static func collectionRecordNames(_ ids: [CKRecord.ID], zoneID: CKRecordZone.ID) throws -> [String] {
         try requireCurrentOwner(zoneID)
         guard ids.allSatisfy({ $0.zoneID == zoneID }) else { throw NativeCloudKitFailure.unsupportedRecord }
@@ -701,7 +715,13 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
                 }
                 forwarded = .didSend(zone: collectionZone ?? "")
             case .fetchedDatabaseChanges(let changes):
-                guard changes.deletions.isEmpty else { throw NativeCloudKitFailure.unsupportedRecord }
+                try NativeCloudKitIdentityValidation.validateDatabaseDeletions(
+                    changes.deletions.map(\.zoneID), collectionZone: collectionZone)
+                #if DEBUG
+                if !changes.deletions.isEmpty {
+                    DebugCloudDiagnostics.nativeFetchSequence.record(.unrelatedDatabaseDeletion, ordinal: debugFetchOrdinal)
+                }
+                #endif
                 forwarded = .databaseChanges
             case .sentDatabaseChanges: throw NativeCloudKitFailure.unsupportedRecord
             @unknown default: throw NativeCloudKitFailure.unsupportedRecord

@@ -32,6 +32,7 @@ extension DebugCloudDiagnostics {
         case will(reason: FetchReason, sameGroup: Bool)
         case did(reason: FetchReason, sameGroup: Bool)
         case database
+        case unrelatedDatabaseDeletion
         case willZone(FetchZone)
         // Original batch's zone classes, including deletions; all false is empty.
         case fetchedZones(root: Bool, collection: Bool, other: Bool)
@@ -49,6 +50,7 @@ extension DebugCloudDiagnostics {
             case .will(let reason, let same): "W\(reason.rawValue)\(same ? 1 : 0)"
             case .did(let reason, let same): "D\(reason.rawValue)\(same ? 1 : 0)"
             case .database: "B"
+            case .unrelatedDatabaseDeletion: "U"
             case .willZone(let zone):
                 switch zone { case .root: "Zr"; case .collection: "Zc"; case .other: "Zo" }
             case .fetchedZones(let root, let collection, let other): "F\(root ? 1 : 0)\(collection ? 1 : 0)\(other ? 1 : 0)"
@@ -69,6 +71,7 @@ extension DebugCloudDiagnostics {
     /// C=configure (automatic/restored), P=prepared (scope/priority), I=invoke,
     /// R=terminal return (including throws), X=cancel entry, L=release entry,
     /// W/D=will/did (m=manual,s=scheduled; group object same), B=database,
+    /// U=nonempty database deletions accepted as unrelated after validation,
     /// Z=will-zone (r=root,c=registered collection,o=other), F=fetched batch
     /// (root/collection/other presence), N=options callback (reason, requested
     /// scope, offered scope, offered priority, group object same at entry).
