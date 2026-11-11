@@ -1599,6 +1599,57 @@ fn nonempty_download_waits_for_collection_drain_and_arrives_in_engine_media_stor
 }
 
 #[test]
+fn download_selection_does_not_reload_all_entities_for_unselected_blobs() {
+    let (fixture, sdk) = published();
+    let media = fixture.workflow.media().unwrap();
+    accept_root(&media, &sdk);
+    let mut metadata = BTreeMap::new();
+    for index in 0..24 {
+        let blob = incoming_media(
+            &fixture,
+            &sdk,
+            &format!("selection-{index}.asset"),
+            format!("synthetic download {index}").as_bytes(),
+        );
+        metadata.insert(blob.name(&[47; 32]), blob);
+    }
+    for _ in 0..metadata.len() {
+        let issued = media.clone().next_work(sdk.instance_id.clone()).unwrap().unwrap();
+        let CloudMediaRequest::Read { name } = issued.request else {
+            panic!("metadata is read before download selection")
+        };
+        media
+            .reply(
+                issued.handle,
+                CloudMediaReply::Record {
+                    envelope: metadata[&name].encode().unwrap(),
+                    name,
+                    record_type: "MGBlob".into(),
+                    asset_path: None,
+                },
+            )
+            .unwrap();
+    }
+    let core = &fixture.workflow.core;
+    let collection = fixture.workflow.host.collection().unwrap();
+    let store = fixture.workflow.host.media().unwrap();
+    let entities = core
+        .entity_facts_page(c::entity_codec::Kind::MediaName, None)
+        .unwrap()
+        .len();
+    assert!(entities >= metadata.len());
+    let before = c::testing::entity_body_reads();
+    let selected = core.cloud_media_work(&collection, &store).unwrap().unwrap();
+    let reads = c::testing::entity_body_reads() - before;
+    assert!(matches!(selected.request, m::Request::Download { .. }));
+    assert!(reads >= entities, "the full candidate set must really be read");
+    assert!(
+        reads <= 4 * entities,
+        "one selection materialized {reads} entity bodies for {entities} entities"
+    );
+}
+
+#[test]
 fn unsyncable_local_file_blocks_download_candidates_and_retained_admission() {
     use crate::cloud_policy::*;
     for retain_download in [false, true] {

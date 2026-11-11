@@ -960,12 +960,11 @@ impl Runtime {
                 if selection == Selection::Resume
                     && b.server == ServerState::Present
                     && b.download == Transfer::Queued
+                    && request.is_none()
                     && !self.media_download_blocked_by_unsyncable(&a, name)?
                     && !self.cloud_media_downloads_blocked()
                 {
-                    if request.is_none() {
-                        request = Some(Request::Download { name: name.clone() });
-                    }
+                    request = Some(Request::Download { name: name.clone() });
                     continue;
                 }
                 if b.server == ServerState::Deleted
