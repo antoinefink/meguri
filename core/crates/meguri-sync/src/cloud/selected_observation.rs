@@ -966,11 +966,7 @@ impl Runtime {
 impl TrackingStore {
     // An original envelope binds its kind, key, origin and version. Match it
     // against scoped stored ACKs without reading local or historical bodies.
-    pub(in crate::cloud) fn selected_ack_set(
-        &self,
-        binding: BindingId,
-        groups: &[Vec<[u8; 32]>],
-    ) -> Result<(), Error> {
+    pub(in crate::cloud) fn selected_ack_set(&self, binding: BindingId, groups: &[Vec<[u8; 32]>]) -> Result<(), Error> {
         self.binding(binding)?.ok_or(Error::BindingNotFound)?;
         if groups.len() > 4096
             || groups.iter().any(Vec::is_empty)
@@ -1002,7 +998,9 @@ impl TrackingStore {
                 }
                 after = keys.last().cloned();
                 for key in keys {
-                    let header = self.entity_key_header(binding, kind, &key)?.ok_or(Error::RecoveryRefused)?;
+                    let header = self
+                        .entity_key_header(binding, kind, &key)?
+                        .ok_or(Error::RecoveryRefused)?;
                     let e = header.facts;
                     if e.kind != kind || e.key != key {
                         return Err(Error::RecoveryRefused);

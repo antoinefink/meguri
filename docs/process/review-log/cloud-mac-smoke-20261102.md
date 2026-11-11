@@ -713,7 +713,7 @@ producer inputs. No independent review ran. The current durable ACK-set read,
 source cause, historical close, host relaunch and signed round trip remain open.
 Mac recovered completion remains disabled. No Unit or acceptance is claimed.
 
-## Current ACK-set cross-check, awaiting execution
+## Current ACK-set cross-check
 
 Starting commit `bc3b9542`. The prepared read checks each original ACK image
 group against exactly one scoped current entity's stored envelope digest.
@@ -740,7 +740,22 @@ an error receipt, with no red/green behavioral evidence.
 Prepared tests cover exact multiple-entity matching, missing/shared versions,
 newer local pending content, stale ACK replacement and scoped ownership. The
 real Service test adds pre-scan refusal and pre-engine/post-start reads with
-wrong and duplicate digest refusal. These tests, Swift compilation, formatting,
-lint, similarity and native app-hosted verification remain unrun for this
-change while Docker is unavailable. Direct source review ran; independent
-review and the full batch gate did not. Mac recovered completion stays disabled.
+wrong and duplicate digest refusal. At WIP commit `8e8db565`, these tests,
+Swift compilation, formatting, lint, similarity and native app-hosted
+verification remained unrun while Docker was unavailable.
+
+Execution resumed from `8e8db565` after Docker recovered. Doctor `70407`
+finds Docker and the dedicated VM ready. Rust run `70991` passes the new
+storage regression. Native Service run `72526` passes both recovery cases,
+including the new pre-scan refusal and pre-engine/post-start ACK reads.
+Bridge registry run `77130` passes seven tests. VM run `79643` compiles the
+actual Snapshot runtime and executes the source ACK guard once, with zero
+skips or failures. This VM test checks the guard; the Service test exercises
+the new bridge against actual durable state.
+
+Formatting `76696`, core lint `78095`, similarity `78402` and privacy `82158`
+pass. Formatting changes only whitespace. Direct review checked scoped headers, original
+witness ownership and repeated current-opening guards. No independent review,
+full batch gate or signed round-trip acceptance ran. Source-cause proof,
+historical close and Mac exchange recovery remain open; Mac recovered
+completion stays disabled. No Unit is claimed.

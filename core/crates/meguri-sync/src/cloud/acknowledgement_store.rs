@@ -548,15 +548,26 @@ mod tests {
         let note_digest = entity_codec::sha256(&note.acked_envelope.0);
         let config_digest = entity_codec::sha256(&config.acked_envelope.0);
         store.selected_ack_set(b, &[]).unwrap();
-        assert_eq!(store.selected_ack_set(BindingId([0; 16]), &[]), Err(Error::BindingNotFound));
-        store.selected_ack_set(b, &[vec![note_digest], vec![config_digest]]).unwrap();
+        assert_eq!(
+            store.selected_ack_set(BindingId([0; 16]), &[]),
+            Err(Error::BindingNotFound)
+        );
+        store
+            .selected_ack_set(b, &[vec![note_digest], vec![config_digest]])
+            .unwrap();
         store.selected_ack_set(b, &[vec![[9; 32], note_digest]]).unwrap();
-        for groups in [vec![vec![[9; 32]]], vec![vec![]], vec![vec![note_digest], vec![note_digest]]] {
+        for groups in [
+            vec![vec![[9; 32]]],
+            vec![vec![]],
+            vec![vec![note_digest], vec![note_digest]],
+        ] {
             assert!(store.selected_ack_set(b, &groups).is_err());
         }
         // Newer local pending content does not erase its acknowledged version.
         let mut changed = note.payload.clone();
-        let entity_codec::Payload::Note(value) = &mut changed else { unreachable!() };
+        let entity_codec::Payload::Note(value) = &mut changed else {
+            unreachable!()
+        };
         value.flds = b"new local question\x1fpublic answer".to_vec();
         note.observe(changed, runtime::DirtySource::Observer, &mut 4).unwrap();
         put(&mut store, b, &note);
@@ -565,6 +576,8 @@ mod tests {
         note.acked_envelope = OpaqueBytes(vec![5, 6]);
         put(&mut store, b, &note);
         assert!(store.selected_ack_set(b, &[vec![note_digest]]).is_err());
-        store.selected_ack_set(b, &[vec![entity_codec::sha256(&note.acked_envelope.0)]]).unwrap();
+        store
+            .selected_ack_set(b, &[vec![entity_codec::sha256(&note.acked_envelope.0)]])
+            .unwrap();
     }
 }

@@ -1130,7 +1130,10 @@ pub fn test_cloud_crosscheck_original_ack_set(
     let envelopes: Vec<Vec<[u8; 32]>> = envelopes
         .into_iter()
         .map(|group| {
-            group.into_iter().map(|digest| digest.try_into().map_err(|_| invalid())).collect()
+            group
+                .into_iter()
+                .map(|digest| digest.try_into().map_err(|_| invalid()))
+                .collect()
         })
         .collect::<Result<_, CoreError>>()?;
     let host = runtime::host()?;
