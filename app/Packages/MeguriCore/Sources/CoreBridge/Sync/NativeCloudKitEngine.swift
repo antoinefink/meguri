@@ -258,7 +258,7 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         do { return try validatedPendingRecords().byName }
         catch { failure = error; return [:] }
     }
-    func pendingNamesForStateEvidence() throws -> Set<String>? {
+    func pendingNamesForStateEvidence() async throws -> Set<String>? {
         guard observeNative != nil else { return nil }
         if let failure { throw failure }
         guard sdk != nil, evidenceTurn else { throw NativeCloudKitFailure.unsupportedRecord }

@@ -148,6 +148,16 @@ def journal_bytes(kind, checks, observations, through=6, header_value=None):
             return "terminal"
         if label.endswith("-state-committed") or c.state_batch_fact(label):
             return label.split("-")[0]
+        callback = c.SENT_PHASE.fullmatch(label)
+        if callback:
+            return callback.groups()
+        send = c.SEND.fullmatch(label)
+        if send:
+            _, batch, _, phase = send.groups()
+            if c.send_result(phase):
+                return (batch, "committed")
+            if phase == "batch-returned":
+                return (batch, "returned")
         if c.pending_fact(label):
             return "pending"
         return None
@@ -216,6 +226,42 @@ class SelectedTests(unittest.TestCase):
         callback("sdk3-state", "engine1")
         evidence.acknowledged(ack)
         evidence.joined([fact("ownedWorkJoined", "own-joined", 0), fact("ownedWorkJoined", "sdk-joined", 3)])
+
+    def test_delete_results_require_their_own_batch_and_state(self):
+        for phase in ("delete-error-3", "deleted", "delete-error-11", "saved"):
+            evidence = c.Evidence()
+
+            def group(*labels, name="engineCallback"):
+                evidence.position += 1
+                items = []
+                for label in labels:
+                    item = fact(name, label, evidence.tick + 1, engine=True)
+                    evidence.ingest(item)
+                    items.append(item)
+                evidence.check_sent_group(items)
+                evidence.check_state_batch_group(items)
+
+            group("required-scan-before-native-sdk", "batch1-media-handoff", name="applied")
+            evidence.ingest(fact("applied", "batch1-save-count", 0, engine=True))
+            evidence.ingest(fact("applied", "batch1-delete-count", 1, engine=True))
+            group("send1-batch1-manual-build", "send1-batch1-entity1-delete-member", name="applied")
+            group("sdk1-sent-batch1-delivered")
+            result = "send1-batch1-entity1-" + phase
+            if phase == "saved":
+                with self.assertRaisesRegex(s.v.Refused, "selected-batch-result"):
+                    group("sdk1-sent-batch1-committed", result)
+                continue
+            group("sdk1-sent-batch1-committed", result)
+            group("sdk1-sent-batch1-returned", "send1-batch1-batch-returned")
+            own = fact("ownedWorkJoined", "own-joined", 0)
+            if phase != "delete-error-3":
+                with self.assertRaisesRegex(s.v.Refused, "engine_order_not_shown"):
+                    evidence.joined([own, fact("ownedWorkJoined", "sdk-joined", 1, engine=True)])
+                group("sdk2-state-delivered")
+                group("sdk2-state-committed", "sdk2-state-batches", "sdk2-entity1-read-absent",
+                      "sdk2-send1-batch1-entity1-reflected-absent", name="stateSaved")
+                group("sdk2-state-returned")
+            evidence.joined([own, fact("ownedWorkJoined", "sdk-joined", len(evidence.sdk), engine=True)])
 
     def test_preflight_diagnostics_export_only_closed_stage_and_refusal_values(self):
         diagnostic = c.Diagnostic()

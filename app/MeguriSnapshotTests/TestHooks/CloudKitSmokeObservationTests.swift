@@ -460,6 +460,37 @@ import Testing
         evidence.sdk(.init(origin: "generated-engine", ordinal: 1, event: event, phase: .returned), current: current())
         #expect(try evidence.joinedOriginalWork().map(\.count) == [1, 1])
     }
+    @Test func nativeSaveAndDeleteResultsKeepTheirBatch() throws {
+        let origin = "generated-engine"
+        let name = entity("n1").recordName
+        let operation = CloudNativeSendOperation(identity: UUID(), reason: .manual)
+        let failure = CloudRecordFailure(name: name, code: .networkUnavailable, nativeCode: 3)
+        let record = CloudRecord(name: name, envelope: Data([1]), systemFields: Data([2]))
+        let cases: [(CloudEngineEvent, String, Bool, Bool)] = [
+            (.sent(batchID: 1, saved: [], failed: [failure], deleted: []), "save-error-3", false, true),
+            (.sent(batchID: 1, saved: [], failed: [], deleted: [], failedDeletes: [failure]), "delete-error-3", true, true),
+            (.sent(batchID: 1, saved: [], failed: [], deleted: [name]), "deleted", true, false)
+        ]
+        for (event, result, deleting, kept) in cases {
+            let evidence = try ledger()
+            try evidence.admitSmokeSDK(origin: origin)
+            evidence.batch(origin: origin, batch: .init(id: 1, saves: deleting ? [] : [record], deletes: deleting ? [name] : []),
+                           proof: nil, current: current(), operation: operation)
+            for phase in [CloudSDKObservationPhase.delivered, .committed, .returned] {
+                evidence.sdk(.init(origin: origin, ordinal: 1, event: event, phase: phase), current: current())
+            }
+            let facts = evidence.drain().compactMap(\.operation)
+            let member = deleting ? "delete-member" : "member"
+            #expect(facts.contains("send1-batch1-entity1-\(member)"))
+            #expect(facts.contains("send1-batch1-entity1-\(result)"))
+            #expect(facts.contains("send1-batch1-batch-returned"))
+            if !kept {
+                #expect(throws: AgentFailure.execution) { try evidence.joinedOriginalWork() }
+                stateCallback(evidence, ordinal: 2, pending: [])
+            }
+            #expect(try evidence.joinedOriginalWork().last?.operation == "sdk-joined")
+        }
+    }
     @Test func commonOriginalPeerJoinRetainsOriginalFetchWithoutHeldReview() throws {
         let evidence = try ledger(selected: true)
         let record = CloudRecord(name: entity("n1").recordName, envelope: Data([1]), systemFields: Data([2]))

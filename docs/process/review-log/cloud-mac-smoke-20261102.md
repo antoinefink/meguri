@@ -215,3 +215,23 @@ Mac VM run `97087` passes the focused callback test. Swift run `94761` passes
 This covers saved records. Failed and deleted record results, the exemptions
 for batches without a result, full exchange replay and the signed round trip
 remain open. This change carries no Unit completion or full-gate claim.
+
+## Failed saves and deletes in the original batch
+
+Starting commit `ecaec5a8`. The selected test records delete members alongside
+save members and records the actual SDK outcomes before the callback returns.
+It records only labels and numeric CloudKit error codes. The host checks
+membership, operation type and the durable callback group. A result can name
+only one still-open batch. An all-error batch with only the specified pending
+errors needs no state pair. Other results still need their original pair.
+
+Direct review checked scope, original callback grouping, error classification,
+and the boundary between failed results and upload acknowledgements. The
+native engine method now explicitly implements the asynchronous pending-list
+requirement so the selected observer uses its native read.
+
+Mac VM run `2060` passes the focused save and delete cases. Host run `99922`
+passes five wrappers, including refusal of a save outcome for a delete member
+and of close without the required state pair. The VM answered `doctor` run
+`3738`. Batches without a result and original exchange replay still need
+coverage. No signed round trip or full-gate claim is made here.
