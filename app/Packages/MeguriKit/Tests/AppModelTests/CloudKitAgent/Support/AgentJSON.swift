@@ -135,6 +135,7 @@ nonisolated enum AgentFailure: String, Error, Codable {
     case wrongContainer = "wrong-container"
     case unsupported, execution, recovery, storage
     case implementationMissing = "implementation_missing"
+    case engineOrderNotShown = "engine_order_not_shown"
     case awaitingUser = "awaiting_user"
 
     enum Disposition: String, Codable { case failed, awaitingUser = "awaiting_user" }

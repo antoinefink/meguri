@@ -552,3 +552,52 @@ verdict. The Mac recovery gate remains unchanged: it still refuses completion
 and close until original SDK ordering, revision proof and current durable
 cross-checks are implemented. No independent review, Unit completion, full
 batch gate or signed acceptance is claimed.
+
+## Replay original SDK results
+
+Starting commit `aabb7bf8`. The restart reader now reads original SDK events
+in their original process namespace. It checks engine admission, built
+batches, actual members, callback phases, result images, adapter updates and
+the state saves that reflect those batches. Results map only to one open
+built batch. A batch closes only through its result, its own return or its
+manual send's recorded return. A later build does not close an earlier one.
+
+ACK membership and held flags are recomputed from original images at or
+above the capture boundary. Own landed saves need their original fetched
+member and callback. Terminal absence needs the original unknown-item result.
+The reader compares those sets with the original work accounting. It does
+not read current SDK status or import callbacks from a later process.
+
+The order check uses record order and the original ticks. It checks the
+pending-list read and the last recorded adapter touch before crediting a
+reflected batch. Kept errors and unreported batches use only the approved
+narrow exemptions. Missing or reversed required order reports the fixed
+`engine_order_not_shown` failure. The host now accepts that reason as a failed
+terminal and still refuses every successor after it.
+
+Run `15199` reproduces 5 failed expectations in the original ACK regression.
+Runs `16679`, `18159` and `20218` pass the growing focused test scope. The
+first host filter (`19596`) selects no tests and supplies no evidence.
+Exact host run `19894` reproduces the missing wire failure reason; after the
+fix, run `21310` passes all 6 selected smoke and coordinator harness cases.
+
+Review added checks for canonical SDK callback labels and complete adapter
+update groups. The failing results are retained in
+`build/cloud-original-sdk-label-red.log` and
+`build/cloud-original-sdk-marker-red.log`; each has one failed expectation.
+The repairs keep every assertion. Final native run `29583` passes all 55
+selected protocol tests. Cases include missing or reversed order, wrong
+engines, ambiguous and closed batch rebuilds, old and held images, kept
+errors, held removals and foreign-process observations.
+
+VM-hosted run `31000` executes the actual journal-producer/reader test once,
+with no skips or failures, after the repairs. It checks the real producer's
+wire groups using generated DTOs, not a signed CloudKit exchange. UI lint
+`21921`, static checks `23680`, final similarity `32003` and source privacy
+`32447` pass. Direct review ran here; no independent agent review ran.
+
+This proves original event reconstruction only. Current durable ACK checks
+for all selected entities, the exact source edit's ACK and cause, historical
+close authority and the host relaunch path remain open. Mac recovery still
+refuses completion until those are implemented. The signed round trip and
+full batch gate are unrun, and no Unit trailer or signed pass is claimed.

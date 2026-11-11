@@ -17,6 +17,7 @@ nonisolated struct AgentSelectedRestoration {
         let selected: Set<String>
         let terminal: [AgentFact]
         let accounting: AgentOriginalExchangeAccounting
+        let sdk: AgentOriginalExchangeSDK
     }
     let state: AgentRestoration
     let nextCommand: Int
@@ -154,8 +155,10 @@ nonisolated struct AgentSelectedRestoration {
                 else { throw AgentFailure.recovery }
                 let accounting = try AgentOriginalExchangeAccounting(records: state.records, capture: captured,
                     terminal: terminal, selected: selected, exchange: id)
+                let sdk = try AgentOriginalExchangeSDK(records: state.records, capture: captured, terminal: terminal,
+                    boundary: boundary, selected: selected, accounting: accounting)
                 exchange = .init(exchange: id, witness: witness, boundary: boundary, selected: selected,
-                                 terminal: terminal.facts, accounting: accounting)
+                                 terminal: terminal.facts, accounting: accounting, sdk: sdk)
             } else if !(program == .syncNowMac && command.action == .edit && command.recovery_check == "sync_now.edit" && edit != nil) {
                 throw AgentFailure.implementationMissing
             }

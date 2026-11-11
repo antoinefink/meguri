@@ -201,6 +201,56 @@ import Testing
             #expect(facts.dropLast().last?.operation == "send1-batch1-entity1-saved")
         }
     }
+    @Test func originalSDKReaderConsumesTheActualJournalProducer() throws {
+        let evidence = try ledger(selected: true), origin = "generated-engine"
+        try evidence.admitRestoredSDK(origin: origin, control: .init(generation: 11, requiredScanComplete: true))
+        var records: [AgentRecord] = []
+        @discardableResult func append(_ facts: [AgentFact]) -> AgentRecord {
+            let record = AgentRecord(header_sha256: String(repeating: "0", count: 64), record_seq: records.count + 1,
+                command_seq: 5, command_sha256: String(repeating: "1", count: 64), agent_instance: "original",
+                observed_at: "2026-11-11T00:00:00Z", kind: .observation, facts: facts)
+            records.append(record)
+            return record
+        }
+        append(evidence.drain())
+        let record = CloudRecord(name: entity("n1").recordName, envelope: Data([1]), systemFields: Data([2]))
+        let capture = append(try evidence.captureFacts(exchange: 3, capture: .init(boundarySeq: 9, selectedNames: [record.name])))
+        let journal = CloudKitSmokeJournal(evidence: evidence)
+        journal.install { { facts in append(facts) } }
+        let image = SmokeReviewImage(name: record.name, envelopeDigest: Data(SHA256.hash(data: record.envelope)),
+                                     digest: Data(repeating: 2, count: 32), imageSeq: 9, held: false)
+        let proof = SmokeBatchProof(generation: 11, seq: 20, session: nil, saves: 1, images: [], saveImages: [image])
+        let operation = CloudNativeSendOperation(identity: UUID(), reason: .manual)
+        journal.recordBatch(origin: origin, batch: .init(id: 1, saves: [record], deletes: []),
+                            proof: proof, current: current(), operation: operation)
+        let event = CloudEngineEvent.sent(batchID: 1, saved: [record], failed: [], deleted: [])
+        for phase in [CloudSDKObservationPhase.delivered, .committed, .returned] {
+            journal.record(.init(origin: origin, ordinal: 1, event: event, phase: phase))
+        }
+        journal.recordSendReturn(origin: origin, operation: operation)
+        for phase in [CloudSDKObservationPhase.delivered, .committed, .returned] {
+            let pending = if case .committed = phase { Set<String>() } else { nil as Set<String>? }
+            journal.record(.init(origin: origin, ordinal: 2, event: .stateUpdate(Data([9])), phase: phase, pendingNames: pending))
+        }
+        try evidence.check()
+        let terminalResult = CoreBridge.CloudPolicyExchangeRecord(.init(exchange: 3, endedMs: 30, source: .command,
+            outcome: .succeeded(selected: 1, heldBack: 0, newerPending: 0, incomingWaiting: 0,
+                media: .init(uploadFiles: nil, uploadBytes: nil, downloadFiles: nil, downloadBytes: nil,
+                    unknownBlobs: nil, missingNames: nil, uploadsRunning: nil, downloadsRunning: nil,
+                    remainingDownloadMs: nil, rootAcked: nil, zoneMissing: nil, noSpace: nil))))
+        guard case .succeeded(_, _, _, _, let media) = terminalResult.outcome else { throw AgentFailure.execution }
+        append(try evidence.workFacts(exchange: 3, work: .init(heldPendingNames: [], heldAcknowledgedNames: [],
+            pendingUnheldNames: [], media: media, acknowledgedNames: [record.name])))
+        let terminal = append(try CloudKitSelectedSyncProof.terminalExchangeFacts(terminalResult))
+        let accounting = try AgentOriginalExchangeAccounting(records: records, capture: capture,
+            terminal: terminal, selected: ["entity1"], exchange: 3)
+        let result = try AgentOriginalExchangeSDK(records: records, capture: capture, terminal: terminal,
+            boundary: 9, selected: ["entity1"], accounting: accounting)
+        let original = try #require(result.acknowledgements["entity1"]?.first)
+        #expect(original.engine == "engine1" && original.callback == "sdk1" && original.batch == "batch1")
+        #expect(original.seq == 9 && !original.held)
+        #expect(evidence.drain().isEmpty)
+    }
     @Test func originalConflictAndFetchKeepTheirHistoricalImage() throws {
         let origin = "generated-engine"
         let name = entity("n1").recordName

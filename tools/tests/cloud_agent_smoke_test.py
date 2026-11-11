@@ -564,14 +564,17 @@ class JournalTests(unittest.TestCase):
             self.journal.inspect(first + first, 1)
 
     def test_failed_blocks_successor_but_permits_late_original_observation(self):
-        start = record(self.commands, 1, 1, "started", action="launch")
-        failed = record(self.commands, 1, 2, "failed", failure="execution", error_domain="core", error_code=1)
-        late = record(self.commands, 1, 3, "observation", facts=[{"name": "ownedWorkJoined"}])
-        prefix = raw(start) + raw(failed) + raw(late)
-        _, command_outcomes = self.journal.inspect(prefix, 1)
-        self.assertEqual(command_outcomes, {1: "failed"})
-        with self.assertRaises(s.v.Refused):
-            self.journal.inspect(prefix + raw(record(self.commands, 2, 4, "started", action="connect")), 2)
+        for reason in ("execution", "engine_order_not_shown"):
+            with self.subTest(reason=reason):
+                journal = s.Journal(raw(header()), self.commands)
+                start = record(self.commands, 1, 1, "started", action="launch")
+                failed = record(self.commands, 1, 2, "failed", failure=reason, error_domain="core", error_code=1)
+                late = record(self.commands, 1, 3, "observation", facts=[{"name": "ownedWorkJoined"}])
+                prefix = raw(start) + raw(failed) + raw(late)
+                _, command_outcomes = journal.inspect(prefix, 1)
+                self.assertEqual(command_outcomes, {1: "failed"})
+                with self.assertRaises(s.v.Refused):
+                    journal.inspect(prefix + raw(record(self.commands, 2, 4, "started", action="connect")), 2)
 
     def test_incomplete_tail_has_no_terminal_and_requested_success_fields_refuse(self):
         first = pair(self.commands, 1, 1)

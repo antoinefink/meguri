@@ -45,7 +45,7 @@ FACTS = {"accountVerified", "coreOpened", "localCommitted", "localDurable", "syn
          "integrity", "ownedWorkJoined", "engineCallback", "stateSaved", "applied", "commandCompleted"}
 FAILURES = {"json", "shape", "version", "binding", "prefix", "sequence", "journal", "busy",
             "wrong-container", "unsupported", "execution", "recovery", "storage",
-            "implementation_missing", "awaiting_user"}
+            "implementation_missing", "awaiting_user", "engine_order_not_shown"}
 LABEL = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,63}")
 DIGEST = re.compile(r"[0-9a-f]{64}")
 
