@@ -73,6 +73,80 @@ fn payloads() -> [codec::Payload; 2] {
 }
 
 #[test]
+fn exchange_blocks_follow_pending_references_and_stop_at_clean_images() {
+    let (_directory, mut store, binding, open) = fixture();
+    let type_payload = codec::Payload::Notetype(codec::Notetype {
+        id: 12,
+        ..Default::default()
+    });
+    let note_payload = payloads()[0].clone();
+    let card_payload = codec::Payload::Card(codec::Card {
+        id: 13,
+        nid: 11,
+        ..Default::default()
+    });
+    let key = store.binding(binding).unwrap().unwrap().facts.record_key;
+    let mut state = store.runtime_binding(binding).unwrap();
+    let rows = [type_payload, note_payload, card_payload]
+        .into_iter()
+        .map(|payload| {
+            new_pending_entity(
+                &key,
+                payload,
+                [5; 16],
+                DirtySource::Snapshot,
+                &mut state.change_counter,
+                (open, 10, 7),
+            )
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let tx = store.connection.transaction().unwrap();
+    for row in &rows {
+        put(&tx, binding, row).unwrap();
+    }
+    put_binding(&tx, binding, &state).unwrap();
+    tx.commit().unwrap();
+    let names = rows.iter().map(|row| row.name.clone()).collect();
+    assert!(store.blocked_exchange_names(binding, &names).unwrap().is_empty());
+    let refused = super::super::incoming::RefusedEntry {
+        record_name: rows[0].name.clone(),
+        reason: "synthetic unsupported format".into(),
+        envelope: OpaqueBytes(vec![1]),
+        origin: None,
+        erev: None,
+        seen_at_ms: 1000,
+    };
+    store
+        .receive_records(binding, &[], std::slice::from_ref(&refused))
+        .unwrap();
+    assert_eq!(store.blocked_exchange_names(binding, &names).unwrap(), names);
+
+    // A supported clean note already satisfies its card's dependency. A later
+    // problem with the note type does not turn that note into pending work.
+    let mut clean = rows[1].clone();
+    clean.mark = None;
+    clean.server_erev = 1;
+    clean.acked_rev = clean.local_rev;
+    clean.acked_row_digest = clean.payload.row_digest().unwrap();
+    clean.acked_payload_digest = clean.payload.payload_digest().unwrap();
+    clean.acked_payload = Some(clean.payload.clone());
+    clean.acked_system_fields = vec![1];
+    let tx = store.connection.transaction().unwrap();
+    put(&tx, binding, &clean).unwrap();
+    tx.commit().unwrap();
+    let selected = [rows[2].name.clone()].into();
+    assert!(store.blocked_exchange_names(binding, &selected).unwrap().is_empty());
+    // A refusal of the note itself still prevents sending its card.
+    let note_refusal = super::super::incoming::RefusedEntry {
+        record_name: clean.name,
+        ..refused
+    };
+    store.receive_records(binding, &[], &[note_refusal]).unwrap();
+    assert_eq!(store.blocked_exchange_names(binding, &selected).unwrap(), selected);
+}
+
+#[test]
 fn guarded_scan_equal_payload_preserves_pending_facts_and_retained_flight() {
     let (_directory, mut store, binding, open) = fixture();
     for payload in payloads() {

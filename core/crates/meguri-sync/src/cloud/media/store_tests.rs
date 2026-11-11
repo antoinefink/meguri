@@ -102,6 +102,42 @@ fn local_media(store: &mut TrackingStore, binding: BindingId, name: &str) -> wor
     entity
 }
 
+#[test]
+fn exchange_media_policy_distinguishes_blocked_names_from_nonpending_names() {
+    for flag in [
+        "ordinary",
+        "unsyncable",
+        "removal_held",
+        "file_missing",
+        "withheld",
+        "superseded",
+    ] {
+        let (_directory, mut store, binding, _) = fixture(empty());
+        let row = local_media(&mut store, binding, "public.bin");
+        let mut ledger = store.media_ledger(binding).unwrap();
+        let mut flags = NameState::default();
+        match flag {
+            "unsyncable" => flags.unsyncable = true,
+            "removal_held" => flags.removal_held = true,
+            "file_missing" => flags.file_missing = true,
+            "withheld" => flags.withheld = Some([8; 32]),
+            "superseded" => flags.superseded = Some([8; 32]),
+            _ => {}
+        }
+        ledger.names.insert("public.bin".into(), flags);
+        store.put_media(binding, &ledger).unwrap();
+        let pending = store.policy_pending_names(binding).unwrap();
+        let excluded = ["file_missing", "withheld", "superseded"].contains(&flag);
+        assert_eq!(pending.contains(&row.name), !excluded, "{flag}");
+        let blocked = store.blocked_exchange_names(binding, &pending).unwrap();
+        assert_eq!(
+            blocked.contains(&row.name),
+            ["unsyncable", "removal_held"].contains(&flag),
+            "{flag}"
+        );
+    }
+}
+
 fn saved(binding: BindingId, entity: &workflow::EntityFacts) -> workflow::Saved {
     let envelope = c::Entity::build(
         c::EntityFields {

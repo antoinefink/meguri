@@ -450,6 +450,8 @@ pub struct ExchangeResult {
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub held_back_names: BTreeSet<String>,
     pub outstanding_names: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub blocked_names: BTreeSet<String>,
 }
 impl ExchangeResult {
     pub(crate) fn record_ack(&mut self, name: &str, image: FlightImage) {

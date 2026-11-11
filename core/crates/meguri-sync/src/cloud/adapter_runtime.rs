@@ -1137,6 +1137,10 @@ impl Runtime {
                     result.outstanding_names.insert(name);
                 }
             }
+            result.blocked_names = store.blocked_exchange_names(binding, &result.outstanding_names)?;
+            result
+                .outstanding_names
+                .retain(|name| !result.blocked_names.contains(name));
             let mut incoming = ExchangeIncoming::default();
             for entry in store.inbox(binding)? {
                 match entry.entry.reason {
@@ -1159,7 +1163,11 @@ impl Runtime {
             outcome
         } else if !fetched {
             CollectionOutcome::WaitingNoAccount
-        } else if result.outstanding_names.is_empty() && incoming.ready == 0 && incoming.blocked == 0 {
+        } else if result.outstanding_names.is_empty()
+            && result.blocked_names.is_empty()
+            && incoming.ready == 0
+            && incoming.blocked == 0
+        {
             CollectionOutcome::Succeeded
         } else {
             CollectionOutcome::Incomplete

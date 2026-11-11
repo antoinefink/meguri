@@ -184,10 +184,20 @@ impl TrackingStore {
     }
     /// Dirty rows before sendability filters, so blocked work cannot disappear from status.
     pub(super) fn policy_pending_names(&self, binding: BindingId) -> Result<std::collections::BTreeSet<String>, Error> {
-        self.binding(binding)?.ok_or(Error::BindingNotFound)?;
+        let owner = self.binding(binding)?.ok_or(Error::BindingNotFound)?;
         let mut q = self.connection.prepare("SELECT json_extract(content,'$.name') FROM cloud_runtime_notes WHERE binding=?1 AND json_extract(content,'$.mark') IS NOT NULL UNION SELECT json_extract(content,'$.name') FROM cloud_runtime_entities WHERE binding=?1 AND json_extract(content,'$.mark') IS NOT NULL")?;
-        Ok(q.query_map([binding.0.as_slice()], |r| r.get::<_, String>(0))?
-            .collect::<Result<_, _>>()?)
+        let mut names = q
+            .query_map([binding.0.as_slice()], |r| r.get::<_, String>(0))?
+            .collect::<Result<std::collections::BTreeSet<_>, _>>()?;
+        for (key, flags) in self.media_ledger(binding)?.names {
+            if flags.file_missing || flags.withheld.is_some() || flags.superseded.is_some() {
+                let name =
+                    entity_codec::entity_name(&owner.facts.record_key.0, entity_codec::Kind::MediaName, key.as_bytes())
+                        .map_err(|_| Error::InvalidData)?;
+                names.remove(&name);
+            }
+        }
+        Ok(names)
     }
 }
 

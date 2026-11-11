@@ -647,6 +647,39 @@ pub(super) fn references(payload: &entity_codec::Payload) -> Result<Vec<(entity_
 }
 
 impl TrackingStore {
+    pub(super) fn collection_references(
+        &self,
+        b: BindingId,
+        payload: &entity_codec::Payload,
+    ) -> Result<Vec<String>, Error> {
+        let binding = self.binding(b)?.ok_or(Error::BindingNotFound)?;
+        let key = &binding.facts.record_key.0;
+        let mut names = references(payload)?
+            .into_iter()
+            .map(|(kind, canonical)| entity_codec::entity_name(key, kind, &canonical).map_err(|_| Error::InvalidData))
+            .collect::<Result<Vec<_>, _>>()?;
+        if let entity_codec::Payload::Note(note) = payload {
+            let fields = std::str::from_utf8(&note.flds).map_err(|_| Error::InvalidData)?;
+            let local_references = meguri_text::media_refs::local_references(fields);
+            if local_references.is_empty() {
+                return Ok(names);
+            }
+            let ledger = self.media_ledger(b)?;
+            for local in local_references {
+                let case = local.to_lowercase();
+                let name = entity_codec::entity_name(key, entity_codec::Kind::MediaName, case.as_bytes())
+                    .map_err(|_| Error::InvalidData)?;
+                if ledger.names.get(&case).is_none_or(|flags| flags.withheld.is_none())
+                    && self
+                        .entity_header(b, &name)?
+                        .is_some_and(|header| header.facts.server_erev == 0 || header.facts.acked_media_tombstone())
+                {
+                    names.push(name);
+                }
+            }
+        }
+        Ok(names)
+    }
     pub fn retained_zones(&self, b: BindingId) -> Result<std::collections::BTreeMap<String, RetainedZone>, Error> {
         self.binding(b)?.ok_or(Error::BindingNotFound)?;
         let mut s = self.connection.prepare(

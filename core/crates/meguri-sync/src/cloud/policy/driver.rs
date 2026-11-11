@@ -1303,10 +1303,11 @@ impl Driver {
             },
             CollectionOutcome::Incomplete => ExchangeOutcome::Incomplete {
                 outstanding: completed.result.outstanding_names.len() as u64,
-                blocked: completed
-                    .incoming
-                    .as_ref()
-                    .map_or(summary.incoming_waiting, |i| i.blocked),
+                blocked: completed.result.blocked_names.len() as u64
+                    + completed
+                        .incoming
+                        .as_ref()
+                        .map_or(summary.incoming_waiting, |i| i.blocked),
             },
             CollectionOutcome::Failed => ExchangeOutcome::Failed {
                 class: owned

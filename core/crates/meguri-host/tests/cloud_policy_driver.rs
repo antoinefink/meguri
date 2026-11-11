@@ -901,6 +901,106 @@ fn exchange_selection_retains_local_edits_waiting_for_incoming_work() {
     }
 }
 
+#[test]
+fn exchange_blocked_names_keep_acknowledgement_precedence_and_durable_counts() {
+    use meguri_sync::cloud::{InboxReason, adapter::CollectionOutcome};
+    for refused in [false, true] {
+        for acknowledged in [false, true] {
+            let rig = rig();
+            let collection = rig.host.collection().unwrap();
+            meguri_engine::decks::rename(&collection, rig.baseline_deck, "Local blocked change".into()).unwrap();
+            let local = deck_row(&rig, rig.baseline_deck.0);
+            let runtime = rig.host.cloud_runtime().unwrap();
+            let driver = rig.host.cloud_policy_driver().unwrap();
+            let run = command(
+                rig.host
+                    .cloud_policy_input(DeviceEvent::SyncNowRequested(Source::Command))
+                    .unwrap(),
+                |kind| matches!(kind, ActionKind::RunExchange { .. }),
+            );
+            let ActionKind::RunExchange { exchange, .. } = run.action.kind else {
+                unreachable!()
+            };
+            let native = driver.capture_exchange(&run, &collection).unwrap();
+            let selection = runtime.exchange_result(native).unwrap();
+            assert_eq!(selection.selected_names.len(), 1);
+            let name = selection.selected_names.iter().next().unwrap().clone();
+            let batch = acknowledged.then(|| {
+                runtime
+                    .build_collection_batch(&rig.sdk, &collection, &selection.selected_names)
+                    .unwrap()
+            });
+            let binding = runtime.status().unwrap().binding.unwrap().id;
+            if refused {
+                let invalid = Saved {
+                    name: name.clone(),
+                    envelope: vec![1],
+                    system_fields: vec![2],
+                };
+                runtime.adapter_fetched(&rig.sdk, &rig.zone, &[invalid], &[]).unwrap();
+                assert_eq!(runtime.refused_entries(binding).unwrap().len(), 1);
+            } else {
+                incoming_deck(&rig);
+                let entries = runtime.inbox_entries(binding).unwrap();
+                assert_eq!(entries.len(), 1);
+                runtime
+                    .set_inbox_reason_for_testing(binding, entries[0].id, InboxReason::Format)
+                    .unwrap();
+            }
+            if let Some(batch) = batch {
+                assert_eq!(batch.saves.len(), 1);
+                let saved = Saved {
+                    name: name.clone(),
+                    envelope: batch.saves[0].envelope.clone(),
+                    system_fields: vec![3],
+                };
+                runtime.enter_sent_handler(&rig.sdk, batch.id).unwrap();
+                runtime
+                    .sent_results(&rig.sdk, &collection, batch.id, &[saved], &[], 1)
+                    .unwrap();
+                runtime.return_sent_handler(&rig.sdk).unwrap();
+            }
+            let completed = runtime.adapter_complete_exchange(&rig.sdk, native, true, None).unwrap();
+            assert!(completed.result.outstanding_names.is_empty());
+            assert_eq!(completed.result.blocked_names.contains(&name), !acknowledged);
+            assert_eq!(completed.result.acked_names.contains(&name), acknowledged);
+            let mut legacy = serde_json::to_value(&completed).unwrap();
+            legacy["result"].as_object_mut().unwrap().remove("blocked_names");
+            let legacy: meguri_sync::cloud::adapter::CompletedExchange = serde_json::from_value(legacy).unwrap();
+            assert!(legacy.result.blocked_names.is_empty());
+            let action = command(
+                driver
+                    .complete_exchange(exchange, rig.host.engine().state(), rig.host.engine().generation())
+                    .unwrap(),
+                |kind| matches!(kind, ActionKind::RecordExchange(_)),
+            );
+            let ActionKind::RecordExchange(record) = &action.action.kind else {
+                unreachable!()
+            };
+            let blocked = u64::from(!acknowledged) + u64::from(!refused);
+            if blocked == 0 {
+                assert_eq!(completed.collection, CollectionOutcome::Succeeded);
+                assert!(matches!(record.outcome, ExchangeOutcome::Succeeded { selected: 1, .. }));
+            } else {
+                assert_eq!(completed.collection, CollectionOutcome::Incomplete);
+                assert_eq!(
+                    record.outcome,
+                    ExchangeOutcome::Incomplete {
+                        outstanding: 0,
+                        blocked
+                    }
+                );
+            }
+            rig.host
+                .execute_cloud_policy_core(&action, Duration::from_secs(10))
+                .unwrap();
+            assert_eq!(runtime.adapter_exchange_result(native), Some(completed));
+            assert_eq!(deck_row(&rig, rig.baseline_deck.0), local);
+            rig.host.close().unwrap();
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 enum CompletionClockEffect {
     Read,

@@ -371,3 +371,34 @@ tests against the final source. Core lint run `67958` and similarity run
 Blocked-entity classification still needs work. Held, newer-pending and
 media counts also need original evidence for interrupted-exchange replay.
 The signed round trip and full integration gate remain open.
+
+## Stored blockers and pending references
+
+Starting commit `3a949b0b`. The original Runtime result now retains blocked
+selected names separately from outstanding names. Format-waiting records,
+refused records and stored media blockers propagate through pending
+references. A clean reference stops that walk. Actual acknowledgements and
+clean selected images take precedence over blockers.
+
+The sender and accounting reader share the existing structural and media
+reference rules. Plain notes avoid the media-ledger read. Media names with
+`file_missing`, `withheld` or `superseded` leave the pending selection under
+K12.1. `unsyncable` and `removal_held` stay pending and blocked. Older result
+rows decode an absent blocked-name set as empty.
+
+Direct review checked binding scope, dependency traversal, precedence,
+legacy decoding and the original durable commit. Run `69873` passes the
+Host case and finds two fixture errors. Runs `70551` and `71227` settle the
+fixtures with the proper layout seed path, current ledger revision and
+required acknowledgement metadata. Run `71566` passes all 58 affected Rust
+checks. After removing unnecessary reads, run `71890` passes 13 sender and
+accounting checks, including the 400-record send. Lint `74246` and similarity
+`73739` pass.
+
+Swift run `72588` passes both publication, exchange and reopen checks.
+Swift run `72587` passes the large-note conflict exchange through the real
+Core and adapter with the test transport.
+
+This covers the stored blockers above. Payload-size and unreadable-row
+classification and generation-claim integration still need work. Original
+exchange replay, the signed round trip and the full gate remain open.

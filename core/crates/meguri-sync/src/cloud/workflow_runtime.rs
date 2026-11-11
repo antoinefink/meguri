@@ -1395,36 +1395,16 @@ impl Runtime {
             let asset = entity.payload.is_none().then_some(encoded_payload);
             let envelope = entity.encode().map_err(|_| Error::InvalidData)?;
             let size = envelope.len().checked_add(2048).ok_or(Error::InvalidData)?;
-            let mut references = (if row_tombstone {
+            let references = if row_tombstone {
                 Vec::new()
             } else {
-                super::super::publication_store::references(&payload)?
-            })
-            .into_iter()
-            .map(|(kind, key)| {
-                codec::entity_name(&binding.facts.record_key.0, kind, &key).map_err(|_| Error::InvalidData)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-            if !row_tombstone && let codec::Payload::Note(note) = &payload {
-                let fields = std::str::from_utf8(&note.flds).map_err(|_| Error::InvalidData)?;
-                for local_name in meguri_text::media_refs::local_references(fields) {
-                    let case = local_name.to_lowercase();
-                    let media_name =
-                        codec::entity_name(&binding.facts.record_key.0, codec::Kind::MediaName, case.as_bytes())
-                            .map_err(|_| Error::InvalidData)?;
-                    let hold = self.with_scan(&guard, collection, |s| {
-                        let store = s.store.as_ref().ok_or(Error::Database)?;
-                        let ledger = store.media_ledger(guard.binding)?;
-                        Ok(ledger.names.get(&case).is_none_or(|n| n.withheld.is_none())
-                            && store
-                                .entity_facts(guard.binding, &media_name)?
-                                .is_some_and(|m| m.server_erev == 0 || m.acked_media_tombstone()))
-                    })?;
-                    if hold {
-                        references.push(media_name);
-                    }
-                }
-            }
+                self.with_scan(&guard, collection, |s| {
+                    Ok(s.store
+                        .as_ref()
+                        .ok_or(Error::Database)?
+                        .collection_references(guard.binding, &payload)?)
+                })?
+            };
             let flight = Flight {
                 local_rev: e.local_rev,
                 payload_digest: entity.payload_sha256,
@@ -2229,6 +2209,7 @@ impl Runtime {
                 acked_names: BTreeSet::new(),
                 held_back_names: BTreeSet::new(),
                 outstanding_names: names,
+                blocked_names: BTreeSet::new(),
             },
         ));
         Ok(id)
