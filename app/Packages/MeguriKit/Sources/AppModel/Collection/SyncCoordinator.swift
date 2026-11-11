@@ -241,6 +241,7 @@ public final class SyncCoordinator {
     private var inputQueue: [Input] = []
     private var inputTask: Task<Void, Never>?
     private var operationTasks: [UUID: Task<Void, Never>] = [:]
+    private var quitOperationIDs: Set<UUID> = []
     private var operationContexts: [UUID: SyncCommandTaskContext] = [:]
     // Core commands retain their original task/result ACKs. Only their phase,
     // never a network task, holds the next policy input or local own step.
@@ -982,7 +983,13 @@ public final class SyncCoordinator {
         quitCompletion = completion
         receive(.quitRequested)
         await waitForInputs()
-        await drainOperations()
+        // QuitFlush moves to a child task. Join its original result, leaving
+        // unrelated work for cancelAndDrain to cancel before joining it.
+        while !quitOperationIDs.isEmpty {
+            let originals = quitOperationIDs.compactMap { operationTasks[$0] }
+            for task in originals { await task.value }
+            await waitForInputs()
+        }
     }
 
     static func changeCause(_ source: OpSource) -> CloudPolicyChangeCause {
@@ -1344,8 +1351,15 @@ public final class SyncCoordinator {
         }
         let context = SyncCommandTaskContext(generation: generation, revision: revision)
         operationContexts[id] = context
+        if issued.contains(where: {
+            switch $0.command.action {
+            case .quitNow, .quitFlush: true
+            default: false
+            }
+        }) { quitOperationIDs.insert(id) }
         operationTasks[id] = Task { [self] in
             defer {
+                quitOperationIDs.remove(id)
                 operationTasks.removeValue(forKey: id); operationContexts.removeValue(forKey: id)
                 if corePhaseOwner { enqueue(.corePhaseFinished(id)) }
             }

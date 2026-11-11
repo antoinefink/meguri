@@ -5,6 +5,117 @@ import Testing
 
 #if os(macOS)
 extension ReviewCollectionStartupTests {
+    @Test func realOwnerQuitCancelsAndJoinsMediaBeforeClosingItsCollection() async throws {
+        try await withShutdownHarness { harness in
+            let backend = try harness.backend
+            await harness.sync.drainOperations()
+            try #require(!harness.sync.operationFailed && !backend.quiesced)
+            let mediaGate = SyncOwnerGate()
+            let held = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            var mediaHeld = false, mediaReturned = false, closeReturned = false
+            backend.beforeExecution = { command in
+                guard case .resumeMedia = command.action, !mediaHeld else { return }
+                mediaHeld = true
+                held.continuation.yield(true)
+                await mediaGate.hold()
+                #expect(Task.isCancelled && SyncCommandTaskContext.current?.shutdownCancelled == true)
+                mediaReturned = true
+            }
+            defer { backend.beforeExecution = nil; mediaGate.release(); held.continuation.finish() }
+            var quitting: Task<Bool, Never>?
+            do {
+                harness.sync.setDeviceSettings(paused: false, automatic: true, media: true)
+                try #require(try await serviceAppSignal(held.stream, stage: "owner quit media held"))
+                quitting = Task {
+                    let result = await harness.owner.closeForQuit()
+                    closeReturned = true
+                    return result
+                }
+                try await backend.waitForQuiesce()
+                #expect(!mediaReturned && !closeReturned && !backend.closed)
+                mediaGate.release()
+                let close = try #require(quitting)
+                #expect(await close.value)
+                #expect(mediaReturned && closeReturned && backend.closed && backend.closeReturned == 1)
+                #expect(!harness.sync.operationFailed)
+            } catch {
+                mediaGate.release()
+                if let quitting { _ = await quitting.value }
+                throw error
+            }
+        }
+    }
+
+    @Test(arguments: [false, true], [false, true])
+    func quitJoinsItsCommandWithoutWaitingForUnrelatedMedia(flush: Bool, fails: Bool) async throws {
+        try await withShutdownCommands { media, _ in
+            let policy = try await CoreCloudWorkflowService().policy()
+            if flush { _ = try await policy.input(.syncNowRequested(.command)) }
+            let output = try await policy.input(.quitRequested)
+            guard case .commands(let commands) = output else {
+                throw BridgeError.internal("Quit command fixture failed")
+            }
+            let quit = try #require(commands.first { command in
+                if flush, case .quitFlush = command.action { return true }
+                if !flush, case .quitNow = command.action { return true }
+                return false
+            })
+            let backend = SyncOwnerFake(), mediaGate = SyncOwnerGate(), quitGate = SyncOwnerGate()
+            let returned = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            var mediaReturned = false, mediaCancelled = false, allowed = false, quitACKs = 0
+            backend.executeCommand = { command in
+                if command.raw === media.raw {
+                    await mediaGate.hold()
+                    mediaCancelled = Task.isCancelled
+                    mediaReturned = true
+                    return .init(outputs: [], error: CancellationError(), deferred: false)
+                }
+                #expect(command.raw === quit.raw && !Task.isCancelled)
+                await quitGate.hold()
+                return .init(outputs: [.syncNowUnavailable(.paused)],
+                    error: fails ? BridgeError.cloudPolicy(.staleCommand) : nil, deferred: false)
+            }
+            backend.onQuiesce = { mediaGate.release() }
+            let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: nil)
+            await sync.preparePlatform(); await sync.completeOpenedHost(generation: 90)
+            await sync.prepareConnectionAuthority()
+            sync.observeCausalBoundary = { boundary, command in
+                if case .commandAcknowledgementJoined = boundary, let command, command.raw === quit.raw {
+                    quitACKs += 1
+                }
+            }
+            defer { sync.observeCausalBoundary = nil; returned.continuation.finish() }
+            backend.nextCommands = [media]; sync.receive(.refresh(.cloud))
+            await mediaGate.waitUntilHeld()
+            backend.routeInput = { event in
+                if case .quitRequested = event { return .commands([quit]) }
+                return .commands([])
+            }
+            let quitting = Task {
+                await sync.quitAfterLocalFlush { allowed = true }
+                returned.continuation.yield(true)
+            }
+            do {
+                await quitGate.waitUntilHeld()
+                #expect(!allowed && !mediaReturned && !backend.quiesced)
+                quitGate.release()
+                try #require(try await serviceAppSignal(returned.stream, stage: "quit command joined while media is held"))
+                await quitting.value
+                #expect(allowed == (flush || !fails))
+                #expect(quitACKs == 1 && sync.syncNowUnavailable == .paused)
+                #expect(!mediaReturned && !backend.quiesced && !backend.closed)
+                #expect(await sync.cancelAndDrain())
+                #expect(mediaReturned && mediaCancelled && backend.closed && backend.closeCount == 1)
+                #expect(sync.operationFailed == fails)
+            } catch {
+                quitGate.release(); mediaGate.release()
+                await quitting.value
+                _ = await sync.cancelAndDrain()
+                throw error
+            }
+        }
+    }
+
     @Test func ownedShutdownCancellationAcknowledgesOriginalMediaAndReopensHealthy() async throws {
         try await withShutdownCommands { media, _ in
             let original = SyncOwnerFake(), successor = SyncOwnerFake()
@@ -201,6 +312,7 @@ extension ReviewCollectionStartupTests {
 
 }
 #endif
+
 
 extension ReviewCollectionStartupTests {
     @Test func unownedAccountCancellationDuringCloseRemainsFailure() async {
