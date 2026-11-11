@@ -1,6 +1,9 @@
 import CoreBridge
 import Foundation
 import WebKit
+#if DEBUG
+import OSLog
+#endif
 
 public final class CardPage: NSObject, WKNavigationDelegate {
     public let webView: CardNativeWebView
@@ -85,6 +88,9 @@ public final class CardPage: NSObject, WKNavigationDelegate {
 
     public nonisolated enum Failure: Error { case closed, superseded, updateFailed, notPrepared }
     static let world = WKContentWorld.world(name: CardRuntime.interactionWorldName)
+    #if DEBUG
+    private static let startupLogger = Logger(subsystem: "Meguri", category: "ReviewStartup")
+    #endif
 
     init(configuration: CardWebConfiguration, resolver: MediaPathResolver?, platform: CardRuntime.Platform,
          appearance: CardRuntime.Appearance, reviewExtra: String, identifier: String, size: CGSize,
@@ -127,21 +133,56 @@ public final class CardPage: NSObject, WKNavigationDelegate {
             let documentID = documentID
             loading = Task { [weak self] in
                 guard let self else { return }
+                #if DEBUG
+                Self.startupLogger.notice("page.begin")
+                #endif
                 do {
+                    #if DEBUG
+                    Self.startupLogger.notice("configuration.begin")
+                    #endif
                     try await self.configuration.ready()
+                    #if DEBUG
+                    Self.startupLogger.notice("configuration.end")
+                    #endif
                     guard !self.closed, self.documentID == documentID else { throw Failure.closed }
+                    #if DEBUG
+                    Self.startupLogger.notice("navigation.begin")
+                    #endif
                     try await withCheckedThrowingContinuation { continuation in
                         self.navigation = continuation
                         self.rootLoadPending = true
                         self.navigationTarget = self.webView.load(URLRequest(url: MediaOrigin.url))
+                        #if DEBUG
+                        Self.startupLogger.notice("navigation.issued")
+                        if self.navigationTarget == nil { Self.startupLogger.notice("navigation.nil") }
+                        #endif
                     }
+                    #if DEBUG
+                    Self.startupLogger.notice("navigation.end")
+                    #endif
                     guard self.documentID == documentID else { return }
                     self.loaded = true
+                    #if DEBUG
+                    Self.startupLogger.notice("appearance.begin")
+                    #endif
                     try await self.applyAppearance(self.appearance, forcePaint: false)
+                    #if DEBUG
+                    Self.startupLogger.notice("appearance.end")
+                    Self.startupLogger.notice("layout.begin")
+                    #endif
                     try await self.run(CardLayoutContinuity.source, world: Self.world)
+                    #if DEBUG
+                    Self.startupLogger.notice("layout.end")
+                    #endif
                     guard self.documentID == documentID else { return }
                     self.finishLoad(.success(()))
+                    #if DEBUG
+                    Self.startupLogger.notice("page.complete")
+                    #endif
                 } catch {
+                    #if DEBUG
+                    Self.startupLogger.notice("page.failed")
+                    #endif
                     guard self.documentID == documentID else { return }
                     self.finishLoad(.failure(error))
                 }
@@ -611,6 +652,10 @@ public final class CardPage: NSObject, WKNavigationDelegate {
             && webView.url == MediaOrigin.url ? documentID : nil
     }
     public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        #if DEBUG
+        if navigation === navigationTarget { Self.startupLogger.notice("navigation.finished.matched") }
+        else { Self.startupLogger.notice("navigation.finished.unmatched") }
+        #endif
         guard navigation === navigationTarget else { return }
         self.navigation?.resume(); self.navigation = nil; navigationTarget = nil
     }
@@ -644,9 +689,17 @@ public final class CardPage: NSObject, WKNavigationDelegate {
         decisionHandler(allowed ? .allow : .cancel)
     }
     public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {
+        #if DEBUG
+        if navigation === navigationTarget { Self.startupLogger.notice("navigation.failed.matched") }
+        else { Self.startupLogger.notice("navigation.failed.unmatched") }
+        #endif
         if navigation === navigationTarget { navigationFailed() }
     }
     public func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) {
+        #if DEBUG
+        if navigation === navigationTarget { Self.startupLogger.notice("navigation.provisionalFailed.matched") }
+        else { Self.startupLogger.notice("navigation.provisionalFailed.unmatched") }
+        #endif
         if navigation === navigationTarget { navigationFailed() }
     }
     public func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {

@@ -136,6 +136,10 @@ public final class ReviewCoordinator {
         await task.value
     }
     private func startOwned() async {
+        #if DEBUG
+        let logger = Logger(subsystem: "Meguri", category: "ReviewStartup")
+        logger.notice("start.begin")
+        #endif
         do {
             #if DEBUG
             let observation = ReviewStartObservation()
@@ -143,6 +147,9 @@ public final class ReviewCoordinator {
             let result = try await client.start(deckID: record.deckID, observation: observation)
             #else
             let result = try await client.start(deckID: record.deckID)
+            #endif
+            #if DEBUG
+            logger.notice("core.returned")
             #endif
             switch result {
             case .refused(.fsrsPolicyPending): onPolicyRefusal?(); phase = .error; notice = "Enable FSRS before studying."
@@ -152,12 +159,34 @@ public final class ReviewCoordinator {
                 try nativeInput?.bindSession(coordinator: nativeCoordinator, session: id, generation: generation, deck: record.deckID)
                 activeTime.start(at: uptime())
                 if paused { activeTime.pause(at: uptime()) }
+                #if DEBUG
+                logger.notice("surface.begin")
+                #endif
                 try await surface.load()
+                #if DEBUG
+                logger.notice("surface.end")
+                logger.notice("apply.begin")
+                #endif
                 try await apply(head, question: true)
+                #if DEBUG
+                logger.notice("apply.end")
+                logger.notice("persist.begin")
+                #endif
                 try await persist()
+                #if DEBUG
+                logger.notice("persist.end")
+                #endif
             }
-        } catch { fail(error) }
+        } catch {
+            #if DEBUG
+            logger.notice("start.failed")
+            #endif
+            fail(error)
+        }
         completeOperation()
+        #if DEBUG
+        logger.notice("start.complete")
+        #endif
     }
 
     public func reveal() {
@@ -394,14 +423,27 @@ public final class ReviewCoordinator {
             guard let item else { throw BridgeError.internal("Active review head has no item") }
             if !paused { activeTime.resume(at: uptime()) }
             studyState = nil; waitingUntil = nil
+            #if DEBUG
+            let logger = Logger(subsystem: "Meguri", category: "ReviewStartup")
+            logger.notice("render.begin")
+            #endif
             try await surface.render(sessionID: sessionID, items: head.items)
+            #if DEBUG
+            logger.notice("render.end")
+            #endif
             guard self.sessionID == sessionID else { throw BridgeError.unavailable(reason: "Session ended during rendering") }
             publishVisibleMedia()
             let needsPresentation = question || previous?.cardId != item.cardId || presentedKey != item.renderKey
             if needsPresentation {
                 preload?.cancel(); await preload?.value; preload = nil
                 let keepAnswer = !question && sideIsAnswer && previous?.cardId == item.cardId
+                #if DEBUG
+                logger.notice("present.begin")
+                #endif
                 try await surface.present(item: item, inputTime: inputTime ?? uptime())
+                #if DEBUG
+                logger.notice("present.end")
+                #endif
                 guard self.sessionID == sessionID else { throw BridgeError.unavailable(reason: "Session ended during presentation") }
                 presentedKey = item.renderKey
                 publishVisibleMedia()
