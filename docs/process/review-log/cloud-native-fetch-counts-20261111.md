@@ -186,3 +186,33 @@ refused because it could expose unrelated private notifications. No notification
 contents were inspected. The owner was asked to check only the Meguri prompt.
 The phone-to-Mac row transfer, cold-start discovery and fresh media transfer
 remain unverified. No new production sync fix or acceptance is claimed.
+
+
+## Corrected Mac preview and reverse arrival
+
+The owner accepted the macOS launch prompt. The preview then reported iCloud
+unavailable. Its resolved settings show ad-hoc signing, and its product schema
+flag is false. The earlier build receipt validates this local-only mode; it
+does not establish an iCloud-capable preview. This corrects the earlier inference.
+No account or schema setup change was needed.
+
+The preview quits normally. Build `build-app/20261111T162522Z-39308`, source
+`bda5cffd`, passes with explicit development signing. Resolved signing mode,
+the product schema flag and the development environment verify. Its executable
+hash matches the receipt. The normal app opens without another setup prompt.
+
+After startup and normal Sync Now, a newer succeeded completion at
+`1794414562913` still leaves 47 actual Mac reviews. Original counters show
+six fetch starts and no database callback, collection-zone fetch or record
+intake. A normal Hide Meguri and return preserves the exact single process.
+Original counters then show `will=7 zoneC=1 modC=3 coreC=3 db=1 dbC=1 unC=1`,
+with no scope cut, refusal or zone failure.
+
+One preview after this cycle shows Unknown and is cancelled. Raising and
+clicking the existing Settings title activates the visible window. A later
+read-only summary shows 48 actual Mac reviews, 1,001 notes, 1,001 cards and
+565 media files. The preview is cancelled. No collection is replaced and no
+additional answer is recorded. The phone also has 48 reviews. The actual
+review-count transfer is therefore observed in both directions. This does not
+prove complete schedule equality, reliable cold-start discovery or fresh media
+transfer. No production discovery repair is claimed.
