@@ -74,7 +74,7 @@ public enum DebugCloudDiagnostics {
         func value(generation: UInt64, hostRevision: UInt64) -> String? {
             state.withLock { state in
                 guard let state, state.generation == generation, state.hostRevision == hostRevision else { return nil }
-                return "policy{initial={\(state.initial)} firstCompleted=\(state.firstCompleted ?? "nil") latest={\(state.latest)}}"
+                return "policy{latest={\(state.latest)} initial={\(state.initial)} firstCompleted=\(state.firstCompleted ?? "nil")}"
             }
         }
 

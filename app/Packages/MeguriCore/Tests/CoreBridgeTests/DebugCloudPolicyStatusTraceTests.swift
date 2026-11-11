@@ -43,7 +43,7 @@ struct DebugCloudPolicyStatusTraceTests {
         #expect(trace.value(generation: 7, hostRevision: 8) == nil)
         trace.retain(initial, generation: 7, hostRevision: 8)
         trace.retain(latest, generation: 7, hostRevision: 8)
-        #expect(trace.value(generation: 7, hostRevision: 8) == "policy{initial={\(Trace.snapshot(initial))} firstCompleted={endedMilliseconds=101 outcome=incomplete outstanding=5 blocked=6} latest={\(Trace.snapshot(latest))}}")
+        #expect(trace.value(generation: 7, hostRevision: 8) == "policy{latest={\(Trace.snapshot(latest))} initial={\(Trace.snapshot(initial))} firstCompleted={endedMilliseconds=101 outcome=incomplete outstanding=5 blocked=6}}")
         // A later nil cannot erase the retained prior exchange, including after restart's first snapshot.
         let empty = policyStatus()
         trace.retain(empty, generation: 7, hostRevision: 8)
@@ -51,11 +51,11 @@ struct DebugCloudPolicyStatusTraceTests {
         #expect(retained.contains("firstCompleted={endedMilliseconds=101 outcome=incomplete outstanding=5 blocked=6}"))
         for (generation, revision) in [(UInt64(7), UInt64(9)), (UInt64(8), UInt64(9))] {
             trace.retain(empty, generation: generation, hostRevision: revision)
-            #expect(trace.value(generation: generation, hostRevision: revision) == "policy{initial={\(Trace.snapshot(empty))} firstCompleted=nil latest={\(Trace.snapshot(empty))}}")
+            #expect(trace.value(generation: generation, hostRevision: revision) == "policy{latest={\(Trace.snapshot(empty))} initial={\(Trace.snapshot(empty))} firstCompleted=nil}")
             trace.retain(latest, generation: generation, hostRevision: revision)
             trace.retain(initial, generation: generation, hostRevision: revision)
             trace.retain(empty, generation: generation, hostRevision: revision)
-            #expect(trace.value(generation: generation, hostRevision: revision) == "policy{initial={\(Trace.snapshot(empty))} firstCompleted={endedMilliseconds=202 outcome=cancelled} latest={\(Trace.snapshot(empty))}}")
+            #expect(trace.value(generation: generation, hostRevision: revision) == "policy{latest={\(Trace.snapshot(empty))} initial={\(Trace.snapshot(empty))} firstCompleted={endedMilliseconds=202 outcome=cancelled}}")
         }
     }
 
@@ -67,7 +67,7 @@ struct DebugCloudPolicyStatusTraceTests {
         trace.retain(initial, generation: 7, hostRevision: 8)
         trace.retain(latest, generation: 7, hostRevision: 8)
         let retained = try #require(trace.value(generation: 7, hostRevision: 8))
-        #expect(retained == "policy{initial={\(Trace.snapshot(initial))} firstCompleted={endedMilliseconds=202 outcome=cancelled} latest={\(Trace.snapshot(latest))}}")
+        #expect(retained == "policy{latest={\(Trace.snapshot(latest))} initial={\(Trace.snapshot(initial))} firstCompleted={endedMilliseconds=202 outcome=cancelled}}")
         // Replacement/reattachment can fail without ever delivering another accepted snapshot.
         for _ in 0..<2 {
             #expect(trace.value(generation: 8, hostRevision: 8) == nil)
@@ -75,6 +75,24 @@ struct DebugCloudPolicyStatusTraceTests {
             #expect(trace.value(generation: 8, hostRevision: 9) == nil)
             #expect(trace.value(generation: 7, hostRevision: 8) == retained)
         }
+    }
+
+    @Test func policyFirstAccessibilityValueKeepsRealSizeLatestFrameWithinInspectionLimit() throws {
+        let completed = policyRecord(.succeeded(selected: 1842, heldBack: 12, newerPending: 13,
+            incomingWaiting: 14, media: policyMedia), ended: 1794398400000)
+        let attempt = policyRecord(.incomplete(outstanding: 21, blocked: 22), ended: 1794398460000)
+        let trace = Trace()
+        trace.retain(policyStatus(), generation: 7, hostRevision: 8)
+        trace.retain(policyStatus(counts: (12, 3, 4, 5), completed: completed, attempt: attempt),
+            generation: 7, hostRevision: 8)
+        let policyValue = try #require(trace.value(generation: 7, hostRevision: 8))
+        let failureValue = DebugCloudDiagnostics.Value(.policyExchange,
+            error: BridgeError.cloudPolicy(.unqualifiedCompletion)).formatted
+        // Match SyncStatusRows' policy-first composition, with a real formatted failure after it.
+        let accessibilityValue = [policyValue, failureValue].joined(separator: " ")
+        let latestFrame = "policy{latest={pending=12 heldBack=3 inFlight=4 incomingWaiting=5 bindingActive=true bindingUsable=false accountMatchesBinding=true lastCompleted={endedMilliseconds=1794398400000 outcome=succeeded selected=1842 heldBack=12 newerPending=13 incomingWaiting=14} lastAttempt={endedMilliseconds=1794398460000 outcome=incomplete outstanding=21 blocked=22}}"
+        #expect(accessibilityValue.count > 512)
+        #expect(String(accessibilityValue.prefix(512)).hasPrefix(latestFrame))
     }
 
     @Test func policyTraceStaysBoundedAndDiscardsUnrequestedAssociatedPayloads() throws {
