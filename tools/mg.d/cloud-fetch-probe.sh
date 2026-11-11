@@ -43,10 +43,12 @@ mg_cloud_fetch_probe_host() {
 mg_cloud_fetch_probe__private() {
   # Existing helpers can record paths, IDs and native errors. Give all their
   # state, artifacts and console a run-owned private boundary, never public MG.
-  local MG_RUN_DIR="$1" MG_STATE="$1/state" input xctestrun rc
+  local MG_RUN_DIR="$1" MG_STATE="$1/state" input xctestrun rc marker proof
   mkdir -m 700 "$MG_STATE" || return 1
   MG_CFP_FAILURE=host-lease
   mg_host_lease || return 1
+  mg_cloud_fetch_probe__root_lease || return 1
+  [ ! -e "$MG_LEASE_DIR/vm-xcode-pending" ] || return 1
   MG_CFP_FAILURE=app-in-use
   mg_app_mac_guard || return 1
   MG_CFP_FAILURE=source-binding
@@ -62,12 +64,38 @@ mg_cloud_fetch_probe__private() {
   [ -n "$xctestrun" ] || return 1
   MG_CFP_FAILURE=app-in-use
   mg_app_mac_guard || return 1
+  MG_CFP_FAILURE=host-lease
+  mg_cloud_fetch_probe__root_lease || return 1
+  marker="$MG_LEASE_DIR/vm-xcode-pending"
+  proof="$MG_RUN_DIR/originals-joined"
+  [ ! -e "$proof" ] && [ ! -L "$proof" ] || return 1
+  # Historical marker name; this job never accesses a VM. No EXIT cleanup:
+  # Python exit alone says nothing about its original native groups.
+  mkdir -m 700 "$marker" || return 1
   MG_CFP_FAILURE=diagnostic
   python3 -B -I "$MG_TOOLS/scripts/cloud-fetch-probe-host.py" "$MG_RUN_DIR" "$xctestrun" \
     "$(mg_app_products mac Debug)/Meguri.app" >"$MG_RUN_DIR/report.json"
   rc=$?
+  MG_CFP_FAILURE=join-uncertain
+  mg_cloud_fetch_probe__root_lease &&
+    [ -f "$proof" ] && [ ! -L "$proof" ] && [ -O "$proof" ] &&
+    cmp -s "$proof" <(printf 'HOST-CK-SDK-ORIGINALS-JOINED-v1\n') || return 1
+  rmdir "$marker" || return 1
   MG_CFP_FAILURE=source-binding
   [ "$input" = "$(mg_app_input_digest)" ] || return 1
   MG_CFP_FAILURE=diagnostic
   return "$rc"
+}
+
+mg_cloud_fetch_probe__root_lease() {
+  # Refuse a recording's nested slot before any guarded work; only this job's
+  # root exclusive lease may carry and later release the completion fence.
+  [ -n "${MG_RUN_ID:-}" ] && [ -n "${MG_LEASE_DIR:-}" ] &&
+    [ "${MG_LEASE_SLOT:-}" = "$MG_LEASE_DIR" ] &&
+    [ "$MG_LEASE_DIR" = "$(mg_host_lease_dir)" ] &&
+    [ ! -e "$MG_LEASE_DIR/inner" ] &&
+    jq -e --argjson pid "$$" --arg run "$MG_RUN_ID" --arg wt "$MG_ROOT" '
+      .pid == $pid and .run_id == $run and .worktree == $wt and
+      .job == "cloud-fetch-probe-host" and .nested == null and .kind == null
+    ' "$MG_LEASE_DIR/holder.json" >/dev/null
 }

@@ -54,6 +54,9 @@ class DiagnosticTests(unittest.TestCase):
         self.commands, self.joined = [], []
         self.extra_line = ""
         self.fault = None
+        self.join_fail_at = None
+        self.unknown_at = None
+        self.spawn_fault = False
 
     def probe(self, stale=False):
         private = Path(tempfile.mkdtemp(dir=self.base)).resolve()
@@ -62,11 +65,18 @@ class DiagnosticTests(unittest.TestCase):
         if stale:
             os.utime(self.xctestrun, ns=(1, 1))
         owner = self
+        launched = []
         class Child:
             def __init__(self, argv, **kwargs):
                 self.argv, self.kwargs = argv, kwargs
+                self.ordinal = len(launched)
+                launched.append(self)
                 self.returncode = owner.code if argv[0] == "/usr/bin/xcodebuild" else 0
+                if self.ordinal == owner.unknown_at:
+                    self.returncode = None
                 owner.commands.append((argv, kwargs))
+                if owner.spawn_fault and argv[0] == "/usr/bin/xcodebuild":
+                    raise p.h.v.Refused("setup-join-uncertain")
                 if argv[0] == "/usr/bin/xcodebuild":
                     raw = p.PREFIX + json.dumps(owner.value) + "\n" + owner.extra_line
                 elif "summary" in argv:
@@ -87,14 +97,23 @@ class DiagnosticTests(unittest.TestCase):
                 if owner.fault and self.argv[0] == "/usr/bin/xcodebuild":
                     raise owner.fault
                 return self.returncode
+        def join(child):
+            self.joined.append(child)
+            if child.ordinal == self.join_fail_at:
+                raise p.h.v.Refused("setup-join-uncertain")
         with patch.object(p.sys, "platform", "darwin"), patch.dict(os.environ, {
                 "MEGURI_APP_SIGNING": "team", "TEST_RUNNER_SECRET": SECRET,
                 "MEGURI_CLOUD_AGENT_PRIVATE": SECRET}), \
                 patch.object(p.h, "setup_launch", side_effect=contextlib.nullcontext), \
                 patch.object(p.h, "setup_process", side_effect=Child), \
-                patch.object(p.h, "setup_join", side_effect=self.joined.append):
+                patch.object(p.h, "setup_join", side_effect=join):
             result = p.run(private, self.xctestrun, self.app)
         self.assertNotIn(SECRET, json.dumps(result))
+        proof = private / "originals-joined"
+        if result[0]["category"] == "join-uncertain":
+            self.assertFalse(proof.exists())
+        else:
+            self.assertEqual(proof.read_bytes(), p.COMPLETION)
         return result, private
 
     def test_fixed_selector_managed_reads_and_safe_limited_wide_misses(self):
@@ -222,11 +241,80 @@ class DiagnosticTests(unittest.TestCase):
                 self.assertEqual(len(self.commands), len(self.joined))
                 self.assertEqual(self.joined[-1].argv[0], "/usr/bin/xcodebuild")
 
+    def test_native_worker_checks(self):
+        for field in ("join_fail_at", "unknown_at"):
+            for ordinal in range(6):
+                with self.subTest(field=field, ordinal=ordinal):
+                    self.commands, self.joined = [], []
+                    setattr(self, field, ordinal)
+                    (report, code), _ = self.probe()
+                    self.assertEqual(code, 1)
+                    self.assertEqual(report["category"], "join-uncertain")
+                    self.assertEqual(len(self.commands), ordinal + 1)
+                    self.assertEqual(len(self.joined), len(self.commands))
+            setattr(self, field, None)
+
+    def test_cancellation_join_failure_stays_uncertain(self):
+        self.fault = p.h.v.Refused("setup-cancelled")
+        self.join_fail_at = 3
+        (report, code), _ = self.probe()
+        self.assertEqual(code, 1)
+        self.assertEqual(report["category"], "join-uncertain")
+        self.assertEqual(len(self.joined), 4)
+
+    def test_uncertain_spawn_withholds_run_proof(self):
+        self.spawn_fault = True
+        (report, code), _ = self.probe()
+        self.assertEqual(code, 1)
+        self.assertEqual(report["category"], "join-uncertain")
+        self.assertEqual(len(self.commands), 4)
+        self.assertEqual(len(self.joined), 3)
+
+    def test_spawn_window_and_join_failure_are_sticky(self):
+        for failure in (p.h.v.Refused("setup-join-uncertain"), KeyboardInterrupt()):
+            for during in ("spawn", "join"):
+                with self.subTest(during=during, failure=type(failure)):
+                    private = Path(tempfile.mkdtemp(dir=self.base))
+                    joins = p.Joins()
+                    child = type("Child", (), {"returncode": 0, "wait": lambda *a, **k: 0})()
+                    with patch.object(p.h, "setup_launch", side_effect=contextlib.nullcontext), \
+                            patch.object(p.h, "setup_process", side_effect=failure if during == "spawn" else None,
+                                         return_value=child) as spawn, \
+                            patch.object(p.h, "setup_join", side_effect=failure if during == "join" else None) as join:
+                        with self.assertRaises((p.h.v.Refused, KeyboardInterrupt)):
+                            p.managed(["generated"], private, "first", 1, joins)
+                        self.assertFalse(joins.safe())
+                        self.assertEqual(join.call_count, int(during == "join"))
+                        # A later command cannot reset the original's obligation.
+                        spawn.side_effect = join.side_effect = None
+                        with self.assertRaises(p.Refused):
+                            p.managed(["generated"], private, "later", 1, joins)
+                        self.assertEqual(spawn.call_count, 1)
+                        self.assertFalse(joins.safe())
+
+    def test_launch_context_cancellation_joins_before_completion(self):
+        @contextlib.contextmanager
+        def cancelled_launch():
+            yield
+            raise p.h.v.Refused("setup-cancelled")
+        with patch.object(p.h, "setup_launch", side_effect=cancelled_launch):
+            private = Path(tempfile.mkdtemp(dir=self.base))
+            joins = p.Joins()
+            events = []
+            child = type("Child", (), {"returncode": 0, "wait": lambda *a, **k: events.append("wait")})()
+            with patch.object(p.h, "setup_process", return_value=child), \
+                    patch.object(p.h, "setup_join", side_effect=lambda _: events.append("join")):
+                with self.assertRaises(p.h.v.Refused):
+                    p.managed(["generated"], private, "cancel", 1, joins)
+            self.assertEqual(events, ["join"])
+            self.assertTrue(joins.safe())
+
 
 class EntryTests(unittest.TestCase):
     # Source the real entry, stubbing its existing MG/native boundaries only.
     SCRIPT = r'''
 mg_job() { :; }
+source "$REPO/tools/mg.d/host.sh"
 source "$REPO/tools/mg.d/cloud-fetch-probe.sh"
 mg_failure() { printf '%s\n' "$1" >>"$MG_STATE/failures"; }
 mg_status() { printf '%s\n' "$1" >"$MG_STATE/status"; }
@@ -234,11 +322,25 @@ mg_message() { :; }
 mg_detail() { printf '%s\n' "$1=$2" >>"$MG_STATE/details"; }
 mg_count() { printf '%s=%s\n' "$1" "$2" >>"$MG_STATE/counts"; }
 uname() { printf '%s\n' "${OS:-Darwin}"; }
-mg_host_lease() { echo lease >>"$CALLS"; [ "$FAIL" != lease ]; }
+mg_host_lease_dir() { echo "$LEASE"; }
+mg_host_lease() {
+  echo lease >>"$CALLS"
+  [ "$FAIL" != lease ] || return 1
+  mkdir "$LEASE" || return 1
+  MG_LEASE_DIR="$LEASE" MG_LEASE_SLOT="$LEASE"
+  mg__lease_write "$LEASE" false || return 1
+  case "$FAIL" in
+    nested) mkdir "$LEASE/inner"; MG_LEASE_SLOT="$LEASE/inner"; mg__lease_write "$MG_LEASE_SLOT" true ;;
+    nested-mark) mg__lease_write "$LEASE" true ;;
+    wrong-run) MG_RUN_ID=another-run ;;
+    pending) mkdir "$LEASE/vm-xcode-pending" ;;
+  esac
+}
 mg_app_mac_guard() {
   echo guard >>"$CALLS"
   echo generated-private-native-description
   mg_detail private '"generated-private-native-description"'
+  if [ "$FAIL" = preexisting-proof ]; then touch "$MG_RUN_DIR/originals-joined"; fi
   n=$((n+1)); [ "$FAIL" != "guard$n" ]
 }
 mg_app_input_digest() {
@@ -250,14 +352,28 @@ mg__vm_xctestrun() { echo "lookup $*" >>"$CALLS"; echo generated-local-product; 
 mg_app_products() { echo generated-local-products; }
 python3() {
   echo helper >>"$CALLS"
+  [ -d "$LEASE/vm-xcode-pending" ] || exit 96
   [ "$FAIL" != drift-run ] || touch "$4/drift-run"
+  [ "$FAIL" != ownership-lost ] || MG_RUN_ID=another-run
+  case "$FAIL" in
+    absent-proof|crash) ;;
+    invalid-proof) echo invalid >"$4/originals-joined" ;;
+    partial-proof) printf 'HOST-CK-SDK-ORIGINALS-JOINED-v1' >"$4/originals-joined" ;;
+    symlink-proof) printf 'HOST-CK-SDK-ORIGINALS-JOINED-v1\n' >"$4/other"; ln -s other "$4/originals-joined" ;;
+    directory-proof) mkdir "$4/originals-joined" ;;
+    *) printf 'HOST-CK-SDK-ORIGINALS-JOINED-v1\n' >"$4/originals-joined" ;;
+  esac
   echo '{"scope":"HOST-CK-SDK-DIAGNOSTIC-ONLY","full_suite":false,"category":"observed","counts":{"total":1,"executed":1,"passed":1,"failed":0,"skipped":0}}'
+  case "$FAIL" in crash) return 137 ;; sdk-failure|test-failure) return 65 ;; esac
+  return 0
 }
 mg_sim_begin() { exit 97; }
 mg_sim_take() { exit 97; }
 mg_app_mac_agent_profile_check() { exit 97; }
 n=0
 mg_cloud_fetch_probe_host "$@"
+[ ! -d "$LEASE/vm-xcode-pending" ] || touch "$FENCED"
+mg__host_lease_release "$LEASE" "$$"
 '''
 
     def entry(self, args=(), **env):
@@ -267,7 +383,8 @@ mg_cloud_fetch_probe_host "$@"
             run.mkdir(); state.mkdir()
             environment = dict(os.environ, REPO=str(ROOT), MG_ROOT=str(ROOT), MG_TOOLS=str(ROOT / "tools"),
                                MG_RUN_DIR=str(run), MG_STATE=str(state), CALLS=str(root / "calls"), FAIL="", OS="Darwin",
-                               MEGURI_APP_SIGNING="team")
+                               MEGURI_APP_SIGNING="team", MG_RUN_ID="generated-run", MG_JOB="cloud-fetch-probe-host",
+                               LEASE=str(root / "lease"), FENCED=str(root / "fenced"))
             environment.update(env)
             result = subprocess.run(["/bin/bash", "-c", self.SCRIPT, "entry", *args], env=environment,
                                     capture_output=True, text=True, check=True)
@@ -278,6 +395,8 @@ mg_cloud_fetch_probe_host "$@"
                 if "guard" in calls:
                     self.assertIn(SECRET, (run / "private/workflow.log").read_text())
             self.assertNotIn(SECRET, public)
+            self.fenced = (root / "fenced").exists()
+            self.lease_exists = (root / "lease").exists()
             return (state / "status").read_text().strip(), calls, public
 
     def test_zeroargs_explicit_team_and_darwin_before_work(self):
@@ -291,20 +410,80 @@ mg_cloud_fetch_probe_host "$@"
     def test_lease_guards_build_and_source_order_with_private_native_state(self):
         status, calls, public = self.entry()
         self.assertEqual(status, "warn")
+        self.assertFalse(self.fenced)
+        self.assertFalse(self.lease_exists)
         self.assertEqual(calls.splitlines(), ["lease", "guard", "digest", "build mac Debug Snapshot", "digest",
                                               "lookup Snapshot macosx Debug", "guard", "helper", "digest"])
         self.assertIn('full_suite=false', public)
         for phase, last in (("lease", "lease"), ("guard1", "guard"), ("build", "build mac Debug Snapshot"),
-                            ("guard2", "guard"), ("drift", "digest")):
+                            ("guard2", "guard"), ("drift", "digest"), ("preexisting-proof", "guard")):
             # lease refusal precedes the guard's private-console sentinel.
             status, calls, public = self.entry(FAIL=phase)
             self.assertEqual(status, "fail")
             self.assertEqual(calls.splitlines()[-1], last)
             self.assertNotIn("helper", calls)
+            self.assertFalse(self.fenced)
+            self.assertFalse(self.lease_exists)
         status, calls, public = self.entry(FAIL="drift-run")
         self.assertEqual(status, "fail")
         self.assertIn("helper", calls)
         self.assertIn("source-binding", public)
+        self.assertFalse(self.fenced)
+        self.assertFalse(self.lease_exists)
+
+    def test_root_ownership_refuses_nested_or_unresolved_lease_before_work(self):
+        for phase in ("nested", "nested-mark", "wrong-run", "pending"):
+            with self.subTest(phase=phase):
+                status, calls, _ = self.entry(FAIL=phase)
+                self.assertEqual(status, "fail")
+                self.assertEqual(calls.splitlines(), ["lease"])
+                self.assertEqual(self.fenced, phase == "pending")
+                self.assertEqual(self.lease_exists, phase in ("nested", "pending"))
+
+    def test_absent_invalid_or_crashed_completion_keeps_fence_even_on_zero_exit(self):
+        for phase in ("absent-proof", "invalid-proof", "partial-proof", "symlink-proof", "directory-proof", "crash", "ownership-lost"):
+            with self.subTest(phase=phase):
+                status, calls, public = self.entry(FAIL=phase)
+                self.assertEqual(status, "fail")
+                self.assertEqual(calls.splitlines()[-1], "helper")
+                self.assertIn("join-uncertain", public)
+                self.assertTrue(self.fenced)
+                self.assertTrue(self.lease_exists)
+
+    def test_normally_joined_sdk_and_test_failures_release_only_own_fence(self):
+        for phase in ("sdk-failure", "test-failure"):
+            with self.subTest(phase=phase):
+                status, calls, public = self.entry(FAIL=phase)
+                self.assertEqual(status, "fail")
+                self.assertIn("helper", calls)
+                self.assertIn("diagnostic", public)
+                self.assertFalse(self.fenced)
+                self.assertFalse(self.lease_exists)
+
+    def test_pending_marker_blocks_existing_stale_drop_and_new_admission(self):
+        script = r'''
+mg_job() { :; }
+source "$REPO/tools/mg.d/host.sh"
+mkdir "$LEASE"
+holder='{"pid":1234,"job":"cloud-fetch-probe-host","run_id":"old-generated"}'
+printf '%s\n' "$holder" >"$LEASE/holder.json"
+mkdir "$LEASE/vm-xcode-pending"
+# Model a dead shell without querying or signalling any real process.
+kill() { return 1; }
+if mg__lease_stale "$LEASE" "$holder"; then exit 91; fi
+host_lease_lock "$LEASE" || exit 92
+host_lease_drop "$LEASE"
+rc=$?
+host_lease_unlock
+[ "$rc" -ne 0 ] && [ -d "$LEASE/vm-xcode-pending" ] || exit 93
+mg__lease_try "$LEASE"
+[ "$?" -eq 1 ] && [ -z "$MG_LEASE_SLOT" ] && [ ! -e "$LEASE/inner" ] || exit 94
+[ "$(cat "$LEASE/holder.json")" = "$holder" ] || exit 95
+'''
+        with tempfile.TemporaryDirectory() as temp:
+            subprocess.run(["/bin/bash", "-c", script], check=True, capture_output=True,
+                           env=dict(os.environ, REPO=str(ROOT), MG_TOOLS=str(ROOT / "tools"),
+                                    MG_ROOT=str(ROOT), LEASE=str(Path(temp) / "lease")))
 
 
 if __name__ == "__main__":

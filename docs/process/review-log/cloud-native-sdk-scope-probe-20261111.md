@@ -196,3 +196,36 @@
   The seed's focused Docker selftest pass was recorded during integration; this
   follow-up runs no builds or tests. One diff check precedes complete patch
   export. No SDK result or acceptance exists for this handoff.
+
+## Host original-child fence — source-only review follow-up
+
+- Role fixer; supplied main starting commit `a143e868`; filtered source
+  baseline `4b459f8bc8415c43465cc89379b4c04af1657fff`.
+  Supplied independent review `85191` reports one P1: catching
+  `setup-join-uncertain` as ordinary failure lets Python exit and MG release
+  its leases while an original native group may remain active. No other P0–P2
+  was reported; the new native host job remains UNRUN.
+- Proposed source repair requires this job's root exclusive host lease before
+  guarded work. Immediately before helper execution it creates that lease's
+  existing `vm-xcode-pending` marker (historical name, no VM access). The helper
+  tracks every original's join obligation across all native commands; uncertain
+  spawn, refused/cancelled join or nonterminal return code stays sticky and
+  reports only `join-uncertain`, with no completion proof. Only all successful
+  managed joins permit the constant private run-owned proof. The shell requires
+  that exact proof and its own root ownership before removing its marker;
+  helper exit status alone and EXIT cleanup never remove it. Joined SDK/test
+  failures and source drift still fail after safe fence release.
+- Generated cases cover each native join refusal/nonterminal result, sticky
+  failure, spawn/cancellation windows, missing/invalid proof, ownership refusal,
+  safe success/failure release, prelaunch refusals and the unchanged stale/drop
+  helpers' pending-marker refusal, including new-run admission. Existing source
+  validations and assertions remain. Generic lease/join code, budgets/fences,
+  privacy guard and app/probe Swift sources are unchanged.
+- Gate planning run `86096` failed. The missing utility now has its own entry.
+- Source-only handoff; one `git diff --check` is the sole consistency check.
+  No builds/tests, network, plugins, subagents, private/forbidden inputs or raw
+  similarity reads. No verified fix, live outcome or acceptance is claimed.
+  Integration owns review and verification, including the exact focused command
+  `tools/mg selftest --filter '^cloud-fetch-probe-host '`. Risk: uncertain or
+  lost completion intentionally retains the exclusive lease; recovery requires
+  establishing original-group completion, never automatic fence reclamation.

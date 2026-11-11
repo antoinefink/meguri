@@ -37,6 +37,7 @@ COUNTERS = {"willFetch", "didFetch", "databaseCallbacks", "willFetchZone", "zone
             "batchRequests", "callbackErrors", "signIns"}
 FLAGS = {"sawExpectedBytes", "statePresent", "unexpectedActivity", "fetchCompleted", "drained"}
 CAP = 16 * 1024 * 1024
+COMPLETION = b"HOST-CK-SDK-ORIGINALS-JOINED-v1\n"
 
 
 class Refused(Exception):
@@ -59,8 +60,18 @@ def strict(raw):
                       parse_constant=lambda _: (_ for _ in ()).throw(Refused()))
 
 
-def managed(argv, private, label, timeout):
+class Joins:
+    def __init__(self):
+        self.pending = 0
+        self.uncertain = False
+
+    def safe(self):
+        return self.pending == 0 and not self.uncertain
+
+
+def managed(argv, private, label, timeout, joins):
     """Reuse the original-child join authority, including cancellation fences."""
+    need(joins.safe())
     environment = {k: v for k, v in os.environ.items()
                    if not k.startswith(("TEST_RUNNER_", "MEGURI_CLOUD_AGENT_"))}
     child = None
@@ -68,12 +79,19 @@ def managed(argv, private, label, timeout):
             (private / (label + ".stderr")).open("xb") as err:
         try:
             with h.setup_launch():
+                joins.pending += 1
                 child = h.setup_process(argv, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
                                         env=environment, start_new_session=True)
             child.wait(timeout=timeout)
         finally:
             if child is not None:
-                h.setup_join(child)
+                try:
+                    h.setup_join(child)
+                    need(type(child.returncode) is int)
+                    joins.pending -= 1
+                except BaseException:
+                    joins.uncertain = True
+                    raise
     return child.returncode
 
 
@@ -83,12 +101,12 @@ def read(path):
     return path.read_bytes()
 
 
-def native(argv, private, label):
-    need(managed(argv, private, label, 180) == 0)
+def native(argv, private, label, joins):
+    need(managed(argv, private, label, 180, joins) == 0)
     return read(private / (label + ".stdout")), read(private / (label + ".stderr"))
 
 
-def product(xctestrun, app, private):
+def product(xctestrun, app, private, joins):
     # The lookup is local, even though the shared shell helper is VM-named.
     products = app.parent.parent
     need(app.name == "Meguri.app" and app.parent.name == "Debug" and
@@ -130,8 +148,8 @@ def product(xctestrun, app, private):
     need(info.get("CFBundleIdentifier") == APP_ID and info.get("CFBundleExecutable") == "Meguri" and
          info.get("MeguriCardInspectionBuild") == "debug" and info.get("LSUIElement") is True)
     need((app / "Contents/PlugIns/MeguriSnapshotTests.xctest").is_dir())
-    native(["/usr/bin/codesign", "--verify", "--deep", "--strict", str(app)], private, "signature")
-    _, description = native(["/usr/bin/codesign", "-d", "--verbose=4", str(app)], private, "identity")
+    native(["/usr/bin/codesign", "--verify", "--deep", "--strict", str(app)], private, "signature", joins)
+    _, description = native(["/usr/bin/codesign", "-d", "--verbose=4", str(app)], private, "identity", joins)
     attributes = {}
     for record in description.decode().splitlines():
         field, separator, content = record.partition("=")
@@ -146,7 +164,7 @@ def product(xctestrun, app, private):
     need(any(authority.startswith("Apple Development:")
              for authority in attributes.get("Authority", [])))
     encoded_grants, _ = native(
-        ["/usr/bin/codesign", "-d", "--entitlements", "-", "--xml", str(app)], private, "grants")
+        ["/usr/bin/codesign", "-d", "--entitlements", "-", "--xml", str(app)], private, "grants", joins)
     signed_grants = plistlib.loads(encoded_grants)
     for entitlement, expected in (
             ("com.apple.developer.team-identifier", signing_group),
@@ -205,30 +223,43 @@ def diagnostic_success(value):
 
 
 def run(private, xctestrun, app):
+    joins = Joins()
     counts = {key: 0 for key in ("total", "executed", "passed", "failed", "skipped")}
     report = {"scope": SCOPE, "full_suite": False, "category": "product-refused", "counts": counts}
     try:
         need(sys.platform == "darwin" and os.environ.get("MEGURI_APP_SIGNING") == "team")
         need(stat.S_IMODE(private.lstat().st_mode) == 0o700 and private.stat().st_uid == os.getuid())
-        product(xctestrun, app, private)
+        product(xctestrun, app, private, joins)
         report["category"] = "execution-refused"
         rc = managed(["/usr/bin/xcodebuild", "test-without-building", "-xctestrun", str(xctestrun),
                       "-destination", "platform=macOS,arch=arm64", "-resultBundlePath", str(private / "probe.xcresult"),
-                      "-collect-test-diagnostics", "never", "-only-testing:" + SELECTOR], private, "console", 600)
+                      "-collect-test-diagnostics", "never", "-only-testing:" + SELECTOR], private, "console", 600, joins)
         report["category"] = "result-refused"
         summary, _ = native(["/usr/bin/xcrun", "xcresulttool", "get", "test-results", "summary", "--path",
-                             str(private / "probe.xcresult")], private, "summary")
+                             str(private / "probe.xcresult")], private, "summary", joins)
         tree, _ = native(["/usr/bin/xcrun", "xcresulttool", "get", "test-results", "tests", "--path",
-                          str(private / "probe.xcresult")], private, "tests")
+                          str(private / "probe.xcresult")], private, "tests", joins)
         report["counts"] = test_counts(strict(summary), strict(tree))
         value = observation(read(private / "console.stdout") + b"\n" + read(private / "console.stderr"))
         report["observation"] = value
         success = rc == 0 and report["counts"]["passed"] == 1 and diagnostic_success(value)
         report["category"] = "observed" if success else "diagnostic-failed"
-        return report, 0 if success else 1
+        code = 0 if success else 1
     except (Exception, KeyboardInterrupt):
         # No exception messages, raw native errors, IDs or paths cross this boundary.
+        code = 1
+    if not joins.safe():
+        report["category"] = "join-uncertain"
         return report, 1
+    try:
+        # Private, exclusive run storage binds this constant proof to this run.
+        # A crash or partial write cannot establish completion in the shell.
+        with (private / "originals-joined").open("xb") as proof:
+            proof.write(COMPLETION)
+    except (Exception, KeyboardInterrupt):
+        report["category"] = "completion-refused"
+        return report, 1
+    return report, code
 
 
 def main():

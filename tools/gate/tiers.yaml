@@ -766,6 +766,7 @@ runs:
     user_step: device-run
 
 utilities:
+  - {job: cloud-fetch-probe-host, why: "On-demand SDK observation; no gate evidence"}
   - {job: cloud-media-probe, why: "Explicit normal-app generated media diagnostic only; prepare-ui is private prepared-only PREPARATION with separate authorized Finder copy/sync evidence; staged-only or peer-byte-match never grants Q7/signed-lane acceptance"}
   - {job: vm-crash-info, why: "Explicit bounded retained Mac UI crash taxonomy with original-receipt unzoned admission and guest-completion lease fencing only; no app or gate acceptance"}
   - {job: cloudkit-account-setup, why: "OWNER ONLY J2.2.1 explicit interactive account source producer; setup-only, never gates or catch-up"}
