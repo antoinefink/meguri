@@ -237,6 +237,10 @@ enum NativeCloudKitSendError {
 private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
     nonisolated let instanceID: String
     private var sdk: CKSyncEngine?
+    #if DEBUG
+    private var debugFetchOrdinal: UInt16 = 0
+    private weak var debugFetchGroup: CKOperationGroup?
+    #endif
     private let delegate: any CloudKitEngineDelegate
     private let observeNative: (@Sendable (CloudNativeEvidenceObservation) async -> Void)?
     private var manualSends: [String: CloudNativeSendOperation] = [:]
@@ -263,6 +267,10 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         var configuration = CKSyncEngine.Configuration(database: database, stateSerialization: serialization, delegate: self)
         configuration.automaticallySync = automatic
         sdk = CKSyncEngine(configuration)
+        #if DEBUG
+        debugFetchOrdinal = DebugCloudDiagnostics.nativeFetchSequence.register(
+            automatic: automatic, restored: serialization != nil)
+        #endif
     }
     private func zone(_ name: String) -> CKRecordZone.ID { .init(zoneName: name, ownerName: CKCurrentUserDefaultName) }
     private func recordID(_ name: String, zone: String) -> CKRecord.ID { .init(recordName: name, zoneID: self.zone(zone)) }
@@ -436,6 +444,10 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         let group = CKOperationGroup(); group.name = options.groupID
         var native = CKSyncEngine.FetchChangesOptions(scope: .zoneIDs(options.zones.map(zone)), operationGroup: group)
         native.prioritizedZoneIDs = options.priorityZones.map(zone)
+        #if DEBUG
+        DebugCloudDiagnostics.nativeFetchSequence.record(.prepared(scope: debugFetchScope(native),
+            priority: debugFetchPriority(native)), ordinal: debugFetchOrdinal)
+        #endif
         let prepared = native
         let lifetime = networkLifetime
         let generation = lifetime.authority()
@@ -462,6 +474,15 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         // Preparation suspends the actor; join events and returned work again.
         repeat { try await waitForEventBookkeeping() } while activeEvent
         try networkLifetime.enqueue(generation: generation, validate: validate, begin: {})
+        #if DEBUG
+        let diagnosticOrdinal = debugFetchOrdinal
+        debugFetchGroup = options.operationGroup
+        DebugCloudDiagnostics.nativeFetchSequence.record(.invoke, ordinal: diagnosticOrdinal)
+        defer {
+            DebugCloudDiagnostics.nativeFetchSequence.record(.returned, ordinal: diagnosticOrdinal)
+            if debugFetchGroup === options.operationGroup { debugFetchGroup = nil }
+        }
+        #endif
         try await sdk.fetchChanges(options)
     }
     func sendChanges(zones: [String]) async throws {
@@ -475,6 +496,9 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         try await operation.drain()
     }
     func cancelOperations() async {
+        #if DEBUG
+        DebugCloudDiagnostics.nativeFetchSequence.record(.cancel, ordinal: debugFetchOrdinal)
+        #endif
         let original = sdk
         let operations = networkLifetime.beginCancellation()
         defer { networkLifetime.endCancellation() }
@@ -483,6 +507,9 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         if let returnedWork { await returnedWork.value }
     }
     func release() async {
+        #if DEBUG
+        DebugCloudDiagnostics.nativeFetchSequence.record(.release, ordinal: debugFetchOrdinal)
+        #endif
         networkLifetime.retire()
         await cancelOperations()
         sdk = nil
@@ -501,6 +528,14 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         NativeCloudKitSendError.code(error)
     }
     #if DEBUG
+    private func debugFetchScope(_ options: CKSyncEngine.FetchChangesOptions) -> DebugCloudDiagnostics.FetchInclusion {
+        .init(root: options.scope.contains(zone("meguri-root")),
+              collection: collectionZone.map { options.scope.contains(zone($0)) } ?? false)
+    }
+    private func debugFetchPriority(_ options: CKSyncEngine.FetchChangesOptions) -> DebugCloudDiagnostics.FetchInclusion {
+        .init(root: options.prioritizedZoneIDs.contains(zone("meguri-root")),
+              collection: collectionZone.map { options.prioritizedZoneIDs.contains(zone($0)) } ?? false)
+    }
     // Caller admits the original SDK first. Read public state only; retain no IDs.
     private func debugRecordUnfetchedServerChanges(_ syncEngine: CKSyncEngine) {
         let unfetched = syncEngine.state.zoneIDsWithUnfetchedServerChanges
@@ -521,18 +556,39 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         default: break
         }
         switch event {
-        case .willFetchChanges:
+        case .willFetchChanges(let will):
+            DebugCloudDiagnostics.nativeFetchSequence.record(.will(
+                reason: will.context.reason == .manual ? .manual : .scheduled,
+                sameGroup: debugFetchGroup === will.context.options.operationGroup), ordinal: debugFetchOrdinal)
             DebugCloudDiagnostics.fetchRecorder.record(.will)
+        case .didFetchChanges(let did):
+            DebugCloudDiagnostics.nativeFetchSequence.record(.did(
+                reason: did.context.reason == .manual ? .manual : .scheduled,
+                sameGroup: debugFetchGroup === did.context.options.operationGroup), ordinal: debugFetchOrdinal)
         case .fetchedDatabaseChanges(let changes):
+            DebugCloudDiagnostics.nativeFetchSequence.record(.database, ordinal: debugFetchOrdinal)
             let registered = collectionZone.map { zone($0) }
             DebugCloudDiagnostics.fetchRecorder.recordServerChangeObservations(
                 database: true,
                 databaseCollection: registered.map { id in changes.modifications.contains { $0.zoneID == id } } ?? false)
         case .willFetchRecordZoneChanges(let will):
+            DebugCloudDiagnostics.nativeFetchSequence.record(.willZone(
+                NativeCloudKitIdentityValidation.debugFetchZone(will.zoneID, collectionZone: collectionZone)),
+                ordinal: debugFetchOrdinal)
             if NativeCloudKitIdentityValidation.debugFetchZone(will.zoneID, collectionZone: collectionZone) == .collection {
                 DebugCloudDiagnostics.fetchRecorder.record(.zoneC)
             }
         case .fetchedRecordZoneChanges(let fetched):
+            var root = false, collection = false, other = false
+            for id in fetched.modifications.map({ $0.record.recordID.zoneID }) + fetched.deletions.map({ $0.recordID.zoneID }) {
+                switch NativeCloudKitIdentityValidation.debugFetchZone(id, collectionZone: collectionZone) {
+                case .root: root = true
+                case .collection: collection = true
+                case .other: other = true
+                }
+            }
+            DebugCloudDiagnostics.nativeFetchSequence.record(.fetchedZones(root: root, collection: collection, other: other),
+                ordinal: debugFetchOrdinal)
             for modification in fetched.modifications {
                 switch NativeCloudKitIdentityValidation.debugFetchZone(modification.record.recordID.zoneID, collectionZone: collectionZone) {
                 case .collection: DebugCloudDiagnostics.fetchRecorder.record(.modC)
@@ -758,9 +814,19 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         if originalSDKAtEntry { debugRecordUnfetchedServerChanges(syncEngine) }
         let observedCollectionZone = originalSDKAtEntry ? collectionZone.map { zone($0) } : nil
         let requestedCollection = observedCollectionZone.map { context.options.scope.contains($0) }
+        let diagnosticOrdinal = debugFetchOrdinal
+        let requestedScope = debugFetchScope(context.options)
+        let reason: DebugCloudDiagnostics.FetchReason = context.reason == .manual ? .manual : .scheduled
+        let sameGroup = debugFetchGroup === context.options.operationGroup
+        var offeredScope = DebugCloudDiagnostics.FetchInclusion()
+        var offeredPriority = DebugCloudDiagnostics.FetchInclusion()
         // All existing early/error returns offer the empty scope.
         var offeredCollection = false
         defer {
+            if originalSDKAtEntry {
+                DebugCloudDiagnostics.nativeFetchSequence.record(.options(reason: reason, requested: requestedScope,
+                    offered: offeredScope, priority: offeredPriority, sameGroup: sameGroup), ordinal: diagnosticOrdinal)
+            }
             if let requestedCollection {
                 DebugCloudDiagnostics.fetchRecorder.recordFetchOptions(
                     requestedCollection: requestedCollection, offeredCollection: offeredCollection)
@@ -783,6 +849,8 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
             var result = CKSyncEngine.FetchChangesOptions(scope: .zoneIDs(options.zones.map(zone)), operationGroup: group)
             result.prioritizedZoneIDs = options.priorityZones.map(zone)
             #if DEBUG
+            offeredScope = debugFetchScope(result)
+            offeredPriority = debugFetchPriority(result)
             if let observedCollectionZone { offeredCollection = result.scope.contains(observedCollectionZone) }
             #endif
             return result
