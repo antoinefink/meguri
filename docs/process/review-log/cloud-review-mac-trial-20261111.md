@@ -26,6 +26,11 @@ and after that restart. Its original cause is not established.
 - `core-test/20261111T085019Z-91583`: `cloud_media_roundtrip` passes (11/11).
   It uses real Core/storage and a fake cloud service across two processes.
   It does not prove a live CloudKit or physical-device round trip.
+- `swift-test/20261111T090235Z-18709`: review startup, collection lifecycle
+  and sync coordinator checks pass (128 tests). This includes retained review
+  state, media retries, account changes, cancellation and shutdown ownership.
+  The earlier attempt `17710` ran no tests: its sandbox could not reach Docker.
+  The host-authorized run passed the unchanged lint and test requirements.
 - `gate/20261111T084914Z-89396` is a plan only, not a passing gate.
 - `ui-test/20261111T085902Z-10263` inventories no available physical device.
 
