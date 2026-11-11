@@ -1492,6 +1492,23 @@ impl Runtime {
         ))
     }
 
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fn exchange_capture_for_testing(
+        &self,
+        instance: &str,
+        id: u64,
+    ) -> Result<(u64, Vec<String>), RuntimeError> {
+        let state = self.state();
+        Self::caller_locked(&state, instance)?;
+        let (_, capture) = state
+            .actions
+            .exchange
+            .as_ref()
+            .filter(|(active, _)| *active == id)
+            .ok_or(RuntimeError::StaleIncarnation)?;
+        Ok((capture.boundary_seq, capture.selected_names.iter().cloned().collect()))
+    }
+
     /// Counts actual workflow entity body materializations on the last observer callback.
     #[cfg(feature = "test-hooks")]
     pub fn last_capture_body_reads_for_testing(&self) -> usize {

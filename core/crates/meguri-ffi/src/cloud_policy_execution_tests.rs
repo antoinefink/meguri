@@ -784,6 +784,16 @@ fn cursorless_auto_off_ffi_capture_maps_before_first_root_fetch() {
     assert_eq!(after.captures.get(&before.policy_exchange), Some(&id));
     assert_eq!(after.active_id, Some(id));
     let selection = workflow.core.exchange_result(id).unwrap();
+    #[cfg(feature = "test-hooks")]
+    {
+        let capture = crate::test_hooks::test_cloud_original_exchange_capture(issued.handle.clone(), id).unwrap();
+        assert_eq!(capture.boundary_seq, selection.boundary_seq);
+        assert_eq!(
+            capture.selected_names,
+            selection.selected_names.iter().cloned().collect::<Vec<_>>()
+        );
+        assert!(crate::test_hooks::test_cloud_original_exchange_capture(issued.handle.clone(), id + 1).is_err());
+    }
     assert_eq!(selection.boundary_seq, collection.last_seq().0);
     assert!(!selection.selected_names.is_empty());
     assert_eq!(selection.outstanding_names, selection.selected_names);

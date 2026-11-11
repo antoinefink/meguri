@@ -24,6 +24,10 @@ public struct RestoredCloudControlObservation: Sendable {
     public let generation: UInt64
     public let requiredScanComplete: Bool
 }
+public struct OriginalCloudExchangeCapture: Sendable {
+    public let boundarySeq: UInt64
+    public let selectedNames: [String]
+}
 public actor SelectedCloudRestorationInspection {
     public init() {}
     public func originalControlWitness() async throws -> OriginalCloudControlWitness {
@@ -43,6 +47,13 @@ public actor SelectedCloudRestorationInspection {
     public func originalExchangeWitness(command: CloudPolicyCommand) async throws -> Data {
         try await QueryLane.shared.call(.testCloudOriginalExchangeWitness) {
             try MeguriCoreBindings.testCloudOriginalExchangeWitness(command: command.raw)
+        }
+    }
+    public func originalExchangeCapture(command: CloudPolicyCommand, runtimeExchange: UInt64) async throws -> OriginalCloudExchangeCapture {
+        try await QueryLane.shared.call(.testCloudOriginalExchangeCapture) {
+            let captured = try MeguriCoreBindings.testCloudOriginalExchangeCapture(command: command.raw,
+                                                                                  runtimeExchange: runtimeExchange)
+            return .init(boundarySeq: captured.boundarySeq, selectedNames: captured.selectedNames)
         }
     }
     public func readOriginalExchange(exchange: UInt64, witness: Data) async throws -> CloudPolicyExchangeRecord {

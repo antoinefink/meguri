@@ -933,6 +933,18 @@ impl CloudPolicyCommand {
             .map(|v| v.to_vec())
             .map_err(|_| failure(CloudPolicyFailure::StaleCommand))
     }
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fn original_exchange_capture_inner(
+        &self,
+        runtime_exchange: u64,
+    ) -> Result<(u64, Vec<String>), CoreError> {
+        self.owner.owns(self)?;
+        self.owner.collection()?;
+        self.owner
+            .driver()?
+            .original_exchange_capture_for_testing(&self.command, runtime_exchange)
+            .map_err(|_| failure(CloudPolicyFailure::StaleCommand))
+    }
     pub(crate) fn exchange_observation_for_testing(&self) -> Result<p::ExchangeObservation, CoreError> {
         self.owner.owns(self)?;
         self.owner.collection()?;

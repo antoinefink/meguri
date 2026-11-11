@@ -235,3 +235,23 @@ passes five wrappers, including refusal of a save outcome for a delete member
 and of close without the required state pair. The VM answered `doctor` run
 `3738`. Batches without a result and original exchange replay still need
 coverage. No signed round trip or full-gate claim is made here.
+
+## Original exchange capture
+
+Starting commit `b1913578`. A test-only Core read returns the live capture
+for the original issued policy command and its exact Runtime exchange. The
+selected app test writes the collection sequence and aliases of the selected
+entities in one group before running the exchange. The same aliases identify
+entities in the SDK batch journal. The host and the relaunch parser require
+the capture between issuance and result, from the same process, and compare
+its selection size to the original result.
+
+Direct review checked command ownership, the capture lifetime, alias reuse
+and the observation order. Rust run `5578` compares the test export to the
+actual capture and refuses a different Runtime exchange. Mac VM run `5807`
+passes the alias test. Host run `7339` passes five wrappers, including the
+missing capture and missing member cases. Swift run `9614` passes 13
+selected protocol and restoration tests. Swift run `12111` passes the seven
+instrumentation registry tests. The capture supplies one input
+for replay. Image sequences, held flags and the full outcome computation
+still need coverage before Mac exchange recovery can pass.

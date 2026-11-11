@@ -13,6 +13,8 @@ nonisolated struct AgentSelectedRestoration {
     struct Exchange {
         let exchange: UInt64
         let witness: String
+        let boundary: UInt64
+        let selected: Set<String>
         let terminal: [AgentFact]
     }
     let state: AgentRestoration
@@ -117,24 +119,39 @@ nonisolated struct AgentSelectedRestoration {
                 let issued = try observation(command.command_seq, .syncResult, "original-exchange-issued")
                 guard let id = issued.1.count, id > 0, let witness = issued.1.digest,
                       AgentJSON.digest(witness) else { throw AgentFailure.recovery }
+                let captured = try observation(command.command_seq, .syncResult, "exchange-capture").0
+                guard captured.facts.count >= 2, captured.record_seq > issued.0.record_seq,
+                      captured.facts[0] == .init(name: .syncResult, count: id, operation: "exchange-capture"),
+                      let boundary = captured.facts[1].count,
+                      captured.facts[1] == .init(name: .syncResult, count: boundary, operation: "exchange-boundary")
+                else { throw AgentFailure.recovery }
+                var selected = Set<String>()
+                for fact in captured.facts.dropFirst(2) {
+                    let prefix = "exchange-selected-entity"
+                    guard let label = fact.operation, label.hasPrefix(prefix),
+                          let number = UInt64(label.dropFirst(prefix.count)), number > 0, label == prefix + String(number),
+                          fact == .init(name: .syncResult, operation: label), selected.insert("entity\(number)").inserted
+                    else { throw AgentFailure.recovery }
+                }
                 let resultRecords = state.records.filter { record in
                     record.command_seq == command.command_seq && record.kind == .observation &&
                         record.facts.contains { $0.operation?.hasPrefix("terminal-") == true }
                 }
                 guard resultRecords.count == 1, let terminal = resultRecords.first,
                       terminal.agent_instance == issued.0.agent_instance,
-                      terminal.record_seq > issued.0.record_seq,
+                      terminal.record_seq > captured.record_seq,
                       terminal.facts.first == .init(name: .syncResult, count: id, operation: "terminal-exchange-succeeded"),
                       terminal.facts.dropFirst().prefix(5).map(\.operation) ==
                         ["terminal-ended-ms", "terminal-selected", "terminal-held-back",
                          "terminal-newer-pending", "terminal-incoming-waiting"],
+                      terminal.facts[2].count == UInt64(selected.count),
                       terminal.facts.allSatisfy({ fact in
                           fact.count != nil && fact.operation?.hasPrefix("terminal-") == true &&
                               fact == .init(name: .syncResult, count: fact.count, operation: fact.operation)
                       }),
                       Set(terminal.facts.map(\.operation)).count == terminal.facts.count
                 else { throw AgentFailure.recovery }
-                exchange = .init(exchange: id, witness: witness, terminal: terminal.facts)
+                exchange = .init(exchange: id, witness: witness, boundary: boundary, selected: selected, terminal: terminal.facts)
             } else if !(program == .syncNowMac && command.action == .edit && command.recovery_check == "sync_now.edit" && edit != nil) {
                 throw AgentFailure.implementationMissing
             }

@@ -125,6 +125,24 @@ import Testing
                                           "terminal-error-throttled", "terminal-retry-ms"])
         #expect(retry.map(\.count) == [7, 30, nil, 50])
     }
+    @Test func exchangeCaptureSharesAliasesWithTheOriginalBatch() throws {
+        let evidence = try ledger()
+        let name = entity("n1").recordName
+        let capture = OriginalCloudExchangeCapture(boundarySeq: 9, selectedNames: [name])
+        let facts = try evidence.captureFacts(exchange: 3, capture: capture)
+        #expect(facts.map(\.operation) == ["exchange-capture", "exchange-boundary", "exchange-selected-entity1"])
+        #expect(facts.map(\.count) == [3, 9, nil])
+        let origin = "generated-engine"
+        try evidence.admitSmokeSDK(origin: origin)
+        let operation = CloudNativeSendOperation(identity: UUID(), reason: .manual)
+        let record = CloudRecord(name: name, envelope: Data([1]), systemFields: Data([2]))
+        evidence.batch(origin: origin, batch: .init(id: 1, saves: [record], deletes: []),
+                       proof: nil, current: current(), operation: operation)
+        #expect(evidence.drain().contains { $0.operation == "send1-batch1-entity1-member" })
+        #expect(throws: AgentFailure.execution) {
+            try evidence.captureFacts(exchange: 3, capture: .init(boundarySeq: 9, selectedNames: [name, name]))
+        }
+    }
     @Test func originalOwnAttemptRequiresPrepareEnqueueReplyThenCommit() throws {
         let identity = UUID()
         let metadata = CloudOwnMetadata(operationID: Data([1]), attempt: 4, kind: .createZones)

@@ -122,6 +122,9 @@ def generated(kind):
     number = 5 if kind == "mac" else 4
     observations[number][1:1] = [
         fact("syncResult", "original-exchange-issued", 1, "d" * 64),
+        fact("syncResult", "exchange-capture", 1),
+        fact("syncResult", "exchange-boundary", 9),
+        fact("syncResult", "exchange-selected-entity1"),
         fact("syncResult", "terminal-exchange-succeeded", 1),
         fact("syncResult", "terminal-ended-ms", 30),
         *[{**item, "operation": "terminal-" + item["operation"]} for item in exchange
@@ -146,6 +149,8 @@ def journal_bytes(kind, checks, observations, through=6, header_value=None):
         label = item.get("operation", "")
         if label in c.TERMINAL_LABELS:
             return "terminal"
+        if label in {"exchange-capture", "exchange-boundary"} or c.CAPTURE_MEMBER.fullmatch(label):
+            return "capture"
         if label.endswith("-state-committed") or c.state_batch_fact(label):
             return label.split("-")[0]
         callback = c.SENT_PHASE.fullmatch(label)
@@ -384,6 +389,17 @@ class SelectedTests(unittest.TestCase):
             for item in checks[5][0]["facts"] + observations[5]:
                 if item.get("operation") == "n1-earlier-original-ack": item["count"] = 99
         with self.assertRaises(s.v.Refused): admitted("mac", mutate=mismatch)
+
+    def test_exchange_needs_the_original_capture_and_matching_count(self):
+        def omit(checks, observations):
+            observations[5] = [item for item in observations[5] if item.get("operation") != "exchange-capture"]
+
+        def lose_member(checks, observations):
+            observations[5] = [item for item in observations[5] if item.get("operation") != "exchange-selected-entity1"]
+
+        for mutate in (omit, lose_member):
+            with self.assertRaisesRegex(s.v.Refused, "selected-exchange-capture"):
+                admitted("mac", mutate=mutate)
 
     def test_acknowledgement_requires_its_actual_saved_batch_member(self):
         def substitute(checks, observations):

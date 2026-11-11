@@ -308,6 +308,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
     private let policy: CoreCloudPolicyService
     private let adapter: CloudKitSyncAdapter
     private let exchangeGate: (any CloudPolicyExchangeGate)?
+    private let observeExchangeCapture: (@Sendable (CloudPolicyCommand, UInt64) async -> Void)?
     private let flushDeadline: @Sendable (Int64) async throws -> Void
     private let readinessClock: any CloudPolicyReadinessClock
     private var exchange: UInt64?
@@ -342,10 +343,12 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
     private var zoneDeletionSDK: String?
 
     public init(policy: CoreCloudPolicyService, adapter: CloudKitSyncAdapter, exchangeGate: (any CloudPolicyExchangeGate)? = nil, readinessClock: any CloudPolicyReadinessClock = ContinuousCloudPolicyReadinessClock(), mediaService: CoreCloudMediaService? = nil, mediaTransport: (any CloudMediaTransport)? = nil, ownTransport: (any CloudOwnTransport)? = nil,
+                observeExchangeCapture: (@Sendable (CloudPolicyCommand, UInt64) async -> Void)? = nil,
                 flushDeadline: @escaping @Sendable (Int64) async throws -> Void = { until in
                     try await Task.sleep(for: .seconds(max(0, Double(until) / 1_000 - Date().timeIntervalSince1970)))
                 }) {
         self.policy = policy; self.adapter = adapter; self.exchangeGate = exchangeGate; self.readinessClock = readinessClock
+        self.observeExchangeCapture = observeExchangeCapture
         self.mediaService = mediaService; self.mediaTransport = mediaTransport
         self.cleanupWorker = ownTransport.map { CloudCleanupExecutor(transport: $0) }
         self.zoneDeletionWorker = ownTransport.map { CloudZoneDeletionExecutor(transport: $0) }
@@ -933,6 +936,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                     await delivery.acknowledge(outputs)
                     if let runtimeID = capture.runtimeExchange {
                         captured = true
+                        await observeExchangeCapture?(command, runtimeID)
                         #if DEBUG
                         site = .exchangeRun
                         #endif

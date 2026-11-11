@@ -58,7 +58,8 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
                      persisted: @escaping @Sendable () async -> Void,
                      observeEvent: (@Sendable (CloudSDKObservation) async -> Void)? = nil,
                      observeBatch: (@Sendable (String, String, CloudEngineBatch) async -> Void)? = nil,
-                     observeOwn: (@Sendable (CloudOwnObservation) -> Void)? = nil) async throws -> NativeCollectionCloudBackend {
+                     observeOwn: (@Sendable (CloudOwnObservation) -> Void)? = nil,
+                     observeExchangeCapture: (@Sendable (CloudPolicyCommand, UInt64) async -> Void)? = nil) async throws -> NativeCollectionCloudBackend {
         let policy = try await workflow.policy()
         let connection = try await workflow.connection()
         let media = try await workflow.media()
@@ -68,7 +69,8 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
             appOwnsAccountObservation: true, accountReadRequested: persisted,
             observeEvent: observeEvent, observeBatch: observeBatch)
         let executor = NativeCloudPolicyExecutor(policy: policy, adapter: adapter,
-            mediaService: media, mediaTransport: mediaTransport, ownTransport: ownTransport)
+            mediaService: media, mediaTransport: mediaTransport, ownTransport: ownTransport,
+            observeExchangeCapture: observeExchangeCapture)
         let own = CloudOwnExecutor(core: connection, transport: ownTransport, observe: observeOwn)
         return NativeCollectionCloudBackend(workflow: workflow, policy: policy, connection: connection,
             own: own, factory: factory, adapter: adapter, executor: executor)

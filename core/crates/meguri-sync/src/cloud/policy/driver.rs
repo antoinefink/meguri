@@ -381,6 +381,24 @@ impl Driver {
         Ok(witness)
     }
     #[cfg(feature = "test-hooks")]
+    pub fn original_exchange_capture_for_testing(
+        &self,
+        command: &Command,
+        runtime_exchange: u64,
+    ) -> Result<(u64, Vec<String>), DriverError> {
+        let owned = self.lock_owned();
+        self.validate_locked(&owned, command)?;
+        let ActionKind::RunExchange { exchange, .. } = command.action.kind else {
+            return Err(DriverError::NotCoreAction);
+        };
+        let (sdk, _) = owned
+            .captures
+            .get(&exchange)
+            .filter(|(_, id)| *id == runtime_exchange)
+            .ok_or(DriverError::UnqualifiedCompletion)?;
+        Ok(self.runtime.exchange_capture_for_testing(sdk, runtime_exchange)?)
+    }
+    #[cfg(feature = "test-hooks")]
     fn validate_original_exchange_issuance(&self, command: &Command) -> Result<(), DriverError> {
         let owned = self.lock_owned();
         // This includes the original opening and private Runtime guard. The

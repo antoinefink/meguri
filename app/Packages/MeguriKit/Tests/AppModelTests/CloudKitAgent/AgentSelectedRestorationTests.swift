@@ -4,7 +4,8 @@ import Testing
 // Prefix evidence only. Real owned progress is proved in Core/Service tests.
 @Suite struct AgentSelectedRestorationTests {
     @MainActor private func state(phone: Bool = false, completed: Int = 3, pending: Bool = false,
-                                  editGeneration: UInt64 = 7, recordTerminal: Bool = true) throws -> AgentRestoration {
+                                  editGeneration: UInt64 = 7, recordTerminal: Bool = true,
+                                  recordCapture: Bool = true) throws -> AgentRestoration {
         var object = try #require(JSONSerialization.jsonObject(with: CloudKitAgentProtocolTests.header) as? [String: Any])
         object["selection"] = "sync_now"; object["device_kind"] = phone ? "iphone" : "mac"
         let headerBytes = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
@@ -42,6 +43,13 @@ import Testing
                 facts = [.init(name: .syncResult, count: 1, digest: String(repeating: "7", count: 64), operation: "original-exchange-issued")]
             }
             for fact in facts { append(.observation, command: command, facts: [fact]) }
+            if command.action == .syncNow && recordCapture {
+                append(.observation, command: command, facts: [
+                    .init(name: .syncResult, count: 1, operation: "exchange-capture"),
+                    .init(name: .syncResult, count: 9, operation: "exchange-boundary"),
+                    .init(name: .syncResult, operation: "exchange-selected-entity1")
+                ])
+            }
             if command.action == .syncNow && recordTerminal {
                 append(.observation, command: command, facts: [
                     .init(name: .syncResult, count: 1, operation: "terminal-exchange-succeeded"),
@@ -66,6 +74,10 @@ import Testing
         let exchange = try AgentSelectedRestoration(state(completed: 4, pending: true))
         #expect(exchange.exchange?.exchange == 1 && exchange.pending?.action == .syncNow)
         #expect(exchange.exchange?.terminal.count == 6)
+        #expect(exchange.exchange?.boundary == 9 && exchange.exchange?.selected == ["entity1"])
+        #expect(throws: AgentFailure.recovery) {
+            try AgentSelectedRestoration(state(completed: 4, pending: true, recordCapture: false))
+        }
         #expect(throws: AgentFailure.recovery) {
             try AgentSelectedRestoration(state(completed: 4, pending: true, recordTerminal: false))
         }

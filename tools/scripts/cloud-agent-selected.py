@@ -35,6 +35,7 @@ KEPT_CODES = {3, 4, 6, 7, 9, 23, 36}
 SENT_PHASE = re.compile(r"sdk[1-9][0-9]*-sent-batch([1-9][0-9]*)-(committed|returned)")
 PENDING = re.compile(r"entity([1-9][0-9]*)-(added|removed-held|removed-absent)")
 STATE_BATCHES = re.compile(r"sdk([1-9][0-9]*)-state-batches")
+CAPTURE_MEMBER = re.compile(r"exchange-selected-entity[1-9][0-9]*")
 PENDING_READ = re.compile(r"sdk([1-9][0-9]*)-entity([1-9][0-9]*)-read-(held|absent)")
 REFLECTED = re.compile(r"sdk([1-9][0-9]*)-send([1-9][0-9]*)-batch([1-9][0-9]*)-"
                        r"entity([1-9][0-9]*)-reflected-(held|absent)")
@@ -414,7 +415,7 @@ class Journal(s.Journal):
         labels = MEDIA | {"p1", "n1", "own-joined", "sdk-joined", "canonical-active", "canonical-complete-epoch",
             "binding-matches-epoch", "required-scan-native-sdk-admitted", "owned-adoption-backup-activation",
             "original-n1-preserved", "original-control-witness", "original-edit-witness", "original-exchange-issued",
-            "original-exchange", "selected", "held-back", "newer-pending", "incoming-waiting",
+            "original-exchange", "exchange-capture", "exchange-boundary", "selected", "held-back", "newer-pending", "incoming-waiting",
             "n1-earlier-original-ack", "n1-original-ack-after-attempt-boundary-timing-unresolved",
             "n1-original-fetched-returned", "normal-adoption-generation-joined", "required-scan-before-native-sdk"}
         for record in self.records:
@@ -423,7 +424,7 @@ class Journal(s.Journal):
                 traced = s.TRACE.fullmatch(label or "")
                 need(label is None or label in labels or label in TERMINAL_LABELS or ACK.fullmatch(label) or
                      FETCH.fullmatch(label) or SEND.fullmatch(label) or DELETE_COUNT.fullmatch(label) or
-                     pending_fact(label) or state_batch_fact(label) or
+                     pending_fact(label) or state_batch_fact(label) or CAPTURE_MEMBER.fullmatch(label) or
                      (traced and (traced.group(2) is None or traced.group(2) in s.OWN_KINDS)),
                      "selected-public-fact")
         return complete, terminal
@@ -491,7 +492,7 @@ class Journal(s.Journal):
                     need(len(issued) == 1, "selected-exchange-issuance")
                     exact(issued[0], "syncResult", ("count", "digest"), operation="original-exchange-issued")
                     need(issued[0]["count"] == facts[0]["count"], "selected-exchange-issuance")
-                    expected[1:1] = [issued[0], *self.exchange_terminal(number, facts, ends[number])]
+                    expected[1:1] = [issued[0], *self.exchange_journal(number, facts, ends[number], issued[0])]
                 elif self.kind == "iphone" and number == 5:
                     need(len(facts) == 2, "selected-peer")
                     exact(facts[0], "localDurable", ("count", "digest"), operation="n1")
@@ -509,17 +510,32 @@ class Journal(s.Journal):
             completed[number] = facts
         return completed
 
-    def exchange_terminal(self, number, facts, end):
-        groups = [record["facts"] for record in self.records if record["kind"] == "observation" and
-                  record["command_seq"] == number and record["record_seq"] < end and
-                  any(item.get("operation") in TERMINAL_LABELS for item in record["facts"])]
-        need(len(groups) == 1 and len(groups[0]) >= 2, "selected-exchange-terminal")
-        group = groups[0]
+    def exchange_journal(self, number, facts, end, issued):
+        records = [record for record in self.records if record["kind"] == "observation" and
+                   record["command_seq"] == number and record["record_seq"] < end]
+        result_rows = [record for record in records if any(item.get("operation") in TERMINAL_LABELS for item in record["facts"])]
+        need(len(result_rows) == 1 and len(result_rows[0]["facts"]) >= 2, "selected-exchange-terminal")
+        terminal = result_rows[0]
+        group = terminal["facts"]
         exact(group[0], "syncResult", count=facts[0]["count"], operation="terminal-exchange-succeeded")
         exact(group[1], "syncResult", ("count",), operation="terminal-ended-ms")
         need(group[2:] == [{**item, "operation": "terminal-" + item["operation"]} for item in facts
                            if item.get("operation") in EXCHANGE_COUNTS | MEDIA], "selected-exchange-terminal")
-        return group
+        captures = [record for record in records if any(item.get("operation") == "exchange-capture" for item in record["facts"])]
+        source = next(record for record in records if issued in record["facts"])
+        need(len(captures) == 1 and len(captures[0]["facts"]) >= 2, "selected-exchange-capture")
+        capture = captures[0]
+        need(source["record_seq"] < capture["record_seq"] < terminal["record_seq"] and
+             source["agent_instance"] == capture["agent_instance"] == terminal["agent_instance"], "selected-exchange-capture")
+        marker, boundary, *members = capture["facts"]
+        exact(marker, "syncResult", count=issued["count"], operation="exchange-capture")
+        exact(boundary, "syncResult", ("count",), operation="exchange-boundary")
+        selected = unique(members)
+        need(len(selected) == unique(facts)["selected"]["count"], "selected-exchange-capture")
+        for label, item in selected.items():
+            need(CAPTURE_MEMBER.fullmatch(label), "selected-exchange-capture")
+            exact(item, "syncResult", operation=label)
+        return capture["facts"] + group
 
     def control(self, facts, evidence):
         need(evidence.admissions and evidence.sdk and

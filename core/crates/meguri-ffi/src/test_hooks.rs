@@ -1006,6 +1006,23 @@ pub fn test_cloud_original_exchange_witness(
     callback::enter("test_cloud_original_exchange_witness");
     command.original_exchange_witness_inner()
 }
+#[derive(uniffi::Record)]
+pub struct CloudOriginalExchangeCapture {
+    pub boundary_seq: u64,
+    pub selected_names: Vec<String>,
+}
+#[uniffi::export]
+pub fn test_cloud_original_exchange_capture(
+    command: Arc<crate::cloud_policy::CloudPolicyCommand>,
+    runtime_exchange: u64,
+) -> Result<CloudOriginalExchangeCapture, CoreError> {
+    callback::enter("test_cloud_original_exchange_capture");
+    let (boundary_seq, selected_names) = command.original_exchange_capture_inner(runtime_exchange)?;
+    Ok(CloudOriginalExchangeCapture {
+        boundary_seq,
+        selected_names,
+    })
+}
 #[uniffi::export]
 pub fn test_cloud_read_original_exchange(
     exchange: u64,

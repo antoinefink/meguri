@@ -601,7 +601,10 @@ import Foundation
                         let current = try await CoreSmokeInspection().cloud()
                         evidence.validate(origin: event.origin, current: current)
                     } catch { evidence.fail() }
-                }, observeBatch: observeBatch, observeOwn: { [evidence] in evidence.own($0) })
+                }, observeBatch: observeBatch, observeOwn: { [evidence] in evidence.own($0) },
+                observeExchangeCapture: { [weak self, evidence] command, runtimeID in
+                    await self?.backend?.recordCapture(command, runtimeID: runtimeID, evidence: evidence)
+                })
             try admission.revalidate()
             let wrapper = CloudKitSmokeBackend(production: production, workflow: workflow)
             backend = wrapper
@@ -904,6 +907,16 @@ import Foundation
         if result.error != nil { exchanges.fail(.execution); publications.fail(.execution) }
         if result.error == nil, !result.deferred, case .recordExchange(let record) = command.action { exchanges.yield(record) }
         return result
+    }
+    func recordCapture(_ command: CloudPolicyCommand, runtimeID: UInt64, evidence: CloudKitSmokeEvidence) async {
+        guard let write = observeOriginalTerminal else { return }
+        do {
+            guard case .runExchange(let id, _) = command.action, requestedExchange == id else { throw AgentFailure.execution }
+            let capture = try await SelectedCloudRestorationInspection().originalExchangeCapture(command: command,
+                                                                                                runtimeExchange: runtimeID)
+            guard requestedExchange == id else { throw AgentFailure.execution }
+            try write(evidence.captureFacts(exchange: id, capture: capture))
+        } catch { exchanges.fail((error as? AgentFailure) ?? .journal) }
     }
     func checkFailure() throws { try exchanges.checkFailure(); try publications.checkFailure() }
     func prepareForSyncNow() throws {

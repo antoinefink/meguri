@@ -275,6 +275,18 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
         }
     }
     func fail() { state.withLock { $0.failed = true } }
+    func captureFacts(exchange: UInt64, capture: OriginalCloudExchangeCapture) throws -> [AgentFact] {
+        try state.withLock { s in
+            guard !s.failed, !s.joined, s.generation != nil, exchange > 0,
+                  Set(capture.selectedNames).count == capture.selectedNames.count else { throw AgentFailure.execution }
+            return [
+                .init(name: .syncResult, count: exchange, operation: "exchange-capture"),
+                .init(name: .syncResult, count: capture.boundarySeq, operation: "exchange-boundary")
+            ] + capture.selectedNames.map { name in
+                .init(name: .syncResult, operation: "exchange-selected-\(s.entity(name))")
+            }
+        }
+    }
     func check() throws { try state.withLock { if $0.failed { throw AgentFailure.execution } } }
     func drain() -> [AgentFact] { state.withLock { let facts = $0.facts; $0.facts.removeAll(); return facts } }
 
