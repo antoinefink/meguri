@@ -820,3 +820,22 @@ independent review and the full integration gate remain open; no Unit claimed.
 The local trial does not satisfy the retained VM, mobile or signed acceptance
 requirements. The VM account-setup attempts still await the owner; normal Mac
 preview connection uses this Mac's account without that test-lane source.
+
+### Live result after the repair
+
+Signed standalone build `57330` at `5ca7a5a1` passes its executable-hash,
+signature and cloud-configuration checks. The normal Mac preview was quit
+normally and reopened. Connect to iCloud then downloaded the collection and
+showed actual decks and study counts, passing the earlier active-record failure.
+One ordinary Sync Now updated the visible last-sync time. This is UI evidence,
+not a two-device result or proof of uploaded review rows.
+
+A downloaded card opens through Study and reveals its answer and four rating
+controls. No answer was graded. Media remains incomplete: the status reports
+missing and pending files, and an image is visibly unavailable. A Debug
+`taskCancelled` diagnostic also remains in status; its cause is not established.
+No screenshot, card text, collection name or account value was copied into Git.
+
+The app remains open for local feedback. Next: investigate the media status
+and source availability, then verify a real review round trip on another device.
+Independent review, the full gate and signed acceptance remain open.
