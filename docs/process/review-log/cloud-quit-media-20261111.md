@@ -40,3 +40,24 @@ Direct diff review checked task registration/removal, the nested quit task,
 missing-command and failed-command returns, and required result admission.
 No independent agent was used. Independent review, the integration gate and
 the normal signed Mac trial remain open. No Unit or acceptance is claimed.
+
+## Normal Mac trial
+
+Signed standalone build `build-app/20261111T080705Z-52414` passes on clean
+`b64295b3`, including normal signature, cloud configuration and executable hash.
+The older preview was paused and replaced through an exact-process SIGTERM;
+that replacement is not evidence for the repaired normal-quit path.
+
+The new preview resumed media with a backlog still present. An initial window
+observation did not establish whether quit had completed. The controlled check
+then retained the exact preview PID before the normal quit gesture and observed
+that original PID exit, with zero preview processes and no successor during its
+15-second observation window. It did not send a termination signal in this check.
+The PID check confirms normal quit. Timing and signed-lane acceptance await
+their required checks.
+
+The same preview was opened again. The collection and enabled sync setting
+remain, and media is still pending. Error-category inspection was scoped to the
+original preview PID to exclude expected errors from test processes. The preview
+is left open on its deck page. Missing cloud media, two-device review delivery,
+independent review and the integration gate remain open.
