@@ -137,3 +137,20 @@ required lint. Privacy `150222Z-52326` and similarity `150220Z-52024` pass.
 The original formatter limits remain: maximum output is 254, below 256, and
 the 512-character assertion also passes with the latest policy value.
 Native observation is pending. No sync behavior changes or acceptance is claimed.
+
+## Real foreground comparison
+
+On `aedf2fda`, physical drive `152456Z-89270` completes one real Home/return
+cycle in the same process, followed by normal Sync Now. All 12 interaction steps
+pass with verified continuity; its overall result fails 94 hierarchy checks.
+It leaves the request uninterrupted and opens no connection preview. The next
+drive, `152750Z-92039`, captures status before any preview: `will=10 zoneC=1
+modC=8 coreC=8 db=1 dbC=1 unC=1`, with `cut=0`, no refusal and no zone error.
+The newer succeeded completion is `1794410833184`. A read-only local summary
+then shows 47 reviews, matching the last verified Mac total. All 12 steps pass
+with verified continuity; overall hierarchy verification fails 190 findings.
+The preview is cancelled and the phone returns to Decks.
+
+No transport or merge implementation changed to produce this arrival. The next
+work is launch/foreground discovery and the reverse transfer. Cold-start behavior,
+fresh media transfer and full acceptance remain unverified.

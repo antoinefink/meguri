@@ -3501,27 +3501,52 @@ mg_drive_run() { echo unexpected-runner >>"$STUB_LOG"; return 1; }
 mg_record__start_recorder() { echo unexpected-recorder >>"$STUB_LOG"; return 1; }
 mg_drive__screen_start() { echo unexpected-screen-recorder >>"$STUB_LOG"; return 1; }
 FAKES
-  local step kind entry
+  local step kind entry cycle documents
+  local innocuous='{"name":"PRIVATE_SENTINEL","steps":[{"launch":{}}]}'
   for step in '{"foregroundCycle":true}' '{"foregroundCycle":false}' \
       '{"foregroundCycle":null}' '{"foregroundCycle":"PRIVATE_SENTINEL"}' \
       '{"foregroundCycle":true,"transition":"PRIVATE_SENTINEL"}' \
       '{"foregroundCycle":true,"tap":"PRIVATE_SENTINEL"}' \
       '{"\u0066oregroundCycle":{}}'; do
-    printf '{"name":"PRIVATE_SENTINEL","steps":[{"launch":{}},%s]}' "$step" >"$FX_DRIVE_SCRIPT"
-    for kind in iphone mac; do
-      for entry in drive foreground-cycle-entry; do
-        : >"$STUB_LOG"
-        if [ "$entry" = drive ]; then
-          mg drive "$FX_DRIVE_SCRIPT" --platform "$kind" --record
-        else
-          mg foreground-cycle-entry "$FX_DRIVE_SCRIPT" "$kind"
-        fi
-        [ "$status" -eq 2 ]
-        [ "$(field .status)" = error ]
-        [ "$(field '.failures[0].id')" = usage ]
-        [[ "$output$stderr$(cat "$result")" != *PRIVATE_SENTINEL* ]]
-        [ ! -s "$STUB_LOG" ]
+    cycle="$(printf '{"name":"PRIVATE_SENTINEL","steps":[{"launch":{}},%s]}' "$step")"
+    for documents in "$cycle" "$cycle"$'\n'"$innocuous" "$innocuous"$'\n'"$cycle"; do
+      printf '%s\n' "$documents" >"$FX_DRIVE_SCRIPT"
+      for kind in iphone mac; do
+        for entry in drive foreground-cycle-entry; do
+          : >"$STUB_LOG"
+          if [ "$entry" = drive ]; then
+            mg drive "$FX_DRIVE_SCRIPT" --platform "$kind" --record
+          else
+            mg foreground-cycle-entry "$FX_DRIVE_SCRIPT" "$kind"
+          fi
+          [ "$status" -eq 2 ]
+          [ "$(field .status)" = error ]
+          [ "$(field '.failures[0].id')" = usage ]
+          [[ "$output$stderr$(cat "$result")" != *PRIVATE_SENTINEL* ]]
+          [ ! -s "$STUB_LOG" ]
+        done
       done
+    done
+  done
+  # A single noncycle document reaches the existing stop-before-work stubs.
+  printf '%s\n' "$innocuous" >"$FX_DRIVE_SCRIPT"
+  for kind in iphone mac; do
+    for entry in drive foreground-cycle-entry; do
+      : >"$STUB_LOG"
+      if [ "$entry" = drive ]; then
+        mg drive "$FX_DRIVE_SCRIPT" --platform "$kind" --record
+      else
+        mg foreground-cycle-entry "$FX_DRIVE_SCRIPT" "$kind"
+      fi
+      [ "$(field '[.failures[] | select(.id == "usage")] | length')" -eq 0 ]
+      if [ "$kind" = iphone ]; then
+        called '^sim-begin$'
+        called '^unexpected-build$'
+      else
+        called '^unexpected-mac-discovery$'
+      fi
+      not_called 'unexpected-(sim-lease|runner|recorder|screen-recorder)'
+      [[ "$output$stderr$(cat "$result")" != *PRIVATE_SENTINEL* ]]
     done
   done
 }

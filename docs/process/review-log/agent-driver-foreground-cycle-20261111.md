@@ -60,5 +60,48 @@ recording; the existing physical path independently refuses recording. This WIP
 checkpoint permits that bounded diagnosis, not acceptance or a full gate. The
 recording guard will be repaired while that physical comparison runs.
 
+Review `151758Z-78142` P2 fixer: supplied clean WIP base `aedf2fda`,
+filtered starting commit `9957fc27a5aca4bcd7428d85cdcdb53f4d06588d`; original
+batch base remains `1416a520542a8c5daa38a23bfe398da704c3d6c9`.
+The common recording guard now slurps JSON, requires exactly one document and
+refuses any nested `foregroundCycle` key with parser output suppressed. The
+existing refusal matrix adds both concatenation orders through CLI/common entry
+and a single-document noncycle fallthrough assertion. Prior cases and limits
+remain; Swift bytes are unchanged. One static consistency check only; no builds,
+tests, other agents or native execution here. The prior 15 Swift and three MG
+policy passes cover unchanged behavior, not this repair or new native proof.
+Focused verification and required integration checks remain with the orchestrator.
+
 No grade, replacement, SDK reset or synthetic lifecycle notification is part of
-this script. Neither native execution nor data convergence is verified.
+this script. The native observations follow below.
+
+## Final tool verification and original device run
+
+Filtered stream fixer `152349Z-87594` repairs the remaining P2. Round-three
+independent review `152641Z-91312` finds no P0/P1 or P2. Docker self-tests
+`153020Z-93946` pass all three cases, including both JSON-stream orders and
+valid-single-document fallthrough. The original 15 Swift parser/control tests
+still cover the unchanged Swift source. The recording-only finding is closed;
+this is no full gate or application acceptance.
+
+Signed physical preparation `run/20261111T152321Z-87245` passes on `aedf2fda`.
+Drive `152456Z-89270` presses Home, returns to Meguri, then requests Sync Now.
+All 12 steps pass; original process/artifact continuity is
+verified. Its overall result fails 94 hierarchy checks. The immediate status
+still has zero collection-zone fetches; this is not a completed-transfer claim.
+No connection preview is opened during this pass.
+
+The later read-only drive `152750Z-92039` first captures status before opening
+any preview. It completes all 12 steps with verified continuity; the overall
+result fails 190 hierarchy checks. Its first snapshot has ten native fetch
+starts, one collection-zone fetch, eight original collection modifications and
+eight successful Core intakes, with no native refusal or zone error. The recorded
+completion is `1794410833184`, succeeded. The local summary then reports
+47 reviews, matching the last verified Mac count, rather than the previous 43.
+The preview is cancelled and the phone returns to Decks. No grade, collection
+replacement, reset, synthetic notification or recording occurs.
+
+This shows an actual incoming transfer and local application after the real
+foreground cycle. It does not fix cold-start discovery or prove the reverse
+trip, scheduling equality, media transfer or full sync acceptance. Those checks
+and the integration gate remain open.

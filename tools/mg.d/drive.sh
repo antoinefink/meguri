@@ -700,7 +700,7 @@ mg_drive__job() {
   local MG_UI_PHYSICAL_DEVICE=""
   # Whole-drive recorders would capture Home. Check key presence even when
   # the action value/shape is invalid; callers keep scripts frozen during jobs.
-  if [ "$record" = yes ] && ! jq -e 'all(.. | objects; has("foregroundCycle") | not)' "$script" >/dev/null 2>&1; then
+  if [ "$record" = yes ] && ! jq -se 'length == 1 and all(.[0] | .. | objects; has("foregroundCycle") | not)' "$script" >/dev/null 2>&1; then
     mg_drive__usage "recording requires valid JSON without foregroundCycle"
     return 0
   fi
