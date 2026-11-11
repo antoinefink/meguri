@@ -399,6 +399,33 @@ impl Driver {
         Ok(self.runtime.exchange_capture_for_testing(sdk, runtime_exchange)?)
     }
     #[cfg(feature = "test-hooks")]
+    pub fn original_exchange_work_for_testing(
+        &self,
+        command: &Command,
+    ) -> Result<(crate::cloud::adapter::ExchangeWork, std::collections::BTreeSet<String>), DriverError> {
+        let owned = self.lock_owned();
+        self.validate_locked(&owned, command)?;
+        let ActionKind::RecordExchange(record) = &command.action.kind else {
+            return Err(DriverError::NotCoreAction);
+        };
+        if owned.issued_records.get(&record.exchange) != Some(record) {
+            return Err(DriverError::UnqualifiedCompletion);
+        }
+        let (_, native) = owned
+            .captures
+            .get(&record.exchange)
+            .ok_or(DriverError::UnqualifiedCompletion)?;
+        let (completed, ended_ms) = self
+            .runtime
+            .policy_completed_exchange(*native)
+            .ok_or(DriverError::UnqualifiedCompletion)?;
+        if completed.id != *native || ended_ms != record.ended_ms {
+            return Err(DriverError::UnqualifiedCompletion);
+        }
+        let work = completed.work.ok_or(DriverError::UnqualifiedCompletion)?;
+        Ok((work, completed.result.held_back_names))
+    }
+    #[cfg(feature = "test-hooks")]
     fn validate_original_exchange_issuance(&self, command: &Command) -> Result<(), DriverError> {
         let owned = self.lock_owned();
         // This includes the original opening and private Runtime guard. The

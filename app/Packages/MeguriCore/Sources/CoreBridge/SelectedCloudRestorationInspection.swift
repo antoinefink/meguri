@@ -28,6 +28,13 @@ public struct OriginalCloudExchangeCapture: Sendable {
     public let boundarySeq: UInt64
     public let selectedNames: [String]
 }
+// Original completion metadata. SDK acknowledgement and recovery proof stay separate.
+public struct OriginalCloudExchangeWork: Sendable {
+    public let heldPendingNames: [String]
+    public let heldAcknowledgedNames: [String]
+    public let pendingUnheldNames: [String]
+    public let media: CloudPolicyMediaFacts
+}
 public actor SelectedCloudRestorationInspection {
     public init() {}
     public func originalControlWitness() async throws -> OriginalCloudControlWitness {
@@ -54,6 +61,13 @@ public actor SelectedCloudRestorationInspection {
             let captured = try MeguriCoreBindings.testCloudOriginalExchangeCapture(command: command.raw,
                                                                                   runtimeExchange: runtimeExchange)
             return .init(boundarySeq: captured.boundarySeq, selectedNames: captured.selectedNames)
+        }
+    }
+    public func originalExchangeWork(command: CloudPolicyCommand) async throws -> OriginalCloudExchangeWork {
+        try await QueryLane.shared.call(.testCloudOriginalExchangeWork) {
+            let work = try MeguriCoreBindings.testCloudOriginalExchangeWork(command: command.raw)
+            return .init(heldPendingNames: work.heldPendingNames, heldAcknowledgedNames: work.heldAckedNames,
+                         pendingUnheldNames: work.pendingUnheldNames, media: .init(work.media))
         }
     }
     public func readOriginalExchange(exchange: UInt64, witness: Data) async throws -> CloudPolicyExchangeRecord {

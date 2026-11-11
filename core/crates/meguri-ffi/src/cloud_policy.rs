@@ -945,6 +945,24 @@ impl CloudPolicyCommand {
             .original_exchange_capture_for_testing(&self.command, runtime_exchange)
             .map_err(|_| failure(CloudPolicyFailure::StaleCommand))
     }
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fn original_exchange_work_inner(
+        &self,
+    ) -> Result<crate::test_hooks::CloudOriginalExchangeWork, CoreError> {
+        self.owner.owns(self)?;
+        self.owner.collection()?;
+        let (work, held_acked_names) = self
+            .owner
+            .driver()?
+            .original_exchange_work_for_testing(&self.command)
+            .map_err(|_| failure(CloudPolicyFailure::StaleCommand))?;
+        Ok(crate::test_hooks::CloudOriginalExchangeWork {
+            held_pending_names: work.held_pending_names.into_iter().collect(),
+            held_acked_names: held_acked_names.into_iter().collect(),
+            pending_unheld_names: work.pending_unheld_names.into_iter().collect(),
+            media: work.media.into(),
+        })
+    }
     pub(crate) fn exchange_observation_for_testing(&self) -> Result<p::ExchangeObservation, CoreError> {
         self.owner.owns(self)?;
         self.owner.collection()?;

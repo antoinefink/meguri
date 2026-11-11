@@ -52,10 +52,14 @@ extension ReviewCollectionStartupTests {
             #expect(admitted == 1)
             let backend = try second.backend
             var witness: Data?, issued: CloudPolicyCommand?, original: CloudPolicyExchangeRecord?, requests = 0
+            var originalWork: OriginalCloudExchangeWork?, recordHandle: CloudPolicyCommand?
             backend.beforeExecution = { command in
                 if case .runExchange = command.action {
                     requests += 1; issued = command
                     witness = try? await inspector.originalExchangeWitness(command: command)
+                } else if case .recordExchange = command.action {
+                    recordHandle = command
+                    originalWork = try? await inspector.originalExchangeWork(command: command)
                 }
             }
             backend.afterExecution = { command, result in
@@ -69,13 +73,27 @@ extension ReviewCollectionStartupTests {
             await second.sync.drainOperations(); await second.sync.waitForInputs()
             let record = try #require(original), exchangeWitness = try #require(witness)
             try #require(requests == 1)
+            let originalSnapshot = try #require(originalWork)
+            guard case .succeeded(_, let heldWork, let pendingWork, _, let originalMedia) = record.outcome else {
+                throw ServiceWorkflowFailure.refused
+            }
+            #expect(heldWork == UInt64(Set(originalSnapshot.heldPendingNames).union(originalSnapshot.heldAcknowledgedNames).count))
+            #expect(pendingWork == UInt64(Set(originalSnapshot.pendingUnheldNames).count))
+            #expect(originalMedia == originalSnapshot.media)
             let before = try await CoreNoteService().readNote(id: input.noteID)
             let completedHandle = try #require(issued)
             await #expect(throws: (any Error).self) {
                 try await inspector.originalExchangeWitness(command: completedHandle)
             }
+            await #expect(throws: (any Error).self) {
+                try await inspector.originalExchangeWork(command: completedHandle)
+            }
             backend.beforeExecution = nil; backend.afterExecution = nil
             try #require(await second.owner.close())
+            let originalRecordHandle = try #require(recordHandle)
+            await #expect(throws: (any Error).self) {
+                try await inspector.originalExchangeWork(command: originalRecordHandle)
+            }
             if let issued {
                 await #expect(throws: (any Error).self) { try await inspector.originalExchangeWitness(command: issued) }
             }
@@ -109,6 +127,9 @@ extension ReviewCollectionStartupTests {
                 if observation.metadata.kind == .saveCompleteEpoch { Issue.record("Historical inspection must not republish") }
             }
             try await third.reopen()
+            await #expect(throws: (any Error).self) {
+                try await inspector.originalExchangeWork(command: originalRecordHandle)
+            }
             let recovered = try #require(restored)
             #expect(recovered.originalGeneration == edited.generation && recovered.originalSeq == edited.seq)
             #expect(recovered.generation != recovered.originalGeneration)

@@ -768,6 +768,16 @@ fn completed_exchange_keeps_original_pending_and_media_work_after_later_edits() 
         let ActionKind::RecordExchange(record) = &action.action.kind else {
             unreachable!()
         };
+        let (original_work, original_held) = driver.original_exchange_work_for_testing(&action).unwrap();
+        assert_eq!(&original_work, frozen);
+        assert_eq!(original_held, completed.result.held_back_names);
+        assert!(driver.original_exchange_work_for_testing(&run).is_err());
+        let mut invalid = action.clone();
+        let ActionKind::RecordExchange(invalid_record) = &mut invalid.action.kind else {
+            unreachable!()
+        };
+        invalid_record.ended_ms += 1;
+        assert!(driver.original_exchange_work_for_testing(&invalid).is_err());
         let ExchangeOutcome::Succeeded {
             held_back,
             newer_pending,
@@ -789,6 +799,7 @@ fn completed_exchange_keeps_original_pending_and_media_work_after_later_edits() 
             b"synthetic media awaiting upload"
         );
         rig.host.close().unwrap();
+        assert!(driver.original_exchange_work_for_testing(&action).is_err());
     }
 }
 

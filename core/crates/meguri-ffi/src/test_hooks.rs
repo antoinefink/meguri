@@ -1036,6 +1036,20 @@ pub fn test_cloud_original_exchange_capture(
         selected_names,
     })
 }
+#[derive(uniffi::Record)]
+pub struct CloudOriginalExchangeWork {
+    pub held_pending_names: Vec<String>,
+    pub held_acked_names: Vec<String>,
+    pub pending_unheld_names: Vec<String>,
+    pub media: crate::cloud_policy::CloudPolicyMediaFacts,
+}
+#[uniffi::export]
+pub fn test_cloud_original_exchange_work(
+    command: Arc<crate::cloud_policy::CloudPolicyCommand>,
+) -> Result<CloudOriginalExchangeWork, CoreError> {
+    callback::enter("test_cloud_original_exchange_work");
+    command.original_exchange_work_inner()
+}
 #[uniffi::export]
 pub fn test_cloud_read_original_exchange(
     exchange: u64,

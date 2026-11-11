@@ -420,3 +420,23 @@ exchange and reopen checks. Lint `79816` and similarity `80360` pass.
 
 The snapshot is product accounting, not original callback proof. Original
 journal recomputation, the signed round trip and the full gate remain open.
+
+## Original-command work reader
+
+Starting commit `e8c3f312`. A test-only reader exposes the original completion's
+held-pending names, held-acknowledged names, unheld pending names and media
+facts. It requires the original issued RecordExchange handle, its retained
+capture and matching completion time. Missing legacy snapshots fail the read.
+It reads no current status and grants no recovery or SDK acknowledgement.
+
+Direct review checked original-owner and command guards, issuance equality,
+capture lookup and the absence of foreign calls under the driver lock. Rust
+run `81628` passes the frozen-work regression, changed-command refusal and
+closed-owner refusal. Swift run `82336` passes both publication and reopen
+checks, including the FFI read and refusal of old handles after reopening.
+Run `85494` passes all seven interval-registry checks. Lint `83456` and
+similarity `83783` pass. Doctor `84300` reports working Docker and VM.
+
+This reader does not yet append original work to the signed journal. The
+replay implementation, signed round trip and full gate remain open. No
+independent review or completed-unit claim is made.
