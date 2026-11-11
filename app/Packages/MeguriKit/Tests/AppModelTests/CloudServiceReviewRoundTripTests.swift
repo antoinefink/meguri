@@ -8,6 +8,96 @@ import struct MeguriCoreBindings.PhysicalReviewRows
 import Testing
 
 extension ReviewCollectionStartupTests {
+    @Test func realServiceExternalMediaReachesRetainedBindingIncrementally() async throws {
+        let fixture = try InitialCloudFixture.load()
+        let root = FileManager.default.temporaryDirectory.appending(path: "synthetic-external-media-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let serviceDirectory = root.appending(path: "service")
+        try FileManager.default.createDirectory(at: serviceDirectory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        let process = try await CloudServiceProcess.open(stateDirectory: serviceDirectory)
+        var active: ServiceAppHarness?
+        do {
+            let wire = try ServiceWorkflowWire(process: process, directory: root.appending(path: "transport"))
+            let a = try ServiceAppHarness(root: root.appending(path: "A"), wire: wire)
+            let b = try ServiceAppHarness(root: root.appending(path: "B"), wire: wire)
+            defer {
+                a.defaults.removePersistentDomain(forName: a.suite)
+                b.defaults.removePersistentDomain(forName: b.suite)
+            }
+            try await wire.seed(fixture)
+            active = a
+            try await a.adopt()
+            try await a.exchange()
+            let originalA = try await serviceMediaProof(generation: a.owner.generation)
+            let collectionA = try await CoreCollectionService().localPublicationInformation(generation: a.owner.generation)
+            try #require(await a.owner.close())
+            active = b
+            try await b.adopt()
+            try await b.exchange()
+            let originalB = try await serviceMediaProof(generation: b.owner.generation)
+            let collectionB = try await CoreCollectionService().localPublicationInformation(generation: b.owner.generation)
+            try #require(originalB.root != originalA.root && originalB.names == originalA.names && originalB.bytes == originalA.bytes)
+            try #require(collectionB.localCounts[.note] == collectionA.localCounts[.note])
+            try #require(collectionB.localCounts[.revlog] == collectionA.localCounts[.revlog])
+            try #require(await b.owner.close())
+
+            active = a
+            try await a.reopen()
+            let baseline = try await serviceMediaProof(generation: a.owner.generation)
+            try #require(baseline.root == originalA.root && baseline.names == originalA.names && baseline.bytes == originalA.bytes)
+            let mediaName = "Synthetic-External-\(UUID().uuidString).bin"
+            let mediaBytes = Data((0..<10240).map { UInt8(truncatingIfNeeded: $0) })
+            try #require(!baseline.names.contains { $0.caseKey == mediaName.lowercased() })
+            let receiptStart = await wire.receipts.count
+            // Simulate Finder in the owned fixture directory. No registration,
+            // trackedNames read or collection edit between this write and Sync Now.
+            try mediaBytes.write(to: baseline.root.appendingPathComponent(mediaName), options: .withoutOverwriting)
+            try await a.exchange()
+            try await a.backend.waitForInstalledMedia(name: mediaName, bytes: mediaBytes, receiptsAfter: receiptStart)
+            await a.sync.waitForInputs()
+            let sent = try await serviceMediaProof(generation: a.owner.generation)
+            let tracked = try #require(sent.names.first { $0.name == mediaName })
+            let receipts = Array(await wire.receipts.dropFirst(receiptStart))
+            try #require(receipts.contains { $0.matchesEntity(kind: 9, key: Data(tracked.caseKey.utf8)) }, "No actual MediaName Saved receipt")
+            let blobs = try receipts.compactMap { try $0.blobBytes() }
+            try #require(blobs.contains(mediaBytes), "No actual MGBlob Saved receipt containing the external file bytes")
+            var expectedBytes = baseline.bytes
+            expectedBytes[mediaName] = mediaBytes
+            try #require(sent.root == baseline.root && sent.names.count == baseline.names.count + 1)
+            try #require(sent.names.filter { $0.name != mediaName } == baseline.names && sent.bytes == expectedBytes)
+            let sentCollection = try await CoreCollectionService().localPublicationInformation(generation: a.owner.generation)
+            try #require(sentCollection.localCounts[.note] == collectionA.localCounts[.note])
+            try #require(sentCollection.localCounts[.revlog] == collectionA.localCounts[.revlog])
+            try #require(sentCollection.lastReviewMilliseconds == collectionA.lastReviewMilliseconds)
+            try #require(await a.owner.close())
+
+            // B keeps its original paths, defaults and tracking. No fresh adoption.
+            // This misses a long-lived native Apple CKSyncEngine and does not
+            // prove real Apple transfer; the Service transport is controlled.
+            active = b
+            try await b.reopen()
+            try await b.exchange()
+            try await b.backend.waitForInstalledMedia(name: mediaName, bytes: mediaBytes)
+            await b.sync.waitForInputs()
+            let received = try await serviceMediaProof(generation: b.owner.generation)
+            try #require(received.root == originalB.root && received.names == sent.names && received.bytes == expectedBytes)
+            try #require(received.bytes[mediaName] == mediaBytes)
+            let receivedCollection = try await CoreCollectionService().localPublicationInformation(generation: b.owner.generation)
+            try #require(receivedCollection.localCounts[.note] == collectionB.localCounts[.note])
+            try #require(receivedCollection.localCounts[.revlog] == collectionB.localCounts[.revlog])
+            try #require(receivedCollection.lastReviewMilliseconds == collectionB.lastReviewMilliseconds)
+            try #require(await b.owner.close())
+            let exit = await process.close()
+            try #require(exit.status == 0 && exit.joined && !exit.unexpectedOutput && !exit.ioFailed)
+            try #require(exit.diagnostics.isEmpty && !exit.diagnosticLimitExceeded)
+        } catch {
+            await active?.cleanup()
+            _ = await process.cancel()
+            throw error
+        }
+    }
+
     @Test func realServiceReviewAndRegisteredMediaSurviveReopenAndFreshAdoption() async throws {
         let fixture = try InitialCloudFixture.load()
         let root = FileManager.default.temporaryDirectory.appending(path: "synthetic-full-app-\(UUID().uuidString)")
