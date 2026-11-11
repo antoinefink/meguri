@@ -101,7 +101,7 @@ def generated(kind):
             upload.append(event("engineCallback", "sdk%d-sent-batch1-%s" % (sdk, phase), True))
             if phase == "committed":
                 upload.append(event("engineCallback", "send1-batch1-entity1-saved", True))
-                upload.append(fact("engineCallback", "send1-batch1-entity1-image-live", 9, engine=True))
+                upload.append(fact("engineCallback", "send1-batch1-entity1-image-live", 9, "1" * 64, engine=True))
         returned, sent_sdk = tick, sdk
         upload.append(event("engineCallback", "send1-batch1-batch-returned", True))
         upload.append(event("applied", "send1-manual-returned", True))
@@ -201,6 +201,17 @@ def admitted(kind, through=6, mutate=None):
 
 
 class SelectedTests(unittest.TestCase):
+    def test_original_ack_requires_its_envelope_digest(self):
+        for digest in (None, "invalid"):
+            def mutate(checks, observations):
+                for item in observations[5]:
+                    if item.get("operation") == "send1-batch1-entity1-image-live":
+                        item.pop("digest")
+                        if digest is not None:
+                            item["digest"] = digest
+            with self.subTest(digest=digest), self.assertRaises(s.v.Refused):
+                admitted("mac", mutate=mutate)
+
     def test_original_incoming_reasons_count_entries_without_collapsing_one_entity(self):
         def waiting(checks, observations):
             for item in checks[4][0]["facts"] + observations[4]:
@@ -461,10 +472,10 @@ class SelectedTests(unittest.TestCase):
                 continue
             group("sdk1-sent-batch1-committed", result)
             if conflict:
-                image = fact("engineCallback", "send1-batch1-entity1-conflict-image-held", 9, engine=True)
+                image = fact("engineCallback", "send1-batch1-entity1-conflict-image-held", 9, "1" * 64, engine=True)
                 evidence.ingest(image)
                 evidence.check_sent_group([fact("engineCallback", "sdk1-sent-batch1-committed", engine=True), image])
-                self.assertEqual(evidence.native_batches["1"]["images"]["1"], (9, True))
+                self.assertEqual(evidence.native_batches["1"]["images"]["1"], (9, True, "1" * 64))
             group("sdk1-sent-batch1-returned", "send1-batch1-batch-returned")
             own = fact("ownedWorkJoined", "own-joined", 0)
             if phase != "delete-error-3":
@@ -631,7 +642,7 @@ class SelectedTests(unittest.TestCase):
             fetched = next(item for item in trace if item["operation"].endswith("-fetched-committed"))
             sdk = fetched["operation"].split("-")[0]
             trace.insert(trace.index(fetched) + 1, fact("engineCallback", sdk + "-fetched-entity1", engine=True))
-            trace.append(fact("applied", sdk + "-own-landed-entity1-held", 9, engine=True))
+            trace.append(fact("applied", sdk + "-own-landed-entity1-held", 9, "1" * 64, engine=True))
             items = [item for item in items if not c.FETCH.fullmatch(item.get("operation", ""))]
             work = next(i for i, item in enumerate(items) if item.get("operation") == "exchange-work")
             observations[4] = items[:work] + trace + items[work:]

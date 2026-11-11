@@ -688,3 +688,27 @@ and source privacy `52467` pass.
 Direct review traced both loaders and the original edit/ACK callers.
 No independent review, full batch gate or signed acceptance ran. The broader
 recovery and real signed round-trip work remains open.
+
+## Original ACK envelope evidence
+
+Starting commit `7dc6e776`. Original SDK image observations now retain the
+actual acknowledged envelope digest with their existing sequence, held flag,
+batch and callback. This covers ordinary Saved, save-conflict acknowledgements
+and own landed saves found by fetch. The Swift recovery reader and host verifier
+require that digest and retain it for the current durable cross-check. Missing
+or malformed digests fail; another process still supplies no original event.
+
+Red run `53799` records three issues: missing digest accepted, malformed digest
+misclassified and a valid digest refused. Final Swift run `62268` passes all 19
+restoration cases. Host selftest `57270` passes four wrappers, including the
+full synthetic selected-transcript suite and its missing/malformed digest cases.
+VM runs `57578` and `60420` each execute one actual producer test with zero skips
+or failures: normal save/reader replay, then conflict and fetched own-save
+digests. Suite-only request `57004` was refused before execution and proves
+nothing. Lint `59006`, static checks `59678`, similarity `59243` and source
+privacy `60873` pass.
+
+Direct review checked exact fact shapes, matching host/Swift fields and actual
+producer inputs. No independent review ran. The current durable ACK-set read,
+source cause, historical close, host relaunch and signed round trip remain open.
+Mac recovered completion remains disabled. No Unit or acceptance is claimed.

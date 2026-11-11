@@ -625,11 +625,14 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
                             let label = "\(send)-\(handed.alias)-\(entity)"
                             s.append(.engineCallback, "\(label)-\(result.label)", engine: engine)
                             if result == .saved, let image = handed.proof?.saveImages.first(where: { $0.name == name }) {
-                                s.facts.append(.init(name: .engineCallback, count: image.imageSeq, engine: engine,
+                                guard let digest = image.envelopeDigest, digest.count == 32 else { throw AgentFailure.execution }
+                                s.facts.append(.init(name: .engineCallback, count: image.imageSeq,
+                                                     digest: CloudKitSmokeGeneratedInput.hex(digest), engine: engine,
                                                      operation: label + (image.held ? "-image-held" : "-image-live")))
                             }
                             if let image = historical.first(where: { $0.name == name }) {
-                                s.facts.append(.init(name: .engineCallback, count: image.imageSeq, engine: engine,
+                                s.facts.append(.init(name: .engineCallback, count: image.imageSeq,
+                                                     digest: CloudKitSmokeGeneratedInput.hex(image.envelopeDigest), engine: engine,
                                                      operation: label + (image.held ? "-conflict-image-held" : "-conflict-image-live")))
                             }
                             handed.open.remove(name)
@@ -663,7 +666,8 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
                 else { throw AgentFailure.execution }
                 let label = "\(callback.alias)-own-landed-\(entity)"
                 guard operations.insert(label).inserted else { throw AgentFailure.execution }
-                return .init(name: .applied, count: image.imageSeq, engine: callback.engine,
+                return .init(name: .applied, count: image.imageSeq,
+                             digest: CloudKitSmokeGeneratedInput.hex(image.envelopeDigest), engine: callback.engine,
                              operation: label + (image.held ? "-held" : "-live"))
             }
         }

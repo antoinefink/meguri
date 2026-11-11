@@ -252,7 +252,7 @@ import Testing
                 [event(.engineCallback, "sdk1-sent-batch1-delivered")],
                 [event(.engineCallback, "sdk1-sent-batch1-committed"),
                  event(.engineCallback, "send1-batch1-entity1-saved"),
-                 .init(name: .engineCallback, count: 9, engine: "engine1",
+                 .init(name: .engineCallback, count: 9, digest: String(repeating: "8", count: 64), engine: "engine1",
                        operation: held ? "send1-batch1-entity1-image-held" : "send1-batch1-entity1-image-live")],
                 [event(.engineCallback, "sdk1-sent-batch1-returned"),
                  event(.engineCallback, "send1-batch1-batch-returned")],
@@ -280,6 +280,30 @@ import Testing
         }
         #expect(throws: AgentFailure.recovery) {
             try AgentSelectedRestoration(state(completed: 4, pending: true, sdkFacts: originalSDKSave()))
+        }
+    }
+
+    @MainActor @Test func originalAcknowledgementRequiresItsExactEnvelopeDigest() throws {
+        let work = [AgentFact(name: .syncResult, operation: "work-selected-acked-entity1")]
+        for digest: String? in [nil, "invalid", String(repeating: "8", count: 64)] {
+            let groups = originalSDKSave().map { group in
+                group.map { fact in
+                    var value = fact
+                    if value.operation == "send1-batch1-entity1-image-live" { value.digest = digest }
+                    return value
+                }
+            }
+            if digest?.count == 64 {
+                let original = try AgentSelectedRestoration(state(completed: 4, pending: true,
+                    sdkFacts: groups, workFacts: work))
+                #expect(original.exchange?.sdk.acknowledgements["entity1"]?.count == 1)
+                #expect(original.exchange?.sdk.acknowledgements["entity1"]?.first?.envelopeDigest == digest)
+            } else {
+                #expect(throws: AgentFailure.recovery) {
+                    try AgentSelectedRestoration(state(completed: 4, pending: true,
+                        sdkFacts: groups, workFacts: work))
+                }
+            }
         }
     }
     @MainActor private func retick(_ groups: [[AgentFact]]) -> [[AgentFact]] {
@@ -351,11 +375,12 @@ import Testing
             [.init(name: .engineCallback, count: 3, engine: "engine1", operation: "sdk1-fetched-committed"),
              .init(name: .engineCallback, engine: "engine1", operation: "sdk1-fetched-entity1")],
             [.init(name: .engineCallback, count: 4, engine: "engine1", operation: "sdk1-fetched-returned")],
-            [.init(name: .applied, count: 9, engine: "engine1", operation: "sdk1-own-landed-entity1-live")]]
+            [.init(name: .applied, count: 9, digest: String(repeating: "8", count: 64), engine: "engine1", operation: "sdk1-own-landed-entity1-live")]]
         let work = [AgentFact(name: .syncResult, operation: "work-selected-acked-entity1")]
         let original = try AgentSelectedRestoration(state(completed: 4, pending: true, sdkFacts: groups, workFacts: work))
         let image = try #require(original.exchange?.sdk.acknowledgements["entity1"]?.first)
         #expect(image.callback == "sdk1" && image.batch == nil && image.seq == 9 && !image.held)
+        #expect(image.envelopeDigest == String(repeating: "8", count: 64))
         for label in ["sdk1-fetched-entity1", "sdk1-fetched-returned"] {
             #expect(throws: AgentFailure.recovery) {
                 try AgentSelectedRestoration(state(completed: 4, pending: true,

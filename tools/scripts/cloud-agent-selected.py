@@ -222,13 +222,14 @@ class Evidence(s.SmokeEvidence):
         image = SAVED_IMAGE.fullmatch(operation)
         if image:
             send, batch, entity, conflict, held = image.groups()
-            s.evidence_shape(item, "engineCallback", engine=True)
+            s.fact(item)
+            s.evidence_shape(item, "engineCallback", engine=True, digest=True)
             info = self.native_batches.get(batch)
             expected = (f"save-error-{SERVER_RECORD_CHANGED}", self.position, SERVER_RECORD_CHANGED) if conflict else ("saved", self.position, None)
             need(info is not None and info["send"] == send and info["engine"] == item["engine"] and
                  info["results"].get(entity) == expected and entity not in info["images"],
                  "selected-saved-image")
-            info["images"][entity] = (item["count"], held == "held")
+            info["images"][entity] = (item["count"], held == "held", item["digest"])
             return True
         member = FETCHED_MEMBER.fullmatch(operation)
         landed = OWN_LANDED.fullmatch(operation)
@@ -243,10 +244,10 @@ class Evidence(s.SmokeEvidence):
                 need(len(callback[2]) == 2 and key not in self.fetched_members, "selected-fetched-member")
                 self.fetched_members[key] = self.position
             else:
-                exact(item, "applied", ("count", "engine", "operation"))
+                exact(item, "applied", ("count", "digest", "engine", "operation"))
                 need(len(callback[2]) == 3 and self.fetched_members.get(key, self.position) < self.position and
                      key not in self.landed, "selected-own-landed")
-                self.landed[key] = (item["count"], landed[3] == "held")
+                self.landed[key] = (item["count"], landed[3] == "held", item["digest"])
                 self.landed_positions[key] = self.position
             return True
         native = SEND.fullmatch(operation)
@@ -672,7 +673,7 @@ class Journal(s.Journal):
                 if result and image and capture["record_seq"] < result[1] < terminal["record_seq"] and image[0] >= boundary["count"]:
                     need(evidence.reflected_after_result(batch, key), "engine_order_not_shown")
                     images.append(image[1])
-            images.extend(held for key, (seq, held) in evidence.landed.items()
+            images.extend(held for key, (seq, held, _digest) in evidence.landed.items()
                           if "entity" + key[1] == entity and seq >= boundary["count"] and
                           capture["record_seq"] < evidence.landed_positions[key] < terminal["record_seq"])
             if images:

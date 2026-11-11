@@ -249,6 +249,7 @@ import Testing
         let original = try #require(result.acknowledgements["entity1"]?.first)
         #expect(original.engine == "engine1" && original.callback == "sdk1" && original.batch == "batch1")
         #expect(original.seq == 9 && !original.held)
+        #expect(original.envelopeDigest == CloudKitSmokeGeneratedInput.hex(Data(SHA256.hash(data: record.envelope))))
         #expect(evidence.drain().isEmpty)
     }
     @Test func originalConflictAndFetchKeepTheirHistoricalImage() throws {
@@ -268,7 +269,8 @@ import Testing
         conflict.sdk(.init(origin: origin, ordinal: 1, event: sent, phase: .delivered), current: current())
         conflict.sdk(.init(origin: origin, ordinal: 1, event: sent, phase: .committed), current: current(), historical: [original])
         try conflict.check()
-        #expect(conflict.drain().last == .init(name: .engineCallback, count: 9, engine: "engine1",
+        #expect(conflict.drain().last == .init(name: .engineCallback, count: 9,
+                                               digest: CloudKitSmokeGeneratedInput.hex(original.envelopeDigest), engine: "engine1",
                                                operation: "send1-batch1-entity1-conflict-image-held"))
 
         let fetched = try ledger(selected: true)
@@ -281,7 +283,8 @@ import Testing
         #expect(throws: AgentFailure.execution) { try fetched.fetchedAcknowledgementFacts([original]) }
         fetched.sdk(.init(origin: origin, ordinal: 1, event: page, phase: .returned), current: current())
         #expect(try fetched.fetchedAcknowledgementFacts([original]) ==
-                [.init(name: .applied, count: 9, engine: "engine1", operation: "sdk1-own-landed-entity1-held")])
+                [.init(name: .applied, count: 9, digest: CloudKitSmokeGeneratedInput.hex(original.envelopeDigest), engine: "engine1",
+                       operation: "sdk1-own-landed-entity1-held")])
     }
     @Test func originalOwnAttemptRequiresPrepareEnqueueReplyThenCommit() throws {
         let identity = UUID()

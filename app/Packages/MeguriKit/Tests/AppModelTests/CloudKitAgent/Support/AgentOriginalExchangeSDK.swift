@@ -11,6 +11,7 @@ nonisolated struct AgentOriginalExchangeSDK {
         let record: Int
         let seq: UInt64
         let held: Bool
+        let envelopeDigest: String
     }
     let acknowledgements: [String: [Image]]
 
@@ -120,6 +121,12 @@ nonisolated struct AgentOriginalExchangeSDK {
             else { throw AgentFailure.engineOrderNotShown }
             return engine
         }
+        private func imageShape(_ fact: AgentFact, name: AgentFact.Name) throws -> (String, String) {
+            guard let digest = fact.digest, AgentJSON.digest(digest) else { throw AgentFailure.recovery }
+            var metadata = fact
+            metadata.digest = nil
+            return (try shape(metadata, name: name, timed: false), digest)
+        }
         private mutating func advance(_ fact: AgentFact, name: AgentFact.Name) throws -> String {
             let engine = try shape(fact, name: name)
             guard engines.contains(engine), let count = fact.count else { throw AgentFailure.engineOrderNotShown }
@@ -206,7 +213,7 @@ nonisolated struct AgentOriginalExchangeSDK {
                 else { throw AgentFailure.engineOrderNotShown }
                 batch.members[entity] = saving; batch.open.insert(entity); batches[key] = batch
             } else if kind.hasPrefix("image-") || kind.hasPrefix("conflict-image-") {
-                let engine = try shape(fact, name: .engineCallback, timed: false)
+                let (engine, digest) = try imageShape(fact, name: .engineCallback)
                 let conflict = kind.hasPrefix("conflict-"), flag = parts.last
                 guard flag == "held" || flag == "live", kind == (conflict ? "conflict-image-" : "image-") + (flag ?? ""),
                       let seq = fact.count, engine == batch.engine,
@@ -215,7 +222,7 @@ nonisolated struct AgentOriginalExchangeSDK {
                       !images.contains(where: { $0.batch == key && $0.entity == entity })
                 else { throw AgentFailure.recovery }
                 images.append(.init(entity: entity, engine: engine, callback: callback, batch: key, record: record,
-                                    seq: seq, held: flag == "held"))
+                                    seq: seq, held: flag == "held", envelopeDigest: digest))
             } else {
                 let engine = try advance(fact, name: .engineCallback)
                 let saving = kind == "saved" || kind.hasPrefix("save-error-")
@@ -244,7 +251,7 @@ nonisolated struct AgentOriginalExchangeSDK {
                 return
             }
             if parts.count == 5, parts[1...2] == ["own", "landed"] {
-                let engine = try shape(fact, name: .applied, timed: false)
+                let (engine, digest) = try imageShape(fact, name: .applied)
                 guard Self.numbered(parts[3], "entity"), let seq = fact.count, parts[4] == "held" || parts[4] == "live",
                       let callback = callbacks[key], callback.engine == engine, callback.event == "fetched",
                       callback.phases.count == 3, let returned = callback.phases.last, returned.record < record,
@@ -252,7 +259,7 @@ nonisolated struct AgentOriginalExchangeSDK {
                       !images.contains(where: { $0.callback == key && $0.entity == parts[3] })
                 else { throw AgentFailure.recovery }
                 images.append(.init(entity: parts[3], engine: engine, callback: key, batch: nil,
-                                    record: record, seq: seq, held: parts[4] == "held"))
+                                    record: record, seq: seq, held: parts[4] == "held", envelopeDigest: digest))
                 return
             }
             guard let phase = parts.last, ["delivered", "committed", "returned"].contains(phase)
