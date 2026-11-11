@@ -467,3 +467,61 @@ This is original pending-work and media evidence only. Incoming-entry and
 other selected-entity outcomes, full journal recomputation, the signed round
 trip and the full gate remain open. The approved account source is still
 absent on this host. No account value was read, and setup was not rerun.
+
+## Original outcomes and deletion before upload
+
+Starting commit `8d557ca6`. The completion snapshot now retains original
+incoming-entry reasons and selected-name outcomes for the signed test path.
+Each incoming entry keeps its ordinal, so two entries for one record remain
+two entries. Release builds do not collect the extra named accounting. The
+test-only reader requires the same issued command and original completion;
+older rows without this accounting refuse the read.
+
+The regression exposed a product defect: a note and card created, selected,
+then deleted before handoff left the exchange incomplete. Tracking had
+correctly dropped both unsent rows, but the active exchange did not learn
+that they were done. The observer now reports those drops only after its
+tracking transaction commits. They satisfy only the captured revisions and
+never create an acknowledgement. Undo restores newer pending work without
+undoing that original completion. Run `93560` reproduces the incomplete
+result; run `94247` passes the deletion, undo, clean-selection and incoming
+checks after the fix.
+
+The journal producer checks an exact, disjoint selected-name partition and
+emits only opaque entity labels and closed reason values. The host checks
+that partition, the original incoming counts, qualifying original ACK images,
+their held flags and original state-save ordering. It rejects a claimed ACK
+without its original result, and a clean classification hiding such an ACK.
+Terminal-absence claims require the original unknown-item result. This is
+additional evidence checking, not the full interrupted-command replay.
+
+Broad run `95035` found an older tombstone test expecting unchanged observer
+stamps after a verified reopen scan. Baseline run `96892`, at the starting
+commit, reproduces the same failure. The assertion now checks the real scan's
+certified stamps while preserving exact equality of every other tracking
+field. Its pre-scan equality assertions are unchanged. The first baseline
+build (`96477`) lacked spec data and supplies no test evidence.
+
+The comparison build reused the main Cargo cache and replaced its executable
+files. Some Cargo metadata still appeared fresh, so run `97257` does not prove
+the current source. After removing the finished copy and advancing source
+timestamps, a fresh build in run `98121` passes all 43 selected Rust tests,
+including both new tests by name. Source-copy checks need a separate target
+directory; tools/AGENTS.md records this.
+
+Swift run `98819` passes both real publication and reopen checks. Core lint
+`99932`, verifier selftest `3098` (four harness cases), static checks `3583`
+and similarity `4002` (implementation) and `6485` (tools) pass. VM-hosted run `4641` executes the
+producer test once with zero skips and failures. Selftest `98521` identified
+two fixture/parser issues: a moved state-save fixture shifted non-tick facts,
+and a missing work marker received the wrong refusal category. Both are
+corrected with their assertions retained. Restricted selftest `1975` reached
+no Docker tests; restricted hosted run `1495` was stopped in preflight and
+ran no tests. Their host-access runs above provide the actual evidence.
+
+Direct review covered transaction ordering, captured revisions, outcome
+precedence, legacy decoding, build-feature scope, original command ownership,
+opaque labels and matching SDK evidence. No independent agent review ran,
+following Antoine's instruction to work in this session. The full recovery
+implementation, signed round trip and full batch gate remain open. No Unit
+trailer or current signed acceptance is claimed.

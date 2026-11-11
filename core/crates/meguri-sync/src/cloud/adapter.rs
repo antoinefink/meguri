@@ -38,6 +38,8 @@ pub struct CompletedExchange {
     pub incoming: Option<ExchangeIncoming>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub work: Option<ExchangeWork>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accounting: Option<ExchangeAccounting>,
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExchangeIncoming {
@@ -50,6 +52,39 @@ pub struct ExchangeWork {
     pub held_pending_names: BTreeSet<String>,
     pub pending_unheld_names: BTreeSet<String>,
     pub media: super::policy::MediaFacts,
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExchangeAccounting {
+    pub clean_names: BTreeSet<String>,
+    pub incoming: Vec<ExchangeIncomingEntry>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExchangeIncomingEntry {
+    pub record_name: String,
+    pub reason: ExchangeIncomingReason,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ExchangeIncomingReason {
+    Ready,
+    Generation,
+    Reference,
+    Structure,
+    Format,
+    Asset,
+    ApplyFailed,
+}
+impl From<&InboxReason> for ExchangeIncomingReason {
+    fn from(reason: &InboxReason) -> Self {
+        match reason {
+            InboxReason::Ready => Self::Ready,
+            InboxReason::Generation => Self::Generation,
+            InboxReason::Reference => Self::Reference,
+            InboxReason::Structure => Self::Structure,
+            InboxReason::Format => Self::Format,
+            InboxReason::Asset => Self::Asset,
+            InboxReason::ApplyFailed { .. } => Self::ApplyFailed,
+        }
+    }
 }
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default)]

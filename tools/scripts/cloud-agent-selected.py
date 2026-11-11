@@ -33,6 +33,7 @@ DELETE_COUNT = re.compile(r"batch([1-9][0-9]*)-delete-count")
 # Public CKError.Code values kept in the engine's pending list.
 KEPT_CODES = {3, 4, 6, 7, 9, 23, 36}
 SERVER_RECORD_CHANGED = 14
+UNKNOWN_ITEM = 11
 SENT_PHASE = re.compile(r"sdk[1-9][0-9]*-sent-batch([1-9][0-9]*)-(committed|returned)")
 SAVED_IMAGE = re.compile(r"send([1-9][0-9]*)-batch([1-9][0-9]*)-entity([1-9][0-9]*)-(?:(conflict)-)?image-(held|live)")
 FETCHED_MEMBER = re.compile(r"sdk([1-9][0-9]*)-fetched-entity([1-9][0-9]*)")
@@ -41,6 +42,8 @@ PENDING = re.compile(r"entity([1-9][0-9]*)-(added|removed-held|removed-absent)")
 STATE_BATCHES = re.compile(r"sdk([1-9][0-9]*)-state-batches")
 CAPTURE_MEMBER = re.compile(r"exchange-selected-entity[1-9][0-9]*")
 WORK_MEMBER = re.compile(r"work-(held-pending|held-acked|pending-unheld)-(entity[1-9][0-9]*)")
+WORK_OUTCOME = re.compile(r"work-selected-(acked|clean|dropped|absent|blocked|outstanding)-(entity[1-9][0-9]*)")
+WORK_INCOMING = re.compile(r"work-incoming([1-9][0-9]*)-(entity[1-9][0-9]*)-(ready|generation|reference|structure|format|asset|apply-failed)")
 PENDING_READ = re.compile(r"sdk([1-9][0-9]*)-entity([1-9][0-9]*)-read-(held|absent)")
 REFLECTED = re.compile(r"sdk([1-9][0-9]*)-send([1-9][0-9]*)-batch([1-9][0-9]*)-"
                        r"entity([1-9][0-9]*)-reflected-(held|absent)")
@@ -149,7 +152,8 @@ def pending_fact(label):
 
 
 def work_fact(label):
-    return label == "exchange-work" or label in WORK_MEDIA or bool(WORK_MEMBER.fullmatch(label))
+    return label == "exchange-work" or label in WORK_MEDIA or bool(
+        WORK_MEMBER.fullmatch(label) or WORK_OUTCOME.fullmatch(label) or WORK_INCOMING.fullmatch(label))
 
 
 def state_batch_fact(label):
@@ -174,6 +178,7 @@ class Evidence(s.SmokeEvidence):
         self.position = 0
         self.fetched_members = {}
         self.landed = {}
+        self.landed_positions = {}
 
     @staticmethod
     def trace(item):
@@ -242,6 +247,7 @@ class Evidence(s.SmokeEvidence):
                 need(len(callback[2]) == 3 and self.fetched_members.get(key, self.position) < self.position and
                      key not in self.landed, "selected-own-landed")
                 self.landed[key] = (item["count"], landed[3] == "held")
+                self.landed_positions[key] = self.position
             return True
         native = SEND.fullmatch(operation)
         if native is not None:
@@ -566,7 +572,7 @@ class Journal(s.Journal):
                     need(len(issued) == 1, "selected-exchange-issuance")
                     exact(issued[0], "syncResult", ("count", "digest"), operation="original-exchange-issued")
                     need(issued[0]["count"] == facts[0]["count"], "selected-exchange-issuance")
-                    expected[1:1] = [issued[0], *self.exchange_journal(number, facts, ends[number], issued[0])]
+                    expected[1:1] = [issued[0], *self.exchange_journal(number, facts, ends[number], issued[0], evidence)]
                 elif self.kind == "iphone" and number == 5:
                     need(len(facts) == 2, "selected-peer")
                     exact(facts[0], "localDurable", ("count", "digest"), operation="n1")
@@ -584,7 +590,7 @@ class Journal(s.Journal):
             completed[number] = facts
         return completed
 
-    def exchange_journal(self, number, facts, end, issued):
+    def exchange_journal(self, number, facts, end, issued, evidence):
         records = [record for record in self.records if record["kind"] == "observation" and
                    record["command_seq"] == number and record["record_seq"] < end]
         result_rows = [record for record in records if any(item.get("operation") in TERMINAL_LABELS for item in record["facts"])]
@@ -619,25 +625,67 @@ class Journal(s.Journal):
         work = work_rows[0]
         need(capture["record_seq"] < work["record_seq"] < terminal["record_seq"] and
              work["agent_instance"] == source["agent_instance"] and work["facts"], "selected-exchange-work")
+        need(work["facts"][0].get("operation") == "exchange-work", "selected-exchange-work")
         exact(work["facts"][0], "syncResult", count=issued["count"], operation="exchange-work")
         members = {kind: set() for kind in ("held-pending", "held-acked", "pending-unheld")}
+        outcomes = {kind: set() for kind in ("acked", "clean", "dropped", "absent", "blocked", "outstanding")}
+        incoming = []
         media = {}
         for label, item in unique(work["facts"][1:]).items():
             member = WORK_MEMBER.fullmatch(label)
+            outcome = WORK_OUTCOME.fullmatch(label)
+            entry = WORK_INCOMING.fullmatch(label)
             if member:
                 exact(item, "syncResult", operation=label)
                 members[member[1]].add(member[2])
+            elif outcome:
+                exact(item, "syncResult", operation=label)
+                outcomes[outcome[1]].add(outcome[2])
+            elif entry:
+                exact(item, "syncResult", operation=label)
+                need(int(entry[1]) == len(incoming) + 1, "selected-exchange-incoming")
+                incoming.append(entry[3])
             else:
                 need(label in WORK_MEDIA, "selected-exchange-work")
                 exact(item, "syncResult", ("count",), operation=label)
                 media[label.removeprefix("work-")] = item["count"]
         reported = unique(facts)
+        selected_names = {name.removeprefix("exchange-selected-") for name in selected}
+        need(set().union(*outcomes.values()) == selected_names and
+             sum(map(len, outcomes.values())) == len(selected_names) and
+             not outcomes["blocked"] and not outcomes["outstanding"], "selected-exchange-outcomes")
+        need(all(reason in {"generation", "reference", "structure"} for reason in incoming) and
+             len(incoming) == reported["incoming-waiting"]["count"], "selected-exchange-incoming")
         need(members["held-pending"].isdisjoint(members["pending-unheld"]) and
-             members["held-acked"] <= {name.removeprefix("exchange-selected-") for name in selected} and
+             members["held-acked"] <= outcomes["acked"] and
              len(members["held-pending"] | members["held-acked"]) == reported["held-back"]["count"] and
              len(members["pending-unheld"]) == reported["newer-pending"]["count"] and
              media == {label: item["count"] for label, item in reported.items() if label in MEDIA},
              "selected-exchange-work-accounting")
+        acknowledged = set()
+        for entity in selected_names:
+            images = []
+            key = entity.removeprefix("entity")
+            for batch, info in evidence.native_batches.items():
+                result = info["results"].get(key)
+                image = info["images"].get(key)
+                if result and image and capture["record_seq"] < result[1] < terminal["record_seq"] and image[0] >= boundary["count"]:
+                    need(evidence.reflected_after_result(batch, key), "engine_order_not_shown")
+                    images.append(image[1])
+            images.extend(held for key, (seq, held) in evidence.landed.items()
+                          if "entity" + key[1] == entity and seq >= boundary["count"] and
+                          capture["record_seq"] < evidence.landed_positions[key] < terminal["record_seq"])
+            if images:
+                acknowledged.add(entity)
+                need(all(images) == (entity in members["held-acked"]), "selected-exchange-ack-proof")
+        need(acknowledged == outcomes["acked"], "selected-exchange-ack-proof")
+        for entity in outcomes["absent"]:
+            key = entity.removeprefix("entity")
+            results = [(batch, info["results"].get(key)) for batch, info in evidence.native_batches.items()]
+            valid = [(batch, result) for batch, result in results if result and result[0] == f"save-error-{UNKNOWN_ITEM}" and
+                     capture["record_seq"] < result[1] < terminal["record_seq"]]
+            need(valid, "selected-exchange-absence-proof")
+            need(all(evidence.reflected_after_result(batch, key) for batch, _ in valid), "engine_order_not_shown")
         return capture["facts"] + work["facts"] + group
 
     def control(self, facts, evidence):

@@ -5,9 +5,9 @@ mod driver;
 mod status;
 mod transition;
 mod types;
-#[cfg(feature = "test-hooks")]
-pub use driver::ExchangeObservation;
 pub use driver::{Command, DeviceEvent, Driver, DriverError, PolicyWork};
+#[cfg(feature = "test-hooks")]
+pub use driver::{ExchangeObservation, OriginalExchangeWork};
 pub use transition::step;
 pub use types::*;
 

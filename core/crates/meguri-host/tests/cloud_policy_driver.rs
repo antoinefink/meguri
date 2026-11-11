@@ -768,9 +768,10 @@ fn completed_exchange_keeps_original_pending_and_media_work_after_later_edits() 
         let ActionKind::RecordExchange(record) = &action.action.kind else {
             unreachable!()
         };
-        let (original_work, original_held) = driver.original_exchange_work_for_testing(&action).unwrap();
-        assert_eq!(&original_work, frozen);
-        assert_eq!(original_held, completed.result.held_back_names);
+        let original = driver.original_exchange_work_for_testing(&action).unwrap();
+        assert_eq!(&original.work, frozen);
+        assert_eq!(original.result, completed.result);
+        assert_eq!(original.accounting, completed.accounting.clone().unwrap());
         assert!(driver.original_exchange_work_for_testing(&run).is_err());
         let mut invalid = action.clone();
         let ActionKind::RecordExchange(invalid_record) = &mut invalid.action.kind else {
@@ -804,10 +805,167 @@ fn completed_exchange_keeps_original_pending_and_media_work_after_later_edits() 
 }
 
 #[test]
+fn exchange_finishes_when_selected_new_note_and_card_are_deleted_before_handoff() {
+    use meguri_sync::cloud::adapter::CollectionOutcome;
+    for restore in [false, true] {
+        let rig = rig_with_root(false);
+        fetch_first_root(&rig);
+        let collection = rig.host.collection().unwrap();
+        let runtime = rig.host.cloud_runtime().unwrap();
+        let driver = rig.host.cloud_policy_driver().unwrap();
+        let notetype = rig
+            .records
+            .iter()
+            .find_map(|saved| {
+                let codec::DecodeOutcome::Supported(entity) = codec::Entity::decode(&saved.envelope).ok()? else {
+                    return None;
+                };
+                match Payload::decode(entity.fields.kind, entity.payload.as_deref()?).ok()? {
+                    Payload::Notetype(value) => Some(meguri_model::ids::NotetypeId(value.id)),
+                    _ => None,
+                }
+            })
+            .unwrap();
+        let added = meguri_engine::notes::add(
+            &collection,
+            meguri_engine::notes::AddNote {
+                notetype_id: notetype,
+                fields: vec!["Created during a manual test".into(), "Public answer".into()],
+                tags: Vec::new(),
+                deck_id: rig.baseline_deck,
+                guid: None,
+                update_add_defaults: false,
+            },
+            meguri_engine::OpSource::UserUndoable,
+        )
+        .unwrap()
+        .value;
+        assert_eq!(added.cards.len(), 1);
+        let run = command(
+            rig.host
+                .cloud_policy_input(DeviceEvent::SyncNowRequested(Source::Command))
+                .unwrap(),
+            |kind| matches!(kind, ActionKind::RunExchange { .. }),
+        );
+        let native = driver.capture_exchange(&run, &collection).unwrap();
+        let selected = runtime.exchange_result(native).unwrap().selected_names;
+        fetch_first_root(&rig);
+        let new_rows = selected
+            .iter()
+            .filter(|name| {
+                matches!(
+                    runtime.entity_facts(name).unwrap().unwrap().kind,
+                    codec::Kind::Note | codec::Kind::Card
+                )
+            })
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(new_rows.len(), 2);
+        let other = selected
+            .difference(&new_rows)
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(other.len(), 1);
+        for name in &other {
+            assert_eq!(runtime.entity_facts(name).unwrap().unwrap().kind, codec::Kind::Config);
+        }
+        for name in &new_rows {
+            let entity = runtime.entity_facts(name).unwrap().unwrap();
+            assert!(!entity.sent && entity.server_erev == 0 && entity.in_flight.is_empty());
+        }
+        meguri_engine::notes::delete(&collection, vec![added.id], meguri_engine::OpSource::UserUndoable)
+            .unwrap()
+            .unwrap();
+        for name in &new_rows {
+            assert!(runtime.entity_facts(name).unwrap().is_none());
+        }
+        // Note creation also updates an ordinary config key. Sync that selected
+        // work normally without ever handing the deleted note or card to the SDK.
+        let call = runtime.start_manual_send_call(&rig.sdk).unwrap().unwrap();
+        let batch = runtime.build_collection_batch(&rig.sdk, &collection, &other).unwrap();
+        assert_eq!(batch.saves.len(), other.len());
+        let saved = batch
+            .saves
+            .into_iter()
+            .map(|record| Saved {
+                name: record.name,
+                envelope: record.envelope,
+                system_fields: b"synthetic-config-save".to_vec(),
+            })
+            .collect::<Vec<_>>();
+        runtime.enter_sent_handler(&rig.sdk, batch.id).unwrap();
+        runtime
+            .sent_results(&rig.sdk, &collection, batch.id, &saved, &[], 1)
+            .unwrap();
+        runtime.return_sent_handler(&rig.sdk).unwrap();
+        runtime.finish_send_call(&rig.sdk, call.id).unwrap();
+        if restore {
+            collection.undo(meguri_engine::undo::UndoScope::Global).unwrap();
+            for name in &new_rows {
+                assert!(runtime.entity_facts(name).unwrap().is_some());
+            }
+        }
+        let completed = runtime.adapter_complete_exchange(&rig.sdk, native, true, None).unwrap();
+        assert_eq!(completed.result.acked_names, other);
+        assert!(completed.result.acked_names.is_disjoint(&new_rows));
+        assert_eq!(completed.result.dropped_names, new_rows);
+        assert!(completed.result.absent_names.is_empty());
+        assert_eq!(completed.collection, CollectionOutcome::Succeeded);
+        assert!(completed.result.outstanding_names.is_empty());
+        let work = completed.work.as_ref().unwrap();
+        assert_eq!(
+            work.pending_unheld_names.intersection(&new_rows).count(),
+            if restore { 2 } else { 0 }
+        );
+        let accounting = completed.accounting.as_ref().unwrap();
+        assert!(accounting.clean_names.is_empty() && accounting.incoming.is_empty());
+        rig.host.close().unwrap();
+    }
+}
+
+#[test]
+fn exchange_records_clean_selected_entities_without_claiming_a_new_ack() {
+    use meguri_sync::cloud::adapter::{CollectionOutcome, CompletedExchange};
+    let rig = rig();
+    let collection = rig.host.collection().unwrap();
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let driver = rig.host.cloud_policy_driver().unwrap();
+    meguri_engine::decks::rename(&collection, rig.baseline_deck, "Temporary local name".into()).unwrap();
+    let run = command(
+        rig.host
+            .cloud_policy_input(DeviceEvent::SyncNowRequested(Source::Command))
+            .unwrap(),
+        |kind| matches!(kind, ActionKind::RunExchange { .. }),
+    );
+    let native = driver.capture_exchange(&run, &collection).unwrap();
+    let selected = runtime.exchange_result(native).unwrap().selected_names;
+    assert_eq!(selected.len(), 1);
+    collection.undo(meguri_engine::undo::UndoScope::Global).unwrap();
+    for name in &selected {
+        let entity = runtime.entity_facts(name).unwrap().unwrap();
+        assert!(entity.mark.is_none() && entity.server_erev > 0 && entity.in_flight.is_empty());
+    }
+    let completed = runtime.adapter_complete_exchange(&rig.sdk, native, true, None).unwrap();
+    assert_eq!(completed.collection, CollectionOutcome::Succeeded);
+    assert!(completed.result.acked_names.is_empty() && completed.result.dropped_names.is_empty());
+    assert!(completed.result.outstanding_names.is_empty());
+    assert_eq!(completed.accounting.as_ref().unwrap().clean_names, selected);
+    let mut legacy = serde_json::to_value(&completed).unwrap();
+    legacy.as_object_mut().unwrap().remove("accounting");
+    assert_eq!(
+        serde_json::from_value::<CompletedExchange>(legacy).unwrap().accounting,
+        None
+    );
+    rig.host.close().unwrap();
+}
+
+#[test]
 fn exchange_incoming_reasons_keep_their_original_accounting_after_completion() {
     use meguri_sync::cloud::{
         ApplyFailure, InboxReason,
-        adapter::{CollectionOutcome, CompletedExchange, ExchangeIncoming},
+        adapter::{
+            CollectionOutcome, CompletedExchange, ExchangeIncoming, ExchangeIncomingEntry, ExchangeIncomingReason,
+        },
     };
     let reasons = [
         (InboxReason::Ready, false, 1, 0, 0),
@@ -860,6 +1018,13 @@ fn exchange_incoming_reasons_keep_their_original_accounting_after_completion() {
             .unwrap();
         let completed = runtime.adapter_complete_exchange(&rig.sdk, native, true, None).unwrap();
         assert!(completed.result.selected_names.is_empty());
+        assert_eq!(
+            completed.accounting.as_ref().unwrap().incoming,
+            vec![ExchangeIncomingEntry {
+                record_name: entries[0].entry.record_name.clone(),
+                reason: ExchangeIncomingReason::from(&reason),
+            }]
+        );
         assert_eq!(
             completed.incoming,
             Some(ExchangeIncoming {

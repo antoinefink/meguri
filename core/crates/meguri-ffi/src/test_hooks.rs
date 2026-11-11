@@ -1042,6 +1042,45 @@ pub struct CloudOriginalExchangeWork {
     pub held_acked_names: Vec<String>,
     pub pending_unheld_names: Vec<String>,
     pub media: crate::cloud_policy::CloudPolicyMediaFacts,
+    pub acked_names: Vec<String>,
+    pub clean_names: Vec<String>,
+    pub dropped_names: Vec<String>,
+    pub absent_names: Vec<String>,
+    pub blocked_names: Vec<String>,
+    pub outstanding_names: Vec<String>,
+    pub incoming: Vec<CloudOriginalExchangeIncoming>,
+}
+#[derive(uniffi::Record)]
+pub struct CloudOriginalExchangeIncoming {
+    pub record_name: String,
+    pub reason: CloudOriginalIncomingReason,
+}
+#[derive(uniffi::Enum)]
+pub enum CloudOriginalIncomingReason {
+    Ready,
+    Generation,
+    Reference,
+    Structure,
+    Format,
+    Asset,
+    ApplyFailed,
+}
+impl From<meguri_sync::cloud::adapter::ExchangeIncomingEntry> for CloudOriginalExchangeIncoming {
+    fn from(value: meguri_sync::cloud::adapter::ExchangeIncomingEntry) -> Self {
+        use meguri_sync::cloud::adapter::ExchangeIncomingReason as R;
+        Self {
+            record_name: value.record_name,
+            reason: match value.reason {
+                R::Ready => CloudOriginalIncomingReason::Ready,
+                R::Generation => CloudOriginalIncomingReason::Generation,
+                R::Reference => CloudOriginalIncomingReason::Reference,
+                R::Structure => CloudOriginalIncomingReason::Structure,
+                R::Format => CloudOriginalIncomingReason::Format,
+                R::Asset => CloudOriginalIncomingReason::Asset,
+                R::ApplyFailed => CloudOriginalIncomingReason::ApplyFailed,
+            },
+        }
+    }
 }
 #[uniffi::export]
 pub fn test_cloud_original_exchange_work(

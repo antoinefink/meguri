@@ -34,6 +34,42 @@ public struct OriginalCloudExchangeWork: Sendable {
     public let heldAcknowledgedNames: [String]
     public let pendingUnheldNames: [String]
     public let media: CloudPolicyMediaFacts
+    public let acknowledgedNames: [String]
+    public let cleanNames: [String]
+    public let droppedNames: [String]
+    public let absentNames: [String]
+    public let blockedNames: [String]
+    public let outstandingNames: [String]
+    public let incoming: [OriginalCloudExchangeIncoming]
+    init(heldPendingNames: [String], heldAcknowledgedNames: [String], pendingUnheldNames: [String],
+         media: CloudPolicyMediaFacts, acknowledgedNames: [String] = [], cleanNames: [String] = [],
+         droppedNames: [String] = [], absentNames: [String] = [], blockedNames: [String] = [],
+         outstandingNames: [String] = [], incoming: [OriginalCloudExchangeIncoming] = []) {
+        self.heldPendingNames = heldPendingNames; self.heldAcknowledgedNames = heldAcknowledgedNames
+        self.pendingUnheldNames = pendingUnheldNames; self.media = media
+        self.acknowledgedNames = acknowledgedNames; self.cleanNames = cleanNames; self.droppedNames = droppedNames
+        self.absentNames = absentNames; self.blockedNames = blockedNames; self.outstandingNames = outstandingNames
+        self.incoming = incoming
+    }
+}
+public struct OriginalCloudExchangeIncoming: Sendable {
+    public let recordName: String
+    public let reason: OriginalCloudIncomingReason
+}
+public enum OriginalCloudIncomingReason: String, Sendable {
+    case ready, generation, reference, structure, format, asset
+    case applyFailed = "apply-failed"
+    init(_ reason: MeguriCoreBindings.CloudOriginalIncomingReason) {
+        self = switch reason {
+        case .ready: .ready
+        case .generation: .generation
+        case .reference: .reference
+        case .structure: .structure
+        case .format: .format
+        case .asset: .asset
+        case .applyFailed: .applyFailed
+        }
+    }
 }
 public actor SelectedCloudRestorationInspection {
     public init() {}
@@ -67,7 +103,10 @@ public actor SelectedCloudRestorationInspection {
         try await QueryLane.shared.call(.testCloudOriginalExchangeWork) {
             let work = try MeguriCoreBindings.testCloudOriginalExchangeWork(command: command.raw)
             return .init(heldPendingNames: work.heldPendingNames, heldAcknowledgedNames: work.heldAckedNames,
-                         pendingUnheldNames: work.pendingUnheldNames, media: .init(work.media))
+                         pendingUnheldNames: work.pendingUnheldNames, media: .init(work.media),
+                         acknowledgedNames: work.ackedNames, cleanNames: work.cleanNames, droppedNames: work.droppedNames,
+                         absentNames: work.absentNames, blockedNames: work.blockedNames, outstandingNames: work.outstandingNames,
+                         incoming: work.incoming.map { .init(recordName: $0.recordName, reason: .init($0.reason)) })
         }
     }
     public func readOriginalExchange(exchange: UInt64, witness: Data) async throws -> CloudPolicyExchangeRecord {

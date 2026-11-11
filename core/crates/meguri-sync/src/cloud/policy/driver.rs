@@ -342,6 +342,12 @@ pub struct ExchangeObservation {
     pub completed_ids: Vec<u64>,
     pub active_id: Option<u64>,
 }
+#[cfg(feature = "test-hooks")]
+pub struct OriginalExchangeWork {
+    pub work: crate::cloud::adapter::ExchangeWork,
+    pub result: crate::cloud::workflow::ExchangeResult,
+    pub accounting: crate::cloud::adapter::ExchangeAccounting,
+}
 impl Driver {
     /// Retained opening/generation only: completed commands may have old tokens.
     #[cfg(feature = "test-hooks")]
@@ -399,10 +405,7 @@ impl Driver {
         Ok(self.runtime.exchange_capture_for_testing(sdk, runtime_exchange)?)
     }
     #[cfg(feature = "test-hooks")]
-    pub fn original_exchange_work_for_testing(
-        &self,
-        command: &Command,
-    ) -> Result<(crate::cloud::adapter::ExchangeWork, std::collections::BTreeSet<String>), DriverError> {
+    pub fn original_exchange_work_for_testing(&self, command: &Command) -> Result<OriginalExchangeWork, DriverError> {
         let owned = self.lock_owned();
         self.validate_locked(&owned, command)?;
         let ActionKind::RecordExchange(record) = &command.action.kind else {
@@ -423,7 +426,12 @@ impl Driver {
             return Err(DriverError::UnqualifiedCompletion);
         }
         let work = completed.work.ok_or(DriverError::UnqualifiedCompletion)?;
-        Ok((work, completed.result.held_back_names))
+        let accounting = completed.accounting.ok_or(DriverError::UnqualifiedCompletion)?;
+        Ok(OriginalExchangeWork {
+            work,
+            result: completed.result,
+            accounting,
+        })
     }
     #[cfg(feature = "test-hooks")]
     fn validate_original_exchange_issuance(&self, command: &Command) -> Result<(), DriverError> {

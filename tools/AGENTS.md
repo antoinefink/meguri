@@ -94,3 +94,4 @@
 - Private scans permit only byte-exact public artifacts at the exact paths and SHAs pinned in `private_scan.py` (Unicode notice, official jQuery release and notice); edits are scanned again. Fixed public interface/compiler literals there exempt only fully contained matches in complete, case-sensitive literal spans (also in decoded variants), never surrounding or crossing tokens. Never use path, prefix or editable-manifest exemptions.
 
 - Never restore old source mtimes after compiling a different source state. Cargo can reuse stale dependency artifacts. After restoring changed source, advance its timestamps; preserve mtimes only when the current cache is known to match those exact bytes.
+- Source-copy baselines need their own `MEGURI_DOCKER_CARGO_TARGET` directory. Sharing the canonical target can overwrite test binaries while its fingerprints stay fresh. Check the selected test inventory before crediting a comparison.

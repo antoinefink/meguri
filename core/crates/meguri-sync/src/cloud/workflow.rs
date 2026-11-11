@@ -452,6 +452,10 @@ pub struct ExchangeResult {
     pub outstanding_names: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub blocked_names: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub dropped_names: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub absent_names: BTreeSet<String>,
 }
 impl ExchangeResult {
     pub(crate) fn record_ack(&mut self, name: &str, image: FlightImage) {
@@ -465,6 +469,17 @@ impl ExchangeResult {
             self.held_back_names.remove(name);
         }
         self.outstanding_names.remove(name);
+        self.dropped_names.remove(name);
+        self.absent_names.remove(name);
+    }
+    pub(crate) fn record_drop(&mut self, name: String) {
+        if self.selected_names.contains(&name)
+            && !self.acked_names.contains(&name)
+            && !self.absent_names.contains(&name)
+        {
+            self.outstanding_names.remove(&name);
+            self.dropped_names.insert(name);
+        }
     }
 }
 /// Opening-local undo authority. No Collection/Runtime strong references.

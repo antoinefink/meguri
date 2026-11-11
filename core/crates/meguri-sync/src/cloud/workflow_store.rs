@@ -836,7 +836,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         rows: &meguri_engine::ObserverRows<'_>,
         random: &dyn meguri_model::rng::RandomSource,
         mut hook: impl FnMut(usize) -> Result<(), Error>,
-    ) -> Result<(), runtime::RuntimeError> {
+    ) -> Result<Vec<(String, u64)>, runtime::RuntimeError> {
         if commit.changes.whole_collection
             || (!commit.changes.notetypes.is_empty()
                 && commit.changes.source != meguri_model::changes::OpSource::CloudRekey)
@@ -893,6 +893,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
             }
         }
         let mut written = 0;
+        let mut dropped = Vec::new();
         for kind in row_payload::KINDS {
             let Some(table) = row_payload::table(kind) else {
                 continue;
@@ -928,6 +929,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                     if matches!(kind, codec::Kind::Note | codec::Kind::Card) {
                         if !e.sent && e.server_erev == 0 && e.in_flight.is_empty() {
                             remove_entity(&tx, b, &e)?;
+                            dropped.push((e.name, e.local_rev));
                             continue;
                         }
                         let view = BeforeCommitView {
@@ -965,6 +967,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                         return Err(Error::InvalidData.into());
                     }
                     remove_entity(&tx, b, &e)?;
+                    dropped.push((e.name, e.local_rev));
                     continue;
                 }
                 let view = CommitView {
@@ -1028,7 +1031,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         }
         put_binding(&tx, b, &state)?;
         tx.commit().map_err(Error::from)?;
-        Ok(())
+        Ok(dropped)
     }
 }
 fn layout(c: &Connection, b: BindingId, id: i64) -> Result<codec::Notetype, Error> {

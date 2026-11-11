@@ -121,17 +121,21 @@ def generated(kind):
         check(5, [("localDurability", [fact("localDurable", "n1", 9, "1" * 64),
                                        fact("engineCallback", "n1-original-fetched-returned", returned, engine=True)])])
     number = 5 if kind == "mac" else 4
-    observations[number][1:1] = [
+    ordinary = [item for item in observations[number][1:] if not c.Evidence.trace(item)]
+    traces = [item for item in observations[number][1:] if c.Evidence.trace(item)]
+    observations[number] = [observations[number][0],
         fact("syncResult", "original-exchange-issued", 1, "d" * 64),
         fact("syncResult", "exchange-capture", 1),
         fact("syncResult", "exchange-boundary", 9),
         fact("syncResult", "exchange-selected-entity1"),
+        *traces,
         fact("syncResult", "exchange-work", 1),
+        fact("syncResult", "work-selected-" + ("acked" if kind == "mac" else "clean") + "-entity1"),
         *[{**item, "operation": "work-" + item["operation"]} for item in exchange if item["operation"] in c.MEDIA],
         fact("syncResult", "terminal-exchange-succeeded", 1),
         fact("syncResult", "terminal-ended-ms", 30),
         *[{**item, "operation": "terminal-" + item["operation"]} for item in exchange
-          if item["operation"] in c.EXCHANGE_COUNTS | c.MEDIA]]
+          if item["operation"] in c.EXCHANGE_COUNTS | c.MEDIA], *ordinary]
     join = [fact("ownedWorkJoined", "own-joined", 5 if kind == "mac" else 0),
             fact("ownedWorkJoined", "sdk-joined", sdk, engine=True)]
     check(6, [("integrity", [fact("integrity", count=5)]), ("coordinatorResult", join),
@@ -197,6 +201,49 @@ def admitted(kind, through=6, mutate=None):
 
 
 class SelectedTests(unittest.TestCase):
+    def test_original_incoming_reasons_count_entries_without_collapsing_one_entity(self):
+        def waiting(checks, observations):
+            for item in checks[4][0]["facts"] + observations[4]:
+                if item.get("operation") in {"incoming-waiting", "terminal-incoming-waiting"}: item["count"] = 2
+            work = next(n for n, item in enumerate(observations[4]) if item.get("operation") == "exchange-work")
+            observations[4][work + 1:work + 1] = [fact("syncResult", label) for label in (
+                "work-incoming1-entity2-generation", "work-incoming2-entity2-reference")]
+        admitted("iphone", through=4, mutate=waiting)
+        for reason in ("ready", "format", "asset", "apply-failed"):
+            def blocked(checks, observations):
+                work = next(n for n, item in enumerate(observations[4]) if item.get("operation") == "exchange-work")
+                observations[4].insert(work + 1, fact("syncResult", "work-incoming1-entity2-" + reason))
+            with self.subTest(reason=reason), self.assertRaisesRegex(s.v.Refused, "selected-exchange-incoming"):
+                admitted("iphone", through=4, mutate=blocked)
+
+    def test_original_selected_outcomes_must_cover_the_selection_once(self):
+        for variant in ("missing", "repeated", "blocked"):
+            def invalid(checks, observations):
+                group = observations[4]
+                original = next(item for item in group if item.get("operation") == "work-selected-clean-entity1")
+                if variant == "missing": group.remove(original)
+                elif variant == "repeated": group.insert(group.index(original), fact("syncResult", "work-selected-acked-entity1"))
+                else: original["operation"] = "work-selected-blocked-entity1"
+            with self.subTest(variant=variant), self.assertRaisesRegex(s.v.Refused, "selected-exchange-outcomes"):
+                admitted("iphone", through=4, mutate=invalid)
+
+    def test_original_ack_needs_a_qualifying_image_and_its_actual_held_flag(self):
+        for variant in ("older", "held", "clean"):
+            def invalid(checks, observations):
+                for item in observations[5]:
+                    if item.get("operation") == "send1-batch1-entity1-image-live":
+                        if variant == "older": item["count"] = 8
+                        elif variant == "held": item["operation"] = "send1-batch1-entity1-image-held"
+                    if variant == "clean" and item.get("operation") == "work-selected-acked-entity1":
+                        item["operation"] = "work-selected-clean-entity1"
+            with self.subTest(variant=variant), self.assertRaisesRegex(s.v.Refused, "selected-exchange-ack-proof"):
+                admitted("mac", through=5, mutate=invalid)
+        def no_original_ack(checks, observations):
+            for item in observations[4]:
+                if item.get("operation") == "work-selected-clean-entity1": item["operation"] = "work-selected-acked-entity1"
+        with self.assertRaisesRegex(s.v.Refused, "selected-exchange-ack-proof"):
+            admitted("iphone", through=4, mutate=no_original_ack)
+
     def test_original_work_recomputes_overlapping_held_names_and_newer_pending(self):
         def counts(checks, observations):
             for item in checks[5][0]["facts"] + observations[5]:
@@ -206,6 +253,9 @@ class SelectedTests(unittest.TestCase):
             observations[5][work + 1:work + 1] = [fact("syncResult", label) for label in (
                 "work-held-pending-entity1", "work-held-pending-entity2", "work-held-acked-entity1",
                 "work-pending-unheld-entity3")]
+            for item in observations[5]:
+                if item.get("operation") == "send1-batch1-entity1-image-live":
+                    item["operation"] = "send1-batch1-entity1-image-held"
         admitted("mac", through=5, mutate=counts)
 
     def test_original_work_refuses_missing_late_or_inconsistent_facts(self):
@@ -583,8 +633,14 @@ class SelectedTests(unittest.TestCase):
             trace.insert(trace.index(fetched) + 1, fact("engineCallback", sdk + "-fetched-entity1", engine=True))
             trace.append(fact("applied", sdk + "-own-landed-entity1-held", 9, engine=True))
             items = [item for item in items if not c.FETCH.fullmatch(item.get("operation", ""))]
-            terminal = next(i for i, item in enumerate(items) if item.get("operation") in c.TERMINAL_LABELS)
-            observations[4] = items[:terminal] + trace + items[terminal:]
+            work = next(i for i, item in enumerate(items) if item.get("operation") == "exchange-work")
+            observations[4] = items[:work] + trace + items[work:]
+            for item in checks[4][0]["facts"] + observations[4]:
+                if item.get("operation") in {"held-back", "terminal-held-back"}: item["count"] = 1
+                if item.get("operation") == "work-selected-clean-entity1":
+                    item["operation"] = "work-selected-acked-entity1"
+            work = next(i for i, item in enumerate(observations[4]) if item.get("operation") == "exchange-work")
+            observations[4].insert(work + 1, fact("syncResult", "work-held-acked-entity1"))
 
         admitted("iphone", mutate=original_fetch)
 
@@ -636,7 +692,9 @@ class SelectedTests(unittest.TestCase):
             first_state = next(i for i, item in enumerate(items) if item.get("operation") == "sdk3-state-delivered")
             tick = items[first_state]["count"]
             for item in items[first_state:]:
-                item["count"] += 2
+                if c.Evidence.trace(item) and item.get("operation") not in {
+                        "normal-adoption-generation-joined", "required-scan-before-native-sdk"}:
+                    item["count"] += 2
             items[first_state:first_state] = [
                 fact("applied", "pending-update", tick, engine=True),
                 fact("applied", "entity1-removed-held", tick + 1, engine=True)]

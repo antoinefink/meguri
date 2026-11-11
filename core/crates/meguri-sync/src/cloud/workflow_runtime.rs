@@ -6,6 +6,19 @@ use crate::cloud::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 impl Runtime {
+    pub(super) fn record_exchange_drops_locked(s: &mut State, dropped: Vec<(String, u64)>) {
+        if let Some((_, exchange)) = &mut s.actions.exchange {
+            for (name, revision) in dropped {
+                if s.actions
+                    .selected_revs
+                    .get(&name)
+                    .is_some_and(|selected| *selected <= revision)
+                {
+                    exchange.record_drop(name);
+                }
+            }
+        }
+    }
     #[cfg(feature = "test-hooks")]
     pub fn set_collection_record_limit_for_testing(&self, limit: usize) -> Result<(), RuntimeError> {
         if !(1..=250).contains(&limit) {
@@ -2106,6 +2119,9 @@ impl Runtime {
             // the ACK set and leave every other selected revision outstanding.
             for name in terminal_names {
                 exchange.outstanding_names.remove(&name);
+                if !exchange.acked_names.contains(&name) && !exchange.dropped_names.contains(&name) {
+                    exchange.absent_names.insert(name);
+                }
             }
         }
         s.actions
@@ -2210,6 +2226,8 @@ impl Runtime {
                 held_back_names: BTreeSet::new(),
                 outstanding_names: names,
                 blocked_names: BTreeSet::new(),
+                dropped_names: BTreeSet::new(),
+                absent_names: BTreeSet::new(),
             },
         ));
         Ok(id)

@@ -151,7 +151,8 @@ import Testing
             uploadsRunning: nil, downloadsRunning: nil, remainingDownloadMs: nil,
             rootAcked: true, zoneMissing: false, noSpace: nil))
         let work = OriginalCloudExchangeWork(heldPendingNames: [a, b], heldAcknowledgedNames: [a],
-                                             pendingUnheldNames: [c], media: media)
+                                             pendingUnheldNames: [c], media: media, acknowledgedNames: [a],
+                                             incoming: [.init(recordName: b, reason: .generation), .init(recordName: b, reason: .reference)])
         #expect(throws: AgentFailure.execution) { try evidence.workFacts(exchange: 3, work: work) }
         _ = try evidence.captureFacts(exchange: 3, capture: .init(boundarySeq: 9, selectedNames: [a]))
         let facts = try evidence.workFacts(exchange: 3, work: work)
@@ -160,13 +161,18 @@ import Testing
         #expect(facts.first == .init(name: .syncResult, count: 3, operation: "exchange-work"))
         #expect(facts.contains(.init(name: .syncResult, count: 31, operation: "work-media-upload-bytes")))
         #expect(facts.contains(.init(name: .syncResult, count: 0, operation: "work-media-zone-missing")))
+        #expect(facts.contains(.init(name: .syncResult, operation: "work-selected-acked-entity1")))
+        #expect(facts.contains(.init(name: .syncResult, operation: "work-incoming1-entity2-generation")))
+        #expect(facts.contains(.init(name: .syncResult, operation: "work-incoming2-entity2-reference")))
         #expect(!facts.contains { $0.operation == "work-media-uploads-running" || $0.operation == "work-media-no-space" })
         #expect(!facts.contains { fact in [a, b, c].contains { fact.operation?.contains($0) == true } })
         #expect(throws: AgentFailure.execution) { try evidence.workFacts(exchange: 3, work: work) }
         for invalid in [
-            OriginalCloudExchangeWork(heldPendingNames: [b, b], heldAcknowledgedNames: [], pendingUnheldNames: [], media: media),
-            OriginalCloudExchangeWork(heldPendingNames: [b], heldAcknowledgedNames: [], pendingUnheldNames: [b], media: media),
-            OriginalCloudExchangeWork(heldPendingNames: [], heldAcknowledgedNames: [b], pendingUnheldNames: [], media: media)
+            OriginalCloudExchangeWork(heldPendingNames: [b, b], heldAcknowledgedNames: [], pendingUnheldNames: [], media: media, acknowledgedNames: [a]),
+            OriginalCloudExchangeWork(heldPendingNames: [b], heldAcknowledgedNames: [], pendingUnheldNames: [b], media: media, acknowledgedNames: [a]),
+            OriginalCloudExchangeWork(heldPendingNames: [], heldAcknowledgedNames: [b], pendingUnheldNames: [], media: media, acknowledgedNames: [a]),
+            OriginalCloudExchangeWork(heldPendingNames: [], heldAcknowledgedNames: [], pendingUnheldNames: [], media: media, acknowledgedNames: [a], cleanNames: [a]),
+            OriginalCloudExchangeWork(heldPendingNames: [], heldAcknowledgedNames: [], pendingUnheldNames: [], media: media)
         ] {
             let other = try ledger()
             _ = try other.captureFacts(exchange: 3, capture: .init(boundarySeq: 9, selectedNames: [a]))

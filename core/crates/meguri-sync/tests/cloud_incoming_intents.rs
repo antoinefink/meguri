@@ -4463,7 +4463,32 @@ fn original_handed_entity_tombstone_save_unknown_item_drops_note_and_cards_durab
     settled(&mut pair, b);
     assert!(pair.receiver.sdk_pending().is_empty());
     assert!(pair.receiver.sdk_database_pending().is_empty());
-    assert!(pair.receiver.facts().unwrap().entities == retained);
+    let actual = pair.receiver.facts().unwrap().entities;
+    let state = pair.receiver.driver().stored_runtime_state().unwrap();
+    let coverage = state.coverage.unwrap();
+    let live = pair.receiver.driver().incoming_observation(b).unwrap();
+    assert_eq!(coverage.open, state.open_counter);
+    assert_eq!(
+        coverage.open,
+        retained.values().map(|e| e.observer_open).max().unwrap() + 1
+    );
+    assert_eq!(coverage.cursor.generation, live.generation);
+    assert_eq!(coverage.cursor.native_file, live.native_file);
+    assert!(
+        coverage.cursor.seq > 0
+            && coverage.cursor.covered_through >= coverage.cursor.seq
+            && live.seq >= coverage.cursor.seq
+    );
+    let mut scanned = retained.clone();
+    for entity in scanned.values_mut() {
+        assert_ne!(entity.kind, codec::Kind::MediaName);
+        entity.observer_open = coverage.open;
+        entity.observed_seq = coverage.cursor.seq;
+        entity.observed_generation = coverage.cursor.generation;
+    }
+    // Reopen verification ran the real scan. Compare its certified stamps and
+    // every retained payload, revision, ACK, flight and other tracking field.
+    assert!(actual == scanned, "only certified scan stamps may change after reopen");
     assert_eq!(saved(&pair, &unrelated), unrelated_record);
     assert!(!pair.service.request_log().unwrap().iter().any(|entry| {
         entry.request_id > receipt.request_id

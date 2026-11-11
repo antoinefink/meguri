@@ -302,14 +302,27 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
         try state.withLock { s in
             let held = Set(work.heldPendingNames), acked = Set(work.heldAcknowledgedNames)
             let unheld = Set(work.pendingUnheldNames)
+            let categories = [("acked", work.acknowledgedNames), ("clean", work.cleanNames),
+                              ("dropped", work.droppedNames), ("absent", work.absentNames),
+                              ("blocked", work.blockedNames), ("outstanding", work.outstandingNames)]
+            let all = categories.reduce(into: Set<String>()) { $0.formUnion($1.1) }
             guard !s.failed, !s.joined, let selected = s.exchangeCaptures[exchange],
                   !s.exchangeWork.contains(exchange), held.count == work.heldPendingNames.count,
                   acked.count == work.heldAcknowledgedNames.count, unheld.count == work.pendingUnheldNames.count,
-                  held.isDisjoint(with: unheld), acked.isSubset(of: selected) else { throw AgentFailure.execution }
+                  held.isDisjoint(with: unheld), acked.isSubset(of: Set(work.acknowledgedNames)),
+                  categories.allSatisfy({ Set($0.1).count == $0.1.count }),
+                  all == selected, all.count == categories.reduce(0, { $0 + $1.1.count }) else { throw AgentFailure.execution }
             var facts: [AgentFact] = [.init(name: .syncResult, count: exchange, operation: "exchange-work")]
             for (prefix, names) in [("work-held-pending-", held), ("work-held-acked-", acked),
                                     ("work-pending-unheld-", unheld)] {
                 facts += names.sorted().map { .init(name: .syncResult, operation: prefix + s.entity($0)) }
+            }
+            for (kind, names) in categories {
+                facts += names.sorted().map { .init(name: .syncResult, operation: "work-selected-" + kind + "-" + s.entity($0)) }
+            }
+            for (offset, entry) in work.incoming.enumerated() {
+                facts.append(.init(name: .syncResult,
+                    operation: "work-incoming\(offset + 1)-\(s.entity(entry.recordName))-\(entry.reason.rawValue)"))
             }
             facts += CloudKitSelectedSyncProof.mediaFacts(work.media).map { original in
                 var fact = original

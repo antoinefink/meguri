@@ -1127,13 +1127,18 @@ impl Runtime {
         }
         let binding = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
         let live = Self::sdk_locked(&s, sdk).is_ok();
-        let (incoming, work) = with_tracking_access(|| -> Result<_, RuntimeError> {
+        let (incoming, work, accounting) = with_tracking_access(|| -> Result<_, RuntimeError> {
             let store = s.store.as_ref().ok_or(Error::Database)?;
+            let mut accounting = cfg!(feature = "test-hooks").then(ExchangeAccounting::default);
             for name in std::mem::take(&mut result.outstanding_names) {
-                if !store
+                if store
                     .entity_header(binding, &name)?
                     .is_some_and(|header| header.facts.server_erev > 0 && header.facts.mark.is_none())
                 {
+                    if let Some(accounting) = &mut accounting {
+                        accounting.clean_names.insert(name);
+                    }
+                } else {
                     result.outstanding_names.insert(name);
                 }
             }
@@ -1143,13 +1148,19 @@ impl Runtime {
                 .retain(|name| !result.blocked_names.contains(name));
             let mut incoming = ExchangeIncoming::default();
             for entry in store.inbox(binding)? {
+                if let Some(accounting) = &mut accounting {
+                    accounting.incoming.push(ExchangeIncomingEntry {
+                        record_name: entry.entry.record_name,
+                        reason: (&entry.entry.reason).into(),
+                    });
+                }
                 match entry.entry.reason {
                     InboxReason::Ready => incoming.ready += 1,
                     InboxReason::Generation | InboxReason::Reference | InboxReason::Structure => incoming.waiting += 1,
                     InboxReason::Format | InboxReason::Asset | InboxReason::ApplyFailed { .. } => incoming.blocked += 1,
                 }
             }
-            Ok((incoming, Self::exchange_work_locked(&s, store, binding)?))
+            Ok((incoming, Self::exchange_work_locked(&s, store, binding)?, accounting))
         })?;
         let outcome = if s
             .bound
@@ -1178,6 +1189,7 @@ impl Runtime {
             result,
             incoming: Some(incoming),
             work: Some(work),
+            accounting,
         };
         let mut durable = s.adapter.durable.clone();
         durable.exchanges.insert(id, completed.clone());
@@ -1672,6 +1684,7 @@ impl Runtime {
                         result,
                         incoming: None,
                         work: None,
+                        accounting: None,
                     },
                 ),
             );

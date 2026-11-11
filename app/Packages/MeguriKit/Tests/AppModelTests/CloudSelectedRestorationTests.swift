@@ -80,6 +80,15 @@ extension ReviewCollectionStartupTests {
             #expect(heldWork == UInt64(Set(originalSnapshot.heldPendingNames).union(originalSnapshot.heldAcknowledgedNames).count))
             #expect(pendingWork == UInt64(Set(originalSnapshot.pendingUnheldNames).count))
             #expect(originalMedia == originalSnapshot.media)
+            let categories = [originalSnapshot.acknowledgedNames, originalSnapshot.cleanNames,
+                originalSnapshot.droppedNames, originalSnapshot.absentNames, originalSnapshot.blockedNames,
+                originalSnapshot.outstandingNames].map { Set($0) }
+            let allSelected = categories.reduce(into: Set<String>()) { $0.formUnion($1) }
+            #expect(allSelected.count == categories.reduce(0) { $0 + $1.count })
+            #expect(originalSnapshot.blockedNames.isEmpty && originalSnapshot.outstandingNames.isEmpty)
+            #expect(originalSnapshot.incoming.isEmpty)
+            guard case .succeeded(let selectedCount, _, _, _, _) = record.outcome else { throw ServiceWorkflowFailure.refused }
+            #expect(UInt64(allSelected.count) == selectedCount)
             let before = try await CoreNoteService().readNote(id: input.noteID)
             let completedHandle = try #require(issued)
             await #expect(throws: (any Error).self) {

@@ -951,16 +951,23 @@ impl CloudPolicyCommand {
     ) -> Result<crate::test_hooks::CloudOriginalExchangeWork, CoreError> {
         self.owner.owns(self)?;
         self.owner.collection()?;
-        let (work, held_acked_names) = self
+        let original = self
             .owner
             .driver()?
             .original_exchange_work_for_testing(&self.command)
             .map_err(|_| failure(CloudPolicyFailure::StaleCommand))?;
         Ok(crate::test_hooks::CloudOriginalExchangeWork {
-            held_pending_names: work.held_pending_names.into_iter().collect(),
-            held_acked_names: held_acked_names.into_iter().collect(),
-            pending_unheld_names: work.pending_unheld_names.into_iter().collect(),
-            media: work.media.into(),
+            held_pending_names: original.work.held_pending_names.into_iter().collect(),
+            held_acked_names: original.result.held_back_names.into_iter().collect(),
+            pending_unheld_names: original.work.pending_unheld_names.into_iter().collect(),
+            media: original.work.media.into(),
+            acked_names: original.result.acked_names.into_iter().collect(),
+            clean_names: original.accounting.clean_names.into_iter().collect(),
+            dropped_names: original.result.dropped_names.into_iter().collect(),
+            absent_names: original.result.absent_names.into_iter().collect(),
+            blocked_names: original.result.blocked_names.into_iter().collect(),
+            outstanding_names: original.result.outstanding_names.into_iter().collect(),
+            incoming: original.accounting.incoming.into_iter().map(Into::into).collect(),
         })
     }
     pub(crate) fn exchange_observation_for_testing(&self) -> Result<p::ExchangeObservation, CoreError> {

@@ -1635,7 +1635,7 @@ impl ChangeObserver for Runtime {
         let fail_after = state.fail_capture_after.take();
         let result = with_tracking_access(|| -> Result<(), RuntimeError> {
             if generic {
-                return state.store.as_mut().ok_or(Error::Database)?.capture_workflow(
+                let dropped = state.store.as_mut().ok_or(Error::Database)?.capture_workflow(
                     binding,
                     open,
                     commit,
@@ -1652,7 +1652,9 @@ impl ChangeObserver for Runtime {
                         }
                         Ok(())
                     },
-                );
+                )?;
+                Self::record_exchange_drops_locked(&mut state, dropped);
+                return Ok(());
             }
             state.store.as_mut().ok_or(Error::Database)?.capture_runtime_notes(
                 binding,
