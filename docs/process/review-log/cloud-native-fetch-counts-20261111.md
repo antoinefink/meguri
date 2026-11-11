@@ -103,3 +103,20 @@ Independent filtered review `144753Z-30680` finds no P0–P2. Focused tests
 `144832Z-33252` and similarity `144833Z-33533` pass. Existing formatter bounds
 and assertions remain enabled. Native observation of these new flags is pending.
 The Mac has 47 actual reviews, the phone 43; sync acceptance remains open.
+
+## Physical discovery observation
+
+Physical preparation `run/20261111T145001Z-35003` passes on `433b095b`.
+Drive `145121Z-37610` completes all 18 interaction steps with verified
+continuity. Its overall result fails 257 hierarchy checks. The phone has
+43 actual reviews; the read-only preview is cancelled and it returns to Decks.
+The recorded exchange completion advances from `1794407966674` to
+`1794408767300`, with succeeded/selected-zero outcomes.
+
+Before and after the request, `inC=1 outC=1 db=0 dbC=0 un=1 unC=0`.
+Fetch starts advance from four to six; collection-zone starts, original record
+modifications and Core intake counts remain zero. Across this process, native
+state therefore reports some unfetched zone, but never the full registered
+collection-zone identity, and no database-change callback is observed. These
+aggregate flags do not establish why that zone is missing or prove that every
+fetch-options callback admitted it. No production fix or convergence is claimed.
