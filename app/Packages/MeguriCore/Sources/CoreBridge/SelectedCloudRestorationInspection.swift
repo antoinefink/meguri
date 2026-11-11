@@ -114,5 +114,10 @@ public actor SelectedCloudRestorationInspection {
             try CloudPolicyExchangeRecord(MeguriCoreBindings.testCloudReadOriginalExchange(exchange: exchange, witness: witness))
         }
     }
+    public func crosscheckOriginalAcknowledgements(exchange: UInt64, witness: Data, envelopes: [[Data]]) async throws -> UInt64 {
+        try await QueryLane.shared.call(.testCloudCrosscheckOriginalAckSet) {
+            try MeguriCoreBindings.testCloudCrosscheckOriginalAckSet(exchange: exchange, witness: witness, envelopes: envelopes)
+        }
+    }
 }
 #endif

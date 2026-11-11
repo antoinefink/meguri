@@ -11,7 +11,10 @@ use meguri_engine::{
     replace::ReplaceReason,
 };
 use sha2::{Digest, Sha256};
-use std::io::{self, Write};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    io::{self, Write},
+};
 
 const MAX_PUBLICATION_OBSERVATION_BYTES: usize = 8 * MAX_CONTROL_BYTES;
 
@@ -913,6 +916,116 @@ impl Runtime {
         };
         self.selected_recheck(collection, &snapshot, &control)?;
         Ok(record)
+    }
+
+    /// Only a current durable cross-check. The caller separately replays the
+    /// original journal's selection, image sequence, held flags and result.
+    pub fn crosscheck_original_ack_set_for_testing(
+        &self,
+        collection: &Collection,
+        exchange: u64,
+        witness: [u8; 32],
+        envelopes: &[Vec<[u8; 32]>],
+    ) -> Result<u64, RuntimeError> {
+        let (snapshot, control) = self.selected_owned_snapshot(collection)?;
+        let original = snapshot.bound.as_ref().ok_or(Error::RecoveryRefused)?;
+        let read = || -> Result<(), RuntimeError> {
+            let s = self.state();
+            if s.bound.as_ref() != Some(original)
+                || s.incarnation != snapshot.incarnation
+                || s.scan_required
+                || s.scan_running
+                || !s.whole_complete
+                || s.tracking_stopped
+                || !collection.is_current()
+            {
+                return Err(Error::RecoveryRefused.into());
+            }
+            with_tracking_access(|| -> Result<(), RuntimeError> {
+                let store = s.store.as_ref().ok_or(Error::Database)?;
+                let record = store
+                    .selected_original_exchange(&original.binding, original.file, exchange, witness)?
+                    .ok_or(Error::RecoveryRefused)?;
+                match record.outcome {
+                    crate::cloud::policy::ExchangeOutcome::Succeeded { selected, .. }
+                        if u64::try_from(envelopes.len()).is_ok_and(|count| count <= selected) => {}
+                    _ => return Err(Error::RecoveryRefused.into()),
+                }
+                store.selected_ack_set(original.binding.id, envelopes)?;
+                Ok(())
+            })
+        };
+        read()?;
+        self.selected_recheck(collection, &snapshot, &control)?;
+        read()?;
+        self.selected_recheck(collection, &snapshot, &control)?;
+        Ok(collection.generation().0)
+    }
+}
+
+impl TrackingStore {
+    // An original envelope binds its kind, key, origin and version. Match it
+    // against scoped stored ACKs without reading local or historical bodies.
+    pub(in crate::cloud) fn selected_ack_set(
+        &self,
+        binding: BindingId,
+        groups: &[Vec<[u8; 32]>],
+    ) -> Result<(), Error> {
+        self.binding(binding)?.ok_or(Error::BindingNotFound)?;
+        if groups.len() > 4096
+            || groups.iter().any(Vec::is_empty)
+            || groups
+                .iter()
+                .try_fold(0usize, |total, group| total.checked_add(group.len()))
+                .is_none_or(|total| total > 4096)
+        {
+            return Err(Error::RecoveryRefused);
+        }
+        let mut wanted = BTreeMap::new();
+        for (index, group) in groups.iter().enumerate() {
+            for digest in group {
+                if wanted.insert(*digest, index).is_some_and(|prior| prior != index) {
+                    return Err(Error::RecoveryRefused);
+                }
+            }
+        }
+        if wanted.is_empty() {
+            return Ok(());
+        }
+        let mut found = BTreeSet::new();
+        for kind in row_payload::KINDS {
+            let mut after: Option<Vec<u8>> = None;
+            loop {
+                let keys = self.entity_keys_page(binding, kind, after.as_deref())?;
+                if keys.is_empty() {
+                    break;
+                }
+                after = keys.last().cloned();
+                for key in keys {
+                    let header = self.entity_key_header(binding, kind, &key)?.ok_or(Error::RecoveryRefused)?;
+                    let e = header.facts;
+                    if e.kind != kind || e.key != key {
+                        return Err(Error::RecoveryRefused);
+                    }
+                    let Some(index) = wanted.get(&codec::sha256(&e.acked_envelope.0)) else {
+                        continue;
+                    };
+                    if e.server_erev == 0
+                        || e.acked_rev == 0
+                        || e.acked_rev > e.local_rev
+                        || e.acked_system_fields.is_empty()
+                        || e.acked_envelope.0.is_empty()
+                        || !found.insert(*index)
+                    {
+                        return Err(Error::RecoveryRefused);
+                    }
+                }
+            }
+        }
+        if found.len() != groups.len() {
+            return Err(Error::RecoveryRefused);
+        }
+        Ok(())
     }
 }
 pub(crate) fn exchange_correlation(

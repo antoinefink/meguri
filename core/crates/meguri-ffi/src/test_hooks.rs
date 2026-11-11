@@ -1109,6 +1109,37 @@ pub fn test_cloud_read_original_exchange(
         .map_err(crate::sync::cloud_error)?;
     Ok(result.into())
 }
+#[uniffi::export]
+pub fn test_cloud_crosscheck_original_ack_set(
+    exchange: u64,
+    witness: Vec<u8>,
+    envelopes: Vec<Vec<Vec<u8>>>,
+) -> Result<u64, CoreError> {
+    callback::enter("test_cloud_crosscheck_original_ack_set");
+    let invalid = || crate::sync::cloud_error("original ACK set shape");
+    if envelopes.len() > 4096
+        || envelopes.iter().any(Vec::is_empty)
+        || envelopes
+            .iter()
+            .try_fold(0usize, |total, group| total.checked_add(group.len()))
+            .is_none_or(|total| total > 4096)
+    {
+        return Err(invalid());
+    }
+    let witness = witness.try_into().map_err(|_| invalid())?;
+    let envelopes: Vec<Vec<[u8; 32]>> = envelopes
+        .into_iter()
+        .map(|group| {
+            group.into_iter().map(|digest| digest.try_into().map_err(|_| invalid())).collect()
+        })
+        .collect::<Result<_, CoreError>>()?;
+    let host = runtime::host()?;
+    let collection = host.cloud_connection_collection()?;
+    host.cloud_runtime()
+        .ok_or_else(invalid)?
+        .crosscheck_original_ack_set_for_testing(&collection, exchange, witness, &envelopes)
+        .map_err(crate::sync::cloud_error)
+}
 #[derive(Clone, uniffi::Record)]
 pub struct CloudOriginalControlWitness {
     pub generation: u64,

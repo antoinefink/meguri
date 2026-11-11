@@ -89,6 +89,10 @@ extension ReviewCollectionStartupTests {
             #expect(originalSnapshot.incoming.isEmpty)
             guard case .succeeded(let selectedCount, _, _, _, _) = record.outcome else { throw ServiceWorkflowFailure.refused }
             #expect(UInt64(allSelected.count) == selectedCount)
+            let originalAck = try await role.observe()
+            try #require(originalAck.entity.acknowledged && originalAck.entity.ackedEnvelopeDigest.count == 32)
+            try #require(originalSnapshot.acknowledgedNames == [originalAck.entity.recordName])
+            let originalEnvelopes = [[originalAck.entity.ackedEnvelopeDigest]]
             let before = try await CoreNoteService().readNote(id: input.noteID)
             let completedHandle = try #require(issued)
             await #expect(throws: (any Error).self) {
@@ -114,6 +118,10 @@ extension ReviewCollectionStartupTests {
             let creationAcks = AsyncStream<HistoricalOriginalCloudAck>.makeStream()
             await third.factory.inspectCreation { _ in
                 creationAcks.continuation.yield(try await freshRole.readOriginalAck(witness: editWitness))
+                let generation = try await inspector.crosscheckOriginalAcknowledgements(exchange: record.exchange,
+                    witness: exchangeWitness, envelopes: originalEnvelopes)
+                let owned = try await freshRole.validateOwned()
+                try #require(generation == owned.generation)
             }
             third.beforeBackend = {
                 _ = try await inspector.control(original: publication)
@@ -121,6 +129,10 @@ extension ReviewCollectionStartupTests {
                 // Before the new backend's required scan, old observer stamps
                 // cannot establish a current-opening ACK.
                 await #expect(throws: (any Error).self) { try await freshRole.readOriginalAck(witness: editWitness) }
+                await #expect(throws: (any Error).self) {
+                    try await inspector.crosscheckOriginalAcknowledgements(exchange: record.exchange,
+                        witness: exchangeWitness, envelopes: originalEnvelopes)
+                }
                 let actual = try await inspector.readOriginalExchange(exchange: record.exchange, witness: exchangeWitness)
                 try #require(actual.exchange == record.exchange && actual.endedMilliseconds == record.endedMilliseconds)
                 guard case .succeeded(let selected, let held, let newer, let incoming, let media) = actual.outcome,
@@ -147,6 +159,14 @@ extension ReviewCollectionStartupTests {
             var creationIterator = creationAcks.stream.makeAsyncIterator()
             let atCreation = try #require(await creationIterator.next())
             let currentAck = try await freshRole.readOriginalAck(witness: editWitness)
+            #expect(try await inspector.crosscheckOriginalAcknowledgements(exchange: record.exchange,
+                witness: exchangeWitness, envelopes: originalEnvelopes) == currentAck.generation)
+            for envelopes in [[[Data(repeating: 0, count: 32)]], originalEnvelopes + originalEnvelopes] {
+                await #expect(throws: (any Error).self) {
+                    try await inspector.crosscheckOriginalAcknowledgements(exchange: record.exchange,
+                        witness: exchangeWitness, envelopes: envelopes)
+                }
+            }
             #expect(currentAck.originalGeneration == edited.generation && currentAck.originalSeq == edited.seq)
             #expect(currentAck.localRevision == edited.localRevision && currentAck.ackedRevision == edited.localRevision)
             #expect(currentAck.noteDigest == edited.noteDigest && currentAck.ackedEnvelopeDigest.count == 32)

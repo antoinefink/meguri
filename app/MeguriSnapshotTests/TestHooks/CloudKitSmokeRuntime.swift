@@ -787,6 +787,16 @@ import Foundation
             }
             // A matching row is a cross-check. Unsuccessful results cannot recover success.
             _ = try CloudKitSelectedSyncProof.exchangeFacts(record)
+            if requireScan {
+                var envelopes: [[Data]] = []
+                for label in exchange.sdk.acknowledgements.keys.sorted() {
+                    guard let images = exchange.sdk.acknowledgements[label], !images.isEmpty else { throw AgentFailure.recovery }
+                    envelopes.append(try images.map { try CloudKitSelectedRestoration.bytes($0.envelopeDigest) })
+                }
+                let generation = try await SelectedCloudRestorationInspection().crosscheckOriginalAcknowledgements(
+                    exchange: exchange.exchange, witness: CloudKitSelectedRestoration.bytes(exchange.witness), envelopes: envelopes)
+                guard generation == control.generation else { throw AgentFailure.recovery }
+            }
             if requireScan, program == .syncNowMac {
                 guard let edit = restoration.edit, let edited = restoredEdit else { throw AgentFailure.recovery }
                 let ack = try await originalRole.readOriginalAck(witness: CloudKitSelectedRestoration.bytes(edit.witness),

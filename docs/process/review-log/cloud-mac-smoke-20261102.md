@@ -712,3 +712,35 @@ Direct review checked exact fact shapes, matching host/Swift fields and actual
 producer inputs. No independent review ran. The current durable ACK-set read,
 source cause, historical close, host relaunch and signed round trip remain open.
 Mac recovered completion remains disabled. No Unit or acceptance is claimed.
+
+## Current ACK-set cross-check, awaiting execution
+
+Starting commit `bc3b9542`. The prepared read checks each original ACK image
+group against exactly one scoped current entity's stored envelope digest.
+Envelope identity includes the native kind, key, origin and version; current
+row order never reconstructs journal aliases. Missing versions, changed ACKs,
+overlapping groups, ambiguous matches and invalid ACK metadata refuse the read.
+A newer local pending revision may retain its original ACK. Headers are paged;
+local and historical payload bodies are not read.
+
+The runtime requires the original succeeded exchange witness, current ownership
+and a completed reopen scan. It reads twice around provider/ownership rechecks.
+The test-only bridge and signed runtime now call it with the original journal's
+qualified envelope groups. This supplies no original event, image sequence or
+cause: those still come from original records. The recovery counter added above
+is a different namespace from the original engine image sequence.
+
+Native Mac core builds `64850` and `65400` pass; the latter covers the final
+source and generated bridge signature. Static checks `66119` and source privacy
+`65669` pass. Rust request `64448` never reached compilation: Docker blocked in
+`info`. Its run and stuck cleanup lookup were cancelled by signalling only the
+owned clients. The Docker service and other projects were untouched. This is
+an error receipt, with no red/green behavioral evidence.
+
+Prepared tests cover exact multiple-entity matching, missing/shared versions,
+newer local pending content, stale ACK replacement and scoped ownership. The
+real Service test adds pre-scan refusal and pre-engine/post-start reads with
+wrong and duplicate digest refusal. These tests, Swift compilation, formatting,
+lint, similarity and native app-hosted verification remain unrun for this
+change while Docker is unavailable. Direct source review ran; independent
+review and the full batch gate did not. Mac recovered completion stays disabled.

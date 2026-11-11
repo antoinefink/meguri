@@ -530,4 +530,41 @@ mod tests {
         assert_eq!(store.binding_acknowledgement_sequence(b).unwrap(), 1);
         assert_eq!(store.entity_acknowledgement_sequence(b, &e.name).unwrap(), Some(1));
     }
+
+    #[cfg(feature = "test-hooks")]
+    #[test]
+    fn current_ack_set_matches_exact_original_envelopes_without_crediting_missing_or_shared_versions() {
+        let root = tempfile::tempdir().unwrap();
+        let mut store = open(root.path());
+        let b = binding(&mut store);
+        let mut note = row(true);
+        ack(&mut note, 1);
+        note.acked_envelope = OpaqueBytes(vec![1, 2]);
+        put(&mut store, b, &note);
+        let mut config = row(false);
+        ack(&mut config, 1);
+        config.acked_envelope = OpaqueBytes(vec![3, 4]);
+        put(&mut store, b, &config);
+        let note_digest = entity_codec::sha256(&note.acked_envelope.0);
+        let config_digest = entity_codec::sha256(&config.acked_envelope.0);
+        store.selected_ack_set(b, &[]).unwrap();
+        assert_eq!(store.selected_ack_set(BindingId([0; 16]), &[]), Err(Error::BindingNotFound));
+        store.selected_ack_set(b, &[vec![note_digest], vec![config_digest]]).unwrap();
+        store.selected_ack_set(b, &[vec![[9; 32], note_digest]]).unwrap();
+        for groups in [vec![vec![[9; 32]]], vec![vec![]], vec![vec![note_digest], vec![note_digest]]] {
+            assert!(store.selected_ack_set(b, &groups).is_err());
+        }
+        // Newer local pending content does not erase its acknowledged version.
+        let mut changed = note.payload.clone();
+        let entity_codec::Payload::Note(value) = &mut changed else { unreachable!() };
+        value.flds = b"new local question\x1fpublic answer".to_vec();
+        note.observe(changed, runtime::DirtySource::Observer, &mut 4).unwrap();
+        put(&mut store, b, &note);
+        store.selected_ack_set(b, &[vec![note_digest]]).unwrap();
+        ack(&mut note, 2);
+        note.acked_envelope = OpaqueBytes(vec![5, 6]);
+        put(&mut store, b, &note);
+        assert!(store.selected_ack_set(b, &[vec![note_digest]]).is_err());
+        store.selected_ack_set(b, &[vec![entity_codec::sha256(&note.acked_envelope.0)]]).unwrap();
+    }
 }
