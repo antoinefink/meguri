@@ -4,6 +4,26 @@ use crate::cloud::policy::*;
 use std::collections::BTreeSet;
 
 impl Runtime {
+    pub(super) fn exchange_work_locked(
+        state: &super::State,
+        store: &TrackingStore,
+        binding: BindingId,
+    ) -> Result<crate::cloud::adapter::ExchangeWork, RuntimeError> {
+        let pending = store.policy_pending_names(binding)?;
+        let held: BTreeSet<_> = state
+            .cloud
+            .deferred
+            .iter()
+            .chain(&state.cloud.incoming_held)
+            .chain(&state.policy.held_images)
+            .cloned()
+            .collect();
+        Ok(crate::cloud::adapter::ExchangeWork {
+            held_pending_names: pending.intersection(&held).cloned().collect(),
+            pending_unheld_names: pending.difference(&held).cloned().collect(),
+            media: Self::policy_media_facts_locked(state, store, binding)?,
+        })
+    }
     /// Sample this Runtime's original platform provider, never a UI identity or
     /// the process-global configuration for a later Host. No core lock is held.
     pub fn policy_account_identity(&self) -> Result<(u64, IdentityStatus), RuntimeError> {
@@ -89,25 +109,21 @@ impl Runtime {
                     verified: b.verified,
                     publish_step,
                 });
-                let pending = store.policy_pending_names(b.binding.id)?;
-                let held: BTreeSet<_> = s
-                    .cloud
-                    .deferred
-                    .iter()
-                    .chain(&s.cloud.incoming_held)
-                    .chain(&s.policy.held_images)
-                    .cloned()
-                    .collect();
-                held_pending = pending.intersection(&held).cloned().collect();
+                let work = Self::exchange_work_locked(&s, store, b.binding.id)?;
+                held_pending = work.held_pending_names.clone();
                 summary.held = held_pending.len() as u64;
-                summary.pending_unheld = pending.difference(&held).count() as u64;
+                summary.pending_unheld = work.pending_unheld_names.len() as u64;
                 summary.sendable = store
                     .dirty_names(b.binding.id)?
                     .0
                     .keys()
-                    .filter(|n| !held.contains(*n) && !s.policy.parked.contains(*n))
+                    .filter(|n| !held_pending.contains(*n) && !s.policy.parked.contains(*n))
                     .count() as u64;
-                summary.parked = pending.intersection(&s.policy.parked).count() as u64;
+                summary.parked = held_pending
+                    .iter()
+                    .chain(&work.pending_unheld_names)
+                    .filter(|name| s.policy.parked.contains(*name))
+                    .count() as u64;
                 summary.zone_deletions_due = store
                     .retained_zones(b.binding.id)?
                     .values()
@@ -172,7 +188,7 @@ impl Runtime {
                 if publish.is_some() && s.publication.waiting || store.adoption_op()?.is_some() {
                     summary.attention.insert(Attention::RecoveryOpWaiting, 1);
                 }
-                summary.media = Self::policy_media_facts_locked(&s, store, b.binding.id)?;
+                summary.media = work.media;
                 let media_ledger = store.media_ledger(b.binding.id)?;
                 for (attention, count) in [
                     (

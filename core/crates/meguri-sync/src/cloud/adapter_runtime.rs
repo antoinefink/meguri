@@ -1127,7 +1127,7 @@ impl Runtime {
         }
         let binding = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
         let live = Self::sdk_locked(&s, sdk).is_ok();
-        let incoming = with_tracking_access(|| -> Result<ExchangeIncoming, RuntimeError> {
+        let (incoming, work) = with_tracking_access(|| -> Result<_, RuntimeError> {
             let store = s.store.as_ref().ok_or(Error::Database)?;
             for name in std::mem::take(&mut result.outstanding_names) {
                 if !store
@@ -1149,7 +1149,7 @@ impl Runtime {
                     InboxReason::Format | InboxReason::Asset | InboxReason::ApplyFailed { .. } => incoming.blocked += 1,
                 }
             }
-            Ok(incoming)
+            Ok((incoming, Self::exchange_work_locked(&s, store, binding)?))
         })?;
         let outcome = if s
             .bound
@@ -1177,6 +1177,7 @@ impl Runtime {
             collection: outcome,
             result,
             incoming: Some(incoming),
+            work: Some(work),
         };
         let mut durable = s.adapter.durable.clone();
         durable.exchanges.insert(id, completed.clone());
@@ -1670,6 +1671,7 @@ impl Runtime {
                         collection: CollectionOutcome::Cancelled,
                         result,
                         incoming: None,
+                        work: None,
                     },
                 ),
             );

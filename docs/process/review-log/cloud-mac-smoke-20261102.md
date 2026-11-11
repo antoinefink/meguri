@@ -402,3 +402,21 @@ Core and adapter with the test transport.
 This covers the stored blockers above. Payload-size and unreadable-row
 classification and generation-claim integration still need work. Original
 exchange replay, the signed round trip and the full gate remain open.
+
+## Original completion work
+
+Starting commit `8a9cb2fb`. Runtime now stores held and unheld pending names
+and media facts with the original completed exchange. Policy recording uses
+that snapshot. Later edits cannot change those reported values. Older rows
+without the optional snapshot retain their existing decoding and fallback.
+
+Direct review checked lock ownership, provider re-entry, original completion
+timing, set membership and optional media values. No independent agent review
+ran, following Antoine's instruction to work in this session. The first build
+found an ambiguous State type. The explicit Runtime type fixes that error.
+Focused run `77626` passes the before/after-edit regression. Run `78363`
+passes all 31 affected Rust checks. Swift run `78698` passes both publication,
+exchange and reopen checks. Lint `79816` and similarity `80360` pass.
+
+The snapshot is product accounting, not original callback proof. Original
+journal recomputation, the signed round trip and the full gate remain open.

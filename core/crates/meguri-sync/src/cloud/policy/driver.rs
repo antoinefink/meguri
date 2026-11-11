@@ -1286,16 +1286,20 @@ impl Driver {
             .runtime
             .policy_projection_with_work(lifecycle_kind(&lifecycle), generation.0, work)?;
         let summary = &projection.facts.summary;
+        let frozen = completed.work.as_ref();
+        let held_pending = frozen.map_or(&projection.held_pending, |snapshot| &snapshot.held_pending_names);
         let outcome = match completed.collection {
             CollectionOutcome::Succeeded => ExchangeOutcome::Succeeded {
                 selected: completed.result.selected_names.len() as u64,
-                held_back: projection.held_pending.union(&completed.result.held_back_names).count() as u64,
-                newer_pending: summary.pending_unheld,
+                held_back: held_pending.union(&completed.result.held_back_names).count() as u64,
+                newer_pending: frozen.map_or(summary.pending_unheld, |snapshot| {
+                    snapshot.pending_unheld_names.len() as u64
+                }),
                 incoming_waiting: completed
                     .incoming
                     .as_ref()
                     .map_or(summary.incoming_waiting, |i| i.waiting),
-                media: summary.media.clone(),
+                media: frozen.map_or_else(|| summary.media.clone(), |snapshot| snapshot.media.clone()),
             },
             CollectionOutcome::WaitingNoAccount => ExchangeOutcome::Waiting {
                 class: OperationError::NoAccount,

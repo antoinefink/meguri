@@ -702,6 +702,97 @@ fn completed_runtime_exchange_uses_accepted_end_clock_not_projection_time() {
 }
 
 #[test]
+fn completed_exchange_keeps_original_pending_and_media_work_after_later_edits() {
+    use meguri_sync::cloud::{
+        adapter::{CollectionOutcome, CompletedExchange},
+        policy::Lifecycle,
+    };
+    for before_completion in [false, true] {
+        let rig = rig();
+        let collection = rig.host.collection().unwrap();
+        let media = rig.host.media().unwrap();
+        let runtime = rig.host.cloud_runtime().unwrap();
+        let driver = rig.host.cloud_policy_driver().unwrap();
+        let run = command(
+            rig.host
+                .cloud_policy_input(DeviceEvent::SyncNowRequested(Source::Command))
+                .unwrap(),
+            |kind| matches!(kind, ActionKind::RunExchange { .. }),
+        );
+        let ActionKind::RunExchange { exchange, .. } = run.action.kind else {
+            unreachable!()
+        };
+        let native = driver.capture_exchange(&run, &collection).unwrap();
+        let edit = || {
+            meguri_engine::decks::rename(&collection, rig.baseline_deck, "Newer pending edit".into()).unwrap();
+            media
+                .write_exact("pending.bin", b"synthetic media awaiting upload")
+                .unwrap();
+            runtime.consume_media_feed(&collection, &media).unwrap();
+        };
+        if before_completion {
+            edit();
+        }
+        let completed = runtime.adapter_complete_exchange(&rig.sdk, native, true, None).unwrap();
+        assert_eq!(completed.collection, CollectionOutcome::Succeeded);
+        assert!(completed.result.selected_names.is_empty());
+        let frozen = completed.work.as_ref().unwrap();
+        assert!(frozen.held_pending_names.is_empty());
+        assert_eq!(frozen.pending_unheld_names.is_empty(), !before_completion);
+        assert_eq!(frozen.media.upload_files, Some(u64::from(before_completion)));
+        assert_eq!(frozen.media.upload_bytes, Some(if before_completion { 31 } else { 0 }));
+        assert_eq!(frozen.media.uploads_running, None);
+        assert_eq!(frozen.media.remaining_download_ms, None);
+        let encoded = serde_json::to_value(&completed).unwrap();
+        assert_eq!(
+            serde_json::from_value::<CompletedExchange>(encoded.clone()).unwrap(),
+            completed
+        );
+        let mut legacy = encoded;
+        legacy.as_object_mut().unwrap().remove("work");
+        assert_eq!(serde_json::from_value::<CompletedExchange>(legacy).unwrap().work, None);
+        if !before_completion {
+            edit();
+        }
+        let current = runtime
+            .policy_projection(Lifecycle::Ready, collection.generation().0)
+            .unwrap();
+        assert!(current.facts.summary.pending_unheld > 0);
+        assert_eq!(current.facts.summary.media.upload_files, Some(1));
+        let action = command(
+            driver
+                .complete_exchange(exchange, rig.host.engine().state(), rig.host.engine().generation())
+                .unwrap(),
+            |kind| matches!(kind, ActionKind::RecordExchange(_)),
+        );
+        let ActionKind::RecordExchange(record) = &action.action.kind else {
+            unreachable!()
+        };
+        let ExchangeOutcome::Succeeded {
+            held_back,
+            newer_pending,
+            media: reported,
+            ..
+        } = &record.outcome
+        else {
+            panic!("successful exchange required")
+        };
+        assert_eq!(*held_back, 0);
+        assert_eq!(*newer_pending, frozen.pending_unheld_names.len() as u64);
+        assert_eq!(reported, &frozen.media);
+        rig.host
+            .execute_cloud_policy_core(&action, Duration::from_secs(10))
+            .unwrap();
+        assert_eq!(runtime.adapter_exchange_result(native), Some(completed));
+        assert_eq!(
+            std::fs::read(media.store().media_dir().join("pending.bin")).unwrap(),
+            b"synthetic media awaiting upload"
+        );
+        rig.host.close().unwrap();
+    }
+}
+
+#[test]
 fn exchange_incoming_reasons_keep_their_original_accounting_after_completion() {
     use meguri_sync::cloud::{
         ApplyFailure, InboxReason,
