@@ -2064,13 +2064,19 @@ fn cloud_q6_resume_absence_child_checkpoint() {
     assert!(
         matches!(&edited_note.payload, Payload::Note(n) if n.id == facts.note_id && n.flds == facts.edited_fields)
             && edited_note.mark.is_some(),
-        "payload-is-note={} id-matches={} fields-match={} mark-present={} local_rev={} acked_rev={}",
+        "payload-is-note={} id-matches={} fields-match={} mark-present={} local_rev={} acked_rev={} observer_open={} open={} observed_seq={} collection_seq={} observed_generation={} collection_generation={}",
         matches!(&edited_note.payload, Payload::Note(_)),
         matches!(&edited_note.payload, Payload::Note(n) if n.id == facts.note_id),
         matches!(&edited_note.payload, Payload::Note(n) if n.flds == facts.edited_fields),
         edited_note.mark.is_some(),
         edited_note.local_rev,
-        edited_note.acked_rev
+        edited_note.acked_rev,
+        edited_note.observer_open,
+        open,
+        edited_note.observed_seq,
+        collection.last_seq().0,
+        edited_note.observed_generation,
+        collection.generation().0
     );
     assert!(!runtime.entity_facts_page(Kind::Revlog, None).unwrap().is_empty());
     let (sdk, state, zone) = admit(&host);
