@@ -272,3 +272,22 @@
 - Only that exact preview process was stopped. The same product was reopened
   and left active on its deck overview. Review startup and cold-start receive
   remain unresolved; the next source trace must locate the blocked await.
+
+## Review visibility trace
+
+- Debug traces `9bade26c`, `0e6be4c4`, `464d3d76` and `0d746526` add fixed
+  notices only. Reviews `98333`, `1970`, `6388` and `9876` report no P0–P2.
+  The second review could inspect source but not compare the synthetic history.
+- Signed standalone builds `98992`, `1290`, `6717` and `8882` passed, including
+  their UI lint checks. Actual startup completes both page loads and rendering,
+  then waits for `settled` during first-card preparation. No grade was saved.
+- Loading-layer experiment `ae2a60c4` passed source review `4322` and build
+  `3810`, but did not change the native outcome. It was reverted in `c9dd3739`.
+- Build `8882` reports the card DOM shown, a native window present but occluded,
+  and a hidden document. Its frame observation has not returned. No readiness
+  signal or bridge rejection was observed. Doctor `10746` finds an unlocked
+  host with an awake display; native menu actions do not resolve visibility.
+- This qualifies the earlier startup-failure finding: the preview stall is
+  real, but a product defect is not established while WebKit is hidden.
+  No origin guard or readiness requirement changed. The latest preview is
+  reopened on its deck overview. Cold-start iCloud receive remains unresolved.
