@@ -37,3 +37,28 @@ The guard is unchanged. Final checks pass: `swift-test/125723Z-35477` (35 cases)
 
 All failed receipts remain retained. The broader integration gate and actual
 two-device review/media convergence remain outstanding. No unit is accepted.
+
+## Device observations
+
+Normal signed phone run `20261111T125817Z-38353` passes and verifies launch.
+Drive `125934Z-40380` completes 14 interaction steps with verified continuity;
+the preview is ready and shows 43 local reviews and 565 local media files.
+The former preview error does not recur. No particular earlier read failure is
+therefore established, and no replacement or phone grade is performed.
+
+Direct Mac inspection confirms 44 local reviews. Its manual sync reports a new
+completion time of 14:03 local. The cloud header's counts are dated earlier;
+they are not evidence of the current remote review total.
+
+The phone Settings attempt `130441Z-44991` fails before its off-screen Sync Now
+control; it does not establish a request. Preview `130621Z-46568` still shows
+43 local reviews. Visible popover drive `130809Z-49189` completes six steps,
+including Sync Now. Follow-up `131004Z-51521` completes twelve steps: the
+reported sync time advances to 14:09 local, but the local review count remains
+43. Its preview is cancelled and the phone returns to Decks.
+
+These drives retain failing hierarchy audits, despite completed interaction
+steps and verified process continuity. No drive is counted as a passing gate.
+The actual 44-versus-43 discrepancy now needs investigation of the exchange and
+incoming apply path. Account equality remains unverified. No count difference
+is attributed to one cause without further evidence.
