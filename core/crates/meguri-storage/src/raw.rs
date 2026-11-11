@@ -60,7 +60,7 @@ impl ReadSnapshot<'_> {
 
 fn run(conn: &Connection, sql: &str, params: &[SqlValue]) -> Result<RawRows, StorageError> {
     let mut statement = conn.prepare(sql)?;
-    let columns: Vec<String> = statement.column_names().into_iter().map(str::to_owned).collect();
+    let columns: Vec<String> = statement.column_names().map(str::to_owned).collect();
     let values = params.iter().map(|p| match p {
         SqlValue::Null => Value::Null,
         SqlValue::Integer(v) => Value::Integer(*v),
