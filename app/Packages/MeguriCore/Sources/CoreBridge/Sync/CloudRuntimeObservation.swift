@@ -9,6 +9,24 @@ public struct CloudSDKObservation: Sendable {
     public let event: CloudEngineEvent
     public let phase: CloudSDKObservationPhase
 }
+
+public struct CloudNativeSendOperation: Sendable, Hashable {
+    public enum Reason: Sendable, Hashable { case manual, scheduled }
+    public let identity: UUID
+    public let reason: Reason
+    public init(identity: UUID, reason: Reason) {
+        self.identity = identity
+        self.reason = reason
+    }
+}
+
+/// In-process evidence from the native send path. Journal writers project
+/// record names and operation identities to run-local labels.
+public enum CloudNativeSendObservation: Sendable {
+    case built(origin: String, operation: CloudNativeSendOperation, zone: String, batch: CloudEngineBatch)
+    case manualReturned(origin: String, operation: CloudNativeSendOperation)
+    case unbound
+}
 public enum CloudOwnObservationPhase: Sendable {
     case prepared, enqueued(Bool), replied(CloudPublicationResult), committed
 }

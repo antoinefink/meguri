@@ -24,8 +24,13 @@ import Synchronization
         flush(event: event)
     }
 
-    func recordBatch(origin: String, batch: CloudEngineBatch, proof: SmokeBatchProof?, current: SmokeCloudObservation) {
-        evidence.batch(origin: origin, batch: batch, proof: proof, current: current)
+    func recordBatch(origin: String, batch: CloudEngineBatch, proof: SmokeBatchProof?, current: SmokeCloudObservation,
+                     operation: CloudNativeSendOperation? = nil) {
+        evidence.batch(origin: origin, batch: batch, proof: proof, current: current, operation: operation)
+        flush()
+    }
+    func recordSendReturn(origin: String, operation: CloudNativeSendOperation) {
+        evidence.sendReturned(origin: origin, operation: operation)
         flush()
     }
 
@@ -34,11 +39,15 @@ import Synchronization
         guard !facts.isEmpty else { return }
         do {
             let current = try writer()
+            guard let event else {
+                try current(facts)
+                return
+            }
             var callbackWriter = current
             func isCallback(_ fact: AgentFact) -> Bool {
                 fact.engine != nil && (fact.name == .engineCallback || fact.name == .stateSaved)
             }
-            if let event, facts.contains(where: isCallback) {
+            if facts.contains(where: isCallback) {
                 // No causal command is available here. Bind at delivery and
                 // keep that command through commit, return and a later step.
                 switch event.phase {
@@ -98,6 +107,13 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
         let proof: SmokeBatchProof?
         let session: UInt64?
         let seq: UInt64
+        var send: String?
+        var open: Set<String> = []
+    }
+    private struct Send {
+        let alias: String
+        let engine: String
+        var returned = false
     }
     private struct Held {
         let session: UInt64
@@ -119,6 +135,11 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
         var own: [UUID: Own] = [:]
         var callbacks: [EngineKey: Callback] = [:]
         var batches: [EngineKey: Batch] = [:]
+        var sends: [CloudNativeSendOperation: Send] = [:]
+        var entities: [String: String] = [:]
+        var nextBatch = 1
+        var nextSend = 1
+        var nextEntity = 1
         var lastOrdinals: [String: UInt64] = [:]
         var held: Held?
         var stateReturns: [String: UInt64] = [:]
@@ -148,6 +169,23 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
             guard engineLabels.isEmpty else { throw AgentFailure.execution }
             return try admitEngine(origin)
         }
+        mutating func send(_ operation: CloudNativeSendOperation, engine: String) throws -> Send {
+            if let existing = sends[operation] {
+                guard existing.engine == engine, !existing.returned else { throw AgentFailure.execution }
+                return existing
+            }
+            let original = Send(alias: "send\(nextSend)", engine: engine)
+            nextSend += 1
+            sends[operation] = original
+            return original
+        }
+        mutating func entity(_ name: String) -> String {
+            if let existing = entities[name] { return existing }
+            let alias = "entity\(nextEntity)"
+            nextEntity += 1
+            entities[name] = alias
+            return alias
+        }
     }
     private let state = Mutex(State())
     func setGeneration(_ generation: UInt64, selectedPublication: Bool = false) throws {
@@ -161,11 +199,22 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
     func check() throws { try state.withLock { if $0.failed { throw AgentFailure.execution } } }
     func drain() -> [AgentFact] { state.withLock { let facts = $0.facts; $0.facts.removeAll(); return facts } }
 
-    func reserveHistoricalEngines(_ records: [AgentRecord]) throws {
+    func reserveHistoricalLabels(_ records: [AgentRecord]) throws {
         try state.withLock { s in
             guard s.generation == nil, s.engineLabels.isEmpty else { throw AgentFailure.recovery }
             for record in records {
-                s.reservedLabels.formUnion((record.facts + record.checks.flatMap(\.facts)).compactMap(\.engine))
+                let facts = record.facts + record.checks.flatMap(\.facts)
+                s.reservedLabels.formUnion(facts.compactMap(\.engine))
+                for label in facts.compactMap(\.operation).flatMap({ $0.split(separator: "-") }) {
+                    func successor(after prefix: String, current: Int) throws -> Int {
+                        guard label.hasPrefix(prefix), let n = Int(label.dropFirst(prefix.count)), n > 0 else { return current }
+                        guard n < Int.max - 4096 else { throw AgentFailure.recovery }
+                        return max(current, n + 1)
+                    }
+                    s.nextBatch = try successor(after: "batch", current: s.nextBatch)
+                    s.nextSend = try successor(after: "send", current: s.nextSend)
+                    s.nextEntity = try successor(after: "entity", current: s.nextEntity)
+                }
             }
         }
     }
@@ -389,15 +438,32 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
                 let batchLabel = batch.flatMap { s.batches[$0]?.alias }.map { "-" + $0 } ?? ""
                 s.append(kind == "state" && expected == 1 ? .stateSaved : .engineCallback,
                          cb.alias + "-" + kind + batchLabel + "-" + suffix, engine: engine)
+                let callbackTick = s.tick
+                if let batch, var handed = s.batches[batch], let send = handed.send {
+                    if expected == 1 {
+                        for name in cb.saved.sorted() {
+                            let candidates = s.batches.filter { $0.key.origin == origin && $0.value.open.contains(name) }
+                            guard candidates.count == 1, candidates[batch] != nil,
+                                  let entity = s.entities[name] else { throw AgentFailure.execution }
+                            s.append(.engineCallback, "\(send)-\(handed.alias)-\(entity)-saved", engine: engine)
+                            handed.open.remove(name)
+                        }
+                    } else if expected == 2 && !cb.saved.isEmpty {
+                        s.append(.engineCallback, "\(send)-\(handed.alias)-batch-returned", engine: engine)
+                        handed.open.removeAll()
+                    }
+                    s.batches[batch] = handed
+                }
                 if expected == 2 {
-                    cb.returned = s.tick
-                    if kind == "state" { s.stateReturns[engine] = s.tick }
+                    cb.returned = callbackTick
+                    if kind == "state" { s.stateReturns[engine] = callbackTick }
                 }
                 s.callbacks[key] = cb
             } catch { s.failed = true }
         }
     }
-    func batch(origin: String, batch: CloudEngineBatch, proof: SmokeBatchProof?, current: SmokeCloudObservation) {
+    func batch(origin: String, batch: CloudEngineBatch, proof: SmokeBatchProof?, current: SmokeCloudObservation,
+               operation: CloudNativeSendOperation? = nil) {
         state.withLock { s in
             do {
                 let key = EngineKey(origin: origin, id: batch.id)
@@ -413,12 +479,38 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
                               batch.saves.contains { $0.name == image.name && Self.hash($0.envelope) == image.envelopeDigest }
                           }) else { throw AgentFailure.execution }
                 }
-                let alias = "batch\(s.batches.count + 1)"
-                s.batches[key] = Batch(alias: alias, engine: engine, ordinal: s.batches.count + 1,
+                let alias = "batch\(s.nextBatch)"
+                let send = try operation.map { try s.send($0, engine: engine).alias }
+                s.batches[key] = Batch(alias: alias, engine: engine, ordinal: s.nextBatch,
                     records: Dictionary(uniqueKeysWithValues: batch.saves.map { ($0.name, Self.hash($0.envelope)) }),
-                    proof: proof, session: proof?.session ?? current.activeSession, seq: proof?.seq ?? current.seq)
+                    proof: proof, session: proof?.session ?? current.activeSession, seq: proof?.seq ?? current.seq,
+                    send: send, open: send == nil ? [] : Set(batch.saves.map(\.name)))
+                s.nextBatch += 1
                 s.append(.applied, alias + (proof == nil ? "-media-handoff" : "-collection-handoff"), engine: engine)
                 s.facts.append(.init(name: .applied, count: UInt64(batch.saves.count), engine: engine, operation: alias + "-save-count"))
+                if let send, let operation {
+                    let phase = operation.reason == .manual ? "manual-build" : "scheduled-build"
+                    s.append(.applied, "\(send)-\(alias)-\(phase)", engine: engine)
+                    for record in batch.saves {
+                        let entity = s.entity(record.name)
+                        s.append(.applied, "\(send)-\(alias)-\(entity)-member", engine: engine)
+                    }
+                }
+            } catch { s.failed = true }
+        }
+    }
+    func sendReturned(origin: String, operation: CloudNativeSendOperation) {
+        state.withLock { s in
+            do {
+                guard !s.failed, !s.joined, operation.reason == .manual,
+                      let engine = s.engineLabels[origin] else { throw AgentFailure.execution }
+                var send = try s.send(operation, engine: engine)
+                send.returned = true
+                s.sends[operation] = send
+                for key in s.batches.keys where key.origin == origin && s.batches[key]?.send == send.alias {
+                    s.batches[key]?.open.removeAll()
+                }
+                s.append(.applied, "\(send.alias)-manual-returned", engine: engine)
             } catch { s.failed = true }
         }
     }
@@ -457,7 +549,9 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
                 }
                 guard let cb = candidates.sorted(by: { ($0.returned ?? 0) < ($1.returned ?? 0) }).last,
                       let batch = cb.batch, let alias = s.batches[batch]?.alias else { throw AgentFailure.execution }
-                return .init(name: .applied, count: cb.returned, engine: cb.engine, operation: entity.label + "-" + cb.alias + "-" + alias + "-ack")
+                let member = s.batches[batch]?.send == nil ? "" : s.entities[entity.recordName].map { "-" + $0 } ?? ""
+                return .init(name: .applied, count: cb.returned, engine: cb.engine,
+                             operation: entity.label + "-" + cb.alias + "-" + alias + member + "-ack")
             }
         }
     }

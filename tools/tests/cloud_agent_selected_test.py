@@ -86,11 +86,19 @@ def generated(kind):
         check(4, [("localDurability", [fact("localCommitted", "n1", 8, "1" * 64),
                                        fact("localDurable", "n1", 2, "1" * 64),
                                        fact("localDurable", "original-edit-witness", 1, "e" * 64)])])
-        upload = [event("applied", "batch1-collection-handoff", True), fact("applied", "batch1-save-count", 1, engine=True)]
-        upload += callback("sent-batch1")
+        upload = [event("applied", "batch1-collection-handoff", True), fact("applied", "batch1-save-count", 1, engine=True),
+                  event("applied", "send1-batch1-manual-build", True),
+                  event("applied", "send1-batch1-entity1-member", True)]
+        sdk += 1
+        for phase in ("delivered", "committed", "returned"):
+            upload.append(event("engineCallback", "sdk%d-sent-batch1-%s" % (sdk, phase), True))
+            if phase == "committed":
+                upload.append(event("engineCallback", "send1-batch1-entity1-saved", True))
         returned, sent_sdk = tick, sdk
+        upload.append(event("engineCallback", "send1-batch1-batch-returned", True))
+        upload.append(event("applied", "send1-manual-returned", True))
         upload += callback("state")
-        exchange += [fact("applied", "n1-sdk%d-batch1-ack" % sent_sdk, returned, engine=True),
+        exchange += [fact("applied", "n1-sdk%d-batch1-entity1-ack" % sent_sdk, returned, engine=True),
                      fact("stateSaved", "n1-earlier-original-ack", 2, "1" * 64),
                      fact("localDurable", "n1", 2, "1" * 64)]
         check(5, [("coordinatorResult", exchange)])
@@ -162,8 +170,14 @@ class SelectedTests(unittest.TestCase):
         trace("required-scan-before-native-sdk")
         trace("batch1-collection-handoff")
         evidence.ingest({"name": "applied", "count": 1, "operation": "batch1-save-count", "engine": "engine1"})
-        callback("sdk1-sent-batch1", "engine1")
-        ack = {"name": "applied", "count": evidence.tick, "operation": "n1-sdk1-batch1-ack", "engine": "engine1"}
+        trace("send1-batch1-manual-build")
+        trace("send1-batch1-entity1-member")
+        trace("sdk1-sent-batch1-delivered", "engineCallback")
+        trace("sdk1-sent-batch1-committed", "engineCallback")
+        trace("send1-batch1-entity1-saved", "engineCallback")
+        trace("sdk1-sent-batch1-returned", "engineCallback")
+        ack = {"name": "applied", "count": evidence.tick, "operation": "n1-sdk1-batch1-entity1-ack", "engine": "engine1"}
+        trace("send1-batch1-batch-returned", "engineCallback")
         with self.assertRaisesRegex(s.v.Refused, "selected-scan-before-sdk"):
             trace("sdk2-state-delivered", "engineCallback", "engine2")
         trace("required-scan-before-native-sdk", engine="engine2")
@@ -287,7 +301,7 @@ class SelectedTests(unittest.TestCase):
                 admitted("mac", mutate=alter)
 
     def test_missing_ack_revision_and_callback_state_refuse(self):
-        for label in ("n1-sdk2-batch1-ack", "n1-earlier-original-ack", "sdk3-state-committed"):
+        for label in ("n1-sdk2-batch1-entity1-ack", "n1-earlier-original-ack", "sdk3-state-committed"):
             def omit(checks, observations):
                 for check in checks[5]: check["facts"][:] = [f for f in check["facts"] if f.get("operation") != label]
                 observations[5][:] = [f for f in observations[5] if f.get("operation") != label]
@@ -296,6 +310,14 @@ class SelectedTests(unittest.TestCase):
             for item in checks[5][0]["facts"] + observations[5]:
                 if item.get("operation") == "n1-earlier-original-ack": item["count"] = 99
         with self.assertRaises(s.v.Refused): admitted("mac", mutate=mismatch)
+
+    def test_acknowledgement_requires_its_actual_saved_batch_member(self):
+        def substitute(checks, observations):
+            for item in checks[5][0]["facts"] + observations[5]:
+                if item.get("operation") == "n1-sdk2-batch1-entity1-ack":
+                    item["operation"] = "n1-sdk2-batch1-entity2-ack"
+        with self.assertRaisesRegex(s.v.Refused, "selected-ack-member"):
+            admitted("mac", mutate=substitute)
 
     def test_peer_apply_fetch_return_and_control_comparison_are_required(self):
         def bad_peer(checks, observations):

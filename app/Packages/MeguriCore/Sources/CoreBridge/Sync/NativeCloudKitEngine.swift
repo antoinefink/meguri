@@ -125,9 +125,11 @@ enum NativeCloudKitRecordRouting {
 public actor NativeCloudKitEngineFactory: CloudKitEngineFactory {
     let database: CKDatabase
     private let account: @Sendable () async throws -> CloudResolvedAccount
+    private let observeSend: (@Sendable (CloudNativeSendObservation) async -> Void)?
     private var accountObservers: [UUID: any NSObjectProtocol] = [:]
-    public init(database: CKDatabase, accountResolver: @escaping @Sendable () async throws -> CloudResolvedAccount) {
-        self.database = database; account = accountResolver
+    public init(database: CKDatabase, observeSend: (@Sendable (CloudNativeSendObservation) async -> Void)? = nil,
+                accountResolver: @escaping @Sendable () async throws -> CloudResolvedAccount) {
+        self.database = database; account = accountResolver; self.observeSend = observeSend
     }
     public func accountChanges() -> AsyncStream<Void>? {
         let (stream, continuation) = AsyncStream<Void>.makeStream()
@@ -146,7 +148,7 @@ public actor NativeCloudKitEngineFactory: CloudKitEngineFactory {
             do { serialization = try JSONDecoder().decode(CKSyncEngine.State.Serialization.self, from: data) }
             catch { throw NativeCloudKitFailure.invalidSerialization }
         } else { serialization = nil }
-        let engine = NativeCloudKitEngine(instanceID: configuration.instanceID, delegate: delegate)
+        let engine = NativeCloudKitEngine(instanceID: configuration.instanceID, delegate: delegate, observeSend: observeSend)
         await engine.setCollectionZone(configuration.collectionZone)
         await engine.configure(database: database, serialization: serialization, automatic: configuration.automaticallySync)
         return engine
@@ -218,6 +220,9 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
     nonisolated let instanceID: String
     private var sdk: CKSyncEngine?
     private let delegate: any CloudKitEngineDelegate
+    private let observeSend: (@Sendable (CloudNativeSendObservation) async -> Void)?
+    private var manualSends: [String: CloudNativeSendOperation] = [:]
+    private var scheduledSends: [String: CloudNativeSendOperation] = [:]
     private var activeEvent = false
     private var eventWaiters: [CheckedContinuation<Void, Never>] = []
     private var returnedWork: Task<Void, Never>?
@@ -230,8 +235,9 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
     private func fetchedPayloadStaging() throws -> CloudMediaStaging {
         try CloudMediaStaging.sharedDefault()
     }
-    init(instanceID: String, delegate: any CloudKitEngineDelegate) {
-        self.instanceID = instanceID; self.delegate = delegate
+    init(instanceID: String, delegate: any CloudKitEngineDelegate,
+         observeSend: (@Sendable (CloudNativeSendObservation) async -> Void)? = nil) {
+        self.instanceID = instanceID; self.delegate = delegate; self.observeSend = observeSend
     }
     func configure(database: CKDatabase, serialization: CKSyncEngine.State.Serialization?, automatic: Bool) {
         var configuration = CKSyncEngine.Configuration(database: database, stateSerialization: serialization, delegate: self)
@@ -362,7 +368,23 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         // Same actor turn: event-idle admission, Core validation, lock release,
         // then the captured SDK invocation without another application await.
         try networkLifetime.enqueue(generation: generation, validate: validate, begin: {})
-        try await sdk.sendChanges(options)
+        guard let observeSend else {
+            try await sdk.sendChanges(options)
+            return
+        }
+        var observedOptions = options
+        observedOptions.operationGroup = CKOperationGroup()
+        let group = observedOptions.operationGroup.operationGroupID
+        let operation = CloudNativeSendOperation(identity: UUID(), reason: .manual)
+        manualSends[group] = operation
+        let result: Result<Void, any Error>
+        do {
+            try await sdk.sendChanges(observedOptions)
+            result = .success(())
+        } catch { result = .failure(error) }
+        manualSends.removeValue(forKey: group)
+        await observeSend(.manualReturned(origin: instanceID, operation: operation))
+        try result.get()
     }
     func prepareFetch(options: CloudFetchOptions) async throws -> CloudKitNetworkEnqueue {
         try await waitForEventBookkeeping()
@@ -503,8 +525,19 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
             case .didFetchRecordZoneChanges(let did):
                 forwarded = .didFetchZone(zone: try NativeCloudKitIdentityValidation.zoneName(did.zoneID), error: did.error.map(code))
             case .didFetchChanges(let did): forwarded = .didFetch(groupID: did.context.options.operationGroup.name ?? "", reason: did.context.reason == .manual ? .manual : .scheduled)
-            case .willSendChanges: forwarded = .willSend(zone: collectionZone ?? "")
-            case .didSendChanges: forwarded = .didSend(zone: collectionZone ?? "")
+            case .willSendChanges(let event):
+                if let observeSend, event.context.reason == .scheduled {
+                    let group = event.context.options.operationGroup.operationGroupID
+                    if scheduledSends[group] == nil {
+                        scheduledSends[group] = .init(identity: UUID(), reason: .scheduled)
+                    } else { await observeSend(.unbound) }
+                }
+                forwarded = .willSend(zone: collectionZone ?? "")
+            case .didSendChanges(let event):
+                if observeSend != nil, event.context.reason == .scheduled {
+                    scheduledSends.removeValue(forKey: event.context.options.operationGroup.operationGroupID)
+                }
+                forwarded = .didSend(zone: collectionZone ?? "")
             case .fetchedDatabaseChanges(let changes):
                 guard changes.deletions.isEmpty else { throw NativeCloudKitFailure.unsupportedRecord }
                 forwarded = .databaseChanges
@@ -561,6 +594,18 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
             if let batch = await delegate.nextRecordZoneChangeBatch(pending: scoped, zone: candidate, engine: self) { selected = (candidate, batch); break }
         }
         guard let (batchZone, batch) = selected else { return nil }
+        if let observeSend {
+            let group = context.options.operationGroup.operationGroupID
+            let operation: CloudNativeSendOperation? = switch context.reason {
+            case .manual: manualSends.count == 1 ? manualSends[group] : nil
+            case .scheduled: scheduledSends[group]
+            @unknown default: nil
+            }
+            if let operation {
+                await observeSend(.built(origin: instanceID, operation: operation, zone: batchZone, batch: batch))
+            } else { await observeSend(.unbound) }
+            guard sdk === syncEngine else { return nil }
+        }
         guard failure == nil else { return nil }
         do {
             try NativeCloudMediaBatch.validate(batch, zone: batchZone)

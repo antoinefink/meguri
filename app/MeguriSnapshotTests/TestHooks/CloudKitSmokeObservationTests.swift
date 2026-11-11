@@ -365,6 +365,38 @@ import Testing
         let joined = try evidence.joinedOriginalWork()
         #expect(joined.last?.operation == "sdk-joined" && joined.last?.count == 3 && joined.last?.engine == nil)
     }
+    @Test func originalManualReturnClosesOnlyItsOwnBatchForARebuiltRecord() throws {
+        let original = CloudNativeSendOperation(identity: UUID(), reason: .manual)
+        let later = CloudNativeSendOperation(identity: UUID(), reason: .scheduled)
+        let record = CloudRecord(name: entity("n1").recordName, envelope: Data([1]), systemFields: Data([2]))
+        let origin = "generated-engine"
+        for closed in [false, true] {
+            let evidence = try ledger()
+            try evidence.admitSmokeSDK(origin: origin)
+            evidence.batch(origin: origin, batch: .init(id: 1, saves: [record], deletes: []),
+                           proof: nil, current: current(), operation: original)
+            if closed { evidence.sendReturned(origin: origin, operation: original) }
+            evidence.batch(origin: origin, batch: .init(id: 2, saves: [record], deletes: []),
+                           proof: nil, current: current(), operation: later)
+            let sent = CloudEngineEvent.sent(batchID: 2, saved: [record], failed: [], deleted: [])
+            for phase in [CloudSDKObservationPhase.delivered, .committed, .returned] {
+                evidence.sdk(.init(origin: origin, ordinal: 1, event: sent, phase: phase), current: current())
+            }
+            if closed {
+                try evidence.check()
+                stateCallback(evidence, ordinal: 2)
+                let facts = evidence.drain()
+                #expect(facts.contains { $0.operation == "send1-manual-returned" })
+                #expect(facts.contains { $0.operation == "send2-batch2-entity1-saved" })
+                let ack = try evidence.requireAcknowledgements([entity("n1")],
+                    observations: [.savedPendingRemoved(name: record.name, requestID: 2)])
+                #expect(ack.first?.operation == "n1-sdk1-batch2-entity1-ack")
+            } else {
+                #expect(throws: AgentFailure.execution) { try evidence.check() }
+                #expect(!evidence.drain().contains { $0.operation == "send2-batch2-entity1-saved" })
+            }
+        }
+    }
     @Test func commonOriginalJoinWaitsForOriginalOwnCommitAndSDKReturn() throws {
         let evidence = try ledger(selected: true)
         let identity = UUID()

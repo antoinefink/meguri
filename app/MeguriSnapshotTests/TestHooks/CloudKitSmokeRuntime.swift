@@ -510,10 +510,37 @@ import Foundation
             let admission = try retainedAdmission()
             let container = CKContainer(identifier: configuration.container)
             let database = container.privateCloudDatabase
+            let recordBatch: @Sendable (String, String, CloudEngineBatch, CloudNativeSendOperation?) async -> Void = {
+                [evidence, callbackJournal] origin, zone, batch, operation in
+                do {
+                    let inspection = CoreSmokeInspection()
+                    let proof = zone == "meguri-media" ? nil : try await inspection.batch(sdk: origin, id: batch.id)
+                    let current = try await inspection.cloud()
+                    await callbackJournal.recordBatch(origin: origin, batch: batch, proof: proof,
+                                                      current: current, operation: operation)
+                } catch { evidence.fail() }
+            }
+            let observeSend: (@Sendable (CloudNativeSendObservation) async -> Void)?
+            let observeBatch: (@Sendable (String, String, CloudEngineBatch) async -> Void)?
+            if program == .smoke {
+                observeSend = nil
+                observeBatch = { origin, zone, batch in await recordBatch(origin, zone, batch, nil) }
+            } else {
+                observeSend = { [evidence, callbackJournal] observation in
+                    switch observation {
+                    case .built(let origin, let operation, let zone, let batch):
+                        await recordBatch(origin, zone, batch, operation)
+                    case .manualReturned(let origin, let operation):
+                        await callbackJournal.recordSendReturn(origin: origin, operation: operation)
+                    case .unbound: evidence.fail()
+                    }
+                }
+                observeBatch = nil
+            }
             // Both the app account reader and adapter use this factory.
             // Its fresh result matches the frozen input before Core accepts
             // identity; J2.2 preserves automatic SDK scheduling.
-            let nativeFactory = NativeCloudKitEngineFactory(database: database, accountResolver: { [self] in
+            let nativeFactory = NativeCloudKitEngineFactory(database: database, observeSend: observeSend, accountResolver: { [self] in
                 try await resolveAccount(container: container)
             })
             let stagingRoot = data.appendingPathComponent("cloud-native-staging", isDirectory: true)
@@ -571,14 +598,7 @@ import Foundation
                         let current = try await CoreSmokeInspection().cloud()
                         evidence.validate(origin: event.origin, current: current)
                     } catch { evidence.fail() }
-                }, observeBatch: { [evidence, callbackJournal] origin, zone, batch in
-                    do {
-                        let inspection = CoreSmokeInspection()
-                        let proof = zone == "meguri-media" ? nil : try await inspection.batch(sdk: origin, id: batch.id)
-                        let current = try await inspection.cloud()
-                        await callbackJournal.recordBatch(origin: origin, batch: batch, proof: proof, current: current)
-                    } catch { evidence.fail() }
-                }, observeOwn: { [evidence] in evidence.own($0) })
+                }, observeBatch: observeBatch, observeOwn: { [evidence] in evidence.own($0) })
             try admission.revalidate()
             let wrapper = CloudKitSmokeBackend(production: production, workflow: workflow)
             backend = wrapper
@@ -788,7 +808,7 @@ import Foundation
         _ = try retainedAdmission()
         guard try state.header.program == program, owner == nil else { throw AgentFailure.binding }
         let restored = try AgentSelectedRestoration(state)
-        try evidence.reserveHistoricalEngines(state.records)
+        try evidence.reserveHistoricalLabels(state.records)
         restoration = restored
         do {
             _ = try await openRuntime(restoration: restored, observe: { _ in throw AgentFailure.recovery })

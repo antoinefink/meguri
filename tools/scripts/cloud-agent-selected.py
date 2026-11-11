@@ -25,7 +25,9 @@ PROGRAMS = {
                ("sync_now", {}), ("observe", {"note": "n1"}), ("close", {})),
 }
 FETCH = re.compile(r"sdk([1-9][0-9]*)-(fetch-start|fetch-zone-start|fetched|fetch-zone-end|fetch-end)-(delivered|committed|returned)")
-ACK = re.compile(r"n1-sdk([1-9][0-9]*)-batch([1-9][0-9]*)-ack")
+ACK = re.compile(r"n1-sdk([1-9][0-9]*)-batch([1-9][0-9]*)-entity([1-9][0-9]*)-ack")
+SEND = re.compile(r"send([1-9][0-9]*)(?:-batch([1-9][0-9]*))?(?:-entity([1-9][0-9]*))?"
+                  r"-(manual-build|scheduled-build|member|saved|batch-returned|manual-returned)")
 MEDIA = {"media-upload-pending", "media-download-pending", "media-missing", "media-unknown",
          "media-uploads-running", "media-downloads-running", "media-upload-bytes", "media-download-bytes",
          "media-remaining-download-ms", "media-root-acked", "media-zone-missing", "media-no-space"}
@@ -131,11 +133,13 @@ class Evidence(s.SmokeEvidence):
         super().__init__()
         self.admissions = {}
         self.adoption = None
+        self.sends = {}
+        self.native_batches = {}
 
     @staticmethod
     def trace(item):
         operation = item.get("operation", "")
-        return bool(s.TRACE.fullmatch(operation) or FETCH.fullmatch(operation) or operation in {
+        return bool(s.TRACE.fullmatch(operation) or FETCH.fullmatch(operation) or SEND.fullmatch(operation) or operation in {
             "normal-adoption-generation-joined", "required-scan-before-native-sdk"})
 
     def ingest(self, item):
@@ -154,8 +158,20 @@ class Evidence(s.SmokeEvidence):
             return True
         if self.trace(item) and "engine" in item:
             need(item["engine"] in self.admissions, "selected-scan-before-sdk")
+        native = SEND.fullmatch(operation)
+        if native is not None:
+            self.ingest_send(item, *native.groups())
+            return True
         found = FETCH.fullmatch(operation)
         if found is None:
+            trace = s.TRACE.fullmatch(operation)
+            if trace is not None and trace.group(5) == "sent" and trace.group(7) == "delivered":
+                batch = trace.group(6)
+                info = self.native_batches.get(batch)
+                need(info is not None and info["engine"] == item.get("engine") and
+                     len(info["members"]) == self.batches[batch]["saves"] and info["callback"] is None,
+                     "selected-native-batch")
+                info["callback"] = trace.group(4)
             return super().ingest(item)
         sdk, kind, phase = found.groups()
         s.evidence_shape(item, "engineCallback", engine=True)
@@ -164,15 +180,63 @@ class Evidence(s.SmokeEvidence):
         self.ingest_callback(sdk, kind, None, phase, item["engine"])
         return True
 
+    def ingest_send(self, item, send, batch, entity, phase):
+        result = phase in {"saved", "batch-returned"}
+        s.evidence_shape(item, "engineCallback" if result else "applied", engine=True)
+        self.tick += 1
+        need(item["count"] == self.tick <= 4096 and self.last_batch is None, "selected-send-order")
+        engine = item["engine"]
+        if phase in {"manual-build", "scheduled-build", "manual-returned"}:
+            reason = phase.split("-")[0]
+            if send not in self.sends:
+                need(send == str(len(self.sends) + 1), "selected-send-origin")
+                self.sends[send] = [engine, reason, False]
+            need(self.sends[send] == [engine, reason, False] and entity is None, "selected-send-origin")
+            if phase == "manual-returned":
+                need(batch is None, "selected-send-return")
+                self.sends[send][2] = True
+                for info in self.native_batches.values():
+                    if info["send"] == send: info["open"].clear()
+                return
+            handoff = self.batches.get(batch)
+            need(handoff is not None and handoff["engine"] == engine and batch not in self.native_batches,
+                 "selected-native-batch")
+            self.native_batches[batch] = {"engine": engine, "send": send, "members": set(), "open": set(),
+                                          "saved": set(), "callback": None, "returned": False}
+            return
+        info = self.native_batches.get(batch)
+        need(info is not None and info["engine"] == engine and info["send"] == send, "selected-native-batch")
+        if phase == "member":
+            need(entity is not None and entity not in info["members"] and info["callback"] is None and
+                 not self.sends[send][2] and len(info["members"]) < self.batches[batch]["saves"], "selected-batch-member")
+            info["members"].add(entity)
+            info["open"].add(entity)
+        elif phase == "saved":
+            candidates = {label for label, other in self.native_batches.items()
+                          if other["engine"] == engine and entity in other["open"]}
+            callback = self.sdk.get(info["callback"])
+            need(candidates == {batch} and callback is not None and len(callback[2]) == 2,
+                 "selected-batch-result")
+            info["open"].remove(entity)
+            info["saved"].add(entity)
+        else:
+            callback = self.sdk.get(info["callback"])
+            need(entity is None and info["saved"] and callback is not None and len(callback[2]) == 3 and
+                 not info["returned"], "selected-batch-return")
+            info["returned"] = True
+            info["open"].clear()
+
     def acknowledged(self, item):
         found = ACK.fullmatch(item.get("operation", ""))
         need(found is not None, "selected-ack-operation")
-        sdk, batch = found.groups()
+        sdk, batch, entity = found.groups()
         exact(item, "applied", ("count", "operation", "engine"))
         callback = self.sdk.get(sdk)
         need(callback is not None and callback[:2] == ["sent", batch] and len(callback[2]) == 3 and
              callback[3] == item["engine"] and callback[2][-1] == item["count"] and self.batches[batch]["saves"] > 0,
              "selected-ack-callback")
+        info = self.native_batches[batch]
+        need(info["callback"] == sdk and info["returned"] and entity in info["saved"], "selected-ack-member")
         need(self.has_later_state(item["engine"], item["count"]), "selected-ack-state")
 
     def fetched(self, item):
@@ -221,7 +285,8 @@ class Journal(s.Journal):
             for item in record["facts"] + [f for check in record["checks"] for f in check["facts"]]:
                 label = item.get("operation")
                 traced = s.TRACE.fullmatch(label or "")
-                need(label is None or label in labels or label in TERMINAL_LABELS or ACK.fullmatch(label) or FETCH.fullmatch(label) or
+                need(label is None or label in labels or label in TERMINAL_LABELS or ACK.fullmatch(label) or
+                     FETCH.fullmatch(label) or SEND.fullmatch(label) or
                      (traced and (traced.group(2) is None or traced.group(2) in s.OWN_KINDS)),
                      "selected-public-fact")
         return complete, terminal

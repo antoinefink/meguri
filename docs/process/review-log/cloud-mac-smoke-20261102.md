@@ -171,3 +171,25 @@ needs its own completed state callback.
 J4.1 still needs per-record results and pending-list evidence. J5.1 still
 needs original exchange reconstruction and a signed recovery run. The
 full gate and signed round trip remain open.
+
+## Original sends and saved records
+
+Starting commit `a089494a`. The selected test observer links each built batch
+to the operation in its native send context. The journal uses run-local
+labels for operations and records. The manual
+return follows the original SDK call, and a scheduled end event does not
+close a batch. The existing runtime path does not install this observer
+outside the selected test.
+
+The Swift and host checks require a saved record to match one open batch of
+its own engine. The Mac VM test `84770` shows that a rebuild stays ambiguous
+until the earlier manual call returns. Host run `84514` passes five wrappers
+and refuses an acknowledgement for an entity absent from the saved batch.
+Swift run `86934` passes 71 existing sync and native media tests.
+Direct review checked native context binding, label reuse, result order and
+ambiguity refusal.
+
+This records successful saved outcomes. Failed results, adapter pending-list
+changes, and state saves naming the batches they reflect remain needed before
+J4.1 and J5.1 can be checked in full. The live signed run still awaits the
+approved test account.
