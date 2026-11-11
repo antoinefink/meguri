@@ -440,3 +440,30 @@ similarity `83783` pass. Doctor `84300` reports working Docker and VM.
 This reader does not yet append original work to the signed journal. The
 replay implementation, signed round trip and full gate remain open. No
 independent review or completed-unit claim is made.
+
+## Original work in the signed journal
+
+Starting commit `3a786582`. The signed test backend reads work through the
+issued result command before recording it. After that record commits, it
+appends the original name sets and optional media facts before the terminal
+result. Only run-local entity labels leave the ledger. Repeated work groups,
+duplicate names, inconsistent held sets and held acknowledgements outside
+the original selection fail the producer.
+
+The host requires one original work group after capture and before the
+terminal result, in the original process. It computes held counts from the
+set union and newer-pending counts from the unheld set, then compares all
+observed media fields. Unknown values remain absent.
+
+Direct review checked command correlation, original snapshot timing, label
+mapping, group shape and ordering, set membership and optional-field equality.
+The first selftest filter selected nothing and supplies no test evidence.
+Run `88106` finds one old media fixture missing its new work observation.
+After adding that observation, run `90462` passes all four selected harness
+tests. VM-hosted run `88405` executes the producer test once with no skips or
+failures. Static checks `90799` and similarity `91131` pass.
+
+This is original pending-work and media evidence only. Incoming-entry and
+other selected-entity outcomes, full journal recomputation, the signed round
+trip and the full gate remain open. The approved account source is still
+absent on this host. No account value was read, and setup was not rerun.

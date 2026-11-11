@@ -126,6 +126,8 @@ def generated(kind):
         fact("syncResult", "exchange-capture", 1),
         fact("syncResult", "exchange-boundary", 9),
         fact("syncResult", "exchange-selected-entity1"),
+        fact("syncResult", "exchange-work", 1),
+        *[{**item, "operation": "work-" + item["operation"]} for item in exchange if item["operation"] in c.MEDIA],
         fact("syncResult", "terminal-exchange-succeeded", 1),
         fact("syncResult", "terminal-ended-ms", 30),
         *[{**item, "operation": "terminal-" + item["operation"]} for item in exchange
@@ -150,6 +152,8 @@ def journal_bytes(kind, checks, observations, through=6, header_value=None):
         label = item.get("operation", "")
         if label in c.TERMINAL_LABELS:
             return "terminal"
+        if c.work_fact(label):
+            return "work"
         if label in {"exchange-capture", "exchange-boundary"} or c.CAPTURE_MEMBER.fullmatch(label):
             return "capture"
         if label.endswith("-state-committed") or c.state_batch_fact(label):
@@ -193,6 +197,35 @@ def admitted(kind, through=6, mutate=None):
 
 
 class SelectedTests(unittest.TestCase):
+    def test_original_work_recomputes_overlapping_held_names_and_newer_pending(self):
+        def counts(checks, observations):
+            for item in checks[5][0]["facts"] + observations[5]:
+                if item.get("operation") in {"held-back", "terminal-held-back"}: item["count"] = 2
+                if item.get("operation") in {"newer-pending", "terminal-newer-pending"}: item["count"] = 1
+            work = next(n for n, item in enumerate(observations[5]) if item.get("operation") == "exchange-work")
+            observations[5][work + 1:work + 1] = [fact("syncResult", label) for label in (
+                "work-held-pending-entity1", "work-held-pending-entity2", "work-held-acked-entity1",
+                "work-pending-unheld-entity3")]
+        admitted("mac", through=5, mutate=counts)
+
+    def test_original_work_refuses_missing_late_or_inconsistent_facts(self):
+        for label in ("work-held-pending-entity1", "work-held-acked-entity2",
+                      "work-pending-unheld-entity2", "work-media-upload-pending"):
+            with self.subTest(label=label):
+                def append(checks, observations):
+                    work = next(n for n, item in enumerate(observations[5]) if item.get("operation") == "exchange-work")
+                    observations[5].insert(work + 1, fact("syncResult", label, 0 if label in c.WORK_MEDIA else None))
+                with self.assertRaisesRegex(s.v.Refused, "selected-exchange-work-accounting"):
+                    admitted("mac", through=5, mutate=append)
+        for late in (False, True):
+            with self.subTest(late=late):
+                def remove(checks, observations):
+                    work = next(item for item in observations[5] if item.get("operation") == "exchange-work")
+                    observations[5].remove(work)
+                    if late: observations[5].append(work)
+                with self.assertRaisesRegex(s.v.Refused, "selected-exchange-work"):
+                    admitted("mac", through=5, mutate=remove)
+
     def test_unreported_batches_need_each_original_adapter_removal_at_each_state(self):
         cases = {
             "no_later_state": True,
@@ -477,6 +510,8 @@ class SelectedTests(unittest.TestCase):
         def add_media(checks, observations):
             item = fact("syncResult", "media-upload-pending", 0)
             checks[4][0]["facts"].append(item); observations[4].append(copy.deepcopy(item))
+            work = next(i for i, f in enumerate(observations[4]) if f.get("operation") == "exchange-work")
+            observations[4].insert(work + 1, {**item, "operation": "work-media-upload-pending"})
             index = next(i for i, f in enumerate(observations[4]) if f.get("operation") == "original-exchange")
             observations[4].insert(index, {**item, "operation": "terminal-media-upload-pending"})
         absent = admitted("iphone").completion(4)[4]

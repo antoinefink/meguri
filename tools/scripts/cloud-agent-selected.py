@@ -40,12 +40,14 @@ OWN_LANDED = re.compile(r"sdk([1-9][0-9]*)-own-landed-entity([1-9][0-9]*)-(held|
 PENDING = re.compile(r"entity([1-9][0-9]*)-(added|removed-held|removed-absent)")
 STATE_BATCHES = re.compile(r"sdk([1-9][0-9]*)-state-batches")
 CAPTURE_MEMBER = re.compile(r"exchange-selected-entity[1-9][0-9]*")
+WORK_MEMBER = re.compile(r"work-(held-pending|held-acked|pending-unheld)-(entity[1-9][0-9]*)")
 PENDING_READ = re.compile(r"sdk([1-9][0-9]*)-entity([1-9][0-9]*)-read-(held|absent)")
 REFLECTED = re.compile(r"sdk([1-9][0-9]*)-send([1-9][0-9]*)-batch([1-9][0-9]*)-"
                        r"entity([1-9][0-9]*)-reflected-(held|absent)")
 MEDIA = {"media-upload-pending", "media-download-pending", "media-missing", "media-unknown",
          "media-uploads-running", "media-downloads-running", "media-upload-bytes", "media-download-bytes",
          "media-remaining-download-ms", "media-root-acked", "media-zone-missing", "media-no-space"}
+WORK_MEDIA = {"work-" + field for field in MEDIA}
 EXCHANGE_COUNTS = {"selected", "held-back", "newer-pending", "incoming-waiting"}
 TERMINAL_LABELS = {"terminal-exchange-" + outcome for outcome in
                    ("succeeded", "incomplete", "waiting", "failed", "cancelled")} | {
@@ -144,6 +146,10 @@ def unique(facts):
 
 def pending_fact(label):
     return label == "pending-update" or bool(PENDING.fullmatch(label))
+
+
+def work_fact(label):
+    return label == "exchange-work" or label in WORK_MEDIA or bool(WORK_MEMBER.fullmatch(label))
 
 
 def state_batch_fact(label):
@@ -484,10 +490,13 @@ class Journal(s.Journal):
                 if OWN_LANDED.fullmatch(label or ""):
                     exchange = 5 if self.kind == "mac" else 4
                     need(record["kind"] == "observation" and record["command_seq"] == exchange, "selected-own-landed")
+                if work_fact(label or ""):
+                    exchange = 5 if self.kind == "mac" else 4
+                    need(record["kind"] == "observation" and record["command_seq"] == exchange, "selected-exchange-work")
                 traced = s.TRACE.fullmatch(label or "")
                 need(label is None or label in labels or label in TERMINAL_LABELS or ACK.fullmatch(label) or
                      FETCH.fullmatch(label) or SEND.fullmatch(label) or DELETE_COUNT.fullmatch(label) or SAVED_IMAGE.fullmatch(label) or
-                     pending_fact(label) or state_batch_fact(label) or CAPTURE_MEMBER.fullmatch(label) or
+                     pending_fact(label) or state_batch_fact(label) or CAPTURE_MEMBER.fullmatch(label) or work_fact(label) or
                      FETCHED_MEMBER.fullmatch(label) or OWN_LANDED.fullmatch(label) or
                      (traced and (traced.group(2) is None or traced.group(2) in s.OWN_KINDS)),
                      "selected-public-fact")
@@ -605,7 +614,31 @@ class Journal(s.Journal):
         for label, item in selected.items():
             need(CAPTURE_MEMBER.fullmatch(label), "selected-exchange-capture")
             exact(item, "syncResult", operation=label)
-        return capture["facts"] + group
+        work_rows = [record for record in records if any(work_fact(item.get("operation", "")) for item in record["facts"])]
+        need(len(work_rows) == 1, "selected-exchange-work")
+        work = work_rows[0]
+        need(capture["record_seq"] < work["record_seq"] < terminal["record_seq"] and
+             work["agent_instance"] == source["agent_instance"] and work["facts"], "selected-exchange-work")
+        exact(work["facts"][0], "syncResult", count=issued["count"], operation="exchange-work")
+        members = {kind: set() for kind in ("held-pending", "held-acked", "pending-unheld")}
+        media = {}
+        for label, item in unique(work["facts"][1:]).items():
+            member = WORK_MEMBER.fullmatch(label)
+            if member:
+                exact(item, "syncResult", operation=label)
+                members[member[1]].add(member[2])
+            else:
+                need(label in WORK_MEDIA, "selected-exchange-work")
+                exact(item, "syncResult", ("count",), operation=label)
+                media[label.removeprefix("work-")] = item["count"]
+        reported = unique(facts)
+        need(members["held-pending"].isdisjoint(members["pending-unheld"]) and
+             members["held-acked"] <= {name.removeprefix("exchange-selected-") for name in selected} and
+             len(members["held-pending"] | members["held-acked"]) == reported["held-back"]["count"] and
+             len(members["pending-unheld"]) == reported["newer-pending"]["count"] and
+             media == {label: item["count"] for label, item in reported.items() if label in MEDIA},
+             "selected-exchange-work-accounting")
+        return capture["facts"] + work["facts"] + group
 
     def control(self, facts, evidence):
         need(evidence.admissions and evidence.sdk and

@@ -192,6 +192,8 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
         var batches: [EngineKey: Batch] = [:]
         var sends: [CloudNativeSendOperation: Send] = [:]
         var entities: [String: String] = [:]
+        var exchangeCaptures: [UInt64: Set<String>] = [:]
+        var exchangeWork: Set<UInt64> = []
         // Only the last touch matters. Additions clear a prior removal.
         var heldRemovals: [String: Set<String>] = [:]
         var nextBatch = 1
@@ -285,13 +287,37 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
     func captureFacts(exchange: UInt64, capture: OriginalCloudExchangeCapture) throws -> [AgentFact] {
         try state.withLock { s in
             guard !s.failed, !s.joined, s.generation != nil, exchange > 0,
+                  s.exchangeCaptures[exchange] == nil,
                   Set(capture.selectedNames).count == capture.selectedNames.count else { throw AgentFailure.execution }
+            s.exchangeCaptures[exchange] = Set(capture.selectedNames)
             return [
                 .init(name: .syncResult, count: exchange, operation: "exchange-capture"),
                 .init(name: .syncResult, count: capture.boundarySeq, operation: "exchange-boundary")
             ] + capture.selectedNames.map { name in
                 .init(name: .syncResult, operation: "exchange-selected-\(s.entity(name))")
             }
+        }
+    }
+    func workFacts(exchange: UInt64, work: OriginalCloudExchangeWork) throws -> [AgentFact] {
+        try state.withLock { s in
+            let held = Set(work.heldPendingNames), acked = Set(work.heldAcknowledgedNames)
+            let unheld = Set(work.pendingUnheldNames)
+            guard !s.failed, !s.joined, let selected = s.exchangeCaptures[exchange],
+                  !s.exchangeWork.contains(exchange), held.count == work.heldPendingNames.count,
+                  acked.count == work.heldAcknowledgedNames.count, unheld.count == work.pendingUnheldNames.count,
+                  held.isDisjoint(with: unheld), acked.isSubset(of: selected) else { throw AgentFailure.execution }
+            var facts: [AgentFact] = [.init(name: .syncResult, count: exchange, operation: "exchange-work")]
+            for (prefix, names) in [("work-held-pending-", held), ("work-held-acked-", acked),
+                                    ("work-pending-unheld-", unheld)] {
+                facts += names.sorted().map { .init(name: .syncResult, operation: prefix + s.entity($0)) }
+            }
+            facts += CloudKitSelectedSyncProof.mediaFacts(work.media).map { original in
+                var fact = original
+                fact.operation = original.operation.map { "work-" + $0 }
+                return fact
+            }
+            s.exchangeWork.insert(exchange)
+            return facts
         }
     }
     func check() throws { try state.withLock { if $0.failed { throw AgentFailure.execution } } }

@@ -143,6 +143,36 @@ import Testing
             try evidence.captureFacts(exchange: 3, capture: .init(boundarySeq: 9, selectedNames: [name, name]))
         }
     }
+    @Test func originalCompletionWorkKeepsNamesOpaqueAndUnknownMediaAbsent() throws {
+        let evidence = try ledger()
+        let a = "generated-A", b = "generated-B", c = "generated-C"
+        let media = CoreBridge.CloudPolicyMediaFacts(.init(uploadFiles: 2, uploadBytes: 31,
+            downloadFiles: 0, downloadBytes: 0, unknownBlobs: 1, missingNames: 0,
+            uploadsRunning: nil, downloadsRunning: nil, remainingDownloadMs: nil,
+            rootAcked: true, zoneMissing: false, noSpace: nil))
+        let work = OriginalCloudExchangeWork(heldPendingNames: [a, b], heldAcknowledgedNames: [a],
+                                             pendingUnheldNames: [c], media: media)
+        #expect(throws: AgentFailure.execution) { try evidence.workFacts(exchange: 3, work: work) }
+        _ = try evidence.captureFacts(exchange: 3, capture: .init(boundarySeq: 9, selectedNames: [a]))
+        let facts = try evidence.workFacts(exchange: 3, work: work)
+        #expect(facts.prefix(5).map(\.operation) == ["exchange-work", "work-held-pending-entity1",
+            "work-held-pending-entity2", "work-held-acked-entity1", "work-pending-unheld-entity3"])
+        #expect(facts.first == .init(name: .syncResult, count: 3, operation: "exchange-work"))
+        #expect(facts.contains(.init(name: .syncResult, count: 31, operation: "work-media-upload-bytes")))
+        #expect(facts.contains(.init(name: .syncResult, count: 0, operation: "work-media-zone-missing")))
+        #expect(!facts.contains { $0.operation == "work-media-uploads-running" || $0.operation == "work-media-no-space" })
+        #expect(!facts.contains { fact in [a, b, c].contains { fact.operation?.contains($0) == true } })
+        #expect(throws: AgentFailure.execution) { try evidence.workFacts(exchange: 3, work: work) }
+        for invalid in [
+            OriginalCloudExchangeWork(heldPendingNames: [b, b], heldAcknowledgedNames: [], pendingUnheldNames: [], media: media),
+            OriginalCloudExchangeWork(heldPendingNames: [b], heldAcknowledgedNames: [], pendingUnheldNames: [b], media: media),
+            OriginalCloudExchangeWork(heldPendingNames: [], heldAcknowledgedNames: [b], pendingUnheldNames: [], media: media)
+        ] {
+            let other = try ledger()
+            _ = try other.captureFacts(exchange: 3, capture: .init(boundarySeq: 9, selectedNames: [a]))
+            #expect(throws: AgentFailure.execution) { try other.workFacts(exchange: 3, work: invalid) }
+        }
+    }
     @Test func collectionSaveRecordsTheHandedSequenceAndHeldFlag() throws {
         let origin = "generated-engine"
         let record = CloudRecord(name: entity("n1").recordName, envelope: Data([1]), systemFields: Data([2]))

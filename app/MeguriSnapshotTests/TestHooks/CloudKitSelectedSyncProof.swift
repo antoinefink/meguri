@@ -112,6 +112,12 @@ nonisolated enum CloudKitSelectedSyncProof {
                      .init(name: .syncResult, count: held, operation: "held-back"),
                      .init(name: .syncResult, count: newer, operation: "newer-pending"),
                      .init(name: .syncResult, count: incoming, operation: "incoming-waiting")]
+        facts += mediaFacts(media)
+        return facts
+    }
+
+    static func mediaFacts(_ media: CloudPolicyMediaFacts) -> [AgentFact] {
+        var facts: [AgentFact] = []
         // Collection completion does not establish media completion. Nil means
         // unobserved, never zero. Keep every observed counter independently.
         for (label, count) in [("media-upload-pending", media.uploadFiles), ("media-download-pending", media.downloadFiles),

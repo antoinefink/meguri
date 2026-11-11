@@ -904,12 +904,20 @@ import Foundation
     }
     func execute(_ command: CloudPolicyCommand) async -> SyncCommandResult {
         do { try await observePublication() } catch { exchanges.fail(.execution); publications.fail(.execution) }
+        var originalWork: OriginalCloudExchangeWork?
+        if case .recordExchange(let record) = command.action, record.exchange == requestedExchange,
+           observeOriginalTerminal != nil {
+            do { originalWork = try await SelectedCloudRestorationInspection().originalExchangeWork(command: command) }
+            catch { exchanges.fail((error as? AgentFailure) ?? .execution) }
+        }
         let result = await production.execute(command)
         if result.error == nil, !result.deferred, case .recordExchange(let record) = command.action {
             if record.exchange == requestedExchange, let observeOriginalTerminal {
                 do {
+                    guard let originalWork else { throw AgentFailure.recovery }
                     let applied = try await CoreSmokeInspection().historicalAcknowledgements()
                     if !applied.isEmpty { try observeOriginalTerminal(evidence.fetchedAcknowledgementFacts(applied)) }
+                    try observeOriginalTerminal(evidence.workFacts(exchange: record.exchange, work: originalWork))
                     try observeOriginalTerminal(CloudKitSelectedSyncProof.terminalExchangeFacts(record))
                 }
                 catch { exchanges.fail((error as? AgentFailure) ?? .journal) }
