@@ -71,14 +71,20 @@ public enum DebugCloudDiagnostics {
         }
     }
 
-    /// Only a fixed number of scalar counts and an overflow flag survive.
+    /// Only fixed scalar counts, two scope flags and an overflow flag survive.
     /// will/zoneC count native starts; modC/modR count original modifications
     /// before conversion. coreC counts records after successful core intake.
     /// refused counts native fetched callbacks reaching the existing catch;
     /// zoneFail counts original failed zone results (all zones). No new sink.
+    /// inC/outC OR-retain whether an original SDK options callback requested/
+    /// returned a scope containing its registered collection zone. They may
+    /// come from different callbacks/owners; neither pairs causes nor proves
+    /// current-owner authority. No zone identity or options are retained.
     final class FetchRecorder: Sendable {
         private struct State: Sendable {
             var counts: [UInt64]
+            var requestedCollection = false
+            var offeredCollection = false
             var overflow = false
         }
         private let state: Mutex<State>
@@ -93,11 +99,17 @@ public enum DebugCloudDiagnostics {
                 state.overflow = state.overflow || sum.overflow
             }
         }
+        func recordFetchOptions(requestedCollection: Bool, offeredCollection: Bool) {
+            state.withLock { state in
+                state.requestedCollection = state.requestedCollection || requestedCollection
+                state.offeredCollection = state.offeredCollection || offeredCollection
+            }
+        }
         var formatted: String {
             state.withLock { state in
                 let counts = FetchCounter.allCases.map { "\($0.label)=\(state.counts[$0.rawValue])" }
                     .joined(separator: " ")
-                return "processAll{\(counts) overflow=\(state.overflow ? 1 : 0)}"
+                return "processAll{\(counts) inC=\(state.requestedCollection ? 1 : 0) outC=\(state.offeredCollection ? 1 : 0) overflow=\(state.overflow ? 1 : 0)}"
             }
         }
     }

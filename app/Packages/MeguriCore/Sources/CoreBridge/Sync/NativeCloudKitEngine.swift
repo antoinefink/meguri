@@ -707,6 +707,21 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         }
     }
     func nextFetchChangesOptions(_ context: CKSyncEngine.FetchChangesContext, syncEngine: CKSyncEngine) async -> CKSyncEngine.FetchChangesOptions {
+        #if DEBUG
+        // Keep the first identity check. A later release does not change this
+        // callback's process-wide count or grant current-owner authority.
+        let originalSDKAtEntry = sdk === syncEngine
+        let observedCollectionZone = originalSDKAtEntry ? collectionZone.map { zone($0) } : nil
+        let requestedCollection = observedCollectionZone.map { context.options.scope.contains($0) }
+        // All existing early/error returns offer the empty scope.
+        var offeredCollection = false
+        defer {
+            if let requestedCollection {
+                DebugCloudDiagnostics.fetchRecorder.recordFetchOptions(
+                    requestedCollection: requestedCollection, offeredCollection: offeredCollection)
+            }
+        }
+        #endif
         guard failure == nil, let collectionZone else { return .init(scope: .zoneIDs([])) }
         let group = context.options.operationGroup
         // Preserve manual scopes exactly; scheduled callbacks are narrowed to
@@ -722,6 +737,9 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
             guard failure == nil else { return .init(scope: .zoneIDs([])) }
             var result = CKSyncEngine.FetchChangesOptions(scope: .zoneIDs(options.zones.map(zone)), operationGroup: group)
             result.prioritizedZoneIDs = options.priorityZones.map(zone)
+            #if DEBUG
+            if let observedCollectionZone { offeredCollection = result.scope.contains(observedCollectionZone) }
+            #endif
             return result
         } catch {
             failure = error

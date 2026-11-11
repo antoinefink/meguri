@@ -29,7 +29,7 @@ struct NativeCloudKitEngineTests {
             case .other: break
             }
         }
-        #expect(recorder.formatted == "processAll{will=0 zoneC=0 modC=1 modR=2 coreC=0 refused=0 zoneFail=0 overflow=0}")
+        #expect(recorder.formatted == "processAll{will=0 zoneC=0 modC=1 modR=2 coreC=0 refused=0 zoneFail=0 inC=0 outC=0 overflow=0}")
         for excluded in [sentinel, "foreign-owner", "meguri-root", "meguri-media"] {
             #expect(!recorder.formatted.contains(excluded))
         }

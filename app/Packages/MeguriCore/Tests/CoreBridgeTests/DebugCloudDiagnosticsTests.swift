@@ -10,7 +10,7 @@ struct DebugCloudDiagnosticsTests {
 
     @Test func processFetchCountsStartAtZeroAndKeepBoundariesIndependent() {
         let recorder = DebugCloudDiagnostics.FetchRecorder()
-        #expect(recorder.formatted == "processAll{will=0 zoneC=0 modC=0 modR=0 coreC=0 refused=0 zoneFail=0 overflow=0}")
+        #expect(recorder.formatted == "processAll{will=0 zoneC=0 modC=0 modR=0 coreC=0 refused=0 zoneFail=0 inC=0 outC=0 overflow=0}")
         recorder.record(.will)
         recorder.record(.zoneC)
         recorder.record(.modC, count: 3)
@@ -19,8 +19,8 @@ struct DebugCloudDiagnosticsTests {
         recorder.record(.refused)
         recorder.record(.zoneFail)
         recorder.record(.coreC, count: 0)
-        #expect(recorder.formatted == "processAll{will=1 zoneC=1 modC=3 modR=2 coreC=2 refused=1 zoneFail=1 overflow=0}")
-        #expect(DebugCloudDiagnostics.FetchRecorder().formatted == "processAll{will=0 zoneC=0 modC=0 modR=0 coreC=0 refused=0 zoneFail=0 overflow=0}")
+        #expect(recorder.formatted == "processAll{will=1 zoneC=1 modC=3 modR=2 coreC=2 refused=1 zoneFail=1 inC=0 outC=0 overflow=0}")
+        #expect(DebugCloudDiagnostics.FetchRecorder().formatted == "processAll{will=0 zoneC=0 modC=0 modR=0 coreC=0 refused=0 zoneFail=0 inC=0 outC=0 overflow=0}")
     }
 
     @Test func processFetchCountsSaturateEveryBoundaryAndKeepOverflowSticky() {
@@ -39,6 +39,7 @@ struct DebugCloudDiagnosticsTests {
         }
         let bounded = DebugCloudDiagnostics.FetchRecorder(initialCount: .max)
         for counter in DebugCloudDiagnostics.FetchCounter.allCases { bounded.record(counter) }
+        bounded.recordFetchOptions(requestedCollection: true, offeredCollection: true)
         let original = bounded.formatted
         for _ in 0..<1_000 {
             for counter in DebugCloudDiagnostics.FetchCounter.allCases { bounded.record(counter) }
@@ -46,12 +47,35 @@ struct DebugCloudDiagnosticsTests {
         #expect(bounded.formatted == original && original.utf8.count < 256)
     }
 
+    @Test func processFetchScopeFlagsStartFalseAndORRetainIndependentCallbacksUntilFreshRecorder() {
+        let empty = "processAll{will=0 zoneC=0 modC=0 modR=0 coreC=0 refused=0 zoneFail=0 inC=0 outC=0 overflow=0}"
+        for inputFirst in [false, true] {
+            let recorder = DebugCloudDiagnostics.FetchRecorder()
+            #expect(recorder.formatted == empty)
+            recorder.recordFetchOptions(requestedCollection: false, offeredCollection: false)
+            #expect(recorder.formatted == empty)
+            recorder.recordFetchOptions(requestedCollection: inputFirst, offeredCollection: !inputFirst)
+            let first = "processAll{will=0 zoneC=0 modC=0 modR=0 coreC=0 refused=0 zoneFail=0 inC=\(inputFirst ? 1 : 0) outC=\(inputFirst ? 0 : 1) overflow=0}"
+            #expect(recorder.formatted == first)
+            recorder.recordFetchOptions(requestedCollection: false, offeredCollection: false)
+            #expect(recorder.formatted == first)
+            // Separate callbacks may establish the two flags; they are not paired evidence.
+            recorder.recordFetchOptions(requestedCollection: !inputFirst, offeredCollection: inputFirst)
+            let both = "processAll{will=0 zoneC=0 modC=0 modR=0 coreC=0 refused=0 zoneFail=0 inC=1 outC=1 overflow=0}"
+            #expect(recorder.formatted == both)
+            recorder.recordFetchOptions(requestedCollection: false, offeredCollection: false)
+            recorder.record(.will, count: 0)
+            #expect(recorder.formatted == both)
+            #expect(DebugCloudDiagnostics.FetchRecorder().formatted == empty)
+        }
+    }
+
     @Test func processFetchCountsSynchronizeConcurrentOriginalBoundaries() {
         let recorder = DebugCloudDiagnostics.FetchRecorder()
         DispatchQueue.concurrentPerform(iterations: 256) { _ in
             for counter in DebugCloudDiagnostics.FetchCounter.allCases { recorder.record(counter) }
         }
-        #expect(recorder.formatted == "processAll{will=256 zoneC=256 modC=256 modR=256 coreC=256 refused=256 zoneFail=256 overflow=0}")
+        #expect(recorder.formatted == "processAll{will=256 zoneC=256 modC=256 modR=256 coreC=256 refused=256 zoneFail=256 inC=0 outC=0 overflow=0}")
     }
 
     @Test func pageEpochStagesMapAndFormatOnlyFiniteTags() {
