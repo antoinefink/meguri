@@ -149,6 +149,12 @@ public final class SyncCoordinator {
     public private(set) var status: CloudPolicyStatus?
     public private(set) var settings: CloudPolicyDeviceSettings
     public private(set) var generation: UInt64 = 0
+    #if DEBUG
+    public var debugPolicyStatusValue: String? {
+        guard status != nil else { return nil }
+        return DebugCloudDiagnostics.policyStatusValue(generation: generation, hostRevision: hostRevision)
+    }
+    #endif
     public private(set) var operationFailed = false
     /// Retained deferred native admission is not a completed command. Only the
     /// Rust projection may describe sync completion to the UI.
@@ -1423,6 +1429,7 @@ public final class SyncCoordinator {
                                 statusSequence = value.sequence; status = snapshot
                                 #if DEBUG
                                 DebugCloudDiagnostics.recordStatus(snapshot.error)
+                                DebugCloudDiagnostics.recordPolicyStatus(snapshot, generation: value.generation, hostRevision: revision)
                                 #endif
                             }
                         case .quitNow: quitCompletion?(); quitCompletion = nil

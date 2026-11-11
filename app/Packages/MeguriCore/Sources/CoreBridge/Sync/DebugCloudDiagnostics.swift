@@ -48,8 +48,73 @@ public enum DebugCloudDiagnostics {
 
     private static let logger = Logger(subsystem: "app.meguri", category: "CloudDiagnostics")
     private static let recorder = Recorder()
+    private static let policyStatusTrace = PolicyStatusTrace()
 
     public static var latestValue: String? { recorder.latestValue }
+    public static func policyStatusValue(generation: UInt64, hostRevision: UInt64) -> String? {
+        policyStatusTrace.value(generation: generation, hostRevision: hostRevision)
+    }
+
+    public static func recordPolicyStatus(_ status: CloudPolicyStatus, generation: UInt64, hostRevision: UInt64) {
+        policyStatusTrace.retain(status, generation: generation, hostRevision: hostRevision)
+    }
+
+    /// Core policy projections only: selected is not original SDK accounting or convergence evidence.
+    /// Retain safe strings, never the status DTO or its associated payloads. No separate observation is needed.
+    final class PolicyStatusTrace: Sendable {
+        private struct State: Sendable {
+            let generation: UInt64
+            let hostRevision: UInt64
+            let initial: String
+            var firstCompleted: String?
+            var latest: String
+        }
+        private let state = Mutex<State?>(nil)
+
+        func value(generation: UInt64, hostRevision: UInt64) -> String? {
+            state.withLock { state in
+                guard let state, state.generation == generation, state.hostRevision == hostRevision else { return nil }
+                return "policy{initial={\(state.initial)} firstCompleted=\(state.firstCompleted ?? "nil") latest={\(state.latest)}}"
+            }
+        }
+
+        func retain(_ status: CloudPolicyStatus, generation: UInt64, hostRevision: UInt64) {
+            let snapshot = Self.snapshot(status)
+            let completed = status.lastCompleted.map { Self.exchange($0) }
+            state.withLock { state in
+                if state?.generation != generation || state?.hostRevision != hostRevision {
+                    state = State(generation: generation, hostRevision: hostRevision,
+                        initial: snapshot, firstCompleted: completed, latest: snapshot)
+                } else {
+                    if state?.firstCompleted == nil { state?.firstCompleted = completed }
+                    state?.latest = snapshot
+                }
+            }
+        }
+
+        static func snapshot(_ status: CloudPolicyStatus) -> String {
+            "pending=\(status.pending) heldBack=\(status.heldBack) inFlight=\(status.inFlight) incomingWaiting=\(status.incomingWaiting) bindingActive=\(flag(status.controls.bindingActive)) bindingUsable=\(flag(status.controls.bindingUsable)) accountMatchesBinding=\(flag(status.accountMatchesBinding)) lastCompleted=\(exchange(status.lastCompleted)) lastAttempt=\(exchange(status.lastAttempt))"
+        }
+
+        static func flag(_ value: Bool?) -> String {
+            switch value { case .some(true): "true"; case .some(false): "false"; case nil: "unknown" }
+        }
+
+        static func exchange(_ record: CloudPolicyExchangeRecord?) -> String {
+            guard let record else { return "nil" }
+            let outcome: String
+            switch record.outcome {
+            case .succeeded(let selected, let heldBack, let newerPending, let incomingWaiting, _):
+                outcome = "succeeded selected=\(selected) heldBack=\(heldBack) newerPending=\(newerPending) incomingWaiting=\(incomingWaiting)"
+            case .incomplete(let outstanding, let blocked):
+                outcome = "incomplete outstanding=\(outstanding) blocked=\(blocked)"
+            case .waiting: outcome = "waiting"
+            case .failed: outcome = "failed"
+            case .cancelled: outcome = "cancelled"
+            }
+            return "{endedMilliseconds=\(record.endedMilliseconds) outcome=\(outcome)}"
+        }
+    }
 
     public static func record(_ boundary: Boundary, action: CloudPolicyAction? = nil, error: any Error) {
         let value = Value(boundary, action: action, error: error)

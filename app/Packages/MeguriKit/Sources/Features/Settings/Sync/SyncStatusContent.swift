@@ -39,7 +39,8 @@ struct SyncStatusRows: View {
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("settings.accountSync.status")
             #if DEBUG
-            .accessibilityValue(DebugCloudDiagnostics.latestValue ?? "")
+            .accessibilityValue([DebugCloudDiagnostics.latestValue, sync.debugPolicyStatusValue]
+                .compactMap { $0 }.joined(separator: " "))
             #endif
             if let status = sync.status {
                 ForEach(Array(SyncStatusCopy.lines(status, now: clock.now()).enumerated()), id: \.offset) { _, line in
