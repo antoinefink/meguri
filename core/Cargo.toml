@@ -57,12 +57,12 @@ uniffi = { version = "=0.32.2", default-features = false }
 # Meguri-defined output with no oracle parity, exact-pinned so the sanitizer's
 # parse tree changes only by a deliberate bump.
 html5ever = "=0.39.0"
-pulldown-cmark = { version = "=0.13.5", default-features = false, features = ["html"] }
+pulldown-cmark = { version = "=0.13.6", default-features = false, features = ["html"] }
 
 # SQLite (KTD3): bundled on every target, so Docker and the devices run the
 # same SQLite with the same compile options (rust-stack §1). Only
 # meguri-storage issues SQL against a collection.
-rusqlite = { version = "0.40.2", default-features = false, features = ["backup", "bundled", "cache", "collation", "functions"] }
+rusqlite = { version = "0.41.0", default-features = false, features = ["backup", "bundled", "cache", "collation", "functions"] }
 
 # Sync transport (KTD14, rust-stack §3, meguri-sync; tokio and reqwest only
 # there and in meguri-servers). reqwest's `rustls` is aws-lc-rs plus the
