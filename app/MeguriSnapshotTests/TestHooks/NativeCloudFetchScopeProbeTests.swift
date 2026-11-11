@@ -109,12 +109,34 @@ private enum ScopeProbePhase: String {
 private enum ScopeProbeFailure: String, Error {
     case configuration, cancelled, sdkFailure, invalidResult, timeout
     case missingExpectedBytes, missingState, incompleteFetch, unexpectedActivity
+    case sdkNotAuthenticated, sdkPermissionFailure, sdkMissingEntitlement
+    case sdkBadContainer, sdkBadDatabase, sdkNetworkUnavailable, sdkNetworkFailure
+    case sdkServiceUnavailable, sdkRequestRateLimited, sdkServerRejectedRequest
+    case sdkPartialFailure, sdkZoneNotFound, sdkUnknownItem, sdkInternalError, sdkIncompatibleVersion
 
     static func category(_ error: any Error) -> Self {
         if let failure = error as? Self { return failure }
         if error is CancellationError { return .cancelled }
-        if let cloud = error as? CKError, cloud.code == .operationCancelled { return .cancelled }
-        return .sdkFailure
+        guard let cloud = error as? CKError else { return .sdkFailure }
+        switch cloud.code {
+        case .operationCancelled: return .cancelled
+        case .notAuthenticated: return .sdkNotAuthenticated
+        case .permissionFailure: return .sdkPermissionFailure
+        case .missingEntitlement: return .sdkMissingEntitlement
+        case .badContainer: return .sdkBadContainer
+        case .badDatabase: return .sdkBadDatabase
+        case .networkUnavailable: return .sdkNetworkUnavailable
+        case .networkFailure: return .sdkNetworkFailure
+        case .serviceUnavailable: return .sdkServiceUnavailable
+        case .requestRateLimited: return .sdkRequestRateLimited
+        case .serverRejectedRequest: return .sdkServerRejectedRequest
+        case .partialFailure: return .sdkPartialFailure
+        case .zoneNotFound: return .sdkZoneNotFound
+        case .unknownItem: return .sdkUnknownItem
+        case .internalError: return .sdkInternalError
+        case .incompatibleVersion: return .sdkIncompatibleVersion
+        default: return .sdkFailure
+        }
     }
 }
 

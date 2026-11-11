@@ -105,3 +105,42 @@
   runtime override or host execution. Source-only: no builds/tests or live SDK
   result; one `git diff --check` at handoff. Integration owns focused tests,
   independent review and native verification. No unit acceptance is claimed.
+
+## Closed SDK error categories — source-only follow-up
+
+- Main starting commit `67c0caa0`; filtered starting commit
+  `40c9e1e3ad7c7f4e00bab34d030d40eec53be0a8`.
+- Supplied evidence: profile repair independently reviewed clear; generated-only
+  test `72687` passed one/zero skips. Native probe
+  `mac-hosted-test/20261111T213651Z-74589` executed exactly one/zero skips,
+  failed at create with generic `sdkFailure`, and cleanup failed with the same
+  category. Seed, limited, wide and fresh did not run. No cause is inferred.
+- Extend only `ScopeProbeFailure` and `category(Error)` with fixed sdk-prefixed
+  cases for the requested common CKError codes; preserve cancellation, existing
+  categories and generic fallback. No descriptions, userInfo, identifiers,
+  settings, payloads, arbitrary numeric fields or account API calls are added.
+  Operations, resources, mutations, scopes, budgets, assertions, selection and
+  cleanup are unchanged.
+- Source-only: no builds/tests or SDK execution here; one `git diff --check`
+  at handoff. Integration owns native compilation and verification. This change
+  establishes no scope outcome or sync acceptance.
+
+## Integration evidence
+
+- Probe round2 independent review `cleanroom/20261111T211949Z-64336`: no P0–P2.
+  Similarity `20261111T212921Z-68041` passed for base `06ea6c30`.
+- Profile repair review `cleanroom/20261111T213457Z-72265`: no P0–P2.
+  Focused Docker selftest `20261111T213435Z-71858`: 17 passed, zero skipped.
+  Private scan `20261111T213431Z-71566` passed. Native generated-only selected
+  test `mac-hosted-test/20261111T213514Z-72687`: one executed pass, zero skipped.
+  It launches in the same VM where the previous profile failed.
+- Explicit probe selection `mac-hosted-test/20261111T213651Z-74589`: one executed
+  failure, zero skipped. It proves selection despite the default Snapshot
+  exclusion; it provides no scope comparison because creation failed.
+- Physical normal launch `run/20261111T212700Z-66327` passed. Read-only phone
+  drive `20261111T212820Z-67680` completed all eight steps and verified process
+  continuity; overall failed with 49 hierarchy issues. It still reports 2,389
+  missing media files. No answer, replacement, Home cycle or manual sync was sent.
+- One lease-aware dedicated VM restart retained both earlier launch failures.
+  Doctor `20261111T213308Z-70969` warns, with no technical failures.
+  No sync, unit, milestone or release acceptance is claimed.
