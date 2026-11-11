@@ -67,11 +67,17 @@ public struct CloudConnectionView: View {
                 } else if !submitted, !confirming, let failure = sync.connectionFailure {
                     Text(SyncText.value(SyncStatusPresentation.connectionErrorKey(failure)))
                         .accessibilityIdentifier("sync.connect.failure")
+                        #if DEBUG
+                        .accessibilityValue(DebugCloudPreviewProbe.shared.previewReadTag)
+                        #endif
                 }
             } else if !submitted || confirmation != .resume {
                 if let failure = sync.connectionFailure {
                     Text(SyncText.value(SyncStatusPresentation.connectionErrorKey(failure)))
                         .accessibilityIdentifier("sync.connect.failure")
+                        #if DEBUG
+                        .accessibilityValue(DebugCloudPreviewProbe.shared.previewReadTag)
+                        #endif
                 } else if sync.operationFailed {
                     Text(SyncText.value("sync.recovery.error.other"))
                         .accessibilityIdentifier("sync.connect.operationError")

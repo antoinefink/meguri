@@ -48,6 +48,21 @@ public enum CloudOwnTransportFailure: Error, Sendable {
 #if DEBUG
 /// Temporary, memory-only diagnosis: one attempt and bounded adoption counters.
 public final class DebugCloudPreviewProbe: Observable, Sendable {
+    // Scoped to the original result task, never an actor's mutable attempt slot.
+    @TaskLocal static var previewAttempt: UUID?
+
+    enum ReadPhase: String, Sendable {
+        case active, epoch
+
+        init?(recordType: String) {
+            switch recordType {
+            case "MGActive": self = .active
+            case "MGEpoch": self = .epoch
+            default: return nil
+            }
+        }
+    }
+
     /// Retained by one connection, never derived from an FFI wrapper's identity.
     final class AdoptionSession: Sendable {
         private let current = Mutex<UUID?>(nil)
@@ -107,7 +122,7 @@ public final class DebugCloudPreviewProbe: Observable, Sendable {
     public static let shared = DebugCloudPreviewProbe()
     public static let ownWork = DebugCloudPreviewProbe()
     private let changes = ObservationRegistrar()
-    private let latest = Mutex<(attempt: UUID, tag: String, stage: WorkStage?)?>(nil)
+    private let latest = Mutex<(attempt: UUID, tag: String, stage: WorkStage?, readTag: String?)?>(nil)
     private let adoption = Mutex<(session: UUID?, counters: AdoptionCounters, failure: CloudAdoptionFailureDiagnostic?)>((nil, .init(), nil))
 
     init() {}
@@ -115,6 +130,41 @@ public final class DebugCloudPreviewProbe: Observable, Sendable {
     public var latestTag: String {
         changes.access(self, keyPath: \.latestTag)
         return latest.withLock { $0?.tag ?? "unobserved" }
+    }
+
+    /// Last actual preview read only. Neither a found record nor absent error
+    /// evidence establishes that the core accepted its epoch or contents.
+    public var previewReadTag: String {
+        changes.access(self, keyPath: \.previewReadTag)
+        return latest.withLock { $0?.readTag ?? "previewRead:none" }
+    }
+
+    func recordRead(_ phase: ReadPhase, attempt: UUID, read: CloudControlRead? = nil,
+                    evidence: CloudZoneDeletionRead? = nil, error: (any Error)? = nil) {
+        let outcome: String
+        if error != nil { outcome = "error" }
+        else {
+            switch read {
+            case .found?: outcome = "found"
+            case .missing?: outcome = "missing"
+            case .zoneMissing?: outcome = "zoneMissing"
+            case .failed?: outcome = "failed"
+            case nil: outcome = "unknown"
+            }
+        }
+        // These typed facts contain a CK code only when the original error was
+        // classified as CKErrorDomain. Never infer an SDK failure from a read.
+        func failureTag(_ failure: CloudZoneDeletionFailure?) -> String {
+            guard let failure else { return evidence == nil ? "unknown" : "none" }
+            guard let code = failure.code else { return "unknown:none" }
+            return "CKErrorDomain:\(code)"
+        }
+        let tag = "previewRead:\(phase.rawValue);previewReadOutcome:\(outcome);previewReadEvidence:\(evidence == nil ? "none" : "present");previewReadItem:\(failureTag(evidence?.failure));previewReadTerminal:\(failureTag(evidence?.terminal));previewReadThrown:\(error.map(Self.classify) ?? "none")"
+        // Observation callbacks may synchronously reread or begin a new attempt.
+        // Notify outside the mutex and fence again at the actual state update.
+        changes.withMutation(of: self, keyPath: \.previewReadTag) {
+            latest.withLock { if $0?.attempt == attempt { $0?.readTag = tag } }
+        }
     }
 
     /// Last entered stage for this attempt, not evidence of completion or cause.
@@ -175,9 +225,15 @@ public final class DebugCloudPreviewProbe: Observable, Sendable {
 
     func begin() -> UUID {
         let attempt = UUID()
+        // Reserve ordering before observers run, preserving their visible values.
+        latest.withLock { $0 = (attempt, $0?.tag ?? "unobserved", $0?.stage, $0?.readTag) }
         changes.withMutation(of: self, keyPath: \.latestTag) {
             changes.withMutation(of: self, keyPath: \.lastEnteredWorkStageTag) {
-                latest.withLock { $0 = (attempt, "running", nil) }
+                changes.withMutation(of: self, keyPath: \.previewReadTag) {
+                    latest.withLock {
+                        if $0?.attempt == attempt { $0 = (attempt, "running", nil, nil) }
+                    }
+                }
             }
         }
         return attempt
@@ -189,7 +245,9 @@ public final class DebugCloudPreviewProbe: Observable, Sendable {
     func enter(_ stage: WorkStage, attempt: UUID) {
         changes.withMutation(of: self, keyPath: \.latestTag) {
             changes.withMutation(of: self, keyPath: \.lastEnteredWorkStageTag) {
-                latest.withLock { if $0?.attempt == attempt { $0 = (attempt, stage.tag, stage) } }
+                latest.withLock {
+                    if $0?.attempt == attempt { $0?.tag = stage.tag; $0?.stage = stage }
+                }
             }
         }
     }
@@ -365,7 +423,15 @@ public actor CloudOwnExecutor {
             try requireIdle()
             // Use the same active task slot as recovery operations. The separate
             // result task retains its typed preview while cancel/close join it.
+            #if DEBUG
+            let result = Task {
+                try await DebugCloudPreviewProbe.$previewAttempt.withValue(probeAttempt) {
+                    try await self.executePreview()
+                }
+            }
+            #else
             let result = Task { try await self.executePreview() }
+            #endif
             previewTask = result
             let id = UUID()
             let join = Task<CloudConnectionProgress, any Error> { _ = try await result.value; return .progressed }
@@ -432,7 +498,28 @@ public actor CloudOwnExecutor {
         let op = try transport.prepare(command); prepared = op
         try checkStopping()
         guard admission.map({ $0.enqueue(op) }) ?? op.enqueue() else { throw CloudOwnTransportFailure.queueRejected }
+        #if DEBUG
+        let attempt = DebugCloudPreviewProbe.previewAttempt
+        let phase = DebugCloudPreviewProbe.ReadPhase(recordType: target.recordType)
+        if let attempt, let phase { DebugCloudPreviewProbe.shared.recordRead(phase, attempt: attempt) }
+        let result: CloudOwnTransportReply
+        do { result = try await op.reply() }
+        catch {
+            if let attempt, let phase {
+                DebugCloudPreviewProbe.shared.recordRead(phase, attempt: attempt,
+                    evidence: op.controlReadEvidence(), error: error)
+            }
+            throw error
+        }
+        if let attempt, let phase {
+            let read: CloudControlRead?
+            if case .read(let value) = result { read = value } else { read = nil }
+            DebugCloudPreviewProbe.shared.recordRead(phase, attempt: attempt, read: read,
+                evidence: op.controlReadEvidence())
+        }
+        #else
         let result = try await op.reply()
+        #endif
         prepared = nil
         guard case .read(let read) = result else { throw CloudOwnTransportFailure.unexpectedReply }
         return read

@@ -9,6 +9,159 @@ import Testing
 @testable import CoreBridge
 
 struct DebugCloudPreviewProbeTests {
+    @Test func previewReadProjectionIsBoundedAndContentFree() {
+        let sentinel = UUID().uuidString
+        let record = CloudControlRecord(encrypted: Data(sentinel.utf8), systemFields: Data(sentinel.utf8))
+        #expect(DebugCloudPreviewProbe.ReadPhase(recordType: "MGActive") == .active)
+        #expect(DebugCloudPreviewProbe.ReadPhase(recordType: "MGEpoch") == .epoch)
+        let rejected = [sentinel, "MGActive" + sentinel, "MGEpoch" + sentinel, "mgactive"]
+        for value in rejected { #expect(DebugCloudPreviewProbe.ReadPhase(recordType: value) == nil) }
+        let outcomes: [(CloudControlRead, String)] = [
+            (.found(record), "found"), (.missing, "missing"), (.zoneMissing, "zoneMissing"), (.failed, "failed")
+        ]
+        let probe = DebugCloudPreviewProbe()
+        let attempt = probe.begin()
+        for (read, outcome) in outcomes {
+            probe.recordRead(.epoch, attempt: attempt, read: read)
+            let unknown = probe.previewReadTag
+            #expect(unknown == "previewRead:epoch;previewReadOutcome:\(outcome);previewReadEvidence:none;previewReadItem:unknown;previewReadTerminal:unknown;previewReadThrown:none")
+            // All-fields success has evidence but no failure; it must not be
+            // presented as an SDK failure, even when the record carries bytes.
+            probe.recordRead(.active, attempt: attempt, read: read, evidence: .init(read: read))
+            let observed = probe.previewReadTag
+            #expect(observed == "previewRead:active;previewReadOutcome:\(outcome);previewReadEvidence:present;previewReadItem:none;previewReadTerminal:none;previewReadThrown:none")
+            let boundedAndContentFree = observed.count < 320 && unknown.count < 320
+                && !observed.contains(sentinel) && !unknown.contains(sentinel)
+            #expect(boundedAndContentFree)
+        }
+    }
+
+    @Test func previewReadRetainsOnlyOriginalItemAndTerminalCodesThroughFinalFailure() {
+        let probe = DebugCloudPreviewProbe()
+        let attempt = probe.begin()
+        for code in [Int64.min, 11, Int64.max] {
+            probe.recordRead(.epoch, attempt: attempt, read: .failed, evidence: .init(read: .failed,
+                failure: .init(code: code, retryAfterMilliseconds: 91357, encryptedDataReset: true),
+                terminal: .init(code: 2, retryAfterMilliseconds: 84629)))
+            let tag = probe.previewReadTag
+            #expect(tag == "previewRead:epoch;previewReadOutcome:failed;previewReadEvidence:present;previewReadItem:CKErrorDomain:\(code);previewReadTerminal:CKErrorDomain:2;previewReadThrown:none")
+            #expect(tag.count < 320)
+            #expect(!tag.contains("91357") && !tag.contains("84629"))
+            probe.fail(attempt, error: BridgeError.cloudConnection(.epochIncomplete))
+            #expect(probe.previewReadTag == tag)
+            probe.finish(attempt)
+            #expect(probe.previewReadTag == tag)
+        }
+        probe.recordRead(.epoch, attempt: attempt, read: .failed,
+            evidence: .init(read: .failed, failure: .init(code: nil)))
+        #expect(probe.previewReadTag == "previewRead:epoch;previewReadOutcome:failed;previewReadEvidence:present;previewReadItem:unknown:none;previewReadTerminal:none;previewReadThrown:none")
+    }
+
+    @Test func previewReadResetAndStaleIsolationKeepOnlyLastActualRead() {
+        let probe = DebugCloudPreviewProbe()
+        #expect(probe.previewReadTag == "previewRead:none")
+        let older = probe.begin()
+        probe.recordRead(.active, attempt: older, read: .missing)
+        let current = probe.begin()
+        #expect(probe.previewReadTag == "previewRead:none")
+        probe.recordRead(.epoch, attempt: older, read: .failed)
+        #expect(probe.previewReadTag == "previewRead:none")
+        probe.recordRead(.active, attempt: current, read: .missing,
+            evidence: .init(read: .missing, failure: .init(code: 11)))
+        probe.recordRead(.epoch, attempt: current)
+        #expect(probe.previewReadTag == "previewRead:epoch;previewReadOutcome:unknown;previewReadEvidence:none;previewReadItem:unknown;previewReadTerminal:unknown;previewReadThrown:none")
+        let sentinel = UUID().uuidString
+        probe.recordRead(.epoch, attempt: current, error: BridgeError.internal(sentinel))
+        let expected = "previewRead:epoch;previewReadOutcome:error;previewReadEvidence:none;previewReadItem:unknown;previewReadTerminal:unknown;previewReadThrown:coreInternal"
+        probe.fail(current, error: BridgeError.cloudConnection(.epochIncomplete))
+        probe.recordRead(.active, attempt: older, read: .zoneMissing,
+            evidence: .init(read: .zoneMissing, terminal: .init(code: 26)))
+        probe.recordRead(.active, attempt: older, error: CancellationError())
+        probe.finish(older)
+        #expect(probe.previewReadTag == expected)
+        let payloadAbsent = !probe.previewReadTag.contains(sentinel)
+        #expect(payloadAbsent)
+    }
+
+    @Test func previewReadNotificationsAllowSynchronousRereadsAndReset() {
+        let probe = DebugCloudPreviewProbe()
+        let attempt = probe.begin()
+        let calls = Mutex(0)
+        let mutations: [() -> Void] = [
+            { probe.recordRead(.epoch, attempt: attempt, read: .failed) },
+            { _ = probe.begin() }
+        ]
+        for mutate in mutations {
+            withObservationTracking {
+                _ = probe.previewReadTag
+            } onChange: {
+                _ = probe.previewReadTag
+                _ = probe.latestTag
+                calls.withLock { $0 += 1 }
+            }
+            mutate()
+        }
+        #expect(calls.withLock { $0 } == 2)
+        #expect(probe.previewReadTag == "previewRead:none")
+    }
+
+    @Test func previewReadReentrantBeginPreservesNewerAttempt() throws {
+        let probe = DebugCloudPreviewProbe()
+        let original = probe.begin()
+        probe.enter(.performLocal, attempt: original)
+        probe.recordRead(.active, attempt: original, read: .missing)
+        let originalRead = probe.previewReadTag
+        let newerAttempt = Mutex<UUID?>(nil)
+        let didReenter = Mutex(false)
+        let newerRead = "previewRead:epoch;previewReadOutcome:zoneMissing;previewReadEvidence:present;previewReadItem:CKErrorDomain:26;previewReadTerminal:CKErrorDomain:2;previewReadThrown:none"
+        withObservationTracking {
+            _ = probe.previewReadTag
+        } onChange: {
+            // Native willSet can notify this observer again before it unregisters.
+            guard didReenter.withLock({ entered in
+                if entered { return false }
+                entered = true
+                return true
+            }) else { return }
+            #expect(probe.latestTag == "performLocal")
+            #expect(probe.lastEnteredWorkStageTag == "performLocal")
+            #expect(probe.previewReadTag == originalRead)
+            // The outer begin has reserved ordering, but has not reset values.
+            probe.enter(.afterActivation, attempt: original)
+            probe.finish(original)
+            #expect(probe.latestTag == "performLocal")
+            #expect(probe.lastEnteredWorkStageTag == "performLocal")
+            let newer = probe.begin()
+            #expect(probe.latestTag == "running")
+            #expect(probe.lastEnteredWorkStageTag == nil)
+            #expect(probe.previewReadTag == "previewRead:none")
+            probe.enter(.adoptionControlRead, attempt: newer)
+            probe.recordRead(.epoch, attempt: newer, read: .zoneMissing,
+                evidence: .init(read: .zoneMissing, failure: .init(code: 26), terminal: .init(code: 2)))
+            newerAttempt.withLock { $0 = newer }
+        }
+        let stale = probe.begin()
+        #expect(didReenter.withLock { $0 })
+        let newer = try #require(newerAttempt.withLock { $0 })
+        #expect(stale != newer)
+        #expect(probe.latestTag == "adoptionControlRead")
+        #expect(probe.lastEnteredWorkStageTag == "adoptionControlRead")
+        #expect(probe.previewReadTag == newerRead)
+        probe.recordRead(.active, attempt: stale, read: .failed)
+        probe.enter(.afterActivation, attempt: stale)
+        probe.fail(stale, error: CloudOwnTransportFailure.busy)
+        probe.finish(stale)
+        #expect(probe.latestTag == "adoptionControlRead")
+        #expect(probe.lastEnteredWorkStageTag == "adoptionControlRead")
+        #expect(probe.previewReadTag == newerRead)
+        probe.recordRead(.active, attempt: newer, read: .missing)
+        probe.enter(.adoptionControlResult, attempt: newer)
+        probe.finish(newer, progress: .idle)
+        #expect(probe.latestTag == "idle")
+        #expect(probe.lastEnteredWorkStageTag == "adoptionControlResult")
+        #expect(probe.previewReadTag == "previewRead:active;previewReadOutcome:missing;previewReadEvidence:none;previewReadItem:unknown;previewReadTerminal:unknown;previewReadThrown:none")
+    }
+
     @Test func transportAndTaskFailuresHaveFixedTags() {
         let failures: [(CloudOwnTransportFailure, String)] = [
             (.closed, "transportClosed"), (.busy, "transportBusy"),
@@ -617,6 +770,83 @@ struct DebugCloudPreviewProbeTests {
             NSUnderlyingErrorKey: NSError(domain: sentinel, code: 19, userInfo: [NSLocalizedDescriptionKey: sentinel]),
             "payload": sentinel
         ])
+    }
+}
+
+/// Holds the original reply independently of its evidence, as native callbacks
+/// do. No SDK calls; evidence is available only after that same reply drains.
+private final class DebugPreparedPreviewRead: CloudOwnTransport, CloudPreparedOwnOperation, Sendable {
+    let held = HeldOwnOperation()
+    let evidenceReads = Mutex(0)
+    private let replied = Mutex(false)
+    private let error: (any Error)?
+    init(error: (any Error)? = nil) { self.error = error }
+    func prepare(_ command: CloudOwnTransportCommand) -> any CloudPreparedOwnOperation { self }
+    func enqueue() -> Bool { held.enqueue() }
+    func cancel() { held.cancel() }
+    func reply() async throws -> CloudOwnTransportReply {
+        let reply = try await held.reply()
+        replied.withLock { $0 = true }
+        if let error { throw error }
+        return reply
+    }
+    func controlReadEvidence() -> CloudZoneDeletionRead? {
+        evidenceReads.withLock { $0 += 1 }
+        guard replied.withLock({ $0 }) else { return nil }
+        return .init(read: .zoneMissing, failure: .init(code: 26), terminal: .init(code: 2))
+    }
+}
+
+extension EventTests {
+    @Test func debugPreviewOriginalReplyEvidenceAndThrownAwait() async throws {
+        for throwing in [false, true] {
+            try await withCloudConnection { f in
+                let sentinel = UUID().uuidString
+                let operation = DebugPreparedPreviewRead(error: throwing ? BridgeError.internal(sentinel) : nil)
+                let executor = CloudOwnExecutor(core: f.connection, transport: operation)
+                let pending = Task { try await executor.preview() }
+                try await operation.held.waitUntilQueued()
+                operation.held.finish(.read(.zoneMissing))
+                if throwing {
+                    do { _ = try await pending.value; Issue.record("Expected error") }
+                    catch {
+                        let originalError = error as? BridgeError == .internal(sentinel)
+                        #expect(originalError)
+                    }
+                    #expect(DebugCloudPreviewProbe.shared.previewReadTag == "previewRead:active;previewReadOutcome:error;previewReadEvidence:present;previewReadItem:CKErrorDomain:26;previewReadTerminal:CKErrorDomain:2;previewReadThrown:coreInternal")
+                    #expect(operation.evidenceReads.withLock { $0 } == 1)
+                } else {
+                    guard case .ready(let handle, let summary) = try await pending.value else {
+                        throw CloudOwnTransportFailure.unexpectedReply
+                    }
+                    #expect(summary.decision == .confirmUpload)
+                    #expect(DebugCloudPreviewProbe.shared.previewReadTag == "previewRead:active;previewReadOutcome:zoneMissing;previewReadEvidence:present;previewReadItem:CKErrorDomain:26;previewReadTerminal:CKErrorDomain:2;previewReadThrown:none")
+                    #expect(operation.evidenceReads.withLock { $0 } == 1)
+                    try await f.connection.cancelPreview(handle)
+                }
+                let payloadAbsent = !DebugCloudPreviewProbe.shared.previewReadTag.contains(sentinel)
+                #expect(payloadAbsent)
+            }
+        }
+    }
+
+    @Test func debugPreviewOldResultTaskCannotUpdateNewBusyAttempt() async throws {
+        try await withCloudConnection { f in
+            let operation = DebugPreparedPreviewRead()
+            let executor = CloudOwnExecutor(core: f.connection, transport: operation)
+            let pending = Task { try await executor.preview() }
+            try await operation.held.waitUntilQueued()
+            await #expect(throws: CloudOwnTransportFailure.busy) { _ = try await executor.preview() }
+            #expect(DebugCloudPreviewProbe.shared.previewReadTag == "previewRead:none")
+            operation.held.finish(.read(.zoneMissing))
+            guard case .ready(let handle, _) = try await pending.value else {
+                throw CloudOwnTransportFailure.unexpectedReply
+            }
+            #expect(operation.evidenceReads.withLock { $0 } == 1)
+            #expect(DebugCloudPreviewProbe.shared.latestTag == "transportBusy")
+            #expect(DebugCloudPreviewProbe.shared.previewReadTag == "previewRead:none")
+            try await f.connection.cancelPreview(handle)
+        }
     }
 }
 #endif
