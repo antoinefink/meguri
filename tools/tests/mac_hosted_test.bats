@@ -50,8 +50,13 @@ mg_sim_begin() {
 mg_app_build() {
   echo "build $*" >>"$STUB_LOG"
   mkdir -p "$MG_RUN_DIR/build-mac-Debug-Snapshot.xcresult"
+  [ -z "${FX_PROFILE:-}" ] || MG_CLOUD_AGENT_MAC_PROFILE_BINDING=synthetic-binding
   [ "${FX_DRIFT:-}" != build ] || touch "$MG_RUN_DIR/drift"
   return 0
+}
+mg_app_mac_agent_profile_check() {
+  echo "profile recheck" >>"$STUB_LOG"
+  [ "${FX_PROFILE:-}" != changed ]
 }
 mg_sim_take() {
   echo "take VM" >>"$STUB_LOG"
@@ -228,6 +233,21 @@ not_called() { ! grep -Eq -- "$1" "$STUB_LOG"; }
   FX_DRIFT=run mg --suite "$SUITE"
   [ "$status" -eq 2 ]
   [ "$(field '.failures[0].id')" = source-binding ]
+}
+
+@test "mac-hosted-test rechecks a selected profile after build before VM delivery" {
+  FX_PROFILE=selected mg --suite "$SUITE"
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(sed -n '/^build /p; /^profile recheck$/p; /^take VM$/p' "$STUB_LOG")" = "$(printf 'build mac Debug Snapshot\nprofile recheck\ntake VM')" ]
+}
+
+@test "mac-hosted-test changed selected profile refuses VM delivery and execution" {
+  FX_PROFILE=changed mg --suite "$SUITE"
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = agent-profile ]
+  called '^profile recheck$'
+  not_called '^take VM$|^vm-test '
 }
 
 @test "mac-hosted-test dry-run registers host placement without invoking helpers or updating latest" {

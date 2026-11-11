@@ -44,6 +44,7 @@ mg_mac_hosted_test__usage() {
 
 mg_mac_hosted_test() {
   local suite input prefix="$MG_RUN_DIR/selected" rc tree receipt
+  local MG_CLOUD_AGENT_MAC_PROFILE_BINDING="" MG_CLOUD_AGENT_MAC_PROFILE_PRIVATE=""
   # No target, platform, build setting or command passthrough. Validate before
   # probing the VM, hashing sources or touching build products.
   if [ "$#" -ne 2 ] || [ "$1" != --suite ] ||
@@ -81,6 +82,13 @@ mg_mac_hosted_test() {
   if [ "$input" != "$(mg_app_input_digest)" ]; then
     mg_failure source-binding "app/core sources changed during the selected-test build"
     mg_status error
+    return 0
+  fi
+  # This Snapshot producer has no CloudAgent freeze. Revalidate its selected
+  # profile binding after building, before any products are delivered to the VM.
+  if [ -n "$MG_CLOUD_AGENT_MAC_PROFILE_BINDING" ] && ! mg_app_mac_agent_profile_check; then
+    mg_failure agent-profile "App-only Mac profile changed before selected-test VM delivery"
+    mg_status fail
     return 0
   fi
   mg_sim_take || { mg_queued_settle; return 0; }

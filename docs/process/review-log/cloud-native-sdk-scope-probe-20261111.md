@@ -80,3 +80,28 @@
 - Unrun here: no builds, tests or SDK operations. One `git diff --check` is the
   sole consistency check. Integration owns native compilation and independent
   round2 review before the live probe. No cause, fix or acceptance claim is made.
+
+## Existing-profile scope repair — source-only handoff
+
+- Main starting commit `7916d292`; filtered starting commit
+  `078757a241c65726ba9044f12a2d9fb2a234904c`.
+- Supplied integration evidence: the independently reviewed native SDK
+  diagnostic compiled but never executed; VM launch failed in
+  `mac-hosted-test` runs ending `63801` and `68903`. Read-only probes verified
+  the actual Snapshot app signature. Its embedded profile covers three devices
+  and excludes the private VM reference; the already approved local profile
+  supplied through `MEGURI_CLOUD_AGENT_MAC_PROFILE_FILE` covers four and includes
+  the VM. These are supplied observations, not a live result or established
+  launch-failure cause. No private settings, identities, paths or IDs are recorded.
+- Extend existing app-only profile selection only to
+  team/build-for-testing/mac/Debug/Snapshot/Meguri when
+  `MG_JOB=mac-hosted-test`, using the existing validator and target-only settings.
+  Preserve the CloudAgent allowlist, refusals and freeze/build invariants;
+  widget/test signing remains unchanged. Clear stale binding state at build
+  entry and recheck the selected Snapshot binding after build, before VM delivery.
+  Add shell scope, stale-binding and pre-delivery recheck cases; existing tests
+  remain enabled.
+- No new grant, profile/certificate mutation, re-signing, entitlement/trust change,
+  runtime override or host execution. Source-only: no builds/tests or live SDK
+  result; one `git diff --check` at handoff. Integration owns focused tests,
+  independent review and native verification. No unit acceptance is claimed.

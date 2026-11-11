@@ -80,10 +80,15 @@ mg_app_cloud_agent_build() {
   python3 -B -I "$MG_TOOLS/scripts/cloud-agent-injection.py" --build "$MG_RUN_DIR" "$frameworks" -- "$@"
 }
 
-# Private app-only Mac CloudAgent profile input, never a public MG argument.
+# Private app-only Mac profile input, never a public MG argument.
 mg_app_mac_agent_profile_scope() {
   [ "$#" -eq 6 ] && [ "$1" = team ] && [ "$2" = build-for-testing ] &&
-    [ "$3" = mac ] && [ "$4" = Debug ] && [ "$5" = CloudAgent ] && [ "$6" = Meguri ]
+    [ "$3" = mac ] && [ "$4" = Debug ] && [ "$6" = Meguri ] || return 1
+  case "$5" in
+    CloudAgent) return 0 ;;
+    Snapshot) [ "${MG_JOB:-}" = mac-hosted-test ] ;;
+    *) return 1 ;;
+  esac
 }
 
 mg_app_mac_agent_profile_check() {
@@ -112,6 +117,10 @@ mg_app_mac_agent_profile_refusal() {
 # Explicit action keeps every nested UI/snapshot/perf caller on its test plan.
 # Only explicit preview actions select build; no ambient switch changes callers.
 mg_app_build_action() {
+  # Only this producer may populate a binding; stale state must not select
+  # private signing/log handling for a later, out-of-scope build.
+  MG_CLOUD_AGENT_MAC_PROFILE_BINDING=""
+  MG_CLOUD_AGENT_MAC_PROFILE_PRIVATE=""
   local action="$1" standalone_arg="" plan_arg="" personal=false test_args=()
   shift
   local platform="$1" config="$2" plan="${3:-UI}" scheme="${4:-Meguri}" signing="${MEGURI_APP_SIGNING-adhoc}" dest result log rc counts sdk xctestrun policy settings=() core_args=() build_command=(xcodebuild)
