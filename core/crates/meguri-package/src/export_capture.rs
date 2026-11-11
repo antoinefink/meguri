@@ -144,6 +144,23 @@ pub(crate) fn open_at(parent: &File, name: &OsStr, directory: bool) -> std::io::
     Ok(unsafe { File::from_raw_fd(fd) })
 }
 
+// Protected path ancestors are search authority, never enumeration or payload
+// handles. In particular, Darwin's sandbox may allow search but deny reading.
+fn open_search_directory_at(parent: libc::c_int, name: &OsStr) -> std::io::Result<File> {
+    let name = CString::new(name.as_bytes()).map_err(|_| std::io::Error::other("invalid component"))?;
+    #[cfg(target_vendor = "apple")]
+    let access = libc::O_SEARCH;
+    #[cfg(not(target_vendor = "apple"))]
+    let access = libc::O_PATH;
+    let flags = access | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC;
+    // SAFETY: parent is live or AT_FDCWD, name is terminated, ownership transfers once.
+    let fd = unsafe { libc::openat(parent, name.as_ptr(), flags) };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(unsafe { File::from_raw_fd(fd) })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct EntryMetadata {
     stamp: Stamp,
@@ -523,7 +540,10 @@ impl ExportSourceValidation {
         // External output paths are normalized by their admitting caller.
         let (mut parent, relative) = match absolute.strip_prefix(&self.directory) {
             Ok(relative) => (self.parent.try_clone()?, relative),
-            Err(_) => (File::open("/")?, absolute.as_path()),
+            Err(_) => (
+                open_search_directory_at(libc::AT_FDCWD, OsStr::new("/"))?,
+                absolute.as_path(),
+            ),
         };
         let mut components = relative.components().peekable();
         while let Some(component) = components.next() {
@@ -540,7 +560,7 @@ impl ExportSourceValidation {
                             Err(e) => Err(e.into()),
                         };
                     } else {
-                        open_at(&parent, name, true)
+                        open_search_directory_at(parent.as_raw_fd(), name)
                     };
                     match result {
                         Ok(next) => parent = next,
@@ -926,6 +946,82 @@ impl MediaFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn external_protected_paths_need_only_searchable_ancestors_and_still_reject_aliases() {
+        use std::{
+            os::unix::{fs::PermissionsExt, process::CommandExt},
+            process::Command,
+        };
+        const CHILD: &str = "MEGURI_EXPORT_CAPTURE_SEARCH_ONLY_CHILD";
+        const TEST: &str =
+            "export_capture::tests::external_protected_paths_need_only_searchable_ancestors_and_still_reject_aliases";
+        if let Some(directory) = std::env::var_os(CHILD) {
+            // Only this fresh process may change identity. Permission checks
+            // must be real even when the test harness runs as root in Docker.
+            assert_ne!(unsafe { libc::geteuid() }, 0);
+            let directory = PathBuf::from(directory);
+            let collection = directory.join("collection");
+            let media = collection.join("collection.media");
+            fs::create_dir_all(&media).unwrap();
+            fs::write(media.join("included"), b"ordinary media").unwrap();
+            let ancestor = directory.join("external");
+            let output_directory = ancestor.join("outputs");
+            fs::create_dir_all(&output_directory).unwrap();
+            let output = output_directory.join("protected.colpkg");
+            fs::write(&output, b"protected output, never payload").unwrap();
+            let missing = output_directory.join("missing.colpkg");
+            let missing_parent = output_directory.join("not-created/output.colpkg");
+            fs::set_permissions(&ancestor, fs::Permissions::from_mode(0o111)).unwrap();
+            assert_eq!(
+                File::open(&ancestor).unwrap_err().kind(),
+                std::io::ErrorKind::PermissionDenied
+            );
+            assert!(fs::metadata(&output).unwrap().is_file());
+            let protected = vec![output.clone(), missing.clone(), missing_parent.clone()];
+            let proof = ExportSourceValidation::inventory(&collection, protected.clone(), &|| false).unwrap();
+            assert_eq!(proof.files.len(), 1);
+            assert_eq!(proof.files[0].name(), "included");
+            proof.validate(&|| false).unwrap();
+            assert!(!missing.exists());
+            assert!(!missing_parent.exists());
+            fs::hard_link(&output, media.join("alias")).unwrap();
+            assert!(matches!(
+                ExportSourceValidation::inventory(&collection, protected, &|| false),
+                Err(Error::ExportSourceInvalid { detail }) if detail.contains("aliases")
+            ));
+            return;
+        }
+        // Use the shared system temp directory so every ancestor is searchable
+        // after a root harness drops the child's credentials.
+        let directory = tempfile::tempdir_in("/tmp").unwrap();
+        // Canonicalize system temp aliases (notably /var on Darwin): this
+        // regression must not depend on following any ancestor symlink.
+        let path = directory.path().canonicalize().unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o777)).unwrap();
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args(["--exact", TEST, "--nocapture"])
+            .env(CHILD, &path)
+            .current_dir("/");
+        if unsafe { libc::geteuid() } == 0 {
+            command.gid(65534).uid(65534);
+        }
+        let output = command.output();
+        // Restore traversal/read access even if the child panicked, so TempDir
+        // can remove the fixture without leaving restrictive directories.
+        let ancestor = path.join("external");
+        if ancestor.exists() {
+            fs::set_permissions(ancestor, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        let output = output.unwrap();
+        assert!(
+            output.status.success(),
+            "permission regression child failed:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
     struct OpenFailure;
     impl Drop for OpenFailure {
         fn drop(&mut self) {
