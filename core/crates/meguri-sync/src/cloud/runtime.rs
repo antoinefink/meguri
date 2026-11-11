@@ -1005,11 +1005,11 @@ impl Runtime {
             } else {
                 None
             };
-            // Record the complete pair only after selection; mismatches retain evidence.
+            // Only active opens record current file identities; isolated opens retain evidence.
             let durable = if binding.facts.state == BindingState::Active {
                 store.open_runtime_binding(binding.id, file, durable_file)?
             } else {
-                previous.clone()
+                store.open_isolated_runtime_binding(binding.id)?
             };
             let decision_matches = publication.as_ref().is_some_and(|p| match &p.binding {
                 meguri_engine::device_state::AccountBinding::LocalOnly => true,

@@ -2009,6 +2009,29 @@ fn sign_out_resume_wrong_account_keeps_pending_note_and_reads_own_namespace() {
             .unwrap()
             .is_none_or(|db| db.zones.is_empty() && db.used_bytes == 0)
     );
+    let isolated = runtime.status().unwrap().binding.unwrap();
+    host.close().unwrap();
+    drop(collection);
+    drop(host);
+
+    // A real isolated reopen advances only per-open bookkeeping. The pending
+    // edit, captured base, ACKs and observer stamps must remain exact.
+    let cloud::OpenOutcome::Opened(store) = cloud::TrackingStore::open(&dir, binding.scope.clone()).unwrap() else {
+        panic!("closed tracking must remain readable")
+    };
+    let mut expected = store.stored_runtime_state(binding.id).unwrap().unwrap();
+    drop(store);
+    expected.open_counter = expected.open_counter.checked_add(1).unwrap();
+    expected.drained = false;
+    let requests = service.request_log().unwrap().len();
+    let host = actual::open_actual(&dir, account);
+    let runtime = host.cloud_runtime().unwrap();
+    assert_eq!(runtime.stored_state_for_testing().unwrap(), expected);
+    assert!(runtime.status().unwrap().binding.unwrap() == isolated);
+    assert!(runtime.entity_facts(&original.name).unwrap().unwrap() == pending);
+    assert_eq!(rows(&host), local_rows);
+    assert!(runtime.resume_binding_offer().is_none());
+    assert_eq!(service.request_log().unwrap().len(), requests);
     host.close().unwrap();
 }
 

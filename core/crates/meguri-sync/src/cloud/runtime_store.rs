@@ -220,6 +220,18 @@ impl TrackingStore {
         Ok(value)
     }
 
+    /// A real isolated open needs a fresh observer namespace too. Retain its
+    /// file evidence and all recovery/send state until an explicit restore.
+    pub(super) fn open_isolated_runtime_binding(&mut self, binding: BindingId) -> Result<StoredRuntimeState, Error> {
+        let mut value = self.runtime_binding(binding)?;
+        value.open_counter = next(value.open_counter)?;
+        value.drained = false;
+        let transaction = self.connection.transaction()?;
+        put_binding(&transaction, binding, &value)?;
+        transaction.commit()?;
+        Ok(value)
+    }
+
     pub(super) fn isolate_runtime_binding(&mut self, binding: BindingId, reason: IsolationReason) -> Result<(), Error> {
         let mut value = self.binding(binding)?.ok_or(Error::BindingNotFound)?;
         if !isolation_replaces(value.facts.state, reason) {
