@@ -283,7 +283,8 @@ class Evidence(s.SmokeEvidence):
             need(handoff is not None and handoff["engine"] == engine and batch not in self.native_batches,
                  "selected-native-batch")
             self.native_batches[batch] = {"engine": engine, "send": send, "members": {}, "open": set(),
-                                          "results": {}, "images": {}, "callback": None, "returned": None}
+                                          "results": {}, "images": {}, "callback": None, "returned": None,
+                                          "built": self.position, "unreported_state_unsupported": False}
             return
         info = self.native_batches.get(batch)
         need(info is not None and info["engine"] == engine and info["send"] == send, "selected-native-batch")
@@ -307,7 +308,7 @@ class Evidence(s.SmokeEvidence):
             info["results"][entity] = (phase, self.position, code)
         else:
             callback = self.sdk.get(info["callback"])
-            need(entity is None and info["results"] and callback is not None and len(callback[2]) == 3 and
+            need(entity is None and callback is not None and len(callback[2]) == 3 and
                  not info["returned"], "selected-batch-return")
             info["returned"] = self.position
             info["open"].clear()
@@ -387,6 +388,11 @@ class Evidence(s.SmokeEvidence):
         need(set(reads) == members and marker["engine"] == engine, "selected-state-read")
         expected = {}
         for batch, info in batches.items():
+            if not info["results"] and not all(
+                    self.pending.get((engine, entity), (None, 0))[0] == "removed-held" and
+                    self.pending[engine, entity][1] > info["built"] for entity in info["members"]):
+                # Later adapter work cannot explain an earlier saved state.
+                info["unreported_state_unsupported"] = True
             witnesses = set()
             for entity in info["members"]:
                 action, changed = self.pending.get((engine, entity), (None, 0))
@@ -443,8 +449,12 @@ class Evidence(s.SmokeEvidence):
              all(len(ticks) == 4 for _, ticks in self.own.values()) and
              all(len(ticks) == 3 for _, _, ticks, _ in self.sdk.values()), "selected-join-order")
         for batch, info in self.native_batches.items():
+            need(list(info["members"].values()).count("save") == self.batches[batch]["saves"] and
+                 list(info["members"].values()).count("delete") == self.delete_counts.get(batch, 0),
+                 "selected-native-batch")
             results = info["results"]
             if not results:
+                need(not info["unreported_state_unsupported"], "engine_order_not_shown")
                 continue
             need(info["returned"] is not None, "selected-batch-return")
             if any(code not in KEPT_CODES for _, _, code in results.values()):

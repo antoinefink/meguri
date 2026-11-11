@@ -193,6 +193,117 @@ def admitted(kind, through=6, mutate=None):
 
 
 class SelectedTests(unittest.TestCase):
+    def test_unreported_batches_need_each_original_adapter_removal_at_each_state(self):
+        cases = {
+            "no_later_state": True,
+            "removed_after_build": True,
+            "still_pending": False,
+            "absent_without_removal": False,
+            "removed_before_build": False,
+            "removed_when_absent": False,
+            "only_one_removed": False,
+            "added_after_removal": False,
+            "later_removal_cannot_repair": False,
+            "later_state_loses_removal": False,
+            "missing_member": False,
+        }
+        for case, accepted in cases.items():
+            with self.subTest(case=case):
+                evidence = c.Evidence()
+
+                def group(labels, name="applied"):
+                    evidence.position += 1
+                    facts = [fact(name, label, evidence.tick + index + 1, engine=True)
+                             for index, label in enumerate(labels)]
+                    for item in facts:
+                        evidence.ingest(item)
+                    evidence.check_pending_group(facts)
+                    evidence.check_state_batch_group(facts)
+
+                def state(number, status="absent", reflected=None):
+                    sdk = "sdk" + str(number)
+                    group([sdk + "-state-delivered"], "engineCallback")
+                    labels = [sdk + "-state-committed", sdk + "-state-batches"]
+                    for entity in evidence.native_batches.get("1", {}).get("members", {}):
+                        labels.append(sdk + "-entity" + entity + "-read-" + status)
+                    if reflected:
+                        labels.append(sdk + "-send1-batch1-entity" + reflected + "-reflected-" + status)
+                    group(labels, "stateSaved")
+                    group([sdk + "-state-returned"], "engineCallback")
+
+                def remove(entities=("1", "2"), status="held"):
+                    group(["pending-update"] + ["entity" + entity + "-removed-" + status for entity in entities])
+
+                group(["required-scan-before-native-sdk"])
+                state(1)
+                if case == "removed_before_build":
+                    remove()
+                group(["batch1-media-handoff"])
+                evidence.ingest(fact("applied", "batch1-save-count", 2, engine=True))
+                members = ["send1-batch1-scheduled-build", "send1-batch1-entity1-member"]
+                if case != "missing_member":
+                    members.append("send1-batch1-entity2-member")
+                group(members)
+                if case in {"removed_after_build", "added_after_removal", "later_state_loses_removal"}:
+                    remove()
+                elif case == "removed_when_absent":
+                    remove(status="absent")
+                elif case in {"only_one_removed", "missing_member"}:
+                    remove(("1",))
+                if case == "added_after_removal":
+                    group(["pending-update", "entity1-added"])
+                if case != "no_later_state":
+                    pending = case in {"still_pending", "added_after_removal"}
+                    reflected = None
+                    if case == "only_one_removed":
+                        reflected = "2"
+                    elif case in {"absent_without_removal", "removed_when_absent", "later_removal_cannot_repair"}:
+                        reflected = "1"
+                    state(2, "held" if pending else "absent", reflected)
+                if case == "later_removal_cannot_repair":
+                    remove()
+                    state(3)
+                elif case == "later_state_loses_removal":
+                    remove(status="absent")
+                    state(3, reflected="1")
+                proof = [fact("ownedWorkJoined", "own-joined", 0),
+                         fact("ownedWorkJoined", "sdk-joined", len(evidence.sdk), engine=True)]
+                if accepted:
+                    evidence.joined(proof)
+                else:
+                    reason = "selected-native-batch" if case == "missing_member" else "engine_order_not_shown"
+                    with self.assertRaisesRegex(s.v.Refused, reason):
+                        evidence.joined(proof)
+
+    def test_empty_original_batch_return_closes_only_its_own_members(self):
+        evidence = c.Evidence()
+
+        def group(labels, name="applied"):
+            evidence.position += 1
+            facts = [fact(name, label, evidence.tick + index + 1, engine=True)
+                     for index, label in enumerate(labels)]
+            for item in facts:
+                evidence.ingest(item)
+            evidence.check_sent_group(facts)
+
+        group(["required-scan-before-native-sdk", "batch1-media-handoff"])
+        evidence.ingest(fact("applied", "batch1-save-count", 1, engine=True))
+        group(["send1-batch1-scheduled-build", "send1-batch1-entity1-member"])
+        for phase in ("delivered", "committed", "returned"):
+            labels = ["sdk1-sent-batch1-" + phase]
+            if phase == "returned":
+                labels.append("send1-batch1-batch-returned")
+            group(labels, "engineCallback")
+        self.assertEqual(evidence.native_batches["1"]["open"], set())
+        self.assertEqual(evidence.native_batches["1"]["results"], {})
+        group(["batch2-media-handoff"])
+        evidence.ingest(fact("applied", "batch2-save-count", 1, engine=True))
+        group(["send2-batch2-scheduled-build", "send2-batch2-entity1-member"])
+        group(["sdk2-sent-batch2-delivered"], "engineCallback")
+        group(["sdk2-sent-batch2-committed", "send2-batch2-entity1-saved"], "engineCallback")
+        self.assertEqual(set(evidence.native_batches["2"]["results"]), {"1"})
+        self.assertEqual(evidence.native_batches["1"]["results"], {})
+
     def test_replacement_engine_cannot_prove_original_save(self):
         evidence = c.Evidence()
 

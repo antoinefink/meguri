@@ -471,6 +471,26 @@ import Testing
             }
         }
     }
+    @Test func emptySentCallbackClosesItsOriginalBatchBeforeARebuild() throws {
+        let origin = "generated-engine"
+        let evidence = try ledger()
+        let record = CloudRecord(name: entity("n1").recordName, envelope: Data([1]), systemFields: Data([2]))
+        try evidence.admitSmokeSDK(origin: origin)
+        for batch in UInt64(1)...2 {
+            evidence.batch(origin: origin, batch: .init(id: batch, saves: [record], deletes: []),
+                proof: nil, current: current(), operation: .init(identity: UUID(), reason: .scheduled))
+            let event = CloudEngineEvent.sent(batchID: batch, saved: batch == 1 ? [] : [record], failed: [], deleted: [])
+            for phase in [CloudSDKObservationPhase.delivered, .committed, .returned] {
+                evidence.sdk(.init(origin: origin, ordinal: batch, event: event, phase: phase), current: current())
+            }
+        }
+        try evidence.check()
+        let operations = evidence.drain().compactMap(\.operation)
+        #expect(operations.contains("send1-batch1-batch-returned"))
+        #expect(!operations.contains("send1-batch1-entity1-saved"))
+        #expect(operations.contains("send2-batch2-entity1-saved"))
+        #expect(operations.contains("send2-batch2-batch-returned"))
+    }
     @Test func stateReflectionUsesTheLivePendingReadAndTheActualAdapterUpdate() throws {
         let evidence = try ledger()
         let origin = "generated-engine"
@@ -513,6 +533,50 @@ import Testing
         stateCallback(reversed, ordinal: 3, pending: [])
         #expect(throws: AgentFailure.execution) {
             try reversed.requireAcknowledgements([entity("n1")], observations: removed)
+        }
+    }
+    @Test func unreportedBatchesRequireTheirOriginalRemovalAtEveryLaterState() throws {
+        let cases = ["noLaterState", "heldRemoval", "stillPending", "unexplainedAbsence", "earlyRemoval",
+                     "absentRemoval", "partialRemoval", "addedAgain", "lateRepair", "laterStateChanged"]
+        let origin = "generated-engine"
+        let records = ["generated-one", "generated-two"].map {
+            CloudRecord(name: $0, envelope: Data([1]), systemFields: Data([2]))
+        }
+        let names = Set(records.map(\.name))
+        for scenario in cases {
+            let evidence = CloudKitSmokeEvidence()
+            try evidence.setGeneration(11, selectedPublication: true, needsPendingEvidence: true)
+            try evidence.admitSmokeSDK(origin: origin)
+            stateCallback(evidence, pending: [])
+            func remove(held: Bool, partial: Bool = false) {
+                let selected = partial ? [records[0].name] : records.map(\.name)
+                evidence.pendingUpdated(origin: origin, adds: [],
+                    removes: Dictionary(uniqueKeysWithValues: selected.map { ($0, held) }))
+            }
+            if scenario == "earlyRemoval" { remove(held: true) }
+            let operation = CloudNativeSendOperation(identity: UUID(), reason: .scheduled)
+            evidence.batch(origin: origin, batch: .init(id: 1, saves: records, deletes: []),
+                           proof: nil, current: current(), operation: operation)
+            if ["heldRemoval", "addedAgain", "laterStateChanged"].contains(scenario) { remove(held: true) }
+            if scenario == "absentRemoval" { remove(held: false) }
+            if scenario == "partialRemoval" { remove(held: true, partial: true) }
+            if scenario == "addedAgain" { evidence.pendingUpdated(origin: origin, adds: names, removes: [:]) }
+            if scenario != "noLaterState" {
+                stateCallback(evidence, ordinal: 2, pending: ["stillPending", "addedAgain"].contains(scenario) ? names : [])
+            }
+            if scenario == "lateRepair" {
+                remove(held: true)
+                stateCallback(evidence, ordinal: 3, pending: [])
+            } else if scenario == "laterStateChanged" {
+                remove(held: false)
+                stateCallback(evidence, ordinal: 3, pending: [])
+            }
+            try evidence.check()
+            if ["noLaterState", "heldRemoval"].contains(scenario) {
+                #expect(try evidence.joinedOriginalWork().count == 2)
+            } else {
+                #expect(throws: AgentFailure.execution) { try evidence.joinedOriginalWork() }
+            }
         }
     }
     @Test func commonOriginalJoinWaitsForOriginalOwnCommitAndSDKReturn() throws {

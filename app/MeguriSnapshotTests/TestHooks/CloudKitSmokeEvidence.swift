@@ -155,6 +155,8 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
         var returned = false
         var readded: Set<String> = []
         var firstStateSave: BatchStateSave?
+        var removedWhileHeld: Set<String> = []
+        var unreportedStateUnsupported = false
 
         var names: Set<String> { deletes.union(records.keys) }
     }
@@ -252,8 +254,12 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
             }
             let keys = batches.keys.sorted { (batches[$0]?.ordinal ?? 0) < (batches[$1]?.ordinal ?? 0) }
             for key in keys {
-                guard var batch = batches[key], batch.engine == engine, let send = batch.send,
-                      let witness = batch.names.sorted().first(where: { name in
+                guard var batch = batches[key], batch.engine == engine, let send = batch.send else { continue }
+                if batch.reported.isEmpty && !batch.names.isSubset(of: batch.removedWhileHeld) {
+                    batch.unreportedStateUnsupported = true
+                }
+                batches[key] = batch
+                guard let witness = batch.names.sorted().first(where: { name in
                           pending.contains(name) ? batch.readded.contains(name) : !heldRemovals[engine, default: []].contains(name)
                       }),
                       let alias = entities[witness] else { continue }
@@ -590,7 +596,7 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
                             handed.open.remove(name)
                             handed.reported.insert(name)
                         }
-                    } else if expected == 2 && !results.isEmpty {
+                    } else if expected == 2 {
                         s.append(.engineCallback, "\(send)-\(handed.alias)-batch-returned", engine: engine)
                         handed.open.removeAll()
                         handed.returned = true
@@ -709,10 +715,16 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
                 s.append(.applied, "\(alias)-added", engine: engine)
                 s.heldRemovals[engine]?.remove(name)
             }
+            let removedWhileHeld = Set(removes.filter(\.value).keys)
             for key in s.batches.keys where key.origin == origin {
-                guard var batch = s.batches[key], batch.returned else { continue }
-                batch.readded.subtract(removes.keys)
-                batch.readded.formUnion(adds.intersection(batch.names))
+                guard var batch = s.batches[key] else { continue }
+                batch.removedWhileHeld.subtract(removes.keys)
+                batch.removedWhileHeld.formUnion(removedWhileHeld.intersection(batch.names))
+                batch.removedWhileHeld.subtract(adds)
+                if batch.returned {
+                    batch.readded.subtract(removes.keys)
+                    batch.readded.formUnion(adds.intersection(batch.names))
+                }
                 s.batches[key] = batch
             }
         }
@@ -809,6 +821,7 @@ nonisolated final class CloudKitSmokeEvidence: Sendable {
     private static func originalWorkJoin(_ s: State) throws -> [AgentFact] {
         guard !s.failed, !s.joined, s.generation != nil, s.adoptingFrom == nil,
               s.own.values.allSatisfy({ $0.phase == 4 }),
+              s.batches.values.allSatisfy({ $0.send == nil || !$0.reported.isEmpty || !$0.unreportedStateUnsupported }),
               !s.callbacks.isEmpty, s.callbacks.values.allSatisfy({ cb in
                   guard cb.phase == 3 else { return false }
                   if let key = cb.batch, let batch = s.batches[key], batch.send != nil {

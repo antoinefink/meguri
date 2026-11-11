@@ -312,3 +312,28 @@ written after the exchange result. Rust run `32033` passes both focused
 checks. Mac VM run `32306`, host run `33874` and core lint run `35377` pass.
 Swift instrumentation run `36196` passes seven tests.
 Replay and the signed round trip remain open.
+
+## Batches without record results
+
+Starting commit `c14a077b`. The observer and host now check unreported
+batches at every later state save. Each member needs an original removal
+after its build, while the engine held it, with no later add before that
+state. A later removal cannot repair evidence missing from an earlier state.
+An empty sent callback now closes its own batch before another batch can
+receive a result for the same record.
+
+Direct review removed an observer tick comparison and added the host's
+complete-membership check. The observer follows actual adapter transitions
+for each batch. The host checks the journal's record order. Missing members
+cannot satisfy the removal rule.
+
+Mac VM runs `52513`, `54371`, `56082` and `52512` pass one test each,
+with zero skips or failures. They cover unreported batches, empty returns,
+live state reads and original send returns. Host run `59652` passes five
+wrappers. Similarity run `59943` passes. Run `52228` rejected a suite-only
+argument before execution.
+
+Signed selected run `38952` built and installed both development products.
+It ended `awaiting_user` because the approved account source is absent.
+Its `signed_execution` is false. Exchange replay, the signed round trip and
+the full integration gate remain open.
