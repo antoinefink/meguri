@@ -101,3 +101,62 @@ under the real privacy boundary, separately observed exact-file Finder copy,
 normal app sync and exact phone copy-from/SDK evidence. Actual data, Finder
 access and iCloud transfer were not tested in this filtered run; no acceptance
 is claimed.
+
+## Integration evidence
+
+The extension passed focused selftest `20261111T191149Z-94385`: seven Bats
+checks, including the generated filesystem and native-command tests. Privacy
+`20261111T191154Z-94662`, static checks `20261111T191250Z-95757` and similarity
+`20261111T191254Z-96085` passed. Independent filtered review
+`20261111T191231Z-95048` found no P0–P2 issues. The review made no source edits.
+
+Real preparation `20261111T191241Z-95439` passed with `prepared-only` and both
+transfer and signed acceptance false. Finder selected its exact generated file,
+copied it into the existing Mac media folder, and then selected that installed
+filename. The folder count increased from 565 to 566. Finder showed 10 KB.
+No replacement dialog or access grant occurred. The original source stayed in
+private diagnostic storage.
+
+The normal Mac app detected one new change. A visible Sync Now interaction
+advanced its last-sync time from 18:09 to 20:14. It still reported the existing
+2,389 missing files, with 2,390 files waiting. This proves no peer bytes yet.
+The connected phone's normal foreground observation and exact byte check remain
+pending. No collection replacement or review change occurred in these actions.
+
+Phone foreground run `20261111T191547Z-97490` completed all six interactions.
+Its overall result failed on 98 hierarchy issues; those remain unresolved.
+The snapshot retained the earlier completion instant, so it does not prove a
+fresh automatic exchange. Read-back `20261111T191732Z-99050` failed with native
+CoreDevice error 7000 before returning bytes. The read returned no file.
+Transfer remains unverified.
+
+A later Mac observation showed the waiting count return from 2,390 to the
+existing 2,389. The extra waiting item was no longer shown. Server upload
+was not proven. A separate
+manual phone exchange is the next phase, not a repeat of the automatic claim.
+
+Manual phone run `20261111T191841Z-99437` completed five interactions, with
+63 unresolved hierarchy issues. Its immediate snapshot was stale; the next
+read-back (`20261111T192015Z-311`) failed and proves no transfer. Later observation
+`20261111T192050Z-698` showed a newer successful exchange at
+`1794424803536` with pending, held-back, in-flight and incoming-waiting counts
+zero. Its three interactions completed; 36 hierarchy issues kept the result red.
+The post-completion read-back `20261111T192242Z-1520` still failed with native
+error 7000. Thus successful exchange status alone does not establish media
+arrival. The product metadata comparisons show matching development app identity,
+cloud container, environment and enabled schema on both products. Values remain
+private; no account or connection settings are recorded here.
+
+The read-only phone summary in `20261111T192741Z-2547` showed 49 reviews and
+565 media files. Cancel and return to Decks completed. All eleven interactions
+completed; 223 hierarchy issues kept the receipt red. This independently
+confirms that the phone did not have the additional file at that observation.
+
+A disposable empty deck was created in the normal Mac app to distinguish
+collection propagation from media propagation. The sender showed two pending
+changes, then no pending count after a native File-menu Sync Now request.
+The immediate phone observations in `20261111T193238Z-3717` did not show the
+new deck or a fresh completion yet. All eleven interactions completed, with
+133 hierarchy issues. These immediate observations are not final exchange
+results. A current signed Mac diagnostic build is next; no production fix is
+selected without sender evidence.
