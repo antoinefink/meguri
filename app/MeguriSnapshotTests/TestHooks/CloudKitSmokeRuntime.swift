@@ -520,18 +520,20 @@ import Foundation
                                                       current: current, operation: operation)
                 } catch { evidence.fail() }
             }
-            let observeSend: (@Sendable (CloudNativeSendObservation) async -> Void)?
+            let observeNative: (@Sendable (CloudNativeEvidenceObservation) async -> Void)?
             let observeBatch: (@Sendable (String, String, CloudEngineBatch) async -> Void)?
             if program == .smoke {
-                observeSend = nil
+                observeNative = nil
                 observeBatch = { origin, zone, batch in await recordBatch(origin, zone, batch, nil) }
             } else {
-                observeSend = { [evidence, callbackJournal] observation in
+                observeNative = { [evidence, callbackJournal] observation in
                     switch observation {
                     case .built(let origin, let operation, let zone, let batch):
                         await recordBatch(origin, zone, batch, operation)
                     case .manualReturned(let origin, let operation):
                         await callbackJournal.recordSendReturn(origin: origin, operation: operation)
+                    case .pendingUpdated(let origin, let adds, let removes):
+                        await callbackJournal.recordPendingUpdate(origin: origin, adds: adds, removes: removes)
                     case .unbound: evidence.fail()
                     }
                 }
@@ -540,7 +542,7 @@ import Foundation
             // Both the app account reader and adapter use this factory.
             // Its fresh result matches the frozen input before Core accepts
             // identity; J2.2 preserves automatic SDK scheduling.
-            let nativeFactory = NativeCloudKitEngineFactory(database: database, observeSend: observeSend, accountResolver: { [self] in
+            let nativeFactory = NativeCloudKitEngineFactory(database: database, observeNative: observeNative, accountResolver: { [self] in
                 try await resolveAccount(container: container)
             })
             let stagingRoot = data.appendingPathComponent("cloud-native-staging", isDirectory: true)
@@ -554,7 +556,8 @@ import Foundation
             let workflow = CoreCloudWorkflowService()
             if restoration != nil {
                 _ = try await validateRestoredProgress(requireScan: false)
-                try evidence.setGeneration((try await inspection.integrity()).generation, selectedPublication: true)
+                try evidence.setGeneration((try await inspection.integrity()).generation, selectedPublication: true,
+                                           needsPendingEvidence: true)
                 try await workflow.prepareRuntimeBeforePolicy()
                 _ = try await validateRestoredProgress(requireScan: true)
             }
@@ -617,7 +620,8 @@ import Foundation
         let local = try await inspection.cloud()
         if restoration == nil {
             guard local.publicationID == nil, !local.bindingUsable, local.engine == nil else { throw AgentFailure.execution }
-            try evidence.setGeneration(collection.generation, selectedPublication: program != .smoke)
+            try evidence.setGeneration(collection.generation, selectedPublication: program != .smoke,
+                                       needsPendingEvidence: program != .smoke)
         } else {
             _ = try await validateRestoredProgress(requireScan: true)
             guard local.publicationID == nil, local.bindingUsable else { throw AgentFailure.execution }

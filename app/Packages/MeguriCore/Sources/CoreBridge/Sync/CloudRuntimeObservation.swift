@@ -8,6 +8,12 @@ public struct CloudSDKObservation: Sendable {
     public let ordinal: UInt64
     public let event: CloudEngineEvent
     public let phase: CloudSDKObservationPhase
+    public let pendingNames: Set<String>?
+    public init(origin: String, ordinal: UInt64, event: CloudEngineEvent, phase: CloudSDKObservationPhase,
+                pendingNames: Set<String>? = nil) {
+        self.origin = origin; self.ordinal = ordinal; self.event = event; self.phase = phase
+        self.pendingNames = pendingNames
+    }
 }
 
 public struct CloudNativeSendOperation: Sendable, Hashable {
@@ -22,9 +28,10 @@ public struct CloudNativeSendOperation: Sendable, Hashable {
 
 /// In-process evidence from the native send path. Journal writers project
 /// record names and operation identities to run-local labels.
-public enum CloudNativeSendObservation: Sendable {
+public enum CloudNativeEvidenceObservation: Sendable {
     case built(origin: String, operation: CloudNativeSendOperation, zone: String, batch: CloudEngineBatch)
     case manualReturned(origin: String, operation: CloudNativeSendOperation)
+    case pendingUpdated(origin: String, adds: Set<String>, removes: [String: Bool])
     case unbound
 }
 public enum CloudOwnObservationPhase: Sendable {

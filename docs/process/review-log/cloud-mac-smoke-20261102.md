@@ -193,3 +193,25 @@ This records successful saved outcomes. Failed results, adapter pending-list
 changes, and state saves naming the batches they reflect remain needed before
 J4.1 and J5.1 can be checked in full. The live signed run still awaits the
 approved test account.
+
+## Pending records and saved state
+
+Starting commit `5050a1a1`. The selected native test records the pending list
+from the engine while its original state callback is active. It records each
+adapter update with the prior presence of removed records and the additions
+the adapter applied. Both paths use run-local aliases and durable journal
+groups. The host derives the batches named by each state save from those
+facts and checks the earliest matching save in journal order.
+
+Direct review checked callback authority, journal grouping, pending changes
+and the order of the original result and state save. It found that the Swift
+check used the batch key to find the state callback. The corrected test
+requires the exact callback to return and refuses a state save that preceded
+the result even if a later save would pass.
+
+Mac VM run `97087` passes the focused callback test. Swift run `94761` passes
+71 sync and native media tests. Host run `94802` passes five test wrappers.
+
+This covers saved records. Failed and deleted record results, the exemptions
+for batches without a result, full exchange replay and the signed round trip
+remain open. This change carries no Unit completion or full-gate claim.

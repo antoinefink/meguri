@@ -7,7 +7,7 @@ private actor CloudSDKDelegate: CloudKitEngineDelegate {
     init(adapter: CloudKitSyncAdapter, origin: String) { self.adapter = adapter; self.origin = origin }
     func eventWillDeliver(engine: any CloudKitEngine) async { await adapter?.eventWillDeliver(origin: origin) }
     func handleEvent(_ event: CloudEngineEvent, engine: any CloudKitEngine) async {
-        await adapter?.handleEvent(event, origin: origin)
+        await adapter?.handleEvent(event, origin: origin, engine: engine)
     }
     func eventHandlerReturned(_ event: CloudEngineEvent, engine: any CloudKitEngine) async {
         await adapter?.eventHandlerReturned(event, origin: origin)
@@ -718,7 +718,7 @@ public actor CloudKitSyncAdapter {
         guard let instance = owned[origin] else { return }
         instance.handlers += 1; changed()
     }
-    fileprivate func handleEvent(_ event: CloudEngineEvent, origin: String) async {
+    fileprivate func handleEvent(_ event: CloudEngineEvent, origin: String, engine: any CloudKitEngine) async {
         guard let instance = owned[origin] else { return }
         // Pair even a refused delivery with its original return notification.
         // Other event kinds cannot justify waiting for send admission.
@@ -771,7 +771,13 @@ public actor CloudKitSyncAdapter {
             case .willSend, .didSend: break
             }
             guard await valid(origin) else { return }
-            await observeEvent?(.init(origin: origin, ordinal: ordinal, event: event, phase: .committed))
+            if let observeEvent {
+                let pending: Set<String>?
+                if case .stateUpdate = event { pending = try await engine.pendingNamesForStateEvidence() }
+                else { pending = nil }
+                guard await valid(origin), owned[origin] === instance else { return }
+                await observeEvent(.init(origin: origin, ordinal: ordinal, event: event, phase: .committed, pendingNames: pending))
+            }
             guard await valid(origin), owned[origin] === instance else { return }
             await eventDidPersist(event)
             guard await valid(origin) else { return }

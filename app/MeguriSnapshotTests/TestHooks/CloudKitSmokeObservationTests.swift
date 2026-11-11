@@ -72,10 +72,12 @@ import Testing
         try evidence.setGeneration(11, selectedPublication: selected)
         return evidence
     }
-    private func stateCallback(_ evidence: CloudKitSmokeEvidence, ordinal: UInt64 = 1) {
+    private func stateCallback(_ evidence: CloudKitSmokeEvidence, ordinal: UInt64 = 1, pending: Set<String>? = nil) {
         for phase in [CloudSDKObservationPhase.delivered, .committed, .returned] {
+            let read = if case .committed = phase { pending } else { nil as Set<String>? }
             evidence.sdk(.init(origin: "generated-engine", ordinal: ordinal,
-                               event: .stateUpdate(Data([9])), phase: phase), current: current())
+                               event: .stateUpdate(Data([9])), phase: phase,
+                               pendingNames: read), current: current())
         }
     }
     @Test func callbackJournalWritesEachPhaseBeforeReturnAndKeepsItsCommand() throws {
@@ -384,7 +386,7 @@ import Testing
             }
             if closed {
                 try evidence.check()
-                stateCallback(evidence, ordinal: 2)
+                stateCallback(evidence, ordinal: 2, pending: [])
                 let facts = evidence.drain()
                 #expect(facts.contains { $0.operation == "send1-manual-returned" })
                 #expect(facts.contains { $0.operation == "send2-batch2-entity1-saved" })
@@ -395,6 +397,50 @@ import Testing
                 #expect(throws: AgentFailure.execution) { try evidence.check() }
                 #expect(!evidence.drain().contains { $0.operation == "send2-batch2-entity1-saved" })
             }
+        }
+    }
+    @Test func stateReflectionUsesTheLivePendingReadAndTheActualAdapterUpdate() throws {
+        let evidence = try ledger()
+        let origin = "generated-engine"
+        let operation = CloudNativeSendOperation(identity: UUID(), reason: .manual)
+        let record = CloudRecord(name: entity("n1").recordName, envelope: Data([1]), systemFields: Data([2]))
+        try evidence.admitSmokeSDK(origin: origin)
+        evidence.batch(origin: origin, batch: .init(id: 1, saves: [record], deletes: []),
+                       proof: nil, current: current(), operation: operation)
+        let sent = CloudEngineEvent.sent(batchID: 1, saved: [record], failed: [], deleted: [])
+        for phase in [CloudSDKObservationPhase.delivered, .committed, .returned] {
+            evidence.sdk(.init(origin: origin, ordinal: 1, event: sent, phase: phase), current: current())
+        }
+        let removed = [CloudWorkflowObservation.savedPendingRemoved(name: record.name, requestID: 1)]
+        evidence.pendingUpdated(origin: origin, adds: [], removes: [record.name: true])
+        stateCallback(evidence, ordinal: 2, pending: [])
+        #expect(evidence.drain().contains { $0.operation == "sdk2-entity1-read-absent" })
+        #expect(throws: AgentFailure.execution) { try evidence.requireAcknowledgements([entity("n1")], observations: removed) }
+
+        // The serialization passed to both callbacks is identical. The second
+        // live read sees the add-back and names the original batch.
+        evidence.pendingUpdated(origin: origin, adds: [record.name], removes: [:])
+        let update = CloudEngineEvent.stateUpdate(Data([9]))
+        for phase in [CloudSDKObservationPhase.delivered, .committed] {
+            evidence.sdk(.init(origin: origin, ordinal: 3, event: update, phase: phase,
+                               pendingNames: [record.name]), current: current())
+        }
+        #expect(evidence.drain().contains { $0.operation == "sdk3-send1-batch1-entity1-reflected-held" })
+        #expect(throws: AgentFailure.execution) { try evidence.requireAcknowledgements([entity("n1")], observations: removed) }
+        evidence.sdk(.init(origin: origin, ordinal: 3, event: update, phase: .returned), current: current())
+        #expect(try evidence.requireAcknowledgements([entity("n1")], observations: removed).count == 1)
+
+        let reversed = try ledger()
+        try reversed.admitSmokeSDK(origin: origin)
+        reversed.batch(origin: origin, batch: .init(id: 1, saves: [record], deletes: []),
+                       proof: nil, current: current(), operation: operation)
+        stateCallback(reversed, ordinal: 1, pending: [])
+        for phase in [CloudSDKObservationPhase.delivered, .committed, .returned] {
+            reversed.sdk(.init(origin: origin, ordinal: 2, event: sent, phase: phase), current: current())
+        }
+        stateCallback(reversed, ordinal: 3, pending: [])
+        #expect(throws: AgentFailure.execution) {
+            try reversed.requireAcknowledgements([entity("n1")], observations: removed)
         }
     }
     @Test func commonOriginalJoinWaitsForOriginalOwnCommitAndSDKReturn() throws {

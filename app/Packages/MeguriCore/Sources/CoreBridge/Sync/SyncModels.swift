@@ -107,6 +107,7 @@ public struct CloudSavedPendingRemoval: Sendable, Equatable {
 public protocol CloudKitEngine: Sendable {
     var instanceID: String { get }
     func pendingRecordZoneChanges() async -> [String: CloudPendingChange]
+    func pendingNamesForStateEvidence() async throws -> Set<String>?
     func takeSavedPendingRemovals() async -> [CloudSavedPendingRemoval]
     func pendingDatabaseChanges() async -> Set<String>
     /// Returns the record changes the engine applied under the original update ID.
@@ -135,6 +136,7 @@ public protocol CloudKitEngineDelegate: Sendable {
     func nextFetchChangesOptions(_ options: CloudFetchOptions, engine: any CloudKitEngine) async -> CloudFetchOptions
 }
 extension CloudKitEngine {
+    public func pendingNamesForStateEvidence() async throws -> Set<String>? { nil }
     public func takeSavedPendingRemovals() async -> [CloudSavedPendingRemoval] { [] }
 }
 extension CloudKitEngineDelegate {

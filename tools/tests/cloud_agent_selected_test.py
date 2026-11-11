@@ -46,12 +46,19 @@ def generated(kind):
         nonlocal tick
         tick += 1
         return fact(name, label, tick, engine=engine)
-    def callback(kind):
+    def callback(kind, saved_batch=False):
         nonlocal sdk
         sdk += 1
-        return [event("stateSaved" if kind == "state" and phase == "committed" else "engineCallback",
-                      "sdk%d-%s-%s" % (sdk, kind, phase), True)
-                for phase in ("delivered", "committed", "returned")]
+        facts = []
+        for phase in ("delivered", "committed", "returned"):
+            state_save = kind == "state" and phase == "committed"
+            facts.append(event("stateSaved" if state_save else "engineCallback", "sdk%d-%s-%s" % (sdk, kind, phase), True))
+            if state_save:
+                facts.append(event("stateSaved", "sdk%d-state-batches" % sdk, True))
+                if saved_batch:
+                    facts.append(event("stateSaved", "sdk%d-entity1-read-absent" % sdk, True))
+                    facts.append(event("stateSaved", "sdk%d-send1-batch1-entity1-reflected-absent" % sdk, True))
+        return facts
     def check(n, names):
         checks[n] = [{"name": name, "outcome": "pass", "facts": rows} for name, rows in names]
         observations[n] = [fact("accountVerified")] + copy.deepcopy([row for _, rows in names for row in rows])
@@ -97,7 +104,7 @@ def generated(kind):
         returned, sent_sdk = tick, sdk
         upload.append(event("engineCallback", "send1-batch1-batch-returned", True))
         upload.append(event("applied", "send1-manual-returned", True))
-        upload += callback("state")
+        upload += callback("state", saved_batch=True)
         exchange += [fact("applied", "n1-sdk%d-batch1-entity1-ack" % sent_sdk, returned, engine=True),
                      fact("stateSaved", "n1-earlier-original-ack", 2, "1" * 64),
                      fact("localDurable", "n1", 2, "1" * 64)]
@@ -135,10 +142,19 @@ def journal_bytes(kind, checks, observations, through=6, header_value=None):
                         "record_seq": len(records)+1, "command_seq": n,
                         "command_sha256": s.v.digest(commands[n-1][:-1]), "agent_instance": "original1",
                         "observed_at": "2026-11-10T12:00:00Z", "kind": record_kind, "facts": [], "checks": [], **extra})
+    def group(item):
+        label = item.get("operation", "")
+        if label in c.TERMINAL_LABELS:
+            return "terminal"
+        if label.endswith("-state-committed") or c.state_batch_fact(label):
+            return label.split("-")[0]
+        if c.pending_fact(label):
+            return "pending"
+        return None
     for n in range(1, through+1):
         add(n, "started", action=c.PROGRAMS[kind][n-1][0])
-        for terminal, items in itertools.groupby(observations[n], key=lambda item: item.get("operation") in c.TERMINAL_LABELS):
-            if terminal:
+        for grouped, items in itertools.groupby(observations[n], key=group):
+            if grouped:
                 add(n, "observation", facts=list(items))
             else:
                 for item in items: add(n, "observation", facts=[item])
@@ -160,12 +176,23 @@ class SelectedTests(unittest.TestCase):
         evidence = c.Evidence()
 
         def trace(label, name="applied", engine="engine1"):
+            evidence.position += 1
             evidence.ingest({"name": name, "count": evidence.tick + 1, "operation": label, "engine": engine})
 
         def callback(label, engine):
             for phase in ("delivered", "committed", "returned"):
                 name = "stateSaved" if label.endswith("-state") and phase == "committed" else "engineCallback"
-                trace(label + "-" + phase, name, engine)
+                operation = label + "-" + phase
+                trace(operation, name, engine)
+                if name == "stateSaved":
+                    sdk = label.split("-")[0]
+                    labels = [operation, sdk + "-state-batches"]
+                    if engine == "engine1":
+                        labels.extend([sdk + "-entity1-read-absent", sdk + "-send1-batch1-entity1-reflected-absent"])
+                    group = [{"name": name, "operation": op, "engine": engine} for op in labels]
+                    for item in group[1:]:
+                        evidence.ingest({**item, "count": evidence.tick + 1})
+                    evidence.check_state_batch_group(group)
 
         trace("required-scan-before-native-sdk")
         trace("batch1-collection-handoff")
@@ -182,7 +209,7 @@ class SelectedTests(unittest.TestCase):
             trace("sdk2-state-delivered", "engineCallback", "engine2")
         trace("required-scan-before-native-sdk", engine="engine2")
         callback("sdk2-state", "engine2")
-        with self.assertRaisesRegex(s.v.Refused, "selected-ack-state"):
+        with self.assertRaisesRegex(s.v.Refused, "engine_order_not_shown"):
             evidence.acknowledged(ack)
         with self.assertRaisesRegex(s.v.Refused, "selected-ack-callback"):
             evidence.acknowledged({**ack, "engine": "engine2"})
@@ -301,7 +328,8 @@ class SelectedTests(unittest.TestCase):
                 admitted("mac", mutate=alter)
 
     def test_missing_ack_revision_and_callback_state_refuse(self):
-        for label in ("n1-sdk2-batch1-entity1-ack", "n1-earlier-original-ack", "sdk3-state-committed"):
+        for label in ("n1-sdk2-batch1-entity1-ack", "n1-earlier-original-ack", "sdk3-state-committed",
+                      "sdk3-state-batches"):
             def omit(checks, observations):
                 for check in checks[5]: check["facts"][:] = [f for f in check["facts"] if f.get("operation") != label]
                 observations[5][:] = [f for f in observations[5] if f.get("operation") != label]
@@ -318,6 +346,26 @@ class SelectedTests(unittest.TestCase):
                     item["operation"] = "n1-sdk2-batch1-entity2-ack"
         with self.assertRaisesRegex(s.v.Refused, "selected-ack-member"):
             admitted("mac", mutate=substitute)
+
+    def test_live_pending_read_excludes_adapter_removals(self):
+        def replace_with_held_read(checks, observations):
+            for item in observations[5]:
+                if item.get("operation") == "sdk3-entity1-read-absent":
+                    item["operation"] = "sdk3-entity1-read-held"
+        with self.assertRaisesRegex(s.v.Refused, "selected-state-batches"):
+            admitted("mac", mutate=replace_with_held_read)
+
+        def remove_before_state(checks, observations):
+            items = observations[5]
+            first_state = next(i for i, item in enumerate(items) if item.get("operation") == "sdk3-state-delivered")
+            tick = items[first_state]["count"]
+            for item in items[first_state:]:
+                item["count"] += 2
+            items[first_state:first_state] = [
+                fact("applied", "pending-update", tick, engine=True),
+                fact("applied", "entity1-removed-held", tick + 1, engine=True)]
+        with self.assertRaisesRegex(s.v.Refused, "selected-state-batches"):
+            admitted("mac", mutate=remove_before_state)
 
     def test_peer_apply_fetch_return_and_control_comparison_are_required(self):
         def bad_peer(checks, observations):

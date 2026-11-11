@@ -125,11 +125,11 @@ enum NativeCloudKitRecordRouting {
 public actor NativeCloudKitEngineFactory: CloudKitEngineFactory {
     let database: CKDatabase
     private let account: @Sendable () async throws -> CloudResolvedAccount
-    private let observeSend: (@Sendable (CloudNativeSendObservation) async -> Void)?
+    private let observeNative: (@Sendable (CloudNativeEvidenceObservation) async -> Void)?
     private var accountObservers: [UUID: any NSObjectProtocol] = [:]
-    public init(database: CKDatabase, observeSend: (@Sendable (CloudNativeSendObservation) async -> Void)? = nil,
+    public init(database: CKDatabase, observeNative: (@Sendable (CloudNativeEvidenceObservation) async -> Void)? = nil,
                 accountResolver: @escaping @Sendable () async throws -> CloudResolvedAccount) {
-        self.database = database; account = accountResolver; self.observeSend = observeSend
+        self.database = database; account = accountResolver; self.observeNative = observeNative
     }
     public func accountChanges() -> AsyncStream<Void>? {
         let (stream, continuation) = AsyncStream<Void>.makeStream()
@@ -148,7 +148,7 @@ public actor NativeCloudKitEngineFactory: CloudKitEngineFactory {
             do { serialization = try JSONDecoder().decode(CKSyncEngine.State.Serialization.self, from: data) }
             catch { throw NativeCloudKitFailure.invalidSerialization }
         } else { serialization = nil }
-        let engine = NativeCloudKitEngine(instanceID: configuration.instanceID, delegate: delegate, observeSend: observeSend)
+        let engine = NativeCloudKitEngine(instanceID: configuration.instanceID, delegate: delegate, observeNative: observeNative)
         await engine.setCollectionZone(configuration.collectionZone)
         await engine.configure(database: database, serialization: serialization, automatic: configuration.automaticallySync)
         return engine
@@ -220,9 +220,11 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
     nonisolated let instanceID: String
     private var sdk: CKSyncEngine?
     private let delegate: any CloudKitEngineDelegate
-    private let observeSend: (@Sendable (CloudNativeSendObservation) async -> Void)?
+    private let observeNative: (@Sendable (CloudNativeEvidenceObservation) async -> Void)?
     private var manualSends: [String: CloudNativeSendOperation] = [:]
     private var scheduledSends: [String: CloudNativeSendOperation] = [:]
+    private var evidenceTurn = false
+    private var evidenceWaiters: [CheckedContinuation<Void, Never>] = []
     private var activeEvent = false
     private var eventWaiters: [CheckedContinuation<Void, Never>] = []
     private var returnedWork: Task<Void, Never>?
@@ -236,8 +238,8 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         try CloudMediaStaging.sharedDefault()
     }
     init(instanceID: String, delegate: any CloudKitEngineDelegate,
-         observeSend: (@Sendable (CloudNativeSendObservation) async -> Void)? = nil) {
-        self.instanceID = instanceID; self.delegate = delegate; self.observeSend = observeSend
+         observeNative: (@Sendable (CloudNativeEvidenceObservation) async -> Void)? = nil) {
+        self.instanceID = instanceID; self.delegate = delegate; self.observeNative = observeNative
     }
     func configure(database: CKDatabase, serialization: CKSyncEngine.State.Serialization?, automatic: Bool) {
         var configuration = CKSyncEngine.Configuration(database: database, stateSerialization: serialization, delegate: self)
@@ -256,6 +258,20 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         do { return try validatedPendingRecords().byName }
         catch { failure = error; return [:] }
     }
+    func pendingNamesForStateEvidence() throws -> Set<String>? {
+        guard observeNative != nil else { return nil }
+        if let failure { throw failure }
+        guard sdk != nil, evidenceTurn else { throw NativeCloudKitFailure.unsupportedRecord }
+        return Set(try validatedPendingRecords().byName.keys)
+    }
+    private func enterEvidenceTurn() async {
+        if evidenceTurn { await withCheckedContinuation { evidenceWaiters.append($0) } }
+        else { evidenceTurn = true }
+    }
+    private func leaveEvidenceTurn() {
+        if evidenceWaiters.isEmpty { evidenceTurn = false }
+        else { evidenceWaiters.removeFirst().resume() }
+    }
     func takeSavedPendingRemovals() async -> [CloudSavedPendingRemoval] {
         guard failure == nil, sdk != nil else { return [] }
         do {
@@ -269,7 +285,12 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         do { return try NativeCloudKitIdentityValidation.databaseZoneNames(sdk?.state.pendingDatabaseChanges ?? []) }
         catch { failure = error; return [] }
     }
-    func applyPendingUpdate(_ update: CloudPendingUpdate) throws -> CloudPendingUpdate {
+    func applyPendingUpdate(_ update: CloudPendingUpdate) async throws -> CloudPendingUpdate {
+        let observing = observeNative != nil
+        let authority = observing ? networkLifetime.authority() : nil
+        if observing { await enterEvidenceTurn() }
+        defer { if observing { leaveEvidenceTurn() } }
+        if let authority, authority != networkLifetime.authority() { throw CancellationError() }
         if let failure { throw failure }
         guard let sdk else { return .init(id: update.id, kind: update.kind, adds: [:], removes: []) }
         do {
@@ -282,10 +303,15 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
                 let id = recordID(name, zone: NativeCloudMediaBatch.zone(name: name, collection: collectionZone))
                 return change == .save ? .saveRecord(id) : .deleteRecord(id)
             }
-            guard !removes.isEmpty || !adds.isEmpty else { return applied }
-            savedRemoval.applicationWillChangePending()
-            sdk.state.remove(pendingRecordZoneChanges: removes)
-            sdk.state.add(pendingRecordZoneChanges: adds)
+            if !removes.isEmpty || !adds.isEmpty {
+                savedRemoval.applicationWillChangePending()
+                sdk.state.remove(pendingRecordZoneChanges: removes)
+                sdk.state.add(pendingRecordZoneChanges: adds)
+            }
+            if let observeNative {
+                let removed = Dictionary(uniqueKeysWithValues: update.removes.map { ($0, pending.byName[$0] != nil) })
+                await observeNative(.pendingUpdated(origin: instanceID, adds: Set(applied.adds.keys), removes: removed))
+            }
             return applied
         } catch {
             failure = error
@@ -368,7 +394,7 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         // Same actor turn: event-idle admission, Core validation, lock release,
         // then the captured SDK invocation without another application await.
         try networkLifetime.enqueue(generation: generation, validate: validate, begin: {})
-        guard let observeSend else {
+        guard let observeNative else {
             try await sdk.sendChanges(options)
             return
         }
@@ -383,7 +409,7 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
             result = .success(())
         } catch { result = .failure(error) }
         manualSends.removeValue(forKey: group)
-        await observeSend(.manualReturned(origin: instanceID, operation: operation))
+        await observeNative(.manualReturned(origin: instanceID, operation: operation))
         try result.get()
     }
     func prepareFetch(options: CloudFetchOptions) async throws -> CloudKitNetworkEnqueue {
@@ -461,6 +487,11 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         if activeEvent { await withCheckedContinuation { eventWaiters.append($0) } }
         else { activeEvent = true; networkLifetime.beginEvent() }
         if let returnedWork { await returnedWork.value }
+        // The signed observer holds this turn through the delegate's state
+        // read and append. Returned bookkeeping can apply its updates later.
+        let observing = observeNative != nil
+        if observing { await enterEvidenceTurn() }
+        defer { if observing { leaveEvidenceTurn() } }
         if sdk === syncEngine {
             let receipts = await takeSavedPendingRemovals()
             if !receipts.isEmpty { await delegate.savedPendingRemovalsConfirmed(receipts, engine: self) }
@@ -526,15 +557,15 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
                 forwarded = .didFetchZone(zone: try NativeCloudKitIdentityValidation.zoneName(did.zoneID), error: did.error.map(code))
             case .didFetchChanges(let did): forwarded = .didFetch(groupID: did.context.options.operationGroup.name ?? "", reason: did.context.reason == .manual ? .manual : .scheduled)
             case .willSendChanges(let event):
-                if let observeSend, event.context.reason == .scheduled {
+                if let observeNative, event.context.reason == .scheduled {
                     let group = event.context.options.operationGroup.operationGroupID
                     if scheduledSends[group] == nil {
                         scheduledSends[group] = .init(identity: UUID(), reason: .scheduled)
-                    } else { await observeSend(.unbound) }
+                    } else { await observeNative(.unbound) }
                 }
                 forwarded = .willSend(zone: collectionZone ?? "")
             case .didSendChanges(let event):
-                if observeSend != nil, event.context.reason == .scheduled {
+                if observeNative != nil, event.context.reason == .scheduled {
                     scheduledSends.removeValue(forKey: event.context.options.operationGroup.operationGroupID)
                 }
                 forwarded = .didSend(zone: collectionZone ?? "")
@@ -594,7 +625,7 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
             if let batch = await delegate.nextRecordZoneChangeBatch(pending: scoped, zone: candidate, engine: self) { selected = (candidate, batch); break }
         }
         guard let (batchZone, batch) = selected else { return nil }
-        if let observeSend {
+        if let observeNative {
             let group = context.options.operationGroup.operationGroupID
             let operation: CloudNativeSendOperation? = switch context.reason {
             case .manual: manualSends.count == 1 ? manualSends[group] : nil
@@ -602,8 +633,8 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
             @unknown default: nil
             }
             if let operation {
-                await observeSend(.built(origin: instanceID, operation: operation, zone: batchZone, batch: batch))
-            } else { await observeSend(.unbound) }
+                await observeNative(.built(origin: instanceID, operation: operation, zone: batchZone, batch: batch))
+            } else { await observeNative(.unbound) }
             guard sdk === syncEngine else { return nil }
         }
         guard failure == nil else { return nil }
@@ -632,6 +663,9 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
             return prepared
         } catch {
             failure = error
+            let observing = observeNative != nil
+            if observing { await enterEvidenceTurn() }
+            defer { if observing { leaveEvidenceTurn() } }
             await delegate.eventWillDeliver(engine: self)
             await delegate.handleEvent(.deliveryFailed, engine: self)
             returnedWork = Task { await self.returned(.deliveryFailed) }
