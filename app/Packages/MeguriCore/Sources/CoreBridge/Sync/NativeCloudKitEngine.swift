@@ -490,14 +490,34 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
     private func code(_ error: any Error) -> CloudEngineErrorCode {
         NativeCloudKitSendError.code(error)
     }
+    #if DEBUG
+    // Caller admits the original SDK first. Read public state only; retain no IDs.
+    private func debugRecordUnfetchedServerChanges(_ syncEngine: CKSyncEngine) {
+        let unfetched = syncEngine.state.zoneIDsWithUnfetchedServerChanges
+        let registered = collectionZone.map { zone($0) }
+        DebugCloudDiagnostics.fetchRecorder.recordServerChangeObservations(
+            unfetched: !unfetched.isEmpty,
+            unfetchedCollection: registered.map { unfetched.contains($0) } ?? false)
+    }
+    #endif
     func handleEvent(_ event: CKSyncEngine.Event, syncEngine: CKSyncEngine) async {
         guard sdk === syncEngine else { return }
         #if DEBUG
         // Process-wide original callback facts, after SDK admission and before
         // conversion can throw. No current-owner or convergence authority.
         switch event {
+        case .willFetchChanges, .fetchedDatabaseChanges, .stateUpdate, .didFetchChanges:
+            debugRecordUnfetchedServerChanges(syncEngine)
+        default: break
+        }
+        switch event {
         case .willFetchChanges:
             DebugCloudDiagnostics.fetchRecorder.record(.will)
+        case .fetchedDatabaseChanges(let changes):
+            let registered = collectionZone.map { zone($0) }
+            DebugCloudDiagnostics.fetchRecorder.recordServerChangeObservations(
+                database: true,
+                databaseCollection: registered.map { id in changes.modifications.contains { $0.zoneID == id } } ?? false)
         case .willFetchRecordZoneChanges(let will):
             if NativeCloudKitIdentityValidation.debugFetchZone(will.zoneID, collectionZone: collectionZone) == .collection {
                 DebugCloudDiagnostics.fetchRecorder.record(.zoneC)
@@ -711,6 +731,7 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
         // Keep the first identity check. A later release does not change this
         // callback's process-wide count or grant current-owner authority.
         let originalSDKAtEntry = sdk === syncEngine
+        if originalSDKAtEntry { debugRecordUnfetchedServerChanges(syncEngine) }
         let observedCollectionZone = originalSDKAtEntry ? collectionZone.map { zone($0) } : nil
         let requestedCollection = observedCollectionZone.map { context.options.scope.contains($0) }
         // All existing early/error returns offer the empty scope.

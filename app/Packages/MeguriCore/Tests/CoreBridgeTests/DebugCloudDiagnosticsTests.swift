@@ -10,7 +10,7 @@ struct DebugCloudDiagnosticsTests {
 
     @Test func processFetchCountsStartAtZeroAndKeepBoundariesIndependent() {
         let recorder = DebugCloudDiagnostics.FetchRecorder()
-        #expect(recorder.formatted == "processAll{will=0 zoneC=0 modC=0 modR=0 coreC=0 refused=0 zoneFail=0 inC=0 outC=0 overflow=0}")
+        #expect(recorder.formatted == "processAll{will=0 zoneC=0 modC=0 modR=0 coreC=0 refused=0 zoneFail=0 inC=0 outC=0 db=0 dbC=0 un=0 unC=0 overflow=0}")
         recorder.record(.will)
         recorder.record(.zoneC)
         recorder.record(.modC, count: 3)
@@ -19,8 +19,8 @@ struct DebugCloudDiagnosticsTests {
         recorder.record(.refused)
         recorder.record(.zoneFail)
         recorder.record(.coreC, count: 0)
-        #expect(recorder.formatted == "processAll{will=1 zoneC=1 modC=3 modR=2 coreC=2 refused=1 zoneFail=1 inC=0 outC=0 overflow=0}")
-        #expect(DebugCloudDiagnostics.FetchRecorder().formatted == "processAll{will=0 zoneC=0 modC=0 modR=0 coreC=0 refused=0 zoneFail=0 inC=0 outC=0 overflow=0}")
+        #expect(recorder.formatted == "processAll{will=1 zoneC=1 modC=3 modR=2 coreC=2 refused=1 zoneFail=1 inC=0 outC=0 db=0 dbC=0 un=0 unC=0 overflow=0}")
+        #expect(DebugCloudDiagnostics.FetchRecorder().formatted == "processAll{will=0 zoneC=0 modC=0 modR=0 coreC=0 refused=0 zoneFail=0 inC=0 outC=0 db=0 dbC=0 un=0 unC=0 overflow=0}")
     }
 
     @Test func processFetchCountsSaturateEveryBoundaryAndKeepOverflowSticky() {
@@ -40,6 +40,7 @@ struct DebugCloudDiagnosticsTests {
         let bounded = DebugCloudDiagnostics.FetchRecorder(initialCount: .max)
         for counter in DebugCloudDiagnostics.FetchCounter.allCases { bounded.record(counter) }
         bounded.recordFetchOptions(requestedCollection: true, offeredCollection: true)
+        bounded.recordServerChangeObservations(database: true, databaseCollection: true, unfetched: true, unfetchedCollection: true)
         let original = bounded.formatted
         for _ in 0..<1_000 {
             for counter in DebugCloudDiagnostics.FetchCounter.allCases { bounded.record(counter) }
@@ -48,20 +49,20 @@ struct DebugCloudDiagnosticsTests {
     }
 
     @Test func processFetchScopeFlagsStartFalseAndORRetainIndependentCallbacksUntilFreshRecorder() {
-        let empty = "processAll{will=0 zoneC=0 modC=0 modR=0 coreC=0 refused=0 zoneFail=0 inC=0 outC=0 overflow=0}"
+        let empty = "processAll{will=0 zoneC=0 modC=0 modR=0 coreC=0 refused=0 zoneFail=0 inC=0 outC=0 db=0 dbC=0 un=0 unC=0 overflow=0}"
         for inputFirst in [false, true] {
             let recorder = DebugCloudDiagnostics.FetchRecorder()
             #expect(recorder.formatted == empty)
             recorder.recordFetchOptions(requestedCollection: false, offeredCollection: false)
             #expect(recorder.formatted == empty)
             recorder.recordFetchOptions(requestedCollection: inputFirst, offeredCollection: !inputFirst)
-            let first = "processAll{will=0 zoneC=0 modC=0 modR=0 coreC=0 refused=0 zoneFail=0 inC=\(inputFirst ? 1 : 0) outC=\(inputFirst ? 0 : 1) overflow=0}"
+            let first = "processAll{will=0 zoneC=0 modC=0 modR=0 coreC=0 refused=0 zoneFail=0 inC=\(inputFirst ? 1 : 0) outC=\(inputFirst ? 0 : 1) db=0 dbC=0 un=0 unC=0 overflow=0}"
             #expect(recorder.formatted == first)
             recorder.recordFetchOptions(requestedCollection: false, offeredCollection: false)
             #expect(recorder.formatted == first)
             // Separate callbacks may establish the two flags; they are not paired evidence.
             recorder.recordFetchOptions(requestedCollection: !inputFirst, offeredCollection: inputFirst)
-            let both = "processAll{will=0 zoneC=0 modC=0 modR=0 coreC=0 refused=0 zoneFail=0 inC=1 outC=1 overflow=0}"
+            let both = "processAll{will=0 zoneC=0 modC=0 modR=0 coreC=0 refused=0 zoneFail=0 inC=1 outC=1 db=0 dbC=0 un=0 unC=0 overflow=0}"
             #expect(recorder.formatted == both)
             recorder.recordFetchOptions(requestedCollection: false, offeredCollection: false)
             recorder.record(.will, count: 0)
@@ -70,12 +71,58 @@ struct DebugCloudDiagnosticsTests {
         }
     }
 
+    @Test func processServerChangeFlagsStartFalseAndORRetainUntilFreshRecorder() {
+        let empty = "processAll{will=0 zoneC=0 modC=0 modR=0 coreC=0 refused=0 zoneFail=0 inC=0 outC=0 db=0 dbC=0 un=0 unC=0 overflow=0}"
+        let recorder = DebugCloudDiagnostics.FetchRecorder()
+        #expect(recorder.formatted == empty)
+        recorder.recordServerChangeObservations()
+        #expect(recorder.formatted == empty)
+        // A database callback need not discover the collection zone.
+        recorder.recordServerChangeObservations(database: true)
+        let databaseOnly = "processAll{will=0 zoneC=0 modC=0 modR=0 coreC=0 refused=0 zoneFail=0 inC=0 outC=0 db=1 dbC=0 un=0 unC=0 overflow=0}"
+        #expect(recorder.formatted == databaseOnly)
+        recorder.recordServerChangeObservations()
+        #expect(recorder.formatted == databaseOnly)
+        // A later noncollection snapshot establishes only any-zone knowledge.
+        recorder.recordServerChangeObservations(unfetched: true)
+        let noncollection = "processAll{will=0 zoneC=0 modC=0 modR=0 coreC=0 refused=0 zoneFail=0 inC=0 outC=0 db=1 dbC=0 un=1 unC=0 overflow=0}"
+        #expect(recorder.formatted == noncollection)
+        recorder.recordServerChangeObservations()
+        #expect(recorder.formatted == noncollection)
+        recorder.recordServerChangeObservations(unfetched: true, unfetchedCollection: true)
+        let unfetchedCollection = "processAll{will=0 zoneC=0 modC=0 modR=0 coreC=0 refused=0 zoneFail=0 inC=0 outC=0 db=1 dbC=0 un=1 unC=1 overflow=0}"
+        #expect(recorder.formatted == unfetchedCollection)
+        recorder.recordServerChangeObservations()
+        #expect(recorder.formatted == unfetchedCollection)
+        recorder.recordServerChangeObservations(database: true, databaseCollection: true)
+        let all = "processAll{will=0 zoneC=0 modC=0 modR=0 coreC=0 refused=0 zoneFail=0 inC=0 outC=0 db=1 dbC=1 un=1 unC=1 overflow=0}"
+        #expect(recorder.formatted == all)
+        recorder.recordServerChangeObservations()
+        recorder.recordFetchOptions(requestedCollection: false, offeredCollection: false)
+        recorder.record(.will, count: 0)
+        #expect(recorder.formatted == all)
+        #expect(DebugCloudDiagnostics.FetchRecorder().formatted == empty)
+
+        // Server-change knowledge can also precede database discovery.
+        let reverse = DebugCloudDiagnostics.FetchRecorder()
+        reverse.recordServerChangeObservations(unfetched: true)
+        #expect(reverse.formatted == "processAll{will=0 zoneC=0 modC=0 modR=0 coreC=0 refused=0 zoneFail=0 inC=0 outC=0 db=0 dbC=0 un=1 unC=0 overflow=0}")
+        reverse.recordServerChangeObservations(database: true, databaseCollection: true)
+        #expect(reverse.formatted == "processAll{will=0 zoneC=0 modC=0 modR=0 coreC=0 refused=0 zoneFail=0 inC=0 outC=0 db=1 dbC=1 un=1 unC=0 overflow=0}")
+        reverse.recordServerChangeObservations()
+        reverse.recordServerChangeObservations(unfetched: true, unfetchedCollection: true)
+        reverse.recordServerChangeObservations()
+        #expect(reverse.formatted == all)
+        #expect(recorder.formatted == all)
+        #expect(DebugCloudDiagnostics.FetchRecorder().formatted == empty)
+    }
+
     @Test func processFetchCountsSynchronizeConcurrentOriginalBoundaries() {
         let recorder = DebugCloudDiagnostics.FetchRecorder()
         DispatchQueue.concurrentPerform(iterations: 256) { _ in
             for counter in DebugCloudDiagnostics.FetchCounter.allCases { recorder.record(counter) }
         }
-        #expect(recorder.formatted == "processAll{will=256 zoneC=256 modC=256 modR=256 coreC=256 refused=256 zoneFail=256 inC=0 outC=0 overflow=0}")
+        #expect(recorder.formatted == "processAll{will=256 zoneC=256 modC=256 modR=256 coreC=256 refused=256 zoneFail=256 inC=0 outC=0 db=0 dbC=0 un=0 unC=0 overflow=0}")
     }
 
     @Test func pageEpochStagesMapAndFormatOnlyFiniteTags() {

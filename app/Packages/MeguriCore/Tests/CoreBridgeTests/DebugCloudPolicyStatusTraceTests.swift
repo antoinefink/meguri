@@ -98,7 +98,8 @@ struct DebugCloudPolicyStatusTraceTests {
         process.record(.zoneFail, count: 3)
         process.recordFetchOptions(requestedCollection: true, offeredCollection: false)
         process.recordFetchOptions(requestedCollection: false, offeredCollection: true)
-        #expect(process.formatted == "processAll{will=12 zoneC=11 modC=1842 modR=2 coreC=1840 refused=1 zoneFail=3 inC=1 outC=1 overflow=0}")
+        process.recordServerChangeObservations(database: true, databaseCollection: true, unfetched: true, unfetchedCollection: true)
+        #expect(process.formatted == "processAll{will=12 zoneC=11 modC=1842 modR=2 coreC=1840 refused=1 zoneFail=3 inC=1 outC=1 db=1 dbC=1 un=1 unC=1 overflow=0}")
         // Match SyncStatusRows: all-process counts/flags, current-owner policy, failure.
         let values: [String?] = [process.formatted, policyValue, failureValue]
         let accessibilityValue = values.compactMap { $0 }.joined(separator: " ")

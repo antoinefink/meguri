@@ -71,7 +71,7 @@ public enum DebugCloudDiagnostics {
         }
     }
 
-    /// Only fixed scalar counts, two scope flags and an overflow flag survive.
+    /// Only fixed scalar counts, Boolean observations and an overflow flag survive.
     /// will/zoneC count native starts; modC/modR count original modifications
     /// before conversion. coreC counts records after successful core intake.
     /// refused counts native fetched callbacks reaching the existing catch;
@@ -80,11 +80,19 @@ public enum DebugCloudDiagnostics {
     /// returned a scope containing its registered collection zone. They may
     /// come from different callbacks/owners; neither pairs causes nor proves
     /// current-owner authority. No zone identity or options are retained.
+    /// db/dbC OR-retain original database callbacks/collection modifications;
+    /// un/unC OR-retain nonempty/collection unfetched-server-change snapshots.
+    /// These aggregate across instances and times, never causal pairs,
+    /// completion, current-owner evidence or convergence.
     final class FetchRecorder: Sendable {
         private struct State: Sendable {
             var counts: [UInt64]
             var requestedCollection = false
             var offeredCollection = false
+            var database = false
+            var databaseCollection = false
+            var unfetched = false
+            var unfetchedCollection = false
             var overflow = false
         }
         private let state: Mutex<State>
@@ -105,11 +113,21 @@ public enum DebugCloudDiagnostics {
                 state.offeredCollection = state.offeredCollection || offeredCollection
             }
         }
+        func recordServerChangeObservations(database: Bool = false, databaseCollection: Bool = false,
+                                            unfetched: Bool = false, unfetchedCollection: Bool = false) {
+            state.withLock { state in
+                state.database = state.database || database
+                state.databaseCollection = state.databaseCollection || databaseCollection
+                state.unfetched = state.unfetched || unfetched
+                state.unfetchedCollection = state.unfetchedCollection || unfetchedCollection
+            }
+        }
         var formatted: String {
             state.withLock { state in
                 let counts = FetchCounter.allCases.map { "\($0.label)=\(state.counts[$0.rawValue])" }
                     .joined(separator: " ")
-                return "processAll{\(counts) inC=\(state.requestedCollection ? 1 : 0) outC=\(state.offeredCollection ? 1 : 0) overflow=\(state.overflow ? 1 : 0)}"
+                let serverChanges = "db=\(state.database ? 1 : 0) dbC=\(state.databaseCollection ? 1 : 0) un=\(state.unfetched ? 1 : 0) unC=\(state.unfetchedCollection ? 1 : 0)"
+                return "processAll{\(counts) inC=\(state.requestedCollection ? 1 : 0) outC=\(state.offeredCollection ? 1 : 0) \(serverChanges) overflow=\(state.overflow ? 1 : 0)}"
             }
         }
     }

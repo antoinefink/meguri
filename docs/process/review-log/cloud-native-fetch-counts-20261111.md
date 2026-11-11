@@ -78,3 +78,28 @@ all code and tests are unchanged. Final focused tests
 `swift-test/20261111T143447Z-14191` pass 46 cases with required lint, and the
 final source/evidence privacy scan passes. Native observation of these two
 flags remains open.
+
+## Scope observation and server-change state
+
+Physical preparation `run/20261111T143554Z-17594` passes on `1b30605d`.
+Drive `143758Z-19075` completes all 18 interaction steps with verified
+continuity. Its overall result fails 257 hierarchy checks. Scope flags are
+`inC=1 outC=1`; fetch starts advance from four to six, while collection-zone
+starts and record counts stay zero. The phone has 43 actual reviews. The
+preview is cancelled, and the phone returns to Decks. This drive retains the
+prior completion timestamp; it does not prove a new exchange completed.
+
+Starting commit: `1b30605d`. Filtered author `144457Z-28792` adds four Debug
+flags: original database callback observed, collection zone among its changes,
+any unfetched server zone, and collection zone among those unfetched zones.
+Only Boolean facts survive full zone comparisons in memory. Read-only public
+SDK state is sampled at existing admitted callback boundaries. No network call,
+reset, retry, task or production behavior changes. Flags aggregate across
+instances and times and cannot prove causal pairing, current ownership,
+completion or convergence.
+
+Independent filtered review `144753Z-30680` finds no P0–P2. Focused tests
+`swift-test/20261111T144815Z-32207` pass 47 cases with required lint. Privacy
+`144832Z-33252` and similarity `144833Z-33533` pass. Existing formatter bounds
+and assertions remain enabled. Native observation of these new flags is pending.
+The Mac has 47 actual reviews, the phone 43; sync acceptance remains open.
