@@ -6,6 +6,47 @@ import Testing
 
 struct NativeCloudKitEngineTests {
     #if DEBUG
+    @Test func processSentRecordRoutingUsesFullZoneIDsAndRetainsOnlyNumericTotals() {
+        let collection = CKRecordZone.ID(zoneName: UUID().uuidString, ownerName: CKCurrentUserDefaultName)
+        let media = CKRecordZone.ID(zoneName: "meguri-media", ownerName: CKCurrentUserDefaultName)
+        let foreignOwner = UUID().uuidString
+        let unrelated = CKRecordZone.ID(zoneName: UUID().uuidString, ownerName: CKCurrentUserDefaultName)
+        let foreignCollection = CKRecordZone.ID(zoneName: collection.zoneName, ownerName: foreignOwner)
+        let foreignMedia = CKRecordZone.ID(zoneName: media.zoneName, ownerName: foreignOwner)
+        let root = CKRecordZone.ID(zoneName: "meguri-root", ownerName: CKCurrentUserDefaultName)
+        let cases: [(CKRecordZone.ID, CKRecordZone.ID?, Bool)] = [
+            (collection, collection, true), (media, collection, true),
+            (collection, collection, false), (media, collection, false),
+            (media, nil, true), (media, nil, false),
+            (collection, nil, true), (collection, nil, false),
+            (collection, unrelated, true), (collection, unrelated, false),
+            (collection, foreignCollection, true), (collection, foreignCollection, false),
+            (foreignCollection, collection, true), (foreignCollection, collection, false),
+            (foreignCollection, foreignCollection, true), (foreignCollection, foreignCollection, false),
+            (foreignMedia, collection, true), (foreignMedia, collection, false),
+            (unrelated, collection, true), (unrelated, collection, false),
+            (root, collection, true), (root, collection, false)
+        ]
+        let recorder = DebugCloudDiagnostics.FetchRecorder()
+        let originalFetch = recorder.formatted
+        var privateLabels = [collection.zoneName, unrelated.zoneName, foreignOwner,
+            CKCurrentUserDefaultName, "meguri-media", "meguri-root"]
+        for (zone, registered, saved) in cases {
+            let id = CKRecord.ID(recordName: UUID().uuidString, zoneID: zone)
+            privateLabels.append(id.recordName)
+            NativeCloudKitIdentityValidation.debugRecordSentRecord(id,
+                collectionZoneID: registered, saved: saved, recorder: recorder)
+        }
+        #expect(recorder.sentFormatted == "processSent{sentC=1 sentM=2 sendFailC=1 sendFailM=2 overflow=0}")
+        #expect(recorder.formatted == originalFetch)
+        for label in privateLabels {
+            #expect(!recorder.sentFormatted.contains(label))
+            #expect(!recorder.formatted.contains(label))
+        }
+        #expect(DebugCloudDiagnostics.FetchRecorder().sentFormatted ==
+            "processSent{sentC=0 sentM=0 sendFailC=0 sendFailM=0 overflow=0}")
+    }
+
     @Test func processFetchClassificationUsesOriginalFullZoneAndRetainsNoAssociatedData() {
         let sentinel = UUID().uuidString
         let collection = CKRecordZone.ID(zoneName: sentinel, ownerName: CKCurrentUserDefaultName)

@@ -182,3 +182,36 @@ The test misses a long-lived native Apple CKSyncEngine and does not prove real
 Apple transfer. It is unrun here: integration owns the single focused test and
 independent review. Only one `git diff --check` consistency check is performed
 before export; no native SDK, tests or other verification jobs are run here.
+
+## Original native sender callback diagnostics — 2026-11-11
+
+Role: fixer. Requested starting commit: `8f0a0e7c`. Filtered source baseline:
+`3bf2e7c` (upstream history unavailable).
+Spec: sync/cloudkit-records#K12.4, R1952, R1953.
+
+Adds Debug-only process-wide `sentC`, `sentM`, `sendFailC`, `sendFailM`
+observations after the existing original SDK identity admission in handleEvent,
+before conversion or delivery can fail. Only actual savedRecords,
+failedRecordSaves and failedRecordDeletes feed them. Successful deletions,
+pending counts, input requests and command completion supply no save receipt.
+Routing compares full CKRecordZone.ID values, owner included, against the
+registered collection and current-user media zone; foreign owners are ignored.
+No identifiers, records, errors, settings or payloads survive projection.
+
+The existing processAll block, UInt64 saturation, sticky overflow and less-than-
+256-byte bound remain unchanged. A separate processSent block extends the same
+safe status prefix with four numeric totals and its own sticky overflow; its
+worst-case bound is less than 160 bytes. These aggregate across engine instances
+and time. They are diagnostic observations, not selected-leg or signed acceptance
+evidence, current-owner authority, convergence or an explanation of the issue.
+All additions are under DEBUG. No production behavior, waits, scheduling,
+journaling, policy, SQL or SDK calls change.
+
+New tests use fresh local recorders and generated record IDs for full-owner,
+absent-registration and unrelated-zone routing, safe output, counter independence,
+saturation and bounds. Existing assertions and limits remain intact. SDK Event
+initializers and live inputs are not used. Native compilation, focused tests,
+independent review and provenance/privacy/similarity checks remain unrun here
+and belong to integration. Only one git diff --check consistency check is run
+before export. No native calls or private inputs were used; no cause or pass
+claim is made.

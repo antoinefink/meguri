@@ -53,7 +53,7 @@ public enum DebugCloudDiagnostics {
 
     /// All original callbacks in this PROCESS, across owners/instances. These
     /// totals prove neither current-owner delivery nor convergence or cause.
-    public static var processFetchValue: String { fetchRecorder.formatted }
+    public static var processFetchValue: String { "\(fetchRecorder.formatted) \(fetchRecorder.sentFormatted)" }
 
     enum FetchZone: Equatable, Sendable { case collection, root, other }
     enum FetchCounter: Int, CaseIterable, Sendable {
@@ -67,6 +67,18 @@ public enum DebugCloudDiagnostics {
             case .coreC: "coreC"
             case .refused: "refused"
             case .zoneFail: "zoneFail"
+            }
+        }
+    }
+
+    enum SentCounter: Int, CaseIterable, Sendable {
+        case sentC, sentM, sendFailC, sendFailM
+        var label: String {
+            switch self {
+            case .sentC: "sentC"
+            case .sentM: "sentM"
+            case .sendFailC: "sendFailC"
+            case .sendFailM: "sendFailM"
             }
         }
     }
@@ -86,9 +98,15 @@ public enum DebugCloudDiagnostics {
     /// un/unC OR-retain nonempty/collection unfetched-server-change snapshots.
     /// These aggregate across instances and times, never causal pairs,
     /// completion, current-owner evidence or convergence.
+    /// processSent counts only original saved records and failed saves/deletes
+    /// in the registered collection or current-user media zone. It is a separate
+    /// bounded block so the existing processAll fields and size limit survive.
+    /// These process-wide totals are not selected-leg or signed acceptance evidence.
     final class FetchRecorder: Sendable {
         private struct State: Sendable {
             var counts: [UInt64]
+            var sentCounts: [UInt64]
+            var sentOverflow = false
             var requestedCollection = false
             var offeredCollection = false
             var scopeCut = false
@@ -101,13 +119,28 @@ public enum DebugCloudDiagnostics {
         private let state: Mutex<State>
         // Scalar seed allows overflow testing without changing the process recorder.
         init(initialCount: UInt64 = 0) {
-            state = Mutex(State(counts: Array(repeating: initialCount, count: FetchCounter.allCases.count)))
+            state = Mutex(State(counts: Array(repeating: initialCount, count: FetchCounter.allCases.count),
+                sentCounts: Array(repeating: initialCount, count: SentCounter.allCases.count)))
         }
         func record(_ counter: FetchCounter, count: UInt64 = 1) {
             state.withLock { state in
                 let sum = state.counts[counter.rawValue].addingReportingOverflow(count)
                 state.counts[counter.rawValue] = sum.overflow ? .max : sum.partialValue
                 state.overflow = state.overflow || sum.overflow
+            }
+        }
+        func recordSent(_ counter: SentCounter, count: UInt64 = 1) {
+            state.withLock { state in
+                let sum = state.sentCounts[counter.rawValue].addingReportingOverflow(count)
+                state.sentCounts[counter.rawValue] = sum.overflow ? .max : sum.partialValue
+                state.sentOverflow = state.sentOverflow || sum.overflow
+            }
+        }
+        var sentFormatted: String {
+            state.withLock { state in
+                let counts = SentCounter.allCases.map { "\($0.label)=\(state.sentCounts[$0.rawValue])" }
+                    .joined(separator: " ")
+                return "processSent{\(counts) overflow=\(state.sentOverflow ? 1 : 0)}"
             }
         }
         func recordFetchOptions(requestedCollection: Bool, offeredCollection: Bool) {

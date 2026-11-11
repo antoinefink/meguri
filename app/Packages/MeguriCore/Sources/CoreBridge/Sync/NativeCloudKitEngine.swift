@@ -12,6 +12,16 @@ enum NativeCloudKitIdentityValidation {
         if let collectionZone, id.zoneName == collectionZone { return .collection }
         return id.zoneName == "meguri-root" ? .root : .other
     }
+    // Caller admits the original SDK. Compare full IDs; retain no SDK objects.
+    static func debugRecordSentRecord(_ id: CKRecord.ID, collectionZoneID: CKRecordZone.ID?,
+                                     saved: Bool, recorder: DebugCloudDiagnostics.FetchRecorder) {
+        guard id.zoneID.ownerName == CKCurrentUserDefaultName else { return }
+        if let collectionZoneID, id.zoneID == collectionZoneID {
+            recorder.recordSent(saved ? .sentC : .sendFailC)
+        } else if id.zoneID == CKRecordZone.ID(zoneName: "meguri-media", ownerName: CKCurrentUserDefaultName) {
+            recorder.recordSent(saved ? .sentM : .sendFailM)
+        }
+    }
     #endif
     static func requireCurrentOwner(_ id: CKRecordZone.ID) throws {
         guard id.ownerName == CKCurrentUserDefaultName else { throw NativeCloudKitFailure.unsupportedRecord }
@@ -532,6 +542,20 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
             }
         case .didFetchRecordZoneChanges(let did):
             if did.error != nil { DebugCloudDiagnostics.fetchRecorder.record(.zoneFail) }
+        case .sentRecordZoneChanges(let sent):
+            let registered = collectionZone.map { zone($0) }
+            for record in sent.savedRecords {
+                NativeCloudKitIdentityValidation.debugRecordSentRecord(record.recordID,
+                    collectionZoneID: registered, saved: true, recorder: DebugCloudDiagnostics.fetchRecorder)
+            }
+            for failure in sent.failedRecordSaves {
+                NativeCloudKitIdentityValidation.debugRecordSentRecord(failure.record.recordID,
+                    collectionZoneID: registered, saved: false, recorder: DebugCloudDiagnostics.fetchRecorder)
+            }
+            for id in sent.failedRecordDeletes.keys {
+                NativeCloudKitIdentityValidation.debugRecordSentRecord(id,
+                    collectionZoneID: registered, saved: false, recorder: DebugCloudDiagnostics.fetchRecorder)
+            }
         default: break
         }
         #endif

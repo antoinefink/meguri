@@ -8,6 +8,46 @@ import Testing
 struct DebugCloudDiagnosticsTests {
     private typealias Value = DebugCloudDiagnostics.Value
 
+    @Test func processSentCountsRequireTheirOwnObservationsAndStaySeparateFromFetchFacts() {
+        let recorder = DebugCloudDiagnostics.FetchRecorder()
+        let empty = "processSent{sentC=0 sentM=0 sendFailC=0 sendFailM=0 overflow=0}"
+        #expect(recorder.sentFormatted == empty)
+        recorder.recordFetchOptions(requestedCollection: true, offeredCollection: true)
+        recorder.recordServerChangeObservations(database: true, databaseCollection: true,
+            unfetched: true, unfetchedCollection: true)
+        for counter in DebugCloudDiagnostics.FetchCounter.allCases { recorder.record(counter) }
+        #expect(recorder.sentFormatted == empty)
+        let fetch = recorder.formatted
+        for counter in DebugCloudDiagnostics.SentCounter.allCases { recorder.recordSent(counter) }
+        #expect(recorder.sentFormatted == "processSent{sentC=1 sentM=1 sendFailC=1 sendFailM=1 overflow=0}")
+        #expect(recorder.formatted == fetch)
+        #expect(DebugCloudDiagnostics.FetchRecorder().sentFormatted == empty)
+    }
+
+    @Test func processSentCountsSaturateEveryBoundaryAndKeepTheirOwnBoundAndOverflow() {
+        for counter in DebugCloudDiagnostics.SentCounter.allCases {
+            let recorder = DebugCloudDiagnostics.FetchRecorder(initialCount: .max - 1)
+            let fetch = recorder.formatted
+            recorder.recordSent(counter)
+            #expect(recorder.sentFormatted.contains("\(counter.label)=\(UInt64.max) "))
+            #expect(recorder.sentFormatted.hasSuffix("overflow=0}"))
+            recorder.recordSent(counter)
+            recorder.recordSent(counter, count: .max)
+            recorder.recordSent(counter, count: 0)
+            #expect(recorder.sentFormatted.contains("\(counter.label)=\(UInt64.max) "))
+            #expect(recorder.sentFormatted.hasSuffix("overflow=1}"))
+            #expect(recorder.formatted == fetch)
+        }
+        let bounded = DebugCloudDiagnostics.FetchRecorder(initialCount: .max)
+        for counter in DebugCloudDiagnostics.SentCounter.allCases { bounded.recordSent(counter) }
+        let original = bounded.sentFormatted
+        DispatchQueue.concurrentPerform(iterations: 256) { _ in
+            for counter in DebugCloudDiagnostics.SentCounter.allCases { bounded.recordSent(counter) }
+        }
+        #expect(bounded.sentFormatted == original && original.utf8.count < 160)
+        #expect(bounded.formatted.utf8.count < 256)
+    }
+
     @Test func processFetchCountsStartAtZeroAndKeepBoundariesIndependent() {
         let recorder = DebugCloudDiagnostics.FetchRecorder()
         #expect(recorder.formatted == "processAll{will=0 zoneC=0 modC=0 modR=0 coreC=0 refused=0 zoneFail=0 inC=0 outC=0 cut=0 db=0 dbC=0 un=0 unC=0 overflow=0}")
