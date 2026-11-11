@@ -2,6 +2,7 @@ import CoreBridge
 import Foundation
 import WebKit
 #if DEBUG
+import CoreFoundation
 import OSLog
 #endif
 
@@ -294,8 +295,73 @@ public final class CardPage: NSObject, WKNavigationDelegate {
     }
 
     func waitForSettled(_ update: CardUpdate) async throws {
+        #if DEBUG
+        observeSettlingFacts()
+        #endif
         try await waitFor("settled", update: update)
     }
+    #if DEBUG
+    private func observeSettlingFacts() {
+        guard !closed else { return }
+        // Observations only: these do not establish readiness or card identity.
+        if webView.window != nil { Self.startupLogger.notice("fact.window.present") }
+        else { Self.startupLogger.notice("fact.window.missing") }
+        #if os(macOS)
+        if let window = webView.window {
+            if window.isVisible { Self.startupLogger.notice("fact.window.visible") }
+            else { Self.startupLogger.notice("fact.window.notVisible") }
+            if window.occlusionState.contains(.visible) { Self.startupLogger.notice("fact.window.unoccluded") }
+            else { Self.startupLogger.notice("fact.window.occluded") }
+        }
+        if webView.isHiddenOrHasHiddenAncestor { Self.startupLogger.notice("fact.view.hidden") }
+        else { Self.startupLogger.notice("fact.view.notHidden") }
+        if webView.visibleRect.isEmpty { Self.startupLogger.notice("fact.rect.empty") }
+        else { Self.startupLogger.notice("fact.rect.nonempty") }
+        if webView.bounds.width > 0 && webView.bounds.height > 0 { Self.startupLogger.notice("fact.bounds.positive") }
+        else { Self.startupLogger.notice("fact.bounds.nonpositive") }
+        #endif
+
+        func observedBool(_ value: Any?) -> Bool? {
+            guard let value = value as? NSNumber,
+                  CFGetTypeID(value) == CFBooleanGetTypeID() else { return nil }
+            return value.boolValue
+        }
+
+        webView.callAsyncJavaScript("""
+            const qa = document.getElementById('qa');
+            return {hasQA: qa !== null, shown: qa !== null && qa.style.opacity === '1', hidden: document.hidden, complete: document.readyState === 'complete'};
+            """, arguments: [:], in: nil, in: Self.world) { [weak self] result in
+            guard let self, !self.closed else { return }
+            guard case .success(let value) = result,
+                  let facts = value as? [String: Any], facts.count == 4,
+                  let hasQA = observedBool(facts["hasQA"]),
+                  let shown = observedBool(facts["shown"]),
+                  let hidden = observedBool(facts["hidden"]),
+                  let complete = observedBool(facts["complete"]) else {
+                Self.startupLogger.notice("fact.dom.failed")
+                return
+            }
+            if hasQA { Self.startupLogger.notice("fact.qa.present") }
+            else { Self.startupLogger.notice("fact.qa.missing") }
+            if shown { Self.startupLogger.notice("fact.qa.shown") }
+            else { Self.startupLogger.notice("fact.qa.notShown") }
+            if hidden { Self.startupLogger.notice("fact.document.hidden") }
+            else { Self.startupLogger.notice("fact.document.notHidden") }
+            if complete { Self.startupLogger.notice("fact.document.complete") }
+            else { Self.startupLogger.notice("fact.document.incomplete") }
+        }
+        webView.callAsyncJavaScript("""
+            await new Promise(resolve => requestAnimationFrame(() => resolve(true))); return true;
+            """, arguments: [:], in: nil, in: Self.world) { [weak self] result in
+            guard let self, !self.closed else { return }
+            if case .success(let value) = result, observedBool(value) == true {
+                Self.startupLogger.notice("fact.frame.delivered")
+            } else {
+                Self.startupLogger.notice("fact.frame.failed")
+            }
+        }
+    }
+    #endif
     func waitForShown(_ update: CardUpdate) async throws {
         try await waitFor("shown", update: update)
     }
