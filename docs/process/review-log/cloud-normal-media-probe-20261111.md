@@ -25,3 +25,28 @@ settings/receipt and version-2 physical preparation shapes; verify the observed
 `devicectl copy from` API returns a single regular file at the requested private
 destination and the usual `info.outcome == success` / object `result` JSON
 envelope. Unknown shapes fail closed; there is no listing or alternate path.
+
+## Public CLI admission follow-up — 2026-11-11
+
+Role: fixer. Requested start: `a963f900`; filtered baseline:
+`d9db837bda98c23a78412552763df03f798a5a87` (upstream history unavailable).
+Inspection confirms the forwarding risk: MG dispatch passes caller globals to
+the helper after its internal globals, and argparse accepts duplicate globals
+before the action. Actual MG/stub reproduction is unconfirmed in this runner.
+
+Generated Bats regressions invoke the actual sandbox MG wrapper with a harmless
+marker/closed-report helper replacement. They check non-execution for internal
+overrides, extra/unknown/missing arguments and paths, plus exact forwarding and
+internal root/run-ID preservation for valid public forms. The wrapper now admits
+only the documented run-ID grammar before Python, retaining both phone flag
+orders. Usage failures use fixed text and a fixed repro command. The production
+helper, source/receipt/byte guards and existing tests/limits are unchanged.
+
+`tools/mg selftest --filter '^normal media probe'` was attempted with tests only
+before the wrapper fix and again afterward. Both exited 2 before any test:
+`tools/mg: jq is required (macOS ships /usr/bin/jq)`. These are unavailable
+checks, not observed red/green results or passes. Integration must apply the Bats
+change first and retain the marker failure, then apply the wrapper fix and run
+the same filter. No native calls or real home/app/device/private inputs were
+used. Focused verification and independent/provenance/privacy/similarity review
+remain with integration.
