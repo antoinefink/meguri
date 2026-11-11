@@ -144,3 +144,21 @@
 - One lease-aware dedicated VM restart retained both earlier launch failures.
   Doctor `20261111T213308Z-70969` warns, with no technical failures.
   No sync, unit, milestone or release acceptance is claimed.
+
+## Classified native execution
+
+- Independent mapping review `cleanroom/20261111T214012Z-77399`: no P0–P2
+  in the scoped source pass. Swift lint `20261111T214016Z-77748`: 146 passed,
+  zero findings or skips.
+- `mac-hosted-test/20261111T214101Z-78442`: the new mapping compiled and the
+  exact diagnostic executed once, failed once, zero skips. Both create and
+  cleanup returned `sdkNotAuthenticated`. Every fetch-stage counter remained
+  zero. No fetch-scope outcome, successful cleanup or sync acceptance follows.
+- Do not repeat this VM SDK path without changed account readiness. Owner-only
+  account setup remains reserved. The authorized Mac feedback path is a possible
+  separate diagnostic, not an automatic fallback or VM acceptance substitute.
+  The original integration batch base remains
+  `1416a520542a8c5daa38a23bfe398da704c3d6c9`; full integration gates remain pending.
+- Focused static checks `20261111T214307Z-80387`: three passed. Similarity
+  `20261111T214311Z-80862` passed for base `06ea6c30`; seven unsupported or
+  excluded paths remain scanner skips. These receipts do not replace a full gate.
