@@ -212,9 +212,29 @@ fn delayed_saved_batch_and_root_preserve_actual_pending_and_durable_flights_afte
             _ => unreachable!(),
         }
         let runtime_before = sdk.driver().stored_runtime_state().unwrap();
-        assert!(sdk.deliver_sent_event(&response.response).is_err());
-        equal_entity(&before, &sdk.entity_facts(&name).unwrap());
+        let mut expected = before.clone();
+        if event == "reopen" {
+            // K11.4 re-observes unchanged rows in this open's scan; V3.4
+            // refusals below must preserve the facts after that transition.
+            let scan_state = sdk.driver().scan_state().unwrap();
+            assert!(scan_state.scan_completed_this_open);
+            assert!(!scan_state.scan_required);
+            assert!(!scan_state.scan_running);
+            let scan = sdk.driver().scan_proof().unwrap();
+            assert_ne!(runtime_before.open_counter, before.observer_open);
+            expected.observer_open = runtime_before.open_counter;
+            expected.observed_seq = scan.snapshot_seq;
+            expected.observed_generation = scan.snapshot_generation;
+        }
+        let before_stale = sdk.entity_facts(&name).unwrap();
+        // Permit only the independently witnessed observation metadata above.
+        // Account/signout isolation must preserve even that metadata (V2.2).
+        equal_entity(&expected, &before_stale);
         assert_eq!(sdk.sdk_pending(), pending);
+        assert!(sdk.deliver_sent_event(&response.response).is_err());
+        equal_entity(&before_stale, &sdk.entity_facts(&name).unwrap());
+        assert_eq!(sdk.sdk_pending(), pending);
+        assert_eq!(sdk.driver().stored_runtime_state().unwrap(), runtime_before);
         assert!(
             sdk.driver()
                 .build_for_instance(origin.clone(), BTreeSet::from([name.clone()]))
@@ -222,6 +242,9 @@ fn delayed_saved_batch_and_root_preserve_actual_pending_and_durable_flights_afte
                 .saves
                 .is_empty()
         );
+        equal_entity(&before_stale, &sdk.entity_facts(&name).unwrap());
+        assert_eq!(sdk.sdk_pending(), pending);
+        assert_eq!(sdk.driver().stored_runtime_state().unwrap(), runtime_before);
         let Field::EncryptedBytes(envelope) = root.accepted_record.fields.get("e").unwrap() else {
             panic!("root envelope")
         };
@@ -235,7 +258,7 @@ fn delayed_saved_batch_and_root_preserve_actual_pending_and_durable_flights_afte
                 )
                 .unwrap()
         );
-        equal_entity(&before, &sdk.entity_facts(&name).unwrap());
+        equal_entity(&before_stale, &sdk.entity_facts(&name).unwrap());
         assert_eq!(sdk.sdk_pending(), pending);
         let runtime_after = sdk.driver().stored_runtime_state().unwrap();
         assert_eq!(
@@ -243,7 +266,7 @@ fn delayed_saved_batch_and_root_preserve_actual_pending_and_durable_flights_afte
             serde_json::to_value(&runtime_before).unwrap()
         );
         sdk.close_clean().unwrap();
-        equal_entity(&before, &files.read_entity_durable(&name).unwrap());
+        equal_entity(&before_stale, &files.read_entity_durable(&name).unwrap());
         assert_eq!(durable_state(&files).root_ack, runtime_before.root_ack);
     }
 }
