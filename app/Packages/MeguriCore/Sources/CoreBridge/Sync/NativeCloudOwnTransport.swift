@@ -37,6 +37,21 @@ enum NativeCloudOwnRecords {
         if let value, !(value is Data) { throw NativeCloudKitFailure.unsupportedRecord }
         return CloudControlRecord(encrypted: value as? Data, systemFields: try NativeCloudKitSystemFields.encode(record))
     }
+    static func revalidatedActive(_ record: CKRecord, target: CloudControlTarget, expected: CloudControlRecord,
+                                  tagReader: @Sendable (CKRecord) -> String? = { $0.recordChangeTag }) throws -> CloudControlRecord {
+        guard target.zone == "meguri-root", target.name == "active", target.recordType == "MGActive" else {
+            throw NativeCloudKitFailure.unsupportedRecord
+        }
+        let restored = try NativeCloudKitSystemFields.restore(expected.systemFields, target: target)
+        let actual = try control(record, target: target)
+        if let encrypted = expected.encrypted, actual.encrypted == encrypted,
+           let tag = tagReader(restored), !tag.isEmpty, tagReader(record) == tag {
+            // An SDK archive is not a version identifier. Preserve the original
+            // only after the native version and encrypted content both match.
+            return expected
+        }
+        return actual
+    }
     static func save(target: CloudControlTarget, encrypted: Data, systemFields: Data?) throws -> CKRecord {
         let record: CKRecord
         if let systemFields { record = try NativeCloudKitSystemFields.restore(systemFields, target: target) }
@@ -322,6 +337,12 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
         case .deleteZones(let batch): return try prepareZoneDeletion(batch)
         case .zoneInventory: return prepareZoneInventory()
         case .read(let target): return read(target, publication: false)
+        case .adoptionActive(let target, let expected):
+            guard target.zone == "meguri-root", target.name == "active", target.recordType == "MGActive" else {
+                throw NativeCloudKitFailure.unsupportedRecord
+            }
+            _ = try NativeCloudKitSystemFields.restore(expected.systemFields, target: target)
+            return read(target, publication: false, expectedActive: expected)
         case .assetRead(let zone, let name): return try assetRead(zone: zone, name: name)
         case .publication(.read(let target)): return read(target, publication: true)
         case .publication(.createZones(let zones)): return createZones(zones)
@@ -330,7 +351,8 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
         case .adoptionPage(let zone, let cursor, let expectedEpoch): return try page(zone: zone, cursor: cursor, expectedEpoch: expectedEpoch)
         }
     }
-    private func read(_ target: CloudControlTarget, publication: Bool) -> NativePreparedOwnOperation {
+    private func read(_ target: CloudControlTarget, publication: Bool,
+                      expectedActive: CloudControlRecord? = nil) -> NativePreparedOwnOperation {
         let id = NativeCloudOwnRecords.id(target)
         let operation = CKFetchRecordsOperation(recordIDs: [id])
         operation.desiredKeys = nil // Include encrypted e and every asset field.
@@ -344,6 +366,7 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
         }
         operation.perRecordResultBlock = perRecord
         readPerRecordHandlerInstalled?(perRecord)
+        let activeTagReader = payloadTagReader
         let terminal: @Sendable (Result<Void, any Error>) -> Void = { [weak prepared] result in
             guard let prepared else { return }
             do {
@@ -354,7 +377,11 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
                     return
                 }
                 let read: CloudControlRead
-                if let received { read = try NativeCloudOwnRecords.readResult(received, target: target) }
+                if let expectedActive, case .success(let native)? = received {
+                    read = .found(try NativeCloudOwnRecords.revalidatedActive(native, target: target,
+                        expected: expectedActive, tagReader: activeTagReader))
+                }
+                else if let received { read = try NativeCloudOwnRecords.readResult(received, target: target) }
                 else if case .failure(let error) = result {
                     let native = error as NSError
                     // Only the exact requested ID can supply a terminal-only

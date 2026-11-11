@@ -322,7 +322,7 @@ actor ServiceWorkflowWire {
                 return .init(zone: zone, failure: nil)
             }
             return .deletedZones(.init(results: results))
-        case .read: return .read(try controlRead(reply))
+        case .read, .adoptionActive: return .read(try controlRead(reply))
         case .publication(.read): return .publication(.read(try controlRead(reply)))
         case .publication(.createZones(let zones)):
             guard replies.count == zones.count else { throw ServiceWorkflowFailure.wire }

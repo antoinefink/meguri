@@ -800,7 +800,8 @@ fn assert_adoption_recovery_operation(fixture: Fixture) {
     let CloudPublicationWork::Adoption { handle, action, .. } = connection.next_publication_work().unwrap() else {
         panic!("adoption work")
     };
-    assert!(matches!(action, CloudAdoptionAction::Read { .. }));
+    assert!(matches!(action, CloudAdoptionAction::ReadActive { expected, .. }
+        if expected.encrypted == active.encrypted && expected.system_fields == active.system_fields));
     connection
         .adoption_result(
             handle.clone(),
@@ -1668,7 +1669,10 @@ fn adoption_fetch_ready(connection: &CloudConnection) {
         let CloudPublicationWork::Adoption { handle, action, .. } = connection.next_publication_work().unwrap() else {
             panic!("actual host adoption read")
         };
-        assert!(matches!(action, CloudAdoptionAction::Read { .. }));
+        assert!(matches!(
+            action,
+            CloudAdoptionAction::ReadActive { .. } | CloudAdoptionAction::Read { .. }
+        ));
         connection
             .adoption_result(
                 handle,

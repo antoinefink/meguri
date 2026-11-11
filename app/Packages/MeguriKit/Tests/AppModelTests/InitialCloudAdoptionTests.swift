@@ -1371,7 +1371,7 @@ private nonisolated final class InitialCloudTransport: CloudOwnTransport, Sendab
         requests.record(command)
         switch command {
         case .zoneInventory: throw CloudOwnTransportFailure.unexpectedReply
-        case .read(let target):
+        case .read(let target), .adoptionActive(let target, _):
             let record = records.first { $0.zone == target.zone && $0.name == target.name && $0.recordType == target.recordType }
             return InitialCloudImmediateReply(.read(record.map { .found($0.control) } ?? .missing))
         case .adoptionPage(let zone, _, _):

@@ -59,6 +59,54 @@ struct NativeCloudOwnTransportTests {
         try NativeCloudOwnRecords.control(epochNative(), target: epochTarget)
     }
 
+    @Test func activeRecheckUsesNativeVersionInsteadOfOpaqueArchiveByteIdentity() throws {
+        let original = CKRecord(recordType: active.recordType, recordID: NativeCloudOwnRecords.id(active))
+        original.encryptedValues["e"] = Data([1, 3, 5]) as CKRecordValue
+        let xml = NSKeyedArchiver(requiringSecureCoding: true)
+        xml.outputFormat = .xml
+        original.encodeSystemFields(with: xml); xml.finishEncoding()
+        let expected = CloudControlRecord(encrypted: original.encryptedValues["e"] as? Data, systemFields: xml.encodedData)
+        let independent = CKRecord(recordType: active.recordType, recordID: NativeCloudOwnRecords.id(active))
+        independent.encryptedValues["e"] = Data([1, 3, 5]) as CKRecordValue
+        let projected = try NativeCloudOwnRecords.revalidatedActive(independent, target: active, expected: expected,
+                                                                   tagReader: { _ in "synthetic-version" })
+        #expect(projected.encrypted == expected.encrypted && projected.systemFields == expected.systemFields)
+        for mode in ["different-version", "missing-version", "different-payload"] {
+            let calls = Mutex(0)
+            if mode == "different-payload" { independent.encryptedValues["e"] = Data([8]) as CKRecordValue }
+            let changed = try NativeCloudOwnRecords.revalidatedActive(independent, target: active, expected: expected, tagReader: { _ in
+                let index = calls.withLock { value in value += 1; return value }
+                if mode == "missing-version" { return nil }
+                return mode == "different-version" && index == 2 ? "other-version" : "synthetic-version"
+            })
+            #expect(changed.systemFields != expected.systemFields)
+        }
+        #expect(throws: (any Error).self) {
+            try NativeCloudOwnRecords.revalidatedActive(independent, target: active,
+                expected: .init(encrypted: expected.encrypted, systemFields: Data([0])), tagReader: { _ in "synthetic-version" })
+        }
+    }
+
+    @Test func activeAdoptionReadRetainsTheCoreVersionThroughActualSDKCallbacks() async throws {
+        let original = CKRecord(recordType: active.recordType, recordID: NativeCloudOwnRecords.id(active))
+        original.encryptedValues["e"] = Data([2, 4, 6]) as CKRecordValue
+        let xml = NSKeyedArchiver(requiringSecureCoding: true)
+        xml.outputFormat = .xml
+        original.encodeSystemFields(with: xml); xml.finishEncoding()
+        let expected = CloudControlRecord(encrypted: original.encryptedValues["e"] as? Data, systemFields: xml.encodedData)
+        let queue = NativeOwnCapturingQueue()
+        let transport = NativeCloudOwnTransport(queue: queue, payloadTagReader: { _ in "synthetic-version" })
+        let prepared = try transport.prepare(.adoptionActive(active, expected: expected))
+        #expect(prepared.enqueue())
+        let operation = try #require(queue.operations.withLock { $0.first as? CKFetchRecordsOperation })
+        let fetched = CKRecord(recordType: active.recordType, recordID: NativeCloudOwnRecords.id(active))
+        fetched.encryptedValues["e"] = expected.encrypted as CKRecordValue?
+        operation.perRecordResultBlock?(fetched.recordID, .success(fetched))
+        operation.fetchRecordsResultBlock?(.success(()))
+        guard case .read(.found(let value)) = try await prepared.reply() else { throw CloudOwnTransportFailure.unexpectedReply }
+        #expect(value.encrypted == expected.encrypted && value.systemFields == expected.systemFields)
+    }
+
     /// Public secure-coding formats deliberately differ. Only the tag reader
     /// is synthetic; this fixture supplies no server-version or device proof.
     @Test func epochEquivalentNativeVersionProjectsOriginalXMLArchive() throws {

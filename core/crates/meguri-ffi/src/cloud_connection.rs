@@ -564,6 +564,10 @@ impl CloudAdoptionWork {
 }
 #[derive(Clone, uniffi::Enum)]
 pub enum CloudAdoptionAction {
+    ReadActive {
+        target: CloudControlTarget,
+        expected: CloudControlRecord,
+    },
     Read {
         target: CloudControlTarget,
     },
@@ -842,7 +846,13 @@ impl CloudConnection {
                         .ok_or_else(|| failure(CloudConnectionFailure::AuthorityChanged))?;
                     let action = match &work.task {
                         a::AdoptionTask::ReadActive | a::AdoptionTask::RecheckActive => {
-                            CloudAdoptionAction::Read { target: active() }
+                            CloudAdoptionAction::ReadActive {
+                                target: active(),
+                                expected: CloudControlRecord {
+                                    encrypted: op.active.encrypted.clone(),
+                                    system_fields: op.active.system_fields.0.clone(),
+                                },
+                            }
                         }
                         a::AdoptionTask::ReadEpoch => CloudAdoptionAction::Read {
                             target: epoch(op.epoch),

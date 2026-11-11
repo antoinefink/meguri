@@ -797,3 +797,26 @@ alone proves neither a callback's cause nor a successful cloud exchange.
 Next, test the ordinary live review and sync workflow in a bounded session.
 Keep the unfinished recovery work and its failed receipts. This trial cannot
 supply final acceptance.
+
+## Normal Mac preview: active-record recheck
+
+Starting commit `bdc613dc`. Antoine requested a local Mac trial on
+2026-11-11. Signed standalone build `35337` opened normally. Connect to
+iCloud failed at adoption's `activeValidation`, before any page was fetched.
+The Core guard compares encrypted data and the opaque SDK archive together.
+
+The adoption handle now carries its original active record to the native
+read. Native identity, owner, type, nonempty change tag and encrypted data
+must match before projection retains that original archive. Other versions
+remain actual reads, so the existing Core authority guard still refuses them.
+This follows the existing epoch projection; no persisted layout changes.
+
+Native run `41660` fails on the unchanged-version test. FFI `48786`
+passes 25 tests, native `49854` passes 46, and app-model `51753` adopts actual
+rows and commits a review. Lint `51380` and similarity `53007` pass. Request
+`46100` selected no tests and proves nothing. Live repair verification,
+independent review and the full integration gate remain open; no Unit claimed.
+
+The local trial does not satisfy the retained VM, mobile or signed acceptance
+requirements. The VM account-setup attempts still await the owner; normal Mac
+preview connection uses this Mac's account without that test-lane source.

@@ -12,6 +12,7 @@ import CloudKit
 public enum CloudOwnTransportCommand: Sendable {
     case publication(CloudOwnOperation)
     case read(CloudControlTarget)
+    case adoptionActive(CloudControlTarget, expected: CloudControlRecord)
     /// The core supplies the work for this read.
     /// Its submit guards must pass before the operation can start.
     case assetRead(zone: String, name: String)
@@ -422,9 +423,13 @@ public actor CloudOwnExecutor {
         if stopping || closed { throw CloudOwnTransportFailure.closed }
         try Task.checkCancellation()
     }
-    private func read(_ target: CloudControlTarget, admission: CloudOwnWorkAdmission? = nil) async throws -> CloudControlRead {
+    private func read(_ target: CloudControlTarget, admission: CloudOwnWorkAdmission? = nil,
+                      expectedActive: CloudControlRecord? = nil) async throws -> CloudControlRead {
         try checkStopping()
-        let op = try transport.prepare(.read(target)); prepared = op
+        let command: CloudOwnTransportCommand
+        if let expectedActive { command = .adoptionActive(target, expected: expectedActive) }
+        else { command = .read(target) }
+        let op = try transport.prepare(command); prepared = op
         try checkStopping()
         guard admission.map({ $0.enqueue(op) }) ?? op.enqueue() else { throw CloudOwnTransportFailure.queueRejected }
         let result = try await op.reply()
@@ -553,14 +558,16 @@ public actor CloudOwnExecutor {
         case .adoption(let handle, let action, _):
             try checkStopping()
             switch action {
-            case .read(let target):
+            case .read(let target), .readActive(let target, _):
+                let expected: CloudControlRecord?
+                if case .readActive(_, let value) = action { expected = value } else { expected = nil }
                 #if DEBUG
                 recordWorkStage(.adoptionControlRead)
-                let reply = try await read(target, admission: admission)
+                let reply = try await read(target, admission: admission, expectedActive: expected)
                 recordWorkStage(.adoptionControlResult)
                 try await core.adoptionResult(handle, result: .read(reply))
                 #else
-                try await core.adoptionResult(handle, result: .read(try await read(target, admission: admission)))
+                try await core.adoptionResult(handle, result: .read(try await read(target, admission: admission, expectedActive: expected)))
                 #endif
             case .fetch(let zone, let cursor, let expectedEpoch):
                 do {

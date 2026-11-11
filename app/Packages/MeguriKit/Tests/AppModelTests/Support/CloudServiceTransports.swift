@@ -57,7 +57,7 @@ nonisolated struct ServiceOwnTransport: CloudOwnTransport {
         let operations: [ServiceJSON]
         switch command {
         case .zoneInventory: operations = [.string("FetchAllZones")]
-        case .read(let target), .publication(.read(let target)):
+        case .read(let target), .adoptionActive(let target, _), .publication(.read(let target)):
             operations = [serviceReadOperation(zone: target.zone, name: target.name, fields: ["e"])]
         case .zoneDeletionActiveRead(let target):
             operations = [serviceReadOperation(zone: target.zone, name: target.name, fields: ["e"])]
