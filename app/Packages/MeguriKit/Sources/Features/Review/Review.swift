@@ -24,21 +24,14 @@ public struct ReviewView: View {
                 if let pair = model.pair {
                     #if os(macOS)
                     ReviewCardHost(model: model, pair: pair, close: close)
-                        .allowsHitTesting(cardVisible)
-                        .accessibilityHidden(!cardVisible)
+                        .opacity(model.phase == .question || model.phase == .answer || model.phase == .transition ? 1 : 0)
                     #else
                     ReviewCardHost(model: model, pair: pair, close: close)
                         .accessibilityIdentifier("review.session.card")
                         .accessibilityAction(named: Text("Show Answer", bundle: .module)) { model.reveal() }
                         .accessibilityAction(.magicTap) { model.reveal() }
-                        .allowsHitTesting(cardVisible)
-                        .accessibilityHidden(!cardVisible)
+                        .opacity(model.phase == .question || model.phase == .answer || model.phase == .transition ? 1 : 0)
                     #endif
-                }
-                if !cardVisible {
-                    Rectangle().fill(.background)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
                 }
                 stateContent
             }
@@ -47,9 +40,6 @@ public struct ReviewView: View {
         .onDisappear { visibilityChanged(false) }
         .task { await appearance() }
         .onChange(of: colorScheme) { _, _ in Task { await appearance() } }
-    }
-    private var cardVisible: Bool {
-        model.phase == .question || model.phase == .answer || model.phase == .transition
     }
     @ViewBuilder private var stateContent: some View {
         switch model.phase {
