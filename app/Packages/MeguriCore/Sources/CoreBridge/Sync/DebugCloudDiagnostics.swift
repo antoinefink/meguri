@@ -80,6 +80,8 @@ public enum DebugCloudDiagnostics {
     /// returned a scope containing its registered collection zone. They may
     /// come from different callbacks/owners; neither pairs causes nor proves
     /// current-owner authority. No zone identity or options are retained.
+    /// cut OR-retains whether any original callback requested but did not offer
+    /// its registered collection zone; it identifies no completed exchange or owner.
     /// db/dbC OR-retain original database callbacks/collection modifications;
     /// un/unC OR-retain nonempty/collection unfetched-server-change snapshots.
     /// These aggregate across instances and times, never causal pairs,
@@ -89,6 +91,7 @@ public enum DebugCloudDiagnostics {
             var counts: [UInt64]
             var requestedCollection = false
             var offeredCollection = false
+            var scopeCut = false
             var database = false
             var databaseCollection = false
             var unfetched = false
@@ -111,6 +114,7 @@ public enum DebugCloudDiagnostics {
             state.withLock { state in
                 state.requestedCollection = state.requestedCollection || requestedCollection
                 state.offeredCollection = state.offeredCollection || offeredCollection
+                state.scopeCut = state.scopeCut || (requestedCollection && !offeredCollection)
             }
         }
         func recordServerChangeObservations(database: Bool = false, databaseCollection: Bool = false,
@@ -127,7 +131,7 @@ public enum DebugCloudDiagnostics {
                 let counts = FetchCounter.allCases.map { "\($0.label)=\(state.counts[$0.rawValue])" }
                     .joined(separator: " ")
                 let serverChanges = "db=\(state.database ? 1 : 0) dbC=\(state.databaseCollection ? 1 : 0) un=\(state.unfetched ? 1 : 0) unC=\(state.unfetchedCollection ? 1 : 0)"
-                return "processAll{\(counts) inC=\(state.requestedCollection ? 1 : 0) outC=\(state.offeredCollection ? 1 : 0) \(serverChanges) overflow=\(state.overflow ? 1 : 0)}"
+                return "processAll{\(counts) inC=\(state.requestedCollection ? 1 : 0) outC=\(state.offeredCollection ? 1 : 0) cut=\(state.scopeCut ? 1 : 0) \(serverChanges) overflow=\(state.overflow ? 1 : 0)}"
             }
         }
     }

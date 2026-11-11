@@ -120,3 +120,20 @@ state therefore reports some unfetched zone, but never the full registered
 collection-zone identity, and no database-change callback is observed. These
 aggregate flags do not establish why that zone is missing or prove that every
 fetch-options callback admitted it. No production fix or convergence is claimed.
+
+## Scope-cut observation
+
+Starting commit: `095efaf9`. Filtered author `145640Z-44488` adds one sticky
+Boolean derived from the existing original callback's requested and returned
+scope facts: `cut` records whether any callback requested the registered
+collection zone but did not offer it back. Native SDK code is unchanged.
+This observation does not identify an exchange or current owner.
+
+Independent review `145919Z-48366` finds one P2: an exact formatter expectation
+omits the new field. Filtered fixer `145919Z-48576` corrects only that literal;
+the two exports differ only by this expected-string addition. No other finding
+remains. Focused tests `swift-test/20261111T150110Z-50874` pass 47 cases with
+required lint. Privacy `150222Z-52326` and similarity `150220Z-52024` pass.
+The original formatter limits remain: maximum output is 254, below 256, and
+the 512-character assertion also passes with the latest policy value.
+Native observation is pending. No sync behavior changes or acceptance is claimed.
