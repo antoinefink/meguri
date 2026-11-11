@@ -141,6 +141,35 @@ class DiagnosticTests(unittest.TestCase):
         self.assertEqual(private.stat().st_mode & 0o777, 0o700)
         self.assertIn(SECRET, (private / "console.stderr").read_text())
 
+    def test_priority_rebuilt_byte_misses_remain_observations(self):
+        for stage in ("priority", "rebuilt"):
+            with self.subTest(stage=stage):
+                self.value = good_observation()
+                self.value[stage]["sawExpectedBytes"] = False
+                (report, code), _ = self.probe()
+                self.assertEqual(code, 0)
+                self.assertEqual(report["category"], "observed")
+                self.assertFalse(report["observation"][stage]["sawExpectedBytes"])
+
+    def test_priority_rebuilt_completion_errors_and_cleanup_stay_red(self):
+        for stage in ("priority", "rebuilt"):
+            changes = [("fetchCompleted", False), ("drained", False),
+                       ("callbackErrors", 1), ("unexpectedActivity", True),
+                       ("sdkFailure", True), ("cleanupSucceeded", False),
+                       ("cleanupFailure", "sdkFailure")]
+            for field, value in changes:
+                with self.subTest(stage=stage, field=field):
+                    self.value = good_observation()
+                    if field == "sdkFailure":
+                        self.value.update(failurePhase=stage, failureCategory="sdkFailure")
+                    elif field.startswith("cleanup"):
+                        self.value[field] = value
+                    else:
+                        self.value[stage][field] = value
+                    (report, code), _ = self.probe()
+                    self.assertEqual(code, 1)
+                    self.assertEqual(report["category"], "diagnostic-failed")
+
     def test_native_test_failure_and_nonzero_exit_stay_red(self):
         self.summary.update(result="Failed", passedTests=0, failedTests=1)
         self.tree["testNodes"][0]["result"] = "Failed"

@@ -22,9 +22,9 @@ METHOD = "NativeCloudFetchScopeProbeTests/observeSavedStateFetchScopes()"
 SELECTOR = "MeguriSnapshotTests/" + METHOD
 APP_ID = "com.antoinefink.meguri.dev"
 PREFIX = "MG_SDK_SCOPE_PROBE "
-STAGES = ("seed", "limited", "wide", "fresh")
+STAGES = ("seed", "limited", "wide", "priority", "rebuilt", "fresh")
 PHASES = {"none", "configuration", "create", "inventory", "save1", "seed", "save2",
-          "limited", "wide", "fresh", "cleanup"}
+          "limited", "wide", "priority", "rebuilt", "fresh", "cleanup"}
 ERRORS = {"none", "configuration", "cancelled", "sdkFailure", "invalidResult", "timeout",
           "missingExpectedBytes", "missingState", "incompleteFetch", "unexpectedActivity",
           "sdkNotAuthenticated", "sdkPermissionFailure", "sdkMissingEntitlement",

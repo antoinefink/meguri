@@ -229,3 +229,18 @@
   `tools/mg selftest --filter '^cloud-fetch-probe-host '`. Risk: uncertain or
   lost completion intentionally retains the exclusive lease; recovery requires
   establishing original-group completion, never automatic fence reclamation.
+
+## Priority and rebuilt options — source-only comparison
+
+- Role fixer; supplied main starting commit `5cf5dd3c`; filtered baseline
+  `5e8f90101d48fcc47dfc5648392b0e7392cb9e1e`.
+- Supplied host baseline `cloud-fetch-probe-host89533`: diagnostic warn, exactly
+  one executed/pass, zero skips. Seed/limited/wide/fresh each saw expected bytes,
+  one database callback and one zone callback, drained true, no errors; cleanup
+  succeeded. Saved-state zoneIDs works in this host baseline only; no app-sync
+  acceptance or iOS claim.
+- Extend only fixed report stages/phases and generated focused cases. Production,
+  routing, leases, security, native commands/group counts and privacy output stay
+  unchanged. No variant result is claimed. No builds/tests or SDK calls; one
+  `git diff --check` before prompt export. Integration command:
+  `tools/mg selftest --filter '^cloud-fetch-probe-host '`.

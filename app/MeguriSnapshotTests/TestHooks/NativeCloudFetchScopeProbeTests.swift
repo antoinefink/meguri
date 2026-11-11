@@ -63,7 +63,20 @@ import Testing
             report.wide = wide.counts
             try wide.requireSuccess()
 
-            // A/B value2 delivery is an observation, never an SDK assumption.
+            phase = .priority
+            let priority = await ScopeProbeFetch.run(database: database, state: originalSeedState,
+                scope: .zoneIDs([zoneID]), recordID: recordID, expected: Data([2]), prioritizeZone: true)
+            report.priority = priority.counts
+            try priority.requireSuccess()
+
+            phase = .rebuilt
+            let rebuilt = await ScopeProbeFetch.run(database: database, state: originalSeedState,
+                scope: .zoneIDs([zoneID]), recordID: recordID, expected: Data([2]),
+                prioritizeZone: true, rebuildOptions: true)
+            report.rebuilt = rebuilt.counts
+            try rebuilt.requireSuccess()
+
+            // Saved-state value2 delivery is an observation, never an SDK assumption.
             phase = .fresh
             let fresh = await ScopeProbeFetch.run(database: database, state: nil, scope: wideScope,
                                                  recordID: recordID, expected: Data([2]))
@@ -103,7 +116,7 @@ import Testing
 }
 
 private enum ScopeProbePhase: String {
-    case configuration, create, inventory, save1, seed, save2, limited, wide, fresh, cleanup
+    case configuration, create, inventory, save1, seed, save2, limited, wide, priority, rebuilt, fresh, cleanup
 }
 
 private enum ScopeProbeFailure: String, Error {
@@ -175,6 +188,8 @@ private struct ScopeProbeReport {
     var seed = ScopeProbeCounts()
     var limited = ScopeProbeCounts()
     var wide = ScopeProbeCounts()
+    var priority = ScopeProbeCounts()
+    var rebuilt = ScopeProbeCounts()
     var fresh = ScopeProbeCounts()
     var failurePhase: ScopeProbePhase?
     var failureCategory: ScopeProbeFailure?
@@ -185,7 +200,8 @@ private struct ScopeProbeReport {
     // All interpolated strings are closed enums; all observations are counts or
     // booleans. No SDK object, name, serialization or payload reaches output.
     var json: String {
-        "{\"seed\":\(seed.json),\"limited\":\(limited.json),\"wide\":\(wide.json),\"fresh\":\(fresh.json)," +
+        "{\"seed\":\(seed.json),\"limited\":\(limited.json),\"wide\":\(wide.json)," +
+        "\"priority\":\(priority.json),\"rebuilt\":\(rebuilt.json),\"fresh\":\(fresh.json)," +
         "\"failurePhase\":\"\(failurePhase?.rawValue ?? "none")\"," +
         "\"failureCategory\":\"\(failureCategory?.rawValue ?? "none")\"," +
         "\"cleanupAttempted\":\(cleanupAttempted),\"cleanupSucceeded\":\(cleanupSucceeded)," +
@@ -215,12 +231,14 @@ private struct ScopeProbeFetchResult: Sendable {
 private actor ScopeProbeObserver: CKSyncEngineDelegate {
     private let recordID: CKRecord.ID
     private let expected: Data
+    private let rebuildOptions: Bool
     private var counts = ScopeProbeCounts()
     private var serialization: CKSyncEngine.State.Serialization?
 
-    init(recordID: CKRecord.ID, expected: Data) {
+    init(recordID: CKRecord.ID, expected: Data, rebuildOptions: Bool = false) {
         self.recordID = recordID
         self.expected = expected
+        self.rebuildOptions = rebuildOptions
     }
 
     func handleEvent(_ event: CKSyncEngine.Event, syncEngine: CKSyncEngine) async {
@@ -274,6 +292,12 @@ private actor ScopeProbeObserver: CKSyncEngineDelegate {
     func nextFetchChangesOptions(_ context: CKSyncEngine.FetchChangesContext,
                                 syncEngine: CKSyncEngine) async -> CKSyncEngine.FetchChangesOptions {
         counts.fetchOptionsCallbacks += 1
+        if rebuildOptions {
+            var options = CKSyncEngine.FetchChangesOptions(scope: .zoneIDs([recordID.zoneID]),
+                                                          operationGroup: context.options.operationGroup)
+            options.prioritizedZoneIDs = context.options.prioritizedZoneIDs
+            return options
+        }
         return context.options
     }
 
@@ -289,14 +313,17 @@ private enum ScopeProbeFetch {
 
     static func run(database: CKDatabase, state: CKSyncEngine.State.Serialization?,
                     scope: CKSyncEngine.FetchChangesOptions.Scope, recordID: CKRecord.ID,
-                    expected: Data) async -> ScopeProbeFetchResult {
-        let observer = ScopeProbeObserver(recordID: recordID, expected: expected)
+                    expected: Data, prioritizeZone: Bool = false,
+                    rebuildOptions: Bool = false) async -> ScopeProbeFetchResult {
+        let observer = ScopeProbeObserver(recordID: recordID, expected: expected, rebuildOptions: rebuildOptions)
         var configuration = CKSyncEngine.Configuration(database: database, stateSerialization: state, delegate: observer)
         configuration.automaticallySync = false
         let engine = CKSyncEngine(configuration)
         let group = CKOperationGroup()
         group.defaultConfiguration = ScopeProbeOperations.budget()
-        let options = CKSyncEngine.FetchChangesOptions(scope: scope, operationGroup: group)
+        var initialOptions = CKSyncEngine.FetchChangesOptions(scope: scope, operationGroup: group)
+        if prioritizeZone { initialOptions.prioritizedZoneIDs = [recordID.zoneID] }
+        let options = initialOptions
         let initiallyEmpty = engine.state.pendingRecordZoneChanges.isEmpty && engine.state.pendingDatabaseChanges.isEmpty
 
         let finish: Finish
