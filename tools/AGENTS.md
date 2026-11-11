@@ -7,6 +7,7 @@
 - `MEGURI_DOCKER_CARGO_TARGET` optionally selects an existing absolute host directory for this checkout's Rust build cache; otherwise Compose uses its named volume. Use a dedicated cache directory. Set it on `tools/mg` so nested jobs inherit it. Native Rust builds separately honor `CARGO_TARGET_DIR`.
 
 - Antoine's temporary macOS-first pass (2026-10-25) permits direct host Xcode MCP build/run/debug/UI feedback. Keep it scoped to Meguri; defer VM/mobile iterations without counting them as passes. Required integration gates still use MG. A Mac-only Xcode build can extract partial-platform catalog edits: preserve them separately for review rather than committing mobile entries marked stale.
+- For native host feedback, select the exact built app path: installed copies can share a bundle identity. If raising its window leaves Meguri inactive, select its window from the native Window menu; verify activation before judging disabled review controls.
 - Probe signatures, entitlements and Xcode device inventory with host access. Restricted native-service probes can return empty device lists; confirm through host MG before asking for a reconnect. Restricted `codesign` probes can report an invalid blob with exit 0 even when the unchanged product verifies on the host; compare executable hashes before changing signing.
 - A readable stat/signature does not grant app-data access. Preserve privacy refusals; normal-app media diagnostics use explicit `prepare-ui` plus an authorized Finder copy, never a raw-container fallback.
 

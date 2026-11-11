@@ -257,3 +257,18 @@
   stages received the expected bytes. Cleanup succeeded.
 - Neither priority zones nor reconstruction reproduces the receive failure
   in this Mac test. No product behavior changed and no sync acceptance follows.
+
+## Normal Mac preview
+
+- Standalone Debug build `94674` passed at `fef37db5`, with its signature
+  verified. Static checks `96574` and similarity `96603` passed; the latter
+  also reports five unsupported or excluded paths. No full gate ran.
+- Selecting the window from Meguri's native Window menu activated the exact
+  standalone product. Raising the window alone had left it inactive. This
+  route is recorded in `tools/AGENTS.md` for future host feedback.
+- Study then remained at `cardLoad` with an active window. Back to Decks
+  also remained pending. No answer was graded. This is a reproduced review
+  startup failure, not proof of which awaited operation is blocked.
+- Only that exact preview process was stopped. The same product was reopened
+  and left active on its deck overview. Review startup and cold-start receive
+  remain unresolved; the next source trace must locate the blocked await.
