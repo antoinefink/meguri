@@ -1,5 +1,7 @@
 # tools/
 
+- `cloud-fetch-probe-host` takes no arguments and requires explicit team signing; host Debug Snapshot SDK observation only (warn), never a fallback or acceptance. Keep all native evidence private; do not add it to gates/catch-up.
+
 - `cloudkit-account-setup` is owner-only, terminal-interactive and setup-only. Never invoke it from gates, catch-up or agents; candidates and SDK/transport diagnostics stay private, including on uncertain publication.
 
 - `MEGURI_DOCKER_CARGO_TARGET` optionally selects an existing absolute host directory for this checkout's Rust build cache; otherwise Compose uses its named volume. Use a dedicated cache directory. Set it on `tools/mg` so nested jobs inherit it. Native Rust builds separately honor `CARGO_TARGET_DIR`.

@@ -162,3 +162,37 @@
 - Focused static checks `20261111T214307Z-80387`: three passed. Similarity
   `20261111T214311Z-80862` passed for base `06ea6c30`; seven unsupported or
   excluded paths remain scanner skips. These receipts do not replace a full gate.
+
+## Explicit host SDK diagnostic — source-only handoff
+
+- Role fixer, implementer view; main starting commit `0883c1d9`; filtered
+  source baseline `2830605991505a50d92b4c7eaf22c5e108dd9361`. Supplied VM
+  diagnostic ending `78442` executed once, failed once, zero skips; create and
+  cleanup were `sdkNotAuthenticated` before all fetch stages. No cause or fetch
+  outcome is inferred. The user explicitly authorized Mac-first testing and
+  Meguri disposable test-data changes/restarts on this Mac.
+- Reuse only generic managed-child primitives from the existing handoff helper;
+  no owner setup is called by importing it. Fixed no-shell native commands,
+  600-second diagnostic wait, original-child joins on every exit, unchanged
+  existing join budgets/fences and stripped ambient runner/agent overrides.
+  Native console, build state, result bundles and errors remain run-owned and
+  private; only closed counts/booleans/enums cross into public MG output.
+- Require exactly one selected executed method, zero skips, no other cases,
+  xcode exit zero and one strictly validated Swift report. Failed native tests,
+  SDK/cleanup failures, missing seed/fresh bytes or incomplete drains stay red;
+  limited/wide misses remain observations. Success is diagnostic-only warn,
+  `HOST-CK-SDK-DIAGNOSTIC-ONLY`, `full_suite=false`; no app/sync/unit/milestone/
+  release or signed-lane acceptance. This is neither fallback nor VM evidence.
+- Source-only: no builds, tests, SDK calls, network, plugins, subagents, private
+  inputs or forbidden sources; one diff check at handoff. Focused generated
+  tests stub every native boundary for later Docker MG execution:
+  `tools/mg selftest --filter '^cloud-fetch-probe-host '`. Integration owns
+  those checks, independent review and provenance/privacy/similarity gates.
+
+- Source-only follow-up from main `0883c1d9`, filtered baseline
+  `650724629f14f5c224ff77f6fd306c603b4a48f0`: reorganized signature metadata
+  extraction and entitlement correlation, preserving every public key and
+  validation requirement, and rewrote the host-diagnostic paragraph above.
+  The seed's focused Docker selftest pass was recorded during integration; this
+  follow-up runs no builds or tests. One diff check precedes complete patch
+  export. No SDK result or acceptance exists for this handoff.
