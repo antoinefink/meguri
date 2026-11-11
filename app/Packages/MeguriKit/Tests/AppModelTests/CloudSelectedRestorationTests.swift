@@ -111,9 +111,16 @@ extension ReviewCollectionStartupTests {
             active = third
             let freshRole = try await OriginalCloudRoleInspection.inspect(main: input.bytes, wal: nil)
             var restored: HistoricalOriginalCloudEdit?
+            let creationAcks = AsyncStream<HistoricalOriginalCloudAck>.makeStream()
+            await third.factory.inspectCreation { _ in
+                creationAcks.continuation.yield(try await freshRole.readOriginalAck(witness: editWitness))
+            }
             third.beforeBackend = {
                 _ = try await inspector.control(original: publication)
                 restored = try await freshRole.readOriginalEdit(witness: editWitness)
+                // Before the new backend's required scan, old observer stamps
+                // cannot establish a current-opening ACK.
+                await #expect(throws: (any Error).self) { try await freshRole.readOriginalAck(witness: editWitness) }
                 let actual = try await inspector.readOriginalExchange(exchange: record.exchange, witness: exchangeWitness)
                 try #require(actual.exchange == record.exchange && actual.endedMilliseconds == record.endedMilliseconds)
                 guard case .succeeded(let selected, let held, let newer, let incoming, let media) = actual.outcome,
@@ -136,10 +143,20 @@ extension ReviewCollectionStartupTests {
                 if observation.metadata.kind == .saveCompleteEpoch { Issue.record("Historical inspection must not republish") }
             }
             try await third.reopen()
+            creationAcks.continuation.finish()
+            var creationIterator = creationAcks.stream.makeAsyncIterator()
+            let atCreation = try #require(await creationIterator.next())
+            let currentAck = try await freshRole.readOriginalAck(witness: editWitness)
+            #expect(currentAck.originalGeneration == edited.generation && currentAck.originalSeq == edited.seq)
+            #expect(currentAck.localRevision == edited.localRevision && currentAck.ackedRevision == edited.localRevision)
+            #expect(currentAck.noteDigest == edited.noteDigest && currentAck.ackedEnvelopeDigest.count == 32)
             await #expect(throws: (any Error).self) {
                 try await inspector.originalExchangeWork(command: originalRecordHandle)
             }
             let recovered = try #require(restored)
+            #expect(currentAck.generation == recovered.generation && currentAck.noteDigest == recovered.noteDigest)
+            #expect(atCreation.generation == currentAck.generation && atCreation.ackedRevision == currentAck.ackedRevision)
+            #expect(atCreation.ackedEnvelopeDigest == currentAck.ackedEnvelopeDigest)
             #expect(recovered.originalGeneration == edited.generation && recovered.originalSeq == edited.seq)
             #expect(recovered.generation != recovered.originalGeneration)
             #expect(recovered.localRevision == edited.localRevision && recovered.noteDigest == edited.noteDigest)

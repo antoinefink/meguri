@@ -787,6 +787,12 @@ import Foundation
             }
             // A matching row is a cross-check. Unsuccessful results cannot recover success.
             _ = try CloudKitSelectedSyncProof.exchangeFacts(record)
+            if requireScan, program == .syncNowMac {
+                guard let edit = restoration.edit, let edited = restoredEdit else { throw AgentFailure.recovery }
+                let ack = try await originalRole.readOriginalAck(witness: CloudKitSelectedRestoration.bytes(edit.witness),
+                                                                 generation: control.generation)
+                try CloudKitSelectedSyncProof.requireRestoredAcknowledgement(ack, edited: edited, control: control)
+            }
             selectedExchangeAttempted = true; selectedExchangeRecord = record
         }
         _ = try retainedAdmission()

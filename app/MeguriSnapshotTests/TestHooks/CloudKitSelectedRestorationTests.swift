@@ -40,5 +40,32 @@ import Testing
         }
         try AgentSelectedRestoration.requireExchangeRecovery(.syncNowPhone)
     }
+    @Test func restoredSourceAcknowledgementNeedsTheSameEditAndCurrentScannedOpening() throws {
+        let digest = Data(repeating: 1, count: 32)
+        let edited = HistoricalOriginalCloudEdit(generation: 12, originalGeneration: 11, originalSeq: 9,
+                                                 localRevision: 2, noteDigest: digest)
+        func ack(generation: UInt64 = 12, originalGeneration: UInt64 = 11, originalSeq: UInt64 = 9,
+                 localRevision: UInt64 = 2, ackedRevision: UInt64 = 2, noteDigest: Data? = nil,
+                 envelope: Data = Data(repeating: 2, count: 32)) -> HistoricalOriginalCloudAck {
+            .init(generation: generation, originalGeneration: originalGeneration, originalSeq: originalSeq,
+                  localRevision: localRevision, noteDigest: noteDigest ?? digest, ackedRevision: ackedRevision,
+                  ackedEnvelopeDigest: envelope)
+        }
+        let control = RestoredCloudControlObservation(generation: 12, requiredScanComplete: true)
+        try CloudKitSelectedSyncProof.requireRestoredAcknowledgement(ack(), edited: edited, control: control)
+        for invalid in [ack(generation: 13), ack(originalGeneration: 10), ack(originalSeq: 8),
+                        ack(localRevision: 3), ack(ackedRevision: 1), ack(ackedRevision: 3),
+                        ack(noteDigest: Data(repeating: 3, count: 32)), ack(envelope: Data())] {
+            #expect(throws: AgentFailure.recovery) {
+                try CloudKitSelectedSyncProof.requireRestoredAcknowledgement(invalid, edited: edited, control: control)
+            }
+        }
+        for invalid in [RestoredCloudControlObservation(generation: 13, requiredScanComplete: true),
+                        RestoredCloudControlObservation(generation: 12, requiredScanComplete: false)] {
+            #expect(throws: AgentFailure.recovery) {
+                try CloudKitSelectedSyncProof.requireRestoredAcknowledgement(ack(), edited: edited, control: invalid)
+            }
+        }
+    }
 }
 #endif

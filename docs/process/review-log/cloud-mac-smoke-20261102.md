@@ -601,3 +601,36 @@ for all selected entities, the exact source edit's ACK and cause, historical
 close authority and the host relaunch path remain open. Mac recovery still
 refuses completion until those are implemented. The signed round trip and
 full batch gate are unrun, and no Unit trailer or signed pass is claimed.
+
+## Source ACK at the current opening
+
+Starting commit `32dc605e`. After the required reopen scan, Mac recovery now
+uses the existing WAL-backed source ACK inspector. It compares the current
+opening, original opening and sequence, exact edited revision and digest,
+ACK revision and envelope digest shape. It does not treat that current read
+as an original SDK callback or permission to complete the exchange.
+
+The first characterization attempted the read before backend preparation.
+Its retained output is `build/cloud-original-durable-source-before.log`.
+The inspector correctly refused old observer stamps (`entity.exact`, mask 8)
+because the required new-opening scan had not run. The test now requires that
+refusal, then reads successfully after the scan. Run `35972` proves both
+boundaries. No guard or timeout changed.
+
+Final Service run `39051` passes the real publication/edit/exchange/reopen
+case and the adopted-phone reopen case. The source case also reads the ACK
+at the actual factory boundary before engine creation, then checks it again
+after startup. The exact revision and envelope remain the same. This covers
+the new call's WAL barrier at the boundary recovery uses. VM-hosted run
+`37399` compiles the runtime wiring and executes its field/scan refusal test
+once, with no skips or failures. Similarity `40172` and source privacy pass.
+
+Direct review checked call order, current and original identities, scan
+admission, witness ownership and failure propagation. There was no separate
+agent review. This is the source note's current durability check only. The
+broader selected-entity check remains open: adapter_store::mark_ack currently
+records absence-pass progress, and the durable acknowledgement counter of
+cloudkit-recovery V10.2 still needs work. Exact journal cause, historical
+close authority, the host relaunch path, signed round trip and full batch
+gate also remain open. Mac recovered completion stays disabled. No Unit or
+release acceptance is claimed.
