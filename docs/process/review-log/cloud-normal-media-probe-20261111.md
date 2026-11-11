@@ -376,3 +376,8 @@ No second variant was added. This result establishes no internal SDK cause.
 The dispatch thread, delegate filtering and retained state remain unproven.
 The filtered runner performed one `git diff --check`; it ran no builds or tests.
 No gate or acceptance claim is made.
+
+Normal phone restoration `run/20261111T204709Z-53856` passes after the source
+removal at `bdcedd22`. The signed app is installed and launched normally.
+The phone is no longer running the experiment. No grade, replacement or reset
+was submitted. Host device-inventory guidance is retained in `tools/AGENTS.md`.
