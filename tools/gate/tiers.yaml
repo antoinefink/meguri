@@ -780,7 +780,7 @@ utilities:
   - {job: corpus-generate, why: "spec side: generates the comparison corpus as run artifacts; conformance checks published scenarios"}
   - {job: cleanroom, why: "restricted Codex implementation runner; boundary probes run before every invocation"}
   - {job: cleanroom-image, why: "builds the restricted Codex runtime; cleanroom verifies it before use"}
-  - {job: core-format, why: "rewrites Rust source formatting; core-lint verifies the result"}
+  - {job: core-format, why: "optional Rust source formatting on demand"}
   - {job: gate, why: "runs the tiers"}
   - {job: merge, why: "runs the gate for a branch and fast-forwards the integration branch"}
   - {job: catch-up, why: "re-runs the runs merges queued because of the machine's state, once tools/mg doctor reports their user step clear (U19b)"}

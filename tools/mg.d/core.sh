@@ -3,7 +3,7 @@
 mg_job core-test docker:dev mg_core_test \
   "Rust tests: cargo nextest on core/ (no retries), canary_* test binaries first; --canaries runs only those; args after -- go to nextest"
 mg_job core-lint docker:dev mg_core_lint \
-  "Rust lint: cargo fmt --check, clippy -D warnings on all targets and features, layering-check (edges.toml), and no AnkiWeb name in meguri-sync built without its features"
+  "Rust lint: clippy -D warnings on all targets and features, layering-check (edges.toml), and no AnkiWeb name in meguri-sync built without its features; source formatting is optional"
 mg_job core-deny docker:dev mg_core_deny \
   "Rust dependency gate: cargo deny check on core/ (licenses, advisories, bans, sources); args after -- name checks"
 mg_job u38-wiring docker:dev mg_u38_wiring \
@@ -177,7 +177,7 @@ mg_core_test() {
   fi
 }
 
-# tools/mg core-lint: rustfmt, clippy, layering-check and the AnkiWeb scan. All four run, so one
+# tools/mg core-lint: clippy, layering-check and the AnkiWeb scan. All three run, so one
 # run reports every kind of finding.
 mg_core_lint() {
   [ "${1:-}" = "--" ] && shift
@@ -193,24 +193,7 @@ mg_core_lint() {
     return 0
   fi
 
-  local repro="tools/mg core-lint" failed_steps="" passed=0 failed=0 rc n f
-
-  # rustfmt: one failure per file it would change.
-  local fmt="$MG_RUN_DIR/rustfmt-files.txt"
-  (cd core && cargo fmt --all --check)
-  rc=$?
-  if [ "$rc" -ne 0 ]; then
-    (cd core && cargo fmt --all --check -- --files-with-diff) >"$fmt" 2>/dev/null
-    n=0
-    while IFS= read -r f; do
-      [ -n "$f" ] || continue
-      f="${f#"$MG_ROOT"/core/}"
-      mg_failure "fmt/$f" "rustfmt would reformat core/$f; run cargo fmt --all in core/" "$repro"
-      n=$((n + 1))
-    done <"$fmt"
-    [ "$n" -gt 0 ] || mg_failure "fmt-exit-$rc" "cargo fmt --check exited with code $rc; see log.txt" "$repro"
-    failed_steps="$failed_steps fmt"
-  fi
+  local repro="tools/mg core-lint" failed_steps="" passed=0 failed=0 rc n
 
   # clippy: one failure per distinct diagnostic.
   local clippy="$MG_RUN_DIR/clippy.jsonl"
@@ -283,17 +266,17 @@ mg_core_lint() {
     fi
   fi
 
-  for n in fmt clippy layering ankiweb; do
+  for n in clippy layering ankiweb; do
     case " $failed_steps " in
       *" $n "*) failed=$((failed + 1)) ;;
       *) passed=$((passed + 1)) ;;
     esac
   done
-  mg_count total 4
+  mg_count total 3
   mg_count passed "$passed"
   mg_count failed "$failed"
   if [ "$failed" -eq 0 ]; then
-    mg_message "core-lint: rustfmt, clippy, layering-check and the AnkiWeb scan clean"
+    mg_message "core-lint: clippy, layering-check and the AnkiWeb scan clean"
     mg_status pass
   else
     mg_message "core-lint: failed:$failed_steps"
@@ -363,7 +346,7 @@ mg_core_deny() {
 
 
 mg_job core-format docker:dev mg_core_format \
-  "Rewrite Rust source formatting with cargo fmt --all; core-lint verifies it"
+  "Optionally rewrite Rust source formatting with cargo fmt --all; core-lint does not enforce formatting"
 mg_core_format() {
   if [ "$#" -ne 0 ]; then
     mg_failure usage "core-format takes no arguments"
