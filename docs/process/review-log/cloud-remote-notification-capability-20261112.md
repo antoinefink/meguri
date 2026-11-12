@@ -17,3 +17,7 @@
 - Signed normal Mac Release build `build-app/20261112T095822Z-61062` passed. This is a Mac product; it does not verify the iOS capability in an installed phone bundle. That build and device observation remain pending.
 - Privacy `private/20261112T100207Z-66331` flagged one sentence in this log. The sentence was rewritten; the guard is unchanged. The commit hook must pass the complete final text.
 - No completed U154, full gate, delivery fix or release acceptance is claimed.
+
+## Installed phone check
+
+`run/20261112T100422Z-69088` passed with normal launch verified. The actual built phone Info has `UIBackgroundModes = [remote-notification]`. No notification permission prompt or new handler was added. This verifies configuration and launch, not a delivery deadline.
