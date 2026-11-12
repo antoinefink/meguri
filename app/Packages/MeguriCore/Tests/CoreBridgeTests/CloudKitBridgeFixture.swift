@@ -142,7 +142,7 @@ struct CloudKitBridgeFixture: Sendable {
                      failInbox: Bool = false, failState: Bool = false, startAdapter: Bool = true,
                      assetReadTransport: (any CloudOwnTransport)? = nil,
                      delegateWorkValidated: @escaping @Sendable () async -> Void = {},
-                     connectedPolicyOpening: Bool = false) async throws -> Self {
+                     connectedPolicyOpening: Bool = false, appOwnsAccountObservation: Bool = false) async throws -> Self {
         try #require(!connectedPolicyOpening || !startAdapter,
                      "Connected policy fixtures must start only through policy Start actions")
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
@@ -179,6 +179,7 @@ struct CloudKitBridgeFixture: Sendable {
             let adapter = CloudKitSyncAdapter(core: core, engineFactory: factory,
                                              eventDidPersist: { await probe.didPersist($0) },
                                              assetReadTransport: assetReadTransport,
+                                             appOwnsAccountObservation: appOwnsAccountObservation,
                                              delegateWorkValidated: delegateWorkValidated)
             if startAdapter {
                 try await adapter.start(automaticallySync: false)
@@ -237,10 +238,13 @@ func withCloudKitFixture(
 
 /// The native policy owns SDK startup; pure adapter fixtures keep their defaults.
 func withNativePolicyFixture(
-    keepAlive: Bool = false,
+    keepAlive: Bool = false, assetReadTransport: (any CloudOwnTransport)? = nil,
+    appOwnsAccountObservation: Bool = false,
     _ body: (CloudKitBridgeFixture) async throws -> Void
 ) async throws {
-    let fixture = try await CloudKitBridgeFixture.open(keepAlive: keepAlive, startAdapter: false, connectedPolicyOpening: true)
+    let fixture = try await CloudKitBridgeFixture.open(keepAlive: keepAlive, startAdapter: false,
+        assetReadTransport: assetReadTransport, connectedPolicyOpening: true,
+        appOwnsAccountObservation: appOwnsAccountObservation)
     do { try await body(fixture) }
     catch { await fixture.close(); throw error }
     await fixture.close()

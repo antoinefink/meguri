@@ -87,6 +87,7 @@ nonisolated struct SyncCommandResult: Sendable {
     let error: (any Error)?
     let originalGuardRefusal: CloudPolicyOriginalGuardRefusal?
     let dependentFetchRefusal: CloudPolicyDependentFetchRefusal?
+    let fetchProofOutcome: CloudPolicyFetchProofOutcome?
     let accountReadRefusal: SyncAccountReadRefusal?
     let deferred: Bool
     let accountVerified: Bool
@@ -96,10 +97,11 @@ nonisolated struct SyncCommandResult: Sendable {
     let afterOutputs: (@MainActor @Sendable (Bool) async -> SyncCommandResult)?
     init(outputs: [CloudPolicyOutput], error: (any Error)?, deferred: Bool, accountVerified: Bool = false, mediaCancellation: Bool = false, acknowledgedOutputCount: Int = 0,
          afterOutputs: (@MainActor @Sendable (Bool) async -> SyncCommandResult)? = nil, originalGuardRefusal: CloudPolicyOriginalGuardRefusal? = nil,
-         accountReadRefusal: SyncAccountReadRefusal? = nil, dependentFetchRefusal: CloudPolicyDependentFetchRefusal? = nil) {
+         accountReadRefusal: SyncAccountReadRefusal? = nil, dependentFetchRefusal: CloudPolicyDependentFetchRefusal? = nil, fetchProofOutcome: CloudPolicyFetchProofOutcome? = nil) {
         self.outputs = outputs; self.error = error; self.deferred = deferred; self.accountVerified = accountVerified
         self.mediaCancellation = mediaCancellation; self.originalGuardRefusal = originalGuardRefusal
         self.accountReadRefusal = accountReadRefusal; self.dependentFetchRefusal = dependentFetchRefusal
+        self.fetchProofOutcome = fetchProofOutcome
         self.acknowledgedOutputCount = acknowledgedOutputCount; self.afterOutputs = afterOutputs
     }
 }
@@ -1433,7 +1435,7 @@ public final class SyncCoordinator {
                     consume(output, generation: expected)
                 }
                 if result.deferred { hasDeferredNativeWork = true }
-                if let error = result.error, !(closing && shutdownCancelled && error is CancellationError) {
+                if let error = result.error, !(closing && shutdownCancelled && error is CancellationError && result.fetchProofOutcome?.preservesFailure != true) {
                     #if DEBUG
                     if let failure = result.diagnosticFailure {
                         DebugCloudDiagnostics.record(failure)
@@ -1441,7 +1443,7 @@ public final class SyncCoordinator {
                         DebugCloudDiagnostics.record(.commandResult, error: error)
                     }
                     #endif
-                    if result.originalGuardRefusal == nil, result.dependentFetchRefusal == nil, !supersededAccountCancellation, !(result.mediaCancellation && error is CancellationError) {
+                    if result.originalGuardRefusal == nil, result.dependentFetchRefusal == nil, result.fetchProofOutcome?.accountStopCancellation != true, !supersededAccountCancellation, !(result.mediaCancellation && error is CancellationError) {
                         operationFailed = true; failureRevision &+= 1
                     }
                 }

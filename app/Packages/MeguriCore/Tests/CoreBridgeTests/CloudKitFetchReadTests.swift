@@ -307,3 +307,280 @@ extension EventTests {
         }
     }
 }
+
+#if DEBUG
+private func fetchProofCommands(_ output: CloudPolicyOutput) throws -> [CloudPolicyCommand] {
+    guard case .commands(let commands) = output else { throw BridgeError.internal("Unexpected policy output") }
+    return commands
+}
+
+private final class FetchProofAcknowledgements: Sendable {
+    private let count = Mutex(0)
+    func record(_ amount: Int) { count.withLock { $0 += amount } }
+    var value: Int { count.withLock { $0 } }
+}
+
+private final class FetchProofOriginalFailure: Error {}
+
+// Inject only at the original transport reply boundary, after its SDK drain.
+private struct FetchProofThrowingTransport: CloudOwnTransport {
+    let base: FetchControlTransport
+    let error: any Error
+    func prepare(_ command: CloudOwnTransportCommand) throws -> any CloudPreparedOwnOperation {
+        Operation(original: try base.prepare(command), error: error)
+    }
+    private struct Operation: CloudPreparedOwnOperation {
+        let original: any CloudPreparedOwnOperation
+        let error: any Error
+        func enqueue() -> Bool { original.enqueue() }
+        func cancel() { original.cancel() }
+        func controlReadEvidence() -> CloudZoneDeletionRead? { original.controlReadEvidence() }
+        func reply() async throws -> CloudOwnTransportReply {
+            _ = try await original.reply()
+            throw error
+        }
+    }
+}
+
+enum FetchProofStopCase: CaseIterable, Sendable, Equatable {
+    case noAccount, otherAccount, noReceipt, nonAccount, caller
+    var qualifies: Bool { self == .noAccount || self == .otherAccount }
+}
+enum FetchProofFirstFailure: CaseIterable, Sendable, Equatable {
+    case provider, providerCancellation, transport, transportCancellation, sdk
+    var providerFirst: Bool { self == .provider || self == .providerCancellation }
+}
+
+private func fetchProofAccountStop(_ f: CloudKitBridgeFixture, policy: CoreCloudPolicyService,
+                                   other: Bool = false) async throws -> CloudPolicyCommand {
+    let read = try await f.core.beginIdentityRead(transition: true)
+    try #require(try await f.core.completeIdentityRead(id: read, status: other ? .available : .noAccount,
+        identity: other ? Data("synthetic-account-B".utf8) : nil))
+    let projected = try await policy.projectIdentityRead(read)
+    let command = try #require(try fetchProofCommands(projected).first { if case .stopEngine = $0.action { true } else { false } })
+    try #require(command.accountRetirement != nil)
+    return command
+}
+
+private func executeFetchProof(_ command: CloudPolicyCommand, executor: NativeCloudPolicyExecutor,
+                               acknowledgements: FetchProofAcknowledgements) async -> CloudPolicyNativeResult {
+    await CloudPolicyOutputAcknowledgement.$input.withValue({ work in
+        let output = try await work()
+        acknowledgements.record(1)
+        return output
+    }) {
+        await executor.execute(command, corePrepared: {}, acknowledgeOutputs: { outputs in
+            acknowledgements.record(outputs.count)
+        })
+    }
+}
+
+extension EventTests {
+    @Test(arguments: [FetchProofStopCase.caller, .noAccount])
+    func nativeFetchProofCancellationRecordsProducerBeforeResponsiveProvider(mode: FetchProofStopCase) async throws {
+        let transport = FetchControlTransport()
+        try await withNativePolicyFixture(assetReadTransport: transport, appOwnsAccountObservation: true) { f in
+            let (policy, executor) = try await nativePolicy(f)
+            try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: executor)
+            let engine = try await f.engine()
+            let calls = engine.acceptedNetworkCalls.value
+            let drains = try await f.core.fetchDrains()
+            await engine.signInSameSyntheticIdentity()
+            transport.setReplies([.found(f.root.envelope)])
+            await engine.appendFetchScripts([.manual(fetchedZones: [], records: [], group: nil)])
+            let command = try #require(try fetchProofCommands(try await policy.input(.foreground)).first { if case .requestFetch = $0.action { true } else { false } })
+            let provider = CloudCallbackGate(), cancelled = CloudCallbackGate(), selected = CloudCallbackGate()
+            await provider.open(); await cancelled.open()
+            let (cancellationWait, releaseProvider) = AsyncStream<Void>.makeStream()
+            defer { releaseProvider.finish() }
+            await f.adapter.setProofAdmission({ _ in
+                await provider.enter()
+                // The stream wait wakes on task cancellation.
+                var iterator = cancellationWait.makeAsyncIterator()
+                _ = await iterator.next()
+                await cancelled.enter()
+                try Task.checkCancellation()
+                throw BridgeError.internal("Fetch proof provider resumed without cancellation")
+            }, acknowledgeOutputs: { _ in })
+            await f.adapter.setFetchProofCompletionObserver { await selected.enter() }
+            let acknowledgements = FetchProofAcknowledgements()
+            let fetch = Task { await executeFetchProof(command, executor: executor, acknowledgements: acknowledgements) }
+            var stop: Task<CloudPolicyNativeResult, Never>?
+            do {
+                try await provider.waitForArrival()
+                if mode == .caller { fetch.cancel() }
+                else {
+                    let stopCommand = try await fetchProofAccountStop(f, policy: policy)
+                    stop = Task { await executor.execute(stopCommand) }
+                }
+                try await cancelled.waitForArrival()
+                try await selected.waitForArrival()
+                #expect(!(await engine.recordedTrace()).contains(.released))
+                await selected.open()
+                let result = await fetch.value
+                #expect(result.error is CancellationError)
+                let outcome = try #require(result.fetchProofOutcome)
+                #expect(outcome.accountStopCancellation == mode.qualifies)
+                #expect(!outcome.preservesFailure)
+                #expect(result.originalGuardRefusal == nil && result.dependentFetchRefusal == nil)
+                #expect(!result.outputs.isEmpty && result.acknowledgedOutputCount == result.outputs.count)
+                #expect(acknowledgements.value == result.outputs.count)
+                if let stop { #expect(await stop.value.error == nil) }
+                #expect(transport.targets.map(\.name) == ["active"])
+                #expect(engine.acceptedNetworkCalls.value == calls + 1)
+                #expect(try await f.core.fetchDrains() == drains)
+            } catch {
+                fetch.cancel(); releaseProvider.finish(); await selected.open()
+                _ = await fetch.value; _ = await stop?.value
+                throw error
+            }
+            await f.adapter.setFetchProofCompletionObserver(nil)
+        }
+    }
+
+    @Test(arguments: FetchProofStopCase.allCases)
+    func nativeFetchProofCancellationRequiresExecutedOriginalAccountStop(mode: FetchProofStopCase) async throws {
+        let transport = FetchControlTransport()
+        try await withNativePolicyFixture(assetReadTransport: transport, appOwnsAccountObservation: true) { f in
+            let (policy, executor) = try await nativePolicy(f)
+            try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: executor)
+            let engine = try await f.engine()
+            // Setup is complete before recording any operation counts.
+            let calls = engine.acceptedNetworkCalls.value
+            let drains = try await f.core.fetchDrains()
+            await engine.signInSameSyntheticIdentity()
+            transport.setReplies([.found(f.root.envelope)])
+            await engine.appendFetchScripts([.manual(fetchedZones: [], records: [], group: nil)])
+            let command = try #require(try fetchProofCommands(try await policy.input(.foreground)).first { if case .requestFetch = $0.action { true } else { false } })
+            let provider = CloudCallbackGate(), selected = CloudCallbackGate()
+            await f.adapter.setProofAdmission({ _ in
+                await provider.enter()
+                try Task.checkCancellation()
+            }, acknowledgeOutputs: { _ in })
+            await f.adapter.setFetchProofCompletionObserver { await selected.enter() }
+            let acknowledgements = FetchProofAcknowledgements()
+            let fetch = Task { await executeFetchProof(command, executor: executor, acknowledgements: acknowledgements) }
+            var stop: Task<CloudPolicyNativeResult, Never>?
+            do {
+                try await provider.waitForArrival()
+                if mode == .caller { fetch.cancel() }
+                else {
+                    let stopCommand: CloudPolicyCommand
+                    if mode == .nonAccount {
+                        stopCommand = try #require(try fetchProofCommands(try await policy.input(.settings(.init(enabled: true, paused: true, automatic: true, media: false)))).first { if case .stopEngine = $0.action { true } else { false } })
+                        #expect(stopCommand.accountRetirement == nil)
+                    } else if mode == .noReceipt {
+                        try await f.core.accountChanged(sdk: nil, status: .noAccount, identity: nil)
+                        stopCommand = try #require(try fetchProofCommands(try await policy.input(.refresh(.cloud))).first { if case .stopEngine = $0.action { true } else { false } })
+                        #expect(stopCommand.accountRetirement == nil)
+                    } else { stopCommand = try await fetchProofAccountStop(f, policy: policy, other: mode == .otherAccount) }
+                    stop = Task { await executor.execute(stopCommand) }
+                }
+                try await selected.waitForArrival()
+                // Stop must release A's exact wait before joining A's network.
+                #expect(!(await engine.recordedTrace()).contains(.released))
+                await provider.open(); await selected.open()
+                let result = await fetch.value
+                #expect(result.error is CancellationError)
+                let outcome = try #require(result.fetchProofOutcome)
+                #expect(outcome.accountStopCancellation == mode.qualifies)
+                #expect(!outcome.preservesFailure)
+                #expect(result.originalGuardRefusal == nil && result.dependentFetchRefusal == nil)
+                #expect(!result.outputs.isEmpty && result.acknowledgedOutputCount == result.outputs.count)
+                #expect(acknowledgements.value == result.outputs.count)
+                if let stop { #expect(await stop.value.error == nil) }
+                #expect(transport.targets.map(\.name) == ["active"])
+                #expect(engine.acceptedNetworkCalls.value == calls + 1)
+                #expect(try await f.core.fetchDrains() == drains)
+            } catch {
+                fetch.cancel(); await provider.open(); await selected.open()
+                _ = await fetch.value; _ = await stop?.value
+                throw error
+            }
+            await f.adapter.setFetchProofCompletionObserver(nil)
+        }
+    }
+
+    @Test(arguments: FetchProofFirstFailure.allCases, [false, true])
+    func nativeFetchProofFirstFailureSurvivesLaterAccountStopAndClose(mode: FetchProofFirstFailure, close: Bool) async throws {
+        let base = FetchControlTransport()
+        let original = FetchProofOriginalFailure()
+        let failure: any Error = mode == .providerCancellation || mode == .transportCancellation ? CancellationError() : original
+        let transport: any CloudOwnTransport = mode == .transport || mode == .transportCancellation
+            ? FetchProofThrowingTransport(base: base, error: failure) : base
+        try await withNativePolicyFixture(assetReadTransport: transport, appOwnsAccountObservation: true) { f in
+            let (policy, executor) = try await nativePolicy(f)
+            try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: executor)
+            let engine = try await f.engine()
+            let calls = engine.acceptedNetworkCalls.value
+            let drains = try await f.core.fetchDrains()
+            await engine.signInSameSyntheticIdentity()
+            base.setReplies([mode == .sdk ? .failure(.networkFailure) : .found(f.root.envelope)])
+            await engine.appendFetchScripts([.manual(fetchedZones: [], records: [], group: nil)])
+            let command = try #require(try fetchProofCommands(try await policy.input(.foreground)).first { if case .requestFetch = $0.action { true } else { false } })
+            let provider = CloudCallbackGate(), selected = CloudCallbackGate(), stopResultGate = CloudCallbackGate()
+            await f.adapter.setProofAdmission({ _ in
+                await provider.enter()
+                if mode.providerFirst { throw failure }
+                try Task.checkCancellation()
+            }, acknowledgeOutputs: { _ in })
+            await f.adapter.setFetchProofCompletionObserver { await selected.enter() }
+            let acknowledgements = FetchProofAcknowledgements()
+            let fetch = Task { await executeFetchProof(command, executor: executor, acknowledgements: acknowledgements) }
+            var stop: Task<CloudPolicyNativeResult, Never>?
+            var shutdown: Task<Void, any Error>?
+            do {
+                try await provider.waitForArrival()
+                if mode.providerFirst {
+                    await provider.open()
+                    // Actual provider failure has won the canonical wait; only
+                    // delivery to performFetchRead remains held.
+                    try await selected.waitForArrival()
+                }
+                let stopCommand = try await fetchProofAccountStop(f, policy: policy)
+                stop = Task {
+                    await MaintenanceCallObservation.$capture.withValue({ call in
+                        if call == .cloudPolicyRetirementResult { Task { await stopResultGate.open() } }
+                    }) { await executor.execute(stopCommand) }
+                }
+                if !mode.providerFirst { try await selected.waitForArrival() }
+                // Synchronize on the actual stop result read, after the losing
+                // cancellation producer ran, without joining A's held delivery.
+                await stopResultGate.enter()
+                if close {
+                    fetch.cancel()
+                    shutdown = Task { try await f.adapter.quiesce() }
+                }
+                await provider.open(); await selected.open()
+                let result = await fetch.value
+                if mode == .sdk {
+                    let error = try #require(result.error as? CloudKitSDKOperationFailure)
+                    #expect(error.code == Int64(CKError.Code.networkFailure.rawValue))
+                } else if mode == .providerCancellation || mode == .transportCancellation {
+                    #expect(result.error is CancellationError)
+                } else { #expect((result.error as? FetchProofOriginalFailure) === original) }
+                let outcome = try #require(result.fetchProofOutcome)
+                #expect(!outcome.accountStopCancellation && outcome.preservesFailure)
+                #expect(result.originalGuardRefusal == nil && result.dependentFetchRefusal == nil)
+                #expect(!result.outputs.isEmpty && result.acknowledgedOutputCount == result.outputs.count)
+                #expect(acknowledgements.value == result.outputs.count)
+                if let stop { #expect(await stop.value.error == nil) }
+                try await shutdown?.value
+                #expect(engine.acceptedNetworkCalls.value == calls + 1)
+                #expect(base.targets.map(\.name) == ["active"])
+                #expect(try await f.core.fetchDrains() == drains)
+                if mode == .sdk {
+                    let read = try #require(try await f.core.diagnostics().rootReads.last)
+                    #expect(read.failure?.code == Int64(CKError.Code.networkFailure.rawValue))
+                    #expect(read.outcome == "failed" && !read.accepted)
+                }
+            } catch {
+                fetch.cancel(); await provider.open(); await selected.open(); await stopResultGate.open()
+                _ = await fetch.value; _ = await stop?.value; _ = try? await shutdown?.value
+                throw error
+            }
+            await f.adapter.setFetchProofCompletionObserver(nil)
+        }
+    }
+}
+#endif

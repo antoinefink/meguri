@@ -56,6 +56,33 @@ public enum DebugCloudDiagnostics {
         }
     }
 
+    /// First local snapshot at the original fetch-read identity-refresh catch.
+    /// The command's task-local scope supplies pairing; only Boolean facts survive.
+    @TaskLocal public static var fetchReadFailureCapture: FetchReadFailureCapture?
+
+    public final class FetchReadFailureCapture: Sendable {
+        private struct Value: Sendable {
+            let targetActive, transportError, resultFailed, evidenceFailure, evidenceTerminal: Bool
+            let taskCancelled, stopping, policyStop, retirementFailure, accountRetired, cancellationError: Bool
+            var formatted: String {
+                "fetchReadRefresh{targetActive=\(targetActive ? 1 : 0) transportError=\(transportError ? 1 : 0) resultFailed=\(resultFailed ? 1 : 0) evidenceFailure=\(evidenceFailure ? 1 : 0) evidenceTerminal=\(evidenceTerminal ? 1 : 0) taskCancelled=\(taskCancelled ? 1 : 0) stopping=\(stopping ? 1 : 0) policyStop=\(policyStop ? 1 : 0) retirementFailure=\(retirementFailure ? 1 : 0) accountRetired=\(accountRetired ? 1 : 0) cancellationError=\(cancellationError ? 1 : 0)}"
+            }
+        }
+        private let first = Mutex<Value?>(nil)
+        public init() {}
+        public var firstValue: String? { first.withLock { $0?.formatted } }
+        func record(targetActive: Bool, transportError: Bool, resultFailed: Bool,
+                    evidenceFailure: Bool, evidenceTerminal: Bool, taskCancelled: Bool,
+                    stopping: Bool, policyStop: Bool, retirementFailure: Bool,
+                    accountRetired: Bool, cancellationError: Bool) {
+            let value = Value(targetActive: targetActive, transportError: transportError, resultFailed: resultFailed,
+                evidenceFailure: evidenceFailure, evidenceTerminal: evidenceTerminal, taskCancelled: taskCancelled,
+                stopping: stopping, policyStop: policyStop, retirementFailure: retirementFailure,
+                accountRetired: accountRetired, cancellationError: cancellationError)
+            first.withLock { if $0 == nil { $0 = value } }
+        }
+    }
+
     private static let logger = Logger(subsystem: "app.meguri", category: "CloudDiagnostics")
     private static let recorder = Recorder()
     private static let policyStatusTrace = PolicyStatusTrace()

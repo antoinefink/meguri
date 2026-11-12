@@ -130,7 +130,8 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
     private enum DiagnosticKind: String { case error, coreActionFailed, applyDeferred }
     @discardableResult
     private func capture(_ error: any Error, stage: DiagnosticStage, kind: DiagnosticKind = .error,
-                         action: CloudPolicyAction? = nil, sendFailure: String? = nil, latestMedia: String? = nil, expectedRefusal: Bool = false) -> String {
+                         action: CloudPolicyAction? = nil, sendFailure: String? = nil, latestMedia: String? = nil,
+                         fetchReadFailure: String? = nil, expectedRefusal: Bool = false) -> String {
         let category: String
         switch error {
         case is CancellationError: category = "cancellation"
@@ -204,12 +205,34 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
         let ownership = SyncCommandTaskContext.current?.shutdownCancelled == true ? "ownedShutdown" : "none"
         #if DEBUG
         let firstSendFailure = sendFailure ?? DebugCloudDiagnostics.sendFailureCapture?.firstValue
+        let errorType: String
+        if case .startEngine? = action {
+            let helperTag: String
+            if let helper = error as? CloudServiceProcessFailure {
+                switch helper {
+                case .configuration: helperTag = "configuration"
+                case .launch: helperTag = "launch"
+                case .closed: helperTag = "closed"
+                case .input: helperTag = "input"
+                case .output: helperTag = "output"
+                case .malformedReply: helperTag = "malformedReply"
+                case .fixtureInputLimit: helperTag = "fixtureInputLimit"
+                case .fixtureReplyLimit: helperTag = "fixtureReplyLimit"
+                case .fixtureDiagnosticLimit: helperTag = "fixtureDiagnosticLimit"
+                case .fixtureAttachmentLimit: helperTag = "fixtureAttachmentLimit"
+                }
+            } else { helperTag = "" }
+            let helperFailure = helperTag.isEmpty ? "" : " helperFailure=\(helperTag)"
+            errorType = " errorType=\(String(describing: type(of: error)))\(helperFailure)"
+        } else { errorType = "" }
         #else
         let firstSendFailure = sendFailure
+        let errorType = ""
         #endif
         let sendSite = firstSendFailure.map { " \($0)" } ?? ""
         let mediaSite = latestMedia.map { " latestMedia=[\($0)]" } ?? ""
-        let diagnostic = "\(stage.rawValue).\(kind.rawValue): \(category)\(actionTag) task=\(taskState) close=\(closePhase) cancellation=\(ownership)\(sendSite)\(mediaSite)"
+        let fetchReadSite = fetchReadFailure.map { " \($0)" } ?? ""
+        let diagnostic = "\(stage.rawValue).\(kind.rawValue): \(category)\(actionTag)\(errorType) task=\(taskState) close=\(closePhase) cancellation=\(ownership)\(sendSite)\(mediaSite)\(fetchReadSite)"
         if expectedRefusal {
             trace("qualifiedOriginalRefusal \(diagnostic)")
         } else if firstFailureDiagnostic == nil {
@@ -250,13 +273,14 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
         case .statusChanged: "statusChanged"
         }
     }
-    private func capture(_ output: CloudPolicyOutput, stage: DiagnosticStage, sendFailure: String? = nil, latestMedia: String? = nil) {
+    private func capture(_ output: CloudPolicyOutput, stage: DiagnosticStage, sendFailure: String? = nil,
+                         latestMedia: String? = nil, fetchReadFailure: String? = nil) {
         switch output {
         case .coreActionFailed(let error, let commands):
-            capture(error, stage: stage, kind: .coreActionFailed, sendFailure: sendFailure, latestMedia: latestMedia)
+            capture(error, stage: stage, kind: .coreActionFailed, sendFailure: sendFailure, latestMedia: latestMedia, fetchReadFailure: fetchReadFailure)
             onCommands?(commands)
         case .commands(let commands): onCommands?(commands)
-        case .applyDeferred(let error): capture(error, stage: stage, kind: .applyDeferred, sendFailure: sendFailure, latestMedia: latestMedia)
+        case .applyDeferred(let error): capture(error, stage: stage, kind: .applyDeferred, sendFailure: sendFailure, latestMedia: latestMedia, fetchReadFailure: fetchReadFailure)
         case .syncNowUnavailable: break
         }
     }
@@ -286,12 +310,15 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
         await beforeExecution?(command)
         #if DEBUG
         let sendCapture = DebugCloudDiagnostics.SendFailureCapture()
+        let fetchReadCapture = DebugCloudDiagnostics.FetchReadFailureCapture()
         let mediaRecorder = DebugCloudDiagnostics.Recorder()
         let observe = observeCoreCall
         let result = await MaintenanceCallObservation.$capture.withValue({ observe?(command, $0) }) {
             await DebugCloudDiagnostics.$sendFailureCapture.withValue(sendCapture) {
-                await DebugCloudDiagnostics.$mediaRecorder.withValue(mediaRecorder) {
-                    await production.execute(command, corePrepared: corePrepared)
+                await DebugCloudDiagnostics.$fetchReadFailureCapture.withValue(fetchReadCapture) {
+                    await DebugCloudDiagnostics.$mediaRecorder.withValue(mediaRecorder) {
+                        await production.execute(command, corePrepared: corePrepared)
+                    }
                 }
             }
         }
@@ -299,14 +326,17 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
         // not establish that no media work occurred during this command.
         let latestMedia = mediaRecorder.latestValue
         let sendFailure = sendCapture.firstValue
+        let fetchReadFailure = fetchReadCapture.firstValue
         #else
         let result = await production.execute(command, corePrepared: corePrepared)
         let latestMedia: String? = nil
         let sendFailure: String? = nil
+        let fetchReadFailure: String? = nil
         #endif
         await afterExecution?(command, result)
-        trace("command.end ordinal=\(sequence) action=\(label) elapsed_ms=\(serviceAppUptimeMilliseconds() - start) error=\(result.error != nil) deferred=\(result.deferred)")
-        for output in result.outputs { capture(output, stage: .executeOutputs, sendFailure: sendFailure, latestMedia: latestMedia) }
+        let fetchReadSite = fetchReadFailure.map { " \($0)" } ?? ""
+        trace("command.end ordinal=\(sequence) action=\(label) elapsed_ms=\(serviceAppUptimeMilliseconds() - start) error=\(result.error != nil) deferred=\(result.deferred)\(fetchReadSite)")
+        for output in result.outputs { capture(output, stage: .executeOutputs, sendFailure: sendFailure, latestMedia: latestMedia, fetchReadFailure: fetchReadFailure) }
         switch command.action {
         case .startEngine: started.yield(result.error == nil && !result.deferred)
         case .runExchange: exchanged.yield(result.error == nil && !result.deferred)
@@ -324,8 +354,8 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
             } catch { mediaCompleted.yield(.init(proof: .failure(error), receipts: await wire.receipts)) }
         }
         if let error = result.error {
-            let diagnostic = capture(error, stage: .executeError, action: command.action, sendFailure: sendFailure, latestMedia: latestMedia, expectedRefusal: result.originalGuardRefusal != nil || result.dependentFetchRefusal != nil)
-            if result.originalGuardRefusal == nil, result.dependentFetchRefusal == nil, !(error is CancellationError && SyncCommandTaskContext.current?.shutdownCancelled == true) {
+            let diagnostic = capture(error, stage: .executeError, action: command.action, sendFailure: sendFailure, latestMedia: latestMedia, fetchReadFailure: fetchReadFailure, expectedRefusal: result.originalGuardRefusal != nil || result.dependentFetchRefusal != nil || result.fetchProofOutcome?.accountStopCancellation == true)
+            if result.originalGuardRefusal == nil, result.dependentFetchRefusal == nil, result.fetchProofOutcome?.accountStopCancellation != true, !(error is CancellationError && SyncCommandTaskContext.current?.shutdownCancelled == true && result.fetchProofOutcome?.preservesFailure != true) {
                 causalTrace?.expectation(false)
                 Issue.record("Service app command failed; \(diagnostic)")
             }

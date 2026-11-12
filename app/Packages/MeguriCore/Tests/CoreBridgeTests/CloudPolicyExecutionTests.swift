@@ -1724,6 +1724,7 @@ extension EventTests {
                 let result = await executor.execute(command)
                 #expect(result.error as? BridgeError == .cloudPolicy(.staleCommand))
                 #expect(result.dependentFetchRefusal == nil && result.originalGuardRefusal == nil)
+                #expect(result.fetchProofOutcome == nil)
             }, whileRunning: {
                 try await gate.waitForArrival()
                 try await f.core.retireSDK(engine.instanceID, policyStop: false)
@@ -1771,10 +1772,12 @@ extension EventTests {
                     } catch {
                         #expect(error as? BridgeError == .cloudPolicy(mode == "malformed" ? .coreCapabilityUnavailable : .notNativeAction))
                         #expect(!(error is CloudDependentFetchRefusalError))
+                        #expect(!(error is CloudFetchProofError))
                     }
                 } else {
                     let result = await executor.execute(command)
                     #expect(result.dependentFetchRefusal == nil && result.originalGuardRefusal == nil)
+                    #expect(result.fetchProofOutcome == nil)
                     switch mode {
                     case "invalidSDK": #expect(result.error == nil) // Original NoOperation, not a qualified error.
                     case "wrongOwner": #expect(result.error as? BridgeError == .cloudPolicy(.wrongOwner))

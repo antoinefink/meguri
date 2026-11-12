@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// Immutable callback origin. An old delivery never looks up a replacement's id.
 private actor CloudSDKDelegate: CloudKitEngineDelegate {
@@ -63,6 +64,88 @@ struct CloudDependentFetchRefusalError: Error {
     let qualification: CloudPolicyDependentFetchRefusal
 }
 
+// One original proof wait owns both the first result and its producer. The
+// account receipt is attached only at the validated StopEngine cancellation.
+fileprivate struct CloudFetchProofCompletion: Sendable {
+    struct AccountStop: Sendable {
+        let command: CloudPolicyCommand
+        let execution: CoreCloudPolicyExecution
+    }
+    enum Producer: Sendable { case provider, caller, adapterStop, accountStop(AccountStop) }
+    let result: Result<Void, any Error>
+    let producer: Producer
+}
+
+fileprivate struct CloudFetchProofIssuer: Sendable {
+    let command: CloudPolicyCommand
+    let execution: CoreCloudPolicyExecution
+    let original: CloudSDKStopWitness
+}
+
+/// Sealed evidence for one original fetch proof result; grants no authority.
+public struct CloudPolicyFetchProofOutcome: Sendable {
+    fileprivate let completion: CloudFetchProofCompletion
+    fileprivate let issuer: CloudFetchProofIssuer?
+    fileprivate let original: CloudSDKStopWitness
+    fileprivate let earlierFailure: (any Error)?
+    fileprivate let cleanupFailure: (any Error)?
+    fileprivate let callerCancelled: Bool
+    var error: any Error {
+        if let earlierFailure { return earlierFailure }
+        if case .failure(let error) = completion.result { return error }
+        preconditionFailure("Fetch proof failure requires its original error")
+    }
+    public var accountStopCancellation: Bool {
+        guard !callerCancelled, earlierFailure == nil, cleanupFailure == nil,
+              issuer != nil, error is CancellationError,
+              case .accountStop = completion.producer else { return false }
+        return true
+    }
+    public var preservesFailure: Bool {
+        if earlierFailure != nil || cleanupFailure != nil { return true }
+        if case .provider = completion.producer { return true }
+        return false
+    }
+}
+struct CloudFetchProofError: Error {
+    let outcome: CloudPolicyFetchProofOutcome
+    var error: any Error { outcome.error }
+}
+
+// Specific to the post-control-read proof wait. No other completion uses it.
+private final class CloudFetchProofWait: Sendable {
+    let issuer: CloudFetchProofIssuer?
+    let original: CloudSDKStopWitness
+    private struct State {
+        var completion: CloudFetchProofCompletion?
+        var waiter: CheckedContinuation<CloudFetchProofCompletion, Never>?
+    }
+    private let state = Mutex(State())
+    init(issuer: CloudFetchProofIssuer?, original: CloudSDKStopWitness) {
+        self.issuer = issuer; self.original = original
+    }
+    func complete(_ result: Result<Void, any Error>, producer: CloudFetchProofCompletion.Producer) {
+        let completion = CloudFetchProofCompletion(result: result, producer: producer)
+        let waiter = state.withLock { state in
+            guard state.completion == nil else { return Optional<CheckedContinuation<CloudFetchProofCompletion, Never>>.none }
+            state.completion = completion
+            let waiter = state.waiter; state.waiter = nil
+            return waiter
+        }
+        waiter?.resume(returning: completion)
+    }
+    func drain() async -> CloudFetchProofCompletion {
+        await withCheckedContinuation { continuation in
+            let completion: CloudFetchProofCompletion? = state.withLock { state in
+                if let completion = state.completion { return completion }
+                state.waiter = continuation
+                return Optional<CloudFetchProofCompletion>.none
+            }
+            if let completion { continuation.resume(returning: completion) }
+        }
+    }
+}
+
 public actor CloudKitSyncAdapter {
     private enum StopReason: String {
         case registrationFailure, configureAutomatic, heldPolicyStop, finalStop
@@ -117,11 +200,11 @@ public actor CloudKitSyncAdapter {
         var lossAccountTask: (id: UUID, task: Task<Void, Never>)?
         var rootReadOperation: (any CloudPreparedOwnOperation)?
         var rootReadAdmission: CloudOwnWorkAdmission?
-        var rootReadIdentity: (task: Task<Void, Never>, wait: CloudKitNetworkCompletion)?
-        func cancelRootReadIdentity() {
+        var rootReadIdentity: (task: Task<Void, Never>, wait: CloudFetchProofWait)?
+        func cancelRootReadIdentity(accountStop: CloudFetchProofCompletion.AccountStop? = nil) {
+            rootReadIdentity?.wait.complete(.failure(CancellationError()),
+                producer: accountStop.map { .accountStop($0) } ?? .adapterStop)
             rootReadIdentity?.task.cancel()
-            // Revoke the fetch's wait, without claiming the provider returned.
-            rootReadIdentity?.wait.complete(CancellationError())
         }
         var assetWorker: CloudAssetReadExecutor?
         var assetQueue: [AssetReadRequest] = []
@@ -521,6 +604,17 @@ public actor CloudKitSyncAdapter {
         guard !quiescing || final else { return nil }
         if let task = stopTasks[origin] { return task }
         guard let instance = owned[origin] else { return nil }
+        let proofStop: CloudFetchProofCompletion.AccountStop?
+        if reason == .policyStop, let accountStop, accountStop.accountRetirement != nil,
+           let execution, case .stopEngine(.gateClosed) = accountStop.action,
+           current == origin, owned[origin] === instance, !instance.stopping,
+           !instance.authorityRetired, !instance.failed, instance.retirementFailure == nil,
+           instance.firstStopReason == nil,
+           let wait = instance.rootReadIdentity?.wait, let issuer = wait.issuer,
+           issuer.original === instance.stopWitness, case .requestFetch = issuer.command.action,
+           wait.original === instance.stopWitness, wait.original.sdk == origin {
+            proofStop = .init(command: accountStop, execution: execution)
+        } else { proofStop = nil }
         if instance.firstStopReason == nil { instance.firstStopReason = reason }
         #if DEBUG
         if !instance.firstStopRecorded {
@@ -535,7 +629,7 @@ public actor CloudKitSyncAdapter {
         instance.lossAccountTask?.task.cancel()
         instance.lossMediaDrainTask?.cancel()
         instance.rootReadAdmission?.setOpen(false)
-        instance.cancelRootReadIdentity()
+        instance.cancelRootReadIdentity(accountStop: proofStop)
         let task = Task {
             do {
                 try await self.drainInstance(origin, policyStop: policyStop, execution: execution, final: final, accountStop: accountStop)
@@ -1476,7 +1570,7 @@ public actor CloudKitSyncAdapter {
         }
         if let operationError { throw operationError }
     }
-    private func fetch(zones: [String], origin pinnedOrigin: String? = nil, execution: CoreCloudPolicyExecution? = nil, reservedFetch: Bool = false) async throws -> Bool {
+    private func fetch(zones: [String], origin pinnedOrigin: String? = nil, execution: CoreCloudPolicyExecution? = nil, reservedFetch: Bool = false, proofIssuer: CloudFetchProofIssuer? = nil) async throws -> Bool {
         guard !quiescing, !suspended, !suspending else { throw CancellationError() }
         let requestedOrigin = pinnedOrigin ?? current
         if !reservedFetch, fetchBusy {
@@ -1553,9 +1647,9 @@ public actor CloudKitSyncAdapter {
                 if let transport = assetReadTransport {
                     for read in plan.reads {
                         guard await valid(origin), !quiescing, !suspended, !suspending else { return false }
-                        let next = try await performFetchRead(read, transport: transport, origin: origin, instance: instance, execution: execution)
+                        let next = try await performFetchRead(read, transport: transport, origin: origin, instance: instance, execution: execution, proofIssuer: proofIssuer)
                         if let next {
-                            _ = try await performFetchRead(next, transport: transport, origin: origin, instance: instance, execution: execution)
+                            _ = try await performFetchRead(next, transport: transport, origin: origin, instance: instance, execution: execution, proofIssuer: proofIssuer)
                         }
                     }
                 }
@@ -1566,9 +1660,20 @@ public actor CloudKitSyncAdapter {
                 // qualified call whose read failed waits for the next event trigger.
                 if plan.qualified { return drained }
             } catch {
-                if await valid(origin) {
-                    _ = try await core.finishFetch(sdk: origin, id: id)
-                    try await reportOperation(execution, zones: [.root, .collection], kind: .fetch, started: false, error: error)
+                let proof = error as? CloudFetchProofError
+                do {
+                    if await valid(origin) {
+                        _ = try await core.finishFetch(sdk: origin, id: id)
+                        try await reportOperation(execution, zones: [.root, .collection], kind: .fetch, started: false, error: proof?.error ?? error)
+                    }
+                } catch {
+                    if let proof {
+                        throw CloudFetchProofError(outcome: .init(completion: proof.outcome.completion,
+                            issuer: proof.outcome.issuer, original: proof.outcome.original,
+                            earlierFailure: proof.outcome.earlierFailure, cleanupFailure: error,
+                            callerCancelled: Task.isCancelled))
+                    }
+                    throw error
                 }
                 throw error
             }
@@ -1577,7 +1682,7 @@ public actor CloudKitSyncAdapter {
     }
     private func performFetchRead(_ read: CoreCloudFetchRead, transport: any CloudOwnTransport,
                                   origin: String, instance: Instance,
-                                  execution: CoreCloudPolicyExecution?) async throws -> CoreCloudFetchRead? {
+                                  execution: CoreCloudPolicyExecution?, proofIssuer: CloudFetchProofIssuer? = nil) async throws -> CoreCloudFetchRead? {
         try Task.checkCancellation()
         guard await valid(origin), !quiescing, !suspended, !suspending,
               current == origin, owned[origin] === instance, !instance.stopping else { throw CancellationError() }
@@ -1622,10 +1727,39 @@ public actor CloudKitSyncAdapter {
             || [evidence?.failure?.code, evidence?.terminal?.code].contains(28)
             || evidence?.failure?.encryptedDataReset == true || evidence?.terminal?.encryptedDataReset == true
         if live && mustRefresh {
-            do { try await refreshFetchReadIdentity(instance: instance) }
+            do { try await refreshFetchReadIdentity(instance: instance, issuer: proofIssuer) }
             catch {
-                _ = try? await read.complete(result, discard: true, evidence: evidence, admission: admission)
-                throw error
+                let proof = error as? CloudFetchProofError
+                let originalError = proof?.error ?? error
+                #if DEBUG
+                DebugCloudDiagnostics.fetchReadFailureCapture?.record(
+                    targetActive: target.name == "active", transportError: transportError != nil,
+                    resultFailed: result == .failed, evidenceFailure: evidence?.failure != nil,
+                    evidenceTerminal: evidence?.terminal != nil, taskCancelled: Task.isCancelled,
+                    stopping: instance.stopping, policyStop: instance.firstStopReason == .policyStop,
+                    retirementFailure: instance.retirementFailure != nil,
+                    accountRetired: instance.stopWitness.accountRetired, cancellationError: originalError is CancellationError)
+                #endif
+                // Earlier native failures outrank the proof's cancellation. Keep
+                // the SDK numeric facts even after account authority is gone.
+                let earlierFailure: (any Error)?
+                if let transportError { earlierFailure = transportError }
+                else if result == .failed || evidence?.failure != nil || evidence?.terminal != nil {
+                    if let facts = evidence?.failure ?? evidence?.terminal, let code = facts.code {
+                        earlierFailure = CloudKitSDKOperationFailure(underlying: CloudOwnTransportFailure.missingReply,
+                            code: code, retryAfterMilliseconds: facts.retryAfterMilliseconds)
+                    } else { earlierFailure = CloudOwnTransportFailure.missingReply }
+                } else { earlierFailure = nil }
+                var cleanupFailure: (any Error)?
+                do { _ = try await read.complete(result, discard: true, evidence: evidence, admission: admission) }
+                catch { cleanupFailure = error }
+                if let proof, proofIssuer != nil {
+                    throw CloudFetchProofError(outcome: .init(completion: proof.outcome.completion,
+                        issuer: proof.outcome.issuer, original: proof.outcome.original,
+                        earlierFailure: earlierFailure, cleanupFailure: cleanupFailure,
+                        callerCancelled: Task.isCancelled))
+                }
+                throw earlierFailure ?? originalError
             }
         }
         let stillCurrent = await valid(origin)
@@ -1814,8 +1948,14 @@ public actor CloudKitSyncAdapter {
             throw BridgeError.unavailable(reason: "Cloud account proof unavailable")
         }
     }
-    private func refreshFetchReadIdentity(instance: Instance) async throws {
-        let wait = CloudKitNetworkCompletion()
+    #if DEBUG
+    private var fetchProofCompletionObserver: (@Sendable () async -> Void)?
+    func setFetchProofCompletionObserver(_ observer: (@Sendable () async -> Void)?) {
+        fetchProofCompletionObserver = observer
+    }
+    #endif
+    private func refreshFetchReadIdentity(instance: Instance, issuer: CloudFetchProofIssuer?) async throws {
+        let wait = CloudFetchProofWait(issuer: issuer, original: instance.stopWitness)
         let task = Task {
             do {
                 guard self.owned.values.contains(where: { $0 === instance }), !instance.stopping else {
@@ -1824,16 +1964,26 @@ public actor CloudKitSyncAdapter {
                 // This lookup is a proof read, not an engine account event;
                 // do not advance the no-state point of the retained FetchRead.
                 try await self.refreshControlIdentity()
-                wait.complete(nil)
-            } catch { wait.complete(error) }
+                wait.complete(.success(()), producer: .provider)
+            } catch { wait.complete(.failure(error), producer: .provider) }
         }
         instance.rootReadIdentity = (task, wait)
         defer { instance.rootReadIdentity = nil }
         try await withTaskCancellationHandler {
+            let completion = await wait.drain()
+            #if DEBUG
+            await fetchProofCompletionObserver?()
+            #endif
+            if case .failure = completion.result {
+                throw CloudFetchProofError(outcome: .init(completion: completion, issuer: issuer,
+                    original: instance.stopWitness, earlierFailure: nil, cleanupFailure: nil,
+                    callerCancelled: Task.isCancelled))
+            }
             try Task.checkCancellation()
-            try await wait.drain()
-            try Task.checkCancellation()
-        } onCancel: { task.cancel(); wait.complete(CancellationError()) }
+        } onCancel: {
+            wait.complete(.failure(CancellationError()), producer: .caller)
+            task.cancel()
+        }
     }
 
     public func requestFetch(zones: [String]) async throws { _ = try await fetch(zones: zones) }
@@ -2002,7 +2152,9 @@ public actor CloudKitSyncAdapter {
         }
         do {
             switch command.action {
-            case .requestFetch(let zones): _ = try await fetch(zones: scope(zones), origin: origin, execution: execution, reservedFetch: reservedFetch)
+            case .requestFetch(let zones):
+                _ = try await fetch(zones: scope(zones), origin: origin, execution: execution, reservedFetch: reservedFetch,
+                    proofIssuer: .init(command: command, execution: execution, original: instance.stopWitness))
             case .requestSend(let zones): try await send(zones: scope(zones), origin: origin, execution: execution)
             default: throw BridgeError.cloudPolicy(.notNativeAction)
             }
