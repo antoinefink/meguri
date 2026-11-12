@@ -86,6 +86,7 @@ nonisolated struct SyncCommandResult: Sendable {
     let outputs: [CloudPolicyOutput]
     let error: (any Error)?
     let originalGuardRefusal: CloudPolicyOriginalGuardRefusal?
+    let dependentFetchRefusal: CloudPolicyDependentFetchRefusal?
     let accountReadRefusal: SyncAccountReadRefusal?
     let deferred: Bool
     let accountVerified: Bool
@@ -95,10 +96,10 @@ nonisolated struct SyncCommandResult: Sendable {
     let afterOutputs: (@MainActor @Sendable (Bool) async -> SyncCommandResult)?
     init(outputs: [CloudPolicyOutput], error: (any Error)?, deferred: Bool, accountVerified: Bool = false, mediaCancellation: Bool = false, acknowledgedOutputCount: Int = 0,
          afterOutputs: (@MainActor @Sendable (Bool) async -> SyncCommandResult)? = nil, originalGuardRefusal: CloudPolicyOriginalGuardRefusal? = nil,
-         accountReadRefusal: SyncAccountReadRefusal? = nil) {
+         accountReadRefusal: SyncAccountReadRefusal? = nil, dependentFetchRefusal: CloudPolicyDependentFetchRefusal? = nil) {
         self.outputs = outputs; self.error = error; self.deferred = deferred; self.accountVerified = accountVerified
         self.mediaCancellation = mediaCancellation; self.originalGuardRefusal = originalGuardRefusal
-        self.accountReadRefusal = accountReadRefusal
+        self.accountReadRefusal = accountReadRefusal; self.dependentFetchRefusal = dependentFetchRefusal
         self.acknowledgedOutputCount = acknowledgedOutputCount; self.afterOutputs = afterOutputs
     }
 }
@@ -1440,7 +1441,7 @@ public final class SyncCoordinator {
                         DebugCloudDiagnostics.record(.commandResult, error: error)
                     }
                     #endif
-                    if result.originalGuardRefusal == nil, !supersededAccountCancellation, !(result.mediaCancellation && error is CancellationError) {
+                    if result.originalGuardRefusal == nil, result.dependentFetchRefusal == nil, !supersededAccountCancellation, !(result.mediaCancellation && error is CancellationError) {
                         operationFailed = true; failureRevision &+= 1
                     }
                 }

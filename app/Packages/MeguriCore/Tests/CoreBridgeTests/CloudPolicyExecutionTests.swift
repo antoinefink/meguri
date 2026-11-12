@@ -1537,3 +1537,252 @@ extension EventTests {
         }
     }
 }
+
+#if DEBUG
+enum DependentFetchRefusalCase: CaseIterable, Sendable, Equatable {
+    case noAccount, otherAccount, noPark, noRetirement, revocationFailure, earlierFailure
+    case retirementFailure
+    var qualifies: Bool { self == .noAccount || self == .otherAccount }
+}
+
+extension EventTests {
+    // Real issued commands and real Core account projection/StopEngine. The
+    // fake holds only A's native enqueue; B must never begin its Core fetch.
+    @Test(arguments: DependentFetchRefusalCase.allCases)
+    func nativeDependentFetchRefusalRequiresOriginalProofParkAndAccountRetirement(mode: DependentFetchRefusalCase) async throws {
+        try await withNativePolicyFixture { f in
+            let (policy, executor) = try await nativePolicy(f)
+            try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: executor)
+            let engine = try await f.engine()
+            let calls = engine.acceptedNetworkCalls.value
+            let a = try #require(try policyCommands(try await policy.input(.foreground)).first { if case .requestFetch = $0.action { true } else { false } })
+            let b = try #require(try policyCommands(try await policy.input(.foreground)).first { if case .requestFetch = $0.action { true } else { false } })
+            let native = CloudCallbackGate(), park = CloudCallbackGate(), revoke = CloudCallbackGate()
+            let originalFailure = NativePolicyOriginalFailure()
+            let bCalls = Mutex<[BridgeCall]>([])
+            let transitions = Mutex<[String]>([])
+            let returned = Mutex(false)
+            let aOutputs = Mutex(0), bOutputs = Mutex(0)
+            let bResult = Mutex<CloudPolicyNativeResult?>(nil)
+            await engine.pauseNextOperationTask(native)
+            if mode != .earlierFailure { await park.open() }
+            try await withCloudTask(gates: [native], operation: {
+                let result = await CloudPolicyOutputAcknowledgement.$input.withValue({ work in
+                    let output = try await work()
+                    aOutputs.withLock { $0 += 1 }
+                    return output
+                }) {
+                    await executor.execute(a, corePrepared: {}, acknowledgeOutputs: { outputs in
+                        aOutputs.withLock { $0 += outputs.count }
+                    })
+                }
+                // A's original failure remains observable and unqualified.
+                #expect(result.error != nil && result.dependentFetchRefusal == nil)
+                #expect(result.acknowledgedOutputCount == result.outputs.count)
+                #expect(aOutputs.withLock { $0 } == result.outputs.count)
+            }, whileRunning: {
+                try await native.waitForArrival()
+                let bTask = Task {
+                    let transition: (@Sendable (CloudQuiescentDependencyWait, CloudQuiescentDependencyWait.Phase) async throws -> Void)?
+                    if mode == .noPark { transition = nil }
+                    else {
+                        transition = { _, phase in
+                            switch phase {
+                            case .park:
+                                // The preparation's actual result read precedes
+                                // acceptance; no Core/native fetch has started.
+                                #expect(bCalls.withLock { $0.filter { $0 == .cloudPolicyExecutionResult }.count } == 1)
+                                transitions.withLock { $0.append("park") }
+                                if mode == .earlierFailure {
+                                    do { throw originalFailure }
+                                    catch { await park.enter(); throw error }
+                                }
+                                await park.enter()
+                            case .revoke:
+                                transitions.withLock { $0.append("revoke") }
+                                await revoke.enter()
+                                if mode == .revocationFailure { throw originalFailure }
+                            }
+                        }
+                    }
+                    let result = await MaintenanceCallObservation.$capture.withValue({ call in bCalls.withLock { $0.append(call) } }) {
+                        await CloudQuiescentDependencyWait.$transition.withValue(transition) {
+                            await CloudPolicyOutputAcknowledgement.$input.withValue({ work in
+                                let output = try await work()
+                                bOutputs.withLock { $0 += 1 }
+                                return output
+                            }) {
+                                await executor.execute(b, corePrepared: {}, acknowledgeOutputs: { outputs in
+                                    bOutputs.withLock { $0 += outputs.count }
+                                })
+                            }
+                        }
+                    }
+                    bResult.withLock { $0 = result }; returned.withLock { $0 = true }
+                    if mode != .noPark { _ = await park.operationSucceeded() }
+                    if mode != .noPark && mode != .earlierFailure { _ = await revoke.operationSucceeded() }
+                }
+                do {
+                    if mode == .noPark {
+                        // No accepted park exists. Synchronize at B's initial
+                        // read-only preparation using its actual lane entries.
+                        let limit = ContinuousClock.now + .seconds(10)
+                        while bCalls.withLock({ !$0.contains(.cloudPolicyExecutionValidateExecution) }) {
+                            try Task.checkCancellation()
+                            guard ContinuousClock.now < limit, !returned.withLock({ $0 }) else {
+                                throw BridgeError.internal("Dependent initial validation was not reached")
+                            }
+                            await Task.yield()
+                        }
+                        try await policy.validateOriginalOwner()
+                    } else { try await park.waitForArrival() }
+                    #expect(!returned.withLock { $0 })
+                    #expect(!bCalls.withLock { $0.contains(.cloudPolicyExecutionStartBeginFetch) })
+                    #expect(engine.acceptedNetworkCalls.value == calls)
+                    // Project this completed identity read into the stop command.
+                    let read = try await f.core.beginIdentityRead(transition: true)
+                    let other = mode == .otherAccount
+                    try #require(try await f.core.completeIdentityRead(id: read, status: other ? .available : .noAccount,
+                        identity: other ? Data("synthetic-account-B".utf8) : nil))
+                    let projected = try await policy.projectIdentityRead(read)
+                    let stop = try #require(try policyCommands(projected).first { if case .stopEngine = $0.action { true } else { false } })
+                    try #require(stop.accountRetirement != nil)
+                    if mode != .earlierFailure { await park.open() }
+                    if mode == .noRetirement {
+                        // Guard revocation alone supplies no retired-instance fact.
+                        await native.open()
+                    } else {
+                        if mode == .retirementFailure {
+                            await f.adapter.failNextRetirement(originalFailure)
+                            let failedStop = await executor.execute(stop)
+                            #expect((failedStop.error as? NativePolicyOriginalFailure) === originalFailure)
+                            #expect((await f.adapter.lastFailure as? NativePolicyOriginalFailure) === originalFailure)
+                            #expect(await f.adapter.retainedInstanceIDs() == [engine.instanceID])
+                            #expect(!(await engine.recordedTrace().contains(.released)))
+                        }
+                        let retirementCalls = Mutex<[BridgeCall]>([])
+                        let stopped = await MaintenanceCallObservation.$capture.withValue({ call in retirementCalls.withLock { $0.append(call) } }) {
+                            await executor.execute(stop)
+                        }
+                        #expect(stopped.error == nil)
+                        #expect(await engine.recordedTrace().contains(.released))
+                        if mode == .retirementFailure {
+                            #expect(await f.adapter.retainedInstanceIDs().isEmpty)
+                            #expect(retirementCalls.withLock { $0.contains(.cloudPolicyExecutionStartRetireOriginal) && $0.contains(.cloudPolicyRetirementResult) })
+                            #expect((await f.adapter.lastFailure as? NativePolicyOriginalFailure) === originalFailure)
+                        }
+                    }
+                    if mode == .earlierFailure { await park.open() }
+                    else if mode != .noPark {
+                        try await revoke.waitForArrival()
+                        #expect(!returned.withLock { $0 })
+                        #expect(!bCalls.withLock { $0.contains(.cloudPolicyExecutionStartBeginFetch) })
+                        await revoke.open()
+                    }
+                    await bTask.value
+                } catch {
+                    await native.open(); await park.open(); await revoke.open()
+                    bTask.cancel(); await bTask.value
+                    throw error
+                }
+            })
+            let result = try #require(bResult.withLock { $0 })
+            if mode == .earlierFailure || mode == .revocationFailure {
+                #expect((result.error as? NativePolicyOriginalFailure) === originalFailure)
+            } else { #expect(result.error as? BridgeError == .cloudPolicy(.staleCommand)) }
+            #expect((result.dependentFetchRefusal != nil) == mode.qualifies)
+            #expect(result.originalGuardRefusal == nil && !result.deferred)
+            #expect(!result.outputs.isEmpty && result.acknowledgedOutputCount == result.outputs.count)
+            #expect(bOutputs.withLock { $0 } == result.outputs.count)
+            #expect(!bCalls.withLock { $0.contains(.cloudPolicyExecutionStartBeginFetch) || $0.contains(.cloudPolicyExecutionStartReportStarted) })
+            #expect(engine.acceptedNetworkCalls.value == calls)
+            if mode == .retirementFailure {
+                #expect(result.dependentFetchRefusal == nil)
+                #expect((await f.adapter.lastFailure as? NativePolicyOriginalFailure) === originalFailure)
+                #expect(transitions.withLock { $0 } == ["park", "revoke"])
+                #expect(bCalls.withLock { $0.filter { $0 == .cloudPolicyStartPrepareExecution }.count } == 2)
+            }
+            if mode.qualifies {
+                // Both original lifecycle transition ACKs were joined, and the
+                // unchanged post-park preparation supplied the actual refusal.
+                #expect(transitions.withLock { $0 } == ["park", "revoke"])
+                #expect(bCalls.withLock { $0.filter { $0 == .cloudPolicyStartPrepareExecution }.count } == 2)
+            }
+        }
+    }
+
+    @Test func nativeDependentFetchCurrentInvalidSDKKeepsItsOriginalError() async throws {
+        try await withNativePolicyFixture { f in
+            let (policy, executor) = try await nativePolicy(f)
+            try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: executor)
+            let engine = try await f.engine()
+            let calls = engine.acceptedNetworkCalls.value
+            let command = try #require(try policyCommands(try await policy.input(.foreground)).first { if case .requestFetch = $0.action { true } else { false } })
+            let gate = CloudCallbackGate()
+            await f.adapter.setPolicyOperationOriginObserver { await gate.enter() }
+            try await withCloudTask(gates: [gate], operation: {
+                let result = await executor.execute(command)
+                #expect(result.error as? BridgeError == .cloudPolicy(.staleCommand))
+                #expect(result.dependentFetchRefusal == nil && result.originalGuardRefusal == nil)
+            }, whileRunning: {
+                try await gate.waitForArrival()
+                try await f.core.retireSDK(engine.instanceID, policyStop: false)
+                await gate.open()
+            })
+            await f.adapter.setPolicyOperationOriginObserver(nil)
+            #expect(engine.acceptedNetworkCalls.value == calls)
+        }
+    }
+
+    @Test(arguments: ["stale", "invalidSDK", "wrongOwner", "wrongAction", "malformed", "generation"])
+    func nativeDependentFetchInitialFailuresCannotAcquireQualification(mode: String) async throws {
+        var foreign: CloudPolicyCommand?
+        if mode == "wrongOwner" {
+            try await withNativePolicyFixture { f in
+                let (policy, executor) = try await nativePolicy(f)
+                try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: executor)
+                foreign = try #require(try policyCommands(try await policy.input(.foreground)).first { if case .requestFetch = $0.action { true } else { false } })
+            }
+        }
+        try await withNativePolicyFixture { f in
+            let (policy, executor) = try await nativePolicy(f)
+            try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: executor)
+            let engine = try await f.engine()
+            let calls = engine.acceptedNetworkCalls.value
+            let commands = try policyCommands(try await policy.input(.foreground))
+            let command = try #require(foreign ?? commands.first { if case .requestFetch = $0.action { true } else { false } })
+            if mode == "stale" { _ = try await policy.input(.settings(.init(enabled: true, paused: true, automatic: true, media: false))) }
+            if mode == "invalidSDK" { try await f.core.retireSDK(engine.instanceID, policyStop: false) }
+            if mode == "generation" { try await CloudFenceTransition.generation.apply(to: f) }
+            let parks = Mutex(0)
+            try await CloudQuiescentDependencyWait.$transition.withValue({ _, _ in parks.withLock { $0 += 1 } }) {
+                if mode == "wrongAction" || mode == "malformed" {
+                    let wrong: CloudPolicyCommand
+                    if mode == "malformed" { wrong = try await pendingCommand(policy) }
+                    else {
+                        let exchange = try await policy.input(.syncNowRequested(.command))
+                        wrong = try #require(try policyCommands(exchange).first { if case .runExchange = $0.action { true } else { false } })
+                    }
+                    do {
+                        try await f.adapter.executePolicyOperation(wrong, policy: policy)
+                        Issue.record("Wrong action entered a policy fetch")
+                    } catch {
+                        #expect(error as? BridgeError == .cloudPolicy(mode == "malformed" ? .coreCapabilityUnavailable : .notNativeAction))
+                        #expect(!(error is CloudDependentFetchRefusalError))
+                    }
+                } else {
+                    let result = await executor.execute(command)
+                    #expect(result.dependentFetchRefusal == nil && result.originalGuardRefusal == nil)
+                    switch mode {
+                    case "invalidSDK": #expect(result.error == nil) // Original NoOperation, not a qualified error.
+                    case "wrongOwner": #expect(result.error as? BridgeError == .cloudPolicy(.wrongOwner))
+                    case "generation": #expect(result.error as? BridgeError == .cloudPolicy(.closed))
+                    default: #expect(result.error as? BridgeError == .cloudPolicy(.staleCommand))
+                    }
+                }
+            }
+            #expect(parks.withLock { $0 } == 0 && engine.acceptedNetworkCalls.value == calls)
+        }
+    }
+}
+#endif

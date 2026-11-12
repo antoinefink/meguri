@@ -185,16 +185,26 @@ final class CloudPolicyReadinessDecision: Sendable {
     }
 }
 
-/// Value-only evidence from one exact Instance, retained after adapter removal.
+/// Original stop evidence from one exact Instance, retained after adapter removal.
 /// This grants no authority and never calls Core, UI or cancellation handlers.
 final class CloudSDKStopWitness: Sendable {
     let sdk: String
-    private let state = Mutex((stopping: false, authorityRetired: false))
+    private struct State {
+        var stopping = false
+        var authorityRetired = false
+        var accountRetirement: (CloudPolicyCommand, CoreCloudPolicyExecution)?
+    }
+    private let state = Mutex(State())
     init(sdk: String) { self.sdk = sdk }
     func update(stopping: Bool, authorityRetired: Bool) {
-        state.withLock { $0 = (stopping, authorityRetired) }
+        state.withLock { $0.stopping = stopping; $0.authorityRetired = authorityRetired }
     }
     var stoppingOrRetired: Bool { state.withLock { $0.stopping || $0.authorityRetired } }
+    func recordAccountRetirement(_ command: CloudPolicyCommand, execution: CoreCloudPolicyExecution) {
+        guard command.accountRetirement != nil else { return }
+        state.withLock { if $0.accountRetirement == nil { $0.accountRetirement = (command, execution) } }
+    }
+    var accountRetired: Bool { state.withLock { $0.authorityRetired && $0.accountRetirement != nil } }
 }
 
 /// Shared by one actual media run and its child work. Cancellation handlers can
@@ -257,6 +267,7 @@ public struct CloudPolicyNativeResult: Sendable {
     public let outputs: [CloudPolicyOutput]
     public let error: (any Error)?
     public let originalGuardRefusal: CloudPolicyOriginalGuardRefusal?
+    public let dependentFetchRefusal: CloudPolicyDependentFetchRefusal?
     public let deferred: Bool
     public let mediaCancellation: Bool
     public let acknowledgedOutputCount: Int
@@ -264,10 +275,11 @@ public struct CloudPolicyNativeResult: Sendable {
     /// The original cleanup failure is diagnostic evidence, outside app failure cycles.
     public let zoneDeletionError: (any Error)?
     public let cleanupInventoryError: (any Error)?
-    init(outputs: [CloudPolicyOutput], error: (any Error)?, deferred: Bool, zoneDeletionError: (any Error)? = nil, cleanupInventoryError: (any Error)? = nil, mediaCancellation: Bool = false, acknowledgedOutputCount: Int = 0, afterOutputs: (@Sendable () async -> CloudPolicyNativeResult)? = nil, originalGuardRefusal: CloudPolicyOriginalGuardRefusal? = nil) {
+    init(outputs: [CloudPolicyOutput], error: (any Error)?, deferred: Bool, zoneDeletionError: (any Error)? = nil, cleanupInventoryError: (any Error)? = nil, mediaCancellation: Bool = false, acknowledgedOutputCount: Int = 0, afterOutputs: (@Sendable () async -> CloudPolicyNativeResult)? = nil, originalGuardRefusal: CloudPolicyOriginalGuardRefusal? = nil, dependentFetchRefusal: CloudPolicyDependentFetchRefusal? = nil) {
         self.outputs = outputs; self.error = error; self.deferred = deferred; self.zoneDeletionError = zoneDeletionError; self.cleanupInventoryError = cleanupInventoryError
         self.mediaCancellation = mediaCancellation; self.acknowledgedOutputCount = acknowledgedOutputCount
         self.afterOutputs = afterOutputs; self.originalGuardRefusal = originalGuardRefusal
+        self.dependentFetchRefusal = dependentFetchRefusal
     }
 }
 // Forward the existing coordinator ACK seam through transparent backend
@@ -609,8 +621,9 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
             // Extract only this exact original attempt's error. A failed refresh
             // cannot change the already retained result.
             let attempt = caught as? CloudPolicyAttemptError
+            let dependent = caught as? CloudDependentFetchRefusalError
             let error: any Error
-            if let attempt { error = attempt.error } else { error = caught }
+            if let attempt { error = attempt.error } else if let dependent { error = dependent.error } else { error = caught }
             let refusal = attempt?.refusal
             #if DEBUG
             switch command.action {
@@ -634,7 +647,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
             }
             await delivery.acknowledge(outputs)
             _ = try? await delivery.appendInput(to: &outputs) { [policy] in try await policy.input(.refresh(.cloud)) }
-            return .init(outputs: outputs, error: error, deferred: false, acknowledgedOutputCount: delivery.count, originalGuardRefusal: refusal)
+            return .init(outputs: outputs, error: error, deferred: false, acknowledgedOutputCount: delivery.count, originalGuardRefusal: refusal, dependentFetchRefusal: dependent?.qualification)
         }
     }
     private func performCleanup(_ command: CloudPolicyCommand, corePrepared: @Sendable () async -> Void) async -> CloudPolicyNativeResult {

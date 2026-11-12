@@ -594,10 +594,20 @@ public enum CloudPolicyAction: Sendable {
         }
     }
 }
+// Only a successful original account projection can attach this receipt to
+// its own StopEngine. It is diagnostic provenance, never execution authority.
+struct CloudPolicyAccountRetirement: Sendable {
+    let status: CloudPolicyStatus
+    fileprivate init(_ status: CloudPolicyStatus) { self.status = status }
+}
 public struct CloudPolicyCommand: Sendable {
     let raw: MeguriCoreBindings.CloudPolicyCommand
     public let action: CloudPolicyAction
-    init(_ v: MeguriCoreBindings.CloudPolicyIssuedCommand) { raw = v.handle; action = .init(v.action) }
+    let accountRetirement: CloudPolicyAccountRetirement?
+    init(_ v: MeguriCoreBindings.CloudPolicyIssuedCommand) { self.init(v, accountRetirement: nil) }
+    fileprivate init(_ v: MeguriCoreBindings.CloudPolicyIssuedCommand, accountRetirement: CloudPolicyAccountRetirement?) {
+        raw = v.handle; action = .init(v.action); self.accountRetirement = accountRetirement
+    }
 }
 /// Follow-up commands on failure are required work, including StopEngine.
 /// Consumers handle the output before selecting or displaying an error.
@@ -613,6 +623,23 @@ public enum CloudPolicyOutput: Sendable {
         case .applyDeferred(let error): .applyDeferred(error: BridgeError(error))
         case .syncNowUnavailable(let reason): .syncNowUnavailable(.init(reason))
         }
+    }
+    // Inspect only the status returned WITH this successfully projected input.
+    // A later status lookup or an arbitrary StopEngine cannot supply this fact.
+    static func accountProjection(_ value: MeguriCoreBindings.CloudPolicyOutput) -> Self {
+        guard case .commands(let commands) = value,
+              let status = commands.compactMap({ issued -> CloudPolicyStatus? in
+                  if case .statusChanged(let status) = issued.action { return .init(status) }
+                  return nil
+              }).last,
+              status.accountStatus == .noAccount || (status.accountStatus == .available && !status.accountMatchesBinding)
+        else { return .init(value) }
+        return .commands(commands.map { issued in
+            let receipt: CloudPolicyAccountRetirement?
+            if case .stopEngine(.gateClosed) = issued.action { receipt = .init(status) }
+            else { receipt = nil }
+            return CloudPolicyCommand(issued, accountRetirement: receipt)
+        })
     }
 }
 public struct CloudPolicyCapture: Sendable {

@@ -324,8 +324,8 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
             } catch { mediaCompleted.yield(.init(proof: .failure(error), receipts: await wire.receipts)) }
         }
         if let error = result.error {
-            let diagnostic = capture(error, stage: .executeError, action: command.action, sendFailure: sendFailure, latestMedia: latestMedia, expectedRefusal: result.originalGuardRefusal != nil)
-            if result.originalGuardRefusal == nil, !(error is CancellationError && SyncCommandTaskContext.current?.shutdownCancelled == true) {
+            let diagnostic = capture(error, stage: .executeError, action: command.action, sendFailure: sendFailure, latestMedia: latestMedia, expectedRefusal: result.originalGuardRefusal != nil || result.dependentFetchRefusal != nil)
+            if result.originalGuardRefusal == nil, result.dependentFetchRefusal == nil, !(error is CancellationError && SyncCommandTaskContext.current?.shutdownCancelled == true) {
                 causalTrace?.expectation(false)
                 Issue.record("Service app command failed; \(diagnostic)")
             }

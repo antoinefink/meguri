@@ -170,7 +170,7 @@ public actor CoreCloudPolicyService {
             let started = try raw.startRefreshAccount()
             return CloudPolicyJobValue(handle: started.handle, read: { try started.result.result() })
         }
-        return CloudPolicyOutput(value)
+        return CloudPolicyOutput.accountProjection(value)
     }
     func projectIdentityRead(_ request: UInt64) async throws -> CloudPolicyOutput {
         defer { notifyReadinessChanged() }
@@ -180,7 +180,7 @@ public actor CoreCloudPolicyService {
             let started = try raw.startProjectIdentityRead(request: request)
             return CloudPolicyJobValue(handle: started.handle, read: { try started.result.result() })
         }
-        return CloudPolicyOutput(value)
+        return CloudPolicyOutput.accountProjection(value)
     }
     /// Latest applied Driver snapshot. Feed Refresh after core events and
     /// consume its commands before reading status; this read emits no work.

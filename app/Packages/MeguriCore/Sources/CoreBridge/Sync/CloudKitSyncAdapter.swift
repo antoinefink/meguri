@@ -45,6 +45,24 @@ struct CloudMediaSendReceipt {
     }
 }
 
+/// Records a dependent fetch refusal for its original command and SDK.
+/// The retained proof grants no execution authority.
+public struct CloudPolicyDependentFetchRefusal: Sendable {
+    private let command: CloudPolicyCommand
+    private let execution: CoreCloudPolicyExecution
+    private let original: CloudSDKStopWitness
+    private let dependencies: [CloudQuiescentDependencyWait]
+    fileprivate init(command: CloudPolicyCommand, execution: CoreCloudPolicyExecution,
+                     original: CloudSDKStopWitness, dependencies: [CloudQuiescentDependencyWait]) {
+        self.command = command; self.execution = execution
+        self.original = original; self.dependencies = dependencies
+    }
+}
+struct CloudDependentFetchRefusalError: Error {
+    let error: BridgeError
+    let qualification: CloudPolicyDependentFetchRefusal
+}
+
 public actor CloudKitSyncAdapter {
     private enum StopReason: String {
         case registrationFailure, configureAutomatic, heldPolicyStop, finalStop
@@ -129,6 +147,7 @@ public actor CloudKitSyncAdapter {
         var batches: [UInt64: UInt32] = [:]
         var savedRemovalGuards: [UInt64: (guardValue: CloudGuard, names: Set<String>)] = [:]
         var failed = false
+        var retirementFailure: (any Error)?
         #if DEBUG
         private(set) var firstFailure: (phase: FailurePhase, tag: String)?
         var firstStopRecorded = false
@@ -214,6 +233,8 @@ public actor CloudKitSyncAdapter {
     func setOriginalMediaDrainWithWitness(_ drain: @escaping @Sendable (CloudSDKStopWitness) async -> Void) { originalMediaDrain = drain }
 
     #if DEBUG
+    private var nextRetirementError: (any Error)?
+    func failNextRetirement(_ error: any Error) { nextRetirementError = error }
     // Scheduling observation only, after the lane-backed call releases Core.
     private var sendAdmissionObserver: (@Sendable (Bool) async -> Void)?
     private var policyOperationOriginObserver: (@Sendable () async -> Void)?
@@ -494,7 +515,7 @@ public actor CloudKitSyncAdapter {
             catch { throw error }
         }
     }
-    private func beginStop(_ origin: String, reason: StopReason, policyStop: Bool, execution: CoreCloudPolicyExecution? = nil, final: Bool = false) -> Task<Void, any Error>? {
+    private func beginStop(_ origin: String, reason: StopReason, policyStop: Bool, execution: CoreCloudPolicyExecution? = nil, final: Bool = false, accountStop: CloudPolicyCommand? = nil) -> Task<Void, any Error>? {
         // Callback/creation error paths must preserve original authority during
         // the same required-effect drain as the issued StopEngine command.
         guard !quiescing || final else { return nil }
@@ -517,9 +538,10 @@ public actor CloudKitSyncAdapter {
         instance.cancelRootReadIdentity()
         let task = Task {
             do {
-                try await self.drainInstance(origin, policyStop: policyStop, execution: execution, final: final)
+                try await self.drainInstance(origin, policyStop: policyStop, execution: execution, final: final, accountStop: accountStop)
                 self.stopTasks.removeValue(forKey: origin); self.changed()
             } catch {
+                if instance.retirementFailure == nil { instance.retirementFailure = error }
                 self.lastFailure = error
                 self.stopTasks.removeValue(forKey: origin); self.changed()
                 throw error
@@ -529,10 +551,10 @@ public actor CloudKitSyncAdapter {
         changed()
         return task
     }
-    private func stopInstance(_ origin: String, reason: StopReason, policyStop: Bool, execution: CoreCloudPolicyExecution? = nil, final: Bool = false) async throws {
-        if let task = beginStop(origin, reason: reason, policyStop: policyStop, execution: execution, final: final) { try await task.value }
+    private func stopInstance(_ origin: String, reason: StopReason, policyStop: Bool, execution: CoreCloudPolicyExecution? = nil, final: Bool = false, accountStop: CloudPolicyCommand? = nil) async throws {
+        if let task = beginStop(origin, reason: reason, policyStop: policyStop, execution: execution, final: final, accountStop: accountStop) { try await task.value }
     }
-    private func drainInstance(_ origin: String, policyStop: Bool, execution: CoreCloudPolicyExecution?, final: Bool) async throws {
+    private func drainInstance(_ origin: String, policyStop: Bool, execution: CoreCloudPolicyExecution?, final: Bool, accountStop: CloudPolicyCommand?) async throws {
         guard let instance = owned[origin] else { return }
         instance.rootReadOperation?.cancel()
         await drainOriginalAssetReads(origin)
@@ -541,9 +563,20 @@ public actor CloudKitSyncAdapter {
         if !instance.authorityRetired {
             // If publication inspection or persistence fails, Core still owns the SDK.
             // Keep the instance, return the error, and let stopTasks attempt stop again.
+            #if DEBUG
+            if let error = nextRetirementError {
+                nextRetirementError = nil
+                throw error
+            }
+            #endif
             if let execution { try await execution.retireOriginal() }
             else { try await core.retireSDK(origin, policyStop: policyStop) }
-            instance.authorityRetired = true; changed()
+            instance.authorityRetired = true
+            if let accountStop, let execution, instance.firstStopReason == .policyStop, !instance.failed,
+               instance.retirementFailure == nil {
+                instance.stopWitness.recordAccountRetirement(accountStop, execution: execution)
+            }
+            changed()
         }
         while instance.handlers > 0 || instance.applying { let old = version; try await waitForChange(after: old) }
         await instance.engine.cancelOperations()
@@ -1461,7 +1494,7 @@ public actor CloudKitSyncAdapter {
                 policyOperationOutputs.insert(contentsOf: outputs, at: 0)
                 throw BridgeError.unavailable(reason: "Cloud outputs require original acknowledgement")
             }
-            try await waitForQuiescentFetchDependency()
+            _ = try await waitForQuiescentFetchDependency()
         }
         guard !quiescing else { throw CancellationError() }
         guard let origin = requestedOrigin, let instance = owned[origin], await valid(origin) else {
@@ -1842,7 +1875,7 @@ public actor CloudKitSyncAdapter {
                 heldStops.append((command, execution, policy))
                 return true
             }
-            if let original { try await stopInstance(original, reason: .policyStop, policyStop: false, execution: execution) }
+            if let original { try await stopInstance(original, reason: .policyStop, policyStop: false, execution: execution, accountStop: command) }
             else { try await execution.retireOriginal() }
             if quiescing, let original, let instance = owned[original], !instance.authorityRetired {
                 heldStops.append((command, execution, policy))
@@ -1871,7 +1904,8 @@ public actor CloudKitSyncAdapter {
     }
     // Call only between this command's actual completed/ACKed stages. The
     // busy owner's callbacks stay live and continue to fence its own admission.
-    private func waitForQuiescentFetchDependency() async throws {
+    private func waitForQuiescentFetchDependency() async throws -> [CloudQuiescentDependencyWait] {
+        var joined: [CloudQuiescentDependencyWait] = []
         while fetchBusy {
             let parked = try await CloudQuiescentDependencyWait.park()
             do {
@@ -1882,25 +1916,55 @@ public actor CloudKitSyncAdapter {
             }
             try await parked?.revoke()
             try Task.checkCancellation()
+            if let parked { joined.append(parked) }
         }
+        return joined
     }
-    private func reserveUnadmittedPolicyFetch() async throws {
-        try await waitForQuiescentFetchDependency()
+    private func reserveUnadmittedPolicyFetch() async throws -> [CloudQuiescentDependencyWait] {
+        let joined = try await waitForQuiescentFetchDependency()
         try Task.checkCancellation()
         guard !quiescing, !suspended, !suspending else { throw CancellationError() }
         fetchBusy = true
+        return joined
     }
     func executePolicyOperation(_ command: CloudPolicyCommand, policy: CoreCloudPolicyService) async throws {
-        // Retain this command's originals even while its unadmitted fetch parks.
         let originals = owned
         let reservedFetch: Bool
         if case .requestFetch = command.action { reservedFetch = true } else { reservedFetch = false }
-        if reservedFetch { try await reserveUnadmittedPolicyFetch() }
+        var issuer: (execution: CoreCloudPolicyExecution, instance: Instance)?
+        if reservedFetch, fetchBusy {
+            // Read-only issuer proof: its Core job/result/ACK and original-SDK
+            // read finish before a dependent park. No fetch/admission is begun.
+            guard let prepared = try await policy.prepareExecution(command) else { return }
+            let origin = try await prepared.originalSDK()
+            try await prepared.validate()
+            if let origin, let instance = originals[origin], !instance.stopping, !instance.authorityRetired, !instance.failed {
+                issuer = (prepared, instance)
+            }
+        }
+        let dependencies: [CloudQuiescentDependencyWait]
+        if reservedFetch { dependencies = try await reserveUnadmittedPolicyFetch() }
+        else { dependencies = [] }
         defer { if reservedFetch { fetchBusy = false; changed() } }
 
-        // Retention permits classification, never a new SDK admission. Core's
-        // original capability is still validated after the park is revoked.
-        guard let execution = try await policy.prepareExecution(command) else { return }
+        // Preserve the original post-park disposition and guard checks,
+        // including NoOperation. The earlier capability is evidence only.
+        let execution: CoreCloudPolicyExecution
+        do {
+            guard let prepared = try await policy.prepareExecution(command) else { return }
+            execution = prepared
+        } catch {
+            guard !Task.isCancelled, let issuer, !dependencies.isEmpty,
+                  !issuer.instance.failed, issuer.instance.firstStopReason == .policyStop,
+                  issuer.instance.retirementFailure == nil,
+                  issuer.instance.stopWitness.accountRetired,
+                  let refusal = error as? BridgeError, refusal == .cloudPolicy(.staleCommand)
+            else { throw error }
+            // This is the first failure after a completed valid proof and
+            // accepted park/revocation, before any Core fetch or native effect.
+            throw CloudDependentFetchRefusalError(error: refusal, qualification:
+                .init(command: command, execution: issuer.execution, original: issuer.instance.stopWitness, dependencies: dependencies))
+        }
         #if DEBUG
         await policyOperationOriginObserver?()
         #endif
@@ -2024,7 +2088,7 @@ public actor CloudKitSyncAdapter {
                 }
                 try await parked?.revoke()
             }
-            try await waitForQuiescentFetchDependency()
+            _ = try await waitForQuiescentFetchDependency()
         } while exchangeTask != nil || policyReservation != nil
         try Task.checkCancellation()
         guard !quiescing else { throw CancellationError() }
@@ -2040,7 +2104,7 @@ public actor CloudKitSyncAdapter {
     func preparePolicyExchange(execution: CoreCloudPolicyExecution) async throws -> PreparedPolicyExchange {
         guard !quiescing else { throw CancellationError() }
         guard let origin = try await execution.originalSDK() else { throw BridgeError.cloudPolicy(.staleCommand) }
-        try await waitForQuiescentFetchDependency()
+        _ = try await waitForQuiescentFetchDependency()
         try await waitForDeferredUpdates(origin: origin)
         try await execution.validate()
         guard await valid(origin) else { throw BridgeError.cloudPolicy(.staleCommand) }
