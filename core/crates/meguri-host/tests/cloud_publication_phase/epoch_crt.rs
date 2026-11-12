@@ -1,7 +1,7 @@
 //! P6 producer step only: actual publication and fetch transactions, no policy seeding.
 use super::*;
 
-fn setup() -> (tempfile::TempDir, std::path::PathBuf, CoreHost, Service<SeededRandom>) {
+pub(super) fn setup() -> (tempfile::TempDir, std::path::PathBuf, CoreHost, Service<SeededRandom>) {
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("device");
     generated(&dir);
@@ -44,7 +44,7 @@ fn epoch_crt_publication_requires_actual_epoch_ack_and_survives_reopen() {
     reopened.close().unwrap();
 }
 
-fn save_complete_epoch(
+pub(super) fn save_complete_epoch(
     service: &mut Service<SeededRandom>,
     zone: &str,
     change: impl FnOnce(&mut Epoch),
