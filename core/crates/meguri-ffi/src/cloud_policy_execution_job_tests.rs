@@ -1923,11 +1923,27 @@ fn original_attempt_detail_queued_cancellation_and_generation_rejection_never_qu
 fn original_attempt_detail_foreign_facade_cannot_admit_or_qualify_command() {
     let (fixture, original, _, _) = admission_fixture(AdmissionKind::Send);
     let command = original_attempt_command(&original, false);
-    let foreign = fixture.workflow.policy().unwrap();
+    let (foreign_fixture, foreign, _, _) = admission_fixture(AdmissionKind::Send);
+    assert!(!Arc::ptr_eq(&original, &foreign));
+    let before = [&fixture, &foreign_fixture].map(|fixture| {
+        let state = fixture.workflow.host.cloud_policy_driver().unwrap().state();
+        (
+            state.status().pending,
+            state.cycles,
+            fixture.workflow.core.emitted_update_ids(),
+        )
+    });
     assert!(
         matches!(foreign.start_execute_core(command), Err(error) if error == policy_failure(CloudPolicyFailure::WrongOwner))
     );
+    for (fixture, (pending, cycles, emitted)) in [&fixture, &foreign_fixture].into_iter().zip(before) {
+        let state = fixture.workflow.host.cloud_policy_driver().unwrap().state();
+        assert_eq!(state.status().pending, pending);
+        assert_eq!(state.cycles, cycles);
+        assert_eq!(fixture.workflow.core.emitted_update_ids(), emitted);
+    }
     fixture.workflow.host.close().unwrap();
+    foreign_fixture.workflow.host.close().unwrap();
 }
 
 #[test]
@@ -1967,7 +1983,7 @@ fn original_attempt_current_invalid_media_and_retired_or_missing_sdk_never_quali
         if condition == 0 {
             assert_eq!(detail.error, Some(policy_failure(CloudPolicyFailure::StaleCommand)));
         }
-        assert!(matches!(job.result.result(), Err(error) if Some(error) == detail.error));
+        assert!(matches!(job.result.result(), Err(error) if Some(&error) == detail.error.as_ref()));
         assert_eq!(fixture.workflow.core.emitted_update_ids(), before);
         assert_eq!(
             fixture.workflow.host.cloud_policy_driver().unwrap().state().cycles,

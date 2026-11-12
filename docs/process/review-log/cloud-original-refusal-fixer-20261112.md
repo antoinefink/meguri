@@ -49,3 +49,20 @@ No builds or tests were run in this runner. No further compile issue was identif
 - `core-test/20261112T084734Z-79786` compiled production code, then stopped at one new Rust test expression moving an error in a match guard. No executable test pass is claimed.
 - The new expression requires an ownership-only correction with the same comparison. Independent source review is running separately. Swift checks, native app verification and required full integration remain pending.
 - After reconnection, `ui-test/20261112T084205Z-73262` reported the phone available. `drive/20261112T084436Z-76719` then failed to enable automation before its script ran. It provides no app or convergence result.
+
+## Foreign facade fixture correction
+
+- Starting filtered commit: `51af0d7` (permitted source baseline); requested upstream master: `28330189`. The seed's exact Rust E0507 reference comparison and reviewed conditional ACK count are preserved.
+- User-reported MG `core-test/20261112T085113Z-82325`: 84 tests, 81 passed and 3 failed. This pass addresses only the new foreign-facade test; the two older Host failures remain with the integrator.
+- `original_attempt_detail_foreign_facade_cannot_admit_or_qualify_command` now creates a second real admission fixture after the first owner issues its command. It asserts distinct policy Arc identity, preserves the precise immediate WrongOwner assertion, checks unchanged pending counts, cycles and emitted update IDs on both hosts, and closes both hosts.
+- Production behavior, qualification rules, original tests, expected errors, timeouts and privacy guards are unchanged. Own-source inspection and one bounded source consistency pass only; no builds, tests, network or agents. Integrator owns executable verification, independent review and provenance/privacy/similarity gates. No passing-run or acceptance claim.
+
+## Focused verification and scoped review
+
+- `cleanroom/20261112T084601Z-78062`: no production P0-P2 findings; one P2 in the new app test. UpdatePending keeps a required refresh, so its exact result-ACK count is two. ResumeMedia has one. The test now requires those exact counts.
+- `cleanroom/20261112T085539Z-87891`: the test-only corrections have no P0-P2 findings. This review does not replace the final recovery review.
+- `core-test/20261112T085113Z-82325`: 81 of 84 tests passed. The new foreign-owner test reused the same cached policy object and failed; its fixture now opens a second actual Host. Two older Host cases also failed and remain open: `first_manual_capture_cannot_send_after_changed_or_deleted_root` and `native_authority_retire_isolation_precedes_held_readback_and_survives_failure`. They have not been waived or proved unrelated by a baseline run.
+- `core-test/20261112T085642Z-88427`: both corrected foreign-owner and shared-cell cancelled/absent-result cases passed. This is separate focused evidence, not a fresh pass of the 84-test run.
+- `swift-test/20261112T085413Z-84470`: passed the two new original-result cases, the unchanged stale-command rejection case and seven instrumentation checks.
+- `swift-test/20261112T085753Z-89549`: passed. `serviceAppPauseQualifiesOnlyOriginalSupersededCommand` and `serviceAppPauseAndResumeWithMediaRetiresOriginalSDKWithoutOperationFailure` each passed both parameter values. `currentCommandFailuresStayStickyIncludingDuringShutdown` passed. The tests retain required output delivery and ACK checks.
+- Formatting passed. Signed Mac/phone verification, current similarity evidence, retained failed recovery cases and the full batch gate remain pending. No completed-unit or release claim.

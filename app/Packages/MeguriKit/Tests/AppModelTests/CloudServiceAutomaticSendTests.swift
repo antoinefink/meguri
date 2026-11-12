@@ -177,7 +177,7 @@ extension ReviewCollectionStartupTests {
                 #expect(afterMedia.names == media.names && afterMedia.bytes == media.bytes)
                 await returned.release()
                 await app.sync.drainOperations()
-                #expect(acknowledgements == 1)
+                #expect(acknowledgements == (resumeMedia ? 1 : 2))
                 #expect(!app.sync.operationFailed && app.sync.failureRevision == failureRevision)
                 #expect(backend.firstFailureDiagnostic == nil)
                 #expect(backend.diagnostics.contains { $0.contains("qualifiedOriginalRefusal") })
