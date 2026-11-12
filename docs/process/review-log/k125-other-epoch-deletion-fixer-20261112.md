@@ -41,3 +41,7 @@ The older preview remains running after native Quit. A path-verified TERM stops 
 Phone `run/20261112T012522Z-78795` passes normal-launch verification at the same source. Retained drive `012646Z-80225` completes all eight actions with verified continuity. Its 45 hierarchy findings keep the overall receipt failed. The prior synthetic peer change remains visible. The binding is active, usable and account-matched; pending, in-flight and waiting incoming counts are zero. No new peer edit is made, so zero new record deliveries is expected. The latest finite fault remains cancellation; this observation shows no new tracking fault and establishes no cold-discovery guarantee.
 
 The full integration gate, device accessibility repair and remaining recovery work are still required. These focused and normal-app observations do not replace them.
+
+## Lint before integration
+
+`core-lint/20261112T014155Z-82082` rejects two one-element slices made with cloned strings in the new tests. Filtered repair `cleanroom/20261112T014405Z-82449`, committed as `7eb70c91`, borrows the same strings. The two-name duplicate input and all assertions remain intact. Refreshed lint `014550Z-83534` passes. Focused Rust `014610Z-83847` passes all five affected tests. The failed lint receipt is retained; no warning is suppressed. The next full gate uses the original integration base.
