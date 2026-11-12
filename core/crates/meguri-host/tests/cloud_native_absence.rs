@@ -3107,8 +3107,10 @@ fn fetched_other_epoch_deletions_remove_due_rows_for_every_cause_and_survive_reo
     drop(collection);
     rig.host.close().unwrap();
     let reopened = open(&rig.root.path().join("device"));
-    let (sdk, state, _) = admit(&reopened);
     let runtime = reopened.cloud_runtime().unwrap();
+    assert_eq!(runtime.adapter_snapshot().unwrap().entities, durable.entities);
+    // Check raw persistence before admission reconciles binding and refreshes observer stamps.
+    let (sdk, state, _) = admit(&reopened);
     assert_eq!(state.as_deref(), Some(b"after-zone-deletions".as_slice()));
     assert!(runtime.publication_control_for_testing().unwrap().zones.is_empty());
     assert_eq!(
@@ -3119,7 +3121,6 @@ fn fetched_other_epoch_deletions_remove_due_rows_for_every_cause_and_survive_reo
     let name = codec::entity_name(&[114; 32], codec::Kind::Deck, &codec::id_key(deck.0)).unwrap();
     let entity = runtime.entity_facts(&name).unwrap().unwrap();
     assert!(entity.mark.is_some());
-    assert_eq!(runtime.adapter_snapshot().unwrap().entities, durable.entities);
     assert_eq!(observed_zones, zones);
     runtime
         .adapter_fetched_collection_zone_deletions(&sdk, &observed_zones)
