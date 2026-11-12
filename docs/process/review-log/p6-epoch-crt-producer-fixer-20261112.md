@@ -84,7 +84,8 @@ helper called on the outer rig rather than its child. Filtered repairs
 add explicit None values and forward the existing read-only child command.
 An initial over-anchored filter selected no test and failed; it is not evidence
 of a pass. The corrected selection below exercises the actual suspension.
-Final independent review of these small compile repairs follows the WIP commit.
+Final independent review `cleanroom/20261112T201410Z-18689` reports no
+P0/P1 findings and no optional P2 findings in these compilation repairs.
 
 - RED `core-test/20261112T200939Z-15382`: the retained-adoption regression
   fails at suspension with the old V2 reader, while the installed schema is V3.
