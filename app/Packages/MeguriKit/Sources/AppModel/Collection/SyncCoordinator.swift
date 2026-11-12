@@ -88,6 +88,7 @@ nonisolated struct SyncCommandResult: Sendable {
     let originalGuardRefusal: CloudPolicyOriginalGuardRefusal?
     let dependentFetchRefusal: CloudPolicyDependentFetchRefusal?
     let fetchProofOutcome: CloudPolicyFetchProofOutcome?
+    let nativeCancellation: CloudPolicyNativeCancellation?
     let accountReadRefusal: SyncAccountReadRefusal?
     let deferred: Bool
     let accountVerified: Bool
@@ -97,26 +98,47 @@ nonisolated struct SyncCommandResult: Sendable {
     let afterOutputs: (@MainActor @Sendable (Bool) async -> SyncCommandResult)?
     init(outputs: [CloudPolicyOutput], error: (any Error)?, deferred: Bool, accountVerified: Bool = false, mediaCancellation: Bool = false, acknowledgedOutputCount: Int = 0,
          afterOutputs: (@MainActor @Sendable (Bool) async -> SyncCommandResult)? = nil, originalGuardRefusal: CloudPolicyOriginalGuardRefusal? = nil,
-         accountReadRefusal: SyncAccountReadRefusal? = nil, dependentFetchRefusal: CloudPolicyDependentFetchRefusal? = nil, fetchProofOutcome: CloudPolicyFetchProofOutcome? = nil) {
+         accountReadRefusal: SyncAccountReadRefusal? = nil, dependentFetchRefusal: CloudPolicyDependentFetchRefusal? = nil, fetchProofOutcome: CloudPolicyFetchProofOutcome? = nil, nativeCancellation: CloudPolicyNativeCancellation? = nil) {
         self.outputs = outputs; self.error = error; self.deferred = deferred; self.accountVerified = accountVerified
         self.mediaCancellation = mediaCancellation; self.originalGuardRefusal = originalGuardRefusal
         self.accountReadRefusal = accountReadRefusal; self.dependentFetchRefusal = dependentFetchRefusal
-        self.fetchProofOutcome = fetchProofOutcome
+        self.fetchProofOutcome = fetchProofOutcome; self.nativeCancellation = nativeCancellation
         self.acknowledgedOutputCount = acknowledgedOutputCount; self.afterOutputs = afterOutputs
     }
 }
 enum SyncOwnerFailure: Error { case configurationUnavailable }
 
-// Inherited by native child work, but marked only when the coordinator cancels
-// its retained original command task for shutdown. Account reads use a separate
-// explicit control, without task-local ownership.
+// Retained by the exact original command task. Intent is recorded before
+// cancellation, and never upgraded by a later close or replacement.
 @MainActor final class SyncCommandTaskContext {
     @TaskLocal nonisolated static var current: SyncCommandTaskContext?
+    enum Cancellation { case expiry, replacement, shutdown, other }
     let generation: UInt64
     let revision: UInt64
-    var shutdownCancellationRequested = false
+    private let backend: any SyncCoordinatorBackend
+    var activeCommand: CloudPolicyCommand?
+    private var firstCancellation: Cancellation?
+    private var cancelledCommand: CloudPolicyCommand?
+    private(set) var shutdownCancellationRequested = false
     var shutdownCancelled: Bool { shutdownCancellationRequested && Task.isCancelled }
-    init(generation: UInt64, revision: UInt64) { self.generation = generation; self.revision = revision }
+    init(generation: UInt64, revision: UInt64, backend: any SyncCoordinatorBackend) {
+        self.generation = generation; self.revision = revision; self.backend = backend
+    }
+    func recordCancellation(_ intent: Cancellation, alreadyCancelled: Bool) {
+        guard firstCancellation == nil else { return }
+        firstCancellation = alreadyCancelled ? .other : intent
+        cancelledCommand = activeCommand
+        shutdownCancellationRequested = firstCancellation == .shutdown
+    }
+    func ownsNativeCancellation(_ result: SyncCommandResult, command: CloudPolicyCommand,
+                                backend: any SyncCoordinatorBackend, generation: UInt64, revision: UInt64) -> Bool {
+        guard firstCancellation == .expiry || firstCancellation == .replacement,
+              self.backend === backend, self.generation == generation, self.revision == revision,
+              result.error is CancellationError, result.fetchProofOutcome?.preservesFailure != true,
+              let proof = result.nativeCancellation, let cancelledCommand,
+              proof.matches(cancelledCommand), proof.matches(command) else { return false }
+        return true
+    }
 }
 
 // This control is retained by the original account task and its queued
@@ -212,7 +234,7 @@ public final class SyncCoordinator {
         case account(Bool)
         case ownAccountProof(UInt64, generation: UInt64, revision: UInt64)
         case result(SyncCommandResult, generation: UInt64, revision: UInt64, shutdownCancelled: Bool,
-                    supersededAccountCancellation: Bool = false, acknowledged: CheckedContinuation<Void, Never>?)
+                    supersededAccountCancellation: Bool = false, nativeCancellationOwned: Bool = false, acknowledged: CheckedContinuation<Void, Never>?)
         case completeAccount(UInt64, backend: any SyncCoordinatorBackend, generation: UInt64, revision: UInt64,
                              control: SyncAccountTaskControl,
                              complete: @MainActor (Bool) async -> SyncCommandResult,
@@ -1067,7 +1089,7 @@ public final class SyncCoordinator {
     public func backgroundExpired() {
         if suspended { pendingExpiry = true }
         else {
-            for task in operationTasks.values { task.cancel() }
+            cancelCommands(.expiry)
             ownTask?.cancel()
             receive(.backgroundExpiring)
         }
@@ -1421,7 +1443,7 @@ public final class SyncCoordinator {
                 #endif
                 acknowledged.resume(throwing: error)
             }
-        case .result(let result, let expected, let revision, let shutdownCancelled, let supersededAccountCancellation, let acknowledged):
+        case .result(let result, let expected, let revision, let shutdownCancelled, let supersededAccountCancellation, let nativeCancellationOwned, let acknowledged):
             #if DEBUG
             let failureBefore = failureRevision
             defer {
@@ -1443,7 +1465,7 @@ public final class SyncCoordinator {
                         DebugCloudDiagnostics.record(.commandResult, error: error)
                     }
                     #endif
-                    if result.originalGuardRefusal == nil, result.dependentFetchRefusal == nil, result.fetchProofOutcome?.accountStopCancellation != true, !supersededAccountCancellation, !(result.mediaCancellation && error is CancellationError) {
+                    if result.originalGuardRefusal == nil, result.dependentFetchRefusal == nil, result.fetchProofOutcome?.accountStopCancellation != true, !supersededAccountCancellation, !nativeCancellationOwned, !(result.mediaCancellation && error is CancellationError) {
                         operationFailed = true; failureRevision &+= 1
                     }
                 }
@@ -1637,7 +1659,7 @@ public final class SyncCoordinator {
             let phase = CorePhase(command: issued.first?.command)
             corePhase[id] = phase; lastCorePhase = phase
         }
-        let context = SyncCommandTaskContext(generation: generation, revision: revision)
+        let context = SyncCommandTaskContext(generation: generation, revision: revision, backend: backend)
         operationContexts[id] = context
         if issued.contains(where: {
             switch $0.command.action {
@@ -1699,6 +1721,7 @@ public final class SyncCoordinator {
                         }
                         #endif
                     }
+                    context.activeCommand = command
                     result = await CloudQuiescentDependencyWait.$transition.withValue(park) {
                     await backend.execute(command, corePrepared: { [self] in
                         // The qualified local cleanup pass returned; inventory
@@ -1765,7 +1788,9 @@ public final class SyncCoordinator {
                             result.causalCommandOrdinal = value.sequence
                             #endif
                             enqueue(.result(result, generation: value.generation, revision: revision,
-                                shutdownCancelled: context.shutdownCancelled, acknowledged: acknowledged))
+                                shutdownCancelled: context.shutdownCancelled,
+                                nativeCancellationOwned: context.ownsNativeCancellation(result, command: command,
+                                    backend: backend, generation: value.generation, revision: revision), acknowledged: acknowledged))
                         }
                         #if DEBUG
                         observeCausalBoundary?(.commandAcknowledgementJoined, command)
@@ -1782,7 +1807,7 @@ public final class SyncCoordinator {
         defer { replacementTask = nil }
         await originalAttachment?.value
         guard platformPrepared else { return }
-        for task in operationTasks.values { task.cancel() }
+        cancelCommands(.replacement)
         cancelAccountTask(shutdown: false)
         revokeProofWaits()
         await initialOwnDrain?.value
@@ -1917,16 +1942,17 @@ public final class SyncCoordinator {
             await waitForInputs()
         } while !operationTasks.isEmpty || ownTask != nil
     }
-    private func cancelCommandsForShutdown() {
+    private func cancelCommands(_ intent: SyncCommandTaskContext.Cancellation) {
         for (id, task) in operationTasks {
-            // Preserve the first cancellation origin (for example expiry).
-            if !task.isCancelled, let context = operationContexts[id],
-               context.generation == generation, context.revision == hostRevision {
-                context.shutdownCancellationRequested = true
+            if let context = operationContexts[id] {
+                let originalOwner = context.generation == generation && context.revision == hostRevision
+                context.recordCancellation(intent == .shutdown && !originalOwner ? .other : intent,
+                    alreadyCancelled: task.isCancelled)
             }
             task.cancel()
         }
     }
+    private func cancelCommandsForShutdown() { cancelCommands(.shutdown) }
 
     /// Stops native admissions and joins original SDK/own/media callbacks while
     /// Core is OPEN. A failed drain leaves the backend retained for close retry.

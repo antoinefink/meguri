@@ -261,6 +261,29 @@ final class CloudMediaCancellationContext: Sendable {
     }
 }
 
+/// Sealed at a concrete native cancellation edge after original preparation.
+/// This is outcome evidence only; the coordinator must also match its first
+/// cancellation intent for the retained command task and backend owner.
+public struct CloudPolicyNativeCancellation: Sendable {
+    private let command: CloudPolicyCommand
+    private let execution: CoreCloudPolicyExecution
+    private let sdk: String
+    private let dependency: CloudQuiescentDependencyWait?
+    fileprivate init(command: CloudPolicyCommand, execution: CoreCloudPolicyExecution, sdk: String,
+                     dependency: CloudQuiescentDependencyWait? = nil) {
+        self.command = command; self.execution = execution; self.sdk = sdk; self.dependency = dependency
+    }
+    init(adapterEdge: CloudAdapterNativeCancellationEdge) {
+        self.init(command: adapterEdge.command, execution: adapterEdge.execution,
+                  sdk: adapterEdge.sdk, dependency: adapterEdge.dependency)
+    }
+    public func matches(_ original: CloudPolicyCommand) -> Bool { command.raw === original.raw }
+}
+struct CloudNativeCancellationError: Error {
+    let error: any Error
+    let proof: CloudPolicyNativeCancellation
+}
+
 /// A coordinator owns this executor alongside its ONE adapter. Outputs include
 /// required failure follow-ups. Deferred configuration is not completed work.
 public struct CloudPolicyNativeResult: Sendable {
@@ -269,6 +292,7 @@ public struct CloudPolicyNativeResult: Sendable {
     public let originalGuardRefusal: CloudPolicyOriginalGuardRefusal?
     public let dependentFetchRefusal: CloudPolicyDependentFetchRefusal?
     public let fetchProofOutcome: CloudPolicyFetchProofOutcome?
+    public let nativeCancellation: CloudPolicyNativeCancellation?
     public let deferred: Bool
     public let mediaCancellation: Bool
     public let acknowledgedOutputCount: Int
@@ -276,11 +300,12 @@ public struct CloudPolicyNativeResult: Sendable {
     /// The original cleanup failure is diagnostic evidence, outside app failure cycles.
     public let zoneDeletionError: (any Error)?
     public let cleanupInventoryError: (any Error)?
-    init(outputs: [CloudPolicyOutput], error: (any Error)?, deferred: Bool, zoneDeletionError: (any Error)? = nil, cleanupInventoryError: (any Error)? = nil, mediaCancellation: Bool = false, acknowledgedOutputCount: Int = 0, afterOutputs: (@Sendable () async -> CloudPolicyNativeResult)? = nil, originalGuardRefusal: CloudPolicyOriginalGuardRefusal? = nil, dependentFetchRefusal: CloudPolicyDependentFetchRefusal? = nil, fetchProofOutcome: CloudPolicyFetchProofOutcome? = nil) {
+    init(outputs: [CloudPolicyOutput], error: (any Error)?, deferred: Bool, zoneDeletionError: (any Error)? = nil, cleanupInventoryError: (any Error)? = nil, mediaCancellation: Bool = false, acknowledgedOutputCount: Int = 0, afterOutputs: (@Sendable () async -> CloudPolicyNativeResult)? = nil, originalGuardRefusal: CloudPolicyOriginalGuardRefusal? = nil, dependentFetchRefusal: CloudPolicyDependentFetchRefusal? = nil, fetchProofOutcome: CloudPolicyFetchProofOutcome? = nil, nativeCancellation: CloudPolicyNativeCancellation? = nil) {
         self.outputs = outputs; self.error = error; self.deferred = deferred; self.zoneDeletionError = zoneDeletionError; self.cleanupInventoryError = cleanupInventoryError
         self.mediaCancellation = mediaCancellation; self.acknowledgedOutputCount = acknowledgedOutputCount
         self.afterOutputs = afterOutputs; self.originalGuardRefusal = originalGuardRefusal
         self.dependentFetchRefusal = dependentFetchRefusal; self.fetchProofOutcome = fetchProofOutcome
+        self.nativeCancellation = nativeCancellation
     }
 }
 // Forward the existing coordinator ACK seam through transparent backend
@@ -441,6 +466,9 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                  .stopEngine, .cancelExchange, .cancelBackgroundFlush, .pauseMedia, .cancelFlushTimer, .quitNow:
                 break
             default:
+                #if DEBUG
+                if case .resumeMedia = command.action { site = .mediaQuiescing }
+                #endif
                 guard !quiescing else { throw CancellationError() }
             }
             switch command.action {
@@ -519,10 +547,16 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 if let error = result.error { throw error }
             case .readBlobs, .resumeMedia, .pauseMedia, .prioritizeMedia:
                 guard let mediaService, let mediaTransport else { throw BridgeError.cloudPolicy(.coreCapabilityUnavailable) }
+                #if DEBUG
+                site = .mediaPreparation
+                #endif
                 let prepared: CoreCloudPolicyExecution?
                 if case .resumeMedia = command.action { prepared = try await policy.prepareExecutionAttempt(command) }
                 else { prepared = try await policy.prepareExecution(command) }
                 guard let permit = prepared else { throw BridgeError.cloudPolicy(.staleCommand) }
+                #if DEBUG
+                site = .mediaOriginalSDK
+                #endif
                 let instance = try await permit.originalSDK()
                 if case .pauseMedia = command.action {
                     if let instance { await drainOriginalMedia(instance) }
@@ -535,8 +569,20 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 } else {
                     guard let instance else { throw BridgeError.cloudPolicy(.staleCommand) }
                     if let joining = mediaDrains[instance] { await joining.value }
+                    #if DEBUG
+                    site = .mediaQuiescing
+                    #endif
                     guard !quiescing else { throw CancellationError() }
-                    try Task.checkCancellation()
+                    #if DEBUG
+                    site = .mediaPreNetwork
+                    #endif
+                    // Only this explicit check, after successful original
+                    // preparation and SDK lookup, proves pre-network cancellation.
+                    do { try Task.checkCancellation() }
+                    catch {
+                        throw CloudNativeCancellationError(error: error, proof:
+                            .init(command: command, execution: permit, sdk: instance))
+                    }
                     if mediaRuns[instance] != nil {
                         if case .resumeMedia = command.action { heldMediaResume[instance] = (command, permit) }
                         return .init(outputs: [], error: nil, deferred: true)
@@ -624,12 +670,13 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
             let attempt = caught as? CloudPolicyAttemptError
             let dependent = caught as? CloudDependentFetchRefusalError
             let proof = caught as? CloudFetchProofError
+            let cancellation = caught as? CloudNativeCancellationError
             let error: any Error
-            if let attempt { error = attempt.error } else if let dependent { error = dependent.error } else if let proof { error = proof.error } else { error = caught }
+            if let attempt { error = attempt.error } else if let dependent { error = dependent.error } else if let proof { error = proof.error } else if let cancellation { error = cancellation.error } else { error = caught }
             let refusal = attempt?.refusal
             #if DEBUG
             switch command.action {
-            case .requestSend, .updatePending:
+            case .requestSend, .updatePending, .resumeMedia:
                 DebugCloudDiagnostics.sendFailureCapture?.record(site, error: error)
             default: break
             }
@@ -649,7 +696,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
             }
             await delivery.acknowledge(outputs)
             _ = try? await delivery.appendInput(to: &outputs) { [policy] in try await policy.input(.refresh(.cloud)) }
-            return .init(outputs: outputs, error: error, deferred: false, acknowledgedOutputCount: delivery.count, originalGuardRefusal: refusal, dependentFetchRefusal: dependent?.qualification, fetchProofOutcome: proof?.outcome)
+            return .init(outputs: outputs, error: error, deferred: false, acknowledgedOutputCount: delivery.count, originalGuardRefusal: refusal, dependentFetchRefusal: dependent?.qualification, fetchProofOutcome: proof?.outcome, nativeCancellation: cancellation?.proof ?? proof?.outcome.nativeCancellation)
         }
     }
     private func performCleanup(_ command: CloudPolicyCommand, corePrepared: @Sendable () async -> Void) async -> CloudPolicyNativeResult {
@@ -879,6 +926,9 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                                 #endif
                             }
                             catch {
+                                #if DEBUG
+                                DebugCloudDiagnostics.sendFailureCapture?.record(.mediaWorker, error: error)
+                                #endif
                                 context.observe(error)
                                 outputs.append(contentsOf: await adapter.takePolicyOperationOutputs())
                                 await delivery.acknowledge(outputs)
@@ -889,7 +939,12 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                             if let error = reply.failure() { throw error }
                         }
                     }
-                } catch { context.observe(error); readFailure = error }
+                } catch {
+                    #if DEBUG
+                    DebugCloudDiagnostics.sendFailureCapture?.record(.mediaWorker, error: error)
+                    #endif
+                    context.observe(error); readFailure = error
+                }
                 outputs.append(contentsOf: await adapter.takePolicyOperationOutputs())
                 #if DEBUG
                 await mediaEndReadObserver?(instance)
@@ -898,6 +953,9 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 let endedFailure = sendStopped ? nil : readFailure
                 do { try await delivery.appendInput(to: &outputs) { try await permit.report(zones: [.media], kind: .read, started: false, error: endedFailure) } }
                 catch {
+                    #if DEBUG
+                    DebugCloudDiagnostics.sendFailureCapture?.record(.mediaWorker, error: error)
+                    #endif
                     if context.observeEndReadReportFailure(error, primary: readFailure) {
                         #if DEBUG
                         DebugCloudDiagnostics.record(.policyExecute, action: issued.action, error: error)
@@ -915,6 +973,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
         } catch {
             var mediaCancellation = context.observe(error)
             #if DEBUG
+            DebugCloudDiagnostics.sendFailureCapture?.record(.mediaWorker, error: error)
             DebugCloudDiagnostics.record(.policyExecute, action: selected.0.action, error: error)
             #endif
             if let queuedResume = heldMediaResume.removeValue(forKey: instance), let mediaTransport {

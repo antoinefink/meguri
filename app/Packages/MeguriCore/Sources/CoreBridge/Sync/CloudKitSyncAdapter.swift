@@ -82,6 +82,25 @@ fileprivate struct CloudFetchProofIssuer: Sendable {
     let original: CloudSDKStopWitness
 }
 
+// Constructed only where this adapter observes the original cancellation edge.
+struct CloudAdapterNativeCancellationEdge: Sendable {
+    let command: CloudPolicyCommand
+    let execution: CoreCloudPolicyExecution
+    let sdk: String
+    let dependency: CloudQuiescentDependencyWait?
+    fileprivate init(issuer: CloudFetchProofIssuer, dependency: CloudQuiescentDependencyWait? = nil) {
+        command = issuer.command; execution = issuer.execution
+        sdk = issuer.original.sdk; self.dependency = dependency
+    }
+}
+
+#if DEBUG
+// Original-task test boundary, invoked only after the real discard is joined.
+enum CloudFetchProofCompletionFault {
+    @TaskLocal static var afterOriginalDiscard: (@Sendable () throws -> Void)?
+}
+#endif
+
 /// Sealed evidence for one original fetch proof result; grants no authority.
 public struct CloudPolicyFetchProofOutcome: Sendable {
     fileprivate let completion: CloudFetchProofCompletion
@@ -101,6 +120,15 @@ public struct CloudPolicyFetchProofOutcome: Sendable {
               case .accountStop = completion.producer else { return false }
         return true
     }
+    var nativeCancellation: CloudPolicyNativeCancellation? {
+        guard callerCancelled, earlierFailure == nil, cleanupFailure == nil,
+              case .caller = completion.producer, case .failure(let error) = completion.result,
+              error is CancellationError, let issuer, issuer.original === original else { return nil }
+        return .init(adapterEdge: .init(issuer: issuer))
+    }
+    #if DEBUG
+    var debugOriginalCompletionFailure: (any Error)? { cleanupFailure }
+    #endif
     public var preservesFailure: Bool {
         if earlierFailure != nil || cleanupFailure != nil { return true }
         if case .provider = completion.producer { return true }
@@ -385,18 +413,18 @@ public actor CloudKitSyncAdapter {
         }
     }
     private func removeReadinessObserver(_ id: UUID) { readinessObservers.removeValue(forKey: id) }
-    private func cancelWait(_ id: UUID) { waiters.removeValue(forKey: id)?.resume(throwing: CancellationError()) }
-    private func waitForChange(after old: UInt64) async throws {
-        try Task.checkCancellation()
+    private func cancelWait(_ id: UUID, error: any Error) { waiters.removeValue(forKey: id)?.resume(throwing: error) }
+    private func waitForChange(after old: UInt64, cancellationError: @escaping @Sendable () -> any Error = { CancellationError() }) async throws {
+        if Task.isCancelled { throw cancellationError() }
         if version != old { return }
         let id = UUID()
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
-                if Task.isCancelled { continuation.resume(throwing: CancellationError()) }
+                if Task.isCancelled { continuation.resume(throwing: cancellationError()) }
                 else if version != old { continuation.resume() }
                 else { waiters[id] = continuation }
             }
-        } onCancel: { Task { await self.cancelWait(id) } }
+        } onCancel: { Task { await self.cancelWait(id, error: cancellationError()) } }
     }
     private func valid(_ origin: String) async -> Bool {
         guard let instance = owned[origin], !instance.stopping, current == origin else { return false }
@@ -1751,7 +1779,12 @@ public actor CloudKitSyncAdapter {
                     } else { earlierFailure = CloudOwnTransportFailure.missingReply }
                 } else { earlierFailure = nil }
                 var cleanupFailure: (any Error)?
-                do { _ = try await read.complete(result, discard: true, evidence: evidence, admission: admission) }
+                do {
+                    _ = try await read.complete(result, discard: true, evidence: evidence, admission: admission)
+                    #if DEBUG
+                    try CloudFetchProofCompletionFault.afterOriginalDiscard?()
+                    #endif
+                }
                 catch { cleanupFailure = error }
                 if let proof, proofIssuer != nil {
                     throw CloudFetchProofError(outcome: .init(completion: proof.outcome.completion,
@@ -2054,24 +2087,43 @@ public actor CloudKitSyncAdapter {
     }
     // Call only between this command's actual completed/ACKed stages. The
     // busy owner's callbacks stay live and continue to fence its own admission.
-    private func waitForQuiescentFetchDependency() async throws -> [CloudQuiescentDependencyWait] {
+    private struct DependencyCancellation: Error { let error: CancellationError }
+    private func waitForQuiescentFetchDependency(issuer: CloudFetchProofIssuer? = nil) async throws -> [CloudQuiescentDependencyWait] {
         var joined: [CloudQuiescentDependencyWait] = []
         while fetchBusy {
             let parked = try await CloudQuiescentDependencyWait.park()
             do {
-                while fetchBusy { let old = version; try await waitForChange(after: old) }
+                while fetchBusy {
+                    let old = version
+                    try await waitForChange(after: old, cancellationError: { DependencyCancellation(error: CancellationError()) })
+                }
             } catch {
-                try? await parked?.revoke()
+                try await parked?.revoke()
+                if let cancellation = error as? DependencyCancellation {
+                    let original = cancellation.error
+                    if let issuer, let parked {
+                        throw CloudNativeCancellationError(error: original, proof:
+                            .init(adapterEdge: .init(issuer: issuer, dependency: parked)))
+                    }
+                    throw original
+                }
                 throw error
             }
             try await parked?.revoke()
-            try Task.checkCancellation()
+            do { try Task.checkCancellation() }
+            catch {
+                if let issuer, let parked {
+                    throw CloudNativeCancellationError(error: error, proof:
+                        .init(adapterEdge: .init(issuer: issuer, dependency: parked)))
+                }
+                throw error
+            }
             if let parked { joined.append(parked) }
         }
         return joined
     }
-    private func reserveUnadmittedPolicyFetch() async throws -> [CloudQuiescentDependencyWait] {
-        let joined = try await waitForQuiescentFetchDependency()
+    private func reserveUnadmittedPolicyFetch(issuer: CloudFetchProofIssuer?) async throws -> [CloudQuiescentDependencyWait] {
+        let joined = try await waitForQuiescentFetchDependency(issuer: issuer)
         try Task.checkCancellation()
         guard !quiescing, !suspended, !suspending else { throw CancellationError() }
         fetchBusy = true
@@ -2093,7 +2145,10 @@ public actor CloudKitSyncAdapter {
             }
         }
         let dependencies: [CloudQuiescentDependencyWait]
-        if reservedFetch { dependencies = try await reserveUnadmittedPolicyFetch() }
+        if reservedFetch {
+            let proof = issuer.map { CloudFetchProofIssuer(command: command, execution: $0.execution, original: $0.instance.stopWitness) }
+            dependencies = try await reserveUnadmittedPolicyFetch(issuer: proof)
+        }
         else { dependencies = [] }
         defer { if reservedFetch { fetchBusy = false; changed() } }
 

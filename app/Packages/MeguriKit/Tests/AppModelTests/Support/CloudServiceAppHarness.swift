@@ -354,8 +354,13 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
             } catch { mediaCompleted.yield(.init(proof: .failure(error), receipts: await wire.receipts)) }
         }
         if let error = result.error {
-            let diagnostic = capture(error, stage: .executeError, action: command.action, sendFailure: sendFailure, latestMedia: latestMedia, fetchReadFailure: fetchReadFailure, expectedRefusal: result.originalGuardRefusal != nil || result.dependentFetchRefusal != nil || result.fetchProofOutcome?.accountStopCancellation == true)
-            if result.originalGuardRefusal == nil, result.dependentFetchRefusal == nil, result.fetchProofOutcome?.accountStopCancellation != true, !(error is CancellationError && SyncCommandTaskContext.current?.shutdownCancelled == true && result.fetchProofOutcome?.preservesFailure != true) {
+            let context = SyncCommandTaskContext.current
+            let ownedCancellation = context.map {
+                $0.ownsNativeCancellation(result, command: command, backend: self,
+                    generation: $0.generation, revision: $0.revision)
+            } == true
+            let diagnostic = capture(error, stage: .executeError, action: command.action, sendFailure: sendFailure, latestMedia: latestMedia, fetchReadFailure: fetchReadFailure, expectedRefusal: ownedCancellation || result.originalGuardRefusal != nil || result.dependentFetchRefusal != nil || result.fetchProofOutcome?.accountStopCancellation == true)
+            if !ownedCancellation, result.originalGuardRefusal == nil, result.dependentFetchRefusal == nil, result.fetchProofOutcome?.accountStopCancellation != true, !(error is CancellationError && SyncCommandTaskContext.current?.shutdownCancelled == true && result.fetchProofOutcome?.preservesFailure != true) {
                 causalTrace?.expectation(false)
                 Issue.record("Service app command failed; \(diagnostic)")
             }

@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import AppModel
 @testable import CoreBridge
@@ -203,6 +204,169 @@ extension ReviewCollectionStartupTests {
             }
         }
     }
+
+    #if DEBUG
+    @Test(arguments: [false, true])
+    func nativePreparationAndExpiryIntentAloneRemainUnownedAndSticky(alreadyCancelled: Bool) async throws {
+        try await withShutdownHarness(mediaEnabled: false) { app in
+            app.sync.setDeviceSettings(paused: false, automatic: true, media: false)
+            await app.sync.waitForInputs(); await app.sync.drainOperations()
+            let original = try app.backend
+            let policy = try await original.workflow.policy()
+            guard case .commands(let commands) = try await policy.input(.foreground) else {
+                throw BridgeError.internal("Expected actual foreground commands")
+            }
+            let command = try #require(commands.first { if case .requestFetch = $0.action { true } else { false } })
+            let execution = try #require(try await policy.prepareExecution(command))
+            #expect(try await execution.originalSDK() != nil)
+            let backend = SyncOwnerFake(), held = SyncOwnerGate()
+            var returned = false
+            backend.executeCommand = { issued in
+                #expect(issued.raw === command.raw)
+                if alreadyCancelled { withUnsafeCurrentTask { $0?.cancel() } }
+                await held.hold()
+                let result = SyncCommandResult(outputs: [], error: CancellationError(), deferred: false)
+                #expect(result.nativeCancellation == nil)
+                let context = SyncCommandTaskContext.current
+                #expect(Task.isCancelled && context != nil)
+                #expect(context?.ownsNativeCancellation(result, command: command, backend: backend,
+                    generation: 173, revision: context?.revision ?? 0) == false)
+                returned = true
+                return result
+            }
+            backend.onQuiesce = { held.release() }
+            let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: nil)
+            await sync.preparePlatform(); await sync.completeOpenedHost(generation: 173)
+            await sync.prepareConnectionAuthority()
+            backend.nextCommands = [command]; sync.receive(.refresh(.cloud))
+            await held.waitUntilHeld()
+            sync.backgroundExpired()
+            held.release()
+            await backend.waitForExecution(); await sync.waitForInputs(); await sync.drainOperations()
+            #expect(returned && sync.operationFailed && sync.failureRevision == 1)
+            #expect(await sync.cancelAndDrain())
+            #expect(sync.operationFailed && sync.failureRevision == 1)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func nativeOriginalFetchCancellationMatchesExpiryOrReplacementIntent(replacement: Bool) async throws {
+        try await withShutdownHarness(mediaEnabled: false) { app in
+            app.sync.setDeviceSettings(paused: false, automatic: true, media: false)
+            await app.sync.waitForInputs(); await app.sync.drainOperations()
+            let sdk = try #require(await app.factory.engines.last)
+            await sdk.waitForAutomaticSend()
+            try await sdk.signInSameServiceIdentity()
+            await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
+            await sdk.omitNextZoneCallbacks()
+            let original = try app.backend
+            let policy = try await original.workflow.policy()
+            let issued = try await policy.input(.foreground)
+            guard case .commands(let commands) = issued else { throw BridgeError.internal("Expected actual foreground commands") }
+            let mismatch = try #require(commands.first { if case .requestFetch = $0.action { true } else { false } })
+            let native = SyncOwnerGate(), provider = SyncOwnerGate()
+            let parked = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let proofWaiting = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let providerReturned = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            var receipts = 0, acknowledgements = 0
+            var originalCommands: [CloudPolicyCommand] = []
+            var originalResults: [CloudPolicyCommand] = []
+            var originalACKs: [CloudPolicyCommand] = []
+            let capturingForeground = Mutex(false)
+            original.beforeExecution = { command in
+                if capturingForeground.withLock({ $0 }), case .requestFetch = command.action { originalCommands.append(command) }
+            }
+            var contexts: [SyncCommandTaskContext] = []
+            app.sync.observeQuiescentDependency = { parked.continuation.yield($0) }
+            app.sync.observeAccountPolicyDrain = { if case .waiting = $0 { proofWaiting.continuation.yield(true) } }
+            app.sync.observeCausalBoundary = { boundary, command in
+                if case .commandAcknowledgementJoined = boundary, let command,
+                   originalCommands.contains(where: { $0.raw === command.raw }) {
+                    originalACKs.append(command); acknowledgements += 1
+                }
+            }
+            original.afterExecution = { command, result in
+                guard originalCommands.contains(where: { $0.raw === command.raw }) else { return }
+                guard let context = SyncCommandTaskContext.current else { Issue.record("Missing retained original context"); return }
+                #expect(result.error is CancellationError && result.nativeCancellation != nil)
+                #expect(context.ownsNativeCancellation(result, command: command, backend: original,
+                    generation: context.generation, revision: context.revision))
+                #expect(!context.ownsNativeCancellation(result, command: mismatch, backend: original,
+                    generation: context.generation, revision: context.revision))
+                #expect(!context.ownsNativeCancellation(result, command: command, backend: SyncOwnerFake(),
+                    generation: context.generation, revision: context.revision))
+                #expect(!context.ownsNativeCancellation(result, command: command, backend: original,
+                    generation: context.generation + 1, revision: context.revision))
+                #expect(!context.ownsNativeCancellation(result, command: command, backend: original,
+                    generation: context.generation, revision: context.revision + 1))
+                let unowned = SyncCommandTaskContext(generation: context.generation, revision: context.revision, backend: original)
+                unowned.activeCommand = command
+                #expect(!unowned.ownsNativeCancellation(result, command: command, backend: original,
+                    generation: context.generation, revision: context.revision))
+                unowned.recordCancellation(.expiry, alreadyCancelled: true)
+                #expect(!unowned.ownsNativeCancellation(result, command: command, backend: original,
+                    generation: context.generation, revision: context.revision))
+                #expect(result.acknowledgedOutputCount == result.outputs.count)
+                originalResults.append(command)
+                contexts.append(context); receipts += 1
+            }
+            defer {
+                original.beforeExecution = nil; original.afterExecution = nil
+                app.sync.observeQuiescentDependency = nil; app.sync.observeAccountPolicyDrain = nil
+                app.sync.observeCausalBoundary = nil
+                native.release(); provider.release()
+                parked.continuation.finish(); proofWaiting.continuation.finish(); providerReturned.continuation.finish()
+            }
+            await sdk.holdNextFetchReturn { await native.hold() }
+            capturingForeground.withLock { $0 = true }
+            app.sync.receive(.foreground)
+            await native.waitUntilHeld()
+            capturingForeground.withLock { $0 = false }
+            try #require(originalCommands.count == 1)
+            capturingForeground.withLock { $0 = true }
+            app.sync.receive(.foreground)
+            try #require(try await serviceAppSignal(parked.stream, stage: "native dependent accepted"))
+            capturingForeground.withLock { $0 = false }
+            try #require(originalCommands.count == 2)
+            #expect(originalCommands[0].raw !== originalCommands[1].raw)
+            await app.sync.accountChanged()
+            try #require(try await serviceAppSignal(proofWaiting.stream, stage: "account proof held by original fetch"))
+            await app.factory.holdNextAccountRead { await provider.hold(); providerReturned.continuation.yield(true) }
+            native.release()
+            await provider.waitUntilHeld()
+            if replacement {
+                let source = try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg"))
+                app.owner.entry.inspect(source); await app.owner.entry.waitForCompletion()
+                try #require(app.owner.entry.preview != nil)
+                app.owner.entry.confirm(); await app.owner.entry.waitForCompletion()
+                await app.sync.waitForReplacement()
+            } else {
+                app.sync.backgroundExpired()
+                try #require(await app.owner.close())
+                try await app.reopen()
+            }
+            await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
+            #expect(receipts == 2 && acknowledgements == 2)
+            for command in originalCommands {
+                #expect(originalResults.filter { $0.raw === command.raw }.count == 1)
+                #expect(originalACKs.filter { $0.raw === command.raw }.count == 1)
+            }
+            #expect(contexts.allSatisfy { !$0.shutdownCancellationRequested })
+            #expect(original.closed && original.closeReturned == 1)
+            #expect(!app.sync.operationFailed && app.sync.failureRevision == 0)
+            let successor = try app.backend
+            #expect(successor !== original)
+            let snapshot = try await successor.workflow.durableSnapshot()
+            let guardBefore = try await successor.workflow.currentGuard()
+            provider.release()
+            try #require(try await serviceAppSignal(providerReturned.stream, stage: "late original provider returned"))
+            await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
+            #expect(try await successor.workflow.durableSnapshot() == snapshot)
+            #expect(try await successor.workflow.currentGuard() == guardBefore)
+            #expect(!app.sync.operationFailed && app.sync.failureRevision == 0)
+        }
+    }
+    #endif
 
     @Test func backgroundExpiryCancellationHeldThroughCloseRemainsUnownedAndSticky() async throws {
         try await withShutdownCommands { media, _ in

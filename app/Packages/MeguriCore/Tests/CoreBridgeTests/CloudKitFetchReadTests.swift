@@ -421,6 +421,12 @@ extension EventTests {
                 #expect(result.error is CancellationError)
                 let outcome = try #require(result.fetchProofOutcome)
                 #expect(outcome.accountStopCancellation == mode.qualifies)
+                #expect((result.nativeCancellation != nil) == (mode == .caller))
+                if let cancellation = result.nativeCancellation {
+                    #expect(cancellation.matches(command))
+                    let other = try #require(try fetchProofCommands(try await policy.input(.foreground)).first { if case .requestFetch = $0.action { true } else { false } })
+                    #expect(!cancellation.matches(other))
+                }
                 #expect(!outcome.preservesFailure)
                 #expect(result.originalGuardRefusal == nil && result.dependentFetchRefusal == nil)
                 #expect(!result.outputs.isEmpty && result.acknowledgedOutputCount == result.outputs.count)
@@ -484,6 +490,12 @@ extension EventTests {
                 #expect(result.error is CancellationError)
                 let outcome = try #require(result.fetchProofOutcome)
                 #expect(outcome.accountStopCancellation == mode.qualifies)
+                #expect((result.nativeCancellation != nil) == (mode == .caller))
+                if let cancellation = result.nativeCancellation {
+                    #expect(cancellation.matches(command))
+                    let other = try #require(try fetchProofCommands(try await policy.input(.foreground)).first { if case .requestFetch = $0.action { true } else { false } })
+                    #expect(!cancellation.matches(other))
+                }
                 #expect(!outcome.preservesFailure)
                 #expect(result.originalGuardRefusal == nil && result.dependentFetchRefusal == nil)
                 #expect(!result.outputs.isEmpty && result.acknowledgedOutputCount == result.outputs.count)
@@ -495,6 +507,73 @@ extension EventTests {
             } catch {
                 fetch.cancel(); await provider.open(); await selected.open()
                 _ = await fetch.value; _ = await stop?.value
+                throw error
+            }
+            await f.adapter.setFetchProofCompletionObserver(nil)
+        }
+    }
+
+    @Test(arguments: ["provider", "transport", "cleanup"])
+    func nativeFetchProofEarlierCancellationOrCleanupFailureSurvivesCallerCancel(mode: String) async throws {
+        let base = FetchControlTransport()
+        let transport: any CloudOwnTransport = mode == "transport"
+            ? FetchProofThrowingTransport(base: base, error: CancellationError()) : base
+        try await withNativePolicyFixture(assetReadTransport: transport, appOwnsAccountObservation: true) { f in
+            let (policy, executor) = try await nativePolicy(f)
+            try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: executor)
+            let engine = try await f.engine()
+            let calls = engine.acceptedNetworkCalls.value
+            await engine.signInSameSyntheticIdentity()
+            base.setReplies([.found(f.root.envelope)])
+            await engine.appendFetchScripts([.manual(fetchedZones: [], records: [], group: nil)])
+            let command = try #require(try fetchProofCommands(try await policy.input(.foreground)).first { if case .requestFetch = $0.action { true } else { false } })
+            let provider = CloudCallbackGate(), selected = CloudCallbackGate()
+            await f.adapter.setProofAdmission({ _ in
+                await provider.enter()
+                throw CancellationError()
+            }, acknowledgeOutputs: { _ in })
+            await f.adapter.setFetchProofCompletionObserver { await selected.enter() }
+            let acknowledgements = FetchProofAcknowledgements()
+            let injected = Mutex(0)
+            let completionFailure = FetchProofOriginalFailure()
+            let fault: (@Sendable () throws -> Void)?
+            if mode == "cleanup" {
+                fault = {
+                    injected.withLock { $0 += 1 }
+                    throw completionFailure
+                }
+            } else { fault = nil }
+            let fetch = Task {
+                await CloudFetchProofCompletionFault.$afterOriginalDiscard.withValue(fault) {
+                    await executeFetchProof(command, executor: executor, acknowledgements: acknowledgements)
+                }
+            }
+            do {
+                try await provider.waitForArrival()
+                if mode == "provider" {
+                    await provider.open()
+                    try await selected.waitForArrival()
+                    fetch.cancel()
+                } else {
+                    fetch.cancel()
+                    try await selected.waitForArrival()
+                }
+                await provider.open(); await selected.open()
+                let result = await fetch.value
+                #expect(result.error is CancellationError && result.nativeCancellation == nil)
+                let outcome = try #require(result.fetchProofOutcome)
+                #expect(outcome.preservesFailure && !outcome.accountStopCancellation)
+                #expect(injected.withLock { $0 } == (mode == "cleanup" ? 1 : 0))
+                if mode == "cleanup" {
+                    // Injected reported failure after successful original-resource discard.
+                    #expect((outcome.debugOriginalCompletionFailure as? FetchProofOriginalFailure) === completionFailure)
+                }
+                #expect(result.acknowledgedOutputCount == result.outputs.count)
+                #expect(acknowledgements.value == result.outputs.count)
+                #expect(engine.acceptedNetworkCalls.value == calls + 1)
+            } catch {
+                fetch.cancel(); await provider.open(); await selected.open()
+                _ = await fetch.value
                 throw error
             }
             await f.adapter.setFetchProofCompletionObserver(nil)
@@ -561,6 +640,7 @@ extension EventTests {
                 } else { #expect((result.error as? FetchProofOriginalFailure) === original) }
                 let outcome = try #require(result.fetchProofOutcome)
                 #expect(!outcome.accountStopCancellation && outcome.preservesFailure)
+                #expect(result.nativeCancellation == nil)
                 #expect(result.originalGuardRefusal == nil && result.dependentFetchRefusal == nil)
                 #expect(!result.outputs.isEmpty && result.acknowledgedOutputCount == result.outputs.count)
                 #expect(acknowledgements.value == result.outputs.count)

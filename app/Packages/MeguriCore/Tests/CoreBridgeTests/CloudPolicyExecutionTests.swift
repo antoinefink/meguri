@@ -1391,6 +1391,37 @@ extension EventTests {
 
 #if canImport(CloudKit)
 extension EventTests {
+    @Test(arguments: ["originalSDK", "stale"])
+    func nativeMediaPreNetworkCancellationRequiresSuccessfulOriginalPreparation(mode: String) async throws {
+        try await withNativePolicyFixture { f in
+            let (policy, _) = try await nativePolicy(f)
+            let issued = try await policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: true)))
+            let command = try #require(try policyCommands(issued).first { if case .resumeMedia = $0.action { true } else { false } })
+            let queue = NativeOwnCapturingQueue()
+            let transport = try NativeCloudMediaTransport(queue: queue,
+                staging: .init(directory: f.directory.appending(path: "cancel-staging"), available: { UInt64.max }))
+            let executor = NativeCloudPolicyExecutor(policy: policy, adapter: f.adapter,
+                mediaService: try await f.core.media(), mediaTransport: transport)
+            if mode == "stale" { _ = try await policy.input(.settings(.init(enabled: true, paused: true, automatic: true, media: true))) }
+            let task = Task {
+                await MaintenanceCallObservation.$capture.withValue({ call in
+                    if mode == "originalSDK" && call == .cloudPolicyExecutionOriginalSdk {
+                        withUnsafeCurrentTask { $0?.cancel() }
+                    }
+                }) { await executor.execute(command) }
+            }
+            let result = await task.value
+            #expect(result.error != nil)
+            #expect((result.nativeCancellation != nil) == (mode == "originalSDK"))
+            if let proof = result.nativeCancellation {
+                #expect(result.error is CancellationError && proof.matches(command))
+                let other = try await pendingCommand(policy)
+                #expect(!proof.matches(other))
+            }
+            #expect(queue.operations.withLock { $0.isEmpty })
+        }
+    }
+
     @Test func nativeMediaOffAndExpiryControlsStartDuringAHeldExchangeFetch() async throws {
         try await withNativePolicyFixture { f in
             let (policy, _) = try await nativePolicy(f)
@@ -1708,6 +1739,76 @@ extension EventTests {
                 #expect(transitions.withLock { $0 } == ["park", "revoke"])
                 #expect(bCalls.withLock { $0.filter { $0 == .cloudPolicyStartPrepareExecution }.count } == 2)
             }
+        }
+    }
+
+    @Test(arguments: ["accepted", "parkFailure", "revocationFailure"])
+    func nativeDependentCancellationRequiresAcceptedProofAndCompletedRevocation(mode: String) async throws {
+        try await withNativePolicyFixture { f in
+            let (policy, executor) = try await nativePolicy(f)
+            try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: executor)
+            let engine = try await f.engine()
+            let a = try #require(try policyCommands(try await policy.input(.foreground)).first { if case .requestFetch = $0.action { true } else { false } })
+            let b = try #require(try policyCommands(try await policy.input(.foreground)).first { if case .requestFetch = $0.action { true } else { false } })
+            let native = CloudCallbackGate(), park = CloudCallbackGate(), revoke = CloudCallbackGate()
+            let calls = engine.acceptedNetworkCalls.value
+            let observed = Mutex<[BridgeCall]>([])
+            let acknowledgements = Mutex(0)
+            await engine.pauseNextOperationTask(native)
+            try await withCloudTask(gates: [native], operation: {
+                _ = await executor.execute(a)
+            }, whileRunning: {
+                try await native.waitForArrival()
+                let dependent = Task {
+                    await MaintenanceCallObservation.$capture.withValue({ call in observed.withLock { $0.append(call) } }) {
+                        await CloudQuiescentDependencyWait.$transition.withValue({ _, phase in
+                            switch phase {
+                            case .park:
+                                await park.enter()
+                                if mode == "parkFailure" { throw CancellationError() }
+                            case .revoke:
+                                await revoke.enter()
+                                if mode == "revocationFailure" { throw CancellationError() }
+                            }
+                        }) {
+                            await CloudPolicyOutputAcknowledgement.$input.withValue({ work in
+                                let output = try await work()
+                                acknowledgements.withLock { $0 += 1 }
+                                return output
+                            }) {
+                                await executor.execute(b, corePrepared: {}, acknowledgeOutputs: { outputs in
+                                    acknowledgements.withLock { $0 += outputs.count }
+                                })
+                            }
+                        }
+                    }
+                }
+                do {
+                    try await park.waitForArrival()
+                    dependent.cancel(); await park.open()
+                    if mode != "parkFailure" {
+                        try await revoke.waitForArrival()
+                        #expect(!observed.withLock { $0.contains(.cloudPolicyExecutionStartBeginFetch) })
+                        await revoke.open()
+                    }
+                    let result = await dependent.value
+                    #expect(result.error is CancellationError)
+                    #expect((result.nativeCancellation != nil) == (mode == "accepted"))
+                    if let proof = result.nativeCancellation {
+                        #expect(proof.matches(b) && !proof.matches(a))
+                    }
+                    #expect(result.fetchProofOutcome == nil && result.dependentFetchRefusal == nil)
+                    #expect(!result.outputs.isEmpty && result.acknowledgedOutputCount == result.outputs.count)
+                    #expect(acknowledgements.withLock { $0 } == result.outputs.count)
+                    #expect(!observed.withLock { $0.contains(.cloudPolicyExecutionStartBeginFetch) })
+                    #expect(engine.acceptedNetworkCalls.value == calls)
+                } catch {
+                    dependent.cancel(); await park.open(); await revoke.open()
+                    _ = await dependent.value
+                    throw error
+                }
+                await native.open()
+            })
         }
     }
 

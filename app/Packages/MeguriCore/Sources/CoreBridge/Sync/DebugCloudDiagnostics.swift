@@ -34,6 +34,7 @@ public enum DebugCloudDiagnostics {
         case originalSDK, sendAdmission, pendingUpdateApplication, beginSend, admissionValidation
         case sendValidation, sdkAuthorization, sdkPreparation, enqueue, invocationReport
         case enqueueSDKAuthorization, enqueueExecutionValidation, drain, postDrainValidation
+        case mediaPreparation, mediaOriginalSDK, mediaQuiescing, mediaPreNetwork, mediaWorker
         case completion, deferredUpdates, finish
         case exchangeReadiness, exchangeGate, exchangePreparation, exchangeReservation
         case exchangeCapture, exchangeRun, exchangeCompletion, exchangeEndBeforeCapture, heldConfiguration

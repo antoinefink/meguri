@@ -301,7 +301,7 @@ extension SyncCommandResult {
         }
         self.init(outputs: result.outputs, error: result.error, deferred: result.deferred, mediaCancellation: result.mediaCancellation,
             acknowledgedOutputCount: result.acknowledgedOutputCount,
-            afterOutputs: afterOutputs, originalGuardRefusal: result.originalGuardRefusal, dependentFetchRefusal: result.dependentFetchRefusal, fetchProofOutcome: result.fetchProofOutcome)
+            afterOutputs: afterOutputs, originalGuardRefusal: result.originalGuardRefusal, dependentFetchRefusal: result.dependentFetchRefusal, fetchProofOutcome: result.fetchProofOutcome, nativeCancellation: result.nativeCancellation)
     }
 }
 #endif
