@@ -50,4 +50,42 @@ Integration checkpoint: new Core8 passed in
 Independent review `cleanroom/20261112T112704Z-25201` found two remaining P1
 issues: successful-read supersession must retain cancellation semantics, and the
 nested fallback catch must preserve the earlier resolver error after lost
-admission. They remain open. No unit completion or full gate is claimed.
+admission. No unit completion or full gate is claimed.
+
+Follow-up fixer pass, implementer view; supplied main start `9a741f22`:
+successful resolutions now return cancellation on lost admission when this
+original reader has a newer read ID. Resolver failures and projection failures
+without that supersession retain their errors. The outer error is explicitly
+bound so the nested setup-fallback catch returns it with accumulated outputs on
+lost admission; valid-authority projection failures retain the inner error.
+Existing authority checks, effects and task/read ownership wiring are unchanged.
+
+Added deterministic setup-failure coverage: hold the real fallback projection,
+advance actual Core read authority, close the original reader before release,
+then assert the original setup error and refusal provenance. Existing newer-read
+and close/freeze checks are unchanged. Source consistency review and
+`git diff --check` only; compilation/tests and independent verification belong
+to integration. No retries, guard changes or unrelated TwoFetch work.
+
+
+## Integration result
+
+Third independent review `cleanroom/20261112T113145Z-37984` found no P0/P1
+findings and no P2 findings in the supersession delta. Earlier review covered the
+original ownership wiring and first-outcome repair. Final changed-source Core
+selection passed all eleven tests in `swift-test/20261112T113151Z-38411`, including
+the unchanged formerly failing newer-read test and four invalidation cases.
+Final app selection passed all eight tests in `swift-test/20261112T113336Z-42189`,
+including the six Mixed cases, two Resume cases, two publisher cases,
+the native close check and tests for retained errors.
+Final delta guards passed: `similarity/20261112T113340Z-43332`, `static-checks/20261112T113344Z-43906`, `private/20261112T113421Z-45291`.
+The earlier full repair source scan passed `similarity/20261112T112805Z-28862`;
+the final delta scan covers both Swift files changed afterward. Commit hooks
+remain enabled. This closes this bounded account-close repair; other TwoFetch
+failures and integration batch base `1416a520542a8c5daa38a23bfe398da704c3d6c9`
+remain open. No Unit trailer, full gate, milestone or release acceptance claim.
+
+A separate signed Mac preview built from reviewed clean `2ce1d0be` passed
+`build-app/20261112T112313Z-17235` and was reopened by exact product path.
+It includes the prior Resume fix, but not this later account-close repair.
+Its retained deck counts were observed; its Needs Attention state remains open.

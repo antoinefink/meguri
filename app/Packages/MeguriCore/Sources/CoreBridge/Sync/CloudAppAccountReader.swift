@@ -228,36 +228,40 @@ public final class CloudAppAccountReader {
             guard admits(id, epoch: expected), permit.isLive else { return cancelled() }
             outputs.append(output)
             return .init(outputs: outputs, error: nil, verified: verified)
-        } catch {
-            guard admits(id, epoch: expected) else { return .init(outputs: outputs, error: error, verified: false) }
+        } catch let resolverError {
+            guard admits(id, epoch: expected) else {
+                // A newer read on this reader supersedes only successful resolutions.
+                if case .success = resolved, let latest, latest != id { return cancelled() }
+                return .init(outputs: outputs, error: resolverError, verified: false)
+            }
             // A projection/replay error must not complete the read again.
             guard !completionAttempted else {
                 await adapter.accountReadCompleted(id: id, available: false)
-                return .init(outputs: [], error: error, verified: false)
+                return .init(outputs: [], error: resolverError, verified: false)
             }
             var setupFailure = false
             #if canImport(CloudKit)
-            setupFailure = (error as? CKError).map {
+            setupFailure = (resolverError as? CKError).map {
                 [.missingEntitlement, .badContainer, .permissionFailure, .managedAccountRestricted, .badDatabase].contains($0.code)
             } ?? false
             #endif
             let accepted = (try? await workflow.completeIdentityRead(id: id,
                 status: setupFailure ? .configuration : .couldNotDetermine, identity: nil)) == true
             if let afterFallbackIdentityCompletion { await afterFallbackIdentityCompletion(accepted) }
-            guard accepted, admits(id, epoch: expected) else { return .init(outputs: outputs, error: error, verified: false) }
+            guard accepted, admits(id, epoch: expected) else { return .init(outputs: outputs, error: resolverError, verified: false) }
             await adapter.accountReadCompleted(id: id, available: false)
             // A failed resolver must not reverify from the cached provider.
             if setupFailure {
                 do {
                     let output = try await policy.projectIdentityRead(id)
-                    guard admits(id, epoch: expected), permit.isLive else { return .init(outputs: outputs, error: error, verified: false) }
+                    guard admits(id, epoch: expected), permit.isLive else { return .init(outputs: outputs, error: resolverError, verified: false) }
                     outputs.append(output)
                 } catch {
-                    guard admits(id, epoch: expected) else { return .init(outputs: outputs, error: error, verified: false) }
+                    guard admits(id, epoch: expected) else { return .init(outputs: outputs, error: resolverError, verified: false) }
                     return .init(outputs: [], error: error, verified: false)
                 }
             }
-            return .init(outputs: outputs, error: error, verified: false)
+            return .init(outputs: outputs, error: resolverError, verified: false)
         }
     }
     /// The app calls this only after the read's policy outputs and follow-up
