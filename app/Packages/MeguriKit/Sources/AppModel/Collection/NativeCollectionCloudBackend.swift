@@ -146,20 +146,40 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
         guard result.verified, result.error == nil, !closed, !Task.isCancelled else {
             return .init(outputs: [], error: result.error, deferred: false, accountVerified: result.verified)
         }
+        #if DEBUG
+        var diagnosticBoundary: DebugCloudDiagnostics.Boundary = .accountProjectionLifecycle
+        #endif
         do {
             let lifecycle: CollectionLifecycle = try await CoreCollectionService().lifecycle()
             if case .ready = lifecycle {
+                #if DEBUG
+                diagnosticBoundary = .accountProjectionStatus
+                #endif
                 let status: CloudPolicyStatus = try await policy.status()
                 if status.controls.bindingUsable == true {
                     // Reconcile the current verified Host before policy can issue
                     // StartEngine. Core settles queued inbox work before its scan.
+                    #if DEBUG
+                    diagnosticBoundary = .accountProjectionPrepare
+                    #endif
                     try await workflow.prepareRuntimeBeforePolicy()
+                    #if DEBUG
+                    diagnosticBoundary = .accountProjectionRefresh
+                    #endif
                     let refreshed = try await policy.input(.refresh(.cloud))
                     return .init(outputs: [refreshed], error: nil, deferred: false, accountVerified: true)
                 }
             }
             return .init(outputs: [], error: nil, deferred: false, accountVerified: true)
-        } catch { return .init(outputs: [], error: error, deferred: false) }
+        } catch {
+            #if DEBUG
+            var failure = SyncCommandResult(outputs: [], error: error, deferred: false)
+            failure.diagnosticFailure = .init(boundary: diagnosticBoundary, error: error)
+            return failure
+            #else
+            return .init(outputs: [], error: error, deferred: false)
+            #endif
+        }
     }
     func freezeForSuspend() async throws {
         await accounts.freeze()

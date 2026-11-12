@@ -360,12 +360,98 @@ struct DebugCloudDiagnosticsTests {
     }
 
     @Test func returnedFailuresHaveFiniteBoundariesAndNoCommandAction() {
-        for boundary: DebugCloudDiagnostics.Boundary in [.commandResult, .coreActionFailed, .applyDeferred] {
+        for boundary: DebugCloudDiagnostics.Boundary in [
+            .commandResult, .coreActionFailed, .applyDeferred,
+            .accountProjectionLifecycle, .accountProjectionStatus, .accountProjectionPrepare, .accountProjectionRefresh
+        ] {
             let value = Value(boundary, action: .prioritizeMedia(names: [UUID().uuidString]),
                               error: BridgeError.cancelled)
             #expect(value.formatted == "boundary=\(boundary.rawValue) action=none failure=bridge.cancelled")
             #expect(value.zone == nil && value.kind == nil && value.code == nil)
         }
+    }
+
+    @Test func accountProjectionPreservesTheExactSourceStageAndOriginalCategory() {
+        let cases: [(DebugCloudDiagnostics.Boundary, String)] = [
+            (.accountProjectionLifecycle, "boundary=accountProjectionLifecycle action=none failure=connection.tracking"),
+            (.accountProjectionStatus, "boundary=accountProjectionStatus action=none failure=connection.tracking"),
+            (.accountProjectionPrepare, "boundary=accountProjectionPrepare action=none failure=connection.tracking"),
+            (.accountProjectionRefresh, "boundary=accountProjectionRefresh action=none failure=connection.tracking")
+        ]
+        for (boundary, expected) in cases {
+            let failure = DebugCloudDiagnostics.ProjectedFailure(boundary: boundary,
+                error: BridgeError.cloudConnection(.tracking))
+            #expect(failure.value.formatted == expected)
+            #expect(failure.value.zone == nil && failure.value.kind == nil && failure.value.code == nil)
+        }
+    }
+
+    @Test func deferredProjectionDropsPayloadsAndDoesNotInferCategoriesFromText() {
+        typealias Projection = DebugCloudDiagnostics.ProjectedFailure
+        let sentinel = UUID().uuidString
+        let untrustedText = [sentinel, "connection.tracking", "accountProjectionRefresh"].joined(separator: " ")
+
+        weak var sourceError: NSError?
+        let unknownProjection: Projection = {
+            let underlying = NSError(
+                domain: untrustedText, code: 1234567, userInfo: [sentinel: untrustedText])
+            let source = NSError(domain: untrustedText, code: 987654321, userInfo: [
+                sentinel: untrustedText,
+                NSUnderlyingErrorKey: underlying,
+                NSLocalizedDescriptionKey: untrustedText
+            ])
+            sourceError = source
+            return Projection(boundary: .accountProjectionStatus, error: source)
+        }()
+        // Check release before reading the already-classified value.
+        #expect(sourceError == nil)
+
+        let cases: [(projection: Projection, expected: String)] = [
+            (
+                Projection(boundary: .accountProjectionPrepare, error: BridgeError.internal(untrustedText)),
+                "boundary=accountProjectionPrepare action=none failure=bridge.internal"
+            ),
+            (
+                unknownProjection,
+                "boundary=accountProjectionStatus action=none failure=other"
+            ),
+            (
+                Projection(
+                    boundary: .accountProjectionLifecycle,
+                    error: HostileError()
+                ),
+                "boundary=accountProjectionLifecycle action=none failure=other"
+            )
+        ]
+        for entry in cases {
+            #expect(entry.projection.value.formatted == entry.expected)
+            #expect(!entry.projection.value.formatted.contains(sentinel))
+        }
+    }
+
+    @Test func deferredProjectionSharesTheExistingRecorderCapAndUpdatesLatestAfter64() {
+        let recorder = DebugCloudDiagnostics.Recorder()
+        #expect(recorder.latestValue == nil)
+        let command = Value(.commandResult, error: BridgeError.cancelled)
+        let projected = DebugCloudDiagnostics.ProjectedFailure(boundary: .accountProjectionLifecycle,
+            error: BridgeError.cloudConnection(.tracking))
+        var received: [Value] = []
+        for _ in 0..<32 {
+            recorder.emit(command) { received.append($0) }
+            recorder.emit(projected.value) { received.append($0) }
+        }
+        #expect(received.count == 64)
+        #expect(received.filter { $0 == command }.count == 32)
+        #expect(received.filter { $0 == projected.value }.count == 32)
+        #expect(recorder.latestValue == projected.value.formatted)
+        recorder.emitStatus(.status(.offline, zone: .root, kind: .read, code: 4)) { received.append($0) }
+        #expect(recorder.latestValue == "boundary=policyStatus action=none failure=offline zone=root kind=read code=4")
+        let latest = DebugCloudDiagnostics.ProjectedFailure(boundary: .accountProjectionRefresh,
+            error: BridgeError.internal(UUID().uuidString))
+        recorder.emit(latest.value) { received.append($0) }
+        #expect(received.count == 64)
+        #expect(recorder.latestValue == "boundary=accountProjectionRefresh action=none failure=bridge.internal")
+        #expect(DebugCloudDiagnostics.Recorder().latestValue == nil)
     }
 
     @Test func statusProjectsEveryClassAndLogicalZoneAndKind() {

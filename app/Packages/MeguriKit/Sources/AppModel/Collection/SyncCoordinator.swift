@@ -74,6 +74,9 @@ extension SyncCoordinatorBackend {
     func resumeAfterCoreResume() async {}
 }
 nonisolated struct SyncCommandResult: Sendable {
+    #if DEBUG
+    var diagnosticFailure: DebugCloudDiagnostics.ProjectedFailure? = nil
+    #endif
     let outputs: [CloudPolicyOutput]
     let error: (any Error)?
     let deferred: Bool
@@ -1174,7 +1177,11 @@ public final class SyncCoordinator {
                 if result.deferred { hasDeferredNativeWork = true }
                 if let error = result.error, !(closing && shutdownCancelled && error is CancellationError) {
                     #if DEBUG
-                    DebugCloudDiagnostics.record(.commandResult, error: error)
+                    if let failure = result.diagnosticFailure {
+                        DebugCloudDiagnostics.record(failure)
+                    } else {
+                        DebugCloudDiagnostics.record(.commandResult, error: error)
+                    }
                     #endif
                     if !supersededAccountCancellation, !(result.mediaCancellation && error is CancellationError) {
                         operationFailed = true; failureRevision &+= 1

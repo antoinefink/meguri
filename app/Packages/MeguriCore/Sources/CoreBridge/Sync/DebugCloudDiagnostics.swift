@@ -10,9 +10,19 @@ public enum DebugCloudDiagnostics {
         case commandResult, policyStatus, coreActionFailed, applyDeferred
         case accountCompletionRefused, accountResultCurrent, accountResultSuperseded
         case accountReaderClosed, accountReaderFrozen, accountReaderTaskCancelled, accountReaderInvalidated
+        case accountProjectionLifecycle, accountProjectionStatus, accountProjectionPrepare, accountProjectionRefresh
         case platformBootstrap, backendAttachment, retainedRecoveryFailure, connectionFailure
         case ownWorkTrigger, connectionOperationCancel, suspendFreeze, beginAccountRead
         case policyInput, backendReplacement, closeDrain
+    }
+
+    /// Deferred source evidence; classification retains neither the error nor its payload.
+    public struct ProjectedFailure: Sendable {
+        let value: Value
+
+        public init(boundary: Boundary, error: any Error) {
+            value = Value(boundary, error: error)
+        }
     }
 
     /// One command-scoped observation, inherited by its existing child tasks.
@@ -242,6 +252,12 @@ public enum DebugCloudDiagnostics {
         }
     }
 
+    public static func record(_ failure: ProjectedFailure) {
+        recorder.emit(failure.value) { value in
+            logger.error("cloudFailure \(value.formatted, privacy: .public)")
+        }
+    }
+
     static func recordAdoptionFailure(_ diagnostic: CloudAdoptionFailureDiagnostic) {
         let value = Value.adoption(diagnostic)
         recorder.emit(value) { value in
@@ -341,7 +357,8 @@ public enum DebugCloudDiagnostics {
             case .commandResult, .policyStatus, .coreActionFailed, .applyDeferred,
                  .accountCompletionRefused, .accountResultCurrent, .accountResultSuperseded,
                  .accountReaderClosed, .accountReaderFrozen, .accountReaderTaskCancelled,
-                 .accountReaderInvalidated, .platformBootstrap, .backendAttachment,
+                 .accountReaderInvalidated, .accountProjectionLifecycle, .accountProjectionStatus,
+                 .accountProjectionPrepare, .accountProjectionRefresh, .platformBootstrap, .backendAttachment,
                  .retainedRecoveryFailure, .connectionFailure, .ownWorkTrigger,
                  .connectionOperationCancel, .suspendFreeze, .beginAccountRead,
                  .policyInput, .backendReplacement, .closeDrain: self.action = "none"
