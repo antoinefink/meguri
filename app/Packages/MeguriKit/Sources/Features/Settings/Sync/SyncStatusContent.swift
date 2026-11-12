@@ -43,13 +43,18 @@ struct SyncStatusRows: View {
                 .compactMap { $0 }.joined(separator: " "))
             #endif
             if let status = sync.status {
-                ForEach(Array(SyncStatusCopy.lines(status, now: clock.now()).enumerated()), id: \.offset) { _, line in
+                ForEach(Array(SyncStatusCopy.lines(status, now: clock.now()).enumerated()), id: \.offset) { offset, line in
                     Text(line)
+                        .accessibilityIdentifier("settings.accountSync.detail.\(offset)")
                 }
             }
             if let failure = sync.connectionFailure {
                 Text(SyncText.value(SyncStatusPresentation.connectionErrorKey(failure)))
-            } else if sync.operationFailed { Text(SyncText.value("sync.recovery.error.other")) }
+                    .accessibilityIdentifier("settings.accountSync.connectionError")
+            } else if sync.operationFailed {
+                Text(SyncText.value("sync.recovery.error.other"))
+                    .accessibilityIdentifier("settings.accountSync.operationError")
+            }
             if let recovery = sync.recovery {
                 CloudRecoveryContent(collection: collection, recovery: recovery)
             }
@@ -61,6 +66,7 @@ struct SyncNowButton: View {
     let collection: ReviewCollection
     var identifier = "sync.status.syncNow"
     var showsUnavailableReason = true
+    var reasonIdentifierSuffix = ""
     private var reason: String? { SyncStatusCopy.unavailable(collection) }
     var body: some View {
         Button(SyncText.value("sync.now.command")) { collection.requestSyncNow() }
@@ -72,7 +78,10 @@ struct SyncNowButton: View {
             // not an on-demand SDK query.
             .accessibilityValue(DebugCloudDiagnostics.nativeFetchSequenceValue)
             #endif
-        if showsUnavailableReason, let reason { Text(reason).foregroundStyle(.secondary) }
+        if showsUnavailableReason, let reason {
+            Text(reason).foregroundStyle(.secondary)
+                .accessibilityIdentifier("\(identifier)Reason\(reasonIdentifierSuffix)")
+        }
     }
 }
 
@@ -227,7 +236,11 @@ struct CloudRecoveryContent: View {
     let recovery: CloudRecoveryStatus
     var body: some View {
         Text(SyncText.value(stepKey))
-        if recovery.switchConflict { Text(SyncText.value("sync.attention.publishConflict")) }
+            .accessibilityIdentifier("sync.recovery.status")
+        if recovery.switchConflict {
+            Text(SyncText.value("sync.attention.publishConflict"))
+                .accessibilityIdentifier("sync.recovery.switchConflict")
+        }
         Button(SyncText.value("sync.action.resumeOp")) {
             if recovery.adoptionTransportWait { collection.sync.resumeWaitingAdoption() }
             else { collection.sync.resumeConnection() }
@@ -238,8 +251,10 @@ struct CloudRecoveryContent: View {
         Button(SyncText.value("sync.action.cancelOp")) {
             if recovery.adoptionTransportWait { Task { await collection.sync.cancelConnectionOperation() } }
         }.disabled(!recovery.adoptionTransportWait)
+            .accessibilityIdentifier("sync.recovery.cancel")
         if !recovery.adoptionTransportWait {
             Text(SyncText.value("sync.recovery.error.notOffered")).foregroundStyle(.secondary)
+                .accessibilityIdentifier("sync.recovery.cancelUnavailableReason")
         }
     }
     private var stepKey: String {

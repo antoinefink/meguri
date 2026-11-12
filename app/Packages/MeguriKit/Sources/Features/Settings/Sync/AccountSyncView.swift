@@ -16,6 +16,7 @@ public struct AccountSyncView: View {
             Section {
                 SyncStatusRows(collection: collection)
                 Text(SyncText.value(accountKey))
+                    .accessibilityIdentifier("settings.accountSync.accountState")
                 if decisionRequired {
                     Button(SyncText.value("sync.decision.action")) { open(.publicationChoice) }
                         .accessibilityLabel(SyncText.value("sync.decision.action.label"))
@@ -46,8 +47,13 @@ public struct AccountSyncView: View {
                 }
                 SyncNowButton(collection: collection, identifier: "settings.accountSync.syncNow",
                     showsUnavailableReason: !(sync.status == nil && sync.setupState == .configurationUnavailable))
-            } header: { Text(SyncText.value("sync.settings.iCloud")) }
-            footer: { Text(SyncText.value("sync.settings.privacy")) }
+            } header: {
+                Text(SyncText.value("sync.settings.iCloud"))
+                    .accessibilityIdentifier("settings.accountSync.iCloudHeading")
+            } footer: {
+                Text(SyncText.value("sync.settings.privacy"))
+                    .accessibilityIdentifier("settings.accountSync.privacyFooter")
+            }
             Section {
                 Toggle(SyncText.value("sync.settings.automatic"), isOn: Binding(
                     get: { sync.settings.automatic }, set: { update(automatic: $0) }))
@@ -55,7 +61,11 @@ public struct AccountSyncView: View {
                     .accessibilityIdentifier("settings.accountSync.automatic")
             } footer: {
                 Text(SyncText.value("sync.settings.automatic.footer"))
-                if let controlReason { Text(SyncText.value(controlReason)) }
+                    .accessibilityIdentifier("settings.accountSync.automaticFooter")
+                if let controlReason {
+                    Text(SyncText.value(controlReason))
+                        .accessibilityIdentifier("settings.accountSync.automaticUnavailableReason")
+                }
             }
             Section {
                 Toggle(SyncText.value("sync.settings.media"), isOn: Binding(
@@ -64,7 +74,11 @@ public struct AccountSyncView: View {
                     .accessibilityIdentifier("settings.accountSync.media")
             } footer: {
                 Text(SyncText.value("sync.settings.media.footer"))
-                if let controlReason { Text(SyncText.value(controlReason)) }
+                    .accessibilityIdentifier("settings.accountSync.mediaFooter")
+                if let controlReason {
+                    Text(SyncText.value(controlReason))
+                        .accessibilityIdentifier("settings.accountSync.mediaUnavailableReason")
+                }
             }
             CloudAttentionSection(collection: collection, host: host)
             Section {
@@ -75,21 +89,32 @@ public struct AccountSyncView: View {
                     Button(SyncText.value("sync.settings.conflicts")) {}.disabled(true)
                         .accessibilityIdentifier("settings.accountSync.reviewConflicts")
                 }
-            } footer: { Text(SyncText.value("sync.recovery.error.notOffered")) }
+            } footer: {
+                Text(SyncText.value("sync.recovery.error.notOffered"))
+                    .accessibilityIdentifier("settings.accountSync.conflictsUnavailableReason")
+            }
             if sync.status?.accountStatus == .available {
                 Section {
                     CloudPreviewEntryButton(collection: collection, entry: .replaceLocal, host: host)
                     CloudPreviewEntryButton(collection: collection, entry: .replaceCloud, host: host)
-                } header: { Text(SyncText.value("sync.settings.advanced")) }
-                footer: {
-                    if sync.settings.paused { Text(SyncText.value("sync.status.paused.user")) }
+                } header: {
+                    Text(SyncText.value("sync.settings.advanced"))
+                        .accessibilityIdentifier("settings.accountSync.advancedHeading")
+                } footer: {
+                    if sync.settings.paused {
+                        Text(SyncText.value("sync.status.paused.user"))
+                            .accessibilityIdentifier("settings.accountSync.advancedPauseReason")
+                    }
                 }
             }
             if controls.bindingActive == true {
                 Section {
                     Button(SyncText.value("sync.settings.stop"), role: .destructive) {}.disabled(true)
                         .accessibilityIdentifier("settings.accountSync.stop")
-                } footer: { Text(SyncText.value("sync.recovery.error.notOffered")) }
+                } footer: {
+                    Text(SyncText.value("sync.recovery.error.notOffered"))
+                        .accessibilityIdentifier("settings.accountSync.stopUnavailableReason")
+                }
             }
             Section {
                 DisclosureGroup {
@@ -97,11 +122,19 @@ public struct AccountSyncView: View {
                     // No raw SDK diagnostics, account identity or connection values.
                     if let status = sync.status {
                         Text(SyncText.value(accountKey))
-                        if let error = status.error { Text(SyncText.value(SyncStatusPresentation.errorKey(error.error))) }
+                            .accessibilityIdentifier("settings.accountSync.detailsAccountState")
+                        if let error = status.error {
+                            Text(SyncText.value(SyncStatusPresentation.errorKey(error.error)))
+                                .accessibilityIdentifier("settings.accountSync.detailsError")
+                        }
                         if let last = status.lastAttempt {
                             Text(SyncStatusCopy.resultTitle(last.outcome))
+                                .accessibilityIdentifier("settings.accountSync.detailsLastAttempt")
                         }
-                    } else { Text(SyncText.value(accountKey)) }
+                    } else {
+                        Text(SyncText.value(accountKey))
+                            .accessibilityIdentifier("settings.accountSync.detailsAccountState")
+                    }
                 } label: { Text("Connection details", bundle: .module) }
                 .accessibilityIdentifier("settings.accountSync.details")
             }
@@ -169,9 +202,10 @@ struct CloudAttentionSection: View {
     var body: some View {
         if let items = collection.sync.status?.attention, !items.isEmpty {
             Section {
-                ForEach(SyncStatusCopy.attentionOrder.filter { items[$0] != nil }, id: \.self) { item in
+                ForEach(Array(SyncStatusCopy.attentionOrder.enumerated()).filter { items[$0.element] != nil }, id: \.element) { offset, item in
                     VStack(alignment: .leading) {
                         Text(SyncStatusCopy.attention(item, count: items[item] ?? 0))
+                            .accessibilityIdentifier("settings.accountSync.attentionMessage.\(offset)")
                         if item == .chooseCollection || item == .isolated {
                             CloudPreviewEntryButton(collection: collection, entry: .connect, host: host)
                         }
@@ -182,22 +216,32 @@ struct CloudAttentionSection: View {
                             CloudPreviewEntryButton(collection: collection, entry: .replaceLocal, host: host)
                         }
                         if [.quotaFull, .localStorageFull, .trackingError, .cloudError, .exchangeIncomplete].contains(item) {
-                            SyncNowButton(collection: collection)
+                            SyncNowButton(collection: collection, reasonIdentifierSuffix: ".\(offset)")
                         }
-                        if item == .quotaFull { Text(SyncText.value("sync.attention.storageGuidance")) }
+                        if item == .quotaFull {
+                            Text(SyncText.value("sync.attention.storageGuidance"))
+                                .accessibilityIdentifier("settings.accountSync.attentionStorageGuidance.\(offset)")
+                        }
                         if [.refused, .referenceWaiting, .oversize, .unreadable, .unsyncable, .claimStuck,
                             .generationIncomplete, .applyFailed, .rekeyFailed, .mediaMissing].contains(item) {
                             Button(SyncText.value("sync.action.showDetails")) {}.disabled(true)
+                                .accessibilityIdentifier("settings.accountSync.attentionShowDetails.\(offset)")
                             Text(SyncText.value("sync.recovery.error.notOffered")).foregroundStyle(.secondary)
+                                .accessibilityIdentifier("settings.accountSync.attentionDetailsUnavailableReason.\(offset)")
                         }
                         if item == .conflicts {
                             Button(SyncText.value("sync.action.reviewConflicts")) {}.disabled(true)
+                                .accessibilityIdentifier("settings.accountSync.attentionReviewConflicts.\(offset)")
                             Text(SyncText.value("sync.recovery.error.notOffered")).foregroundStyle(.secondary)
+                                .accessibilityIdentifier("settings.accountSync.attentionConflictsUnavailableReason.\(offset)")
                         }
                     }
                     .accessibilityElement(children: .contain)
                 }
-            } header: { Text(SyncText.value("sync.status.needsAttention.title")) }
+            } header: {
+                Text(SyncText.value("sync.status.needsAttention.title"))
+                    .accessibilityIdentifier("settings.accountSync.attentionHeading")
+            }
         }
     }
 }
