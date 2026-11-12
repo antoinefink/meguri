@@ -639,6 +639,7 @@ mod tests {
         for (name, bytes) in payloads {
             assert_eq!(host.media().unwrap().add(name, bytes).unwrap(), name);
         }
+        assert!(host.derived().wait_idle(Duration::from_secs(5)));
         let source = root.path().join("input.colpkg");
         let c = host.collection().unwrap();
         let reader = c.reader(ReaderRole::Maintenance).unwrap();
