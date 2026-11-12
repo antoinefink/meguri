@@ -299,8 +299,9 @@ extension ReviewCollectionStartupTests {
                     generation: context.generation + 1, revision: context.revision))
                 #expect(!context.ownsNativeCancellation(result, command: command, backend: original,
                     generation: context.generation, revision: context.revision + 1))
-                let unowned = SyncCommandTaskContext(generation: context.generation, revision: context.revision, backend: original)
-                unowned.activeCommand = command
+                let unowned = SyncCommandTaskContext(generation: context.generation, revision: context.revision, backend: original,
+                                                     originalCommands: [command])
+                unowned.activeCommandIndex = 0
                 #expect(!unowned.ownsNativeCancellation(result, command: command, backend: original,
                     generation: context.generation, revision: context.revision))
                 unowned.recordCancellation(.expiry, alreadyCancelled: true)
@@ -364,6 +365,80 @@ extension ReviewCollectionStartupTests {
             #expect(try await successor.workflow.durableSnapshot() == snapshot)
             #expect(try await successor.workflow.currentGuard() == guardBefore)
             #expect(!app.sync.operationFailed && app.sync.failureRevision == 0)
+        }
+    }
+    @Test(arguments: [false, true])
+    func queuedOriginalMediaCancellationOwnsOnlyFrozenQueueAndPreservesEarlierProviderFailure(earlierFailure: Bool) async throws {
+        try await withShutdownHarness { app in
+            app.sync.setDeviceSettings(paused: false, automatic: true, media: true)
+            await app.sync.waitForInputs(); await app.sync.drainOperations()
+            let original = try app.backend
+            let policy = try await original.workflow.policy()
+            guard case .commands(let issued) = try await policy.input(.foreground),
+                  case .commands(let later) = try await policy.input(.foreground) else {
+                throw BridgeError.internal("Expected actual foreground command lists")
+            }
+            let active = try #require(issued.first { if case .requestFetch = $0.action { true } else { false } })
+            let queued = try #require(issued.first { if case .resumeMedia = $0.action { true } else { false } })
+            let unissued = try #require(later.first { if case .resumeMedia = $0.action { true } else { false } })
+            let backend = SyncOwnerFake(), held = SyncOwnerGate()
+            let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: nil)
+            await sync.preparePlatform(); await sync.completeOpenedHost(generation: app.sync.generation)
+            await sync.prepareConnectionAuthority()
+            var context: SyncCommandTaskContext?
+            var results: [CloudPolicyCommand] = [], acknowledgements: [CloudPolicyCommand] = []
+            var providerError: (any Error)?
+            sync.observeCausalBoundary = { boundary, command in
+                guard let command, command.raw === active.raw || command.raw === queued.raw else { return }
+                if case .commandAcknowledgementJoined = boundary { acknowledgements.append(command) }
+            }
+            backend.executeCommand = { command in
+                results.append(command)
+                if command.raw === active.raw {
+                    context = SyncCommandTaskContext.current
+                    #expect(context != nil && !Task.isCancelled)
+                    if earlierFailure {
+                        await app.factory.resolveNextAccountRead(with: .failure(ServiceWorkflowFailure.wire))
+                        do { _ = try await app.factory.resolveAccount(); Issue.record("Expected original provider failure") }
+                        catch { providerError = error }
+                    }
+                    await held.hold()
+                    #expect(Task.isCancelled && context?.shutdownCancellationRequested == false)
+                    return .init(outputs: [], error: providerError, deferred: false)
+                }
+                guard command.raw === queued.raw, let context else {
+                    Issue.record("Unexpected original queue command"); return .init(outputs: [], error: nil, deferred: false)
+                }
+                #expect(SyncCommandTaskContext.current === context && Task.isCancelled)
+                let result = await original.execute(command)
+                #expect(result.error is CancellationError && result.nativeCancellation?.matches(command) == true)
+                #expect(context.ownsNativeCancellation(result, command: command, backend: backend,
+                    generation: context.generation, revision: context.revision))
+                #expect(!context.ownsNativeCancellation(result, command: active, backend: backend,
+                    generation: context.generation, revision: context.revision))
+                #expect(!context.ownsNativeCancellation(result, command: unissued, backend: backend,
+                    generation: context.generation, revision: context.revision))
+                checkFrozenQueueOwnership(result, command: command, other: active, unissued: unissued, backend: backend)
+                #expect(result.acknowledgedOutputCount == result.outputs.count)
+                return result
+            }
+            defer { held.release(); backend.executeCommand = nil; sync.observeCausalBoundary = nil }
+            backend.nextCommands = [active, queued]; sync.receive(.refresh(.cloud))
+            await held.waitUntilHeld()
+            sync.backgroundExpired()
+            held.release()
+            await sync.drainOperations()
+            for command in [active, queued] {
+                #expect(results.filter { $0.raw === command.raw }.count == 1)
+                #expect(acknowledgements.filter { $0.raw === command.raw }.count == 1)
+            }
+            #expect((providerError != nil) == earlierFailure)
+            #expect(sync.operationFailed == earlierFailure && sync.failureRevision == (earlierFailure ? 1 : 0))
+            #expect(context?.shutdownCancellationRequested == false)
+            #expect(await sync.cancelAndDrain())
+            #expect(context?.shutdownCancellationRequested == false)
+            #expect(sync.operationFailed == earlierFailure && sync.failureRevision == (earlierFailure ? 1 : 0))
+            #expect(!app.sync.operationFailed && !original.closed)
         }
     }
     #endif
@@ -1041,6 +1116,74 @@ extension ReviewCollectionStartupTests {
 }
 
 #if DEBUG
+// Every row uses the real media executor's sealed result above.
+@MainActor private func checkFrozenQueueOwnership(
+    _ result: SyncCommandResult, command: CloudPolicyCommand, other: CloudPolicyCommand,
+    unissued: CloudPolicyCommand, backend: any SyncCoordinatorBackend
+) {
+    func make(_ commands: [CloudPolicyCommand]) -> SyncCommandTaskContext {
+        SyncCommandTaskContext(generation: 179, revision: 3, backend: backend, originalCommands: commands)
+    }
+    func owns(_ context: SyncCommandTaskContext, _ actual: CloudPolicyCommand) -> Bool {
+        context.ownsNativeCancellation(result, command: actual, backend: backend, generation: 179, revision: 3)
+    }
+    for intent in [SyncCommandTaskContext.Cancellation.expiry, .replacement] {
+        let queued = make([other, command])
+        queued.activeCommandIndex = 0
+        queued.recordCancellation(intent, alreadyCancelled: false)
+        #expect(!owns(queued, command)) // Still executing the earlier original.
+        queued.activeCommandIndex = 1
+        #expect(owns(queued, command))
+        #expect(!owns(queued, other) && !owns(queued, unissued))
+        queued.recordCancellation(.shutdown, alreadyCancelled: true)
+        #expect(owns(queued, command) && !queued.shutdownCancellationRequested)
+
+        let notStarted = make([other, command])
+        notStarted.recordCancellation(intent, alreadyCancelled: false)
+        notStarted.activeCommandIndex = 1
+        #expect(owns(notStarted, command))
+
+        let completed = make([command, other])
+        completed.activeCommandIndex = 1
+        completed.recordCancellation(intent, alreadyCancelled: false)
+        completed.activeCommandIndex = 0
+        completed.recordCancellation(.shutdown, alreadyCancelled: true)
+        completed.recordCancellation(intent, alreadyCancelled: false)
+        #expect(!owns(completed, command) && !completed.shutdownCancellationRequested)
+
+        for index in [-1, 2] {
+            let inconsistent = make([other, command])
+            inconsistent.activeCommandIndex = index
+            inconsistent.recordCancellation(intent, alreadyCancelled: false)
+            inconsistent.activeCommandIndex = 1
+            inconsistent.recordCancellation(intent, alreadyCancelled: false)
+            #expect(!owns(inconsistent, command))
+        }
+        var originalList = [other]
+        let unknown = make(originalList)
+        unknown.recordCancellation(intent, alreadyCancelled: false)
+        originalList.append(command)
+        unknown.activeCommandIndex = 1
+        unknown.recordCancellation(.shutdown, alreadyCancelled: true)
+        #expect(!owns(unknown, command))
+        let laterList = make(originalList)
+        laterList.activeCommandIndex = 1
+        #expect(!owns(laterList, command))
+        let different = make([unissued])
+        different.activeCommandIndex = 0
+        different.recordCancellation(intent, alreadyCancelled: false)
+        #expect(!owns(different, command) && !owns(different, unissued))
+    }
+    for origin in [SyncCommandTaskContext.Cancellation.other, .shutdown, .expiry] {
+        let unknownOrigin = make([command])
+        unknownOrigin.activeCommandIndex = 0
+        unknownOrigin.recordCancellation(origin, alreadyCancelled: origin == .expiry)
+        unknownOrigin.recordCancellation(.replacement, alreadyCancelled: false)
+        unknownOrigin.recordCancellation(.expiry, alreadyCancelled: false)
+        #expect(!owns(unknownOrigin, command))
+    }
+}
+
 private struct P4OrderingCommands {
     let status: CloudPolicyCommand, record: CloudPolicyCommand, cleanup: CloudPolicyCommand
     let fetch: CloudPolicyCommand, update: CloudPolicyCommand, stop: CloudPolicyCommand

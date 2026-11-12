@@ -116,18 +116,28 @@ enum SyncOwnerFailure: Error { case configurationUnavailable }
     let generation: UInt64
     let revision: UInt64
     private let backend: any SyncCoordinatorBackend
-    var activeCommand: CloudPolicyCommand?
+    private let originalCommands: [CloudPolicyCommand]
+    var activeCommandIndex: Int?
+    private var activeCommand: CloudPolicyCommand? {
+        guard let index = activeCommandIndex, originalCommands.indices.contains(index) else { return nil }
+        return originalCommands[index]
+    }
     private var firstCancellation: Cancellation?
-    private var cancelledCommand: CloudPolicyCommand?
+    private var cancelledCommands: [CloudPolicyCommand] = []
     private(set) var shutdownCancellationRequested = false
     var shutdownCancelled: Bool { shutdownCancellationRequested && Task.isCancelled }
-    init(generation: UInt64, revision: UInt64, backend: any SyncCoordinatorBackend) {
+    init(generation: UInt64, revision: UInt64, backend: any SyncCoordinatorBackend,
+         originalCommands: [CloudPolicyCommand]) {
         self.generation = generation; self.revision = revision; self.backend = backend
+        self.originalCommands = originalCommands
     }
     func recordCancellation(_ intent: Cancellation, alreadyCancelled: Bool) {
         guard firstCancellation == nil else { return }
         firstCancellation = alreadyCancelled ? .other : intent
-        cancelledCommand = activeCommand
+        if let index = activeCommandIndex {
+            // An invalid position cannot identify a remaining original queue.
+            if originalCommands.indices.contains(index) { cancelledCommands = Array(originalCommands[index...]) }
+        } else { cancelledCommands = originalCommands }
         shutdownCancellationRequested = firstCancellation == .shutdown
     }
     func ownsNativeCancellation(_ result: SyncCommandResult, command: CloudPolicyCommand,
@@ -135,8 +145,9 @@ enum SyncOwnerFailure: Error { case configurationUnavailable }
         guard firstCancellation == .expiry || firstCancellation == .replacement,
               self.backend === backend, self.generation == generation, self.revision == revision,
               result.error is CancellationError, result.fetchProofOutcome?.preservesFailure != true,
-              let proof = result.nativeCancellation, let cancelledCommand,
-              proof.matches(cancelledCommand), proof.matches(command) else { return false }
+              let proof = result.nativeCancellation, let activeCommand,
+              proof.matches(activeCommand), proof.matches(command),
+              cancelledCommands.contains(where: { proof.matches($0) }) else { return false }
         return true
     }
 }
@@ -1659,7 +1670,8 @@ public final class SyncCoordinator {
             let phase = CorePhase(command: issued.first?.command)
             corePhase[id] = phase; lastCorePhase = phase
         }
-        let context = SyncCommandTaskContext(generation: generation, revision: revision, backend: backend)
+        let context = SyncCommandTaskContext(generation: generation, revision: revision, backend: backend,
+                                             originalCommands: issued.map(\.command))
         operationContexts[id] = context
         if issued.contains(where: {
             switch $0.command.action {
@@ -1699,7 +1711,7 @@ public final class SyncCoordinator {
             }
             await CloudOriginalCommandProofYield.$admission.withValue(proofAdmission) {
             await SyncCommandTaskContext.$current.withValue(context) {
-                for value in issued {
+                for (index, value) in issued.enumerated() {
                     let command = value.command
                     if replacing || revision != hostRevision || backendRetired { return }
                     if closing, !Self.requiredDuringClose(command.action) { continue }
@@ -1721,7 +1733,7 @@ public final class SyncCoordinator {
                         }
                         #endif
                     }
-                    context.activeCommand = command
+                    context.activeCommandIndex = index
                     result = await CloudQuiescentDependencyWait.$transition.withValue(park) {
                     await backend.execute(command, corePrepared: { [self] in
                         // The qualified local cleanup pass returned; inventory
