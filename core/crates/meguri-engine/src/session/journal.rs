@@ -154,6 +154,7 @@ enum Work {
     Compact(mpsc::SyncSender<Result<(), EngineError>>),
     Migrate(PersistentIdentity, mpsc::SyncSender<Result<(), EngineError>>),
     OpeningEvidence(Box<managed::Evidence>, mpsc::SyncSender<Result<(), EngineError>>),
+    RetiredSource((u64, u64), mpsc::SyncSender<Result<RecoveryBinding, EngineError>>),
     #[cfg(feature = "test-hooks")]
     Fault(JournalStage, mpsc::SyncSender<()>),
     #[cfg(feature = "test-hooks")]
@@ -166,6 +167,8 @@ pub(crate) struct Journal {
     worker: Mutex<Option<JoinHandle<()>>>,
     generation: Generation,
     live_native: (u64, u64),
+    live_canonical: Vec<u8>,
+    retired_binding: Mutex<Option<RecoveryBinding>>,
 }
 fn encode(number: u64, record: &Record) -> Result<Vec<u8>, EngineError> {
     let payload = serde_json::to_string(record).map_err(error)?;
@@ -861,6 +864,8 @@ impl Journal {
             worker: Mutex::new(Some(worker)),
             generation,
             live_native: native,
+            live_canonical: canonical.to_vec(),
+            retired_binding: Mutex::new(None),
         });
         if let Some(evidence) = opening {
             let (tx, rx) = mpsc::sync_channel(1);
@@ -1057,7 +1062,43 @@ impl Journal {
         wait_until(rx, deadline)
     }
     pub(crate) fn retire(&self) -> Result<(), EngineError> {
-        self.append(Record::Retired)
+        self.append(Record::Retired)?;
+        if self.state.lock().unwrap().header.path != self.live_canonical {
+            let (tx, rx) = mpsc::sync_channel(1);
+            self.tx.send(Work::RetiredSource(self.live_native, tx)).map_err(error)?;
+            // Capture before releasing the old collection to the swap. Later
+            // rebind must consume these exact bytes on this exact descriptor.
+            *self.retired_binding.lock().unwrap() = Some(rx.recv().map_err(error)??);
+        }
+        Ok(())
+    }
+    // Only the still-owned worker can attest the exact file it durably retired.
+    // The stored locator alone never authorizes opening a different path.
+    fn retired_source(&self, canonical: &[u8]) -> Result<Option<RecoveryBinding>, EngineError> {
+        if canonical != self.live_canonical {
+            return Err(identity_mismatch());
+        }
+        let state = self.state.lock().unwrap();
+        if state.header.path == canonical {
+            return Ok(None);
+        }
+        if let Some(failure) = &state.failure {
+            return Err(failure.clone());
+        }
+        if !state.retired
+            || state.header.version != 2
+            || !matches!(state.header.native, Native::Persistent(identity @ PersistentIdentity::Darwin { .. })
+                if identity.valid_for_platform())
+        {
+            return Err(identity_mismatch());
+        }
+        drop(state);
+        let retired_binding = self.retired_binding.lock().unwrap();
+        let source = retired_binding.as_ref().ok_or_else(identity_mismatch)?;
+        Ok(Some(RecoveryBinding {
+            file: source.file.try_clone().map_err(error)?,
+            bytes: source.bytes.clone(),
+        }))
     }
 }
 fn wait_until(reply: mpsc::Receiver<Result<(), EngineError>>, deadline: Duration) -> Result<(), EngineError> {
@@ -1112,6 +1153,32 @@ fn file_loop(
             }
             Work::Barrier(reply) => {
                 let _ = reply.send(state.lock().unwrap().failure.clone().map_or(Ok(()), Err));
+            }
+            Work::RetiredSource(native, reply) => {
+                let result = (|| {
+                    if let Some(failure) = &state.lock().unwrap().failure {
+                        return Err(failure.clone());
+                    }
+                    let source = RecoveryBinding::read(&path)?;
+                    same_file(&file, &source.file)?;
+                    let (loaded, frames, complete) = read_bytes_bound(&source.bytes, &validated.header, native)?;
+                    if !validated.retired
+                        || !loaded.retired
+                        || loaded.header.path != validated.header.path
+                        || loaded.header.native != validated.header.native
+                        || loaded.header.incarnation != validated.header.incarnation
+                        || loaded.next_event != validated.next_event
+                        || frames != number
+                        || complete != source.bytes.len()
+                    {
+                        return Err(identity_mismatch());
+                    }
+                    // Retired was acknowledged by the preceding append's full
+                    // sync on this worker descriptor; retain its exact bytes.
+                    source.require(&path)?;
+                    Ok(source)
+                })();
+                let _ = reply.send(result);
             }
             Work::OpeningEvidence(evidence, reply) => {
                 let result = evidence.require();

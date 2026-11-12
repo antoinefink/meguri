@@ -1428,6 +1428,398 @@ fn c12_managed_same_file_path_reopen_preserves_darwin_history_and_refuses_non_da
     }
 }
 
+// C12.5's historical locator must compose with C12.7's controlled replacement.
+// This uses real Darwin identity, not a decoder override on non-Darwin hosts.
+#[cfg(target_vendor = "apple")]
+#[test]
+fn c12_managed_darwin_moved_resolved_journal_allows_verified_replacement_and_cold_open() {
+    use meguri_engine::WalCoverage;
+    use meguri_storage::persistent_identity;
+    use std::os::unix::ffi::OsStrExt;
+
+    let outer = tempfile::tempdir().unwrap();
+    let h = Harness::new(3);
+    let path = h.collection.path().to_owned();
+    let clock = h.clock.clone();
+    let (id, head) = h.start();
+    accept(&h.review, id, &head, Rating::Easy, NOW);
+    h.review.flush_for_background().unwrap();
+    h.review.end(id).unwrap();
+    let old_logs = logs(&h.collection);
+    let old_rows = common::steps::dump(&h.collection);
+    assert_eq!(old_logs.len(), 1);
+    let (identity, seq) = {
+        let reader = h.collection.reader(ReaderRole::Query).unwrap();
+        let snapshot = reader.snapshot().unwrap();
+        (snapshot.wal_identity(), snapshot.seq())
+    };
+    match h.collection.wait_wal_covered(identity, seq, Duration::from_secs(1)).unwrap() {
+        WalCoverage::Covered(receipt) => {
+            assert_eq!(receipt.identity(), identity);
+            assert!(receipt.through() >= seq);
+        }
+        other => panic!("saved answer needs actual WAL coverage: {other:?}"),
+    }
+    h.engine.close().unwrap();
+    drop(h.collection);
+    drop(h.review);
+    drop(h.engine);
+    let seed_dir = h.dir;
+    let old_native = native(&path);
+    let old_persistent = darwin_persistent(&path);
+    assert!(matches!(
+        old_persistent,
+        persistent_identity::PersistentIdentity::Darwin { .. }
+    ));
+    let saved = fs::read(journal_path(&path)).unwrap();
+    let historical = journal_header(&saved);
+    assert_eq!(historical["version"], 2);
+    assert!(
+        historical["next_event"].as_u64().unwrap() > 1,
+        "resolved, non-pristine history"
+    );
+
+    let moved = outer.path().join("moved-container");
+    fs::rename(path.parent().unwrap(), &moved).unwrap();
+    let path = moved.join("collection.anki2");
+    assert_eq!(native(&path), old_native);
+    assert_eq!(darwin_persistent(&path), old_persistent);
+    let canonical = serde_json::json!(path.canonicalize().unwrap().as_os_str().as_bytes());
+    assert_ne!(historical["path"], canonical);
+    let (engine, review, stream, opened) = try_review_with_clock(&path, clock.clone());
+    let collection = opened.expect("C12.5 same-native-file managed reopening");
+    assert!(matches!(engine.state(), LifecycleState::Ready { .. }));
+    assert_eq!(logs(&collection), old_logs);
+    let reopened_rows = common::steps::dump(&collection);
+    assert_eq!(reopened_rows["cards"], old_rows["cards"]);
+    assert_eq!(reopened_rows["revlog"], old_rows["revlog"]);
+    assert_eq!(
+        fs::read(journal_path(&path)).unwrap(),
+        saved,
+        "historical bytes/path retained"
+    );
+
+    assert_resolved_journal_verified_replacement(engine, collection, review, stream, clock, head.items[0].card_id);
+    drop(seed_dir);
+}
+
+// A real pristine migration retains its verified archive through resolved
+// compaction. No further path change precedes the controlled replacement.
+#[cfg(target_vendor = "apple")]
+#[test]
+fn c12_managed_darwin_migrated_resolved_journal_allows_verified_replacement_and_cold_open() {
+    darwin_migrated_resolved_replacement(false);
+}
+
+#[cfg(target_vendor = "apple")]
+#[test]
+fn c12_managed_darwin_migrated_retired_crash_reopens_before_provider_reset() {
+    darwin_migrated_resolved_replacement(true);
+}
+
+#[cfg(target_vendor = "apple")]
+fn darwin_migrated_resolved_replacement(crash: bool) {
+    use sha2::{Digest, Sha256};
+    use std::os::unix::ffi::OsStrExt;
+
+    let outer = tempfile::tempdir().unwrap();
+    let h = Harness::new(3);
+    let path = h.collection.path().to_owned();
+    let clock = h.clock.clone();
+    h.engine.close().unwrap();
+    drop(h.collection);
+    drop(h.review);
+    drop(h.engine);
+    let archived = fs::read(journal_path(&path)).unwrap();
+    let pristine = journal_header(&archived);
+    assert_eq!(pristine["version"], 2);
+    assert_eq!(pristine["next_event"], 1);
+    assert!(pristine.get("notice").is_none());
+    assert_eq!(archived.iter().filter(|b| **b == b'\n').count(), 1);
+    let old_native = native(&path);
+    let old_persistent = darwin_persistent(&path);
+    assert!(matches!(
+        old_persistent,
+        meguri_storage::persistent_identity::PersistentIdentity::Darwin { .. }
+    ));
+    let moved = outer.path().join("pristine-migration");
+    fs::rename(path.parent().unwrap(), &moved).unwrap();
+    let path = moved.join("collection.anki2");
+    assert_eq!(native(&path), old_native);
+    assert_eq!(darwin_persistent(&path), old_persistent);
+    let canonical = serde_json::json!(path.canonicalize().unwrap().as_os_str().as_bytes());
+    assert_ne!(pristine["path"], canonical);
+
+    // Normal registered service opening creates both the archive and notice.
+    let (engine, review, stream, opened) = try_review_with_clock(&path, clock.clone());
+    let collection = opened.expect("qualified pristine v2 migration before Ready");
+    assert!(matches!(engine.state(), LifecycleState::Ready { .. }));
+    let migrated = journal_header(&fs::read(journal_path(&path)).unwrap());
+    let archive = identity_archive(&path, &archived);
+    let digest: [u8; 32] = Sha256::digest(&archived).into();
+    assert_eq!(fs::read(&archive).unwrap(), archived);
+    assert_eq!(migrated["notice"]["reason"], "pristine_v2_rebound");
+    assert_eq!(migrated["notice"]["archive_sha256"], serde_json::to_value(digest).unwrap());
+    assert_ne!(migrated["incarnation"], pristine["incarnation"]);
+    assert_eq!(migrated["native"], pristine["native"]);
+    assert_eq!(migrated["path"], canonical);
+    assert_eq!(migrated["next_event"], 1);
+    assert!(logs(&collection).is_empty(), "migration applies no answers");
+
+    let (id, head) = start(&review);
+    accept(&review, id, &head, Rating::Easy, NOW);
+    review.flush_for_background().unwrap();
+    review.end(id).unwrap();
+    let resolved = journal_header(&fs::read(journal_path(&path)).unwrap());
+    assert_eq!(resolved["notice"], migrated["notice"]);
+    assert_eq!(resolved["path"], canonical, "no later relocation");
+    assert_eq!(resolved["incarnation"], migrated["incarnation"]);
+    assert_eq!(fs::read(&archive).unwrap(), archived, "archive survives resolved compaction");
+    if crash {
+        let old_native = native(&path);
+        assert_eq!(logs(&collection).len(), 1);
+        engine.close().unwrap();
+        drop(collection);
+        drop(review);
+        drop(engine);
+        let source = Harness::new(3);
+        assert!(source.cards.contains(&head.items[0].card_id));
+        let candidate_rows = common::steps::dump(&source.collection);
+        assert!(logs(&source.collection).is_empty());
+        source.engine.close().unwrap();
+        let candidate = outer.path().join("candidate.anki2");
+        fs::copy(source.collection.path(), &candidate).unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "c12_migrated_retired_crash_worker", "--nocapture"])
+            .env("MEGURI_C12_MIGRATED_CRASH_LIVE", &path)
+            .env("MEGURI_C12_MIGRATED_CRASH_CANDIDATE", &candidate)
+            .status()
+            .unwrap();
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(status.signal(), Some(libc::SIGABRT), "actual controlled replacement crash");
+        assert_ne!(native(&path), old_native, "candidate landed before process death");
+        let retired = fs::read(journal_path(&path)).unwrap();
+        assert_eq!(journal_header(&retired), resolved);
+        let records: Vec<serde_json::Value> = retired
+            .split(|b| *b == b'\n')
+            .filter(|line| !line.is_empty())
+            .map(|line| {
+                let frame: serde_json::Value = serde_json::from_slice(line).unwrap();
+                serde_json::from_str(frame["payload"].as_str().unwrap()).unwrap()
+            })
+            .collect();
+        assert_eq!(records.last(), Some(&serde_json::json!("Retired")));
+        assert_eq!(journal_header(&retired)["notice"], migrated["notice"]);
+        assert_eq!(fs::read(&archive).unwrap(), archived);
+
+        // Cold managed Opening must validate the real migration archive even
+        // though a retired source permits the old native file to differ.
+        let held_archive = outer.path().join("held-archive");
+        fs::rename(&archive, &held_archive).unwrap();
+        let (engine, review, _, opened) = try_review_with_clock(&path, clock.clone());
+        assert!(opened.is_err());
+        assert!(!matches!(engine.state(), LifecycleState::Ready { .. }));
+        assert!(review.start(DeckId(1), None).is_err());
+        engine.close().unwrap();
+        drop(opened);
+        drop(review);
+        drop(engine);
+        assert_eq!(fs::read(journal_path(&path)).unwrap(), retired);
+        assert_eq!(fs::read(&held_archive).unwrap(), archived);
+        fs::rename(&held_archive, &archive).unwrap();
+
+        let mut fresh_bytes = None;
+        for _ in 0..2 {
+            let (engine, review, stream, opened) = try_review_with_clock(&path, clock.clone());
+            let collection = opened.expect("cold managed Opening consumes same-path migrated Retired source");
+            assert!(matches!(engine.state(), LifecycleState::Ready { .. }));
+            review.flush_for_background().unwrap();
+            assert!(logs(&collection).is_empty(), "no old answers applied to candidate");
+            let actual = common::steps::dump(&collection);
+            assert_eq!(actual["cards"], candidate_rows["cards"]);
+            assert_eq!(actual["revlog"], candidate_rows["revlog"]);
+            assert!(replacement_events(&stream).is_empty());
+            engine.close().unwrap();
+            drop(collection);
+            drop(review);
+            drop(engine);
+            let bytes = fs::read(journal_path(&path)).unwrap();
+            let fresh = journal_header(&bytes);
+            assert_eq!(fresh["version"], 2);
+            assert_eq!(fresh["path"], canonical);
+            assert_eq!(fresh["native"], serde_json::to_value(darwin_persistent(&path)).unwrap());
+            assert_ne!(fresh["incarnation"], migrated["incarnation"]);
+            assert_eq!(fresh["next_event"], 1);
+            assert!(fresh.get("notice").is_none());
+            assert_eq!(bytes.iter().filter(|b| **b == b'\n').count(), 1);
+            if let Some(previous) = &fresh_bytes {
+                assert_eq!(&bytes, previous, "durable reset survives another cold open");
+            }
+            fresh_bytes = Some(bytes);
+        }
+    } else {
+        assert_resolved_journal_verified_replacement(engine, collection, review, stream, clock, head.items[0].card_id);
+    }
+    assert_eq!(fs::read(archive).unwrap(), archived, "permanent migration evidence retained");
+}
+
+#[cfg(target_vendor = "apple")]
+#[test]
+fn c12_migrated_retired_crash_worker() {
+    use meguri_engine::replace::{ReplaceReason, ReplacementStage};
+    use meguri_model::faultpoint::{self, Fault};
+    let Some(path) = std::env::var_os("MEGURI_C12_MIGRATED_CRASH_LIVE").map(PathBuf::from) else {
+        return;
+    };
+    let candidate = PathBuf::from(std::env::var_os("MEGURI_C12_MIGRATED_CRASH_CANDIDATE").unwrap());
+    let clock = Arc::new(StepClock::new(NOW, UtcOffset::UTC, "UTC"));
+    let (engine, collection, _review) = session_support::open(&path, clock);
+    assert_eq!(logs(&collection).len(), 1);
+    let stage = ReplacementStage::new(path.parent().unwrap()).unwrap();
+    fs::copy(candidate, stage.path()).unwrap();
+    let slot = engine.acquire_slot(LongOp::Restore).unwrap();
+    faultpoint::arm("replace.after_dir_sync", Fault::Abort);
+    let result = slot.replace_verified(stage, ReplaceReason::Restore, |_| Ok(()));
+    panic!("controlled crash boundary was not reached: {result:?}");
+}
+
+#[cfg(target_vendor = "apple")]
+fn darwin_persistent(path: &Path) -> meguri_storage::persistent_identity::PersistentIdentity {
+    // Called only while no SQLite connection owns this file.
+    meguri_storage::persistent_identity::read_from(&fs::File::open(path).unwrap(), native(path)).unwrap()
+}
+
+// Shared real-service replacement check; callers use resolved journals.
+// Journal bytes and migration data come from the real service.
+#[cfg(target_vendor = "apple")]
+fn assert_resolved_journal_verified_replacement(
+    engine: Engine,
+    collection: Collection,
+    review: Arc<ReviewService>,
+    stream: meguri_engine::Subscription,
+    clock: Arc<StepClock>,
+    answered_card: CardId,
+) {
+    use meguri_engine::replace::{ReplaceReason, ReplacementStage};
+    use meguri_model::faultpoint::{self, Fault};
+    use meguri_storage::raw::{PlainDatabase, RawValue};
+    use std::os::unix::ffi::OsStrExt;
+
+    struct BeforeRename {
+        native: (u64, u64),
+        journal: Vec<u8>,
+        revlog: Vec<Vec<RawValue>>,
+    }
+    static CAPTURE: Mutex<Option<(PathBuf, Vec<BeforeRename>)>> = Mutex::new(None);
+    fn before_rename() {
+        let mut capture = CAPTURE.lock().unwrap();
+        let (path, visits) = capture.as_mut().unwrap();
+        // The real writer has drained and closed; the candidate has not moved.
+        meguri_storage::verified_replace::check_live_wal(path).unwrap();
+        let database = PlainDatabase::open(path).unwrap();
+        let revlog = database.rows("SELECT * FROM revlog ORDER BY id", &[]).unwrap();
+        database.close().unwrap();
+        visits.push(BeforeRename {
+            native: native(path),
+            journal: fs::read(journal_path(path)).unwrap(),
+            revlog,
+        });
+    }
+    let path = collection.path().to_owned();
+    let canonical = serde_json::json!(path.canonicalize().unwrap().as_os_str().as_bytes());
+    let old_native = native(&path);
+    let old_logs = logs(&collection);
+    assert_eq!(old_logs.len(), 1);
+    let saved = fs::read(journal_path(&path)).unwrap();
+    let historical = journal_header(&saved);
+    assert_eq!(historical["version"], 2);
+    assert!(historical["next_event"].as_u64().unwrap() > 1);
+    assert_eq!(saved.iter().filter(|b| **b == b'\n').count(), 1, "resolved compaction has no event frames");
+
+    // Matching card ids and base rows show any old answer replay in cards
+    // and revlog. The candidate comes from the test harness.
+    let source = Harness::new(3);
+    assert!(source.cards.contains(&answered_card));
+    let candidate_rows = common::steps::dump(&source.collection);
+    assert!(logs(&source.collection).is_empty());
+    source.engine.close().unwrap();
+    let stage = ReplacementStage::new(path.parent().unwrap()).unwrap();
+    fs::copy(source.collection.path(), stage.path()).unwrap();
+    let generation = collection.generation();
+    assert!(replacement_events(&stream).is_empty());
+    *CAPTURE.lock().unwrap() = Some((path.clone(), Vec::new()));
+    let point = "replace.media.after_final_database_verification";
+    let slot = engine.acquire_slot(LongOp::Restore).unwrap();
+    faultpoint::arm(point, Fault::Callback(before_rename));
+    let replaced = slot.replace_verified(stage, ReplaceReason::Restore, |_| Ok(()));
+    faultpoint::disarm(point);
+    drop(slot);
+    let (_, captures) = CAPTURE.lock().unwrap().take().unwrap();
+    let state = engine.state();
+    let events = replacement_events(&stream);
+    let replacement_rows = replaced.as_ref().ok().map(|c| (logs(c), common::steps::dump(c)));
+    let active = review.active_session();
+    // Close and join before asserting the expected semantic RED. The retired
+    // evidence is captured even when provider rebind refuses the replacement.
+    engine.close().unwrap();
+    drop(collection);
+    drop(review);
+    drop(engine);
+    assert_eq!(captures.len(), 1, "actual verified pre-rename boundary reached once");
+    let before = &captures[0];
+    assert_eq!(before.native, old_native);
+    assert_eq!(before.revlog.len(), 1);
+    assert_eq!(before.revlog[0][0], RawValue::Integer(old_logs[0]));
+    assert_eq!(journal_header(&before.journal), historical);
+    assert!(before.journal.starts_with(&saved));
+    let records: Vec<serde_json::Value> = before
+        .journal
+        .split(|b| *b == b'\n')
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            let frame: serde_json::Value = serde_json::from_slice(line).unwrap();
+            serde_json::from_str(frame["payload"].as_str().unwrap()).unwrap()
+        })
+        .collect();
+    assert_eq!(records.len(), 2, "resolved high-water header followed by durable retired marker");
+    assert_eq!(records[1], serde_json::json!("Retired"));
+    let replacement = replaced.expect("C12.7 provider rebind must consume its own retired binding");
+    assert_eq!(replacement.generation().0, generation.0 + 1);
+    assert!(matches!(state, LifecycleState::Ready { generation: g } if g == replacement.generation()));
+    assert_eq!(events, vec![replacement.generation()]);
+    assert_eq!(active, None);
+    let (replacement_logs, actual) = replacement_rows.unwrap();
+    assert!(replacement_logs.is_empty(), "no old answer replay at provider rebind");
+    assert_eq!(actual["cards"], candidate_rows["cards"]);
+    assert_eq!(actual["revlog"], candidate_rows["revlog"]);
+    drop(replacement);
+    assert_ne!(native(&path), old_native);
+    let fresh_bytes = fs::read(journal_path(&path)).unwrap();
+    let fresh = journal_header(&fresh_bytes);
+    assert_eq!(fresh["version"], 2);
+    assert_eq!(fresh["path"], canonical);
+    assert_eq!(fresh["native"], serde_json::to_value(darwin_persistent(&path)).unwrap());
+    assert_ne!(fresh["incarnation"], historical["incarnation"]);
+    assert_eq!(fresh["next_event"], 1);
+    assert!(fresh.get("notice").is_none());
+    assert_eq!(fresh_bytes.iter().filter(|b| **b == b'\n').count(), 1);
+
+    let (engine, review, stream, opened) = try_review_with_clock(&path, clock);
+    let collection = opened.expect("cold open after the controlled replacement");
+    assert!(matches!(engine.state(), LifecycleState::Ready { .. }));
+    review.flush_for_background().unwrap();
+    assert!(logs(&collection).is_empty(), "old saved answer never enters replacement");
+    let actual = common::steps::dump(&collection);
+    assert_eq!(actual["cards"], candidate_rows["cards"]);
+    assert_eq!(actual["revlog"], candidate_rows["revlog"]);
+    assert!(replacement_events(&stream).is_empty());
+    assert_eq!(fs::read(journal_path(&path)).unwrap(), fresh_bytes);
+    engine.close().unwrap();
+    drop(collection);
+    drop(review);
+    drop(engine);
+}
+
 #[derive(Clone, Default)]
 struct MigrationTrace(Arc<Mutex<Vec<std::collections::BTreeMap<String, String>>>>);
 impl tracing::Subscriber for MigrationTrace {

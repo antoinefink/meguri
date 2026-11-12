@@ -234,6 +234,102 @@ impl Evidence {
     }
 }
 
+// C12.7 authority comes from the old provider's still-owned worker, not from
+// discovering a Retired record at an unrelated historical locator. Cold open
+// has no such authority and continues to require the current stored path.
+pub(in crate::session) fn reset_after_replace(
+    c: &Collection,
+    engine: &WeakEngine,
+    retired: &Journal,
+) -> Result<(), EngineError> {
+    let canonical = c.path().canonicalize().map_err(error)?.as_os_str().as_bytes().to_vec();
+    let Some(source) = retired.retired_source(&canonical)? else {
+        return Ok(());
+    };
+    let (native, persistent, mut incarnation) = super::super::service::native_binding(c)?;
+    let path = c.path().with_file_name("meguri-pending-answers.jsonl");
+    let directory = Directory::read(path.parent().ok_or_else(identity_mismatch)?)?;
+    let h = first_header(&source.bytes).ok_or_else(corruption)?;
+    let archive = verify_migration_archive(c.path(), &h, &directory)?;
+    let require_current = || {
+        let engine = engine.upgrade().ok_or_else(identity_mismatch)?;
+        if !matches!(engine.state(), LifecycleState::ExclusiveBusy {
+            phase: crate::ExclusivePhase::Replacing, ..
+        }) || c.core.exec.generation() != c.generation()
+            || !(c.generation() == retired.generation
+                || retired.generation.0.checked_add(1) == Some(c.generation().0))
+        {
+            return Err(identity_mismatch());
+        }
+        c.core.exec.require_admission(Some(c.privilege.ok_or_else(identity_mismatch)?))?;
+        let binding = super::super::service::native_binding(c)?;
+        if binding.0 != native || binding.1 != persistent {
+            return Err(identity_mismatch());
+        }
+        require_live(c.path(), native, &canonical)?;
+        Ok::<(), EngineError>(())
+    };
+    let check = || {
+        require_current()?;
+        directory.require_file(&path)?;
+        source.require(&path)?;
+        if let Some(archive) = &archive {
+            let location = archive_path(c.path(), &h.notice.as_ref().ok_or_else(identity_mismatch)?.archive_sha256);
+            directory.require_file(&location)?;
+            archive.require(&location)?;
+        }
+        Ok::<(), EngineError>(())
+    };
+    check()?;
+    if incarnation == h.incarnation {
+        incarnation = super::super::service::native_binding(c)?.2;
+    }
+    if incarnation == h.incarnation || !persistent.valid_for_platform() {
+        return Err(identity_mismatch());
+    }
+    let next = Header {
+        version: 2,
+        path: canonical.clone(),
+        native: Native::Persistent(persistent),
+        incarnation,
+        next_event: 1,
+        notice: None,
+    };
+    let bytes = encode(1, &Record::Header(next))?;
+    let mut staged = AtomicFile::new(&path, Purpose::Sidecar)?;
+    staged.file_mut().write_all(&bytes).map_err(error)?;
+    let published = RecoveryBinding {
+        file: staged.file_mut().try_clone().map_err(error)?,
+        bytes,
+    };
+    let verification_failure = std::cell::RefCell::new(None);
+    let publication = staged.publish(|_| {
+        check().map_err(|failure| {
+            *verification_failure.borrow_mut() = Some(failure);
+            meguri_storage::StorageError::Io { detail: "pending_answer_identity_mismatch".into() }
+        })
+    });
+    if let Some(failure) = verification_failure.into_inner() {
+        return Err(failure);
+    }
+    publication?;
+    // The reset is allowed only after the exact retired source was qualified;
+    // persistence failures propagate, and the migration archive is permanent.
+    published.sync(&path)?;
+    retained_bytes(&source)?;
+    if source.file.metadata().map_err(error)?.nlink() != 0 {
+        return Err(identity_mismatch());
+    }
+    require_current()?;
+    directory.require_file(&path)?;
+    if let Some(archive) = &archive {
+        let location = archive_path(c.path(), &h.notice.as_ref().ok_or_else(identity_mismatch)?.archive_sha256);
+        directory.require_file(&location)?;
+        archive.require(&location)?;
+    }
+    Ok(())
+}
+
 pub(in crate::session) fn open(
     c: &Collection,
     engine: &WeakEngine,
@@ -298,13 +394,17 @@ pub(in crate::session) fn open(
     // An exact unused v2 source always takes the existing fresh-binding path.
     if eligible_header.is_none() {
         let h = retained_header.ok_or_else(identity_mismatch)?;
-        if h.native != Native::Persistent(persistent) || (h.path != canonical && !same_file_path) {
-            return Err(identity_mismatch());
-        }
         // Historical-path decoding is confined to the exact Darwin authority
         // above. The full ordinary codec still validates every complete frame.
         let (mut loaded, mut number, mut complete) = read_bytes_bound(&original.bytes, &h, native)?;
-        if loaded.retired && h.path != canonical {
+        // C12.7 replacement is distinct from C12.5 same-file recovery. A
+        // current-path retired source may describe the replaced native file;
+        // its notice/archive still needs validation before the durable reset.
+        if if loaded.retired {
+            h.path != canonical
+        } else {
+            h.native != Native::Persistent(persistent) || (h.path != canonical && !same_file_path)
+        } {
             return Err(identity_mismatch());
         }
         let archive = match &h.notice {
@@ -373,6 +473,7 @@ pub(in crate::session) fn open(
     if next_incarnation == old.incarnation {
         return Err(identity_mismatch());
     }
+    let journal_canonical = canonical.clone();
     let next = Header {
         version: 2,
         path: canonical,
@@ -475,6 +576,8 @@ pub(in crate::session) fn open(
         worker: Mutex::new(Some(worker)),
         generation: c.generation(),
         live_native: native,
+        live_canonical: journal_canonical,
+        retired_binding: Mutex::new(None),
     });
     if let Err(failure) = journal.barrier() {
         let saved = journal.state.lock().unwrap().failure.clone().unwrap_or(failure);

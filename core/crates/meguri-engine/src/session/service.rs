@@ -3138,7 +3138,7 @@ impl GenerationListener for ReviewService {
         "review-session"
     }
     fn collection_reopened(&self, c: &Collection) -> Result<(), EngineError> {
-        {
+        let retired = {
             let mut state = self.inner.state.lock().unwrap();
             state.paused = true;
             state.session = None;
@@ -3146,8 +3146,15 @@ impl GenerationListener for ReviewService {
             self.inner.owned.lock().unwrap().clear();
             // Drop the retired binding; queued old work must never find it
             // under the reopened generation (which may be unchanged).
-            state.binding = None;
+            state.binding.take()
+        };
+        if let Some(binding) = &retired {
+            if !Weak::ptr_eq(&binding.core, &Arc::downgrade(&c.core)) {
+                return Err(invalid("pending_answer_identity_mismatch"));
+            }
+            super::journal::managed::reset_after_replace(c, &self.engine, &binding.journal)?;
         }
+        drop(retired);
         self.run(c)?;
         // Replay discards its historical day state. ReplaceTask has already
         // run L8's first check; restore the quiet current D8 cache before
