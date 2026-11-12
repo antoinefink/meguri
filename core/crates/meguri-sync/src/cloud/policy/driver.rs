@@ -132,6 +132,26 @@ impl std::fmt::Display for DriverError {
     }
 }
 impl std::error::Error for DriverError {}
+/// Immutable evidence from the original pre-effect validation, never a command flag.
+/// Fields and construction stay inside Driver; later state cannot reclassify it.
+#[derive(Clone, Debug)]
+pub struct OriginalIssuedGuardSuperseded {
+    _owner: String,
+    _issued_policy: Guard,
+    _observed_policy: Guard,
+    _issued_backend: crate::cloud::adapter::Guard,
+    _observed_backend: crate::cloud::adapter::Guard,
+}
+#[derive(Debug)]
+pub struct CommandAttemptFailure {
+    pub error: DriverError,
+    pub refusal: Option<OriginalIssuedGuardSuperseded>,
+}
+impl From<DriverError> for CommandAttemptFailure {
+    fn from(error: DriverError) -> Self {
+        Self { error, refusal: None }
+    }
+}
 #[derive(Clone, Default)]
 struct Owned {
     state: State,
@@ -967,55 +987,66 @@ impl Driver {
         command: &Command,
         work: &mut PolicyWork,
     ) -> Result<NativeDisposition, DriverError> {
+        self.native_disposition_attempt_with_work(command, work)
+            .map_err(|failure| failure.error)
+    }
+    pub fn native_disposition_attempt_with_work(
+        &self,
+        command: &Command,
+        work: &mut PolicyWork,
+    ) -> Result<NativeDisposition, CommandAttemptFailure> {
         let owned = self.lock_for_work(work)?;
-        self.validate_locked(&owned, command)?;
-        if matches!(
-            command.action.kind,
-            ActionKind::RequestFetch { .. } | ActionKind::RequestSend { .. }
-        ) {
-            let engine = self.runtime.policy_engine(&command.backend_guard)?;
-            if !engine.as_ref().is_some_and(|engine| {
-                !engine.stopping
-                    && Some(engine.binding) == command.action.guard.binding
-                    && !owned
-                        .state
-                        .engine
-                        .as_ref()
-                        .is_some_and(|old| old.instance == engine.instance && old.stopping)
-            }) {
-                work.check()?;
-                return Ok(NativeDisposition::NoOperation);
+        self.validate_original_attempt(&owned, command, matches!(command.action.kind, ActionKind::ResumeMedia))?;
+        (|| -> Result<NativeDisposition, DriverError> {
+            if matches!(
+                command.action.kind,
+                ActionKind::RequestFetch { .. } | ActionKind::RequestSend { .. }
+            ) {
+                let engine = self.runtime.policy_engine(&command.backend_guard)?;
+                if !engine.as_ref().is_some_and(|engine| {
+                    !engine.stopping
+                        && Some(engine.binding) == command.action.guard.binding
+                        && !owned
+                            .state
+                            .engine
+                            .as_ref()
+                            .is_some_and(|old| old.instance == engine.instance && old.stopping)
+                }) {
+                    work.check()?;
+                    return Ok(NativeDisposition::NoOperation);
+                }
             }
-        }
-        if let ActionKind::ConfigureAutomatic { on } = command.action.kind {
-            let engine = self.runtime.policy_engine(&command.backend_guard)?;
-            let running = engine.as_ref().is_some_and(|engine| {
-                !engine.stopping
-                    && Some(engine.binding) == command.action.guard.binding
-                    && !owned
-                        .state
-                        .engine
-                        .as_ref()
-                        .is_some_and(|old| old.instance == engine.instance && old.stopping)
-            });
-            // An open gate retains scheduling intent even while the old SDK stops.
-            // A closed gate can only turn off an existing running instance
-            // while a scan or ordinary intent holds back collection work.
-            let allowed = owned.state.engine_allowed()
-                && (owned.state.gate_open()
-                    || (!on
-                        && running
-                        && owned.state.facts.lifecycle == Lifecycle::Ready
-                        && !owned.state.facts.summary.crt_mismatch
-                        && (owned.state.facts.summary.scan != Scan::None
-                            || owned.state.facts.summary.unsettled_intents > 0)));
-            if !allowed {
-                work.check()?;
-                return Ok(NativeDisposition::NoOperation);
+            if let ActionKind::ConfigureAutomatic { on } = command.action.kind {
+                let engine = self.runtime.policy_engine(&command.backend_guard)?;
+                let running = engine.as_ref().is_some_and(|engine| {
+                    !engine.stopping
+                        && Some(engine.binding) == command.action.guard.binding
+                        && !owned
+                            .state
+                            .engine
+                            .as_ref()
+                            .is_some_and(|old| old.instance == engine.instance && old.stopping)
+                });
+                // An open gate retains scheduling intent even while the old SDK stops.
+                // A closed gate can only turn off an existing running instance
+                // while a scan or ordinary intent holds back collection work.
+                let allowed = owned.state.engine_allowed()
+                    && (owned.state.gate_open()
+                        || (!on
+                            && running
+                            && owned.state.facts.lifecycle == Lifecycle::Ready
+                            && !owned.state.facts.summary.crt_mismatch
+                            && (owned.state.facts.summary.scan != Scan::None
+                                || owned.state.facts.summary.unsettled_intents > 0)));
+                if !allowed {
+                    work.check()?;
+                    return Ok(NativeDisposition::NoOperation);
+                }
             }
-        }
-        work.check()?;
-        Ok(NativeDisposition::Enqueue)
+            work.check()?;
+            Ok(NativeDisposition::Enqueue)
+        })()
+        .map_err(Into::into)
     }
     fn validate_locked(&self, owned: &Owned, command: &Command) -> Result<(), DriverError> {
         self.validate_view(&NativeValidation::from(&owned.state), command)
@@ -1031,6 +1062,68 @@ impl Driver {
         runtime: &crate::cloud::adapter::Guard,
         owner: impl FnOnce() -> String,
     ) -> Result<(), DriverError> {
+        self.validate_runtime_facts_attempt(view, command, runtime, owner, false)
+            .map_err(|failure| failure.error)
+    }
+    fn validate_original_attempt(
+        &self,
+        owned: &Owned,
+        command: &Command,
+        eligible: bool,
+    ) -> Result<(), CommandAttemptFailure> {
+        if !eligible {
+            return self.validate_locked(owned, command).map_err(Into::into);
+        }
+        let view = NativeValidation::from(&owned.state);
+        // One original Runtime State snapshot supplies guard AND opening.
+        let (runtime, owner) = self.runtime.policy_original_authority();
+        self.validate_runtime_facts_attempt(&view, command, &runtime, || owner.unwrap_or_default(), true)
+    }
+    fn validate_runtime_facts_attempt(
+        &self,
+        view: &NativeValidation,
+        command: &Command,
+        runtime: &crate::cloud::adapter::Guard,
+        owner: impl FnOnce() -> String,
+        qualify_original_refusal: bool,
+    ) -> Result<(), CommandAttemptFailure> {
+        // Preserve legacy early policy refusal without consulting another owner.
+        let current_owner = if qualify_original_refusal || view.guard == command.action.guard {
+            owner()
+        } else {
+            String::new()
+        };
+        // Only these original command refusal paths are in this refinement.
+        // Generation/binding/opening inconsistencies never qualify, even if a
+        // token also changed. Strictly older tokens exclude generic mismatch.
+        let same_authority = qualify_original_refusal
+            && command.action.guard.binding.is_some()
+            && matches!(
+                command.action.kind,
+                ActionKind::UpdatePending(_) | ActionKind::ResumeMedia
+            )
+            && !command.owner.is_empty()
+            && command.owner == current_owner
+            && view.guard.generation == command.action.guard.generation
+            && view.guard.binding == command.action.guard.binding
+            && runtime.generation == command.backend_guard.generation
+            && runtime.binding == command.backend_guard.binding
+            && command.backend_guard.generation == command.action.guard.generation
+            && runtime.binding == command.action.guard.binding.map_or_else(Vec::new, |b| b.0.to_vec());
+        let refused = || CommandAttemptFailure {
+            error: DriverError::StaleCommand,
+            refusal: (same_authority
+                && command.action.guard.token <= view.guard.token
+                && command.backend_guard.token <= runtime.token
+                && (command.action.guard.token < view.guard.token || command.backend_guard.token < runtime.token))
+                .then(|| OriginalIssuedGuardSuperseded {
+                    _owner: command.owner.clone(),
+                    _issued_policy: command.action.guard.clone(),
+                    _observed_policy: view.guard.clone(),
+                    _issued_backend: command.backend_guard.clone(),
+                    _observed_backend: runtime.clone(),
+                }),
+        };
         if view.guard != command.action.guard {
             #[cfg(feature = "test-hooks")]
             eprintln!(
@@ -1039,9 +1132,8 @@ impl Driver {
                 view.guard.binding == command.action.guard.binding,
                 view.guard.token == command.action.guard.token,
             );
-            return Err(DriverError::StaleCommand);
+            return Err(refused());
         }
-        let current_owner = owner();
         if command.owner != current_owner {
             #[cfg(feature = "test-hooks")]
             eprintln!(
@@ -1049,7 +1141,7 @@ impl Driver {
                 command.owner.is_empty(),
                 current_owner.is_empty(),
             );
-            return Err(DriverError::StaleCommand);
+            return Err(DriverError::StaleCommand.into());
         }
         if runtime != &command.backend_guard {
             #[cfg(feature = "test-hooks")]
@@ -1058,7 +1150,7 @@ impl Driver {
                 runtime.generation == command.backend_guard.generation,
                 runtime.binding == command.backend_guard.binding,
             );
-            return Err(DriverError::StaleCommand);
+            return Err(refused());
         }
         // Scheduling values are snapshots, unlike authority for manual work.
         // Async native construction must revalidate the original command here
@@ -1071,7 +1163,7 @@ impl Driver {
         if automatic.is_some_and(|value| value != view.automatic) {
             #[cfg(feature = "test-hooks")]
             eprintln!("cloud-policy-rejection stage=validate.automatic-setting");
-            return Err(DriverError::StaleCommand);
+            return Err(DriverError::StaleCommand.into());
         }
         // Unbound Runtime has no collection generation. Only Host control
         // work may use that issued zero/empty guard; the facade separately
@@ -1091,7 +1183,7 @@ impl Driver {
                 command.backend_guard.generation == command.action.guard.generation,
                 runtime.binding == command.action.guard.binding.map_or_else(Vec::new, |b| b.0.to_vec()),
             );
-            return Err(DriverError::StaleCommand);
+            return Err(DriverError::StaleCommand.into());
         }
         if (command.quiet_proof.is_some() || matches!(command.action.kind, ActionKind::RecordQuietPoint { .. }))
             && command
@@ -1099,7 +1191,7 @@ impl Driver {
                 .as_ref()
                 .is_none_or(|proof| !proof.qualifies(&command.action))
         {
-            return Err(DriverError::UnqualifiedCompletion);
+            return Err(DriverError::UnqualifiedCompletion.into());
         }
         Ok(())
     }
@@ -1122,140 +1214,158 @@ impl Driver {
         timeout: Duration,
         work: &mut PolicyWork,
     ) -> Result<Vec<Command>, DriverError> {
+        self.execute_core_attempt_with_work(command, collection, lifecycle, timeout, work)
+            .map_err(|failure| failure.error)
+    }
+    pub fn execute_core_attempt_with_work(
+        &self,
+        command: &Command,
+        collection: &Collection,
+        lifecycle: LifecycleState,
+        timeout: Duration,
+        work: &mut PolicyWork,
+    ) -> Result<Vec<Command>, CommandAttemptFailure> {
         let mut owned = self.lock_for_work(work)?;
-        self.validate_locked(&owned, command)?;
-        let guard = &command.backend_guard;
-        let result = match &command.action.kind {
-            ActionKind::UpdatePending(update) => self
-                .runtime
-                .policy_update_pending_with_work(guard, *update, work)
-                .map(|_| Event::EvidenceCommitted(Box::new(owned.state.evidence.clone()))),
-            ActionKind::ProbeTracking => self
-                .runtime
-                .policy_probe_with_work(guard, work)
-                .map(|_| Event::TrackingChanged(ChangeCause::Probe)),
-            ActionKind::ApplyReady { retry_failed } => {
-                match self
+        self.validate_original_attempt(
+            &owned,
+            command,
+            matches!(command.action.kind, ActionKind::UpdatePending(_)),
+        )?;
+        (|| -> Result<Vec<Command>, DriverError> {
+            let guard = &command.backend_guard;
+            let result = match &command.action.kind {
+                ActionKind::UpdatePending(update) => self
                     .runtime
-                    .policy_apply_ready_with_work(collection, guard, *retry_failed, timeout, work)
-                {
-                    Ok(crate::cloud::incoming::IncomingDisposition::Progress(0)) => {
-                        // Ready media can await bytes that only an external event supplies.
-                        // Reproject the observation without requesting another apply.
+                    .policy_update_pending_with_work(guard, *update, work)
+                    .map(|_| Event::EvidenceCommitted(Box::new(owned.state.evidence.clone()))),
+                ActionKind::ProbeTracking => self
+                    .runtime
+                    .policy_probe_with_work(guard, work)
+                    .map(|_| Event::TrackingChanged(ChangeCause::Probe)),
+                ActionKind::ApplyReady { retry_failed } => {
+                    match self
+                        .runtime
+                        .policy_apply_ready_with_work(collection, guard, *retry_failed, timeout, work)
+                    {
+                        Ok(crate::cloud::incoming::IncomingDisposition::Progress(0)) => {
+                            // Ready media can await bytes that only an external event supplies.
+                            // Reproject the observation without requesting another apply.
+                            Ok(Event::EvidenceCommitted(Box::new(owned.state.evidence.clone())))
+                        }
+                        Ok(crate::cloud::incoming::IncomingDisposition::Progress(_)) => {
+                            Ok(Event::TrackingChanged(ChangeCause::Cloud))
+                        }
+                        Ok(crate::cloud::incoming::IncomingDisposition::Deferred(error)) => {
+                            return Err(DriverError::ApplyDeferred(error));
+                        }
+                        Err(error) => Err(error),
+                    }
+                }
+                ActionKind::RecordQuietPoint { at_ms } => {
+                    let proof = command.quiet_proof.as_ref().ok_or(DriverError::UnqualifiedCompletion)?;
+                    let current = self.runtime.policy_projection_with_work(
+                        lifecycle_kind(&lifecycle),
+                        collection.generation().0,
+                        work,
+                    )?;
+                    let summary = &current.facts.summary;
+                    if !summary.collection_known
+                        || summary.scan != Scan::None
+                        || summary.pending_unheld > 0
+                        || summary.in_flight > 0
+                        || summary.ready > 0
+                        || summary.apply_in_progress
+                        || summary.unsettled_intents > 0
+                        || owned.state.drained != [true, true]
+                    {
+                        #[cfg(feature = "test-hooks")]
+                        eprintln!("cloud-policy-observation stage=execute.quiet-superseded");
+                        // Valid work can arrive after this drain qualified. Consume
+                        // its candidate without stamping or retrying the same drain.
+                        work.effect()?;
+                        proof.0.consumed.store(true, std::sync::atomic::Ordering::SeqCst);
                         Ok(Event::EvidenceCommitted(Box::new(owned.state.evidence.clone())))
+                    } else if owned
+                        .recorded_quiet_ordinal
+                        .is_some_and(|ordinal| ordinal > proof.0.ordinal)
+                    {
+                        // A later issued command only supersedes this stamp after
+                        // its Runtime write succeeds, regardless of clock movement.
+                        Ok(Event::EvidenceCommitted(Box::new(owned.state.evidence.clone())))
+                    } else {
+                        self.runtime
+                            .policy_record_quiet_with_work(guard, *at_ms, work)
+                            .map(|evidence| {
+                                owned.recorded_quiet_ordinal = Some(proof.0.ordinal);
+                                Event::EvidenceCommitted(Box::new(evidence))
+                            })
                     }
-                    Ok(crate::cloud::incoming::IncomingDisposition::Progress(_)) => {
-                        Ok(Event::TrackingChanged(ChangeCause::Cloud))
-                    }
-                    Ok(crate::cloud::incoming::IncomingDisposition::Deferred(error)) => {
-                        return Err(DriverError::ApplyDeferred(error));
-                    }
-                    Err(error) => Err(error),
                 }
-            }
-            ActionKind::RecordQuietPoint { at_ms } => {
-                let proof = command.quiet_proof.as_ref().ok_or(DriverError::UnqualifiedCompletion)?;
-                let current = self.runtime.policy_projection_with_work(
-                    lifecycle_kind(&lifecycle),
-                    collection.generation().0,
-                    work,
-                )?;
-                let summary = &current.facts.summary;
-                if !summary.collection_known
-                    || summary.scan != Scan::None
-                    || summary.pending_unheld > 0
-                    || summary.in_flight > 0
-                    || summary.ready > 0
-                    || summary.apply_in_progress
-                    || summary.unsettled_intents > 0
-                    || owned.state.drained != [true, true]
-                {
-                    #[cfg(feature = "test-hooks")]
-                    eprintln!("cloud-policy-observation stage=execute.quiet-superseded");
-                    // Valid work can arrive after this drain qualified. Consume
-                    // its candidate without stamping or retrying the same drain.
-                    work.effect()?;
-                    proof.0.consumed.store(true, std::sync::atomic::Ordering::SeqCst);
-                    Ok(Event::EvidenceCommitted(Box::new(owned.state.evidence.clone())))
-                } else if owned
-                    .recorded_quiet_ordinal
-                    .is_some_and(|ordinal| ordinal > proof.0.ordinal)
-                {
-                    // A later issued command only supersedes this stamp after
-                    // its Runtime write succeeds, regardless of clock movement.
-                    Ok(Event::EvidenceCommitted(Box::new(owned.state.evidence.clone())))
-                } else {
+                ActionKind::RecordExchange(record) => {
+                    if owned.issued_records.get(&record.exchange) != Some(record) {
+                        return Err(DriverError::UnqualifiedCompletion);
+                    }
                     self.runtime
-                        .policy_record_quiet_with_work(guard, *at_ms, work)
-                        .map(|evidence| {
-                            owned.recorded_quiet_ordinal = Some(proof.0.ordinal);
-                            Event::EvidenceCommitted(Box::new(evidence))
+                        .policy_record_exchange_with_work(collection, guard, &command.owner, record, work)
+                        .map(|evidence| Event::EvidenceCommitted(Box::new(evidence)))
+                }
+                ActionKind::RunCleanup => {
+                    work.effect()?;
+                    owned.issued_cleanup = None;
+                    return Err(DriverError::CoreCapabilityUnavailable("cloud cleanup"));
+                }
+                ActionKind::StatusChanged(_) => return Ok(Vec::new()),
+                _ => return Err(DriverError::NotCoreAction),
+            };
+            match result {
+                Ok(event) => self.project_and_step_with_work(
+                    &mut owned,
+                    lifecycle,
+                    collection.generation(),
+                    (event, None),
+                    work,
+                    true,
+                ),
+                Err(error) => {
+                    // A rejected boundary has made no policy/durable effect. It
+                    // must not be turned into a new tracking-failure transition.
+                    if work.rejected.load(std::sync::atomic::Ordering::SeqCst) {
+                        return Err(DriverError::Runtime(error));
+                    }
+                    if !self.runtime.policy_tracking_stopped() {
+                        return Err(DriverError::Runtime(error));
+                    }
+                    // The original error is returned. Preserve the stop even if no later callback arrives.
+                    let no_space = matches!(
+                        &error,
+                        RuntimeError::Tracking(Error::Io(std::io::ErrorKind::StorageFull))
+                    );
+                    let (state, actions) = step(
+                        owned.state.clone(),
+                        Input {
+                            now_ms: self.clock.now_ms(),
+                            facts: None,
+                            event: Event::TrackingWriteFailed { no_space },
+                        },
+                    );
+                    owned.state = state;
+                    // These are newly issued stop actions, after Runtime reported failure.
+                    let backend_guard = self.runtime.adapter_guard();
+                    let commands = actions
+                        .into_iter()
+                        .map(|action| Command {
+                            action,
+                            owner: command.owner.clone(),
+                            backend_guard: backend_guard.clone(),
+                            cleanup_drain: None,
+                            quiet_proof: None,
                         })
+                        .collect();
+                    Err(DriverError::CoreActionFailed { error, commands })
                 }
             }
-            ActionKind::RecordExchange(record) => {
-                if owned.issued_records.get(&record.exchange) != Some(record) {
-                    return Err(DriverError::UnqualifiedCompletion);
-                }
-                self.runtime
-                    .policy_record_exchange_with_work(collection, guard, &command.owner, record, work)
-                    .map(|evidence| Event::EvidenceCommitted(Box::new(evidence)))
-            }
-            ActionKind::RunCleanup => {
-                work.effect()?;
-                owned.issued_cleanup = None;
-                return Err(DriverError::CoreCapabilityUnavailable("cloud cleanup"));
-            }
-            ActionKind::StatusChanged(_) => return Ok(Vec::new()),
-            _ => return Err(DriverError::NotCoreAction),
-        };
-        match result {
-            Ok(event) => self.project_and_step_with_work(
-                &mut owned,
-                lifecycle,
-                collection.generation(),
-                (event, None),
-                work,
-                true,
-            ),
-            Err(error) => {
-                // A rejected boundary has made no policy/durable effect. It
-                // must not be turned into a new tracking-failure transition.
-                if work.rejected.load(std::sync::atomic::Ordering::SeqCst) {
-                    return Err(DriverError::Runtime(error));
-                }
-                if !self.runtime.policy_tracking_stopped() {
-                    return Err(DriverError::Runtime(error));
-                }
-                // The original error is returned. Preserve the stop even if no later callback arrives.
-                let no_space = matches!(
-                    &error,
-                    RuntimeError::Tracking(Error::Io(std::io::ErrorKind::StorageFull))
-                );
-                let (state, actions) = step(
-                    owned.state.clone(),
-                    Input {
-                        now_ms: self.clock.now_ms(),
-                        facts: None,
-                        event: Event::TrackingWriteFailed { no_space },
-                    },
-                );
-                owned.state = state;
-                // These are newly issued stop actions, after Runtime reported failure.
-                let backend_guard = self.runtime.adapter_guard();
-                let commands = actions
-                    .into_iter()
-                    .map(|action| Command {
-                        action,
-                        owner: command.owner.clone(),
-                        backend_guard: backend_guard.clone(),
-                        cleanup_drain: None,
-                        quiet_proof: None,
-                    })
-                    .collect();
-                Err(DriverError::CoreActionFailed { error, commands })
-            }
-        }
+        })()
+        .map_err(Into::into)
     }
     /// Starts the existing Runtime capture, not a policy-owned selection.
     /// Call only after P12.3's gate wait/fetch prerequisites, never from an SDK handler.

@@ -475,6 +475,14 @@ impl CloudPolicy {
         command: Arc<CloudPolicyCommand>,
         work: &mut p::PolicyWork,
     ) -> Result<Option<Arc<CloudPolicyExecution>>, CoreError> {
+        self.prepare_execution_attempt_with_work(command, work)
+            .map_err(|failure| failure.error)
+    }
+    pub(super) fn prepare_execution_attempt_with_work(
+        self: Arc<Self>,
+        command: Arc<CloudPolicyCommand>,
+        work: &mut p::PolicyWork,
+    ) -> Result<Option<Arc<CloudPolicyExecution>>, super::policy_jobs::AttemptFailure> {
         self.owns(&command)?;
         match &command.command.action.kind {
             p::ActionKind::StartEngine { .. }
@@ -497,20 +505,20 @@ impl CloudPolicy {
             | p::ActionKind::ArmFlushTimer { .. }
             | p::ActionKind::CancelFlushTimer
             | p::ActionKind::QuitNow => {}
-            _ => return Err(failure(CloudPolicyFailure::CoreCapabilityUnavailable)),
+            _ => return Err(failure(CloudPolicyFailure::CoreCapabilityUnavailable).into()),
         }
         if self
             .driver()?
-            .native_disposition_with_work(&command.command, work)
-            .map_err(execution_error)?
+            .native_disposition_attempt_with_work(&command.command, work)
+            .map_err(|failure| super::policy_jobs::AttemptFailure::from_driver(failure, execution_error, &self))?
             == p::NativeDisposition::NoOperation
         {
             return Ok(None);
         }
         let original_sdk = self
             .driver()?
-            .native_origin_with_work(&command.command, work)
-            .map_err(execution_error)?;
+            .native_origin_attempt_with_work(&command.command, work)
+            .map_err(|failure| super::policy_jobs::AttemptFailure::from_driver(failure, execution_error, &self))?;
         work.check().map_err(crate::cloud_connection::error)?;
         Ok(Some(Arc::new(CloudPolicyExecution {
             command,

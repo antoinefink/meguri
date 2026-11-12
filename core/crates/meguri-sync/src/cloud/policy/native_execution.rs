@@ -313,10 +313,21 @@ impl Driver {
         command: &Command,
         work: &mut PolicyWork,
     ) -> Result<Option<String>, DriverError> {
+        self.native_origin_attempt_with_work(command, work)
+            .map_err(|failure| failure.error)
+    }
+    pub fn native_origin_attempt_with_work(
+        &self,
+        command: &Command,
+        work: &mut PolicyWork,
+    ) -> Result<Option<String>, CommandAttemptFailure> {
         let owned = self.lock_for_work(work)?;
-        self.validate_locked(&owned, command)?;
-        let sdk = self.runtime.policy_sdk_origin(&command.backend_guard)?;
-        work.check()?;
+        self.validate_original_attempt(&owned, command, matches!(command.action.kind, ActionKind::ResumeMedia))?;
+        let sdk = self
+            .runtime
+            .policy_sdk_origin(&command.backend_guard)
+            .map_err(DriverError::from)?;
+        work.check().map_err(DriverError::from)?;
         Ok(sdk)
     }
 

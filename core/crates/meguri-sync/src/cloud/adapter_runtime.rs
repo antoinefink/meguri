@@ -27,6 +27,12 @@ impl Runtime {
     pub fn adapter_guard(&self) -> Guard {
         Self::adapter_guard_locked(&self.state())
     }
+    /// Original pre-effect policy validation needs one State observation of
+    /// both opening and backend guard. NativeAuthority remains final-check-only.
+    pub(crate) fn policy_original_authority(&self) -> (Guard, Option<String>) {
+        let state = self.state();
+        (Self::adapter_guard_locked(&state), Self::instance_locked(&state).ok())
+    }
     pub fn register_sdk(&self, automatic: bool) -> Result<(String, Option<Vec<u8>>, String), RuntimeError> {
         let _ = self.adapter_now();
         let mut s = self.state();

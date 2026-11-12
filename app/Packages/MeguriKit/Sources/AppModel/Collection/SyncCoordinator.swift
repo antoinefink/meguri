@@ -83,6 +83,7 @@ nonisolated struct SyncCommandResult: Sendable {
     #endif
     let outputs: [CloudPolicyOutput]
     let error: (any Error)?
+    let originalGuardRefusal: CloudPolicyOriginalGuardRefusal?
     let deferred: Bool
     let accountVerified: Bool
     let mediaCancellation: Bool
@@ -90,9 +91,9 @@ nonisolated struct SyncCommandResult: Sendable {
     // Account preparation returns before any subsequent Core preparation/input.
     let afterOutputs: (@MainActor @Sendable (Bool) async -> SyncCommandResult)?
     init(outputs: [CloudPolicyOutput], error: (any Error)?, deferred: Bool, accountVerified: Bool = false, mediaCancellation: Bool = false, acknowledgedOutputCount: Int = 0,
-         afterOutputs: (@MainActor @Sendable (Bool) async -> SyncCommandResult)? = nil) {
+         afterOutputs: (@MainActor @Sendable (Bool) async -> SyncCommandResult)? = nil, originalGuardRefusal: CloudPolicyOriginalGuardRefusal? = nil) {
         self.outputs = outputs; self.error = error; self.deferred = deferred; self.accountVerified = accountVerified
-        self.mediaCancellation = mediaCancellation
+        self.mediaCancellation = mediaCancellation; self.originalGuardRefusal = originalGuardRefusal
         self.acknowledgedOutputCount = acknowledgedOutputCount; self.afterOutputs = afterOutputs
     }
 }
@@ -1356,7 +1357,7 @@ public final class SyncCoordinator {
                         DebugCloudDiagnostics.record(.commandResult, error: error)
                     }
                     #endif
-                    if !supersededAccountCancellation, !(result.mediaCancellation && error is CancellationError) {
+                    if result.originalGuardRefusal == nil, !supersededAccountCancellation, !(result.mediaCancellation && error is CancellationError) {
                         operationFailed = true; failureRevision &+= 1
                     }
                 }

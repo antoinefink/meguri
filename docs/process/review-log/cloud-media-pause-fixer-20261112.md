@@ -36,5 +36,8 @@
   before the repair passed for automatic sync off and on. Actual Pause,
   Resume, successor exchange and retained collection/review facts were checked.
 - MG formatting and the unchanged staged privacy guard passed.
-- Independent source review, the rebuilt Mac interface check and full batch
-  integration verification remain pending. Earlier failed checks remain open.
+- Independent scoped source review `cleanroom/20261112T074755Z-21723` found no P0-P2 issues in this repair. This is not the final review of the earlier recovery checkpoint.
+- `similarity/20261112T074831Z-23310` passed. The signed Mac build `build-app/20261112T074802Z-22077` passed.
+- In that exact Mac app, Pause no longer produced the original media SDK preparation error. Older UpdatePending and ResumeMedia commands still produced a persistent warning; their refusal classification remains a separate open repair.
+- The Mac recorded an answer after Resume. Undo restored the card and Redo advanced it. Three collection records were sent; pending and in-flight counts reached zero. A subsequent manual sync succeeded. After a normal quit and relaunch, the answer remained saved.
+- These observations do not establish receipt on the other device or complete media coverage. The signed two-device round trip, retained failed stress cases, final review and full batch gate remain open.

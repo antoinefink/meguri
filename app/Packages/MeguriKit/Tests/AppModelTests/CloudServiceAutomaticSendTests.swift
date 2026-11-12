@@ -71,6 +71,143 @@ extension ReviewCollectionStartupTests {
         }
     }
 
+    @Test(arguments: [false, true])
+    func serviceAppPauseQualifiesOnlyOriginalSupersededCommand(resumeMedia: Bool) async throws {
+        try await withAutomaticServiceApp { app, fixture, wire in
+            let backend = try app.backend
+            // Media off -> on with automatic scheduling issues the real ResumeMedia.
+            // A normal local edit supplies UpdatePending in the other row.
+            app.sync.setDeviceSettings(paused: false, automatic: resumeMedia, media: false)
+            await app.sync.waitForInputs(); await app.sync.drainOperations()
+            let sdk = try #require(await app.factory.engines.last)
+            await sdk.waitForAutomaticSend(); await app.sync.drainOperations()
+            let generation = app.owner.generation
+            let failureRevision = app.sync.failureRevision
+            let held = ServiceAutomaticGate(), returned = ServiceAutomaticGate()
+            let stopped = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let cancelled = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let originalID = Mutex<ObjectIdentifier?>(nil)
+            let calls = Mutex<[String]>([])
+            var original: CloudPolicyCommand?
+            var observed: SyncCommandResult?
+            var acknowledgements = 0
+            backend.beforeExecution = { command in
+                let matches: Bool
+                if resumeMedia { if case .resumeMedia = command.action { matches = true } else { matches = false } }
+                else { if case .updatePending = command.action { matches = true } else { matches = false } }
+                if matches, original == nil {
+                    original = command; originalID.withLock { $0 = ObjectIdentifier(command.raw) }
+                    await held.hold()
+                }
+            }
+            backend.afterExecution = { command, result in
+                if let original, command.raw === original.raw {
+                    observed = result
+                    await returned.hold()
+                }
+                if case .stopEngine = command.action { stopped.continuation.yield(result.error == nil && !result.deferred) }
+            }
+            #if DEBUG
+            backend.observeCoreCall = { command, call in
+                guard originalID.withLock({ $0 == ObjectIdentifier(command.raw) }) else { return }
+                calls.withLock { $0.append(call.description) }
+            }
+            #endif
+            app.sync.observeCausalBoundary = { boundary, command in
+                if case .commandAcknowledgementJoined = boundary, let command, let original, command.raw === original.raw {
+                    acknowledgements += 1
+                }
+            }
+            await sdk.inspectNextCancellation { cancelled.continuation.yield(true) }
+            defer {
+                backend.beforeExecution = nil; backend.afterExecution = nil
+                app.sync.observeCausalBoundary = nil
+                #if DEBUG
+                backend.observeCoreCall = nil
+                #endif
+                stopped.continuation.finish(); cancelled.continuation.finish()
+            }
+            do {
+                if resumeMedia { app.sync.setDeviceSettings(paused: false, automatic: true, media: true) }
+                else {
+                    let seed = try #require(fixture.notes.first)
+                    try await automaticServiceEdit(app, id: seed.id, suffix: " held original UpdatePending")
+                }
+                try #require(try await serviceAppSignal(held.entered, stage: "actual original command held before execution"))
+                try #require(original != nil)
+                let collection = try await CoreCollectionService().localPublicationInformation(generation: generation)
+                app.sync.setDeviceSettings(paused: true, automatic: resumeMedia, media: resumeMedia)
+                await app.sync.waitForInputs()
+                // Join actual Pause observations, never drain with the original held.
+                try #require(try await serviceAppSignal(cancelled.stream, stage: "Pause cancels original SDK"))
+                try #require(try await serviceAppSignal(stopped.stream, stage: "Pause StopEngine returned"))
+                #expect(app.sync.settings.paused && acknowledgements == 0)
+                let before = try await backend.workflow.durableSnapshot()
+                let emitted = try await backend.workflow.emittedUpdateIDs()
+                let pending = await sdk.pendingRecordZoneChanges()
+                let additions = await sdk.pendingAdditionUpdates
+                let batches = await sdk.batchRequests
+                let fetches = await sdk.manualFetchGroups
+                let receipts = await wire.receipts.count
+                let media = try await serviceMediaProof(generation: generation)
+                await held.release()
+                try #require(try await serviceAppSignal(returned.entered, stage: "original Core refusal stored through native result"))
+                let result = try #require(observed)
+                #expect(result.error as? BridgeError == .cloudPolicy(.staleCommand))
+                #expect(result.originalGuardRefusal != nil && !result.deferred)
+                #if DEBUG
+                let originalCalls = calls.withLock { $0 }
+                #expect(originalCalls.contains(resumeMedia ? "CloudPolicyExecutionResult.detailed_result" : "CloudPolicyOutputResult.detailed_result"))
+                #expect(!originalCalls.contains("CloudPolicyExecution.start_begin_media"))
+                #expect(!originalCalls.contains("CloudPolicyExecution.start_begin_fetch"))
+                #expect(!originalCalls.contains("CloudPolicyExecution.start_begin_send"))
+                #expect(!originalCalls.contains("CloudWorkflow.take_pending_updates"))
+                #endif
+                #expect(acknowledgements == 0)
+                #expect(try await backend.workflow.emittedUpdateIDs() == emitted)
+                #expect(await sdk.pendingRecordZoneChanges() == pending)
+                #expect(await sdk.pendingAdditionUpdates == additions)
+                #expect(await sdk.batchRequests == batches)
+                #expect(await sdk.manualFetchGroups == fetches)
+                #expect(await wire.receipts.count == receipts)
+                let after = try await backend.workflow.durableSnapshot()
+                #expect(after.entities == before.entities && after.inboxNames == before.inboxNames)
+                #expect(after.trackingContent == before.trackingContent)
+                let afterMedia = try await serviceMediaProof(generation: generation)
+                #expect(afterMedia.names == media.names && afterMedia.bytes == media.bytes)
+                await returned.release()
+                await app.sync.drainOperations()
+                #expect(acknowledgements == 1)
+                #expect(!app.sync.operationFailed && app.sync.failureRevision == failureRevision)
+                #expect(backend.firstFailureDiagnostic == nil)
+                #expect(backend.diagnostics.contains { $0.contains("qualifiedOriginalRefusal") })
+                app.sync.setDeviceSettings(paused: false, automatic: resumeMedia, media: resumeMedia)
+                await app.sync.waitForInputs(); await app.sync.drainOperations()
+                let successor = try #require(await app.factory.engines.last)
+                #expect(successor !== sdk && successor.instanceID != sdk.instanceID)
+                try await backend.workflow.validateSDK(successor.instanceID)
+                let successorFetches = await successor.manualFetchGroups.count
+                try await app.exchange(); await app.sync.drainOperations()
+                await successor.waitForAutomaticSend(); await app.sync.drainOperations()
+                #expect(await successor.manualFetchGroups.count > successorFetches)
+                #expect(!app.sync.operationFailed && app.sync.failureRevision == failureRevision)
+                #expect(backend.firstFailureDiagnostic == nil)
+                #expect(app.owner.state == .ready && app.owner.generation == generation)
+                #expect(try app.backend === backend)
+                let finalEntities = try await backend.workflow.durableSnapshot().entities
+                #expect(finalEntities.map(\.name) == before.entities.map(\.name))
+                #expect(finalEntities.map(\.localRev) == before.entities.map(\.localRev))
+                #expect(finalEntities.map(\.payloadDigest) == before.entities.map(\.payloadDigest))
+                let final = try await CoreCollectionService().localPublicationInformation(generation: generation)
+                #expect(final.localCounts == collection.localCounts && final.lastReviewMilliseconds == collection.lastReviewMilliseconds)
+            } catch {
+                await held.release(); await returned.release()
+                await app.sync.drainOperations()
+                throw error
+            }
+        }
+    }
+
     @Test(arguments: [0, 1, 2, 3, 4])
     func serviceAppOriginalProofProjectsActualProviderOutcomesWithoutLosingPendingWork(outcome: Int) async throws {
         try await withAutomaticServiceApp { app, _, _ in

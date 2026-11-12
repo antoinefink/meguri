@@ -1731,3 +1731,257 @@ fn generic_started_job_rechecks_command_and_sdk_after_existing_pool_wait() {
         assert!(matches!(job.result.result(), Err(error) if error == expected));
     }
 }
+
+fn original_attempt_command(policy: &Arc<CloudPolicy>, media: bool) -> Arc<CloudPolicyCommand> {
+    commands(
+        policy
+            .clone()
+            .input(if media {
+                CloudPolicyEvent::Settings {
+                    settings: CloudPolicyDeviceSettings {
+                        enabled: true,
+                        paused: false,
+                        automatic: true,
+                        media: true,
+                    },
+                }
+            } else {
+                CloudPolicyEvent::Refresh {
+                    cause: CloudPolicyChangeCause::Local,
+                }
+            })
+            .unwrap(),
+    )
+    .into_iter()
+    .find(|issued| {
+        if media {
+            matches!(issued.action, CloudPolicyAction::ResumeMedia)
+        } else {
+            matches!(issued.action, CloudPolicyAction::UpdatePending { .. })
+        }
+    })
+    .unwrap()
+    .handle
+}
+
+#[test]
+fn original_attempt_detail_retains_refusal_and_failed_terminal_across_reuse_pause_and_close() {
+    for media in [false, true] {
+        let (fixture, policy, _, _) = admission_fixture(AdmissionKind::Send);
+        let command = original_attempt_command(&policy, media);
+        let events = fixture.workflow.host.engine().stream().subscribe();
+        let pool = hold_pool(&fixture);
+        // Queue the actual original command before Pause, not a replacement guard.
+        let core_job = (!media).then(|| policy.clone().start_execute_core(command.clone()).unwrap());
+        let native_job = media.then(|| policy.clone().start_prepare_execution(command.clone()).unwrap());
+        if let Some(job) = &core_job {
+            assert!(job.result.detailed_result().unwrap().is_none());
+        }
+        if let Some(job) = &native_job {
+            assert!(job.result.detailed_result().unwrap().is_none());
+        }
+        policy
+            .clone()
+            .input(CloudPolicyEvent::Settings {
+                settings: CloudPolicyDeviceSettings {
+                    enabled: true,
+                    paused: true,
+                    automatic: media,
+                    media,
+                },
+            })
+            .unwrap();
+        let emitted = fixture.workflow.core.emitted_update_ids();
+        let cycles = fixture.workflow.host.cloud_policy_driver().unwrap().state().cycles;
+        drop(pool);
+        let expected = policy_failure(CloudPolicyFailure::StaleCommand);
+        let proof = if let Some(job) = &core_job {
+            assert!(matches!(finished(&events, job.handle.id), JobOutcome::Failed { .. }));
+            assert!(matches!(job.result.result(), Err(error) if error == expected));
+            let detail = job.result.detailed_result().unwrap().unwrap();
+            assert!(detail.value.is_none());
+            assert_eq!(detail.error, Some(expected.clone()));
+            detail.original_guard_refusal.unwrap()
+        } else {
+            let job = native_job.as_ref().unwrap();
+            assert!(matches!(finished(&events, job.handle.id), JobOutcome::Failed { .. }));
+            assert!(matches!(job.result.result(), Err(error) if error == expected));
+            let detail = job.result.detailed_result().unwrap().unwrap();
+            assert!(detail.value.is_none());
+            assert_eq!(detail.error, Some(expected.clone()));
+            detail.original_guard_refusal.unwrap()
+        };
+        assert_eq!(fixture.workflow.core.emitted_update_ids(), emitted);
+        assert_eq!(
+            fixture.workflow.host.cloud_policy_driver().unwrap().state().cycles,
+            cycles
+        );
+        // Reusing a handle creates a separate attempt and cell, never changes
+        // the first result or its immutable witness.
+        if media {
+            let again = policy.clone().start_prepare_execution(command.clone()).unwrap();
+            assert!(matches!(finished(&events, again.handle.id), JobOutcome::Failed { .. }));
+            let second = again
+                .result
+                .detailed_result()
+                .unwrap()
+                .unwrap()
+                .original_guard_refusal
+                .unwrap();
+            assert!(!Arc::ptr_eq(&proof, &second));
+        } else {
+            let again = policy.clone().start_execute_core(command.clone()).unwrap();
+            assert!(matches!(finished(&events, again.handle.id), JobOutcome::Failed { .. }));
+            let second = again
+                .result
+                .detailed_result()
+                .unwrap()
+                .unwrap()
+                .original_guard_refusal
+                .unwrap();
+            assert!(!Arc::ptr_eq(&proof, &second));
+        }
+        policy.clone().input(settings(media, false)).unwrap();
+        fixture.workflow.host.close().unwrap();
+        let retained = if let Some(job) = &core_job {
+            let detail = job.result.detailed_result().unwrap().unwrap();
+            assert_eq!(detail.error, Some(expected));
+            detail.original_guard_refusal.unwrap()
+        } else {
+            let detail = native_job.as_ref().unwrap().result.detailed_result().unwrap().unwrap();
+            assert_eq!(detail.error, Some(expected));
+            detail.original_guard_refusal.unwrap()
+        };
+        assert!(Arc::ptr_eq(&proof, &retained));
+    }
+}
+
+#[test]
+fn original_attempt_detail_current_wrong_action_then_pause_remains_unqualified() {
+    let (fixture, policy, _, _) = admission_fixture(AdmissionKind::Send);
+    let media = original_attempt_command(&policy, true);
+    let events = fixture.workflow.host.engine().stream().subscribe();
+    // A genuinely issued CURRENT native command sent to the core-action port.
+    let invalid = policy.clone().start_execute_core(media.clone()).unwrap();
+    assert!(matches!(
+        finished(&events, invalid.handle.id),
+        JobOutcome::Failed { .. }
+    ));
+    let detail = invalid.result.detailed_result().unwrap().unwrap();
+    assert_eq!(detail.error, Some(policy_failure(CloudPolicyFailure::NotCoreAction)));
+    assert!(detail.original_guard_refusal.is_none());
+    policy.clone().input(settings(true, true)).unwrap();
+    let later = invalid.result.detailed_result().unwrap().unwrap();
+    assert_eq!(later.error, detail.error);
+    assert!(later.original_guard_refusal.is_none());
+    let wrong_port = policy.clone().start_execute_core(media).unwrap();
+    assert!(matches!(
+        finished(&events, wrong_port.handle.id),
+        JobOutcome::Failed { .. }
+    ));
+    let wrong_port = wrong_port.result.detailed_result().unwrap().unwrap();
+    assert_eq!(wrong_port.error, Some(policy_failure(CloudPolicyFailure::StaleCommand)));
+    assert!(wrong_port.original_guard_refusal.is_none());
+    fixture.workflow.host.close().unwrap();
+}
+
+#[test]
+fn original_attempt_detail_queued_cancellation_and_generation_rejection_never_qualify() {
+    for replace in [false, true] {
+        let (fixture, policy, _, _) = admission_fixture(AdmissionKind::Send);
+        let command = original_attempt_command(&policy, false);
+        let engine = fixture.workflow.host.engine();
+        let events = engine.stream().subscribe();
+        let pool = hold_pool(&fixture);
+        let slot = engine.acquire_slot(meguri_engine::LongOp::Restore).unwrap();
+        let job = policy.clone().start_execute_core(command.clone()).unwrap();
+        if replace {
+            slot.enter_exclusive(true).unwrap().replace(|_| Ok(())).unwrap();
+        } else {
+            job.handle.cancel.cancel().unwrap();
+        }
+        drop(slot);
+        drop(pool);
+        let terminal = finished(&events, job.handle.id);
+        let detail = job.result.detailed_result().unwrap().unwrap();
+        assert!(detail.value.is_none() && detail.original_guard_refusal.is_none());
+        if replace {
+            assert!(matches!(terminal, JobOutcome::Failed { .. }));
+            assert_eq!(
+                detail.error,
+                Some(policy_failure(CloudPolicyFailure::GenerationChanged))
+            );
+        } else {
+            assert_eq!(terminal, JobOutcome::Cancelled);
+            assert_eq!(detail.error, Some(CoreError::Cancelled));
+        }
+        fixture.workflow.host.close().unwrap();
+    }
+}
+
+#[test]
+fn original_attempt_detail_foreign_facade_cannot_admit_or_qualify_command() {
+    let (fixture, original, _, _) = admission_fixture(AdmissionKind::Send);
+    let command = original_attempt_command(&original, false);
+    let foreign = fixture.workflow.policy().unwrap();
+    assert!(
+        matches!(foreign.start_execute_core(command), Err(error) if error == policy_failure(CloudPolicyFailure::WrongOwner))
+    );
+    fixture.workflow.host.close().unwrap();
+}
+
+#[test]
+fn original_attempt_current_invalid_media_and_retired_or_missing_sdk_never_qualify() {
+    for condition in 0..3 {
+        let (fixture, policy, _, sdk) = admission_fixture(AdmissionKind::Send);
+        let sdk = sdk.unwrap();
+        let command = original_attempt_command(&policy, true);
+        let execution = policy.clone().prepare_execution(command).unwrap().unwrap();
+        match condition {
+            0 => {
+                policy
+                    .clone()
+                    .input(CloudPolicyEvent::Settings {
+                        settings: CloudPolicyDeviceSettings {
+                            enabled: true,
+                            paused: false,
+                            automatic: true,
+                            media: false,
+                        },
+                    })
+                    .unwrap();
+            }
+            1 => fixture.workflow.core.retire_sdk(&sdk, false).unwrap(),
+            _ => {
+                fixture.workflow.core.retire_sdk(&sdk, false).unwrap();
+                fixture.workflow.core.release_sdk(&sdk).unwrap();
+            }
+        }
+        let before = fixture.workflow.core.emitted_update_ids();
+        let cycles = fixture.workflow.host.cloud_policy_driver().unwrap().state().cycles;
+        let events = fixture.workflow.host.engine().stream().subscribe();
+        let job = execution.start_begin_media().unwrap();
+        assert!(matches!(finished(&events, job.handle.id), JobOutcome::Failed { .. }));
+        let detail = job.result.detailed_result().unwrap().unwrap();
+        assert!(detail.value.is_none() && detail.error.is_some() && detail.original_guard_refusal.is_none());
+        if condition == 0 {
+            assert_eq!(detail.error, Some(policy_failure(CloudPolicyFailure::StaleCommand)));
+        }
+        assert!(matches!(job.result.result(), Err(error) if Some(error) == detail.error));
+        assert_eq!(fixture.workflow.core.emitted_update_ids(), before);
+        assert_eq!(
+            fixture.workflow.host.cloud_policy_driver().unwrap().state().cycles,
+            cycles
+        );
+        policy.clone().input(settings(true, true)).unwrap();
+        assert!(
+            job.result
+                .detailed_result()
+                .unwrap()
+                .unwrap()
+                .original_guard_refusal
+                .is_none()
+        );
+        fixture.workflow.host.close().unwrap();
+    }
+}

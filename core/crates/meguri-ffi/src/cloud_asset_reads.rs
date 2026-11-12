@@ -90,7 +90,8 @@ impl CloudAssetReadNextResult {
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
+            .as_ref()
+            .map(|stored| stored.result.clone())
             .transpose()
     }
 }
@@ -114,7 +115,8 @@ macro_rules! asset_job {
                     .0
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
-                    .clone()
+                    .as_ref()
+                    .map(|stored| stored.result.clone())
                     .transpose()
             }
         }

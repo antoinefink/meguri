@@ -3,41 +3,91 @@
 use super::*;
 use meguri_engine::{EngineError, Generation};
 
-// The cell preserves the FFI error, which conversion to EngineError can erase.
-// It owns no Host; completed reads must survive close and replacement.
-pub(crate) struct Cell<T>(pub(crate) Mutex<Option<Result<T, CoreError>>>);
+/// Created only by the Driver at the original refusal.
+#[derive(Debug, uniffi::Object)]
+pub struct CloudPolicyOriginalGuardRefusal {
+    pub(super) _fact: p::OriginalIssuedGuardSuperseded,
+    pub(super) _owner: Weak<CloudPolicy>,
+}
+#[derive(Clone, Debug)]
+pub(crate) struct AttemptFailure {
+    pub(crate) error: CoreError,
+    pub(crate) refusal: Option<Arc<CloudPolicyOriginalGuardRefusal>>,
+}
+impl From<CoreError> for AttemptFailure {
+    fn from(error: CoreError) -> Self {
+        Self { error, refusal: None }
+    }
+}
+impl AttemptFailure {
+    pub(crate) fn from_driver(
+        failure: p::CommandAttemptFailure,
+        map: impl FnOnce(p::DriverError) -> CoreError,
+        owner: &Arc<CloudPolicy>,
+    ) -> Self {
+        Self {
+            error: map(failure.error),
+            refusal: failure.refusal.map(|fact| {
+                Arc::new(CloudPolicyOriginalGuardRefusal {
+                    _fact: fact,
+                    _owner: Arc::downgrade(owner),
+                })
+            }),
+        }
+    }
+}
+// Error and immutable provenance are stored atomically in the SAME per-job cell.
+// Completed reads own no Host and survive close/replacement.
+#[derive(Clone, Debug)]
+pub(crate) struct Stored<T> {
+    pub(crate) result: Result<T, CoreError>,
+    refusal: Option<Arc<CloudPolicyOriginalGuardRefusal>>,
+}
+pub(crate) struct Cell<T>(pub(crate) Mutex<Option<Stored<T>>>);
 pub(crate) struct Completion<T>(pub(crate) Arc<Cell<T>>);
+fn store<T>(cell: &Cell<T>, value: Result<T, AttemptFailure>) -> Result<(), EngineError> {
+    let stored = match value {
+        Ok(value) => Stored {
+            result: Ok(value),
+            refusal: None,
+        },
+        Err(failure) => Stored {
+            result: Err(failure.error),
+            refusal: failure.refusal,
+        },
+    };
+    let terminal = stored
+        .result
+        .as_ref()
+        .map(|_| ())
+        .map_err(|error| EngineError::from(error.clone()));
+    *cell.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(stored);
+    terminal
+}
 impl<T> Completion<T> {
     pub(crate) fn finish(self, value: Result<T, CoreError>) -> Result<(), EngineError> {
-        let terminal = value
-            .as_ref()
-            .map(|_| ())
-            .map_err(|error| EngineError::from(error.clone()));
-        *self.0.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(value);
-        terminal
+        store(&self.0, value.map_err(Into::into))
+    }
+    fn finish_attempt(self, value: Result<T, AttemptFailure>) -> Result<(), EngineError> {
+        store(&self.0, value)
     }
 }
 impl<T> Drop for Completion<T> {
     fn drop(&mut self) {
         let mut cell = self.0.0.lock().unwrap_or_else(PoisonError::into_inner);
-        // The registry reports panics with their original message. A queued
-        // cancellation drops the closure without calling it; retain that result.
         if cell.is_none() && !std::thread::panicking() {
-            *cell = Some(Err(CoreError::Cancelled));
+            *cell = Some(Stored {
+                result: Err(CoreError::Cancelled),
+                refusal: None,
+            });
         }
     }
 }
-// Required completions have no destructor placeholder: no body, panic or drop
-// without a normal return must remain distinguishable from actual Cancelled.
+// Required completions retain the absence of a normally returned result.
 pub(crate) struct RequiredCompletion<T>(pub(crate) Arc<Cell<T>>);
 impl<T> RequiredCompletion<T> {
     pub(crate) fn finish(self, value: Result<T, CoreError>) -> Result<(), EngineError> {
-        let terminal = value
-            .as_ref()
-            .map(|_| ())
-            .map_err(|error| EngineError::from(error.clone()));
-        *self.0.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(value);
-        terminal
+        store(&self.0, value.map_err(Into::into))
     }
 }
 macro_rules! typed_result {
@@ -54,7 +104,8 @@ macro_rules! typed_result {
                     .0
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
-                    .clone()
+                    .as_ref()
+                    .map(|stored| stored.result.clone())
                     .transpose()
             }
         }
@@ -113,11 +164,59 @@ typed_result!(
     Arc<crate::cloud_asset_reads::CloudAssetReadPass>
 );
 
+macro_rules! detailed_result {
+    ($result:ident, $detail:ident, $value:ty) => {
+        #[derive(Clone, uniffi::Record)]
+        pub struct $detail {
+            pub value: Option<$value>,
+            pub error: Option<CoreError>,
+            pub original_guard_refusal: Option<Arc<CloudPolicyOriginalGuardRefusal>>,
+        }
+        #[uniffi::export]
+        impl $result {
+            pub fn detailed_result(&self) -> Result<Option<$detail>, CoreError> {
+                callback::enter(concat!(stringify!($result), ".detailed_result"));
+                Ok(self
+                    .cell
+                    .0
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .as_ref()
+                    .map(|stored| {
+                        let (value, error) = match &stored.result {
+                            Ok(value) => (Some(value.clone()), None),
+                            Err(error) => (None, Some(error.clone())),
+                        };
+                        $detail {
+                            value,
+                            error,
+                            original_guard_refusal: stored.refusal.clone(),
+                        }
+                    }))
+            }
+        }
+    };
+}
+detailed_result!(CloudPolicyOutputResult, CloudPolicyOutputDetail, CloudPolicyOutput);
+detailed_result!(
+    CloudPolicyExecutionResult,
+    CloudPolicyExecutionDetail,
+    CloudPolicyPreparedExecution
+);
+detailed_result!(CloudPolicyMediaResult, CloudPolicyMediaDetail, bool);
+
 impl CloudPolicy {
     pub(crate) fn start_policy<T: Send + 'static>(
         self: Arc<Self>,
         name: &'static str,
         work: impl FnOnce(Arc<Self>, &mut p::PolicyWork) -> Result<T, CoreError> + Send + 'static,
+    ) -> Result<(crate::jobs::JobHandle, Arc<Cell<T>>), CoreError> {
+        self.start_policy_attempt(name, move |owner, authority| work(owner, authority).map_err(Into::into))
+    }
+    fn start_policy_attempt<T: Send + 'static>(
+        self: Arc<Self>,
+        name: &'static str,
+        work: impl FnOnce(Arc<Self>, &mut p::PolicyWork) -> Result<T, AttemptFailure> + Send + 'static,
     ) -> Result<(crate::jobs::JobHandle, Arc<Cell<T>>), CoreError> {
         // Preserve immediate Closed/GenerationChanged errors, even after this
         // engine has paused its registry. Command starts first check owns()
@@ -150,15 +249,18 @@ impl CloudPolicy {
                 .map_err(CoreError::from)
                 .and_then(|()| owner.validate_owner())
                 .and_then(|()| job.cancel.check().map_err(CoreError::from))
+                .map_err(AttemptFailure::from)
                 .and_then(|()| work(owner, &mut work_authority));
             // Retain the precise FFI owner failure sampled after contention;
             // never perform a fresh owner lookup over an effected outcome.
             let value = match owner_error.lock().unwrap_or_else(PoisonError::into_inner).take() {
-                Some(error) => Err(error),
-                None if work_authority.generation_was_rejected() => Err(failure(CloudPolicyFailure::GenerationChanged)),
+                Some(error) => Err(error.into()),
+                None if work_authority.generation_was_rejected() => {
+                    Err(failure(CloudPolicyFailure::GenerationChanged).into())
+                }
                 None => value,
             };
-            completion.finish(value)
+            completion.finish_attempt(value)
         });
         Ok((crate::jobs::wrap(handle), cell))
     }
@@ -468,8 +570,8 @@ impl CloudPolicy {
     ) -> Result<CloudPolicyOutputJob, CoreError> {
         callback::enter("CloudPolicy.start_execute_core");
         self.owns(&command)?;
-        let (handle, cell) = self.start_policy("CloudPolicy.execute_core", move |owner, work| {
-            owner.execute_core_with_work(command, work)
+        let (handle, cell) = self.start_policy_attempt("CloudPolicy.execute_core", move |owner, work| {
+            owner.execute_core_attempt_with_work(command, work)
         })?;
         Ok(CloudPolicyOutputJob {
             handle,
@@ -551,9 +653,9 @@ impl CloudPolicy {
     ) -> Result<CloudPolicyExecutionJob, CoreError> {
         callback::enter("CloudPolicy.start_prepare_execution");
         self.owns(&command)?;
-        let (handle, cell) = self.start_policy("CloudPolicy.prepare_execution", move |owner, work| {
+        let (handle, cell) = self.start_policy_attempt("CloudPolicy.prepare_execution", move |owner, work| {
             owner
-                .prepare_execution_with_work(command, work)
+                .prepare_execution_attempt_with_work(command, work)
                 .map(|execution| CloudPolicyPreparedExecution { execution })
         })?;
         Ok(CloudPolicyExecutionJob {
@@ -644,7 +746,10 @@ mod tests {
             }
         }
         for (job, cell, expected) in cases {
-            assert_eq!(*cell.0.lock().unwrap(), expected);
+            assert_eq!(
+                cell.0.lock().unwrap().as_ref().map(|stored| stored.result.clone()),
+                expected
+            );
             match expected {
                 Some(Ok(_)) => assert_eq!(outcomes[&job.id], JobOutcome::Succeeded),
                 Some(Err(CoreError::Cancelled)) => assert_eq!(outcomes[&job.id], JobOutcome::Cancelled),
@@ -671,6 +776,9 @@ mod tests {
         assert!(required.0.lock().unwrap().is_none());
         let ordinary = Arc::new(Cell::<u64>(Mutex::new(None)));
         drop(Completion(ordinary.clone()));
-        assert_eq!(*ordinary.0.lock().unwrap(), Some(Err(CoreError::Cancelled)));
+        assert_eq!(
+            ordinary.0.lock().unwrap().as_ref().map(|stored| stored.result.clone()),
+            Some(Err(CoreError::Cancelled))
+        );
     }
 }

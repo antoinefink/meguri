@@ -17,7 +17,8 @@ macro_rules! typed_result {
                     .0
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
-                    .clone()
+                    .as_ref()
+                    .map(|stored| stored.result.clone())
                     .transpose()
             }
         }
@@ -204,7 +205,8 @@ impl CloudAdoptionAppliedResult {
             .0
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+            .as_ref()
+            .map(|stored| stored.result.clone())
             .transpose()
     }
     /// None means no captured failure (also while pending). Never consumes the

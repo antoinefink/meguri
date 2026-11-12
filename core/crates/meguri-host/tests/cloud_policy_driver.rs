@@ -38,10 +38,13 @@ fn rig() -> Rig {
     rig_with_root(true)
 }
 fn rig_with_root(confirm_root: bool) -> Rig {
+    rig_with_root_seed(confirm_root, 1914)
+}
+fn rig_with_root_seed(confirm_root: bool, seed: u64) -> Rig {
     let root = tempfile::tempdir().unwrap();
     let directory = root.path().join("collection");
     std::fs::create_dir_all(&directory).unwrap();
-    let mut config = options(&directory, 1_894_701_600_000, 1914);
+    let mut config = options(&directory, 1_894_701_600_000, seed);
     // HostConfig defaults to LocalOnly, which correctly closes the policy gate.
     // Arrange the same connected account as the existing synthetic baseline.
     config.publication_binding = meguri_engine::device_state::AccountBinding::Connected {
@@ -2306,4 +2309,141 @@ fn native_authority_unbound_preserves_original_stale_error_precedence() {
         runtime.validate_native_caller_for_testing(""),
         Err(RuntimeError::StaleIncarnation)
     ));
+}
+
+// Original opaque issuance throughout: only real settings/runtime transitions
+// invalidate it. No test reconstructs a guard or substitutes a result.
+#[test]
+fn original_refusal_attempt_distinguishes_policy_and_backend_supersession() {
+    for media in [false, true] {
+        for backend_only in [false, true] {
+            let rig = rig();
+            let driver = rig.host.cloud_policy_driver().unwrap();
+            let issued = if media {
+                command(
+                    rig.host
+                        .cloud_policy_input(DeviceEvent::Settings(DeviceSettings {
+                            enabled: true,
+                            paused: false,
+                            automatic: true,
+                            media: true,
+                        }))
+                        .unwrap(),
+                    |kind| matches!(kind, ActionKind::ResumeMedia),
+                )
+            } else {
+                command(
+                    rig.host
+                        .cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Local))
+                        .unwrap(),
+                    |kind| matches!(kind, ActionKind::UpdatePending(_)),
+                )
+            };
+            if backend_only {
+                rig.host.cloud_runtime().unwrap().adapter_pause(true).unwrap();
+            } else {
+                rig.host
+                    .cloud_policy_input(DeviceEvent::Settings(DeviceSettings {
+                        enabled: true,
+                        paused: true,
+                        automatic: media,
+                        media,
+                    }))
+                    .unwrap();
+            }
+            let runtime = rig.host.cloud_runtime().unwrap();
+            let before = runtime.emitted_update_ids();
+            let cycles = driver.state().cycles;
+            let failure = if media {
+                driver
+                    .native_disposition_attempt_with_work(&issued, &mut Default::default())
+                    .unwrap_err()
+            } else {
+                rig.host
+                    .execute_cloud_policy_core_attempt_with_work(
+                        &issued,
+                        Duration::from_secs(10),
+                        &mut Default::default(),
+                    )
+                    .unwrap_err()
+            };
+            assert!(matches!(failure.error, DriverError::StaleCommand));
+            assert!(failure.refusal.is_some());
+            // Old public accessors keep exactly the original stale failure.
+            if media {
+                assert!(matches!(
+                    driver.native_disposition(&issued),
+                    Err(DriverError::StaleCommand)
+                ));
+            } else {
+                assert!(matches!(
+                    rig.host.execute_cloud_policy_core(&issued, Duration::from_secs(10)),
+                    Err(DriverError::StaleCommand)
+                ));
+            }
+            assert_eq!(runtime.emitted_update_ids(), before);
+            assert_eq!(driver.state().cycles, cycles);
+            // The already returned attempt is immutable across another settings turn.
+            rig.host
+                .cloud_policy_input(DeviceEvent::Settings(DeviceSettings {
+                    enabled: true,
+                    paused: false,
+                    automatic: media,
+                    media,
+                }))
+                .unwrap();
+            assert!(failure.refusal.is_some());
+            rig.host.close().unwrap();
+        }
+    }
+}
+
+#[test]
+fn original_refusal_attempt_rejects_foreign_owner_binding_and_generation_without_qualification() {
+    let original = rig();
+    let issued = command(
+        original
+            .host
+            .cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Local))
+            .unwrap(),
+        |kind| matches!(kind, ActionKind::UpdatePending(_)),
+    );
+    let foreign = rig_with_root_seed(true, 1915);
+    assert_ne!(
+        issued.action.guard.binding,
+        foreign
+            .host
+            .cloud_policy_driver()
+            .unwrap()
+            .state()
+            .facts
+            .binding
+            .as_ref()
+            .map(|binding| binding.id)
+    );
+    foreign.host.cloud_runtime().unwrap().adapter_pause(true).unwrap();
+    let error = foreign
+        .host
+        .execute_cloud_policy_core_attempt_with_work(&issued, Duration::from_secs(10), &mut Default::default())
+        .unwrap_err();
+    assert!(matches!(error.error, DriverError::StaleCommand));
+    assert!(error.refusal.is_none());
+    foreign.host.close().unwrap();
+    let slot = original
+        .host
+        .engine()
+        .acquire_slot(meguri_engine::LongOp::Restore)
+        .unwrap();
+    slot.enter_exclusive(true).unwrap().replace(|_| Ok(())).unwrap();
+    drop(slot);
+    original
+        .host
+        .cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Cloud))
+        .unwrap();
+    let error = original
+        .host
+        .execute_cloud_policy_core_attempt_with_work(&issued, Duration::from_secs(10), &mut Default::default())
+        .unwrap_err();
+    assert!(error.refusal.is_none());
+    original.host.close().unwrap();
 }

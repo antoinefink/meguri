@@ -1315,6 +1315,32 @@ impl CloudPolicy {
             .execute_cloud_policy_core_with_work(&command.command, Duration::from_secs(1), work);
         self.output(result)
     }
+    fn execute_core_attempt_with_work(
+        self: Arc<Self>,
+        command: Arc<CloudPolicyCommand>,
+        work: &mut p::PolicyWork,
+    ) -> Result<CloudPolicyOutput, policy_jobs::AttemptFailure> {
+        self.owns(&command)?;
+        match self
+            .host
+            .execute_cloud_policy_core_attempt_with_work(&command.command, Duration::from_secs(1), work)
+        {
+            Ok(commands) => self.output(Ok(commands)).map_err(Into::into),
+            Err(attempt) => {
+                let refusal = attempt.refusal;
+                self.output(Err(attempt.error))
+                    .map_err(|error| policy_jobs::AttemptFailure {
+                        error,
+                        refusal: refusal.map(|fact| {
+                            Arc::new(policy_jobs::CloudPolicyOriginalGuardRefusal {
+                                _fact: fact,
+                                _owner: Arc::downgrade(&self),
+                            })
+                        }),
+                    })
+            }
+        }
+    }
     fn submit_native_with_work(
         self: Arc<Self>,
         command: Arc<CloudPolicyCommand>,

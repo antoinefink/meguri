@@ -347,6 +347,64 @@ extension EventTests {
         }
     }
 
+    @Test func nativeOriginalRefusalKeepsLegacyErrorAndImmutableAttemptEvidence() async throws {
+        try await withNativePolicyFixture { f in
+            let (policy, executor) = try await nativePolicy(f)
+            let command = try await pendingCommand(policy)
+            let current = await executor.execute(command)
+            #expect(current.error == nil && current.originalGuardRefusal == nil)
+            _ = try await policy.input(.settings(.init(enabled: true, paused: true, automatic: false, media: false)))
+            let emitted = try await f.core.emittedUpdateIDs()
+            let refused = await executor.execute(command)
+            #expect(refused.error as? BridgeError == .cloudPolicy(.staleCommand))
+            #expect(refused.originalGuardRefusal != nil && !refused.deferred)
+            #expect(try await f.core.emittedUpdateIDs() == emitted)
+            do {
+                _ = try await policy.executeCore(command)
+                Issue.record("Legacy accessor accepted the original stale command")
+            } catch { #expect(error as? BridgeError == .cloudPolicy(.staleCommand)) }
+            _ = try await policy.input(.settings(.init(enabled: true, paused: false, automatic: false, media: false)))
+            #expect(current.originalGuardRefusal == nil && current.error == nil)
+            #expect(refused.error as? BridgeError == .cloudPolicy(.staleCommand))
+            #expect(refused.originalGuardRefusal != nil)
+        }
+    }
+
+    @Test func nativeGenuineFailureThenPauseAndStaleReexecutionKeepsOriginalFailureAndOutputs() async throws {
+        try await withNativePolicyFixture { f in
+            let wrapped = Mutex<PolicyPendingEngine?>(nil)
+            await f.factory.wrapNextEngine { sdk in
+                let engine = PolicyPendingEngine(sdk); wrapped.withLock { $0 = engine }; return engine
+            }
+            let (policy, executor) = try await nativePolicy(f)
+            let engine = try #require(wrapped.withLock { $0 })
+            try await addPendingDeck(f, name: "Original error before Pause")
+            let command = try await pendingCommand(policy)
+            await engine.failNextApply(PolicyPendingApplyFailure())
+            let deliveries = Mutex(0)
+            let original = await CloudPolicyOutputAcknowledgement.$current.withValue({ outputs in
+                deliveries.withLock { $0 += outputs.count }
+            }) {
+                await CloudPolicyOutputAcknowledgement.$input.withValue({ work in try await work() }) {
+                    await executor.execute(command)
+                }
+            }
+            #expect(original.error is PolicyPendingApplyFailure && original.originalGuardRefusal == nil)
+            #expect(original.outputs.count == 1 && original.acknowledgedOutputCount == 0)
+            #expect(deliveries.withLock { $0 } == 0)
+            _ = try await policy.input(.settings(.init(enabled: true, paused: true, automatic: false, media: false)))
+            let later = await executor.execute(command)
+            #expect(later.error as? BridgeError == .cloudPolicy(.staleCommand))
+            #expect(later.originalGuardRefusal != nil)
+            let followup = try #require(original.afterOutputs)
+            // The caller still owns the original output ACK before this refresh.
+            _ = try policyCommands(try #require(original.outputs.first))
+            _ = await followup()
+            #expect(original.error is PolicyPendingApplyFailure && original.originalGuardRefusal == nil)
+            #expect(original.outputs.count == 1 && original.acknowledgedOutputCount == 0)
+        }
+    }
+
     @Test func nativeUpdatePendingDefersOrderedListsUntilOriginalCallbackReturns() async throws {
         try await withNativePolicyFixture { f in
             let (policy, executor) = try await nativePolicy(f)

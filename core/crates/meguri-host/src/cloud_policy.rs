@@ -40,4 +40,22 @@ impl CoreHost {
         let collection = self.collection()?;
         driver.execute_core_with_work(command, &collection, self.engine().state(), timeout, work)
     }
+    /// Detailed original pre-effect refusal; all acquisition/owner failures remain plain.
+    pub fn execute_cloud_policy_core_attempt_with_work(
+        &self,
+        command: &Command,
+        timeout: Duration,
+        work: &mut PolicyWork,
+    ) -> Result<Vec<Command>, meguri_sync::cloud::policy::CommandAttemptFailure> {
+        let driver = self.cloud_policy.as_ref().ok_or(DriverError::StaleCommand)?;
+        if matches!(
+            &command.action.kind,
+            meguri_sync::cloud::policy::ActionKind::StatusChanged(_)
+        ) {
+            driver.validate_with_work(command, work)?;
+            return Ok(Vec::new());
+        }
+        let collection = self.collection().map_err(DriverError::from)?;
+        driver.execute_core_attempt_with_work(command, &collection, self.engine().state(), timeout, work)
+    }
 }

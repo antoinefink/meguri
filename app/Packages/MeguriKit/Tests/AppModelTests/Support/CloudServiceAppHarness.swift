@@ -100,7 +100,7 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
     private enum DiagnosticKind: String { case error, coreActionFailed, applyDeferred }
     @discardableResult
     private func capture(_ error: any Error, stage: DiagnosticStage, kind: DiagnosticKind = .error,
-                         action: CloudPolicyAction? = nil, sendFailure: String? = nil, latestMedia: String? = nil) -> String {
+                         action: CloudPolicyAction? = nil, sendFailure: String? = nil, latestMedia: String? = nil, expectedRefusal: Bool = false) -> String {
         let category: String
         switch error {
         case is CancellationError: category = "cancellation"
@@ -180,7 +180,9 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
         let sendSite = firstSendFailure.map { " \($0)" } ?? ""
         let mediaSite = latestMedia.map { " latestMedia=[\($0)]" } ?? ""
         let diagnostic = "\(stage.rawValue).\(kind.rawValue): \(category)\(actionTag) task=\(taskState) close=\(closePhase) cancellation=\(ownership)\(sendSite)\(mediaSite)"
-        if firstFailureDiagnostic == nil {
+        if expectedRefusal {
+            trace("qualifiedOriginalRefusal \(diagnostic)")
+        } else if firstFailureDiagnostic == nil {
             firstFailureDiagnostic = diagnostic
             trace("firstFailure \(diagnostic)", emit: true)
         } else {
@@ -292,8 +294,8 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
             } catch { mediaCompleted.yield(.init(proof: .failure(error), receipts: await wire.receipts)) }
         }
         if let error = result.error {
-            let diagnostic = capture(error, stage: .executeError, action: command.action, sendFailure: sendFailure, latestMedia: latestMedia)
-            if !(error is CancellationError && SyncCommandTaskContext.current?.shutdownCancelled == true) {
+            let diagnostic = capture(error, stage: .executeError, action: command.action, sendFailure: sendFailure, latestMedia: latestMedia, expectedRefusal: result.originalGuardRefusal != nil)
+            if result.originalGuardRefusal == nil, !(error is CancellationError && SyncCommandTaskContext.current?.shutdownCancelled == true) {
                 Issue.record("Service app command failed; \(diagnostic)")
             }
         }

@@ -32,6 +32,21 @@ struct CloudPolicyJobValue<Value: Sendable>: Sendable {
     let read: @Sendable () throws -> Value?
 }
 
+/// Sealed, immutable Core evidence, tied to one stored failed execution attempt.
+public struct CloudPolicyOriginalGuardRefusal: Sendable {
+    private let raw: MeguriCoreBindings.CloudPolicyOriginalGuardRefusal
+    fileprivate init(_ raw: MeguriCoreBindings.CloudPolicyOriginalGuardRefusal) { self.raw = raw }
+}
+// Internal transport only. The native result exposes the unchanged BridgeError.
+struct CloudPolicyAttemptError: Error {
+    let error: BridgeError
+    let refusal: CloudPolicyOriginalGuardRefusal?
+    fileprivate init(_ error: MeguriCoreBindings.CoreError, _ refusal: MeguriCoreBindings.CloudPolicyOriginalGuardRefusal?) {
+        self.error = BridgeError(error)
+        self.refusal = refusal.map(CloudPolicyOriginalGuardRefusal.init)
+    }
+}
+
 /// Retains the original Host policy. Native control work must run outside SDK
 /// callbacks, in the emitted order. No Swift policy or completion inference.
 public actor CoreCloudPolicyService {
@@ -187,6 +202,19 @@ public actor CoreCloudPolicyService {
         }
         return CloudPolicyOutput(value)
     }
+    // Production executor's additive read; the public throwing accessor above
+    // still returns the exact legacy error. Read only the original job's cell.
+    func executeCoreAttempt(_ command: CloudPolicyCommand) async throws -> CloudPolicyOutput {
+        defer { notifyReadinessChanged() }
+        let raw = self.raw; let command = command.raw
+        let detail: MeguriCoreBindings.CloudPolicyOutputDetail = try await run(.cloudPolicyStartExecuteCore, result: .cloudPolicyOutputDetailedResult) { [raw] in
+            let started = try raw.startExecuteCore(command: command)
+            return CloudPolicyJobValue(handle: started.handle, read: { try started.result.detailedResult() })
+        }
+        if let error = detail.error { throw CloudPolicyAttemptError(error, detail.originalGuardRefusal) }
+        guard let value = detail.value else { throw BridgeError.internal("Policy result missing its stored outcome") }
+        return CloudPolicyOutput(value)
+    }
     /// Prepare before calling; enqueue synchronously during the callback;
     /// await completion afterwards. An accepted result means queue admission only.
     public func submitNative(_ command: CloudPolicyCommand, queue: any CloudPolicyQueue) async throws -> CloudPolicyAdmission {
@@ -248,6 +276,16 @@ public actor CoreCloudPolicyService {
             return CloudPolicyJobValue(handle: started.handle, read: { try started.result.result() })
         }
         return value
+    }
+    func prepareExecutionAttempt(_ command: CloudPolicyCommand) async throws -> CoreCloudPolicyExecution? {
+        let raw = self.raw; let command = command.raw
+        let detail: MeguriCoreBindings.CloudPolicyExecutionDetail = try await run(.cloudPolicyStartPrepareExecution, result: .cloudPolicyExecutionDetailedResult) { [raw] in
+            let started = try raw.startPrepareExecution(command: command)
+            return CloudPolicyJobValue(handle: started.handle, read: { try started.result.detailedResult() })
+        }
+        if let error = detail.error { throw CloudPolicyAttemptError(error, detail.originalGuardRefusal) }
+        guard let value = detail.value else { throw BridgeError.internal("Policy result missing its stored outcome") }
+        return value.execution.map(CoreCloudPolicyExecution.init)
     }
     func prepareExecution(_ command: CloudPolicyCommand) async throws -> CoreCloudPolicyExecution? {
         let raw = self.raw

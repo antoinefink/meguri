@@ -477,8 +477,14 @@ fn asset_lifecycle_jobs_original_selector_actual_cancelled_and_absent_returns_ar
     let got = collect_job_outcomes(engine, &events, &[cancelled.id.0, no_body_return.id.0]);
     assert_eq!(got[&cancelled.id.0], JobOutcome::Cancelled);
     assert_eq!(got[&no_body_return.id.0], JobOutcome::Succeeded);
-    assert_eq!(*error.0.lock().unwrap(), Some(Err(CoreError::Cancelled)));
-    assert_eq!(*absent.0.lock().unwrap(), None);
+    assert_eq!(
+        error.0.lock().unwrap().as_ref().map(|stored| stored.result.clone()),
+        Some(Err(CoreError::Cancelled))
+    );
+    assert_eq!(
+        absent.0.lock().unwrap().as_ref().map(|stored| stored.result.clone()),
+        None
+    );
     pass.finish().unwrap();
     fixture.workflow.host.close().unwrap();
 }

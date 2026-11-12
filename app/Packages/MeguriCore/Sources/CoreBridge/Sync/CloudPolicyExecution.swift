@@ -256,6 +256,7 @@ final class CloudMediaCancellationContext: Sendable {
 public struct CloudPolicyNativeResult: Sendable {
     public let outputs: [CloudPolicyOutput]
     public let error: (any Error)?
+    public let originalGuardRefusal: CloudPolicyOriginalGuardRefusal?
     public let deferred: Bool
     public let mediaCancellation: Bool
     public let acknowledgedOutputCount: Int
@@ -263,10 +264,10 @@ public struct CloudPolicyNativeResult: Sendable {
     /// The original cleanup failure is diagnostic evidence, outside app failure cycles.
     public let zoneDeletionError: (any Error)?
     public let cleanupInventoryError: (any Error)?
-    init(outputs: [CloudPolicyOutput], error: (any Error)?, deferred: Bool, zoneDeletionError: (any Error)? = nil, cleanupInventoryError: (any Error)? = nil, mediaCancellation: Bool = false, acknowledgedOutputCount: Int = 0, afterOutputs: (@Sendable () async -> CloudPolicyNativeResult)? = nil) {
+    init(outputs: [CloudPolicyOutput], error: (any Error)?, deferred: Bool, zoneDeletionError: (any Error)? = nil, cleanupInventoryError: (any Error)? = nil, mediaCancellation: Bool = false, acknowledgedOutputCount: Int = 0, afterOutputs: (@Sendable () async -> CloudPolicyNativeResult)? = nil, originalGuardRefusal: CloudPolicyOriginalGuardRefusal? = nil) {
         self.outputs = outputs; self.error = error; self.deferred = deferred; self.zoneDeletionError = zoneDeletionError; self.cleanupInventoryError = cleanupInventoryError
         self.mediaCancellation = mediaCancellation; self.acknowledgedOutputCount = acknowledgedOutputCount
-        self.afterOutputs = afterOutputs
+        self.afterOutputs = afterOutputs; self.originalGuardRefusal = originalGuardRefusal
     }
 }
 // Forward the existing coordinator ACK seam through transparent backend
@@ -434,7 +435,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 #if DEBUG
                 site = .executeCore
                 #endif
-                outputs.append(try await policy.executeCore(command))
+                outputs.append(try await policy.executeCoreAttempt(command))
                 // Core validates the original command and queues its ordered
                 // updates. The adapter validates the SDK and defers application
                 // until any active handler has returned, then acknowledges
@@ -505,7 +506,10 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 if let error = result.error { throw error }
             case .readBlobs, .resumeMedia, .pauseMedia, .prioritizeMedia:
                 guard let mediaService, let mediaTransport else { throw BridgeError.cloudPolicy(.coreCapabilityUnavailable) }
-                guard let permit = try await policy.prepareExecution(command) else { throw BridgeError.cloudPolicy(.staleCommand) }
+                let prepared: CoreCloudPolicyExecution?
+                if case .resumeMedia = command.action { prepared = try await policy.prepareExecutionAttempt(command) }
+                else { prepared = try await policy.prepareExecution(command) }
+                guard let permit = prepared else { throw BridgeError.cloudPolicy(.staleCommand) }
                 let instance = try await permit.originalSDK()
                 if case .pauseMedia = command.action {
                     if let instance { await drainOriginalMedia(instance) }
@@ -601,7 +605,13 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 if execution != nil, exchange == id { nativeExchangeTask?.cancel(); await adapter.cancelPolicyExchange() }
             }
             return .init(outputs: outputs, error: nil, deferred: false, acknowledgedOutputCount: delivery.count)
-        } catch {
+        } catch let caught {
+            // Extract only this exact original attempt's error. A failed refresh
+            // cannot change the already retained result.
+            let attempt = caught as? CloudPolicyAttemptError
+            let error: any Error
+            if let attempt { error = attempt.error } else { error = caught }
+            let refusal = attempt?.refusal
             #if DEBUG
             switch command.action {
             case .requestSend, .updatePending:
@@ -618,13 +628,13 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                     // Return the failed local computation through its original
                     // ACK before the later refresh takes another input turn.
                     return .init(outputs: outputs, error: error, deferred: false, acknowledgedOutputCount: delivery.count,
-                        afterOutputs: deferredRefreshAfterFailure())
+                        afterOutputs: deferredRefreshAfterFailure(), originalGuardRefusal: refusal)
                 default: break
                 }
             }
             await delivery.acknowledge(outputs)
             _ = try? await delivery.appendInput(to: &outputs) { [policy] in try await policy.input(.refresh(.cloud)) }
-            return .init(outputs: outputs, error: error, deferred: false, acknowledgedOutputCount: delivery.count)
+            return .init(outputs: outputs, error: error, deferred: false, acknowledgedOutputCount: delivery.count, originalGuardRefusal: refusal)
         }
     }
     private func performCleanup(_ command: CloudPolicyCommand, corePrepared: @Sendable () async -> Void) async -> CloudPolicyNativeResult {
