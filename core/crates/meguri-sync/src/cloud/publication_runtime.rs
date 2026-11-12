@@ -1146,6 +1146,7 @@ impl Runtime {
             return Ok(());
         }
         let mut accepted = false;
+        let mut accepted_epoch = None;
         #[cfg(feature = "test-hooks")]
         let selected_origin = match &result {
             OwnResult::Saved(_) => Some(selected_observation::ReplyOrigin::Saved),
@@ -1229,6 +1230,7 @@ impl Runtime {
                             op.step = PublishStep::Zones;
                         }
                         accepted = true;
+                        accepted_epoch = Some(epoch);
                     } else if expected_state == EpochState::Complete && op.step == PublishStep::Sent {
                         #[cfg(feature = "test-hooks")]
                         {
@@ -1239,6 +1241,7 @@ impl Runtime {
                         op.complete_system_fields = Some(record.system_fields);
                         op.step = PublishStep::Complete;
                         accepted = true;
+                        accepted_epoch = Some(epoch);
                     }
                 }
             }
@@ -1319,7 +1322,7 @@ impl Runtime {
         if accepted {
             op.retry_after_ms = None;
             if let Err(error) =
-                with_tracking_access(|| s.store.as_mut().ok_or(Error::Database)?.publication_ack_control(&op))
+                with_tracking_access(|| s.store.as_mut().ok_or(Error::Database)?.publication_ack_control(&op, accepted_epoch.as_ref()))
             {
                 s.publication.reset_root_missing = None;
                 return Err(error.into());

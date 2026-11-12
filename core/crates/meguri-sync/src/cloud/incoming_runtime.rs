@@ -544,19 +544,18 @@ impl Runtime {
     /// Non-SDK transport boundary. It persists the very same facts as adapter_fetched.
     pub fn receive_collection_records(&self, instance: &str, records: &[Saved]) -> Result<(), RuntimeError> {
         let at = self.adapter_now()?;
-        let key = {
+        let binding = {
             let s = self.state();
             Self::caller_locked(&s, instance)?;
             s.bound
                 .as_ref()
                 .ok_or(RuntimeError::StaleIncarnation)?
                 .binding
-                .facts
-                .record_key
-                .0
+                .clone()
         };
         let entities: Vec<_> = records.iter().filter(|r| r.name != "epoch").cloned().collect();
-        let (entries, refused) = classify(&key, &entities, at);
+        let (entries, refused) = classify(&binding.facts.record_key.0, &entities, at);
+        let fetched_epoch = super::super::epoch_crt_store::fetched(&binding, records);
         meguri_model::faultpoint!("cloud.fetch.before_inbox").map_err(Error::from)?;
         #[cfg(feature = "test-hooks")]
         self.incoming_hooks
@@ -569,7 +568,7 @@ impl Runtime {
                 s.store
                     .as_mut()
                     .ok_or(Error::Database)?
-                    .receive_records(b, &entries, &refused)
+                    .receive_records(b, &entries, &refused, fetched_epoch.as_ref())
             }))
             .unwrap_or(Err(Error::Database))
         });

@@ -363,12 +363,16 @@ impl TrackingStore {
         b: BindingId,
         entries: &[InboxEntry],
         refused: &[RefusedEntry],
+        fetched_epoch: Option<&super::control_codec::Epoch>,
     ) -> Result<(), Error> {
         if self.binding(b)?.ok_or(Error::BindingNotFound)?.facts.state != BindingState::Active {
             return Err(Error::IsolatedBinding);
         }
         let tx = self.connection.transaction()?;
         receive(&tx, b, entries, refused)?;
+        if let Some(epoch) = fetched_epoch {
+            super::epoch_crt_store::put(&tx, b, epoch, super::epoch_crt_store::Authority::Fetched)?;
+        }
         #[cfg(feature = "test-hooks")]
         super::testing::tracking_commit(&tx, "cloud.tracking.commit.inbox")?;
         meguri_model::faultpoint!("cloud.tracking.commit.inbox")?;

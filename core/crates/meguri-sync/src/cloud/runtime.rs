@@ -1917,6 +1917,14 @@ pub(super) fn note_image(row: &[Cell], nt_struct_gen: u64) -> Result<codec::Note
 
 #[cfg(feature = "test-hooks")]
 impl Runtime {
+    /// Read only the qualified durable P6 ledger; never the media fallback.
+    pub fn epoch_crt_for_testing(&self) -> Result<Option<i64>, RuntimeError> {
+        let s = self.state();
+        let Some(bound) = &s.bound else { return Ok(None); };
+        with_tracking_access(|| {
+            Ok(s.store.as_ref().ok_or(Error::Database)?.epoch_crt(bound.binding.id)?)
+        })
+    }
     /// Stable-State equivalence, including the original caller/SDK error order.
     pub fn native_authority_matches_state_for_testing(&self, candidates: &[&str]) -> bool {
         fn same(a: Result<(), RuntimeError>, b: Result<(), RuntimeError>) -> bool {

@@ -590,6 +590,7 @@ impl Runtime {
                 fail,
                 start_absence: false,
                 resolved_epoch: None,
+                fetched_epoch: None,
             },
         )?;
         if !names.is_empty() {
@@ -624,6 +625,7 @@ impl Runtime {
                 fail,
                 start_absence: false,
                 resolved_epoch: None,
+                fetched_epoch: None,
             },
         )?;
         #[cfg(feature = "test-hooks")]
@@ -758,6 +760,14 @@ impl Runtime {
         #[cfg(not(feature = "test-hooks"))]
         let fail = false;
         let previous = s.adapter.durable.clone();
+        let fetched_epoch = if zone == "meguri-root" || deleted.iter().any(|name| name == "epoch") {
+            None
+        } else {
+            super::super::epoch_crt_store::fetched(
+                &s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding,
+                &records,
+            )
+        };
         if zone == "meguri-root" {
             if deleted.iter().any(|name| name == "active") {
                 s.adapter.durable.active = None;
@@ -779,6 +789,7 @@ impl Runtime {
                 fail,
                 start_absence: false,
                 resolved_epoch: None,
+                fetched_epoch,
             },
         ) {
             s.adapter.durable = previous;
@@ -923,6 +934,7 @@ impl Runtime {
                     fail: false,
                     start_absence: true,
                     resolved_epoch: None,
+                    fetched_epoch: None,
                 },
             ) {
                 s.adapter.durable = prior;
@@ -1092,6 +1104,7 @@ impl Runtime {
                 fail: false,
                 start_absence: false,
                 resolved_epoch,
+                fetched_epoch: None,
             },
         ) {
             s.adapter.durable = old;
@@ -1489,6 +1502,7 @@ impl Runtime {
                         fail: false,
                         start_absence: false,
                         resolved_epoch: None,
+                        fetched_epoch: None,
                     },
                 )?;
                 Ok(())

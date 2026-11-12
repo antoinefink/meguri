@@ -1,5 +1,7 @@
 //! Focused production-phase tests; the enabled cloud_publication contract is
 //! unchanged and still requires the child coordinator and incoming/media paths.
+#[path = "cloud_publication_phase/epoch_crt.rs"]
+mod epoch_crt_knowledge;
 use meguri_host::CoreHost;
 use meguri_model::{
     clock::{StepClock, UtcOffset},

@@ -19,7 +19,7 @@ impl TrackingStore {
             CREATE TABLE IF NOT EXISTS cloud_adoption_authority(
             binding BLOB PRIMARY KEY REFERENCES bindings(id), controls TEXT NOT NULL CHECK(json_valid(controls)),
             activated_file TEXT CHECK(activated_file IS NULL OR json_valid(activated_file)));
-            UPDATE cloud_publication_schema SET version=2;",
+            UPDATE cloud_publication_schema SET version=2 WHERE version=1;",
         )?;
         // Older publication readers must refuse a store carrying adoption work.
         tx.commit()?;
@@ -133,6 +133,17 @@ impl TrackingStore {
             "INSERT INTO cloud_publication_bindings(binding,media_key,root_acked,crt) VALUES(?1,?2,1,?3)",
             params![op.binding_after.0.as_slice(), media_key.0.as_slice(), crt],
         )?;
+        // The validated complete MGEpoch, rather than the staged local col row,
+        // supplies P6 knowledge in the same commit that creates its binding.
+        let super::control_codec::DecodeOutcome::Supported(epoch) = super::control_codec::Epoch::decode(
+            op.epoch_record.as_ref().and_then(|r| r.encrypted.as_deref()).ok_or(Error::InvalidData)?,
+        ).map_err(|_| Error::InvalidData)? else {
+            return Err(Error::InvalidData);
+        };
+        if epoch.crt != crt {
+            return Err(Error::InvalidData);
+        }
+        super::epoch_crt_store::put(&tx, op.binding_after, &epoch, super::epoch_crt_store::Authority::Adopted)?;
         for entity in entities {
             super::workflow_store::put(&tx, op.binding_after, &entity?)?;
         }

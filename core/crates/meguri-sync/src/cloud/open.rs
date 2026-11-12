@@ -223,7 +223,7 @@ impl RetainedAdoptionStore {
         for (table, expected) in [
             ("cloud_runtime_schema", super::runtime_store::VERSION),
             ("cloud_workflow_schema", 2),
-            ("cloud_publication_schema", 2),
+            ("cloud_publication_schema", 3),
         ] {
             let versions = store
                 .connection

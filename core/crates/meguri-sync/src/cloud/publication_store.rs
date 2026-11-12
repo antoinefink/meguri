@@ -32,11 +32,23 @@ pub(super) fn check_version(c: &Connection) -> Result<(), Error> {
         let versions = s
             .query_map([], |r| r.get::<_, i64>(0))?
             .collect::<Result<Vec<_>, _>>()?;
-        if versions != [1] && versions != [2] {
+        if versions != [1] && versions != [2] && versions != [3] {
             return Err(Error::RuntimeSchemaUnsupported);
         }
+        let ledger: Option<String> = c.query_row(
+            "SELECT type FROM sqlite_master WHERE name='cloud_epoch_crt'",
+            [], |r| r.get(0),
+        ).optional()?;
+        if (versions == [3] && ledger.as_deref() != Some("table"))
+            || (versions != [3] && ledger.is_some())
+        {
+            return Err(Error::InvalidData);
+        }
+        if ledger.is_some() {
+            c.prepare("SELECT binding,crt,authority FROM cloud_epoch_crt LIMIT 0")?;
+        }
     } else {
-        let orphan: bool = c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name IN ('cloud_publication_ops','cloud_publication_bindings','cloud_publication_zones'))", [], |r| r.get(0))?;
+        let orphan: bool = c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name IN ('cloud_publication_ops','cloud_publication_bindings','cloud_publication_zones','cloud_epoch_crt'))", [], |r| r.get(0))?;
         if orphan {
             return Err(Error::InvalidData);
         }
@@ -78,6 +90,7 @@ pub(super) const WORK_TABLES: &[&str] = &[
     "cloud_runtime_bindings",
     "cloud_adapter_state",
     "cloud_publication_bindings",
+    "cloud_epoch_crt",
     "cloud_adoption_authority",
     "cloud_publication_zones",
 ];
@@ -196,7 +209,15 @@ impl TrackingStore {
     }
     pub(super) fn install_publication(&mut self) -> Result<(), Error> {
         check_version(&self.connection)?;
-        self.connection.execute_batch(SCHEMA)?;
+        let tx = self.connection.transaction()?;
+        tx.execute_batch(SCHEMA)?;
+        let version: i64 = tx.query_row("SELECT version FROM cloud_publication_schema", [], |r| r.get(0))?;
+        if version < 3 {
+            // No backfill: legacy crt may have come from media-root-local fallback.
+            tx.execute_batch(super::epoch_crt_store::SCHEMA)?;
+            tx.execute("UPDATE cloud_publication_schema SET version=3", [])?;
+        }
+        tx.commit()?;
         if let Some(op) = self.publication_op()? {
             op.validate()?;
         }
@@ -410,10 +431,17 @@ impl TrackingStore {
         tx.commit()?;
         Ok(())
     }
-    pub(super) fn publication_ack_control(&mut self, op: &PublishOp) -> Result<(), Error> {
+    pub(super) fn publication_ack_control(
+        &mut self,
+        op: &PublishOp,
+        accepted_epoch: Option<&super::control_codec::Epoch>,
+    ) -> Result<(), Error> {
         let id = op.binding_after.ok_or(Error::InvalidData)?;
         self.binding(id)?.ok_or(Error::BindingNotFound)?;
         let tx = self.connection.transaction()?;
+        if let Some(epoch) = accepted_epoch {
+            super::epoch_crt_store::put(&tx, id, epoch, super::epoch_crt_store::Authority::Published)?;
+        }
         tx.execute(
             "UPDATE cloud_publication_bindings SET media_key=?2,root_acked=?3 WHERE binding=?1",
             params![id.0.as_slice(), op.media_key.0.as_slice(), op.root_acked],

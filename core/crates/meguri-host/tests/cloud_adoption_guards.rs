@@ -110,6 +110,19 @@ fn store(directory: &Path) -> cloud::TrackingStore {
         _ => panic!("actual tracking store required"),
     }
 }
+#[test]
+fn epoch_crt_adoption_records_actual_complete_epoch_knowledge() {
+    let mut pair = Pair::published();
+    let expected = pair.sender.collection_header().unwrap().crt;
+    let preview = pair.receiver.preview(&mut pair.service, STEPS).unwrap();
+    pair.receiver.adopt_cloud(&preview).unwrap();
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    let binding = pair.receiver.facts().unwrap().current.unwrap().id;
+    assert_eq!(pair.receiver.collection_header().unwrap().crt, expected);
+    pair.receiver.close_clean().unwrap();
+    assert_eq!(store(&pair.directory).epoch_crt_for_testing(binding).unwrap(), Some(expected));
+    pair.sender.close_clean().unwrap();
+}
 fn cloud_disabled_config(directory: &Path, op: &cloud::adoption::AdoptOp) -> meguri_host::HostConfig {
     let mut config = options(directory, NOW, 819);
     assert!(config.cloud.is_none());

@@ -19,6 +19,13 @@ use meguri_testkit::cloud::devices::{NativeFiles, options};
 use std::{sync::Arc, time::Duration};
 
 struct Account;
+#[test]
+fn epoch_crt_legacy_runtime_keeps_unknown_attention_conservative() {
+    let rig = rig();
+    assert_eq!(rig.host.cloud_runtime().unwrap().epoch_crt_for_testing().unwrap(), None);
+    assert!(!rig.host.cloud_policy_driver().unwrap().state().facts.summary.attention_known);
+    rig.host.close().unwrap();
+}
 impl IdentityProvider for Account {
     fn read_identity(&self, _: &BuildScope) -> IdentityStatus {
         IdentityStatus::Available(OpaqueBytes(b"synthetic-account-A".to_vec()))

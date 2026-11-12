@@ -17,6 +17,7 @@ mod durable_identity;
 #[cfg(test)]
 mod durable_identity_tests;
 pub mod entity_codec;
+mod epoch_crt_store;
 mod exchange_accounting;
 pub mod generation;
 pub mod generation_codec;

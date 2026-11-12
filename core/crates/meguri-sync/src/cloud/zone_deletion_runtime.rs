@@ -149,6 +149,7 @@ impl Runtime {
                         fail: false,
                         start_absence: false,
                         resolved_epoch: None,
+                        fetched_epoch: None,
                     },
                     Some((reset.then_some(IsolationReason::EncryptedDataReset), false, false)),
                 )

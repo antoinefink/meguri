@@ -444,6 +444,18 @@ fn connection_successful_suspend_then_close_uses_retained_adoption_tracking_and_
         let host = &fixture.workflow.host;
         let generation = host.cloud_connection_generation().unwrap();
         let collection = host.collection().unwrap();
+        let op = fixture.workflow.core.adoption_op().unwrap().unwrap();
+        {
+            let db = meguri_storage::rusqlite::Connection::open_with_flags(
+                host.cloud_connection_directory().join(c::TRACKING_FILE),
+                meguri_storage::rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )
+            .unwrap();
+            let version: i64 = db
+                .query_row("SELECT version FROM cloud_publication_schema", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(version, 3, "actual Runtime installation must use publication V3");
+        }
         assert_eq!(
             host.engine().suspend(Duration::from_secs(5)).unwrap(),
             meguri_engine::SuspendOutcome::Suspended
@@ -453,6 +465,11 @@ fn connection_successful_suspend_then_close_uses_retained_adoption_tracking_and_
         assert!(collection.open_evidence().is_err());
         assert!(stage.exists());
         assert_eq!(host.engine().slot_holder(), Some(meguri_engine::LongOp::CloudAdopt));
+        assert_eq!(
+            fixture.workflow.core.adoption_op_for_host_close(host.engine()).unwrap(),
+            Some(op),
+            "retained V3 reopen must preserve the exact adoption instead of RecoveryRefused"
+        );
         if fail_cleanup {
             let path = collection.path();
             let parked = path.with_extension("cleanup-retry");
@@ -489,7 +506,17 @@ fn tracking_bytes(directory: &std::path::Path) -> std::collections::BTreeMap<std
 #[test]
 fn connection_suspended_adoption_close_refuses_missing_replaced_or_older_store_without_file_changes() {
     use std::io::{Seek, SeekFrom, Write};
-    for change in ["missing", "replaced", "older"] {
+    for change in [
+        "missing",
+        "replaced",
+        "older",
+        "publication-v2",
+        "publication-newer",
+        "publication-empty",
+        "publication-duplicate",
+        "publication-missing-ledger",
+        "publication-malformed-ledger",
+    ] {
         let fixture = Fixture::new(Keys::new([]));
         let (_connection, _handle, _, stage) = adoption(&fixture);
         let host = &fixture.workflow.host;
@@ -505,7 +532,39 @@ fn connection_suspended_adoption_close_refuses_missing_replaced_or_older_store_w
         // original and change only the retained-store authority under test.
         let original = std::fs::read(&path).unwrap();
         let parked = directory.join("meguri-cloud.db.parked-original");
-        if change == "older" {
+        let publication_change = match change {
+            "publication-v2" => Some((
+                "UPDATE cloud_publication_schema SET version=2",
+                "UPDATE cloud_publication_schema SET version=3",
+            )),
+            "publication-newer" => Some((
+                "UPDATE cloud_publication_schema SET version=4",
+                "UPDATE cloud_publication_schema SET version=3",
+            )),
+            "publication-empty" => Some((
+                "DELETE FROM cloud_publication_schema",
+                "INSERT INTO cloud_publication_schema VALUES(3)",
+            )),
+            "publication-duplicate" => Some((
+                "INSERT INTO cloud_publication_schema VALUES(3)",
+                "DELETE FROM cloud_publication_schema; INSERT INTO cloud_publication_schema VALUES(3)",
+            )),
+            "publication-missing-ledger" => Some((
+                "ALTER TABLE cloud_epoch_crt RENAME TO parked_epoch_crt",
+                "ALTER TABLE parked_epoch_crt RENAME TO cloud_epoch_crt",
+            )),
+            "publication-malformed-ledger" => Some((
+                "ALTER TABLE cloud_epoch_crt RENAME COLUMN authority TO parked_authority",
+                "ALTER TABLE cloud_epoch_crt RENAME COLUMN parked_authority TO authority",
+            )),
+            _ => None,
+        };
+        if let Some((corrupt, _)) = publication_change {
+            // Deliberately corrupt the installed schema on the original inode.
+            // Drop the fixture writer before snapshotting the refusal evidence.
+            let db = meguri_storage::rusqlite::Connection::open(&path).unwrap();
+            db.execute_batch(corrupt).unwrap();
+        } else if change == "older" {
             // SQLite's persisted big-endian user_version. Keep the same inode
             // and all rows so only the no-migration requirement can reject it.
             let mut file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
@@ -538,7 +597,10 @@ fn connection_suspended_adoption_close_refuses_missing_replaced_or_older_store_w
             assert!(collection.open_evidence().is_err());
             assert!(stage.exists());
         }
-        if change == "older" {
+        if let Some((_, restore)) = publication_change {
+            let db = meguri_storage::rusqlite::Connection::open(&path).unwrap();
+            db.execute_batch(restore).unwrap();
+        } else if change == "older" {
             std::fs::write(&path, original).unwrap();
         } else {
             if change == "replaced" {

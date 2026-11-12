@@ -359,6 +359,9 @@ impl PublicationRig {
     pub fn facts(&self) -> Result<PublicationFacts> {
         self.sdk.borrow_mut().driver.call(Input::PublicationFacts)
     }
+    pub fn collection_header(&self) -> Result<CollectionHeader> {
+        self.sdk.borrow_mut().driver.call(Input::CollectionHeader)
+    }
     /// Actual runtime status, without binding, account or collection payloads.
     pub fn authority_status(&self) -> Result<(bool, bool)> {
         self.sdk.borrow_mut().driver.call(Input::AuthorityStatus)

@@ -120,6 +120,7 @@ impl Runtime {
                             fail: false,
                             start_absence: false,
                             resolved_epoch: None,
+                            fetched_epoch: None,
                         },
                     ) {
                         Self::invalidate_tracking_locked(s);
@@ -270,6 +271,7 @@ impl Runtime {
                         fail: false,
                         start_absence: false,
                         resolved_epoch,
+                        fetched_epoch: None,
                     },
                 ) {
                     Self::invalidate_tracking_locked(s);
@@ -366,6 +368,7 @@ impl Runtime {
                         fail: false,
                         start_absence: false,
                         resolved_epoch,
+                        fetched_epoch: None,
                     },
                 ) {
                     Self::invalidate_tracking_locked(s);
