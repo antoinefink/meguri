@@ -759,6 +759,11 @@ fn historical_birthtime_mismatch_reopen_durably_isolates_and_preserves_pending_a
         (store.binding(fixture.binding).unwrap().unwrap(), notes)
     });
 
+    // An isolated reopen starts a fresh observer namespace without changing file evidence.
+    let mut expected_after_open = historical.clone();
+    expected_after_open.open_counter = historical.open_counter.checked_add(1).unwrap();
+    expected_after_open.drained = false;
+
     let reopened = fixture.open();
     let collection = reopened.collection().unwrap();
     assert_eq!(fixture.files.identity(collection.path()).unwrap(), live);
@@ -771,7 +776,7 @@ fn historical_birthtime_mismatch_reopen_durably_isolates_and_preserves_pending_a
     assert_eq!(status.binding.as_ref(), Some(&isolated));
     assert!(!status.stored_usable);
     assert!(next.note_scan_proof().is_none());
-    assert_eq!(next.stored_state_for_testing().unwrap(), historical);
+    assert_eq!(next.stored_state_for_testing().unwrap(), expected_after_open);
     incomplete(next);
     assert!(next.reconcile_notes(&collection, BUDGET).is_err());
     reopened.close().unwrap();
@@ -780,7 +785,7 @@ fn historical_birthtime_mismatch_reopen_durably_isolates_and_preserves_pending_a
         assert_eq!(store.binding(fixture.binding).unwrap().as_ref(), Some(&isolated));
         assert_eq!(
             store.stored_runtime_state(fixture.binding).unwrap().unwrap(),
-            historical
+            expected_after_open
         );
         for (id, expected) in fixture.ids.iter().zip(&notes) {
             assert_eq!(

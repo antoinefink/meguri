@@ -43,3 +43,28 @@ weakened. This repair is not a two-device or milestone acceptance claim.
 The integration batch still awaits the retained testkit stale-callback
 regression, dependency advisories, native accessibility work, and a required
 full gate. No unit or milestone is accepted by this commit.
+
+## Full-suite expectation follow-up — 2026-11-12
+
+Start: `d02886ffe330d49806b322b3617970230b585191`. Full Rust run
+`core-test/20261112T015202Z-84026` passes 4,912 cases, fails two and skips
+ten. The historical-birthtime case still expects the old open counter.
+Every preceding file-mismatch, isolation and scan-refusal check passes.
+
+Filtered repair `cleanroom/20261112T020838Z-85550` derives the expected
+post-open state from the original historical state, advances its counter
+once with checked arithmetic and clears the drained flag. Both full-state
+comparisons and all file, pending and ACK comparisons remain. No production
+code changes. Independent review `021036Z-86099` finds no P0–P2 issue or
+weakened preservation check. Focused `core-test/20261112T022841Z-92381`
+passes the corrected case.
+
+Gate `20261112T014846Z-84391` is cancelled after those two failures and the
+255 passing native durability checks, to repair before further integration
+work. Its incomplete result and all failure evidence remain. It accepts no
+unit or milestone; a complete gate at the original integration base is still
+required. The separate memory-limit failure is not resolved by this change.
+
+Refreshed lint `core-lint/20261112T022949Z-92697`, static
+`static-checks/20261112T022952Z-92969` and scoped similarity
+`similarity/20261112T022956Z-93284` pass. No guard exception is added.
