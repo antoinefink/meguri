@@ -79,6 +79,8 @@ extension SyncCoordinatorBackend {
 }
 nonisolated struct SyncCommandResult: Sendable {
     #if DEBUG
+    var causalCommandOrdinal: UInt64? = nil
+    var causalReadOrdinal: UInt64? = nil
     var diagnosticFailure: DebugCloudDiagnostics.ProjectedFailure? = nil
     #endif
     let outputs: [CloudPolicyOutput]
@@ -227,6 +229,12 @@ public final class SyncCoordinator {
     enum CausalBoundary {
         case commandResultEnqueue, commandAcknowledgementJoined
         case proofResultReduced, proofAcknowledgementSending
+        case accountCompletion(read: UInt64, followup: Bool, closing: Bool, suspended: Bool, replacing: Bool,
+                               taskCancelled: Bool?, admitted: Bool, backendMatches: Bool, generationMatches: Bool,
+                               revisionMatches: Bool, pendingMismatch: Bool)
+        case accountAccepted(read: UInt64, verified: Bool, succeeded: Bool)
+        case resultReduced(command: UInt64?, read: UInt64?, cancellation: Bool, shutdownOwned: Bool, before: UInt64, after: UInt64)
+        case resumeEntered, resumeReturned, resumeRefused(authorityChanged: Bool), resumeCancelled
         case ownCoreStarted
         case dependencyRevocationJoined(UUID)
         case corePredecessorWaiting(CloudPolicyCommand), corePredecessorReleased(CloudPolicyCommand)
@@ -1258,7 +1266,15 @@ public final class SyncCoordinator {
         case .completeAccount(let read, let original, let expected, let revision, let complete, let acknowledged):
             guard !closing, !suspended, !replacing, accountTask?.isCancelled == false,
                   expected == generation, revision == hostRevision, backend === original else {
+                #if DEBUG
+                observeAccountCompletion(read, original: original, expected: expected, revision: revision, admitted: false)
+                #endif
+                #if DEBUG
+                var result = await complete(false)
+                result.causalReadOrdinal = read
+                #else
                 let result = await complete(false)
+                #endif
                 await reduce(.result(result, generation: expected, revision: revision, shutdownCancelled: false, acknowledged: nil))
                 acknowledged.resume(returning: true)
                 return
@@ -1273,7 +1289,15 @@ public final class SyncCoordinator {
             // Lookup has returned, but no proof has been committed yet. Only
             // this lane may rotate authority, after all original command ACKs.
             observeAccountPolicyDrain?(.finished)
+            #if DEBUG
+            observeAccountCompletion(read, original: original, expected: expected, revision: revision, admitted: true)
+            #endif
+            #if DEBUG
+            var result = await complete(true)
+            result.causalReadOrdinal = read
+            #else
             let result = await complete(true)
+            #endif
             let supersededAccountCancellation = result.error is CancellationError
                 && pendingAccountRead.map { $0 != read } == true
                 && expected == generation && revision == hostRevision && backend === original
@@ -1295,7 +1319,15 @@ public final class SyncCoordinator {
                 let admitted = !closing && !suspended && !replacing && accountTask?.isCancelled == false
                     && expected == generation && revision == hostRevision && backend === original
                     && pendingAccountRead.map { $0 != read } != true
+                #if DEBUG
+                observeAccountCompletion(read, original: original, expected: expected, revision: revision, admitted: admitted, followup: true)
+                #endif
+                #if DEBUG
+                var followup = await next(admitted)
+                followup.causalReadOrdinal = read
+                #else
                 let followup = await next(admitted)
+                #endif
                 let supersededAccountCancellation = followup.error is CancellationError
                     && pendingAccountRead.map { $0 != read } == true
                     && expected == generation && revision == hostRevision && backend === original
@@ -1305,6 +1337,9 @@ public final class SyncCoordinator {
                     result: followup, acknowledged: acknowledged))
                 return
             }
+            #if DEBUG
+            observeCausalBoundary?(.accountAccepted(read: read, verified: result.accountVerified, succeeded: result.error == nil), nil)
+            #endif
             if result.accountVerified { await reduce(.ownAccountProof(read, generation: expected, revision: revision)) }
             if result.error == nil, result.accountVerified {
                 startRetainedRecoveryAfterProof(original, generation: expected, revision: revision)
@@ -1324,6 +1359,9 @@ public final class SyncCoordinator {
             guard !closing, !suspended, !replacing, !settings.paused, ownTask?.isCancelled == false,
                   expected == generation, revision == hostRevision, backend?.connection === service,
                   ownResumePreparation?.owner == ownOwner, ownResumePreparation?.token === preparation else {
+                #if DEBUG
+                observeCausalBoundary?(.resumeCancelled, nil)
+                #endif
                 acknowledged.resume(returning: .cancelled)
                 return
             }
@@ -1340,10 +1378,29 @@ public final class SyncCoordinator {
             observeResumePolicyDrain?(.finished)
             ownResumePreparation = nil // atomic revocation before Core/SDK work
             do {
+                #if DEBUG
+                observeCausalBoundary?(.resumeEntered, nil)
+                #endif
                 let proof = try await service.resumeBindingForAccountProof(handle)
+                #if DEBUG
+                observeCausalBoundary?(.resumeReturned, nil)
+                #endif
                 acknowledged.resume(returning: .resumed(proof))
-            } catch { acknowledged.resume(throwing: error) }
+            } catch {
+                #if DEBUG
+                observeCausalBoundary?(.resumeRefused(authorityChanged: (error as? BridgeError) == .cloudConnection(.authorityChanged)), nil)
+                #endif
+                acknowledged.resume(throwing: error)
+            }
         case .result(let result, let expected, let revision, let shutdownCancelled, let supersededAccountCancellation, let acknowledged):
+            #if DEBUG
+            let failureBefore = failureRevision
+            defer {
+                observeCausalBoundary?(.resultReduced(command: result.causalCommandOrdinal, read: result.causalReadOrdinal,
+                    cancellation: result.error is CancellationError, shutdownOwned: shutdownCancelled,
+                    before: failureBefore, after: failureRevision), nil)
+            }
+            #endif
             if expected == generation, revision == hostRevision, !replacing, !suspended {
                 for output in result.outputs.dropFirst(result.acknowledgedOutputCount) {
                     consume(output, generation: expected)
@@ -1676,6 +1733,7 @@ public final class SyncCoordinator {
                         await withCheckedContinuation { acknowledged in
                             #if DEBUG
                             observeCausalBoundary?(.commandResultEnqueue, command)
+                            result.causalCommandOrdinal = value.sequence
                             #endif
                             enqueue(.result(result, generation: value.generation, revision: revision,
                                 shutdownCancelled: context.shutdownCancelled, acknowledged: acknowledged))
@@ -1768,6 +1826,15 @@ public final class SyncCoordinator {
         default: false
         }
     }
+    #if DEBUG
+    private func observeAccountCompletion(_ read: UInt64, original: any SyncCoordinatorBackend, expected: UInt64,
+                                          revision: UInt64, admitted: Bool, followup: Bool = false) {
+        observeCausalBoundary?(.accountCompletion(read: read, followup: followup, closing: closing, suspended: suspended,
+            replacing: replacing, taskCancelled: accountTask?.isCancelled, admitted: admitted, backendMatches: backend === original,
+            generationMatches: expected == generation, revisionMatches: revision == hostRevision,
+            pendingMismatch: pendingAccountRead.map { $0 != read } == true), nil)
+    }
+    #endif
     private func startAccountRead() {
         guard accountTask == nil, !closing, !replacing, !suspended, let backend else { return }
         accountTask = Task {

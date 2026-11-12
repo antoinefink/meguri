@@ -305,9 +305,11 @@ extension ReviewCollectionStartupTests {
     @Test(arguments: [0, 1, 2, 3, 4])
     func serviceAppTwoFetchesKeepDependentTrackedAcrossProofAndRetirement(outcome: Int) async throws {
         try await withAutomaticServiceApp { app, _, _ in
+            app.startCausalTrace()
+            let causalTrace = app.causalTrace
             app.sync.setDeviceSettings(paused: false, automatic: true, media: true)
             await app.sync.waitForInputs(); await app.sync.drainOperations()
-            let sdk = try #require(await app.factory.engines.last)
+            let sdk = try #require(causalTrace.presence(await app.factory.engines.last))
             await sdk.waitForAutomaticSend()
             try await sdk.signInSameServiceIdentity()
             await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
@@ -318,6 +320,7 @@ extension ReviewCollectionStartupTests {
             let commands = try app.backend
             var fetchACKs = 0
             app.sync.observeCausalBoundary = { boundary, command in
+                ServiceAppHarness.recordCausal(boundary, in: causalTrace)
                 if case .commandAcknowledgementJoined = boundary, let command, case .requestFetch = command.action { fetchACKs += 1 }
             }
             app.sync.observeAccountPolicyDrain = { stage in
@@ -327,7 +330,7 @@ extension ReviewCollectionStartupTests {
             app.sync.observeQuiescentDependency = { parked.continuation.yield($0) }
             #endif
             defer {
-                app.sync.observeCausalBoundary = nil; app.sync.observeAccountPolicyDrain = nil
+                app.restoreCausalTraceObserver(); app.sync.observeAccountPolicyDrain = nil
                 #if DEBUG
                 app.sync.observeQuiescentDependency = nil
                 #endif
@@ -339,12 +342,12 @@ extension ReviewCollectionStartupTests {
             // remain tracked while A owns its original native result and proof.
             app.sync.receive(.foreground)
             do {
-                try #require(try await serviceAppSignal(native.entered, stage: "fetch A original Service terminal held"))
+                try #require(causalTrace.expectation(try await serviceAppSignal(native.entered, stage: "fetch A original Service terminal held", trace: causalTrace)))
                 app.sync.receive(.foreground)
-                try #require(try await serviceAppSignal(parked.stream, stage: "fetch B parked before Core fetch admission"))
+                try #require(causalTrace.expectation(try await serviceAppSignal(parked.stream, stage: "fetch B parked before Core fetch admission", trace: causalTrace)))
                 await app.sync.accountChanged()
-                try #require(try await serviceAppSignal(resolvedI.stream, stage: "resolved app read I retained behind fetch A"))
-                #expect(await app.factory.accountReadCount == reads + 1)
+                try #require(causalTrace.expectation(try await serviceAppSignal(resolvedI.stream, stage: "resolved app read I retained behind fetch A", trace: causalTrace)))
+                #expect(causalTrace.expectation(await app.factory.accountReadCount == reads + 1))
                 if outcome == 1 {
                     await app.factory.resolveNextAccountRead(with: .success(.init(status: .noAccount, identity: nil)))
                 } else if outcome == 2 {
@@ -356,8 +359,8 @@ extension ReviewCollectionStartupTests {
                     await proof.hold(); providerReturned.continuation.yield(true)
                 }
                 await native.release()
-                try #require(try await serviceAppSignal(proof.entered, stage: "A fresh proof while B stays tracked and unadmitted"))
-                #expect(fetchACKs == 0)
+                try #require(causalTrace.expectation(try await serviceAppSignal(proof.entered, stage: "A fresh proof while B stays tracked and unadmitted", trace: causalTrace)))
+                #expect(causalTrace.expectation(fetchACKs == 0))
                 if outcome >= 3 {
                     // Retire the real old owner while A's provider ignores
                     // cancellation and B is still parked, then test its late
@@ -365,13 +368,15 @@ extension ReviewCollectionStartupTests {
                     let retired = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
                     let ownerShutdownTask = Task { @MainActor () throws -> Void in
                         if outcome == 3 {
+                            causalTrace.append("intentional.expiry.enter")
                             app.sync.backgroundExpired()
+                            causalTrace.append("intentional.close.enter")
                             let closed = await app.owner.close()
                             retired.continuation.yield(closed)
                         } else {
-                            let source = try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg"))
+                            let source = try #require(causalTrace.presence(Bundle.module.url(forResource: "review", withExtension: "colpkg")))
                             app.owner.entry.inspect(source); await app.owner.entry.waitForCompletion()
-                            try #require(app.owner.entry.preview != nil)
+                            try #require(causalTrace.expectation(app.owner.entry.preview != nil))
                             app.owner.entry.confirm(); await app.owner.entry.waitForCompletion()
                             await app.sync.waitForReplacement()
                             retired.continuation.yield(app.owner.entry.lastActivation != nil)
@@ -379,20 +384,20 @@ extension ReviewCollectionStartupTests {
                         retired.continuation.finish()
                     }
                     do {
-                        try #require(try await serviceAppSignal(retired.stream, stage: "original A/B cancellation and native/backend join before provider release"))
+                        try #require(causalTrace.expectation(try await serviceAppSignal(retired.stream, stage: "original A/B cancellation and native/backend join before provider release", trace: causalTrace)))
                         try await ownerShutdownTask.value
-                        #expect(commands.closed && commands.closeReturned == 1)
+                        #expect(causalTrace.expectation(commands.closed && commands.closeReturned == 1))
                         if outcome == 3 { try await app.reopen() }
                         await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
                         let successor = try app.backend
-                        #expect(successor !== commands)
+                        #expect(causalTrace.expectation(successor !== commands))
                         let snapshot = try await successor.workflow.durableSnapshot()
                         let guardBefore = try await successor.workflow.currentGuard()
                         await proof.release()
-                        try #require(try await serviceAppSignal(providerReturned.stream, stage: "late old A provider after successor admission"))
+                        try #require(causalTrace.expectation(try await serviceAppSignal(providerReturned.stream, stage: "late old A provider after successor admission", trace: causalTrace)))
                         await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
-                        #expect(try await successor.workflow.durableSnapshot() == snapshot)
-                        #expect(try await successor.workflow.currentGuard() == guardBefore)
+                        #expect(causalTrace.expectation(try await successor.workflow.durableSnapshot() == snapshot))
+                        #expect(causalTrace.expectation(try await successor.workflow.currentGuard() == guardBefore))
                         return
                     } catch {
                         await proof.release(); _ = await ownerShutdownTask.result
@@ -401,10 +406,10 @@ extension ReviewCollectionStartupTests {
                 }
                 await proof.release()
                 await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
-                #expect(fetchACKs == 2) // each original command returns through its normal executor
-                if outcome == 0 { #expect(!app.sync.operationFailed) }
+                #expect(causalTrace.expectation(fetchACKs == 2)) // each original command returns through its normal executor
+                if outcome == 0 { #expect(causalTrace.expectation(!app.sync.operationFailed)) }
                 else {
-                    do { try await commands.workflow.validateSDK(sdk.instanceID); Issue.record("Retired original SDK admitted dependent fetch") }
+                    do { try await commands.workflow.validateSDK(sdk.instanceID); causalTrace.expectation(false); Issue.record("Retired original SDK admitted dependent fetch") }
                     catch { }
                 }
             } catch {
@@ -419,13 +424,15 @@ extension ReviewCollectionStartupTests {
     @Test(arguments: [0, 1, 2], [false, true])
     func serviceAppMixedAndFlushDependenciesJoinOriginalProof(trigger: Int, retire: Bool) async throws {
         try await withAutomaticServiceApp { app, _, _ in
+            app.startCausalTrace()
+            let causalTrace = app.causalTrace
             if trigger == 0 {
                 app.sync.setDeviceSettings(paused: false, automatic: true, media: true)
                 await app.sync.waitForInputs(); await app.sync.drainOperations()
             }
-            let sdk = try #require(await app.factory.engines.last)
+            let sdk = try #require(causalTrace.presence(await app.factory.engines.last))
             await sdk.waitForAutomaticSend()
-            try #require(await sdk.automaticSchedulingEnabled == (trigger == 0))
+            try #require(causalTrace.expectation(await sdk.automaticSchedulingEnabled == (trigger == 0)))
             try await sdk.signInSameServiceIdentity()
             await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
             await sdk.omitNextZoneCallbacks()
@@ -455,11 +462,11 @@ extension ReviewCollectionStartupTests {
             commands.afterExecution = { command, result in
                 if let primary, command.raw === primary.raw { primaryResults += 1 }
                 if let dependent, command.raw === dependent.raw {
-                    #expect(!isParked, "Dependency revocation joins before original result delivery")
+                    #expect(causalTrace.expectation(!isParked), "Dependency revocation joins before original result delivery")
                     dependentResults += 1
                 }
                 if !retire, (primary.map { command.raw === $0.raw } == true || dependent.map { command.raw === $0.raw } == true) {
-                    #expect(result.error == nil && !result.deferred)
+                    #expect(causalTrace.expectation(result.error == nil && !result.deferred))
                 }
             }
             app.sync.observeQuiescentDependency = { value in
@@ -469,13 +476,14 @@ extension ReviewCollectionStartupTests {
                 parked.continuation.yield(value)
             }
             app.sync.observeCausalBoundary = { boundary, command in
+                ServiceAppHarness.recordCausal(boundary, in: causalTrace)
                 guard case .commandAcknowledgementJoined = boundary, let command else { return }
                 if let primary, command.raw === primary.raw { primaryACKs += 1 }
                 if let dependent, command.raw === dependent.raw { dependentACKs += 1 }
             }
             defer {
                 commands.beforeExecution = nil; commands.afterExecution = nil
-                app.sync.observeQuiescentDependency = nil; app.sync.observeCausalBoundary = nil
+                app.sync.observeQuiescentDependency = nil; app.restoreCausalTraceObserver()
                 parked.continuation.finish(); providerReturned.continuation.finish()
             }
             let fetches = await sdk.manualFetchGroups.count
@@ -487,70 +495,73 @@ extension ReviewCollectionStartupTests {
             if trigger == 0 { app.sync.receive(.foreground) }
             else { app.sync.syncNow() }
             do {
-                try #require(try await serviceAppSignal(native.entered, stage: "primary actual Service fetch return held"))
-                try #require(primaryStarts == 1 && primary != nil)
-                #expect(await sdk.manualFetchGroups.count == fetches + 1)
+                try #require(causalTrace.expectation(try await serviceAppSignal(native.entered, stage: "primary actual Service fetch return held", trace: causalTrace)))
+                try #require(causalTrace.expectation(primaryStarts == 1 && primary != nil))
+                #expect(causalTrace.expectation(await sdk.manualFetchGroups.count == fetches + 1))
                 if trigger == 0 { app.sync.syncNow() }
                 else if trigger == 1 {
                     app.sync.receive(.background(deadlineMilliseconds: Int64(Date().timeIntervalSince1970 * 1_000) + 30_000))
                 } else { app.sync.receive(.quitRequested) }
-                try #require(try await serviceAppSignal(parked.stream, stage: "actual dependent exchange or flush parked"))
-                try #require(dependentStarts == 1 && dependent != nil)
-                #expect(primaryResults == 0 && dependentResults == 0 && primaryACKs == 0 && dependentACKs == 0)
-                #expect(await sdk.manualFetchGroups.count == fetches + 1)
+                try #require(causalTrace.expectation(try await serviceAppSignal(parked.stream, stage: "actual dependent exchange or flush parked", trace: causalTrace)))
+                try #require(causalTrace.expectation(dependentStarts == 1 && dependent != nil))
+                #expect(causalTrace.expectation(primaryResults == 0 && dependentResults == 0 && primaryACKs == 0 && dependentACKs == 0))
+                #expect(causalTrace.expectation(await sdk.manualFetchGroups.count == fetches + 1))
                 await app.factory.holdNextAccountRead {
                     await proof.hold(); providerReturned.continuation.yield(true)
                 }
                 await native.release()
-                try #require(try await serviceAppSignal(proof.entered, stage: "primary fresh account proof admitted with dependent still tracked"))
-                #expect(isParked && primaryResults == 0 && dependentResults == 0)
-                #expect(await app.factory.accountReadCount == reads + 1)
-                #expect(!cancelled.withLock { $0 })
+                try #require(causalTrace.expectation(try await serviceAppSignal(proof.entered, stage: "primary fresh account proof admitted with dependent still tracked", trace: causalTrace)))
+                #expect(causalTrace.expectation(isParked && primaryResults == 0 && dependentResults == 0))
+                #expect(causalTrace.expectation(await app.factory.accountReadCount == reads + 1))
+                #expect(causalTrace.expectation(!cancelled.withLock { $0 }))
                 if retire {
                     let closed = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
                     defer { closed.continuation.finish() }
-                    let closing = Task { _ = closed.continuation.yield(await app.owner.close()) }
+                    let closing = Task {
+                        causalTrace.append("intentional.close.enter")
+                        _ = closed.continuation.yield(await app.owner.close())
+                    }
                     do {
-                        try #require(try await serviceAppSignal(closed.stream, stage: "original proof and parked dependent cancel before late provider"))
+                        try #require(causalTrace.expectation(try await serviceAppSignal(closed.stream, stage: "original proof and parked dependent cancel before late provider", trace: causalTrace)))
                         await closing.value
                     } catch { await proof.release(); await closing.value; throw error }
-                    #expect(commands.closed && commands.closeReturned == 1 && cancelled.withLock { $0 })
-                    #expect(primaryACKs == 1 && dependentACKs == 1)
-                    #expect(!isParked && revocations == parks)
+                    #expect(causalTrace.expectation(commands.closed && commands.closeReturned == 1 && cancelled.withLock { $0 }))
+                    #expect(causalTrace.expectation(primaryACKs == 1 && dependentACKs == 1))
+                    #expect(causalTrace.expectation(!isParked && revocations == parks))
                     try await app.reopen()
                     await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
                     let successor = try app.backend
-                    let successorSDK = try #require(await app.factory.engines.last)
-                    #expect(successor !== commands && successorSDK.instanceID != sdk.instanceID)
+                    let successorSDK = try #require(causalTrace.presence(await app.factory.engines.last))
+                    #expect(causalTrace.expectation(successor !== commands && successorSDK.instanceID != sdk.instanceID))
                     try await successor.workflow.validateSDK(successorSDK.instanceID)
                     let snapshot = try await successor.workflow.durableSnapshot()
                     let guardBefore = try await successor.workflow.currentGuard()
                     await proof.release()
-                    try #require(try await serviceAppSignal(providerReturned.stream, stage: "late original provider returns after successor admission"))
+                    try #require(causalTrace.expectation(try await serviceAppSignal(providerReturned.stream, stage: "late original provider returns after successor admission", trace: causalTrace)))
                     await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
-                    #expect(try await successor.workflow.durableSnapshot() == snapshot)
-                    #expect(try await successor.workflow.currentGuard() == guardBefore)
+                    #expect(causalTrace.expectation(try await successor.workflow.durableSnapshot() == snapshot))
+                    #expect(causalTrace.expectation(try await successor.workflow.currentGuard() == guardBefore))
                 } else {
                     if trigger == 0 {
                         await sdk.inspectNextManualFetch {
-                            #expect(!parkedAtNative.withLock { $0 }, "Exact dependent revocation precedes its actual SDK entry")
+                            #expect(causalTrace.expectation(!parkedAtNative.withLock { $0 }), "Exact dependent revocation precedes its actual SDK entry")
                             dependentEnteredNative.withLock { $0 = true }
                         }
                     }
                     await proof.release()
                     await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
-                    #expect(primaryStarts == 1 && dependentStarts == 1)
-                    if trigger == 0 { #expect(dependentEnteredNative.withLock { $0 }) }
-                    #expect(primaryResults == 1 && dependentResults == 1 && primaryACKs == 1 && dependentACKs == 1)
-                    #expect(parks > 0 && revocations == parks && !isParked)
-                    #expect(!cancelled.withLock { $0 } && !app.sync.operationFailed)
-                    #expect(await app.factory.engines.count == engines)
+                    #expect(causalTrace.expectation(primaryStarts == 1 && dependentStarts == 1))
+                    if trigger == 0 { #expect(causalTrace.expectation(dependentEnteredNative.withLock { $0 })) }
+                    #expect(causalTrace.expectation(primaryResults == 1 && dependentResults == 1 && primaryACKs == 1 && dependentACKs == 1))
+                    #expect(causalTrace.expectation(parks > 0 && revocations == parks && !isParked))
+                    #expect(causalTrace.expectation(!cancelled.withLock { $0 } && !app.sync.operationFailed))
+                    #expect(causalTrace.expectation(await app.factory.engines.count == engines))
                     let groups = await sdk.manualFetchGroups
-                    #expect(groups.count == fetches + (trigger == 0 ? 3 : 2))
-                    #expect(Set(groups).count == groups.count)
+                    #expect(causalTrace.expectation(groups.count == fetches + (trigger == 0 ? 3 : 2)))
+                    #expect(causalTrace.expectation(Set(groups).count == groups.count))
                     try await commands.workflow.validateSDK(sdk.instanceID)
-                    #expect(try await commands.workflow.durableSnapshot().entities == before.entities)
-                    #expect(try await commands.workflow.trackingSendables() == pending)
+                    #expect(causalTrace.expectation(try await commands.workflow.durableSnapshot().entities == before.entities))
+                    #expect(causalTrace.expectation(try await commands.workflow.trackingSendables() == pending))
                 }
             } catch { await native.release(); await proof.release(); throw error }
         }
@@ -811,14 +822,16 @@ extension ReviewCollectionStartupTests {
     @Test(arguments: [false, true])
     func serviceResumeOwnProofFinishesWithoutWaitingForItsOwnTask(priorAccount: Bool) async throws {
         try await withAutomaticServiceApp { app, _, _ in
-            let sdk = try #require(await app.factory.engines.last)
+            app.startCausalTrace()
+            let causalTrace = app.causalTrace
+            let sdk = try #require(causalTrace.presence(await app.factory.engines.last))
             await app.factory.resolveNextAccountRead(with: .success(.init(status: .noAccount, identity: nil)))
             await app.sync.accountChanged(); await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
             await app.factory.resolveNextAccountRead(with: .success(.init(status: .available, identity: Data("synthetic-initial-account".utf8))))
             await app.sync.accountChanged(); await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
             try await app.owner.prepareCloudConnectionPreview(); await app.sync.waitForConnectionPreview()
             guard case .ready(_, let summary) = app.sync.preview else { throw ServiceWorkflowFailure.wire }
-            try #require(summary.decision == .confirmResume)
+            try #require(causalTrace.expectation(summary.decision == .confirmResume))
             let proof = ServiceAutomaticGate(), preceding = ServiceAutomaticGate()
             let pending = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
             app.sync.observeResumePolicyDrain = { stage in
@@ -828,27 +841,28 @@ extension ReviewCollectionStartupTests {
             if priorAccount {
                 await app.factory.holdNextAccountRead { await preceding.hold() }
                 await app.sync.accountChanged()
-                try #require(try await serviceAppSignal(preceding.entered, stage: "account I provider before unadmitted Resume"))
+                try #require(causalTrace.expectation(try await serviceAppSignal(preceding.entered, stage: "account I provider before unadmitted Resume", trace: causalTrace)))
             } else { await app.factory.holdNextAccountRead { await proof.hold() } }
             let resumed = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
             let original = Task {
                 await app.sync.confirmResume()
+                causalTrace.append("confirmResume.return")
                 resumed.continuation.yield(true); resumed.continuation.finish()
             }
             do {
                 if priorAccount {
-                    try #require(try await serviceAppSignal(pending.stream, stage: "unadmitted Resume waiting for actual earlier account I"))
+                    try #require(causalTrace.expectation(try await serviceAppSignal(pending.stream, stage: "unadmitted Resume waiting for actual earlier account I", trace: causalTrace)))
                     await app.factory.holdNextAccountRead { await proof.hold() }
                     await preceding.release()
                 }
-                try #require(try await serviceAppSignal(proof.entered, stage: "Resume owner's exact account proof"))
-                #expect(app.sync.connectionOperationActive)
+                try #require(causalTrace.expectation(try await serviceAppSignal(proof.entered, stage: "Resume owner's exact account proof", trace: causalTrace)))
+                #expect(causalTrace.expectation(app.sync.connectionOperationActive))
                 await proof.release()
-                try #require(try await serviceAppSignal(resumed.stream, stage: "Resume proof ACK releases its own retained task"))
+                try #require(causalTrace.expectation(try await serviceAppSignal(resumed.stream, stage: "Resume proof ACK releases its own retained task", trace: causalTrace)))
                 await original.value; await app.sync.drainOperations()
-                #expect(!app.sync.connectionOperationActive && !app.sync.operationFailed)
-                let successor = try #require(await app.factory.engines.last)
-                #expect(successor.instanceID != sdk.instanceID)
+                #expect(causalTrace.expectation(!app.sync.connectionOperationActive && !app.sync.operationFailed))
+                let successor = try #require(causalTrace.presence(await app.factory.engines.last))
+                #expect(causalTrace.expectation(successor.instanceID != sdk.instanceID))
                 try await app.backend.workflow.validateSDK(successor.instanceID)
             } catch { await preceding.release(); await proof.release(); await original.value; throw error }
         }
@@ -1460,6 +1474,7 @@ extension ReviewCollectionStartupTests {
         let wire = try ServiceWorkflowWire(process: process, directory: root.appending(path: "transport"))
         let app = try ServiceAppHarness(root: root.appending(path: "collection"), wire: wire, clock: .system)
         active = app
+        defer { app.causalTrace.emit(onlyIfFailed: true) }
         defer { app.defaults.removePersistentDomain(forName: app.suite) }
         try await wire.seed(fixture)
         try await prepare?(app)
@@ -1470,10 +1485,11 @@ extension ReviewCollectionStartupTests {
         try #require(!app.sync.operationFailed)
         try #require(!app.sync.settings.automatic)
         try await body(app, fixture, wire)
-        try #require(await app.owner.close())
+        app.causalTrace.append("harness.close.enter")
+        try #require(app.causalTrace.expectation(await app.owner.close()))
         let exit = await process.close()
-        try #require(exit.status == 0 && exit.joined && !exit.unexpectedOutput && !exit.ioFailed)
-        try #require(exit.diagnostics.isEmpty && !exit.diagnosticLimitExceeded)
+        try #require(app.causalTrace.expectation(exit.status == 0 && exit.joined && !exit.unexpectedOutput && !exit.ioFailed))
+        try #require(app.causalTrace.expectation(exit.diagnostics.isEmpty && !exit.diagnosticLimitExceeded))
     } catch {
         if let active { await active.cleanupAfterServiceFailure() }
         else { _ = await process.cancel() }

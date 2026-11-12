@@ -824,7 +824,9 @@ extension ReviewCollectionStartupTests {
                 case .proofResultReduced: trace.record("proof.result.reduced")
                 case .proofAcknowledgementSending: trace.record("proof.ack.send")
                 case .ownCoreStarted, .dependencyRevocationJoined(_),
-                     .corePredecessorWaiting(_), .corePredecessorReleased(_): break
+                     .corePredecessorWaiting(_), .corePredecessorReleased(_),
+                     .accountCompletion, .accountAccepted, .resultReduced,
+                     .resumeEntered, .resumeReturned, .resumeRefused, .resumeCancelled: break
                 }
             }
             #endif

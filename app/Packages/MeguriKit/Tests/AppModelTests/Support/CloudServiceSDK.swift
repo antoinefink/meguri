@@ -11,7 +11,8 @@ nonisolated struct ServiceSentBatch: Sendable {
 actor ServiceSDKFactory: CloudKitEngineFactory {
     let wire: ServiceWorkflowWire
     private(set) var engines: [ServiceSDK] = []
-    init(wire: ServiceWorkflowWire) { self.wire = wire }
+    private let causalTrace: ServiceAppCausalTrace?
+    init(wire: ServiceWorkflowWire, causalTrace: ServiceAppCausalTrace? = nil) { self.wire = wire; self.causalTrace = causalTrace }
     private var nextAccountRead: (@Sendable () async -> Void)?
     private var nextAccountResult: Result<CloudResolvedAccount?, any Error>?
     func resolveNextAccountRead(with result: Result<CloudResolvedAccount?, any Error>) { nextAccountResult = result }
@@ -24,6 +25,7 @@ actor ServiceSDKFactory: CloudKitEngineFactory {
     func holdNextAccountRead(_ hold: @escaping @Sendable () async -> Void) { nextAccountRead = hold }
     func resolveAccount() async throws -> CloudResolvedAccount? {
         accountReadCount += 1
+        causalTrace?.append("provider.invoke ordinal=\(accountReadCount)")
         let hold = nextAccountRead; nextAccountRead = nil
         let result = nextAccountResult; nextAccountResult = nil
         await hold?()

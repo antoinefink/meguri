@@ -3,7 +3,36 @@
 @testable import CoreBridge
 import Foundation
 import Instrumentation
+import Synchronization
 import Testing
+
+// One prefix preserves the first cause across backend replacement and cleanup.
+// Only fixed event labels, booleans and local ordinals may be appended.
+nonisolated final class ServiceAppCausalTrace: Sendable {
+    private struct State { var enabled = false; var failed = false; var count = 0; var entries: [String] = [] }
+    private let state = Mutex(State())
+    func start() { state.withLock { $0.enabled = true } }
+    func append(_ event: String) {
+        state.withLock {
+            guard $0.enabled else { return }
+            $0.count += 1
+            if $0.entries.count < 512 { $0.entries.append("\($0.count):\(event)") }
+        }
+    }
+    @discardableResult func expectation(_ value: Bool, line: UInt = #line) -> Bool {
+        append("expectation.\(line)=\(value)")
+        if !value { state.withLock { if $0.enabled { $0.failed = true } } }
+        return value
+    }
+    func presence<T>(_ value: T?, line: UInt = #line) -> T? {
+        expectation(value != nil, line: line); return value
+    }
+    func emit(onlyIfFailed: Bool = false) {
+        let snapshot = state.withLock { $0 }
+        guard snapshot.enabled, !onlyIfFailed || snapshot.failed else { return }
+        print("Service owner causal trace=[\(snapshot.entries.joined(separator: " | "))] omitted=\(snapshot.count - snapshot.entries.count)")
+    }
+}
 
 nonisolated enum ServiceAppExchangePhase: String {
     case aBaseline = "A-baseline", bBaseline = "B-baseline"
@@ -14,6 +43,7 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
 // Observes the original production backend's command completion. It does not
 // drive policy, acknowledge records, or implement a second coordinator.
 @MainActor final class ServiceAppBackend: SyncCoordinatorBackend {
+    var causalTrace: ServiceAppCausalTrace?
     let production: NativeCollectionCloudBackend
     let workflow: CoreCloudWorkflowService
     var connection: CoreCloudConnectionService? { production.connection }
@@ -296,13 +326,14 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
         if let error = result.error {
             let diagnostic = capture(error, stage: .executeError, action: command.action, sendFailure: sendFailure, latestMedia: latestMedia, expectedRefusal: result.originalGuardRefusal != nil)
             if result.originalGuardRefusal == nil, !(error is CancellationError && SyncCommandTaskContext.current?.shutdownCancelled == true) {
+                causalTrace?.expectation(false)
                 Issue.record("Service app command failed; \(diagnostic)")
             }
         }
         return result
     }
-    func waitForStart() async throws { try #require(try await serviceAppSignal(starts, stage: "SDK start")) }
-    func waitForExchange() async throws { try #require(try await serviceAppSignal(exchanges, stage: "Sync Now exchange")) }
+    func waitForStart() async throws { try #require(try await serviceAppSignal(starts, stage: "SDK start", trace: causalTrace)) }
+    func waitForExchange() async throws { try #require(try await serviceAppSignal(exchanges, stage: "Sync Now exchange", trace: causalTrace)) }
     func waitForAssetRetry() async throws {
         try #require(try await serviceAppSignal(assetRetries, stage: "automatic asset retry command completion"))
     }
@@ -378,8 +409,10 @@ private nonisolated struct ServiceMediaCompletion: Sendable {
     let receipts: [ServiceSavedReceipt]
 }
 private nonisolated struct ServiceAppTimeout: Error { let stage: String }
-nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String) async throws -> Bool {
-    try await withThrowingTaskGroup(of: Bool.self) { group in
+nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String, trace: ServiceAppCausalTrace? = nil, line: UInt = #line) async throws -> Bool {
+    var completed = false
+    defer { if !completed { trace?.expectation(false, line: line) } }
+    return try await withThrowingTaskGroup(of: Bool.self) { group in
         group.addTask {
             for await success in stream { return success }
             throw CloudOwnTransportFailure.missingReply
@@ -387,7 +420,9 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String) as
         group.addTask { try await Task.sleep(for: .seconds(10)); throw ServiceAppTimeout(stage: stage) }
         defer { group.cancelAll() }
         let result = try await group.next()
-        return try serviceRequired(result)
+        let value = try serviceRequired(result)
+        completed = true
+        return value
     }
 }
 
@@ -397,6 +432,7 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String) as
     let defaults: UserDefaults
     let wire: ServiceWorkflowWire
     let factory: ServiceSDKFactory
+    let causalTrace = ServiceAppCausalTrace()
     private let clock: AppClock
     private(set) var backends: [ServiceAppBackend] = []
     var observeOwn: (@Sendable (CloudOwnObservation) -> Void)?
@@ -405,6 +441,17 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String) as
     var beforeBackend: (@MainActor () async throws -> Void)?
     lazy var sync = makeSync()
 
+    #if DEBUG
+    func startCausalTrace() { causalTrace.start(); restoreCausalTraceObserver() }
+    func restoreCausalTraceObserver() { sync.observeCausalBoundary = { [causalTrace] boundary, _ in Self.recordCausal(boundary, in: causalTrace) } }
+    static func recordCausal(_ boundary: SyncCoordinator.CausalBoundary, in trace: ServiceAppCausalTrace) {
+        switch boundary {
+        case .accountCompletion, .accountAccepted, .resultReduced, .resumeEntered, .resumeReturned, .resumeRefused, .resumeCancelled:
+            trace.append(String(describing: boundary))
+        default: break // Other cases can contain opaque command/owner identities.
+        }
+    }
+    #endif
     private func makeSync() -> SyncCoordinator {
         SyncCoordinator(bootstrap: {
             try await CoreCloudWorkflowService.configurePlatform(container: "synthetic-initial-app", environment: .development,
@@ -418,10 +465,11 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String) as
                     + "policy.status=\(phases.policyProbe.rawValue) adapter.stop=\(phases.adapterDrain.rawValue) "
                     + "retained-instances=\(phases.retentionCheck.rawValue)"
             }.joined(separator: " | ")
-            try #require(allBackendsClosed,
+            try #require(causalTrace.expectation(allBackendsClosed),
                 "Service app backend close: count=\(backends.count); first 16=[\(closeDiagnostics)]")
             try await beforeBackend?()
             let backend = try await ServiceAppBackend.make(wire: wire, factory: factory, persisted: persisted, observeOwn: observeOwn, ownTransport: ownTransport)
+            backend.causalTrace = causalTrace
             backends.append(backend)
             return backend
         }, defaults: defaults, clock: .system, directory: nil, observeSignals: false)
@@ -439,14 +487,14 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String) as
          clock: AppClock = .fixed(Date(timeIntervalSince1970: 1_735_689_600))) throws {
         self.root = root; self.wire = wire
         self.clock = clock
-        factory = ServiceSDKFactory(wire: wire)
+        factory = ServiceSDKFactory(wire: wire, causalTrace: causalTrace)
         if let defaults { self.defaults = defaults }
         else { self.defaults = try #require(UserDefaults(suiteName: suite)) }
         if defaults == nil {
             self.defaults.set(["enabled": false, "paused": false, "automatic": false, "media": true], forKey: "meguri.cloud.deviceSettings")
         }
     }
-    var backend: ServiceAppBackend { get throws { try #require(backends.last) } }
+    var backend: ServiceAppBackend { get throws { try #require(causalTrace.presence(backends.last)) } }
     func adopt() async throws {
         await owner.start()
         try #require(owner.state == .noFile)
@@ -457,7 +505,7 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String) as
         await sync.prepareConnectionAuthority()
         let diagnostics = backends.flatMap { $0.diagnostics }.joined(separator: " | ")
         let failureMessage = "Service app adopt: setupState=\(sync.setupState); backend diagnostics=[\(diagnostics)]"
-        try #require(owner.state == .ready && !sync.operationFailed, "\(failureMessage)")
+        try #require(causalTrace.expectation(owner.state == .ready && !sync.operationFailed), "\(failureMessage)")
         try await backend.waitForStart()
         try backend.markDiagnosticBaseline()
     }
@@ -467,7 +515,7 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String) as
         await sync.prepareConnectionAuthority()
         let diagnostics = backends.flatMap { $0.diagnostics }.joined(separator: " | ")
         let failureMessage = "Service app reopen: setupState=\(sync.setupState); backend diagnostics=[\(diagnostics)]"
-        try #require(owner.state == .ready && !sync.operationFailed, "\(failureMessage)")
+        try #require(causalTrace.expectation(owner.state == .ready && !sync.operationFailed), "\(failureMessage)")
         try await backend.waitForStart()
         try backend.markDiagnosticBaseline()
     }
@@ -502,6 +550,9 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String) as
     // Only the failing asset fixture owns this process and may interrupt it.
     // Join it before the single final owner close so accepted IPC can finish.
     func cleanupAfterServiceFailure() async {
+        causalTrace.append("cleanupAfterServiceFailure.enter")
+        causalTrace.emit()
+        defer { causalTrace.emit() }
         let start = serviceAppUptimeMilliseconds()
         func record(_ message: String) {
             let entry = "\(message) elapsed_ms=\(serviceAppUptimeMilliseconds() - start)"
@@ -514,14 +565,18 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String) as
             }
         }
         reportTrace()
+        causalTrace.append("cleanup.process.cancel.begin")
         record("cleanup.process.cancel.begin")
         let exit = await wire.process.cancel()
+        causalTrace.append("cleanup.process.cancel.end joined=\(exit.joined)")
         record("cleanup.process.cancel.end joined=\(exit.joined) status=\(exit.status) io_failed=\(exit.ioFailed)")
-        #expect(exit.joined, "Failing asset fixture must join its owned Service process")
+        #expect(causalTrace.expectation(exit.joined), "Failing asset fixture must join its owned Service process")
+        causalTrace.append("cleanup.owner.close.begin")
         record("cleanup.owner.close.begin")
         let closed = await owner.close()
+        causalTrace.append("cleanup.owner.close.end closed=\(closed)")
         record("cleanup.owner.close.end closed=\(closed)")
-        #expect(closed, "Failing asset fixture final owner.close returned false; host may remain retained")
+        #expect(causalTrace.expectation(closed), "Failing asset fixture final owner.close returned false; host may remain retained")
         reportTrace()
         print(serviceTransportSummary(wire.process))
     }
