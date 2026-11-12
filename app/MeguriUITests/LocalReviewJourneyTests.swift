@@ -78,7 +78,7 @@ final class LocalReviewJourneyTests: XCTestCase {
         XCTAssertTrue(element(app, "home.deck.study").waitForExistence(timeout: 10), "Space on Close must dismiss the answer; its key must not rate Good")
         XCTAssertFalse(element(app, "review.session.screen").exists)
         XCTAssertFalse(element(app, "review.session.rate.good").exists)
-        XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answers recorded"),
+        XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answer recorded"),
             "Closing must retain only the one answer left after undo")
         XCTAssertTrue(waitForDeckCounts(app, due: 3),
             "Closing must not rate the restored card")
@@ -508,7 +508,8 @@ final class LocalReviewJourneyTests: XCTestCase {
     }
 
     private func assertSavedOutcome(_ app: XCUIApplication, answers: Int, evidence: String, due: Int = 0) {
-        let recorded = waitForText(element(app, "home.session.recorded"), "\(answers) answers recorded")
+        let expectedCaption = answers == 1 ? "1 answer recorded" : "\(answers) answers recorded"
+        let recorded = waitForText(element(app, "home.session.recorded"), expectedCaption)
         // Home can appear before finishReview's asynchronous owner refresh applies.
         // Later-today learning is outside these counts; only the waiting case
         // must show the separate Waiting for Learning state before Close.

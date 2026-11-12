@@ -88,11 +88,11 @@ import notify
         try click(element(app, "review.session.rate.easy"), app, bundle)
         XCTAssertTrue(element(app, "review.session.close").waitForExistence(timeout: 20))
         try click(element(app, "review.session.close"), app, bundle)
-        XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answers recorded"))
+        XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answer recorded"))
         app.terminate()
         app.launchArguments = MeguriLaunch(now: "2030-01-15T10:00:00Z", timeZone: "UTC", locale: "en_US", animations: false).arguments
         app.launch()
-        XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answers recorded"))
+        XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answer recorded"))
         capture(app, "export-reimport-durable-review")
     }
     /// Destination proof only: generated media and its existing review history
@@ -266,7 +266,7 @@ import notify
         try click(element(app, "review.session.rate.easy"), app, bundle)
         _ = try waitNativeReview("accepted", app, bundle)
         try click(element(app, "review.session.close"), app, bundle)
-        XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answers recorded"))
+        XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answer recorded"))
         _ = try waitNativeReview("ended", app, bundle)
         capture(app, "native-review-one-answer-recorded")
         try closeNativeReview(bundle)
@@ -274,7 +274,7 @@ import notify
         // Same five bound inputs; no fixture, import source, route or clock.
         app.launchArguments = MeguriLaunch(locale: "en_US", animations: false, extra: native).arguments
         app.launch()
-        XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answers recorded"))
+        XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answer recorded"))
         let reopenedEvidence = try waitNativeReview("reopened", app, bundle)
         capture(app, "native-review-reopened-one-answer")
         #if os(macOS)
@@ -1255,7 +1255,7 @@ import notify
         let close = element(app, "review.session.close")
         XCTAssertTrue(close.waitForExistence(timeout: 20))
         try click(close, app, bundle)
-        XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answers recorded"))
+        XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answer recorded"))
         XCTAssertTrue(deckPage.waitForExistence(timeout: 10))
         let after = counts.map(text)
         capture(app, "entry-saved-answer")
@@ -1263,7 +1263,7 @@ import notify
         // Reopen the installed collection without fixture/source/route setup.
         app.launchArguments = MeguriLaunch(now: "2030-01-15T10:00:00Z", timeZone: "UTC", locale: "en_US", animations: false).arguments
         app.launch()
-        XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answers recorded"))
+        XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answer recorded"))
         let retainedDeck = app.buttons[deckIdentifier].firstMatch
         let restartReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             (deckPage.exists && study.isHittable) || (retainedDeck.exists && retainedDeck.isHittable)

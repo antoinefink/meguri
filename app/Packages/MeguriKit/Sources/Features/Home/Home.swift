@@ -418,7 +418,10 @@ public struct HomeDeckTree: View {
                             Text("\(previousAnswerCount) answers recorded", bundle: .module)
                                 .foregroundStyle(.secondary)
                                 .accessibilityIdentifier("home.session.recorded")
-                        } header: { Text("Previous Session", bundle: .module) }
+                        } header: {
+                            Text("Previous Session", bundle: .module)
+                                .accessibilityIdentifier("home.collection.previousSessionHeader")
+                        }
                         .id(InfoAnchor.previousSession)
                     }
                 }

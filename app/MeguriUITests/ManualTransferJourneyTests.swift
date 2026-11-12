@@ -191,12 +191,12 @@ import AppKit
                    "review.session.rate.easy", "review.session.close"] {
             try click(element(app, id), app, bundle)
         }
-        try waitForText(element(app, "home.session.recorded"), "1 answers recorded", app, bundle)
+        try waitForText(element(app, "home.session.recorded"), "1 answer recorded", app, bundle)
         attachSuccess(app, "rf4-account-a-import-real-review-saved")
         app.terminate()
         app.launchArguments = MeguriLaunch(timeZone: "UTC", locale: "en_US", animations: false, extra: ["-ShowAnkiServerInterface", "YES"]).arguments
         app.launch()
-        try waitForText(element(app, "home.session.recorded"), "1 answers recorded", app, bundle)
+        try waitForText(element(app, "home.session.recorded"), "1 answer recorded", app, bundle)
         attachSuccess(app, "rf4-account-a-review-durable-after-restart")
 
         // Restore the persisted answer and A's stored login with no passive work.
