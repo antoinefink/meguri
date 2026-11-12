@@ -200,6 +200,8 @@ for name, sdk in (("Info-iOS.plist", "iphone*"), ("Info-macOS.plist", "macosx*")
                                 check=True, capture_output=True)
         # GCC may prefix blank lines from its implicit stdc-predef header.
         actual = plistlib.loads(result.stdout.lstrip())
+        if name == "Info-iOS.plist":
+            assert actual["UIBackgroundModes"] == ["remote-notification"]
         assert type(actual["MeguriCloudSchemaConfigured"]) is bool
         assert actual["MeguriCloudSchemaConfigured"] is expected
         for key, value in substitutions.items():
