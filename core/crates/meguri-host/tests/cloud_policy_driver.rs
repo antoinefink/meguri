@@ -704,6 +704,183 @@ fn completed_runtime_exchange_uses_accepted_end_clock_not_projection_time() {
     rig.host.close().unwrap();
 }
 
+// Reproduce P19 through real capture, owned SDK fetch outcomes and the core
+// evidence command. This does not seed a policy summary or an exchange receipt.
+fn k10_completed_exchange(rig: &Rig) {
+    let driver = rig.host.cloud_policy_driver().unwrap();
+    let run = command(
+        rig.host
+            .cloud_policy_input(DeviceEvent::SyncNowRequested(Source::Command))
+            .unwrap(),
+        |kind| matches!(kind, ActionKind::RunExchange { .. }),
+    );
+    let ActionKind::RunExchange { exchange, .. } = run.action.kind else {
+        unreachable!()
+    };
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let native = driver.capture_exchange(&run, &rig.host.collection().unwrap()).unwrap();
+    let fetch = runtime
+        .adapter_begin_fetch(&rig.sdk, vec!["meguri-root".into(), rig.zone.clone()])
+        .unwrap();
+    let group = format!("fetch:{fetch}");
+    runtime.adapter_will_fetch(&rig.sdk, group.clone(), true).unwrap();
+    runtime.adapter_did_fetch(&rig.sdk, &group, true).unwrap();
+    assert!(runtime.adapter_finish_fetch(&rig.sdk, fetch).unwrap());
+    runtime.adapter_exchange_fetch(&rig.sdk, true).unwrap();
+    rig.clock.step_ms(10_000);
+    let completed = runtime.adapter_complete_exchange(&rig.sdk, native, true, None).unwrap();
+    assert_eq!(
+        completed.collection,
+        meguri_sync::cloud::adapter::CollectionOutcome::Succeeded
+    );
+    let record = command(
+        driver
+            .complete_exchange(exchange, rig.host.engine().state(), rig.host.engine().generation())
+            .unwrap(),
+        |kind| matches!(kind, ActionKind::RecordExchange(_)),
+    );
+    rig.host
+        .execute_cloud_policy_core(&record, Duration::from_secs(10))
+        .unwrap();
+    rig.host
+        .cloud_policy_input(DeviceEvent::Settings(DeviceSettings {
+            enabled: true,
+            paused: false,
+            automatic: true,
+            media: false,
+        }))
+        .unwrap();
+}
+
+#[test]
+fn k10_projection_completed_scan_and_exchange_cannot_prove_missing_attention_facts() {
+    use meguri_sync::cloud::policy::{Lifecycle, Scan};
+    let rig = rig();
+    k10_completed_exchange(&rig);
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let projection = runtime
+        .policy_projection(Lifecycle::Ready, rig.host.engine().generation().0)
+        .unwrap();
+    let binding = projection.facts.binding.as_ref().unwrap();
+    assert!(binding.usable && binding.verified);
+    assert!(projection.root_confirmed);
+    let summary = &projection.facts.summary;
+    assert!(summary.collection_known);
+    assert_eq!(summary.scan, Scan::None);
+    assert_eq!(
+        (
+            summary.pending_unheld,
+            summary.sendable,
+            summary.in_flight,
+            summary.ready,
+            summary.incoming_waiting,
+            summary.unsettled_intents
+        ),
+        (0, 0, 0, 0, 0, 0)
+    );
+    assert!(!summary.apply_in_progress);
+    assert!(summary.attention.is_empty());
+    let completed = projection.evidence.last_completed.as_ref().unwrap();
+    assert!(matches!(completed.outcome, ExchangeOutcome::Succeeded { .. }));
+    assert_eq!(completed.ended_ms, 1_894_701_610_000);
+    // Known-clean work and P19 success are insufficient: the production K10
+    // flag/root/crt/generation producers documented in the handoff are absent.
+    // Keep this conservative until those producers supply actual evidence.
+    assert!(!summary.attention_known);
+    let status = rig.host.cloud_policy_driver().unwrap().status();
+    assert!(status.account_matches_binding);
+    assert_eq!(status.evidence, projection.evidence);
+    assert_eq!(status.state, StatusState::AwaitingEvidence);
+    rig.host.close().unwrap();
+}
+
+#[test]
+fn k10_projection_scan_without_p19_evidence_does_not_supply_a_zero_or_timestamp() {
+    use meguri_sync::cloud::policy::Lifecycle;
+    let rig = rig();
+    let projection = rig
+        .host
+        .cloud_runtime()
+        .unwrap()
+        .policy_projection(Lifecycle::Ready, rig.host.engine().generation().0)
+        .unwrap();
+    assert!(projection.facts.summary.collection_known);
+    assert!(!projection.facts.summary.attention_known);
+    assert!(projection.evidence.last_completed.is_none());
+    assert!(projection.evidence.quiet_ms.is_none());
+    assert_eq!(projection.evidence.as_of_ms(), None);
+    rig.host.close().unwrap();
+}
+
+#[test]
+fn k10_projection_corrupt_records_count_refusals_despite_prior_success() {
+    use meguri_sync::cloud::policy::{Attention, Lifecycle};
+    let rig = rig();
+    k10_completed_exchange(&rig);
+    let driver = rig.host.cloud_policy_driver().unwrap();
+    let evidence = driver.status().evidence;
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let corrupt: Vec<_> = rig
+        .records
+        .iter()
+        .take(2)
+        .map(|saved| Saved {
+            name: saved.name.clone(),
+            envelope: b"synthetic-invalid-envelope".to_vec(),
+            system_fields: b"synthetic-invalid-version".to_vec(),
+        })
+        .collect();
+    assert_eq!(corrupt.len(), 2);
+    runtime.adapter_fetched(&rig.sdk, &rig.zone, &corrupt, &[]).unwrap();
+    let projection = runtime
+        .policy_projection(Lifecycle::Ready, rig.host.engine().generation().0)
+        .unwrap();
+    assert_eq!(projection.facts.summary.attention.get(&Attention::Refused), Some(&2));
+    assert!(!projection.facts.summary.attention_known);
+    assert_eq!(projection.evidence, evidence);
+    rig.host
+        .cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Cloud))
+        .unwrap();
+    let status = driver.status();
+    assert_eq!(status.state, StatusState::NeedsAttention);
+    assert_eq!(status.attention.get(&Attention::Refused), Some(&2));
+    rig.host.close().unwrap();
+}
+
+#[test]
+fn k10_projection_stale_account_callback_cannot_reuse_prior_success_as_readiness() {
+    use meguri_sync::cloud::{
+        BindingState, IsolationReason,
+        policy::{Attention, Lifecycle},
+    };
+    let rig = rig();
+    k10_completed_exchange(&rig);
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let evidence = rig.host.cloud_policy_driver().unwrap().status().evidence;
+    runtime
+        .adapter_account(Some(&rig.sdk), IdentityStatus::SwitchedAccounts)
+        .unwrap();
+    assert!(matches!(
+        runtime.adapter_fetched(&rig.sdk, &rig.zone, &rig.records, &[]),
+        Err(RuntimeError::StaleIncarnation)
+    ));
+    let projection = runtime
+        .policy_projection(Lifecycle::Ready, rig.host.engine().generation().0)
+        .unwrap();
+    let binding = projection.facts.binding.as_ref().unwrap();
+    assert_eq!(binding.state, BindingState::Isolated(IsolationReason::AccountChanged));
+    assert!(!binding.usable && !binding.verified);
+    assert!(!projection.facts.summary.attention_known);
+    assert_eq!(projection.evidence, evidence);
+    rig.host
+        .cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Cloud))
+        .unwrap();
+    let status = rig.host.cloud_policy_driver().unwrap().status();
+    assert_eq!(status.state, StatusState::NeedsAttention);
+    assert_eq!(status.attention.get(&Attention::Isolated), Some(&1));
+    rig.host.close().unwrap();
+}
+
 #[test]
 fn completed_exchange_keeps_original_pending_and_media_work_after_later_edits() {
     use meguri_sync::cloud::{
