@@ -7,6 +7,70 @@ import Testing
 
 // The existing suite serializes the process-global Core owner.
 extension ReviewCollectionStartupTests {
+    @Test(arguments: [false, true])
+    func serviceAppPauseAndResumeWithMediaRetiresOriginalSDKWithoutOperationFailure(automatic: Bool) async throws {
+        try await withAutomaticServiceApp { app, _, _ in
+            app.sync.setDeviceSettings(paused: false, automatic: automatic, media: true)
+            await app.sync.waitForInputs(); await app.sync.drainOperations()
+            let sdk = try #require(await app.factory.engines.last)
+            await sdk.waitForAutomaticSend()
+            await app.sync.drainOperations()
+            let backend = try app.backend
+            let generation = app.owner.generation
+            let before = try await backend.workflow.durableSnapshot()
+            let collection = try await CoreCollectionService().localPublicationInformation(generation: generation)
+            #expect(!app.sync.operationFailed)
+            #expect(backend.firstFailureDiagnostic == nil)
+            #expect(await sdk.automaticSchedulingEnabled == automatic)
+            let cancelled = Mutex(false)
+            await sdk.inspectNextCancellation { cancelled.withLock { $0 = true } }
+
+            app.sync.setDeviceSettings(paused: true, automatic: automatic, media: true)
+            await app.sync.waitForInputs(); await app.sync.drainOperations()
+            #expect(app.sync.settings.paused && app.sync.settings.media)
+            #expect(!app.sync.operationFailed)
+            #expect(backend.firstFailureDiagnostic == nil)
+            #expect(cancelled.withLock { $0 })
+            #expect(try await backend.workflow.durableSnapshot().entities == before.entities)
+            do {
+                _ = try await sdk.prepareSend(zones: [])
+                Issue.record("Pause did not release the original SDK")
+            } catch { }
+            do {
+                try await backend.workflow.validateSDK(sdk.instanceID)
+                Issue.record("Pause retained original SDK authority")
+            } catch { }
+
+            app.sync.setDeviceSettings(paused: false, automatic: automatic, media: true)
+            await app.sync.waitForInputs(); await app.sync.drainOperations()
+            let successor = try #require(await app.factory.engines.last)
+            #expect(successor !== sdk && successor.instanceID != sdk.instanceID)
+            #expect(await successor.automaticSchedulingEnabled == automatic)
+            #expect(!app.sync.settings.paused && app.sync.settings.media)
+            #expect(!app.sync.operationFailed)
+            #expect(backend.firstFailureDiagnostic == nil)
+            try await backend.workflow.validateSDK(successor.instanceID)
+            let fetches = await successor.manualFetchGroups.count
+            try await app.exchange()
+            await app.sync.drainOperations()
+            await successor.waitForAutomaticSend()
+            await app.sync.drainOperations()
+            #expect(await successor.manualFetchGroups.count > fetches)
+            #expect(!app.sync.operationFailed)
+            #expect(backend.firstFailureDiagnostic == nil)
+            do {
+                try await backend.workflow.validateSDK(sdk.instanceID)
+                Issue.record("Resume revived original SDK authority")
+            } catch { }
+            #expect(app.owner.state == .ready && app.owner.generation == generation)
+            #expect(try app.backend === backend)
+            #expect(try await backend.workflow.durableSnapshot().entities == before.entities)
+            let after = try await CoreCollectionService().localPublicationInformation(generation: generation)
+            #expect(after.localCounts == collection.localCounts)
+            #expect(after.lastReviewMilliseconds == collection.lastReviewMilliseconds)
+        }
+    }
+
     @Test(arguments: [0, 1, 2, 3, 4])
     func serviceAppOriginalProofProjectsActualProviderOutcomesWithoutLosingPendingWork(outcome: Int) async throws {
         try await withAutomaticServiceApp { app, _, _ in

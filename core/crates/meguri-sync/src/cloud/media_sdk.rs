@@ -475,7 +475,11 @@ impl Runtime {
         work: &mut PolicyWork,
     ) -> Result<bool, RuntimeError> {
         let _ = self.adapter_now();
-        if let Some(sdk) = sdk {
+        // Pause only clears guarded Core work; Swift owns queue cancellation
+        // and drain. Settings may already have revoked the old SDK's authority.
+        if !matches!(action, crate::cloud::policy::ActionKind::PauseMedia)
+            && let Some(sdk) = sdk
+        {
             self.prepare_cloud_media_sdk_with_work(sdk, work)?;
             #[cfg(feature = "test-hooks")]
             self.incoming_hooks

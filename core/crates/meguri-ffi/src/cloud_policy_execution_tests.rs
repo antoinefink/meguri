@@ -67,12 +67,15 @@ fn start() -> (Fixture, Arc<CloudPolicy>, Arc<CloudPolicyExecution>) {
     (fixture, policy, execution)
 }
 fn start_with_root() -> (Fixture, Arc<CloudPolicy>, Arc<CloudPolicyExecution>, CloudRecord) {
+    start_with_settings(settings(false, false))
+}
+fn start_with_settings(event: CloudPolicyEvent) -> (Fixture, Arc<CloudPolicy>, Arc<CloudPolicyExecution>, CloudRecord) {
     let fixture = fixture();
     let (sdk, root, _) = fixture.baseline();
     fixture.workflow.retire_sdk(sdk.instance_id.clone(), false).unwrap();
     fixture.workflow.release_sdk(sdk.instance_id).unwrap();
     let policy = fixture.workflow.policy().unwrap();
-    let mut issued = commands(policy.clone().input(settings(false, false)).unwrap());
+    let mut issued = commands(policy.clone().input(event).unwrap());
     issued.extend(commands(policy.clone().refresh_account().unwrap()));
     issued.extend(commands(
         policy
@@ -98,6 +101,162 @@ fn guarded_registration_accepts_once_and_retains_actual_sdk_identity() {
     fixture.workflow.validate_sdk(registration.instance_id).unwrap();
     assert!(execution.register_sdk().is_err());
     fixture.workflow.host.close().unwrap();
+}
+
+fn media_settings(automatic: bool, paused: bool) -> CloudPolicyEvent {
+    CloudPolicyEvent::Settings {
+        settings: CloudPolicyDeviceSettings {
+            enabled: true,
+            paused,
+            automatic,
+            media: true,
+        },
+    }
+}
+
+#[test]
+fn settings_pause_with_media_succeeds_with_revoked_or_released_original_sdk() {
+    use c::testing::IncomingStage;
+    use meguri_storage::rows::Table;
+
+    for automatic in [false, true] {
+        for retire_first in [false, true] {
+            let (fixture, policy, start, _) = start_with_settings(media_settings(automatic, false));
+            let sdk = start.register_sdk().unwrap();
+            let runtime = &fixture.workflow.core;
+            runtime.prepare_cloud_media_sdk(&sdk.instance_id).unwrap();
+            let collection = fixture.workflow.host.collection().unwrap();
+            let facts = || {
+                let reader = collection.reader(ReaderRole::Query).unwrap();
+                Table::ALL.map(|table| reader.row_page(table, None).unwrap())
+            };
+            let before = facts(); // Includes card scheduling and revlog rows.
+            let seq = collection.last_seq();
+            assert!(fixture.workflow.host.review().active_session().is_none());
+            let original_guard = runtime.adapter_guard();
+            let issued = commands(policy.clone().input(media_settings(automatic, true)).unwrap());
+            let pause = issued
+                .iter()
+                .find(|c| matches!(c.action, CloudPolicyAction::PauseMedia))
+                .unwrap();
+            let stop = issued
+                .iter()
+                .find(|c| matches!(c.action, CloudPolicyAction::StopEngine { .. }))
+                .unwrap();
+            let pause = policy.clone().prepare_execution(pause.handle.clone()).unwrap().unwrap();
+            let stop = policy.clone().prepare_execution(stop.handle.clone()).unwrap().unwrap();
+            assert_eq!(pause.original_sdk().unwrap(), Some(sdk.instance_id.clone()));
+            assert_eq!(stop.original_sdk().unwrap(), Some(sdk.instance_id.clone()));
+            let paused_guard = runtime.adapter_guard();
+            assert_ne!(paused_guard.token, original_guard.token);
+            assert!(matches!(
+                runtime.validate_sdk(&sdk.instance_id),
+                Err(r::RuntimeError::StaleIncarnation)
+            ));
+            if retire_first {
+                stop.retire_original().unwrap();
+                fixture.workflow.release_sdk(sdk.instance_id.clone()).unwrap();
+                assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+            }
+            let stages = Arc::new(Mutex::new(Vec::new()));
+            let observed = stages.clone();
+            runtime.set_incoming_stage_hook_for_testing(move |stage| observed.lock().unwrap().push(stage));
+            let result = pause.begin_media();
+            runtime.set_incoming_stage_hook_for_testing(|_| {});
+            assert_eq!(result, Ok(false));
+            assert!(!stages.lock().unwrap().contains(&IncomingStage::PolicyMediaPrepared));
+            assert!(stages.lock().unwrap().contains(&IncomingStage::PolicyMediaSelected));
+            assert!(
+                runtime
+                    .cleanup_observation_for_testing(&sdk.instance_id)
+                    .unwrap()
+                    .media_paused
+            );
+            assert_eq!(runtime.adapter_guard(), paused_guard);
+            assert!(matches!(
+                runtime.validate_sdk(&sdk.instance_id),
+                Err(r::RuntimeError::StaleIncarnation)
+            ));
+            assert!(runtime.prepare_cloud_media_sdk(&sdk.instance_id).is_err());
+            assert!(
+                fixture
+                    .workflow
+                    .begin_fetch(sdk.instance_id.clone(), vec!["meguri-root".into()])
+                    .is_err()
+            );
+            assert!(fixture.workflow.begin_send(sdk.instance_id.clone()).is_err());
+            if !retire_first {
+                stop.retire_original().unwrap();
+                fixture.workflow.release_sdk(sdk.instance_id.clone()).unwrap();
+            }
+            // Reopening the gate must never restore the original SDK's authority.
+            policy.clone().input(media_settings(automatic, false)).unwrap();
+            assert!(matches!(
+                runtime.validate_sdk(&sdk.instance_id),
+                Err(r::RuntimeError::StaleIncarnation)
+            ));
+            assert_eq!(collection.last_seq(), seq);
+            assert_eq!(facts(), before);
+            assert!(fixture.workflow.host.review().active_session().is_none());
+            fixture.workflow.host.close().unwrap();
+        }
+    }
+}
+
+#[test]
+fn settings_pause_with_media_rejects_stale_policy_runtime_guards_and_wrong_owner() {
+    for runtime_only in [false, true] {
+        let (fixture, policy, start, _) = start_with_settings(media_settings(false, false));
+        start.register_sdk().unwrap();
+        let command = commands(policy.clone().input(media_settings(false, true)).unwrap())
+            .into_iter()
+            .find(|c| matches!(c.action, CloudPolicyAction::PauseMedia))
+            .unwrap();
+        let pause = policy
+            .clone()
+            .prepare_execution(command.handle.clone())
+            .unwrap()
+            .unwrap();
+        if runtime_only {
+            fixture.workflow.core.adapter_pause(false).unwrap();
+        } else {
+            let driver = fixture.workflow.host.cloud_policy_driver().unwrap();
+            let guard = driver.state().guard();
+            fixture
+                .workflow
+                .account_changed(None, CloudAccountStatus::NoAccount, None)
+                .unwrap();
+            policy
+                .clone()
+                .input(CloudPolicyEvent::Refresh {
+                    cause: CloudPolicyChangeCause::Cloud,
+                })
+                .unwrap();
+            assert_ne!(driver.state().guard(), guard);
+        }
+        assert!(matches!(
+            pause.begin_media(),
+            Err(CoreError::CloudPolicy {
+                failure: CloudPolicyFailure::StaleCommand
+            })
+        ));
+        fixture.workflow.host.close().unwrap();
+        let replacement = self::fixture();
+        let other = replacement.workflow.policy().unwrap();
+        assert!(matches!(
+            other.prepare_execution(command.handle),
+            Err(CoreError::CloudPolicy {
+                failure: CloudPolicyFailure::WrongOwner
+            })
+        ));
+        assert!(matches!(
+            pause.begin_media(),
+            Err(CoreError::CloudPolicy {
+                failure: CloudPolicyFailure::Closed
+            })
+        ));
+        replacement.workflow.host.close().unwrap();
+    }
 }
 
 #[test]
