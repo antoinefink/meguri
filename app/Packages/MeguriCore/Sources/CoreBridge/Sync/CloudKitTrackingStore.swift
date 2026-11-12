@@ -191,6 +191,12 @@ public actor CoreCloudWorkflowService {
         let raw = try await owner()
         try await MaintenanceLane.shared.call(.cloudWorkflowTrackingFailure) { try raw.trackingFailure(sdk: sdk) }
     }
+    func fetchedCollectionZoneDeletions(sdk: String, names: [String]) async throws {
+        let raw = try await owner()
+        try await MaintenanceLane.shared.call(.cloudWorkflowFetchedCollectionZoneDeletions) {
+            try raw.fetchedCollectionZoneDeletions(sdk: sdk, names: names)
+        }
+    }
     func stateUpdate(sdk: String, state: Data) async throws -> Void {
         let raw = try await owner()
         return try await MaintenanceLane.shared.call(.cloudWorkflowStateUpdate) { try raw.stateUpdate(sdk: sdk, state: state) }

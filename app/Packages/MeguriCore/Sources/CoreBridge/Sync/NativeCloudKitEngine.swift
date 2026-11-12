@@ -42,12 +42,33 @@ enum NativeCloudKitIdentityValidation {
         if let collectionZone {
             reserved.append(CKRecordZone.ID(zoneName: collectionZone, ownerName: CKCurrentUserDefaultName))
         }
-        // Recognized zone-loss translation to Core remains unfinished. Keep
-        // refusing it; unrelated database metadata has no collection effect.
-        guard !ids.contains(where: { reserved.contains($0) || $0.zoneName.hasPrefix("c-") }) else {
+        // Root/media/bound loss handling remains explicitly incomplete.
+        guard !ids.contains(where: { reserved.contains($0) }) else {
             throw NativeCloudKitFailure.unsupportedRecord
         }
+        for id in ids where id.zoneName.hasPrefix("c-") {
+            guard collectionZone != nil, isCanonicalCollectionZone(id.zoneName) else {
+                throw NativeCloudKitFailure.unsupportedRecord
+            }
+        }
     }
+    private static func isCanonicalCollectionZone(_ name: String) -> Bool {
+        // K4.1: 128 bits in lowercase unpadded RFC 4648 base32. The final
+        // symbol has two zero pad bits: a/e/i/m/q/u/y/4 are canonical.
+        let bytes = Array(name.utf8)
+        guard bytes.count == 28, bytes[0] == 99, bytes[1] == 45,
+              bytes.dropFirst(2).allSatisfy({ (97...122).contains($0) || (50...55).contains($0) }),
+              let last = bytes.last else { return false }
+        return [97, 101, 105, 109, 113, 117, 121, 52].contains(last)
+    }
+    static func databaseDeletionEvent(modified: [CKRecordZone.ID], deleted: [CKRecordZone.ID],
+                                      collectionZone: String?) throws -> CloudEngineEvent {
+        for id in modified + deleted { try requireCurrentOwner(id) }
+        try validateDatabaseDeletions(deleted, collectionZone: collectionZone)
+        let names = deleted.map(\.zoneName).filter { $0.hasPrefix("c-") }
+        return names.isEmpty ? .databaseChanges : .fetchedCollectionZoneDeletions(names)
+    }
+
     static func collectionRecordNames(_ ids: [CKRecord.ID], zoneID: CKRecordZone.ID) throws -> [String] {
         try requireCurrentOwner(zoneID)
         guard ids.allSatisfy({ $0.zoneID == zoneID }) else { throw NativeCloudKitFailure.unsupportedRecord }
@@ -715,14 +736,14 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
                 }
                 forwarded = .didSend(zone: collectionZone ?? "")
             case .fetchedDatabaseChanges(let changes):
-                try NativeCloudKitIdentityValidation.validateDatabaseDeletions(
-                    changes.deletions.map(\.zoneID), collectionZone: collectionZone)
+                forwarded = try NativeCloudKitIdentityValidation.databaseDeletionEvent(
+                    modified: changes.modifications.map(\.zoneID), deleted: changes.deletions.map(\.zoneID),
+                    collectionZone: collectionZone)
                 #if DEBUG
-                if !changes.deletions.isEmpty {
+                if case .databaseChanges = forwarded, !changes.deletions.isEmpty {
                     DebugCloudDiagnostics.nativeFetchSequence.record(.unrelatedDatabaseDeletion, ordinal: debugFetchOrdinal)
                 }
                 #endif
-                forwarded = .databaseChanges
             case .sentDatabaseChanges: throw NativeCloudKitFailure.unsupportedRecord
             @unknown default: throw NativeCloudKitFailure.unsupportedRecord
             }

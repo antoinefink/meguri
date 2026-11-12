@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(CloudKit)
+import CloudKit
+#endif
 import Instrumentation
 import func MeguriCoreBindings.testCloudZoneDeletionFixture
 import func MeguriCoreBindings.testCloudZoneDeletionRows
@@ -297,6 +300,73 @@ extension EventTests {
             let remainingRows = try await deletionRows()
             #expect(remainingRows == Dictionary(uniqueKeysWithValues: zones.map { ($0, true) }))
             await executor.close()
+        }
+    }
+}
+
+extension EventTests {
+    /// K12.5/K13.1/P24: actual native classification -> event -> lane -> Rust.
+    /// Exact names are proved by one due row leaving while the other rows stay.
+    @Test func fetchedOtherEpochDeletionUsesOriginalSDKAndExactNames() async throws {
+        try await withCloudKitFixture(keepAlive: true) { f in
+            let old = try await f.engine()
+            let zones = try await deletionFixture(f)
+            let before = try await f.core.durableSnapshot()
+            #expect(try await deletionRows() == Dictionary(uniqueKeysWithValues: zones.map { ($0, true) }))
+            #if canImport(CloudKit)
+            let event = try NativeCloudKitIdentityValidation.databaseDeletionEvent(modified: [],
+                deleted: [.init(zoneName: zones[0], ownerName: CKCurrentUserDefaultName)], collectionZone: f.zone)
+            #else
+            let event = CloudEngineEvent.fetchedCollectionZoneDeletions([zones[0]])
+            #endif
+            await old.emitRetained(event, label: "otherEpochDeleted")
+            await old.emitRetained(event, label: "otherEpochReplay")
+            #expect(await f.adapter.lastFailure == nil)
+            #expect(try await deletionRows() == Dictionary(uniqueKeysWithValues: zones.dropFirst().map { ($0, true) }))
+            #expect(try await f.core.durableSnapshot() == before)
+            let cursor = Data([0x12, 0x05])
+            await old.emitRetained(.stateUpdate(cursor), label: "afterOtherEpoch")
+            #expect(try await f.core.durableSnapshot().serialization == cursor)
+            try await f.adapter.configureAutomatic(true)
+            try await f.adapter.waitForIdle()
+            let replacement = try await f.engine()
+            #expect(replacement.instanceID != old.instanceID)
+            await old.emitRetained(.fetchedCollectionZoneDeletions([zones[1]]), label: "oldOtherEpoch")
+            #expect(try await deletionRows()[zones[1]] == true)
+            try await f.core.validateSDK(replacement.instanceID)
+            await replacement.emitRetained(.fetchedCollectionZoneDeletions([zones[1]]), label: "currentOtherEpoch")
+            #expect(try await deletionRows() == [zones[2]: true])
+        }
+    }
+
+    /// Same real intake fault as fetched records; failed metadata closes intake
+    /// before a later opaque state can pass it, with original cancel/drain order.
+    @Test func fetchedOtherEpochDeletionFailureKeepsRowsAndCursor() async throws {
+        try await withCloudKitFixture(keepAlive: true, failInbox: true) { f in
+            let engine = try await f.engine()
+            let zones = try await deletionFixture(f)
+            let rows = try await deletionRows()
+            let before = try await f.core.durableSnapshot()
+            await engine.emitRetained(.fetchedCollectionZoneDeletions(zones), label: "failedOtherEpoch")
+            await engine.emitRetained(.stateUpdate(Data([0xff])), label: "afterFailedOtherEpoch")
+            try await f.adapter.waitForIdle()
+            #expect(await f.adapter.lastFailure != nil)
+            #expect(try await deletionRows() == rows)
+            let after = try await f.core.durableSnapshot()
+            #expect(after.serialization == before.serialization)
+            #expect(after.entities == before.entities && after.inboxNames == before.inboxNames)
+            #expect(after.trackingStopped)
+            #expect(await f.adapter.retainedInstanceIDs().isEmpty)
+            #expect(await f.factory.engines().count == 1)
+            let trace = await engine.recordedTrace()
+            let returned = try #require(trace.firstIndex(of: .eventReturned("failedOtherEpoch")))
+            let cancel = try #require(trace.firstIndex(of: .cancelEntered))
+            let drained = try #require(trace.firstIndex(of: .cancelReturned))
+            let released = try #require(trace.firstIndex(of: .released))
+            #expect(returned < cancel && cancel < drained && drained < released)
+            await engine.emitRetained(.stateUpdate(Data([0xfe])), label: "lateOtherEpochState")
+            #expect(await engine.requestRetainedBatch(zone: f.zone) == nil)
+            #expect(try await f.core.durableSnapshot() == after)
         }
     }
 }

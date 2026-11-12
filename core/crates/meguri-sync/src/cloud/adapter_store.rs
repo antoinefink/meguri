@@ -7,6 +7,7 @@ use super::{
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use std::collections::BTreeSet;
 pub(super) struct AdapterCommitOptions {
+    pub deleted_collection_zones: Vec<String>,
     pub at_ms: i64,
     pub fail: bool,
     pub start_absence: bool,
@@ -39,11 +40,21 @@ impl TrackingStore {
         options: AdapterCommitOptions,
     ) -> Result<(), Error> {
         let AdapterCommitOptions {
+            deleted_collection_zones,
             at_ms,
             fail,
             start_absence,
             resolved_epoch,
         } = options;
+        // All-or-nothing even for callers below Swift's classification boundary.
+        let owner = self.binding(binding)?.ok_or(Error::BindingNotFound)?;
+        let bound = super::adapter::collection_zone(owner.facts.epoch);
+        if deleted_collection_zones
+            .iter()
+            .any(|name| name == &bound || !super::publication_store::valid_collection_zone(name))
+        {
+            return Err(Error::InvalidData);
+        }
         let mut durable = durable.clone();
         let prior = self.adapter_durable(binding)?;
         // Ordinary callbacks cannot forget accepted loss, including callbacks
@@ -100,7 +111,13 @@ impl TrackingStore {
             )?;
         }
         super::incoming_store::receive(&tx, binding, entries, refused)?;
-        if !entries.is_empty() || !refused.is_empty() {
+        for zone in &deleted_collection_zones {
+            tx.execute(
+                "DELETE FROM cloud_publication_zones WHERE binding=?1 AND zone=?2",
+                params![binding.0.as_slice(), zone],
+            )?;
+        }
+        if !entries.is_empty() || !refused.is_empty() || !deleted_collection_zones.is_empty() {
             #[cfg(feature = "test-hooks")]
             super::testing::tracking_commit(&tx, "cloud.tracking.commit.inbox")?;
             meguri_model::faultpoint!("cloud.tracking.commit.inbox")?;

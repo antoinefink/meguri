@@ -727,7 +727,7 @@ impl TrackingStore {
         Ok(())
     }
 }
-fn valid_collection_zone(zone: &str) -> bool {
+pub(super) fn valid_collection_zone(zone: &str) -> bool {
     let Some(encoded) = zone.strip_prefix("c-") else {
         return false;
     };

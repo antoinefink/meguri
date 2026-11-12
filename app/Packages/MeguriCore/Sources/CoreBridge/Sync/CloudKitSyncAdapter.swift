@@ -737,6 +737,8 @@ public actor CloudKitSyncAdapter {
                 instance.recordDeliveryFailure()
                 #endif
             case .databaseChanges: break
+            case .fetchedCollectionZoneDeletions(let names):
+                try await core.fetchedCollectionZoneDeletions(sdk: origin, names: names)
             case .stateUpdate(let state): try await core.stateUpdate(sdk: origin, state: state)
             case .fetched(let zone, let records, let deleted):
                 try await core.fetched(sdk: origin, zone: zone, records: records, deleted: deleted)

@@ -905,6 +905,12 @@ impl CloudWorkflow {
         callback::enter("CloudWorkflow.tracking_failure");
         self.core.adapter_tracking_failure(&sdk).map_err(cloud_error)
     }
+    pub fn fetched_collection_zone_deletions(&self, sdk: String, names: Vec<String>) -> Result<(), CoreError> {
+        callback::enter("CloudWorkflow.fetched_collection_zone_deletions");
+        self.core
+            .adapter_fetched_collection_zone_deletions(&sdk, &names)
+            .map_err(cloud_error)
+    }
     pub fn state_update(&self, sdk: String, state: Vec<u8>) -> Result<(), CoreError> {
         callback::enter("CloudWorkflow.state_update");
         self.core.adapter_state_update(&sdk, &state).map_err(cloud_error)

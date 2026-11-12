@@ -18,14 +18,56 @@ struct NativeCloudKitEngineTests {
         }
     }
 
+    /// K2/K4.1/K12.5: only canonical 128-bit other-epoch zone names.
+    @Test func otherEpochDatabaseDeletionsProduceMetadataAfterAllOwnersValidate() throws {
+        let other = CKRecordZone.ID(zoneName: "c-77777777777777777777777774", ownerName: CKCurrentUserDefaultName)
+        let unrelated = CKRecordZone.ID(zoneName: "unrelated-zone", ownerName: CKCurrentUserDefaultName)
+        let bound = "c-aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        let event = try NativeCloudKitIdentityValidation.databaseDeletionEvent(
+            modified: [], deleted: [unrelated, other, other], collectionZone: bound)
+        guard case .fetchedCollectionZoneDeletions(let names) = event else {
+            Issue.record("Expected other-epoch deletion metadata"); return
+        }
+        #expect(names == [other.zoneName, other.zoneName])
+        for suffix in ["a", "e", "i", "m", "q", "u", "y", "4"] {
+            let name = "c-" + String(repeating: "a", count: 25) + suffix
+            guard case .fetchedCollectionZoneDeletions(let canonical) = try NativeCloudKitIdentityValidation.databaseDeletionEvent(
+                modified: [], deleted: [.init(zoneName: name, ownerName: CKCurrentUserDefaultName)],
+                collectionZone: other.zoneName) else {
+                Issue.record("Expected a canonical final base32 symbol"); return
+            }
+            #expect(canonical == [name])
+        }
+        for foreign in ["foreign-owner", "another-foreign-owner"] {
+            let id = CKRecordZone.ID(zoneName: "unrelated-zone", ownerName: foreign)
+            for deleted in [[other, id], [id, other]] {
+                #expect(throws: NativeCloudKitFailure.self) {
+                    _ = try NativeCloudKitIdentityValidation.databaseDeletionEvent(modified: [], deleted: deleted, collectionZone: bound)
+                }
+            }
+            #expect(throws: NativeCloudKitFailure.self) {
+                _ = try NativeCloudKitIdentityValidation.databaseDeletionEvent(modified: [id], deleted: [other], collectionZone: bound)
+            }
+        }
+        for deleted in [[], [unrelated]] {
+            guard case .databaseChanges = try NativeCloudKitIdentityValidation.databaseDeletionEvent(
+                modified: [other], deleted: deleted, collectionZone: bound) else {
+                Issue.record("Empty/unrelated deletion must preserve the no-op event"); return
+            }
+        }
+    }
+
     @Test func reservedAndBoundDatabaseDeletionsStillRefuseIncludingMixedLists() {
         let unrelated = CKRecordZone.ID(zoneName: "unrelated-zone", ownerName: CKCurrentUserDefaultName)
-        for registered in [nil, "unusual-bound-zone"] as [String?] {
-            var names = ["meguri-root", "meguri-media", "c-", "c-current", "c-other-epoch"]
+        for registered in [nil, "unusual-bound-zone", "c-aaaaaaaaaaaaaaaaaaaaaaaaaa"] as [String?] {
+            var names = ["meguri-root", "meguri-media", "c-", "c-current", "c-other-epoch",
+                "c-aaaaaaaaaaaaaaaaaaaaaaaaab", "c-AAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "c-aaaaaaaaaaaaaaaaaaaaaaaaaa=", "c-aaaaaaaaaaaaaaaaaaaaaaaaa"]
             if let registered { names.append(registered) }
             for name in names {
                 let id = CKRecordZone.ID(zoneName: name, ownerName: CKCurrentUserDefaultName)
-                for ids in [[id], [unrelated, id], [id, unrelated]] {
+                let other = CKRecordZone.ID(zoneName: "c-77777777777777777777777774", ownerName: CKCurrentUserDefaultName)
+                for ids in [[id], [unrelated, id], [id, unrelated], [other, id], [id, other]] {
                     expectUnsupportedDatabaseDeletions(ids, collectionZone: registered)
                 }
             }
@@ -34,7 +76,7 @@ struct NativeCloudKitEngineTests {
 
     @Test func foreignOwnerDatabaseDeletionsAlwaysRefuse() {
         let unrelated = CKRecordZone.ID(zoneName: "unrelated-zone", ownerName: CKCurrentUserDefaultName)
-        for registered in [nil, "unusual-bound-zone"] as [String?] {
+        for registered in [nil, "unusual-bound-zone", "c-aaaaaaaaaaaaaaaaaaaaaaaaaa"] as [String?] {
             for name in ["unrelated-zone", "meguri-root", "meguri-media", "c-", "c-other-epoch", "unusual-bound-zone"] {
                 let foreign = CKRecordZone.ID(zoneName: name, ownerName: "foreign-owner")
                 for ids in [[foreign], [unrelated, foreign], [foreign, unrelated]] {

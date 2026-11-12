@@ -112,6 +112,7 @@ impl Runtime {
                         None,
                         &durable,
                         super::super::adapter_store::AdapterCommitOptions {
+                            deleted_collection_zones: Vec::new(),
                             at_ms,
                             fail: false,
                             start_absence: false,
@@ -218,6 +219,7 @@ impl Runtime {
                     None,
                     &durable,
                     super::super::adapter_store::AdapterCommitOptions {
+                        deleted_collection_zones: Vec::new(),
                         at_ms,
                         fail: false,
                         start_absence: false,
@@ -306,6 +308,7 @@ impl Runtime {
                     None,
                     &durable,
                     super::super::adapter_store::AdapterCommitOptions {
+                        deleted_collection_zones: Vec::new(),
                         at_ms,
                         fail: false,
                         start_absence: false,

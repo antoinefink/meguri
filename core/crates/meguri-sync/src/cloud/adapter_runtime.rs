@@ -543,6 +543,37 @@ impl Runtime {
         }
         result.map_err(Into::into)
     }
+    /// K12.5: metadata must commit before a later SDK cursor can advance.
+    /// Hold the original SDK/usable-account/binding guard through the existing
+    /// tracking transaction. A failure closes this intake, never a successor.
+    pub fn adapter_fetched_collection_zone_deletions(&self, sdk: &str, names: &[String]) -> Result<(), RuntimeError> {
+        let at_ms = self.adapter_now()?;
+        let mut s = self.state();
+        Self::sdk_locked(&s, sdk)?;
+        #[cfg(feature = "test-hooks")]
+        let fail = std::mem::take(&mut s.adapter.fail_inbox);
+        #[cfg(not(feature = "test-hooks"))]
+        let fail = false;
+        Self::adapter_commit_locked(
+            &mut s,
+            &[],
+            &[],
+            None,
+            AdapterCommitOptions {
+                deleted_collection_zones: names.to_vec(),
+                at_ms,
+                fail,
+                start_absence: false,
+                resolved_epoch: None,
+            },
+        )?;
+        if !names.is_empty() {
+            // Supersede inventories captured before this atomic deletion while
+            // still holding the same State lock as the successful commit.
+            s.zone_listing_fence = Arc::new(());
+        }
+        Ok(())
+    }
     pub fn adapter_state_update(&self, sdk: &str, serialization: &[u8]) -> Result<(), RuntimeError> {
         let at_ms = self.adapter_now()?;
         let mut s = self.state();
@@ -557,6 +588,7 @@ impl Runtime {
             &[],
             Some(serialization),
             AdapterCommitOptions {
+                deleted_collection_zones: Vec::new(),
                 at_ms,
                 fail,
                 start_absence: false,
@@ -696,6 +728,7 @@ impl Runtime {
             &refused,
             None,
             AdapterCommitOptions {
+                deleted_collection_zones: Vec::new(),
                 at_ms,
                 fail,
                 start_absence: false,
@@ -839,6 +872,7 @@ impl Runtime {
                 &[],
                 None,
                 AdapterCommitOptions {
+                    deleted_collection_zones: Vec::new(),
                     at_ms,
                     fail: false,
                     start_absence: true,
@@ -1007,6 +1041,7 @@ impl Runtime {
             &[],
             None,
             AdapterCommitOptions {
+                deleted_collection_zones: Vec::new(),
                 at_ms,
                 fail: false,
                 start_absence: false,
@@ -1403,6 +1438,7 @@ impl Runtime {
                     saved_state.as_deref(),
                     &Durable::default(),
                     super::super::adapter_store::AdapterCommitOptions {
+                        deleted_collection_zones: Vec::new(),
                         at_ms: clock.now_ms(),
                         fail: false,
                         start_absence: false,

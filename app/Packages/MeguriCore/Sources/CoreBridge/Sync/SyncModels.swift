@@ -84,6 +84,8 @@ public struct CloudEngineConfiguration: Sendable, Equatable {
 public enum CloudEngineEvent: Sendable, Equatable {
     case deliveryFailed
     case databaseChanges
+    /// Validated fetched deletions of canonical collection zones of other epochs.
+    case fetchedCollectionZoneDeletions([String])
     case stateUpdate(Data)
     case accountChanged(change: CloudAccountChange, identity: Data?)
     case fetched(zone: String, records: [CloudRecord], deleted: [String])

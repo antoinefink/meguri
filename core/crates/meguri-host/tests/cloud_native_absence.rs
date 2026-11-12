@@ -30,7 +30,7 @@ use meguri_sync::cloud::{
 use meguri_testkit::{
     cloud::{
         Caller, Config, Field, Mutation, MutationSuccess, Operation, Page, Record, RecordChange, RecordInput, Reply,
-        RequestedFields, Scope, Service, Token,
+        RequestedFields, Scope, Service, Token, ZoneChange,
         devices::{NativeFiles, options},
     },
     generate::recipe::{Recipe, generate_recipe},
@@ -2991,3 +2991,371 @@ fn epoch_loss_commit_error_reopen(zone_missing: bool, kind: std::io::ErrorKind) 
 
 #[path = "cloud_native_absence/live_resume.rs"]
 mod live_resume;
+
+// K12.5 (another c- zone), K10.3 zones, K13.1.2-.3, P10.3/P24, Q11.
+// Reuse the native adapter baseline and real retained-zone fixture. No seeded
+// deletion outcome: each cause is delivered by the existing Service database log.
+fn fetched_database_changes(service: &mut Service<SeededRandom>, mut token: Option<Token>) -> (Vec<ZoneChange>, Token) {
+    let mut changes = Vec::new();
+    loop {
+        let response = service
+            .request(&scope(), Caller::default(), Operation::FetchDatabase { token })
+            .unwrap();
+        let Ok(Reply::DatabaseChanges(page)) = response.result else {
+            panic!("actual database changes required")
+        };
+        changes.extend(page.changes);
+        if !page.more {
+            return (changes, page.token);
+        }
+        token = Some(page.token);
+    }
+}
+
+#[test]
+fn fetched_other_epoch_deletions_remove_due_rows_for_every_cause_and_survive_reopen() {
+    use meguri_testkit::cloud::RemovalCause;
+    let mut rig = fixture(1, true);
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let collection = rig.host.collection().unwrap();
+    let deck = meguri_engine::decks::add(&collection, "Pending zone-loss edit".into())
+        .unwrap()
+        .value
+        .id;
+    let media = rig.host.media().unwrap();
+    runtime.reconcile_binding(&collection, &media, BUDGET).unwrap();
+    let local = rows(&rig.host);
+    let pending = runtime.tracking_sendables();
+    assert!(!pending.is_empty());
+    let zones = runtime.prepare_zone_deletion_fixture_for_testing(&rig.sdk).unwrap();
+    let retained = runtime.publication_control_for_testing().unwrap();
+    assert!(retained.zones.values().all(|z| z.deletion_due));
+    let before = runtime.adapter_snapshot().unwrap();
+    assert!(matches!(
+        rig.service
+            .request(
+                &scope(),
+                Caller::default(),
+                Operation::Configure(Config {
+                    page_size: 1,
+                    ..Config::default()
+                })
+            )
+            .unwrap()
+            .result,
+        Ok(Reply::Done)
+    ));
+    // Finish the initial inventory before any deletion. Its actual terminal
+    // token is the watermark for history, including across incremental pages.
+    let (_, mut token) = fetched_database_changes(&mut rig.service, None);
+    let mut observed_zones = Vec::new();
+    for (zone, cause) in zones.iter().zip([
+        RemovalCause::Deleted,
+        RemovalCause::Purged,
+        RemovalCause::EncryptedDataReset,
+    ]) {
+        for operation in [
+            Operation::CreateZone { zone: zone.clone() },
+            Operation::DeleteZone {
+                zone: zone.clone(),
+                cause,
+            },
+        ] {
+            assert!(matches!(
+                rig.service
+                    .request(&scope(), Caller::default(), operation)
+                    .unwrap()
+                    .result,
+                Ok(Reply::Done)
+            ));
+        }
+        let (changes, terminal) = fetched_database_changes(&mut rig.service, Some(token));
+        token = terminal;
+        assert!(
+            changes
+                .iter()
+                .any(|change| change.zone == *zone && change.removed == Some(cause))
+        );
+        let deletion = changes
+            .iter()
+            .find(|change| change.removed.is_some())
+            .expect("actual database deletion required");
+        assert_eq!(deletion.zone, *zone);
+        assert!(deletion.removed == Some(cause));
+        runtime
+            .adapter_fetched_collection_zone_deletions(&rig.sdk, &[deletion.zone.clone(), deletion.zone.clone()])
+            .unwrap();
+        runtime
+            .adapter_fetched_collection_zone_deletions(&rig.sdk, &[deletion.zone.clone()])
+            .unwrap();
+        observed_zones.push(deletion.zone.clone());
+        let after = runtime.publication_control_for_testing().unwrap();
+        assert!(!after.zones.contains_key(zone));
+        assert_eq!(after.current, retained.current);
+        assert_eq!(runtime.tracking_sendables(), pending);
+        assert_eq!(
+            runtime.adapter_snapshot().unwrap().tracking_content,
+            before.tracking_content
+        );
+        runtime.validate_sdk(&rig.sdk).unwrap();
+    }
+    assert_eq!(rows(&rig.host), local);
+    assert!(runtime.publication_control_for_testing().unwrap().zones.is_empty());
+    runtime.adapter_state_update(&rig.sdk, b"after-zone-deletions").unwrap();
+    let durable = runtime.adapter_snapshot().unwrap();
+    drop(media);
+    drop(collection);
+    rig.host.close().unwrap();
+    let reopened = open(&rig.root.path().join("device"));
+    let (sdk, state, _) = admit(&reopened);
+    let runtime = reopened.cloud_runtime().unwrap();
+    assert_eq!(state.as_deref(), Some(b"after-zone-deletions".as_slice()));
+    assert!(runtime.publication_control_for_testing().unwrap().zones.is_empty());
+    assert_eq!(
+        runtime.status().unwrap().binding.unwrap().facts.state,
+        cloud::BindingState::Active
+    );
+    assert_eq!(rows(&reopened), local);
+    let name = codec::entity_name(&[114; 32], codec::Kind::Deck, &codec::id_key(deck.0)).unwrap();
+    let entity = runtime.entity_facts(&name).unwrap().unwrap();
+    assert!(entity.mark.is_some());
+    assert_eq!(runtime.adapter_snapshot().unwrap().entities, durable.entities);
+    assert_eq!(observed_zones, zones);
+    runtime
+        .adapter_fetched_collection_zone_deletions(&sdk, &observed_zones)
+        .unwrap();
+    reopened.close().unwrap();
+}
+
+#[test]
+fn fetched_other_epoch_removed_zone_rejects_stale_listing_then_tracks_recreated_zone() {
+    use meguri_testkit::cloud::RemovalCause;
+    let mut rig = fixture(1, true);
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let collection = rig.host.collection().unwrap();
+    meguri_engine::decks::add(&collection, "Pending held-inventory edit".into()).unwrap();
+    runtime
+        .reconcile_binding(&collection, &rig.host.media().unwrap(), BUDGET)
+        .unwrap();
+    let local = rows(&rig.host);
+    let pending = runtime.tracking_sendables();
+    assert!(!pending.is_empty());
+    let zones = runtime.prepare_zone_deletion_fixture_for_testing(&rig.sdk).unwrap();
+    let retained = runtime.publication_control_for_testing().unwrap();
+    assert!(retained.zones.values().all(|z| z.deletion_due));
+    let before = runtime.adapter_snapshot().unwrap();
+    assert!(matches!(
+        rig.service
+            .request(
+                &scope(),
+                Caller::default(),
+                Operation::Configure(Config {
+                    page_size: 1,
+                    ..Config::default()
+                })
+            )
+            .unwrap()
+            .result,
+        Ok(Reply::Done)
+    ));
+    for zone in &zones {
+        assert!(matches!(
+            rig.service
+                .request(
+                    &scope(),
+                    Caller::default(),
+                    Operation::CreateZone { zone: zone.clone() }
+                )
+                .unwrap()
+                .result,
+            Ok(Reply::Done)
+        ));
+    }
+    let zone = &zones[0];
+    let held_request = runtime.begin_zone_listing(&rig.sdk, &collection).unwrap();
+    let (inventory, token) = fetched_database_changes(&mut rig.service, None);
+    assert!(inventory.iter().all(|change| change.removed.is_none()));
+    let held_names: Vec<_> = inventory.into_iter().map(|change| change.zone).collect();
+    assert!(held_names.contains(zone) && held_names.contains(&rig.zone));
+    assert!(matches!(
+        rig.service
+            .request(
+                &scope(),
+                Caller::default(),
+                Operation::DeleteZone {
+                    zone: zone.clone(),
+                    cause: RemovalCause::Deleted
+                }
+            )
+            .unwrap()
+            .result,
+        Ok(Reply::Done)
+    ));
+    let (changes, _) = fetched_database_changes(&mut rig.service, Some(token));
+    let deletion = changes
+        .iter()
+        .find(|change| change.removed.is_some())
+        .expect("actual database deletion required");
+    assert_eq!(&deletion.zone, zone);
+    assert!(deletion.removed == Some(RemovalCause::Deleted));
+    runtime
+        .adapter_fetched_collection_zone_deletions(&rig.sdk, &[deletion.zone.clone()])
+        .unwrap();
+    let mut remaining = retained.zones.clone();
+    assert!(remaining.remove(zone).is_some());
+    assert_eq!(runtime.publication_control_for_testing().unwrap().zones, remaining);
+    assert!(
+        !runtime
+            .complete_zone_listing(held_request, &collection, Some(&held_names))
+            .unwrap()
+    );
+    assert_eq!(runtime.publication_control_for_testing().unwrap().zones, remaining);
+    assert_eq!(
+        runtime.publication_control_for_testing().unwrap().current,
+        retained.current
+    );
+    assert_eq!(runtime.tracking_sendables(), pending);
+    assert_eq!(
+        runtime.adapter_snapshot().unwrap().tracking_content,
+        before.tracking_content
+    );
+    assert_eq!(rows(&rig.host), local);
+    runtime.validate_sdk(&rig.sdk).unwrap();
+
+    assert!(matches!(
+        rig.service
+            .request(
+                &scope(),
+                Caller::default(),
+                Operation::CreateZone { zone: zone.clone() }
+            )
+            .unwrap()
+            .result,
+        Ok(Reply::Done)
+    ));
+    let fresh_request = runtime.begin_zone_listing(&rig.sdk, &collection).unwrap();
+    let (inventory, _) = fetched_database_changes(&mut rig.service, None);
+    assert!(inventory.iter().all(|change| change.removed.is_none()));
+    let fresh_names: Vec<_> = inventory.into_iter().map(|change| change.zone).collect();
+    assert!(fresh_names.contains(zone) && fresh_names.contains(&rig.zone));
+    assert!(
+        runtime
+            .complete_zone_listing(fresh_request, &collection, Some(&fresh_names))
+            .unwrap()
+    );
+    let after = runtime.publication_control_for_testing().unwrap();
+    assert!(after.zones.contains_key(zone));
+    for (name, row) in remaining {
+        assert_eq!(after.zones[&name], row);
+    }
+    assert_eq!(after.current, retained.current);
+    assert_eq!(runtime.tracking_sendables(), pending);
+    assert_eq!(
+        runtime.adapter_snapshot().unwrap().tracking_content,
+        before.tracking_content
+    );
+    assert_eq!(rows(&rig.host), local);
+    runtime.validate_sdk(&rig.sdk).unwrap();
+    drop(collection);
+    rig.host.close().unwrap();
+}
+
+#[test]
+fn fetched_other_epoch_deletion_refuses_mixed_bound_reserved_and_malformed_without_partial_mutation() {
+    let malformed = [
+        "c-",
+        "c-current",
+        "c-aaaaaaaaaaaaaaaaaaaaaaaaab",
+        "c-AAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "c-aaaaaaaaaaaaaaaaaaaaaaaaaa=",
+        "c-aaaaaaaaaaaaaaaaaaaaaaaaa",
+        "unrelated-zone",
+    ];
+    for refused in ["meguri-root", "meguri-media"]
+        .into_iter()
+        .chain(malformed)
+        .chain(["BOUND"])
+    {
+        let rig = fixture(1, true);
+        let runtime = rig.host.cloud_runtime().unwrap();
+        let zones = runtime.prepare_zone_deletion_fixture_for_testing(&rig.sdk).unwrap();
+        let invalid = if refused == "BOUND" { rig.zone.as_str() } else { refused };
+        let before = runtime.adapter_snapshot().unwrap();
+        let retained = runtime.publication_control_for_testing().unwrap().zones;
+        assert!(
+            runtime
+                .adapter_fetched_collection_zone_deletions(
+                    &rig.sdk,
+                    &[zones[0].clone(), invalid.into(), zones[1].clone()]
+                )
+                .is_err()
+        );
+        assert_eq!(runtime.publication_control_for_testing().unwrap().zones, retained);
+        assert_eq!(
+            runtime.adapter_snapshot().unwrap().tracking_content,
+            before.tracking_content
+        );
+        assert!(runtime.adapter_state_update(&rig.sdk, b"must-not-advance").is_err());
+        assert_eq!(runtime.adapter_snapshot().unwrap().serialization, before.serialization);
+        rig.host.close().unwrap();
+    }
+}
+
+#[test]
+fn fetched_other_epoch_deletion_transaction_failure_rolls_back_and_closes_only_original_intake() {
+    use cloud::testing::{TrackingFault, arm_tracking_fault};
+    for fault in [TrackingFault::Io, TrackingFault::Constraint, TrackingFault::Panic] {
+        let rig = fixture(1, true);
+        let runtime = rig.host.cloud_runtime().unwrap();
+        let zones = runtime.prepare_zone_deletion_fixture_for_testing(&rig.sdk).unwrap();
+        let before = runtime.adapter_snapshot().unwrap();
+        let retained = runtime.publication_control_for_testing().unwrap().zones;
+        arm_tracking_fault("cloud.tracking.commit.inbox", fault).unwrap();
+        assert!(
+            runtime
+                .adapter_fetched_collection_zone_deletions(&rig.sdk, &zones)
+                .is_err()
+        );
+        assert_eq!(runtime.publication_control_for_testing().unwrap().zones, retained);
+        assert_eq!(
+            runtime.adapter_snapshot().unwrap().tracking_content,
+            before.tracking_content
+        );
+        assert!(runtime.adapter_snapshot().unwrap().tracking_stopped);
+        assert!(runtime.adapter_state_update(&rig.sdk, b"must-not-advance").is_err());
+        assert_eq!(runtime.adapter_snapshot().unwrap().serialization, before.serialization);
+        rig.host.close().unwrap();
+        let reopened = open(&rig.root.path().join("device"));
+        let (_, state, _) = admit(&reopened);
+        let runtime = reopened.cloud_runtime().unwrap();
+        assert_eq!(state, before.serialization);
+        assert_eq!(runtime.publication_control_for_testing().unwrap().zones, retained);
+        reopened.close().unwrap();
+    }
+}
+
+#[test]
+fn fetched_other_epoch_deletion_from_stale_sdk_cannot_mutate_or_invalidate_successor() {
+    let rig = fixture(1, true);
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let zones = runtime.prepare_zone_deletion_fixture_for_testing(&rig.sdk).unwrap();
+    runtime.retire_sdk(&rig.sdk, false).unwrap();
+    runtime.release_sdk(&rig.sdk).unwrap();
+    let (sdk, _, _) = runtime.register_sdk(false).unwrap();
+    let before = runtime.adapter_snapshot().unwrap();
+    let retained = runtime.publication_control_for_testing().unwrap().zones;
+    assert!(matches!(
+        runtime.adapter_fetched_collection_zone_deletions(&rig.sdk, &zones),
+        Err(cloud::runtime::RuntimeError::StaleIncarnation)
+    ));
+    assert_eq!(
+        runtime.adapter_snapshot().unwrap().tracking_content,
+        before.tracking_content
+    );
+    assert_eq!(runtime.publication_control_for_testing().unwrap().zones, retained);
+    runtime.validate_sdk(&sdk).unwrap();
+    runtime.adapter_state_update(&sdk, b"successor-state").unwrap();
+    runtime.adapter_fetched_collection_zone_deletions(&sdk, &zones).unwrap();
+    assert!(runtime.publication_control_for_testing().unwrap().zones.is_empty());
+    rig.host.close().unwrap();
+}
