@@ -195,6 +195,47 @@ def describe(e):
     return {"type": e.type, "identifier": e.identifier, "label": e.label, "frame": e.frame, "path": e.path}
 
 
+def native_toggle_switch_parts(document, root):
+    """Recognize the inner switch through its native Toggle owner.
+
+    Only missing-ID classification uses this structural match. Keep every
+    original node and identity for all other diagnostics, as for sheet chrome.
+    iPhone and iPad exports both use the normalized platform name `ios`.
+    """
+    if type(document.get("schema")) is not int or document["schema"] != 1 or document.get("platform") != "ios":
+        return set()
+
+    def geometry(e):
+        return (all(type(e.frame.get(k)) in (int, float) for k in ("x", "y", "width", "height"))
+                and all(math.isfinite(v) for v in (e.x, e.y, e.w, e.h, e.x + e.w, e.y + e.h))
+                and e.w > 0 and e.h > 0)
+
+    recognized = set()
+    for owner in root.walk():
+        label, state = owner.raw.get("label"), owner.raw.get("value")
+        if (owner.type != "switch" or not isinstance(owner.identifier, str)
+                or not IDENTIFIER.fullmatch(owner.identifier) or is_system_identifier(owner)
+                or not isinstance(label, str) or not label.strip()
+                or not isinstance(state, str) or state not in ("0", "1")
+                or len(owner.children) != 2 or not geometry(owner)):
+            continue
+        texts = [c for c in owner.children if c.type == "staticText"]
+        switches = [c for c in owner.children if c.type == "switch"]
+        if len(texts) != 1 or len(switches) != 1:
+            continue
+        text, switch = texts[0], switches[0]
+        if (text.raw.get("label") != label or text.raw.get("value") not in (None, "")
+                or switch.raw.get("label") not in (None, "") or switch.raw.get("value") != state):
+            continue
+        if not all(not c.children and c.raw.get("identifier") in (None, "") and geometry(c)
+                   and c.x >= owner.x and c.y >= owner.y
+                   and c.x + c.w <= owner.x + owner.w and c.y + c.h <= owner.y + owner.h
+                   for c in (text, switch)):
+            continue
+        recognized.add(switch)
+    return recognized
+
+
 def native_sheet_grabbers(document, root):
     """Recognize only the captured English iOS half-screen chrome shape.
 
@@ -345,6 +386,7 @@ def ordinary_issues(document, root, native_ids, native_link_comparison_page=None
     """Ordinary diagnostics for one observation, without merging identities."""
     elements = [e for e in root.walk() if not e.under(SYSTEM_UI) and not e.under(TRANSIENT)]
     sheet_grabbers = native_sheet_grabbers(document, root)
+    toggle_parts = native_toggle_switch_parts(document, root)
     issues = []
 
     for e in elements:
@@ -356,7 +398,7 @@ def ordinary_issues(document, root, native_ids, native_link_comparison_page=None
                            and any(a.type == "webView" and a.identifier == native_link_comparison_page
                                    for a in e.ancestors))
         if ((e.type in INTERACTIVE or e.type in ROWS) and not e.identifier and e not in native_ids and not comparison_link and e.visible and not e.in_system_alert()
-                and not e.is_sidebar_toggle() and e not in sheet_grabbers
+                and not e.is_sidebar_toggle() and e not in sheet_grabbers and e not in toggle_parts
                 and not (e.type in ROWS and e.identified_inside())):
             issues.append(dict(kind="missing-identifier", message="%s '%s' has no accessibility identifier" % (e.type, e.label),
                                **describe(e)))

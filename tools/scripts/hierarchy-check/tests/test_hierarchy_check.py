@@ -309,6 +309,162 @@ class MissingIdentifier(unittest.TestCase):
         self.assertEqual(hierarchy_check.check(doc(el("button", label="hidden", f=(0, 0, 0, 0)))), [])
 
 
+class NativeToggleParts(unittest.TestCase):
+    """Synthetic normalized iOS trees for one standard SwiftUI Toggle."""
+
+    def tree(self, state="1", identifier="work.preferences.option", label="Example option", y=100):
+        text = el("staticText", label=label, f=(40, y + 20, 140, 20))
+        inner = el("switch", f=(300, y + 16, 60, 28))
+        inner["value"] = state
+        outer = el("switch", identifier, label, f=(20, y, 360, 60), children=[text, inner])
+        outer["value"] = state
+        return doc(outer), outer, text, inner
+
+    def assert_missing_controls(self, tree, *controls):
+        missing = [i for i in hierarchy_check.check(tree) if i["kind"] == "missing-identifier"]
+        self.assertEqual([(i["type"], i["label"], i["frame"]) for i in missing],
+                         [(c["type"], c["label"], c["frame"]) for c in controls])
+
+    def test_01(self):
+        for state in ["0", "1"]:
+            for identifier, label, y in [("work.preferences.option", "Example option", 100),
+                                         ("app.settings.sample", "Window chime", 300)]:
+                with self.subTest(state=state, identifier=identifier):
+                    tree, _, _, _ = self.tree(state, identifier, label, y)
+                    self.assertEqual(hierarchy_check.check(tree), [])
+
+    def test_outer_requires_a_valid_app_identifier(self):
+        for identifier in ["", None, "bad ID", "work.preferences", "_UIKitGenerated"]:
+            with self.subTest(identifier=identifier):
+                tree, outer, _, inner = self.tree()
+                if identifier is None:
+                    del outer["identifier"]
+                else:
+                    outer["identifier"] = identifier
+                self.assert_missing_controls(tree, *([outer, inner] if not identifier else [inner]))
+                bad = [i["identifier"] for i in hierarchy_check.check(tree) if i["kind"] == "bad-identifier"]
+                self.assertEqual(bad, [identifier] if identifier in ["bad ID", "work.preferences"] else [])
+
+    def test_outer_requires_its_label_and_binary_string_value(self):
+        for key, values in [("label", [None, ""]), ("value", [None, "", "2", 1, True])]:
+            for value in values:
+                with self.subTest(key=key, value=value):
+                    tree, outer, _, inner = self.tree()
+                    outer[key] = value
+                    self.assert_missing_controls(tree, inner)
+            with self.subTest(key=key, absent=True):
+                tree, outer, _, inner = self.tree()
+                del outer[key]
+                self.assert_missing_controls(tree, inner)
+
+    def test_different_state_or_labelled_inner_switch_remains_a_control(self):
+        for key, value in [("value", "0"), ("value", None), ("value", 1), ("label", "Another option")]:
+            with self.subTest(key=key, value=value):
+                tree, _, _, inner = self.tree()
+                inner[key] = value
+                self.assert_missing_controls(tree, inner)
+
+    def test_app_identified_inner_switch_keeps_its_own_identity_checks(self):
+        for identifier, expected in [("work.preferences.inner", []), ("bad ID", ["bad-identifier"]),
+                                     ("work.preferences.option", ["duplicate-identifier"])]:
+            with self.subTest(identifier=identifier):
+                tree, outer, _, inner = self.tree()
+                inner["identifier"] = identifier
+                issues = hierarchy_check.check(tree)
+                self.assertEqual(kinds(issues), expected)
+                if expected:
+                    self.assertEqual(issues[0]["identifier"], identifier)
+                if expected == ["duplicate-identifier"]:
+                    self.assertEqual(issues[0]["frames"], [outer["frame"], inner["frame"]])
+
+    def test_label_and_leaf_structure_must_describe_the_same_single_toggle(self):
+        for change in ["different-text", "text-value", "missing-text", "wrong-outer-role",
+                       "wrong-inner-role", "nested-inner", "inner-child"]:
+            with self.subTest(change=change):
+                tree, outer, text, inner = self.tree()
+                extra = None
+                if change == "different-text":
+                    text["label"] = "Another option"
+                elif change == "text-value":
+                    text["value"] = "1"
+                elif change == "missing-text":
+                    outer["children"].remove(text)
+                elif change == "wrong-outer-role":
+                    outer["type"] = "other"
+                elif change == "wrong-inner-role":
+                    inner["type"] = "button"
+                elif change == "nested-inner":
+                    outer["children"][1] = el("other", f=(300, 116, 60, 28), children=[inner])
+                else:
+                    extra = el("button", label="Nested action", f=(310, 120, 20, 20))
+                    inner["children"].append(extra)
+                self.assert_missing_controls(tree, *([inner, extra] if extra else [inner]))
+
+    def test_another_interactive_sibling_is_not_hidden_with_the_inner_switch(self):
+        tree, outer, _, inner = self.tree()
+        button = el("button", label="Separate action", f=(200, 120, 44, 28))
+        outer["children"].append(button)
+        self.assert_missing_controls(tree, inner, button)
+
+    def test_owner_and_parts_require_finite_contained_geometry(self):
+        for part, x in [("outer", 50), ("text", 5), ("inner", 370)]:
+            with self.subTest(part=part, outside=True):
+                tree, outer, text, inner = self.tree()
+                {"outer": outer, "text": text, "inner": inner}[part]["frame"]["x"] = x
+                self.assert_missing_controls(tree, inner)
+        for part in ["outer", "text", "inner"]:
+            for key, value in [("x", float("nan")), ("y", float("inf")), ("width", float("inf"))]:
+                with self.subTest(part=part, key=key, value=value):
+                    tree, outer, text, inner = self.tree()
+                    {"outer": outer, "text": text, "inner": inner}[part]["frame"][key] = value
+                    self.assert_missing_controls(tree, inner)
+
+    def test_standalone_and_non_ios_switches_still_need_identifiers(self):
+        _, _, _, inner = self.tree()
+        self.assert_missing_controls(doc(inner), inner)
+        for platform in ["mac", "ipad", "iOS", None]:
+            with self.subTest(platform=platform):
+                tree, _, _, inner = self.tree()
+                tree["platform"] = platform
+                self.assert_missing_controls(tree, inner)
+
+    def test_invalid_identifiers_on_every_original_toggle_node_remain_reported(self):
+        for index in range(3):
+            with self.subTest(node=index):
+                tree, *nodes = self.tree()
+                nodes[index]["identifier"] = "bad ID"
+                bad = [i for i in hierarchy_check.check(tree) if i["kind"] == "bad-identifier"]
+                self.assertEqual([(i["identifier"], i["frame"]) for i in bad],
+                                 [("bad ID", nodes[index]["frame"])])
+
+    def test_duplicates_on_every_original_toggle_node_remain_reported(self):
+        for index in range(3):
+            with self.subTest(node=index):
+                tree, *nodes = self.tree()
+                nodes[index]["identifier"] = "work.preferences.option"
+                other = el("staticText", "work.preferences.option", "Other text", f=(20, 300, 120, 20))
+                tree["root"]["children"][0]["children"].append(other)
+                duplicates = [i for i in hierarchy_check.check(tree) if i["kind"] == "duplicate-identifier"]
+                self.assertEqual(len(duplicates), 1)
+                self.assertEqual(duplicates[0]["identifier"], "work.preferences.option")
+                expected = [nodes[0]["frame"]]
+                if index:
+                    expected.append(nodes[index]["frame"])
+                self.assertEqual(duplicates[0]["frames"], expected + [other["frame"]])
+
+    def test_positive_shape_does_not_suppress_independent_findings(self):
+        tree, outer, _, _ = self.tree()
+        window = tree["root"]["children"][0]
+        window["children"].extend([
+            el("button", label="Separate action", f=(20, 300, 100, 44)),
+            el("staticText", "bad ID", "Invalid identity", f=(20, 400, 140, 20)),
+            el("staticText", outer["identifier"], "Repeated identity", f=(20, 500, 140, 20)),
+        ])
+        issues = hierarchy_check.check(tree)
+        self.assertEqual(kinds(issues), ["bad-identifier", "duplicate-identifier", "missing-identifier"])
+        self.assertEqual([i["label"] for i in issues if i["kind"] == "missing-identifier"], ["Separate action"])
+
+
 class NativeSheetGrabber(unittest.TestCase):
     """Invented trees exercise the public checker, never captured fixtures."""
 
