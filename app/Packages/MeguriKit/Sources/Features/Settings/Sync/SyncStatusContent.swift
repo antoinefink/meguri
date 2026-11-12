@@ -67,6 +67,11 @@ struct SyncNowButton: View {
             .disabled(collection.syncNowAvailability() != .available || collection.navigation.sheet != nil)
             .help(reason ?? SyncText.value("sync.now.command"))
             .accessibilityIdentifier(identifier)
+            #if DEBUG
+            // Samples on the button's status-driven render: a noncausal observation,
+            // not an on-demand SDK query.
+            .accessibilityValue(DebugCloudDiagnostics.nativeFetchSequenceValue)
+            #endif
         if showsUnavailableReason, let reason { Text(reason).foregroundStyle(.secondary) }
     }
 }

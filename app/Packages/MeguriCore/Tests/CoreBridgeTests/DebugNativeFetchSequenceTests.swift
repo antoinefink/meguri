@@ -15,13 +15,13 @@ struct DebugNativeFetchSequenceTests {
             latest: "boundary=policyStatus action=none failure=offline zone=collection kind=fetch",
             sequence: recorder.formatted)
         #expect(value.hasPrefix("fault{boundary=policyStatus action=none failure=offline zone=collection kind=fetch} "))
-        #expect(value.hasSuffix("nf{l=1 a=1 r=1 o=0|1:C11,1:R}"))
+        #expect(value.hasSuffix("nf{l=1 a=1 r=1 o=0 n=2 e=0|1:C11,1:R}"))
     }
 
     @Test func absentFaultKeepsExplicitNoneAndSequence() {
         let value = DebugCloudDiagnostics.formatNativeFetchSequenceValue(
             latest: nil, sequence: Recorder().formatted)
-        #expect(value == "fault{none} nf{l=0 a=0 r=0 o=0|}")
+        #expect(value == "fault{none} nf{l=0 a=0 r=0 o=0 n=0 e=0|}")
     }
 
     @Test func unrelatedDatabaseDeletionHasItsOwnObservationTag() {
@@ -29,11 +29,11 @@ struct DebugNativeFetchSequenceTests {
         let ordinal = recorder.register(automatic: false, restored: false)
         recorder.record(.database, ordinal: ordinal)
         recorder.record(.unrelatedDatabaseDeletion, ordinal: ordinal)
-        #expect(recorder.formatted == "nf{l=1 a=0 r=0 o=0|1:C00,1:B,1:U}")
+        #expect(recorder.formatted == "nf{l=1 a=0 r=0 o=0 n=3 e=0|1:C00,1:B,1:U}")
     }
 
     @Test func longFaultPreservesLargestSequenceAndLatestTailWithinByteBound() {
-        let recorder = Recorder(lastAllocatedOrdinal: .max - 1)
+        let recorder = Recorder(lastAllocatedOrdinal: .max - 1, appendCount: .max)
         let ordinal = recorder.register(automatic: true, restored: true)
         for _ in 0..<15 {
             recorder.record(.options(reason: .manual, requested: .init(root: true, collection: true),
@@ -45,11 +45,13 @@ struct DebugNativeFetchSequenceTests {
         let sequence = recorder.formatted
         let value = DebugCloudDiagnostics.formatNativeFetchSequenceValue(
             latest: "failure=offline " + String(repeating: "fixedFaultTag ", count: 40), sequence: sequence)
-        #expect(sequence.utf8.count <= 284)
+        #expect(sequence.utf8.count == 306)
+        #expect(sequence.hasPrefix("nf{l=65535 a=1 r=1 o=0 n=18446744073709551615 e=1|"))
         #expect(value.hasPrefix("fault{failure=offline "))
         #expect(value.hasSuffix(sequence))
         #expect(value.hasSuffix(",65535:Ns1100000}"))
         #expect(value.utf8.count == 188 + sequence.utf8.count)
+        #expect(value.utf8.count == 494)
         #expect(value.utf8.count <= 512)
     }
 
@@ -80,16 +82,16 @@ struct DebugNativeFetchSequenceTests {
         recorder.record(.database, ordinal: second)
         recorder.record(.returned, ordinal: first)
         #expect(first == 1 && second == 2)
-        #expect(recorder.formatted == "nf{l=2 a=0 r=1 o=0|1:C10,1:I,2:C01,1:Ws0,2:B,1:R}")
+        #expect(recorder.formatted == "nf{l=2 a=0 r=1 o=0 n=6 e=0|1:C10,1:I,2:C01,1:Ws0,2:B,1:R}")
         // Exactly sixteen newer events evict all six earlier observations.
         for _ in 0..<8 {
             recorder.record(.cancel, ordinal: first)
             recorder.record(.release, ordinal: second)
         }
-        #expect(recorder.formatted == "nf{l=2 a=0 r=1 o=0|" +
+        #expect(recorder.formatted == "nf{l=2 a=0 r=1 o=0 n=22 e=0|" +
             Array(repeating: "1:X,2:L", count: 8).joined(separator: ",") + "}")
         recorder.record(.database, ordinal: first)
-        #expect(recorder.formatted == "nf{l=2 a=0 r=1 o=0|2:L," +
+        #expect(recorder.formatted == "nf{l=2 a=0 r=1 o=0 n=23 e=0|2:L," +
             Array(repeating: "1:X,2:L", count: 7).joined(separator: ",") + ",1:B}")
     }
 
@@ -98,25 +100,73 @@ struct DebugNativeFetchSequenceTests {
         let ordinal = first.register(automatic: true, restored: true)
         first.record(.invoke, ordinal: ordinal)
         let second = Recorder()
-        #expect(second.formatted == "nf{l=0 a=0 r=0 o=0|}")
+        #expect(second.formatted == "nf{l=0 a=0 r=0 o=0 n=0 e=0|}")
         #expect(second.register(automatic: false, restored: false) == 1)
-        #expect(first.formatted == "nf{l=1 a=1 r=1 o=0|1:C11,1:I}")
-        #expect(second.formatted == "nf{l=1 a=0 r=0 o=0|1:C00}")
+        #expect(first.formatted == "nf{l=1 a=1 r=1 o=0 n=2 e=0|1:C11,1:I}")
+        #expect(second.formatted == "nf{l=1 a=0 r=0 o=0 n=1 e=0|1:C00}")
+    }
+
+    @Test func identicalFinalSixteenEventsHaveDistinctObservedAppendCounts() {
+        let recorder = Recorder()
+        let ordinal = recorder.register(automatic: false, restored: false)
+        let cycle: [Event] = [
+            .prepared(scope: .init(), priority: .init()), .invoke,
+            .will(reason: .manual, sameGroup: true),
+            .did(reason: .manual, sameGroup: true), .returned
+        ]
+        for _ in 0..<4 {
+            for event in cycle { recorder.record(event, ordinal: ordinal) }
+        }
+        let first = recorder.formatted
+        for _ in 0..<4 {
+            for event in cycle { recorder.record(event, ordinal: ordinal) }
+        }
+        let second = recorder.formatted
+        #expect(first.hasPrefix("nf{l=1 a=0 r=0 o=0 n=21 e=0|"))
+        #expect(second.hasPrefix("nf{l=1 a=0 r=0 o=0 n=41 e=0|"))
+        #expect(first.split(separator: "|").last == second.split(separator: "|").last)
+        #expect(first.filter { $0 == ":" }.count == 16)
+        #expect(second.filter { $0 == ":" }.count == 16)
+        #expect(first != second)
+    }
+
+    @Test func appendCountSaturatesAndOverflowSticksWithoutAffectingOrdinals() {
+        let recorder = Recorder(appendCount: .max - 2)
+        let ordinal = recorder.register(automatic: false, restored: false)
+        #expect(ordinal == 1)
+        #expect(recorder.formatted ==
+            "nf{l=1 a=0 r=0 o=0 n=18446744073709551614 e=0|1:C00}")
+        recorder.record(.invoke, ordinal: ordinal)
+        #expect(recorder.formatted ==
+            "nf{l=1 a=0 r=0 o=0 n=18446744073709551615 e=0|1:C00,1:I}")
+        recorder.record(.returned, ordinal: ordinal)
+        #expect(recorder.formatted ==
+            "nf{l=1 a=0 r=0 o=0 n=18446744073709551615 e=1|1:C00,1:I,1:R}")
+        for _ in 0..<32 { recorder.record(.database, ordinal: ordinal) }
+        #expect(recorder.formatted ==
+            "nf{l=1 a=0 r=0 o=0 n=18446744073709551615 e=1|" +
+            Array(repeating: "1:B", count: 16).joined(separator: ",") + "}")
+        // Append overflow neither sets ordinal overflow nor prevents allocation.
+        #expect(recorder.register(automatic: true, restored: true) == 2)
+        #expect(recorder.formatted ==
+            "nf{l=2 a=1 r=1 o=0 n=18446744073709551615 e=1|" +
+            Array(repeating: "1:B", count: 15).joined(separator: ",") + ",2:C11}")
     }
 
     @Test func registrationSaturatesWithoutReusingOrdinalsAndOverflowSticks() {
         let recorder = Recorder(lastAllocatedOrdinal: .max - 2)
         #expect(recorder.register(automatic: false, restored: true) == 65534)
         #expect(recorder.register(automatic: true, restored: false) == 65535)
-        #expect(recorder.formatted == "nf{l=65535 a=1 r=0 o=0|65534:C01,65535:C10}")
+        #expect(recorder.formatted == "nf{l=65535 a=1 r=0 o=0 n=2 e=0|65534:C01,65535:C10}")
         for _ in 0..<32 {
             #expect(recorder.register(automatic: false, restored: true) == 0)
         }
         recorder.record(.returned, ordinal: 65535)
-        #expect(recorder.formatted == "nf{l=0 a=0 r=1 o=1|" +
+        // Ordinal overflow leaves the independently counted appends below saturation.
+        #expect(recorder.formatted == "nf{l=0 a=0 r=1 o=1 n=35 e=0|" +
             Array(repeating: "0:C01", count: 15).joined(separator: ",") + ",65535:R}")
         #expect(recorder.register(automatic: true, restored: false) == 0)
-        #expect(recorder.formatted.hasPrefix("nf{l=0 a=1 r=0 o=1|"))
+        #expect(recorder.formatted.hasPrefix("nf{l=0 a=1 r=0 o=1 n=36 e=0|"))
     }
 
     @Test func observationsKeepGenuineFieldsSeparateWithoutInferringCompletion() {
@@ -132,7 +182,7 @@ struct DebugNativeFetchSequenceTests {
         recorder.record(.fetchedZones(root: false, collection: false, other: false), ordinal: ordinal)
         recorder.record(.fetchedZones(root: true, collection: true, other: true), ordinal: ordinal)
         recorder.record(.did(reason: .manual, sameGroup: false), ordinal: ordinal)
-        #expect(recorder.formatted == "nf{l=1 a=0 r=0 o=0|1:C00,1:P1001,1:Nm0100001,1:Ns0010010,1:F000,1:F111,1:Dm0}")
+        #expect(recorder.formatted == "nf{l=1 a=0 r=0 o=0 n=7 e=0|1:C00,1:P1001,1:Nm0100001,1:Ns0010010,1:F000,1:F111,1:Dm0}")
     }
 
     @Test func everyClosedEventKindAndFieldCombinationFitsWorstCaseTail() {
@@ -168,9 +218,11 @@ struct DebugNativeFetchSequenceTests {
             }
         }
         for event in events {
-            let recorder = Recorder(lastAllocatedOrdinal: .max - 1)
+            let recorder = Recorder(lastAllocatedOrdinal: .max - 1, appendCount: .max)
             let ordinal = recorder.register(automatic: true, restored: true)
             for _ in 0..<16 { recorder.record(event, ordinal: ordinal) }
+            #expect(recorder.formatted.hasPrefix("nf{l=65535 a=1 r=1 o=0 n=18446744073709551615 e=1|"))
+            #expect(recorder.formatted.utf8.count <= 306)
             #expect(recorder.formatted.utf8.count <= 512)
             #expect(recorder.formatted.filter { $0 == ":" }.count == 16)
         }

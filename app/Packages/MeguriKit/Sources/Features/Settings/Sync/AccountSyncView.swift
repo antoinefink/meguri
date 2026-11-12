@@ -109,9 +109,6 @@ public struct AccountSyncView: View {
         .formStyle(.grouped)
         .navigationTitle(SyncText.value("sync.settings.section"))
         .accessibilityIdentifier("settings.accountSync.content")
-        #if DEBUG
-        .accessibilityValue(DebugCloudDiagnostics.nativeFetchSequenceValue)
-        #endif
     }
     private var controlReason: String? {
         controls.bindingUsable == false ? "sync.now.unavailable.notConnected" : nil

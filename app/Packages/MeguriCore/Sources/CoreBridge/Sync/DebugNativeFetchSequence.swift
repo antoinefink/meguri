@@ -9,7 +9,7 @@ extension DebugCloudDiagnostics {
     }
 
     // Internal composition seam, not a sanitizer. Production uses only the two curated sources above.
-    // Cap only the fault fragment: 180 + 8 wrapper bytes + <=284 sequence bytes stays below 512.
+    // Cap only the fault fragment: 180 + 8 wrapper bytes + <=306 sequence bytes = 494 < 512.
     static func formatNativeFetchSequenceValue(latest: String?, sequence: String) -> String {
         var fault = ""
         for scalar in (latest ?? "none").unicodeScalars {
@@ -67,7 +67,12 @@ extension DebugCloudDiagnostics {
     /// This is neither current-owner nor causal completion, convergence,
     /// selected-leg or signed proof. Group sameness observes object identity only;
     /// it says nothing about SDK group copying. No caller strings or CK objects.
-    /// Format: nf{l=latest a=automatic r=restored o=overflow|ordinal:tag,...}.
+    /// n counts every recorder append, including configuration, saturating at UInt64.max;
+    /// the next attempted append sets sticky e, independently of ordinal overflow o.
+    /// The count is observed at render time, not on-demand freshness or causal SDK ordering.
+    /// SyncNowButton samples on status-driven render; an identical count does not prove
+    /// a stalled native engine if the render did not refresh. Repeated tails can alias.
+    /// Format: nf{l=latest a=automatic r=restored o=overflow n=count e=countOverflow|ordinal:tag,...}.
     /// C=configure (automatic/restored), P=prepared (scope/priority), I=invoke,
     /// R=terminal return (including throws), X=cancel entry, L=release entry,
     /// W/D=will/did (m=manual,s=scheduled; group object same), B=database,
@@ -83,20 +88,27 @@ extension DebugCloudDiagnostics {
         }
         private struct State: Sendable {
             var lastAllocated: UInt16
+            var appendCount: UInt64
+            var appendOverflow = false
             var latest: UInt16 = 0
             var automatic = false
             var restored = false
             var overflow = false
             var tail: [Entry] = []
             mutating func append(_ event: NativeFetchEvent, ordinal: UInt16) {
+                if appendCount == .max {
+                    appendOverflow = true
+                } else {
+                    appendCount += 1
+                }
                 if tail.count == 16 { tail.removeFirst() }
                 tail.append(Entry(ordinal: ordinal, event: event))
             }
         }
         private let state: Mutex<State>
-        // Fresh recorder and near-max scalar seed for focused tests only.
-        init(lastAllocatedOrdinal: UInt16 = 0) {
-            state = Mutex(State(lastAllocated: lastAllocatedOrdinal))
+        // Fresh recorder and near-max scalar seeds for focused tests only.
+        init(lastAllocatedOrdinal: UInt16 = 0, appendCount: UInt64 = 0) {
+            state = Mutex(State(lastAllocated: lastAllocatedOrdinal, appendCount: appendCount))
         }
         func register(automatic: Bool, restored: Bool) -> UInt16 {
             state.withLock { state in
@@ -119,11 +131,11 @@ extension DebugCloudDiagnostics {
             state.withLock { $0.append(event, ordinal: ordinal) }
         }
         // Longest entry: 5 ordinal digits + ':' + 9 tag bytes = 15.
-        // Header <= 28 bytes + 16 entries * 16 bytes + '}' < 512 UTF8 bytes.
+        // Header <= 50 bytes + 16 entries * 15 bytes + 15 commas + '}' = 306 UTF8 bytes.
         var formatted: String {
             state.withLock { state in
                 let tail = state.tail.map { "\($0.ordinal):\($0.event.tag)" }.joined(separator: ",")
-                return "nf{l=\(state.latest) a=\(state.automatic ? 1 : 0) r=\(state.restored ? 1 : 0) o=\(state.overflow ? 1 : 0)|\(tail)}"
+                return "nf{l=\(state.latest) a=\(state.automatic ? 1 : 0) r=\(state.restored ? 1 : 0) o=\(state.overflow ? 1 : 0) n=\(state.appendCount) e=\(state.appendOverflow ? 1 : 0)|\(tail)}"
             }
         }
     }
