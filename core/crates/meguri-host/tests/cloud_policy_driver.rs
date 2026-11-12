@@ -2033,6 +2033,18 @@ fn first_manual_capture_cannot_send_after_changed_or_deleted_root() {
             runtime
                 .adapter_fetched(&rig.sdk, "meguri-root", &[], &["active".into()])
                 .unwrap();
+            // Root deletion queues a known loss. V2.2 requires a fresh account
+            // read before the account lane accepts that loss and isolates it.
+            let identity_read = runtime.adapter_begin_identity_read(false, None).unwrap();
+            assert!(
+                runtime
+                    .adapter_complete_identity_read(
+                        identity_read,
+                        IdentityStatus::Available(OpaqueBytes(b"synthetic-account-A".to_vec())),
+                    )
+                    .unwrap()
+            );
+            runtime.adapter_accept_zone_losses(identity_read, &collection).unwrap();
         } else {
             let mut changed = rig.active.clone();
             let mut active = meguri_sync::cloud::control_codec::Active::decode(&changed.envelope).unwrap();
@@ -2248,6 +2260,16 @@ fn native_authority_retire_isolation_precedes_held_readback_and_survives_failure
             .unwrap()
             .unwrap();
         assert!(followup.is_active());
+        // V2.2 requires a read started after this loss; the event is not a read.
+        let identity_read = runtime.adapter_begin_identity_read(false, None).unwrap();
+        assert!(
+            runtime
+                .adapter_complete_identity_read(
+                    identity_read,
+                    IdentityStatus::Available(OpaqueBytes(b"synthetic-account-A".to_vec())),
+                )
+                .unwrap()
+        );
         runtime.validate_sdk(&rig.sdk).unwrap();
         runtime.validate_native_sdk_for_testing(&rig.sdk).unwrap();
         if fail_readback {
