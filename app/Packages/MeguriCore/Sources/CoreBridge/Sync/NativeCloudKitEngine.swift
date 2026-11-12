@@ -556,8 +556,17 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
             DebugCloudDiagnostics.nativeFetchSequence.record(.returned, ordinal: diagnosticOrdinal)
             if debugFetchGroup === options.operationGroup { debugFetchGroup = nil }
         }
-        #endif
+        do {
+            try await sdk.fetchChanges(options)
+            DebugCloudDiagnostics.nativeFetchSequence.record(.outcome(.success), ordinal: diagnosticOrdinal)
+        } catch {
+            let outcome = DebugCloudDiagnostics.NativeFetchOutcome.classifyFailure(error)
+            DebugCloudDiagnostics.nativeFetchSequence.record(.outcome(outcome), ordinal: diagnosticOrdinal)
+            throw error
+        }
+        #else
         try await sdk.fetchChanges(options)
+        #endif
     }
     func sendChanges(zones: [String]) async throws {
         let prepared = try await prepareSend(zones: zones)

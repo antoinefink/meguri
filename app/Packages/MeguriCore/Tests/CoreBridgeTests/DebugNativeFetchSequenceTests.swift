@@ -1,11 +1,96 @@
 #if DEBUG
 import Testing
+#if canImport(CloudKit)
+import CloudKit
+import Foundation
+#endif
 @testable import CoreBridge
 
 struct DebugNativeFetchSequenceTests {
     private typealias Recorder = DebugCloudDiagnostics.NativeFetchSequence
     private typealias Event = DebugCloudDiagnostics.NativeFetchEvent
     private typealias Inclusion = DebugCloudDiagnostics.FetchInclusion
+    private typealias Outcome = DebugCloudDiagnostics.NativeFetchOutcome
+    private static let failureTags: [(CloudEngineErrorCode, String)] = [
+        (.notAuthenticated, "Oauth"), (.accountTemporarilyUnavailable, "Oaccount"),
+        (.networkFailure, "OnetFail"), (.networkUnavailable, "OnetDown"),
+        (.requestRateLimited, "Orate"), (.serviceUnavailable, "Oservice"),
+        (.zoneBusy, "OzoneBusy"), (.limitExceeded, "Olimit"),
+        (.batchRequestFailed, "Obatch"), (.unknownItem, "Ounknown"),
+        (.zoneNotFound, "OzoneGone"), (.encryptedDataReset, "Oreset"),
+        (.userDeletedZone, "Odeleted"), (.serverRecordChanged, "Oconflict"), (.other, "Oother")
+    ]
+
+    @Test func originalCallOutcomesKeepFixedTagsSeparateFromTerminalReturn() {
+        let cases: [(Outcome, String)] = [(.success, "Osuccess"), (.cancelled, "Ocancel")] +
+            Self.failureTags.map { (.failure($0.0), $0.1) }
+        #expect(Set(cases.map { $0.1 }).count == cases.count)
+        for (outcome, tag) in cases {
+            let recorder = Recorder()
+            let ordinal = recorder.register(automatic: false, restored: false)
+            recorder.record(.invoke, ordinal: ordinal)
+            recorder.record(.outcome(outcome), ordinal: ordinal)
+            recorder.record(.returned, ordinal: ordinal)
+            #expect(recorder.formatted == "nf{l=1 a=0 r=0 o=0 n=4 e=0|1:C00,1:I,1:\(tag),1:R}")
+        }
+    }
+
+    #if canImport(CloudKit)
+    @Test func originalCallFailureClassifierUsesExistingSafeCodes() {
+        let nativeCodes: [CKError.Code] = [.notAuthenticated, .accountTemporarilyUnavailable,
+            .networkFailure, .networkUnavailable, .requestRateLimited, .serviceUnavailable,
+            .zoneBusy, .limitExceeded, .batchRequestFailed, .unknownItem, .zoneNotFound,
+            .zoneNotFound, .userDeletedZone, .serverRecordChanged, .permissionFailure]
+        let marker = "arbitrary-error-text-must-not-appear"
+        for (nativeCode, expected) in zip(nativeCodes, Self.failureTags) {
+            var info: [String: Any] = [NSLocalizedDescriptionKey: marker,
+                NSLocalizedFailureReasonErrorKey: marker, "arbitrary": marker]
+            if expected.0 == .encryptedDataReset { info[CKErrorUserDidResetEncryptedDataKey] = true }
+            let error = CKError(nativeCode, userInfo: info)
+            let outcome = Outcome.classifyFailure(error)
+            #expect(outcome == .failure(expected.0))
+            let recorder = Recorder()
+            let ordinal = recorder.register(automatic: false, restored: false)
+            recorder.record(.outcome(outcome), ordinal: ordinal)
+            let value = DebugCloudDiagnostics.formatNativeFetchSequenceValue(latest: nil, sequence: recorder.formatted)
+            #expect(value == "fault{none} nf{l=1 a=0 r=0 o=0 n=2 e=0|1:C00,1:\(expected.1)}")
+            #expect(!value.contains(marker))
+        }
+        // SDK operationCancelled is not Swift CancellationError; the existing conversion yields other.
+        #expect(Outcome.classifyFailure(CKError(.operationCancelled)) == .failure(.other))
+    }
+
+    @Test func cancellationAndArbitraryErrorTextStayContentFreeWithinBound() {
+        struct TextError: LocalizedError, CustomStringConvertible {
+            let marker: String
+            var errorDescription: String? { marker }
+            var description: String { marker }
+        }
+        let marker = "arbitrary-private-marker-" + String(repeating: "🧪", count: 1024)
+        let cases: [(any Error, Outcome, String)] = [
+            (CancellationError(), .cancelled, "Ocancel"),
+            (TextError(marker: marker), .failure(.other), "Oother"),
+            (NSError(domain: marker, code: 12345, userInfo: [NSLocalizedDescriptionKey: marker]),
+                .failure(.other), "Oother")
+        ]
+        for (error, expected, tag) in cases {
+            let outcome = Outcome.classifyFailure(error)
+            #expect(outcome == expected)
+            let recorder = Recorder(lastAllocatedOrdinal: .max - 1, appendCount: .max)
+            let ordinal = recorder.register(automatic: true, restored: true)
+            for _ in 0..<32 { recorder.record(.outcome(outcome), ordinal: ordinal) }
+            recorder.record(.returned, ordinal: ordinal)
+            let sequence = recorder.formatted
+            #expect(sequence == "nf{l=65535 a=1 r=1 o=0 n=18446744073709551615 e=1|" +
+                Array(repeating: "65535:\(tag)", count: 15).joined(separator: ",") + ",65535:R}")
+            let value = DebugCloudDiagnostics.formatNativeFetchSequenceValue(latest: nil, sequence: sequence)
+            #expect(sequence.utf8.count <= 306)
+            #expect(value.utf8.count <= 512)
+            #expect(!value.contains("arbitrary-private-marker"))
+            #expect(!value.contains("🧪"))
+        }
+    }
+    #endif
 
     @Test func curatedFailureAppearsBeforeCompleteSequence() {
         let recorder = Recorder()
@@ -192,6 +277,8 @@ struct DebugNativeFetchSequenceTests {
         }
         var events: [Event] = [.invoke, .returned, .cancel, .release, .database, .unrelatedDatabaseDeletion,
             .willZone(.root), .willZone(.collection), .willZone(.other)]
+        events += [.outcome(.success), .outcome(.cancelled)]
+        events += Self.failureTags.map { .outcome(.failure($0.0)) }
         for automatic in flags {
             for restored in flags { events.append(.configured(automatic: automatic, restored: restored)) }
         }

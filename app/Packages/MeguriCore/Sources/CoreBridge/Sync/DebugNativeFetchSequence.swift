@@ -25,10 +25,48 @@ extension DebugCloudDiagnostics {
         fileprivate var tag: String { "\(root ? 1 : 0)\(collection ? 1 : 0)" }
     }
     enum FetchReason: String, CaseIterable, Sendable { case manual = "m", scheduled = "s" }
+    enum NativeFetchOutcome: Equatable, Sendable {
+        case success, cancelled
+        case failure(CloudEngineErrorCode)
+
+        #if canImport(CloudKit)
+        // Classify the original throw before any network-failure wrapping. Retain no error.
+        static func classifyFailure(_ error: any Error) -> Self {
+            if error is CancellationError { return .cancelled }
+            return .failure(NativeCloudKitSendError.code(error))
+        }
+        #endif
+
+        fileprivate var tag: String {
+            switch self {
+            case .success: "Osuccess"
+            case .cancelled: "Ocancel"
+            case .failure(let code):
+                switch code {
+                case .notAuthenticated: "Oauth"
+                case .accountTemporarilyUnavailable: "Oaccount"
+                case .networkFailure: "OnetFail"
+                case .networkUnavailable: "OnetDown"
+                case .requestRateLimited: "Orate"
+                case .serviceUnavailable: "Oservice"
+                case .zoneBusy: "OzoneBusy"
+                case .limitExceeded: "Olimit"
+                case .batchRequestFailed: "Obatch"
+                case .unknownItem: "Ounknown"
+                case .zoneNotFound: "OzoneGone"
+                case .encryptedDataReset: "Oreset"
+                case .userDeletedZone: "Odeleted"
+                case .serverRecordChanged: "Oconflict"
+                case .other: "Oother"
+                }
+            }
+        }
+    }
     enum NativeFetchEvent: Equatable, Sendable {
         case configured(automatic: Bool, restored: Bool)
         case prepared(scope: FetchInclusion, priority: FetchInclusion)
         case invoke, returned, cancel, release
+        case outcome(NativeFetchOutcome)
         case will(reason: FetchReason, sameGroup: Bool)
         case did(reason: FetchReason, sameGroup: Bool)
         case database
@@ -45,6 +83,7 @@ extension DebugCloudDiagnostics {
             case .prepared(let scope, let priority): "P\(scope.tag)\(priority.tag)"
             case .invoke: "I"
             case .returned: "R"
+            case .outcome(let outcome): outcome.tag
             case .cancel: "X"
             case .release: "L"
             case .will(let reason, let same): "W\(reason.rawValue)\(same ? 1 : 0)"
@@ -75,6 +114,8 @@ extension DebugCloudDiagnostics {
     /// Format: nf{l=latest a=automatic r=restored o=overflow n=count e=countOverflow|ordinal:tag,...}.
     /// C=configure (automatic/restored), P=prepared (scope/priority), I=invoke,
     /// R=terminal return (including throws), X=cancel entry, L=release entry,
+    /// O=original SDK call outcome (success, CancellationError, or fixed error-code tag),
+    /// observed before R; success says only that fetchChanges returned without throwing.
     /// W/D=will/did (m=manual,s=scheduled; group object same), B=database,
     /// U=nonempty database deletions accepted as unrelated after validation,
     /// Z=will-zone (r=root,c=registered collection,o=other), F=fetched batch
