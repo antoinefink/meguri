@@ -22,7 +22,7 @@ Rust `011032Z-69967` passes 47 of 48 cases. The remaining new test compares full
 - `core-test/20261112T011741Z-75744`: 48 tests pass in isolation. This covers the native absence, cleanup-listing and adapter owners, including every deletion cause, rollback, cursor blocking, replay, reopen, stale SDKs and both inventory orders.
 - `swift-test/20261112T011035Z-70268`: 32 tests pass, including native classification, actual Core/FFI delivery, cancellation/drain order and the interval registry.
 - `swift-test/20261112T011322Z-72627`: both original-result-held review/resume variants pass with the real Service.
-- Static `011037Z-70934` and similarity `011036Z-70724` pass for the production patch. The final test-only correction awaits refreshed receipts.
+- Refreshed static `012125Z-76745` passes three checks. Similarity `012122Z-76414` passes the 14 source files in scope after the final test correction. The documentation input is excluded from that scan.
 
 The failure receipts and filtered exports remain retained. No assertion, timeout or privacy limit is relaxed. No normalization is used in the persistence assertion.
 
@@ -31,3 +31,13 @@ The failure receipts and filtered exports remain retained. No assertion, timeout
 This implements only K12.5's other-epoch fetched-deletion row. Full root, bound and media-zone loss translation remains open, including cause-specific isolation, fresh account checks, bound-loss reads, send/reset mappings, cache cleanup and signed SDK evidence. Creation discovery and other P24/Q11 obligations remain separate. No spec row is closed here. The required integration gate remains pending at the original base.
 
 Normal device arrival and review evidence, original missing media and hierarchy failures remain recorded in `cloud-native-zone-metadata-20261112.md` and `cloud-account-projection-20261112.md`. No account values or actual connection settings enter this log.
+
+## Normal signed previews
+
+Mac `build-app/20261112T012225Z-77182` passes at source `a4b63b41`. Computer use opens that exact standalone product and inspects its native window. The real review deck loads with counts `[18, 0, 17]`. The window menu enables native interaction; this is no WebKit visibility proof or design acceptance.
+
+The older preview remains running after native Quit. A path-verified TERM stops only that preview; no other process is targeted. After reopening, host inspection finds one Meguri app process, at the intended product path. The delay in normal Quit is not diagnosed or declared fixed.
+
+Phone `run/20261112T012522Z-78795` passes normal-launch verification at the same source. Retained drive `012646Z-80225` completes all eight actions with verified continuity. Its 45 hierarchy findings keep the overall receipt failed. The prior synthetic peer change remains visible. The binding is active, usable and account-matched; pending, in-flight and waiting incoming counts are zero. No new peer edit is made, so zero new record deliveries is expected. The latest finite fault remains cancellation; this observation shows no new tracking fault and establishes no cold-discovery guarantee.
+
+The full integration gate, device accessibility repair and remaining recovery work are still required. These focused and normal-app observations do not replace them.
