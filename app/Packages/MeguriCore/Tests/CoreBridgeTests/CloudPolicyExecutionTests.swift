@@ -1741,7 +1741,9 @@ extension EventTests {
             try await withNativePolicyFixture { f in
                 let (policy, executor) = try await nativePolicy(f)
                 try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: executor)
-                foreign = try #require(try policyCommands(try await policy.input(.foreground)).first { if case .requestFetch = $0.action { true } else { false } })
+                let candidate: CloudPolicyCommand? = try policyCommands(try await policy.input(.foreground)).first { if case .requestFetch = $0.action { true } else { false } }
+                let command: CloudPolicyCommand = try #require(candidate)
+                foreign = command
             }
         }
         try await withNativePolicyFixture { f in

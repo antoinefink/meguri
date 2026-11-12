@@ -24,3 +24,18 @@ MG remains failed for a compiler warning at test line1744. The optional storage
 context makes this require expression redundant. Bind its optional input and
 required value before assignment; keep the required foreign-command check.
 No broad pass claimed. Remaining app errors stay open.
+
+
+## Final checks for this repair
+
+- `cleanroom/20261112T121508Z-15706`: no P0/P1 or P2 finding in the typed require fix.
+- `swift-test/20261112T121513Z-16106`: PASS3 groups,14 cases, no compiler warning.
+- `swift-test/20261112T121622Z-18269`: FAIL;8 groups pass, the existing five-case
+  group remains red. Account cases1/2 now retain only A cancellation; B stale
+  refusal is qualified. Deadline/replacement/reopen failures remain enabled.
+- `similarity/20261112T121626Z-19417`: PASS for all8 changed Swift files.
+
+The earlier Core91597 receipt stays failed. No test limit, required check,
+assertion, originalGuardRefusal rule or private-data guard was disabled. The
+package AGENTS note records the compiler trap. These checks close B's repair,
+not the full unit or integration batch. Base1416 remains in force for that gate.
