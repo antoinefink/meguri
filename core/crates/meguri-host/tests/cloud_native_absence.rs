@@ -3086,7 +3086,7 @@ fn fetched_other_epoch_deletions_remove_due_rows_for_every_cause_and_survive_reo
             .adapter_fetched_collection_zone_deletions(&rig.sdk, &[deletion.zone.clone(), deletion.zone.clone()])
             .unwrap();
         runtime
-            .adapter_fetched_collection_zone_deletions(&rig.sdk, &[deletion.zone.clone()])
+            .adapter_fetched_collection_zone_deletions(&rig.sdk, std::slice::from_ref(&deletion.zone))
             .unwrap();
         observed_zones.push(deletion.zone.clone());
         let after = runtime.publication_control_for_testing().unwrap();
@@ -3200,7 +3200,7 @@ fn fetched_other_epoch_removed_zone_rejects_stale_listing_then_tracks_recreated_
     assert_eq!(&deletion.zone, zone);
     assert!(deletion.removed == Some(RemovalCause::Deleted));
     runtime
-        .adapter_fetched_collection_zone_deletions(&rig.sdk, &[deletion.zone.clone()])
+        .adapter_fetched_collection_zone_deletions(&rig.sdk, std::slice::from_ref(&deletion.zone))
         .unwrap();
     let mut remaining = retained.zones.clone();
     assert!(remaining.remove(zone).is_some());
