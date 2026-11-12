@@ -96,7 +96,7 @@ enum NativeCloudMediaRecords {
         let native = error as NSError
         let result: CloudMediaReadResult
         if native.domain == CKErrorDomain, native.code == CKError.Code.unknownItem.rawValue { result = .unknownItem }
-        else if native.domain == CKErrorDomain, native.code == CKError.Code.zoneNotFound.rawValue { result = .zoneMissing }
+        else if let loss = NativeCloudOwnRecords.zoneLoss(error, zone: "meguri-media") { result = loss.cause == .deleted ? .zoneMissing : .zoneLoss(loss.cause) }
         else { result = .failed(code: native.domain == CKErrorDomain ? Int64(native.code) : 0) }
         return .init(result: result, retryAfterMilliseconds: NativeCloudOwnRecords.retryDuration(error))
     }

@@ -117,12 +117,14 @@ public enum CloudOwnOperation: Sendable {
     }
 }
 public enum CloudPublicationResult: Sendable {
+    case zoneLosses([CloudZoneLoss])
     case zonesCreated, saved(CloudControlRecord), conflict(CloudControlRecord)
     case read(CloudControlRead), failed(retryAfterMilliseconds: Int64?), notStarted
     /// Server duration only. Rust validates the reply and persists its deadline.
     case retryAfter(durationMilliseconds: UInt64)
     var raw: MeguriCoreBindings.CloudPublicationResult {
         switch self {
+        case .zoneLosses(let losses): .zoneLosses(losses: losses.map(\.raw))
         case .zonesCreated: .zonesCreated
         case .saved(let r): .saved(record: r.raw)
         case .conflict(let r): .conflict(record: r.raw)

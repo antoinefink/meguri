@@ -520,6 +520,7 @@ pub enum CloudOwnOperation {
 }
 #[derive(Clone, uniffi::Enum)]
 pub enum CloudPublicationResult {
+    ZoneLosses { losses: Vec<crate::sync::CloudZoneLoss> },
     ZonesCreated,
     Saved { record: CloudControlRecord },
     Conflict { record: CloudControlRecord },
@@ -531,6 +532,9 @@ pub enum CloudPublicationResult {
 impl From<CloudPublicationResult> for p::OwnResult {
     fn from(v: CloudPublicationResult) -> Self {
         match v {
+            CloudPublicationResult::ZoneLosses { losses } => {
+                Self::ZoneLosses(losses.into_iter().map(Into::into).collect())
+            }
             CloudPublicationResult::ZonesCreated => Self::ZonesCreated,
             CloudPublicationResult::Saved { record } => Self::Saved(record.into()),
             CloudPublicationResult::Conflict { record } => Self::Conflict(record.into()),

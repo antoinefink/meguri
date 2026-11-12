@@ -25,6 +25,69 @@ private final class ZoneDeletionHandlers: Sendable {
     func deleted(_ zone: CKRecordZone.ID, _ result: Result<Void, any Error>) { perZone.withLock { $0(zone, result) } }
 }
 struct NativeCloudZoneDeletionTransportTests {
+    @Test func terminalForeignOwnerCannotHideBehindSuccessfulDeletionCallback() async throws {
+        let queue = NativeOwnCapturingQueue(), terminal = ZoneDeletionTerminalCapture()
+        let prepared = try NativeCloudOwnTransport(queue: queue,
+            zoneDeletionTerminalHandlerInstalled: { terminal.installed($0) }).prepare(.deleteZones(.init(zones: ["c-first"])))
+        #expect(prepared.enqueue())
+        let operation = try #require(queue.operations.withLock { $0.first as? CKModifyRecordZonesOperation })
+        let handlers = try ZoneDeletionHandlers(operation)
+        handlers.deleted(NativeCloudOwnRecords.zone("c-first"), .success(()))
+        let foreign = CKRecordZone.ID(zoneName: "c-first", ownerName: "synthetic-foreign-owner")
+        try terminal.complete(.failure(CKError(.partialFailure, userInfo: [CKPartialErrorsByItemIDKey: [foreign: CKError(.zoneNotFound)]])))
+        do { _ = try await prepared.reply(); Issue.record("Foreign terminal ID admitted a deletion result") }
+        catch { #expect(error is NativeCloudKitFailure) }
+    }
+
+    @Test func singletonTerminalAbsenceRetainsExactIssuedRowCause() async throws {
+        for reset in [false, true] {
+            let queue = NativeOwnCapturingQueue(), terminal = ZoneDeletionTerminalCapture()
+            let prepared = try NativeCloudOwnTransport(queue: queue,
+                zoneDeletionTerminalHandlerInstalled: { terminal.installed($0) })
+                .prepare(.deleteZones(.init(zones: ["c-first"])))
+            #expect(prepared.enqueue())
+            try terminal.complete(.failure(CKError(.zoneNotFound,
+                userInfo: [CKErrorUserDidResetEncryptedDataKey: NSNumber(value: reset)])))
+            guard case .deletedZones(let reply) = try await prepared.reply() else { throw CloudOwnTransportFailure.unexpectedReply }
+            #expect(reply.results == [.init(zone: "c-first", failure: .init(code: 26, encryptedDataReset: reset))])
+            #expect(reply.terminal?.code == 26 && reply.terminal?.encryptedDataReset == reset)
+        }
+    }
+    @Test(arguments: [CKError.Code.unknownItem, .networkFailure, .userDeletedZone])
+    func singletonTerminalFailureRetainsOriginalNumericCause(code: CKError.Code) async throws {
+        let terminal = ZoneDeletionTerminalCapture()
+        let prepared = try NativeCloudOwnTransport(queue: NativeOwnCapturingQueue(),
+            zoneDeletionTerminalHandlerInstalled: { terminal.installed($0) }).prepare(.deleteZones(.init(zones: ["c-first"])))
+        #expect(prepared.enqueue())
+        try terminal.complete(.failure(CKError(code)))
+        guard case .deletedZones(let reply) = try await prepared.reply() else { throw CloudOwnTransportFailure.unexpectedReply }
+        #expect(reply.results == [.init(zone: "c-first", failure: .init(code: Int64(code.rawValue)))])
+        #expect(reply.terminal?.code == Int64(code.rawValue))
+    }
+
+    @Test func ambiguousTerminalAbsenceDoesNotGuessMissingRows() async throws {
+        let terminal = ZoneDeletionTerminalCapture()
+        let prepared = try NativeCloudOwnTransport(queue: NativeOwnCapturingQueue(),
+            zoneDeletionTerminalHandlerInstalled: { terminal.installed($0) })
+            .prepare(.deleteZones(.init(zones: ["c-first", "c-second"])))
+        #expect(prepared.enqueue())
+        try terminal.complete(.failure(CKError(.zoneNotFound)))
+        guard case .deletedZones(let reply) = try await prepared.reply() else { throw CloudOwnTransportFailure.unexpectedReply }
+        #expect(reply.results.allSatisfy { $0.failure != nil && $0.failure?.code == nil })
+        #expect(reply.terminal?.code == 26)
+    }
+    @Test func accountWideTerminalResetRetainsAllExactIssuedAbsenceRows() async throws {
+        let terminal = ZoneDeletionTerminalCapture()
+        let names = ["c-first", "c-second"]
+        let prepared = try NativeCloudOwnTransport(queue: NativeOwnCapturingQueue(),
+            zoneDeletionTerminalHandlerInstalled: { terminal.installed($0) }).prepare(.deleteZones(.init(zones: names)))
+        #expect(prepared.enqueue())
+        try terminal.complete(.failure(CKError(.zoneNotFound,
+            userInfo: [CKErrorUserDidResetEncryptedDataKey: NSNumber(value: true)])))
+        guard case .deletedZones(let reply) = try await prepared.reply() else { throw CloudOwnTransportFailure.unexpectedReply }
+        #expect(reply.results == names.map { .init(zone: $0, failure: .init(code: 26, encryptedDataReset: true)) })
+    }
+
     @Test func oneNativeBatchPreservesOriginalPerZoneTerminalAndEncryptedResetErrors() async throws {
         let zones = ["c-first", "c-second", "c-third"]
         let queue = NativeOwnCapturingQueue()

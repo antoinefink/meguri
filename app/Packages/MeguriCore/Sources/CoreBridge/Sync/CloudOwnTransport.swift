@@ -374,6 +374,7 @@ public actor CloudOwnExecutor {
     private let core: CoreCloudConnectionService
     private let transport: any CloudOwnTransport
     private let observe: (@Sendable (CloudOwnObservation) -> Void)?
+    private let freshAccountRead: (@Sendable () async throws -> Void)?
     private var active: (id: UUID, task: Task<CloudConnectionProgress, any Error>)?
     private var prepared: (any CloudPreparedOwnOperation)?
     private var previewTask: Task<CloudConnectionPreviewWork, any Error>?
@@ -383,8 +384,9 @@ public actor CloudOwnExecutor {
     private var debugWorkAttempt: UUID?
     #endif
     public init(core: CoreCloudConnectionService, transport: any CloudOwnTransport,
-                observe: (@Sendable (CloudOwnObservation) -> Void)? = nil) {
-        self.core = core; self.transport = transport; self.observe = observe
+                observe: (@Sendable (CloudOwnObservation) -> Void)? = nil,
+                freshAccountRead: (@Sendable () async throws -> Void)? = nil) {
+        self.core = core; self.transport = transport; self.observe = observe; self.freshAccountRead = freshAccountRead
     }
 
     public func runNext(admission: CloudOwnWorkAdmission? = nil,
@@ -629,6 +631,16 @@ public actor CloudOwnExecutor {
                 }
                 #endif
                 observation?(.init(metadata: metadata, identity: identity, phase: .replied(result), publicationEvent: event))
+                let needsFreshRead: Bool
+                switch result {
+                case .zoneLosses, .read(.missing), .read(.zoneMissing): needsFreshRead = true
+                default: needsFreshRead = false
+                }
+                if needsFreshRead {
+                    guard let freshAccountRead else { throw BridgeError.unavailable(reason: "Fresh cloud account reader unavailable") }
+                    try await freshAccountRead()
+                    try checkStopping(); try Task.checkCancellation(); try admission?.check()
+                }
                 try await core.publicationResult(request, result: result)
                 observation?(.init(metadata: metadata, identity: identity, phase: .committed, publicationEvent: event))
             } catch {

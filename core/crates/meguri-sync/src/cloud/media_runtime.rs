@@ -233,7 +233,11 @@ impl Runtime {
     ) -> Result<T, RuntimeError> {
         let mut s = self.state();
         Self::check_media_recovery_locked(&s, a)?;
-        if s.adapter.paused {
+        if s.adapter.paused
+            || s.media.zone_missing
+            || s.adapter.known_loss.is_some()
+            || s.adapter.durable.collection_loss.is_some()
+        {
             return Err(RuntimeError::StaleIncarnation);
         }
         with_tracking_access(|| work(s.store.as_mut().ok_or(Error::Database)?)).map_err(Into::into)
@@ -255,17 +259,47 @@ impl Runtime {
         let _ = self.adapter_now();
         let mut s = self.state();
         Self::check_media_locked(&s, a)?;
-        let changed = with_tracking_access(|| {
-            let changed = s.store.as_mut().ok_or(Error::Database)?.put_media(a.binding, ledger);
-            #[cfg(feature = "test-hooks")]
-            let changed = changed.inspect_err(|error| {
-                let (kind, variant) = RuntimeError::Tracking(*error).refusal_tags_for_testing();
-                eprintln!("cloudMedia.commitRefused site=ledgerWrite errorKind={kind} variant={variant}");
-            });
-            changed
-        })?;
+        let changed = with_tracking_access(|| self.commit_media_state_locked(&mut s, a.binding, ledger))?;
         self.notify_media_pending_locked(&mut s, changed)?;
         Ok(())
+    }
+    pub(super) fn commit_media_state_locked(
+        &self,
+        s: &mut State,
+        binding: BindingId,
+        ledger: &Ledger,
+    ) -> Result<bool, RuntimeError> {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<bool, Error> {
+            let pending = s.store.as_ref().ok_or(Error::Database)?.dirty_names(binding)?;
+            let missing = s
+                .store
+                .as_mut()
+                .ok_or(Error::Database)?
+                .commit_media_ledger(binding, ledger)?;
+            s.media.zone_missing |= missing;
+            s.publish_authority();
+            #[cfg(feature = "test-hooks")]
+            {
+                self.incoming_hooks
+                    .hit(super::super::testing::IncomingStage::MediaLedgerCommitted);
+                if self
+                    .incoming_hooks
+                    .media_readback_failure
+                    .swap(false, std::sync::atomic::Ordering::SeqCst)
+                {
+                    return Err(Error::Database);
+                }
+            }
+            Ok(s.store.as_ref().ok_or(Error::Database)?.dirty_names(binding)? != pending)
+        }))
+        .unwrap_or(Err(Error::Database));
+        match result {
+            Ok(changed) => Ok(changed),
+            Err(error) => {
+                Self::invalidate_tracking_locked(s);
+                Err(error.into())
+            }
+        }
     }
     fn notify_media_pending_locked(&self, s: &mut State, changed: bool) -> Result<(), RuntimeError> {
         s.media.pending_notification |= changed;
@@ -299,6 +333,9 @@ impl Runtime {
         }
         let s = self.state();
         Self::check_media_locked(&s, a)?;
+        if s.media.zone_missing && !Self::retained_upload_authority(&s, a) {
+            return Err(RuntimeError::StaleIncarnation);
+        }
         work()
     }
     pub fn consume_media_feed(&self, collection: &Collection, media: &MediaService) -> Result<usize, RuntimeError> {
@@ -647,7 +684,10 @@ impl Runtime {
             if let Some(sdk) = sdk {
                 Self::sdk_locked(&s, sdk)?;
             }
-            if s.media.enabled == Some(false)
+            if s.media.zone_missing
+                || s.adapter.known_loss.is_some()
+                || s.adapter.durable.collection_loss.is_some()
+                || s.media.enabled == Some(false)
                 || s.media.paused
                 || s.adapter.paused
                 || s.scan_running
@@ -1032,6 +1072,8 @@ impl Runtime {
             authority: a,
             request,
         };
+        let identity_floor = s.adapter.next_identity;
+        s.media.identity_reads.insert(work.id, identity_floor);
         if matches!(
             work.request,
             Request::Root | Request::Read { .. } | Request::Reads { .. }
@@ -1080,6 +1122,7 @@ impl Runtime {
         };
         #[cfg(feature = "test-hooks")]
         let reply_label = match &reply {
+            Reply::ZoneLoss(_) => "ZoneLoss",
             Reply::BlobReads { .. } => "BlobReads",
             Reply::Record { .. } => "Record",
             Reply::Saved { .. } => "Saved",
@@ -1131,6 +1174,48 @@ impl Runtime {
                 {
                     return Err(RuntimeError::StaleIncarnation);
                 }
+            }
+            let reset = matches!(
+                &reply,
+                Reply::ZoneLoss(super::super::adapter::ZoneLossCause::EncryptedDataReset)
+            ) || matches!(&reply, Reply::BlobReads { results } if results.iter().any(|r| matches!(r.result, BlobReadResult::ZoneLoss(super::super::adapter::ZoneLossCause::EncryptedDataReset))));
+            if reset {
+                if let Reply::BlobReads { results } = &reply {
+                    let Request::Reads { names } = &work.request else {
+                        return Err(Error::InvalidData.into());
+                    };
+                    let actual: BTreeSet<_> = results.iter().map(|r| &r.name).collect();
+                    if results.len() != names.len() || actual.len() != results.len() || actual != names.iter().collect()
+                    {
+                        return Err(Error::InvalidData.into());
+                    }
+                }
+                let mut s = self.state();
+                Self::check_media_locked(&s, a)?;
+                let after = *s
+                    .media
+                    .identity_reads
+                    .get(&work.id)
+                    .ok_or(RuntimeError::StaleIncarnation)?;
+                let request = s
+                    .adapter
+                    .accepted_identity_read
+                    .as_ref()
+                    .ok_or(RuntimeError::IdentityUnverified)?
+                    .request;
+                Self::fresh_loss_identity_locked(&s, request, after)?;
+                with_tracking_access(|| {
+                    Self::commit_service_isolation_locked(&mut s, a.binding, IsolationReason::EncryptedDataReset)
+                })?;
+                let b = s.bound.as_mut().ok_or(RuntimeError::StaleIncarnation)?;
+                b.binding.facts.state = BindingState::Isolated(IsolationReason::EncryptedDataReset);
+                b.usable = false;
+                b.verified = false;
+                s.root_confirmed = false;
+                s.publish_authority();
+                let live = with_tracking_access(|| s.store.as_ref().ok_or(Error::Database)?.inbox(a.binding))?;
+                super::super::payload_asset::sweep(&self.directory, a.binding, &live)?;
+                return Ok(());
             }
             #[cfg(feature = "test-hooks")]
             {
@@ -1194,12 +1279,12 @@ impl Runtime {
                                     b.upload = Transfer::None;
                                 }
                             }
-                            BlobReadResult::ZoneMissing => ledger.zone_missing = true,
+                            BlobReadResult::ZoneMissing | BlobReadResult::ZoneLoss(_) => ledger.zone_missing = true,
                             BlobReadResult::Failed { .. } => {}
                         }
                     }
                 }
-                (_, Reply::ZoneMissing) => ledger.zone_missing = true,
+                (_, Reply::ZoneMissing | Reply::ZoneLoss(_)) => ledger.zone_missing = true,
                 (Request::Root, Reply::UnknownItem) => ledger.zone_missing = true,
                 (
                     Request::Root,
@@ -2515,6 +2600,13 @@ impl Runtime {
         }
         let s = self.state();
         Self::check_media_locked(&s, &work.authority)?;
+        // Saved receipts for original uploads retain their authority. Read and
+        // download results cannot apply across accepted permanent media loss.
+        if (s.media.zone_missing || s.adapter.known_loss.is_some() || s.adapter.durable.collection_loss.is_some())
+            && !matches!(work.request, Request::Upload { .. } | Request::Delete { .. })
+        {
+            return Err(RuntimeError::StaleIncarnation);
+        }
         if s.media.pending.as_ref() != Some(work)
             && s.media.metadata_pending.as_ref() != Some(work)
             && !s.actions.media_batches.values().any(|original| &original.work == work)
@@ -2538,7 +2630,17 @@ impl Runtime {
         self.consume_media_feed(collection, media)?;
         let a = MediaRecoveryAuthority(self.media_authority(collection, true)?);
         self.media_recovery_io(collection, &a, || Ok(()))?;
-        let entries = self.with_media_admission(&a, |s| s.inbox(a.binding))?;
+        // Recovery above still settles required local feed/intent work. Only
+        // selection of NEW media input is skipped after permanent media loss.
+        let entries = {
+            let s = self.state();
+            Self::check_media_recovery_locked(&s, &a)?;
+            if s.media.zone_missing {
+                return Ok(0);
+            }
+            drop(s);
+            self.with_media_admission(&a, |s| s.inbox(a.binding))?
+        };
         let mut count = 0;
         for entry in entries {
             if entry.entry.reason != InboxReason::Ready {

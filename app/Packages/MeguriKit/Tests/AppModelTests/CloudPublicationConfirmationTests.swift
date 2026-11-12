@@ -149,7 +149,7 @@ extension ReviewCollectionStartupTests {
         let hold = PublicationStatusHold()
         var heldCommand: CloudPolicyCommand?
         var stage = "retain-publication"
-        let waiting = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        var waiting = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
         let entered = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
         defer { harness.removeStorage() }
         do {
@@ -199,11 +199,15 @@ extension ReviewCollectionStartupTests {
             #expect(commandReturned && harness.sync.connectionOperationActive)
             #expect(harness.observations.operationIDs == Set([operationID]))
             #expect(harness.transport.zones.enqueues == 1)
-            // Another account read must leave the existing zone request count at one.
+            // Observe the resolved repeat read behind the original own task before joining it.
             stage = "startup-repeat-account-proof"
+            waiting = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
             await harness.sync.accountChanged()
-            await harness.sync.prepareConnectionAuthority()
+            try #require(try await publicationSignal(waiting.stream, stage: "startup-repeat-account-proof"))
             #expect(harness.transport.zones.enqueues == 1)
+            #expect(harness.sync.connectionOperationActive && harness.transport.save.enqueues == 0)
+            #expect(harness.observations.operationIDs == Set([operationID]))
+            #expect(harness.accountCompletion == nil)
             harness.transport.zones.finish(.publication(.zonesCreated))
             stage = "startup-save-control-admission"
             try await harness.transport.save.waitForAdmission(stage: "startup-save-control-admission")
@@ -215,6 +219,9 @@ extension ReviewCollectionStartupTests {
             harness.release()
             stage = "startup-own-work-drain"
             await harness.sync.waitForConnectionPreview()
+            stage = "startup-repeat-account-proof-completion"
+            await harness.sync.prepareConnectionAuthority()
+            harness.expectSuccessfulAccountCompletion(stage: "startup-repeat-account-proof-completion")
             stage = "startup-owner-close"
             #expect(await harness.owner.close())
         } catch {
@@ -501,6 +508,10 @@ private nonisolated struct PublicationAccountCompletion {
     private(set) var accountCompletion: PublicationAccountCompletion?
     var connection: CoreCloudConnectionService? { native.connection }
     var own: CloudOwnExecutor? { native.own }
+    func setProofAdmission(_ admission: @escaping @Sendable (CloudOriginalCommandProofYield) async throws -> Void,
+                           acknowledgeOutputs: @escaping @Sendable ([CloudPolicyOutput]) async -> Void) async {
+        await native.setProofAdmission(admission, acknowledgeOutputs: acknowledgeOutputs)
+    }
     init(native: NativeCollectionCloudBackend) { self.native = native }
     func input(_ event: CloudPolicyEvent) async throws -> CloudPolicyOutput { try await native.input(event) }
     func execute(_ command: CloudPolicyCommand) async -> SyncCommandResult {
@@ -512,6 +523,7 @@ private nonisolated struct PublicationAccountCompletion {
     func beginAccountRead(transition: Bool) async throws -> UInt64 { try await native.beginAccountRead(transition: transition) }
     func readAccount(_ read: UInt64) async -> SyncCommandResult { await native.readAccount(read) }
     func prepareAccountRead(_ read: UInt64) async -> @MainActor (Bool) async -> SyncCommandResult {
+        accountCompletion = nil
         let complete = await native.prepareAccountRead(read)
         return { admitted in
             let result = await complete(admitted)

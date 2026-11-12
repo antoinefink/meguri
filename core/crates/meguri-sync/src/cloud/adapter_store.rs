@@ -39,6 +39,19 @@ impl TrackingStore {
         durable: &Durable,
         options: AdapterCommitOptions,
     ) -> Result<(), Error> {
+        self.adapter_commit_loss(binding, entries, refused, state, durable, options, None)
+    }
+    #[allow(clippy::too_many_arguments)] // Extends the existing callback transaction; no stored shape.
+    pub(super) fn adapter_commit_loss(
+        &mut self,
+        binding: BindingId,
+        entries: &[InboxEntry],
+        refused: &[super::incoming::RefusedEntry],
+        state: Option<&[u8]>,
+        durable: &Durable,
+        options: AdapterCommitOptions,
+        loss: Option<(Option<IsolationReason>, bool, bool)>,
+    ) -> Result<(), Error> {
         let AdapterCommitOptions {
             deleted_collection_zones,
             at_ms,
@@ -78,6 +91,9 @@ impl TrackingStore {
         }
         let mut facts = self.binding(binding)?.ok_or(Error::BindingNotFound)?.facts;
         let mut runtime = self.stored_runtime_state(binding)?;
+        if let Some(reason) = loss.and_then(|v| v.0) {
+            facts.state = BindingState::Isolated(reason);
+        }
         if durable.active_deleted {
             facts.state = BindingState::Isolated(IsolationReason::ActiveMissing);
             if let Some(runtime) = runtime.as_mut() {
@@ -91,8 +107,22 @@ impl TrackingStore {
                 let zone = super::adapter::collection_zone(facts.epoch);
                 drains.iter().any(|drain| drain.zone == zone)
             });
+        let publisher_root = if loss.is_some_and(|v| v.2) {
+            let mut op = self.publication_op()?.ok_or(Error::InvalidData)?;
+            if op.binding_after != Some(binding) || op.step == super::publication::PublishStep::Cancelling {
+                return Err(Error::InvalidData);
+            }
+            op.active = None;
+            op.active_attempt = None;
+            Some(op)
+        } else {
+            None
+        };
         let tx = self.connection.transaction()?;
-        if durable.active_deleted {
+        if let Some(op) = publisher_root {
+            super::publication_store::put_op(&tx, &self.scope, &op)?;
+        }
+        if durable.active_deleted || loss.and_then(|v| v.0).is_some() {
             tx.execute(
                 "UPDATE bindings SET facts=?2 WHERE id=?1",
                 params![binding.0.as_slice(), encode(&facts)?],
@@ -117,6 +147,19 @@ impl TrackingStore {
                 params![binding.0.as_slice(), zone],
             )?;
         }
+        if let Some((reason, media_missing, _)) = loss {
+            if media_missing {
+                let mut ledger = super::media::cleanup::ledger(&tx, binding)?;
+                ledger.zone_missing = true;
+                super::media::store::put_ledger(&tx, binding, &ledger)?;
+            }
+            if matches!(
+                reason,
+                Some(IsolationReason::ZoneDeletedByUser | IsolationReason::EncryptedDataReset)
+            ) {
+                super::incoming_store::remove_server_cache(&tx, binding)?;
+            }
+        }
         if !entries.is_empty() || !refused.is_empty() || !deleted_collection_zones.is_empty() {
             #[cfg(feature = "test-hooks")]
             super::testing::tracking_commit(&tx, "cloud.tracking.commit.inbox")?;
@@ -126,6 +169,12 @@ impl TrackingStore {
             tx.execute("INSERT INTO engine_state(binding,serialization,saved_at_ms) VALUES (?1,?2,?3) ON CONFLICT(binding) DO UPDATE SET serialization=excluded.serialization,saved_at_ms=excluded.saved_at_ms",params![binding.0.as_slice(),state,at_ms])?;
         }
         tx.execute("INSERT INTO cloud_adapter_state(binding,content) VALUES (?1,?2) ON CONFLICT(binding) DO UPDATE SET content=excluded.content", params![binding.0.as_slice(),encode(&durable)?])?;
+        if facts.state != BindingState::Active {
+            tx.execute(
+                "UPDATE cloud_adapter_state SET content=json_set(content,'$.absence',NULL) WHERE binding=?1",
+                [binding.0.as_slice()],
+            )?;
+        }
         if recheck_media {
             super::media::store::recheck_after_drain(&tx, binding, at_ms)?;
         }

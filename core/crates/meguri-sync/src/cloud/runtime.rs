@@ -26,6 +26,8 @@ mod adoption_impl;
 pub(super) mod asset_read_impl;
 #[path = "fetch_read_runtime.rs"]
 mod fetch_read_impl;
+#[path = "known_loss_runtime.rs"]
+mod known_loss_impl;
 pub use asset_read_impl::AssetReadActivityGuard;
 #[path = "conflict_cleanup_runtime.rs"]
 mod conflict_cleanup_impl;
@@ -537,6 +539,8 @@ pub(crate) struct NativeAuthority {
     usable: bool,
     verified: bool,
     active: bool,
+    service_pending: bool,
+    media_missing: bool,
 }
 impl NativeAuthority {
     fn from_state(s: &State) -> Self {
@@ -544,6 +548,8 @@ impl NativeAuthority {
             guard: Runtime::adapter_guard_locked(s),
             instance: Runtime::instance_locked(s).ok(),
             sdk: s.adapter.sdk.clone(),
+            service_pending: s.adapter.known_loss.is_some() || s.adapter.durable.collection_loss.is_some(),
+            media_missing: s.media.zone_missing,
             usable: s.bound.as_ref().is_some_and(|b| b.usable),
             verified: s.bound.as_ref().is_some_and(|b| b.verified),
             active: s
@@ -566,6 +572,20 @@ impl NativeAuthority {
         self.sdk
             .as_ref()
             .is_some_and(|s| s.id == id && !s.stopping && s.guard == self.guard)
+    }
+    pub(crate) fn validate_network_sdk(&self, sdk: &str) -> Result<(), RuntimeError> {
+        self.validate_sdk(sdk)?;
+        if self.service_pending {
+            return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
+        }
+        Ok(())
+    }
+    pub(crate) fn validate_media_sdk(&self, sdk: &str) -> Result<(), RuntimeError> {
+        self.validate_network_sdk(sdk)?;
+        if self.media_missing {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        Ok(())
     }
     pub(crate) fn validate_sdk(&self, sdk: &str) -> Result<(), RuntimeError> {
         if !self.sdk_matches(sdk) {
@@ -966,6 +986,10 @@ impl Runtime {
                 state.publication.restarted_confirmed = restarted_confirmed;
                 return Ok(());
             };
+            // Isolation may have committed before its inbox-file sweep. Open
+            // recovery also runs for isolated owners, which cannot install an SDK.
+            let live = store.inbox(binding.id)?;
+            super::payload_asset::sweep(&self.directory, binding.id, &live)?;
             let previous = store.runtime_binding(binding.id)?;
             let publication_matches = publication
                 .as_ref()
@@ -1011,6 +1035,7 @@ impl Runtime {
             } else {
                 store.open_isolated_runtime_binding(binding.id)?
             };
+            let media_missing = store.media_ledger(binding.id)?.zone_missing;
             let decision_matches = publication.as_ref().is_some_and(|p| match &p.binding {
                 meguri_engine::device_state::AccountBinding::LocalOnly => true,
                 meguri_engine::device_state::AccountBinding::Connected {
@@ -1028,22 +1053,8 @@ impl Runtime {
                 }
                 meguri_engine::device_state::AccountBinding::Unknown => false,
             });
-            let adapter_durable = store.adapter_durable(binding.id)?;
-            if binding.facts.state == BindingState::Active
-                && publication_matches
-                && publication_clear
-                && decision_matches
-                && adapter_durable
-                    .collection_loss
-                    .as_ref()
-                    .is_some_and(|loss| loss.binding == binding && loss.file == file)
-            {
-                // Reconstruct only the obligation, not process authority. The
-                // existing isolation transaction preserves serialization/ACKs
-                // and local rows; account/permanent reasons remain stronger.
-                store.isolate_runtime_binding(binding.id, IsolationReason::ZoneMissing)?;
-                binding = store.binding(binding.id)?.ok_or(Error::BindingNotFound)?;
-            }
+            // A retained loss is an obligation, never fresh account proof.
+            // Core-issued identity completion settles it before another SDK can start.
             state.adapter.durable = store.adapter_durable(binding.id)?;
             let usable = binding.facts.state == BindingState::Active
                 && publication_matches
@@ -1068,6 +1079,7 @@ impl Runtime {
                     .and_then(|op| (op.step != super::publication::PublishStep::Confirmed).then_some(op.step)),
             });
             state.media = super::media::Process::default();
+            state.media.zone_missing = media_missing;
             #[cfg(feature = "test-hooks")]
             {
                 state.selected_reopen_note = selected_reopen_note;
@@ -1932,6 +1944,11 @@ impl Runtime {
     pub fn fail_retire_readback_for_testing(&self) {
         self.incoming_hooks
             .retire_readback_failure
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    pub fn fail_media_readback_for_testing(&self) {
+        self.incoming_hooks
+            .media_readback_failure
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
     pub fn set_incoming_stage_hook_for_testing(

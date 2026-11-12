@@ -116,6 +116,14 @@ pub enum IncomingStage {
     FetchBeforeInbox,
     FetchAfterInbox,
     FetchAfterCursor,
+    KnownLossBeforeAcceptance,
+    KnownLossAfterAcceptance,
+    KnownLossBeforeCacheSweep,
+    KnownLossAfterCacheSweep,
+    KnownLossBeforeCursor,
+    KnownLossAfterCursor,
+    KnownLossBeforeActiveResult,
+    KnownLossAfterActiveResult,
     ApplyAfterIntent,
     ApplyAfterCommit,
     ApplyAfterFlush,
@@ -129,6 +137,7 @@ pub enum IncomingStage {
     MediaReplyBeforeApply,
     MediaReplyBeforeTracking,
     MediaSettlementBeforeCommit,
+    MediaLedgerCommitted,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ApplyInterruption {
@@ -149,6 +158,7 @@ pub(super) type StageHook = Arc<dyn Fn(IncomingStage) + Send + Sync>;
 pub(super) struct Hooks {
     pub(super) capture_asset_submit_reader: std::sync::atomic::AtomicBool,
     pub(super) retire_readback_failure: std::sync::atomic::AtomicBool,
+    pub(super) media_readback_failure: std::sync::atomic::AtomicBool,
     pub(super) stage: Mutex<Option<StageHook>>,
     pub(super) interruption: Mutex<Option<ApplyInterruption>>,
 }
@@ -210,6 +220,7 @@ pub fn arm_tracking_fault(name: &str, fault: TrackingFault) -> Result<(), Error>
             | "cloud.tracking.commit.intent"
             | "cloud.tracking.commit.rollback"
             | "cloud.publication.ack_control"
+            | "cloud.media.commit.ledger"
     ) {
         return Err(Error::InvalidData);
     }

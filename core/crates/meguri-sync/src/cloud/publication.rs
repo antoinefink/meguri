@@ -205,6 +205,8 @@ pub struct OwnRequest {
 }
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OwnResult {
+    /// Transient transport facts only; never written into a recovery op.
+    ZoneLosses(Vec<super::adapter::ZoneLoss>),
     ZonesCreated,
     Saved(ControlRecord),
     Conflict(ControlRecord),
@@ -244,6 +246,8 @@ pub(crate) struct ProcessState {
     pub next_attempt: u64,
     pub running: Option<OwnRequest>,
     pub submitted: bool,
+    pub own_identity_after: u64,
+    pub recreate_active_root: Option<[u8; 16]>,
     pub zones_created: bool,
     /// Only a validated Missing reply grants a conditional root save. Never persisted.
     pub reset_root_missing: Option<(OwnRequest, super::adapter::Guard)>,
@@ -282,6 +286,7 @@ pub struct ZoneDeletionGuard {
     pub(crate) file: NativeFileIdentity,
     pub(crate) decision: DecisionSnapshot,
     pub(crate) account: OpaqueBytes,
+    pub(crate) after_identity: u64,
 }
 impl std::fmt::Debug for ZoneDeletionGuard {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

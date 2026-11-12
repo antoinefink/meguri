@@ -45,13 +45,18 @@ extension NativeCloudOwnTransport {
             guard let prepared else { return }
             var failure = read.failure
             var original = read.result
+            if case .failure(let error) = result {
+                do { _ = try NativeCloudOwnRecords.exactFailure(error, item: id) }
+                catch { prepared.finish(.failure(error)); return }
+            }
             if original == nil, case .failure(let error) = result {
                 // Preserve a single-record partial error's actual cause as well
                 // as its enclosing terminal failure.
-                let native = error as NSError
-                let partials = native.userInfo[CKPartialErrorsByItemIDKey] as? [CKRecord.ID: any Error]
-                let cause = partials?[id] ?? error
-                original = NativeCloudOwnRecords.readError(cause); failure = .native(cause)
+                do {
+                    if let cause = try NativeCloudOwnRecords.exactFailure(error, item: id) {
+                        original = NativeCloudOwnRecords.readError(cause); failure = .native(cause)
+                    } else { original = .failed; failure = .native(error) }
+                } catch { prepared.finish(.failure(error)); return }
             }
             if original == nil {
                 CloudZoneDeletionDiagnostics.record(.invalidReply, error: CloudOwnTransportFailure.missingReply)
@@ -82,6 +87,12 @@ extension NativeCloudOwnTransport {
         let terminalHandler: @Sendable (Result<Void, any Error>) -> Void = { [weak prepared] result in
             let actual = state.withLock { value in let actual = value; value.finished = true; return actual }
             guard let prepared else { return }
+            guard !actual.invalid else { prepared.finish(.failure(NativeCloudKitFailure.unsupportedRecord)); return }
+            var losses: [CloudZoneLoss] = []
+            if case .failure(let error) = result {
+                do { losses = try NativeCloudKitSendError.zoneLosses(error, zones: names, zoneOperation: true) }
+                catch { prepared.finish(.failure(error)); return }
+            }
             let terminal = CloudZoneDeletionFailure.terminal(result)
             let partials: [CKRecordZone.ID: any Error]?
             if case .failure(let error) = result { partials = (error as NSError).userInfo[CKPartialErrorsByItemIDKey] as? [CKRecordZone.ID: any Error] }
@@ -90,9 +101,11 @@ extension NativeCloudOwnTransport {
                 let id = NativeCloudOwnRecords.zone(name)
                 // Actual per-item errors survive a terminal partial wrapper.
                 // Missing callbacks are never inferred successful.
-                if let per = actual.results[id], per.failure != nil { return per }
+                if let per = actual.results[id] { return per }
                 if let error = partials?[id] { return .init(zone: name, failure: .native(error)) }
-                if let per = actual.results[id], !actual.invalid { return per }
+                if let terminal, names.count == 1 || losses.contains(where: { $0.zone == name && $0.cause == .encryptedDataReset }) {
+                    return .init(zone: name, failure: terminal)
+                }
                 CloudZoneDeletionDiagnostics.record(.invalidReply, error: CloudOwnTransportFailure.missingReply)
                 return .init(zone: name, failure: .init(code: nil))
             }

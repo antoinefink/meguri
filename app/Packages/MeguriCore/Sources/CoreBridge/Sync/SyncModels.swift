@@ -53,7 +53,7 @@ public struct CloudEngineBatch: Sendable, Equatable {
 }
 public enum CloudEngineErrorCode: Sendable, Equatable {
     case notAuthenticated, accountTemporarilyUnavailable, networkFailure, networkUnavailable
-    case requestRateLimited, serviceUnavailable, zoneBusy, limitExceeded, batchRequestFailed, unknownItem, zoneNotFound, serverRecordChanged, other
+    case requestRateLimited, serviceUnavailable, zoneBusy, limitExceeded, batchRequestFailed, unknownItem, zoneNotFound, encryptedDataReset, userDeletedZone, serverRecordChanged, other
 }
 public struct CloudRecordFailure: Sendable, Equatable {
     public let name: String
@@ -81,11 +81,26 @@ public struct CloudFetchOptions: Sendable, Equatable {
 public struct CloudEngineConfiguration: Sendable, Equatable {
     public let instanceID: String; public let automaticallySync: Bool; public let serialization: Data?; public let collectionZone: String
 }
+public enum CloudZoneLossCause: Sendable, Equatable { case deleted, purged, encryptedDataReset }
+public struct CloudZoneLoss: Sendable, Equatable {
+    public let zone: String
+    public let cause: CloudZoneLossCause
+    public init(zone: String, cause: CloudZoneLossCause) { self.zone = zone; self.cause = cause }
+    var raw: MeguriCoreBindings.CloudZoneLoss {
+        let cause: MeguriCoreBindings.CloudZoneLossCause = switch self.cause {
+        case .deleted: .deleted
+        case .purged: .purged
+        case .encryptedDataReset: .encryptedDataReset
+        }
+        return .init(zone: zone, cause: cause)
+    }
+}
 public enum CloudEngineEvent: Sendable, Equatable {
     case deliveryFailed
     case databaseChanges
     /// Validated fetched deletions of canonical collection zones of other epochs.
     case fetchedCollectionZoneDeletions([String])
+    case fetchedZoneLosses([CloudZoneLoss])
     case stateUpdate(Data)
     case accountChanged(change: CloudAccountChange, identity: Data?)
     case fetched(zone: String, records: [CloudRecord], deleted: [String])
@@ -181,6 +196,11 @@ public struct CloudRootReadDiagnostic: Sendable, Equatable, Encodable {
     public let accepted: Bool
     public let failure: CloudZoneDeletionFailure?
     public let terminal: CloudZoneDeletionFailure?
+    public init(active: Bool, lostCollection: Bool, outcome: String, a7Failure: Bool, accepted: Bool,
+                failure: CloudZoneDeletionFailure? = nil, terminal: CloudZoneDeletionFailure? = nil) {
+        self.active = active; self.lostCollection = lostCollection; self.outcome = outcome
+        self.a7Failure = a7Failure; self.accepted = accepted; self.failure = failure; self.terminal = terminal
+    }
     init(_ value: MeguriCoreBindings.CloudRootReadDiagnostic) {
         active = value.active; lostCollection = value.lostCollection
         outcome = value.outcome; a7Failure = value.a7Failure; accepted = value.accepted
@@ -249,6 +269,8 @@ extension CloudEngineErrorCode {
         case .batchRequestFailed: .batchRequestFailed
         case .unknownItem: .unknownItem
         case .zoneNotFound: .zoneNotFound
+        case .encryptedDataReset: .encryptedDataReset
+        case .userDeletedZone: .userDeletedZone
         case .serverRecordChanged: .serverRecordChanged
         case .other: .other
         }

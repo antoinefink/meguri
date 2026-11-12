@@ -36,16 +36,6 @@ enum NativeCloudKitIdentityValidation {
     }
     static func validateDatabaseDeletions(_ ids: [CKRecordZone.ID], collectionZone: String?) throws {
         for id in ids { try requireCurrentOwner(id) }
-        var reserved = ["meguri-root", "meguri-media"].map {
-            CKRecordZone.ID(zoneName: $0, ownerName: CKCurrentUserDefaultName)
-        }
-        if let collectionZone {
-            reserved.append(CKRecordZone.ID(zoneName: collectionZone, ownerName: CKCurrentUserDefaultName))
-        }
-        // Root/media/bound loss handling remains explicitly incomplete.
-        guard !ids.contains(where: { reserved.contains($0) }) else {
-            throw NativeCloudKitFailure.unsupportedRecord
-        }
         for id in ids where id.zoneName.hasPrefix("c-") {
             guard collectionZone != nil, isCanonicalCollectionZone(id.zoneName) else {
                 throw NativeCloudKitFailure.unsupportedRecord
@@ -63,9 +53,18 @@ enum NativeCloudKitIdentityValidation {
     }
     static func databaseDeletionEvent(modified: [CKRecordZone.ID], deleted: [CKRecordZone.ID],
                                       collectionZone: String?) throws -> CloudEngineEvent {
-        for id in modified + deleted { try requireCurrentOwner(id) }
-        try validateDatabaseDeletions(deleted, collectionZone: collectionZone)
-        let names = deleted.map(\.zoneName).filter { $0.hasPrefix("c-") }
+        try databaseDeletionEvent(modified: modified, losses: deleted.map { ($0, .deleted) }, collectionZone: collectionZone)
+    }
+    static func databaseDeletionEvent(modified: [CKRecordZone.ID], losses: [(CKRecordZone.ID, CloudZoneLossCause)],
+                                      collectionZone: String?) throws -> CloudEngineEvent {
+        let ids = losses.map { $0.0 }
+        for id in modified + ids { try requireCurrentOwner(id) }
+        try validateDatabaseDeletions(ids, collectionZone: collectionZone)
+        let owned = losses.filter { id, _ in id.zoneName == "meguri-root" || id.zoneName == "meguri-media" || id.zoneName.hasPrefix("c-") }
+        guard collectionZone != nil || owned.isEmpty else { throw NativeCloudKitFailure.unsupportedRecord }
+        let known = owned.contains { id, _ in id.zoneName == "meguri-root" || id.zoneName == "meguri-media" || id.zoneName == collectionZone }
+        if known || owned.contains(where: { $0.1 == .encryptedDataReset }) { return .fetchedZoneLosses(owned.map { .init(zone: $0.0.zoneName, cause: $0.1) }) }
+        let names = owned.map { $0.0.zoneName }
         return names.isEmpty ? .databaseChanges : .fetchedCollectionZoneDeletions(names)
     }
 
@@ -224,6 +223,7 @@ enum NativeCloudKitSendError {
         return try NativeCloudRecordConversion.decode(server)
     }
     static func code(_ error: any Error) -> CloudEngineErrorCode {
+        if let wrapped = error as? CloudKitSDKOperationFailure { return code(wrapped.underlying) }
         guard (error as NSError).domain == CKErrorDomain, let error = error as? CKError else { return .other }
         return switch error.code {
         case .notAuthenticated: .notAuthenticated
@@ -236,10 +236,49 @@ enum NativeCloudKitSendError {
         case .limitExceeded: .limitExceeded
         case .batchRequestFailed: .batchRequestFailed
         case .unknownItem: .unknownItem
-        case .zoneNotFound: .zoneNotFound
+        case .zoneNotFound:
+            ((error as NSError).userInfo[CKErrorUserDidResetEncryptedDataKey] as? NSNumber)?.boolValue == true ? .encryptedDataReset : .zoneNotFound
+        case .userDeletedZone: .userDeletedZone
         case .serverRecordChanged: .serverRecordChanged
         default: .other
         }
+    }
+    /// Only original terminal facts with an exact requested zone can establish
+    /// a loss. A multi-zone terminal without item identities is ambiguous.
+    static func zoneLosses(_ error: any Error, zones: [String], zoneOperation: Bool = false) throws -> [CloudZoneLoss] {
+        if let wrapped = error as? CloudKitSDKOperationFailure {
+            return try zoneLosses(wrapped.underlying, zones: zones, zoneOperation: zoneOperation)
+        }
+        let native = error as NSError
+        guard native.domain == CKErrorDomain else { return [] }
+        if native.code == CKError.Code.partialFailure.rawValue {
+            let items: [AnyHashable: Any]
+            if let raw = native.userInfo[CKPartialErrorsByItemIDKey] {
+                guard let dictionary = raw as? [AnyHashable: Any] else { throw NativeCloudKitFailure.unsupportedRecord }
+                items = dictionary
+            } else { items = [:] }
+            // Validate the complete dictionary before returning any authority.
+            let scoped = try items.map { key, value -> (String, any Error) in
+                let id: CKRecordZone.ID
+                if !zoneOperation, let record = key.base as? CKRecord.ID { id = record.zoneID }
+                else if let zone = key.base as? CKRecordZone.ID { id = zone }
+                else { throw NativeCloudKitFailure.unsupportedRecord }
+                try NativeCloudKitIdentityValidation.requireCurrentOwner(id)
+                guard zones.contains(id.zoneName), let failure = value as? any Error else {
+                    throw NativeCloudKitFailure.unsupportedRecord
+                }
+                return (id.zoneName, failure)
+            }
+            let losses = scoped.compactMap { NativeCloudOwnRecords.zoneLoss($0.1, zone: $0.0) }
+            return losses
+        }
+        // Reset is account-wide. The original multi-zone operation scope is
+        // sufficient without attributing an ordinary absence to a guessed zone.
+        if code(error) == .encryptedDataReset {
+            return zones.map { .init(zone: $0, cause: .encryptedDataReset) }
+        }
+        guard zones.count == 1, let zone = zones.first else { return [] }
+        return NativeCloudOwnRecords.zoneLoss(error, zone: zone).map { [$0] } ?? []
     }
     static func failure(record: CKRecord, error: CKError, collectionZoneID: CKRecordZone.ID) throws -> CloudRecordFailure {
         if error.code == .serverRecordChanged, record.recordType == "MGBlob",
@@ -737,8 +776,16 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
                 forwarded = .didSend(zone: collectionZone ?? "")
             case .fetchedDatabaseChanges(let changes):
                 forwarded = try NativeCloudKitIdentityValidation.databaseDeletionEvent(
-                    modified: changes.modifications.map(\.zoneID), deleted: changes.deletions.map(\.zoneID),
-                    collectionZone: collectionZone)
+                    modified: changes.modifications.map(\.zoneID), losses: try changes.deletions.map { deletion in
+                        let cause: CloudZoneLossCause
+                        switch deletion.reason {
+                        case .deleted: cause = .deleted
+                        case .purged: cause = .purged
+                        case .encryptedDataReset: cause = .encryptedDataReset
+                        @unknown default: throw NativeCloudKitFailure.unsupportedRecord
+                        }
+                        return (deletion.zoneID, cause)
+                    }, collectionZone: collectionZone)
                 #if DEBUG
                 if case .databaseChanges = forwarded, !changes.deletions.isEmpty {
                     DebugCloudDiagnostics.nativeFetchSequence.record(.unrelatedDatabaseDeletion, ordinal: debugFetchOrdinal)

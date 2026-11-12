@@ -476,18 +476,53 @@ struct NativeCloudOwnTransportTests {
                     }
                     terminal(.failure(partial))
                 }
-                let reply = try await prepared.reply()
-                let read: CloudControlRead
-                if publication {
-                    guard case .publication(.read(let value)) = reply else { throw CloudOwnTransportFailure.unexpectedReply }
-                    read = value
-                } else {
-                    guard case .read(let value) = reply else { throw CloudOwnTransportFailure.unexpectedReply }
-                    read = value
+                let outcome: Result<CloudOwnTransportReply, any Error>
+                do { outcome = .success(try await prepared.reply()) }
+                catch { outcome = .failure(error) }
+                let foreignIdentity = (4...6).contains(source)
+                var returnedFound = false
+                switch outcome {
+                case .failure(let error):
+                    // K20/V26.1: a terminal dictionary outside the issued
+                    // identity refuses the whole callback, even on a read error.
+                    #expect(foreignIdentity)
+                    switch error as? NativeCloudKitFailure {
+                    case .unsupportedRecord?: break
+                    default: Issue.record("Expected exact unsupportedRecord refusal, got \(error)")
+                    }
+                    let evidence = try #require(prepared.controlReadEvidence())
+                    #expect(evidence.read == .failed)
+                    let terminalEvidence = try #require(evidence.terminal)
+                    #expect(terminalEvidence.code == nil && !terminalEvidence.encryptedDataReset)
+                case .success(let reply):
+                    #expect(!foreignIdentity)
+                    switch reply {
+                    case .read(.found), .publication(.read(.found)): returnedFound = true
+                    default: break
+                    }
+                    if publication && source < 3 && (rawCode == 26 || rawCode == 28) {
+                        // K12.5/V26.1: exact publication zone loss retains
+                        // its target and cause rather than a generic read failure.
+                        switch reply {
+                        case .publication(.zoneLosses(let losses)):
+                            #expect(losses == [.init(zone: root.zone,
+                                cause: rawCode == 26 ? .deleted : .purged)])
+                        default: Issue.record("Expected exact publication zone loss")
+                        }
+                    } else {
+                        let expected: CloudControlRead = source < 3
+                            ? (rawCode == 11 ? .missing : (rawCode == 26 ? .zoneMissing : .failed)) : .failed
+                        switch reply {
+                        case .publication(.read(let read)):
+                            #expect(publication && read == expected)
+                        case .read(let read):
+                            #expect(!publication && read == expected)
+                        default: Issue.record("Expected typed read classification")
+                        }
+                    }
                 }
-                let expected: CloudControlRead = source < 3
-                    ? (rawCode == 11 ? .missing : (rawCode == 26 ? .zoneMissing : .failed)) : .failed
-                #expect(read == expected)
+                // Keep both invariants after every outcome, including refusal.
+                #expect(!returnedFound)
                 #expect(queue.operations.withLock { $0.count == 1 && $0.allSatisfy { $0 is CKFetchRecordsOperation } })
             }
         }
@@ -1295,5 +1330,175 @@ struct NativeCloudOwnTransportTests {
         }
     }
 
+}
+
+extension NativeCloudOwnTransportTests {
+    @Test func successfulControlCallbackDoesNotHideForeignTerminalIdentity() async throws {
+        let queue = NativeOwnCapturingQueue(), handlers = NativeOwnReadHandlers()
+        let prepared = try NativeCloudOwnTransport(queue: queue,
+            readTerminalHandlerInstalled: { handler in handlers.terminal.withLock { $0 = handler } }).prepare(.read(active))
+        try #require(prepared.enqueue())
+        let operation = try #require(queue.operations.withLock { $0.first as? CKFetchRecordsOperation })
+        let id = NativeCloudOwnRecords.id(active)
+        operation.perRecordResultBlock?(id, .success(CKRecord(recordType: active.recordType, recordID: id)))
+        let foreign = CKRecord.ID(recordName: "active", zoneID: CKRecordZone.ID(zoneName: active.zone, ownerName: "synthetic-foreign-owner"))
+        let terminal = try #require(handlers.terminal.withLock { $0 })
+        terminal(.failure(CKError(.partialFailure,
+            userInfo: [CKPartialErrorsByItemIDKey: [foreign: CKError(.zoneNotFound)]])))
+        do { _ = try await prepared.reply(); Issue.record("Foreign terminal ID admitted a control result") }
+        catch { #expect(error is NativeCloudKitFailure) }
+    }
+
+    /// K12.5/P15/V26.1: original terminal-only partial results retain both the
+    /// exact target cause and enclosing operation, including NSNumber flags.
+    @Test func controlReadTerminalOnlyPartialRetainsExactTypedCauseAndWrapper() async throws {
+        for target in [active, .init(zone: "c-synthetic", name: "epoch", recordType: "MGEpoch")] {
+            for code in [CKError.Code.zoneNotFound, .userDeletedZone, .networkFailure] {
+                for reset in [false, true] {
+                    let queue = NativeOwnCapturingQueue(), handlers = NativeOwnReadHandlers()
+                    let prepared = try NativeCloudOwnTransport(queue: queue,
+                        readTerminalHandlerInstalled: { handler in handlers.terminal.withLock { $0 = handler } }).prepare(.read(target))
+                    try #require(prepared.enqueue())
+                    let exact = CKError(code, userInfo: [CKErrorUserDidResetEncryptedDataKey: NSNumber(value: reset), CKErrorRetryAfterKey: 123.0])
+                    let wrapper = CKError(.partialFailure, userInfo: [CKErrorRetryAfterKey: 456.0,
+                        CKPartialErrorsByItemIDKey: [NativeCloudOwnRecords.id(target): exact]])
+                    let terminal = try #require(handlers.terminal.withLock { $0 })
+                    terminal(.failure(wrapper))
+                    guard case .read(let read) = try await prepared.reply() else { throw CloudOwnTransportFailure.unexpectedReply }
+                    #expect(read == (code == .zoneNotFound ? .zoneMissing : .failed))
+                    let evidence = try #require(prepared.controlReadEvidence())
+                    #expect(evidence.failure?.code == Int64(code.rawValue))
+                    #expect(evidence.failure?.encryptedDataReset == reset)
+                    #expect(evidence.terminal?.code == 2 && evidence.terminal?.retryAfterMilliseconds == 456_000)
+                }
+            }
+        }
+    }
+
+    @Test(arguments: [0, 1, 2, 3, 4, 5])
+    func createZonesValidatesWholeRequestBeforeSelectingTerminalLosses(row: Int) async throws {
+        let queue = NativeOwnCapturingQueue(), handlers = NativeOwnReadHandlers()
+        let names = ["meguri-root", "meguri-media", "c-synthetic"]
+        let prepared = try NativeCloudOwnTransport(queue: queue,
+            zoneCreationTerminalHandlerInstalled: { handler in handlers.terminal.withLock { $0 = handler } })
+            .prepare(.publication(.createZones(names)))
+        try #require(prepared.enqueue())
+        let op = try #require(queue.operations.withLock { $0.first as? CKModifyRecordZonesOperation })
+        // Include both absent callbacks and an actual successful sibling.
+        if row != 0 {
+            let sibling = CKRecordZone(zoneID: NativeCloudOwnRecords.zone("c-synthetic"))
+            op.perRecordZoneSaveBlock?(sibling.zoneID, .success(sibling))
+        }
+        let reset = CKError(.zoneNotFound, userInfo: [CKErrorUserDidResetEncryptedDataKey: NSNumber(value: true)])
+        let network = CKError(.networkFailure, userInfo: [CKErrorRetryAfterKey: 123.0])
+        var items: [AnyHashable: any Error] = [NativeCloudOwnRecords.zone("meguri-media"): reset,
+            NativeCloudOwnRecords.zone("meguri-root"): network]
+        if row == 2 { items[CKRecordZone.ID(zoneName: "meguri-root", ownerName: "foreign-owner")] = network }
+        if row == 3 { items[NativeCloudOwnRecords.zone("unrequested")] = network }
+        if row == 4 { items[CKRecord.ID(recordName: "root", zoneID: NativeCloudOwnRecords.zone("meguri-media"))] = network }
+        if row == 5 {
+            items[NativeCloudOwnRecords.zone("meguri-root")] = CKError(.partialFailure,
+                userInfo: [CKPartialErrorsByItemIDKey: [NativeCloudOwnRecords.zone("unrequested"): network]])
+        }
+        let wrapper = CKError(.partialFailure, userInfo: [CKPartialErrorsByItemIDKey: items, CKErrorRetryAfterKey: 456.0])
+        let terminal = try #require(handlers.terminal.withLock { $0 })
+        terminal(.failure(wrapper))
+        if row >= 2 {
+            do { _ = try await prepared.reply(); Issue.record("Foreign terminal scope admitted reset") }
+            catch { #expect(error is NativeCloudKitFailure) }
+        } else {
+            guard case .publication(.zoneLosses(let losses)) = try await prepared.reply() else { throw CloudOwnTransportFailure.unexpectedReply }
+            #expect(losses == [.init(zone: "meguri-media", cause: .encryptedDataReset)])
+        }
+        #expect(NativeCloudOwnRecords.retryDuration(wrapper) == 456_000)
+        #expect(queue.operations.withLock { $0.count } == 1)
+    }
+
+    @Test(arguments: [false, true])
+    func unkeyedOrdinaryMultiZoneTerminalDoesNotGuessZoneLoss(successfulSibling: Bool) async throws {
+        let queue = NativeOwnCapturingQueue(), handlers = NativeOwnReadHandlers()
+        let prepared = try NativeCloudOwnTransport(queue: queue,
+            zoneCreationTerminalHandlerInstalled: { handler in handlers.terminal.withLock { $0 = handler } })
+            .prepare(.publication(.createZones(["meguri-root", "meguri-media", "c-synthetic"])))
+        try #require(prepared.enqueue())
+        if successfulSibling {
+            let operation = try #require(queue.operations.withLock { $0.first as? CKModifyRecordZonesOperation })
+            let zone = CKRecordZone(zoneID: NativeCloudOwnRecords.zone("meguri-root"))
+            operation.perRecordZoneSaveBlock?(zone.zoneID, .success(zone))
+        }
+        let terminal = try #require(handlers.terminal.withLock { $0 })
+        terminal(.failure(CKError(.zoneNotFound)))
+        guard case .publication(.failed(let retry)) = try await prepared.reply() else { throw CloudOwnTransportFailure.unexpectedReply }
+        #expect(retry == nil)
+    }
+
+    @Test(arguments: [0, 1, 2])
+    func successfulActiveCallbackCannotHideUnexpectedTerminalItem(row: Int) async throws {
+        let queue = NativeOwnCapturingQueue(), handlers = NativeOwnReadHandlers()
+        let prepared = try NativeCloudOwnTransport(queue: queue,
+            readPerRecordHandlerInstalled: { handler in handlers.perRecord.withLock { $0 = handler } },
+            readTerminalHandlerInstalled: { handler in handlers.terminal.withLock { $0 = handler } }).prepare(.read(active))
+        try #require(prepared.enqueue())
+        let record = try NativeCloudOwnRecords.save(target: active, encrypted: Data([1]), systemFields: nil)
+        let perRecord = try #require(handlers.perRecord.withLock { $0 })
+        perRecord(record.recordID, .success(record))
+        let zone = CKRecordZone.ID(zoneName: row == 1 ? "unrequested" : active.zone,
+            ownerName: row == 2 ? "foreign-owner" : CKCurrentUserDefaultName)
+        let wrong = CKRecord.ID(recordName: row == 0 ? "another-record" : active.name, zoneID: zone)
+        let terminal = try #require(handlers.terminal.withLock { $0 })
+        terminal(.failure(CKError(.partialFailure,
+            userInfo: [CKPartialErrorsByItemIDKey: [wrong: CKError(.networkFailure)]])))
+        do { _ = try await prepared.reply(); Issue.record("Successful callback hid foreign terminal item") }
+        catch { #expect(error is NativeCloudKitFailure) }
+    }
+
+    @Test func createZonesTerminalOnlyPartialPreservesOriginalSuccessfulSibling() async throws {
+        for code in [CKError.Code.zoneNotFound, .userDeletedZone] {
+            for reset in [false, true] {
+                let queue = NativeOwnCapturingQueue(), handlers = NativeOwnReadHandlers()
+                let prepared = try NativeCloudOwnTransport(queue: queue,
+                    zoneCreationTerminalHandlerInstalled: { handler in handlers.terminal.withLock { $0 = handler } })
+                    .prepare(.publication(.createZones(["meguri-root", "meguri-media"])))
+                try #require(prepared.enqueue())
+                let op = try #require(queue.operations.withLock { $0.first as? CKModifyRecordZonesOperation })
+                let success = CKRecordZone(zoneID: NativeCloudOwnRecords.zone("meguri-root"))
+                op.perRecordZoneSaveBlock?(success.zoneID, .success(success))
+                let error = CKError(code, userInfo: [CKErrorUserDidResetEncryptedDataKey: NSNumber(value: reset)])
+                let terminal = try #require(handlers.terminal.withLock { $0 })
+                terminal(.failure(CKError(.partialFailure,
+                    userInfo: [CKPartialErrorsByItemIDKey: [NativeCloudOwnRecords.zone("meguri-media"): error]])))
+                guard case .publication(.zoneLosses(let losses)) = try await prepared.reply() else { throw CloudOwnTransportFailure.unexpectedReply }
+                let cause: CloudZoneLossCause = code == .userDeletedZone ? .purged : reset ? .encryptedDataReset : .deleted
+                #expect(losses == [.init(zone: "meguri-media", cause: cause)])
+                #expect(queue.operations.withLock { $0.count } == 1)
+            }
+        }
+    }
+
+    @Test func createZonesAccountWideResetSurvivesCompleteSuccessfulCallbacks() async throws {
+        for partial in [false, true] {
+            let queue = NativeOwnCapturingQueue(), handlers = NativeOwnReadHandlers()
+            let names = ["meguri-root", "meguri-media", "c-synthetic"]
+            let prepared = try NativeCloudOwnTransport(queue: queue,
+                zoneCreationTerminalHandlerInstalled: { handler in handlers.terminal.withLock { $0 = handler } })
+                .prepare(.publication(.createZones(names)))
+            try #require(prepared.enqueue())
+            let op = try #require(queue.operations.withLock { $0.first as? CKModifyRecordZonesOperation })
+            for name in names {
+                let zone = CKRecordZone(zoneID: NativeCloudOwnRecords.zone(name))
+                op.perRecordZoneSaveBlock?(zone.zoneID, .success(zone))
+            }
+            let error = CKError(partial ? .partialFailure : .zoneNotFound, userInfo: [
+                CKErrorUserDidResetEncryptedDataKey: NSNumber(value: true),
+                CKPartialErrorsByItemIDKey: [NativeCloudOwnRecords.zone("c-synthetic"): CKError(.zoneNotFound,
+                    userInfo: [CKErrorUserDidResetEncryptedDataKey: NSNumber(value: true)])]
+            ])
+            let terminal = try #require(handlers.terminal.withLock { $0 })
+            terminal(.failure(error))
+            guard case .publication(.zoneLosses(let losses)) = try await prepared.reply() else { throw CloudOwnTransportFailure.unexpectedReply }
+            #expect(Set(losses.map(\.zone)) == Set(partial ? ["c-synthetic"] : names))
+            #expect(losses.allSatisfy { $0.cause == .encryptedDataReset })
+        }
+    }
 }
 #endif

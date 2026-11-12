@@ -159,6 +159,12 @@ impl Runtime {
     pub fn sdk_root_confirmed(&self) -> bool {
         self.state().root_confirmed
     }
+    pub fn validate_network_sdk(&self, sdk: &str) -> Result<(), RuntimeError> {
+        self.native_authority().validate_network_sdk(sdk)
+    }
+    pub fn validate_network_media_sdk(&self, sdk: &str) -> Result<(), RuntimeError> {
+        self.native_authority().validate_media_sdk(sdk)
+    }
     pub fn validate_sdk(&self, sdk: &str) -> Result<(), RuntimeError> {
         let s = self.state();
         Self::sdk_locked(&s, sdk)
@@ -266,7 +272,10 @@ impl Runtime {
                                     && p.decision == meguri_engine::device_state::PublicationDecision::Clear
                             })
                     });
-                if original {
+                let fresh = s.adapter.accepted_identity_read.as_ref().is_some_and(|proof| {
+                    Self::fresh_loss_identity_locked(&s, proof.request, read.loss_identity_after).is_ok()
+                });
+                if original && fresh {
                     // Existing isolation precedence and triggers preserve pending
                     // local rows and clear absence state. Never overwrite a
                     // stronger current reason with this service fallback.
@@ -316,6 +325,9 @@ impl Runtime {
             .ok_or(RuntimeError::StaleIncarnation)?;
         work.effect()?;
         authority.stopping = true;
+        if s.adapter.known_loss.as_ref().is_some_and(|loss| loss.sdk == sdk) {
+            s.adapter.known_loss = None;
+        }
         s.publish_authority();
         s.policy.flights.retain(|(owner, _), _| owner != sdk);
         if policy_stop {
@@ -578,10 +590,16 @@ impl Runtime {
         let at_ms = self.adapter_now()?;
         let mut s = self.state();
         Self::sdk_locked(&s, sdk)?;
+        if s.adapter.known_loss.is_some() || s.adapter.durable.collection_loss.is_some() {
+            return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
+        }
         #[cfg(feature = "test-hooks")]
         let fail = std::mem::take(&mut s.adapter.fail_state);
         #[cfg(not(feature = "test-hooks"))]
         let fail = false;
+        #[cfg(feature = "test-hooks")]
+        self.incoming_hooks
+            .hit(super::super::testing::IncomingStage::KnownLossBeforeCursor);
         Self::adapter_commit_locked(
             &mut s,
             &[],
@@ -594,7 +612,11 @@ impl Runtime {
                 start_absence: false,
                 resolved_epoch: None,
             },
-        )
+        )?;
+        #[cfg(feature = "test-hooks")]
+        self.incoming_hooks
+            .hit(super::super::testing::IncomingStage::KnownLossAfterCursor);
+        Ok(())
     }
     pub fn adapter_fetched(
         &self,
@@ -668,6 +690,17 @@ impl Runtime {
             }
         } else if zone != collection_zone(EpochId(epoch)) {
             return Err(RuntimeError::Incomplete(Incomplete::WholeBindingReconciliation));
+        }
+        if zone == "meguri-root" && deleted.iter().any(|name| name == "active") {
+            return self
+                .adapter_observe_zone_losses(
+                    sdk,
+                    &[super::super::adapter::ZoneLoss {
+                        zone: zone.into(),
+                        cause: super::super::adapter::ZoneLossCause::Deleted,
+                    }],
+                )
+                .map(|_| ());
         }
         if zone != "meguri-root" {
             meguri_model::faultpoint!("cloud.fetch.before_inbox").map_err(Error::from)?;
@@ -1617,11 +1650,24 @@ impl Runtime {
             s.adapter.accepted_identity_read = None;
             // A pending lookup is not evidence of a different account. Keep the
             // verified owner accepting records and their following cursor (V9.1).
+            let read_owner = origin_sdk
+                .map(str::to_owned)
+                .or_else(|| s.adapter.known_loss.as_ref().map(|l| l.sdk.clone()))
+                .or_else(|| s.adapter.pending_collection_loss.as_ref().map(|r| r.sdk.clone()))
+                .or_else(|| {
+                    s.bound.as_ref().filter(|b| b.usable && b.verified).and_then(|_| {
+                        s.adapter
+                            .sdk
+                            .as_ref()
+                            .filter(|sdk| !sdk.stopping)
+                            .map(|sdk| sdk.id.clone())
+                    })
+                });
             s.adapter.identity_read = Some((
                 id,
                 Self::adapter_guard_locked(s),
                 s.incarnation,
-                origin_sdk.map(str::to_owned),
+                read_owner,
                 no_collection,
             ));
             Ok(id)

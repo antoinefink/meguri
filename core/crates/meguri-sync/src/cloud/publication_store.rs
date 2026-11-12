@@ -43,7 +43,7 @@ pub(super) fn check_version(c: &Connection) -> Result<(), Error> {
     }
     Ok(())
 }
-fn put_op(tx: &Transaction<'_>, scope: &BuildScope, op: &PublishOp) -> Result<(), Error> {
+pub(super) fn put_op(tx: &Transaction<'_>, scope: &BuildScope, op: &PublishOp) -> Result<(), Error> {
     op.validate()?;
     tx.execute("INSERT INTO cloud_publication_ops(container,environment,id,content) VALUES(?1,?2,?3,?4) ON CONFLICT(container,environment) DO UPDATE SET id=excluded.id,content=excluded.content",
         params![scope.container.as_str(), scope.environment.code(), op.id.as_slice(), encode(op)?])?;

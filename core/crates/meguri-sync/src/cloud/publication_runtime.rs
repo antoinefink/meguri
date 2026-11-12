@@ -644,6 +644,10 @@ impl Runtime {
             if_unchanged,
         };
         let (kind, operation) = match op.step {
+            PublishStep::Complete if s.publication.recreate_active_root == Some(op.id) => (
+                OwnKind::CreateZones,
+                OwnOperation::CreateZones(vec!["meguri-root".into()]),
+            ),
             PublishStep::Bound if !s.publication.zones_created => (
                 OwnKind::CreateZones,
                 OwnOperation::CreateZones(vec![zone.clone(), "meguri-root".into(), "meguri-media".into()]),
@@ -779,6 +783,7 @@ impl Runtime {
         }
         s.publication.submitted = false;
         s.publication.running = Some(request.clone());
+        s.publication.own_identity_after = s.adapter.next_identity;
         Ok(PublicationWork::Own(Box::new(request)))
     }
     pub fn perform_publication_local(
@@ -1041,6 +1046,93 @@ impl Runtime {
         {
             return Err(RuntimeError::StaleIncarnation);
         }
+        if let OwnResult::ZoneLosses(losses) = &result {
+            use crate::cloud::adapter::ZoneLossCause;
+            if losses.is_empty()
+                || losses.iter().any(|loss| match &request.operation {
+                    OwnOperation::Read { zone, .. } | OwnOperation::Save { zone, .. } => &loss.zone != zone,
+                    OwnOperation::CreateZones(zones) => !zones.contains(&loss.zone),
+                })
+            {
+                return Err(Error::InvalidData.into());
+            }
+            let proof = s
+                .adapter
+                .accepted_identity_read
+                .as_ref()
+                .ok_or(RuntimeError::IdentityUnverified)?
+                .request;
+            Self::fresh_loss_identity_locked(&s, proof, s.publication.own_identity_after)?;
+            let bound = crate::cloud::adapter::collection_zone(op.epoch);
+            if losses
+                .iter()
+                .any(|l| l.zone != bound && l.zone != "meguri-root" && l.zone != "meguri-media")
+            {
+                return Err(Error::InvalidData.into());
+            }
+            let reset = losses.iter().any(|l| l.cause == ZoneLossCause::EncryptedDataReset);
+            let purged = losses
+                .iter()
+                .any(|l| l.zone != "meguri-media" && l.cause == ZoneLossCause::Purged);
+            let collection_lost = losses.iter().any(|l| l.zone == bound);
+            let root_lost = losses.iter().any(|l| l.zone == "meguri-root");
+            if !reset && !purged && !collection_lost && root_lost && request.kind == OwnKind::SaveActive {
+                // V26.1's publisher exception only: no root remains to replace.
+                // Existing fields retain the crash obligation. A restart tries
+                // the new-record save, then meets zoneNotFound again if needed.
+                op.active = None;
+                op.active_attempt = None;
+                with_tracking_access(|| s.store.as_mut().ok_or(Error::Database)?.write_publication_op(&op))?;
+                s.publication.recreate_active_root = Some(op.id);
+                s.publication.waiting = false;
+                return Ok(());
+            }
+            let reason = if reset {
+                Some(IsolationReason::EncryptedDataReset)
+            } else if purged {
+                Some(IsolationReason::ZoneDeletedByUser)
+            } else if collection_lost {
+                Some(IsolationReason::ZoneMissing)
+            } else {
+                None
+            };
+            let id = op.binding_after.ok_or(Error::InvalidData)?;
+            if let Some(reason) = reason {
+                with_tracking_access(|| Self::commit_service_isolation_locked(&mut s, id, reason))?;
+                // Commit has removed network authority. Publish before any
+                // fallible readback, hook, sweep or unwind can leave this path.
+                let b = s.bound.as_mut().ok_or(RuntimeError::StaleIncarnation)?;
+                b.binding.facts.state = BindingState::Isolated(reason);
+                b.usable = false;
+                b.verified = false;
+                s.root_confirmed = false;
+                s.publish_authority();
+                #[cfg(feature = "test-hooks")]
+                self.incoming_hooks
+                    .hit(super::super::testing::IncomingStage::SDKIsolationPublished);
+                #[cfg(feature = "test-hooks")]
+                if self
+                    .incoming_hooks
+                    .retire_readback_failure
+                    .swap(false, std::sync::atomic::Ordering::SeqCst)
+                {
+                    return Err(Error::Database.into());
+                }
+                let binding = with_tracking_access(|| s.store.as_ref().ok_or(Error::Database)?.binding(id))?
+                    .ok_or(Error::BindingNotFound)?;
+                s.bound.as_mut().ok_or(RuntimeError::StaleIncarnation)?.binding = binding;
+                let live = with_tracking_access(|| s.store.as_ref().ok_or(Error::Database)?.inbox(id))?;
+                super::super::payload_asset::sweep(&self.directory, id, &live)?;
+            } else if losses.iter().any(|l| l.zone == "meguri-media") {
+                with_tracking_access(|| {
+                    let mut ledger = s.store.as_ref().ok_or(Error::Database)?.media_ledger(id)?;
+                    ledger.zone_missing = true;
+                    self.commit_media_state_locked(&mut s, id, &ledger).map(|_| ())
+                })?;
+            }
+            s.publication.waiting = true;
+            return Ok(());
+        }
         if let OwnResult::Failed { .. } | OwnResult::RetryAfter { .. } = result {
             op.retry_after_ms = match result {
                 OwnResult::Failed { retry_after_ms } => retry_after_ms,
@@ -1063,6 +1155,14 @@ impl Runtime {
         #[cfg(feature = "test-hooks")]
         let mut selected_complete = None;
         match (request.kind, result) {
+            (OwnKind::CreateZones, OwnResult::ZonesCreated)
+                if op.step == PublishStep::Complete
+                    && s.publication.recreate_active_root == Some(op.id)
+                    && request.operation == OwnOperation::CreateZones(vec!["meguri-root".into()]) =>
+            {
+                s.publication.recreate_active_root = None;
+                accepted = true;
+            }
             (OwnKind::CreateZones, OwnResult::ZonesCreated) if op.step == PublishStep::Bound => {
                 s.publication.zones_created = true;
                 accepted = true;
@@ -1155,6 +1255,13 @@ impl Runtime {
                     }
                 }
                 RecordRead::Missing | RecordRead::ZoneMissing => {
+                    let proof = s
+                        .adapter
+                        .accepted_identity_read
+                        .as_ref()
+                        .ok_or(RuntimeError::IdentityUnverified)?
+                        .request;
+                    Self::fresh_loss_identity_locked(&s, proof, s.publication.own_identity_after)?;
                     let id = op.binding_after.ok_or(Error::InvalidData)?;
                     with_tracking_access(|| {
                         s.store
@@ -1481,6 +1588,7 @@ impl Runtime {
             file,
             decision,
             account,
+            after_identity: s.adapter.next_identity,
         })
     }
     pub(super) fn validate_zone_deletion_guard(

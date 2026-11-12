@@ -178,6 +178,7 @@ pub(crate) struct AdapterState {
     pub root_reads: Vec<RootReadDiagnostic>,
     // Accepted epoch loss belongs to this SDK/binding, not a transport handle.
     pub pending_collection_loss: Option<FetchRead>,
+    pub known_loss: Option<KnownLoss>,
     pub missing_did: u64,
     pub retain_inspection: bool,
     pub closed_snapshot: Option<Snapshot>,
@@ -185,6 +186,27 @@ pub(crate) struct AdapterState {
     pub fail_inbox: bool,
     #[cfg(feature = "test-hooks")]
     pub fail_state: bool,
+}
+
+/// Finite native facts; no NSError, connection or account payload is retained.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ZoneLossCause {
+    Deleted,
+    Purged,
+    EncryptedDataReset,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ZoneLoss {
+    pub zone: String,
+    pub cause: ZoneLossCause,
+}
+#[derive(Clone)]
+pub(crate) struct KnownLoss {
+    pub sdk: String,
+    pub(super) scan: super::runtime::ScanGuard,
+    pub guard: Guard,
+    pub after_read: u64,
+    pub losses: Vec<ZoneLoss>,
 }
 
 /// Core-owned completion evidence. The guard is the result of accepting the
@@ -212,11 +234,14 @@ pub struct FetchRead {
     pub(crate) sdk: String,
     pub(super) scan: super::runtime::ScanGuard,
     pub(crate) guard: Guard,
-    pub(crate) fetch: u64,
+    pub(crate) fetch: Option<u64>,
     pub(crate) point: u64,
     pub(crate) zone: String,
     pub(crate) lost_collection: bool,
     pub(crate) a7_failure: bool,
+    pub(crate) known_loss: bool,
+    pub(crate) after_identity: u64,
+    pub(crate) loss_identity_after: u64,
 }
 impl FetchRead {
     pub fn zone(&self) -> &str {

@@ -2,6 +2,7 @@
 @testable import AppModel
 @testable import CoreBridge
 import Foundation
+import Instrumentation
 import Testing
 
 nonisolated enum ServiceAppExchangePhase: String {
@@ -17,9 +18,16 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
     let workflow: CoreCloudWorkflowService
     var connection: CoreCloudConnectionService? { production.connection }
     var own: CloudOwnExecutor? { production.own }
+    func setProofAdmission(_ admission: @escaping @Sendable (CloudOriginalCommandProofYield) async throws -> Void,
+                           acknowledgeOutputs: @escaping @Sendable ([CloudPolicyOutput]) async -> Void) async {
+        await production.setProofAdmission(admission, acknowledgeOutputs: acknowledgeOutputs)
+    }
     // Observation only: callbacks must record/yield without native calls or reentry.
     var onCommands: (@MainActor ([CloudPolicyCommand]) -> Void)? = nil
     var beforeExecution: (@MainActor (CloudPolicyCommand) async -> Void)?
+    #if DEBUG
+    var observeCoreCall: (@Sendable (CloudPolicyCommand, BridgeCall) -> Void)?
+    #endif
     // A focused shutdown regression can hold delivery of an actual completed
     // command result; it never substitutes execution or issues a capability.
     var afterExecution: (@MainActor (CloudPolicyCommand, SyncCommandResult) async -> Void)?
@@ -247,9 +255,12 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
         #if DEBUG
         let sendCapture = DebugCloudDiagnostics.SendFailureCapture()
         let mediaRecorder = DebugCloudDiagnostics.Recorder()
-        let result = await DebugCloudDiagnostics.$sendFailureCapture.withValue(sendCapture) {
-            await DebugCloudDiagnostics.$mediaRecorder.withValue(mediaRecorder) {
-                await production.execute(command, corePrepared: corePrepared)
+        let observe = observeCoreCall
+        let result = await MaintenanceCallObservation.$capture.withValue({ observe?(command, $0) }) {
+            await DebugCloudDiagnostics.$sendFailureCapture.withValue(sendCapture) {
+                await DebugCloudDiagnostics.$mediaRecorder.withValue(mediaRecorder) {
+                    await production.execute(command, corePrepared: corePrepared)
+                }
             }
         }
         // Last retained media failure, not necessarily the first. Absence does

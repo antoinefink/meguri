@@ -823,7 +823,8 @@ extension ReviewCollectionStartupTests {
                 case .commandAcknowledgementJoined: trace.record("command.ack.join.return", command: ordinal)
                 case .proofResultReduced: trace.record("proof.result.reduced")
                 case .proofAcknowledgementSending: trace.record("proof.ack.send")
-                case .ownCoreStarted: break
+                case .ownCoreStarted, .dependencyRevocationJoined(_),
+                     .corePredecessorWaiting(_), .corePredecessorReleased(_): break
                 }
             }
             #endif
@@ -1541,6 +1542,10 @@ private nonisolated enum InitialCloudCommandCorrelation {
     var shutdownTrace: NativeCollectionCloudBackend.ShutdownTrace { backend.shutdownTrace }
     var connection: CoreCloudConnectionService? { backend.connection }
     var own: CloudOwnExecutor? { backend.own }
+    func setProofAdmission(_ admission: @escaping @Sendable (CloudOriginalCommandProofYield) async throws -> Void,
+                           acknowledgeOutputs: @escaping @Sendable ([CloudPolicyOutput]) async -> Void) async {
+        await backend.setProofAdmission(admission, acknowledgeOutputs: acknowledgeOutputs)
+    }
     var actionTrace: InitialCloudActionTrace?
     var beforeExecution: (@MainActor (CloudPolicyCommand) async -> Void)?
     var beforeReturn: (@MainActor (CloudPolicyCommand, SyncCommandResult) async -> Void)?

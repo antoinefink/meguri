@@ -2,10 +2,711 @@
 @testable import AppModel
 @testable import CoreBridge
 import Foundation
+import Synchronization
 import Testing
 
 // The existing suite serializes the process-global Core owner.
 extension ReviewCollectionStartupTests {
+    @Test(arguments: [0, 1, 2, 3, 4])
+    func serviceAppOriginalProofProjectsActualProviderOutcomesWithoutLosingPendingWork(outcome: Int) async throws {
+        try await withAutomaticServiceApp { app, _, _ in
+            let sdk = try #require(await app.factory.engines.last)
+            try await sdk.signInSameServiceIdentity()
+            await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
+            await sdk.omitNextZoneCallbacks()
+            let gate = ServiceAutomaticGate()
+            let result: Result<CloudResolvedAccount?, any Error>
+            switch outcome {
+            case 0: result = .success(.init(status: .available, identity: Data("synthetic-initial-account".utf8)))
+            case 1: result = .success(.init(status: .available, identity: Data("synthetic-other-account".utf8)))
+            case 2: result = .success(.init(status: .noAccount, identity: nil))
+            case 3: result = .success(.init(status: .temporarilyUnavailable, identity: nil))
+            default: result = .failure(ServiceWorkflowFailure.wire)
+            }
+            await app.factory.resolveNextAccountRead(with: result)
+            await app.factory.holdNextAccountRead { await gate.hold() }
+            app.sync.syncNow()
+            do {
+                try #require(try await serviceAppSignal(gate.entered, stage: "original command fresh proof provider held"))
+                let workflow = try app.backend.workflow
+                let before = try await workflow.durableSnapshot()
+                let pending = try await workflow.trackingSendables()
+                await gate.release()
+                await app.sync.drainOperations(); await app.sync.prepareConnectionAuthority()
+                let after = try await workflow.durableSnapshot()
+                #expect(after.entities == before.entities)
+                #expect(try await workflow.trackingSendables() == pending)
+                if outcome == 0 { #expect(!app.sync.operationFailed) }
+                else if outcome == 1 || outcome == 2 {
+                    let content = try #require(JSONSerialization.jsonObject(with: after.trackingContent) as? [Any])
+                    let binding = try #require(content.first as? [Any])
+                    let facts = try #require(binding.last as? [String: Any])
+                    #expect(facts["state"] as? [String: String] == ["Isolated": outcome == 1 ? "AccountChanged" : "SignedOut"])
+                    do { try await workflow.validateSDK(sdk.instanceID); Issue.record("Original SDK survived account transition") }
+                    catch { }
+                } else {
+                    #expect(app.sync.operationFailed)
+                }
+            } catch { await gate.release(); throw error }
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func serviceAppCloseReleasesIgnoringProofProviderBeforeLateResultAndReopen(switchLate: Bool) async throws {
+        try await withAutomaticServiceApp { app, _, _ in
+            let sdk = try #require(await app.factory.engines.last)
+            try await sdk.signInSameServiceIdentity()
+            await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
+            await sdk.omitNextZoneCallbacks()
+            let provider = ServiceAutomaticGate()
+            let providerReturned = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            await app.factory.resolveNextAccountRead(with: .success(.init(status: switchLate ? .available : .noAccount,
+                identity: switchLate ? Data("synthetic-other-account".utf8) : nil)))
+            await app.factory.holdNextAccountRead {
+                await provider.hold()
+                providerReturned.continuation.yield(true)
+            }
+            app.sync.syncNow()
+            var close: Task<Bool, Never>?
+            do {
+                try #require(try await serviceAppSignal(provider.entered, stage: "ignoring original proof provider"))
+                let oldBackend = try app.backend
+                let closed = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+                close = Task {
+                    let result = await app.owner.close()
+                    closed.continuation.yield(result)
+                    return result
+                }
+                // The provider remains held while every original command and
+                // native callback/counter drains and the backend closes.
+                try #require(try await serviceAppSignal(closed.stream, stage: "close before ignoring provider returned"))
+                #expect(oldBackend.closed && oldBackend.closeReturned == 1)
+                try await app.reopen()
+                await app.sync.drainOperations()
+                let successor = try app.backend
+                #expect(successor !== oldBackend)
+                let before = try await successor.workflow.durableSnapshot()
+                let guardBefore = try await successor.workflow.currentGuard()
+                await provider.release()
+                try #require(try await serviceAppSignal(providerReturned.stream, stage: "original late provider return"))
+                await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
+                #expect(try await successor.workflow.durableSnapshot() == before)
+                #expect(try await successor.workflow.currentGuard() == guardBefore)
+                #expect(!app.sync.operationFailed)
+            } catch {
+                await provider.release(); _ = await close?.value
+                throw error
+            }
+        }
+    }
+
+    #if DEBUG
+    @Test(arguments: [0, 1, 2, 3, 4])
+    func serviceAppTwoFetchesKeepDependentTrackedAcrossProofAndRetirement(outcome: Int) async throws {
+        try await withAutomaticServiceApp { app, _, _ in
+            app.sync.setDeviceSettings(paused: false, automatic: true, media: true)
+            await app.sync.waitForInputs(); await app.sync.drainOperations()
+            let sdk = try #require(await app.factory.engines.last)
+            await sdk.waitForAutomaticSend()
+            try await sdk.signInSameServiceIdentity()
+            await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
+            await sdk.omitNextZoneCallbacks()
+            let native = ServiceAutomaticGate(), proof = ServiceAutomaticGate()
+            let parked = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let resolvedI = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let commands = try app.backend
+            var fetchACKs = 0
+            app.sync.observeCausalBoundary = { boundary, command in
+                if case .commandAcknowledgementJoined = boundary, let command, case .requestFetch = command.action { fetchACKs += 1 }
+            }
+            app.sync.observeAccountPolicyDrain = { stage in
+                if case .waiting = stage { resolvedI.continuation.yield(true) }
+            }
+            #if DEBUG
+            app.sync.observeQuiescentDependency = { parked.continuation.yield($0) }
+            #endif
+            defer {
+                app.sync.observeCausalBoundary = nil; app.sync.observeAccountPolicyDrain = nil
+                #if DEBUG
+                app.sync.observeQuiescentDependency = nil
+                #endif
+                parked.continuation.finish(); resolvedI.continuation.finish()
+            }
+            let reads = await app.factory.accountReadCount
+            await sdk.holdNextFetchReturn { await native.hold() }
+            // Two independently issued Foreground RequestFetch commands. B must
+            // remain tracked while A owns its original native result and proof.
+            app.sync.receive(.foreground)
+            do {
+                try #require(try await serviceAppSignal(native.entered, stage: "fetch A original Service terminal held"))
+                app.sync.receive(.foreground)
+                try #require(try await serviceAppSignal(parked.stream, stage: "fetch B parked before Core fetch admission"))
+                await app.sync.accountChanged()
+                try #require(try await serviceAppSignal(resolvedI.stream, stage: "resolved app read I retained behind fetch A"))
+                #expect(await app.factory.accountReadCount == reads + 1)
+                if outcome == 1 {
+                    await app.factory.resolveNextAccountRead(with: .success(.init(status: .noAccount, identity: nil)))
+                } else if outcome == 2 {
+                    await app.factory.resolveNextAccountRead(with: .success(.init(status: .available, identity: Data("synthetic-other-account".utf8))))
+                }
+                let providerReturned = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+                defer { providerReturned.continuation.finish() }
+                await app.factory.holdNextAccountRead {
+                    await proof.hold(); providerReturned.continuation.yield(true)
+                }
+                await native.release()
+                try #require(try await serviceAppSignal(proof.entered, stage: "A fresh proof while B stays tracked and unadmitted"))
+                #expect(fetchACKs == 0)
+                if outcome >= 3 {
+                    // Retire the real old owner while A's provider ignores
+                    // cancellation and B is still parked, then test its late
+                    // return against the actual successor.
+                    let retired = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+                    let ownerShutdownTask = Task { @MainActor () throws -> Void in
+                        if outcome == 3 {
+                            app.sync.backgroundExpired()
+                            let closed = await app.owner.close()
+                            retired.continuation.yield(closed)
+                        } else {
+                            let source = try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg"))
+                            app.owner.entry.inspect(source); await app.owner.entry.waitForCompletion()
+                            try #require(app.owner.entry.preview != nil)
+                            app.owner.entry.confirm(); await app.owner.entry.waitForCompletion()
+                            await app.sync.waitForReplacement()
+                            retired.continuation.yield(app.owner.entry.lastActivation != nil)
+                        }
+                        retired.continuation.finish()
+                    }
+                    do {
+                        try #require(try await serviceAppSignal(retired.stream, stage: "original A/B cancellation and native/backend join before provider release"))
+                        try await ownerShutdownTask.value
+                        #expect(commands.closed && commands.closeReturned == 1)
+                        if outcome == 3 { try await app.reopen() }
+                        await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
+                        let successor = try app.backend
+                        #expect(successor !== commands)
+                        let snapshot = try await successor.workflow.durableSnapshot()
+                        let guardBefore = try await successor.workflow.currentGuard()
+                        await proof.release()
+                        try #require(try await serviceAppSignal(providerReturned.stream, stage: "late old A provider after successor admission"))
+                        await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
+                        #expect(try await successor.workflow.durableSnapshot() == snapshot)
+                        #expect(try await successor.workflow.currentGuard() == guardBefore)
+                        return
+                    } catch {
+                        await proof.release(); _ = await ownerShutdownTask.result
+                        throw error
+                    }
+                }
+                await proof.release()
+                await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
+                #expect(fetchACKs == 2) // each original command returns through its normal executor
+                if outcome == 0 { #expect(!app.sync.operationFailed) }
+                else {
+                    do { try await commands.workflow.validateSDK(sdk.instanceID); Issue.record("Retired original SDK admitted dependent fetch") }
+                    catch { }
+                }
+            } catch {
+                await native.release(); await proof.release()
+                throw error
+            }
+        }
+    }
+
+    // Three actual policy triggers, each with normal completion and owner
+    // cancellation/reopen. No clock/deadline or command result is substituted.
+    @Test(arguments: [0, 1, 2], [false, true])
+    func serviceAppMixedAndFlushDependenciesJoinOriginalProof(trigger: Int, retire: Bool) async throws {
+        try await withAutomaticServiceApp { app, _, _ in
+            if trigger == 0 {
+                app.sync.setDeviceSettings(paused: false, automatic: true, media: true)
+                await app.sync.waitForInputs(); await app.sync.drainOperations()
+            }
+            let sdk = try #require(await app.factory.engines.last)
+            await sdk.waitForAutomaticSend()
+            try #require(await sdk.automaticSchedulingEnabled == (trigger == 0))
+            try await sdk.signInSameServiceIdentity()
+            await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
+            await sdk.omitNextZoneCallbacks()
+            let commands = try app.backend
+            let native = ServiceAutomaticGate(), proof = ServiceAutomaticGate()
+            let parked = AsyncStream<Bool>.makeStream(bufferingPolicy: .unbounded)
+            let providerReturned = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            var primary: CloudPolicyCommand?, dependent: CloudPolicyCommand?
+            var primaryStarts = 0, dependentStarts = 0
+            var primaryResults = 0, dependentResults = 0
+            var primaryACKs = 0, dependentACKs = 0
+            var isParked = false, parks = 0, revocations = 0
+            let cancelled = Mutex(false), parkedAtNative = Mutex(false), dependentEnteredNative = Mutex(false)
+            await sdk.inspectNextCancellation { cancelled.withLock { $0 = true } }
+            commands.beforeExecution = { command in
+                switch command.action {
+                case .requestFetch where trigger == 0:
+                    primary = command; primaryStarts += 1
+                case .runExchange:
+                    if trigger == 0 { dependent = command; dependentStarts += 1 }
+                    else { primary = command; primaryStarts += 1 }
+                case .backgroundFlush where trigger == 1, .quitFlush where trigger == 2:
+                    dependent = command; dependentStarts += 1
+                default: break
+                }
+            }
+            commands.afterExecution = { command, result in
+                if let primary, command.raw === primary.raw { primaryResults += 1 }
+                if let dependent, command.raw === dependent.raw {
+                    #expect(!isParked, "Dependency revocation joins before original result delivery")
+                    dependentResults += 1
+                }
+                if !retire, (primary.map { command.raw === $0.raw } == true || dependent.map { command.raw === $0.raw } == true) {
+                    #expect(result.error == nil && !result.deferred)
+                }
+            }
+            app.sync.observeQuiescentDependency = { value in
+                isParked = value
+                parkedAtNative.withLock { $0 = value }
+                if value { parks += 1 } else { revocations += 1 }
+                parked.continuation.yield(value)
+            }
+            app.sync.observeCausalBoundary = { boundary, command in
+                guard case .commandAcknowledgementJoined = boundary, let command else { return }
+                if let primary, command.raw === primary.raw { primaryACKs += 1 }
+                if let dependent, command.raw === dependent.raw { dependentACKs += 1 }
+            }
+            defer {
+                commands.beforeExecution = nil; commands.afterExecution = nil
+                app.sync.observeQuiescentDependency = nil; app.sync.observeCausalBoundary = nil
+                parked.continuation.finish(); providerReturned.continuation.finish()
+            }
+            let fetches = await sdk.manualFetchGroups.count
+            let engines = await app.factory.engines.count
+            let reads = await app.factory.accountReadCount
+            let before = try await commands.workflow.durableSnapshot()
+            let pending = try await commands.workflow.trackingSendables()
+            await sdk.holdNextFetchReturn { await native.hold() }
+            if trigger == 0 { app.sync.receive(.foreground) }
+            else { app.sync.syncNow() }
+            do {
+                try #require(try await serviceAppSignal(native.entered, stage: "primary actual Service fetch return held"))
+                try #require(primaryStarts == 1 && primary != nil)
+                #expect(await sdk.manualFetchGroups.count == fetches + 1)
+                if trigger == 0 { app.sync.syncNow() }
+                else if trigger == 1 {
+                    app.sync.receive(.background(deadlineMilliseconds: Int64(Date().timeIntervalSince1970 * 1_000) + 30_000))
+                } else { app.sync.receive(.quitRequested) }
+                try #require(try await serviceAppSignal(parked.stream, stage: "actual dependent exchange or flush parked"))
+                try #require(dependentStarts == 1 && dependent != nil)
+                #expect(primaryResults == 0 && dependentResults == 0 && primaryACKs == 0 && dependentACKs == 0)
+                #expect(await sdk.manualFetchGroups.count == fetches + 1)
+                await app.factory.holdNextAccountRead {
+                    await proof.hold(); providerReturned.continuation.yield(true)
+                }
+                await native.release()
+                try #require(try await serviceAppSignal(proof.entered, stage: "primary fresh account proof admitted with dependent still tracked"))
+                #expect(isParked && primaryResults == 0 && dependentResults == 0)
+                #expect(await app.factory.accountReadCount == reads + 1)
+                #expect(!cancelled.withLock { $0 })
+                if retire {
+                    let closed = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+                    defer { closed.continuation.finish() }
+                    let closing = Task { _ = closed.continuation.yield(await app.owner.close()) }
+                    do {
+                        try #require(try await serviceAppSignal(closed.stream, stage: "original proof and parked dependent cancel before late provider"))
+                        await closing.value
+                    } catch { await proof.release(); await closing.value; throw error }
+                    #expect(commands.closed && commands.closeReturned == 1 && cancelled.withLock { $0 })
+                    #expect(primaryACKs == 1 && dependentACKs == 1)
+                    #expect(!isParked && revocations == parks)
+                    try await app.reopen()
+                    await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
+                    let successor = try app.backend
+                    let successorSDK = try #require(await app.factory.engines.last)
+                    #expect(successor !== commands && successorSDK.instanceID != sdk.instanceID)
+                    try await successor.workflow.validateSDK(successorSDK.instanceID)
+                    let snapshot = try await successor.workflow.durableSnapshot()
+                    let guardBefore = try await successor.workflow.currentGuard()
+                    await proof.release()
+                    try #require(try await serviceAppSignal(providerReturned.stream, stage: "late original provider returns after successor admission"))
+                    await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
+                    #expect(try await successor.workflow.durableSnapshot() == snapshot)
+                    #expect(try await successor.workflow.currentGuard() == guardBefore)
+                } else {
+                    if trigger == 0 {
+                        await sdk.inspectNextManualFetch {
+                            #expect(!parkedAtNative.withLock { $0 }, "Exact dependent revocation precedes its actual SDK entry")
+                            dependentEnteredNative.withLock { $0 = true }
+                        }
+                    }
+                    await proof.release()
+                    await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
+                    #expect(primaryStarts == 1 && dependentStarts == 1)
+                    if trigger == 0 { #expect(dependentEnteredNative.withLock { $0 }) }
+                    #expect(primaryResults == 1 && dependentResults == 1 && primaryACKs == 1 && dependentACKs == 1)
+                    #expect(parks > 0 && revocations == parks && !isParked)
+                    #expect(!cancelled.withLock { $0 } && !app.sync.operationFailed)
+                    #expect(await app.factory.engines.count == engines)
+                    let groups = await sdk.manualFetchGroups
+                    #expect(groups.count == fetches + (trigger == 0 ? 3 : 2))
+                    #expect(Set(groups).count == groups.count)
+                    try await commands.workflow.validateSDK(sdk.instanceID)
+                    #expect(try await commands.workflow.durableSnapshot().entities == before.entities)
+                    #expect(try await commands.workflow.trackingSendables() == pending)
+                }
+            } catch { await native.release(); await proof.release(); throw error }
+        }
+    }
+
+    // The real QuitFlush keeps P11.4's original now+10s deadline. The other
+    // row uses the existing app expiry/task-cancellation path; both join the
+    // same cancelFlush and retain the ignoring provider until after results.
+    @Test(arguments: [false, true])
+    func serviceAppParkedFlushRevocationACKPrecedesNativeAndCoreCancellation(deadline: Bool) async throws {
+        try await withAutomaticServiceApp { app, _, _ in
+            let sdk = try #require(await app.factory.engines.last)
+            try await sdk.signInSameServiceIdentity()
+            await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
+            await sdk.omitNextZoneCallbacks()
+            let native = ServiceAutomaticGate(), proof = ServiceAutomaticGate()
+            let parked = AsyncStream<Bool>.makeStream(bufferingPolicy: .unbounded)
+            let cancelled = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let returned = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let state = Mutex((parked: false, everParked: false, joined: false, native: 0, core: 0))
+            let backend = try app.backend
+            var flush: CloudPolicyCommand?, exchange: CloudPolicyCommand?
+            var flushResults = 0, exchangeResults = 0, flushACKs = 0, exchangeACKs = 0
+            app.sync.observeQuiescentDependency = { value in
+                state.withLock { $0.parked = value; $0.everParked = $0.everParked || value }
+                parked.continuation.yield(value)
+            }
+            app.sync.observeCausalBoundary = { boundary, command in
+                guard let command else { return }
+                switch boundary {
+                case .dependencyRevocationJoined:
+                    if case .quitFlush = command.action { state.withLock { $0.joined = true } }
+                case .commandAcknowledgementJoined:
+                    if let flush, command.raw === flush.raw { flushACKs += 1 }
+                    if let exchange, command.raw === exchange.raw { exchangeACKs += 1 }
+                default: break
+                }
+            }
+            backend.beforeExecution = { command in
+                if case .quitFlush = command.action { flush = command }
+                if case .runExchange = command.action { exchange = command }
+            }
+            backend.afterExecution = { command, result in
+                if let flush, command.raw === flush.raw {
+                    #expect(result.error is CancellationError && !result.deferred)
+                    flushResults += 1
+                }
+                if let exchange, command.raw === exchange.raw { exchangeResults += 1 }
+            }
+            backend.observeCoreCall = { command, call in
+                guard case .quitFlush = command.action,
+                      call == .cloudPolicyExecutionStartValidateControl || call == .cloudPolicyExecutionOriginalSdk else { return }
+                state.withLock {
+                    if $0.everParked {
+                        #expect($0.joined && !$0.parked, "Actual Core cancellation follows ordered revocation ACK")
+                        $0.core += 1
+                    }
+                }
+            }
+            await sdk.inspectNextCancellation {
+                state.withLock {
+                    #expect($0.joined && !$0.parked, "Actual SDK cancellation follows ordered revocation ACK")
+                    $0.native += 1
+                }
+                cancelled.continuation.yield(true)
+            }
+            defer {
+                backend.beforeExecution = nil; backend.afterExecution = nil; backend.observeCoreCall = nil
+                app.sync.observeQuiescentDependency = nil; app.sync.observeCausalBoundary = nil
+                parked.continuation.finish(); cancelled.continuation.finish(); returned.continuation.finish()
+            }
+            await sdk.holdNextFetchReturn { await native.hold() }
+            app.sync.syncNow()
+            do {
+                try #require(try await serviceAppSignal(native.entered, stage: "original exchange native terminal before flush"))
+                app.sync.receive(.quitRequested)
+                try #require(try await serviceAppSignal(parked.stream, stage: "real quit flush parked on original exchange"))
+                try #require(flush != nil && exchange != nil)
+                await app.factory.holdNextAccountRead { await proof.hold(); returned.continuation.yield(true) }
+                await native.release()
+                try #require(try await serviceAppSignal(proof.entered, stage: "original fresh proof pending at flush cancellation"))
+                #expect(flushResults == 0 && exchangeResults == 0 && flushACKs == 0 && exchangeACKs == 0)
+                if !deadline { app.sync.backgroundExpired() }
+                try #require(try await serviceAppSignal(cancelled.stream, stage: "real cancellation at original absolute deadline or task expiry"))
+                await app.sync.drainOperations()
+                #expect(flushResults == 1 && exchangeResults == 1 && flushACKs == 1 && exchangeACKs == 1)
+                #expect(state.withLock { $0.joined && !$0.parked && $0.native > 0 && $0.core > 0 })
+                // The provider still has not returned. Close/reopen and then
+                // deliver its late original reply against a real successor.
+                try #require(await app.owner.close())
+                try await app.reopen(); await app.sync.drainOperations()
+                let successor = try app.backend
+                #expect(successor !== backend)
+                let snapshot = try await successor.workflow.durableSnapshot()
+                let guardBefore = try await successor.workflow.currentGuard()
+                await proof.release()
+                try #require(try await serviceAppSignal(returned.stream, stage: "late provider after cancelled flush and successor"))
+                await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
+                #expect(try await successor.workflow.durableSnapshot() == snapshot)
+                #expect(try await successor.workflow.currentGuard() == guardBefore)
+            } catch { await native.release(); await proof.release(); throw error }
+        }
+    }
+
+    @Test
+    func serviceAppPredecessorCorePhaseRetainsRealResultACKBeforeAccountProof() async throws {
+        try await withAutomaticServiceApp { app, _, _ in
+            let sdk = try #require(await app.factory.engines.last)
+            try await sdk.signInSameServiceIdentity()
+            await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
+            let backend = try app.backend
+            let native = ServiceAutomaticGate(), provider = ServiceAutomaticGate()
+            let firstResultGate = ServiceAutomaticGate(), resultB = ServiceAutomaticGate()
+            let waiting = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let completion = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            var a: CloudPolicyCommand?, b: CloudPolicyCommand?
+            var aACK = false, bACK = false, bEntered = false, bReleased = false, projected = false
+            backend.beforeExecution = { command in
+                if case .recordExchange = command.action, a == nil { a = command }
+                if let b, command.raw === b.raw {
+                    #expect(aACK && bReleased, "B enters actual Core execution only after A's result ACK and phase release")
+                    bEntered = true
+                }
+            }
+            backend.afterExecution = { command, result in
+                if let a, command.raw === a.raw {
+                    #expect(result.error == nil && !result.deferred)
+                    await firstResultGate.hold()
+                }
+                if let b, command.raw === b.raw {
+                    #expect(result.error == nil && !result.deferred)
+                    await resultB.hold()
+                }
+            }
+            app.sync.observeCausalBoundary = { boundary, command in
+                switch boundary {
+                case .corePredecessorWaiting(let predecessor):
+                    if case .recordExchange = predecessor.action, let command {
+                        b = command
+                        waiting.continuation.yield(true)
+                    }
+                case .corePredecessorReleased(let predecessor):
+                    if let a, predecessor.raw === a.raw { bReleased = true }
+                case .commandAcknowledgementJoined:
+                    if let command, let a, command.raw === a.raw { aACK = true }
+                    if let command, let b, command.raw === b.raw { bACK = true }
+                case .proofResultReduced:
+                    #expect(aACK && bACK, "Account projection cannot pass either real unfinished Core/result prefix")
+                    projected = true
+                default: break
+                }
+            }
+            app.sync.observeAccountPolicyDrain = { stage in
+                if case .waiting = stage { completion.continuation.yield(true) }
+            }
+            defer {
+                backend.beforeExecution = nil; backend.afterExecution = nil
+                app.sync.observeCausalBoundary = nil; app.sync.observeAccountPolicyDrain = nil
+                waiting.continuation.finish(); completion.continuation.finish()
+            }
+            await sdk.holdNextFetchReturn { await native.hold() }
+            app.sync.syncNow()
+            do {
+                try #require(try await serviceAppSignal(native.entered, stage: "actual exchange native prefix held"))
+                await app.factory.holdNextAccountRead { await provider.hold() }
+                await app.sync.accountChanged()
+                try #require(try await serviceAppSignal(provider.entered, stage: "real account proof provider before predecessor phases"))
+                await provider.release()
+                try #require(try await serviceAppSignal(completion.stream, stage: "resolved real account completion held behind actual native prefix"))
+                #expect(!projected)
+                // Normal SDK callbacks/drains are retained: no synthetic phase,
+                // result, ACK, or no-callback inference is introduced here.
+                await native.release()
+                try #require(try await serviceAppSignal(firstResultGate.entered, stage: "first exchange result paused pending acknowledgement"))
+                try #require(try await serviceAppSignal(waiting.stream, stage: "tracked command B waiting actual predecessor phase A"))
+                // The same resolved account completion remains held behind
+                // the actual Core/result prefix; B is not a causal proof wait.
+                #expect(!aACK && !bEntered && !projected)
+                await firstResultGate.release()
+                try #require(try await serviceAppSignal(resultB.entered, stage: "B released by actual A result ACK, actual B Core result held"))
+                #expect(aACK && bEntered && bReleased && !bACK && !projected)
+                await resultB.release()
+                await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
+                #expect(aACK && bACK && projected && !app.sync.operationFailed)
+                try await backend.workflow.validateSDK(sdk.instanceID)
+                // An actual successor owner remains usable after all phases.
+                try #require(await app.owner.close())
+                try await app.reopen(); await app.sync.drainOperations()
+                let successor = try app.backend
+                #expect(successor !== backend)
+                let successorSDK = try #require(await app.factory.engines.last)
+                try await successor.workflow.validateSDK(successorSDK.instanceID)
+            } catch {
+                await native.release(); await provider.release(); await firstResultGate.release(); await resultB.release()
+                throw error
+            }
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func servicePublisherOriginalOwnResultCommitsBeforeResolvedAccountProjection(signOut: Bool) async throws {
+        let gate = ServiceAutomaticGate()
+        let committed = Mutex(false)
+        try await withServicePublisher(prepare: { app in
+            app.ownTransport = HeldServicePublicationTransport(original: ServiceOwnTransport(wire: app.wire), gate: gate)
+            app.observeOwn = { observation in
+                if case .createZones = observation.metadata.kind, case .committed = observation.phase { committed.withLock { $0 = true } }
+            }
+        }) { app in
+            let originalBackend = try app.backend
+            let readResolved = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            var projected = false
+            app.sync.observeAccountPolicyDrain = { stage in
+                if case .waiting = stage { readResolved.continuation.yield(true) }
+            }
+            #if DEBUG
+            app.sync.observeCausalBoundary = { boundary, _ in
+                if case .proofResultReduced = boundary {
+                    #expect(committed.withLock { $0 }, "Original own result bookkeeping precedes account projection")
+                    projected = true
+                }
+            }
+            #endif
+            defer {
+                app.sync.observeAccountPolicyDrain = nil
+                #if DEBUG
+                app.sync.observeCausalBoundary = nil
+                #endif
+                readResolved.continuation.finish()
+            }
+            let publication = Task { await app.sync.confirmPublication() }
+            do {
+                try #require(try await serviceAppSignal(gate.entered, stage: "original Service CreateZones result held"))
+                #expect(app.sync.connectionOperationActive && !committed.withLock { $0 })
+                await app.factory.resolveNextAccountRead(with: .success(signOut
+                    ? .init(status: .noAccount, identity: nil)
+                    : .init(status: .available, identity: Data("synthetic-initial-account".utf8))))
+                await app.sync.accountChanged()
+                try #require(try await serviceAppSignal(readResolved.stream, stage: "account I completion held by actual own operation"))
+                #expect(!projected && !committed.withLock { $0 })
+                await gate.release()
+                await publication.value
+                await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
+                #expect(committed.withLock { $0 })
+                #if DEBUG
+                #expect(projected)
+                #endif
+                let backend = try app.backend
+                #expect(backend === originalBackend)
+                if !signOut { #expect(!app.sync.operationFailed) }
+            } catch {
+                await gate.release(); await publication.value
+                throw error
+            }
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func serviceResumeOwnProofFinishesWithoutWaitingForItsOwnTask(priorAccount: Bool) async throws {
+        try await withAutomaticServiceApp { app, _, _ in
+            let sdk = try #require(await app.factory.engines.last)
+            await app.factory.resolveNextAccountRead(with: .success(.init(status: .noAccount, identity: nil)))
+            await app.sync.accountChanged(); await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
+            await app.factory.resolveNextAccountRead(with: .success(.init(status: .available, identity: Data("synthetic-initial-account".utf8))))
+            await app.sync.accountChanged(); await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
+            try await app.owner.prepareCloudConnectionPreview(); await app.sync.waitForConnectionPreview()
+            guard case .ready(_, let summary) = app.sync.preview else { throw ServiceWorkflowFailure.wire }
+            try #require(summary.decision == .confirmResume)
+            let proof = ServiceAutomaticGate(), preceding = ServiceAutomaticGate()
+            let pending = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            app.sync.observeResumePolicyDrain = { stage in
+                if case .waiting = stage { pending.continuation.yield(true) }
+            }
+            defer { app.sync.observeResumePolicyDrain = nil; pending.continuation.finish() }
+            if priorAccount {
+                await app.factory.holdNextAccountRead { await preceding.hold() }
+                await app.sync.accountChanged()
+                try #require(try await serviceAppSignal(preceding.entered, stage: "account I provider before unadmitted Resume"))
+            } else { await app.factory.holdNextAccountRead { await proof.hold() } }
+            let resumed = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let original = Task {
+                await app.sync.confirmResume()
+                resumed.continuation.yield(true); resumed.continuation.finish()
+            }
+            do {
+                if priorAccount {
+                    try #require(try await serviceAppSignal(pending.stream, stage: "unadmitted Resume waiting for actual earlier account I"))
+                    await app.factory.holdNextAccountRead { await proof.hold() }
+                    await preceding.release()
+                }
+                try #require(try await serviceAppSignal(proof.entered, stage: "Resume owner's exact account proof"))
+                #expect(app.sync.connectionOperationActive)
+                await proof.release()
+                try #require(try await serviceAppSignal(resumed.stream, stage: "Resume proof ACK releases its own retained task"))
+                await original.value; await app.sync.drainOperations()
+                #expect(!app.sync.connectionOperationActive && !app.sync.operationFailed)
+                let successor = try #require(await app.factory.engines.last)
+                #expect(successor.instanceID != sdk.instanceID)
+                try await app.backend.workflow.validateSDK(successor.instanceID)
+            } catch { await preceding.release(); await proof.release(); await original.value; throw error }
+        }
+    }
+
+    #endif
+
+    @Test func serviceAppResolvedAccountReadKeepsItsProjectionBeforeCommandFreshProof() async throws {
+        try await withAutomaticServiceApp { app, _, _ in
+            let sdk = try #require(await app.factory.engines.last)
+            try await sdk.signInSameServiceIdentity()
+            await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
+            await sdk.omitNextZoneCallbacks()
+            let native = ServiceAutomaticGate(), fresh = ServiceAutomaticGate()
+            let waiting = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            var proofProjections = 0
+            app.sync.observeAccountPolicyDrain = { stage in
+                if case .waiting = stage { waiting.continuation.yield(true) }
+            }
+            #if DEBUG
+            app.sync.observeCausalBoundary = { boundary, _ in
+                if case .proofAcknowledgementSending = boundary { proofProjections += 1 }
+            }
+            #endif
+            let before = await app.factory.accountReadCount
+            await sdk.holdNextFetchReturn { await native.hold() }
+            let original = Task { try await app.exchange() }
+            do {
+                try #require(try await serviceAppSignal(native.entered, stage: "original native fetch result before command return"))
+                await app.sync.accountChanged()
+                try #require(try await serviceAppSignal(waiting.stream, stage: "resolved app read I held by original command"))
+                #expect(await app.factory.accountReadCount == before + 1)
+                await app.factory.holdNextAccountRead { await fresh.hold() }
+                await native.release()
+                try #require(try await serviceAppSignal(fresh.entered, stage: "ordered fresh read after I projection"))
+                #if DEBUG
+                #expect(proofProjections >= 1)
+                #endif
+                #expect(!app.sync.operationFailed)
+                await fresh.release()
+                try await original.value
+                await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
+                #expect(!app.sync.operationFailed)
+            } catch {
+                await native.release(); await fresh.release()
+                original.cancel(); _ = await original.result
+                app.sync.observeAccountPolicyDrain = nil
+                #if DEBUG
+                app.sync.observeCausalBoundary = nil
+                #endif
+                throw error
+            }
+            app.sync.observeAccountPolicyDrain = nil
+            #if DEBUG
+            app.sync.observeCausalBoundary = nil
+            #endif
+        }
+    }
+
     @Test
     func serviceSDKSavedRemovalRequiresOriginalHandlerReturnAndActualBookkeeping() async throws {
         try await withAutomaticServiceApp { app, fixture, wire in
@@ -414,7 +1115,138 @@ extension ReviewCollectionStartupTests {
     }
 }
 
-@MainActor private func withAutomaticServiceApp(_ body: @MainActor (ServiceAppHarness, InitialCloudFixture, ServiceWorkflowWire) async throws -> Void) async throws {
+
+// P3/P4, approved P24(d), Q11's in-force no-state row. This uses the
+// production app backend (appOwnsAccountObservation=true), original Service
+// database/read operations and the real Copy Debug Info producer.
+extension ReviewCollectionStartupTests {
+    // Named Q11 prerequisite: same-ID signIn after C1's actual root fetch,
+    // before C1 returns, must read the now-deleted root and emit no root drain.
+    @Test func q11ServiceAppSignInAfterRootFetchReadsDeletedActiveWithoutDrain() async throws {
+        try await withAutomaticServiceApp { app, _, wire in
+            let sdk = try #require(await app.factory.engines.last)
+            let workflow = try app.backend.workflow
+            let before = try await workflow.durableSnapshot()
+            let drains = try await workflow.fetchDrains()
+            let returned = ServiceAutomaticGate()
+            await sdk.holdNextFetchReturn { await returned.hold() }
+            app.sync.syncNow()
+            do {
+                try #require(try await serviceAppSignal(returned.entered, stage: "Q11 C1 root zone fetch completed"))
+                let deleted = try await wire.call(.object(["DeleteZone": .object([
+                    "zone": .string("meguri-root"), "cause": .string("Deleted")])]))
+                #expect(try deleted.ok().text == "Done")
+                try await sdk.signInSameServiceIdentity()
+                await returned.release()
+                await app.sync.drainOperations(); await app.sync.prepareConnectionAuthority()
+                let after = try await workflow.durableSnapshot()
+                let content = try #require(JSONSerialization.jsonObject(with: after.trackingContent) as? [Any])
+                let binding = try #require(content.first as? [Any])
+                let facts = try #require(binding.last as? [String: Any])
+                #expect(facts["state"] as? [String: String] == ["Isolated": "ActiveMissing"])
+                #expect(after.entities == before.entities)
+                #expect(!(try await workflow.fetchDrains()).dropFirst(drains.count).contains { $0.zone == "meguri-root" })
+                #expect(!after.absencePassCompleted)
+                let reads = try await workflow.diagnostics().rootReads
+                #expect(reads.contains { $0.active && $0.accepted && $0.outcome == "zoneNotFound" })
+            } catch { await returned.release(); throw error }
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func serviceAppNoStateProofReturnsThroughCoordinatorAndCopyDebugInfo(scheduledFirst: Bool) async throws {
+        try await withAutomaticServiceApp(prepare: { app in
+            await app.factory.omitFirstZoneCallbacksOnNextInstance(scheduledFirst: scheduledFirst)
+        }) { app, _, _ in
+            let workflow = try app.backend.workflow
+            let initial = try await workflow.diagnostics().rootReads
+            let epoch = try #require(initial.first { !$0.active && $0.outcome == "found" && $0.accepted })
+            #expect(epoch.a7Failure)
+            let producer = FieldDiagnosticsStore(directory: app.root.appending(path: "diagnostics"),
+                rootReadDiagnostics: { (try? await workflow.diagnostics().rootReads) ?? [] })
+            let bytes = try await producer.debugInfo()
+            let info = try #require(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
+            let exported = try #require(info["rootReads"] as? [[String: Any]])
+            #expect(exported.count == initial.count)
+            #expect(exported.compactMap { $0["a7Failure"] as? Bool } == initial.map(\.a7Failure))
+            let sdk = try #require(await app.factory.engines.last)
+            if scheduledFirst { #expect(await sdk.joinedScheduledFetches >= 1) }
+            // C1 really fetched its zones before the sign-in no-state point.
+            // Hold its native return, then deliver the actual same-ID event.
+            let c1 = ServiceAutomaticGate()
+            await sdk.holdNextFetchReturn { await c1.hold() }
+            let before = try await workflow.diagnostics().rootReads.count
+            let original = Task { try await app.exchange() }
+            do {
+                try #require(try await serviceAppSignal(c1.entered, stage: "C1 fetched zones before same-ID signIn"))
+                try await sdk.signInSameServiceIdentity()
+                await c1.release()
+                try await original.value
+            } catch {
+                await c1.release(); original.cancel(); _ = await original.result
+                throw error
+            }
+            await app.sync.prepareConnectionAuthority()
+            await app.sync.drainOperations()
+            let later = try await workflow.diagnostics().rootReads
+            let found = later.dropFirst(before).filter { !$0.active && $0.outcome == "found" && $0.accepted }
+            #expect(!found.isEmpty && found.allSatisfy { !$0.a7Failure })
+            let latestBytes = try await producer.debugInfo()
+            let latestInfo = try #require(JSONSerialization.jsonObject(with: latestBytes) as? [String: Any])
+            let latest = try #require(latestInfo["rootReads"] as? [[String: Any]])
+            #expect(latest.compactMap { $0["a7Failure"] as? Bool } == later.map(\.a7Failure))
+            #expect(!app.sync.operationFailed)
+            try #require(await app.owner.close())
+            await app.factory.inspectCreation { configuration in
+                try #require(configuration.serialization != nil)
+            }
+            try await app.reopen()
+            let reopenedWorkflow = try app.backend.workflow
+            let reopenedProducer = FieldDiagnosticsStore(directory: app.root.appending(path: "diagnostics"),
+                rootReadDiagnostics: { (try? await reopenedWorkflow.diagnostics().rootReads) ?? [] })
+            let savedSDK = try #require(await app.factory.engines.last)
+            try await savedSDK.signInSameServiceIdentity()
+            await app.sync.prepareConnectionAuthority()
+            await savedSDK.omitNextZoneCallbacks()
+            let prior = try await reopenedWorkflow.diagnostics().rootReads.count
+            try await app.exchange()
+            await app.sync.drainOperations()
+            let savedReads = try await reopenedWorkflow.diagnostics().rootReads
+            let savedFound = savedReads.dropFirst(prior).filter { !$0.active && $0.outcome == "found" && $0.accepted }
+            #expect(!savedFound.isEmpty && savedFound.allSatisfy { !$0.a7Failure })
+            let savedBytes = try await reopenedProducer.debugInfo()
+            let savedInfo = try #require(JSONSerialization.jsonObject(with: savedBytes) as? [String: Any])
+            let savedText = try #require(savedInfo["rootReads"] as? [[String: Any]])
+            #expect(savedText.compactMap { $0["a7Failure"] as? Bool } == savedReads.map(\.a7Failure))
+        }
+    }
+
+    @Test func serviceAppHeldOriginalFreshReadFinishesWithoutWaitingOnItsCommandACK() async throws {
+        try await withAutomaticServiceApp { app, _, _ in
+            let sdk = try #require(await app.factory.engines.last)
+            try await sdk.signInSameServiceIdentity()
+            await app.sync.prepareConnectionAuthority()
+            await app.sync.drainOperations()
+            await sdk.omitNextZoneCallbacks()
+            let gate = ServiceAutomaticGate()
+            await app.factory.holdNextAccountRead { await gate.hold() }
+            let exchange = Task { try await app.exchange() }
+            do {
+                try #require(try await serviceAppSignal(gate.entered, stage: "original in-command account resolver"))
+                await gate.release()
+                try await exchange.value
+                await app.sync.drainOperations()
+                #expect(!app.sync.operationFailed)
+            } catch {
+                await gate.release()
+                exchange.cancel(); _ = await exchange.result
+                throw error
+            }
+        }
+    }
+}
+
+@MainActor private func withAutomaticServiceApp(prepare: (@MainActor (ServiceAppHarness) async throws -> Void)? = nil, _ body: @MainActor (ServiceAppHarness, InitialCloudFixture, ServiceWorkflowWire) async throws -> Void) async throws {
     let fixture = try InitialCloudFixture.load()
     let root = FileManager.default.temporaryDirectory.appending(path: "synthetic-sdk-automatic-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
@@ -429,6 +1261,7 @@ extension ReviewCollectionStartupTests {
         active = app
         defer { app.defaults.removePersistentDomain(forName: app.suite) }
         try await wire.seed(fixture)
+        try await prepare?(app)
         try await app.adopt(); try await app.exchange()
         // Join the original exchange's follow-up commands before a settings
         // change retires that SDK. No preexisting request belongs to our holds.
@@ -443,6 +1276,65 @@ extension ReviewCollectionStartupTests {
     } catch {
         if let active { await active.cleanupAfterServiceFailure() }
         else { _ = await process.cancel() }
+        throw error
+    }
+}
+
+// Every reply below is produced by the existing Service operation. Only its
+// original owner's receipt is held; enqueue/cancel and read evidence stay real.
+private nonisolated struct HeldServicePublicationTransport: CloudOwnTransport {
+    let original: ServiceOwnTransport
+    let gate: ServiceAutomaticGate
+    func prepare(_ command: CloudOwnTransportCommand) throws -> any CloudPreparedOwnOperation {
+        let operation = try original.prepare(command)
+        if case .publication(.createZones) = command { return HeldServicePublicationReply(original: operation, gate: gate) }
+        return operation
+    }
+}
+private nonisolated struct HeldServicePublicationReply: CloudPreparedOwnOperation {
+    let original: any CloudPreparedOwnOperation
+    let gate: ServiceAutomaticGate
+    func enqueue() -> Bool { original.enqueue() }
+    func cancel() { original.cancel() }
+    func controlReadEvidence() -> CloudZoneDeletionRead? { original.controlReadEvidence() }
+    func reply() async throws -> CloudOwnTransportReply {
+        let reply = try await original.reply()
+        await gate.hold()
+        return reply
+    }
+}
+
+@MainActor private func withServicePublisher(prepare: @MainActor (ServiceAppHarness) async throws -> Void,
+                                            _ body: @MainActor (ServiceAppHarness) async throws -> Void) async throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: "synthetic-own-account-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let source = try #require(Bundle.module.url(forResource: "schema-18", withExtension: "anki2"))
+    let bytes = try Data(contentsOf: source)
+    let serviceHome = root.appending(path: "service")
+    try FileManager.default.createDirectory(at: serviceHome, withIntermediateDirectories: false)
+    let process = try await CloudServiceProcess.open(stateDirectory: serviceHome)
+    var active: ServiceAppHarness?
+    do {
+        let wire = try ServiceWorkflowWire(process: process, directory: root.appending(path: "transport"))
+        let app = try ServiceAppHarness(root: root.appending(path: "collection"), wire: wire, clock: .system)
+        active = app
+        defer { app.defaults.removePersistentDomain(forName: app.suite) }
+        try FileManager.default.createDirectory(at: app.root, withIntermediateDirectories: false)
+        try bytes.write(to: app.root.appending(path: "collection.anki2"))
+        try await prepare(app)
+        await app.owner.start(); await app.sync.prepareConnectionAuthority()
+        try await app.owner.prepareCloudConnectionPreview()
+        await app.sync.waitForConnectionPreview(); await app.sync.drainOperations()
+        guard case .ready(_, let summary) = app.sync.preview else { throw ServiceWorkflowFailure.wire }
+        try #require(summary.decision == .confirmUpload)
+        try await body(app)
+        try #require(await app.owner.close())
+        let exit = await process.close()
+        try #require(exit.status == 0 && exit.joined && !exit.unexpectedOutput && !exit.ioFailed)
+        try #require(exit.diagnostics.isEmpty && !exit.diagnosticLimitExceeded)
+    } catch {
+        if let active { await active.cleanupAfterServiceFailure() } else { _ = await process.cancel() }
         throw error
     }
 }

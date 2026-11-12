@@ -21,7 +21,8 @@ impl Runtime {
         self.validate_cloud_media_work(collection, work)?;
         {
             let s = self.state();
-            if s.media.enabled == Some(false)
+            if s.media.zone_missing
+                || s.media.enabled == Some(false)
                 || s.media.paused
                 || !matches!(work.request, Request::Root) && !s.media.root_checked
             {
@@ -96,6 +97,9 @@ impl Runtime {
         let mut s = self.state();
         Self::caller_locked(&s, sdk)?;
         Self::check_media_locked(&s, &work.authority)?;
+        if s.media.zone_missing {
+            return Err(RuntimeError::StaleIncarnation);
+        }
         Self::gate_locked(&s)?;
         if s.media.pending.as_ref() != Some(work)
             && !s
@@ -143,6 +147,9 @@ impl Runtime {
             let mut s = self.state();
             Self::sdk_locked(&s, sdk)?;
             Self::gate_locked(&s)?;
+            if s.media.zone_missing || s.adapter.known_loss.is_some() || s.adapter.durable.collection_loss.is_some() {
+                return Ok(None);
+            }
             s.media.observed_now_ms = now;
             let allowed = s.root_confirmed
                 && !s.media.paused
@@ -230,6 +237,9 @@ impl Runtime {
         Self::caller_locked(&s, sdk)?;
         Self::check_media_locked(&s, &work.authority)?;
         Self::gate_locked(&s)?;
+        if s.media.zone_missing || s.adapter.known_loss.is_some() || s.adapter.durable.collection_loss.is_some() {
+            return Ok(None);
+        }
         if s.actions.media_upload.as_ref() != Some(&(owner, work.clone())) || s.policy.parked.contains(name) {
             return Ok(None);
         }

@@ -864,6 +864,24 @@ fn epoch_loss_fixture() -> (Fixture, Arc<CloudPolicyExecution>, String) {
         .unwrap();
     assert!(followup.is_active());
     runtime.validate_sdk(&sdk).unwrap();
+    // K12.5/V9: pending-loss handling during SDK shutdown requires an identity
+    // read after the epoch probe, as does completion of the Active followup.
+    let proof = fixture.workflow.begin_identity_read(false, None).unwrap();
+    let r::IdentityStatus::Available(account) = r::IdentityProvider::read_identity(
+        &Account,
+        &c::BuildScope {
+            container: c::ContainerId::new("synthetic-u114").unwrap(),
+            environment: c::Environment::Development,
+        },
+    ) else {
+        panic!("original fixture account must remain available")
+    };
+    assert!(
+        fixture
+            .workflow
+            .complete_identity_read(proof, CloudAccountStatus::Available, Some(account.0))
+            .unwrap()
+    );
     policy
         .clone()
         .input(CloudPolicyEvent::Refresh {

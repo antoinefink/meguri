@@ -4703,3 +4703,126 @@ fn same_open_observation_after_cloud_capture_defers_the_old_batch_and_preserves_
     assert_eq!(image.payload, Some(newer.payload));
     host.close().unwrap();
 }
+
+// K12.5/V3.3/V3.4: real publisher SaveActive terminal loss commits isolation.
+// A readback error or unwind must never leave compact native authority usable.
+#[test]
+fn publisher_committed_loss_revokes_native_authority_before_readback_error_or_panic() {
+    use cloud::adapter::{ZoneLoss, ZoneLossCause};
+    use cloud::testing::IncomingStage;
+    use meguri_testkit::cloud::{ErrorCode, RemovalCause};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    for panic_readback in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("device");
+        generated(&dir);
+        let host = open_host(&dir, keys());
+        host.media().unwrap().store().register_full(|_, _| true).unwrap();
+        let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(44)).unwrap();
+        let p = preview(&host, &mut service);
+        let runtime = host.cloud_runtime().unwrap();
+        let collection = host.collection().unwrap();
+        runtime.confirm_connection_publication(&p, &collection).unwrap();
+        let request = until_active(&host, &mut service);
+        let instance = runtime.instance().unwrap();
+        runtime.validate_native_caller_for_testing(&instance).unwrap();
+        assert!(matches!(
+            service
+                .request(
+                    &scope(),
+                    Caller::default(),
+                    Operation::DeleteZone {
+                        zone: "meguri-root".into(),
+                        cause: RemovalCause::EncryptedDataReset,
+                    }
+                )
+                .unwrap()
+                .result,
+            Ok(Reply::Done)
+        ));
+        let OwnOperation::Save {
+            zone,
+            name,
+            record_type,
+            encrypted,
+            if_unchanged,
+        } = &request.operation
+        else {
+            panic!("original SaveActive")
+        };
+        let response = runtime
+            .submit_publication_request(&request, &collection, || {
+                service
+                    .request(
+                        &scope(),
+                        Caller::default(),
+                        Operation::Modify {
+                            zone: zone.clone(),
+                            atomic: false,
+                            changes: vec![Mutation::Save {
+                                record: RecordInput::encrypted(name, record_type, encrypted.clone()),
+                                if_unchanged: if_unchanged.as_ref().map(|f| SystemFields::from_bytes(f.0.clone())),
+                            }],
+                        },
+                    )
+                    .unwrap()
+            })
+            .unwrap();
+        let error = response.result.err().unwrap();
+        assert!(error.code == ErrorCode::ZoneNotFound && error.encrypted_data_reset);
+        let fresh = runtime.adapter_begin_identity_read(false, None).unwrap();
+        assert!(
+            runtime
+                .adapter_complete_identity_read(
+                    fresh,
+                    IdentityStatus::Available(cloud::OpaqueBytes(scope().account.into_bytes()))
+                )
+                .unwrap()
+        );
+        let revoked = Arc::new(AtomicBool::new(false));
+        let observed = revoked.clone();
+        let checking = runtime.clone();
+        runtime.set_incoming_stage_hook_for_testing(move |stage| {
+            if stage == IncomingStage::SDKIsolationPublished {
+                observed.store(
+                    checking.validate_native_caller_for_testing(&instance).is_err(),
+                    Ordering::SeqCst,
+                );
+                if panic_readback {
+                    panic!("original committed publisher readback unwind");
+                }
+            }
+        });
+        if !panic_readback {
+            runtime.fail_retire_readback_for_testing();
+        }
+        let completion = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            runtime.publication_result(
+                &request,
+                OwnResult::ZoneLosses(vec![ZoneLoss {
+                    zone: zone.clone(),
+                    cause: ZoneLossCause::EncryptedDataReset,
+                }]),
+                &collection,
+            )
+        }));
+        runtime.set_incoming_stage_hook_for_testing(|_| {});
+        assert!(revoked.load(Ordering::SeqCst));
+        if panic_readback {
+            assert!(completion.is_err());
+        } else {
+            assert!(completion.unwrap().is_err());
+        }
+        assert!(!runtime.status().unwrap().stored_usable);
+        assert_eq!(
+            runtime.status().unwrap().binding.unwrap().facts.state,
+            cloud::BindingState::Isolated(cloud::IsolationReason::EncryptedDataReset)
+        );
+        assert!(
+            runtime
+                .validate_native_caller_for_testing(&runtime.instance().unwrap())
+                .is_err()
+        );
+        host.close().unwrap();
+    }
+}

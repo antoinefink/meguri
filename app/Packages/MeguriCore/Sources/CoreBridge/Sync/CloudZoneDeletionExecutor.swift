@@ -20,12 +20,20 @@ private final class ZoneDeletionQueueReceipt: CloudZoneDeletionQueue {
 /// No retries, CKSyncEngine work, activity cycles or replacement operations.
 public actor CloudZoneDeletionExecutor {
     private let transport: any CloudOwnTransport
+    private let freshAccountRead: (@Sendable () async throws -> Void)?
     private var active: Task<Void, any Error>?
     private var prepared: (any CloudPreparedOwnOperation)?
     private var closed = false
     private var failureCategory: CloudZoneDeletionLocalFailure = .preparation
     private var recordedFailure = false
-    public init(transport: any CloudOwnTransport) { self.transport = transport }
+    public init(transport: any CloudOwnTransport, freshAccountRead: (@Sendable () async throws -> Void)? = nil) {
+        self.transport = transport; self.freshAccountRead = freshAccountRead
+    }
+    private func refreshForReset(_ facts: [CloudZoneDeletionFailure?], rootMissing: Bool = false) async throws {
+        guard rootMissing || facts.contains(where: { $0?.code == 26 || $0?.code == 28 }) else { return }
+        guard let freshAccountRead else { throw BridgeError.unavailable(reason: "Fresh cloud account reader unavailable") }
+        try await freshAccountRead(); try check()
+    }
 
     public func run(_ pass: CoreCloudZoneDeletionPass) async throws {
         guard !closed else {
@@ -59,7 +67,9 @@ public actor CloudZoneDeletionExecutor {
             let batch: CloudZoneDeletionBatch?
             failureCategory = .completion
             switch read {
-            case .zoneDeletionActiveRead(let result): batch = try await pass.completeRead(result)
+            case .zoneDeletionActiveRead(let result):
+                try await refreshForReset([result.failure, result.terminal], rootMissing: result.read == .missing || result.read == .zoneMissing)
+                batch = try await pass.completeRead(result)
             default:
                 failureCategory = .invalidReply
                 _ = try await pass.completeRead(.init(read: .failed, failure: .init(code: nil)))
@@ -70,7 +80,9 @@ public actor CloudZoneDeletionExecutor {
                 let reply = try await operation(.deleteZones(batch), pass: pass, deletion: true)
                 failureCategory = .completion
                 switch reply {
-                case .deletedZones(let result): try await pass.completeDeletion(result)
+                case .deletedZones(let result):
+                    try await refreshForReset(result.results.map(\.failure) + [result.terminal])
+                    try await pass.completeDeletion(result)
                 default:
                     failureCategory = .invalidReply
                     try await pass.completeDeletion(.init(results: batch.zones.map { .init(zone: $0, failure: .init(code: nil)) }))

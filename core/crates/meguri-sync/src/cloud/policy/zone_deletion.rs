@@ -79,12 +79,20 @@ impl Driver {
         }
         let result = (|| {
             self.validate(&pass.command)?;
-            if failure
-                .iter()
-                .chain(terminal.iter())
-                .any(|f| f.code == Some(26) && f.encrypted_data_reset)
+            let facts: Vec<_> = failure.iter().chain(terminal.iter()).collect();
+            let reason = if facts.iter().any(|f| f.code == Some(26) && f.encrypted_data_reset) {
+                Some(crate::cloud::IsolationReason::EncryptedDataReset)
+            } else if facts.iter().any(|f| f.code == Some(28)) {
+                Some(crate::cloud::IsolationReason::ZoneDeletedByUser)
+            } else if matches!(read, RecordRead::Missing | RecordRead::ZoneMissing)
+                || facts.iter().any(|f| f.code == Some(26))
             {
-                self.runtime.zone_deletion_read_reset(&pass.guard, collection)?;
+                Some(crate::cloud::IsolationReason::ActiveMissing)
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                self.runtime.zone_deletion_read_loss(&pass.guard, collection, reason)?;
                 return Ok(Vec::new());
             }
             Ok(self.runtime.zone_deletion_check(
@@ -163,12 +171,15 @@ impl Driver {
         }
         self.runtime.record_zone_deletion_diagnostic(Diagnostic::Deleted {
             results: results.clone(),
-            terminal,
+            terminal: terminal.clone(),
         });
         let result = self.validate(&pass.command).and_then(|()| {
-            Ok(self
-                .runtime
-                .zone_deletion_batch_result(&pass.guard, collection, &results)?)
+            Ok(self.runtime.zone_deletion_batch_result_with_terminal(
+                &pass.guard,
+                collection,
+                &results,
+                terminal.as_ref(),
+            )?)
         });
         *pass.phase.lock().unwrap_or_else(PoisonError::into_inner) = Phase::Finished;
         result

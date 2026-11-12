@@ -71,12 +71,17 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
         let executor = NativeCloudPolicyExecutor(policy: policy, adapter: adapter,
             mediaService: media, mediaTransport: mediaTransport, ownTransport: ownTransport,
             observeExchangeCapture: observeExchangeCapture)
-        let own = CloudOwnExecutor(core: connection, transport: ownTransport, observe: observeOwn)
+        let own = CloudOwnExecutor(core: connection, transport: ownTransport, observe: observeOwn,
+            freshAccountRead: { try await adapter.refreshControlIdentity() })
         return NativeCollectionCloudBackend(workflow: workflow, policy: policy, connection: connection,
             own: own, factory: factory, adapter: adapter, executor: executor)
     }
 
     func takeAccountReadRequest() async -> Bool { await adapter.takeAccountReadRequest() }
+    func setProofAdmission(_ admission: @escaping @Sendable (CloudOriginalCommandProofYield) async throws -> Void,
+                           acknowledgeOutputs: @escaping @Sendable ([CloudPolicyOutput]) async -> Void) async {
+        await adapter.setProofAdmission(admission, acknowledgeOutputs: acknowledgeOutputs)
+    }
     func input(_ event: CloudPolicyEvent) async throws -> CloudPolicyOutput {
         let output = try await policy.input(event)
         switch output {
@@ -138,7 +143,16 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
                     guard admitted, accounts.isCurrentRead(id), !closed, !Task.isCancelled else {
                         return .init(outputs: [], error: CancellationError(), deferred: false)
                     }
-                    return await projectAccountRead(result)
+                    let projected = await projectAccountRead(result)
+                    guard projected.error == nil else { return projected }
+                    return .init(outputs: projected.outputs, error: nil, deferred: projected.deferred,
+                        accountVerified: projected.accountVerified, afterOutputs: { [self] admitted in
+                            guard admitted, accounts.isCurrentRead(id), !closed, !Task.isCancelled else {
+                                return .init(outputs: [], error: CancellationError(), deferred: false)
+                            }
+                            await accounts.didProjectRead(id)
+                            return .init(outputs: [], error: nil, deferred: false, accountVerified: true)
+                        })
                 })
         }
     }

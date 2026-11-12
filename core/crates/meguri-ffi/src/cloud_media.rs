@@ -47,6 +47,7 @@ impl From<&m::Request> for CloudMediaRequest {
 }
 #[derive(Clone, uniffi::Enum)]
 pub enum CloudMediaBlobResult {
+    ZoneLoss { cause: crate::sync::CloudZoneLossCause },
     Present { envelope: Vec<u8> },
     UnknownItem,
     ZoneMissing,
@@ -61,6 +62,9 @@ pub struct CloudMediaBlobRead {
 /// CloudWorkflow.sent with its original SDK batch and retained backend Work.
 #[derive(Clone, uniffi::Enum)]
 pub enum CloudMediaReply {
+    ZoneLoss {
+        cause: crate::sync::CloudZoneLossCause,
+    },
     BlobReads {
         results: Vec<CloudMediaBlobRead>,
     },
@@ -79,12 +83,26 @@ pub enum CloudMediaReply {
 impl From<CloudMediaReply> for m::Reply {
     fn from(reply: CloudMediaReply) -> Self {
         match reply {
+            CloudMediaReply::ZoneLoss { cause } => Self::ZoneLoss(
+                crate::sync::CloudZoneLoss {
+                    zone: "meguri-media".into(),
+                    cause,
+                }
+                .into_loss_cause(),
+            ),
             CloudMediaReply::BlobReads { results } => Self::BlobReads {
                 results: results
                     .into_iter()
                     .map(|r| m::BlobRead {
                         name: r.name,
                         result: match r.result {
+                            CloudMediaBlobResult::ZoneLoss { cause } => m::BlobReadResult::ZoneLoss(
+                                crate::sync::CloudZoneLoss {
+                                    zone: "meguri-media".into(),
+                                    cause,
+                                }
+                                .into_loss_cause(),
+                            ),
                             CloudMediaBlobResult::Present { envelope } => m::BlobReadResult::Present { envelope },
                             CloudMediaBlobResult::UnknownItem => m::BlobReadResult::UnknownItem,
                             CloudMediaBlobResult::ZoneMissing => m::BlobReadResult::ZoneMissing,
@@ -211,6 +229,7 @@ impl CloudWorkflow {
         self.core
             .validate_cloud_media_batch(&sdk, &self.host.collection()?, batch)
             .map_err(cloud_error)?;
+        self.core.validate_network_media_sdk(&sdk).map_err(cloud_error)?;
         Ok(callback::invoke("CloudMediaQueue.enqueue", || queue.enqueue()))
     }
 }

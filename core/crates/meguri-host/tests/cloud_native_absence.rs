@@ -2169,6 +2169,7 @@ const EPOCH_LOSS_CHECKPOINT: &str = "EPOCH_LOSS_ACCEPTED_CHECKPOINT ";
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct EpochLossCheckpoint {
+    sdk: String,
     serialization: Vec<u8>,
     binding: Vec<u8>,
     entities: Vec<cloud::workflow::EntityFacts>,
@@ -2230,7 +2231,7 @@ fn failed_inferred_epoch_read_then_real_collection_fetch_completes_cursorless_ab
     assert!(!issued[4]["epoch_verification"].is_null());
     assert!(
         runtime
-            .adapter_complete_fetch_read(&epoch, &collection, RecordRead::Failed, false, None, None)
+            .complete_fetch_read_with_account(&epoch, &collection, RecordRead::Failed, false, None, None)
             .unwrap()
             .is_none()
     );
@@ -2267,7 +2268,7 @@ fn failed_inferred_epoch_read_then_real_collection_fetch_completes_cursorless_ab
         assert!(matches!(&result, RecordRead::Found(_)));
         assert!(
             runtime
-                .adapter_complete_fetch_read(&epoch, &collection, result, false, None, None)
+                .complete_fetch_read_with_account(&epoch, &collection, result, false, None, None)
                 .unwrap()
                 .is_none()
         );
@@ -2375,72 +2376,43 @@ fn epoch_loss_sigkill_reopen(zone_missing: bool, stronger: &str) {
     let runtime = host.cloud_runtime().unwrap();
     let reopened = runtime.adapter_snapshot().unwrap();
     let before_rows = rows(&host);
-    let mut service = service(root.path());
-    let mut owner = None;
-    let mut restored = None;
-    let drains_before;
+    let drains_before = runtime.adapter_fetch_drains();
     if runtime.status().unwrap().binding.unwrap().facts.state == cloud::BindingState::Active {
-        let (sdk, serialization, zone) = admit(&host);
-        restored = serialization;
-        owner = Some(sdk.clone());
-        // Replay owned fetch boundaries for unchanged zones, with no record or
-        // zone callbacks. Reopen keeps the SDK bytes; no account event resets
-        // them. Any recovered loss evidence must come from production.
-        drains_before = runtime.adapter_fetch_drains();
-        for target in ["meguri-root", zone.as_str()] {
-            if runtime.validate_sdk(&sdk).is_err() {
-                break;
-            }
-            let fetch = runtime.adapter_begin_fetch(&sdk, vec![target.into()]).unwrap();
-            let group = format!("meguri-{fetch}");
-            runtime.adapter_will_fetch(&sdk, group.clone(), true).unwrap();
-            let did = runtime.adapter_did_fetch(&sdk, &group, true);
-            if runtime.validate_sdk(&sdk).is_err() {
-                break;
-            }
-            did.unwrap();
-            let reads = runtime
-                .adapter_fetch_reads(&sdk, fetch, &host.collection().unwrap())
-                .unwrap();
-            for read in reads {
-                let result = actual::read_control(
-                    &mut service,
-                    read.zone(),
-                    if read.is_active() { "active" } else { "epoch" },
-                );
-                let followup = runtime
-                    .adapter_complete_fetch_read(&read, &host.collection().unwrap(), result, false, None, None)
-                    .unwrap();
-                if let Some(active) = followup {
-                    assert!(active.is_active());
-                    let result = actual::read_control(&mut service, active.zone(), "active");
-                    assert!(
-                        runtime
-                            .adapter_complete_fetch_read(
-                                &active,
-                                &host.collection().unwrap(),
-                                result,
-                                false,
-                                None,
-                                None
-                            )
-                            .unwrap()
-                            .is_none()
-                    );
-                }
-            }
-            if runtime.validate_sdk(&sdk).is_ok() {
-                let _ = runtime.adapter_finish_fetch(&sdk, fetch).unwrap();
-            }
-        }
-    } else {
-        drains_before = runtime.adapter_fetch_drains();
+        // The accepted epoch loss is durable, but its original SDK/read died.
+        // Recovery withholds a successor until a new platform proof settles it.
+        let collection = host.collection().unwrap();
+        assert!(!runtime.status().unwrap().stored_usable);
+        assert!(!runtime.status().unwrap().identity_verified);
+        assert!(runtime.register_sdk(false).is_err());
+        let failed = runtime.adapter_begin_identity_read(false, None).unwrap();
         assert!(
-            runtime.register_sdk(false).is_err(),
-            "durably isolated recovery must refuse SDK admission"
+            runtime
+                .adapter_complete_identity_read(failed, IdentityStatus::ReadFailed)
+                .unwrap()
+        );
+        assert!(runtime.adapter_accept_zone_losses(failed, &collection).is_err());
+        assert!(runtime.register_sdk(false).is_err());
+        let stale = runtime.adapter_begin_identity_read(false, None).unwrap();
+        let fresh = runtime.adapter_begin_identity_read(false, None).unwrap();
+        let observed = Account.read_identity(&cloud::BuildScope {
+            container: cloud::ContainerId::new(scope().container).unwrap(),
+            environment: cloud::Environment::Development,
+        });
+        assert!(!runtime.adapter_complete_identity_read(stale, observed.clone()).unwrap());
+        assert!(runtime.adapter_accept_zone_losses(stale, &collection).is_err());
+        assert!(runtime.register_sdk(false).is_err());
+        assert!(runtime.adapter_complete_identity_read(fresh, observed).unwrap());
+        runtime.adapter_accept_zone_losses(fresh, &collection).unwrap();
+        assert_eq!(
+            runtime.status().unwrap().binding.unwrap().facts.state,
+            cloud::BindingState::Isolated(cloud::IsolationReason::ZoneMissing)
         );
     }
-    let had_owner = owner.is_some();
+    assert!(
+        runtime.register_sdk(false).is_err(),
+        "durably isolated recovery must refuse SDK admission"
+    );
+    assert!(runtime.validate_sdk(&checkpoint.sdk).is_err());
     let confirmed = runtime.sdk_root_confirmed();
     let confirmations = runtime
         .trace()
@@ -2448,30 +2420,22 @@ fn epoch_loss_sigkill_reopen(zone_missing: bool, stronger: &str) {
         .filter(|e| matches!(e, TraceEvent::RootConfirmed { .. }))
         .count();
     let drains = runtime.adapter_fetch_drains();
-    let batch = owner.as_ref().and_then(|sdk| {
-        runtime
-            .build_collection_batch(sdk, &host.collection().unwrap(), &actual::names(runtime))
-            .ok()
-    });
+    let batch = runtime
+        .build_collection_batch(&checkpoint.sdk, &host.collection().unwrap(), &actual::names(runtime))
+        .ok();
     let send_fenced = batch.as_ref().is_none_or(|b| b.id == 0 && b.saves.is_empty());
     let after = runtime.adapter_snapshot().unwrap();
     let state = runtime.status().unwrap().binding.unwrap().facts.state;
     let unchanged_rows = rows(&host) == before_rows;
     let no_absence_completion = logged(runtime).is_empty();
     // Capture every outcome before cleanup can change authority or isolation.
-    if let Some(sdk) = owner {
-        runtime.retire_sdk(&sdk, false).unwrap();
-        runtime.release_sdk(&sdk).unwrap();
-    }
     host.close().unwrap();
 
     assert!(
         reopened.serialization == Some(checkpoint.serialization.clone()),
         "saved SDK state must survive SIGKILL"
     );
-    if had_owner {
-        assert_eq!(restored, Some(checkpoint.serialization.clone()));
-    }
+    assert_eq!(after.serialization, Some(checkpoint.serialization.clone()));
     assert!(reopened.binding == checkpoint.binding && after.binding == checkpoint.binding);
     for pending in checkpoint
         .entities
@@ -2615,7 +2579,7 @@ fn cloud_missing_epoch_accepted_child_checkpoint() {
         (cloud::publication::RecordRead::Missing, false) | (cloud::publication::RecordRead::ZoneMissing, true)
     ));
     let active = runtime
-        .adapter_complete_fetch_read(&epoch, &host.collection().unwrap(), result, false, None, None)
+        .complete_fetch_read_with_account(&epoch, &host.collection().unwrap(), result, false, None, None)
         .unwrap()
         .expect("accepted epoch loss must return the original Active followup");
     assert!(active.is_active() && active.zone() == "meguri-root");
@@ -2640,6 +2604,7 @@ fn cloud_missing_epoch_accepted_child_checkpoint() {
     }
     let snapshot = runtime.adapter_snapshot().unwrap();
     let checkpoint = EpochLossCheckpoint {
+        sdk: sdk.clone(),
         serialization: snapshot.serialization.unwrap(),
         binding: snapshot.binding,
         entities: snapshot.entities,
@@ -2802,7 +2767,7 @@ fn epoch_loss_commit_error_reopen(zone_missing: bool, kind: std::io::ErrorKind) 
     let failed = {
         let _disarm = Disarm;
         faultpoint::arm(POINT, Fault::IoError(kind));
-        runtime.adapter_complete_fetch_read(&epoch, &collection, result, false, None, None)
+        runtime.complete_fetch_read_with_account(&epoch, &collection, result, false, None, None)
     }; // Disarm before assertions, snapshot reads, sends or owner cleanup.
     assert!(
         !matches!(&failed, Ok(Some(_))),
@@ -2889,14 +2854,21 @@ fn epoch_loss_commit_error_reopen(zone_missing: bool, kind: std::io::ErrorKind) 
                 if read.is_active() { "active" } else { "epoch" },
             );
             if let Some(active) = runtime
-                .adapter_complete_fetch_read(&read, &host.collection().unwrap(), result, false, None, None)
+                .complete_fetch_read_with_account(&read, &host.collection().unwrap(), result, false, None, None)
                 .unwrap()
             {
                 assert!(active.is_active());
                 let result = actual::read_control(&mut service, active.zone(), "active");
                 assert!(
                     runtime
-                        .adapter_complete_fetch_read(&active, &host.collection().unwrap(), result, false, None, None)
+                        .complete_fetch_read_with_account(
+                            &active,
+                            &host.collection().unwrap(),
+                            result,
+                            false,
+                            None,
+                            None
+                        )
                         .unwrap()
                         .is_none()
                 );
@@ -3013,7 +2985,7 @@ fn fetched_database_changes(service: &mut Service<SeededRandom>, mut token: Opti
 }
 
 #[test]
-fn fetched_other_epoch_deletions_remove_due_rows_for_every_cause_and_survive_reopen() {
+fn fetched_other_epoch_deletions_remove_due_rows_for_ordinary_causes_and_survive_reopen() {
     use meguri_testkit::cloud::RemovalCause;
     let mut rig = fixture(1, true);
     let runtime = rig.host.cloud_runtime().unwrap();
@@ -3049,11 +3021,10 @@ fn fetched_other_epoch_deletions_remove_due_rows_for_every_cause_and_survive_reo
     // token is the watermark for history, including across incremental pages.
     let (_, mut token) = fetched_database_changes(&mut rig.service, None);
     let mut observed_zones = Vec::new();
-    for (zone, cause) in zones.iter().zip([
-        RemovalCause::Deleted,
-        RemovalCause::Purged,
-        RemovalCause::EncryptedDataReset,
-    ]) {
+    for (zone, cause) in zones
+        .iter()
+        .zip([RemovalCause::Deleted, RemovalCause::Purged, RemovalCause::Deleted])
+    {
         for operation in [
             Operation::CreateZone { zone: zone.clone() },
             Operation::DeleteZone {
@@ -3359,4 +3330,1660 @@ fn fetched_other_epoch_deletion_from_stale_sdk_cannot_mutate_or_invalidate_succe
     runtime.adapter_fetched_collection_zone_deletions(&sdk, &zones).unwrap();
     assert!(runtime.publication_control_for_testing().unwrap().zones.is_empty());
     rig.host.close().unwrap();
+}
+
+// K12.5/V2.2/V3.1/V3.4: real Runtime intake, never a parallel loss model.
+#[test]
+fn known_zone_loss_table_requires_a_new_core_issued_account_read_before_commit() {
+    use cloud::adapter::{ZoneLoss, ZoneLossCause::*};
+    use cloud::{BindingState, IsolationReason};
+    for (zone_kind, cause, expected) in [
+        ("root", Deleted, Some(IsolationReason::ActiveMissing)),
+        ("root", Purged, Some(IsolationReason::ZoneDeletedByUser)),
+        ("root", EncryptedDataReset, Some(IsolationReason::EncryptedDataReset)),
+        ("collection", Deleted, None),
+        ("collection", Purged, Some(IsolationReason::ZoneDeletedByUser)),
+        (
+            "collection",
+            EncryptedDataReset,
+            Some(IsolationReason::EncryptedDataReset),
+        ),
+        ("media", Deleted, None),
+        ("media", Purged, None),
+        ("media", EncryptedDataReset, Some(IsolationReason::EncryptedDataReset)),
+    ] {
+        let rig = fixture(1, true);
+        let runtime = rig.host.cloud_runtime().unwrap();
+        let collection = rig.host.collection().unwrap();
+        meguri_engine::decks::add(&collection, "Unsent loss-table edit".into()).unwrap();
+        runtime
+            .reconcile_binding(&collection, &rig.host.media().unwrap(), BUDGET)
+            .unwrap();
+        let local = rows(&rig.host);
+        let pending = runtime.tracking_sendables();
+        let before = runtime.adapter_snapshot().unwrap();
+        let stale = runtime.adapter_begin_identity_read(false, None).unwrap();
+        assert!(runtime.adapter_complete_identity_read(stale, identity()).unwrap());
+        let zone = match zone_kind {
+            "root" => "meguri-root",
+            "media" => "meguri-media",
+            _ => &rig.zone,
+        };
+        runtime
+            .adapter_observe_zone_losses(
+                &rig.sdk,
+                &[ZoneLoss {
+                    zone: zone.into(),
+                    cause,
+                }],
+            )
+            .unwrap();
+        assert!(
+            runtime.adapter_accept_zone_losses(stale, &collection).is_err(),
+            "cached matching proof is not fresh"
+        );
+        assert!(runtime.adapter_state_update(&rig.sdk, b"must-not-pass-loss").is_err());
+        assert_eq!(runtime.adapter_snapshot().unwrap().serialization, before.serialization);
+        let fresh = runtime.adapter_begin_identity_read(false, None).unwrap();
+        assert!(runtime.adapter_complete_identity_read(fresh, identity()).unwrap());
+        runtime.adapter_accept_zone_losses(fresh, &collection).unwrap();
+        assert_eq!(rows(&rig.host), local);
+        assert_eq!(runtime.tracking_sendables(), pending);
+        let binding = runtime.status().unwrap().binding.unwrap();
+        if let Some(reason) = expected {
+            assert_eq!(binding.facts.state, BindingState::Isolated(reason));
+            assert!(runtime.validate_sdk(&rig.sdk).is_err());
+        } else if zone_kind == "collection" {
+            let read = runtime
+                .adapter_known_loss_read(&rig.sdk)
+                .unwrap()
+                .expect("original Active read");
+            assert!(read.is_active());
+            runtime.retire_sdk(&rig.sdk, false).unwrap();
+            assert_eq!(
+                runtime.status().unwrap().binding.unwrap().facts.state,
+                BindingState::Isolated(IsolationReason::ZoneMissing)
+            );
+        } else {
+            assert_eq!(binding.facts.state, BindingState::Active);
+            assert!(runtime.cleanup_observation_for_testing(&rig.sdk).unwrap().zone_missing);
+            runtime.validate_sdk(&rig.sdk).unwrap();
+            runtime.adapter_state_update(&rig.sdk, b"media-only-loss").unwrap();
+        }
+        rig.host.close().unwrap();
+    }
+}
+
+#[test]
+fn known_loss_mixed_callback_is_atomic_and_account_switch_has_precedence() {
+    use cloud::adapter::{ZoneLoss, ZoneLossCause::*};
+    let rig = fixture(1, true);
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let collection = rig.host.collection().unwrap();
+    let retained = runtime.prepare_zone_deletion_fixture_for_testing(&rig.sdk).unwrap();
+    let changes = vec![
+        ZoneLoss {
+            zone: retained[0].clone(),
+            cause: EncryptedDataReset,
+        },
+        ZoneLoss {
+            zone: "meguri-root".into(),
+            cause: Purged,
+        },
+    ];
+    runtime.adapter_observe_zone_losses(&rig.sdk, &changes).unwrap();
+    assert!(
+        runtime
+            .publication_control_for_testing()
+            .unwrap()
+            .zones
+            .contains_key(&retained[0])
+    );
+    let read = runtime.adapter_begin_identity_read(false, None).unwrap();
+    assert!(
+        runtime
+            .adapter_complete_identity_read(read, IdentityStatus::Available(OpaqueBytes(b"other-account".to_vec())))
+            .unwrap()
+    );
+    assert!(runtime.adapter_accept_zone_losses(read, &collection).is_err());
+    assert_eq!(
+        runtime.status().unwrap().binding.unwrap().facts.state,
+        cloud::BindingState::Isolated(cloud::IsolationReason::AccountChanged)
+    );
+    rig.host.close().unwrap();
+}
+
+#[test]
+fn known_loss_read_failed_or_temporary_cannot_use_prior_available_proof() {
+    use cloud::adapter::{ZoneLoss, ZoneLossCause::*};
+    for account in [IdentityStatus::ReadFailed, IdentityStatus::TemporarilyUnavailable] {
+        let rig = fixture(1, true);
+        let runtime = rig.host.cloud_runtime().unwrap();
+        let collection = rig.host.collection().unwrap();
+        runtime
+            .adapter_observe_zone_losses(
+                &rig.sdk,
+                &[ZoneLoss {
+                    zone: "meguri-root".into(),
+                    cause: EncryptedDataReset,
+                }],
+            )
+            .unwrap();
+        let id = runtime.adapter_begin_identity_read(false, None).unwrap();
+        assert!(runtime.adapter_complete_identity_read(id, account).unwrap());
+        assert!(runtime.adapter_accept_zone_losses(id, &collection).is_err());
+        assert_eq!(
+            runtime.status().unwrap().binding.unwrap().facts.state,
+            cloud::BindingState::Active
+        );
+        rig.host.close().unwrap();
+    }
+}
+
+#[test]
+fn known_collection_loss_reads_actual_active_with_fresh_proof_and_never_confirms() {
+    use cloud::adapter::{ZoneLoss, ZoneLossCause};
+    use cloud::{BindingState, IsolationReason, publication::RecordRead};
+    for outcome in [
+        "same",
+        "other",
+        "missing",
+        "zoneMissing",
+        "unreadable",
+        "malformed",
+        "newer",
+        "failed",
+    ] {
+        let mut rig = fixture(1, true);
+        let runtime = rig.host.cloud_runtime().unwrap();
+        let collection = rig.host.collection().unwrap();
+        let local = rows(&rig.host);
+        assert!(matches!(
+            rig.service
+                .request(
+                    &scope(),
+                    Caller::default(),
+                    Operation::DeleteZone {
+                        zone: rig.zone.clone(),
+                        cause: meguri_testkit::cloud::RemovalCause::Deleted,
+                    }
+                )
+                .unwrap()
+                .result,
+            Ok(Reply::Done)
+        ));
+        runtime
+            .adapter_observe_zone_losses(
+                &rig.sdk,
+                &[ZoneLoss {
+                    zone: rig.zone.clone(),
+                    cause: ZoneLossCause::Deleted,
+                }],
+            )
+            .unwrap();
+        let proof = runtime.adapter_begin_identity_read(false, None).unwrap();
+        assert!(runtime.adapter_complete_identity_read(proof, identity()).unwrap());
+        runtime.adapter_accept_zone_losses(proof, &collection).unwrap();
+        let active_read = runtime.adapter_known_loss_read(&rig.sdk).unwrap().unwrap();
+        let mut active = read(&mut rig.service, "meguri-root", "active");
+        if outcome == "other" {
+            let old = saved(&active);
+            let mut envelope = cloud::control_codec::Active::decode(&old.envelope).unwrap();
+            envelope.epoch = [98; 16];
+            let changed = rig
+                .service
+                .request(
+                    &scope(),
+                    Caller::default(),
+                    Operation::Modify {
+                        zone: "meguri-root".into(),
+                        atomic: false,
+                        changes: vec![Mutation::Save {
+                            record: RecordInput::encrypted("active", "MGActive", envelope.encode().unwrap()),
+                            if_unchanged: Some(active.system_fields.clone()),
+                        }],
+                    },
+                )
+                .unwrap();
+            assert!(
+                matches!(&changed.result, Ok(Reply::Modified(items)) if items.len() == 1 && matches!(items[0].result, Ok(MutationSuccess::Saved(_)))),
+                "{outcome}: conditional Active save must return MutationSuccess::Saved"
+            );
+            active = read(&mut rig.service, "meguri-root", "active");
+        }
+        match outcome {
+            "missing" => {
+                let result = rig
+                    .service
+                    .request(
+                        &scope(),
+                        Caller::default(),
+                        Operation::Modify {
+                            zone: "meguri-root".into(),
+                            atomic: false,
+                            changes: vec![Mutation::Delete { name: "active".into() }],
+                        },
+                    )
+                    .unwrap()
+                    .result
+                    .unwrap();
+                assert!(
+                    matches!(result, Reply::Modified(ref items) if items.len() == 1 && matches!(items[0].result, Ok(MutationSuccess::Deleted))),
+                    "{outcome}: original Active deletion must return MutationSuccess::Deleted"
+                );
+            }
+            "zoneMissing" => {
+                assert!(matches!(
+                    rig.service
+                        .request(
+                            &scope(),
+                            Caller::default(),
+                            Operation::DeleteZone {
+                                zone: "meguri-root".into(),
+                                cause: meguri_testkit::cloud::RemovalCause::Deleted,
+                            }
+                        )
+                        .unwrap()
+                        .result,
+                    Ok(Reply::Done)
+                ));
+            }
+            "malformed" | "newer" => {
+                let record = RecordInput::encrypted(
+                    "active",
+                    "MGActive",
+                    match outcome {
+                        "malformed" => vec![255],
+                        "newer" => {
+                            let mut bytes = saved(&active).envelope;
+                            bytes[1] = 2;
+                            bytes
+                        }
+                        _ => unreachable!(),
+                    },
+                );
+                let response = rig
+                    .service
+                    .request(
+                        &scope(),
+                        Caller::default(),
+                        Operation::Modify {
+                            zone: "meguri-root".into(),
+                            atomic: false,
+                            changes: vec![Mutation::Save {
+                                record,
+                                if_unchanged: Some(active.system_fields.clone()),
+                            }],
+                        },
+                    )
+                    .unwrap();
+                assert!(
+                    matches!(&response.result, Ok(Reply::Modified(items)) if items.len() == 1 && matches!(items[0].result, Ok(MutationSuccess::Saved(_)))),
+                    "{outcome}: conditional Active save must return MutationSuccess::Saved"
+                );
+            }
+            _ => {}
+        }
+        // The Service has no transient-read-failure switch. That one original
+        // transport-failure case remains explicit; all other outcomes are read.
+        let result = if outcome == "failed" {
+            RecordRead::Failed
+        } else if outcome == "unreadable" {
+            // Request a Service projection that omits encrypted fields from
+            // the valid record to check that conversion. SDK decryption errors
+            // and encrypted reset behavior are outside this case (A18).
+            let response = rig
+                .service
+                .request(
+                    &scope(),
+                    Caller::default(),
+                    Operation::Read {
+                        zone: "meguri-root".into(),
+                        name: "active".into(),
+                        fields: RequestedFields::Named(vec![]),
+                    },
+                )
+                .unwrap();
+            let Ok(Reply::Record(record)) = response.result else {
+                panic!("{outcome}: projected original Active must return Reply::Record")
+            };
+            assert_eq!(record.name, active.name, "{outcome}: original record name");
+            assert!(
+                record.system_fields == active.system_fields,
+                "{outcome}: original system fields"
+            );
+            assert!(
+                !record.fields.contains_key("e"),
+                "{outcome}: explicit projection omits e"
+            );
+            let control = meguri_testkit::cloud::coordinator::publication_control_record(&record).unwrap();
+            assert!(control.encrypted.is_none(), "{outcome}: conversion preserves absent e");
+            RecordRead::Found(control)
+        } else {
+            sign_out_absence::read_control(&mut rig.service, "meguri-root", "active")
+        };
+        assert!(
+            matches!(
+                (&result, outcome),
+                (
+                    RecordRead::Found(_),
+                    "same" | "other" | "unreadable" | "malformed" | "newer"
+                ) | (RecordRead::Missing, "missing")
+                    | (RecordRead::ZoneMissing, "zoneMissing")
+                    | (RecordRead::Failed, "failed")
+            ),
+            "{outcome}: original control read must preserve the expected response kind"
+        );
+        // The successful read that accepted the loss is too old for Active's result.
+        assert!(
+            runtime
+                .adapter_complete_fetch_read(&active_read, &collection, result.clone(), false, None, None)
+                .is_err()
+        );
+        let fresh = runtime.adapter_begin_identity_read(false, None).unwrap();
+        assert!(runtime.adapter_complete_identity_read(fresh, identity()).unwrap());
+        assert!(
+            runtime
+                .adapter_complete_fetch_read(&active_read, &collection, result, false, None, None)
+                .unwrap()
+                .is_none()
+        );
+        let expected = match outcome {
+            "other" => IsolationReason::EpochSwitched,
+            "missing" | "zoneMissing" => IsolationReason::ActiveMissing,
+            _ => IsolationReason::ZoneMissing,
+        };
+        assert_eq!(
+            runtime.status().unwrap().binding.unwrap().facts.state,
+            BindingState::Isolated(expected)
+        );
+        assert!(!runtime.sdk_root_confirmed());
+        assert_eq!(rows(&rig.host), local);
+        assert!(runtime.validate_sdk(&rig.sdk).is_err());
+        rig.host.close().unwrap();
+    }
+}
+
+#[test]
+fn known_loss_before_acceptance_reopens_at_old_cursor_without_reconstructing_sdk_authority() {
+    use cloud::adapter::{ZoneLoss, ZoneLossCause};
+    let rig = fixture(1, true);
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let before = runtime.adapter_snapshot().unwrap();
+    runtime
+        .adapter_observe_zone_losses(
+            &rig.sdk,
+            &[ZoneLoss {
+                zone: "meguri-root".into(),
+                cause: ZoneLossCause::Purged,
+            }],
+        )
+        .unwrap();
+    runtime.retire_sdk(&rig.sdk, false).unwrap();
+    runtime.release_sdk(&rig.sdk).unwrap();
+    assert_eq!(runtime.adapter_snapshot().unwrap().serialization, before.serialization);
+    rig.host.close().unwrap();
+    let host = open(&rig.root.path().join("device"));
+    let runtime = host.cloud_runtime().unwrap();
+    assert_eq!(runtime.adapter_snapshot().unwrap().serialization, before.serialization);
+    assert!(runtime.validate_sdk(&rig.sdk).is_err());
+    assert_eq!(
+        runtime.status().unwrap().binding.unwrap().facts.state,
+        cloud::BindingState::Active
+    );
+    host.close().unwrap();
+}
+
+#[test]
+fn accepted_known_collection_loss_reopens_only_after_new_identity_proof() {
+    use cloud::adapter::{ZoneLoss, ZoneLossCause};
+    let rig = fixture(1, true);
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let collection = rig.host.collection().unwrap();
+    runtime
+        .adapter_observe_zone_losses(
+            &rig.sdk,
+            &[ZoneLoss {
+                zone: rig.zone.clone(),
+                cause: ZoneLossCause::Deleted,
+            }],
+        )
+        .unwrap();
+    let proof = runtime.adapter_begin_identity_read(false, None).unwrap();
+    assert!(runtime.adapter_complete_identity_read(proof, identity()).unwrap());
+    runtime.adapter_accept_zone_losses(proof, &collection).unwrap();
+    let before = runtime.adapter_snapshot().unwrap();
+    drop(collection);
+    rig.host.close().unwrap();
+    let host = open(&rig.root.path().join("device"));
+    let runtime = host.cloud_runtime().unwrap();
+    assert_eq!(
+        runtime.status().unwrap().binding.unwrap().facts.state,
+        cloud::BindingState::Active
+    );
+    assert!(!runtime.status().unwrap().stored_usable);
+    assert!(runtime.validate_sdk(&rig.sdk).is_err());
+    let fresh = runtime.adapter_begin_identity_read(false, None).unwrap();
+    assert!(runtime.adapter_complete_identity_read(fresh, identity()).unwrap());
+    runtime
+        .adapter_accept_zone_losses(fresh, &host.collection().unwrap())
+        .unwrap();
+    assert_eq!(
+        runtime.status().unwrap().binding.unwrap().facts.state,
+        cloud::BindingState::Isolated(cloud::IsolationReason::ZoneMissing)
+    );
+    assert_eq!(runtime.adapter_snapshot().unwrap().serialization, before.serialization);
+    assert_eq!(runtime.adapter_snapshot().unwrap().entities, before.entities);
+    host.close().unwrap();
+}
+
+#[test]
+fn collection_edit_ack_continues_with_media_disabled_after_zone_rebuild() {
+    use cloud::adapter::{ZoneLoss, ZoneLossCause};
+    let mut rig = fixture(1, true);
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let collection = rig.host.collection().unwrap();
+    let deck = meguri_engine::decks::add(&collection, "Edit after permanent media loss".into())
+        .unwrap()
+        .value
+        .id;
+    let media = rig.host.media().unwrap();
+    runtime.reconcile_binding(&collection, &media, BUDGET).unwrap();
+    rig.host
+        .cloud_policy_input(DeviceEvent::Settings(DeviceSettings {
+            enabled: true,
+            paused: false,
+            automatic: false,
+            media: true,
+        }))
+        .unwrap();
+    runtime.resume_cloud_media();
+    let prepared = runtime
+        .cloud_media_work(&collection, &media)
+        .unwrap()
+        .expect("original root work");
+    assert!(matches!(prepared.request, cloud::media::Request::Root));
+    runtime
+        .validate_cloud_media_admission(&rig.sdk, &collection, &prepared)
+        .unwrap();
+    let old_root = cloud::control_codec::MediaRoot {
+        media_key: [77; 32],
+        created_at_ms: NOW,
+    }
+    .encode()
+    .unwrap();
+    assert!(matches!(
+        rig.service
+            .request(
+                &scope(),
+                Caller::default(),
+                Operation::CreateZone {
+                    zone: "meguri-media".into()
+                }
+            )
+            .unwrap()
+            .result,
+        Ok(Reply::Done)
+    ));
+    put(
+        &mut rig.service,
+        "meguri-media",
+        &[Saved {
+            name: "root".into(),
+            envelope: old_root.clone(),
+            system_fields: Vec::new(),
+        }],
+        "MGMediaRoot",
+    );
+    assert!(matches!(
+        rig.service
+            .request(
+                &scope(),
+                Caller::default(),
+                Operation::DeleteZone {
+                    zone: "meguri-media".into(),
+                    cause: meguri_testkit::cloud::RemovalCause::Purged
+                }
+            )
+            .unwrap()
+            .result,
+        Ok(Reply::Done)
+    ));
+    let native_loss = rig
+        .service
+        .request(
+            &scope(),
+            Caller::default(),
+            Operation::Read {
+                zone: "meguri-media".into(),
+                name: "root".into(),
+                fields: RequestedFields::All,
+            },
+        )
+        .unwrap()
+        .result
+        .err()
+        .unwrap();
+    assert!(native_loss.code == meguri_testkit::cloud::ErrorCode::UserDeletedZone && !native_loss.encrypted_data_reset);
+    runtime
+        .adapter_observe_zone_losses(
+            &rig.sdk,
+            &[ZoneLoss {
+                zone: "meguri-media".into(),
+                cause: ZoneLossCause::Purged,
+            }],
+        )
+        .unwrap();
+    let proof = runtime.adapter_begin_identity_read(false, None).unwrap();
+    assert!(runtime.adapter_complete_identity_read(proof, identity()).unwrap());
+    runtime.adapter_accept_zone_losses(proof, &collection).unwrap();
+    assert!(
+        runtime
+            .validate_cloud_media_admission(&rig.sdk, &collection, &prepared)
+            .is_err()
+    );
+    assert!(runtime.validate_network_media_sdk(&rig.sdk).is_err());
+    runtime.validate_network_sdk(&rig.sdk).unwrap();
+    assert!(runtime.cloud_media_work(&collection, &media).unwrap().is_none());
+
+    let acked = sign_out_absence::send_pending(&rig.host, &mut rig.service, &rig.sdk);
+    let name = codec::entity_name(&[114; 32], codec::Kind::Deck, &codec::id_key(deck.0)).unwrap();
+    assert!(acked.iter().any(|r| r.name == name));
+    let actual = read(&mut rig.service, &rig.zone, &name);
+    assert_eq!(
+        saved(&actual).envelope,
+        acked.iter().find(|r| r.name == name).unwrap().envelope
+    );
+    let entity = runtime.entity_facts(&name).unwrap().unwrap();
+    assert_eq!(entity.local_rev, entity.acked_rev);
+    assert!(entity.mark.is_none());
+    assert!(runtime.cleanup_observation_for_testing(&rig.sdk).unwrap().zone_missing);
+    assert!(matches!(
+        rig.service
+            .request(
+                &scope(),
+                Caller::default(),
+                Operation::CreateZone {
+                    zone: "meguri-media".into()
+                }
+            )
+            .unwrap()
+            .result,
+        Ok(Reply::Done)
+    ));
+    let new_root = cloud::control_codec::MediaRoot {
+        media_key: [88; 32],
+        created_at_ms: NOW + 1,
+    }
+    .encode()
+    .unwrap();
+    put(
+        &mut rig.service,
+        "meguri-media",
+        &[Saved {
+            name: "root".into(),
+            envelope: new_root.clone(),
+            system_fields: Vec::new(),
+        }],
+        "MGMediaRoot",
+    );
+    let recreated = read(&mut rig.service, "meguri-media", "root");
+    assert_eq!(saved(&recreated).envelope, new_root);
+    assert_ne!(saved(&recreated).envelope, old_root);
+    assert!(
+        runtime
+            .cloud_media_reply(
+                &collection,
+                &media,
+                &prepared,
+                cloud::media::Reply::Record {
+                    name: "root".into(),
+                    record_type: "MGMediaRoot".into(),
+                    envelope: saved(&recreated).envelope,
+                    asset: None,
+                }
+            )
+            .is_err()
+    );
+    assert!(
+        runtime
+            .validate_cloud_media_admission(&rig.sdk, &collection, &prepared)
+            .is_err()
+    );
+    runtime.resume_cloud_media();
+    assert!(runtime.cloud_media_work(&collection, &media).unwrap().is_none());
+    assert!(runtime.cleanup_observation_for_testing(&rig.sdk).unwrap().zone_missing);
+    runtime.validate_sdk(&rig.sdk).unwrap();
+    drop(media);
+    drop(collection);
+    rig.host.close().unwrap();
+}
+
+// Hosted fixtures without saved state use the synthetic IdentityProvider
+// for the account read performed by the native actor; checks and limits stay.
+#[test]
+fn permanent_media_loss_keeps_actual_incoming_notes_decks_cards_and_reviews_working() {
+    use cloud::adapter::{ZoneLoss, ZoneLossCause};
+    use meguri_engine::session::{AnswerOutcome, StartResult};
+    use meguri_model::{ids::NoteId, time::EpochMillis};
+    use meguri_sched::answer::Rating;
+    let root = tempfile::tempdir().unwrap();
+    let a_dir = root.path().join("receiver");
+    sign_out_absence::generated(&a_dir);
+    let a = sign_out_absence::open_actual(&a_dir, Arc::new(Account));
+    let mut server = service(root.path());
+    sign_out_absence::publish(&a, &mut server);
+    let b = sign_out_absence::adopt(&root.path().join("sender"), &mut server);
+    let (sdk, _, zone) = admit(&a);
+    let (sender_sdk, _, sender_zone) = admit(&b);
+    assert_eq!(zone, sender_zone);
+    confirm_root(&a, &sdk, &mut server);
+    confirm_root(&b, &sender_sdk, &mut server);
+    let runtime = a.cloud_runtime().unwrap();
+    let collection = a.collection().unwrap();
+    let old_root = saved(&read(&mut server, "meguri-media", "root")).envelope;
+    assert!(matches!(
+        server
+            .request(
+                &scope(),
+                Caller::default(),
+                Operation::DeleteZone {
+                    zone: "meguri-media".into(),
+                    cause: meguri_testkit::cloud::RemovalCause::Purged,
+                }
+            )
+            .unwrap()
+            .result,
+        Ok(Reply::Done)
+    ));
+    let loss = server
+        .request(
+            &scope(),
+            Caller::default(),
+            Operation::Read {
+                zone: "meguri-media".into(),
+                name: "root".into(),
+                fields: RequestedFields::All,
+            },
+        )
+        .unwrap()
+        .result
+        .err()
+        .unwrap();
+    assert_eq!(loss.code, meguri_testkit::cloud::ErrorCode::UserDeletedZone);
+    runtime
+        .adapter_observe_zone_losses(
+            &sdk,
+            &[ZoneLoss {
+                zone: "meguri-media".into(),
+                cause: ZoneLossCause::Purged,
+            }],
+        )
+        .unwrap();
+    let proof = runtime.adapter_begin_identity_read(false, None).unwrap();
+    assert!(runtime.adapter_complete_identity_read(proof, identity()).unwrap());
+    runtime.adapter_accept_zone_losses(proof, &collection).unwrap();
+    assert!(matches!(
+        server
+            .request(
+                &scope(),
+                Caller::default(),
+                Operation::CreateZone {
+                    zone: "meguri-media".into()
+                }
+            )
+            .unwrap()
+            .result,
+        Ok(Reply::Done)
+    ));
+    let new_root = cloud::control_codec::MediaRoot {
+        media_key: [203; 32],
+        created_at_ms: NOW + 1,
+    }
+    .encode()
+    .unwrap();
+    assert_ne!(new_root, old_root);
+    put(
+        &mut server,
+        "meguri-media",
+        &[Saved {
+            name: "root".into(),
+            envelope: new_root,
+            system_fields: vec![],
+        }],
+        "MGMediaRoot",
+    );
+
+    let sender = b.collection().unwrap();
+    let before = rows(&a);
+    let Cell::Integer(note) = before[&Table::Notes][0][0] else {
+        panic!("native note")
+    };
+    meguri_engine::notes::update(
+        &sender,
+        meguri_engine::notes::UpdateNote {
+            id: NoteId(note),
+            fields: vec!["fixture note delta".into(), "answer".into()],
+            tags: vec![],
+        },
+        OpSource::UserUndoable,
+    )
+    .unwrap();
+    let deck = meguri_engine::decks::add(&sender, "Fixture Deck Delta".into())
+        .unwrap()
+        .value
+        .id;
+    let Payload::Card(card) = b
+        .cloud_runtime()
+        .unwrap()
+        .entity_facts_page(codec::Kind::Card, None)
+        .unwrap()
+        .remove(0)
+        .payload
+    else {
+        panic!("native card")
+    };
+    let StartResult::Started { session_id, head, .. } = b.review().start(DeckId(card.did), None).unwrap() else {
+        panic!("native session")
+    };
+    let item = &head.items[0];
+    assert!(matches!(
+        b.review()
+            .answer(
+                session_id,
+                item.card_id,
+                Rating::Easy,
+                item.state_token,
+                EpochMillis(NOW),
+                123
+            )
+            .unwrap(),
+        AnswerOutcome::Accepted { .. }
+    ));
+    b.review().end(session_id).unwrap();
+    b.cloud_runtime()
+        .unwrap()
+        .reconcile_binding(&sender, &b.media().unwrap(), BUDGET)
+        .unwrap();
+    let sent = sign_out_absence::send_pending(&b, &mut server, &sender_sdk);
+    for kind in [
+        codec::Kind::Note,
+        codec::Kind::Deck,
+        codec::Kind::Card,
+        codec::Kind::Revlog,
+    ] {
+        assert!(sent.iter().any(|record| decode(record).0.fields.kind == kind));
+    }
+    let mut token = None;
+    loop {
+        let fetch = begin(runtime, &sdk, &zone);
+        let incoming = page(&mut server, &zone, token);
+        deliver(&a, &sdk, &zone, &incoming, true);
+        finish(runtime, &sdk, &zone, fetch, false);
+        if !incoming.more {
+            break;
+        }
+        token = Some(incoming.token);
+    }
+    assert_eq!(q6_content(&a), q6_content(&b));
+    assert_eq!(rows(&a)[&Table::Revlog].len(), before[&Table::Revlog].len() + 1);
+    assert!(
+        rows(&a)[&Table::Decks]
+            .iter()
+            .any(|row| row[0] == Cell::Integer(deck.0))
+    );
+    runtime.validate_network_sdk(&sdk).unwrap();
+    assert!(runtime.validate_network_media_sdk(&sdk).is_err());
+    // A local session remains usable on the receiver too.
+    let StartResult::Started { session_id, .. } = a.review().start(DeckId(card.did), None).unwrap() else {
+        panic!("receiver local session")
+    };
+    a.review().end(session_id).unwrap();
+    drop(sender);
+    drop(collection);
+    b.close().unwrap();
+    a.close().unwrap();
+}
+
+trait NativeReadAccountProof {
+    fn complete_fetch_read_with_account(
+        &self,
+        read: &cloud::adapter::FetchRead,
+        collection: &meguri_engine::Collection,
+        result: cloud::publication::RecordRead,
+        discard: bool,
+        failure: Option<cloud::zone_deletion::FailureFacts>,
+        terminal: Option<cloud::zone_deletion::FailureFacts>,
+    ) -> Result<Option<cloud::adapter::FetchRead>, cloud::runtime::RuntimeError>;
+}
+impl NativeReadAccountProof for Runtime {
+    fn complete_fetch_read_with_account(
+        &self,
+        read: &cloud::adapter::FetchRead,
+        collection: &meguri_engine::Collection,
+        result: cloud::publication::RecordRead,
+        discard: bool,
+        failure: Option<cloud::zone_deletion::FailureFacts>,
+        terminal: Option<cloud::zone_deletion::FailureFacts>,
+    ) -> Result<Option<cloud::adapter::FetchRead>, cloud::runtime::RuntimeError> {
+        if !discard
+            && self.validate_fetch_read(read, collection).is_ok()
+            && (read.is_active()
+                || matches!(
+                    result,
+                    cloud::publication::RecordRead::Missing | cloud::publication::RecordRead::ZoneMissing
+                ))
+        {
+            let id = self.adapter_begin_identity_read(false, None)?;
+            let actual = Account.read_identity(&cloud::BuildScope {
+                container: cloud::ContainerId::new(scope().container).unwrap(),
+                environment: cloud::Environment::Development,
+            });
+            assert!(self.adapter_complete_identity_read(id, actual)?);
+        }
+        self.adapter_complete_fetch_read(read, collection, result, discard, failure, terminal)
+    }
+}
+
+// K12.5 first/last rows, V2.2/V9, P24 loss prerequisites. Actual
+// database-deletion causes enter the typed Runtime path, including other c-zones.
+#[test]
+fn known_other_epoch_reset_is_account_wide_and_removes_its_due_row_after_fresh_proof() {
+    use cloud::adapter::{ZoneLoss, ZoneLossCause};
+    use meguri_testkit::cloud::RemovalCause;
+    for mixed in [false, true] {
+        let mut rig = fixture(1, true);
+        let runtime = rig.host.cloud_runtime().unwrap();
+        let collection = rig.host.collection().unwrap();
+        meguri_engine::decks::add(&collection, "Retain pending reset edit".into()).unwrap();
+        runtime
+            .reconcile_binding(&collection, &rig.host.media().unwrap(), BUDGET)
+            .unwrap();
+        let local = rows(&rig.host);
+        let pending = runtime.tracking_sendables();
+        let entities = runtime.adapter_snapshot().unwrap().entities;
+        let zones = runtime.prepare_zone_deletion_fixture_for_testing(&rig.sdk).unwrap();
+        let zone = &zones[0];
+        let retained = runtime.publication_control_for_testing().unwrap();
+        assert!(retained.zones[zone].deletion_due);
+        let stale_listing = runtime.begin_zone_listing(&rig.sdk, &collection).unwrap();
+        assert!(matches!(
+            rig.service
+                .request(
+                    &scope(),
+                    Caller::default(),
+                    Operation::CreateZone { zone: zone.clone() }
+                )
+                .unwrap()
+                .result,
+            Ok(Reply::Done)
+        ));
+        let (_, token) = fetched_database_changes(&mut rig.service, None);
+        assert!(matches!(
+            rig.service
+                .request(
+                    &scope(),
+                    Caller::default(),
+                    Operation::DeleteZone {
+                        zone: zone.clone(),
+                        cause: RemovalCause::EncryptedDataReset
+                    }
+                )
+                .unwrap()
+                .result,
+            Ok(Reply::Done)
+        ));
+        let (changes, _) = fetched_database_changes(&mut rig.service, Some(token));
+        let deletion = changes
+            .iter()
+            .find(|c| c.zone == *zone && c.removed == Some(RemovalCause::EncryptedDataReset))
+            .unwrap();
+        let mut losses = vec![ZoneLoss {
+            zone: deletion.zone.clone(),
+            cause: ZoneLossCause::EncryptedDataReset,
+        }];
+        if mixed {
+            losses.push(ZoneLoss {
+                zone: rig.zone.clone(),
+                cause: ZoneLossCause::Deleted,
+            });
+        }
+        let old = runtime.adapter_begin_identity_read(false, None).unwrap();
+        assert!(runtime.adapter_complete_identity_read(old, identity()).unwrap());
+        assert!(runtime.adapter_observe_zone_losses(&rig.sdk, &losses).unwrap());
+        assert!(runtime.adapter_accept_zone_losses(old, &collection).is_err());
+        assert!(runtime.publication_control_for_testing().unwrap().zones[zone].deletion_due);
+        let fresh = runtime.adapter_begin_identity_read(false, None).unwrap();
+        assert!(runtime.adapter_complete_identity_read(fresh, identity()).unwrap());
+        runtime.adapter_accept_zone_losses(fresh, &collection).unwrap();
+        let after = runtime.publication_control_for_testing().unwrap();
+        assert!(!after.zones.contains_key(zone));
+        assert_eq!(after.zones.len(), retained.zones.len() - 1);
+        assert_eq!(
+            after.current.unwrap().facts.state,
+            cloud::BindingState::Isolated(cloud::IsolationReason::EncryptedDataReset)
+        );
+        assert_eq!(runtime.tracking_sendables(), pending);
+        assert_eq!(runtime.adapter_snapshot().unwrap().entities, entities);
+        assert_eq!(rows(&rig.host), local);
+        assert!(runtime.validate_network_sdk(&rig.sdk).is_err());
+        assert!(
+            runtime
+                .complete_zone_listing(stale_listing, &collection, Some(&zones))
+                .is_err()
+        );
+        assert!(runtime.adapter_observe_zone_losses(&rig.sdk, &losses).is_err());
+        drop(collection);
+        rig.host.close().unwrap();
+        let host = open(&rig.root.path().join("device"));
+        let runtime = host.cloud_runtime().unwrap();
+        assert_eq!(
+            runtime.status().unwrap().binding.unwrap().facts.state,
+            cloud::BindingState::Isolated(cloud::IsolationReason::EncryptedDataReset)
+        );
+        assert!(
+            !runtime
+                .publication_control_for_testing()
+                .unwrap()
+                .zones
+                .contains_key(zone)
+        );
+        assert_eq!(runtime.adapter_snapshot().unwrap().entities, entities);
+        assert_eq!(rows(&host), local);
+        assert!(runtime.register_sdk(false).is_err());
+        host.close().unwrap();
+    }
+}
+
+#[test]
+fn known_later_loss_rejects_preceding_lookup_and_superseded_completion() {
+    use cloud::adapter::{ZoneLoss, ZoneLossCause};
+    let rig = fixture(1, true);
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let collection = rig.host.collection().unwrap();
+    let before = runtime.adapter_snapshot().unwrap();
+    runtime
+        .adapter_observe_zone_losses(
+            &rig.sdk,
+            &[ZoneLoss {
+                zone: "meguri-media".into(),
+                cause: ZoneLossCause::Deleted,
+            }],
+        )
+        .unwrap();
+    let preceding = runtime.adapter_begin_identity_read(false, None).unwrap();
+    runtime
+        .adapter_observe_zone_losses(
+            &rig.sdk,
+            &[ZoneLoss {
+                zone: "meguri-root".into(),
+                cause: ZoneLossCause::Purged,
+            }],
+        )
+        .unwrap();
+    assert!(runtime.adapter_complete_identity_read(preceding, identity()).unwrap());
+    assert!(runtime.adapter_accept_zone_losses(preceding, &collection).is_err());
+    assert_eq!(
+        runtime.status().unwrap().binding.unwrap().facts.state,
+        cloud::BindingState::Active
+    );
+    assert_eq!(runtime.adapter_snapshot().unwrap().serialization, before.serialization);
+    let fresh = runtime.adapter_begin_identity_read(false, None).unwrap();
+    assert!(!runtime.adapter_complete_identity_read(preceding, identity()).unwrap());
+    assert!(
+        runtime
+            .adapter_known_loss_read_after_identity(&rig.sdk, preceding)
+            .is_err()
+    );
+    assert!(runtime.adapter_complete_identity_read(fresh, identity()).unwrap());
+    runtime.adapter_accept_zone_losses(fresh, &collection).unwrap();
+    assert_eq!(
+        runtime.status().unwrap().binding.unwrap().facts.state,
+        cloud::BindingState::Isolated(cloud::IsolationReason::ZoneDeletedByUser)
+    );
+    assert_eq!(runtime.adapter_snapshot().unwrap().entities, before.entities);
+    rig.host.close().unwrap();
+}
+
+const KNOWN_LOSS_CHILD_ENV: &str = "MEGURI_KNOWN_LOSS_CHILD";
+
+#[test]
+fn media_loss_commit_failures_revoke_prepared_authority_and_preserve_original_bytes() {
+    use cloud::testing::{TrackingFault, arm_tracking_fault};
+    for boundary in 0..4 {
+        let mut rig = fixture(1, true);
+        known_loss_cache_asset(&mut rig);
+        let runtime = rig.host.cloud_runtime().unwrap();
+        let collection = rig.host.collection().unwrap();
+        let media = rig.host.media().unwrap();
+        // Applying the fetched own save can ACK and reclaim its original stage.
+        runtime.reconcile_binding(&collection, &media, BUDGET).unwrap();
+        let Cell::Integer(note) = rows(&rig.host)[&Table::Notes][0][0] else {
+            panic!("synthetic note")
+        };
+        meguri_engine::notes::update(
+            &collection,
+            meguri_engine::notes::UpdateNote {
+                id: meguri_model::ids::NoteId(note),
+                fields: vec![
+                    "p".repeat(codec::INLINE_ENVELOPE_BYTES + 1),
+                    "unsent local answer".into(),
+                ],
+                tags: vec![],
+            },
+            OpSource::UserUndoable,
+        )
+        .unwrap();
+        runtime.reconcile_binding(&collection, &media, BUDGET).unwrap();
+        let batch = runtime
+            .build_collection_batch(&rig.sdk, &collection, &sign_out_absence::names(runtime))
+            .unwrap();
+        let save = batch.saves.iter().find(|save| save.asset_path.is_some()).unwrap();
+        let upload = (
+            std::path::PathBuf::from(save.asset_path.as_ref().unwrap()),
+            std::fs::read(save.asset_path.as_ref().unwrap()).unwrap(),
+        );
+        rig.host
+            .cloud_policy_input(DeviceEvent::Settings(DeviceSettings {
+                enabled: true,
+                paused: false,
+                automatic: false,
+                media: true,
+            }))
+            .unwrap();
+        runtime.resume_cloud_media();
+        let prepared = runtime.cloud_media_work(&collection, &media).unwrap().unwrap();
+        assert!(matches!(prepared.request, cloud::media::Request::Root));
+        let before = runtime.adapter_snapshot().unwrap();
+        let local = rows(&rig.host);
+        let pending = runtime.tracking_sendables();
+        let entity = before.entities.iter().find(|entity| entity.name == save.name).unwrap();
+        assert!(entity.mark.is_some() && entity.local_rev > entity.acked_rev);
+        assert!(
+            entity
+                .in_flight
+                .iter()
+                .any(|flight| flight.local_rev == entity.local_rev)
+        );
+        assert!(pending.contains_key(&save.name));
+        assert_eq!(
+            std::fs::read(&upload.0).unwrap(),
+            upload.1,
+            "protected before fault {boundary}"
+        );
+        let proof = runtime.adapter_begin_identity_read(false, None).unwrap();
+        assert!(runtime.adapter_complete_identity_read(proof, identity()).unwrap());
+        match boundary {
+            0 => arm_tracking_fault("cloud.media.commit.ledger", TrackingFault::Io).unwrap(),
+            1 => arm_tracking_fault("cloud.media.commit.ledger", TrackingFault::Panic).unwrap(),
+            2 => runtime.fail_media_readback_for_testing(),
+            _ => runtime.set_incoming_stage_hook_for_testing(|stage| {
+                if stage == IncomingStage::MediaLedgerCommitted {
+                    panic!("committed media readback interruption")
+                }
+            }),
+        }
+        assert!(
+            runtime
+                .cloud_media_reply(&collection, &media, &prepared, cloud::media::Reply::ZoneMissing)
+                .is_err()
+        );
+        runtime.set_incoming_stage_hook_for_testing(|_| {});
+        assert!(
+            runtime
+                .validate_cloud_media_admission(&rig.sdk, &collection, &prepared)
+                .is_err()
+        );
+        assert!(
+            runtime.validate_native_sdk_for_testing(&rig.sdk).is_err()
+                || runtime.validate_network_media_sdk(&rig.sdk).is_err()
+        );
+        assert_eq!(rows(&rig.host), local);
+        assert_eq!(runtime.tracking_sendables(), pending);
+        assert_eq!(runtime.adapter_snapshot().unwrap().entities, before.entities);
+        assert_eq!(runtime.adapter_snapshot().unwrap().serialization, before.serialization);
+        assert_eq!(std::fs::read(&upload.0).unwrap(), upload.1);
+        drop(media);
+        drop(collection);
+        rig.host.close().unwrap();
+        let reopened = open(&rig.root.path().join("device"));
+        assert_eq!(rows(&reopened), local);
+        let runtime = reopened.cloud_runtime().unwrap();
+        let after_open = runtime.adapter_snapshot().unwrap();
+        let retained = after_open.entities.iter().find(|e| e.name == save.name).unwrap();
+        assert!(retained.mark.is_some());
+        assert_eq!(retained.mark, entity.mark);
+        assert_eq!(retained.local_rev, entity.local_rev);
+        assert!(retained.local_rev > retained.acked_rev);
+        assert_eq!(retained.acked_rev, entity.acked_rev);
+        let (sdk, serialization, zone) = admit(&reopened);
+        assert_eq!(serialization, before.serialization);
+        assert_eq!(zone, rig.zone);
+        runtime.validate_network_sdk(&sdk).unwrap();
+        if boundary >= 2 {
+            assert!(runtime.validate_network_media_sdk(&sdk).is_err());
+        }
+        // V4 S5/S6 and V6 allow removal of uploads derived for an expired SDK.
+        // Rebuilding the pending local record must reproduce its payload bytes.
+        confirm_root(&reopened, &sdk, &mut rig.service);
+        let after_admission = runtime.adapter_snapshot().unwrap();
+        assert_eq!(runtime.tracking_sendables(), pending);
+        let collection = reopened.collection().unwrap();
+        let rebuilt = runtime
+            .build_collection_batch(&sdk, &collection, &BTreeSet::from([save.name.clone()]))
+            .unwrap();
+        assert_ne!(rebuilt.id, 0, "fresh SDK must receive a real batch at fault {boundary}");
+        assert_eq!(rebuilt.saves.len(), 1);
+        let regenerated = &rebuilt.saves[0];
+        assert_eq!(regenerated.name, save.name);
+        assert_eq!(regenerated.envelope, save.envelope);
+        assert_eq!(
+            std::fs::read(regenerated.asset_path.as_ref().expect("fresh payload asset")).unwrap(),
+            upload.1,
+            "rebuilt pending payload must preserve every byte at fault {boundary}"
+        );
+        let after_rebuild = runtime.adapter_snapshot().unwrap();
+        for snapshot in [&after_open, &after_admission, &after_rebuild] {
+            assert!(snapshot.binding == before.binding);
+            assert_eq!(snapshot.serialization, before.serialization);
+            let retained = snapshot.entities.iter().find(|e| e.name == save.name).unwrap();
+            assert!(retained.mark.is_some() && retained.local_rev > retained.acked_rev);
+            assert!(
+                retained.kind == entity.kind
+                    && retained.key == entity.key
+                    && retained.origin == entity.origin
+                    && retained.sent == entity.sent
+                    && retained.local_rev == entity.local_rev
+                    && retained.acked_rev == entity.acked_rev
+                    && retained.mark == entity.mark
+                    && retained.payload == entity.payload
+                    && retained.base_payload == entity.base_payload
+                    && retained.server_erev == entity.server_erev
+                    && retained.acked_system_fields == entity.acked_system_fields
+                    && retained.acked_row_digest == entity.acked_row_digest
+                    && retained.acked_payload_digest == entity.acked_payload_digest
+                    && retained.acked_payload == entity.acked_payload
+                    && retained.acked_envelope == entity.acked_envelope,
+                "pending local data and ACK counters must survive fault {boundary}"
+            );
+        }
+        let handed = after_rebuild
+            .entities
+            .iter()
+            .find(|e| e.name == regenerated.name)
+            .unwrap();
+        assert!(
+            handed
+                .in_flight
+                .iter()
+                .any(|flight| flight.local_rev == entity.local_rev)
+        );
+        assert_eq!(runtime.tracking_sendables(), pending);
+        assert_eq!(rows(&reopened), local);
+        runtime.validate_network_sdk(&sdk).unwrap();
+        if boundary >= 2 {
+            assert!(runtime.validate_network_media_sdk(&sdk).is_err());
+        }
+        drop(collection);
+        reopened.close().unwrap();
+    }
+}
+
+const KNOWN_LOSS_CHECKPOINT: &str = "KNOWN_LOSS_CHECKPOINT ";
+#[derive(serde::Serialize, serde::Deserialize)]
+struct KnownLossCheckpoint {
+    directory: std::path::PathBuf,
+    serialization: Option<Vec<u8>>,
+    entities: Vec<cloud::workflow::EntityFacts>,
+    root: Option<cloud::workflow::RootAcknowledgement>,
+    cache: Vec<(std::path::PathBuf, Vec<u8>)>,
+    upload: (std::path::PathBuf, Vec<u8>),
+    local_fields: Vec<u8>,
+}
+
+// The original conditional Service save supplies the fetched asset, while its
+// original engine result remains lost. Intake owns its copied inbox file.
+fn known_loss_cache_asset(rig: &mut Rig) -> (std::path::PathBuf, Vec<u8>) {
+    use meguri_testkit::cloud::Asset;
+    let collection = rig.host.collection().unwrap();
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let Cell::Integer(note) = rows(&rig.host)[&Table::Notes][0][0] else {
+        panic!("synthetic note")
+    };
+    meguri_engine::notes::update(
+        &collection,
+        meguri_engine::notes::UpdateNote {
+            id: meguri_model::ids::NoteId(note),
+            fields: vec!["k".repeat(codec::INLINE_ENVELOPE_BYTES + 1), "kept local answer".into()],
+            tags: vec![],
+        },
+        OpSource::UserUndoable,
+    )
+    .unwrap();
+    let batch = runtime
+        .build_collection_batch(&rig.sdk, &collection, &sign_out_absence::names(runtime))
+        .unwrap();
+    let save = batch.saves.iter().find(|s| s.asset_path.is_some()).unwrap();
+    let staged = save.asset_path.as_ref().unwrap();
+    let bytes = std::fs::read(staged).unwrap();
+    let existing = read(&mut rig.service, &rig.zone, &save.name);
+    let mut input = RecordInput::encrypted(&save.name, "MGEntity", save.envelope.clone());
+    input
+        .fields
+        .insert("pa".into(), Field::Asset(Asset::synthetic(bytes.clone())));
+    let response = rig
+        .service
+        .request(
+            &scope(),
+            Caller::default(),
+            Operation::Modify {
+                zone: rig.zone.clone(),
+                atomic: false,
+                changes: vec![Mutation::Save {
+                    record: input,
+                    if_unchanged: Some(existing.system_fields),
+                }],
+            },
+        )
+        .unwrap();
+    let Ok(Reply::Modified(mut items)) = response.result else {
+        panic!("original Service save")
+    };
+    let Ok(MutationSuccess::Saved(record)) = items.remove(0).result else {
+        panic!("original conditional save")
+    };
+    let Field::Asset(asset) = &record.fields["pa"] else {
+        panic!("original Service asset")
+    };
+    let mut download = tempfile::NamedTempFile::new().unwrap();
+    download.write_all(asset.bytes()).unwrap();
+    download.as_file().sync_all().unwrap();
+    runtime
+        .adapter_fetched_assets(
+            &rig.sdk,
+            &rig.zone,
+            &[cloud::workflow::FetchedRecord {
+                record: saved(&record),
+                asset_path: Some(download.path().to_owned()),
+            }],
+            &[],
+        )
+        .unwrap();
+    (staged.clone().into(), bytes)
+}
+
+#[test]
+fn known_loss_acceptance_cache_and_cursor_boundaries_survive_actual_sigkill() {
+    for (stage, media) in [
+        (IncomingStage::KnownLossBeforeAcceptance, false),
+        (IncomingStage::KnownLossAfterAcceptance, false),
+        (IncomingStage::KnownLossBeforeCacheSweep, false),
+        (IncomingStage::KnownLossAfterCacheSweep, false),
+        (IncomingStage::KnownLossBeforeCursor, true),
+        (IncomingStage::KnownLossAfterCursor, true),
+    ] {
+        let control = tempfile::tempdir().unwrap();
+        std::fs::write(
+            control.path().join("known-loss-case.json"),
+            serde_json::to_vec(&(stage, media)).unwrap(),
+        )
+        .unwrap();
+        let (mut child, rx) = Q6Child::spawn_checkpoint(
+            control.path(),
+            "cloud_known_loss_child_checkpoint",
+            KNOWN_LOSS_CHILD_ENV,
+            KNOWN_LOSS_CHECKPOINT,
+        );
+        let checkpoint = rx.recv_timeout(BUDGET);
+        let (killed, reaped) = child.stop().unwrap();
+        killed.unwrap();
+        let status = reaped.unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            assert_eq!(status.signal(), Some(9));
+        }
+        let checkpoint: KnownLossCheckpoint =
+            serde_json::from_str(&checkpoint.expect("real loss boundary within original BUDGET")).unwrap();
+        let host = open(&checkpoint.directory);
+        let runtime = host.cloud_runtime().unwrap();
+        let snapshot = runtime.adapter_snapshot().unwrap();
+        assert_eq!(snapshot.entities, checkpoint.entities);
+        assert_eq!(rows(&host)[&Table::Notes][0][6], Cell::Text(checkpoint.local_fields));
+        assert_eq!(snapshot.root, checkpoint.root);
+        assert_eq!(
+            snapshot.serialization,
+            if stage == IncomingStage::KnownLossAfterCursor {
+                Some(b"accepted-media-loss-cursor".to_vec())
+            } else {
+                checkpoint.serialization
+            }
+        );
+        assert_eq!(
+            std::fs::read(&checkpoint.upload.0).unwrap(),
+            checkpoint.upload.1,
+            "original publication file remains byte exact"
+        );
+        let before = stage == IncomingStage::KnownLossBeforeAcceptance;
+        for (path, bytes) in &checkpoint.cache {
+            if media || before {
+                assert_eq!(&std::fs::read(path).unwrap(), bytes);
+            } else {
+                assert!(
+                    !path.exists(),
+                    "isolated open must finish committed server-cache cleanup"
+                );
+            }
+        }
+        let expected = if media || before {
+            cloud::BindingState::Active
+        } else {
+            cloud::BindingState::Isolated(cloud::IsolationReason::EncryptedDataReset)
+        };
+        assert_eq!(runtime.status().unwrap().binding.unwrap().facts.state, expected);
+        assert!(
+            !runtime.status().unwrap().identity_verified,
+            "reopen never reuses process proof"
+        );
+        if media {
+            assert!(
+                runtime
+                    .cleanup_observation_for_testing("retired-child")
+                    .unwrap()
+                    .zone_missing
+            );
+        }
+        if !media && !before {
+            assert!(runtime.register_sdk(false).is_err());
+        }
+        host.close().unwrap();
+        std::fs::remove_dir_all(checkpoint.directory.parent().unwrap()).unwrap();
+    }
+}
+
+#[test]
+fn bound_loss_acceptance_active_reply_and_sdk_shutdown_persist_on_sigkill() {
+    for (stage, mode, committed_isolation) in [
+        (IncomingStage::KnownLossBeforeAcceptance, 0_u8, false),
+        (IncomingStage::KnownLossAfterAcceptance, 0, false),
+        (IncomingStage::KnownLossBeforeActiveResult, 1, false),
+        (IncomingStage::KnownLossAfterActiveResult, 1, true),
+        (IncomingStage::SDKRetireBeforeReacquisition, 2, false),
+        (IncomingStage::SDKIsolationPublished, 2, true),
+    ] {
+        let control = tempfile::tempdir().unwrap();
+        std::fs::write(
+            control.path().join("known-loss-case.json"),
+            serde_json::to_vec(&(stage, false)).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            control.path().join("known-loss-plain-case.json"),
+            serde_json::to_vec(&mode).unwrap(),
+        )
+        .unwrap();
+        let (mut child, rx) = Q6Child::spawn_checkpoint(
+            control.path(),
+            "cloud_known_loss_child_checkpoint",
+            KNOWN_LOSS_CHILD_ENV,
+            KNOWN_LOSS_CHECKPOINT,
+        );
+        let checkpoint = rx.recv_timeout(BUDGET);
+        let (killed, reaped) = child.stop().unwrap();
+        killed.unwrap();
+        let status = reaped.unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            assert_eq!(status.signal(), Some(9));
+        }
+        let checkpoint: KnownLossCheckpoint =
+            serde_json::from_str(&checkpoint.expect("actual plain-loss boundary within BUDGET")).unwrap();
+        let host = open(&checkpoint.directory);
+        let runtime = host.cloud_runtime().unwrap();
+        let collection = host.collection().unwrap();
+        let snapshot = runtime.adapter_snapshot().unwrap();
+        assert_eq!(snapshot.entities, checkpoint.entities);
+        assert_eq!(snapshot.serialization, checkpoint.serialization);
+        assert_eq!(snapshot.root, checkpoint.root);
+        assert_eq!(
+            rows(&host)[&Table::Notes][0][6],
+            Cell::Text(checkpoint.local_fields.clone())
+        );
+        for (path, bytes) in checkpoint.cache.iter().chain(std::iter::once(&checkpoint.upload)) {
+            assert_eq!(&std::fs::read(path).unwrap(), bytes);
+        }
+        let expected = if committed_isolation {
+            cloud::BindingState::Isolated(cloud::IsolationReason::ZoneMissing)
+        } else {
+            cloud::BindingState::Active
+        };
+        assert_eq!(runtime.status().unwrap().binding.unwrap().facts.state, expected);
+        assert!(!runtime.status().unwrap().identity_verified);
+        assert!(runtime.validate_sdk("killed-original").is_err());
+        let pending_loss = stage != IncomingStage::KnownLossBeforeAcceptance && !committed_isolation;
+        let failed = runtime.adapter_begin_identity_read(false, None).unwrap();
+        assert!(
+            runtime
+                .adapter_complete_identity_read(failed, IdentityStatus::ReadFailed)
+                .unwrap()
+        );
+        if pending_loss {
+            assert!(runtime.adapter_accept_zone_losses(failed, &collection).is_err());
+        }
+        let stale = runtime.adapter_begin_identity_read(false, None).unwrap();
+        let fresh = runtime.adapter_begin_identity_read(false, None).unwrap();
+        assert!(!runtime.adapter_complete_identity_read(stale, identity()).unwrap());
+        if pending_loss {
+            assert!(runtime.adapter_accept_zone_losses(stale, &collection).is_err());
+        }
+        assert!(runtime.adapter_complete_identity_read(fresh, identity()).unwrap());
+        if pending_loss {
+            // The durable obligation survives; the original SDK/read does not.
+            runtime.adapter_accept_zone_losses(fresh, &collection).unwrap();
+            assert_eq!(
+                runtime.status().unwrap().binding.unwrap().facts.state,
+                cloud::BindingState::Isolated(cloud::IsolationReason::ZoneMissing)
+            );
+            assert!(runtime.register_sdk(false).is_err());
+        }
+        assert_eq!(runtime.adapter_snapshot().unwrap().entities, checkpoint.entities);
+        assert_eq!(
+            runtime.adapter_snapshot().unwrap().serialization,
+            checkpoint.serialization
+        );
+        for (path, bytes) in checkpoint.cache.iter().chain(std::iter::once(&checkpoint.upload)) {
+            assert_eq!(&std::fs::read(path).unwrap(), bytes);
+        }
+        drop(collection);
+        host.close().unwrap();
+        std::fs::remove_dir_all(checkpoint.directory.parent().unwrap()).unwrap();
+    }
+}
+
+#[test]
+fn cloud_known_loss_child_checkpoint() {
+    use cloud::adapter::{ZoneLoss, ZoneLossCause};
+    use meguri_testkit::cloud::RemovalCause;
+    let Some(control) = std::env::var_os(KNOWN_LOSS_CHILD_ENV).map(std::path::PathBuf::from) else {
+        return;
+    };
+    let (selected, media): (IncomingStage, bool) =
+        serde_json::from_slice(&std::fs::read(control.join("known-loss-case.json")).unwrap()).unwrap();
+    let plain_mode: Option<u8> = std::fs::read(control.join("known-loss-plain-case.json"))
+        .ok()
+        .map(|bytes| serde_json::from_slice(&bytes).unwrap());
+    let mut rig = fixture(1, true);
+    let upload = known_loss_cache_asset(&mut rig);
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let collection = rig.host.collection().unwrap();
+    let snapshot = runtime.adapter_snapshot().unwrap();
+    let cache: Vec<_> = snapshot
+        .inbox
+        .iter()
+        .filter_map(|entry| match &entry.value {
+            InboxValue::Record {
+                staged_asset: Some(path),
+                ..
+            } => Some((std::path::PathBuf::from(path), std::fs::read(path).unwrap())),
+            _ => None,
+        })
+        .collect();
+    assert!(!cache.is_empty());
+    let checkpoint = serde_json::to_string(&KnownLossCheckpoint {
+        directory: rig.root.path().join("device"),
+        serialization: snapshot.serialization,
+        entities: snapshot.entities,
+        root: snapshot.root,
+        cache,
+        upload,
+        local_fields: match &rows(&rig.host)[&Table::Notes][0][6] {
+            Cell::Text(fields) => fields.clone(),
+            _ => panic!("actual local note fields"),
+        },
+    })
+    .unwrap();
+    runtime.set_incoming_stage_hook_for_testing(move |stage| {
+        if stage == selected {
+            println!("{KNOWN_LOSS_CHECKPOINT}{checkpoint}");
+            std::io::stdout().flush().unwrap();
+            let _ = std::io::stdin().read(&mut [0]);
+            panic!("parent must SIGKILL at the actual durable boundary");
+        }
+    });
+    let zone = if media { "meguri-media" } else { &rig.zone };
+    if media {
+        assert!(matches!(
+            rig.service
+                .request(&scope(), Caller::default(), Operation::CreateZone { zone: zone.into() })
+                .unwrap()
+                .result,
+            Ok(Reply::Done)
+        ));
+    }
+    let (_, token) = fetched_database_changes(&mut rig.service, None);
+    let cause = if plain_mode.is_some() {
+        RemovalCause::Deleted
+    } else if media {
+        RemovalCause::Purged
+    } else {
+        RemovalCause::EncryptedDataReset
+    };
+    assert!(matches!(
+        rig.service
+            .request(
+                &scope(),
+                Caller::default(),
+                Operation::DeleteZone {
+                    zone: zone.into(),
+                    cause
+                }
+            )
+            .unwrap()
+            .result,
+        Ok(Reply::Done)
+    ));
+    let (changes, _) = fetched_database_changes(&mut rig.service, Some(token));
+    let removed = changes
+        .iter()
+        .find(|c| c.zone == zone && c.removed == Some(cause))
+        .unwrap();
+    runtime
+        .adapter_observe_zone_losses(
+            &rig.sdk,
+            &[ZoneLoss {
+                zone: removed.zone.clone(),
+                cause: if plain_mode.is_some() {
+                    ZoneLossCause::Deleted
+                } else if media {
+                    ZoneLossCause::Purged
+                } else {
+                    ZoneLossCause::EncryptedDataReset
+                },
+            }],
+        )
+        .unwrap();
+    assert!(
+        runtime
+            .adapter_state_update(&rig.sdk, b"unaccepted-loss-cursor")
+            .is_err()
+    );
+    let fresh = runtime.adapter_begin_identity_read(false, None).unwrap();
+    assert!(runtime.adapter_complete_identity_read(fresh, identity()).unwrap());
+    runtime.adapter_accept_zone_losses(fresh, &collection).unwrap();
+    if plain_mode == Some(1) {
+        let read = runtime
+            .adapter_known_loss_read(&rig.sdk)
+            .unwrap()
+            .expect("original live Active read");
+        let active = sign_out_absence::read_control(&mut rig.service, "meguri-root", "active");
+        runtime
+            .complete_fetch_read_with_account(&read, &collection, active, false, None, None)
+            .unwrap();
+    } else if plain_mode == Some(2) {
+        runtime.retire_sdk(&rig.sdk, false).unwrap();
+    }
+    if media {
+        runtime
+            .adapter_state_update(&rig.sdk, b"accepted-media-loss-cursor")
+            .unwrap();
+    }
+    panic!("selected original boundary was never reached");
+}
+
+#[test]
+fn known_loss_acceptance_tracking_failure_rolls_back_cache_cursor_and_pending() {
+    use cloud::adapter::{ZoneLoss, ZoneLossCause};
+    use cloud::testing::{TrackingFault, arm_tracking_fault};
+    for fault in [TrackingFault::Io, TrackingFault::Constraint, TrackingFault::Panic] {
+        let mut rig = fixture(1, true);
+        let upload = known_loss_cache_asset(&mut rig);
+        let runtime = rig.host.cloud_runtime().unwrap();
+        let collection = rig.host.collection().unwrap();
+        let zones = runtime.prepare_zone_deletion_fixture_for_testing(&rig.sdk).unwrap();
+        let before = runtime.adapter_snapshot().unwrap();
+        let local = rows(&rig.host);
+        let cache: Vec<_> = before
+            .inbox
+            .iter()
+            .filter_map(|entry| match &entry.value {
+                InboxValue::Record {
+                    staged_asset: Some(path),
+                    ..
+                } => Some((path.clone(), std::fs::read(path).unwrap())),
+                _ => None,
+            })
+            .collect();
+        assert!(!cache.is_empty());
+        runtime
+            .adapter_observe_zone_losses(
+                &rig.sdk,
+                &[ZoneLoss {
+                    zone: zones[0].clone(),
+                    cause: ZoneLossCause::EncryptedDataReset,
+                }],
+            )
+            .unwrap();
+        let proof = runtime.adapter_begin_identity_read(false, None).unwrap();
+        assert!(runtime.adapter_complete_identity_read(proof, identity()).unwrap());
+        arm_tracking_fault("cloud.tracking.commit.inbox", fault).unwrap();
+        assert!(runtime.adapter_accept_zone_losses(proof, &collection).is_err());
+        let after = runtime.adapter_snapshot().unwrap();
+        assert_eq!(after.serialization, before.serialization);
+        assert_eq!(after.entities, before.entities);
+        assert_eq!(after.inbox, before.inbox);
+        assert_eq!(rows(&rig.host), local);
+        assert_eq!(std::fs::read(upload.0).unwrap(), upload.1);
+        for (path, bytes) in cache {
+            assert_eq!(std::fs::read(path).unwrap(), bytes);
+        }
+        assert_eq!(
+            runtime.status().unwrap().binding.unwrap().facts.state,
+            cloud::BindingState::Active
+        );
+        assert!(runtime.status().unwrap().tracking_stopped);
+        assert!(runtime.validate_network_sdk(&rig.sdk).is_err());
+        assert!(runtime.publication_control_for_testing().unwrap().zones[&zones[0]].deletion_due);
+        rig.host.close().unwrap();
+    }
 }

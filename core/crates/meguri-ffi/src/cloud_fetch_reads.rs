@@ -49,6 +49,23 @@ impl From<meguri_sync::cloud::adapter::RootReadDiagnostic> for CloudRootReadDiag
 }
 #[uniffi::export]
 impl CloudWorkflow {
+    pub fn known_loss_read(&self, sdk: String, identity_read: u64) -> Result<Option<Arc<CloudFetchRead>>, CoreError> {
+        callback::enter("CloudWorkflow.known_loss_read");
+        let collection = self.host.collection()?;
+        Ok(self
+            .core
+            .adapter_known_loss_read_after_identity(&sdk, identity_read)
+            .map_err(error)?
+            .map(|read| {
+                Arc::new(CloudFetchRead {
+                    host: self.host.clone(),
+                    core: self.core.clone(),
+                    collection,
+                    read,
+                    consumed: AtomicBool::new(false),
+                })
+            }))
+    }
     pub fn fetch_read_plan(&self, sdk: String, id: u64) -> Result<CloudFetchReadPlan, CoreError> {
         callback::enter("CloudWorkflow.fetch_read_plan");
         let collection = self.host.collection()?;

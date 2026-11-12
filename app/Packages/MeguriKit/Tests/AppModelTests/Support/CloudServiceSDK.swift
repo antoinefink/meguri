@@ -13,6 +13,11 @@ actor ServiceSDKFactory: CloudKitEngineFactory {
     private(set) var engines: [ServiceSDK] = []
     init(wire: ServiceWorkflowWire) { self.wire = wire }
     private var nextAccountRead: (@Sendable () async -> Void)?
+    private var nextAccountResult: Result<CloudResolvedAccount?, any Error>?
+    func resolveNextAccountRead(with result: Result<CloudResolvedAccount?, any Error>) { nextAccountResult = result }
+    private var omitFirstZoneCallbacks = false
+    private var scheduledFirstFetch = false
+    func omitFirstZoneCallbacksOnNextInstance(scheduledFirst: Bool = false) { omitFirstZoneCallbacks = true; scheduledFirstFetch = scheduledFirst }
     private var observeCreation: (@Sendable (CloudEngineConfiguration) async throws -> Void)?
     func inspectCreation(_ inspect: @escaping @Sendable (CloudEngineConfiguration) async throws -> Void) { observeCreation = inspect }
     private(set) var accountReadCount = 0
@@ -20,12 +25,18 @@ actor ServiceSDKFactory: CloudKitEngineFactory {
     func resolveAccount() async throws -> CloudResolvedAccount? {
         accountReadCount += 1
         let hold = nextAccountRead; nextAccountRead = nil
+        let result = nextAccountResult; nextAccountResult = nil
         await hold?()
+        if let result { return try result.get() }
         return .init(status: .available, identity: Data("synthetic-initial-account".utf8))
     }
     func makeEngine(configuration: CloudEngineConfiguration, delegate: any CloudKitEngineDelegate) async throws -> any CloudKitEngine {
         try await observeCreation?(configuration)
         let engine = try ServiceSDK(configuration: configuration, delegate: delegate, wire: wire)
+        if omitFirstZoneCallbacks {
+            await engine.omitNextZoneCallbacks(count: scheduledFirstFetch ? 2 : 1, scheduledFirst: scheduledFirstFetch)
+            omitFirstZoneCallbacks = false; scheduledFirstFetch = false
+        }
         engines.append(engine)
         return engine
     }
@@ -50,6 +61,24 @@ actor ServiceSDK: CloudKitEngine {
     private var revision: UInt64 = 0
     private var savedRemovals: [CloudSavedPendingRemoval] = []
     // This is the SDK's network slot, not the application's policy/input lane.
+    // A7 counterexample: only delivery is absent. The database request, Core
+    // inference and each resulting record-ID read still use the real Service.
+    private var omittedZoneCallbackCalls = 0
+    private var scheduledFirstFetch = false
+    private(set) var manualFetchGroups: [String] = []
+    private var nextManualFetch: (@Sendable () -> Void)?
+    func inspectNextManualFetch(_ inspect: @escaping @Sendable () -> Void) { nextManualFetch = inspect }
+    private var nextFetchReturn: (@Sendable () async -> Void)?
+    func holdNextFetchReturn(_ hold: @escaping @Sendable () async -> Void) { nextFetchReturn = hold }
+    private var scheduledFetch: (operation: CloudKitNetworkOperation, task: Task<Void, any Error>, joined: CloudKitNetworkCompletion)?
+    private(set) var joinedScheduledFetches = 0
+    func omitNextZoneCallbacks(count: Int = 1, scheduledFirst: Bool = false) {
+        omittedZoneCallbackCalls = count; scheduledFirstFetch = scheduledFirst
+    }
+    func signInSameServiceIdentity() async throws {
+        serialization.database = nil; serialization.zones.removeAll()
+        try await deliver(.accountChanged(change: .signIn, identity: Data("synthetic-initial-account".utf8)))
+    }
     private var networkActive = false
     private var networkWaiters: [CheckedContinuation<Void, Never>] = []
     // An addition owns a wake until a pass which observed that ordinal ends.
@@ -267,15 +296,50 @@ actor ServiceSDK: CloudKitEngine {
         guard !released else { throw ServiceWorkflowFailure.refused }
         cancelled = false
         let lifetime = lifetime, generation = lifetime.authority()
+        if scheduledFirstFetch {
+            scheduledFirstFetch = false
+            let began = CloudKitNetworkCompletion(), joined = CloudKitNetworkCompletion()
+            let scheduledOptions = CloudFetchOptions(zones: options.zones, priorityZones: options.priorityZones,
+                groupID: "service-scheduled-\(UUID().uuidString)")
+            let operation = try lifetime.admit(cancelSDK: { await self.cancelSDKCalls() }) {
+                try await self.runScheduledFetch(options: scheduledOptions, generation: generation, began: began, joined: joined)
+            }
+            let task = Task { try await operation.drain() }
+            scheduledFetch = (operation, task, joined)
+            try await began.drain()
+        }
         return CloudKitNetworkEnqueue { prepare, validate in
             try lifetime.admit(cancelSDK: { await self.cancelSDKCalls() }) {
                 try await self.invokeFetch(options: options, generation: generation, prepare: prepare, validate: validate)
             }
         }
     }
+    private func runScheduledFetch(options: CloudFetchOptions, generation: UInt64,
+                                   began: CloudKitNetworkCompletion, joined: CloudKitNetworkCompletion) async throws {
+        do {
+            try await acquireNetwork()
+            defer { releaseNetwork(); scheduleAutomaticSend() }
+            try lifetime.enqueue(generation: generation, validate: {}, begin: {})
+            try await fetchPass(options: options, reason: .scheduled, firstDatabase: {
+                // Actual scheduled database read returned before the app's
+                // fetchChanges invocation joins this original network task.
+                began.complete(nil)
+                try await joined.drain()
+            })
+        } catch { began.complete(error); throw error }
+    }
     private func invokeFetch(options: CloudFetchOptions, generation: UInt64, prepare: @Sendable () async throws -> Void,
                              validate: @Sendable () throws -> Void) async throws {
         try await waitForEventBookkeeping()
+        if let scheduled = scheduledFetch {
+            try await prepare()
+            try lifetime.enqueue(generation: generation, validate: validate, begin: {})
+            joinedScheduledFetches += 1
+            scheduled.joined.complete(nil)
+            defer { scheduledFetch = nil }
+            try await scheduled.task.value
+            return
+        }
         try await acquireNetwork()
         defer { releaseNetwork(); scheduleAutomaticSend() }
         repeat { try await waitForEventBookkeeping() } while eventActive
@@ -387,28 +451,47 @@ actor ServiceSDK: CloudKitEngine {
         let prepared = try await prepareFetch(options: options)
         try await prepared.enqueue(validate: {}).drain()
     }
-    private func fetchPass(options: CloudFetchOptions) async throws {
+    private func fetchPass(options: CloudFetchOptions, reason: CloudFetchReason = .manual,
+                           firstDatabase: (@Sendable () async throws -> Void)? = nil) async throws {
         try requireNetwork()
         let delegate = try serviceRequired(delegate)
         let scoped = await delegate.nextFetchChangesOptions(options, engine: self)
         guard scoped.groupID == options.groupID else { throw ServiceWorkflowFailure.wire }
-        try await deliver(.willFetch(groupID: scoped.groupID, reason: .manual))
+        if case .manual = reason {
+            manualFetchGroups.append(scoped.groupID)
+            let inspect = nextManualFetch; nextManualFetch = nil
+            inspect?()
+        }
+        try await deliver(.willFetch(groupID: scoped.groupID, reason: reason))
         var moreDatabase = true
+        var firstPage = true
         while moreDatabase {
             try requireNetwork()
             let original = try await wire.database(cursor: serialization.database, instance: instanceID)
             let page = try serviceRequired(try original.ok()["DatabaseChanges"])
+            if firstPage { firstPage = false; try await firstDatabase?() }
             let changes = try serviceRequired(page["changes"]?.items)
             if !changes.isEmpty { try await deliver(.databaseChanges) }
             for change in changes {
                 let zone = try serviceRequired(change["zone"]?.text)
-                if let removed = change["removed"], case .null = removed { continue }
+                guard let removed = change["removed"], case .string(let reason) = removed else { continue }
+                let cause: CloudZoneLossCause
+                switch reason {
+                case "Deleted": cause = .deleted
+                case "Purged": cause = .purged
+                case "EncryptedDataReset": cause = .encryptedDataReset
+                default: throw ServiceWorkflowFailure.wire
+                }
                 serialization.zones.removeValue(forKey: zone)
+                try await deliver(.fetchedZoneLosses([.init(zone: zone, cause: cause)]))
             }
             serialization.database = try serviceRequired(page["token"]).encoded()
             moreDatabase = try serviceRequired(page["more"]?.flag)
         }
+        let omit = omittedZoneCallbackCalls > 0
+        if omit { omittedZoneCallbackCalls -= 1 }
         for zone in scoped.zones {
+            if omit { continue }
             try await deliver(.willFetchZone(zone: zone))
             var more = true, zoneError: CloudEngineErrorCode?
             while more {
@@ -434,12 +517,15 @@ actor ServiceSDK: CloudKitEngine {
             try await deliver(.didFetchZone(zone: zone, error: zoneError))
         }
         try await saveSerialization()
-        try await deliver(.didFetch(groupID: scoped.groupID, reason: .manual))
+        try await deliver(.didFetch(groupID: scoped.groupID, reason: reason))
+        let hold = nextFetchReturn; nextFetchReturn = nil
+        await hold?()
     }
     private nonisolated static func errorCode(_ error: ServiceJSON) throws -> CloudEngineErrorCode {
         switch error["code"]?.text {
         case "UnknownItem": .unknownItem
-        case "ZoneNotFound", "UserDeletedZone": .zoneNotFound
+        case "ZoneNotFound": error["encrypted_data_reset"]?.flag == true ? .encryptedDataReset : .zoneNotFound
+        case "UserDeletedZone": .userDeletedZone
         case "ServerRecordChanged": .serverRecordChanged
         case "LimitExceeded": .limitExceeded
         case "BatchRequestFailed": .batchRequestFailed
@@ -448,6 +534,7 @@ actor ServiceSDK: CloudKitEngine {
         }
     }
     private func cancelSDKCalls() {
+        scheduledFetch?.joined.complete(CancellationError())
         cancelled = true
         let inspect = nextCancellation; nextCancellation = nil
         inspect?()

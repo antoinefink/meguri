@@ -102,6 +102,10 @@ extension EventTests {
     @Test func deletionUsesRetainedOriginalReadAndOneBatchWithRealDurableEffects() async throws {
         try await withNativePolicyFixture { fixture in
             let policy = try await assetExecutorPolicy(fixture)
+            // The actual code-26 result below requires one fresh same-account
+            // provider proof before Core accepts the original deletion facts.
+            await fixture.factory.appendAccountRead(.success(.init(status: .available,
+                identity: Data("synthetic-account-A".utf8))))
             let zones = try await deletionFixture(fixture)
             let initialRows = try await deletionRows()
             #expect(initialRows == Dictionary(uniqueKeysWithValues: zones.map { ($0, true) }))
@@ -115,7 +119,8 @@ extension EventTests {
             let issued = try await deletionCommand(fixture, policy: policy)
             try await withCloudTask(gates: [read.terminal, deletion.terminal], operation: {
                 let result = await native.execute(issued)
-                #expect(result.error == nil && result.zoneDeletionError == nil)
+                #expect(result.error == nil && result.zoneDeletionError == nil,
+                    "Deletion completion: error=\(String(describing: result.error)), zoneDeletionError=\(String(describing: result.zoneDeletionError))")
                 try requireDeletionChangesFollowup(result)
             }, whileRunning: {
                 try await read.terminal.waitForArrival()
@@ -191,6 +196,10 @@ extension EventTests {
     @Test func deletionEncryptedResetReturnsActualPolicyStopFollowup() async throws {
         try await withNativePolicyFixture { fixture in
             let policy = try await assetExecutorPolicy(fixture)
+            // The actual code-26 result below requires one fresh same-account
+            // provider proof before Core accepts the original deletion facts.
+            await fixture.factory.appendAccountRead(.success(.init(status: .available,
+                identity: Data("synthetic-account-A".utf8))))
             let zones = try await deletionFixture(fixture)
             let reset = CloudZoneDeletionFailure(code: 26, encryptedDataReset: true)
             let read = AssetExecutorOperation(outcome: .success(.zoneDeletionActiveRead(.init(read: .zoneMissing, failure: reset))))
@@ -200,7 +209,8 @@ extension EventTests {
             await read.terminal.open()
             let issued = try await deletionCommand(fixture, policy: policy)
             let result = await native.execute(issued)
-            #expect(result.error == nil && result.zoneDeletionError == nil)
+            #expect(result.error == nil && result.zoneDeletionError == nil,
+                "Deletion completion: error=\(String(describing: result.error)), zoneDeletionError=\(String(describing: result.zoneDeletionError))")
             let commands = try deletionFollowupCommands(result)
             #expect(commands.contains { if case .stopEngine = $0.action { true } else { false } })
             let diagnostics = try await fixture.core.diagnostics().zoneDeletions

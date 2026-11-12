@@ -905,3 +905,124 @@ fn saved_removal_export_requires_original_complete_receipt_and_handler_return() 
             .is_err()
     );
 }
+
+#[test]
+fn ffi_actual_zone_loss_keeps_successful_original_ack_and_failed_pending_sibling() {
+    use meguri_sync::cloud::adapter::ZoneLossCause;
+    use meguri_testkit::cloud::RemovalCause;
+    for cause in [
+        RemovalCause::Deleted,
+        RemovalCause::Purged,
+        RemovalCause::EncryptedDataReset,
+    ] {
+        let (fixture, sdk) = published();
+        let (first_id, first) = add_note(&fixture, "First original ACK".into());
+        let (second_id, second) = add_note(&fixture, "Second pending loss".into());
+        let batch = build(&fixture, &sdk, &[first.name.clone(), second.name.clone()]);
+        assert_eq!(batch.saves.len(), 2);
+        let prefix = CloudEngineBatch {
+            id: batch.id,
+            saves: vec![batch.saves.iter().find(|r| r.name == first.name).unwrap().clone()],
+            deletes: vec![],
+        };
+        let (saved, failed) = results(&fixture, &sdk, &prefix);
+        assert_eq!(saved.len(), 1);
+        assert!(failed.is_empty());
+        let mut service = fixture.server.lock().unwrap();
+        assert!(matches!(
+            service
+                .request(
+                    &fixture.scope,
+                    Caller::default(),
+                    Operation::DeleteZone {
+                        zone: sdk.collection_zone.clone(),
+                        cause,
+                    }
+                )
+                .unwrap()
+                .result,
+            Ok(Reply::Done)
+        ));
+        let failed_record = batch.saves.iter().find(|r| r.name == second.name).unwrap();
+        let response = service
+            .request(
+                &fixture.scope,
+                Caller::default(),
+                Operation::Modify {
+                    zone: sdk.collection_zone.clone(),
+                    atomic: false,
+                    changes: vec![Mutation::Save {
+                        record: input(failed_record),
+                        if_unchanged: failed_record.system_fields.clone().map(SystemFields::from_bytes),
+                    }],
+                },
+            )
+            .unwrap();
+        let failure = match response.result {
+            Err(error) => error,
+            Ok(Reply::Modified(mut items)) => items.remove(0).result.err().unwrap(),
+            _ => panic!("actual failed modify result required"),
+        };
+        drop(service);
+        let (code, native, expected) = match (failure.code, failure.encrypted_data_reset) {
+            (ErrorCode::ZoneNotFound, true) => (
+                CloudEngineErrorCode::EncryptedDataReset,
+                26,
+                ZoneLossCause::EncryptedDataReset,
+            ),
+            (ErrorCode::UserDeletedZone, _) => (CloudEngineErrorCode::UserDeletedZone, 28, ZoneLossCause::Purged),
+            (ErrorCode::ZoneNotFound, false) => (CloudEngineErrorCode::ZoneNotFound, 26, ZoneLossCause::Deleted),
+            _ => panic!("unexpected actual service loss"),
+        };
+        assert_eq!(
+            deliver(
+                &fixture,
+                &sdk,
+                &batch,
+                saved,
+                vec![CloudRecordFailure {
+                    name: second.name.clone(),
+                    code,
+                    server_record: None,
+                    zone: Some(sdk.collection_zone.clone()),
+                    native_code: Some(native),
+                    retry_after_ms: None,
+                }]
+            ),
+            1
+        );
+        fixture.workflow.handler_returned(sdk.instance_id.clone()).unwrap();
+        let acked = note_facts(&fixture, first_id);
+        let pending = note_facts(&fixture, second_id);
+        assert_eq!(acked.local_rev, acked.acked_rev);
+        assert!(acked.mark.is_none());
+        assert!(pending.local_rev > pending.acked_rev && pending.mark.is_some());
+        assert!(
+            fixture
+                .workflow
+                .state_update(sdk.instance_id.clone(), b"must-not-pass-loss".to_vec())
+                .is_err()
+        );
+        let proof = fixture.workflow.begin_identity_read(false, None).unwrap();
+        assert!(
+            fixture
+                .workflow
+                .complete_identity_read(
+                    proof,
+                    CloudAccountStatus::Available,
+                    Some(fixture.scope.account.as_bytes().to_vec())
+                )
+                .unwrap()
+        );
+        if expected == ZoneLossCause::Deleted {
+            let read = fixture
+                .workflow
+                .known_loss_read(sdk.instance_id.clone(), proof)
+                .unwrap()
+                .expect("original Active read required");
+            assert_eq!(read.target().unwrap().name, "active");
+        } else {
+            assert!(fixture.workflow.validate_sdk(sdk.instance_id.clone()).is_err());
+        }
+    }
+}

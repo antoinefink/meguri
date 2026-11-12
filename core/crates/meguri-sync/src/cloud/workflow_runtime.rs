@@ -148,7 +148,8 @@ impl Runtime {
     }
     pub(super) fn gate_locked(s: &State) -> Result<(), RuntimeError> {
         Self::capture_gate_locked(s)?;
-        if s.adapter.durable.collection_loss.is_some()
+        if s.adapter.known_loss.is_some()
+            || s.adapter.durable.collection_loss.is_some()
             || s.adapter.durable.epoch_verification.is_some()
             || (!s.root_confirmed && !Self::publication_allows_send_locked(s))
         {
@@ -976,7 +977,7 @@ impl Runtime {
     ) -> Result<bool, RuntimeError> {
         self.accept_active_proof(
             &read.sdk,
-            read.fetch,
+            read.fetch.unwrap_or_default(),
             envelope,
             system_fields,
             read.lost_collection,
@@ -1002,7 +1003,7 @@ impl Runtime {
         if let Some(read) = read {
             Self::fetch_read_locked(&s, read)?;
         }
-        if !completed_fetch {
+        if !completed_fetch && !read.is_some_and(|r| r.known_loss) {
             s.trace.push(TraceEvent::RootReadRecorded {
                 instance: instance.into(),
                 request_id,
@@ -1015,6 +1016,7 @@ impl Runtime {
         }
         if !b.verified
             || !b.usable
+            || s.adapter.known_loss.is_some()
             || (s.adapter.durable.collection_loss.is_some() && !lost_zone)
             || (s.adapter.durable.epoch_verification.is_some() && read.is_none())
             || !s.whole_complete
@@ -2130,12 +2132,28 @@ impl Runtime {
         // Ordinary per-record failures park their records without discarding
         // valid root proof or ACKs. Zone loss still requires the native zone
         // lifecycle path. All failed records remain durably pending.
-        if failed.iter().any(|(_, error)| matches!(error, SendError::ZoneMissing)) {
-            Self::invalidate_locked(&mut s);
-            return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
-        }
         if !saved.is_empty() || !conflicts.is_empty() || !failed.is_empty() {
             self.emit_pending_locked(&mut s, UpdateKind::Changes, force)?;
+        }
+        let lost = failed.iter().any(|(_, error)| *error == SendError::ZoneMissing);
+        let zone = s
+            .bound
+            .as_ref()
+            .map(|b| super::super::adapter::collection_zone(b.binding.facts.epoch));
+        let native = s
+            .adapter
+            .sdk
+            .as_ref()
+            .is_some_and(|sdk| sdk.id == instance && !sdk.stopping);
+        drop(s);
+        if lost && native {
+            self.adapter_observe_zone_losses(
+                instance,
+                &[super::super::adapter::ZoneLoss {
+                    zone: zone.ok_or(RuntimeError::StaleIncarnation)?,
+                    cause: super::super::adapter::ZoneLossCause::Deleted,
+                }],
+            )?;
         }
         Ok(saved_count)
     }

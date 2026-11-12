@@ -123,6 +123,7 @@ pub struct Work {
 }
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BlobReadResult {
+    ZoneLoss(super::adapter::ZoneLossCause),
     Present { envelope: Vec<u8> },
     UnknownItem,
     ZoneMissing,
@@ -135,6 +136,7 @@ pub struct BlobRead {
 }
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Reply {
+    ZoneLoss(super::adapter::ZoneLossCause),
     BlobReads {
         results: Vec<BlobRead>,
     },
@@ -164,11 +166,14 @@ pub(crate) enum Selection {
 }
 #[derive(Default)]
 pub(crate) struct Process {
+    // Exact process projection of the binding's durable permanent-loss flag.
+    pub zone_missing: bool,
     pub epoch: u64,
     pub observed_now_ms: i64,
     pub pending: Option<Work>,
     pub metadata_pending: Option<Work>,
     pub next: u64,
+    pub identity_reads: std::collections::BTreeMap<u64, u64>,
     pub root_checked: bool,
     pub recovered: bool,
     pub paused: bool,

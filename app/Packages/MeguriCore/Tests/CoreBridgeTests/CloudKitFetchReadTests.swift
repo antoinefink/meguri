@@ -79,6 +79,30 @@ enum FetchInferenceOrigin: CaseIterable, Sendable, Equatable {
 enum FetchReadRevocation: CaseIterable, Sendable, Equatable { case newNoStatePoint, accountLoss, suspend, stop }
 
 extension EventTests {
+    @Test func cloudKitLostCollectionActiveTransportFailureReachesOriginalCoreRead() async throws {
+        let transport = FetchControlTransport()
+        try await withCloudKitFixture(savedState: nil, assetReadTransport: transport) { f in
+            let engine = try await f.engine()
+            for _ in 0..<3 {
+                await f.factory.appendAccountRead(.success(.init(status: .available, identity: Data("synthetic-account-A".utf8))))
+            }
+            transport.setReplies([.failure(.unknownItem), .failure(.networkFailure)])
+            await engine.appendFetchScripts([.manual(fetchedZones: [], records: [], group: nil)])
+            let before = try await f.core.durableSnapshot()
+            do { try await f.adapter.requestFetch(zones: [f.zone]); Issue.record("Native Active transport failure disappeared") }
+            catch { }
+            #expect(transport.targets.map(\.name) == ["epoch", "active"])
+            let after = try await f.core.durableSnapshot()
+            #expect(try storedBindingState(after) == ["Isolated": "ZoneMissing"])
+            #expect(after.entities == before.entities && after.serialization == before.serialization)
+            let diagnostics = try await f.core.diagnostics().rootReads
+            let active = try #require(diagnostics.last)
+            #expect(active.active && active.accepted && active.outcome == "failed")
+            #expect(active.failure?.code == Int64(CKError.Code.networkFailure.rawValue))
+            #expect(try await f.core.fetchDrains().isEmpty)
+        }
+    }
+
     /// P3/P12.3/V26.1: active is confirmed and stored through the real Core
     /// path; an actual typed epoch record proves existence even without e.
     /// Neither false drain can finish a no-state absence pass.
@@ -88,6 +112,10 @@ extension EventTests {
         let saved: Data? = origin == .savedAccountReset ? Data([0x73, 0x64, 0x6b]) : nil
         try await withCloudKitFixture(savedState: saved, assetReadTransport: transport) { f in
             let engine = try await f.engine()
+            // Actual resolver replies, consumed only by Core-issued fresh reads.
+            for _ in 0..<3 {
+                await f.factory.appendAccountRead(.success(.init(status: .available, identity: Data("synthetic-account-A".utf8))))
+            }
             transport.setReplies([.found(f.root.envelope), .found(nil)])
             if origin == .accountReset || origin == .savedAccountReset { await engine.signInSameSyntheticIdentity() }
             if origin == .priorFailedWill {
@@ -133,6 +161,10 @@ extension EventTests {
         transport.setReplies([.found(nil)])
         try await withCloudKitFixture(savedState: nil, assetReadTransport: transport) { f in
             let engine = try await f.engine()
+            // Actual resolver replies, consumed only by Core-issued fresh reads.
+            for _ in 0..<3 {
+                await f.factory.appendAccountRead(.success(.init(status: .available, identity: Data("synthetic-account-A".utf8))))
+            }
             let gate = CloudCallbackGate()
             await engine.appendFetchScripts([.manualPaused(fetchedZones: [f.zone], records: [],
                 pauseZone: f.zone, afterDid: true, gate: gate)])
@@ -163,6 +195,10 @@ extension EventTests {
         let transport = FetchControlTransport()
         try await withCloudKitFixture(savedState: nil, assetReadTransport: transport) { f in
             let engine = try await f.engine()
+            // Actual resolver replies, consumed only by Core-issued fresh reads.
+            for _ in 0..<3 {
+                await f.factory.appendAccountRead(.success(.init(status: .available, identity: Data("synthetic-account-A".utf8))))
+            }
             transport.setReplies([.failure(code), .found(f.root.envelope)])
             let before = try await f.core.fetchDrains()
             let rootBefore = try await f.core.durableSnapshot()
@@ -200,6 +236,10 @@ extension EventTests {
         transport.setReplies([.failure(.networkFailure), .found(nil)])
         try await withCloudKitFixture(savedState: nil, assetReadTransport: transport) { f in
             let engine = try await f.engine()
+            // Actual resolver replies, consumed only by Core-issued fresh reads.
+            for _ in 0..<3 {
+                await f.factory.appendAccountRead(.success(.init(status: .available, identity: Data("synthetic-account-A".utf8))))
+            }
             let before = try await f.core.fetchDrains()
             await engine.appendFetchScripts([.manual(fetchedZones: [], records: [], group: nil)])
             do {
@@ -235,6 +275,10 @@ extension EventTests {
         transport.setReplies([.failure(.unknownItem)])
         try await withCloudKitFixture(assetReadTransport: transport) { f in
             let engine = try await f.engine()
+            // Actual resolver replies, consumed only by Core-issued fresh reads.
+            for _ in 0..<3 {
+                await f.factory.appendAccountRead(.success(.init(status: .available, identity: Data("synthetic-account-A".utf8))))
+            }
             await engine.signInSameSyntheticIdentity()
             await engine.appendFetchScripts([.manual(fetchedZones: [], records: [], group: nil)])
             let before = try await f.core.fetchDrains()

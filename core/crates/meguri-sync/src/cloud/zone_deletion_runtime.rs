@@ -49,6 +49,20 @@ impl Runtime {
         guard: &ZoneDeletionGuard,
         collection: &Collection,
     ) -> Result<(), RuntimeError> {
+        self.zone_deletion_read_loss(guard, collection, IsolationReason::EncryptedDataReset)
+    }
+    pub fn zone_deletion_read_loss(
+        &self,
+        guard: &ZoneDeletionGuard,
+        collection: &Collection,
+        reason: IsolationReason,
+    ) -> Result<(), RuntimeError> {
+        if !matches!(
+            reason,
+            IsolationReason::EncryptedDataReset | IsolationReason::ZoneDeletedByUser | IsolationReason::ActiveMissing
+        ) {
+            return Err(Error::InvalidData.into());
+        }
         self.validate_zone_deletion_guard(guard, collection)?;
         let mut s = self.state();
         Self::caller_locked(&s, &guard.instance)?;
@@ -56,20 +70,24 @@ impl Runtime {
         if s.incarnation != guard.incarnation {
             return Err(RuntimeError::StaleIncarnation);
         }
+        let proof = s
+            .adapter
+            .accepted_identity_read
+            .as_ref()
+            .ok_or(RuntimeError::IdentityUnverified)?
+            .request;
+        Self::fresh_loss_identity_locked(&s, proof, guard.after_identity)?;
         let id = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
-        with_tracking_access(|| {
-            s.store
-                .as_mut()
-                .ok_or(Error::Database)?
-                .isolate_runtime_binding(id, IsolationReason::EncryptedDataReset)
-        })?;
+        with_tracking_access(|| Self::commit_service_isolation_locked(&mut s, id, reason))?;
         let b = s.bound.as_mut().ok_or(RuntimeError::StaleIncarnation)?;
-        b.binding.facts.state = BindingState::Isolated(IsolationReason::EncryptedDataReset);
+        b.binding.facts.state = BindingState::Isolated(reason);
         b.usable = false;
         b.verified = false;
         s.root_confirmed = false;
         s.adapter.token = s.adapter.token.checked_add(1).ok_or(Error::InvalidData)?;
         s.publish_authority();
+        let live = with_tracking_access(|| s.store.as_ref().ok_or(Error::Database)?.inbox(id))?;
+        super::super::payload_asset::sweep(&self.directory, id, &live)?;
         Ok(())
     }
     pub fn zone_deletion_batch_result(
@@ -78,6 +96,16 @@ impl Runtime {
         collection: &Collection,
         results: &[ZoneResult],
     ) -> Result<(), RuntimeError> {
+        self.zone_deletion_batch_result_with_terminal(guard, collection, results, None)
+    }
+    pub fn zone_deletion_batch_result_with_terminal(
+        &self,
+        guard: &ZoneDeletionGuard,
+        collection: &Collection,
+        results: &[ZoneResult],
+        terminal: Option<&crate::cloud::zone_deletion::FailureFacts>,
+    ) -> Result<(), RuntimeError> {
+        let at_ms = self.adapter_now()?;
         self.validate_zone_deletion_guard(guard, collection)?;
         let mut s = self.state();
         Self::caller_locked(&s, &guard.instance)?;
@@ -86,25 +114,63 @@ impl Runtime {
             return Err(RuntimeError::StaleIncarnation);
         }
         let id = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
-        let reset = results.iter().any(|r| {
-            r.failure
+        let reset = terminal.is_some_and(|f| f.code == Some(26) && f.encrypted_data_reset)
+            || results.iter().any(|r| {
+                r.failure
+                    .as_ref()
+                    .is_some_and(|f| f.code == Some(26) && f.encrypted_data_reset)
+            });
+        if reset {
+            let proof = s
+                .adapter
+                .accepted_identity_read
                 .as_ref()
-                .is_some_and(|f| f.code == Some(26) && f.encrypted_data_reset)
-        });
-        with_tracking_access(|| -> Result<(), Error> {
-            for result in results {
-                if result.failure.as_ref().is_none_or(|f| f.code == Some(26)) {
-                    Self::remove_publication_zone_locked(&mut s, id, &result.zone)?;
-                }
+                .ok_or(RuntimeError::IdentityUnverified)?
+                .request;
+            Self::fresh_loss_identity_locked(&s, proof, guard.after_identity)?;
+        }
+        let zones = results
+            .iter()
+            .filter(|r| r.failure.as_ref().is_none_or(|f| f.code == Some(26)))
+            .map(|r| r.zone.clone())
+            .collect::<Vec<_>>();
+        let durable = s.adapter.durable.clone();
+        with_tracking_access(|| {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                s.store.as_mut().ok_or(Error::Database)?.adapter_commit_loss(
+                    id,
+                    &[],
+                    &[],
+                    None,
+                    &durable,
+                    super::super::adapter_store::AdapterCommitOptions {
+                        deleted_collection_zones: zones.clone(),
+                        at_ms,
+                        fail: false,
+                        start_absence: false,
+                        resolved_epoch: None,
+                    },
+                    Some((reset.then_some(IsolationReason::EncryptedDataReset), false, false)),
+                )
+            }))
+            .unwrap_or(Err(Error::Database));
+            if let Err(error) = result {
+                Self::invalidate_tracking_locked(&mut s);
+                return Err(RuntimeError::from(error));
             }
             if reset {
-                s.store
-                    .as_mut()
-                    .ok_or(Error::Database)?
-                    .isolate_runtime_binding(id, IsolationReason::EncryptedDataReset)?;
+                let b = s.bound.as_mut().ok_or(RuntimeError::StaleIncarnation)?;
+                b.binding.facts.state = BindingState::Isolated(IsolationReason::EncryptedDataReset);
+                b.usable = false;
+                b.verified = false;
+                s.root_confirmed = false;
+                s.publish_authority();
             }
             Ok(())
         })?;
+        if !zones.is_empty() {
+            s.zone_listing_fence = Arc::new(());
+        }
         if reset {
             let b = s.bound.as_mut().ok_or(RuntimeError::StaleIncarnation)?;
             b.binding.facts.state = BindingState::Isolated(IsolationReason::EncryptedDataReset);
@@ -113,6 +179,8 @@ impl Runtime {
             s.root_confirmed = false;
             s.adapter.token = s.adapter.token.checked_add(1).ok_or(Error::InvalidData)?;
             s.publish_authority();
+            let live = with_tracking_access(|| s.store.as_ref().ok_or(Error::Database)?.inbox(id))?;
+            super::super::payload_asset::sweep(&self.directory, id, &live)?;
         }
         Ok(())
     }

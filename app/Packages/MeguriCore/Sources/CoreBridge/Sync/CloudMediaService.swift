@@ -29,9 +29,11 @@ public struct CloudMediaIssuedWork: Sendable {
     init(_ raw: MeguriCoreBindings.CloudMediaIssuedWork) { handle = .init(raw: raw.handle); request = .init(raw.request) }
 }
 public enum CloudMediaBlobReadResult: Sendable {
+    case zoneLoss(name: String, cause: CloudZoneLossCause)
     case present(name: String, envelope: Data), unknownItem(name: String), zoneMissing(name: String), failed(name: String, code: Int64)
     var raw: MeguriCoreBindings.CloudMediaBlobRead {
         switch self {
+        case .zoneLoss(let name, let cause): .init(name: name, result: .zoneLoss(cause: CloudZoneLoss(zone: "meguri-media", cause: cause).raw.cause))
         case .present(let name, let envelope): .init(name: name, result: .present(envelope: envelope))
         case .unknownItem(let name): .init(name: name, result: .unknownItem)
         case .zoneMissing(let name): .init(name: name, result: .zoneMissing)
@@ -43,25 +45,42 @@ public enum CloudMediaBlobReadResult: Sendable {
         case .record(let actual, let type, let envelope, nil) where actual == name && type == "MGBlob": self = .present(name: name, envelope: envelope)
         case .unknownItem: self = .unknownItem(name: name)
         case .zoneMissing: self = .zoneMissing(name: name)
+        case .zoneLoss(let cause): self = .zoneLoss(name: name, cause: cause)
         case .failed(let code): self = .failed(name: name, code: code)
         default: throw CloudMediaFailure.invalidAsset
         }
     }
 }
 public enum CloudMediaReadResult: Sendable {
+    case zoneLoss(CloudZoneLossCause)
+    var requiresFreshAccount: Bool {
+        switch self {
+        case .zoneLoss(.encryptedDataReset): true
+        case .blobReads(let reads): reads.contains { if case .zoneLoss(_, .encryptedDataReset) = $0 { true } else { false } }
+        default: false
+        }
+    }
     case blobReads([CloudMediaBlobReadResult])
     case record(name: String, recordType: String, envelope: Data, asset: CloudMediaStagedAsset?)
     case unknownItem, zoneMissing, failed(code: Int64)
     var failureCode: Int64? {
         switch self {
+        case .zoneLoss(let cause): return cause == .purged ? 28 : 26
         case .failed(let code): return code
         case .blobReads(let reads):
-            return reads.compactMap { if case .failed(_, let code) = $0 { code } else { nil } }.first
+            return reads.compactMap { result -> Int64? in
+                switch result {
+                case .failed(_, let code): code
+                case .zoneLoss(_, let cause): cause == .purged ? 28 : 26
+                default: nil
+                }
+            }.first
         default: return nil
         }
     }
     var raw: MeguriCoreBindings.CloudMediaReply {
         switch self {
+        case .zoneLoss(let cause): .zoneLoss(cause: CloudZoneLoss(zone: "meguri-media", cause: cause).raw.cause)
         case .blobReads(let results): .blobReads(results: results.map(\.raw))
         case .record(let name, let type, let envelope, let asset): .record(name: name, recordType: type, envelope: envelope, assetPath: asset?.url.path)
         case .unknownItem: .unknownItem
@@ -204,6 +223,7 @@ public actor CloudMediaExecutor {
     private let core: CoreCloudMediaService
     private let sdk: String
     private let transport: any CloudMediaTransport
+    private let freshAccountRead: (@Sendable () async throws -> Void)?
     private var active: Task<CloudMediaProgress, any Error>?
     private var activeCancellationContext: CloudMediaCancellationContext?
     private var prepared: (any CloudPreparedMediaRead)?
@@ -214,13 +234,15 @@ public actor CloudMediaExecutor {
     #endif
     public func beginRound() { queued.removeAll() }
 
-    public init(core: CoreCloudMediaService, sdk: String, transport: any CloudMediaTransport) {
-        self.core = core; self.sdk = sdk; self.transport = transport
+    public init(core: CoreCloudMediaService, sdk: String, transport: any CloudMediaTransport,
+                freshAccountRead: (@Sendable () async throws -> Void)? = nil) {
+        self.core = core; self.sdk = sdk; self.transport = transport; self.freshAccountRead = freshAccountRead
     }
     #if DEBUG
     init(core: CoreCloudMediaService, sdk: String, transport: any CloudMediaTransport,
          nextWorkForTesting: @escaping @Sendable () async throws -> CloudMediaIssuedWork?) {
         self.core = core; self.sdk = sdk; self.transport = transport
+        self.freshAccountRead = nil
         self.nextWorkForTesting = nextWorkForTesting
     }
     #endif
@@ -342,6 +364,11 @@ public actor CloudMediaExecutor {
             CloudMediaCancellationContext.current?.observe(replyFailure)
         }
         try Task.checkCancellation()
+        if reply.result.requiresFreshAccount {
+            guard let freshAccountRead else { throw BridgeError.unavailable(reason: "Fresh cloud account reader unavailable") }
+            try await freshAccountRead(); try Task.checkCancellation()
+            guard !stopping else { throw CloudMediaFailure.closed }
+        }
         do { try await core.reply(work.handle, result: reply.result) }
         catch {
             #if DEBUG

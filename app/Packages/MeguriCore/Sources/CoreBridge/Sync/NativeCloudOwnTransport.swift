@@ -136,6 +136,44 @@ enum NativeCloudOwnRecords {
         let delay = maximumDelay(perRecord?.retryAfterMilliseconds.flatMap { UInt64(exactly: $0) }, retryDuration(error))
         return .nativeFailure(code: code, retryAfterMilliseconds: delay.map { Int64(clamping: $0) })
     }
+    /// Check all terminal data against the issued operation's record names
+    /// and key types before delivering callback results.
+    struct TerminalFailures {
+        let original: any Error
+        let items: [AnyHashable: any Error]?
+        let requestedCount: Int
+        func exact(_ item: AnyHashable) -> (any Error)? {
+            if let items { return items[item] }
+            // An unkeyed multi-zone ordinary error identifies no single zone.
+            return requestedCount == 1 ? original : nil
+        }
+    }
+    static func terminalFailures(_ error: any Error, requested: Set<AnyHashable>) throws -> TerminalFailures {
+        let native = error as NSError
+        guard native.domain == CKErrorDomain, native.code == CKError.Code.partialFailure.rawValue else {
+            return .init(original: error, items: nil, requestedCount: requested.count)
+        }
+        let items: [AnyHashable: Any]
+        if let raw = native.userInfo[CKPartialErrorsByItemIDKey] {
+            guard let dictionary = raw as? [AnyHashable: Any] else { throw NativeCloudKitFailure.unsupportedRecord }
+            items = dictionary
+        } else { items = [:] }
+        var validated: [AnyHashable: any Error] = [:]
+        for (key, value) in items {
+            guard requested.contains(key), let failure = value as? any Error else { throw NativeCloudKitFailure.unsupportedRecord }
+            let zone: CKRecordZone.ID
+            if let id = key.base as? CKRecord.ID { zone = id.zoneID }
+            else if let id = key.base as? CKRecordZone.ID { zone = id }
+            else { throw NativeCloudKitFailure.unsupportedRecord }
+            try NativeCloudKitIdentityValidation.requireCurrentOwner(zone)
+            _ = try terminalFailures(failure, requested: [key])
+            validated[key] = failure // retain the exact SDK wrapper and facts
+        }
+        return .init(original: error, items: validated, requestedCount: requested.count)
+    }
+    static func exactFailure(_ error: any Error, item: AnyHashable) throws -> (any Error)? {
+        try terminalFailures(error, requested: [item]).exact(item)
+    }
     static func readError(_ error: any Error) -> CloudControlRead {
         guard let error = error as? CKError else { return .failed }
         switch error.code { case .unknownItem: return .missing; case .zoneNotFound: return .zoneMissing; default: return .failed }
@@ -143,10 +181,21 @@ enum NativeCloudOwnRecords {
     static func readResult(_ result: Result<CKRecord, any Error>, target: CloudControlTarget) throws -> CloudControlRead {
         switch result { case .success(let r): return .found(try control(r, target: target)); case .failure(let e): return readError(e) }
     }
+    static func zoneLoss(_ error: any Error, zone: String) -> CloudZoneLoss? {
+        let cause: CloudZoneLossCause
+        switch NativeCloudKitSendError.code(error) {
+        case .zoneNotFound: cause = .deleted
+        case .userDeletedZone: cause = .purged
+        case .encryptedDataReset: cause = .encryptedDataReset
+        default: return nil
+        }
+        return .init(zone: zone, cause: cause)
+    }
     static func saveResult(_ result: Result<CKRecord, any Error>, target: CloudControlTarget) throws -> CloudPublicationResult {
         switch result {
         case .success(let r): return .saved(try control(r, target: target))
         case .failure(let e):
+            if let loss = zoneLoss(e, zone: target.zone) { return .zoneLosses([loss]) }
             if let error = e as? CKError, error.code == .serverRecordChanged, let record = error.serverRecord {
                 return .conflict(try control(record, target: target))
             }
@@ -286,6 +335,7 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
     private let payloadTagReader: @Sendable (CKRecord) -> String?
     let readPerRecordHandlerInstalled: (@Sendable (@escaping @Sendable (CKRecord.ID, Result<CKRecord, any Error>) -> Void) -> Void)?
     let readTerminalHandlerInstalled: (@Sendable (@escaping @Sendable (Result<Void, any Error>) -> Void) -> Void)?
+    let zoneCreationTerminalHandlerInstalled: (@Sendable (@escaping @Sendable (Result<Void, any Error>) -> Void) -> Void)?
     let zoneDeletionTerminalHandlerInstalled: (@Sendable (@escaping @Sendable (Result<Void, any Error>) -> Void) -> Void)?
     let zoneInventoryPerZoneHandlerInstalled: (@Sendable (@escaping @Sendable (CKRecordZone.ID, Result<CKRecordZone, any Error>) -> Void) -> Void)?
     let zoneInventoryTerminalHandlerInstalled: (@Sendable (@escaping @Sendable (Result<Void, any Error>) -> Void) -> Void)?
@@ -297,6 +347,7 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
         staging = try CloudMediaStaging.sharedDefault()
         readPerRecordHandlerInstalled = nil
         readTerminalHandlerInstalled = nil
+        zoneCreationTerminalHandlerInstalled = nil
         zoneDeletionTerminalHandlerInstalled = nil
         zoneInventoryPerZoneHandlerInstalled = nil
         zoneInventoryTerminalHandlerInstalled = nil
@@ -309,6 +360,7 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
         self.staging = staging
         readPerRecordHandlerInstalled = nil
         readTerminalHandlerInstalled = nil
+        zoneCreationTerminalHandlerInstalled = nil
         zoneDeletionTerminalHandlerInstalled = nil
         zoneInventoryPerZoneHandlerInstalled = nil
         zoneInventoryTerminalHandlerInstalled = nil
@@ -318,6 +370,7 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
          payloadTagReader: @escaping @Sendable (CKRecord) -> String? = { $0.recordChangeTag },
          readPerRecordHandlerInstalled: (@Sendable (@escaping @Sendable (CKRecord.ID, Result<CKRecord, any Error>) -> Void) -> Void)? = nil,
          readTerminalHandlerInstalled: (@Sendable (@escaping @Sendable (Result<Void, any Error>) -> Void) -> Void)? = nil,
+         zoneCreationTerminalHandlerInstalled: (@Sendable (@escaping @Sendable (Result<Void, any Error>) -> Void) -> Void)? = nil,
          zoneDeletionTerminalHandlerInstalled: (@Sendable (@escaping @Sendable (Result<Void, any Error>) -> Void) -> Void)? = nil,
          zoneInventoryPerZoneHandlerInstalled: (@Sendable (@escaping @Sendable (CKRecordZone.ID, Result<CKRecordZone, any Error>) -> Void) -> Void)? = nil,
          zoneInventoryTerminalHandlerInstalled: (@Sendable (@escaping @Sendable (Result<Void, any Error>) -> Void) -> Void)? = nil,
@@ -326,6 +379,7 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
         self.payloadTagReader = payloadTagReader
         self.readPerRecordHandlerInstalled = readPerRecordHandlerInstalled
         self.readTerminalHandlerInstalled = readTerminalHandlerInstalled
+        self.zoneCreationTerminalHandlerInstalled = zoneCreationTerminalHandlerInstalled
         self.zoneDeletionTerminalHandlerInstalled = zoneDeletionTerminalHandlerInstalled
         self.zoneInventoryPerZoneHandlerInstalled = zoneInventoryPerZoneHandlerInstalled
         self.zoneInventoryTerminalHandlerInstalled = zoneInventoryTerminalHandlerInstalled
@@ -371,7 +425,23 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
             guard let prepared else { return }
             do {
                 let received = record.withLock { $0 }
+                let terminalFailure: (any Error)?
+                if case .failure(let error) = result { terminalFailure = try NativeCloudOwnRecords.exactFailure(error, item: id) }
+                else { terminalFailure = nil }
                 let duration = NativeCloudOwnRecords.maximumDelay(received.flatMap { NativeCloudOwnRecords.retryDuration(from: $0) }, NativeCloudOwnRecords.retryDuration(from: result))
+                if publication {
+                    let exact: (any Error)?
+                    if case .failure(let error)? = received { exact = error }
+                    else if received == nil, case .failure(let error) = result {
+                        let ns = error as NSError
+                        if ns.domain == CKErrorDomain, ns.code == CKError.Code.partialFailure.rawValue {
+                            exact = terminalFailure
+                        } else { exact = error }
+                    } else { exact = nil }
+                    if let exact, let loss = NativeCloudOwnRecords.zoneLoss(exact, zone: target.zone) {
+                        prepared.finish(.success(.publication(.zoneLosses([loss])))); return
+                    }
+                }
                 if publication, let duration {
                     prepared.finish(.success(.publication(.retryAfter(durationMilliseconds: duration))))
                     return
@@ -382,20 +452,19 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
                         expected: expectedActive, tagReader: activeTagReader))
                 }
                 else if let received { read = try NativeCloudOwnRecords.readResult(received, target: target) }
-                else if case .failure(let error) = result {
-                    let native = error as NSError
+                else if case .failure(_) = result {
                     // Only the exact requested ID can supply a terminal-only
                     // partial outcome. Per-record callbacks retain precedence.
-                    if native.domain == CKErrorDomain, native.code == CKError.Code.partialFailure.rawValue,
-                       let items = native.userInfo[CKPartialErrorsByItemIDKey] as? [AnyHashable: Any],
-                       let item = items[id] as? any Error {
+                    if let item = terminalFailure {
                         read = NativeCloudOwnRecords.readError(item)
-                    } else { read = NativeCloudOwnRecords.readError(error) }
+                    } else { read = .failed }
                 }
                 else { throw CloudOwnTransportFailure.missingReply }
                 if !publication {
                     let failure: CloudZoneDeletionFailure?
-                    if case .failure(let error)? = received { failure = .evidence(error) } else { failure = nil }
+                    if case .failure(let error)? = received { failure = .evidence(error) }
+                    else if received == nil, let exact = terminalFailure { failure = .evidence(exact) }
+                    else { failure = nil }
                     let terminal: CloudZoneDeletionFailure?
                     if case .failure(let error) = result { terminal = .evidence(error) } else { terminal = nil }
                     prepared.recordControlReadEvidence(.init(read: read, failure: failure, terminal: terminal))
@@ -542,28 +611,48 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
         let ids = Set(names.map(NativeCloudOwnRecords.zone))
         let operation = CKModifyRecordZonesOperation(recordZonesToSave: names.map { CKRecordZone(zoneID: NativeCloudOwnRecords.zone($0)) }, recordZoneIDsToDelete: nil)
         let prepared = NativePreparedOwnOperation(operation: operation, queue: queue)
-        struct State { var saved: Set<CKRecordZone.ID> = []; var failed = false; var retryDuration: UInt64? }
+        struct State { var saved: Set<CKRecordZone.ID> = []; var failed = false; var retryDuration: UInt64?; var losses: [CloudZoneLoss] = []; var observed: Set<CKRecordZone.ID> = []; var foreign = false }
         let state = Mutex(State())
         operation.perRecordZoneSaveBlock = { id, result in
             state.withLock { value in
+                guard ids.contains(id), id.ownerName == CKCurrentUserDefaultName, value.observed.insert(id).inserted else { value.failed = true; value.foreign = true; return }
                 switch result {
                 case .success(let zone):
                     if ids.contains(id), zone.zoneID == id, id.ownerName == CKCurrentUserDefaultName { value.saved.insert(id) }
-                    else { value.failed = true }
+                    else { value.failed = true; value.foreign = true }
                 case .failure(let error):
                     value.failed = true
+                    if let loss = NativeCloudOwnRecords.zoneLoss(error, zone: id.zoneName) { value.losses.append(loss) }
                     value.retryDuration = NativeCloudOwnRecords.maximumDelay(value.retryDuration, NativeCloudOwnRecords.retryDuration(error))
                 }
             }
         }
-        operation.modifyRecordZonesResultBlock = { [weak prepared] result in
+        let terminal: @Sendable (Result<Void, any Error>) -> Void = { [weak prepared] result in
             guard let prepared else { return }
-            let outcome = state.withLock { $0 }
-            if case .success = result, !outcome.failed, outcome.saved == ids { prepared.finish(.success(.publication(.zonesCreated))) }
+            var outcome = state.withLock { $0 }
+            if case .failure(let error) = result {
+                do {
+                    let scoped = try NativeCloudOwnRecords.terminalFailures(error, requested: Set(ids.map { AnyHashable($0) }))
+                    // Only an actual reset is account-wide. Successful callbacks
+                    // retain precedence over ordinary per-zone terminal failures.
+                    if scoped.items == nil, NativeCloudKitSendError.code(error) == .encryptedDataReset {
+                        outcome.losses.append(contentsOf: names.map { .init(zone: $0, cause: .encryptedDataReset) })
+                    }
+                    for id in ids where scoped.items != nil || NativeCloudKitSendError.code(error) != .encryptedDataReset {
+                        guard let exact = scoped.exact(id), let loss = NativeCloudOwnRecords.zoneLoss(exact, zone: id.zoneName) else { continue }
+                        if loss.cause == .encryptedDataReset || !outcome.observed.contains(id) { outcome.losses.append(loss) }
+                    }
+                } catch { outcome.foreign = true }
+            }
+            guard !outcome.foreign else { prepared.finish(.failure(NativeCloudKitFailure.unsupportedRecord)); return }
+            if !outcome.losses.isEmpty { prepared.finish(.success(.publication(.zoneLosses(outcome.losses)))) }
+            else if case .success = result, !outcome.failed, outcome.saved == ids { prepared.finish(.success(.publication(.zonesCreated))) }
             else if let duration = NativeCloudOwnRecords.maximumDelay(outcome.retryDuration, NativeCloudOwnRecords.retryDuration(from: result)) {
                 prepared.finish(.success(.publication(.retryAfter(durationMilliseconds: duration))))
             } else { prepared.finish(.success(.publication(.failed(retryAfterMilliseconds: nil)))) }
         }
+        zoneCreationTerminalHandlerInstalled?(terminal)
+        operation.modifyRecordZonesResultBlock = terminal
         return prepared
     }
     private func save(_ target: CloudControlTarget, encrypted: Data, fields: Data?) throws -> NativePreparedOwnOperation {
@@ -578,13 +667,19 @@ public struct NativeCloudOwnTransport: CloudOwnTransport {
         operation.modifyRecordsResultBlock = { [weak prepared] result in
             guard let prepared else { return }
             do {
+                let terminalFailure: (any Error)?
+                if case .failure(let error) = result { terminalFailure = try NativeCloudOwnRecords.exactFailure(error, item: native.recordID) }
+                else { terminalFailure = nil }
                 let received = record.withLock { $0 }
-                if let duration = NativeCloudOwnRecords.maximumDelay(received.flatMap { NativeCloudOwnRecords.retryDuration(from: $0) }, NativeCloudOwnRecords.retryDuration(from: result)) {
+                if case .failure(let error)? = received, let loss = NativeCloudOwnRecords.zoneLoss(error, zone: target.zone) {
+                    prepared.finish(.success(.publication(.zoneLosses([loss]))))
+                } else if let duration = NativeCloudOwnRecords.maximumDelay(received.flatMap { NativeCloudOwnRecords.retryDuration(from: $0) }, NativeCloudOwnRecords.retryDuration(from: result)) {
                     prepared.finish(.success(.publication(.retryAfter(durationMilliseconds: duration))))
                 } else if let received {
                     prepared.finish(.success(.publication(try NativeCloudOwnRecords.saveResult(received, target: target))))
                 } else if case .failure(let error) = result {
-                    prepared.finish(.success(.publication(try NativeCloudOwnRecords.saveResult(.failure(error), target: target))))
+                    let exact = terminalFailure
+                    prepared.finish(.success(.publication(try NativeCloudOwnRecords.saveResult(.failure(exact ?? error), target: target))))
                 } else { prepared.finish(.failure(CloudOwnTransportFailure.missingReply)) }
             } catch { prepared.finish(.failure(error)) }
         }

@@ -313,7 +313,24 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
     private let readinessClock: any CloudPolicyReadinessClock
     private var exchange: UInt64?
     private var nativeExchangeTask: Task<CloudPolicyNativeResult, Never>?
-    private var flushTask: (id: UUID, task: Task<CloudPolicyNativeResult, Never>, execution: CoreCloudPolicyExecution)?
+    private final class FlushOwner {
+        let id = UUID()
+        let execution: CoreCloudPolicyExecution
+        let exchange: Task<CloudPolicyNativeResult, Never>?
+        let exchangeID: UInt64?
+        var finished = false
+        let park: CloudQuiescentDependencyWait?
+        #if DEBUG
+        let observeCall = MaintenanceCallObservation.capture
+        #endif
+        var cancellation: Task<(any Error)?, Never>?
+        init(execution: CoreCloudPolicyExecution, exchange: Task<CloudPolicyNativeResult, Never>?, exchangeID: UInt64?) {
+            self.execution = execution; self.exchange = exchange; self.exchangeID = exchangeID
+            park = CloudQuiescentDependencyWait.retained()
+        }
+    }
+    private typealias OwnedFlush = (id: UUID, task: Task<CloudPolicyNativeResult, Never>, owner: FlushOwner)
+    private var flushTask: OwnedFlush?
     private var heldConfigure: (CloudPolicyCommand, CoreCloudPolicyExecution)?
     private let mediaService: CoreCloudMediaService?
     private let mediaTransport: (any CloudMediaTransport)?
@@ -351,7 +368,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
         self.observeExchangeCapture = observeExchangeCapture
         self.mediaService = mediaService; self.mediaTransport = mediaTransport
         self.cleanupWorker = ownTransport.map { CloudCleanupExecutor(transport: $0) }
-        self.zoneDeletionWorker = ownTransport.map { CloudZoneDeletionExecutor(transport: $0) }
+        self.zoneDeletionWorker = ownTransport.map { CloudZoneDeletionExecutor(transport: $0, freshAccountRead: { try await adapter.refreshControlIdentity() }) }
         self.flushDeadline = flushDeadline
     }
     private func nextPolicyInput(_ work: @escaping @Sendable () async throws -> CloudPolicyOutput) async throws -> CloudPolicyOutput {
@@ -510,7 +527,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                     let worker: CloudMediaExecutor
                     if let retained = mediaExecutors[instance] { worker = retained }
                     else {
-                        worker = CloudMediaExecutor(core: mediaService, sdk: instance, transport: mediaTransport)
+                        worker = CloudMediaExecutor(core: mediaService, sdk: instance, transport: mediaTransport, freshAccountRead: { try await self.adapter.refreshControlIdentity() })
                         mediaExecutors[instance] = worker
                     }
                     let runID = UUID()
@@ -528,9 +545,10 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 guard flushTask == nil else { return .init(outputs: [], error: nil, deferred: true) }
                 guard let execution = try await policy.prepareExecution(command) else { throw BridgeError.cloudPolicy(.staleCommand) }
                 try await execution.validateControl()
-                let id = UUID()
-                let task = Task { await self.performFlush(execution: execution, acknowledgeOutputs: acknowledgeOutputs) }
-                flushTask = (id, task, execution)
+                let owner = FlushOwner(execution: execution, exchange: nativeExchangeTask, exchangeID: exchange)
+                let id = owner.id
+                let task = Task { await self.performFlush(owner: owner, acknowledgeOutputs: acknowledgeOutputs) }
+                flushTask = (id, task, owner)
                 let deadline = Task<CloudPolicyOutput?, Never> {
                     do {
                         try await self.flushDeadline(until)
@@ -542,10 +560,16 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                     onCancel: { Task { _ = await self.cancelFlush(id: id) } }
                 deadline.cancel()
                 let expired = await deadline.value
+                // A completed flush body can race its caller's cancellation.
+                // Keep B tracked through the original cancellation's native/Core
+                // work as well as its actual task result.
+                if let cancellation = owner.cancellation { _ = await cancellation.value }
                 if flushTask?.id == id { flushTask = nil }
                 if let expired { return .init(outputs: result.outputs + [expired], error: result.error, deferred: result.deferred, acknowledgedOutputCount: result.acknowledgedOutputCount + (CloudPolicyOutputAcknowledgement.input == nil ? 0 : 1)) }
                 return result
             case .cancelBackgroundFlush:
+                // This control command also joins removal before its first Core call.
+                try await flushTask?.owner.park?.revoke()
                 guard let execution = try await policy.prepareExecution(command) else { throw BridgeError.cloudPolicy(.staleCommand) }
                 try await execution.validateControl()
                 if let flushTask { if let failure = await cancelFlush(id: flushTask.id) { throw failure } }
@@ -568,8 +592,11 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 }
                 nativeExchangeTask = task
                 defer { nativeExchangeTask = nil }
-                return await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+                return await withTaskCancellationHandler { await task.value } onCancel: {
+                    Task { await self.cancelOriginalExchangeTask(id: id, task: task) }
+                }
             case .cancelExchange(let id):
+                try await revokeFlushPark(joining: id)
                 let execution = try await policy.prepareExecution(command)
                 if execution != nil, exchange == id { nativeExchangeTask?.cancel(); await adapter.cancelPolicyExchange() }
             }
@@ -679,26 +706,67 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
         await zoneDeletionWorker?.interruptAndDrain()
         _ = await original?.value
     }
+    private func revokeFlushPark(joining exchangeID: UInt64) async throws {
+        guard let original = flushTask, original.owner.exchangeID == exchangeID else { return }
+        try await original.owner.park?.revoke()
+    }
+    private func cancelOriginalExchangeTask(id: UInt64, task: Task<CloudPolicyNativeResult, Never>) async {
+        // Expiry/shutdown may cancel A and B together. A's cancellation must
+        // join B's exact revoker too, before its native cancellation handler.
+        do { try await revokeFlushPark(joining: id) }
+        catch { return }
+        task.cancel()
+    }
     private func cancelFlush(id: UUID) async -> (any Error)? {
         guard let original = flushTask, original.id == id else { return nil }
+        if let cancellation = original.owner.cancellation { return await cancellation.value }
+        guard !original.owner.finished else { return nil }
         original.task.cancel()
-        nativeExchangeTask?.cancel()
-        await adapter.cancelPolicyExchange()
-        // Cancel the exact original SDK; no current-instance recapture.
-        var failure: (any Error)?
-        do { try await adapter.cancelPolicyFlush(execution: original.execution) }
-        catch { failure = error }
-        _ = await original.task.value
-        return failure
+        #if DEBUG
+        // The passive lane capture also belongs to B; cancellation callbacks
+        // need not carry the originating task's locals.
+        let cancellation = MaintenanceCallObservation.$capture.withValue(original.owner.observeCall) {
+            startFlushCancellation(original)
+        }
+        #else
+        let cancellation = startFlushCancellation(original)
+        #endif
+        original.owner.cancellation = cancellation
+        return await cancellation.value
     }
-    private func performFlush(execution: CoreCloudPolicyExecution,
+    private func startFlushCancellation(_ original: OwnedFlush) -> Task<(any Error)?, Never> {
+        Task { () -> (any Error)? in
+            // Task.cancel does not interrupt exchange.value. Join the original
+            // ordered revoker before cancelling A or entering any further Core.
+            do { try await original.owner.park?.revoke() }
+            catch { return error }
+            original.owner.exchange?.cancel()
+            if let exchangeID = original.owner.exchangeID, self.exchange == exchangeID {
+                await self.adapter.cancelPolicyExchange()
+            }
+            var failure: (any Error)?
+            do { try await self.adapter.cancelPolicyFlush(execution: original.owner.execution) }
+            catch { failure = error }
+            _ = await original.task.value
+            return failure
+        }
+    }
+    private func performFlush(owner: FlushOwner,
                               acknowledgeOutputs: (@Sendable ([CloudPolicyOutput]) async -> Void)?) async -> CloudPolicyNativeResult {
         var delivery = CloudPolicyOutputDelivery(deliver: acknowledgeOutputs)
         var outputs: [CloudPolicyOutput] = []
+        let execution = owner.execution
+        defer { owner.finished = true }
         do {
-            if let exchange = nativeExchangeTask {
+            if let exchange = owner.exchange {
+                // prepareExecution/validateControl have consumed their real Core
+                // results. No flush-native work or output prefix exists yet.
+                await delivery.acknowledge(outputs)
+                try await owner.park?.enter()
                 let result = await exchange.value
+                try await owner.park?.revoke()
                 if let failure = result.error { throw failure }
+                try Task.checkCancellation()
             } else {
                 try Task.checkCancellation()
                 try await delivery.appendInput(to: &outputs) { try await execution.prepareFlush() }
@@ -712,11 +780,14 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
             await delivery.acknowledge(outputs)
             return .init(outputs: outputs, error: nil, deferred: false, acknowledgedOutputCount: delivery.count)
         } catch {
+            let failure = error
+            do { try await owner.park?.revoke() }
+            catch { return .init(outputs: outputs, error: error, deferred: false, acknowledgedOutputCount: delivery.count) }
             outputs.append(contentsOf: await adapter.takePolicyOperationOutputs())
             await delivery.acknowledge(outputs)
             _ = try? await delivery.appendInput(to: &outputs) { [policy] in try await policy.input(.refresh(.cloud)) }
             await delivery.acknowledge(outputs)
-            return .init(outputs: outputs, error: error, deferred: false, acknowledgedOutputCount: delivery.count)
+            return .init(outputs: outputs, error: failure, deferred: false, acknowledgedOutputCount: delivery.count)
         }
     }
     private func drainOriginalMedia(_ sdk: String, stopWitness: CloudSDKStopWitness? = nil) async {
@@ -825,7 +896,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 let replacement: CloudMediaExecutor
                 if let retained = mediaExecutors[instance] { replacement = retained }
                 else {
-                    replacement = CloudMediaExecutor(core: coreMedia, sdk: instance, transport: mediaTransport)
+                    replacement = CloudMediaExecutor(core: coreMedia, sdk: instance, transport: mediaTransport, freshAccountRead: { try await self.adapter.refreshControlIdentity() })
                     mediaExecutors[instance] = replacement
                 }
                 let replacementID = UUID()
@@ -922,18 +993,17 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                     try await delivery.appendInput(to: &outputs) { [policy] in try await policy.endBeforeCapture(id, outcome: outcome) }
                 } else {
                     #if DEBUG
-                    site = .exchangePreparation
-                    #endif
-                    try Task.checkCancellation()
-                    guard let execution = try await policy.prepareExecution(command) else { throw BridgeError.cloudPolicy(.staleCommand) }
-                    #if DEBUG
                     site = .exchangeReservation
                     #endif
+                    try Task.checkCancellation()
+                    // Readiness retains its original deadline scope. Only
+                    // causal native admission moves before Core preparation.
                     let reserved = try await adapter.reservePolicyExchange()
                     reservation = reserved
                     #if DEBUG
                     site = .exchangePreparation
                     #endif
+                    guard let execution = try await policy.prepareExecution(command) else { throw BridgeError.cloudPolicy(.staleCommand) }
                     let preparedExchange = try await adapter.preparePolicyExchange(execution: execution)
                     try Task.checkCancellation()
                     #if DEBUG

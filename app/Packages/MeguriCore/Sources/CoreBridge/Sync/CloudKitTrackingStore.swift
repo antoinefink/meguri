@@ -135,9 +135,9 @@ public actor CoreCloudWorkflowService {
         let raw = try await owner()
         return try await MaintenanceLane.shared.call(.cloudWorkflowValidateSdk) { try raw.validateSdk(sdk: sdk) }
     }
-    func finalSDKAuthorization(_ sdk: String) async throws -> @Sendable () throws -> Void {
+    func finalSDKAuthorization(_ sdk: String, media: Bool = false) async throws -> @Sendable () throws -> Void {
         let raw = try await owner()
-        return { try cloudFinalCoreCall(.cloudWorkflowValidateSdk) { try raw.validateSdk(sdk: sdk) } }
+        return { try cloudFinalCoreCall(.cloudWorkflowValidateNetworkSdk) { try raw.validateNetworkSdk(sdk: sdk, media: media) } }
     }
      func retireSDK(_ sdk: String, policyStop: Bool) async throws -> Void {
         let raw = try await owner()
@@ -195,6 +195,18 @@ public actor CoreCloudWorkflowService {
         let raw = try await owner()
         try await MaintenanceLane.shared.call(.cloudWorkflowFetchedCollectionZoneDeletions) {
             try raw.fetchedCollectionZoneDeletions(sdk: sdk, names: names)
+        }
+    }
+    func fetchedZoneLosses(sdk: String, losses: [CloudZoneLoss]) async throws -> Bool {
+        let raw = try await owner()
+        return try await MaintenanceLane.shared.call(.cloudWorkflowFetchedZoneLosses) {
+            try raw.fetchedZoneLosses(sdk: sdk, losses: losses.map(\.raw))
+        }
+    }
+    func knownLossRead(sdk: String, identityRead: UInt64) async throws -> CoreCloudFetchRead? {
+        let raw = try await owner()
+        return try await MaintenanceLane.shared.call(.cloudWorkflowKnownLossRead) {
+            try raw.knownLossRead(sdk: sdk, identityRead: identityRead).map(CoreCloudFetchRead.init)
         }
     }
     func stateUpdate(sdk: String, state: Data) async throws -> Void {

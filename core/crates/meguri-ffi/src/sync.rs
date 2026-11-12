@@ -314,9 +314,39 @@ pub enum CloudEngineErrorCode {
     LimitExceeded,
     BatchRequestFailed,
     ZoneNotFound,
+    EncryptedDataReset,
+    UserDeletedZone,
     Other,
     UnknownItem,
     ServerRecordChanged,
+}
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum CloudZoneLossCause {
+    Deleted,
+    Purged,
+    EncryptedDataReset,
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct CloudZoneLoss {
+    pub zone: String,
+    pub cause: CloudZoneLossCause,
+}
+impl CloudZoneLoss {
+    pub(crate) fn into_loss_cause(self) -> c::adapter::ZoneLossCause {
+        c::adapter::ZoneLoss::from(self).cause
+    }
+}
+impl From<CloudZoneLoss> for c::adapter::ZoneLoss {
+    fn from(loss: CloudZoneLoss) -> Self {
+        Self {
+            zone: loss.zone,
+            cause: match loss.cause {
+                CloudZoneLossCause::Deleted => c::adapter::ZoneLossCause::Deleted,
+                CloudZoneLossCause::Purged => c::adapter::ZoneLossCause::Purged,
+                CloudZoneLossCause::EncryptedDataReset => c::adapter::ZoneLossCause::EncryptedDataReset,
+            },
+        }
+    }
 }
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct CloudRecordFailure {
@@ -540,6 +570,20 @@ impl CloudWorkflow {
             .adapter_complete_identity_read(id, observed.clone())
             .map_err(cloud_error)?;
         if accepted
+            && let r::IdentityStatus::Available(account) = &observed
+            && self
+                .core
+                .status()
+                .map_err(cloud_error)?
+                .binding
+                .as_ref()
+                .is_some_and(|b| b.facts.account == *account && b.facts.state == c::BindingState::Active)
+        {
+            self.core
+                .adapter_accept_zone_losses(id, &self.host.collection()?)
+                .map_err(cloud_error)?;
+        }
+        if accepted
             && !matches!(observed, r::IdentityStatus::ReadFailed)
             && let Some(cache) = &self.identity
         {
@@ -566,6 +610,15 @@ impl CloudWorkflow {
             collection_zone,
             needs_root_fetch: !self.core.sdk_root_confirmed(),
         })
+    }
+    pub fn validate_network_sdk(&self, sdk: String, media: bool) -> Result<(), CoreError> {
+        callback::enter("CloudWorkflow.validate_network_sdk");
+        if media {
+            self.core.validate_network_media_sdk(&sdk)
+        } else {
+            self.core.validate_network_sdk(&sdk)
+        }
+        .map_err(crate::cloud_connection::error)
     }
     pub fn validate_sdk(&self, sdk: String) -> Result<(), CoreError> {
         callback::enter("CloudWorkflow.validate_sdk");
@@ -796,6 +849,31 @@ impl CloudWorkflow {
                 )
                 .map_err(cloud_error)?;
         }
+        let bound_zone = c::adapter::collection_zone(
+            self.core
+                .status()
+                .map_err(cloud_error)?
+                .binding
+                .ok_or_else(|| cloud_error("binding unavailable"))?
+                .facts
+                .epoch,
+        );
+        let mut losses = Vec::new();
+        for failure in failed.iter().chain(&failed_delete) {
+            let cause = match failure.code {
+                CloudEngineErrorCode::ZoneNotFound => Some(c::adapter::ZoneLossCause::Deleted),
+                CloudEngineErrorCode::UserDeletedZone => Some(c::adapter::ZoneLossCause::Purged),
+                CloudEngineErrorCode::EncryptedDataReset => Some(c::adapter::ZoneLossCause::EncryptedDataReset),
+                _ => None,
+            };
+            if let Some(cause) = cause {
+                let zone = failure.zone.clone().unwrap_or_else(|| bound_zone.clone());
+                if zone != bound_zone && zone != "meguri-media" {
+                    return Err(cloud_error("foreign zone loss receipt"));
+                }
+                losses.push(c::adapter::ZoneLoss { zone, cause });
+            }
+        }
         self.core.enter_sent_handler(&sdk, batch_id).map_err(cloud_error)?;
         let sdk_retrying = failed.iter().chain(&failed_delete).any(|f| {
             matches!(
@@ -823,6 +901,8 @@ impl CloudWorkflow {
                         | CloudEngineErrorCode::BatchRequestFailed
                         | CloudEngineErrorCode::UnknownItem
                         | CloudEngineErrorCode::ZoneNotFound
+                        | CloudEngineErrorCode::UserDeletedZone
+                        | CloudEngineErrorCode::EncryptedDataReset
                         | CloudEngineErrorCode::Other
                         | CloudEngineErrorCode::ServerRecordChanged
                 )
@@ -836,7 +916,9 @@ impl CloudWorkflow {
                     CloudEngineErrorCode::LimitExceeded => w::SendError::LimitExceeded,
                     CloudEngineErrorCode::BatchRequestFailed => w::SendError::BatchRequestFailed,
                     CloudEngineErrorCode::UnknownItem => w::SendError::UnknownItem,
-                    CloudEngineErrorCode::ZoneNotFound => w::SendError::ZoneMissing,
+                    CloudEngineErrorCode::ZoneNotFound
+                    | CloudEngineErrorCode::UserDeletedZone
+                    | CloudEngineErrorCode::EncryptedDataReset => w::SendError::ZoneMissing,
                     CloudEngineErrorCode::Other | CloudEngineErrorCode::ServerRecordChanged => w::SendError::Other,
                     _ => return None,
                 };
@@ -850,7 +932,9 @@ impl CloudWorkflow {
                     CloudEngineErrorCode::LimitExceeded => w::SendError::LimitExceeded,
                     CloudEngineErrorCode::BatchRequestFailed => w::SendError::BatchRequestFailed,
                     CloudEngineErrorCode::UnknownItem => w::SendError::UnknownItem,
-                    CloudEngineErrorCode::ZoneNotFound => w::SendError::ZoneMissing,
+                    CloudEngineErrorCode::ZoneNotFound
+                    | CloudEngineErrorCode::UserDeletedZone
+                    | CloudEngineErrorCode::EncryptedDataReset => w::SendError::ZoneMissing,
                     CloudEngineErrorCode::Other => w::SendError::Other,
                     _ => return None,
                 };
@@ -872,12 +956,18 @@ impl CloudWorkflow {
             )
             .map_err(cloud_error)?
         {
+            if !losses.is_empty() {
+                self.core
+                    .adapter_observe_zone_losses(&sdk, &losses)
+                    .map_err(cloud_error)?;
+            }
             return Ok(saved.len() as u64);
         }
         if media_metadata || !blob_conflicts.is_empty() || !deleted.is_empty() || !failed_delete.is_empty() {
             return Err(cloud_error("media receipt has no original SDK work"));
         }
-        self.core
+        let count = self
+            .core
             .sent_results_with_conflicts(
                 &sdk,
                 &self.host.collection()?,
@@ -887,7 +977,13 @@ impl CloudWorkflow {
                 &failed,
                 batch_count as usize,
             )
-            .map_err(cloud_error)
+            .map_err(cloud_error)?;
+        if !losses.is_empty() {
+            self.core
+                .adapter_observe_zone_losses(&sdk, &losses)
+                .map_err(cloud_error)?;
+        }
+        Ok(count)
     }
     pub fn handler_returned(&self, sdk: String) -> Result<(), CoreError> {
         callback::enter("CloudWorkflow.handler_returned");
@@ -909,6 +1005,12 @@ impl CloudWorkflow {
         callback::enter("CloudWorkflow.fetched_collection_zone_deletions");
         self.core
             .adapter_fetched_collection_zone_deletions(&sdk, &names)
+            .map_err(cloud_error)
+    }
+    pub fn fetched_zone_losses(&self, sdk: String, losses: Vec<CloudZoneLoss>) -> Result<bool, CoreError> {
+        callback::enter("CloudWorkflow.fetched_zone_losses");
+        self.core
+            .adapter_observe_zone_losses(&sdk, &losses.into_iter().map(Into::into).collect::<Vec<_>>())
             .map_err(cloud_error)
     }
     pub fn state_update(&self, sdk: String, state: Vec<u8>) -> Result<(), CoreError> {

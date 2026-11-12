@@ -57,19 +57,50 @@ struct NativeCloudKitEngineTests {
         }
     }
 
-    @Test func reservedAndBoundDatabaseDeletionsStillRefuseIncludingMixedLists() {
-        let unrelated = CKRecordZone.ID(zoneName: "unrelated-zone", ownerName: CKCurrentUserDefaultName)
-        for registered in [nil, "unusual-bound-zone", "c-aaaaaaaaaaaaaaaaaaaaaaaaaa"] as [String?] {
-            var names = ["meguri-root", "meguri-media", "c-", "c-current", "c-other-epoch",
-                "c-aaaaaaaaaaaaaaaaaaaaaaaaab", "c-AAAAAAAAAAAAAAAAAAAAAAAAAA",
-                "c-aaaaaaaaaaaaaaaaaaaaaaaaaa=", "c-aaaaaaaaaaaaaaaaaaaaaaaaa"]
-            if let registered { names.append(registered) }
-            for name in names {
+    /// K12.5: preserve all causes after validating the whole callback's owners.
+    @Test func knownDatabaseLossesPreserveCauseAndOtherEpochInMixedCallbacks() throws {
+        let bound = "c-aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        let other = CKRecordZone.ID(zoneName: "c-77777777777777777777777774", ownerName: CKCurrentUserDefaultName)
+        for name in ["meguri-root", bound, "meguri-media"] {
+            for cause in [CloudZoneLossCause.deleted, .purged, .encryptedDataReset] {
                 let id = CKRecordZone.ID(zoneName: name, ownerName: CKCurrentUserDefaultName)
-                let other = CKRecordZone.ID(zoneName: "c-77777777777777777777777774", ownerName: CKCurrentUserDefaultName)
-                for ids in [[id], [unrelated, id], [id, unrelated], [other, id], [id, other]] {
-                    expectUnsupportedDatabaseDeletions(ids, collectionZone: registered)
+                let input = [(id, cause), (other, CloudZoneLossCause.encryptedDataReset)]
+                let event = try NativeCloudKitIdentityValidation.databaseDeletionEvent(modified: [], losses: input, collectionZone: bound)
+                #expect(event == .fetchedZoneLosses([.init(zone: name, cause: cause), .init(zone: other.zoneName, cause: .encryptedDataReset)]))
+                let foreign = CKRecordZone.ID(zoneName: "unrelated", ownerName: "foreign-owner")
+                #expect(throws: NativeCloudKitFailure.self) {
+                    _ = try NativeCloudKitIdentityValidation.databaseDeletionEvent(modified: [foreign], losses: input, collectionZone: bound)
                 }
+                #expect(throws: NativeCloudKitFailure.self) {
+                    _ = try NativeCloudKitIdentityValidation.databaseDeletionEvent(modified: [], losses: input + [(foreign, .deleted)], collectionZone: bound)
+                }
+            }
+        }
+        for name in ["c-", "c-current", "c-aaaaaaaaaaaaaaaaaaaaaaaaab", "c-AAAAAAAAAAAAAAAAAAAAAAAAAA"] {
+            expectUnsupportedDatabaseDeletions([.init(zoneName: name, ownerName: CKCurrentUserDefaultName)], collectionZone: bound)
+        }
+    }
+
+    @Test func actualZoneNotFoundResetFlagIsNSNumberBooleanAndUserDeletionIsTyped() {
+        let plain = CKError(.zoneNotFound)
+        let reset = CKError(.zoneNotFound, userInfo: [CKErrorUserDidResetEncryptedDataKey: NSNumber(value: true)])
+        let falseFlag = CKError(.zoneNotFound, userInfo: [CKErrorUserDidResetEncryptedDataKey: NSNumber(value: false)])
+        #expect(NativeCloudKitSendError.code(plain) == .zoneNotFound)
+        #expect(NativeCloudKitSendError.code(reset) == .encryptedDataReset)
+        #expect(NativeCloudKitSendError.code(falseFlag) == .zoneNotFound)
+        #expect(NativeCloudKitSendError.code(CKError(.userDeletedZone)) == .userDeletedZone)
+    }
+
+    @Test func ownSaveLossPreservesActualZoneAndCause() throws {
+        for zone in ["meguri-root", "meguri-media", "c-aaaaaaaaaaaaaaaaaaaaaaaaaa"] {
+            let target = CloudControlTarget(zone: zone, name: zone == "meguri-root" ? "active" : "root", recordType: "MGActive")
+            for (error, cause) in [(CKError(.zoneNotFound), CloudZoneLossCause.deleted),
+                (CKError(.userDeletedZone), .purged),
+                (CKError(.zoneNotFound, userInfo: [CKErrorUserDidResetEncryptedDataKey: NSNumber(value: true)]), .encryptedDataReset)] {
+                guard case .zoneLosses(let losses) = try NativeCloudOwnRecords.saveResult(.failure(error), target: target) else {
+                    Issue.record("Known own-save loss was dropped"); continue
+                }
+                #expect(losses == [.init(zone: zone, cause: cause)])
             }
         }
     }
@@ -380,6 +411,33 @@ extension NativeCloudKitEngineTests {
         #expect(NativeCloudKitSendError.code(CKError(.zoneNotFound)) == .zoneNotFound)
         #expect(NativeCloudKitSendError.code(CKError(.networkFailure)) == .networkFailure)
         #expect(NativeCloudKitSendError.code(NSError(domain: "synthetic", code: CKError.Code.unknownItem.rawValue)) == .other)
+    }
+}
+
+extension NativeCloudKitEngineTests {
+    @Test func otherCollectionResetRetainsAccountWideTypedCause() throws {
+        let zone = CKRecordZone.ID(zoneName: "c-77777777777777777777777774", ownerName: CKCurrentUserDefaultName)
+        #expect(try NativeCloudKitIdentityValidation.databaseDeletionEvent(modified: [], losses: [(zone, .encryptedDataReset)],
+            collectionZone: "c-aaaaaaaaaaaaaaaaaaaaaaaaaa") == .fetchedZoneLosses([.init(zone: zone.zoneName, cause: .encryptedDataReset)]))
+    }
+    @Test func originalWrappedTerminalUsesExactScopeAndResetFlag() throws {
+        for zone in ["meguri-media", "c-aaaaaaaaaaaaaaaaaaaaaaaaaa"] {
+            for reset in [false, true] {
+                let original = CKError(.zoneNotFound, userInfo: [CKErrorUserDidResetEncryptedDataKey: NSNumber(value: reset)])
+                let wrapped = CloudKitSDKOperationFailure(underlying: original, code: 26, retryAfterMilliseconds: nil)
+                #expect(NativeCloudKitSendError.code(wrapped) == (reset ? .encryptedDataReset : .zoneNotFound))
+                #expect(try NativeCloudKitSendError.zoneLosses(wrapped, zones: [zone]) == [.init(zone: zone, cause: reset ? .encryptedDataReset : .deleted)])
+                let multi = try NativeCloudKitSendError.zoneLosses(wrapped, zones: [zone, "meguri-root"])
+                #expect(multi == (reset ? [.init(zone: zone, cause: .encryptedDataReset), .init(zone: "meguri-root", cause: .encryptedDataReset)] : []))
+                let id = CKRecord.ID(recordName: "original", zoneID: NativeCloudOwnRecords.zone(zone))
+                let terminal = CloudKitSDKOperationFailure(underlying: CKError(.partialFailure,
+                    userInfo: [CKPartialErrorsByItemIDKey: [id: original]]), code: 2, retryAfterMilliseconds: nil)
+                #expect(try NativeCloudKitSendError.zoneLosses(terminal, zones: [zone, "meguri-root"]) == [.init(zone: zone, cause: reset ? .encryptedDataReset : .deleted)])
+                let foreign = CKRecord.ID(recordName: "foreign", zoneID: .init(zoneName: zone, ownerName: "foreign-owner"))
+                let mixed = CKError(.partialFailure, userInfo: [CKPartialErrorsByItemIDKey: [id: original, foreign: original]])
+                #expect(throws: NativeCloudKitFailure.self) { try NativeCloudKitSendError.zoneLosses(mixed, zones: [zone]) }
+            }
+        }
     }
 }
 #endif

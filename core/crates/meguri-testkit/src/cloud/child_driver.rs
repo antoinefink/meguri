@@ -3182,10 +3182,23 @@ impl super::coordinator::PublicationTransport for ChildTransport<'_> {
         transport_reply(self.device, self.stream)
     }
 }
+fn complete_loss_identity_read(runtime: &runtime::Runtime, inputs: &runtime::CloudInputs) -> Result<()> {
+    // Use the operation's original Runtime and configured provider, even if a
+    // nested command replaced the host while its actual reply was held.
+    let read = runtime.adapter_begin_identity_read(false, None)?;
+    let identity = inputs.identity.read_identity(&inputs.scope);
+    if !runtime.adapter_complete_identity_read(read, identity)? {
+        return Err(runtime::RuntimeError::IdentityUnverified.into());
+    }
+    // Acceptance alone is not same-account proof. The original result reducer
+    // still checks freshness, identity and the operation's unchanged authority.
+    Ok(())
+}
 fn handle_transport_command(device: &mut Device, input: Input, stream: &mut UnixStream) -> Result<serde_json::Value> {
     match input {
         Input::PublicationExecute(request) => {
             let runtime = device.host.cloud_runtime().cloned().ok_or_else(failure)?;
+            let inputs = device.options.cloud.clone().ok_or_else(failure)?;
             let collection = device.host.collection()?;
             let (result, responses) = super::coordinator::execute_publication_transport(
                 &request,
@@ -3200,11 +3213,19 @@ fn handle_transport_command(device: &mut Device, input: Input, stream: &mut Unix
                     _ => {}
                 }
             }
+            use core::publication::{OwnKind, OwnResult, RecordRead};
+            if matches!(&result, OwnResult::ZoneLosses(_))
+                || (request.kind == OwnKind::ReadOwnEpoch
+                    && matches!(&result, OwnResult::Read(RecordRead::Missing | RecordRead::ZoneMissing)))
+            {
+                complete_loss_identity_read(&runtime, &inputs)?;
+            }
             runtime.publication_result(&request, result, &collection)?;
             Ok(serde_json::to_value(responses)?)
         }
         Input::DeleteZone(zone) => {
             let runtime = device.host.cloud_runtime().cloned().ok_or_else(failure)?;
+            let inputs = device.options.cloud.clone().ok_or_else(failure)?;
             let collection = device.host.collection()?;
             let guard = device.deletion.clone().ok_or_else(failure)?;
             runtime.submit_zone_deletion(&guard, &collection, || {
@@ -3243,6 +3264,12 @@ fn handle_transport_command(device: &mut Device, input: Input, stream: &mut Unix
                     encrypted_data_reset: error.encrypted_data_reset,
                 }
             });
+            if failure
+                .as_ref()
+                .is_some_and(|f| f.code == Some(26) && f.encrypted_data_reset)
+            {
+                complete_loss_identity_read(&runtime, &inputs)?;
+            }
             runtime.zone_deletion_batch_result(
                 &guard,
                 &collection,

@@ -18,7 +18,7 @@ pub(crate) fn install(c: &Connection) -> Result<(), Error> {
     c.execute_batch("CREATE TABLE IF NOT EXISTS cloud_media_state(binding BLOB PRIMARY KEY REFERENCES bindings(id), content TEXT NOT NULL CHECK(json_valid(content)));" )?;
     Ok(())
 }
-pub(crate) fn put_ledger(tx: &rusqlite::Transaction<'_>, b: BindingId, ledger: &Ledger) -> Result<(), Error> {
+pub(crate) fn put_ledger(tx: &rusqlite::Transaction<'_>, b: BindingId, ledger: &Ledger) -> Result<bool, Error> {
     let content: Option<String> = tx
         .query_row(
             "SELECT content FROM cloud_media_state WHERE binding=?1",
@@ -38,12 +38,13 @@ pub(crate) fn put_ledger(tx: &rusqlite::Transaction<'_>, b: BindingId, ledger: &
         return Err(Error::RecoveryRequired);
     }
     let mut next = ledger.clone();
+    next.zone_missing |= current.zone_missing;
     next.revision = runtime_store::next(current.revision)?;
     tx.execute(
         "INSERT INTO cloud_media_state VALUES(?1,?2) ON CONFLICT(binding) DO UPDATE SET content=excluded.content",
         params![b.0.as_slice(), encode(&next)?],
     )?;
-    Ok(())
+    Ok(next.zone_missing)
 }
 // Called in the transaction that records an actual fetched collection drain,
 // before that drain can be projected to policy as FetchDrained.
@@ -184,12 +185,21 @@ impl TrackingStore {
     pub(crate) fn put_media(&mut self, b: BindingId, ledger: &Ledger) -> Result<bool, Error> {
         self.binding(b)?.ok_or(Error::BindingNotFound)?;
         let pending = self.dirty_names(b)?;
+        self.commit_media_ledger(b, ledger)?;
+        Ok(self.dirty_names(b)? != pending)
+    }
+    // Return the sticky value from the transaction, with no post-commit I/O.
+    // Runtime publishes it before reading pending names or notifying observers.
+    pub(crate) fn commit_media_ledger(&mut self, b: BindingId, ledger: &Ledger) -> Result<bool, Error> {
+        self.binding(b)?.ok_or(Error::BindingNotFound)?;
         let tx = self
             .connection
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        put_ledger(&tx, b, ledger)?;
+        let zone_missing = put_ledger(&tx, b, ledger)?;
+        #[cfg(feature = "test-hooks")]
+        crate::cloud::testing::tracking_commit(&tx, "cloud.media.commit.ledger")?;
         tx.commit()?;
-        Ok(self.dirty_names(b)? != pending)
+        Ok(zone_missing)
     }
     pub(crate) fn commit_media_feed(
         &mut self,

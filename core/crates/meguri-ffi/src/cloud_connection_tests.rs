@@ -560,6 +560,21 @@ fn control(v: p::ControlRecord) -> CloudControlRecord {
 }
 fn result(v: p::OwnResult) -> CloudPublicationResult {
     match v {
+        p::OwnResult::ZoneLosses(losses) => CloudPublicationResult::ZoneLosses {
+            losses: losses
+                .into_iter()
+                .map(|l| crate::sync::CloudZoneLoss {
+                    zone: l.zone,
+                    cause: match l.cause {
+                        meguri_sync::cloud::adapter::ZoneLossCause::Deleted => crate::sync::CloudZoneLossCause::Deleted,
+                        meguri_sync::cloud::adapter::ZoneLossCause::Purged => crate::sync::CloudZoneLossCause::Purged,
+                        meguri_sync::cloud::adapter::ZoneLossCause::EncryptedDataReset => {
+                            crate::sync::CloudZoneLossCause::EncryptedDataReset
+                        }
+                    },
+                })
+                .collect(),
+        },
         p::OwnResult::ZonesCreated => CloudPublicationResult::ZonesCreated,
         p::OwnResult::Saved(r) => CloudPublicationResult::Saved { record: control(r) },
         p::OwnResult::Conflict(r) => CloudPublicationResult::Conflict { record: control(r) },

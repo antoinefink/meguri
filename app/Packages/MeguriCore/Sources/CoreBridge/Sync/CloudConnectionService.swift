@@ -144,6 +144,12 @@ public actor CoreCloudConnectionService {
         let raw = self.raw
         try await MaintenanceLane.shared.call(.cloudConnectionResumeBinding) { [raw] in try raw.resumeBinding(preview: preview.raw) }
     }
+    /// Resume starts after the caller joins earlier commands and result ACKs.
+    /// Issue the proof yield once the retained Resume invocation returns.
+    public func resumeBindingForAccountProof(_ preview: CloudConnectionPreview) async throws -> CloudOriginalCommandProofYield {
+        try await resumeBinding(preview)
+        return CloudOriginalCommandProofYield()
+    }
     public func nextPublicationWork() async throws -> CloudPublicationWork {
         let raw = self.raw
         let value: MeguriCoreBindings.CloudPublicationWork = try await run(.cloudConnectionStartNextPublicationWork, result: .cloudPublicationWorkResult) { [raw] in

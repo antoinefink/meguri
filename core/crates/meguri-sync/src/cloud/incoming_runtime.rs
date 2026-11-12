@@ -266,7 +266,11 @@ impl Runtime {
             {
                 return Err(RuntimeError::StaleIncarnation);
             }
-        } else if !b.usable || !b.verified {
+        } else if !b.usable
+            || !b.verified
+            || s.adapter.known_loss.is_some()
+            || s.adapter.durable.collection_loss.is_some()
+        {
             return Err(RuntimeError::IdentityUnverified);
         }
         Ok(())

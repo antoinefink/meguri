@@ -10,6 +10,8 @@ import Synchronization
 /// must never enter this state; it retains only a call name, without history.
 public final class MaintenanceCallObservation: Observable, Sendable {
     public static let shared = MaintenanceCallObservation()
+    // Passive capture at actual lane entry; contains no arguments or results.
+    @TaskLocal public static var capture: (@Sendable (BridgeCall) -> Void)?
     private let changes = ObservationRegistrar()
     private let current = Mutex<BridgeCall?>(nil)
     private init() {}
@@ -22,6 +24,7 @@ public final class MaintenanceCallObservation: Observable, Sendable {
     func withCall<T>(_ name: BridgeCall, _ body: () throws -> T) rethrows -> T {
         dispatchPrecondition(condition: .onQueue(MaintenanceLane.shared.queue))
         let previous = replace(with: name)
+        Self.capture?(name)
         defer { _ = replace(with: previous) }
         return try body()
     }

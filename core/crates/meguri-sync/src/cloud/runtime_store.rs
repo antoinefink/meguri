@@ -243,6 +243,12 @@ impl TrackingStore {
             "UPDATE bindings SET facts=?2 WHERE id=?1",
             params![binding.0.as_slice(), encode(&value.facts)?],
         )?;
+        if matches!(
+            reason,
+            IsolationReason::EncryptedDataReset | IsolationReason::ZoneDeletedByUser
+        ) {
+            super::incoming_store::remove_server_cache(&transaction, binding)?;
+        }
         transaction.commit()?;
         Ok(())
     }

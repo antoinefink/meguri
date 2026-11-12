@@ -70,11 +70,14 @@ impl Runtime {
                 sdk: sdk.into(),
                 guard: Self::adapter_guard_locked(&s),
                 scan: scan.clone(),
-                fetch,
+                fetch: Some(fetch),
                 point: s.adapter.no_state_point,
                 zone: zone.clone(),
                 lost_collection: false,
                 a7_failure: s.adapter.no_state_creation && !s.adapter.zone_wills.contains(zone),
+                known_loss: false,
+                after_identity: s.adapter.next_identity,
+                loss_identity_after: s.adapter.next_identity,
             })
             .collect::<Vec<_>>();
         s.adapter
@@ -131,10 +134,29 @@ impl Runtime {
     }
     pub(super) fn fetch_read_locked(s: &State, read: &FetchRead) -> Result<(), RuntimeError> {
         Self::sdk_locked(s, &read.sdk)?;
+        if read.known_loss {
+            if Self::adapter_guard_locked(s) != read.guard
+                || !read.lost_collection
+                || !read.is_active()
+                || !s.adapter.pending_collection_loss.as_ref().is_some_and(|pending| {
+                    pending.sdk == read.sdk
+                        && pending.guard == read.guard
+                        && pending.scan.binding == read.scan.binding
+                        && pending.scan.incarnation == read.scan.incarnation
+                        && pending.scan.file == read.scan.file
+                })
+                || s.tracking_stopped
+                || s.adapter.paused
+                || Self::publication_allows_send_locked(s)
+            {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+            return Ok(());
+        }
         let call = s.adapter.fetch.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
         if Self::adapter_guard_locked(s) != read.guard
             || s.adapter.no_state_point != read.point
-            || call.id != read.fetch
+            || Some(call.id) != read.fetch
             || !call.completed
             || s.tracking_stopped
             || s.adapter.paused
@@ -190,14 +212,38 @@ impl Runtime {
                 outcome: outcome.into(),
                 a7_failure: accepted && !read.is_active() && read.a7_failure && matches!(&result, RecordRead::Found(_)),
                 accepted,
-                failure,
-                terminal,
+                failure: failure.clone(),
+                terminal: terminal.clone(),
             });
         }
         if discard {
             return Ok(None);
         }
         validation?;
+        #[cfg(feature = "test-hooks")]
+        if read.lost_collection {
+            self.incoming_hooks
+                .hit(super::super::testing::IncomingStage::KnownLossBeforeActiveResult);
+        }
+        let native_loss = failure.iter().chain(terminal.iter()).find_map(|f| match f.code {
+            Some(26) if f.encrypted_data_reset => Some(IsolationReason::EncryptedDataReset),
+            Some(28) => Some(IsolationReason::ZoneDeletedByUser),
+            _ => None,
+        });
+        if read.is_active() || native_loss.is_some() {
+            let s = self.state();
+            let request = s
+                .adapter
+                .accepted_identity_read
+                .as_ref()
+                .ok_or(RuntimeError::IdentityUnverified)?
+                .request;
+            Self::fresh_loss_identity_locked(&s, request, read.after_identity)?;
+        }
+        if let Some(reason) = native_loss {
+            self.isolate_fetch_read(read, collection, reason)?;
+            return Ok(None);
+        }
         if !read.is_active() && matches!(&result, RecordRead::Missing | RecordRead::ZoneMissing) {
             let at_ms = self.adapter_now()?;
             self.with_scan(&read.scan, collection, |s| {
@@ -240,6 +286,8 @@ impl Runtime {
             followup.zone = "meguri-root".into();
             followup.lost_collection = true;
             followup.a7_failure = false;
+            followup.after_identity = self.state().adapter.next_identity;
+            followup.loss_identity_after = read.after_identity;
             return Ok(Some(followup));
         }
         match result {
@@ -256,6 +304,11 @@ impl Runtime {
                 }
                 let envelope = record.encrypted.ok_or(Error::InvalidData)?;
                 self.accept_fetch_root_read(read, &envelope, &record.system_fields.0)?;
+                #[cfg(feature = "test-hooks")]
+                if read.lost_collection {
+                    self.incoming_hooks
+                        .hit(super::super::testing::IncomingStage::KnownLossAfterActiveResult);
+                }
                 // A lost collection result may isolate even with the same
                 // active epoch, and an epoch switch must never create a drain.
                 if read.lost_collection || self.validate_sdk(&read.sdk).is_err() {
@@ -353,10 +406,7 @@ impl Runtime {
         self.with_scan(&read.scan, collection, |s| {
             Self::fetch_read_locked(s, read)?;
             let id = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
-            s.store
-                .as_mut()
-                .ok_or(Error::Database)?
-                .isolate_runtime_binding(id, reason)?;
+            Self::commit_service_isolation_locked(s, id, reason)?;
             let b = s.bound.as_mut().ok_or(RuntimeError::StaleIncarnation)?;
             b.binding.facts.state = BindingState::Isolated(reason);
             b.verified = false;
@@ -367,6 +417,13 @@ impl Runtime {
             s.root_confirmed = false;
             s.adapter.token = s.adapter.token.checked_add(1).ok_or(Error::InvalidData)?;
             s.publish_authority();
+            if matches!(
+                reason,
+                IsolationReason::EncryptedDataReset | IsolationReason::ZoneDeletedByUser
+            ) {
+                let live = s.store.as_ref().ok_or(Error::Database)?.inbox(id)?;
+                super::super::payload_asset::sweep(&self.directory, id, &live)?;
+            }
             Ok(())
         })
     }

@@ -1310,3 +1310,25 @@ impl TrackingStore {
         Ok(())
     }
 }
+
+// K12.5: delete server copies only. Intents retain their exact inbox ids and
+// staged assets; the existing owned-file sweep handles unreferenced files.
+pub(super) fn remove_server_cache(tx: &Transaction<'_>, binding: BindingId) -> Result<(), Error> {
+    let protected: std::collections::BTreeSet<_> =
+        intents(tx, binding)?.into_iter().flat_map(|i| i.inbox_ids).collect();
+    let mut q = tx.prepare("SELECT id FROM inbox WHERE binding=?1")?;
+    let ids = q
+        .query_map([binding.0.as_slice()], |row| row.get::<_, i64>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(q);
+    for id in ids {
+        if !protected.contains(&id) {
+            tx.execute(
+                "DELETE FROM inbox WHERE binding=?1 AND id=?2",
+                params![binding.0.as_slice(), id],
+            )?;
+        }
+    }
+    tx.execute("DELETE FROM cloud_refused WHERE binding=?1", [binding.0.as_slice()])?;
+    Ok(())
+}

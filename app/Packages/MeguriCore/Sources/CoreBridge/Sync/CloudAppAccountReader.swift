@@ -10,6 +10,50 @@ public struct CloudAppAccountReadResult: Sendable {
     public let verified: Bool
 }
 
+// Providers may ignore Task cancellation. Only this completion fence belongs
+// to the read owner; the detached provider can deliver to this fence alone.
+final class CloudAccountResolution: Sendable {
+    private struct State {
+        var result: Result<CloudResolvedAccount?, any Error>?
+        var waiter: CheckedContinuation<CloudResolvedAccount?, any Error>?
+    }
+    private let state = Mutex(State())
+    private let provider = Mutex<Task<Void, Never>?>(nil)
+    func finish(_ result: Result<CloudResolvedAccount?, any Error>) {
+        let waiter = state.withLock { value in
+            guard value.result == nil else { return Optional<CheckedContinuation<CloudResolvedAccount?, any Error>>.none }
+            value.result = result
+            let waiter = value.waiter; value.waiter = nil
+            return waiter
+        }
+        waiter?.resume(with: result)
+    }
+    func cancel() {
+        finish(.failure(CancellationError()))
+        provider.withLock { $0 }?.cancel()
+    }
+    func resolve(using factory: any CloudKitEngineFactory) async throws -> CloudResolvedAccount? {
+        let task = Task.detached(priority: Task.currentPriority) { [self] in
+            do { finish(.success(try await factory.resolveAccount())) }
+            catch { finish(.failure(error)) }
+        }
+        provider.withLock { $0 = task }
+        if state.withLock({ $0.result != nil }) { task.cancel() }
+        defer { provider.withLock { $0 = nil } }
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            return try await withCheckedThrowingContinuation { continuation in
+                let result = state.withLock { value -> Result<CloudResolvedAccount?, any Error>? in
+                    if let result = value.result { return result }
+                    value.waiter = continuation
+                    return Optional<Result<CloudResolvedAccount?, any Error>>.none
+                }
+                if let result { continuation.resume(with: result) }
+            }
+        } onCancel: { self.cancel() }
+    }
+}
+
 private final class CloudAccountReplayPermit: Sendable {
     private let live = Mutex(true)
     func revoke() { live.withLock { $0 = false } }
@@ -31,6 +75,7 @@ public final class CloudAppAccountReader {
     private var replayPermit = CloudAccountReplayPermit()
     private var committing = 0
     private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var resolutions: [UInt64: CloudAccountResolution] = [:]
 
     public init(workflow: CoreCloudWorkflowService, policy: CoreCloudPolicyService,
                 factory: any CloudKitEngineFactory, adapter: CloudKitSyncAdapter) {
@@ -38,11 +83,13 @@ public final class CloudAppAccountReader {
     }
     public func begin(transition: Bool) async throws -> UInt64 {
         guard !closed, !frozen else { throw CancellationError() }
+        for resolution in resolutions.values { resolution.cancel() }
         replayPermit.revoke(); replayPermit = CloudAccountReplayPermit(); latest = nil
         let expected = epoch
         let id = try await workflow.beginIdentityRead(transition: transition)
         guard !closed, !frozen, expected == epoch else { throw CancellationError() }
         latest = id
+        await adapter.accountReadBegan(id: id)
         return id
     }
     public func read(_ id: UInt64) async -> CloudAppAccountReadResult {
@@ -55,8 +102,11 @@ public final class CloudAppAccountReader {
         let expected = epoch
         guard admits(id, epoch: expected) else { return { self.cancelled() } }
         let permit = replayPermit
+        let resolution = CloudAccountResolution()
+        resolutions[id] = resolution
+        defer { resolutions.removeValue(forKey: id) }
         let resolved: Result<CloudResolvedAccount?, any Error>
-        do { resolved = .success(try await factory.resolveAccount()) }
+        do { resolved = .success(try await resolution.resolve(using: factory)) }
         catch { resolved = .failure(error) }
         return { [self] in await completeRead(id, epoch: expected, permit: permit, resolved: resolved) }
     }
@@ -98,7 +148,10 @@ public final class CloudAppAccountReader {
         } catch {
             guard admits(id, epoch: expected) else { return cancelled() }
             // A projection/replay error must not complete the read again.
-            guard !completionAttempted else { return .init(outputs: [], error: error, verified: false) }
+            guard !completionAttempted else {
+                await adapter.accountReadCompleted(id: id, available: false)
+                return .init(outputs: [], error: error, verified: false)
+            }
             var setupFailure = false
             #if canImport(CloudKit)
             setupFailure = (error as? CKError).map {
@@ -108,6 +161,7 @@ public final class CloudAppAccountReader {
             let accepted = (try? await workflow.completeIdentityRead(id: id,
                 status: setupFailure ? .configuration : .couldNotDetermine, identity: nil)) == true
             guard accepted, admits(id, epoch: expected) else { return cancelled() }
+            await adapter.accountReadCompleted(id: id, available: false)
             // A failed resolver must not reverify from the cached provider.
             if setupFailure {
                 do {
@@ -121,6 +175,12 @@ public final class CloudAppAccountReader {
             }
             return .init(outputs: outputs, error: error, verified: false)
         }
+    }
+    /// The app calls this only after the read's policy outputs and follow-up
+    /// projection have been reduced. Scheduling never joins an SDK on this lane.
+    public func didProjectRead(_ id: UInt64) async {
+        guard admits(id, epoch: epoch) else { return }
+        await adapter.accountReadCompleted(id: id, available: true)
     }
     public func isCurrentRead(_ id: UInt64) -> Bool { admits(id, epoch: epoch) }
     private func admits(_ id: UInt64, epoch expected: UInt64) -> Bool {
@@ -143,6 +203,7 @@ public final class CloudAppAccountReader {
     public func freeze() async {
         replayPermit.revoke()
         frozen = true; epoch &+= 1; latest = nil
+        for resolution in resolutions.values { resolution.cancel() }
         if committing > 0 { await withCheckedContinuation { waiters.append($0) } }
     }
     public func resumeAfterCoreResume() { if !closed { frozen = false } }

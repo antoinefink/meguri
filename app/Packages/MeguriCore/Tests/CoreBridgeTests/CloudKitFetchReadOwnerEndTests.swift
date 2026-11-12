@@ -232,6 +232,10 @@ extension EventTests {
         let active = CloudCallbackGate()
         let transport = OwnerEndReadTransport(activeReply: active)
         try await withCloudKitFixture(keepAlive: true, savedState: nil, assetReadTransport: transport) { f in
+            // K12.5/V26.1: the actual missing epoch requires fresh proof
+            // before Core can issue the follow-up Active read held below.
+            await f.factory.appendAccountRead(.success(.init(status: .available,
+                identity: Data("synthetic-account-A".utf8))))
             let old = try await f.engine()
             let before = try await f.core.durableSnapshot()
             let drains = try await f.core.fetchDrains()
@@ -251,6 +255,9 @@ extension EventTests {
                             identity: Data("synthetic-account-B".utf8))
                     case .activeDeleted:
                         try await f.core.fetched(sdk: old.instanceID, zone: "meguri-root", records: [], deleted: ["active"])
+                        await f.factory.appendAccountRead(.success(.init(status: .available,
+                            identity: Data("synthetic-account-A".utf8))))
+                        try await f.adapter.refreshControlIdentity()
                     }
                     let stop = Task { try await f.adapter.stop() }
                     do {
@@ -396,6 +403,10 @@ extension EventTests {
         let active = CloudCallbackGate()
         let transport = OwnerEndReadTransport(activeReply: active)
         try await withCloudKitFixture(keepAlive: true, savedState: nil, assetReadTransport: transport) { f in
+            // K12.5/V26.1: the actual missing epoch requires fresh proof
+            // before Core can issue the follow-up Active read held below.
+            await f.factory.appendAccountRead(.success(.init(status: .available,
+                identity: Data("synthetic-account-A".utf8))))
             let old = try await f.engine()
             let before = try await f.core.durableSnapshot()
             let drains = try await f.core.fetchDrains()

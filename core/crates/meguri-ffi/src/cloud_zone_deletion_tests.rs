@@ -431,6 +431,22 @@ fn actual_encrypted_reset_reply_removes_due_zone_and_isolates_original_binding()
     actual_delete(&f, &names[0], RemovalCause::EncryptedDataReset);
     let reset = actual_delete(&f, &names[0], RemovalCause::Deleted);
     assert!(reset.failure.as_ref().unwrap().encrypted_data_reset);
+    // K12.5/V9: sample the fixture's platform provider after the actual reset reply.
+    let proof = f.workflow.begin_identity_read(false, None).unwrap();
+    let r::IdentityStatus::Available(account) = r::IdentityProvider::read_identity(
+        &Account,
+        &c::BuildScope {
+            container: c::ContainerId::new(f.scope.container.clone()).unwrap(),
+            environment: c::Environment::Development,
+        },
+    ) else {
+        panic!("original fixture account must remain available")
+    };
+    assert!(
+        f.workflow
+            .complete_identity_read(proof, CloudAccountStatus::Available, Some(account.0))
+            .unwrap()
+    );
     let mut results = vec![reset];
     for zone in &names[1..] {
         results.push(CloudZoneDeletionResult {

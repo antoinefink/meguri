@@ -83,6 +83,20 @@ public actor CloudKitSyncAdapter {
     private final class Instance {
         let engine: any CloudKitEngine
         let zone: String
+        var zoneLossPending = false
+        var lossEvidenceGeneration: UInt64 = 0
+        var lossAccountGeneration: UInt64?
+        func stagedZoneLoss() {
+            zoneLossPending = true
+            lossEvidenceGeneration &+= 1
+            lossAccountRead = nil
+        }
+        var lossAccountRequested = false
+        var lossAccountRead: UInt64?
+        var mediaLossObserved = false
+        var lossMediaDrainTask: Task<Void, Never>?
+        var lossReadTask: Task<Void, Never>?
+        var lossAccountTask: (id: UUID, task: Task<Void, Never>)?
         var rootReadOperation: (any CloudPreparedOwnOperation)?
         var rootReadAdmission: CloudOwnWorkAdmission?
         var rootReadIdentity: (task: Task<Void, Never>, wait: CloudKitNetworkCompletion)?
@@ -160,6 +174,14 @@ public actor CloudKitSyncAdapter {
     private var intentGeneration: UInt64 = 0
     private var creatingSDK = false
     private var identityReads: Set<UInt64> = []
+    private var identityResolutions: [UInt64: CloudAccountResolution] = [:]
+    private var proofAdmission: (@Sendable (CloudOriginalCommandProofYield) async throws -> Void)?
+    private var proofOutputAcknowledgement: (@Sendable ([CloudPolicyOutput]) async -> Void)?
+    public func setProofAdmission(_ admission: @escaping @Sendable (CloudOriginalCommandProofYield) async throws -> Void,
+                                 acknowledgeOutputs: @escaping @Sendable ([CloudPolicyOutput]) async -> Void) {
+        proofAdmission = admission
+        proofOutputAcknowledgement = acknowledgeOutputs
+    }
     private var platformEventsTask: Task<Void, Never>?
     private var observingPlatform = false
     private var lastReachable = false
@@ -296,6 +318,13 @@ public actor CloudKitSyncAdapter {
     private func startPrepared(automaticallySync: Bool, readIdentity: Bool, intent: UInt64, execution: CoreCloudPolicyExecution? = nil) async throws {
         try checkIntent(intent)
         for task in stopTasks.values { try await task.value; try checkIntent(intent) }
+        // A superseded creation retains its original SDK through cleanup.
+        // Join it before a replacement identity read can capture that owner.
+        while creatingSDK {
+            let old = version
+            try await waitForChange(after: old)
+            try checkIntent(intent)
+        }
         guard current == nil else {
             if execution != nil { throw BridgeError.cloudPolicy(.staleCommand) }; return
         }
@@ -382,9 +411,11 @@ public actor CloudKitSyncAdapter {
         let platform = platformEventsTask
         let originals = Array(owned)
         for (_, instance) in originals {
+            instance.lossAccountTask?.task.cancel(); instance.lossReadTask?.cancel()
             instance.rootReadAdmission?.setOpen(false); instance.rootReadOperation?.cancel()
             instance.cancelRootReadIdentity()
         }
+        for resolution in identityResolutions.values { resolution.cancel() }
         if finalStopTask == nil {
             for (_, instance) in originals where !instance.authorityRetired { instance.stopping = false }
         }
@@ -454,7 +485,7 @@ public actor CloudKitSyncAdapter {
         let reads = identityReads
         let exchange = exchangeTask?.task
         exchange?.cancel()
-        for id in reads { _ = try await finishIdentityRead(id, status: .couldNotDetermine, identity: nil) }
+        for id in reads { await cancelIdentityRead(id) }
         if let stopping { try await stopping.value }
         for task in pendingStops { try await task.value }
         if let exchange {
@@ -479,6 +510,9 @@ public actor CloudKitSyncAdapter {
         }
         #endif
         instance.stopping = true
+        instance.lossReadTask?.cancel()
+        instance.lossAccountTask?.task.cancel()
+        instance.lossMediaDrainTask?.cancel()
         instance.rootReadAdmission?.setOpen(false)
         instance.cancelRootReadIdentity()
         let task = Task {
@@ -534,7 +568,7 @@ public actor CloudKitSyncAdapter {
         try await consumePendingUpdates(origin: origin)
     }
     public func waitForIdle() async throws {
-        while owned.values.contains(where: { $0.handlers > 0 || $0.networks > 0 || $0.applying || $0.stopping || $0.failed || $0.assetDispatch != nil }) || !stopTasks.isEmpty {
+        while owned.values.contains(where: { $0.handlers > 0 || $0.networks > 0 || $0.applying || $0.stopping || $0.failed || $0.assetDispatch != nil || $0.lossReadTask != nil || $0.lossAccountRequested }) || !stopTasks.isEmpty {
             let old = version; try await waitForChange(after: old)
         }
         try await executePendingActions()
@@ -576,13 +610,14 @@ public actor CloudKitSyncAdapter {
         if reachable && !wasReachable { try await readPlatformAndResume(transition: false) }
     }
     public func refreshPlatformIdentity(transition: Bool = false) async throws {
-        try await refreshPlatformIdentity(transition: transition, intent: intentGeneration)
+        _ = try await refreshPlatformIdentity(transition: transition, intent: intentGeneration)
     }
     private func finishIdentityRead(_ id: UInt64, status: CloudAccountStatus, identity: Data?) async throws -> Bool {
         defer { identityReads.remove(id) }
         return try await core.completeIdentityRead(id: id, status: status, identity: identity)
     }
     private func cancelIdentityRead(_ id: UInt64) async {
+        identityResolutions[id]?.cancel()
         guard identityReads.contains(id) else { return }
         do { _ = try await finishIdentityRead(id, status: .couldNotDetermine, identity: nil) }
         catch { lastFailure = error }
@@ -591,21 +626,29 @@ public actor CloudKitSyncAdapter {
         if let intent { try checkIntent(intent) }
         else { try Task.checkCancellation() }
     }
-    private func refreshPlatformIdentity(transition: Bool = false, originSDK: String? = nil, intent: UInt64?) async throws {
+    @discardableResult
+    private func refreshPlatformIdentity(transition: Bool = false, originSDK: String? = nil, intent: UInt64?) async throws -> Bool {
+        try await refreshPlatformIdentityRead(transition: transition, originSDK: originSDK, intent: intent).available
+    }
+    private func refreshPlatformIdentityRead(transition: Bool = false, originSDK: String? = nil, intent: UInt64?) async throws -> (id: UInt64, available: Bool) {
         try checkReadIntent(intent)
+        for resolution in identityResolutions.values { resolution.cancel() }
         let id = try await core.beginIdentityRead(transition: transition, originSDK: originSDK)
         identityReads.insert(id)
+        let resolution = CloudAccountResolution()
+        identityResolutions[id] = resolution
+        defer { identityResolutions.removeValue(forKey: id) }
         do {
             try checkReadIntent(intent)
             let resolved: CloudResolvedAccount?
             do {
                 resolved = try await withTaskCancellationHandler {
-                    try await factory.resolveAccount()
+                    try await resolution.resolve(using: factory)
                 } onCancel: { Task { await self.cancelIdentityRead(id) } }
             } catch {
                 _ = try await finishIdentityRead(id, status: .couldNotDetermine, identity: nil)
                 try checkReadIntent(intent)
-                if originSDK != nil { lastFailure = error; return }
+                if originSDK != nil { lastFailure = error; return (id, false) }
                 throw error
             }
             try checkReadIntent(intent)
@@ -614,6 +657,7 @@ public actor CloudKitSyncAdapter {
             guard accepted else {
                 throw BridgeError.unavailable(reason: "Cloud account read expired")
             }
+            return (id, resolved?.status == .available && resolved?.identity != nil)
         } catch {
             if identityReads.contains(id) { _ = try await finishIdentityRead(id, status: .couldNotDetermine, identity: nil) }
             throw error
@@ -671,9 +715,11 @@ public actor CloudKitSyncAdapter {
         suspensionEpoch &+= 1
         suspending = true
         for instance in owned.values {
+            instance.lossAccountTask?.task.cancel(); instance.lossReadTask?.cancel()
             instance.rootReadAdmission?.setOpen(false); instance.rootReadOperation?.cancel()
             instance.cancelRootReadIdentity()
         }
+        for resolution in identityResolutions.values { resolution.cancel() }
         for origin in Array(owned.keys) { await drainOriginalAssetReads(origin, permanently: false) }
         while owned.values.contains(where: { $0.handlers > 0 || $0.networks > 0 || $0.applying }) {
             let old = version; try await waitForChange(after: old)
@@ -739,9 +785,14 @@ public actor CloudKitSyncAdapter {
             case .databaseChanges: break
             case .fetchedCollectionZoneDeletions(let names):
                 try await core.fetchedCollectionZoneDeletions(sdk: origin, names: names)
-            case .stateUpdate(let state): try await core.stateUpdate(sdk: origin, state: state)
+            case .fetchedZoneLosses(let losses):
+                instance.mediaLossObserved = losses.contains { $0.zone == "meguri-media" } || instance.mediaLossObserved
+                if try await core.fetchedZoneLosses(sdk: origin, losses: losses) { instance.stagedZoneLoss() }
+            case .stateUpdate(let state):
+                if !instance.zoneLossPending { try await core.stateUpdate(sdk: origin, state: state) }
             case .fetched(let zone, let records, let deleted):
                 try await core.fetched(sdk: origin, zone: zone, records: records, deleted: deleted)
+                if zone == "meguri-root", deleted.contains("active") { instance.stagedZoneLoss() }
                 #if DEBUG
                 // Original admission guards and successful intake precede this
                 // process total; it establishes no current-owner/convergence proof.
@@ -755,6 +806,8 @@ public actor CloudKitSyncAdapter {
                 let actualSaved = try await core.sent(sdk: origin, batchID: id, saved: saved, failed: failed, deleted: deleted, failedDeletes: failedDeletes, batchCount: instance.batches[id] ?? UInt32(saved.count + failed.count + deleted.count + failedDeletes.count))
                 if !saved.isEmpty || !deleted.isEmpty { instance.savedRemovalGuards[id] = (removalGuard, Set(saved.map(\.name) + deleted)) }
                 instance.operationSaved += actualSaved
+                if (failed + failedDeletes).contains(where: { Self.lossCause($0.code) != nil }) { instance.stagedZoneLoss() }
+                instance.mediaLossObserved = (failed + failedDeletes).contains { $0.zone == "meguri-media" && Self.lossCause($0.code) != nil } || instance.mediaLossObserved
                 let receipt = CloudMediaSendReceipt(failed: failed, failedDeletes: failedDeletes)
                 if let diagnostic = receipt.diagnostic {
                     lastFailure = diagnostic
@@ -776,7 +829,11 @@ public actor CloudKitSyncAdapter {
                 }
             case .willFetch(let group, let reason): try await core.willFetch(sdk: origin, group: group, manual: reason == .manual)
             case .willFetchZone(let zone): try await core.fetchZone(sdk: origin, zone: zone, will: true, failed: false)
-            case .didFetchZone(let zone, let error): try await core.fetchZone(sdk: origin, zone: zone, will: false, failed: error != nil)
+            case .didFetchZone(let zone, let error):
+                try await core.fetchZone(sdk: origin, zone: zone, will: false, failed: error != nil)
+                if let error, let cause = Self.lossCause(error) {
+                    if try await core.fetchedZoneLosses(sdk: origin, losses: [.init(zone: zone, cause: cause)]) { instance.stagedZoneLoss() }
+                }
             case .didFetch(let group, let reason): try await core.didFetch(sdk: origin, group: group, manual: reason == .manual)
             case .willSend, .didSend: break
             }
@@ -871,6 +928,9 @@ public actor CloudKitSyncAdapter {
     // Runs only after the original engine has updated its event slot/lifetime.
     // This notification only marks/enqueues; returnedWork must never join us.
     fileprivate func eventBookkeepingCompleted(_ event: CloudEngineEvent, origin: String) {
+        if let instance = owned[origin], instance.zoneLossPending, !instance.stopping, !instance.failed {
+            Task { await self.requestLossAccountRead(origin: origin) }
+        }
         guard case .sent = event, !quiescing, let instance = owned[origin], !instance.failed,
               !instance.stopping, !instance.assetClosed, !suspended, !suspending,
               current == origin, assetReadTransport != nil else { return }
@@ -1065,7 +1125,7 @@ public actor CloudKitSyncAdapter {
     }
 
     fileprivate func nextBatch(origin: String, pending: [String: CloudPendingChange], zone: String) async -> CloudEngineBatch? {
-        guard await valid(origin), let instance = owned[origin], (zone == instance.zone || zone == "meguri-media") else { return nil }
+        guard await valid(origin), let instance = owned[origin], !instance.zoneLossPending, (zone == instance.zone || zone == "meguri-media") else { return nil }
         await delegateWorkValidated()
         guard !quiescing, !suspended, !suspending, current == origin, owned[origin] === instance, !instance.stopping else { return nil }
         #if DEBUG
@@ -1239,7 +1299,7 @@ public actor CloudKitSyncAdapter {
                 #if DEBUG
                 site = .sdkAuthorization
                 #endif
-                let validateSDK = try await core.finalSDKAuthorization(origin)
+                let validateSDK = try await core.finalSDKAuthorization(origin, media: mediaScope)
                 #if DEBUG
                 site = .sdkPreparation
                 #endif
@@ -1283,6 +1343,14 @@ public actor CloudKitSyncAdapter {
             catch {
                 CloudMediaCancellationContext.current?.observe(error)
                 sendError = error
+                #if canImport(CloudKit)
+                let losses = try NativeCloudKitSendError.zoneLosses(error, zones: zones.filter { $0 == instance.zone || $0 == "meguri-media" })
+                if !losses.isEmpty, await valid(origin) {
+                    instance.mediaLossObserved = losses.contains { $0.zone == "meguri-media" } || instance.mediaLossObserved
+                    if try await core.fetchedZoneLosses(sdk: origin, losses: losses) { instance.stagedZoneLoss() }
+                    await requestLossAccountRead(origin: origin)
+                }
+                #endif
                 #if DEBUG
                 diagnostic?.record(site, error: error)
                 if CloudMediaCancellationContext.current != nil, let action = CloudMediaCancellationContext.selectedAction {
@@ -1375,16 +1443,32 @@ public actor CloudKitSyncAdapter {
         }
         if let operationError { throw operationError }
     }
-    private func fetch(zones: [String], origin pinnedOrigin: String? = nil, execution: CoreCloudPolicyExecution? = nil) async throws -> Bool {
+    private func fetch(zones: [String], origin pinnedOrigin: String? = nil, execution: CoreCloudPolicyExecution? = nil, reservedFetch: Bool = false) async throws -> Bool {
         guard !quiescing, !suspended, !suspending else { throw CancellationError() }
         let requestedOrigin = pinnedOrigin ?? current
-        while fetchBusy { let old = version; try await waitForChange(after: old) }
+        if !reservedFetch, fetchBusy {
+            // Join actual native/removal bookkeeping from earlier stages, then
+            // ACK their outputs before offering this exact dependency park.
+            if let origin = requestedOrigin, let instance = owned[origin] {
+                try await instance.engine.waitForEventBookkeeping()
+                try await consumePendingUpdates(origin: origin)
+                try await instance.engine.waitForEventBookkeeping()
+            }
+            let outputs = takePolicyOperationOutputs()
+            if let acknowledge = CloudPolicyOutputAcknowledgement.current ?? proofOutputAcknowledgement {
+                await acknowledge(outputs)
+            } else if !outputs.isEmpty {
+                policyOperationOutputs.insert(contentsOf: outputs, at: 0)
+                throw BridgeError.unavailable(reason: "Cloud outputs require original acknowledgement")
+            }
+            try await waitForQuiescentFetchDependency()
+        }
         guard !quiescing else { throw CancellationError() }
         guard let origin = requestedOrigin, let instance = owned[origin], await valid(origin) else {
             if execution != nil { throw BridgeError.cloudPolicy(.staleCommand) }; return false
         }
         fetchBusy = true; instance.networks += 1; changed()
-        defer { fetchBusy = false; instance.networks -= 1; changed() }
+        defer { if !reservedFetch { fetchBusy = false }; instance.networks -= 1; changed() }
         let scope = zones.filter { $0 == "meguri-root" || $0 == instance.zone }
         for _ in 0..<2 {
             guard !quiescing else { throw CancellationError() }
@@ -1411,6 +1495,14 @@ public actor CloudKitSyncAdapter {
                 if let execution { try await execution.validate() }
             }
             catch {
+                #if canImport(CloudKit)
+                let losses = try NativeCloudKitSendError.zoneLosses(error, zones: scope)
+                if !losses.isEmpty, await valid(origin) {
+                    instance.mediaLossObserved = losses.contains { $0.zone == "meguri-media" } || instance.mediaLossObserved
+                    if try await core.fetchedZoneLosses(sdk: origin, losses: losses) { instance.stagedZoneLoss() }
+                    await requestLossAccountRead(origin: origin)
+                }
+                #endif
                 policyOperationOutputs.append(contentsOf: invocationOutputs.take())
                 if await valid(origin) {
                     _ = try await core.finishFetch(sdk: origin, id: id)
@@ -1419,6 +1511,7 @@ public actor CloudKitSyncAdapter {
                 throw error
             }
             guard await valid(origin) else { return false }
+            if instance.zoneLossPending { return false }
             policyOperationOutputs.append(contentsOf: invocationOutputs.take())
             do {
                 let plan = try await core.fetchReadPlan(sdk: origin, id: id)
@@ -1459,7 +1552,6 @@ public actor CloudKitSyncAdapter {
         instance.rootReadAdmission = admission
         defer { instance.rootReadAdmission = nil }
         let target = try await read.target()
-        let validateSDK = try await core.finalSDKAuthorization(origin)
         let validateRead = read.finalAuthorization()
         if let execution { try await execution.validate() }
         guard await valid(origin), !quiescing, !suspended, !suspending,
@@ -1476,7 +1568,7 @@ public actor CloudKitSyncAdapter {
                 // the original call/point and policy capability, at queue add.
                 try admission.withPermission { allowed in
                     guard allowed else { throw CancellationError() }
-                    try validateSDK(); try validateRead(); try execution?.validateForEnqueue()
+                    try validateRead(); try execution?.validateForEnqueue()
                     guard operation.enqueue() else { throw CloudOwnTransportFailure.queueRejected }
                 }
                 let reply = try await operation.reply()
@@ -1493,7 +1585,10 @@ public actor CloudKitSyncAdapter {
             CloudZoneDeletionRead(read: .failed, terminal: .evidence($0))
         }
         var live = await valid(origin) && !quiescing && !suspended && !suspending && !Task.isCancelled
-        if live && target.name == "active" {
+        let mustRefresh = target.name == "active" || result == .missing || result == .zoneMissing
+            || [evidence?.failure?.code, evidence?.terminal?.code].contains(28)
+            || evidence?.failure?.encryptedDataReset == true || evidence?.terminal?.encryptedDataReset == true
+        if live && mustRefresh {
             do { try await refreshFetchReadIdentity(instance: instance) }
             catch {
                 _ = try? await read.complete(result, discard: true, evidence: evidence, admission: admission)
@@ -1518,27 +1613,194 @@ public actor CloudKitSyncAdapter {
         return next
     }
 
+    private static func lossCause(_ code: CloudEngineErrorCode) -> CloudZoneLossCause? {
+        switch code {
+        case .zoneNotFound: .deleted
+        case .userDeletedZone: .purged
+        case .encryptedDataReset: .encryptedDataReset
+        default: nil
+        }
+    }
+    private func requestLossAccountRead(origin: String) async {
+        guard let instance = owned[origin], instance.zoneLossPending,
+              !instance.stopping, !quiescing, !suspended, !suspending,
+              instance.lossAccountGeneration != instance.lossEvidenceGeneration else { return }
+        // Only a newly staged Core loss requires another proof. Cursor and
+        // callback bookkeeping retain the exact read already serving this loss.
+        let generation = instance.lossEvidenceGeneration
+        instance.lossAccountGeneration = generation
+        if instance.mediaLossObserved, instance.lossMediaDrainTask == nil {
+            instance.networks += 1
+            instance.lossMediaDrainTask = Task.detached(priority: Task.currentPriority) {
+                await self.drainLossMedia(origin: origin)
+            }
+        }
+        instance.lossAccountRequested = true; changed()
+        if appOwnsAccountObservation { accountReadPending = true; await accountReadRequested() }
+        else {
+            instance.lossAccountTask?.task.cancel()
+            let taskKey = UUID()
+            instance.networks += 1
+            let task = Task.detached(priority: Task.currentPriority) {
+                await self.runLossAccountRead(origin: origin, taskKey: taskKey, generation: generation)
+            }
+            instance.lossAccountTask = (taskKey, task)
+        }
+    }
+    private func drainLossMedia(origin: String) async {
+        guard let instance = owned[origin] else { return }
+        defer { instance.networks -= 1; instance.lossMediaDrainTask = nil; changed() }
+        // Let all original result/ACK bookkeeping return before using the
+        // existing cancellation/drain owner. Collection SDK authority stays live.
+        do { try await instance.engine.waitForEventBookkeeping() } catch { lastFailure = error }
+        await originalMediaDrain?(instance.stopWitness)
+    }
+    private func runLossAccountRead(origin: String, taskKey: UUID, generation: UInt64) async {
+        guard let instance = owned[origin] else { return }
+        defer {
+            instance.networks -= 1
+            if instance.lossAccountTask?.id == taskKey { instance.lossAccountTask = nil; instance.lossAccountRequested = false }
+            changed()
+        }
+        do {
+            // Original SDK result handlers and their pending-removal receipts
+            // finish before account proof can revoke the original authority.
+            while instance.handlers > 0 || instance.applying { let old = version; try await waitForChange(after: old) }
+            try await instance.engine.waitForEventBookkeeping()
+            try Task.checkCancellation()
+            guard owned[origin] === instance, !instance.stopping,
+                  instance.lossAccountTask?.id == taskKey, instance.lossEvidenceGeneration == generation else { return }
+            let result = try await refreshPlatformIdentityRead(intent: nil)
+            guard instance.lossAccountTask?.id == taskKey, !Task.isCancelled,
+                  owned[origin] === instance, !instance.stopping,
+                  instance.lossEvidenceGeneration == generation else { return }
+            instance.lossAccountRead = result.id
+            await accountReadCompleted(id: result.id, available: result.available)
+            if !(await valid(origin)), owned[origin] === instance,
+               instance.lossAccountTask?.id == taskKey, instance.lossEvidenceGeneration == generation,
+               !Task.isCancelled {
+                // Keep stop ownership here without awaiting its completion.
+                // The drain waits until this read releases its network count.
+                _ = beginStop(origin, reason: .handlerInvalid, policyStop: false)
+            }
+        } catch {
+            // A superseded/retired read cannot replace its successor's error.
+            // Errors of the still-owned original read remain observable.
+            if owned[origin] === instance, current == origin, !instance.stopping,
+               instance.lossAccountTask?.id == taskKey, instance.lossEvidenceGeneration == generation {
+                lastFailure = error
+            }
+        }
+    }
+    // Called only after the ordered lane's original Core-issued read completed.
+    // Wake/schedule only: never join an SDK operation on that account lane.
+    func accountReadBegan(id: UInt64) {
+        for instance in owned.values where instance.zoneLossPending && !instance.stopping {
+            instance.lossAccountRead = id
+        }
+    }
+    func accountReadCompleted(id: UInt64, available: Bool) async {
+        for (origin, instance) in owned {
+            guard instance.zoneLossPending, instance.lossAccountRead == id, !instance.stopping else { continue }
+            guard available, await valid(origin), owned[origin] === instance else {
+                if instance.lossAccountRead == id { instance.lossAccountRequested = false; changed() }
+                continue
+            }
+            guard instance.lossAccountRead == id else { continue }
+            do {
+                let read = try await core.knownLossRead(sdk: origin, identityRead: id)
+                guard instance.lossAccountRead == id, owned[origin] === instance, !instance.stopping else { continue }
+                if let read {
+                    guard instance.lossReadTask == nil else { continue }
+                    instance.lossReadTask = Task { await self.runKnownLossRead(read, origin: origin, instance: instance) }
+                } else { instance.zoneLossPending = false; changed() }
+            } catch {
+                guard instance.lossAccountRead == id, owned[origin] === instance else { continue }
+                lastFailure = error
+            }
+            instance.lossAccountRequested = false; changed()
+        }
+    }
+    private func runKnownLossRead(_ read: CoreCloudFetchRead, origin: String, instance: Instance) async {
+        var endedWithoutAcceptance = false
+        do {
+            while fetchBusy { let old = version; try await waitForChange(after: old) }
+            guard await valid(origin), !quiescing, !suspended, !suspending, !instance.stopping,
+                  let transport = assetReadTransport else { throw CancellationError() }
+            fetchBusy = true; instance.networks += 1; changed()
+            do {
+                defer { fetchBusy = false; instance.networks -= 1; changed() }
+                _ = try await performFetchRead(read, transport: transport, origin: origin, instance: instance, execution: nil)
+            }
+        } catch { lastFailure = error; endedWithoutAcceptance = true }
+        instance.lossReadTask = nil; changed()
+        // No self-join: the read has released both network counters first.
+        var mustStop = endedWithoutAcceptance
+        if !mustStop { mustStop = !(await valid(origin)) }
+        if mustStop {
+            if let stop = beginStop(origin, reason: .handlerInvalid, policyStop: false) {
+                do { try await stop.value } catch { lastFailure = error }
+            }
+        }
+        // After joining the read and SDK shutdown, refresh isolation and status
+        // on the ordered input lane.
+        await assetReadDidFinish()
+    }
+    public func refreshControlIdentity() async throws {
+        try Task.checkCancellation()
+        guard !quiescing, !suspended, !suspending else { throw CancellationError() }
+        if appOwnsAccountObservation {
+            guard let admit = CloudOriginalCommandProofYield.admission ?? proofAdmission else {
+                throw BridgeError.unavailable(reason: "Ordered cloud account admission unavailable")
+            }
+            // Called only after the original native read's terminal. Drain the
+            // actual SDK callbacks/removal receipts before offering a proof yield.
+            if let origin = current, let instance = owned[origin] {
+                try await instance.engine.waitForEventBookkeeping()
+                try Task.checkCancellation()
+                try await consumePendingUpdates(origin: origin)
+                try await instance.engine.waitForEventBookkeeping()
+            }
+            let outputs = takePolicyOperationOutputs()
+            guard let acknowledge = CloudPolicyOutputAcknowledgement.current ?? proofOutputAcknowledgement else {
+                guard outputs.isEmpty else {
+                    policyOperationOutputs.insert(contentsOf: outputs, at: 0)
+                    throw BridgeError.unavailable(reason: "Cloud outputs require original acknowledgement")
+                }
+                try await admit(CloudOriginalCommandProofYield())
+                try Task.checkCancellation()
+                return
+            }
+            await acknowledge(outputs)
+            try Task.checkCancellation()
+            try await admit(CloudOriginalCommandProofYield())
+            try Task.checkCancellation()
+            return
+        }
+        guard try await refreshPlatformIdentity(intent: nil) else {
+            throw BridgeError.unavailable(reason: "Cloud account proof unavailable")
+        }
+    }
     private func refreshFetchReadIdentity(instance: Instance) async throws {
         let wait = CloudKitNetworkCompletion()
         let task = Task {
             do {
-                try await self.refreshPlatformIdentity(intent: nil)
+                guard self.owned.values.contains(where: { $0 === instance }), !instance.stopping else {
+                    throw CancellationError()
+                }
+                // This lookup is a proof read, not an engine account event;
+                // do not advance the no-state point of the retained FetchRead.
+                try await self.refreshControlIdentity()
                 wait.complete(nil)
             } catch { wait.complete(error) }
         }
         instance.rootReadIdentity = (task, wait)
         defer { instance.rootReadIdentity = nil }
-        // The actual CK read terminal has already drained. Owner revocation
-        // ends this wait and lets fetch's normal defer release BOTH counters.
-        // A provider ignoring cancellation stays fenced by the identity task's
-        // cancellation checks and its original Core-issued read id.
         try await withTaskCancellationHandler {
             try Task.checkCancellation()
             try await wait.drain()
-        } onCancel: {
-            task.cancel()
-            wait.complete(CancellationError())
-        }
+            try Task.checkCancellation()
+        } onCancel: { task.cancel(); wait.complete(CancellationError()) }
     }
 
     public func requestFetch(zones: [String]) async throws { _ = try await fetch(zones: zones) }
@@ -1607,11 +1869,37 @@ public actor CloudKitSyncAdapter {
         }
         return false
     }
+    // Call only between this command's actual completed/ACKed stages. The
+    // busy owner's callbacks stay live and continue to fence its own admission.
+    private func waitForQuiescentFetchDependency() async throws {
+        while fetchBusy {
+            let parked = try await CloudQuiescentDependencyWait.park()
+            do {
+                while fetchBusy { let old = version; try await waitForChange(after: old) }
+            } catch {
+                try? await parked?.revoke()
+                throw error
+            }
+            try await parked?.revoke()
+            try Task.checkCancellation()
+        }
+    }
+    private func reserveUnadmittedPolicyFetch() async throws {
+        try await waitForQuiescentFetchDependency()
+        try Task.checkCancellation()
+        guard !quiescing, !suspended, !suspending else { throw CancellationError() }
+        fetchBusy = true
+    }
     func executePolicyOperation(_ command: CloudPolicyCommand, policy: CoreCloudPolicyService) async throws {
-        // Keep the exact objects through capability creation and its metadata
-        // read. A scheduling stop can release one during either lane await.
-        // Retention permits classification, never a new SDK admission.
+        // Retain this command's originals even while its unadmitted fetch parks.
         let originals = owned
+        let reservedFetch: Bool
+        if case .requestFetch = command.action { reservedFetch = true } else { reservedFetch = false }
+        if reservedFetch { try await reserveUnadmittedPolicyFetch() }
+        defer { if reservedFetch { fetchBusy = false; changed() } }
+
+        // Retention permits classification, never a new SDK admission. Core's
+        // original capability is still validated after the park is revoked.
         guard let execution = try await policy.prepareExecution(command) else { return }
         #if DEBUG
         await policyOperationOriginObserver?()
@@ -1650,7 +1938,7 @@ public actor CloudKitSyncAdapter {
         }
         do {
             switch command.action {
-            case .requestFetch(let zones): _ = try await fetch(zones: scope(zones), origin: origin, execution: execution)
+            case .requestFetch(let zones): _ = try await fetch(zones: scope(zones), origin: origin, execution: execution, reservedFetch: reservedFetch)
             case .requestSend(let zones): try await send(zones: scope(zones), origin: origin, execution: execution)
             default: throw BridgeError.cloudPolicy(.notNativeAction)
             }
@@ -1717,16 +2005,28 @@ public actor CloudKitSyncAdapter {
         guard !quiescing else { throw CancellationError() }
         policyReservationWaiters += 1; changed()
         defer { policyReservationWaiters -= 1; changed() }
-        while exchangeTask != nil || policyReservation != nil {
-            if let running = exchangeTask {
-                let old = version
-                // Preserve the prior worker's actual result; a new policy
-                // exchange starts only after its original completion/drain.
-                _ = try? await running.task.value
-                if exchangeTask?.id == running.id { try await waitForChange(after: old) }
-            } else { let old = version; try await waitForChange(after: old) }
-            try Task.checkCancellation()
-        }
+        repeat {
+            while exchangeTask != nil || policyReservation != nil {
+                let parked = try await CloudQuiescentDependencyWait.park()
+                do {
+                    while exchangeTask != nil || policyReservation != nil {
+                        if let running = exchangeTask {
+                            let old = version
+                            // Join the exact prior worker and its original result.
+                            _ = try? await running.task.value
+                            if exchangeTask?.id == running.id { try await waitForChange(after: old) }
+                        } else { let old = version; try await waitForChange(after: old) }
+                        try Task.checkCancellation()
+                    }
+                } catch {
+                    try? await parked?.revoke()
+                    throw error
+                }
+                try await parked?.revoke()
+            }
+            try await waitForQuiescentFetchDependency()
+        } while exchangeTask != nil || policyReservation != nil
+        try Task.checkCancellation()
         guard !quiescing else { throw CancellationError() }
         let id = UUID(); policyReservation = id; exchangeRunning = true; changed()
         return id
@@ -1740,7 +2040,7 @@ public actor CloudKitSyncAdapter {
     func preparePolicyExchange(execution: CoreCloudPolicyExecution) async throws -> PreparedPolicyExchange {
         guard !quiescing else { throw CancellationError() }
         guard let origin = try await execution.originalSDK() else { throw BridgeError.cloudPolicy(.staleCommand) }
-        while fetchBusy { let old = version; try await waitForChange(after: old) }
+        try await waitForQuiescentFetchDependency()
         try await waitForDeferredUpdates(origin: origin)
         try await execution.validate()
         guard await valid(origin) else { throw BridgeError.cloudPolicy(.staleCommand) }

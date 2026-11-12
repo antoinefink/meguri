@@ -23,6 +23,45 @@ enum CloudIdentityReadTrigger: CaseIterable, Sendable, Equatable {
 }
 
 extension EventTests {
+    @Test func cancelledIdentityWaitReturnsBeforeIgnoringProviderAndLateReplyCannotRotateSuccessor() async throws {
+        try await withCloudKitFixture { f in
+            let gate = CloudCallbackGate()
+            await f.factory.appendAccountRead(.success(.init(status: .noAccount, identity: nil)), gate: gate)
+            let returned = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let original = Task {
+                defer { returned.continuation.yield(()) }
+                do { try await f.adapter.foregroundReturned(); Issue.record("Cancelled original read succeeded") }
+                catch is CancellationError { }
+            }
+            do {
+                try await gate.waitForArrival()
+                original.cancel()
+                // This original completion must precede opening the provider.
+                try await withThrowingTaskGroup(of: Void.self) { group in
+                    group.addTask {
+                        var iterator = returned.stream.makeAsyncIterator()
+                        guard await iterator.next() != nil else { throw CloudTaskOriginalFailure() }
+                    }
+                    group.addTask {
+                        try await Task.sleep(for: .seconds(10))
+                        throw CloudTaskOriginalFailure()
+                    }
+                    defer { group.cancelAll() }
+                    _ = try await group.next()
+                }
+                await f.factory.appendAccountRead(.success(.init(status: .available, identity: Data("synthetic-account-A".utf8))))
+                try await f.adapter.foregroundReturned()
+                let retained = await f.adapter.retainedInstanceIDs()
+                await gate.open()
+                _ = await original.result
+                #expect(await f.adapter.retainedInstanceIDs() == retained)
+            } catch {
+                await gate.open(); original.cancel(); _ = await original.result
+                throw error
+            }
+        }
+    }
+
     /// V3.4/V9.1: stop joins no paused resolver and revokes every read intent.
     @Test(arguments: CloudIdentityReadTrigger.allCases)
     func cloudKitStopDuringIdentityReadCannotCreateAnSDK(trigger: CloudIdentityReadTrigger) async throws {
@@ -745,6 +784,10 @@ extension EventTests {
     func cloudKitManualSameIdentityNoStatePointRejectsEarlierRootFetch(afterRootDid: Bool) async throws {
         let transport = CloudKitMissingActiveTransport()
         try await withCloudKitFixture(assetReadTransport: transport) { f in
+            // Sign-in carries its identity directly; the later missing Active
+            // reply needs one actual provider proof before K12.5 isolation.
+            await f.factory.appendAccountRead(.success(.init(status: .available,
+                identity: Data("synthetic-account-A".utf8))))
             let engine = try await f.engine()
             let before = try await f.core.fetchDrains()
             let guardBefore = try await f.core.currentGuard()
@@ -1310,6 +1353,9 @@ extension EventTests {
     /// R3/K2/K13.1: SDK deletion is persisted before any later cursor delivery.
     @Test func cloudKitDeletedActiveCannotBeReconfirmedBySuccessfulDrainOrReopen() async throws {
         try await withCloudKitFixture(keepAlive: true) { f in
+            // A fetched Active deletion requires a post-loss account read.
+            await f.factory.appendAccountRead(.success(.init(status: .available,
+                identity: Data("synthetic-account-A".utf8))))
             let engine = try await f.engine()
             let before = try await f.core.durableSnapshot()
             #expect(before.rootEnvelope != nil)
@@ -1320,6 +1366,8 @@ extension EventTests {
             await engine.emitRetained(.didFetch(groupID: "delete-root", reason: .scheduled), label: "deletedRootDrained")
             await engine.emitRetained(.stateUpdate(Data([0xde, 0x1e])), label: "cursorAfterDeletion")
             try await f.adapter.waitForIdle()
+            let deletionFailure = await f.adapter.lastFailure
+            #expect(deletionFailure == nil, "Fetched Active deletion completion: \(String(describing: deletionFailure))")
             let deleted = try await f.core.durableSnapshot()
             #expect(deleted.rootEnvelope == nil && deleted.rootSystemFields == nil)
             #expect(deleted.serialization == before.serialization)
@@ -1601,6 +1649,93 @@ extension EventTests {
                 try? await adapter.stop()
                 throw error
             }
+        }
+    }
+}
+
+extension EventTests {
+    /// K12.5/V2.2/V3.1: original callback returns while its actual account read
+    /// is held; no following opaque state can pass the unaccepted loss.
+    @Test func cloudKitKnownRootLossReturnsBeforeFreshAccountReadAndFencesCursor() async throws {
+        try await withCloudKitFixture { f in
+            let engine = try await f.engine()
+            let before = try await f.core.durableSnapshot()
+            let accountReadsBeforeLoss = await f.factory.resolvedAccountReadCount()
+            let gate = CloudCallbackGate()
+            await f.factory.appendAccountRead(.success(.init(status: .available,
+                identity: Data("synthetic-account-A".utf8))), gate: gate)
+            await engine.emitRetained(.fetchedZoneLosses([.init(zone: "meguri-root", cause: .purged)]), label: "knownRootLoss")
+            try await gate.waitForArrival()
+            await engine.emitRetained(.stateUpdate(Data("must-not-pass-loss".utf8)), label: "cursorBehindLoss")
+            #expect(try await f.core.durableSnapshot().serialization == before.serialization)
+            await gate.open()
+            try await f.adapter.waitForIdle()
+            let lossFailure = await f.adapter.lastFailure
+            #expect(lossFailure == nil, "Known-root-loss completion: \(String(describing: lossFailure))")
+            #expect(await f.factory.resolvedAccountReadCount() == accountReadsBeforeLoss + 1,
+                "The following opaque cursor supplies no new loss requiring another provider read")
+            do { try await f.core.validateSDK(engine.instanceID); Issue.record("Known root loss retained SDK authority") }
+            catch { }
+            #expect(await f.adapter.retainedInstanceIDs().isEmpty)
+            let trace = await engine.recordedTrace()
+            let returned = try #require(trace.firstIndex(of: .eventReturned("knownRootLoss")))
+            let cancelled = try #require(trace.firstIndex(of: .cancelEntered))
+            let cancelReturned = try #require(trace.firstIndex(of: .cancelReturned))
+            let released = try #require(trace.firstIndex(of: .released))
+            #expect(returned < cancelled && cancelled < cancelReturned && cancelReturned < released)
+            let after = try await f.core.durableSnapshot()
+            #expect(after.serialization == before.serialization)
+            #expect(after.entities == before.entities)
+        }
+    }
+
+    /// K12.5/V9.1: a second actual loss staged after read A began needs B's
+    /// fresh proof; coalescing bookkeeping must not reuse the held old read.
+    @Test func cloudKitNewRootLossWhileAccountReadHeldRequiresFreshProof() async throws {
+        try await withCloudKitFixture { f in
+            let engine = try await f.engine()
+            let before = try await f.core.durableSnapshot()
+            let pending = await engine.pendingRecordZoneChanges()
+            let readsBefore = await f.factory.resolvedAccountReadCount()
+            let first = CloudCallbackGate(), second = CloudCallbackGate()
+            let account = CloudResolvedAccount(status: .available, identity: Data("synthetic-account-A".utf8))
+            await f.factory.appendAccountRead(.success(account), gate: first)
+            await f.factory.appendAccountRead(.success(account), gate: second)
+            try await withCloudTask(gates: [first, second], operation: {
+                await engine.emitRetained(.fetchedZoneLosses([.init(zone: "meguri-root", cause: .deleted)]), label: "firstRootLoss")
+                try await first.waitForArrival()
+                try await f.adapter.waitForIdle()
+            }, whileRunning: {
+                try await first.waitForArrival()
+                await engine.emitRetained(.fetchedZoneLosses([.init(zone: "meguri-root", cause: .purged)]), label: "newRootLoss")
+                try await second.waitForArrival()
+                #expect(await f.factory.resolvedAccountReadCount() == readsBefore + 2)
+                try await f.core.validateSDK(engine.instanceID)
+                #expect(await f.adapter.retainedInstanceIDs() == [engine.instanceID])
+                #expect(await engine.pendingRecordZoneChanges() == pending)
+                await engine.emitRetained(.stateUpdate(Data("cursor-behind-new-loss".utf8)), label: "cursorBehindNewLoss")
+                #expect(try await f.core.durableSnapshot().serialization == before.serialization)
+                // A's cancelled provider can return while B still owns proof.
+                await first.open()
+                try await f.core.validateSDK(engine.instanceID)
+                #expect(await engine.pendingRecordZoneChanges() == pending)
+                await second.open()
+            })
+            let failure = await f.adapter.lastFailure
+            #expect(failure == nil, "Fresh loss proof completion: \(String(describing: failure))")
+            #expect(await f.factory.resolvedAccountReadCount() == readsBefore + 2)
+            #expect(await f.adapter.retainedInstanceIDs().isEmpty)
+            let trace = await engine.recordedTrace()
+            let returned = try #require(trace.firstIndex(of: .eventReturned("newRootLoss")))
+            let cancelled = try #require(trace.firstIndex(of: .cancelEntered))
+            let cancelReturned = try #require(trace.firstIndex(of: .cancelReturned))
+            let released = try #require(trace.firstIndex(of: .released))
+            #expect(returned < cancelled && cancelled < cancelReturned && cancelReturned < released)
+            do { try await f.core.validateSDK(engine.instanceID); Issue.record("Fresh root loss retained SDK authority") }
+            catch { }
+            let after = try await f.core.durableSnapshot()
+            #expect(after.serialization == before.serialization)
+            #expect(after.entities == before.entities)
         }
     }
 }

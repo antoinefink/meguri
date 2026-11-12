@@ -28,7 +28,7 @@ public struct CloudBuildConfiguration: Sendable {
 // This seam substitutes transport only in focused owner tests. Production
 // constructs NativeCollectionCloudBackend and the retained Rust services below.
 @MainActor
-protocol SyncCoordinatorBackend: AnyObject {
+protocol SyncCoordinatorBackend: AnyObject, Sendable {
     var connection: CoreCloudConnectionService? { get }
     var own: CloudOwnExecutor? { get }
     func input(_ event: CloudPolicyEvent) async throws -> CloudPolicyOutput
@@ -45,6 +45,8 @@ protocol SyncCoordinatorBackend: AnyObject {
     // cancellation still returns its original failure through result admission.
     func prepareAccountRead(_ read: UInt64) async -> @MainActor (Bool) async -> SyncCommandResult
     func takeAccountReadRequest() async -> Bool
+    func setProofAdmission(_ admission: @escaping @Sendable (CloudOriginalCommandProofYield) async throws -> Void,
+                           acknowledgeOutputs: @escaping @Sendable ([CloudPolicyOutput]) async -> Void) async
     func freezeForSuspend() async throws
     func resumeAfterCoreResume() async
     func quiesce() async throws
@@ -70,6 +72,8 @@ extension SyncCoordinatorBackend {
         return { _ in result }
     }
     func takeAccountReadRequest() async -> Bool { false }
+    func setProofAdmission(_ admission: @escaping @Sendable (CloudOriginalCommandProofYield) async throws -> Void,
+                           acknowledgeOutputs: @escaping @Sendable ([CloudPolicyOutput]) async -> Void) async {}
     func freezeForSuspend() async throws {}
     func resumeAfterCoreResume() async {}
 }
@@ -192,12 +196,17 @@ public final class SyncCoordinator {
                              acknowledged: CheckedContinuation<Bool, Never>)
         case accountOutputsReturned(UInt64, backend: any SyncCoordinatorBackend, generation: UInt64, revision: UInt64,
                                     result: SyncCommandResult, acknowledged: CheckedContinuation<Bool, Never>)
-        case resumeBinding(CloudConnectionPreview, service: CoreCloudConnectionService, generation: UInt64, revision: UInt64,
+        case resumeBinding(CloudConnectionPreview, preparation: ResumePreparation, service: CoreCloudConnectionService, generation: UInt64, revision: UInt64,
                            acknowledged: CheckedContinuation<ResumeAdmission, any Error>)
         case nativeInput(@Sendable () async throws -> CloudPolicyOutput, generation: UInt64, revision: UInt64,
                          phaseOwner: UUID?, acknowledged: CheckedContinuation<CloudPolicyOutput, any Error>)
         case nativeInputReturned(CloudPolicyOutput, acknowledged: CheckedContinuation<CloudPolicyOutput, any Error>)
         case corePhaseFinished(UUID)
+        case proofYield(CloudOriginalCommandProofYield, owner: ProofOwner?, backend: any SyncCoordinatorBackend, generation: UInt64, revision: UInt64)
+        case proofAccountRead
+        case quiescentDependency(CloudQuiescentDependencyWait, CloudQuiescentDependencyWait.Phase, owner: UUID,
+                             backend: any SyncCoordinatorBackend, generation: UInt64, revision: UInt64,
+                             acknowledged: CheckedContinuation<Void, any Error>)
         case corePrepared(acknowledged: CheckedContinuation<Void, Never>)
         case ownCore(UUID, backend: any SyncCoordinatorBackend, generation: UInt64, revision: UInt64,
                      acknowledged: CheckedContinuation<Void, any Error>)
@@ -205,13 +214,23 @@ public final class SyncCoordinator {
         case reconcile(any SyncCoordinatorBackend, acknowledged: CheckedContinuation<Void, Never>?)
         case barrier(CheckedContinuation<Void, Never>)
     }
-    private enum ResumeAdmission { case pending, cancelled, resumed }
+    // Created with the consumed Resume preview before its task does any work.
+    // The input lane revokes it before the actual Core Resume call begins.
+    private final class ResumePreparation { let id = UUID() }
+    private enum ResumeAdmission { case pending, cancelled, resumed(CloudOriginalCommandProofYield) }
+    private enum ProofOwner: Equatable {
+        case command(UUID), own(UUID)
+        var commandID: UUID? { if case .command(let id) = self { id } else { nil } }
+    }
     #if DEBUG
     enum CausalBoundary {
         case commandResultEnqueue, commandAcknowledgementJoined
         case proofResultReduced, proofAcknowledgementSending
         case ownCoreStarted
+        case dependencyRevocationJoined(UUID)
+        case corePredecessorWaiting(CloudPolicyCommand), corePredecessorReleased(CloudPolicyCommand)
     }
+    @ObservationIgnored var observeQuiescentDependency: (@MainActor (Bool) -> Void)?
     @ObservationIgnored var observeCausalBoundary: (@MainActor (CausalBoundary, CloudPolicyCommand?) -> Void)?
     #endif
     enum ResumePolicyDrainStage { case waiting, finished }
@@ -224,10 +243,15 @@ public final class SyncCoordinator {
     @ObservationIgnored var observePublicationConfirmation: (@MainActor () async -> Void)?
     private struct Issued { let command: CloudPolicyCommand; let generation: UInt64; let sequence: UInt64 }
     @MainActor private final class CorePhase {
+        let command: CloudPolicyCommand?
+        init(command: CloudPolicyCommand? = nil) { self.command = command }
         private var finished = false
         private var waiters: [CheckedContinuation<Void, Never>] = []
-        func wait() async {
-            if !finished { await withCheckedContinuation { waiters.append($0) } }
+        func wait(waiting: () -> Void) async {
+            if !finished {
+                waiting()
+                await withCheckedContinuation { waiters.append($0) }
+            }
         }
         func finish() {
             finished = true
@@ -272,6 +296,16 @@ public final class SyncCoordinator {
     private var quitCompletion: (@MainActor () -> Void)?
     private var accountTask: Task<Void, Never>?
     private var pendingAccountRead: UInt64?
+    private struct ProofWait {
+        let proof: CloudOriginalCommandProofYield
+        let owner: ProofOwner?
+        var read: UInt64?
+    }
+    private var proofWaits: [UUID: ProofWait] = [:]
+    private var quiescentDependencies: [UUID: UUID] = [:]
+    private var ownOwner: UUID?
+    private var ownResumePreparation: (owner: UUID, token: ResumePreparation)?
+    private var heldAccountCompletion: Input?
     private var readyPreviewOwner: (service: CoreCloudConnectionService, generation: UInt64, revision: UInt64, id: UUID)?
     private var readingPreview = false
     // A retained acceptance, not preview/view ownership. Nil is distinct from
@@ -392,6 +426,7 @@ public final class SyncCoordinator {
                 // it retained on close failure; the next lane must drain it.
                 backend = value
                 backendRetired = false
+                await installProofAdmission(value, generation: generation, revision: revision)
                 guard !closing, !Task.isCancelled, !replacing,
                       revision == hostRevision, generation == self.generation else {
                     try await value.close()
@@ -541,7 +576,7 @@ public final class SyncCoordinator {
         let expected = generation, revision = hostRevision
         connectionFailure = nil
         readingPreview = true
-        ownTask = Task {
+        startOwnTask(backend: backend, generation: expected, revision: revision) { [self] in
             defer { readingPreview = false; finishOwnWork() }
             do {
                 let work = try await own.preview()
@@ -641,7 +676,8 @@ public final class SyncCoordinator {
         }
         let expected = generation, revision = hostRevision
         preview = nil; readyPreviewOwner = nil
-        ownTask = Task {
+        let resumePreparation: ResumePreparation? = intent == .resume ? ResumePreparation() : nil
+        startOwnTask(backend: backend, generation: expected, revision: revision, resumePreparation: resumePreparation) { [self] in
             var publicationAccepted = false
             var publicationResultDelivered = false
             defer {
@@ -658,6 +694,7 @@ public final class SyncCoordinator {
                     try await connection.cancelPreview(handle)
                     return
                 }
+                var resumeProof: CloudOriginalCommandProofYield?
                 switch intent {
                 case .adoption: _ = try await connection.confirmAdoption(handle)
                 case .publication:
@@ -677,11 +714,13 @@ public final class SyncCoordinator {
                         publicationConfirmation?(.accepted)
                     }
                 case .resume:
-                    guard try await resumeBindingAfterPolicyDrain(handle, service: connection,
+                    guard let resumePreparation,
+                          let proof = try await resumeBindingAfterPolicyDrain(handle, preparation: resumePreparation, service: connection,
                         generation: expected, revision: revision) else {
                         try await connection.cancelPreview(handle)
                         return
                     }
+                    resumeProof = proof
                 }
                 guard expected == generation, revision == hostRevision,
                       self.backend === backend, backend.connection === connection else { return }
@@ -694,8 +733,8 @@ public final class SyncCoordinator {
                     automatic: settings.automatic, media: settings.media))
                 guard !Task.isCancelled, !closing, !suspended, !replacing, !settings.paused else { return }
                 if intent == .resume {
-                    enqueue(.account(false))
-                    await prepareConnectionAuthority()
+                    guard let resumeProof, let admission = CloudOriginalCommandProofYield.admission else { throw CancellationError() }
+                    try await admission(resumeProof)
                 } else { await waitForInputs() }
                 guard !Task.isCancelled, !closing, !suspended, !replacing, !settings.paused,
                       expected == generation, revision == hostRevision,
@@ -728,15 +767,15 @@ public final class SyncCoordinator {
         }
         await ownTask?.value
     }
-    private func resumeBindingAfterPolicyDrain(_ handle: CloudConnectionPreview, service: CoreCloudConnectionService,
-                                              generation expected: UInt64, revision: UInt64) async throws -> Bool {
+    private func resumeBindingAfterPolicyDrain(_ handle: CloudConnectionPreview, preparation: ResumePreparation, service: CoreCloudConnectionService,
+                                              generation expected: UInt64, revision: UInt64) async throws -> CloudOriginalCommandProofYield? {
         while true {
             let admission: ResumeAdmission = try await withCheckedThrowingContinuation {
-                enqueue(.resumeBinding(handle, service: service, generation: expected, revision: revision, acknowledged: $0))
+                enqueue(.resumeBinding(handle, preparation: preparation, service: service, generation: expected, revision: revision, acknowledged: $0))
             }
             switch admission {
-            case .resumed: return true
-            case .cancelled: return false
+            case .resumed(let proof): return proof
+            case .cancelled: return nil
             case .pending:
                 observeResumePolicyDrain?(.waiting)
                 await prepareConnectionAuthority()
@@ -753,7 +792,7 @@ public final class SyncCoordinator {
               recovery?.adoptionTransportWait == true, let operation = recovery?.operation,
               let backend, let connection = backend.connection, let own = backend.own else { return }
         let expected = generation, revision = hostRevision
-        ownTask = Task {
+        startOwnTask(backend: backend, generation: expected, revision: revision) { [self] in
             defer { finishOwnWork() }
             do {
                 let resumed = try await own.resumeAdoption(operation)
@@ -773,7 +812,7 @@ public final class SyncCoordinator {
         guard !closing, !suspended, !replacing, !settings.paused, !awaitingInitialOwnProof,
               initialOwnDrain == nil, !initialActivationReturned, ownTask == nil, let backend, let connection = backend.connection else { return }
         let expected = generation, revision = hostRevision
-        ownTask = Task {
+        startOwnTask(backend: backend, generation: expected, revision: revision) { [self] in
             defer { finishOwnWork() }
             do {
                 if initialAdoptionEnabledBefore == nil { try await connection.trigger() }
@@ -789,8 +828,26 @@ public final class SyncCoordinator {
             }
         }
     }
+    private func startOwnTask(backend original: any SyncCoordinatorBackend, generation expected: UInt64, revision: UInt64,
+                              resumePreparation: ResumePreparation? = nil, operation: @escaping @MainActor () async -> Void) {
+        let id = UUID()
+        ownOwner = id
+        ownResumePreparation = resumePreparation.map { (id, $0) }
+        ownTask = Task { [self] in
+            let admission: @Sendable (CloudOriginalCommandProofYield) async throws -> Void = { [self] proof in
+                try await admitProof(proof, owner: .own(id), backend: original, generation: expected, revision: revision)
+            }
+            await CloudOriginalCommandProofYield.$admission.withValue(admission) { await operation() }
+        }
+    }
     private func finishOwnWork() {
-        ownTask = nil
+        if let id = ownOwner {
+            for wait in proofWaits.values.filter({ $0.owner == .own(id) }) {
+                proofWaits.removeValue(forKey: wait.proof.id); wait.proof.finish(CancellationError())
+            }
+        }
+        ownResumePreparation = nil; ownOwner = nil; ownTask = nil
+        retryAccountCompletion()
         if ownWorkRequested, !closing, !replacing, !suspended, !settings.paused, !awaitingInitialOwnProof, initialOwnDrain == nil { ownWorkRequested = false; resumeConnection() }
     }
     public func cancelConnectionOperation() async {
@@ -964,6 +1021,7 @@ public final class SyncCoordinator {
         await drainOperations()
         suspended = true
         accountTask?.cancel()
+        revokeProofWaits()
         await waitForInputs()
         do {
             try await backend?.freezeForSuspend()
@@ -1008,6 +1066,70 @@ public final class SyncCoordinator {
         }
     }
 
+    private func installProofAdmission(_ original: any SyncCoordinatorBackend, generation expected: UInt64, revision: UInt64) async {
+        await original.setProofAdmission({ [weak self, weak original] proof in
+            guard let self, let original else { throw CancellationError() }
+            try await self.admitProof(proof, owner: nil, backend: original, generation: expected, revision: revision)
+        }, acknowledgeOutputs: { [weak self] outputs in
+            guard let self else { return }
+            await self.acknowledgeProofOutputs(outputs, generation: expected, revision: revision)
+        })
+    }
+    private func acknowledgeProofOutputs(_ outputs: [CloudPolicyOutput], generation expected: UInt64, revision: UInt64) async {
+        await withCheckedContinuation { acknowledged in
+            enqueue(.result(.init(outputs: outputs, error: nil, deferred: false), generation: expected, revision: revision,
+                shutdownCancelled: false, acknowledged: acknowledged))
+        }
+        await waitForInputs()
+    }
+    private func admitProof(_ proof: CloudOriginalCommandProofYield, owner: ProofOwner?, backend original: any SyncCoordinatorBackend,
+                            generation expected: UInt64, revision: UInt64) async throws {
+        try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            enqueue(.proofYield(proof, owner: owner, backend: original, generation: expected, revision: revision))
+            try await proof.wait()
+        } onCancel: {
+            proof.finish(CancellationError())
+            Task { @MainActor [weak self] in self?.retryAccountCompletion() }
+        }
+    }
+    // Retain every original task. Only its typed terminal/ACK yield or exact
+    // quiescent dependency park may admit account proof. A live own task fences
+    // admission until its own yield; another task's yield cannot cover it.
+    private var commandsAdmitAccountProof: Bool {
+        operationTasks.keys.allSatisfy { id in
+            quiescentDependencies.values.contains(id) || proofWaits.values.contains { $0.owner == .command(id) && $0.proof.isPending }
+        } && (ownTask == nil || ownOwner.map { id in
+            ownResumePreparation?.owner == id || proofWaits.values.contains { $0.owner == .own(id) && $0.proof.isPending }
+        } == true)
+    }
+    private func containsProofOwner(_ owner: ProofOwner?) -> Bool {
+        switch owner {
+        case .command(let id): operationTasks[id] != nil
+        case .own(let id): ownOwner == id && ownTask != nil
+        case nil: true
+        }
+    }
+    private func retryAccountCompletion() {
+        if let held = heldAccountCompletion {
+            heldAccountCompletion = nil
+            enqueue(held)
+        }
+        requestProofReadIfReady()
+    }
+    private func requestProofReadIfReady() {
+        guard !closing, !suspended, !replacing, accountTask == nil, pendingAccountRead == nil,
+              commandsAdmitAccountProof,
+              proofWaits.values.contains(where: { $0.proof.isPending && $0.read == nil }),
+              !inputQueue.contains(where: { if case .proofAccountRead = $0 { true } else { false } }) else { return }
+        enqueue(.proofAccountRead)
+    }
+    private func revokeProofWaits() {
+        for wait in proofWaits.values { wait.proof.finish(CancellationError()) }
+        proofWaits.removeAll()
+        retryAccountCompletion()
+    }
+
     private func enqueue(_ input: Input) {
         inputQueue.append(input)
         #if DEBUG
@@ -1024,6 +1146,8 @@ public final class SyncCoordinator {
         guard inputTask == nil else { return }
         inputTask = Task {
             defer { inputTask = nil }
+            await CloudOriginalCommandProofYield.$admission.withValue(nil) {
+            await CloudQuiescentDependencyWait.$transition.withValue(nil) {
             await SyncCommandTaskContext.$current.withValue(nil) {
                 while !inputQueue.isEmpty {
                     let index: Int
@@ -1034,6 +1158,8 @@ public final class SyncCoordinator {
                         guard let ready = inputQueue.firstIndex(where: {
                             switch $0 {
                             case .result, .corePrepared, .ownCoreReturned, .corePhaseFinished: true
+                            case .proofYield(_, let owner, _, _, _): owner?.commandID.map { corePhase[$0] != nil } == true
+                            case .quiescentDependency: true
                             case .nativeInput(_, _, _, let owner, _): owner.map { corePhase[$0] != nil } == true
                             default: false
                             }
@@ -1043,10 +1169,44 @@ public final class SyncCoordinator {
                     await reduce(inputQueue.remove(at: index))
                 }
             }
+            }
+            }
         }
     }
     private func reduce(_ input: Input) async {
         switch input {
+        case .proofYield(let proof, let owner, let original, let expected, let revision):
+            guard proof.isPending, !closing, !suspended, !replacing, !backendRetired,
+                  expected == generation, revision == hostRevision, backend === original,
+                  containsProofOwner(owner) else {
+                proof.finish(CancellationError()); return
+            }
+            proofWaits[proof.id] = ProofWait(proof: proof, owner: owner)
+            if let id = owner?.commandID { await reduce(.corePhaseFinished(id)) }
+            retryAccountCompletion()
+        case .quiescentDependency(let wait, let phase, let owner, let original, let expected, let revision, let acknowledged):
+            switch phase {
+            case .revoke:
+                quiescentDependencies.removeValue(forKey: wait.id)
+                #if DEBUG
+                observeQuiescentDependency?(false)
+                #endif
+                acknowledged.resume()
+            case .park:
+                guard !closing, !suspended, !replacing, !backendRetired,
+                      expected == generation, revision == hostRevision, backend === original,
+                      operationTasks[owner] != nil else { acknowledged.resume(throwing: CancellationError()); return }
+                quiescentDependencies[wait.id] = owner
+                #if DEBUG
+                observeQuiescentDependency?(true)
+                #endif
+                retryAccountCompletion()
+                acknowledged.resume()
+            }
+        case .proofAccountRead:
+            guard accountTask == nil, pendingAccountRead == nil, commandsAdmitAccountProof,
+                  proofWaits.values.contains(where: { $0.proof.isPending && $0.read == nil }) else { return }
+            await reduce(.account(false))
         case .nativeInput(let work, let expected, let revision, let owner, let acknowledged):
             // A failed Core command has already returned its actual result and
             // joined ACK. Hand its phase to this required follow-up input turn
@@ -1070,6 +1230,7 @@ public final class SyncCoordinator {
                 pendingActionLists.removeAll()
                 for list in lists { startActions(list.issued, backend: list.backend, revision: list.revision) }
             }
+            retryAccountCompletion()
         case .ownCore(let id, let original, let expected, let revision, let acknowledged):
             guard !closing, !suspended, !replacing, ownTask?.isCancelled == false,
                   expected == generation, revision == hostRevision, backend === original, !backendRetired else {
@@ -1101,8 +1262,11 @@ public final class SyncCoordinator {
                 acknowledged.resume(returning: true)
                 return
             }
-            guard operationTasks.isEmpty, !inputQueue.contains(where: { if case .result = $0 { true } else { false } }) else {
-                acknowledged.resume(returning: false)
+            guard commandsAdmitAccountProof, !inputQueue.contains(where: { if case .result = $0 { true } else { false } }) else {
+                // Keep this exact resolved app read and its completion. A proof
+                // yield wakes admission without joining the yielding task.
+                heldAccountCompletion = input
+                observeAccountPolicyDrain?(.waiting)
                 return
             }
             // Lookup has returned, but no proof has been committed yet. Only
@@ -1144,13 +1308,21 @@ public final class SyncCoordinator {
             if result.error == nil, result.accountVerified {
                 startRetainedRecoveryAfterProof(original, generation: expected, revision: revision)
             }
+            let waiting = proofWaits.values.filter {
+                $0.read == read || ($0.read == nil && (result.error != nil || !result.accountVerified))
+            }
+            for wait in waiting {
+                proofWaits.removeValue(forKey: wait.proof.id)
+                wait.proof.finish(result.error ?? (result.accountVerified ? nil : BridgeError.unavailable(reason: "Cloud account proof unavailable")))
+            }
             #if DEBUG
             observeCausalBoundary?(.proofAcknowledgementSending, nil)
             #endif
             acknowledged.resume(returning: true)
-        case .resumeBinding(let handle, let service, let expected, let revision, let acknowledged):
+        case .resumeBinding(let handle, let preparation, let service, let expected, let revision, let acknowledged):
             guard !closing, !suspended, !replacing, !settings.paused, ownTask?.isCancelled == false,
-                  expected == generation, revision == hostRevision, backend?.connection === service else {
+                  expected == generation, revision == hostRevision, backend?.connection === service,
+                  ownResumePreparation?.owner == ownOwner, ownResumePreparation?.token === preparation else {
                 acknowledged.resume(returning: .cancelled)
                 return
             }
@@ -1165,9 +1337,10 @@ public final class SyncCoordinator {
             // only after every old command result was acknowledged, and keep
             // policy/account inputs ordered behind the actual native call.
             observeResumePolicyDrain?(.finished)
+            ownResumePreparation = nil // atomic revocation before Core/SDK work
             do {
-                try await service.resumeBinding(handle)
-                acknowledged.resume(returning: .resumed)
+                let proof = try await service.resumeBindingForAccountProof(handle)
+                acknowledged.resume(returning: .resumed(proof))
             } catch { acknowledged.resume(throwing: error) }
         case .result(let result, let expected, let revision, let shutdownCancelled, let supersededAccountCancellation, let acknowledged):
             if expected == generation, revision == hostRevision, !replacing, !suspended {
@@ -1193,6 +1366,7 @@ public final class SyncCoordinator {
                 }
             }
             acknowledged?.resume()
+            retryAccountCompletion()
         case .replaced(let next):
             guard next > generation || (next == generation && setupState == .failed) else { return }
             if desiredVisibleMedia?.generation != next { desiredVisibleMedia = nil }
@@ -1247,6 +1421,11 @@ public final class SyncCoordinator {
                 // before awaiting any network resolution. A later signal makes
                 // an earlier in-flight reply stale immediately.
                 pendingAccountRead = try await backend.beginAccountRead(transition: transition)
+                // These are real Core-issued generations on the existing lane.
+                // A later app observation supersedes a proof waiter too.
+                for key in Array(proofWaits.keys) where proofWaits[key]?.proof.isPending == true {
+                    proofWaits[key]?.read = pendingAccountRead
+                }
                 if awaitingInitialOwnProof { initialOwnResumeRead = pendingAccountRead }
                 startAccountRead()
             } catch {
@@ -1254,6 +1433,8 @@ public final class SyncCoordinator {
                 DebugCloudDiagnostics.record(.beginAccountRead, error: error)
                 #endif
                 operationFailed = true
+                for wait in proofWaits.values { wait.proof.finish(error) }
+                proofWaits.removeAll()
             }
         }
     }
@@ -1354,12 +1535,19 @@ public final class SyncCoordinator {
             else { pendingActionLists.append((ordered, backend, revision)) }
         }
     }
+    private func transitionQuiescentDependency(_ wait: CloudQuiescentDependencyWait, phase: CloudQuiescentDependencyWait.Phase,
+                                               owner: UUID, backend: any SyncCoordinatorBackend, generation: UInt64, revision: UInt64) async throws {
+        try await withCheckedThrowingContinuation { acknowledged in
+            enqueue(.quiescentDependency(wait, phase, owner: owner, backend: backend,
+                generation: generation, revision: revision, acknowledged: acknowledged))
+        }
+    }
     private func startActions(_ issued: [Issued], backend: any SyncCoordinatorBackend, revision: UInt64,
                               separateOperation: Bool = false, corePhaseOwner: Bool = false) {
         let id = UUID()
         let predecessor = corePhaseOwner ? lastCorePhase : nil
         if corePhaseOwner {
-            let phase = CorePhase()
+            let phase = CorePhase(command: issued.first?.command)
             corePhase[id] = phase; lastCorePhase = phase
         }
         let context = SyncCommandTaskContext(generation: generation, revision: revision)
@@ -1373,10 +1561,34 @@ public final class SyncCoordinator {
         operationTasks[id] = Task { [self] in
             defer {
                 quitOperationIDs.remove(id)
+                quiescentDependencies = quiescentDependencies.filter { $0.value != id }
                 operationTasks.removeValue(forKey: id); operationContexts.removeValue(forKey: id)
+                for wait in proofWaits.values.filter({ $0.owner == .command(id) }) {
+                    proofWaits.removeValue(forKey: wait.proof.id)
+                    wait.proof.finish(CancellationError())
+                }
+                retryAccountCompletion()
                 if corePhaseOwner { enqueue(.corePhaseFinished(id)) }
             }
-            await predecessor?.wait()
+            // An unfinished predecessor still owns its real Core/result ACK
+            // prefix. Its ACK/corePrepared/proofYield releases this phase on the
+            // ordered lane; waiting B supplies no admission exemption.
+            await predecessor?.wait {
+                #if DEBUG
+                if let original = predecessor?.command {
+                    observeCausalBoundary?(.corePredecessorWaiting(original), issued.first?.command)
+                }
+                #endif
+            }
+            #if DEBUG
+            if let original = predecessor?.command {
+                observeCausalBoundary?(.corePredecessorReleased(original), issued.first?.command)
+            }
+            #endif
+            let proofAdmission: @Sendable (CloudOriginalCommandProofYield) async throws -> Void = { [self] proof in
+                try await admitProof(proof, owner: .command(id), backend: backend, generation: context.generation, revision: revision)
+            }
+            await CloudOriginalCommandProofYield.$admission.withValue(proofAdmission) {
             await SyncCommandTaskContext.$current.withValue(context) {
                 for value in issued {
                     let command = value.command
@@ -1391,7 +1603,17 @@ public final class SyncCoordinator {
                         }
                     }
                     var result: SyncCommandResult
-                    result = await backend.execute(command, corePrepared: { [self] in
+                    let park: @Sendable (CloudQuiescentDependencyWait, CloudQuiescentDependencyWait.Phase) async throws -> Void = { [self] wait, phase in
+                        try await transitionQuiescentDependency(wait, phase: phase, owner: id, backend: backend,
+                            generation: value.generation, revision: revision)
+                        #if DEBUG
+                        if case .revoke = phase {
+                            await MainActor.run { self.observeCausalBoundary?(.dependencyRevocationJoined(wait.id), command) }
+                        }
+                        #endif
+                    }
+                    result = await CloudQuiescentDependencyWait.$transition.withValue(park) {
+                    await backend.execute(command, corePrepared: { [self] in
                         // The qualified local cleanup pass returned; inventory
                         // remains owned by the original command task.
                         await withCheckedContinuation { enqueue(.corePrepared(acknowledged: $0)) }
@@ -1413,6 +1635,7 @@ public final class SyncCoordinator {
                                 phaseOwner: corePhaseOwner ? id : nil, acknowledged: acknowledged))
                         }
                     })
+                    }
                     // The native executor validates control capabilities as well
                     // as network work. UI effects occur only after that admission.
                     if result.error == nil, revision == hostRevision {
@@ -1464,6 +1687,7 @@ public final class SyncCoordinator {
                     }
                 }
             }
+            }
         }
     }
     private func replaceBackend(after originalAttachment: Task<Void, Never>?) async {
@@ -1472,6 +1696,7 @@ public final class SyncCoordinator {
         guard platformPrepared else { return }
         for task in operationTasks.values { task.cancel() }
         accountTask?.cancel()
+        revokeProofWaits()
         await initialOwnDrain?.value
         // Activation is a local Rust call, with no held SDK callback. Waiting
         // for that call cannot wait for this replacement task. All transport
@@ -1501,6 +1726,7 @@ public final class SyncCoordinator {
                 // No later owner is constructed before that candidate drains.
                 backend = successor
                 backendRetired = false
+                await installProofAdmission(successor, generation: expected, revision: revision)
                 guard !closing, expected == generation, revision == hostRevision else {
                     try await successor.close()
                     backend = nil
@@ -1547,23 +1773,15 @@ public final class SyncCoordinator {
             defer {
                 accountTask = nil
                 if pendingAccountRead != nil, !closing { startAccountRead() }
+                retryAccountCompletion()
             }
             while let read = pendingAccountRead, !closing, !Task.isCancelled {
                 pendingAccountRead = nil
                 let expected = generation, revision = hostRevision
                 let complete = await backend.prepareAccountRead(read)
-                while true {
-                    let finished = await withCheckedContinuation {
-                        enqueue(.completeAccount(read, backend: backend, generation: expected, revision: revision,
-                            complete: complete, acknowledged: $0))
-                    }
-                    if finished { break }
-                    observeAccountPolicyDrain?(.waiting)
-                    // Never join accountTask here: this is that original task.
-                    // Its completion/result must leave the input lane available
-                    // to acknowledge older operations and their follow-up work.
-                    for original in Array(operationTasks.values) { await original.value }
-                    await waitForInputs()
+                _ = await withCheckedContinuation {
+                    enqueue(.completeAccount(read, backend: backend, generation: expected, revision: revision,
+                        complete: complete, acknowledged: $0))
                 }
             }
         }
@@ -1612,6 +1830,7 @@ public final class SyncCoordinator {
         if let closeTask { return await closeTask.value }
         if drained { return true }
         closing = true
+        revokeProofWaits()
         retainedRecoveryStart = nil
         initialOwnAdmission.setOpen(false)
         let task = Task { () -> Bool in
@@ -1626,9 +1845,11 @@ public final class SyncCoordinator {
             // before joining it, including queued work that has no effect yet.
             cancelCommandsForShutdown()
             accountTask?.cancel(); ownTask?.cancel()
+            retryAccountCompletion()
             await waitForInputs()
             cancelCommandsForShutdown()
             accountTask?.cancel(); ownTask?.cancel()
+            retryAccountCompletion()
             do {
                 if initialAdoptionEnabledBefore != nil, !activatingInitialAdoption,
                    let own = backend?.own, let operation = try await backend?.connection?.recoveryStatus()?.operation {

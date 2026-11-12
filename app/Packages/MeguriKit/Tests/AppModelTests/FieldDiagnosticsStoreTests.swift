@@ -260,6 +260,26 @@ import AppModel
         #expect((boundedInfo["zoneDeletions"] as? [Any])?.count == 128)
     }
 
+    /// Serialization unit coverage only. Real Runtime/adapter A7 input is
+    /// exercised by serviceAppNoStateProofReturnsThroughCoordinatorAndCopyDebugInfo.
+    @Test func copyDebugInfoProducerIncludesA7OnlyForQualifiedEpochFailures() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "A7DebugInfo-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let reads = [
+            CloudRootReadDiagnostic(active: false, lostCollection: false, outcome: "found", a7Failure: true, accepted: true),
+            CloudRootReadDiagnostic(active: false, lostCollection: false, outcome: "found", a7Failure: false, accepted: true),
+            CloudRootReadDiagnostic(active: true, lostCollection: false, outcome: "found", a7Failure: false, accepted: true)
+        ]
+        let store = FieldDiagnosticsStore(directory: directory, rootReadDiagnostics: { reads })
+        let bytes = try await store.debugInfo()
+        let object = try #require(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
+        let exported = try #require(object["rootReads"] as? [[String: Any]])
+        #expect(exported.count == 3)
+        #expect(exported.compactMap { $0["a7Failure"] as? Bool } == [true, false, false])
+        #expect(exported.compactMap { $0["active"] as? Bool } == [false, false, true])
+        #expect(exported.allSatisfy { $0["outcome"] as? String == "found" })
+    }
+
     @Test func debugInfoHoldsEverythingStored() async throws {
         let store = try temporaryStore()
         let empty = try await store.debugInfo()
