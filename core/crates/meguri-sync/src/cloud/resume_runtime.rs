@@ -8,6 +8,46 @@ use crate::cloud::{
 use std::collections::{BTreeMap, BTreeSet};
 
 impl Runtime {
+    /// R11: a completed matching process read can reaffirm the original stopped
+    /// owner's ready preview. This grants no usability or SDK verification.
+    pub(super) fn resume_account_reaffirmation_locked(
+        &self,
+        s: &State,
+        proof: &super::super::adapter::AcceptedIdentityRead,
+    ) -> Result<bool, RuntimeError> {
+        if proof.no_collection
+            || proof.request != s.adapter.next_identity
+            || proof.incarnation != s.incarnation
+            || proof.guard != Self::adapter_guard_locked(s)
+            || s.adapter.identity_read.is_some()
+            || s.adapter.sdk.is_some()
+            || s.bound.as_ref().is_none_or(|b| b.usable || b.verified)
+        {
+            return Ok(false);
+        }
+        let Some((preview, true)) = s.publication.preview.as_ref() else {
+            return Ok(false);
+        };
+        let Some(context) = s.publication.resume.as_ref() else {
+            return Ok(false);
+        };
+        if preview.decision != ConnectDecision::ConfirmResume
+            || preview.resume_binding != Some(context.binding.id)
+            || preview.account != context.binding.facts.account
+            || !matches!(&proof.identity, IdentityStatus::Available(a) if a == &preview.account)
+            || preview.native_file != Some(context.scan.file)
+            || preview.decision_before.as_ref() != Some(&context.decision)
+            || !Self::resume_reads_match(context, preview)
+        {
+            return Ok(false);
+        }
+        match self.validate_resume_context_locked(s, context) {
+            Ok(()) => Ok(true),
+            Err(RuntimeError::Publication(PublicationError::NotOffered)) => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
     fn resumable(binding: &Binding) -> bool {
         matches!(
             binding.facts.state,

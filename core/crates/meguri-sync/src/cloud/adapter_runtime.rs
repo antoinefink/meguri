@@ -406,7 +406,7 @@ impl Runtime {
             Self::sdk_locked(&s, sdk)?;
         }
         work.effect()?;
-        Self::adapter_account_locked(self, &mut s, identity, sdk.is_some(), false)
+        Self::adapter_account_locked(self, &mut s, identity, sdk.is_some(), false, None)
     }
     fn adapter_account_locked(
         &self,
@@ -414,6 +414,7 @@ impl Runtime {
         identity: IdentityStatus,
         sdk_event: bool,
         no_collection_authorized: bool,
+        accepted_read: Option<&AcceptedIdentityRead>,
     ) -> Result<(), RuntimeError> {
         // Connection discovery has no binding yet. Accepted account events
         // still invalidate its preview; no account or binding is invented.
@@ -435,7 +436,13 @@ impl Runtime {
                 || s.adapter
                     .sdk
                     .as_ref()
-                    .is_some_and(|sdk| !sdk.stopping && sdk.guard == Self::adapter_guard_locked(s)));
+                    .is_some_and(|sdk| !sdk.stopping && sdk.guard == Self::adapter_guard_locked(s))
+                || (!sdk_event
+                    && !no_collection_authorized
+                    && match accepted_read.filter(|proof| proof.identity == identity) {
+                        Some(proof) => self.resume_account_reaffirmation_locked(s, proof)?,
+                        None => false,
+                    }));
         if !same {
             s.adapter.token = s.adapter.token.checked_add(1).ok_or(Error::InvalidData)?;
             s.publish_authority();
@@ -1704,17 +1711,22 @@ impl Runtime {
             }
             work.effect()?;
             s.adapter.identity_read = None;
-            // A failed later read preserves an already verified process owner (V9.1).
-            if !matches!(identity, IdentityStatus::ReadFailed) {
-                self.adapter_account_locked(s, identity.clone(), false, no_collection)?;
-            }
-            s.adapter.accepted_identity_read = Some(crate::cloud::adapter::AcceptedIdentityRead {
+            // Only this validated completion can supply the reaffirmation proof.
+            // Keep it local until account handling succeeds, then record its
+            // resulting guard as before (isolation may advance that guard).
+            let mut proof = AcceptedIdentityRead {
                 request: id,
                 guard: Self::adapter_guard_locked(s),
                 incarnation: s.incarnation,
                 no_collection,
                 identity,
-            });
+            };
+            // A failed later read preserves an already verified process owner (V9.1).
+            if !matches!(proof.identity, IdentityStatus::ReadFailed) {
+                self.adapter_account_locked(s, proof.identity.clone(), false, no_collection, Some(&proof))?;
+            }
+            proof.guard = Self::adapter_guard_locked(s);
+            s.adapter.accepted_identity_read = Some(proof);
             Ok(true)
         });
         match result {

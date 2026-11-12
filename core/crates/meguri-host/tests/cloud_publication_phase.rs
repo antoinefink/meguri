@@ -4184,6 +4184,105 @@ fn resume_media_fixture(disabled: bool, ready_only: bool) {
     host.close().unwrap();
 }
 
+#[test]
+fn stopped_resume_retains_original_preview_across_accepted_matching_account_read() {
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("resume-reaffirmation");
+    generated(&dir);
+    let host = open_host(&dir, keys());
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(711)).unwrap();
+    let binding = publish_actual_collection(&host, &mut service);
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let identity = IdentityStatus::Available(binding.facts.account.clone());
+    runtime.adapter_stop_syncing().unwrap();
+    assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+    let first = runtime.adapter_begin_identity_read(false, None).unwrap();
+    assert!(runtime.adapter_complete_identity_read(first, identity.clone()).unwrap());
+    let preview = actual_preview(&host, &mut service, &scope());
+    assert_eq!(preview.decision, ConnectDecision::ConfirmResume);
+    assert_eq!(runtime.resume_binding_offer(), Some(binding.id));
+    let original = runtime.adapter_guard();
+    let requests = service.request_log().unwrap().len();
+
+    let second = runtime.adapter_begin_identity_read(false, None).unwrap();
+    assert!(runtime.adapter_complete_identity_read(second, identity).unwrap());
+    assert_eq!(runtime.adapter_guard(), original);
+    let status = runtime.status().unwrap();
+    assert_eq!(
+        status.binding.unwrap().facts.state,
+        cloud::BindingState::Isolated(cloud::IsolationReason::Stopped)
+    );
+    assert!(!status.stored_usable);
+    assert!(!status.identity_verified);
+    assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+    assert!(runtime.register_sdk(false).is_err());
+    assert_eq!(runtime.resume_binding_offer(), Some(binding.id));
+
+    host.resume_cloud_binding(&preview, collection.generation()).unwrap();
+    assert_eq!(runtime.status().unwrap().binding.unwrap(), binding);
+    assert!(!runtime.status().unwrap().scan_required);
+    assert_eq!(service.request_log().unwrap().len(), requests);
+    assert!(runtime.confirm_connection_resume(&preview, &collection).is_err());
+    host.close().unwrap();
+}
+
+#[test]
+fn stopped_resume_reaffirmation_requires_accepted_read_and_current_original_authority() {
+    for change in ["unaccepted", "stale-context", "operation", "changed-account"] {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("resume-reaffirmation-refusal");
+        generated(&dir);
+        let account = Arc::new(MutableAccount(Mutex::new(IdentityStatus::Available(
+            cloud::OpaqueBytes(scope().account.into_bytes()),
+        ))));
+        let host = open_host_with(&dir, keys(), account.clone(), scope());
+        let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(712)).unwrap();
+        let binding = publish_actual_collection(&host, &mut service);
+        let runtime = host.cloud_runtime().unwrap();
+        let collection = host.collection().unwrap();
+        let mut identity = IdentityStatus::Available(binding.facts.account.clone());
+        runtime.adapter_stop_syncing().unwrap();
+        let first = runtime.adapter_begin_identity_read(false, None).unwrap();
+        assert!(runtime.adapter_complete_identity_read(first, identity.clone()).unwrap());
+        let preview = actual_preview(&host, &mut service, &scope());
+        assert_eq!(preview.decision, ConnectDecision::ConfirmResume);
+        match change {
+            "stale-context" => runtime.adapter_pause(true).unwrap(),
+            "operation" => {
+                runtime.confirm_connection_publication(&preview, &collection).unwrap();
+            }
+            "changed-account" => {
+                identity = IdentityStatus::Available(cloud::OpaqueBytes(b"other-account".to_vec()));
+                *account.0.lock().unwrap() = identity.clone();
+            }
+            "unaccepted" => {
+                // Beginning a new read clears the previous accepted proof;
+                // an uncompleted lookup supplies no replacement evidence.
+                runtime.adapter_begin_identity_read(false, None).unwrap();
+            }
+            _ => unreachable!(),
+        }
+        let before_read = runtime.adapter_guard();
+        if change == "unaccepted" {
+            // A direct event cannot stand in for the pending read's completion.
+            runtime.adapter_account(None, identity).unwrap();
+        } else {
+            let read = runtime.adapter_begin_identity_read(false, None).unwrap();
+            assert!(runtime.adapter_complete_identity_read(read, identity).unwrap());
+        }
+        assert_ne!(runtime.adapter_guard(), before_read, "retained {change} authority");
+        assert!(runtime.resume_binding_offer().is_none());
+        assert!(runtime.confirm_connection_resume(&preview, &collection).is_err());
+        let status = runtime.status().unwrap();
+        assert_ne!(status.binding.unwrap().facts.state, cloud::BindingState::Active);
+        assert!(!status.stored_usable);
+        assert!(!status.identity_verified);
+        assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+        host.close().unwrap();
+    }
+}
+
 /// Retained authority refuses stale explicit actions without changing the binding.
 #[test]
 fn resume_proof_refuses_changed_account_file_fence_operation_and_replaced_preview() {
