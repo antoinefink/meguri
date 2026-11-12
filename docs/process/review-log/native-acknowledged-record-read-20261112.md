@@ -37,3 +37,16 @@ Verification:
 Native compilation and the exact read follow this checkpoint commit. This is
 WIP integration evidence, not unit, milestone, signed-lane or full-gate evidence.
 Pending batch base: `1416a520542a8c5daa38a23bfe398da704c3d6c9`.
+
+Native follow-up at clean `78dacbcd`:
+
+- `cloud-record-read-host/20261112T195425Z-3686`: signed build and original
+  native read complete. Three expected records found; all three encrypted byte
+  arrays and change tags match; no missing records or read errors. The utility
+  remains diagnostic-only `warn`, with no acceptance claim.
+- `mac-hosted-test/20261112T195530Z-5886`: synthetic native input guards pass
+  in the dedicated VM (one test, no failures or skips).
+
+This establishes current server presence, not prompt delivery at the earlier
+manual fetch. The delayed automatic intake and the status-authority gaps remain
+open. No record or state was changed by the exact read.
