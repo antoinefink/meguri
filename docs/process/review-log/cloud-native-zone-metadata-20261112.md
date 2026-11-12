@@ -29,3 +29,14 @@ Signed Mac preview `build-app/20261111T234632Z-31675` passes. Computer use opens
 Phone drive `20261111T232822Z-20287` completes all 22 actions: question, answer, Good, next question, Undo, restored question and end. Counts return exactly to `[18, 0, 17]`. Undo enables after Good, then disables after Undo; Redo enables. Continuity is verified. Its 58 hierarchy findings remain failures. The audio-only question has no static text; an empty text comparison proves no card identity. The answer still shows a missing image. Playback is untested.
 
 The original deck still reports 2,389 missing files. Existing exact-byte media-arrival evidence is recorded in `cloud-normal-media-probe-20261111.md`; a completed exchange alone never proves file arrival. Full zone-loss recovery, reliable cold discovery, accessibility repair, integration gates and final acceptance remain open. Private captures and all account values stay outside this log.
+
+
+## Fresh peer marker and diagnostic freshness
+
+The phone-created deck appears on the Mac after its normal restart. The same saved collection remains open. A fresh Mac rename then supplies one original native Saved record, no save error, and a transition from one pending item to zero. The receiving phone starts this comparison with zero pending items.
+
+`drive/20261112T000019Z-39551` completes all six steps but does not show the fresh name immediately. Its 63 hierarchy findings remain red. `000155Z-40351` then completes all eleven steps, including one Home/return. Before that cycle, the phone has a new successful completion at `1794441701065`, but its native and Core collection counts remain two. Immediate post-cycle captures remain old; they prove no lifecycle outcome.
+
+`drive/20261112T000421Z-41382`: 6/6 actions, continuity verified, 45 hierarchy findings. The renamed deck appears. Native modifications and Core forwards: 2 → 5. A newer completion is recorded, alongside a connection-tracking fault. This confirms receipt. Startup behavior and the error remain open.
+
+The Form's short sequence stays unchanged while the nested counters advance. That alone does not prove a cached view: repeated events can yield an identical bounded tail. Remount observation `000759Z-43033` completes ten steps with verified continuity and the same text; 99 hierarchy findings remain red. The trace lacks an append count to distinguish those cases. Its render snapshot cannot establish later current SDK state. A diagnostic improvement follows; no transport change is inferred from this ambiguity.
