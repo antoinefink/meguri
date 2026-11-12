@@ -575,6 +575,7 @@ pub(crate) struct Actions {
     pub smoke_batches: BTreeMap<(String, u64), Option<SmokeBatchProof>>,
     #[cfg(feature = "test-hooks")]
     pub smoke_acks: SmokeHistoricalAcks,
+    pub prepared_batch_crt: BTreeMap<(String, u64), i64>,
     pub request_flights: BTreeMap<(String, u64), BTreeMap<String, HandedSave>>,
     pub payload_uploads: BTreeMap<(String, u64), Vec<tempfile::TempPath>>,
     pub payload_upload_sends: BTreeMap<(String, u64), BTreeSet<u64>>,
@@ -612,6 +613,7 @@ impl Actions {
     pub fn rebind(&mut self, retained_sdk: bool) {
         let mut old = std::mem::replace(self, Self::new());
         if retained_sdk {
+            self.prepared_batch_crt = std::mem::take(&mut old.prepared_batch_crt);
             self.request_flights = std::mem::take(&mut old.request_flights);
             self.payload_uploads = std::mem::take(&mut old.payload_uploads);
             self.payload_upload_sends = std::mem::take(&mut old.payload_upload_sends);

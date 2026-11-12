@@ -19,6 +19,9 @@ use meguri_sync::cloud::{
 };
 use meguri_testkit::cloud::devices::{NativeFiles, options};
 
+#[path = "support/epoch_crt.rs"]
+mod epoch_fixture;
+
 struct Account;
 impl IdentityProvider for Account {
     fn read_identity(&self, _: &BuildScope) -> IdentityStatus {
@@ -65,6 +68,12 @@ fn pending_discovery_failure_leaves_no_sdk_authority_and_allows_registration_ret
             Some(saved_state.clone()),
         )
         .unwrap();
+    let mut service = meguri_testkit::cloud::Service::open(
+        root.path(), meguri_testkit::cloud::Config::default(), meguri_model::rng::SeededRandom::new(1145),
+    ).unwrap();
+    epoch_fixture::accept(&host, &mut service, &meguri_testkit::cloud::Scope {
+        container: "synthetic-u114".into(), environment: "development".into(), account: "synthetic-account-A".into(),
+    });
     meguri_engine::decks::rename(&collection, deck, "Registration edit".into()).unwrap();
     runtime
         .reconcile_binding(&collection, &media, Duration::from_secs(10))

@@ -611,6 +611,10 @@ impl CloudWorkflow {
             needs_root_fetch: !self.core.sdk_root_confirmed(),
         })
     }
+    pub fn validate_prepared_batch(&self, sdk: String, zone: String, batch: u64) -> Result<(), CoreError> {
+        callback::enter("CloudWorkflow.validate_prepared_batch");
+        self.core.validate_prepared_batch(&sdk, &zone, batch).map_err(crate::cloud_connection::error)
+    }
     pub fn validate_network_sdk(&self, sdk: String, media: bool) -> Result<(), CoreError> {
         callback::enter("CloudWorkflow.validate_network_sdk");
         if media {

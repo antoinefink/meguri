@@ -18,10 +18,13 @@ use meguri_sync::cloud::{
 use meguri_testkit::cloud::devices::{NativeFiles, options};
 use std::{sync::Arc, time::Duration};
 
+#[path = "support/epoch_crt.rs"]
+mod epoch_fixture;
+
 struct Account;
 #[test]
 fn epoch_crt_legacy_runtime_keeps_unknown_attention_conservative() {
-    let rig = rig();
+    let rig = rig_with_epoch(true, 1914, false);
     assert_eq!(rig.host.cloud_runtime().unwrap().epoch_crt_for_testing().unwrap(), None);
     assert!(!rig.host.cloud_policy_driver().unwrap().state().facts.summary.attention_known);
     rig.host.close().unwrap();
@@ -48,6 +51,9 @@ fn rig_with_root(confirm_root: bool) -> Rig {
     rig_with_root_seed(confirm_root, 1914)
 }
 fn rig_with_root_seed(confirm_root: bool, seed: u64) -> Rig {
+    rig_with_epoch(confirm_root, seed, true)
+}
+fn rig_with_epoch(confirm_root: bool, seed: u64, known_epoch: bool) -> Rig {
     let root = tempfile::tempdir().unwrap();
     let directory = root.path().join("collection");
     std::fs::create_dir_all(&directory).unwrap();
@@ -116,6 +122,14 @@ fn rig_with_root_seed(confirm_root: bool, seed: u64) -> Rig {
             confirm_root.then(|| b"synthetic-sdk-state".to_vec()),
         )
         .unwrap();
+    if known_epoch {
+        let mut service = meguri_testkit::cloud::Service::open(
+            root.path(), meguri_testkit::cloud::Config::default(), meguri_model::rng::SeededRandom::new(seed),
+        ).unwrap();
+        epoch_fixture::accept(&host, &mut service, &meguri_testkit::cloud::Scope {
+            container: "synthetic-u114".into(), environment: "development".into(), account: "synthetic-account-A".into(),
+        });
+    }
     host.cloud_policy_input(DeviceEvent::Settings(DeviceSettings {
         enabled: true,
         paused: false,
@@ -145,7 +159,7 @@ fn rig_with_root_seed(confirm_root: bool, seed: u64) -> Rig {
         .unwrap();
     let state = host.cloud_policy_driver().unwrap().state();
     assert!(
-        state.gate_open() && state.engine_runs(),
+        state.gate_open() == known_epoch && state.engine_runs(),
         "fixture admission: {state:#?}"
     );
     assert_eq!(

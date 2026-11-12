@@ -486,6 +486,20 @@ struct Bound {
     verified: bool,
     latest_mod: i64,
     latest_scm: i64,
+    // Current committed collection fact, ordered against held scan snapshots.
+    current_crt: (u64, i64),
+    // Qualified cloud_epoch_crt only; never the publication/media fallback.
+    epoch_crt: Option<i64>,
+}
+impl Bound {
+    fn crt_equal(&self) -> bool {
+        self.epoch_crt == Some(self.current_crt.1)
+    }
+    fn observe_crt(&mut self, seq: u64, crt: i64) {
+        if seq >= self.current_crt.0 {
+            self.current_crt = (seq, crt);
+        }
+    }
 }
 #[derive(Default)]
 struct State {
@@ -541,6 +555,7 @@ pub(crate) struct NativeAuthority {
     active: bool,
     service_pending: bool,
     media_missing: bool,
+    crt_equal: bool,
 }
 impl NativeAuthority {
     fn from_state(s: &State) -> Self {
@@ -550,6 +565,7 @@ impl NativeAuthority {
             sdk: s.adapter.sdk.clone(),
             service_pending: s.adapter.known_loss.is_some() || s.adapter.durable.collection_loss.is_some(),
             media_missing: s.media.zone_missing,
+            crt_equal: s.bound.as_ref().is_some_and(Bound::crt_equal),
             usable: s.bound.as_ref().is_some_and(|b| b.usable),
             verified: s.bound.as_ref().is_some_and(|b| b.verified),
             active: s
@@ -576,6 +592,12 @@ impl NativeAuthority {
     pub(crate) fn validate_network_sdk(&self, sdk: &str) -> Result<(), RuntimeError> {
         self.validate_sdk(sdk)?;
         if self.service_pending {
+            return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
+        }
+        Ok(())
+    }
+    pub(crate) fn require_crt_equal(&self) -> Result<(), RuntimeError> {
+        if !self.crt_equal {
             return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
         }
         Ok(())
@@ -827,6 +849,19 @@ impl Runtime {
         Self::invalidate_authority_locked(state);
         with_tracking_access(|| Self::invalidate_drain_locked(state));
     }
+    // Caller holds Runtime and tracking access. Clear cached authority before a
+    // fallible read so a failed projection cannot retain permission to send.
+    fn refresh_epoch_crt_locked(state: &mut State) -> Result<(), RuntimeError> {
+        let Some(bound) = state.bound.as_mut() else { return Ok(()); };
+        bound.epoch_crt = None;
+        bound.epoch_crt = state.store.as_ref().ok_or(Error::Database)?.epoch_crt(bound.binding.id)?;
+        Ok(())
+    }
+    // Writer callers supply the current col value before acquiring any lock.
+    // Recovery replay compares with its own durable owner, not the new binding.
+    fn writer_crt_equal_locked(state: &State, binding: BindingId, crt: i64) -> Result<bool, RuntimeError> {
+        Ok(state.store.as_ref().ok_or(Error::Database)?.epoch_crt(binding)? == Some(crt))
+    }
     // Caller holds both runtime state and tracking access.
     fn invalidate_tracking_locked(state: &mut State) {
         Self::invalidate_authority_locked(state);
@@ -884,6 +919,9 @@ impl Runtime {
                 Some((evidence, activation.clone()));
         }
         let mut state = self.state();
+        let current_crt = state.bound.as_ref()
+            .filter(|b| b.evidence.generation == evidence.generation && b.file == file)
+            .map_or((0, evidence.opened_crt), |b| b.current_crt);
         state.suspended_adoption_cleanup = None;
         state.connection_lifecycle = live_resume_impl::ConnectionLifecycle::Active;
         Self::adapter_close_exchange_locked(&mut state);
@@ -1055,7 +1093,9 @@ impl Runtime {
             });
             // A retained loss is an obligation, never fresh account proof.
             // Core-issued identity completion settles it before another SDK can start.
-            state.adapter.durable = store.adapter_durable(binding.id)?;
+            let adapter_durable = store.adapter_durable(binding.id)?;
+            let epoch_crt = store.epoch_crt(binding.id)?;
+            state.adapter.durable = adapter_durable;
             let usable = binding.facts.state == BindingState::Active
                 && publication_matches
                 && publication_clear
@@ -1093,6 +1133,8 @@ impl Runtime {
                 verified: false,
                 latest_mod,
                 latest_scm,
+                current_crt,
+                epoch_crt,
             });
             Ok(())
         })?;
@@ -1435,6 +1477,9 @@ impl Runtime {
                     },
                 )?;
                 state.note_scan = Some(proof.clone());
+                state.bound.as_mut().ok_or(RuntimeError::StaleIncarnation)?
+                    .observe_crt(snapshot.seq().0, col.created.0);
+                Self::refresh_epoch_crt_locked(state)?;
                 Ok(())
             })?;
             // Whole-binding reconciliation remains required and undrained.
@@ -1574,17 +1619,34 @@ impl ChangeObserver for Runtime {
     }
     fn observe_with_rows(&self, commit: &ObservedCommit<'_>, rows: &ObserverRows<'_>) -> Result<(), EngineError> {
         let _ = self.adapter_now();
+        // Borrowed writer capability: read before taking Runtime/tracking locks.
+        let crt = if commit.changes.collection_row || commit.changes.whole_collection {
+            let row = rows.row_image(Table::Col, &RowKey::Id(1))?
+                .ok_or_else(|| engine_error("missing collection row"))?;
+            Some(super::row_payload::int(&row, 1).map_err(engine_error)?)
+        } else {
+            None
+        };
         #[cfg(feature = "test-hooks")]
         let body_reads_before = super::workflow_store::body_reads();
         let mut state = self.state();
         let Some(bound) = state.bound.as_ref() else {
             return Ok(());
         };
-        if !bound.usable || bound.evidence.generation != commit.generation {
+        if bound.evidence.generation != commit.generation {
             return Ok(());
         }
+        let usable = bound.usable;
         let binding = bound.binding.id;
         let open = bound.open_counter;
+        if let Some(crt) = crt {
+            state.bound.as_mut().ok_or_else(|| engine_error("missing binding"))?
+                .observe_crt(commit.seq.0, crt);
+            state.publish_authority();
+        }
+        if !usable {
+            return Ok(());
+        }
         state.last_capture = Some(CaptureProof {
             observed_seq: commit.seq,
             generation: commit.generation,

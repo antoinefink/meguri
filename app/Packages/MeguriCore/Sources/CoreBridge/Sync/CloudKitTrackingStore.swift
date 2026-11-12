@@ -168,7 +168,11 @@ public actor CoreCloudWorkflowService {
                         try raw.submitMediaBatch(sdk: sdk, batch: batch.id, queue: ForeignMediaQueue(queue))
                     }
                 } : nil
-                return .init(id: batch.id, saves: batch.saves.map(CloudRecord.init), deletes: batch.deletes, mediaAdmission: admission)
+                return .init(id: batch.id, saves: batch.saves.map(CloudRecord.init), deletes: batch.deletes, mediaAdmission: admission, finalAdmission: {
+                    try cloudFinalCoreCall(.cloudWorkflowValidatePreparedBatch) {
+                        try raw.validatePreparedBatch(sdk: sdk, zone: zone, batch: batch.id)
+                    }
+                })
             }
         }
     }

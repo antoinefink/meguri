@@ -144,6 +144,8 @@ pub struct Summary {
     pub apply_in_progress: bool,
     pub unsettled_intents: u64,
     pub scan: Scan,
+    /// Internal qualified epoch knowledge; absence cannot satisfy P6 equality.
+    pub crt_known: bool,
     pub crt_mismatch: bool,
     pub zone_deletions_due: u64,
     pub attention: BTreeMap<Attention, u64>,

@@ -568,9 +568,10 @@ impl Runtime {
                 s.store
                     .as_mut()
                     .ok_or(Error::Database)?
-                    .receive_records(b, &entries, &refused, fetched_epoch.as_ref())
+                    .receive_records(b, &entries, &refused, fetched_epoch.as_ref())?;
+                Self::refresh_epoch_crt_locked(&mut s)
             }))
-            .unwrap_or(Err(Error::Database))
+            .unwrap_or(Err(RuntimeError::Tracking(Error::Database)))
         });
         if result.is_err() {
             Self::invalidate_locked(&mut s);
@@ -688,7 +689,9 @@ impl Runtime {
         };
         let _running = Running(self.state.clone(), self.incoming_idle.clone());
         self.replay_media_intents(collection, &self.media_service(collection)?)?;
-        self.drain_media_metadata(collection, &self.media_service(collection)?)?;
+        if self.state().bound.as_ref().is_some_and(Bound::crt_equal) {
+            self.drain_media_metadata(collection, &self.media_service(collection)?)?;
+        }
         self.with_incoming(&guard, collection, |_| Ok(()))?;
         let replayed = match self.replay_ordinary(collection, &guard, timeout)? {
             IncomingDisposition::Progress(count) => count,
@@ -699,6 +702,9 @@ impl Runtime {
         // remains; zero applied entries is never a native continuation signal.
         let mut parked = false;
         loop {
+            if !self.state().bound.as_ref().is_some_and(Bound::crt_equal) {
+                return Ok(IncomingDisposition::Progress(0));
+            }
             let (entries, retry_granted, failed_this_open) = self.with_incoming(&guard, collection, |s| {
                 Ok((
                     s.store.as_ref().ok_or(Error::Database)?.inbox(guard.binding)?,
@@ -868,6 +874,8 @@ impl Runtime {
         // failures before that conversion so they can never become Deferred.
         let fatal = Arc::new(Mutex::new(None));
         let writer_fatal = fatal.clone();
+        #[cfg(feature = "test-hooks")]
+        self.incoming_hooks.hit(super::super::testing::IncomingStage::ApplyBeforeWriter);
         let result = collection.run(
             meguri_engine::OpSpec::named(
                 "cloud_incoming_apply",
@@ -892,9 +900,13 @@ impl Runtime {
                     mapped
                 };
                 let applied = {
+                    let crt = ctx.scope().col()?.created.0;
                     let mut s = StateGuard::new(shared.lock().unwrap_or_else(PoisonError::into_inner));
                     with_tracking_access(|| {
                         Self::check_incoming_locked(&s, &writer_guard)?;
+                        if !Self::writer_crt_equal_locked(&s, binding, crt)? {
+                            return Ok(None);
+                        }
                         if rekey {
                             rekey_impl::apply_rekey(ctx, &mut s, &writer_guard, &directory, entries)
                         } else {
@@ -916,8 +928,15 @@ impl Runtime {
                     }
                 }
                 // A callback may have invalidated the opening while paused.
+                let crt = ctx.scope().col()?.created.0;
                 let s = StateGuard::new(shared.lock().unwrap_or_else(PoisonError::into_inner));
-                with_tracking_access(|| Self::check_incoming_locked(&s, &writer_guard)).map_err(capture)?;
+                let equal = with_tracking_access(|| {
+                    Self::check_incoming_locked(&s, &writer_guard)?;
+                    Self::writer_crt_equal_locked(&s, binding, crt)
+                }).map_err(capture)?;
+                if applied.is_some() && !equal {
+                    return Err(EngineError::Cancelled);
+                }
                 let targets: BTreeSet<_> = ctx
                     .scope()
                     .journal()
@@ -1353,6 +1372,9 @@ impl Runtime {
                 // and parked rekey evidence, never a replay of the deletion.
                 self.settle_ordinary(collection, guard, i.id, timeout)?;
             } else {
+                if !self.state().bound.as_ref().is_some_and(Bound::crt_equal) {
+                    continue;
+                }
                 // Retain the original inbox and acknowledged base. The next
                 // writer derives L afresh, so a local edit after a crash wins
                 // only its changed parts rather than being overwritten.

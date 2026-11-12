@@ -66,6 +66,7 @@ impl Runtime {
             .contains(name);
             if !admitted {
                 s.actions.media_batches.remove(&(sdk.to_owned(), batch));
+                s.actions.prepared_batch_crt.remove(&(sdk.to_owned(), batch));
                 self.emit_pending_locked(&mut s, workflow::UpdateKind::Changes, BTreeSet::new())?;
                 return Err(RuntimeError::StaleIncarnation);
             }
@@ -126,6 +127,11 @@ impl Runtime {
     ) -> Result<Option<(u64, Work)>, RuntimeError> {
         let _ = self.adapter_now();
         self.validate_sdk(sdk)?;
+        let snapshot_crt = {
+            let lease = collection.reader(ReaderRole::Cloud)?;
+            let snapshot = lease.snapshot()?;
+            snapshot.col()?.created.0
+        };
         // Selection is only a hint. Re-read eligibility with a fresh clock and
         // retain this exact work through final admission and the SDK callback.
         self.consume_media_feed(collection, &self.media_service(collection)?)?;
@@ -147,6 +153,9 @@ impl Runtime {
             let mut s = self.state();
             Self::sdk_locked(&s, sdk)?;
             Self::gate_locked(&s)?;
+            if !s.bound.as_ref().is_some_and(|b| b.current_crt.1 == snapshot_crt && b.epoch_crt == Some(snapshot_crt)) {
+                return Ok(None);
+            }
             if s.media.zone_missing || s.adapter.known_loss.is_some() || s.adapter.durable.collection_loss.is_some() {
                 return Ok(None);
             }
@@ -172,24 +181,29 @@ impl Runtime {
                 if action != workflow::PendingChange::Delete {
                     return Err(Error::InvalidData.into());
                 }
+                let mut original = None;
                 for ((owner, id), retained) in &s.actions.media_batches {
                     if matches!(&retained.work.request,Request::Delete{name:n} if n==&name) {
                         check_requested_action(&retained.work, action)?;
                         check_requested_action(&retained.work, retained.requested)?;
-                        return if owner == sdk {
-                            Ok(Some((*id, retained.work.clone())))
-                        } else {
-                            Err(RuntimeError::StaleIncarnation)
-                        };
+                        if owner != sdk {
+                            return Err(RuntimeError::StaleIncarnation);
+                        }
+                        if s.actions.prepared_batch_crt.get(&(owner.clone(), *id)) == Some(&snapshot_crt) {
+                            return Ok(Some((*id, retained.work.clone())));
+                        }
+                        original = Some(retained.work.clone());
                     }
                 }
                 s.actions.batch = s.actions.batch.checked_add(1).ok_or(Error::InvalidData)?;
                 let id = s.actions.batch;
-                let work = Work {
+                let work = original.unwrap_or_else(|| Work {
                     id,
                     authority: authority.clone(),
                     request: Request::Delete { name: name.clone() },
-                };
+                });
+                let crt = snapshot_crt;
+                s.actions.prepared_batch_crt.insert((sdk.to_owned(), id), crt);
                 s.actions.media_batches.insert(
                     (sdk.into(), id),
                     workflow::MediaBatch {
@@ -237,6 +251,9 @@ impl Runtime {
         Self::caller_locked(&s, sdk)?;
         Self::check_media_locked(&s, &work.authority)?;
         Self::gate_locked(&s)?;
+        if !s.bound.as_ref().is_some_and(|b| b.current_crt.1 == snapshot_crt && b.epoch_crt == Some(snapshot_crt)) {
+            return Ok(None);
+        }
         if s.media.zone_missing || s.adapter.known_loss.is_some() || s.adapter.durable.collection_loss.is_some() {
             return Ok(None);
         }
@@ -252,14 +269,20 @@ impl Runtime {
             {
                 check_requested_action(original, action)?;
                 check_requested_action(original, retained.requested)?;
-                if original_sdk == sdk && original == &work {
+                if original_sdk != sdk || original != &work {
+                    return Err(RuntimeError::StaleIncarnation);
+                }
+                if s.actions.prepared_batch_crt.get(&(original_sdk.clone(), *id)) == Some(&snapshot_crt) {
                     return Ok(Some((*id, original.clone())));
                 }
-                return Err(RuntimeError::StaleIncarnation);
+                // Keep the obsolete preparation immutable for its original
+                // callback; this capture needs a separate handoff identity.
             }
         }
         s.actions.batch = s.actions.batch.checked_add(1).ok_or(Error::InvalidData)?;
         let id = s.actions.batch;
+        let crt = snapshot_crt;
+        s.actions.prepared_batch_crt.insert((sdk.to_owned(), id), crt);
         s.actions.media_batches.insert(
             (sdk.into(), id),
             workflow::MediaBatch {
@@ -338,8 +361,10 @@ impl Runtime {
             }
             if done {
                 s.actions.media_batches.remove(&key);
+                s.actions.prepared_batch_crt.remove(&key);
             } else if let Some((_, error)) = failed_delete.first() {
                 s.actions.media_batches.remove(&key);
+                s.actions.prepared_batch_crt.remove(&key);
                 if *error != workflow::SendError::BatchRequestFailed {
                     // This bridge builds one deletion per batch. A one-record
                     // limit failure is parked, exactly as collection sends.
@@ -395,6 +420,22 @@ impl Runtime {
                 blob.staged = None;
             }
             self.put_media_state(&work.authority, &ledger)?;
+            {
+                let mut s = self.state();
+                Self::caller_locked(&s, sdk)?;
+                Self::check_media_locked(&s, &work.authority)?;
+                // Native callback ownership prevents alias handoff.
+                // Remove alias rows before staging cleanup.
+                let aliases: Vec<_> = s.actions.media_batches.iter()
+                    .filter(|(alias, retained)| *alias != &key && retained.work == work)
+                    .map(|(alias, _)| alias.clone())
+                    .collect();
+                for alias in aliases {
+                    s.actions.media_batches.remove(&alias);
+                    s.actions.prepared_batch_crt.remove(&alias);
+                }
+                s.actions.media_upload = None;
+            }
             let _ = std::fs::remove_file(staged);
         }
         let mut s = self.state();
@@ -404,11 +445,12 @@ impl Runtime {
             .saved_callbacks
             .insert(request_id, saved.iter().map(|r| r.name.clone()).collect());
         if !saved.is_empty() || !blob_conflicts.is_empty() {
-            s.actions.media_upload = None;
             s.actions.media_batches.remove(&key);
+            s.actions.prepared_batch_crt.remove(&key);
         } else if !failed.is_empty() {
             s.policy.parked.insert(name.clone());
             s.actions.media_batches.remove(&key);
+            s.actions.prepared_batch_crt.remove(&key);
         }
         self.emit_pending_locked(&mut s, workflow::UpdateKind::Changes, BTreeSet::new())?;
         Ok(true)

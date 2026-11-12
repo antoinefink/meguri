@@ -1,6 +1,7 @@
 //! Test-first P6/P12/K20 admission, from real publication and its legacy-schema migration.
 //! Canonical source base: df657044 (the filtered runner's Git identity is not the base).
 use super::*;
+use super::media_protocol as protocol;
 use meguri_storage::{ReadRows, ReaderRole};
 use cloud::policy::{Attention, ChangeCause, DeviceEvent, DeviceSettings, Unavailable};
 
@@ -218,5 +219,437 @@ fn epoch_crt_gate_legacy_unknown_blocks_send_until_actual_complete_epoch_is_acce
     let admitted = runtime.build_collection_batch(&sdk, &collection, &names).unwrap();
     assert!(admitted.id > 0 && !admitted.saves.is_empty());
     assert_eq!(admitted.saves[0].name, entity.name);
+    host.close().unwrap();
+}
+
+#[test]
+fn epoch_crt_gate_held_snapshot_cannot_send_after_both_current_values_change() {
+    let (_temp, _dir, host, mut service) = super::epoch_crt_knowledge::setup();
+    let sdk = published(&host, &mut service);
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let crt = local_crt(&host);
+    let zone = cloud::adapter::collection_zone(runtime.status().unwrap().binding.unwrap().facts.epoch);
+    let epoch = super::epoch_crt_knowledge::save_complete_epoch(&mut service, &zone, |epoch| epoch.crt = crt + 1);
+    let writer = collection.clone();
+    let caller = runtime.instance().unwrap();
+    runtime.set_cloud_capture_hook_for_test(move |runtime| {
+        writer.run(meguri_engine::OpSpec::named("synthetic creation time after capture", meguri_engine::OpSource::UserUndoable), move |ctx| {
+            let mut col = ctx.scope().col()?;
+            col.created = meguri_model::time::EpochSecs(crt + 1);
+            ctx.scope().put_col(&col)?;
+            Ok(())
+        }).unwrap();
+        runtime.receive_collection_records(&caller, &[epoch]).unwrap();
+    });
+    let names = entity_names(runtime);
+    let blocked = runtime.build_collection_batch(&sdk, &collection, &names).unwrap();
+    assert_eq!(blocked.id, 0, "the held snapshot still has the old crt");
+    assert!(blocked.saves.is_empty());
+    assert_mismatch(&host, &sdk, false);
+    let fresh = runtime.build_collection_batch(&sdk, &collection, &names).unwrap();
+    assert!(fresh.id > 0 && !fresh.saves.is_empty());
+    host.close().unwrap();
+}
+
+#[test]
+fn epoch_crt_gate_scan_and_reopen_rederive_mismatch_from_durable_values() {
+    let (_temp, dir, host, mut service) = super::epoch_crt_knowledge::setup();
+    let sdk = published(&host, &mut service);
+    let crt = local_crt(&host);
+    change_local_crt(&host, crt + 1);
+    let runtime = host.cloud_runtime().unwrap();
+    runtime.reconcile_binding(&host.collection().unwrap(), &host.media().unwrap(), Duration::from_secs(30)).unwrap();
+    assert_mismatch(&host, &sdk, true);
+    assert!(!runtime.status().unwrap().tracking_stopped);
+    host.close().unwrap();
+    drop(host);
+    let host = open_host(&dir, keys());
+    connect_policy(&host, &scope().account);
+    let state = refresh(&host);
+    assert!(state.facts.summary.crt_mismatch, "open must compare before the scan");
+    let runtime = host.cloud_runtime().unwrap();
+    runtime.reconcile_binding(&host.collection().unwrap(), &host.media().unwrap(), Duration::from_secs(30)).unwrap();
+    let (sdk, _, _) = runtime.register_sdk(false).unwrap();
+    assert_mismatch(&host, &sdk, true);
+    change_local_crt(&host, crt);
+    assert_mismatch(&host, &sdk, false);
+    host.close().unwrap();
+}
+
+#[test]
+fn epoch_crt_gate_prepared_incoming_is_rechecked_on_the_actual_writer() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let (_temp, _dir, host, mut service) = super::epoch_crt_knowledge::setup();
+    let sdk = published(&host, &mut service);
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let crt = local_crt(&host);
+    let key = b"synthetic-epoch-writer".to_vec();
+    let payload = cloud::entity_codec::Payload::Config(cloud::entity_codec::Config {
+        key: key.clone(), mtime_secs: NOW / 1000, val: b"true".to_vec(),
+    });
+    let binding = runtime.status().unwrap().binding.unwrap();
+    let name = cloud::entity_codec::entity_name(&binding.facts.record_key.0, payload.kind(), &key).unwrap();
+    let record = Saved {
+        name: name.clone(),
+        envelope: cloud::entity_codec::Entity::build(cloud::entity_codec::EntityFields {
+            kind: payload.kind(), key: key.clone(), origin: [21; 16], erev: 1, generation: None,
+            tombstone: false, deleted_at_ms: 0, writer: [22; 16], base_sha256: None,
+        }, &payload.encode().unwrap()).unwrap().encode().unwrap(),
+        system_fields: b"synthetic-epoch-writer-receipt".to_vec(),
+    };
+    runtime.receive_collection_records(&runtime.instance().unwrap(), &[record]).unwrap();
+    let reached = Arc::new(AtomicBool::new(false));
+    let observed = reached.clone();
+    let writer = collection.clone();
+    runtime.set_incoming_stage_hook_for_testing(move |stage| {
+        if stage == cloud::testing::IncomingStage::ApplyBeforeWriter && !observed.swap(true, Ordering::SeqCst) {
+            writer.run(meguri_engine::OpSpec::named("synthetic creation time after selection", meguri_engine::OpSource::UserUndoable), move |ctx| {
+                let mut col = ctx.scope().col()?;
+                col.created = meguri_model::time::EpochSecs(crt + 1);
+                ctx.scope().put_col(&col)?;
+                Ok(())
+            }).unwrap();
+        }
+    });
+    assert_eq!(runtime.drain_incoming(&collection, Duration::from_secs(30)).unwrap(), 0);
+    assert!(reached.load(Ordering::SeqCst));
+    assert!(collection.reader(ReaderRole::Query).unwrap().row_image(meguri_storage::Table::Config, &meguri_storage::RowKey::Text(key.clone())).unwrap().is_none());
+    let inbox = runtime.inbox_entries(binding.id).unwrap();
+    assert!(inbox.iter().any(|entry| entry.entry.record_name == name && entry.entry.reason == cloud::InboxReason::Ready && entry.entry.retry_count == 0));
+    assert!(runtime.apply_intents(binding.id).unwrap().is_empty());
+    assert!(!runtime.status().unwrap().tracking_stopped);
+    assert_mismatch(&host, &sdk, true);
+    collection.undo(meguri_engine::undo::UndoScope::Global).unwrap();
+    assert_mismatch(&host, &sdk, false);
+    assert!(runtime.drain_incoming(&collection, Duration::from_secs(30)).unwrap() > 0);
+    assert!(collection.reader(ReaderRole::Query).unwrap().row_image(meguri_storage::Table::Config, &meguri_storage::RowKey::Text(key)).unwrap().is_some());
+    host.close().unwrap();
+}
+
+#[test]
+fn epoch_crt_gate_already_issued_native_send_is_rechecked_without_policy_refresh() {
+    use cloud::policy::{ActionKind, NativeDisposition};
+    let (_temp, _dir, host, mut service) = super::epoch_crt_knowledge::setup();
+    let sdk = published(&host, &mut service);
+    let runtime = host.cloud_runtime().unwrap();
+    let crt = local_crt(&host);
+    host.cloud_policy_input(DeviceEvent::Settings(DeviceSettings {
+        enabled: true, paused: false, automatic: true, media: false,
+    })).unwrap();
+    let commands = host.cloud_policy_input(DeviceEvent::Foreground).unwrap();
+    let send = commands.into_iter().find(|command| matches!(command.action.kind, ActionKind::RequestSend { .. })).expect("published dirty rows issue a send");
+    let driver = host.cloud_policy_driver().unwrap();
+    assert_eq!(driver.native_disposition(&send).unwrap(), NativeDisposition::Enqueue);
+    driver.validate_native_sdk(&send, &sdk).unwrap();
+    change_local_crt(&host, crt + 1);
+    // Driver has not consumed Refresh; compact Runtime authority must close
+    // both the prepared enqueue and final SDK validation independently.
+    assert!(driver.native_disposition(&send).is_err());
+    assert!(driver.validate_native_sdk(&send, &sdk).is_err());
+    runtime.validate_sdk(&sdk).unwrap();
+    assert!(!runtime.status().unwrap().tracking_stopped);
+    host.collection().unwrap().undo(meguri_engine::undo::UndoScope::Global).unwrap();
+    assert_eq!(driver.native_disposition(&send).unwrap(), NativeDisposition::Enqueue);
+    driver.validate_native_sdk(&send, &sdk).unwrap();
+    host.close().unwrap();
+}
+
+fn complete_publication() -> (tempfile::TempDir, CoreHost, Service<SeededRandom>, String) {
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("p6-repair");
+    generated(&dir);
+    let host = open_host(&dir, keys());
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(1147)).unwrap();
+    publish_actual_collection(&host, &mut service);
+    connect_policy(&host, &scope().account);
+    let (sdk, _, _) = host.cloud_runtime().unwrap().register_sdk(false).unwrap();
+    (temp, host, service, sdk)
+}
+
+fn save_entity(service: &mut Service<SeededRandom>, zone: &str, name: &str, envelope: Vec<u8>) -> Saved {
+    let response = service.request(&scope(), Caller::default(), Operation::Modify {
+        zone: zone.into(), atomic: false, changes: vec![Mutation::Save {
+            record: RecordInput::encrypted(name, "MGEntity", envelope.clone()), if_unchanged: None,
+        }],
+    }).unwrap();
+    let Ok(Reply::Modified(mut items)) = response.result else { panic!("actual entity save required"); };
+    let Ok(MutationSuccess::Saved(record)) = items.remove(0).result else { panic!("accepted entity required"); };
+    Saved { name: record.name, envelope, system_fields: record.system_fields.bytes().to_vec() }
+}
+
+#[test]
+fn epoch_crt_gate_existing_epoch_read_persists_complete_unequal_body_atomically() {
+    let (_temp, host, mut service, sdk) = complete_publication();
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let crt = local_crt(&host);
+    let zone = cloud::adapter::collection_zone(runtime.status().unwrap().binding.unwrap().facts.epoch);
+    let response = service.request(&scope(), Caller::default(), Operation::FetchZone { zone: zone.clone(), token: None }).unwrap();
+    let Ok(Reply::ZoneChanges(page)) = response.result else { panic!("actual fetch cursor required"); };
+    assert!(!page.more);
+    let response = service.request(&scope(), Caller::default(), Operation::FetchZone { zone: zone.clone(), token: Some(page.token) }).unwrap();
+    let Ok(Reply::ZoneChanges(page)) = response.result else { panic!("actual empty fetch required"); };
+    assert!(!page.more && page.changes.is_empty());
+    // Start the normal cursorless fetch so its owner requests epoch metadata.
+    // Fetch completion below uses the SDK callbacks and the Service response.
+    let fetch = runtime.adapter_begin_fetch(&sdk, vec![zone.clone()]).unwrap();
+    let group = format!("meguri-{fetch}");
+    runtime.adapter_will_fetch(&sdk, group.clone(), true).unwrap();
+    runtime.adapter_did_fetch(&sdk, &group, true).unwrap();
+    let mut reads = runtime.adapter_fetch_reads(&sdk, fetch, &collection).unwrap();
+    assert_eq!(reads.len(), 1);
+    let read = reads.remove(0);
+    assert!(!read.is_active() && read.zone() == zone);
+    // The server changes after the fetch; only the issued record read can
+    // deliver this unequal complete body to tracking.
+    let changed = super::epoch_crt_knowledge::save_complete_epoch(&mut service, &zone, |epoch| epoch.crt = crt + 1);
+    let response = service.request(&scope(), Caller::default(), Operation::Read {
+        zone: zone.clone(), name: "epoch".into(), fields: RequestedFields::All,
+    }).unwrap();
+    let Ok(Reply::Record(record)) = response.result else { panic!("actual existing epoch read required"); };
+    let control = publication_control_record(&record).unwrap();
+    assert_eq!(control.encrypted.as_deref(), Some(changed.envelope.as_slice()));
+    assert!(runtime.adapter_complete_fetch_read(&read, &collection, RecordRead::Found(control), false, None, None).unwrap().is_none());
+    assert_eq!(runtime.epoch_crt_for_testing().unwrap(), Some(crt + 1));
+    let durable: serde_json::Value = serde_json::from_slice(&runtime.adapter_snapshot().unwrap().tracking_content).unwrap();
+    assert!(durable[4]["epoch_verification"].is_null());
+    assert_mismatch(&host, &sdk, true);
+    let batch = runtime.build_collection_batch(&sdk, &collection, &entity_names(runtime)).unwrap();
+    assert_eq!(batch.id, 0);
+    assert!(batch.saves.is_empty());
+    host.close().unwrap();
+}
+
+#[test]
+fn epoch_crt_gate_prepared_batch_cannot_handoff_after_current_pair_changes_together() {
+    let (_temp, host, mut service, sdk) = complete_publication();
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let zone = cloud::adapter::collection_zone(runtime.status().unwrap().binding.unwrap().facts.epoch);
+    meguri_engine::decks::add(&collection, "Synthetic prepared batch work".into()).unwrap();
+    let batch = runtime.build_collection_batch(&sdk, &collection, &entity_names(runtime)).unwrap();
+    assert!(!batch.saves.is_empty());
+    runtime.validate_prepared_batch(&sdk, &zone, batch.id).unwrap();
+    let before = runtime.adapter_snapshot().unwrap();
+    let crt = local_crt(&host);
+    change_local_crt(&host, crt + 1);
+    assert!(runtime.validate_prepared_batch(&sdk, &zone, batch.id).is_err());
+    runtime.validate_sdk(&sdk).unwrap();
+    runtime.validate_network_sdk(&sdk).unwrap();
+    let changed = super::epoch_crt_knowledge::save_complete_epoch(&mut service, &zone, |epoch| epoch.crt = crt + 1);
+    runtime.adapter_fetched(&sdk, &zone, &[changed], &[]).unwrap();
+    assert_mismatch(&host, &sdk, false);
+    assert!(runtime.validate_prepared_batch(&sdk, &zone, batch.id).is_err(), "the prepared snapshot still has the original crt");
+    let after = runtime.adapter_snapshot().unwrap();
+    assert_eq!(before.entities, after.entities, "denied handoff cannot ACK or replace original flights");
+    host.close().unwrap();
+}
+
+#[test]
+fn epoch_crt_gate_committed_ordinary_intent_settles_after_mismatch_without_new_writer() {
+    use meguri_model::faultpoint::{self, Fault};
+    use meguri_storage::{RowKey, Table};
+    let (_temp, host, mut service, sdk) = complete_publication();
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let binding = runtime.status().unwrap().binding.unwrap();
+    let zone = cloud::adapter::collection_zone(binding.facts.epoch);
+    let key = b"synthetic-p6-committed".to_vec();
+    let payload = cloud::entity_codec::Payload::Config(cloud::entity_codec::Config {
+        key: key.clone(), mtime_secs: NOW / 1000, val: b"true".to_vec(),
+    });
+    let name = cloud::entity_codec::entity_name(&binding.facts.record_key.0, payload.kind(), &key).unwrap();
+    let envelope = cloud::entity_codec::Entity::build(cloud::entity_codec::EntityFields {
+        kind: payload.kind(), key: key.clone(), origin: [31; 16], erev: 1, generation: None,
+        tombstone: false, deleted_at_ms: 0, writer: [32; 16], base_sha256: None,
+    }, &payload.encode().unwrap()).unwrap().encode().unwrap();
+    let saved = save_entity(&mut service, &zone, &name, envelope);
+    runtime.adapter_fetched(&sdk, &zone, &[saved], &[]).unwrap();
+    faultpoint::arm("cloud.apply.after_commit", Fault::IoError(std::io::ErrorKind::Other));
+    let result = runtime.drain_incoming(&collection, Duration::from_secs(30));
+    faultpoint::disarm("cloud.apply.after_commit");
+    assert!(result.is_err());
+    let retained = runtime.apply_intents(binding.id).unwrap();
+    assert_eq!(retained.len(), 1);
+    assert!(retained[0].result_seq.is_some() && !retained[0].keys.is_empty() && !retained[0].inbox_ids.is_empty());
+    let row = collection.reader(ReaderRole::Query).unwrap().row_image(Table::Config, &RowKey::Text(key.clone())).unwrap().unwrap();
+    change_local_crt(&host, local_crt(&host) + 1);
+    // Settle local day-clock maintenance before measuring replay alone.
+    collection.check_rollover().unwrap();
+    let seq = collection.last_seq();
+    runtime.drain_incoming(&collection, Duration::from_secs(30)).unwrap();
+    assert_eq!(collection.last_seq(), seq, "replay must preserve the committed sequence");
+    assert_eq!(collection.reader(ReaderRole::Query).unwrap().row_image(Table::Config, &RowKey::Text(key)).unwrap(), Some(row));
+    assert!(runtime.apply_intents(binding.id).unwrap().is_empty());
+    assert!(!runtime.incoming_wal_receipts().is_empty());
+    assert!(runtime.inbox_entries(binding.id).unwrap().iter().all(|entry| entry.entry.record_name != name));
+    assert_mismatch(&host, &sdk, true);
+    host.close().unwrap();
+}
+
+#[test]
+fn epoch_crt_gate_real_download_and_collision_recheck_before_file_mutation() {
+    use cloud::{entity_codec as codec, media::{blob::Blob, Request}};
+    use meguri_testkit::cloud::Asset;
+    use sha2::{Digest, Sha256};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    for collision in [false, true] {
+        let (temp, host, mut service, sdk) = complete_publication();
+        let runtime = host.cloud_runtime().unwrap();
+        let collection = host.collection().unwrap();
+        let media = host.media().unwrap();
+        host.cloud_policy_input(DeviceEvent::Settings(DeviceSettings {
+            enabled: true, paused: false, automatic: false, media: true,
+        })).unwrap();
+        runtime.resume_cloud_media();
+        let binding = runtime.status().unwrap().binding.unwrap();
+        let zone = cloud::adapter::collection_zone(binding.facts.epoch);
+        let mut remaining = 16;
+        protocol::flush_collection(&host, &mut service, &sdk, &mut remaining);
+        let file = temp.path().join("p6-repair/collection.media/photo.jpg");
+        if collision {
+            let baseline_file = file.with_file_name("uploaded-baseline.jpg");
+            std::fs::write(&baseline_file, b"synthetic local collision").unwrap();
+            media.store().register_full(|_, _| true).unwrap();
+            runtime.consume_media_feed(&collection, &media).unwrap();
+            let (id, work) = protocol::prepare_upload(&host, &mut service, &sdk, &mut remaining);
+            protocol::send_batch(&host, &mut service, &sdk, id, &work);
+            protocol::flush_collection(&host, &mut service, &sdk, &mut remaining);
+            let baseline = runtime.entity_facts_page(codec::Kind::MediaName, None).unwrap().remove(0);
+            assert!(baseline.server_erev > 0 && baseline.mark.is_none());
+            let note = runtime.entity_facts_page(codec::Kind::Note, None).unwrap().remove(0);
+            let codec::Payload::Note(note) = note.payload else { panic!("note required"); };
+            meguri_engine::notes::update(&collection, meguri_engine::notes::UpdateNote {
+                id: meguri_model::ids::NoteId(note.id), fields: vec!["<img src=\"photo.jpg\">".into(), "local".into()], tags: vec![],
+            }, meguri_engine::OpSource::UserUndoable).unwrap();
+            protocol::flush_collection(&host, &mut service, &sdk, &mut remaining);
+            // The blob is already uploaded; this distinct name is a real local creation.
+            std::fs::write(&file, b"synthetic local collision").unwrap();
+            media.store().register_full(|_, _| true).unwrap();
+            runtime.consume_media_feed(&collection, &media).unwrap();
+            let local = runtime.entity_facts_page(codec::Kind::MediaName, None).unwrap().into_iter()
+                .find(|entity| entity.key == b"photo.jpg").unwrap();
+            assert_eq!(local.server_erev, 0);
+            assert!(local.mark.is_some());
+        }
+        // Public known hash vector; Service owns both MGBlob and MGEntity.
+        let bytes = b"abc";
+        let blob = Blob { sha256: Sha256::digest(bytes).into(), sha1: [0xa9,0x99,0x3e,0x36,0x47,0x06,0x81,0x6a,0xba,0x3e,0x25,0x71,0x78,0x50,0xc2,0x6c,0x9c,0xd0,0xd8,0x9d], size: 3 };
+        let media_key = runtime.publication_media_state().unwrap().unwrap().0;
+        let blob_name = blob.name(&media_key.0);
+        let mut input = RecordInput::encrypted(&blob_name, "MGBlob", blob.encode().unwrap());
+        input.fields.insert("a".into(), Field::Asset(Asset::synthetic(bytes.to_vec())));
+        let response = service.request(&scope(), Caller::default(), Operation::Modify {
+            zone: "meguri-media".into(), atomic: false, changes: vec![Mutation::Save { record: input, if_unchanged: None }],
+        }).unwrap();
+        let Ok(Reply::Modified(items)) = response.result else { panic!("actual blob save required"); };
+        assert!(matches!(items[0].result, Ok(MutationSuccess::Saved(_))));
+        let payload = codec::Payload::MediaName(blob.media("photo.jpg"));
+        let name = codec::entity_name(&binding.facts.record_key.0, codec::Kind::MediaName, b"photo.jpg").unwrap();
+        let envelope = codec::Entity::build(codec::EntityFields {
+            kind: codec::Kind::MediaName, key: b"photo.jpg".to_vec(), origin: [71; 16], erev: 1,
+            generation: None, tombstone: false, deleted_at_ms: 0, writer: [72; 16], base_sha256: None,
+        }, &payload.encode().unwrap()).unwrap().encode().unwrap();
+        let saved = save_entity(&mut service, &zone, &name, envelope);
+        runtime.adapter_fetched(&sdk, &zone, &[saved], &[]).unwrap();
+        let crt = local_crt(&host);
+        let reached = Arc::new(AtomicBool::new(false));
+        let observed = reached.clone();
+        let writer = collection.clone();
+        let target = if collision { cloud::testing::IncomingStage::ResolutionBeforeMove } else { cloud::testing::IncomingStage::MediaReplyBeforeApply };
+        runtime.set_incoming_stage_hook_for_testing(move |stage| {
+            if stage == target && !observed.swap(true, Ordering::SeqCst) {
+                writer.run(meguri_engine::OpSpec::named("p6 media boundary creation time", meguri_engine::OpSource::UserUndoable), move |ctx| {
+                    let mut col = ctx.scope().col()?;
+                    col.created = meguri_model::time::EpochSecs(crt + 1);
+                    ctx.scope().put_col(&col)?;
+                    Ok(())
+                }).unwrap();
+            }
+        });
+        let before_notes = runtime.entity_facts_page(codec::Kind::Note, None).unwrap();
+        let mut denied = false;
+        for _ in 0..16 {
+            if remaining == 0 { break; }
+            remaining -= 1;
+            let work = runtime.cloud_media_work(&collection, &media).unwrap().expect("actual queued media work");
+            if matches!(work.request, Request::Upload { .. } | Request::Delete { .. }) {
+                protocol::flush_collection(&host, &mut service, &sdk, &mut remaining);
+            }
+            let result = protocol::deliver(&host, &mut service, &sdk, &work);
+            if reached.load(Ordering::SeqCst) {
+                assert!(result.is_err());
+                denied = true;
+                break;
+            }
+            result.unwrap();
+        }
+        assert!(denied && reached.load(Ordering::SeqCst));
+        if collision {
+            assert_eq!(std::fs::read(&file).unwrap(), b"synthetic local collision");
+            let intents = runtime.apply_intents(binding.id).unwrap();
+            assert_eq!(intents.len(), 1);
+            let apply = intents[0].media.as_ref().unwrap();
+            assert!(apply.moved.is_some() && apply.move_evidence.is_none() && !apply.installed);
+            let moved = apply.moved.as_ref().unwrap();
+            assert!(!file.parent().unwrap().join(std::str::from_utf8(&moved.name).unwrap()).exists());
+        } else {
+            assert!(!file.exists());
+            assert!(runtime.apply_intents(binding.id).unwrap().is_empty());
+        }
+        assert_eq!(runtime.entity_facts_page(codec::Kind::Note, None).unwrap(), before_notes);
+        assert_mismatch(&host, &sdk, true);
+        host.close().unwrap();
+    }
+}
+
+#[test]
+fn epoch_crt_gate_committed_media_trash_settles_after_mismatch_with_real_intent_and_wal() {
+    use cloud::entity_codec::{self as codec, Kind, Payload};
+    use meguri_model::faultpoint::{self, Fault};
+    let (temp, host, mut service, sdk) = complete_publication();
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let media = host.media().unwrap();
+    let binding = runtime.status().unwrap().binding.unwrap();
+    let zone = cloud::adapter::collection_zone(binding.facts.epoch);
+    host.cloud_policy_input(DeviceEvent::Settings(DeviceSettings {
+        enabled: true, paused: false, automatic: false, media: true,
+    })).unwrap();
+    runtime.resume_cloud_media();
+    let file = temp.path().join("p6-repair/collection.media/retired.jpg");
+    std::fs::write(&file, b"synthetic p6 committed trash").unwrap();
+    media.store().register_full(|_, _| true).unwrap();
+    runtime.consume_media_feed(&collection, &media).unwrap();
+    let before = runtime.entity_facts_page(Kind::MediaName, None).unwrap().remove(0);
+    assert!(matches!(&before.payload, Payload::MediaName(value) if value.name == b"retired.jpg"));
+    let envelope = codec::Entity::build(codec::EntityFields {
+        kind: Kind::MediaName, key: before.key.clone(), origin: before.origin,
+        erev: before.server_erev + 1, generation: None, tombstone: true,
+        deleted_at_ms: NOW, writer: [81; 16], base_sha256: None,
+    }, &before.payload.encode().unwrap()).unwrap().encode().unwrap();
+    let saved = save_entity(&mut service, &zone, &before.name, envelope);
+    runtime.adapter_fetched(&sdk, &zone, &[saved], &[]).unwrap();
+    faultpoint::arm("cloud.media.after_resolution_install", Fault::IoError(std::io::ErrorKind::Other));
+    let applied = runtime.drain_incoming(&collection, Duration::from_secs(30));
+    faultpoint::disarm("cloud.media.after_resolution_install");
+    assert!(applied.is_err() && !file.exists());
+    let pending = runtime.apply_intents(binding.id).unwrap();
+    assert_eq!(pending.len(), 1);
+    let apply = pending[0].media.as_ref().unwrap();
+    assert!(apply.installed && !apply.abandoned && apply.server.is_none());
+    assert!(!pending[0].inbox_ids.is_empty());
+    assert!(runtime.incoming_wal_receipts().is_empty());
+    change_local_crt(&host, local_crt(&host) + 1);
+    let seq = collection.last_seq();
+    runtime.drain_incoming(&collection, Duration::from_secs(30)).unwrap();
+    assert_eq!(collection.last_seq(), seq);
+    assert!(!file.exists());
+    assert!(runtime.apply_intents(binding.id).unwrap().is_empty());
+    assert!(!runtime.incoming_wal_receipts().is_empty());
+    assert!(runtime.inbox_entries(binding.id).unwrap().iter().all(|entry| entry.entry.record_name != before.name));
+    assert_mismatch(&host, &sdk, true);
     host.close().unwrap();
 }

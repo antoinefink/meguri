@@ -841,7 +841,7 @@ impl Driver {
         // intent with the current scheduling preference; its old value is
         // rejected by validate_locked without invalidating other actions.
         if owned.state.engine.is_none()
-            && owned.state.gate_open()
+            && owned.state.read_gate_open()
             && actions
                 .iter()
                 .any(|a| matches!(a.kind, ActionKind::ConfigureAutomatic { .. }))
@@ -1002,6 +1002,9 @@ impl Driver {
         let owned = self.lock_for_work(work)?;
         self.validate_original_attempt(&owned, command, matches!(command.action.kind, ActionKind::ResumeMedia))?;
         (|| -> Result<NativeDisposition, DriverError> {
+            if matches!(command.action.kind, ActionKind::RequestSend { .. } | ActionKind::ResumeMedia) {
+                self.runtime.native_authority().require_crt_equal()?;
+            }
             if matches!(
                 command.action.kind,
                 ActionKind::RequestFetch { .. } | ActionKind::RequestSend { .. }
@@ -1031,11 +1034,11 @@ impl Driver {
                             .as_ref()
                             .is_some_and(|old| old.instance == engine.instance && old.stopping)
                 });
-                // An open gate retains scheduling intent even while the old SDK stops.
-                // A closed gate can only turn off an existing running instance
-                // while a scan or ordinary intent holds back collection work.
+                // Read admission retains scheduling through unknown/unequal crt.
+                // A scan or ordinary intent can still turn scheduling off
+                // on an existing running instance.
                 let allowed = owned.state.engine_allowed()
-                    && (owned.state.gate_open()
+                    && (owned.state.read_gate_open()
                         || (!on
                             && running
                             && owned.state.facts.lifecycle == Lifecycle::Ready
@@ -1276,6 +1279,8 @@ impl Driver {
                     )?;
                     let summary = &current.facts.summary;
                     if !summary.collection_known
+                        || !summary.crt_known
+                        || summary.crt_mismatch
                         || summary.scan != Scan::None
                         || summary.pending_unheld > 0
                         || summary.in_flight > 0

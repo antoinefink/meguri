@@ -331,14 +331,14 @@ pub fn step(mut s: State, input: Input) -> (State, Vec<Action>) {
             stop(&mut s, &mut a, StopReason::GateClosed);
         }
     }
-    let binding_swap = open
+    let binding_swap = s.read_gate_open()
         && s.engine
             .as_ref()
             .is_some_and(|e| s.facts.binding.as_ref().is_some_and(|b| e.binding != b.id));
     if binding_swap {
         stop(&mut s, &mut a, StopReason::BindingChanged);
     }
-    let opening = open && (!was_open || binding_swap);
+    let opening = s.read_gate_open() && (!old.read_gate_open() || open && !was_open || binding_swap);
     if opening {
         if !s.engine_runs() {
             if let Some(b) = &s.facts.binding {
@@ -352,8 +352,10 @@ pub fn step(mut s: State, input: Input) -> (State, Vec<Action>) {
         }
         if s.automatic() {
             fetch(&mut a);
-            send(&s, &mut a);
-            if !s.engine_runs() {
+            if open {
+                send(&s, &mut a);
+            }
+            if open && !s.engine_runs() {
                 resume_media(&s, &mut a);
             }
         }
@@ -380,15 +382,17 @@ pub fn step(mut s: State, input: Input) -> (State, Vec<Action>) {
                 }
             }
             Event::DeviceSettings(_) => {
-                if s.automatic() != old.automatic() && (!s.automatic() || open) {
+                if s.automatic() != old.automatic() && (!s.automatic() || s.read_gate_open()) {
                     a.push(ActionKind::ConfigureAutomatic { on: s.automatic() });
                     if !s.automatic() {
                         cancel_timer(&mut s, &mut a);
-                    } else if open {
+                    } else if s.read_gate_open() {
                         a.push(ActionKind::UpdatePending(Update::Full));
                         fetch(&mut a);
-                        send(&s, &mut a);
-                        resume_media(&s, &mut a);
+                        if open {
+                            send(&s, &mut a);
+                            resume_media(&s, &mut a);
+                        }
                     }
                 }
                 if s.settings.media != old.settings.media {
@@ -452,7 +456,7 @@ pub fn step(mut s: State, input: Input) -> (State, Vec<Action>) {
                         send(&s, &mut a);
                         resume_media(&s, &mut a);
                     }
-                } else if s.engine_runs() && s.engine_allowed() && !s.facts.summary.crt_mismatch && s.automatic() {
+                } else if s.engine_runs() && s.engine_allowed() && s.automatic() {
                     fetch(&mut a);
                 }
             }

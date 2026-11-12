@@ -45,9 +45,10 @@ public struct CloudEngineBatch: Sendable, Equatable {
     public let id: UInt64
     public let saves: [CloudRecord]
     public let deletes: [String]
+    let finalAdmission: (@Sendable () throws -> Void)?
     let mediaAdmission: CloudMediaBatchAdmission?
-    init(id: UInt64, saves: [CloudRecord], deletes: [String], mediaAdmission: CloudMediaBatchAdmission? = nil) {
-        self.id = id; self.saves = saves; self.deletes = deletes; self.mediaAdmission = mediaAdmission
+    init(id: UInt64, saves: [CloudRecord], deletes: [String], mediaAdmission: CloudMediaBatchAdmission? = nil, finalAdmission: (@Sendable () throws -> Void)? = nil) {
+        self.id = id; self.saves = saves; self.deletes = deletes; self.mediaAdmission = mediaAdmission; self.finalAdmission = finalAdmission
     }
     public static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id && lhs.saves == rhs.saves && lhs.deletes == rhs.deletes }
 }

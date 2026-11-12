@@ -373,6 +373,9 @@ impl Driver {
                 return Err(DriverError::UnqualifiedCompletion);
             }
             let sdk = sdk.ok_or(DriverError::StaleCommand)?;
+            if matches!(command.action.kind, ActionKind::RequestSend { .. } | ActionKind::ResumeMedia) {
+                runtime.require_crt_equal()?;
+            }
             Ok(runtime.validate_sdk(sdk)?)
         })();
         #[cfg(feature = "test-hooks")]

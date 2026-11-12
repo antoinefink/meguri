@@ -109,6 +109,8 @@ impl Runtime {
                     verified: b.verified,
                     publish_step,
                 });
+                summary.crt_known = b.epoch_crt.is_some();
+                summary.crt_mismatch = b.epoch_crt.is_some_and(|crt| crt != b.current_crt.1);
                 let work = Self::exchange_work_locked(&s, store, b.binding.id)?;
                 held_pending = work.held_pending_names.clone();
                 summary.held = held_pending.len() as u64;
@@ -209,7 +211,7 @@ impl Runtime {
                     }
                 }
                 summary.collection_known = s.whole_complete;
-                // Existing stable-layout Runtime does not expose the full K10 flag/root/crt/generation ledger.
+                // Other K10 flag/root/generation producers remain incomplete.
                 // Those missing facts may never be presented as zero attention.
                 summary.attention_known = false;
                 evidence = store.cloud_policy_evidence(b.binding.id)?;
@@ -331,6 +333,7 @@ impl Runtime {
         if &Self::adapter_guard_locked(&s) != guard {
             return Err(RuntimeError::StaleIncarnation);
         }
+        Self::gate_locked(&s)?;
         let binding = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
         let result = with_tracking_access(|| -> Result<_, RuntimeError> {
             work.effect()?;

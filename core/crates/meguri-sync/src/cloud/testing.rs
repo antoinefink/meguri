@@ -124,6 +124,8 @@ pub enum IncomingStage {
     KnownLossAfterCursor,
     KnownLossBeforeActiveResult,
     KnownLossAfterActiveResult,
+    // After ordinary/rekey selection, off the writer and all core locks.
+    ApplyBeforeWriter,
     ApplyAfterIntent,
     ApplyAfterCommit,
     ApplyAfterFlush,

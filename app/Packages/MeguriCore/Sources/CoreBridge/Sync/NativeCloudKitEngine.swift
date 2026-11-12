@@ -308,6 +308,40 @@ enum NativeCloudKitSendError {
     }
 }
 
+// Call on the owning actor after preparation and media delivery have finished.
+// Admission, handoff bookkeeping and the native return contain no suspension.
+enum NativeCloudKitBatchReturn {
+    static func canPrepare(_ batch: CloudEngineBatch, batches: [String: UInt64]) -> Bool {
+        (batch.saves.map(\.name) + batch.deletes).allSatisfy { batches[$0] == nil }
+    }
+    // Only the original Sent callback's completed bookkeeping releases names,
+    // including retry/cancellation results and same-id reoffers.
+    static func drained(_ batch: UInt64, pendingBatch: inout UInt64?, batches: inout [String: UInt64]) {
+        batches = batches.filter { $0.value != batch }
+        if pendingBatch == batch { pendingBatch = nil }
+    }
+    static func finish(_ prepared: CKSyncEngine.RecordZoneChangeBatch, batch: CloudEngineBatch,
+                       lifetime: CloudKitNetworkLifetime, generation: UInt64,
+                       issue: NativeCloudSavedRemoval.Issue, savedRemoval: inout NativeCloudSavedRemoval,
+                       pendingBatch: inout UInt64?, batches: inout [String: UInt64]) -> CKSyncEngine.RecordZoneChangeBatch? {
+        guard canPrepare(batch, batches: batches) else { return nil }
+        do { try batch.finalAdmission?() } catch { return nil }
+        // Core permission stays outside the native mutex and media callback.
+        // Only pure actor bookkeeping and the return commit hold native authority.
+        var returned: CKSyncEngine.RecordZoneChangeBatch?
+        do {
+            try lifetime.enqueue(generation: generation, validate: {}) {
+                savedRemoval.handed(batch.id, names: Set(batch.saves.map(\.name) + batch.deletes), issue: issue)
+                pendingBatch = batch.id
+                for save in batch.saves { batches[save.name] = batch.id }
+                for name in batch.deletes { batches[name] = batch.id }
+                returned = prepared
+            }
+        } catch { return nil }
+        return returned
+    }
+}
+
 private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
     nonisolated let instanceID: String
     private var sdk: CKSyncEngine?
@@ -828,13 +862,19 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
             for waiter in pending.values { waiter.resume() }
         } else { eventWaiters.removeFirst().resume() }
         await delegate.eventBookkeepingCompleted(event, engine: self)
+        if case .sent(let batch, _, _, _, _) = event {
+            NativeCloudKitBatchReturn.drained(batch, pendingBatch: &pendingBatch, batches: &batches)
+        }
     }
     func nextRecordZoneChangeBatch(_ context: CKSyncEngine.SendChangesContext, syncEngine: CKSyncEngine) async -> CKSyncEngine.RecordZoneChangeBatch? {
-        guard failure == nil, sdk === syncEngine, let collectionZone else { return nil }
+        guard failure == nil, let originalSDK = sdk, originalSDK === syncEngine, let collectionZone else { return nil }
+        let lifetime = networkLifetime
+        let generation = lifetime.authority()
         if let returnedWork { await returnedWork.value }
+        guard failure == nil, sdk === originalSDK else { return nil }
         let pending = pendingRecordZoneChanges()
-        let removalIssue = savedRemoval.capture(pending: pending, generation: networkLifetime.authority())
-        guard failure == nil else { return nil }
+        let removalIssue = savedRemoval.capture(pending: pending, generation: generation)
+        guard failure == nil, sdk === originalSDK else { return nil }
         // Scope each request to one zone, retaining collection-before-media
         // order whenever the original SDK request permits both zones.
         let candidates = [collectionZone, "meguri-media"].filter { name in
@@ -853,9 +893,16 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
                 let names = Set(ids.filter { $0.zoneID == zone(candidate) }.map(\.recordName))
                 scoped = scoped.filter { names.contains($0.key) }
             }
-            if let batch = await delegate.nextRecordZoneChangeBatch(pending: scoped, zone: candidate, engine: self) { selected = (candidate, batch); break }
+            if !scoped.isEmpty {
+                scoped = scoped.filter { batches[$0.key] == nil }
+                if scoped.isEmpty { continue }
+            }
+            let batch = await delegate.nextRecordZoneChangeBatch(pending: scoped, zone: candidate, engine: self)
+            guard failure == nil, sdk === originalSDK else { return nil }
+            if let batch { selected = (candidate, batch); break }
         }
         guard let (batchZone, batch) = selected else { return nil }
+        guard NativeCloudKitBatchReturn.canPrepare(batch, batches: batches) else { return nil }
         if let observeNative {
             let group = context.options.operationGroup.operationGroupID
             let operation: CloudNativeSendOperation? = switch context.reason {
@@ -866,32 +913,32 @@ private actor NativeCloudKitEngine: CloudKitEngine, CKSyncEngineDelegate {
             if let operation {
                 await observeNative(.built(origin: instanceID, operation: operation, zone: batchZone, batch: batch))
             } else { await observeNative(.unbound) }
-            guard sdk === syncEngine else { return nil }
+            guard failure == nil, sdk === originalSDK else { return nil }
         }
-        guard failure == nil else { return nil }
+        guard failure == nil, sdk === originalSDK,
+              NativeCloudKitBatchReturn.canPrepare(batch, batches: batches) else { return nil }
         do {
             try NativeCloudMediaBatch.validate(batch, zone: batchZone)
             let saves = try batch.saves.map { try encode($0, zone: batchZone) }
-            savedRemoval.handed(batch.id, names: Set(batch.saves.map(\.name) + batch.deletes), issue: removalIssue)
-            pendingBatch = batch.id
-            for save in saves { batches[save.recordID.recordName] = batch.id }
-            for name in batch.deletes { batches[name] = batch.id }
             let prepared = CKSyncEngine.RecordZoneChangeBatch(recordsToSave: saves, recordIDsToDelete: batch.deletes.map { recordID($0, zone: batchZone) }, atomicByZone: false)
+            var admitted = prepared
             if batchZone == "meguri-media" {
                 guard let admission = batch.mediaAdmission else { throw NativeCloudKitFailure.unsupportedRecord }
-                let lifetime = networkLifetime
-                let generation = lifetime.authority()
                 do {
-                    return try await admission.deliver(PreparedNativeMediaBatch(prepared)) { deliver in
+                    guard let delivered = try await admission.deliver(PreparedNativeMediaBatch(prepared), commit: { deliver in
                         var delivered = false
                         try lifetime.enqueue(generation: generation, validate: {}) { delivered = deliver() }
                         return delivered
-                    }?.value
+                    }) else { return nil }
+                    admitted = delivered.value
                 } catch {
                     return nil
                 }
             }
-            return prepared
+            guard failure == nil, sdk === originalSDK else { return nil }
+            return NativeCloudKitBatchReturn.finish(admitted, batch: batch,
+                lifetime: lifetime, generation: generation, issue: removalIssue,
+                savedRemoval: &savedRemoval, pendingBatch: &pendingBatch, batches: &batches)
         } catch {
             failure = error
             let observing = observeNative != nil

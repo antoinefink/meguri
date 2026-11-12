@@ -167,6 +167,9 @@ impl Runtime {
         if Self::publication_holds_binding_locked(s) {
             return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
         }
+        if !b.crt_equal() {
+            return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
+        }
         if !s.whole_complete
             || s.scan_required
             || s.scan_running
@@ -487,6 +490,7 @@ impl Runtime {
         #[cfg(feature = "test-hooks")]
         s.actions.smoke_acks.conflicts.clear();
         let key = (instance.to_owned(), request);
+        s.actions.prepared_batch_crt.remove(&key);
         s.actions.request_flights.remove(&key);
         s.policy.flights.remove(&key);
         if s.actions.payload_uploads.contains_key(&key) {
@@ -875,6 +879,9 @@ impl Runtime {
                     recovered_names: proof.recovered_names.clone(),
                 });
                 s.note_scan = Some(proof.clone());
+                s.bound.as_mut().ok_or(RuntimeError::StaleIncarnation)?
+                    .observe_crt(snapshot.seq().0, col.created.0);
+                Self::refresh_epoch_crt_locked(s)?;
                 s.whole_complete = true;
                 s.scan_required = false;
                 s.tracking_stopped = false;
@@ -1217,6 +1224,7 @@ impl Runtime {
         })?;
         let mut lease = collection.reader(ReaderRole::Cloud)?;
         let (snapshot, hold) = lease.capture_cloud(collection, named.keys().cloned().collect())?;
+        let snapshot_crt = snapshot.col()?.created.0;
         #[cfg(feature = "test-hooks")]
         if let Some(hook) = self.take_cloud_capture_hook_for_test() {
             hook(self);
@@ -1237,6 +1245,7 @@ impl Runtime {
                 }
             }
             let ready = Self::gate_locked(s).is_ok()
+                && s.bound.as_ref().is_some_and(|b| b.epoch_crt == Some(snapshot_crt))
                 && !store.has_rekey_intents(guard.binding)?
                 && s.cloud.incoming_seq <= snapshot.seq().0
                 && s.last_session == snapshot.active_session().map(|session| session.0);
@@ -1443,7 +1452,10 @@ impl Runtime {
         }
         let selected = self.with_scan(&guard, collection, |s| {
             Self::caller_locked(s, instance)?;
-            if Self::gate_locked(s).is_err() || s.cloud.incoming_seq > snapshot.seq().0 {
+            if Self::gate_locked(s).is_err()
+                || !s.bound.as_ref().is_some_and(|b| b.epoch_crt == Some(snapshot_crt))
+                || s.cloud.incoming_seq > snapshot.seq().0
+            {
                 return Ok(Vec::new());
             }
             let store = s.store.as_ref().ok_or(Error::Database)?;
@@ -1538,7 +1550,10 @@ impl Runtime {
             let identity = flight.identity();
             let committed = self.with_scan(&guard, collection, |s| {
                 Self::caller_locked(s, instance)?;
-                if Self::gate_locked(s).is_err() || s.cloud.incoming_seq > snapshot.seq().0 {
+                if Self::gate_locked(s).is_err()
+                    || !s.bound.as_ref().is_some_and(|b| b.epoch_crt == Some(snapshot_crt))
+                    || s.cloud.incoming_seq > snapshot.seq().0
+                {
                     return Ok(false);
                 }
                 let store = s.store.as_mut().ok_or(Error::Database)?;
@@ -1585,7 +1600,10 @@ impl Runtime {
             .collect::<Result<Vec<_>, _>>();
         self.with_scan(&guard, collection, |s| {
             Self::caller_locked(s, instance)?;
-            if Self::gate_locked(s).is_err() || s.cloud.incoming_seq > snapshot.seq().0 {
+            if Self::gate_locked(s).is_err()
+                || !s.bound.as_ref().is_some_and(|b| b.epoch_crt == Some(snapshot_crt))
+                || s.cloud.incoming_seq > snapshot.seq().0
+            {
                 return Ok(empty());
             }
             // Recheck conditional authority after all incremental commits.
@@ -1639,6 +1657,7 @@ impl Runtime {
                     batch_id: id,
                     names: saves.iter().map(|e| e.name.clone()).collect(),
                 });
+                s.actions.prepared_batch_crt.insert((instance.to_owned(), id), snapshot_crt);
                 s.actions.request_flights.insert((instance.to_owned(), id), flights);
                 if !uploads.is_empty() {
                     let sends: BTreeSet<_> = s
@@ -2177,9 +2196,13 @@ impl Runtime {
         let lease = collection.reader(ReaderRole::Cloud)?;
         let snapshot = lease.snapshot()?;
         let boundary = snapshot.seq().0;
+        let snapshot_crt = snapshot.col()?.created.0;
         let mut s = self.state();
         Self::caller_locked(&s, instance)?;
         Self::capture_gate_locked(&s)?;
+        if !s.bound.as_ref().is_some_and(|b| b.epoch_crt == Some(snapshot_crt)) {
+            return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
+        }
         if !collection.is_current()
             || s.bound
                 .as_ref()

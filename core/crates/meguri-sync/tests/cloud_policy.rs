@@ -26,6 +26,7 @@ fn ready() -> State {
             }),
             summary: Summary {
                 collection_known: true,
+                crt_known: true,
                 attention_known: true,
                 scan: Scan::None,
                 ..Default::default()
@@ -1027,4 +1028,36 @@ fn review_copy_eligibility_reuses_core_engine_admission_with_unknown_status_evid
     state.facts.fence = Fence::Clear;
     state.account.status = AccountStatus::Configuration;
     assert!(!state.status().controls.automatic_eligible);
+}
+
+#[test]
+fn epoch_crt_unknown_closes_writes_without_recovery_or_stopping_reads() {
+    let mut state = ready();
+    state.facts.summary.crt_known = false;
+    state.facts.summary.attention_known = false;
+    state.drained = [true; 2];
+    state.drain_serial = 1;
+    assert!(!state.gate_open());
+    assert!(state.engine_allowed());
+    assert_eq!(state.sync_now_availability(), Ok(()));
+    assert!(!state.status().attention.contains_key(&Attention::CrtMismatch));
+    let (_, actions) = run(state.clone(), Event::Foreground);
+    assert!(actions.iter().any(|a| matches!(a.kind, ActionKind::RequestFetch { .. })));
+    assert!(!actions.iter().any(|a| matches!(a.kind, ActionKind::RequestSend { .. } | ActionKind::ApplyReady { .. } | ActionKind::StopEngine { .. } | ActionKind::RecordQuietPoint { .. })));
+    state.engine = None;
+    let mut closed = state.clone();
+    closed.facts.lifecycle = Lifecycle::Opening;
+    let (_, actions) = step(closed, Input { now_ms: 1000, facts: Some(state.facts), event: Event::Lifecycle { state: Lifecycle::Ready, generation: 7 } });
+    assert!(actions.iter().any(|a| matches!(a.kind, ActionKind::StartEngine { .. })));
+    assert!(actions.iter().any(|a| matches!(a.kind, ActionKind::RequestFetch { .. })));
+}
+
+#[test]
+fn epoch_crt_known_mismatch_keeps_automatic_fetch_and_reports_recovery_required() {
+    let mut state = ready();
+    state.facts.summary.crt_mismatch = true;
+    assert_eq!(state.sync_now_availability(), Err(Unavailable::RecoveryRequired));
+    let (_, actions) = run(state, Event::Foreground);
+    assert!(actions.iter().any(|a| matches!(a.kind, ActionKind::RequestFetch { .. })));
+    assert!(!actions.iter().any(|a| matches!(a.kind, ActionKind::RequestSend { .. } | ActionKind::StopEngine { .. } | ActionKind::RecordQuietPoint { .. })));
 }

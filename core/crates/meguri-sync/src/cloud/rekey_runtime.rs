@@ -481,11 +481,17 @@ impl Runtime {
         if after {
             self.settle_identity(collection, guard, i, r, timeout)?;
         } else if before {
+            if !self.state().bound.as_ref().is_some_and(Bound::crt_equal) {
+                return Ok(IncomingDisposition::Progress(0));
+            }
             self.with_incoming(guard, collection, |s| {
                 Ok(s.store.as_mut().ok_or(Error::Database)?.clear_rolled_back_rekey(i)?)
             })?;
         } else {
             return Err(Error::RecoveryRefused.into());
+        }
+        if !self.state().bound.as_ref().is_some_and(Bound::crt_equal) {
+            return Ok(IncomingDisposition::Progress(0));
         }
         let entries = self.with_incoming(guard, collection, |s| {
             let entries = s.store.as_ref().ok_or(Error::Database)?.inbox(guard.binding)?;

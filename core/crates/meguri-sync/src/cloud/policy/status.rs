@@ -47,12 +47,15 @@ impl State {
             })
     }
     pub fn gate_open(&self) -> bool {
+        self.read_gate_open() && self.facts.summary.crt_known && !self.facts.summary.crt_mismatch
+    }
+    // P6 closes collection sends/applies, never the existing engine/read path.
+    pub(super) fn read_gate_open(&self) -> bool {
         self.engine_allowed()
             && self.facts.lifecycle == Lifecycle::Ready
             && self.facts.summary.collection_known
             && self.facts.summary.scan == Scan::None
             && self.facts.summary.unsettled_intents == 0
-            && !self.facts.summary.crt_mismatch
     }
     pub fn engine_runs(&self) -> bool {
         self.engine
@@ -210,6 +213,7 @@ impl State {
         } else if s.pending_unheld > 0 || s.sendable > 0 || s.parked > 0 || s.in_flight > 0 || s.ready > 0 {
             StatusState::ChangesPending
         } else if !s.collection_known
+            || !s.crt_known
             || !s.attention_known
             || s.scan != Scan::None
             || s.apply_in_progress

@@ -159,7 +159,7 @@ impl Runtime {
             media_epoch: s.media.epoch,
         })
     }
-    fn check_media_locked(s: &State, a: &Authority) -> Result<(), RuntimeError> {
+    pub(super) fn check_media_locked(s: &State, a: &Authority) -> Result<(), RuntimeError> {
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
         if b.binding.id != a.binding
             || b.open_counter != a.open
@@ -233,7 +233,8 @@ impl Runtime {
     ) -> Result<T, RuntimeError> {
         let mut s = self.state();
         Self::check_media_recovery_locked(&s, a)?;
-        if s.adapter.paused
+        if !s.bound.as_ref().is_some_and(Bound::crt_equal)
+            || s.adapter.paused
             || s.media.zone_missing
             || s.adapter.known_loss.is_some()
             || s.adapter.durable.collection_loss.is_some()
@@ -251,8 +252,28 @@ impl Runtime {
         if self.media_authority(collection, true)? != a.0 {
             return Err(RuntimeError::StaleIncarnation);
         }
+        let lease = collection.reader(ReaderRole::Cloud)?;
+        let snapshot = lease.snapshot()?;
+        self.media_recovery_io_with_snapshot(collection, a, &snapshot, work)
+    }
+    fn media_recovery_io_with_snapshot<T>(
+        &self,
+        collection: &Collection,
+        a: &MediaRecoveryAuthority,
+        snapshot: &meguri_engine::Snapshot<'_>,
+        work: impl FnOnce() -> Result<T, RuntimeError>,
+    ) -> Result<T, RuntimeError> {
+        if self.media_authority(collection, true)? != a.0 {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        let crt = snapshot.col()?.created.0;
         let s = self.state();
         Self::check_media_recovery_locked(&s, a)?;
+        if !s.bound.as_ref().is_some_and(|b| b.current_crt.1 == crt && b.crt_equal())
+            || !with_tracking_access(|| Self::writer_crt_equal_locked(&s, a.binding, crt))?
+        {
+            return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
+        }
         work()
     }
     fn put_media_state(&self, a: &Authority, ledger: &Ledger) -> Result<(), RuntimeError> {
@@ -331,8 +352,16 @@ impl Runtime {
         if current != *a {
             return Err(RuntimeError::StaleIncarnation);
         }
+        let lease = collection.reader(ReaderRole::Cloud)?;
+        let snapshot = lease.snapshot()?;
+        let crt = snapshot.col()?.created.0;
         let s = self.state();
         Self::check_media_locked(&s, a)?;
+        if !s.bound.as_ref().is_some_and(|b| b.current_crt.1 == crt && b.crt_equal())
+            || !with_tracking_access(|| Self::writer_crt_equal_locked(&s, a.binding, crt))?
+        {
+            return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
+        }
         if s.media.zone_missing && !Self::retained_upload_authority(&s, a) {
             return Err(RuntimeError::StaleIncarnation);
         }
@@ -1886,6 +1915,16 @@ impl Runtime {
                 if ctx.generation().0 != authority.generation {
                     return Err(engine_error("media rewrite generation"));
                 }
+                let crt = ctx.scope().col()?.created.0;
+                {
+                    let s = StateGuard::new(shared.lock().unwrap_or_else(PoisonError::into_inner));
+                    Self::check_media_recovery_locked(&s, &authority).map_err(engine_error)?;
+                    if !with_tracking_access(|| Self::writer_crt_equal_locked(&s, authority.binding, crt))
+                        .map_err(engine_error)?
+                    {
+                        return Err(EngineError::Cancelled);
+                    }
+                }
                 for k in &mut planned.keys {
                     let id = i64::from_be_bytes(
                         k.key
@@ -1931,8 +1970,13 @@ impl Runtime {
                 }
                 let mut s = StateGuard::new(shared.lock().unwrap_or_else(PoisonError::into_inner));
                 Self::check_media_recovery_locked(&s, &authority).map_err(engine_error)?;
-                with_tracking_access(|| s.store.as_mut().ok_or(Error::Database)?.update_media_intent(&planned))
-                    .map_err(engine_error)?;
+                with_tracking_access(|| -> Result<(), EngineError> {
+                    if !Self::writer_crt_equal_locked(&s, authority.binding, crt).map_err(engine_error)? {
+                        return Err(EngineError::Cancelled);
+                    }
+                    s.store.as_mut().ok_or(Error::Database).map_err(engine_error)?
+                        .update_media_intent(&planned).map_err(engine_error)
+                })?;
                 Ok(planned)
             },
         )?;
@@ -2335,7 +2379,7 @@ impl Runtime {
         if apply.local_wins && !apply.abandoned {
             let server = apply.server.as_ref().ok_or(Error::InvalidData)?;
             let path = apply.staged.as_ref().ok_or(Error::InvalidData)?;
-            let (owned, found) = self.media_recovery_io(collection, a, || {
+            let (owned, found) = self.media_recovery_io_with_snapshot(collection, a, snapshot, || {
                 Ok(m::io::stage(m::io::open(path)?, &self.cloud_staging())?)
             })?;
             if found != blob::Blob::from(server) {
@@ -2451,6 +2495,59 @@ impl Runtime {
         }
         Ok(())
     }
+    // P6 recovery can finish bookkeeping for an installed intent. Check its
+    // stored ownership against the files and rows before accepting completion.
+    fn settle_committed_media(
+        &self,
+        collection: &Collection,
+        media: &MediaService,
+        a: &MediaRecoveryAuthority,
+        intent: &ApplyIntent,
+    ) -> Result<bool, RuntimeError> {
+        self.with_media_recovery(a, |_| Ok(()))?;
+        if intent.binding != a.binding || intent.native_file != a.file {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        let apply = intent.media.as_ref().ok_or(Error::InvalidData)?;
+        if !apply.installed || apply.abandoned || apply.local_wins
+            || !same(Self::current_media(media, &apply.old_name)?.as_ref(), apply.server.as_ref())
+        {
+            return Ok(false);
+        }
+        let moved = if let Some(moved) = &apply.moved {
+            let Some(proof) = &apply.move_evidence else { return Ok(false); };
+            if !media.store().cloud_move_completed(
+                &apply.old_name, text(&moved.name)?, &m::io::sha1_text(&moved.sha1), proof,
+            ).map_err(media_error)? {
+                return Ok(false);
+            }
+            true
+        } else { false };
+        let lease = collection.reader(ReaderRole::Cloud)?;
+        let snapshot = lease.snapshot()?;
+        for key in &intent.keys {
+            let id = i64::from_be_bytes(key.key.as_slice().try_into().map_err(|_| Error::InvalidData)?);
+            let actual = match snapshot.row_image(Table::Notes, &RowKey::Id(id))? {
+                Some(row) => {
+                    let Some(codec::Payload::Note(after)) = &key.after_payload else { return Ok(false); };
+                    let payload = codec::Payload::Note(note_image(&row, after.nt_struct_gen)?);
+                    Some(payload.row_digest().map_err(|_| Error::InvalidData)?)
+                }
+                None => None,
+            };
+            if actual != key.after_digest {
+                return Ok(false);
+            }
+        }
+        let receipt = match collection.wait_wal_covered(snapshot.wal_identity(), snapshot.seq(), Duration::from_secs(30))? {
+            WalCoverage::Covered(receipt) if receipt.identity() == snapshot.wal_identity()
+                && receipt.through() >= snapshot.seq() => receipt,
+            _ => return Err(RuntimeError::StaleIncarnation),
+        };
+        self.settle_media_apply(collection, media, a, intent, moved, &snapshot)?;
+        self.state().incoming.receipts.push(receipt);
+        Ok(true)
+    }
     pub(super) fn replay_media_intents(
         &self,
         collection: &Collection,
@@ -2463,8 +2560,12 @@ impl Runtime {
         }
         let mut count = 0;
         for intent in intents.into_iter().filter(|i| i.media.is_some()) {
-            self.execute_media_apply(collection, media, &a, intent)?;
-            count += 1;
+            if self.state().bound.as_ref().is_some_and(Bound::crt_equal) {
+                self.execute_media_apply(collection, media, &a, intent)?;
+                count += 1;
+            } else if self.settle_committed_media(collection, media, &a, &intent)? {
+                count += 1;
+            }
         }
         Ok(count)
     }
@@ -3233,6 +3334,7 @@ mod recovery_authority_tests {
                     previous_clean_shutdown: false,
                     opened_mod: 0,
                     opened_scm: 0,
+                    opened_crt: 0,
                     native_file: authority.file.pair(),
                     cloud_file: None,
                 },
@@ -3242,6 +3344,8 @@ mod recovery_authority_tests {
                 verified: true,
                 latest_mod: 0,
                 latest_scm: 0,
+                current_crt: (0, 0),
+                epoch_crt: None,
             }),
             ..State::default()
         };

@@ -50,6 +50,7 @@ pub struct Collection {
 pub struct OpenEvidence {
     pub generation: Generation,
     pub previous_clean_shutdown: bool,
+    pub opened_crt: i64,
     pub opened_mod: i64,
     pub opened_scm: i64,
     pub native_file: (u64, u64),
@@ -71,6 +72,7 @@ impl OpenEvidence {
         Ok(Self {
             generation,
             previous_clean_shutdown: opened.previous_clean_shutdown,
+            opened_crt: col.created.0,
             opened_mod: col.modified.0,
             opened_scm: col.schema_modified.0,
             native_file: opened.writer().native_identity()?,

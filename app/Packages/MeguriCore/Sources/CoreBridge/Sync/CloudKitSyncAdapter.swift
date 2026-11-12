@@ -1306,6 +1306,7 @@ public actor CloudKitSyncAdapter {
                 await observeBatch?(origin, zone, batch)
                 guard await valid(origin), owned[origin] === instance, !quiescing, !suspended, !suspending else { return nil }
             }
+            do { try batch?.finalAdmission?() } catch { return nil }
             return batch
         } catch {
             lastFailure = error; instance.failed = true

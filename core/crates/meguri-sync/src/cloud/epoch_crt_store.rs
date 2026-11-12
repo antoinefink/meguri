@@ -2,7 +2,6 @@
 //! publication/media column is deliberately never a migration source.
 use super::{control_codec::{DecodeOutcome, Epoch, EpochState}, store::decode, *};
 use rusqlite::{Transaction, params};
-#[cfg(any(test, feature = "test-hooks"))]
 use rusqlite::OptionalExtension;
 
 pub(super) const SCHEMA: &str = "
@@ -68,7 +67,6 @@ pub(super) fn put(
 }
 
 impl TrackingStore {
-    #[cfg(any(test, feature = "test-hooks"))]
     pub(super) fn epoch_crt(&self, binding: BindingId) -> Result<Option<i64>, Error> {
         self.binding(binding)?.ok_or(Error::BindingNotFound)?;
         self.connection.query_row(

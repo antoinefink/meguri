@@ -292,6 +292,7 @@ impl Runtime {
             followup.loss_identity_after = read.after_identity;
             return Ok(Some(followup));
         }
+        let mut fetched_epoch = None;
         match result {
             RecordRead::Found(record) if read.is_active() => {
                 let readable = record
@@ -317,7 +318,21 @@ impl Runtime {
                     return Ok(None);
                 }
             }
-            RecordRead::Found(_) => {}
+            RecordRead::Found(record) => {
+                // The issued target already fixes zone/name/type. Qualify its
+                // complete encrypted body against the original live binding.
+                let s = self.state();
+                Self::fetch_read_locked(&s, read)?;
+                let binding = &s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding;
+                if let Some(envelope) = record.encrypted {
+                    fetched_epoch = super::super::epoch_crt_store::fetched(binding, &[workflow::Saved {
+                        name: "epoch".into(), envelope, system_fields: record.system_fields.0,
+                    }]);
+                }
+                if fetched_epoch.is_none() {
+                    return Ok(None);
+                }
+            }
             RecordRead::Missing | RecordRead::ZoneMissing => {
                 self.isolate_fetch_read(read, collection, IsolationReason::ActiveMissing)?;
                 return Ok(None);
@@ -332,8 +347,7 @@ impl Runtime {
         let resolved = self.with_scan(&read.scan, collection, |s| {
             Self::fetch_read_locked(s, read)?;
             let mut durable = s.adapter.durable.clone();
-            // Found on this exact owned epoch target proves existence, even
-            // without encrypted fields. Failed/discarded replies never get here.
+            // Only the qualified complete body resolves ordinary verification.
             let resolved_epoch = if read.is_active() {
                 None
             } else {
@@ -354,7 +368,7 @@ impl Runtime {
                     fetched: false,
                 });
             }
-            if new_drain || resolved_epoch.is_some() {
+            if new_drain || resolved_epoch.is_some() || fetched_epoch.is_some() {
                 let binding = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
                 if let Err(error) = s.store.as_mut().ok_or(Error::Database)?.adapter_commit(
                     binding,
@@ -368,13 +382,14 @@ impl Runtime {
                         fail: false,
                         start_absence: false,
                         resolved_epoch,
-                        fetched_epoch: None,
+                        fetched_epoch,
                     },
                 ) {
                     Self::invalidate_tracking_locked(s);
                     return Err(error.into());
                 }
                 s.adapter.durable = durable;
+                Self::refresh_epoch_crt_locked(s)?;
             }
             if new_drain {
                 s.adapter

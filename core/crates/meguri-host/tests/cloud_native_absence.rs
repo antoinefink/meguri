@@ -36,6 +36,9 @@ use meguri_testkit::{
     generate::recipe::{Recipe, generate_recipe},
 };
 
+#[path = "support/epoch_crt.rs"]
+mod epoch_fixture;
+
 const NOW: i64 = 1_735_689_600_000;
 const BUDGET: Duration = Duration::from_secs(30);
 const CHILD_ENV: &str = "MEGURI_ABSENCE_CHILD";
@@ -365,9 +368,10 @@ fn fixture(notes: usize, saved_state: bool) -> Rig {
         )
         .unwrap();
     records.sort_by(|a, b| a.name.cmp(&b.name));
+    let mut service = service(root.path());
+    epoch_fixture::accept(&host, &mut service, &scope());
     let (sdk, serialization, zone) = admit(&host);
     assert_eq!(serialization.is_some(), saved_state);
-    let mut service = service(root.path());
     for z in ["meguri-root", zone.as_str()] {
         assert!(matches!(
             service
@@ -556,7 +560,9 @@ fn failed_zone_fetch_preserves_marks_until_later_successful_fetch() {
     }
     finish(runtime, &rig.sdk, &rig.zone, id, false);
     safe(&rig.host, &before);
-    assert_eq!(all_seen, rig.records.iter().map(|r| r.name.clone()).collect());
+    let expected: BTreeSet<_> = rig.records.iter().map(|r| r.name.clone())
+        .chain(std::iter::once("epoch".to_owned())).collect();
+    assert_eq!(all_seen, expected);
     completed(&rig.host, &rig.zone, BTreeSet::new());
 }
 

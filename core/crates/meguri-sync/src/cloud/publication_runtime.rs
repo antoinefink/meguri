@@ -1327,6 +1327,7 @@ impl Runtime {
                 s.publication.reset_root_missing = None;
                 return Err(error.into());
             }
+            with_tracking_access(|| Self::refresh_epoch_crt_locked(&mut s))?;
             #[cfg(feature = "test-hooks")]
             if request.kind == OwnKind::SaveCompleteEpoch {
                 s.selected_publication = selected_complete;

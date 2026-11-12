@@ -120,6 +120,7 @@ impl Runtime {
         s.adapter.fetch = None;
         s.adapter.scheduled = None;
         s.policy.flights.clear();
+        s.actions.prepared_batch_crt.clear();
         s.actions.request_flights.clear();
         s.policy.parked.clear();
         s.policy.held_images.clear();
@@ -164,6 +165,28 @@ impl Runtime {
     }
     pub fn sdk_root_confirmed(&self) -> bool {
         self.state().root_confirmed
+    }
+    /// Final prepared native handoff only. Read/network SDK validation stays
+    /// independent of P6 so an Unknown or unequal owner can still fetch.
+    pub fn validate_prepared_batch(&self, sdk: &str, zone: &str, batch: u64) -> Result<(), RuntimeError> {
+        let s = self.state();
+        Self::sdk_locked(&s, sdk)?;
+        Self::gate_locked(&s)?;
+        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+        let key = (sdk.to_owned(), batch);
+        if zone == "meguri-media" {
+            let retained = s.actions.media_batches.get(&key).ok_or(RuntimeError::StaleIncarnation)?;
+            Self::check_media_locked(&s, &retained.work.authority)?;
+            if s.media.zone_missing || s.media.paused || s.media.enabled == Some(false) {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+        } else if zone != collection_zone(b.binding.facts.epoch) || !s.actions.request_flights.contains_key(&key) {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        if s.actions.prepared_batch_crt.get(&key) != Some(&b.current_crt.1) {
+            return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
+        }
+        Ok(())
     }
     pub fn validate_network_sdk(&self, sdk: &str) -> Result<(), RuntimeError> {
         self.native_authority().validate_network_sdk(sdk)
@@ -559,14 +582,15 @@ impl Runtime {
                     serialization,
                     &s.adapter.durable,
                     options,
-                )
+                )?;
+                Self::refresh_epoch_crt_locked(s)
             }))
-            .unwrap_or(Err(Error::Database))
+            .unwrap_or(Err(RuntimeError::Tracking(Error::Database)))
         });
         if result.is_err() {
             Self::invalidate_locked(s);
         }
-        result.map_err(Into::into)
+        result
     }
     /// K12.5: metadata must commit before a later SDK cursor can advance.
     /// Hold the original SDK/usable-account/binding guard through the existing
@@ -1268,6 +1292,8 @@ impl Runtime {
             outcome
         } else if !fetched {
             CollectionOutcome::WaitingNoAccount
+        } else if !s.bound.as_ref().is_some_and(Bound::crt_equal) {
+            CollectionOutcome::Incomplete
         } else if result.outstanding_names.is_empty()
             && result.blocked_names.is_empty()
             && incoming.ready == 0
