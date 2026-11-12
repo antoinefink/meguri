@@ -86,6 +86,7 @@ nonisolated struct SyncCommandResult: Sendable {
     let outputs: [CloudPolicyOutput]
     let error: (any Error)?
     let originalGuardRefusal: CloudPolicyOriginalGuardRefusal?
+    let accountReadRefusal: SyncAccountReadRefusal?
     let deferred: Bool
     let accountVerified: Bool
     let mediaCancellation: Bool
@@ -93,16 +94,19 @@ nonisolated struct SyncCommandResult: Sendable {
     // Account preparation returns before any subsequent Core preparation/input.
     let afterOutputs: (@MainActor @Sendable (Bool) async -> SyncCommandResult)?
     init(outputs: [CloudPolicyOutput], error: (any Error)?, deferred: Bool, accountVerified: Bool = false, mediaCancellation: Bool = false, acknowledgedOutputCount: Int = 0,
-         afterOutputs: (@MainActor @Sendable (Bool) async -> SyncCommandResult)? = nil, originalGuardRefusal: CloudPolicyOriginalGuardRefusal? = nil) {
+         afterOutputs: (@MainActor @Sendable (Bool) async -> SyncCommandResult)? = nil, originalGuardRefusal: CloudPolicyOriginalGuardRefusal? = nil,
+         accountReadRefusal: SyncAccountReadRefusal? = nil) {
         self.outputs = outputs; self.error = error; self.deferred = deferred; self.accountVerified = accountVerified
         self.mediaCancellation = mediaCancellation; self.originalGuardRefusal = originalGuardRefusal
+        self.accountReadRefusal = accountReadRefusal
         self.acknowledgedOutputCount = acknowledgedOutputCount; self.afterOutputs = afterOutputs
     }
 }
 enum SyncOwnerFailure: Error { case configurationUnavailable }
 
 // Inherited by native child work, but marked only when the coordinator cancels
-// its retained original command task for shutdown. Account reads have no context.
+// its retained original command task for shutdown. Account reads use a separate
+// explicit control, without task-local ownership.
 @MainActor final class SyncCommandTaskContext {
     @TaskLocal nonisolated static var current: SyncCommandTaskContext?
     let generation: UInt64
@@ -110,6 +114,18 @@ enum SyncOwnerFailure: Error { case configurationUnavailable }
     var shutdownCancellationRequested = false
     var shutdownCancelled: Bool { shutdownCancellationRequested && Task.isCancelled }
     init(generation: UInt64, revision: UInt64) { self.generation = generation; self.revision = revision }
+}
+
+// This control is retained by the original account task and its queued
+// completion. Record the first cancellation before sending it to that task.
+@MainActor private final class SyncAccountTaskControl {
+    private enum Cancellation { case shutdown, other }
+    private var firstCancellation: Cancellation?
+    func recordCancellation(shutdown: Bool, alreadyCancelled: Bool) {
+        guard firstCancellation == nil else { return }
+        firstCancellation = shutdown && !alreadyCancelled ? .shutdown : .other
+    }
+    var shutdownOwned: Bool { firstCancellation == .shutdown }
 }
 
 /// Presentation lifetime only. The coordinator retains the original publication
@@ -195,6 +211,7 @@ public final class SyncCoordinator {
         case result(SyncCommandResult, generation: UInt64, revision: UInt64, shutdownCancelled: Bool,
                     supersededAccountCancellation: Bool = false, acknowledged: CheckedContinuation<Void, Never>?)
         case completeAccount(UInt64, backend: any SyncCoordinatorBackend, generation: UInt64, revision: UInt64,
+                             control: SyncAccountTaskControl,
                              complete: @MainActor (Bool) async -> SyncCommandResult,
                              acknowledged: CheckedContinuation<Bool, Never>)
         case accountOutputsReturned(UInt64, backend: any SyncCoordinatorBackend, generation: UInt64, revision: UInt64,
@@ -304,6 +321,7 @@ public final class SyncCoordinator {
     private var reachable: Bool?
     private var quitCompletion: (@MainActor () -> Void)?
     private var accountTask: Task<Void, Never>?
+    private var accountTaskControl: SyncAccountTaskControl?
     private var pendingAccountRead: UInt64?
     private struct ProofWait {
         let proof: CloudOriginalCommandProofYield
@@ -1029,7 +1047,7 @@ public final class SyncCoordinator {
         }
         await drainOperations()
         suspended = true
-        accountTask?.cancel()
+        cancelAccountTask(shutdown: false)
         revokeProofWaits()
         await waitForInputs()
         do {
@@ -1263,7 +1281,7 @@ public final class SyncCoordinator {
             desiredVisibleMedia = (expected, Set(names).sorted())
             await replayVisibleMedia()
         case .replayVisibleMedia: await replayVisibleMedia()
-        case .completeAccount(let read, let original, let expected, let revision, let complete, let acknowledged):
+        case .completeAccount(let read, let original, let expected, let revision, let control, let complete, let acknowledged):
             guard !closing, !suspended, !replacing, accountTask?.isCancelled == false,
                   expected == generation, revision == hostRevision, backend === original else {
                 #if DEBUG
@@ -1275,7 +1293,15 @@ public final class SyncCoordinator {
                 #else
                 let result = await complete(false)
                 #endif
-                await reduce(.result(result, generation: expected, revision: revision, shutdownCancelled: false, acknowledged: nil))
+                // Only the original completion's generated refusal can use
+                // this original task's recorded shutdown ownership. Results
+                // from commands, follow-ups and legacy readers never enter it.
+                let shutdownOwned = control === accountTaskControl && control.shutdownOwned
+                    && expected == generation && revision == hostRevision && backend === original
+                    && pendingAccountRead.map { $0 != read } != true
+                    && result.accountReadRefusal?.read == read
+                    && result.accountReadRefusal?.isGeneratedCancellation == true
+                await reduce(.result(result, generation: expected, revision: revision, shutdownCancelled: shutdownOwned, acknowledged: nil))
                 acknowledged.resume(returning: true)
                 return
             }
@@ -1754,7 +1780,7 @@ public final class SyncCoordinator {
         await originalAttachment?.value
         guard platformPrepared else { return }
         for task in operationTasks.values { task.cancel() }
-        accountTask?.cancel()
+        cancelAccountTask(shutdown: false)
         revokeProofWaits()
         await initialOwnDrain?.value
         // Activation is a local Rust call, with no held SDK callback. Waiting
@@ -1837,9 +1863,11 @@ public final class SyncCoordinator {
     #endif
     private func startAccountRead() {
         guard accountTask == nil, !closing, !replacing, !suspended, let backend else { return }
+        let control = SyncAccountTaskControl()
+        accountTaskControl = control
         accountTask = Task {
             defer {
-                accountTask = nil
+                accountTask = nil; accountTaskControl = nil
                 if pendingAccountRead != nil, !closing { startAccountRead() }
                 retryAccountCompletion()
             }
@@ -1849,10 +1877,15 @@ public final class SyncCoordinator {
                 let complete = await backend.prepareAccountRead(read)
                 _ = await withCheckedContinuation {
                     enqueue(.completeAccount(read, backend: backend, generation: expected, revision: revision,
-                        complete: complete, acknowledged: $0))
+                        control: control, complete: complete, acknowledged: $0))
                 }
             }
         }
+    }
+    private func cancelAccountTask(shutdown: Bool) {
+        guard let accountTask else { return }
+        accountTaskControl?.recordCancellation(shutdown: shutdown, alreadyCancelled: accountTask.isCancelled)
+        accountTask.cancel()
     }
     private func reportAvailableSpace() {
         guard let directory, let values = try? directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
@@ -1912,11 +1945,11 @@ public final class SyncCoordinator {
             // A core-phase barrier joins original results. Cancel their jobs
             // before joining it, including queued work that has no effect yet.
             cancelCommandsForShutdown()
-            accountTask?.cancel(); ownTask?.cancel()
+            cancelAccountTask(shutdown: true); ownTask?.cancel()
             retryAccountCompletion()
             await waitForInputs()
             cancelCommandsForShutdown()
-            accountTask?.cancel(); ownTask?.cancel()
+            cancelAccountTask(shutdown: true); ownTask?.cancel()
             retryAccountCompletion()
             do {
                 if initialAdoptionEnabledBefore != nil, !activatingInitialAdoption,

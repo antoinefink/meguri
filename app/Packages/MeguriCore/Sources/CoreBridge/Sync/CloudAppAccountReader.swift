@@ -13,44 +13,116 @@ public struct CloudAppAccountReadResult: Sendable {
 // Providers may ignore Task cancellation. Only this completion fence belongs
 // to the read owner; the detached provider can deliver to this fence alone.
 final class CloudAccountResolution: Sendable {
+    enum Outcome: Sendable {
+        case provider(Result<CloudResolvedAccount?, any Error>)
+        case fence(taskCancellation: Bool)
+        var result: Result<CloudResolvedAccount?, any Error> {
+            switch self {
+            case .provider(let result): result
+            case .fence: .failure(CancellationError())
+            }
+        }
+    }
     private struct State {
-        var result: Result<CloudResolvedAccount?, any Error>?
-        var waiter: CheckedContinuation<CloudResolvedAccount?, any Error>?
+        var outcome: Outcome?
+        var waiter: CheckedContinuation<Outcome, Never>?
     }
     private let state = Mutex(State())
     private let provider = Mutex<Task<Void, Never>?>(nil)
     func finish(_ result: Result<CloudResolvedAccount?, any Error>) {
+        finishOutcome(.provider(result))
+    }
+    private func finishOutcome(_ outcome: Outcome) {
         let waiter = state.withLock { value in
-            guard value.result == nil else { return Optional<CheckedContinuation<CloudResolvedAccount?, any Error>>.none }
-            value.result = result
+            guard value.outcome == nil else { return Optional<CheckedContinuation<Outcome, Never>>.none }
+            value.outcome = outcome
             let waiter = value.waiter; value.waiter = nil
             return waiter
         }
-        waiter?.resume(with: result)
+        waiter?.resume(returning: outcome)
     }
     func cancel() {
-        finish(.failure(CancellationError()))
+        cancel(taskCancellation: false)
+    }
+    private func cancel(taskCancellation: Bool) {
+        finishOutcome(.fence(taskCancellation: taskCancellation))
         provider.withLock { $0 }?.cancel()
     }
     func resolve(using factory: any CloudKitEngineFactory) async throws -> CloudResolvedAccount? {
-        let task = Task.detached(priority: Task.currentPriority) { [self] in
-            do { finish(.success(try await factory.resolveAccount())) }
-            catch { finish(.failure(error)) }
-        }
-        provider.withLock { $0 = task }
-        if state.withLock({ $0.result != nil }) { task.cancel() }
-        defer { provider.withLock { $0 = nil } }
-        return try await withTaskCancellationHandler {
-            try Task.checkCancellation()
-            return try await withCheckedThrowingContinuation { continuation in
-                let result = state.withLock { value -> Result<CloudResolvedAccount?, any Error>? in
-                    if let result = value.result { return result }
-                    value.waiter = continuation
-                    return Optional<Result<CloudResolvedAccount?, any Error>>.none
-                }
-                if let result { continuation.resume(with: result) }
+        try await resolveOutcome(using: factory).result.get()
+    }
+    func resolveOutcome(using factory: any CloudKitEngineFactory,
+                        afterProviderLaunch: (@Sendable (Task<Void, Never>) async -> Void)? = nil) async -> Outcome {
+        return await withTaskCancellationHandler {
+            let task = Task.detached(priority: Task.currentPriority) { [self] in
+                do { finish(.success(try await factory.resolveAccount())) }
+                catch { finish(.failure(error)) }
             }
-        } onCancel: { self.cancel() }
+            // Internal scheduling seam; tests can hold the owner before install.
+            if let afterProviderLaunch { await afterProviderLaunch(task) }
+            provider.withLock { $0 = task }
+            if state.withLock({ $0.outcome != nil }) { task.cancel() }
+            defer { provider.withLock { $0 = nil } }
+            // onCancel participates in the same first-result latch. Checking
+            // Task cancellation here would overwrite an earlier provider error.
+            return await withCheckedContinuation { continuation in
+                let outcome = state.withLock { value -> Outcome? in
+                    if let outcome = value.outcome { return outcome }
+                    value.waiter = continuation
+                    return nil
+                }
+                if let outcome { continuation.resume(returning: outcome) }
+            }
+        } onCancel: { self.cancel(taskCancellation: true) }
+    }
+}
+
+/// A nonadmission return, issued only by its original prepared read. It cannot
+/// complete Core work. Provider failures retain their exact original error.
+public struct CloudAppAccountReadRefusal: Sendable {
+    public let error: any Error
+    private let preparation: CloudAppPreparedAccountRead
+    fileprivate let generatedCancellation: Bool
+    fileprivate init(error: any Error, preparation: CloudAppPreparedAccountRead, generatedCancellation: Bool) {
+        self.error = error; self.preparation = preparation; self.generatedCancellation = generatedCancellation
+    }
+    @MainActor public func isGeneratedCancellation(from preparation: CloudAppPreparedAccountRead,
+                                        reader: CloudAppAccountReader, read: UInt64) -> Bool {
+        generatedCancellation && self.preparation === preparation && preparation.reader === reader && preparation.read == read
+    }
+}
+
+@MainActor public final class CloudAppPreparedAccountRead {
+    fileprivate let reader: CloudAppAccountReader
+    fileprivate let read: UInt64
+    private let outcome: CloudAccountResolution.Outcome
+    private let completion: @MainActor () async -> CloudAppAccountReadResult
+    private var completionStarted = false
+    private var completionFailure: (any Error)?
+    fileprivate init(reader: CloudAppAccountReader, read: UInt64, outcome: CloudAccountResolution.Outcome,
+                     completion: @escaping @MainActor () async -> CloudAppAccountReadResult) {
+        self.reader = reader; self.read = read; self.outcome = outcome; self.completion = completion
+    }
+    public func complete() async -> CloudAppAccountReadResult {
+        completionStarted = true
+        let result = await completion()
+        if completionFailure == nil { completionFailure = result.error }
+        return result
+    }
+    public func refuse() -> CloudAppAccountReadRefusal {
+        // Once actual completion began, refusal cannot supply evidence that
+        // there was no Core work. In particular it cannot hide its failure.
+        if completionStarted {
+            return .init(error: completionFailure ?? CancellationError(), preparation: self, generatedCancellation: false)
+        }
+        switch outcome {
+        case .provider(.failure(let error)):
+            return .init(error: error, preparation: self, generatedCancellation: false)
+        case .fence(taskCancellation: false):
+            return .init(error: CancellationError(), preparation: self, generatedCancellation: false)
+        case .provider(.success), .fence(taskCancellation: true):
+            return .init(error: CancellationError(), preparation: self, generatedCancellation: true)
+        }
     }
 }
 
@@ -76,6 +148,8 @@ public final class CloudAppAccountReader {
     private var committing = 0
     private var waiters: [CheckedContinuation<Void, Never>] = []
     private var resolutions: [UInt64: CloudAccountResolution] = [:]
+    // Internal scheduling observation after the real fallback result, before admission.
+    var afterFallbackIdentityCompletion: (@MainActor (Bool) async -> Void)?
 
     public init(workflow: CoreCloudWorkflowService, policy: CoreCloudPolicyService,
                 factory: any CloudKitEngineFactory, adapter: CloudKitSyncAdapter) {
@@ -99,20 +173,29 @@ public final class CloudAppAccountReader {
     /// Resolve outside the app input lane. The returned completion performs the
     /// actual Core proof and rechecks its original read/epoch at admission.
     public func prepareRead(_ id: UInt64) async -> @MainActor () async -> CloudAppAccountReadResult {
+        let prepared = await prepareAccountRead(id)
+        return { await prepared.complete() }
+    }
+    public func prepareAccountRead(_ id: UInt64) async -> CloudAppPreparedAccountRead {
         let expected = epoch
-        guard admits(id, epoch: expected) else { return { self.cancelled() } }
+        guard admits(id, epoch: expected) else {
+            return .init(reader: self, read: id, outcome: .fence(taskCancellation: false), completion: { self.cancelled() })
+        }
         let permit = replayPermit
         let resolution = CloudAccountResolution()
         resolutions[id] = resolution
         defer { resolutions.removeValue(forKey: id) }
-        let resolved: Result<CloudResolvedAccount?, any Error>
-        do { resolved = .success(try await resolution.resolve(using: factory)) }
-        catch { resolved = .failure(error) }
-        return { [self] in await completeRead(id, epoch: expected, permit: permit, resolved: resolved) }
+        let outcome = await resolution.resolveOutcome(using: factory)
+        return .init(reader: self, read: id, outcome: outcome, completion: { [self] in
+            await completeRead(id, epoch: expected, permit: permit, resolved: outcome.result)
+        })
     }
     private func completeRead(_ id: UInt64, epoch expected: UInt64, permit: CloudAccountReplayPermit,
                               resolved: Result<CloudResolvedAccount?, any Error>) async -> CloudAppAccountReadResult {
-        guard admits(id, epoch: expected) else { return cancelled() }
+        guard admits(id, epoch: expected) else {
+            if case .failure(let error) = resolved { return .init(outputs: [], error: error, verified: false) }
+            return cancelled()
+        }
         committing += 1
         defer {
             committing -= 1
@@ -146,7 +229,7 @@ public final class CloudAppAccountReader {
             outputs.append(output)
             return .init(outputs: outputs, error: nil, verified: verified)
         } catch {
-            guard admits(id, epoch: expected) else { return cancelled() }
+            guard admits(id, epoch: expected) else { return .init(outputs: outputs, error: error, verified: false) }
             // A projection/replay error must not complete the read again.
             guard !completionAttempted else {
                 await adapter.accountReadCompleted(id: id, available: false)
@@ -160,16 +243,17 @@ public final class CloudAppAccountReader {
             #endif
             let accepted = (try? await workflow.completeIdentityRead(id: id,
                 status: setupFailure ? .configuration : .couldNotDetermine, identity: nil)) == true
-            guard accepted, admits(id, epoch: expected) else { return cancelled() }
+            if let afterFallbackIdentityCompletion { await afterFallbackIdentityCompletion(accepted) }
+            guard accepted, admits(id, epoch: expected) else { return .init(outputs: outputs, error: error, verified: false) }
             await adapter.accountReadCompleted(id: id, available: false)
             // A failed resolver must not reverify from the cached provider.
             if setupFailure {
                 do {
                     let output = try await policy.projectIdentityRead(id)
-                    guard admits(id, epoch: expected), permit.isLive else { return cancelled() }
+                    guard admits(id, epoch: expected), permit.isLive else { return .init(outputs: outputs, error: error, verified: false) }
                     outputs.append(output)
                 } catch {
-                    guard admits(id, epoch: expected) else { return cancelled() }
+                    guard admits(id, epoch: expected) else { return .init(outputs: outputs, error: error, verified: false) }
                     return .init(outputs: [], error: error, verified: false)
                 }
             }

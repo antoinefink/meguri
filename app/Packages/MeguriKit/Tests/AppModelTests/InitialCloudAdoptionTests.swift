@@ -8,6 +8,110 @@ import Testing
 @testable import AppModel
 
 extension ReviewCollectionStartupTests {
+    @Test func intentionalCloseRefusesOriginalReadWithoutStickyFailureAndFencesLateProvider() async throws {
+        let harness = try InitialCloudHarness(fixture: InitialCloudFixture.load())
+        let provider = SyncOwnerGate()
+        let returned = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        defer {
+            provider.release(); returned.continuation.finish()
+            harness.factory.beforeAccountReturn = nil
+            harness.release(); harness.removeTemporaryStorage()
+        }
+        do {
+            try await harness.prepareStoppedResume(discover: false)
+            let original = try #require(harness.backends.last)
+            harness.factory.beforeAccountReturn = {
+                await provider.hold() // deliberately ignores task cancellation
+                returned.continuation.yield(())
+            }
+            await harness.sync.accountChanged()
+            await provider.waitUntilHeld()
+            #expect(await harness.sync.cancelAndDrain())
+            #expect(original.closeCount == 1)
+            #expect(!harness.sync.operationFailed && harness.sync.failureRevision == 0)
+            // Close joined the original read's fence without joining a provider
+            // that ignores cancellation. Reopen and prove the successor first.
+            harness.factory.beforeAccountReturn = nil
+            #expect(await harness.owner.close())
+            await harness.owner.start()
+            await harness.sync.prepareConnectionAuthority()
+            let successor = try #require(harness.backends.last)
+            #expect(successor !== original && successor.closeCount == 0)
+            let before = try await successor.workflow.durableSnapshot()
+            let reads = harness.factory.accountReads
+            provider.release()
+            try await initialCloudSignal(returned.stream, stage: "original-provider-returned-after-successor")
+            await harness.sync.prepareConnectionAuthority()
+            #expect(try await successor.workflow.durableSnapshot() == before)
+            #expect(harness.factory.accountReads == reads && harness.factory.live.isEmpty)
+            #expect(!harness.sync.operationFailed && harness.sync.failureRevision == 0)
+            #expect(await harness.owner.close())
+        } catch {
+            provider.release(); harness.factory.beforeAccountReturn = nil
+            await harness.cleanup()
+            throw error
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func originalProviderFailurePreparedBeforeCloseRemainsSticky(cancellation: Bool) async throws {
+        let harness = try InitialCloudHarness(fixture: InitialCloudFixture.load())
+        let provider = SyncOwnerGate(), command = SyncOwnerGate()
+        let waiting = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        var held = false
+        defer {
+            provider.release(); command.release(); waiting.continuation.finish()
+            harness.factory.beforeAccountReturn = nil
+            harness.backends.last?.beforeReturn = nil
+            harness.sync.observeAccountPolicyDrain = nil
+            harness.release(); harness.removeTemporaryStorage()
+        }
+        do {
+            try await harness.prepareStoppedResume(discover: false)
+            let backend = try #require(harness.backends.last)
+            harness.factory.beforeAccountReturn = {
+                await provider.hold()
+                if cancellation { throw CancellationError() }
+                throw BridgeError.internal("synthetic-original-resolver")
+            }
+            await harness.sync.accountChanged()
+            await provider.waitUntilHeld()
+            backend.beforeReturn = { value, result in
+                guard case .statusChanged = value.action, !held else { return }
+                held = true
+                #expect(result.error == nil)
+                await withTaskCancellationHandler {
+                    await command.hold()
+                } onCancel: {
+                    Task { @MainActor in command.release() }
+                }
+            }
+            harness.sync.setDeviceSettings(paused: false, automatic: false, media: false)
+            await command.waitUntilHeld()
+            harness.sync.observeAccountPolicyDrain = { phase in
+                if case .waiting = phase { waiting.continuation.yield(()) }
+            }
+            provider.release()
+            // This observation belongs to the actual resolved completion, after
+            // the producer's first result has latched and before intentional close.
+            try await initialCloudSignal(waiting.stream, stage: "original-provider-failure-prepared")
+            try #require(!harness.sync.operationFailed && harness.sync.failureRevision == 0)
+            let closing = Task { await harness.sync.cancelAndDrain() }
+            // Only cancellation of this actual original command opens its gate;
+            // close then joins both its ACK and the held account completion.
+            #expect(await closing.value)
+            #expect(harness.sync.operationFailed && harness.sync.failureRevision == 1)
+            #expect(backend.closeCount == 1)
+            #expect(await harness.owner.close())
+        } catch {
+            provider.release(); command.release(); harness.factory.beforeAccountReturn = nil
+            await harness.cleanup()
+            throw error
+        }
+    }
+}
+
+extension ReviewCollectionStartupTests {
     @Test func nativeBackendClosesAfterRealCoreSuspendWithoutResume() async throws {
         let fixture = try InitialCloudFixture.load()
         let harness = try InitialCloudHarness(fixture: fixture)

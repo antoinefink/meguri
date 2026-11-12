@@ -315,6 +315,21 @@ extension ReviewCollectionStartupTests {
 
 
 extension ReviewCollectionStartupTests {
+    @Test(arguments: [false, true])
+    func originalCompletedProjectionFailureStaysStickyWhenCloseFollows(cancellation: Bool) async {
+        let backend = SyncOwnerFake()
+        // This seam supplies an already completed original projection result;
+        // it supplies no native prepared-read refusal witness.
+        let error: any Error = cancellation ? CancellationError() : BridgeError.internal("synthetic-original-projection")
+        backend.accountResult = .init(outputs: [], error: error, deferred: false)
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: nil)
+        await sync.preparePlatform(); await sync.completeOpenedHost(generation: 301)
+        await sync.prepareConnectionAuthority()
+        #expect(sync.operationFailed && sync.failureRevision == 1)
+        #expect(await sync.cancelAndDrain())
+        #expect(sync.operationFailed && sync.failureRevision == 1 && backend.closeCount == 1)
+    }
+
     @Test func unownedAccountCancellationDuringCloseRemainsFailure() async {
         let backend = SyncOwnerFake()
         backend.holdAccount = true

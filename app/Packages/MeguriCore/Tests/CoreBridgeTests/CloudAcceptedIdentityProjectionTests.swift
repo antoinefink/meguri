@@ -1,3 +1,4 @@
+import CloudKit
 import Foundation
 import Instrumentation
 import MeguriCoreBindings
@@ -15,6 +16,79 @@ private func projectionPolicy(_ gate: CloudCallbackGate) async throws -> CoreClo
 enum ProjectionInvalidation: Sendable { case refreeze, appClose, close, generation }
 
 extension EventTests {
+    @Test func closeDuringSetupFallbackProjectionRetainsResolverFailure() async throws {
+        try await withNativePolicyFixture { f in
+            let projection = CloudCallbackGate()
+            let policy = try await projectionPolicy(projection)
+            let reader = await CloudAppAccountReader(workflow: f.core, policy: policy, factory: f.factory, adapter: f.adapter)
+            await f.factory.appendAccountRead(.failure(CKError(.permissionFailure)))
+            let id = try await reader.begin(transition: true)
+            let prepared = await reader.prepareAccountRead(id)
+            let completion = Task {
+                let result = await prepared.complete()
+                _ = await projection.operationSucceeded()
+                return result
+            }
+            do {
+                try await projection.waitForArrival()
+                await Task { @MainActor in
+                    let release = Task { await projection.open() }
+                    await reader.close()
+                    await release.value
+                }.value
+                let result = await completion.value
+                #expect((result.error as? CKError)?.code == .permissionFailure)
+                #expect(result.outputs.isEmpty && !result.verified)
+                #expect(!(await reader.isCurrentRead(id)))
+                let refusal = await prepared.refuse()
+                #expect((refusal.error as? CKError)?.code == .permissionFailure)
+                #expect(!(await refusal.isGeneratedCancellation(from: prepared, reader: reader, read: id)))
+            } catch {
+                await projection.open(); _ = await completion.value
+                await reader.close()
+                throw error
+            }
+        }
+    }
+
+    @Test func genuineOriginalProjectionErrorIsRetainedWhenReaderCloseFollows() async throws {
+        try await withNativePolicyFixture { f in
+            let projection = CloudCallbackGate()
+            let policy = try await projectionPolicy(projection)
+            let reader = await CloudAppAccountReader(workflow: f.core, policy: policy, factory: f.factory, adapter: f.adapter)
+            await f.factory.appendAccountRead(.success(.init(status: .available, identity: Data("synthetic-account-A".utf8))))
+            let id = try await reader.begin(transition: true)
+            let prepared = await reader.prepareAccountRead(id)
+            let completion = Task {
+                let result = await prepared.complete()
+                _ = await projection.operationSucceeded()
+                return result
+            }
+            do {
+                try await projection.waitForArrival()
+                // Advance actual Core read authority without changing this
+                // reader's local fence. The original projection must fail.
+                _ = try await f.core.beginIdentityRead(transition: true)
+                await projection.open()
+                let result = await completion.value
+                let originalError = try #require(result.error as? BridgeError)
+                await reader.close()
+                #expect(result.error as? BridgeError == originalError)
+                #expect(!result.verified && result.outputs.isEmpty)
+                // A later refusal retains the completed projection's error
+                // and remains ineligible for shutdown qualification.
+                let refusal = await prepared.refuse()
+                #expect(refusal.error as? BridgeError == originalError)
+                #expect(!(await refusal.isGeneratedCancellation(from: prepared, reader: reader, read: id)))
+                #expect(!(result.error is CancellationError))
+            } catch {
+                await projection.open(); _ = await completion.value
+                await reader.close()
+                throw error
+            }
+        }
+    }
+
     @Test func acceptedAppIdentityProjectionCannotReplaceANewerActualRead() async throws {
         try await withNativePolicyFixture { f in
             let (_, executor) = try await nativePolicy(f)
