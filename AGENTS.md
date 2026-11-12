@@ -19,6 +19,8 @@ Meguri: native SwiftUI app (macOS, iOS, iPadOS 27) on a Rust core, fully compati
 
 - Verification (updated goal, 2026-10-25): keep focused checks, independent review, separate commits and provenance/privacy/similarity checks per unit. Group 3–5 related units in dependency order, including Swift/FFI, with one full gate at the coherent batch boundary. Pure Rust internals may cover at most 20 units per full gate. Always gate milestone boundaries; record the original batch base and resolve technical failures before the next batch. See `docs/process/tiers.md`.
 
+- Cosmetic code lint may be relaxed to avoid delaying delivery (Antoine, 2026-11-12). Retain checks for correctness, safety, privacy, layering, accessibility and native interface requirements.
+
 - Interim exception (Antoine, 2026-10-21): only the recorded R554 audio failure may remain red until U69, with every other required check passing. Preserve the failed gate, enabled test and limits; obtain skipped T1 separately. M1R and final acceptance still require the fix. Exact scope: `docs/process/tiers.md`, approval `E-20261021T134124Z-a07a`.
 
 - Remaining VoiceOver cursor and speech work is optional follow-up after the app goal (Antoine, 2026-10-20). Preserve its tests and failure evidence; it does not block units or milestones. Keyboard ownership, system accessibility audits, labels, contrast and hit targets remain required. Independent Rust work may proceed while U70 awaits its other checks.
