@@ -136,6 +136,10 @@ impl std::error::Error for DriverError {}
 /// Fields and construction stay inside Driver; later state cannot reclassify it.
 #[derive(Clone, Debug)]
 pub struct OriginalIssuedGuardSuperseded {
+    _evidence: Box<OriginalIssuedGuardSupersededEvidence>,
+}
+#[derive(Clone, Debug)]
+struct OriginalIssuedGuardSupersededEvidence {
     _owner: String,
     _issued_policy: Guard,
     _observed_policy: Guard,
@@ -1117,11 +1121,13 @@ impl Driver {
                 && command.backend_guard.token <= runtime.token
                 && (command.action.guard.token < view.guard.token || command.backend_guard.token < runtime.token))
                 .then(|| OriginalIssuedGuardSuperseded {
-                    _owner: command.owner.clone(),
-                    _issued_policy: command.action.guard.clone(),
-                    _observed_policy: view.guard.clone(),
-                    _issued_backend: command.backend_guard.clone(),
-                    _observed_backend: runtime.clone(),
+                    _evidence: Box::new(OriginalIssuedGuardSupersededEvidence {
+                        _owner: command.owner.clone(),
+                        _issued_policy: command.action.guard.clone(),
+                        _observed_policy: view.guard.clone(),
+                        _issued_backend: command.backend_guard.clone(),
+                        _observed_backend: runtime.clone(),
+                    }),
                 }),
         };
         if view.guard != command.action.guard {
