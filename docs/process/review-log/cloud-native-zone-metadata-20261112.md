@@ -40,3 +40,16 @@ The phone-created deck appears on the Mac after its normal restart. The same sav
 `drive/20261112T000421Z-41382`: 6/6 actions, continuity verified, 45 hierarchy findings. The renamed deck appears. Native modifications and Core forwards: 2 → 5. A newer completion is recorded, alongside a connection-tracking fault. This confirms receipt. Startup behavior and the error remain open.
 
 The Form's short sequence stays unchanged while the nested counters advance. That alone does not prove a cached view: repeated events can yield an identical bounded tail. Remount observation `000759Z-43033` completes ten steps with verified continuity and the same text; 99 hierarchy findings remain red. The trace lacks an append count to distinguish those cases. Its render snapshot cannot establish later current SDK state. A diagnostic improvement follows; no transport change is inferred from this ambiguity.
+
+
+## Counted trace verification
+
+Diagnostic start: `6f52b422`. Commit `e5aae23f` adds an append count with saturation and a separate overflow flag. Every append counts, including configuration. Ordinal overflow remains independent. The 16-entry tail and the fault fragment remain intact. The new exact maximum is 306 bytes for the sequence and 494 combined; the native 512-byte limit is unchanged. A repeated tail now has a distinct count until saturation. This remains render-time observation.
+
+DEBUG: the existing Sync Now control samples the recorder when status renders. Production UI and transport are unchanged. No new control, network operation or periodic refresh is introduced. Discovery remains open.
+
+Filtered author `cleanroom/20261112T001045Z-44695` and exact-diff independent review `001327Z-45208` cover the combined patch. Review reports no introduced P0–P2 findings. Focused `swift-test/20261112T001353Z-45773` passes 39 tests. Static checks `001357Z-46769` and similarity `001358Z-46768` pass.
+
+Signed normal phone preparation `run/20261112T001439Z-47766` passes. Retained drive `001609Z-49140` completes eight actions with verified continuity; 63 hierarchy findings remain red. The native Sync Now button exposes count 14. The Form no longer exposes the trace. Its exact screenshot was visually inspected: standard native controls remain intact, and diagnostic text is not drawn.
+
+Later read-only drive `001756Z-50031` completes three actions with verified continuity; 36 hierarchy findings remain red. The button now exposes count 24 and a newer successful completion. No additional request or restart occurs between these captures. This verifies native exposure and status-driven refresh. It establishes no broader sync or accessibility pass.
