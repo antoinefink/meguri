@@ -1173,14 +1173,24 @@ fn sqlite_heap_worker() {
         .unwrap();
     assert_eq!(saw_file, 1);
     assert_eq!(common::query_int(&h.collection, "PRAGMA freelist_count"), 0);
-    assert!(
-        h.collection
-            .reader(ReaderRole::Maintenance)
-            .unwrap()
-            .quick_check()
-            .unwrap()
-            .is_ok()
-    );
+    {
+        let reader = h.collection.reader(ReaderRole::Maintenance).unwrap();
+        // This worker's global heap cap applies to the final reader too.
+        reader.execute_raw("PRAGMA cache_size=-1024", &[]).unwrap();
+        assert_eq!(
+            reader.execute_raw("PRAGMA cache_size", &[]).unwrap().rows,
+            vec![vec![meguri_storage::raw::SqlValue::Integer(-1024)]]
+        );
+        assert_eq!(
+            reader.execute_raw("PRAGMA hard_heap_limit", &[]).unwrap().rows,
+            vec![vec![meguri_storage::raw::SqlValue::Integer(16777216)]]
+        );
+        assert!(reader.quick_check().unwrap().is_ok());
+        assert_eq!(
+            reader.execute_raw("PRAGMA hard_heap_limit", &[]).unwrap().rows,
+            vec![vec![meguri_storage::raw::SqlValue::Integer(16777216)]]
+        );
+    }
     h.engine.close().unwrap();
 }
 #[test]
