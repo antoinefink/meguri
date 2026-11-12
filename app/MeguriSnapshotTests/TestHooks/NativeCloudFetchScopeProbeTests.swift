@@ -1,7 +1,9 @@
 #if DEBUG && MEGURI_TEST_HOOKS && os(macOS)
 import AppModel
 import CloudKit
-import CoreBridge
+@testable import CoreBridge
+import CoreFoundation
+import Darwin
 import Foundation
 import Synchronization
 import Testing
@@ -9,6 +11,69 @@ import Testing
 // Explicit mac-hosted-test selection only; Snapshot skips this suite. This is
 // an SDK diagnostic, with no Meguri workflow or signed-lane acceptance authority.
 @Suite @MainActor final class NativeCloudFetchScopeProbeTests {
+    // Fixed alternate selector. It never enters any scope-probe stage.
+    @Test func observeAcknowledgedRecords() async {
+        var report = RecordReadReport()
+        do {
+            guard Bundle.main.bundleIdentifier == "com.antoinefink.meguri.dev",
+                  let configuration = CloudBuildConfiguration.fromBundle,
+                  case .development = configuration.environment,
+                  configuration.schemaConfigured else { throw ScopeProbeFailure.configuration }
+            let input = try RecordReadInput.parse(RecordReadInput.readPrivateFile())
+            report.slots = input.records.map { _ in RecordReadSlot(error: .invalidResult) }
+            // Validate ALL original secure-coded identities before constructing
+            // the one bounded exact-ID request. No repair/reconstruction.
+            let witnesses = try input.witnesses()
+            try Task.checkCancellation()
+            let database = CKContainer(identifier: configuration.container).privateCloudDatabase
+            report = await RecordReadOperation.run(witnesses, database: database)
+            if Task.isCancelled { report.failureCategory = .cancelled }
+        } catch {
+            report.failureCategory = ScopeProbeFailure.category(error)
+        }
+        print("MG_SDK_RECORD_READ \(report.json)")
+        if !report.completed || report.failureCategory != nil {
+            Issue.record("Native acknowledged-record observation refused; see fixed diagnostic report.")
+        }
+    }
+
+    @Test func acknowledgedRecordInputGuards() throws {
+        let valid: [String: Any] = ["version": 1, "collectionZone": "c-" + String(repeating: "a", count: 26),
+            "recordType": "MGEntity", "records": [["name": "synthetic", "encrypted": "AQ==", "systemFields": "Ag=="]]]
+        func data(_ value: [String: Any]) throws -> Data { try JSONSerialization.data(withJSONObject: value) }
+        let parsed = try RecordReadInput.parse(data(valid))
+        #expect(parsed.records.count == 1)
+        #expect(throws: (any Error).self) { try parsed.witnesses() }
+        for (key, value) in [("version", true as Any), ("collectionZone", "c-invalid" as Any),
+                             ("recordType", "Other" as Any), ("unknown", 1 as Any),
+                             ("records", [] as Any)] {
+            var bad = valid
+            bad[key] = value
+            #expect(throws: (any Error).self) { try RecordReadInput.parse(data(bad)) }
+        }
+        for encoded in ["", "AQ", "AQ==\n", "AR==", "*"] {
+            var bad = valid
+            bad["records"] = [["name": "synthetic", "encrypted": encoded, "systemFields": "Ag=="]]
+            #expect(throws: (any Error).self) { try RecordReadInput.parse(data(bad)) }
+        }
+        var duplicate = valid
+        duplicate["records"] = Array(repeating: ["name": "synthetic", "encrypted": "AQ==", "systemFields": "Ag=="], count: 2)
+        #expect(throws: (any Error).self) { try RecordReadInput.parse(data(duplicate)) }
+        #expect(throws: (any Error).self) { try RecordReadInput.parse(Data(repeating: 32, count: 65_537)) }
+        // Owned secure-coding helper must reject even a valid archive with the
+        // wrong full zone identity, name or record type. No live account needed.
+        let target = CloudControlTarget(zone: valid["collectionZone"] as! String, name: "synthetic", recordType: "MGEntity")
+        for record in [
+            CKRecord(recordType: "Other", recordID: NativeCloudOwnRecords.id(target)),
+            CKRecord(recordType: "MGEntity", recordID: .init(recordName: "other", zoneID: NativeCloudOwnRecords.zone(target.zone))),
+            CKRecord(recordType: "MGEntity", recordID: .init(recordName: target.name,
+                zoneID: .init(zoneName: target.zone, ownerName: "synthetic-other-owner")))
+        ] {
+            let fields = try NativeCloudKitSystemFields.encode(record)
+            #expect(throws: (any Error).self) { try NativeCloudKitSystemFields.restore(fields, target: target) }
+        }
+    }
+
     @Test func observeSavedStateFetchScopes() async {
         var report = ScopeProbeReport()
         var phase = ScopeProbePhase.configuration
@@ -500,6 +565,192 @@ private enum ScopeProbeOperations {
             database.add(operation)
         }
         guard try result.get() == [id] else { throw ScopeProbeFailure.invalidResult }
+    }
+}
+
+// The controller validates duplicate JSON keys and pins the exact immutable
+// bytes through execution. Revalidate the closed schema and native identities
+// here, in the real development app sandbox, before requesting any record.
+private struct RecordReadInput {
+    struct Record {
+        let name: String
+        let encrypted: Data
+        let systemFields: Data
+    }
+    let zone: String
+    let records: [Record]
+
+    static func parse(_ data: Data) throws -> Self {
+        guard !data.isEmpty, data.count <= 65_536,
+              let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              Set(root.keys) == ["version", "collectionZone", "recordType", "records"],
+              let version = root["version"] as? NSNumber,
+              CFGetTypeID(version) != CFBooleanGetTypeID(), version == 1,
+              root["recordType"] as? String == "MGEntity",
+              let zone = root["collectionZone"] as? String,
+              zone.range(of: "^c-[a-z2-7]{25}[aeimquy4]$", options: .regularExpression) != nil,
+              zone.utf8.count == 28,
+              let items = root["records"] as? [[String: Any]], (1...8).contains(items.count)
+        else { throw ScopeProbeFailure.configuration }
+        var names = Set<String>()
+        let records = try items.map { item -> Record in
+            guard Set(item.keys) == ["name", "encrypted", "systemFields"],
+                  let name = item["name"] as? String, (1...255).contains(name.utf8.count),
+                  !name.unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 }),
+                  names.insert(name).inserted else { throw ScopeProbeFailure.configuration }
+            func decode(_ key: String) throws -> Data {
+                guard let text = item[key] as? String, let bytes = Data(base64Encoded: text),
+                      !bytes.isEmpty, bytes.count <= 65_536, bytes.base64EncodedString() == text
+                else { throw ScopeProbeFailure.configuration }
+                return bytes
+            }
+            return try Record(name: name, encrypted: decode("encrypted"), systemFields: decode("systemFields"))
+        }
+        return Self(zone: zone, records: records)
+    }
+
+    func witnesses() throws -> [RecordReadWitness] {
+        try records.map { item in
+            let target = CloudControlTarget(zone: zone, name: item.name, recordType: "MGEntity")
+            let saved = try NativeCloudKitSystemFields.restore(item.systemFields, target: target)
+            guard let tag = saved.recordChangeTag, !tag.isEmpty else { throw ScopeProbeFailure.invalidResult }
+            return RecordReadWitness(id: saved.recordID, encrypted: item.encrypted, changeTag: tag)
+        }
+    }
+
+    static func readPrivateFile() throws -> Data {
+        let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                                                  appropriateFor: nil, create: false)
+        let folder = open(support.appendingPathComponent("MeguriDiagnostics", isDirectory: true).path,
+                          O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+        guard folder >= 0 else { throw ScopeProbeFailure.configuration }
+        defer { close(folder) }
+        var directory = stat()
+        guard fstat(folder, &directory) == 0, directory.st_uid == getuid(),
+              directory.st_mode & 0o777 == 0o700 else { throw ScopeProbeFailure.configuration }
+        let fd = openat(folder, "acknowledged-records.json", O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+        guard fd >= 0 else { throw ScopeProbeFailure.configuration }
+        let file = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        defer { try? file.close() }
+        var before = stat()
+        guard fstat(fd, &before) == 0, before.st_uid == getuid(), before.st_nlink == 1,
+              before.st_mode & S_IFMT == S_IFREG, before.st_mode & 0o777 == 0o600,
+              before.st_size > 0, before.st_size <= 65_536 else { throw ScopeProbeFailure.configuration }
+        let bytes = try file.read(upToCount: 65_537) ?? Data()
+        var after = stat()
+        guard fstat(fd, &after) == 0, bytes.count == before.st_size,
+              before.st_dev == after.st_dev, before.st_ino == after.st_ino,
+              before.st_size == after.st_size, before.st_mode == after.st_mode,
+              before.st_nlink == after.st_nlink,
+              before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec,
+              before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec,
+              before.st_ctimespec.tv_sec == after.st_ctimespec.tv_sec,
+              before.st_ctimespec.tv_nsec == after.st_ctimespec.tv_nsec
+        else { throw ScopeProbeFailure.configuration }
+        return bytes
+    }
+}
+
+private struct RecordReadWitness: Sendable {
+    let id: CKRecord.ID
+    let encrypted: Data
+    let changeTag: String
+}
+
+private struct RecordReadSlot: Sendable {
+    var found = false
+    var bytesMatch = false
+    var changeTagMatch = false
+    var error: ScopeProbeFailure?
+    var status: String {
+        if found { return bytesMatch && changeTagMatch ? "match" : "different" }
+        return error == .sdkUnknownItem ? "missing" : "readError"
+    }
+    var json: String {
+        "{\"found\":\(found),\"bytesMatch\":\(bytesMatch),\"changeTagMatch\":\(changeTagMatch)," +
+        "\"status\":\"\(status)\",\"error\":\"\(error?.rawValue ?? "none")\"}"
+    }
+}
+
+private struct RecordReadReport: Sendable {
+    var completed = false
+    var failureCategory: ScopeProbeFailure?
+    var terminalError: ScopeProbeFailure?
+    var slots: [RecordReadSlot] = []
+    var json: String {
+        "{\"expected\":\(slots.count),\"found\":\(slots.filter(\.found).count)," +
+        "\"exactByteMatch\":\(slots.filter(\.bytesMatch).count)," +
+        "\"missing\":\(slots.filter { $0.status == "missing" }.count)," +
+        "\"different\":\(slots.filter { $0.status == "different" }.count)," +
+        "\"readError\":\(slots.filter { $0.status == "readError" }.count)," +
+        "\"completed\":\(completed),\"failureCategory\":\"\(failureCategory?.rawValue ?? "none")\"," +
+        "\"terminalError\":\"\(terminalError?.rawValue ?? "none")\"," +
+        "\"slots\":[\(slots.map(\.json).joined(separator: ","))]}"
+    }
+}
+
+private enum RecordReadOperation {
+    private struct State: Sendable {
+        var slots: [Int: RecordReadSlot] = [:]
+        var invalid = false
+        var terminal: Result<Void, ScopeProbeFailure>?
+    }
+
+    static func run(_ witnesses: [RecordReadWitness], database: CKDatabase) async -> RecordReadReport {
+        let operation = CKFetchRecordsOperation(recordIDs: witnesses.map(\.id))
+        operation.configuration = ScopeProbeOperations.budget()
+        // Existing owned exact-read convention includes encrypted e. No query,
+        // subscription, engine, state token, retry, or database mutation.
+        operation.desiredKeys = nil
+        let state = Mutex(State())
+        operation.perRecordResultBlock = { id, result in
+            state.withLock { value in
+                guard let index = witnesses.firstIndex(where: { $0.id == id }), value.slots[index] == nil
+                else { value.invalid = true; return }
+                let witness = witnesses[index]
+                switch result {
+                case .success(let record):
+                    guard record.recordID == witness.id, record.recordType == "MGEntity",
+                          record.recordID.zoneID.ownerName == CKCurrentUserDefaultName
+                    else { value.slots[index] = RecordReadSlot(error: .invalidResult); return }
+                    value.slots[index] = RecordReadSlot(found: true,
+                        bytesMatch: record.encryptedValues["e"] as? Data == witness.encrypted,
+                        changeTagMatch: record.recordChangeTag == witness.changeTag)
+                case .failure(let error):
+                    // Only an original exact per-record unknownItem is missing.
+                    value.slots[index] = RecordReadSlot(error: ScopeProbeFailure.category(error))
+                }
+            }
+        }
+        operation.fetchRecordsResultBlock = { result in
+            state.withLock { $0.terminal = result.mapError { ScopeProbeFailure.category($0) } }
+        }
+        // Return only from the original CKOperation completion. SDK request and
+        // resource budgets are unchanged. Cancellation cancels and still joins.
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                operation.completionBlock = {
+                    let report = state.withLock { value -> RecordReadReport in
+                        var fallback = ScopeProbeFailure.invalidResult
+                        var terminalError: ScopeProbeFailure?
+                        if case .failure(let failure) = value.terminal {
+                            fallback = failure == .sdkUnknownItem ? .sdkFailure : failure
+                            terminalError = failure
+                        }
+                        let slots = witnesses.indices.map { value.slots[$0] ?? RecordReadSlot(error: fallback) }
+                        return RecordReadReport(completed: value.terminal != nil && !value.invalid,
+                            failureCategory: value.invalid || value.terminal == nil ? .invalidResult : nil,
+                            terminalError: terminalError,
+                            slots: slots)
+                    }
+                    continuation.resume(returning: report)
+                }
+                if Task.isCancelled { operation.cancel() }
+                database.add(operation)
+            }
+        } onCancel: {
+            operation.cancel()
+        }
     }
 }
 #endif
