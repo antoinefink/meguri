@@ -406,11 +406,15 @@ extension ReviewCollectionStartupTests {
                     #expect(Task.isCancelled && context?.shutdownCancellationRequested == false)
                     return .init(outputs: [], error: providerError, deferred: false)
                 }
+                #expect(CloudPolicyOutputAcknowledgement.current != nil)
+                #expect(CloudPolicyOutputAcknowledgement.input != nil)
                 guard command.raw === queued.raw, let context else {
-                    Issue.record("Unexpected original queue command"); return .init(outputs: [], error: nil, deferred: false)
+                    let result = await original.production.execute(command)
+                    #expect(result.error == nil)
+                    return result
                 }
                 #expect(SyncCommandTaskContext.current === context && Task.isCancelled)
-                let result = await original.execute(command)
+                let result = await original.production.execute(command)
                 #expect(result.error is CancellationError && result.nativeCancellation?.matches(command) == true)
                 #expect(context.ownsNativeCancellation(result, command: command, backend: backend,
                     generation: context.generation, revision: context.revision))
