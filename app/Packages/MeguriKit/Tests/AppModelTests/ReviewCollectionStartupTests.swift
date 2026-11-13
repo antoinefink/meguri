@@ -41,7 +41,7 @@ import Testing
             await study.value
             await fixture.owner.waitForLifecycle()
             #expect(!fixture.owner.reviewIsActive)
-            #expect(model.phase == .question && model.paused && !model.canReveal)
+            #expect(model.phase == .loading && model.paused && !model.canReveal)
             model.reveal(); await model.settled()
             #expect(fixture.surface.reveals == 0)
             fixture.owner.setSceneActive(true)
@@ -50,6 +50,96 @@ import Testing
             model.reveal(); await model.settled()
             #expect(fixture.surface.reveals == 1)
             #expect(model.phase == .answer)
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1)), arguments: ["scene", "foreground"])
+    func pauseBeforeCoreAdmissionRetainsOriginalStart(activity: String) async throws {
+        try await withStartupActivityOwner { fixture, deckID in
+            let client = HeldCoreStart(gate: fixture.gate)
+            fixture.owner.reviewSessionClient = client
+            let study = Task { await fixture.owner.startStudy(deckID: deckID) }
+            do {
+                await fixture.gate.requested() // No Core start has been issued yet.
+                let model = try #require(fixture.owner.review)
+                #expect(model.sessionID == nil && client.starts == 0)
+                if activity == "foreground" {
+                    fixture.owner.setForeground(false)
+                    fixture.owner.setForeground(true)
+                } else {
+                    fixture.owner.setSceneActive(false)
+                    fixture.owner.setSceneActive(true)
+                    await fixture.owner.waitForLifecycle()
+                }
+                #expect(model.paused && model.sessionID == nil)
+                fixture.gate.release()
+                await study.value
+                await fixture.owner.waitForLifecycle()
+                let id = try #require(model.sessionID)
+                #expect(fixture.owner.review === model && !model.paused)
+                #expect(client.starts == 1 && !client.startWasCancelled)
+                // The ID and retained session are Core's actual terminal result.
+                _ = try await Core.sessionHead(sessionID: id, count: 3)
+                #expect(try await CoreCollectionService().resume().activeSession == id)
+                await fixture.owner.finishReview()
+                #expect(client.ends == 1 && model.sessionID == nil)
+                #expect(try await CoreCollectionService().resume().activeSession == nil)
+            } catch {
+                fixture.gate.release()
+                await study.value
+                throw error
+            }
+        }
+    }
+
+    private final class HeldCoreStart: ReviewSessionClient {
+        let gate: StartupResultGate
+        let holdBeforeAdmission: Bool
+        let core = CoreReviewSessionClient()
+        var starts = 0, ends = 0
+        var startWasCancelled = false
+        init(gate: StartupResultGate, holdBeforeAdmission: Bool = true) {
+            self.gate = gate; self.holdBeforeAdmission = holdBeforeAdmission
+        }
+        func start(deckID: Int64) async throws -> ReviewStartResult {
+            if holdBeforeAdmission { await gate.hold() }
+            startWasCancelled = Task.isCancelled
+            try Task.checkCancellation()
+            starts += 1
+            return try await core.start(deckID: deckID)
+        }
+        func head(sessionID: UInt64) async throws -> ReviewHead { try await core.head(sessionID: sessionID) }
+        func answer(sessionID: UInt64, item: ReviewHeadItem, rating: ReviewRating, at: Int64, elapsed: UInt64) async throws -> ReviewAnswerOutcome {
+            try await core.answer(sessionID: sessionID, item: item, rating: rating, at: at, elapsed: elapsed)
+        }
+        func undoStatus(sessionID: UInt64, redo: Bool) async throws -> ReviewUndoStatus { try await core.undoStatus(sessionID: sessionID, redo: redo) }
+        func restore(sessionID: UInt64, redo: Bool) async throws -> ReviewHead { try await core.restore(sessionID: sessionID, redo: redo) }
+        func studyState(deckID: Int64) async throws -> ReviewDeckStudyState { try await core.studyState(deckID: deckID) }
+        func end(sessionID: UInt64) async throws { try await core.end(sessionID: sessionID); ends += 1 }
+    }
+
+    @Test(.timeLimit(.minutes(1))) func cancelledCallerBeforeStartupExecutionStillJoinsCoreStart() async throws {
+        try await withStartupActivityOwner { fixture, deckID in
+            let client = HeldCoreStart(gate: fixture.gate, holdBeforeAdmission: false)
+            let model = ReviewCoordinator(deckID: deckID, surface: fixture.surface,
+                store: ReviewRecordStore(file: fixture.directory.appending(path: "cancelled-start.json")), client: client)
+            let starting = Task {
+                withUnsafeCurrentTask { $0?.cancel() }
+                await model.start() // Cancellation handler runs before startOwned can execute.
+            }
+            await starting.value
+            do {
+                let id = try #require(model.sessionID)
+                #expect(client.starts == 1 && !client.startWasCancelled)
+                #expect(model.phase == .error && fixture.surface.presented.isEmpty)
+                _ = try await Core.sessionHead(sessionID: id, count: 3)
+                #expect(await model.end())
+                #expect(client.ends == 1)
+                #expect(try await CoreCollectionService().resume().activeSession == nil)
+            } catch {
+                _ = await model.end()
+                throw error
+            }
         }
     }
 

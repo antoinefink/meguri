@@ -124,6 +124,13 @@ import Testing
         #expect(retry.map(\.operation) == ["terminal-exchange-waiting", "terminal-ended-ms",
                                           "terminal-error-throttled", "terminal-retry-ms"])
         #expect(retry.map(\.count) == [7, 30, nil, 50])
+
+        let waitingWithoutClass = CoreBridge.CloudPolicyExchangeRecord(.init(
+            exchange: 7, endedMs: 30, source: .command, outcome: .waiting(class: nil, retryAfterMs: nil)))
+        let withoutClass = try CloudKitSelectedSyncProof.terminalExchangeFacts(waitingWithoutClass)
+        #expect(withoutClass.map(\.operation) == ["terminal-exchange-waiting", "terminal-ended-ms"])
+        #expect(withoutClass.map(\.count) == [7, 30])
+        #expect(throws: AgentFailure.execution) { try CloudKitSelectedSyncProof.exchangeFacts(waitingWithoutClass) }
     }
     @Test func exchangeCaptureSharesAliasesWithTheOriginalBatch() throws {
         let evidence = try ledger()

@@ -48,6 +48,10 @@ public final class ReviewCoordinator {
     private var version: UInt64 = 0
     private var preload: Task<Void, Never>?
     private var operation: Task<Void, Never>?
+    private var resumeOperation: Task<Void, any Error>?
+    private var pagePreparation: Task<Void, any Error>?
+    private var closingAdmission = false
+    private var startupNeedsPreparation = false
     private(set) var summaryTask: Task<Void, Never>?
     private var deadlineTimer: Timer?
     private var endTask: Task<Bool, Never>?
@@ -129,25 +133,34 @@ public final class ReviewCoordinator {
     #endif
 
     public func start() async {
-        guard sessionID == nil, !busy, phase == .loading else { return }
+        guard !closingAdmission, sessionID == nil, !busy, phase == .loading else { return }
         busy = true
-        let task = Task { await startOwned() }
+        // Core start owns admission through its terminal result, even if pause
+        // arrives before either task executes. Only page preparation is cancelled.
+        let coreStart = Task {
+            #if DEBUG
+            let observation = ReviewStartObservation()
+            startObservation = observation
+            return try await client.start(deckID: record.deckID, observation: observation)
+            #else
+            return try await client.start(deckID: record.deckID)
+            #endif
+        }
+        let task = Task { await startOwned(coreStart) }
         operation = task
-        await task.value
+        await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
     }
-    private func startOwned() async {
+    private func startOwned(_ coreStart: Task<ReviewStartResult, any Error>) async {
         #if DEBUG
         let logger = Logger(subsystem: "Meguri", category: "ReviewStartup")
         logger.notice("start.begin")
         #endif
         do {
-            #if DEBUG
-            let observation = ReviewStartObservation()
-            startObservation = observation
-            let result = try await client.start(deckID: record.deckID, observation: observation)
-            #else
-            let result = try await client.start(deckID: record.deckID)
-            #endif
+            let result = try await coreStart.value
             #if DEBUG
             logger.notice("core.returned")
             #endif
@@ -157,12 +170,14 @@ public final class ReviewCoordinator {
             case .started(let id, let generation, let head, _):
                 sessionID = id
                 try nativeInput?.bindSession(coordinator: nativeCoordinator, session: id, generation: generation, deck: record.deckID)
+                startupNeedsPreparation = true
                 activeTime.start(at: uptime())
                 if paused { activeTime.pause(at: uptime()) }
                 #if DEBUG
                 logger.notice("surface.begin")
                 #endif
-                try await surface.load()
+                let loaded = try await preparePages { try await self.surface.load() }
+                if loaded { startupNeedsPreparation = false }
                 #if DEBUG
                 logger.notice("surface.end")
                 logger.notice("apply.begin")
@@ -201,25 +216,29 @@ public final class ReviewCoordinator {
                 #if DEBUG
                 logger.debug("surfaceReveal.begin")
                 #endif
-                try await surface.reveal(inputTime: inputTime)
-                #if DEBUG
-                logger.debug("surfaceReveal.end")
-                #endif
-                if let nativeInput, let pair = surface.pair, let sessionID {
+                _ = try await preparePages { [self] in
+                    try await surface.reveal(inputTime: inputTime)
+                    try Task.checkCancellation()
                     #if DEBUG
-                    logger.debug("nativeImage.begin")
+                    logger.debug("surfaceReveal.end")
                     #endif
-                    try await nativeInput.captureImage(pair: pair, coordinator: nativeCoordinator,
-                        session: sessionID, generation: nativeGeneration)
-                    #if DEBUG
-                    logger.debug("nativeImage.end")
-                    #endif
+                    if let nativeInput, let pair = surface.pair, let sessionID {
+                        #if DEBUG
+                        logger.debug("nativeImage.begin")
+                        #endif
+                        try await nativeInput.captureImage(pair: pair, coordinator: nativeCoordinator,
+                            session: sessionID, generation: nativeGeneration)
+                        #if DEBUG
+                        logger.debug("nativeImage.end")
+                        #endif
+                    }
+                    try Task.checkCancellation()
+                    sideIsAnswer = true
+                    if item?.homePreset.stopTimerOnAnswer == true {
+                        frozenDisplaySeconds = timer.milliseconds(at: uptime(), capSeconds: item?.homePreset.maximumAnswerSeconds ?? 60) / 1_000
+                    }
+                    phase = .answer
                 }
-                sideIsAnswer = true
-                if item?.homePreset.stopTimerOnAnswer == true {
-                    frozenDisplaySeconds = timer.milliseconds(at: uptime(), capSeconds: item?.homePreset.maximumAnswerSeconds ?? 60) / 1_000
-                }
-                phase = .answer
             } catch { nativeInput?.failed(error); fail(error) }
             completeOperation()
             #if DEBUG
@@ -266,7 +285,13 @@ public final class ReviewCoordinator {
                     enqueuePersistence()
                     let head = refreshPending ? try await client.head(sessionID: sessionID) : diff.head
                     refreshPending = false
-                    try await apply(head, question: true, inputTime: inputTime)
+                    do {
+                        try await apply(head, question: true, inputTime: inputTime)
+                    } catch {
+                        // Presentation failure cannot skip the accepted record.
+                        try await persist()
+                        throw error
+                    }
                     try await persist()
                 case .stale(let head, let showNotice):
                     if let use { nativeInput?.completed(use, outcome: "stale") }
@@ -300,7 +325,12 @@ public final class ReviewCoordinator {
                 if redo {
                     if var answer = record.undone.popLast() { answer.durable = false; record.answers.append(answer) }
                 } else if let answer = record.answers.popLast() { record.undone.append(answer) }
-                try await apply(head, question: true)
+                do { try await apply(head, question: true) }
+                catch {
+                    // The original Undo/Redo record must drain even if rendering fails.
+                    try await persist()
+                    throw error
+                }
                 try await persist()
             } catch {
                 notice = String(describing: error)
@@ -411,7 +441,8 @@ public final class ReviewCoordinator {
         }
     }
 
-    private func apply(_ head: ReviewHead, question: Bool, inputTime: TimeInterval? = nil) async throws {
+    private func apply(_ head: ReviewHead, question: Bool, inputTime: TimeInterval? = nil,
+                       whilePaused: Bool = false) async throws {
         summaryTask?.cancel(); summaryTask = nil
         counts = head.counts
         terminalState = head.terminalState
@@ -420,43 +451,12 @@ public final class ReviewCoordinator {
         item = head.items.first
         switch head.terminalState {
         case .active:
-            guard let item else { throw BridgeError.internal("Active review head has no item") }
+            guard item != nil else { throw BridgeError.internal("Active review head has no item") }
             if !paused { activeTime.resume(at: uptime()) }
             studyState = nil; waitingUntil = nil
-            #if DEBUG
-            let logger = Logger(subsystem: "Meguri", category: "ReviewStartup")
-            logger.notice("render.begin")
-            #endif
-            try await surface.render(sessionID: sessionID, items: head.items)
-            #if DEBUG
-            logger.notice("render.end")
-            #endif
-            guard self.sessionID == sessionID else { throw BridgeError.unavailable(reason: "Session ended during rendering") }
-            publishVisibleMedia()
-            let needsPresentation = question || previous?.cardId != item.cardId || presentedKey != item.renderKey
-            if needsPresentation {
-                preload?.cancel(); await preload?.value; preload = nil
-                let keepAnswer = !question && sideIsAnswer && previous?.cardId == item.cardId
-                #if DEBUG
-                logger.notice("present.begin")
-                #endif
-                try await surface.present(item: item, inputTime: inputTime ?? uptime())
-                #if DEBUG
-                logger.notice("present.end")
-                #endif
-                guard self.sessionID == sessionID else { throw BridgeError.unavailable(reason: "Session ended during presentation") }
-                presentedKey = item.renderKey
-                publishVisibleMedia()
-                sideIsAnswer = false
-                timer.start(at: uptime())
-                if paused { timer.pause(at: uptime()) }
-                frozenDisplaySeconds = nil
-                if keepAnswer { try await surface.reveal(inputTime: uptime()); sideIsAnswer = true }
-            }
-            phase = sideIsAnswer ? .answer : .question
-            if let next = head.items.dropFirst().first {
-                preload?.cancel(); await preload?.value
-                preload = Task { try? await surface.preload(item: next) }
+            _ = try await preparePages(whilePaused: whilePaused) {
+                try await self.preparePresentation(head, sessionID: sessionID, previous: previous,
+                                                   question: question, inputTime: inputTime)
             }
         case .waitingUntil, .finished:
             clearVisibleMedia()
@@ -492,6 +492,82 @@ public final class ReviewCoordinator {
         arm(at: min(Date(timeIntervalSince1970: Double(head.validUntil)), waitingUntil ?? .distantFuture))
     }
 
+    /// One child owns only visual preparation. Its parent retains Core calls and
+    /// record writes, and joins this child before lifecycle physical suspension.
+    @discardableResult private func preparePages(
+        whilePaused: Bool = false,
+        _ work: @escaping @MainActor () async throws -> Void
+    ) async throws -> Bool {
+        guard !closingAdmission, whilePaused || !paused else { forceQuestion = true; return false }
+        let preparation = Task {
+            try Task.checkCancellation()
+            try await work()
+            try Task.checkCancellation()
+        }
+        pagePreparation = preparation
+        let result = await withTaskCancellationHandler {
+            await preparation.result
+        } onCancel: {
+            preparation.cancel()
+        }
+        pagePreparation = nil
+        if case .failure(let error) = result {
+            // Cancellation belongs to this child, never to a Core result or
+            // persistence failure observed after a lifecycle change.
+            if error is CancellationError && preparation.isCancelled && paused {
+                forceQuestion = true
+                return false
+            }
+            throw error
+        }
+        return true
+    }
+
+    private func preparePresentation(_ head: ReviewHead, sessionID: UInt64, previous: ReviewHeadItem?,
+                                     question: Bool, inputTime: TimeInterval?) async throws {
+        guard let item = head.items.first else { throw BridgeError.internal("Active review head has no item") }
+        #if DEBUG
+        let logger = Logger(subsystem: "Meguri", category: "ReviewStartup")
+        logger.notice("render.begin")
+        #endif
+        try await surface.render(sessionID: sessionID, items: head.items)
+        try Task.checkCancellation()
+        #if DEBUG
+        logger.notice("render.end")
+        #endif
+        guard self.sessionID == sessionID else { throw BridgeError.unavailable(reason: "Session ended during rendering") }
+        publishVisibleMedia()
+        let needsPresentation = question || previous?.cardId != item.cardId || presentedKey != item.renderKey
+        if needsPresentation {
+            preload?.cancel(); await preload?.value; preload = nil
+            try Task.checkCancellation()
+            let keepAnswer = !question && sideIsAnswer && previous?.cardId == item.cardId
+            #if DEBUG
+            logger.notice("present.begin")
+            #endif
+            try await surface.present(item: item, inputTime: inputTime ?? uptime())
+            try Task.checkCancellation()
+            #if DEBUG
+            logger.notice("present.end")
+            #endif
+            guard self.sessionID == sessionID else { throw BridgeError.unavailable(reason: "Session ended during presentation") }
+            presentedKey = item.renderKey
+            publishVisibleMedia()
+            sideIsAnswer = false
+            timer.start(at: uptime())
+            if paused { timer.pause(at: uptime()) }
+            frozenDisplaySeconds = nil
+            if keepAnswer { try await surface.reveal(inputTime: uptime()); sideIsAnswer = true }
+        }
+        try Task.checkCancellation()
+        phase = sideIsAnswer ? .answer : .question
+        if let next = head.items.dropFirst().first {
+            preload?.cancel(); await preload?.value
+            try Task.checkCancellation()
+            preload = Task { try? await surface.preload(item: next) }
+        }
+    }
+
     private func arm(at date: Date) {
         deadlineTimer?.invalidate(); deadlineTimer = nil
         guard !paused, date < .distantFuture, !clock.isFixed else { return }
@@ -506,6 +582,12 @@ public final class ReviewCoordinator {
         summaryTask?.cancel()
         pauseRevision &+= 1
         paused = true
+        // Only the shared visual child is cancelled; original Core calls and
+        // accepted/Undo record persistence drain in their parent operations.
+        if pagePreparation != nil {
+            forceQuestion = true
+            pagePreparation?.cancel()
+        }
         (surface as? ReviewPages)?.inputActive = false
         surface.pair?.ownsKeyboardFocus = false
         timer.pause(at: uptime()); activeTime.pause(at: uptime())
@@ -518,26 +600,50 @@ public final class ReviewCoordinator {
         deadlineTimer?.invalidate(); deadlineTimer = nil
         surface.pair?.pauseAudio()
         await operation?.value
+        _ = await resumeOperation?.result
         timer.pause(at: uptime()); activeTime.pause(at: uptime())
         preload?.cancel(); await preload?.value; preload = nil
         await surface.suspend()
         try await persist()
     }
     public func resume() async throws {
+        guard !closingAdmission else { return }
+        if let resumeOperation { return try await resumeOperation.value }
         guard let sessionID, phase != .ended, paused else { return }
         let revision = pauseRevision
         await operation?.value
-        guard revision == pauseRevision else { return }
+        guard !closingAdmission, self.sessionID == sessionID, phase != .ended,
+              paused, revision == pauseRevision else { return }
+        if let resumeOperation { return try await resumeOperation.value }
         busy = true
+        let task = Task { try await resumeOwned(sessionID: sessionID, revision: revision) }
+        resumeOperation = task
+        try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+    private func resumeOwned(sessionID: UInt64, revision: UInt64) async throws {
+        defer { resumeOperation = nil }
+        guard !closingAdmission, self.sessionID == sessionID, phase != .ended,
+              paused, revision == pauseRevision else { busy = false; return }
         do {
-            await surface.resume()
-            try await apply(client.head(sessionID: sessionID), question: forceQuestion)
-            forceQuestion = false; refreshPending = false
-            guard revision == pauseRevision else {
-                await surface.suspend()
-                busy = false
-                return
+            let ready = try await preparePages(whilePaused: true) {
+                await self.surface.resume()
+                try Task.checkCancellation()
+                if self.startupNeedsPreparation { try await self.surface.load() }
             }
+            guard ready, !closingAdmission, revision == pauseRevision else { busy = false; return }
+            startupNeedsPreparation = false
+            // Read the retained Core session afresh, outside cancellable visuals.
+            let head = try await client.head(sessionID: sessionID)
+            guard !closingAdmission, self.sessionID == sessionID, phase != .ended,
+                  revision == pauseRevision else { busy = false; return }
+            try await apply(head, question: forceQuestion, whilePaused: true)
+            try Task.checkCancellation()
+            guard !closingAdmission, revision == pauseRevision else { busy = false; return }
+            forceQuestion = false; refreshPending = false
             paused = false
             (surface as? ReviewPages)?.inputActive = true
             if item != nil, phase == .question || phase == .answer {
@@ -545,7 +651,10 @@ public final class ReviewCoordinator {
             }
             busy = false
             retryArrivedMedia()
-        } catch { paused = true; busy = false; fail(error); throw error }
+        } catch {
+            paused = true; busy = false
+            fail(error); throw error
+        }
     }
     public func mediaUnavailable() {
         mediaArrivals = ReviewMediaArrivals()
@@ -574,6 +683,8 @@ public final class ReviewCoordinator {
     /// Idempotent across Close, sidebar navigation, window close and app quit.
     @discardableResult public func end() async -> Bool {
         if let endTask { return await endTask.value }
+        closingAdmission = true
+        beginPause()
         let task = Task { () -> Bool in
             do {
                 try await pause()
@@ -596,6 +707,7 @@ public final class ReviewCoordinator {
         return result
     }
     public func generationEnded() {
+        closingAdmission = true
         summaryTask?.cancel()
         paused = true; deadlineTimer?.invalidate(); preload?.cancel()
         sessionID = nil; phase = .ended; surface.close()

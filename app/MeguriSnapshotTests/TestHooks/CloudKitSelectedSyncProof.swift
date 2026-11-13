@@ -84,7 +84,7 @@ nonisolated enum CloudKitSelectedSyncProof {
                           .init(name: .syncResult, count: blocked, operation: "terminal-blocked")]
         case .waiting(let error, let retry):
             outcome = "waiting"
-            accounting = [terminalError(error)]
+            if let error { accounting = [terminalError(error)] }
             if let retry {
                 accounting.append(.init(name: .syncResult, count: UInt64(bitPattern: retry), operation: "terminal-retry-ms"))
             }

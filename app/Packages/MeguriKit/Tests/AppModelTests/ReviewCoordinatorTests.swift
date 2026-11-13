@@ -1,5 +1,5 @@
 import CardRendering
-import CoreBridge
+@testable import CoreBridge
 import Foundation
 import Testing
 @testable import AppModel
@@ -207,6 +207,514 @@ extension ReviewCollectionStartupTests {
         #expect(fixture.client.headReads > 0)
         #expect(!fixture.model.paused)
         _ = await fixture.model.end()
+    }
+
+    @Test(.timeLimit(.minutes(1)), arguments: ["pause-resume", "refresh-close", "media-error-close"])
+    func startupOwnershipSurvivesPhaseChanges(action: String) async throws {
+        let fixture = Fixture()
+        let render = CancellableGate()
+        defer { render.release() }
+        fixture.surface.onRender = { try await render.wait() }
+        let starting = Task { await fixture.model.start() }
+        defer { starting.cancel() }
+        await render.requested()
+        #expect(fixture.model.phase == .loading && fixture.model.sessionID == 5)
+        if action == "refresh-close" {
+            fixture.model.requestRefresh()
+            #expect(fixture.model.phase == .transition)
+        } else if action == "media-error-close" {
+            fixture.model.mediaUnavailable()
+            #expect(fixture.model.phase == .error)
+        }
+        if action == "pause-resume" {
+            try await fixture.model.pause()
+            await starting.value
+            #expect(render.cancelled && fixture.model.paused && fixture.client.ends == 0)
+            #expect(fixture.surface.presented.isEmpty)
+            #expect(try await fixture.store.load()?.endedAt == nil)
+            fixture.surface.onRender = nil
+            fixture.client.currentHead = Self.head(2)
+            try await fixture.model.resume()
+            #expect(fixture.client.headReads == 1 && fixture.surface.presented == [2])
+            #expect(fixture.model.phase == .question && !fixture.model.paused)
+        }
+        #expect(await fixture.model.end())
+        await starting.value
+        #expect(render.cancelled && fixture.client.ends == 1)
+        #expect(fixture.surface.calls.last == "close" && fixture.model.record.answers.isEmpty)
+        #expect(try await fixture.store.load()?.endedAt != nil)
+    }
+
+    @Test(.timeLimit(.minutes(1))) func closeDrainsAcceptedAnswerAndPhysicalStopBeforeCoreEnd() async throws {
+        let fixture = Fixture()
+        await fixture.model.start()
+        fixture.model.reveal(); await fixture.model.settled()
+        let answer = CancellableGate(), physicalStop = CancellableGate()
+        defer { answer.release(); physicalStop.release() }
+        fixture.client.onAnswerResult = { try await answer.wait() }
+        fixture.surface.onSuspend = { _ = try? await physicalStop.wait() }
+        fixture.model.rate(.good)
+        await answer.requested()
+        fixture.model.beginPause()
+        let closing = Task { await fixture.model.end() }
+        defer { closing.cancel() }
+        #expect(fixture.client.ends == 0 && !fixture.surface.calls.contains("suspend"))
+        answer.release()
+        await physicalStop.requested()
+        #expect(!answer.cancelled && fixture.model.record.answers.map(\.cardID) == [1])
+        #expect(fixture.client.ends == 0 && fixture.model.record.endedAt == nil)
+        #expect(try await fixture.store.load()?.answers.map(\.cardID) == [1])
+        #expect(!fixture.surface.calls.contains("close"))
+        physicalStop.release()
+        #expect(await closing.value)
+        #expect(fixture.client.ends == 1 && fixture.surface.calls.last == "close")
+        let saved = try #require(try await fixture.store.load())
+        #expect(saved.answers.map(\.cardID) == [1] && saved.endedAt != nil)
+    }
+
+    @Test(.timeLimit(.minutes(1)), arguments: [false, true])
+    func secondPauseCancelsAndJoinsResumedStartup(close: Bool) async throws {
+        let fixture = Fixture()
+        let first = CancellableGate(), resumed = CancellableGate(), stopped = CancellableGate()
+        var starting: Task<Void, Never>?
+        var resuming: Task<Void, any Error>?
+        var pausing: Task<Bool, any Error>?
+        try await Self.lifecycleDeadline(unblocking: {
+            first.release(); resumed.release(); stopped.release()
+        }, cleanup: {
+            await starting?.value
+            _ = await resuming?.result
+            _ = await pausing?.result
+            _ = await fixture.model.end()
+        }) {
+            fixture.surface.onRender = { try await first.wait() }
+            starting = Task { await fixture.model.start() }
+            await first.requested()
+            try await fixture.model.pause()
+            await starting?.value
+            fixture.surface.onRender = { try await resumed.wait() }
+            resuming = Task { try await fixture.model.resume() }
+            await resumed.requested()
+            fixture.surface.onSuspend = { _ = try? await stopped.wait() }
+            if !close { fixture.model.beginPause() }
+            pausing = Task {
+                if close { return await fixture.model.end() }
+                try await fixture.model.pause()
+                return true
+            }
+            await stopped.requested()
+            try await resuming?.value
+            #expect(first.cancelled && resumed.cancelled && fixture.model.paused)
+            #expect(fixture.surface.presented.isEmpty && fixture.client.ends == 0)
+            stopped.release()
+            #expect(try await pausing?.value == true)
+            #expect((try await fixture.store.load()?.endedAt != nil) == close)
+            fixture.surface.onSuspend = nil; fixture.surface.onRender = nil
+            if !close {
+                fixture.client.currentHead = Self.head(2)
+                try await fixture.model.resume()
+                #expect(fixture.model.canReveal && fixture.surface.presented == [2])
+            }
+            #expect(await fixture.model.end())
+            #expect(fixture.client.ends == 1 && fixture.model.record.answers.isEmpty)
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1)), arguments: ["render", "present"])
+    func callerCancellationKeepsResumePausedUntilNewHeadIsPresented(stage: String) async throws {
+        let fixture = Fixture(), held = CancellableGate()
+        var resuming: Task<Void, any Error>?
+        var completedPresentations: [Int64] = []
+        try await Self.lifecycleDeadline(unblocking: { held.release() }, cleanup: {
+            _ = await resuming?.result
+            _ = await fixture.model.end()
+            fixture.surface.onRender = nil; fixture.surface.onPresent = nil
+        }) {
+            await fixture.model.start()
+            fixture.model.reveal(); await fixture.model.settled()
+            try #require(fixture.model.canRate && fixture.surface.presented == [1])
+            try await fixture.model.pause()
+            fixture.client.currentHead = Self.head(2)
+            let reads = fixture.client.headReads
+            if stage == "render" { fixture.surface.onRender = { try await held.wait() } }
+            fixture.surface.onPresent = {
+                if stage == "present" { try await held.wait() }
+                completedPresentations.append(2)
+            }
+            let caller = Task { try await fixture.model.resume() }
+            resuming = caller
+            await held.requested()
+            #expect(fixture.model.paused && !fixture.model.canReveal && !fixture.model.canRate)
+            #expect(completedPresentations.isEmpty)
+            // Cancel only this caller; no second lifecycle pause changes the revision.
+            caller.cancel()
+            let result = await caller.result
+            switch result {
+            case .success: Issue.record("Caller cancellation incorrectly completed Resume")
+            case .failure(let error): #expect(error is CancellationError)
+            }
+            #expect(held.cancelled && fixture.model.paused)
+            #expect(!fixture.model.canReveal && !fixture.model.canRate)
+            #expect(!fixture.model.canUndo && !fixture.model.canRedo)
+            #expect(completedPresentations.isEmpty)
+            if stage == "render" { #expect(fixture.surface.presented == [1]) }
+            fixture.model.rate(.good); await fixture.model.settled()
+            #expect(fixture.client.answers == 0 && fixture.model.record.answers.isEmpty)
+            #expect(fixture.client.ends == 0 && fixture.surface.calls.filter { $0 == "suspend" }.count == 1)
+            fixture.surface.onRender = nil
+            fixture.surface.onPresent = { completedPresentations.append(2) }
+            try await fixture.model.resume()
+            #expect(!fixture.model.paused && fixture.model.phase == .question)
+            #expect(fixture.model.canReveal && !fixture.model.canRate && fixture.model.item?.cardId == 2)
+            #expect(completedPresentations == [2] && fixture.surface.presented.last == 2)
+            #expect(fixture.client.starts == 1 && fixture.client.headReads == reads + 2 && fixture.client.answers == 0)
+            #expect(try await fixture.store.load()?.answers.isEmpty == true)
+            #expect(await fixture.model.end())
+            #expect(fixture.client.ends == 1 && fixture.surface.calls.last == "close")
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1))) func resumeAfterCloseJoinedWorkCannotRestartPages() async throws {
+        let fixture = Fixture(), stopped = CancellableGate()
+        var closing: Task<Bool, Never>?
+        try await Self.lifecycleDeadline(unblocking: { stopped.release() }, cleanup: {
+            _ = await closing?.value
+            _ = await fixture.model.end()
+        }) {
+            await fixture.model.start()
+            fixture.surface.onSuspend = { _ = try? await stopped.wait() }
+            closing = Task { await fixture.model.end() }
+            await stopped.requested() // End has joined all original preparation.
+            let calls = fixture.surface.calls, reads = fixture.client.headReads
+            try await fixture.model.resume()
+            await fixture.model.start()
+            #expect(fixture.surface.calls == calls && fixture.client.headReads == reads)
+            #expect(fixture.model.paused && fixture.client.ends == 0)
+            #expect(try await fixture.store.load()?.endedAt == nil)
+            stopped.release()
+            #expect(await closing?.value == true)
+            #expect(fixture.client.ends == 1 && fixture.surface.calls.last == "close")
+            #expect(try await fixture.store.load()?.endedAt != nil)
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1)), arguments: ["core", "render", "present", "failure"], [false, true])
+    func acceptedAnswerPreparationIsCancelledWithoutCancellingCommit(stage: String, close: Bool) async throws {
+        let fixture = Fixture()
+        let accepted = CancellableGate(), preparation = CancellableGate(), stopped = CancellableGate()
+        var pausing: Task<Bool, any Error>?
+        var order: [String] = []
+        var physicallyStopped = false
+        try await Self.lifecycleDeadline(unblocking: {
+            accepted.release(); preparation.release(); stopped.release()
+        }, cleanup: {
+            _ = await pausing?.result
+            await fixture.model.settled()
+            _ = await fixture.model.end()
+            fixture.client.onAnswerResult = nil; fixture.client.onEnd = nil
+            fixture.surface.onSuspend = nil; fixture.surface.onRender = nil; fixture.surface.onPresent = nil
+            fixture.model.onRecordChanged = nil
+        }) {
+            await fixture.model.start()
+            fixture.model.reveal(); await fixture.model.settled()
+            fixture.client.onAnswerResult = {
+                try await accepted.wait()
+                // Real ordered fan-out path, including commit-before-result.
+                if stage == "core" { fixture.model.receive(Self.answerCommitted()) }
+            }
+            if stage == "present" { fixture.surface.onPresent = { try await preparation.wait() } }
+            else {
+                fixture.surface.onRender = {
+                    do { try await preparation.wait() }
+                    catch {
+                        if stage == "failure" { throw BridgeError.internal("post-answer preparation failed") }
+                        throw error
+                    }
+                }
+            }
+            fixture.surface.onSuspend = {
+                order.append("physical-stop")
+                _ = try? await stopped.wait()
+                physicallyStopped = true
+                order.append("stopped")
+            }
+            fixture.model.onRecordChanged = { record in
+                guard record.answers.count == 1 else { return }
+                order.append(record.endedAt != nil ? "ended-persist" : physicallyStopped ? "pause-persist" : "accepted-persist")
+            }
+            fixture.client.onEnd = {
+                #expect(order.last == "pause-persist")
+                do {
+                    #expect(try await fixture.store.load()?.answers.first?.durable == true)
+                } catch {
+                    Issue.record(error)
+                }
+                order.append("CoreEnd")
+            }
+            fixture.model.rate(.good)
+            await accepted.requested()
+            if stage != "core" {
+                accepted.release()
+                await preparation.requested()
+                fixture.model.receive(Self.answerCommitted())
+            }
+            fixture.model.beginPause()
+            pausing = Task {
+                if close { return await fixture.model.end() }
+                try await fixture.model.pause()
+                return true
+            }
+            // A pause requested before the answer returns must still retain it.
+            accepted.release()
+            await stopped.requested()
+            #expect(!accepted.cancelled && fixture.client.answers == 1 && fixture.client.ends == 0)
+            #expect(stage == "core" || preparation.cancelled)
+            #expect(fixture.model.record.answers.count == 1 && fixture.model.record.answers[0].durable)
+            let saved = try #require(try await fixture.store.load())
+            #expect(saved.answers == fixture.model.record.answers && saved.endedAt == nil)
+            #expect(order.last == "physical-stop" && order.contains("accepted-persist"))
+            #expect(!fixture.surface.calls.contains("close"))
+            if stage == "failure" { #expect(fixture.model.notice?.contains("post-answer preparation failed") == true) }
+            else { #expect(fixture.model.notice == nil) }
+            stopped.release()
+            #expect(try await pausing?.value == true)
+            fixture.surface.onSuspend = nil; fixture.surface.onRender = nil; fixture.surface.onPresent = nil
+            if !close {
+                try await fixture.model.resume()
+                #expect(fixture.model.phase == .question && fixture.model.item?.cardId == 2 && fixture.model.canReveal)
+                #expect(fixture.surface.presented.last == 2 && fixture.client.headReads > 0)
+            }
+            #expect(await fixture.model.end())
+            #expect(fixture.client.answers == 1 && fixture.client.ends == 1)
+            let ended = try #require(try await fixture.store.load())
+            #expect(ended.answers == saved.answers && ended.endedAt != nil)
+            #expect(order.suffix(2) == ["CoreEnd", "ended-persist"] && fixture.surface.calls.last == "close")
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1)), arguments: ["reveal", "refresh", "undo", "redo", "undo-core", "reveal-failure", "refresh-failure", "undo-failure"], [false, true])
+    func visualPreparationIsCancelledAndJoinedBeforeLifecycleStop(path: String, close: Bool) async throws {
+        let fixture = Fixture()
+        let visual = CancellableGate(), restored = CancellableGate(), stopped = CancellableGate()
+        let action = path.replacingOccurrences(of: "-failure", with: "")
+        let genuineFailure = path.hasSuffix("-failure")
+        var visualJoined = false, physicallyStopped = false
+        var pausing: Task<Bool, any Error>?
+        try await Self.lifecycleDeadline(unblocking: {
+            visual.release(); restored.release(); stopped.release()
+        }, cleanup: {
+            _ = await pausing?.result
+            await fixture.model.settled()
+            _ = await fixture.model.end()
+            fixture.client.onAnswerResult = nil; fixture.client.onEnd = nil; fixture.client.onRestoreResult = nil
+            fixture.surface.onSuspend = nil; fixture.surface.onReveal = nil; fixture.surface.onRender = nil
+        }) {
+            await fixture.model.start()
+            fixture.model.reveal(); await fixture.model.settled()
+            // Synthetic ordered commit fan-out before the original result.
+            fixture.client.onAnswerResult = { fixture.model.receive(Self.answerCommitted()) }
+            fixture.model.rate(.good); await fixture.model.settled()
+            try #require(try await fixture.store.load()?.answers.first?.durable == true)
+            if action == "redo" { fixture.model.restore(); await fixture.model.settled() }
+            let heldVisual: () async throws -> Void = {
+                defer { visualJoined = true }
+                do { try await visual.wait() }
+                catch {
+                    if genuineFailure { throw BridgeError.internal("concrete \(action) visual failure") }
+                    throw error
+                }
+            }
+            if action == "reveal" { fixture.surface.onReveal = heldVisual }
+            else { fixture.surface.onRender = heldVisual }
+            if action == "undo-core" { fixture.client.onRestoreResult = { try await restored.wait() } }
+            fixture.surface.onSuspend = {
+                #expect(action == "undo-core" || (visualJoined && visual.cancelled))
+                #expect(fixture.client.starts == 1 && fixture.client.answers == 1 && fixture.client.ends == 0)
+                let saved = try? await fixture.store.load()
+                #expect(saved?.answers == fixture.model.record.answers && saved?.undone == fixture.model.record.undone)
+                #expect(saved?.endedAt == nil)
+                _ = try? await stopped.wait()
+                physicallyStopped = true
+            }
+            fixture.client.onEnd = {
+                #expect(physicallyStopped)
+                let saved = try #require(try await fixture.store.load())
+                #expect(saved.answers == fixture.model.record.answers && saved.undone == fixture.model.record.undone)
+                #expect(saved.endedAt == nil)
+            }
+            switch action {
+            case "reveal": fixture.model.reveal()
+            case "refresh": fixture.model.requestRefresh(question: true)
+            default: fixture.model.restore(redo: action == "redo")
+            }
+            if action == "undo-core" { await restored.requested() }
+            else { await visual.requested() }
+            // Redo's restored record becomes durable through ordinary fan-out.
+            fixture.model.receive(Self.answerCommitted())
+            fixture.model.beginPause()
+            pausing = Task {
+                if close { return await fixture.model.end() }
+                try await fixture.model.pause()
+                return true
+            }
+            if action == "undo-core" {
+                #expect(!fixture.surface.calls.contains("suspend") && fixture.client.ends == 0)
+                restored.release()
+            }
+            await stopped.requested()
+            #expect(!restored.cancelled)
+            #expect(action == "undo-core" || (visualJoined && visual.cancelled))
+            let expectedRestores: [Bool] = action == "redo" ? [false, true] : action.hasPrefix("undo") ? [false] : []
+            #expect(fixture.client.restores == expectedRestores)
+            let saved = try #require(try await fixture.store.load())
+            if action.hasPrefix("undo") {
+                #expect(saved.answers.isEmpty && saved.undone.map(\.cardID) == [1] && saved.undone.first?.durable == true)
+            } else {
+                #expect(saved.answers.map(\.cardID) == [1] && saved.answers.first?.durable == true && saved.undone.isEmpty)
+            }
+            if genuineFailure { #expect(fixture.model.notice?.contains("concrete \(action) visual failure") == true) }
+            else { #expect(fixture.model.notice == nil) }
+            stopped.release()
+            #expect(try await pausing?.value == true)
+            fixture.surface.onSuspend = nil; fixture.surface.onReveal = nil; fixture.surface.onRender = nil
+            fixture.client.onRestoreResult = nil
+            if !close {
+                let reads = fixture.client.headReads
+                fixture.client.currentHead = Self.head(3)
+                try await fixture.model.resume()
+                #expect(fixture.client.headReads == reads + 1 && fixture.model.item?.cardId == 3)
+                #expect(fixture.model.canReveal && !fixture.model.canRate && fixture.surface.presented.last == 3)
+            }
+            #expect(await fixture.model.end())
+            #expect(fixture.client.starts == 1 && fixture.client.answers == 1 && fixture.client.restores == expectedRestores)
+            #expect(fixture.client.ends == 1 && fixture.surface.calls.last == "close")
+            let ended = try #require(try await fixture.store.load())
+            #expect(ended.answers == saved.answers && ended.undone == saved.undone && ended.endedAt != nil)
+        }
+    }
+
+    @Test(arguments: ["reveal", "refresh", "undo"])
+    func uncancelledVisualCancellationErrorRemainsAFailure(path: String) async throws {
+        let fixture = Fixture()
+        await fixture.model.start()
+        if path == "reveal" {
+            fixture.surface.onReveal = { throw CancellationError() }
+            fixture.model.reveal()
+        } else {
+            fixture.surface.onRender = { throw CancellationError() }
+            if path == "refresh" { fixture.model.requestRefresh(question: true) }
+            else { fixture.model.restore() }
+        }
+        await fixture.model.settled()
+        #expect(!fixture.model.paused && fixture.model.phase == .error)
+        #expect(fixture.model.notice?.contains("CancellationError") == true)
+        #expect(fixture.client.starts == 1 && fixture.client.answers == 0)
+        #expect(fixture.client.restores == (path == "undo" ? [false] : []))
+        #expect(await fixture.model.end())
+    }
+
+    private static func answerCommitted() -> CoreEvent {
+        CoreEvent(.init(seq: 1, generation: 1, causeSeq: nil, kind: .changes(changes: .init(
+            wholeCollection: false, source: .userUndoable,
+            cards: [.init(id: 1, noteId: 1, kind: .updated, memoryStateOnly: false)],
+            notes: [], notetypes: [], decks: [], deckConfigs: [], configKeys: [], tags: [],
+            revlogAdded: [1], revlogRemoved: [], mediaAdded: [], mediaRemoved: [],
+            skippedIncomingCards: [], skippedIncomingNotes: [], skippedIncomingDecks: [], collectionRow: false))))
+    }
+
+    private struct LifecycleDeadline: Error {}
+    private static func lifecycleDeadline(
+        unblocking: @escaping @MainActor () -> Void,
+        cleanup: @escaping @MainActor () async -> Void,
+        _ body: @escaping @MainActor @Sendable () async throws -> Void
+    ) async throws {
+        let results = AsyncStream<Result<Void, any Error>>.makeStream(bufferingPolicy: .bufferingOldest(1))
+        let work = Task { @MainActor in
+            do { try await body(); results.continuation.yield(.success(())) }
+            catch { results.continuation.yield(.failure(error)) }
+        }
+        let timeout = Task {
+            do { try await Task.sleep(for: .seconds(3)) }
+            catch { return }
+            results.continuation.yield(.failure(LifecycleDeadline()))
+        }
+        let result: Result<Void, any Error> = await withTaskCancellationHandler {
+            for await result in results.stream { return result }
+            return .failure(CancellationError())
+        } onCancel: {
+            work.cancel(); timeout.cancel(); results.continuation.finish()
+        }
+        work.cancel(); timeout.cancel()
+        unblocking()
+        await work.value
+        await cleanup() // Join retained original work before Fixture removes its root.
+        await timeout.value
+        results.continuation.finish()
+        try result.get()
+    }
+
+    @Test(.timeLimit(.minutes(1)), arguments: ["core", "core-cancellation", "renderer", "persistence"])
+    func genuineStartupFailureSurvivesLaterCancellation(stage: String) async throws {
+        let fixture = Fixture()
+        let held = SummaryGate(state: Self.summary(waiting: false))
+        let failure: any Error = stage == "core-cancellation" ? CancellationError() :
+            BridgeError.internal("concrete \(stage) failure after cancel")
+        if stage.hasPrefix("core") {
+            fixture.client.onStartResult = { _ = await held.value(); throw failure }
+        } else if stage == "renderer" {
+            fixture.surface.onRender = { _ = await held.value(); throw failure }
+        } else {
+            // persist() must report a real filesystem failure even though the
+            // startup task was cancelled after presentation, before its save.
+            fixture.surface.onPresent = {
+                fixture.model.beginPause()
+                try Data([0]).write(to: fixture.directory)
+            }
+        }
+        let starting = Task { await fixture.model.start() }
+        if stage != "persistence" {
+            await held.requested()
+            fixture.model.beginPause()
+            held.release()
+        }
+        await starting.value
+        #expect(fixture.model.paused && fixture.model.phase == .error)
+        let notice = try #require(fixture.model.notice)
+        if stage == "core-cancellation" { #expect(notice.contains("CancellationError")) }
+        else if stage != "persistence" { #expect(notice.contains("concrete \(stage) failure after cancel")) }
+        else {
+            #expect(!notice.contains("CancellationError"))
+            try FileManager.default.removeItem(at: fixture.directory)
+        }
+        fixture.surface.onPresent = nil
+        #expect(await fixture.model.end())
+        #expect(fixture.client.ends == (stage.hasPrefix("core") ? 0 : 1))
+    }
+
+    @Test(.timeLimit(.minutes(1))) func genuineResumedRenderFailureSurvivesSecondPause() async throws {
+        let fixture = Fixture()
+        let initial = CancellableGate(), failed = SummaryGate(state: Self.summary(waiting: false))
+        fixture.surface.onRender = { try await initial.wait() }
+        let starting = Task { await fixture.model.start() }
+        await initial.requested()
+        try await fixture.model.pause()
+        await starting.value
+        fixture.surface.onRender = {
+            _ = await failed.value()
+            throw BridgeError.internal("resumed renderer failed after cancel")
+        }
+        let resuming = Task { try await fixture.model.resume() }
+        await failed.requested()
+        fixture.model.beginPause()
+        failed.release()
+        switch await resuming.result {
+        case .success: Issue.record("resume-render-error-missing")
+        case .failure(let error): #expect(String(describing: error).contains("resumed renderer failed after cancel"))
+        }
+        #expect(fixture.model.phase == .error && fixture.model.paused)
+        #expect(fixture.model.notice?.contains("resumed renderer failed after cancel") == true)
+        #expect(await fixture.model.end())
+        initial.release()
     }
 
     @Test func policyRefusalDoesNotLoadPagesOrCreateSession() async {
@@ -540,12 +1048,17 @@ extension ReviewCollectionStartupTests {
         var presented: [Int64] = []
         var calls: [String] = []
         var onLoad: (() async throws -> Void)?
+        var onRender: (() async throws -> Void)?
+        var onSuspend: (() async -> Void)?
         var onReveal: (() async throws -> Void)?
         var onResume: (() -> Void)?
+        var onPresent: (() async throws -> Void)?
         var arrivals: [[String]] = []
         func load() async throws { calls.append("load"); try await onLoad?() }
-        func render(sessionID: UInt64, items: [ReviewHeadItem]) async throws { calls.append("render") }
-        func present(item: ReviewHeadItem, inputTime: TimeInterval) async throws { presented.append(item.cardId); calls.append("present") }
+        func render(sessionID: UInt64, items: [ReviewHeadItem]) async throws { calls.append("render"); try await onRender?() }
+        func present(item: ReviewHeadItem, inputTime: TimeInterval) async throws {
+            presented.append(item.cardId); calls.append("present"); try await onPresent?()
+        }
         func preload(item: ReviewHeadItem) async throws {}
         func reveal(inputTime: TimeInterval) async throws { reveals += 1; try await onReveal?() }
         func admitNativeInput(_ input: NativeReviewInput, coordinator: UUID, session: UInt64, generation: UInt64,
@@ -556,7 +1069,7 @@ extension ReviewCollectionStartupTests {
             return try input.admitFacts(coordinator: coordinator, session: session, generation: generation,
                 deck: deck, item: item, rating: rating, instant: instant, eligible: eligible)
         }
-        func suspend() async { calls.append("suspend") }
+        func suspend() async { calls.append("suspend"); await onSuspend?() }
         func resume() async { calls.append("resume"); onResume?() }
         func close() { calls.append("close") }
     }
@@ -579,6 +1092,20 @@ extension ReviewCollectionStartupTests {
             )
         }
     }
+    // Model admission/ordering only; this gate supplies no renderer evidence.
+    final class CancellableGate {
+        private let entered = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingOldest(1))
+        private let held = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingOldest(1))
+        private(set) var cancelled = false
+        func wait() async throws {
+            entered.continuation.yield(())
+            for await _ in held.stream { break }
+            cancelled = Task.isCancelled
+            try Task.checkCancellation()
+        }
+        func requested() async { for await _ in entered.stream { return } }
+        func release() { held.continuation.finish(); entered.continuation.finish() }
+    }
     final class SummaryGate {
         let state: ReviewDeckStudyState
         private var continuation: CheckedContinuation<ReviewDeckStudyState, Never>?
@@ -600,6 +1127,7 @@ extension ReviewCollectionStartupTests {
         }
     }
     final class Client: ReviewSessionClient {
+        var starts = 0
         var answers = 0
         var answerFailure = false
         var elapsed: [UInt64] = []
@@ -610,7 +1138,10 @@ extension ReviewCollectionStartupTests {
         var refusal: ReviewRefusal?
         var summary: ReviewDeckStudyState?
         var summaryGate: SummaryGate?
-        var onStartResult: (() async -> Void)?
+        var onStartResult: (() async throws -> Void)?
+        var onAnswerResult: (() async throws -> Void)?
+        var onRestoreResult: (() async throws -> Void)?
+        var onEnd: (() async throws -> Void)?
         #if DEBUG
         var onStartObservation: ((ReviewStartObservation) -> Void)?
         func start(deckID: Int64, observation: ReviewStartObservation) async throws -> ReviewStartResult {
@@ -621,14 +1152,16 @@ extension ReviewCollectionStartupTests {
         var currentHead = ReviewCoordinatorTests.head(1)
         var answerHead = ReviewAnswerOutcome.accepted(headDiff: ReviewHeadDiff(head: ReviewCoordinatorTests.head(2), marks: [], removed: [1]), leech: false, suspended: false, rolledOver: false)
         func start(deckID: Int64) async throws -> ReviewStartResult {
+            starts += 1
             if let refusal { return .refused(reason: refusal) }
             let result = ReviewStartResult.started(sessionId: 5, generation: 1, head: currentHead, timeLim: 0)
-            await onStartResult?()
+            try await onStartResult?()
             return result
         }
         func head(sessionID: UInt64) async throws -> ReviewHead { headReads += 1; return currentHead }
         func answer(sessionID: UInt64, item: ReviewHeadItem, rating: ReviewRating, at: Int64, elapsed: UInt64) async throws -> ReviewAnswerOutcome {
             answers += 1
+            try await onAnswerResult?()
             self.elapsed.append(elapsed)
             used.append((sessionID, item, rating, at))
             if answerFailure { throw BridgeError.internal("native input completion failure") }
@@ -638,13 +1171,18 @@ extension ReviewCollectionStartupTests {
         func undoStatus(sessionID: UInt64, redo: Bool) async throws -> ReviewUndoStatus {
             .available(step: ReviewStepInfo(id: 1, name: "Answer Card", kind: .answer, session: sessionID, longWrite: nil))
         }
-        func restore(sessionID: UInt64, redo: Bool) async throws -> ReviewHead { restores.append(redo); currentHead = ReviewCoordinatorTests.head(redo ? 2 : 1); return currentHead }
+        func restore(sessionID: UInt64, redo: Bool) async throws -> ReviewHead {
+            restores.append(redo)
+            try await onRestoreResult?()
+            currentHead = ReviewCoordinatorTests.head(redo ? 2 : 1)
+            return currentHead
+        }
         func studyState(deckID: Int64) async throws -> ReviewDeckStudyState {
             if let summaryGate { return await summaryGate.value() }
             guard let summary else { throw BridgeError.internal("No empty head scripted") }
             return summary
         }
-        func end(sessionID: UInt64) async throws { ends += 1 }
+        func end(sessionID: UInt64) async throws { try await onEnd?(); ends += 1 }
     }
     private static func emptyHead(_ terminal: ReviewTerminalState) -> ReviewHead {
         ReviewHead(items: [], counts: .init(new: 0, learning: 0, review: 0), validUntil: Int64.max, terminalState: terminal)
