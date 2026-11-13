@@ -159,6 +159,7 @@ impl Runtime {
                     .flat_map(|(_, names)| names.iter())
                     .collect();
                 summary.in_flight = flights.len() as u64;
+                let reference_waiting = store.reference_waiting(b.binding.id)?;
                 for entry in store.inbox(b.binding.id)? {
                     if entry.entry.reason == InboxReason::Ready {
                         summary.ready += 1;
@@ -166,6 +167,7 @@ impl Runtime {
                         summary.incoming_waiting += 1;
                     }
                     let attention = match entry.entry.reason {
+                        InboxReason::Reference if reference_waiting.contains(&entry.id) => Some(Attention::ReferenceWaiting),
                         InboxReason::Asset if entry.entry.retry_count >= 5 => Some(Attention::AssetUnavailable),
                         InboxReason::Asset => {
                             summary.asset_retryable += 1;

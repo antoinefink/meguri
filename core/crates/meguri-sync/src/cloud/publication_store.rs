@@ -88,6 +88,8 @@ pub(super) const WORK_TABLES: &[&str] = &[
     "cloud_absence_result",
     "engine_state",
     "inbox",
+    "cloud_reference_waiting",
+    "cloud_reference_drains",
     "cloud_runtime_notes",
     "cloud_runtime_entities",
     "cloud_runtime_payloads",

@@ -338,6 +338,14 @@ impl Runtime {
             FetchReadCompletion::Record(result) => (result, false),
             FetchReadCompletion::NativeMalformed => (RecordRead::Failed, true),
         };
+        // Retain the original owned boundary's cutoff before file validation.
+        // Neither network/provider delay can add arrivals to that earlier fetch.
+        let reference_through = {
+            let s = self.state();
+            Self::fetch_read_locked(&s, read).map(|()| {
+                s.adapter.fetch.as_ref().filter(|c| Some(c.id) == read.fetch).and_then(|c| c.reference_through)
+            })
+        };
         let validation = self.validate_fetch_read(read, collection);
         let accepted = !discard && validation.is_ok();
         let outcome = match &result {
@@ -365,6 +373,7 @@ impl Runtime {
             return Ok(None);
         }
         validation?;
+        let reference_through = reference_through?;
         #[cfg(feature = "test-hooks")]
         if read.lost_collection {
             self.incoming_hooks
@@ -573,23 +582,23 @@ impl Runtime {
                 let fail = read.is_epoch_preparation() && std::mem::take(&mut s.adapter.fail_inbox);
                 #[cfg(not(feature = "test-hooks"))]
                 let fail = false;
-                if let Err(error) = s.store.as_mut().ok_or(Error::Database)?.adapter_commit(
-                    binding,
-                    &[],
-                    &[],
-                    None,
-                    &durable,
-                    super::super::adapter_store::AdapterCommitOptions {
-                        deleted_collection_zones: Vec::new(),
-                        at_ms,
-                        fail,
-                        start_absence: false,
-                        resolved_epoch,
-                        fetched_epoch,
-                        root_intake: false,
-                        epoch_readability,
-                    },
-                ) {
+                let options = super::super::adapter_store::AdapterCommitOptions {
+                    deleted_collection_zones: Vec::new(),
+                    at_ms,
+                    fail,
+                    start_absence: false,
+                    resolved_epoch,
+                    fetched_epoch,
+                    root_intake: false,
+                    epoch_readability,
+                };
+                let store = s.store.as_mut().ok_or(Error::Database)?;
+                let committed = if new_drain && !read.is_active() {
+                    store.adapter_commit_reference_drain(binding, &durable, options, reference_through.ok_or(Error::InvalidData)?)
+                } else {
+                    store.adapter_commit(binding, &[], &[], None, &durable, options)
+                };
+                if let Err(error) = committed {
                     Self::invalidate_tracking_locked(s);
                     return Err(error.into());
                 }

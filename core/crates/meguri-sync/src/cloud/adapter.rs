@@ -141,6 +141,9 @@ pub(crate) struct FetchBoundary {
 }
 #[derive(Default)]
 pub(crate) struct FetchCall {
+    // Arrival cutoff at the accepted owned did-event, retained across the API
+    // return and any no-state ID read. Neither delay owns later arrivals.
+    pub reference_through: Option<i64>,
     pub id: u64,
     pub scope: Vec<String>,
     pub boundary: Option<FetchBoundary>,

@@ -197,10 +197,13 @@ impl TrackingStore {
         }
         for entry in entries {
             validate_entry(entry)?;
-            transaction.execute(
+            let added = transaction.execute(
                 "INSERT INTO inbox(binding,entry) VALUES(?1,?2) ON CONFLICT(binding,entry) DO NOTHING",
                 params![binding.0.as_slice(), encode(entry)?],
             )?;
+            if added != 0 {
+                super::reference_waiting_store::identify(&transaction, binding, transaction.last_insert_rowid(), entry)?;
+            }
         }
         transaction.execute(
             "INSERT INTO engine_state(binding,serialization,saved_at_ms) VALUES (?1,?2,?3)
@@ -398,6 +401,7 @@ pub(super) fn validate(connection: &Connection, version: i64) -> Result<(), Erro
         }
     }
     super::conflict_expiry::validate(connection)?;
+    super::reference_waiting_store::validate(connection)?;
     super::incoming_store::validate(connection, version >= 3)?;
     super::adapter_store::validate(connection)?;
     super::acknowledgement_store::validate(connection)?;

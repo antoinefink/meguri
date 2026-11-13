@@ -29,6 +29,7 @@ mod held_view;
 pub mod policy;
 mod policy_store;
 mod incomplete_store;
+mod reference_waiting_store;
 pub mod publication;
 mod publication_store;
 pub mod row_payload;

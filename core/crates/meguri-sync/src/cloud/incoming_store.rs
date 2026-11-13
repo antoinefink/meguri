@@ -327,6 +327,7 @@ fn receive_selected(
                 "UPDATE inbox SET entry=?3 WHERE binding=?1 AND id=?2",
                 params![b.0.as_slice(), id, encode(e)?],
             )?;
+            super::reference_waiting_store::identify(tx, b, id, e)?;
             continue;
         }
         for (id, original) in queued {
@@ -335,10 +336,13 @@ fn receive_selected(
                 tx.execute("DELETE FROM inbox WHERE id=?1", [id])?;
             }
         }
-        tx.execute(
+        let added = tx.execute(
             "INSERT INTO inbox(binding,entry) VALUES(?1,?2) ON CONFLICT(binding,entry) DO NOTHING",
             params![b.0.as_slice(), encode(e)?],
         )?;
+        if added != 0 {
+            super::reference_waiting_store::identify(tx, b, tx.last_insert_rowid(), e)?;
+        }
     }
     Ok(())
 }

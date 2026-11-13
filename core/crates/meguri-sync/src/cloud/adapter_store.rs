@@ -55,6 +55,21 @@ impl TrackingStore {
         options: AdapterCommitOptions,
         loss: Option<(Option<IsolationReason>, bool, bool)>,
     ) -> Result<(), Error> {
+        self.adapter_commit_selected(binding, entries, refused, state, durable, options, loss, None)
+    }
+    // This explicit live-event path must never be selected from a Durable's
+    // remembered drains (historical writers and cursor commits use the above).
+    pub(super) fn adapter_commit_reference_drain(
+        &mut self, binding: BindingId, durable: &Durable, options: AdapterCommitOptions, through: i64,
+    ) -> Result<(), Error> {
+        self.adapter_commit_selected(binding, &[], &[], None, durable, options, None, Some(through))
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn adapter_commit_selected(
+        &mut self, binding: BindingId, entries: &[InboxEntry], refused: &[super::incoming::RefusedEntry],
+        state: Option<&[u8]>, durable: &Durable, options: AdapterCommitOptions,
+        loss: Option<(Option<IsolationReason>, bool, bool)>, reference_drain: Option<i64>,
+    ) -> Result<(), Error> {
         let AdapterCommitOptions {
             deleted_collection_zones,
             at_ms,
@@ -147,6 +162,9 @@ impl TrackingStore {
             )?;
         }
         super::incoming_store::receive(&tx, binding, entries, refused)?;
+        if let Some(through) = reference_drain {
+            super::reference_waiting_store::drained(&tx, binding, through)?;
+        }
         if let Some(epoch) = &fetched_epoch {
             super::epoch_crt_store::put(&tx, binding, epoch, super::epoch_crt_store::Authority::Fetched)?;
         }

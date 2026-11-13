@@ -171,3 +171,9 @@ threads-required = "num-test-threads"
 [[profile.default.overrides]]
 filter = 'package(meguri-host) and binary(cloud_media_rootless_ack) and (test(=identical_feed::two_real_empty_feed_consumers_coalesce_in_first_started_order) or test(=identical_feed::two_real_empty_feed_consumers_coalesce_in_second_started_order))'
 threads-required = "num-test-threads"
+
+# Reference drains retain a one-second lane bound; provider interleaving uses
+# actual file observations with the existing ten-second operation budget.
+[[profile.default.overrides]]
+filter = 'package(meguri-host) and binary(cloud_policy_driver) and (test(/reference_waiting_large_backlog_/) or test(/reference_waiting_paused_scheduled_/))'
+threads-required = "num-test-threads"

@@ -25,6 +25,7 @@ CREATE TABLE cloud_runtime_notes(
 /// The outer recovery schema is V3. Refuse a newer runtime extension in
 /// the private WAL-aware probe, before SQLite opens the original path.
 pub(super) fn check_version(connection: &rusqlite::Connection) -> Result<bool, Error> {
+    super::reference_waiting_store::check_version(connection)?;
     super::policy_store::check_version(connection)?;
     super::workflow_store::check_version(connection)?;
     super::publication_store::check_version(connection)?;
@@ -122,6 +123,7 @@ impl TrackingStore {
         self.install_publication()?;
         self.install_adoption()?;
         self.install_cloud_policy()?;
+        self.install_reference_waiting()?;
         // Ordinary payloads belong to their container/environment only.
         let mut statement = self.connection.prepare(
             "SELECT r.binding,r.content FROM cloud_runtime_bindings r JOIN bindings b ON b.id=r.binding

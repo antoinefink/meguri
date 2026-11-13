@@ -17,6 +17,7 @@
 - SDK and non-SDK control intake pin a ScanGuard and recheck the actual file/publication through `with_scan_file` before its tracking transaction. Cached caller validity alone cannot mark or clear root readability.
 - Publication V4 fences the root-readability ledger: missing legacy rows are unknown, never clean. Only accepted Active/Epoch intake evaluates its mark; cursor/drain/exchange writes preserve it. Epoch knowledge is explicit unknown/complete/incomplete, separate from historical qualified crt; readable status requires complete knowledge.
 - Publication V3 adds qualified epoch-crt knowledge separately from the media fallback column. Never backfill it from legacy crt or media-root acceptance; absent knowledge stays unknown.
+- Reference attention V1 uses trigger-assigned arrivals and live-drain cutoffs captured before providers. Compare Service type/name/envelope/revision/system fields and record/deletion identity; local retry/staging/classification metadata preserves coverage. Legacy zero enrollment proves no past drain. Validate identities on the private probe, never in synchronous drain/readback. Preserve cross-writer triggers and both work tables.
 - GC checks only blob IDs freed by this write in its binding. Header and own-flight intent refs can keep them live. Check that small list again when an intent ends. Digest-only own-save intents still need real writer and WAL proof.
 
 - Workflow V2 pairs `cloud_rekey_intents` with `cloud_apply_intents`. Persist and settle both together; the server inbox remains ready after the move.

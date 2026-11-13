@@ -572,17 +572,21 @@ impl Runtime {
         serialization: Option<&[u8]>,
         options: AdapterCommitOptions,
     ) -> Result<(), RuntimeError> {
+        Self::adapter_commit_selected_locked(s, entries, refused, serialization, options, None)
+    }
+    fn adapter_commit_selected_locked(
+        s: &mut State, entries: &[InboxEntry], refused: &[super::super::incoming::RefusedEntry],
+        serialization: Option<&[u8]>, options: AdapterCommitOptions, reference_drain: Option<i64>,
+    ) -> Result<(), RuntimeError> {
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
         let result = with_tracking_access(|| {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                s.store.as_mut().ok_or(Error::Database)?.adapter_commit(
-                    b,
-                    entries,
-                    refused,
-                    serialization,
-                    &s.adapter.durable,
-                    options,
-                )?;
+                let store = s.store.as_mut().ok_or(Error::Database)?;
+                if let Some(through) = reference_drain {
+                    store.adapter_commit_reference_drain(b, &s.adapter.durable, options, through)?;
+                } else {
+                    store.adapter_commit(b, entries, refused, serialization, &s.adapter.durable, options)?;
+                }
                 Self::refresh_epoch_crt_locked(s)
             }))
             .unwrap_or(Err(RuntimeError::Tracking(Error::Database)))
@@ -1034,10 +1038,12 @@ impl Runtime {
         if boundary.group != group || boundary.manual != manual {
             return Ok(());
         }
+        let through = with_tracking_access(|| s.store.as_ref().ok_or(Error::Database)?.reference_arrival_point())?;
         if manual {
             if let Some(call) = s.adapter.fetch.as_mut() {
                 call.completed = boundary.owns_call;
                 if boundary.owns_call {
+                    call.reference_through = Some(through);
                     call.ended = Some(boundary);
                 }
             }
@@ -1045,7 +1051,7 @@ impl Runtime {
         }
         let fetch = s.adapter.fetch.as_ref().map(|c| c.id);
         drop(s);
-        self.adapter_commit_fetch_boundary(sdk, boundary, fetch)
+        self.adapter_commit_fetch_boundary(sdk, boundary, fetch, through)
     }
     /// Called only after the original manual fetch API returned successfully.
     /// Read planning needs these drains before deciding which ID reads are due.
@@ -1054,11 +1060,17 @@ impl Runtime {
         Self::sdk_locked(&s, sdk)?;
         let call = s.adapter.fetch.as_mut().filter(|c| c.id == id).ok_or(Error::InvalidData)?;
         let Some(boundary) = call.ended.take() else { return Ok(()) };
+        let through = call.reference_through.ok_or(Error::InvalidData)?;
         drop(s);
-        self.adapter_commit_fetch_boundary(sdk, boundary, Some(id))
+        self.adapter_commit_fetch_boundary(sdk, boundary, Some(id), through)
     }
-    fn adapter_commit_fetch_boundary(&self, sdk: &str, boundary: FetchBoundary, fetch: Option<u64>) -> Result<(), RuntimeError> {
+    fn adapter_commit_fetch_boundary(&self, sdk: &str, boundary: FetchBoundary, fetch: Option<u64>, through: i64) -> Result<(), RuntimeError> {
         let at_ms = self.adapter_now()?;
+        let scan = {
+            let s = self.state();
+            Self::sdk_locked(&s, sdk)?;
+            Self::control_intake_guard_locked(&s, sdk)?
+        };
         let verification_guard = {
             let s = self.state();
             Self::sdk_locked(&s, sdk)?;
@@ -1177,67 +1189,87 @@ impl Runtime {
                 return Ok(());
             }
         }
-        let old = s.adapter.durable.clone();
-        if resolved_epoch.is_some() {
-            s.adapter.durable.epoch_verification = None;
-        }
-        s.adapter.durable.drains.extend(drains.clone());
-        if let Err(e) = Self::adapter_commit_locked(
-            &mut s,
-            &[],
-            &[],
-            None,
-            AdapterCommitOptions {
-                deleted_collection_zones: Vec::new(),
-                at_ms,
-                fail: false,
-                start_absence: false,
-                resolved_epoch,
-                fetched_epoch: None,
-                root_intake: false,
-                epoch_readability: None,
-            },
-        ) {
-            s.adapter.durable = old;
-            return Err(e);
-        }
-        s.adapter
-            .decided_zones
-            .extend(drains.iter().filter(|d| d.fetched).map(|d| d.zone.clone()));
-        if let Some(binding) = s.bound.as_ref().map(|b| b.binding.clone()) {
-            let zone = collection_zone(binding.facts.epoch);
-            if drains.iter().any(|d| d.zone == zone) {
-                s.publication.cleanup_drain = Some((Self::adapter_guard_locked(&s), sdk.into(), at_ms));
-                s.media.observed_now_ms = at_ms;
+        let reference_drain = s.bound.as_ref().is_some_and(|b| {
+            let zone = collection_zone(b.binding.facts.epoch);
+            drains.iter().any(|d| d.zone == zone)
+        });
+        drop(s);
+        let commit = |s: &mut State| {
+            Self::sdk_locked(s, sdk)?;
+            if s.adapter.fetch.as_ref().map(|c| c.id) != fetch {
+                return Err(RuntimeError::StaleIncarnation);
             }
-            if drains.iter().any(|d| d.zone == zone && d.fetched) {
-                let completed = with_tracking_access(|| {
-                    s.store
-                        .as_mut()
-                        .ok_or(Error::Database)?
-                        .complete_absence(binding.id, &zone, at_ms)
-                });
-                match completed {
-                    Ok(Some((durable, event))) => {
-                        s.adapter.durable = durable;
-                        // A trace can describe only a committed receipt.
-                        s.trace.push(event);
-                    }
-                    Ok(None) => {}
-                    Err(e) => {
-                        Self::invalidate_locked(&mut s);
-                        return Err(e.into());
+            if s.adapter.no_state_point != point || s.adapter.durable.collection_loss.is_some() {
+                return Ok(());
+            }
+            let old = s.adapter.durable.clone();
+            if resolved_epoch.is_some() {
+                s.adapter.durable.epoch_verification = None;
+            }
+            s.adapter.durable.drains.extend(drains.clone());
+            if let Err(e) = Self::adapter_commit_selected_locked(
+                s,
+                &[],
+                &[],
+                None,
+                AdapterCommitOptions {
+                    deleted_collection_zones: Vec::new(),
+                    at_ms,
+                    fail: false,
+                    start_absence: false,
+                    resolved_epoch,
+                    fetched_epoch: None,
+                    root_intake: false,
+                    epoch_readability: None,
+                },
+                reference_drain.then_some(through),
+            ) {
+                s.adapter.durable = old;
+                return Err(e);
+            }
+            s.adapter
+                .decided_zones
+                .extend(drains.iter().filter(|d| d.fetched).map(|d| d.zone.clone()));
+            if let Some(binding) = s.bound.as_ref().map(|b| b.binding.clone()) {
+                let zone = collection_zone(binding.facts.epoch);
+                if drains.iter().any(|d| d.zone == zone) {
+                    s.publication.cleanup_drain = Some((Self::adapter_guard_locked(s), sdk.into(), at_ms));
+                    s.media.observed_now_ms = at_ms;
+                }
+                if drains.iter().any(|d| d.zone == zone && d.fetched) {
+                    let completed = with_tracking_access(|| {
+                        s.store
+                            .as_mut()
+                            .ok_or(Error::Database)?
+                            .complete_absence(binding.id, &zone, at_ms)
+                    });
+                    match completed {
+                        Ok(Some((durable, event))) => {
+                            s.adapter.durable = durable;
+                            // A trace can describe only a committed receipt.
+                            s.trace.push(event);
+                        }
+                        Ok(None) => {}
+                        Err(e) => {
+                            Self::invalidate_locked(s);
+                            return Err(e.into());
+                        }
                     }
                 }
             }
-        }
-        if let Some(call) = s.adapter.fetch.as_mut() {
-            call.completed = owns_call;
-            if owns_call {
-                call.drains.extend(drains.into_iter().map(|d| d.zone));
+            if let Some(call) = s.adapter.fetch.as_mut() {
+                call.completed = owns_call;
+                if owns_call {
+                    call.drains.extend(drains.into_iter().map(|d| d.zone));
+                }
             }
+            Ok(())
+        };
+        if reference_drain {
+            self.with_scan_file(&scan, &self.directory.join("collection.anki2"), commit)
+        } else {
+            commit(&mut self.state())
         }
-        Ok(())
     }
     pub fn adapter_finish_fetch(&self, sdk: &str, id: u64) -> Result<bool, RuntimeError> {
         self.adapter_finalize_fetch(sdk, id)?;

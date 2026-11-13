@@ -21,6 +21,9 @@ use std::{sync::Arc, time::Duration};
 #[path = "support/epoch_crt.rs"]
 mod epoch_fixture;
 
+#[path = "support/reference_waiting.rs"]
+mod reference_waiting;
+
 struct Account;
 #[test]
 fn epoch_crt_legacy_runtime_keeps_unknown_attention_conservative() {
@@ -55,6 +58,12 @@ fn rig_with_root_seed(confirm_root: bool, seed: u64) -> Rig {
     rig_with_epoch(confirm_root, seed, true)
 }
 fn rig_with_epoch(confirm_root: bool, seed: u64, known_epoch: bool) -> Rig {
+    rig_with_files(confirm_root, seed, known_epoch, Arc::new(NativeFiles))
+}
+fn rig_with_files(
+    confirm_root: bool, seed: u64, known_epoch: bool,
+    files: Arc<dyn meguri_sync::cloud::runtime::FileIdentityProvider>,
+) -> Rig {
     let root = tempfile::tempdir().unwrap();
     let directory = root.path().join("collection");
     std::fs::create_dir_all(&directory).unwrap();
@@ -80,7 +89,7 @@ fn rig_with_epoch(confirm_root: bool, seed: u64, known_epoch: bool) -> Rig {
             environment: Environment::Development,
         },
         identity: Arc::new(Account),
-        files: Arc::new(NativeFiles),
+        files,
     });
     let host = Arc::new(CoreHost::open(config.clone()).unwrap());
     let collection = host.collection().unwrap();
