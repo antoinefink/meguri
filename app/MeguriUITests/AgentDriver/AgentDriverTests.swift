@@ -93,6 +93,14 @@ enum DriveAppLifecycle {
         if !preserve { terminate() }
     }
 
+    static func isRunningInBackground(_ state: XCUIApplication.State) -> Bool {
+        #if os(iOS)
+        state == .runningBackground || state == .runningBackgroundSuspended
+        #else
+        state == .runningBackground
+        #endif
+    }
+
     /// No launch fallback: a failed Home transition or stopped process must
     /// leave activation untouched. The driver supplies bounded XCTest waits.
     @MainActor
@@ -107,7 +115,7 @@ enum DriveAppLifecycle {
             throw AgentDriver.StepFailure(message: "the app did not reach the background within 10 s")
         }
         let background = state()
-        guard background == .runningBackground || background == .runningBackgroundSuspended else {
+        guard isRunningInBackground(background) else {
             throw AgentDriver.StepFailure(message: "the original app is no longer running in the background")
         }
         activate()
@@ -486,7 +494,7 @@ final class AgentDriver {
         }, waitForBackground: {
             let background = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
                 let state = app.state
-                return state == .runningBackground || state == .runningBackgroundSuspended
+                return DriveAppLifecycle.isRunningInBackground(state)
             }, object: nil)
             return XCTWaiter().wait(for: [background], timeout: 10) == .completed
         }, activate: {

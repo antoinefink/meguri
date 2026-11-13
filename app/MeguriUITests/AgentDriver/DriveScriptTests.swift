@@ -474,7 +474,11 @@ final class DriveScriptTests: XCTestCase {
 
     @MainActor
     func testForegroundCycleRefusesNonForegroundWithoutHomeOrActivation() {
+        #if os(iOS)
         let states: [XCUIApplication.State] = [.unknown, .notRunning, .runningBackground, .runningBackgroundSuspended]
+        #else
+        let states: [XCUIApplication.State] = [.unknown, .notRunning, .runningBackground]
+        #endif
         for state in states {
             var calls: [String] = []
             XCTAssertThrowsError(try DriveAppLifecycle.foregroundCycle(state: { state },
@@ -512,7 +516,11 @@ final class DriveScriptTests: XCTestCase {
 
     @MainActor
     func testForegroundCycleActivatesOnceFromEitherRunningBackgroundStateAndBoundsReturn() throws {
+        #if os(iOS)
         let backgrounds: [XCUIApplication.State] = [.runningBackground, .runningBackgroundSuspended]
+        #else
+        let backgrounds: [XCUIApplication.State] = [.runningBackground]
+        #endif
         let returns: [(Bool, XCUIApplication.State)] = [
             (true, .runningForeground), (false, .runningBackground), (true, .notRunning),
         ]
