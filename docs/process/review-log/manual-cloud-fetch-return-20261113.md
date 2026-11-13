@@ -106,3 +106,11 @@ host Xcode, the pinned simulator runtime present and enough process capacity.
 This is a bounded repair checkpoint, not Unit or P24 closure. Other recorded
 failures, the full pending integration gate, live peer receipt, media proof,
 milestone gates and final acceptance remain open. No release is accepted.
+
+## Later media fixture check
+
+The two initial rootless-media failures have a test-only follow-up in
+[rootless media epoch authority](rootless-media-epoch-authority-20261113.md).
+Its `core-test/20261113T114439Z-44138` passes all four binary cases after actual
+Core-issued epoch verification. The earlier failures and this log's native
+drain-count failures remain recorded; no broader gate or live sync claim follows.

@@ -4,11 +4,16 @@ use meguri_model::{
     rng::SeededRandom,
 };
 use meguri_sync::cloud::{
+    adapter::EpochPreparationOutcome,
     media::{Reply as MediaReply, Request as MediaRequest, Work},
+    publication::RecordRead,
     runtime::{CloudInputs, IdentityProvider, IdentityStatus},
     workflow::Saved,
 };
-use meguri_testkit::cloud::devices::{NativeFiles, PreboundDevice, options};
+use meguri_testkit::cloud::{
+    devices::{NativeFiles, PreboundDevice, options},
+    coordinator::publication_control_record,
+};
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
@@ -293,6 +298,7 @@ fn rootless_ack_rechecks_delayed_deletion(fetched: bool) {
     };
     let entity_name;
     let stale_sdk;
+    let accepted_epoch_crt;
     {
         let host = open();
         let sdk = confirm(&host, &mut service);
@@ -334,6 +340,70 @@ fn rootless_ack_rechecks_delayed_deletion(fetched: bool) {
         entity_name =
             codec::entity_name(&files.binding.facts.record_key.0, codec::Kind::MediaName, b"photo.jpg").unwrap();
         let collection = host.collection().unwrap();
+        // Active confirmation leaves the prebound fixture's epoch crt unknown.
+        // Prove the real pending MediaName is blocked despite a valid SDK.
+        runtime.validate_sdk(&sdk).unwrap();
+        assert!(runtime.sdk_root_confirmed());
+        assert!(!runtime.adapter_epoch_crt_known());
+        let pending = runtime.entity_facts(&entity_name).unwrap().unwrap();
+        assert_eq!(pending.kind, codec::Kind::MediaName);
+        assert!(pending.mark.is_some() && pending.local_rev > pending.acked_rev);
+        let blocked = runtime
+            .build_collection_batch(&sdk, &collection, &BTreeSet::from([entity_name.clone()]))
+            .unwrap();
+        assert_eq!(blocked.id, 0);
+        assert!(blocked.saves.is_empty());
+
+        // P12.3 preparation owns a Core-issued read, not an SDK fetch or drain.
+        // Only the existing Service MGEpoch supplies the complete authority.
+        let before = runtime.adapter_snapshot().unwrap();
+        let before_durable = durable(&host);
+        let request = runtime.admit_sync_now(&sdk, &collection).unwrap();
+        let epoch = runtime.sync_now_epoch_read_owned(&request, &collection).unwrap().unwrap();
+        assert!(epoch.is_epoch_preparation() && !epoch.is_active());
+        assert_eq!(epoch.zone(), files.collection_zone);
+        assert_eq!(epoch.epoch_preparation_outcome(), Some(EpochPreparationOutcome::Unknown));
+        runtime.validate_fetch_read(&epoch, &collection).unwrap();
+        let response = service
+            .request(
+                &files.scope,
+                Caller::default(),
+                Operation::Read {
+                    zone: epoch.zone().into(),
+                    name: "epoch".into(),
+                    fields: RequestedFields::All,
+                },
+            )
+            .unwrap();
+        let Reply::Record(record) = response.result.unwrap() else {
+            panic!("actual complete epoch read")
+        };
+        assert_eq!(record.name, "epoch");
+        assert_eq!(record.record_type, "MGEpoch");
+        assert!(
+            runtime
+                .adapter_complete_fetch_read(
+                    &epoch,
+                    &collection,
+                    RecordRead::Found(publication_control_record(&record).unwrap()),
+                    false,
+                    None,
+                    None,
+                )
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(epoch.epoch_preparation_outcome(), Some(EpochPreparationOutcome::Ready));
+        assert!(runtime.adapter_epoch_crt_known());
+        accepted_epoch_crt = runtime.epoch_crt_for_testing().unwrap();
+        assert!(accepted_epoch_crt.is_some());
+        runtime.validate_sdk(&sdk).unwrap();
+        // No drain, absence completion, root mark or completed exchange added;
+        // the pending entity and SDK cursor remain intact. No publication row.
+        assert_eq!(durable(&host), before_durable);
+        assert!(runtime.adapter_snapshot().unwrap() == before);
+        assert!(runtime.publication_media_state().unwrap().is_none());
+        assert!(runtime.media_blobs_for_testing().unwrap().is_empty());
         let batch = runtime
             .build_collection_batch(&sdk, &collection, &BTreeSet::from([entity_name.clone()]))
             .unwrap();
@@ -390,6 +460,14 @@ fn rootless_ack_rechecks_delayed_deletion(fetched: bool) {
     let host = open();
     let sdk = confirm(&host, &mut service);
     let runtime = host.cloud_runtime().unwrap();
+    assert!(runtime.adapter_epoch_crt_known());
+    assert_eq!(runtime.epoch_crt_for_testing().unwrap(), accepted_epoch_crt);
+    assert!(
+        runtime
+            .adapter_sync_now_epoch_read(&sdk, &host.collection().unwrap())
+            .unwrap()
+            .is_none()
+    );
     assert!(runtime.publication_media_state().unwrap().is_none());
     assert!(runtime.media_blobs_for_testing().unwrap().is_empty());
     assert!(runtime.entity_facts(&entity_name).unwrap().unwrap().mark.is_none());
