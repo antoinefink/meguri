@@ -235,7 +235,10 @@ extension ReviewCollectionStartupTests {
     @Test(arguments: RetainedPublicationProofBlock.allCases)
     func retainedPublicationStartupRejectsUnsuccessfulOrObsoleteProof(block: RetainedPublicationProofBlock) async throws {
         let harness = try PublicationPresentationHarness(realAccountProof: true)
-        defer { harness.removeStorage() }
+        defer {
+            harness.sync.observeAccountPolicyDrain = nil
+            harness.removeStorage()
+        }
         do {
             let operationID = try await harness.retainPublicationAndClose()
             if block == .disabled { harness.setSavedEnabled(false) }
@@ -287,9 +290,17 @@ extension ReviewCollectionStartupTests {
                 try await harness.transport.zones.waitForAdmission(stage: "unpause-create-zones-admission")
                 #expect(harness.transport.zones.enqueues == 1 && harness.transport.save.enqueues == 0)
                 #expect(harness.observations.operationIDs == Set([operationID]))
+                // Observe the repeat proof waiting for the original own task before joining it.
+                let waiting = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+                harness.sync.observeAccountPolicyDrain = { stage in
+                    if case .waiting = stage { waiting.continuation.yield(true) }
+                }
                 await harness.sync.accountChanged()
-                await harness.sync.prepareConnectionAuthority()
+                try #require(try await publicationSignal(waiting.stream, stage: "unpause-repeat-account-proof"))
                 #expect(harness.transport.zones.enqueues == 1)
+                #expect(harness.sync.connectionOperationActive && harness.transport.save.enqueues == 0)
+                #expect(harness.observations.operationIDs == Set([operationID]))
+                #expect(harness.accountCompletion == nil)
                 harness.transport.zones.finish(.publication(.zonesCreated))
                 try await harness.transport.save.waitForAdmission(stage: "unpause-save-control-admission")
                 #expect(harness.transport.save.enqueues == 1)
@@ -297,6 +308,8 @@ extension ReviewCollectionStartupTests {
                 #expect(harness.observations.kinds.contains { if case .saveMediaRoot = $0 { true } else { false } })
                 harness.release()
                 await harness.sync.waitForConnectionPreview()
+                await harness.sync.prepareConnectionAuthority()
+                harness.expectSuccessfulAccountCompletion(stage: "unpause-repeat-account-proof-completion")
             }
             #expect(await harness.owner.close())
         } catch {
