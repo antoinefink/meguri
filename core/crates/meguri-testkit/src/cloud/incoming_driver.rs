@@ -2,6 +2,52 @@
 use super::*;
 use std::sync::{Condvar, PoisonError, mpsc};
 
+// Project only actual, correctly targeted Service control records. Core intake
+// owns canonical decoding, CRT persistence and the original instance guard.
+fn service_epoch(
+    runtime: &runtime::Runtime,
+    scope: &Scope,
+    zone: &str,
+    record: super::super::Record,
+) -> Result<Saved> {
+    let binding = runtime.status()?.binding.ok_or_else(failure)?;
+    if binding.scope != devices::build_scope(scope)?
+        || binding.facts.account.0.as_slice() != scope.account.as_bytes()
+        || zone != core::adapter::collection_zone(binding.facts.epoch)
+        || record.name != "epoch"
+        || record.record_type != "MGEpoch"
+    {
+        return Err(failure());
+    }
+    let envelope = match record.fields.get("e") {
+        Some(super::super::Field::EncryptedBytes(envelope)) => envelope.clone(),
+        // Same unreadable-control representation as NativeCloudMediaBatch:
+        // an observed control keeps its version, but supplies no decoded body.
+        None => Vec::new(),
+        _ => return Err(failure()),
+    };
+    Ok(Saved {
+        name: record.name,
+        envelope,
+        system_fields: record.system_fields.bytes().to_vec(),
+    })
+}
+
+pub(super) fn restore_fetched_epochs(
+    mut inputs: Vec<core::workflow::FetchedRecord>,
+    epochs: Vec<(usize, Saved)>,
+) -> Result<Vec<core::workflow::FetchedRecord>> {
+    let mut previous = None;
+    for (index, record) in epochs {
+        if previous.is_some_and(|previous| index <= previous) || index > inputs.len() {
+            return Err(failure());
+        }
+        previous = Some(index);
+        inputs.insert(index, core::workflow::FetchedRecord { record, asset_path: None });
+    }
+    Ok(inputs)
+}
+
 #[derive(Default)]
 struct LatchState {
     armed: BTreeSet<IncomingStage>,
@@ -229,6 +275,7 @@ pub(super) fn dispatch(device: &mut Device, input: Input, stream: &mut UnixStrea
     if !matches!(
         input,
         Input::Fetched(..)
+            | Input::ServiceEpoch(..)
             | Input::FetchApply(..)
             | Input::DeliverCollection(..)
             | Input::DeliverCollectionAssets(..)
@@ -246,7 +293,10 @@ pub(super) fn dispatch(device: &mut Device, input: Input, stream: &mut UnixStrea
     // AfterIntent hook holds neither runtime nor tracking locks.
     let nested_receive = matches!(
         input,
-        Input::DeliverCollection(..) | Input::DeliverCollectionAssets(..) | Input::DeliverCollectionDownload(..)
+        Input::ServiceEpoch(..)
+            | Input::DeliverCollection(..)
+            | Input::DeliverCollectionAssets(..)
+            | Input::DeliverCollectionDownload(..)
     ) && device
         .incoming_worker
         .as_ref()
@@ -280,9 +330,17 @@ pub(super) fn dispatch(device: &mut Device, input: Input, stream: &mut UnixStrea
     let thread = std::thread::spawn(move || {
         let run = || -> Result<serde_json::Value> {
             match input {
+                Input::ServiceEpoch(instance, _request_id, scope, zone, record) => {
+                    runtime.validate_caller(&instance)?;
+                    let record = service_epoch(&runtime, &scope, &zone, record)?;
+                    runtime.receive_collection_records(&instance, &[record])?;
+                    Ok(serde_json::Value::Null)
+                }
                 Input::Fetched(FetchedCallback {
                     instance,
                     records,
+                    epochs,
+                    scope,
                     envelopes,
                     zone,
                     serialization,
@@ -291,6 +349,11 @@ pub(super) fn dispatch(device: &mut Device, input: Input, stream: &mut UnixStrea
                     let mut failure_stage: fn(Box<ChildFailure>) -> ChildFailure = ChildFailure::FetchEnvelopeHydration;
                     let callback = || -> Result<()> {
                         let inputs = hydrate_fetched_records(records, envelopes)?;
+                        // Retain the Service page order as well as its owner.
+                        let epochs = epochs.into_iter().map(|(index, record)| {
+                            Ok((index, service_epoch(&runtime, &scope, &zone, record)?))
+                        }).collect::<Result<Vec<_>>>()?;
+                        let inputs = restore_fetched_epochs(inputs, epochs)?;
                         failure_stage = ChildFailure::FetchCursorProjection;
                         if runtime.incoming_sdk_instance_for_testing().as_deref() == Some(&instance) {
                             let projection = super::super::adapter::collection_cursor_projection(&serialization)?;

@@ -104,6 +104,8 @@ pub enum ReadKind {
 pub struct ReadReceipt {
     pub instance: String,
     pub request_id: u64,
+    pub scope: Scope,
+    pub zone: String,
     pub active_epoch: Option<production::EpochId>,
     pub record: Record,
     pub kind: ReadKind,
@@ -173,6 +175,10 @@ impl Coordinator {
     }
     pub fn last_applied_active(&self) -> Result<Option<production::workflow::Saved>> {
         self.rig.borrow_mut().driver.call(Input::LastAppliedActive)
+    }
+    /// Read the actual durable attention mark and Runtime projection independently.
+    pub fn epoch_readability(&self) -> Result<(Option<production::OpaqueBytes>, u64, bool, bool)> {
+        self.rig.borrow_mut().driver.call(Input::EpochReadability)
     }
     pub fn scan_state(&self) -> Result<ScanState> {
         self.rig.borrow_mut().driver.call(Input::ScanState)
@@ -259,6 +265,12 @@ impl Coordinator {
         Ok(ReadReceipt {
             instance: rig.instance(),
             request_id: response.request_id,
+            scope: rig.files.scope.clone(),
+            zone: if kind == ReadKind::Epoch {
+                rig.files.collection_zone.clone()
+            } else {
+                "meguri-root".into()
+            },
             active_epoch,
             record,
             kind,
@@ -266,7 +278,15 @@ impl Coordinator {
         })
     }
     pub fn deliver_read(&mut self, read: &ReadReceipt) -> Result<()> {
-        if read.kind != ReadKind::Epoch {
+        if read.kind == ReadKind::Epoch {
+            self.rig.get_mut().driver.call::<()>(Input::ServiceEpoch(
+                read.instance.clone(),
+                read.request_id,
+                read.scope.clone(),
+                read.zone.clone(),
+                read.record.clone(),
+            ))?;
+        } else {
             let Some(Field::EncryptedBytes(e)) = read.record.fields.get("e") else {
                 return Err(failure());
             };
@@ -278,6 +298,18 @@ impl Coordinator {
                 read.lost_zone,
             ))?;
         }
+        self.refresh()
+    }
+    /// Exercise legacy fetched-page transport with the original Service read.
+    /// This grants no native SDK/FetchRead authority or cursor-resume proof.
+    pub fn deliver_epoch_page(&mut self, read: &ReadReceipt) -> Result<()> {
+        if read.kind != ReadKind::Epoch { return Err(failure()); }
+        let rig = self.rig.get_mut();
+        let callback = rig.driver.stage_fetched(
+            read.instance.clone(), vec![read.record.clone()], read.scope.clone(),
+            read.zone.clone(), Vec::new(), None,
+        )?;
+        rig.driver.call::<()>(Input::Fetched(callback))?;
         self.refresh()
     }
     pub fn fetch_root(&mut self, service: &mut Service<SeededRandom>) -> Result<RootFetch> {

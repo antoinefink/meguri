@@ -49,10 +49,17 @@ fn staged_sources_survive_suspended_callbacks_until_the_original_terminal_reply(
             fields: BTreeMap::from([("e".into(), super::super::Field::EncryptedBytes(inline_envelope.clone()))]),
             system_fields: super::super::SystemFields::from_bytes(vec![8, 9]),
         };
+        let unreadable_epoch = super::super::Record {
+            name: "epoch".into(), record_type: "MGEpoch".into(), fields: BTreeMap::new(),
+            system_fields: super::super::SystemFields::from_bytes(vec![10, 11]),
+        };
         let callback = driver
             .stage_fetched(
                 "original-sdk".into(),
-                vec![record, inline_record],
+                vec![record, unreadable_epoch, inline_record],
+                Scope {
+                    container: "test".into(), environment: "development".into(), account: "account".into(),
+                },
                 "collection".into(),
                 vec![6],
                 Some(7),
@@ -72,6 +79,14 @@ fn staged_sources_survive_suspended_callbacks_until_the_original_terminal_reply(
             assert_eq!(original.exchange, Some(7));
             assert_eq!(original.zone, "collection");
             assert_eq!(original.serialization, vec![6]);
+            assert_eq!(original.scope.environment, "development");
+            assert_eq!(original.epochs.len(), 1);
+            let (position, epoch) = &original.epochs[0];
+            assert_eq!(*position, 1);
+            assert_eq!(epoch.name, "epoch");
+            assert_eq!(epoch.record_type, "MGEpoch");
+            assert!(epoch.fields.is_empty());
+            assert_eq!(epoch.system_fields.bytes(), &[10, 11]);
             assert!(original.records.iter().all(|input| input.record.envelope.is_empty()));
             let envelope_source = original.envelopes.as_ref().unwrap();
             assert_eq!(envelope_source.ranges, vec![(0, 3), (3, inline_envelope.len() as u64)]);
@@ -87,6 +102,17 @@ fn staged_sources_survive_suspended_callbacks_until_the_original_terminal_reply(
                 assert_eq!(hydrated[1].record.envelope, inline_envelope);
                 assert_eq!(hydrated[1].record.system_fields, vec![8, 9]);
                 assert!(hydrated[1].asset_path.is_none());
+                // The unreadable control remains between both staged entities;
+                // it has no envelope/asset source to release or silently omit.
+                let page = incoming_driver::restore_fetched_epochs(hydrated, vec![(*position, Saved {
+                    name: epoch.name.clone(), envelope: Vec::new(),
+                    system_fields: epoch.system_fields.bytes().to_vec(),
+                })]).unwrap();
+                assert_eq!(page.iter().map(|r| r.record.name.as_str()).collect::<Vec<_>>(),
+                    vec!["source", "epoch", "inline-source"]);
+                assert!(page[1].record.envelope.is_empty());
+                assert_eq!(page[1].record.system_fields, vec![10, 11]);
+                assert!(page[1].asset_path.is_none());
             };
             check_envelopes();
             write_frame(&mut peer, &ChildMessage::Paused(IncomingStage::FetchBeforeInbox)).unwrap();
@@ -152,7 +178,11 @@ fn staged_sources_survive_suspended_callbacks_until_the_original_terminal_reply(
         assert!(driver.completed_work.is_empty());
         assert!(driver.fetched_sources.is_empty());
         let empty = driver
-            .stage_fetched("empty-sdk".into(), vec![], "empty-zone".into(), vec![10, 11], Some(12))
+            .stage_fetched(
+                "empty-sdk".into(), vec![],
+                Scope { container: "test".into(), environment: "development".into(), account: "account".into() },
+                "empty-zone".into(), vec![10, 11], Some(12),
+            )
             .unwrap();
         driver.call::<()>(Input::Fetched(empty)).unwrap();
         assert!(driver.fetched_sources.is_empty());

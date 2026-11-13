@@ -429,7 +429,7 @@ impl SDKRig {
             collection_cursor: token.clone(),
         })?;
         self.driver
-            .stage_fetched(fetch.instance.clone(), records, zone, serialization, fetch.exchange)
+            .stage_fetched(fetch.instance.clone(), records, fetch.scope.clone(), zone, serialization, fetch.exchange)
     }
     /// Finish only this SDK's original callback before any new trigger. Direct
     /// grants keep their replies in ChildDriver for their own callers.
@@ -680,7 +680,9 @@ impl SDKRig {
                     fetch.seen.insert(record.name.clone());
                     entities.push(record);
                 }
-                RecordChange::Saved(record) if !fetch.root_zone && record.record_type == "MGEpoch" => {}
+                RecordChange::Saved(record) if !fetch.root_zone && record.record_type == "MGEpoch" => {
+                    entities.push(record);
+                }
                 _ => {
                     return Err(Box::new(std::io::Error::other(if fetch.root_zone {
                         "root fetch: change shape"
@@ -1170,7 +1172,38 @@ impl SDKRig {
         self.driver.call::<()>(Input::Identity(None))?;
         self.driver.call::<()>(Input::Reconcile)?;
         self.driver.call::<()>(Input::StartSDK(self.instance.clone()))?;
-        self.confirm_root_read(service, &mut (steps - 3))
+        let mut remaining = steps - 3;
+        self.read_healthy_epoch(service, &mut remaining)?;
+        self.confirm_root_read(service, &mut remaining)
+    }
+    fn read_healthy_epoch(
+        &mut self,
+        service: &mut Service<SeededRandom>,
+        remaining: &mut usize,
+    ) -> Result<()> {
+        // Healthy legacy fixtures need independent CRT evidence. This actual
+        // control read is not native admit_sync_now/FetchRead preparation.
+        *remaining = remaining.checked_sub(1).ok_or_else(failure)?;
+        let response = service.request(
+            &self.files.scope,
+            self.caller(),
+            Operation::Read {
+                zone: self.files.collection_zone.clone(),
+                name: "epoch".into(),
+                fields: RequestedFields::All,
+            },
+        )?;
+        let Ok(Reply::Record(record)) = response.result else {
+            return Err(failure());
+        };
+        self.driver.call::<()>(Input::ServiceEpoch(
+            self.instance.clone(),
+            response.request_id,
+            self.files.scope.clone(),
+            self.files.collection_zone.clone(),
+            record,
+        ))?;
+        Ok(())
     }
     pub(crate) fn confirm_root_read(
         &mut self,
@@ -1457,7 +1490,9 @@ impl SDKRig {
         self.install_instance(instance, zone);
         // This rig deliberately performs full fetches, even with saved SDK state.
         // confirm_root_read also completes the actual no-state zone listing.
-        self.confirm_root_read(service, &mut (steps - 3))
+        let mut remaining = steps - 3;
+        self.read_healthy_epoch(service, &mut remaining)?;
+        self.confirm_root_read(service, &mut remaining)
     }
     /// Fetch actual Service evidence without proceeding to a new save.
     pub fn fetch_recovery_exchange(&mut self, service: &mut Service<SeededRandom>, steps: usize) -> Result<()> {

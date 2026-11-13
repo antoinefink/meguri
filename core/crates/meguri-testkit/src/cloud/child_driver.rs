@@ -244,6 +244,8 @@ pub(crate) struct FetchedEnvelopeSource {
 pub(crate) struct FetchedCallback {
     pub instance: String,
     pub records: Vec<FetchedAssetRecord>,
+    pub epochs: Vec<(usize, super::Record)>,
+    pub scope: Scope,
     pub envelopes: Option<FetchedEnvelopeSource>,
     pub zone: String,
     pub serialization: Vec<u8>,
@@ -380,6 +382,8 @@ pub(crate) enum Input {
     IncomingInbox(core::BindingId),
     IncomingRefused(core::BindingId),
     BindingEntity(core::BindingId, String),
+    ServiceEpoch(String, u64, Scope, String, super::Record),
+    EpochReadability,
     DeliverCollection(Vec<Saved>),
     DeliverCollectionAssets(Vec<super::Record>),
     DeliverCollectionDownload(FetchedAssetRecord),
@@ -707,16 +711,23 @@ impl ChildDriver {
         &mut self,
         instance: String,
         records: Vec<super::Record>,
+        scope: Scope,
         zone: String,
         serialization: Vec<u8>,
         exchange: Option<u64>,
     ) -> Result<FetchedCallback> {
         let mut files = Vec::new();
         let mut inputs = Vec::new();
+        let mut epochs = Vec::new();
         let mut envelopes = None;
         let mut ranges = Vec::new();
         let mut offset = 0_u64;
-        for record in records {
+        for (index, record) in records.into_iter().enumerate() {
+            // Keep control transport metadata until the child validates it.
+            if record.name == "epoch" || record.record_type == "MGEpoch" {
+                epochs.push((index, record));
+                continue;
+            }
             let Some(super::Field::EncryptedBytes(envelope)) = record.fields.get("e") else {
                 return Err(Box::new(std::io::Error::other("fetched callback: envelope shape")));
             };
@@ -775,6 +786,8 @@ impl ChildDriver {
         let callback = FetchedCallback {
             instance,
             records: inputs,
+            epochs,
+            scope,
             envelopes,
             zone,
             serialization,
@@ -1327,6 +1340,8 @@ impl ChildDriver {
             Input::Reconcile => "Reconcile",
             Input::Build(..) => "Build",
             Input::Fetched(..) => "Fetched",
+            Input::ServiceEpoch(..) => "ServiceEpoch",
+            Input::EpochReadability => "EpochReadability",
             Input::DeliverCollection(..) => "DeliverCollection",
             Input::DeliverCollectionAssets(..) => "DeliverCollectionAssets",
             Input::DeliverCollectionDownload(..) => "DeliverCollectionDownload",
@@ -1395,6 +1410,7 @@ impl ChildDriver {
             input,
             Input::Fetched(..)
                 | Input::FetchApply(..)
+                | Input::ServiceEpoch(..)
                 | Input::DeliverCollection(..)
                 | Input::DeliverCollectionAssets(..)
                 | Input::DeliverCollectionDownload(..)
@@ -2424,6 +2440,22 @@ impl Device {
                 value(())
             }
             Input::Facts => value(self.facts()?),
+            Input::EpochReadability => {
+                let collection = self.host.collection()?;
+                let generation = {
+                    let lease = collection.reader(ReaderRole::Cloud)?;
+                    let snapshot = lease.snapshot()?;
+                    snapshot.generation().0
+                };
+                let runtime = self.runtime()?;
+                let projection = runtime.policy_projection(core::policy::Lifecycle::Ready, generation)?;
+                value((
+                    runtime.root_unreadable_for_testing()?,
+                    projection.facts.summary.attention.get(&core::policy::Attention::RootUnreadable).copied().unwrap_or(0),
+                    projection.facts.summary.crt_known,
+                    projection.root_confirmed,
+                ))
+            }
             Input::LastAppliedActive => {
                 let snapshot = self.runtime()?.adapter_snapshot()?;
                 let content: serde_json::Value = serde_json::from_slice(&snapshot.tracking_content)?;
@@ -2878,6 +2910,7 @@ impl Device {
                 value(())
             }
             Input::Fetched(..)
+            | Input::ServiceEpoch(..)
             | Input::FetchApply(..)
             | Input::DeliverCollectionAssets(..)
             | Input::DeliverCollectionDownload(..)

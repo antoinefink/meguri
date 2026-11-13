@@ -1214,6 +1214,8 @@ decks:
             })
             .unwrap();
         assert!(scanned < started);
+        let epoch = online.read(&mut service, ReadKind::Epoch).unwrap();
+        online.deliver_read(&epoch).unwrap();
         assert_closed(&mut online, &mut service);
         let root = online.read(&mut service, ReadKind::ActiveNoState).unwrap();
         assert_eq!(root.instance, instance);
@@ -1286,6 +1288,223 @@ decks:
         assert_eq!(service.inspect(&b).unwrap(), baseline_b);
     }
 
+    fn durable_epoch_crt(files: &PreboundDevice) -> Option<i64> {
+        meguri_sync::cloud::runtime::with_tracking_access(|| {
+            let meguri_sync::cloud::OpenOutcome::Opened(store) =
+                meguri_sync::cloud::TrackingStore::open(&files.directory, files.binding.scope.clone()).unwrap()
+            else {
+                panic!("expected the actual tracking store");
+            };
+            store.epoch_crt_for_testing(files.binding.id).unwrap()
+        })
+    }
+
+    #[test]
+    fn actual_service_epoch_and_active_establish_independent_legacy_gates() {
+        let (_run, mut service, files) = fixture();
+        assert_eq!(durable_epoch_crt(&files), None);
+        let baseline = record(&service, &files);
+        let mut active_only = Coordinator::open(&files, IdentityReads::Available(files.scope.account.clone())).unwrap();
+        active_only.reach(Barrier::BeforeRootConfirmation).unwrap();
+        let edit = active_only.edit_note_fields(files.note.id, &EDIT).unwrap();
+        let active = active_only.read(&mut service, ReadKind::ActiveNoState).unwrap();
+        active_only.deliver_read(&active).unwrap();
+        assert!(active_only.trace().iter().any(|e| matches!(e, TraceEvent::RootConfirmed { .. })));
+        assert_closed(&mut active_only, &mut service);
+        active_only.close_clean().unwrap();
+        assert_eq!(durable_epoch_crt(&files), None, "Active alone supplies no CRT");
+
+        let mut epoch_only = Coordinator::open(&files, IdentityReads::Available(files.scope.account.clone())).unwrap();
+        epoch_only.reach(Barrier::BeforeRootConfirmation).unwrap();
+        let before = cursor(&service);
+        let epoch = epoch_only.read(&mut service, ReadKind::Epoch).unwrap();
+        assert_service_read(&service, &files, epoch.request_id, &epoch.instance, "MGEpoch");
+        let Field::EncryptedBytes(envelope) = &epoch.record.fields["e"] else { panic!("actual e") };
+        let meguri_sync::cloud::control_codec::DecodeOutcome::Supported(body) =
+            meguri_sync::cloud::control_codec::Epoch::decode(envelope).unwrap()
+        else { panic!("actual complete epoch") };
+        epoch_only.deliver_read(&epoch).unwrap();
+        assert!(!epoch_only.trace().iter().any(|e| matches!(e, TraceEvent::RootConfirmed { .. })));
+        assert_closed(&mut epoch_only, &mut service);
+        assert_no_writes_since(&service, before);
+        epoch_only.close_clean().unwrap();
+        assert_eq!(durable_epoch_crt(&files), Some(body.crt), "accepted real Epoch persists CRT independently");
+
+        let mut both = Coordinator::open(&files, IdentityReads::Available(files.scope.account.clone())).unwrap();
+        both.reach(Barrier::BeforeRootConfirmation).unwrap();
+        assert_closed(&mut both, &mut service);
+        let active = both.read(&mut service, ReadKind::ActiveNoState).unwrap();
+        both.deliver_read(&active).unwrap();
+        assert_saved(&mut both, &mut service, &files, &baseline, &edit.note);
+        both.close_clean().unwrap();
+    }
+
+    #[test]
+    fn actual_service_epoch_refuses_original_stale_and_changed_account_owners() {
+        for change_account in [false, true] {
+            let (_run, mut service, files) = fixture();
+            let mut original = Coordinator::open(&files, IdentityReads::Available(files.scope.account.clone())).unwrap();
+            original.reach(Barrier::BeforeRootConfirmation).unwrap();
+            let read = original.read(&mut service, ReadKind::Epoch).unwrap();
+            assert_service_read(&service, &files, read.request_id, &original.instance(), "MGEpoch");
+            let before = cursor(&service);
+            if change_account {
+                original.verify_identity("synthetic-account-b".into()).unwrap();
+                assert!(original.deliver_read(&read).is_err());
+                original.close_clean().unwrap();
+            } else {
+                original.close_clean().unwrap();
+                let mut successor = Coordinator::open(&files, IdentityReads::Available(files.scope.account.clone())).unwrap();
+                successor.reach(Barrier::BeforeRootConfirmation).unwrap();
+                assert_ne!(read.instance, successor.instance());
+                assert!(successor.deliver_read(&read).is_err());
+                assert!(!successor.trace().iter().any(|e| matches!(e, TraceEvent::RootConfirmed { .. })));
+                successor.close_clean().unwrap();
+            }
+            assert_eq!(durable_epoch_crt(&files), None);
+            assert_no_writes_since(&service, before);
+        }
+    }
+
+    #[test]
+    fn actual_service_complete_then_missing_e_revokes_readability_not_crt_or_active() {
+        use meguri_sync::cloud::{OpaqueBytes, control_codec::{DecodeOutcome, Epoch}};
+        // Both use the original Service observation. The page branch exercises
+        // legacy callback staging/intake, not native owned FetchRead preparation.
+        for fetched_page in [false, true] {
+            let (_run, mut service, files) = fixture();
+            let mut session = Coordinator::open(&files, IdentityReads::Available(files.scope.account.clone())).unwrap();
+            session.reach(Barrier::BeforeRootConfirmation).unwrap();
+            let complete = session.read(&mut service, ReadKind::Epoch).unwrap();
+            let Field::EncryptedBytes(envelope) = &complete.record.fields["e"] else { panic!("actual e") };
+            let DecodeOutcome::Supported(body) = Epoch::decode(envelope).unwrap() else { panic!("complete epoch") };
+            session.deliver_read(&complete).unwrap();
+            assert_eq!(session.epoch_readability().unwrap(), (None, 0, true, false));
+            let active = session.read(&mut service, ReadKind::ActiveNoState).unwrap();
+            session.deliver_read(&active).unwrap();
+            let retained = session.last_applied_active().unwrap().unwrap();
+            assert_eq!(session.epoch_readability().unwrap(), (None, 0, true, true));
+            let confirmations = session.trace().iter().filter(|e| matches!(e, TraceEvent::RootConfirmed { .. })).count();
+            let before = cursor(&service);
+            let response = service.request(&files.scope, cloud::Caller {
+                instance: Some(complete.instance.clone()), ..cloud::Caller::default()
+            }, cloud::Operation::Read {
+                zone: files.collection_zone.clone(), name: "epoch".into(),
+                fields: cloud::RequestedFields::Named(Vec::new()),
+            }).unwrap();
+            let Ok(cloud::Reply::Record(record)) = response.result else { panic!("actual projected read") };
+            assert!(!record.fields.contains_key("e"));
+            assert_eq!(record.system_fields, complete.record.system_fields);
+            let missing = cloud::coordinator::ReadReceipt {
+                instance: complete.instance, request_id: response.request_id, scope: files.scope.clone(),
+                zone: files.collection_zone.clone(), active_epoch: None, record, kind: ReadKind::Epoch, lost_zone: false,
+            };
+            if fetched_page { session.deliver_epoch_page(&missing).unwrap(); }
+            else { session.deliver_read(&missing).unwrap(); }
+            let mark = Some(OpaqueBytes(retained.system_fields.clone()));
+            assert_eq!(session.epoch_readability().unwrap(), (mark.clone(), 1, true, true));
+            assert_eq!(session.last_applied_active().unwrap(), Some(retained.clone()));
+            assert_eq!(session.trace().iter().filter(|e| matches!(e, TraceEvent::RootConfirmed { .. })).count(), confirmations);
+            session.close_clean().unwrap();
+            assert_eq!(durable_epoch_crt(&files), Some(body.crt));
+            meguri_sync::cloud::runtime::with_tracking_access(|| {
+                let meguri_sync::cloud::OpenOutcome::Opened(store) =
+                    meguri_sync::cloud::TrackingStore::open(&files.directory, files.binding.scope.clone()).unwrap()
+                else { panic!("actual tracking store") };
+                assert_eq!(store.root_unreadable_for_testing(files.binding.id).unwrap(), mark);
+            });
+            let mut reopened = Coordinator::open(&files, IdentityReads::Available(files.scope.account.clone())).unwrap();
+            reopened.reach(Barrier::BeforeRootConfirmation).unwrap();
+            assert_eq!(reopened.epoch_readability().unwrap(), (mark.clone(), 1, true, false));
+            assert_closed(&mut reopened, &mut service);
+            let fresh = reopened.read(&mut service, ReadKind::ActiveNoState).unwrap();
+            reopened.deliver_read(&fresh).unwrap();
+            assert_eq!(reopened.epoch_readability().unwrap(), (mark, 1, true, true));
+            assert_eq!(reopened.last_applied_active().unwrap(), Some(retained));
+            reopened.close_clean().unwrap();
+            assert_eq!(durable_epoch_crt(&files), Some(body.crt));
+            assert_no_writes_since(&service, before);
+        }
+    }
+
+    #[test]
+    fn actual_service_epoch_controls_leave_legacy_crt_unknown() {
+        use meguri_sync::cloud::control_codec::{DecodeOutcome, Epoch, EpochState};
+        for case in ["type", "name", "zone", "scope", "malformed", "publishing", "missing-e", "key", "epoch"] {
+            let (_run, mut service, files) = fixture();
+            let mut session = Coordinator::open(&files, IdentityReads::Available(files.scope.account.clone())).unwrap();
+            session.reach(Barrier::BeforeRootConfirmation).unwrap();
+            let original = session.read(&mut service, ReadKind::Epoch).unwrap();
+            let Field::EncryptedBytes(envelope) = &original.record.fields["e"] else { panic!("actual e") };
+            let DecodeOutcome::Supported(mut body) = Epoch::decode(envelope).unwrap() else { panic!("supported epoch") };
+            let mut target = cloud::RecordInput {
+                name: original.record.name.clone(), record_type: original.record.record_type.clone(),
+                fields: original.record.fields.clone(),
+            };
+            let zone = if case == "zone" { "meguri-root" } else { &files.collection_zone };
+            let mut scope = files.scope.clone();
+            if case == "scope" {
+                scope.environment = "production".into();
+                let created = service.request(&scope, cloud::Caller::default(), cloud::Operation::CreateZone {
+                    zone: zone.into(),
+                }).unwrap();
+                assert!(created.result.is_ok());
+            }
+            match case {
+                "type" => target.record_type = "MGEntity".into(),
+                "name" => target.name = "other-epoch".into(),
+                "malformed" => { target.fields.insert("e".into(), Field::EncryptedBytes(vec![0xff])); }
+                "missing-e" => {},
+                "publishing" | "key" | "epoch" => {
+                    match case {
+                        "publishing" => {
+                            body.state = EpochState::Publishing;
+                            body.counts.clear();
+                        }
+                        "key" => body.record_key[0] ^= 1,
+                        "epoch" => body.epoch_id[0] ^= 1,
+                        _ => unreachable!(),
+                    }
+                    target.fields.insert("e".into(), Field::EncryptedBytes(body.encode().unwrap()));
+                }
+                "zone" | "scope" => {},
+                _ => unreachable!(),
+            }
+            let name = target.name.clone();
+            let replacing = scope == files.scope && zone == files.collection_zone && name == "epoch";
+            let saved = service.request(&scope, cloud::Caller::default(), cloud::Operation::Modify {
+                zone: zone.into(), atomic: false, changes: vec![Mutation::Save {
+                    record: target, if_unchanged: replacing.then(|| original.record.system_fields.clone()),
+                }],
+            }).unwrap();
+            let Ok(cloud::Reply::Modified(items)) = saved.result else { panic!("actual save") };
+            assert!(items[0].result.is_ok(), "control must exist in Service: {case}");
+            let before = cursor(&service);
+            let response = service.request(&scope, cloud::Caller {
+                instance: Some(original.instance.clone()), ..cloud::Caller::default()
+            }, cloud::Operation::Read {
+                zone: zone.into(), name,
+                fields: if case == "missing-e" {
+                    cloud::RequestedFields::Named(Vec::new())
+                } else {
+                    cloud::RequestedFields::All
+                },
+            }).unwrap();
+            let Ok(cloud::Reply::Record(record)) = response.result else { panic!("actual read") };
+            let read = cloud::coordinator::ReadReceipt {
+                instance: original.instance, request_id: response.request_id, scope,
+                zone: zone.into(), active_epoch: None, record, kind: ReadKind::Epoch, lost_zone: false,
+            };
+            let result = session.deliver_read(&read);
+            if matches!(case, "type" | "name" | "zone" | "scope") { assert!(result.is_err()); } else { result.unwrap(); }
+            assert!(!session.trace().iter().any(|e| matches!(e, TraceEvent::RootConfirmed { .. })));
+            assert_closed(&mut session, &mut service);
+            assert_no_writes_since(&service, before);
+            session.close_clean().unwrap();
+            assert_eq!(durable_epoch_crt(&files), None, "control must not establish CRT: {case}");
+        }
+    }
+
     #[test]
     fn normal_root_confirmation_persists_exact_service_active_across_reopen() {
         for completed_fetch in [false, true] {
@@ -1296,6 +1515,8 @@ decks:
             let mut current = Coordinator::open(&files, IdentityReads::Available(files.scope.account.clone())).unwrap();
             current.reach(Barrier::BeforeRootConfirmation).unwrap();
             assert!(current.last_applied_active().unwrap() == Some(older.clone()));
+            let epoch = current.read(&mut service, ReadKind::Epoch).unwrap();
+            current.deliver_read(&epoch).unwrap();
             let edit = current.edit_note_fields(files.note.id, &EDIT).unwrap();
             assert_observer_capture(&current, &edit);
             let local = current.facts().unwrap();
