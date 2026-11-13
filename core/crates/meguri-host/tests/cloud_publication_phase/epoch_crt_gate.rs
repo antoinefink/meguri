@@ -380,6 +380,201 @@ fn save_entity(service: &mut Service<SeededRandom>, zone: &str, name: &str, enve
 }
 
 #[test]
+fn epoch_crt_gate_existence_only_read_retains_verification_with_known_equal_crt() {
+    let (_temp, host, mut service, sdk) = complete_publication();
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let crt = local_crt(&host);
+    let binding = runtime.status().unwrap().binding.unwrap();
+    let zone = cloud::adapter::collection_zone(binding.facts.epoch);
+    assert!(runtime.sdk_root_confirmed(), "publication already confirmed the root");
+    runtime.sdk_fetch_completed_without_root(&sdk).unwrap();
+    let response = service.request(&scope(), Caller::default(), Operation::Read {
+        zone: "meguri-root".into(), name: "active".into(), fields: RequestedFields::All,
+    }).unwrap();
+    let Ok(Reply::Record(record)) = response.result else { panic!("actual active read required"); };
+    let active = publication_control_record(&record).unwrap();
+    // The return value reports first confirmation; this read refreshes an
+    // already-confirmed root. Observe its actual persisted proof instead.
+    assert!(!runtime.accept_root_read(&sdk, response.request_id, active.encrypted.as_deref().unwrap(), &active.system_fields.0, false).unwrap());
+    runtime.validate_sdk(&sdk).unwrap();
+    assert!(runtime.sdk_root_confirmed());
+    let status = runtime.status().unwrap();
+    assert!(status.stored_usable && status.identity_verified);
+    assert_eq!(status.binding.as_ref(), Some(&binding));
+    let root = runtime.adapter_snapshot().unwrap().root.unwrap();
+    assert_eq!(root.request_id, response.request_id);
+    assert_eq!(root.epoch, binding.facts.epoch);
+    assert_eq!(root.envelope.0.as_slice(), active.encrypted.as_deref().unwrap());
+    assert_eq!(root.system_fields, active.system_fields);
+    let deck = meguri_engine::decks::add(&collection, "Synthetic known epoch work".into()).unwrap().value.id;
+    let pending = runtime.entity_facts_page(cloud::entity_codec::Kind::Deck, None).unwrap().into_iter()
+        .find(|entity| entity.key == cloud::entity_codec::id_key(deck.0)).unwrap();
+    assert!(pending.mark.is_some() && pending.local_rev > pending.acked_rev);
+    let drains = runtime.adapter_fetch_drains();
+    let fetch = runtime.adapter_begin_fetch(&sdk, vec![zone.clone()]).unwrap();
+    let group = format!("meguri-{fetch}");
+    runtime.adapter_will_fetch(&sdk, group.clone(), true).unwrap();
+    runtime.adapter_did_fetch(&sdk, &group, true).unwrap();
+    let mut reads = runtime.adapter_fetch_reads(&sdk, fetch, &collection).unwrap();
+    assert_eq!(reads.len(), 1);
+    let read = reads.remove(0);
+    let issued: serde_json::Value = serde_json::from_slice(&runtime.adapter_snapshot().unwrap().tracking_content).unwrap();
+    assert!(!issued[4]["epoch_verification"].is_null());
+    let response = service.request(&scope(), Caller::default(), Operation::Read {
+        zone: zone.clone(), name: "epoch".into(), fields: RequestedFields::Named(Vec::new()),
+    }).unwrap();
+    let Ok(Reply::Record(record)) = response.result else { panic!("actual typed epoch existence required"); };
+    assert_eq!(record.record_type, "MGEpoch");
+    let control = publication_control_record(&record).unwrap();
+    assert!(control.encrypted.is_none());
+    assert!(runtime.adapter_complete_fetch_read(&read, &collection, RecordRead::Found(control), false, None, None).unwrap().is_none());
+    assert!(runtime.adapter_finish_fetch(&sdk, fetch).unwrap());
+    let after: serde_json::Value = serde_json::from_slice(&runtime.adapter_snapshot().unwrap().tracking_content).unwrap();
+    assert_eq!(after[4]["epoch_verification"], issued[4]["epoch_verification"]);
+    assert_eq!(after[4]["absence"], issued[4]["absence"]);
+    assert_eq!(runtime.epoch_crt_for_testing().unwrap(), Some(crt));
+    assert_eq!(&runtime.adapter_fetch_drains()[drains.len()..], &[cloud::adapter::FetchDrain { zone, fetched: false }]);
+    runtime.validate_sdk(&sdk).unwrap();
+    assert!(runtime.sdk_root_confirmed());
+    let batch = runtime.build_collection_batch(&sdk, &collection, &entity_names(runtime)).unwrap();
+    assert_eq!(batch.id, 0, "known equal crt cannot bypass pending verification");
+    assert!(batch.saves.is_empty());
+    assert_eq!(runtime.status().unwrap().binding.unwrap().facts.state, cloud::BindingState::Active);
+    host.close().unwrap();
+}
+
+#[test]
+fn epoch_crt_gate_existence_only_reads_leave_unknown_authority_and_writer_closed() {
+    use meguri_testkit::cloud::devices::PreboundDevice;
+
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("existence-only");
+    generated(&dir);
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(1148)).unwrap();
+    let files = PreboundDevice::arrange(&dir, &mut service, 1148).unwrap();
+    let identity = Arc::new(MutableAccount(Mutex::new(IdentityStatus::Available(files.binding.facts.account.clone()))));
+    let host = open_host_with(&dir, keys(), identity, files.scope.clone());
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    runtime.refresh_identity().unwrap();
+    runtime.reconcile_binding(&collection, &host.media().unwrap(), Duration::from_secs(30)).unwrap();
+    let (sdk, serialization, zone) = runtime.register_sdk(false).unwrap();
+    assert!(serialization.is_none());
+    runtime.sdk_fetch_completed_without_root(&sdk).unwrap();
+    let response = service.request(&files.scope, Caller::default(), Operation::Read {
+        zone: "meguri-root".into(), name: "active".into(), fields: RequestedFields::All,
+    }).unwrap();
+    let Ok(Reply::Record(record)) = response.result else { panic!("actual active read required"); };
+    let active = publication_control_record(&record).unwrap();
+    assert!(runtime.accept_root_read(&sdk, response.request_id, active.encrypted.as_deref().unwrap(), &active.system_fields.0, false).unwrap());
+    assert!(!runtime.adapter_epoch_crt_known());
+    meguri_engine::decks::add(&collection, "Synthetic pending existence work".into()).unwrap();
+
+    // A real Service save supplies pending incoming work; no summary or cache
+    // is seeded. Its writer must stay closed until the epoch body qualifies.
+    let key = b"synthetic-existence-writer".to_vec();
+    let payload = cloud::entity_codec::Payload::Config(cloud::entity_codec::Config {
+        key: key.clone(), mtime_secs: NOW / 1000, val: b"true".to_vec(),
+    });
+    let name = cloud::entity_codec::entity_name(&files.binding.facts.record_key.0, payload.kind(), &key).unwrap();
+    let envelope = cloud::entity_codec::Entity::build(cloud::entity_codec::EntityFields {
+        kind: payload.kind(), key: key.clone(), origin: [23; 16], erev: 1, generation: None,
+        tombstone: false, deleted_at_ms: 0, writer: [24; 16], base_sha256: None,
+    }, &payload.encode().unwrap()).unwrap().encode().unwrap();
+    let response = service.request(&files.scope, Caller::default(), Operation::Modify {
+        zone: zone.clone(), atomic: false, changes: vec![Mutation::Save {
+            record: RecordInput::encrypted(&name, "MGEntity", envelope.clone()), if_unchanged: None,
+        }],
+    }).unwrap();
+    let Ok(Reply::Modified(mut results)) = response.result else { panic!("actual incoming save required"); };
+    let Ok(MutationSuccess::Saved(record)) = results.remove(0).result else { panic!("actual incoming receipt required"); };
+    runtime.receive_collection_records(&runtime.instance().unwrap(), &[Saved {
+        name: record.name, envelope, system_fields: record.system_fields.bytes().to_vec(),
+    }]).unwrap();
+
+    let response = service.request(&files.scope, Caller::default(), Operation::Read {
+        zone: zone.clone(), name: "epoch".into(), fields: RequestedFields::All,
+    }).unwrap();
+    let Ok(Reply::Record(record)) = response.result else { panic!("actual complete epoch required"); };
+    let complete = publication_control_record(&record).unwrap();
+    let DecodeOutcome::Supported(mut publishing) = Epoch::decode(complete.encrypted.as_deref().unwrap()).unwrap() else { panic!("supported epoch required"); };
+    publishing.state = EpochState::Publishing;
+    publishing.counts.clear();
+    // Native-shaped typed replies differ only in their encrypted body. The
+    // nil-e case comes from an actual Service read with no requested fields.
+    let response = service.request(&files.scope, Caller::default(), Operation::Read {
+        zone: zone.clone(), name: "epoch".into(), fields: RequestedFields::Named(Vec::new()),
+    }).unwrap();
+    let Ok(Reply::Record(record)) = response.result else { panic!("actual typed epoch existence required"); };
+    assert_eq!(record.record_type, "MGEpoch");
+    let nil = publication_control_record(&record).unwrap();
+    assert!(nil.encrypted.is_none());
+    let mut unreadable = complete.clone();
+    unreadable.encrypted = Some(vec![255]);
+    let mut unsupported = complete.clone();
+    unsupported.encrypted = Some(vec![8, 2]); // field 1: future format 2
+    let mut noncomplete = complete.clone();
+    noncomplete.encrypted = Some(publishing.encode().unwrap());
+    let mut wrong_epoch = publishing.clone();
+    wrong_epoch.state = EpochState::Complete;
+    wrong_epoch.epoch_id = [99; 16];
+    let mut mismatched = complete.clone();
+    mismatched.encrypted = Some(wrong_epoch.encode().unwrap());
+    let mut no_system_fields = complete.clone();
+    no_system_fields.system_fields.0.clear();
+    let drains_before = runtime.adapter_fetch_drains();
+    let mut pending = serde_json::Value::Null;
+    for (index, control) in [nil, unreadable, unsupported, noncomplete, mismatched, no_system_fields, complete].into_iter().enumerate() {
+        let valid = index == 6;
+        let fetch = runtime.adapter_begin_fetch(&sdk, vec![zone.clone()]).unwrap();
+        let group = format!("meguri-{fetch}");
+        runtime.adapter_will_fetch(&sdk, group.clone(), true).unwrap();
+        runtime.adapter_did_fetch(&sdk, &group, true).unwrap();
+        let mut reads = runtime.adapter_fetch_reads(&sdk, fetch, &collection).unwrap();
+        assert_eq!(reads.len(), 1, "unresolved body must be checked by a later call");
+        let read = reads.remove(0);
+        assert!(!read.is_active() && read.zone() == zone);
+        let issued: serde_json::Value = serde_json::from_slice(&runtime.adapter_snapshot().unwrap().tracking_content).unwrap();
+        if index == 0 { pending = issued[4]["epoch_verification"].clone(); }
+        assert!(!pending.is_null());
+        assert_eq!(issued[4]["epoch_verification"], pending);
+        assert!(runtime.adapter_complete_fetch_read(&read, &collection, RecordRead::Found(control), false, None, None).unwrap().is_none());
+        assert!(runtime.adapter_finish_fetch(&sdk, fetch).unwrap());
+        let snapshot = runtime.adapter_snapshot().unwrap();
+        let after: serde_json::Value = serde_json::from_slice(&snapshot.tracking_content).unwrap();
+        assert_eq!(after[4]["epoch_verification"].is_null(), valid);
+        if !valid { assert_eq!(after[4]["epoch_verification"], pending); }
+        assert_eq!(after[4]["absence"], issued[4]["absence"]);
+        assert!(!snapshot.absence_pass_completed);
+        assert_eq!(runtime.epoch_crt_for_testing().unwrap(), valid.then_some(local_crt(&host)));
+        let drains = runtime.adapter_fetch_drains();
+        assert_eq!(drains.len(), drains_before.len() + index + 1);
+        assert_eq!(drains.last(), Some(&cloud::adapter::FetchDrain { zone: zone.clone(), fetched: false }));
+        let diagnostic = runtime.adapter_root_read_diagnostics().pop().unwrap();
+        assert!(diagnostic.accepted && diagnostic.a7_failure && !diagnostic.active && diagnostic.outcome == "found");
+        runtime.validate_sdk(&sdk).unwrap();
+        assert_eq!(runtime.status().unwrap().binding.unwrap().facts.state, cloud::BindingState::Active);
+        let batch = runtime.build_collection_batch(&sdk, &collection, &entity_names(runtime)).unwrap();
+        assert_eq!(batch.id > 0 && !batch.saves.is_empty(), valid);
+        if !valid {
+            assert_eq!(runtime.drain_incoming(&collection, Duration::from_secs(30)).unwrap(), 0);
+            assert!(collection.reader(ReaderRole::Query).unwrap().row_image(meguri_storage::Table::Config, &meguri_storage::RowKey::Text(key.clone())).unwrap().is_none());
+        } else {
+            // Building the valid batch already drains incoming work. Check
+            // the Service config's actual value, then prove no second apply.
+            let applied = collection.reader(ReaderRole::Query).unwrap().row_image(meguri_storage::Table::Config, &meguri_storage::RowKey::Text(key.clone())).unwrap().expect("valid batch applies the Service config");
+            assert_eq!(applied[0], meguri_storage::Cell::Text(key.clone()));
+            assert_eq!(applied[2], meguri_storage::Cell::Integer(NOW / 1000));
+            assert_eq!(applied[3], meguri_storage::Cell::Blob(b"true".to_vec()));
+            assert_eq!(runtime.drain_incoming(&collection, Duration::from_secs(30)).unwrap(), 0);
+            assert_eq!(collection.reader(ReaderRole::Query).unwrap().row_image(meguri_storage::Table::Config, &meguri_storage::RowKey::Text(key.clone())).unwrap(), Some(applied));
+        }
+    }
+    host.close().unwrap();
+}
+
+#[test]
 fn epoch_crt_gate_existing_epoch_read_persists_complete_unequal_body_atomically() {
     let (_temp, host, mut service, sdk) = complete_publication();
     let runtime = host.cloud_runtime().unwrap();

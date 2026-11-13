@@ -502,7 +502,9 @@ impl Runtime {
                         name: "epoch".into(), envelope, system_fields: record.system_fields.0,
                     }]);
                 }
-                if fetched_epoch.is_none() {
+                // P3: typed epoch existence decides the no-state zone read even
+                // without authority. Preparation still needs a complete body.
+                if read.is_epoch_preparation() && fetched_epoch.is_none() {
                     return Ok(None);
                 }
             }
@@ -528,10 +530,10 @@ impl Runtime {
             }
             let mut durable = s.adapter.durable.clone();
             // Only the qualified complete body resolves ordinary verification.
-            let resolved_epoch = if read.is_active() {
-                None
-            } else {
+            let resolved_epoch = if fetched_epoch.is_some() {
                 durable.epoch_verification.take()
+            } else {
+                None
             };
             let resolved = resolved_epoch.is_some();
             // A root read can be due for a drain already emitted by a real fetch.

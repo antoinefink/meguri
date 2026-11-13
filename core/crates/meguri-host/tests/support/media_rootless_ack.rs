@@ -380,6 +380,43 @@ fn rootless_ack_rechecks_delayed_deletion(fetched: bool) {
         };
         assert_eq!(record.name, "epoch");
         assert_eq!(record.record_type, "MGEpoch");
+        // Each failed preparation has its own issued capability. Typed record
+        // existence alone must never take the ordinary false-drain path here.
+        let complete = publication_control_record(&record).unwrap();
+        let mut absent = complete.clone();
+        absent.encrypted = None;
+        let mut unreadable = complete.clone();
+        unreadable.encrypted = Some(vec![255]);
+        let mut unsupported = complete.clone();
+        unsupported.encrypted = Some(vec![8, 2]); // field 1: future format 2
+        let mut no_system_fields = complete.clone();
+        no_system_fields.system_fields.0.clear();
+        use meguri_sync::cloud::control_codec::{DecodeOutcome, Epoch, EpochState};
+        let DecodeOutcome::Supported(mut publishing) = Epoch::decode(complete.encrypted.as_deref().unwrap()).unwrap() else {
+            panic!("actual supported epoch")
+        };
+        publishing.state = EpochState::Publishing;
+        publishing.counts.clear();
+        let mut noncomplete = complete.clone();
+        noncomplete.encrypted = Some(publishing.encode().unwrap());
+        for (control, expected) in [
+            (absent, EpochPreparationOutcome::Unknown),
+            (unreadable, EpochPreparationOutcome::Conflict),
+            (unsupported, EpochPreparationOutcome::Unsupported),
+            (no_system_fields, EpochPreparationOutcome::Conflict),
+            (noncomplete, EpochPreparationOutcome::Unknown),
+        ] {
+            let attempt = runtime.sync_now_epoch_read_owned(&request, &collection).unwrap().unwrap();
+            assert!(runtime.adapter_complete_fetch_read(&attempt, &collection, RecordRead::Found(control), false, None, None).unwrap().is_none());
+            assert_eq!(attempt.epoch_preparation_outcome(), Some(expected));
+            assert!(!runtime.adapter_epoch_crt_known());
+            assert_eq!(runtime.epoch_crt_for_testing().unwrap(), None);
+            assert_eq!(durable(&host), before_durable);
+            assert!(runtime.adapter_snapshot().unwrap() == before);
+            let blocked = runtime.build_collection_batch(&sdk, &collection, &BTreeSet::from([entity_name.clone()])).unwrap();
+            assert_eq!(blocked.id, 0);
+            assert!(blocked.saves.is_empty());
+        }
         assert!(
             runtime
                 .adapter_complete_fetch_read(

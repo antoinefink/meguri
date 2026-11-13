@@ -114,3 +114,13 @@ The two initial rootless-media failures have a test-only follow-up in
 Its `core-test/20261113T114439Z-44138` passes all four binary cases after actual
 Core-issued epoch verification. The earlier failures and this log's native
 drain-count failures remain recorded; no broader gate or live sync claim follows.
+
+## Later epoch existence repair
+
+The seven native drain-count failures now have a production repair in
+[no-state epoch existence](no-state-epoch-existence-fixer-20261113.md).
+`swift-test/20261113T120724Z-66754` passes all six unchanged native methods,
+including those assertions. The repair preserves the authority requirement
+for sending and resolves verification only from a complete accepted body.
+Earlier failed receipts remain intact. Full integration and live peer checks
+remain pending.
