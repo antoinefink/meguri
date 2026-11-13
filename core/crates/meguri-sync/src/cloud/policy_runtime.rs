@@ -88,6 +88,14 @@ impl Runtime {
         let mut evidence = Evidence::default();
         let mut held_pending = BTreeSet::new();
         with_tracking_access(|| -> Result<(), RuntimeError> {
+            // V8.1 kept sources span all original build scopes and outlive bindings.
+            // Only finalized main files count; enumeration failures are not zero.
+            if let Some(store) = &s.store {
+                let unreadable = store.retained_damaged_sources()?.len() as u64;
+                if unreadable > 0 {
+                    summary.attention.insert(Attention::ConflictsUnreadable, unreadable);
+                }
+            }
             if let (Some(b), Some(store)) = (&s.bound, &s.store) {
                 let publish = store.publication_op()?;
                 let publish_step = publish

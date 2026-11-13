@@ -36,6 +36,7 @@ impl IdentityProvider for Account {
 }
 struct Rig {
     _root: tempfile::TempDir,
+    config: meguri_host::HostConfig,
     host: Arc<CoreHost>,
     clock: Arc<StepClock>,
     sdk: String,
@@ -168,6 +169,7 @@ fn rig_with_epoch(confirm_root: bool, seed: u64, known_epoch: bool) -> Rig {
     );
     Rig {
         _root: root,
+        config,
         host,
         clock,
         sdk,
@@ -831,6 +833,146 @@ fn k10_projection_scan_without_p19_evidence_does_not_supply_a_zero_or_timestamp(
     assert!(projection.evidence.quiet_ms.is_none());
     assert_eq!(projection.evidence.as_of_ms(), None);
     rig.host.close().unwrap();
+}
+
+// Canonical source base: 71e68bd5. Pending integration batch base remains
+// 1416a520542a8c5daa38a23bfe398da704c3d6c9. P14.4 / V8.1 producer regression.
+fn recover_policy_conflicts(rig: &Rig, unreadable: bool) -> Vec<String> {
+    use meguri_sync::cloud::{self, runtime::with_tracking_access};
+    let facts = rig.host.cloud_runtime().unwrap().status().unwrap().binding.unwrap().facts;
+    rig.host.close().unwrap();
+    let source = tempfile::tempdir().unwrap();
+    // V8.1 salvage includes foreign scopes; ordinary runtime access still does not.
+    let foreign = BuildScope {
+        container: ContainerId::new("synthetic-foreign-recovery").unwrap(),
+        environment: Environment::Production,
+    };
+    let cloud::OpenOutcome::Missing(mut store) = cloud::TrackingStore::open(source.path(), foreign).unwrap()
+    else {
+        panic!("expected new synthetic source");
+    };
+    let owner = store.create_binding(facts, rig.config.clock.as_ref(), rig.config.random.as_ref()).unwrap();
+    for id in 1..=3 {
+        store.store_conflict(owner.id, &cloud::ConflictCopy {
+            id: cloud::CopyId([id; 16]),
+            kind: cloud::ConflictKind::Note,
+            key: OpaqueBytes(vec![id]),
+            reason: cloud::ConflictReason::FieldConflict,
+            losing_envelope: OpaqueBytes(b"synthetic-recovery-conflict".to_vec()),
+            losing_payload_digest: cloud::PayloadDigest([id; 32]),
+            winning_payload_digest: cloud::PayloadDigest([99; 32]),
+            field_names: None,
+            template_names: None,
+            note_deck: None,
+            staged_path: None,
+            created_at_ms: rig.clock.now_ms(),
+            resolved_at_ms: None,
+        }).unwrap();
+    }
+    drop(store);
+    let db = meguri_storage::rusqlite::Connection::open(source.path().join(cloud::TRACKING_FILE)).unwrap();
+    db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;").unwrap();
+    if unreadable {
+        // Valid JSON but not a ConflictCopy, as in the partial-recovery regression.
+        for id in [2_u8, 3] {
+            assert_eq!(db.execute("UPDATE conflicts SET content='{}' WHERE id=?1", [[id; 16].as_slice()]).unwrap(), 1);
+        }
+    }
+    db.execute_batch("DROP TABLE inbox;").unwrap();
+    let directory = &rig.config.collection_directory;
+    // Copy the quiescent pair before its fixture connection can checkpoint it.
+    for suffix in ["", "-wal"] {
+        std::fs::copy(source.path().join(format!("{}{suffix}", cloud::TRACKING_FILE)),
+            directory.join(format!("{}{suffix}", cloud::TRACKING_FILE))).unwrap();
+    }
+    drop(db);
+    let scope = rig.config.cloud.as_ref().unwrap().scope.clone();
+    with_tracking_access(|| {
+        let outcome = cloud::TrackingStore::recover(directory, scope,
+            rig.config.clock.as_ref(), rig.config.random.as_ref()).unwrap();
+        let (cloud::OpenOutcome::Missing(store) | cloud::OpenOutcome::Opened(store)) = outcome else {
+            panic!("expected completed synthetic recovery");
+        };
+        assert!(store.selected_binding().unwrap().is_none());
+        assert_eq!(store.salvage_bindings().unwrap().len(), 1);
+        assert_eq!(store.conflict_copies().unwrap().len(), if unreadable { 1 } else { 3 });
+        store.retained_damaged_sources().unwrap()
+    })
+}
+
+#[test]
+fn k10_projection_retained_unreadable_conflicts_survive_binding_and_reopen() {
+    use meguri_sync::cloud::{self, policy::{Attention, Lifecycle}};
+    let rig = rig_with_epoch(true, 1931, false);
+    let kept = recover_policy_conflicts(&rig, true);
+    assert_eq!(kept.len(), 1);
+    let path = rig.config.collection_directory.join(&kept[0]);
+    let wal = rig.config.collection_directory.join(format!("{}-wal", kept[0]));
+    let before = (std::fs::read(&path).unwrap(), std::fs::read(&wal).unwrap());
+    // First reopen with only salvage owners, then install an ordinary synthetic
+    // baseline and reopen again. No policy summary or attention is seeded.
+    for ordinary in [false, true] {
+        for reopened in [false, true] {
+            let host = CoreHost::open(rig.config.clone()).unwrap();
+            let runtime = host.cloud_runtime().unwrap();
+            let collection = host.collection().unwrap();
+            if ordinary && !reopened {
+                runtime.prepare_adapter_baseline_for_testing(&collection,
+                    rig.config.clock.as_ref(), rig.config.random.as_ref(), None).unwrap();
+            }
+            host.cloud_policy_input(DeviceEvent::Settings(DeviceSettings {
+                enabled: true, paused: false, automatic: true, media: false,
+            })).unwrap();
+            host.cloud_policy_input(DeviceEvent::Account {
+                identity: IdentityStatus::Available(OpaqueBytes(b"synthetic-account-A".to_vec())),
+                origin_sdk: None,
+            }).unwrap();
+            host.cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Cloud)).unwrap();
+            let projection = runtime.policy_projection(Lifecycle::Ready, collection.generation().0).unwrap();
+            assert_eq!(projection.facts.binding.is_some(), ordinary);
+            assert_eq!(projection.facts.summary.attention.get(&Attention::ConflictsUnreadable), Some(&1));
+            assert!(!projection.facts.summary.attention_known);
+            let status = host.cloud_policy_driver().unwrap().status();
+            assert_eq!(status.state, StatusState::NeedsAttention);
+            assert_eq!(status.attention.get(&Attention::ConflictsUnreadable), Some(&1));
+            assert_eq!(status.attention.contains_key(&Attention::ChooseCollection), !ordinary);
+            assert!(!status.attention.contains_key(&Attention::Isolated));
+            assert!(!format!("{:?} {status:?}", projection.facts).contains(&kept[0]));
+            // An unsafe identity at an actual kept path must fail projection,
+            // including without an ordinary binding; it cannot become zero.
+            let saved = rig.config.collection_directory.join("retained-source-error-fixture");
+            std::fs::rename(&path, &saved).unwrap();
+            std::os::unix::fs::symlink(&saved, &path).unwrap();
+            assert!(matches!(runtime.policy_projection(Lifecycle::Ready, collection.generation().0),
+                Err(RuntimeError::Tracking(cloud::Error::RecoveryRefused))));
+            std::fs::remove_file(&path).unwrap();
+            std::fs::rename(&saved, &path).unwrap();
+            host.close().unwrap();
+            assert_eq!((std::fs::read(&path).unwrap(), std::fs::read(&wal).unwrap()), before);
+        }
+    }
+}
+
+#[test]
+fn k10_projection_complete_salvage_has_no_unreadable_item_or_readiness_claim() {
+    use meguri_sync::cloud::policy::{Attention, Lifecycle};
+    let rig = rig_with_epoch(true, 1932, false);
+    assert!(recover_policy_conflicts(&rig, false).is_empty());
+    for _ in 0..2 {
+        let host = CoreHost::open(rig.config.clone()).unwrap();
+        let projection = host.cloud_runtime().unwrap()
+            .policy_projection(Lifecycle::Ready, host.engine().generation().0).unwrap();
+        assert!(projection.facts.binding.is_none());
+        assert!(projection.facts.summary.attention.is_empty());
+        assert!(!projection.facts.summary.attention_known);
+        host.cloud_policy_input(DeviceEvent::Settings(DeviceSettings {
+            enabled: true, paused: false, automatic: true, media: false,
+        })).unwrap();
+        let status = host.cloud_policy_driver().unwrap().status();
+        assert!(!status.attention.contains_key(&Attention::ConflictsUnreadable));
+        assert!(!matches!(status.state, StatusState::UpToDate { .. }));
+        host.close().unwrap();
+    }
 }
 
 #[test]
