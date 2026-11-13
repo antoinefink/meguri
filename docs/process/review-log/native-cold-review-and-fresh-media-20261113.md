@@ -23,3 +23,33 @@ The Debug-only attempt `cloud-media-probe/20261113T181142Z-81180` refuses that u
 Phone drive `20261113T182815Z-94727` performs all five normal actions, including Sync Now. Four hierarchy issues retain its failed overall status. No Home-and-return action or copy-to-device command is used.
 
 Read-back `cloud-media-probe/20261113T182949Z-96284` passes with `peer-byte-match`, `transfer_verified: true`, size 10,240 and SHA-256 `ce135fa356aa1cb2c23fc857040591d6f3fc172a723ca705a5b6f63d161b775d`. It reads only the staged filename from the originally prepared normal phone app. This proves this fresh file's actual arrival, beyond a sync timestamp or local write. Signed-lane acceptance stays false; it proves neither audible playback nor every media/error path. No network, SDK-scope or production rule was changed for this transfer.
+
+## Current-build cold media check
+
+Both normal apps now use `ca1a8aff`: Mac personal Release build
+`build-app/20261113T224213Z-30328` and normal iPhone Debug preparation
+`run/20261113T225742Z-32749`. The Mac was quit normally and reopened by exact
+product path. Its local read-only aggregate is four notes, four cards, four
+reviews and four total repetitions.
+
+Stage `cloud-media-probe/20261113T230238Z-35127` adds a new 10,240-byte
+synthetic file. Normal Mac Sync Now displays one media file waiting, then
+finishes its visible cycle. The status remains Unknown.
+
+Phone drive `20261113T230516Z-35498` fails before executing its script: XCTest
+cannot enable automation mode. It supplies no count or manual-sync evidence.
+Read-back `cloud-media-probe/20261113T230951Z-36100` fails because the staged
+file node is absent. The prior phone launch preceded the Mac upload.
+
+A deliberate normal cold launch after that upload, `run/20261113T231307Z-36633`,
+passes with normal launch verified. It uses the existing app data and no fixture
+launch options. Read-back `cloud-media-probe/20261113T231449Z-37877` then passes:
+`peer-byte-match`, transfer verified true, size 10,240, SHA-256
+`5c779d9338697c2a39dd7e0172c8d39058e2e290d4f43c14b20471fe0f099217`.
+The probe only copies that file from the phone; it makes no device data write.
+No phone Sync Now action executed. This is actual cold-foreground media arrival.
+
+This adds no new grade or fresh phone count comparison. It proves neither audio
+playback nor every media/error path, latency, Q7, a milestone or release
+acceptance. The failed automation/read-back receipts and the Unknown status
+remain retained. Signed-lane acceptance stays false.
