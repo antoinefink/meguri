@@ -243,7 +243,7 @@ public final class SyncCoordinator {
         case replaced(UInt64)
         case persisted(revision: UInt64)
         case account(Bool)
-        case ownAccountProof(UInt64, generation: UInt64, revision: UInt64)
+        case ownAccountProof(UInt64, generation: UInt64, revision: UInt64, verified: Bool)
         case result(SyncCommandResult, generation: UInt64, revision: UInt64, shutdownCancelled: Bool,
                     supersededAccountCancellation: Bool = false, nativeCancellationOwned: Bool = false, acknowledged: CheckedContinuation<Void, Never>?)
         case completeAccount(UInt64, backend: any SyncCoordinatorBackend, generation: UInt64, revision: UInt64,
@@ -616,6 +616,7 @@ public final class SyncCoordinator {
             await own.interruptAndDrain()
             await original?.value
             initialOwnDrain = nil
+            retryAccountCompletion()
         }
     }
     private func saveSettings(_ settings: CloudPolicyDeviceSettings) {
@@ -865,7 +866,14 @@ public final class SyncCoordinator {
                 let current = try await connection.recoveryStatus()
                 guard expected == generation, revision == hostRevision, self.backend === backend else { return }
                 recovery = current
-                if resumed { await runOwnWork(backend, generation: expected, revision: revision) }
+                if resumed {
+                    if initialAdoptionActive {
+                        guard !closing, !suspended, !replacing, !settings.paused, !initialAdoptionCancelled,
+                              !awaitingInitialOwnProof, initialOwnDrain == nil else { return }
+                        initialOwnAdmission.setOpen(true)
+                    }
+                    await runOwnWork(backend, generation: expected, revision: revision)
+                }
             } catch {
                 if expected == generation, revision == hostRevision, !closing { operationFailed = true }
             }
@@ -937,6 +945,8 @@ public final class SyncCoordinator {
     private func restoreInitialAdoptionEnabled() {
         guard let earlier = initialAdoptionEnabledBefore else { return }
         initialAdoptionEnabledBefore = nil
+        initialOwnResumeRead = nil
+        awaitingInitialOwnProof = false
         saveEnabled(earlier)
     }
     private func reconcileInitialAdoption(_ original: any SyncCoordinatorBackend) async {
@@ -965,6 +975,7 @@ public final class SyncCoordinator {
     }
     private func willActivateInitialAdoption(generation expected: UInt64, revision: UInt64) throws {
         guard !closing, !suspended, !replacing, !settings.paused, !initialAdoptionCancelled,
+              !awaitingInitialOwnProof, initialOwnDrain == nil,
               ownTask?.isCancelled == false, expected == generation, revision == hostRevision else { throw CancellationError() }
         activatingInitialAdoption = true
     }
@@ -1061,7 +1072,7 @@ public final class SyncCoordinator {
     }
     private func foregroundAfterAccountProof() {
         awaitingResumeProof = false
-        if !settings.paused { initialOwnAdmission.setOpen(true) }
+        if !settings.paused, !awaitingInitialOwnProof, initialOwnDrain == nil { initialOwnAdmission.setOpen(true) }
         receive(.settings(settings))
         enqueue(.replayVisibleMedia)
         if let reachable { receive(.network(reachable: reachable)) }
@@ -1160,7 +1171,7 @@ public final class SyncCoordinator {
     // quiescent dependency park may admit account proof. A live own task fences
     // admission until its own yield; another task's yield cannot cover it.
     private var commandsAdmitAccountProof: Bool {
-        operationTasks.keys.allSatisfy { id in
+        initialOwnDrain == nil && operationTasks.keys.allSatisfy { id in
             quiescentDependencies.values.contains(id) || proofWaits.values.contains { $0.owner == .command(id) && $0.proof.isPending }
         } && (ownTask == nil || ownOwner.map { id in
             ownResumePreparation?.owner == id || proofWaits.values.contains { $0.owner == .own(id) && $0.proof.isPending }
@@ -1402,7 +1413,9 @@ public final class SyncCoordinator {
             #if DEBUG
             observeCausalBoundary?(.accountAccepted(read: read, verified: result.accountVerified, succeeded: result.error == nil), nil)
             #endif
-            if result.accountVerified { await reduce(.ownAccountProof(read, generation: expected, revision: revision)) }
+            if result.error == nil {
+                await reduce(.ownAccountProof(read, generation: expected, revision: revision, verified: result.accountVerified))
+            }
             if result.error == nil, result.accountVerified {
                 startRetainedRecoveryAfterProof(original, generation: expected, revision: revision)
             }
@@ -1527,15 +1540,48 @@ public final class SyncCoordinator {
             guard revision == hostRevision, !closing, !replacing, !suspended else { return }
             if requested { enqueue(.account(true)) }
             await policy(.refresh(.cloud))
-        case .ownAccountProof(let read, let expected, let revision):
+        case .ownAccountProof(let read, let expected, let revision, let verified):
             guard read == initialOwnResumeRead, expected == generation, revision == hostRevision,
-                  !closing, !suspended, !replacing, !settings.paused, initialOwnDrain == nil else { return }
-            initialOwnResumeRead = nil
-            awaitingInitialOwnProof = false
-            initialOwnAdmission.setOpen(true)
-            resumeConnection()
+                  initialAdoptionActive, !closing, !suspended, !replacing, !settings.paused, initialOwnDrain == nil,
+                  let backend, let connection = backend.connection else { return }
+            do {
+                // A successful account read can name another account. Ask Core
+                // to revalidate the retained adoption before reopening native
+                // admission. Enumeration claims no adoption task; the executor
+                // will obtain and execute its work normally after admission.
+                let work = try await connection.nextPublicationWork()
+                guard read == initialOwnResumeRead, expected == generation, revision == hostRevision,
+                      self.backend === backend, !closing, !suspended, !replacing,
+                      !settings.paused, !initialAdoptionCancelled, initialOwnDrain == nil else { return }
+                if verified, case .adoption = work {
+                    initialOwnResumeRead = nil
+                    awaitingInitialOwnProof = false
+                    initialOwnAdmission.setOpen(true)
+                    resumeConnection()
+                } else {
+                    // Core settles account loss/mismatch without queueing or
+                    // installing anything. An explicit transport Resume still
+                    // has to pass its own Core authority check before reopening.
+                    await reconcileInitialAdoptionOnInput(backend)
+                    if verified, read == initialOwnResumeRead, expected == generation, revision == hostRevision,
+                       self.backend === backend, !closing, !suspended, !replacing, !settings.paused,
+                       initialOwnDrain == nil, recovery?.adoptionTransportWait == true {
+                        initialOwnResumeRead = nil
+                        awaitingInitialOwnProof = false
+                    }
+                }
+            } catch {
+                guard read == initialOwnResumeRead, expected == generation, revision == hostRevision,
+                      self.backend === backend, !closing, !suspended, !replacing,
+                      !settings.paused, !initialAdoptionCancelled, initialOwnDrain == nil else { return }
+                operationFailed = true
+            }
         case .account(let transition):
             guard !closing, !replacing, !suspended, let backend else { return }
+            if transition, initialAdoptionActive, !activatingInitialAdoption {
+                awaitingInitialOwnProof = true
+                drainInitialOwnWork()
+            }
             do {
                 // Establish Rust's read generation on the ORDERED input lane,
                 // before awaiting any network resolution. A later signal makes

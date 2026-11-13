@@ -644,21 +644,107 @@ extension ReviewCollectionStartupTests {
         } catch { await harness.cleanup(); throw error }
     }
 
+    @Test(arguments: [InitialCloudAccountReproof.sameAccount, .failedRead, .signedOut])
+    func initialAdoptionAccountReproofOwnsContinuation(proof: InitialCloudAccountReproof) async throws {
+        let fixture = try InitialCloudFixture.load()
+        let harness = try InitialCloudHarness(fixture: fixture)
+        let provider = SyncOwnerGate()
+        defer {
+            provider.release(); harness.factory.beforeAccountReturn = nil
+            harness.release(); harness.removeTemporaryStorage()
+        }
+        do {
+            try await harness.beginAndWaitForPage()
+            let generation = harness.owner.generation
+            let requests = harness.requests.count
+            if proof == .signedOut { harness.factory.account = .init(status: .noAccount, identity: nil) }
+            harness.factory.beforeAccountReturn = {
+                await provider.hold()
+                if proof == .failedRead { throw GenericInitialCloudPageFailure() }
+            }
+            await harness.sync.accountChanged()
+            await provider.waitUntilHeld()
+            try await harness.page.waitForCancellation()
+            #expect(!harness.page.replyReturned && harness.requests.count == requests)
+            harness.page.finish(fixture.page)
+            await harness.sync.waitForInitialOwnDrain()
+            await harness.joinOriginal()
+            // Neither the old callback nor a policy wake grants fresh authority.
+            harness.sync.resumeConnection()
+            await harness.sync.waitForConnectionPreview()
+            #expect(harness.page.replyReturned && !harness.collectionExists && !harness.backupsExist)
+            #expect(harness.owner.generation == generation && harness.owner.review == nil)
+            #expect(harness.sync.initialAdoptionActive && harness.sync.recovery != nil)
+            #expect(harness.sync.settings.enabled && harness.persistedEnabled == true)
+            #expect(harness.requests.count == requests && harness.backends.count == 1 && harness.factory.created.isEmpty)
+            provider.release()
+            harness.factory.beforeAccountReturn = nil
+            await harness.sync.prepareConnectionAuthority()
+            if proof == .signedOut {
+                #expect(!harness.collectionExists && !harness.backupsExist)
+                #expect(harness.owner.generation == generation && harness.owner.review == nil)
+                #expect(!harness.sync.initialAdoptionActive && harness.sync.recovery == nil)
+                #expect(!harness.sync.settings.enabled && harness.persistedEnabled == false)
+                #expect(harness.requests.count == requests && harness.backends.count == 1 && harness.factory.created.isEmpty)
+                #expect(await harness.owner.close())
+                return
+            }
+            if proof == .failedRead {
+                harness.sync.resumeConnection()
+                await harness.sync.waitForConnectionPreview()
+                #expect(harness.sync.operationFailed && harness.sync.initialAdoptionActive)
+                #expect(!harness.collectionExists && !harness.backupsExist && harness.owner.generation == generation)
+                #expect(harness.sync.settings.enabled && harness.persistedEnabled == true)
+                #expect(harness.requests.count == requests && harness.backends.count == 1 && harness.factory.created.isEmpty)
+                await harness.sync.accountChanged()
+                await harness.sync.prepareConnectionAuthority()
+            }
+            await harness.sync.waitForConnectionPreview()
+            await harness.sync.waitForReplacement()
+            await harness.owner.waitForCloudActivation()
+            await harness.sync.prepareConnectionAuthority()
+            try #require(harness.backends.count == 2)
+            try await harness.backends[1].waitForStart()
+            #expect(harness.owner.state == .ready && harness.owner.generation > generation)
+            #expect(harness.sync.settings.enabled && harness.persistedEnabled == true && !harness.sync.settings.automatic)
+            #expect(harness.backends[0].closeCount == 1 && harness.backends[1].starts.count == 1)
+            #expect(harness.backends[1].starts.first?.succeeded == true)
+            #expect(harness.factory.created.count == 1 && harness.factory.maximumLive == 1)
+            #expect(harness.factory.created.first?.automaticallySync == false && harness.factory.created.first?.serialization == nil)
+            #expect(harness.factory.fetches.isEmpty)
+            #expect(try await harness.backends[1].workflow.fetchDrains().isEmpty)
+            #expect(await harness.owner.close())
+            #expect(harness.factory.live.isEmpty)
+        } catch {
+            provider.release(); harness.factory.beforeAccountReturn = nil
+            await harness.cleanup(); throw error
+        }
+    }
+
     @Test(arguments: [InitialCloudInterruption.account, .close])
     func initialAdoptionOriginalCallbackDrainsAcrossLifecycle(interruption: InitialCloudInterruption) async throws {
         let fixture = try InitialCloudFixture.load()
         let harness = try InitialCloudHarness(fixture: fixture)
-        defer { harness.release(); harness.removeTemporaryStorage() }
+        let waiting = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        defer {
+            harness.sync.observeAccountPolicyDrain = nil
+            waiting.continuation.finish()
+            harness.release(); harness.removeTemporaryStorage()
+        }
         var transition: Task<Void, Never>?
         do {
             try await harness.beginAndWaitForPage()
             let generation = harness.owner.generation
             switch interruption {
             case .account:
+                harness.sync.observeAccountPolicyDrain = { phase in
+                    if case .waiting = phase { waiting.continuation.yield(()) }
+                }
                 // Real ordered Core account invalidation, with SDK resolution faked.
                 harness.factory.account = .init(status: .available, identity: Data("synthetic-other-account".utf8))
                 transition = Task { await harness.sync.accountChanged(); await harness.sync.prepareConnectionAuthority() }
-                await transition?.value
+                try await initialCloudSignal(waiting.stream, stage: "initial-adoption-account-proof-drain")
+                #expect(!harness.page.replyReturned)
             case .close:
                 transition = Task { #expect(await harness.owner.close()) }
                 try await harness.page.waitForCancellation()
@@ -1203,6 +1289,7 @@ extension ReviewCollectionStartupTests {
 nonisolated enum InitialCloudProofWindow: Sendable { case reopen, resume }
 nonisolated enum InitialCloudHold: Sendable { case pause, background }
 nonisolated enum InitialCloudInterruption: Sendable { case account, close }
+nonisolated enum InitialCloudAccountReproof: Sendable { case sameAccount, failedRead, signedOut }
 
 @MainActor private final class InitialCloudResumeDrainReleaseState {
     var released = false
