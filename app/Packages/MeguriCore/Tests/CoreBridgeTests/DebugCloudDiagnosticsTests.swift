@@ -292,6 +292,36 @@ struct DebugCloudDiagnosticsTests {
         }
     }
 
+    @Test func unavailableReasonsMatchOnlyExactPublicLiteralsAndDiscardPayloads() {
+        let sentinel = UUID().uuidString
+        let cases: [(String, String)] = [
+            ("Ordered cloud account admission unavailable", "bridge.unavailable.orderedAccountAdmission"),
+            ("Cloud outputs require original acknowledgement", "bridge.unavailable.originalAcknowledgementRequired"),
+            ("Cloud account proof unavailable", "bridge.unavailable.accountProof"),
+            ("Fresh cloud account reader unavailable", "bridge.unavailable.freshAccountReader"),
+            ("Cloud account read expired", "bridge.unavailable.accountReadExpired"),
+            ("Cloud registration expired during creation", "bridge.unavailable.registrationExpiredDuringCreation")
+        ]
+        for (reason, expected) in cases {
+            let value = Value(.commandResult, error: BridgeError.unavailable(reason: reason))
+            #expect(value.failure == expected)
+            #expect(value.formatted == "boundary=commandResult action=none failure=\(expected)")
+            #expect(value.zone == nil && value.kind == nil && value.code == nil)
+            #expect(!value.formatted.contains(reason))
+            #expect(!value.formatted.contains(sentinel))
+
+            for unknown in ["", sentinel, sentinel + reason, reason + sentinel,
+                            " " + reason, reason + " ", reason.lowercased(), expected] {
+                let generic = Value(.commandResult, error: BridgeError.unavailable(reason: unknown))
+                #expect(generic.failure == "bridge.unavailable")
+                #expect(generic.formatted == "boundary=commandResult action=none failure=bridge.unavailable")
+                #expect(generic.zone == nil && generic.kind == nil && generic.code == nil)
+                #expect(!generic.formatted.contains(reason))
+                #expect(!generic.formatted.contains(sentinel))
+            }
+        }
+    }
+
     @Test func actionsDiscardAssociatedData() {
         let sentinel = UUID().uuidString
         let cases: [(CloudPolicyAction, String)] = [

@@ -568,7 +568,16 @@ public enum DebugCloudDiagnostics {
             case .invalidTypeAnswerReplacement: return "bridge.invalidTypeAnswerReplacement"
             case .cancelled: return "bridge.cancelled"
             case .busy: return "bridge.busy"
-            case .unavailable: return "bridge.unavailable"
+            case .unavailable(let reason):
+                switch reason {
+                case "Ordered cloud account admission unavailable": return "bridge.unavailable.orderedAccountAdmission"
+                case "Cloud outputs require original acknowledgement": return "bridge.unavailable.originalAcknowledgementRequired"
+                case "Cloud account proof unavailable": return "bridge.unavailable.accountProof"
+                case "Fresh cloud account reader unavailable": return "bridge.unavailable.freshAccountReader"
+                case "Cloud account read expired": return "bridge.unavailable.accountReadExpired"
+                case "Cloud registration expired during creation": return "bridge.unavailable.registrationExpiredDuringCreation"
+                default: return "bridge.unavailable"
+                }
             case .unsupported: return "bridge.unsupported"
             case .invalidArgument: return "bridge.invalidArgument"
             case .internal: return "bridge.internal"
