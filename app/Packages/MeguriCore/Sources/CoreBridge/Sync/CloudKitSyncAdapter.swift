@@ -328,6 +328,7 @@ public actor CloudKitSyncAdapter {
     struct PreparedPolicyExchange: Sendable {
         fileprivate let origin: String
         fileprivate let zone: String
+        fileprivate let proofIssuer: CloudFetchProofIssuer
     }
     private var quiescing = false
     private var quiesceTask: Task<Void, any Error>?
@@ -2421,7 +2422,7 @@ public actor CloudKitSyncAdapter {
         if exchangeTask == nil { exchangeRunning = false }
         changed()
     }
-    func preparePolicyExchange(execution: CoreCloudPolicyExecution) async throws -> PreparedPolicyExchange {
+    func preparePolicyExchange(command: CloudPolicyCommand, execution: CoreCloudPolicyExecution) async throws -> PreparedPolicyExchange {
         guard !quiescing else { throw CancellationError() }
         guard let origin = try await execution.originalSDK() else { throw BridgeError.cloudPolicy(.staleCommand) }
         _ = try await waitForQuiescentFetchDependency()
@@ -2429,7 +2430,8 @@ public actor CloudKitSyncAdapter {
         try await execution.validate()
         guard await valid(origin) else { throw BridgeError.cloudPolicy(.staleCommand) }
         guard let instance = owned[origin] else { throw BridgeError.cloudPolicy(.staleCommand) }
-        return PreparedPolicyExchange(origin: origin, zone: instance.zone)
+        return PreparedPolicyExchange(origin: origin, zone: instance.zone,
+            proofIssuer: .init(command: command, execution: execution, original: instance.stopWitness))
     }
     func runPolicyExchange(runtimeID: UInt64, execution: CoreCloudPolicyExecution, prepared: PreparedPolicyExchange) async throws {
         // Preparation pinned this original before capture. No awaited lookup
@@ -2437,7 +2439,8 @@ public actor CloudKitSyncAdapter {
         let origin = prepared.origin
         let id = UUID()
         let task = Task {
-            return try await self.runCapturedExchange(origin: origin, zone: prepared.zone, id: runtimeID, execution: execution)
+            return try await self.runCapturedExchange(origin: origin, zone: prepared.zone, id: runtimeID, execution: execution,
+                proofIssuer: prepared.proofIssuer)
         }
         exchangeTask = (id, task); policyWorkerID = id; exchangeOrigin = origin; exchangeRunning = true; changed()
         defer { exchangeTask = nil; policyWorkerID = nil; exchangeOrigin = nil; exchangeRunning = false; changed() }
@@ -2530,7 +2533,8 @@ public actor CloudKitSyncAdapter {
         exchangeOrigin = origin
         return try await runCapturedExchange(origin: origin, zone: instance.zone, id: id)
     }
-    private func runCapturedExchange(origin: String, zone: String, id: UInt64, execution: CoreCloudPolicyExecution? = nil) async throws -> CloudExchangeResult {
+    private func runCapturedExchange(origin: String, zone: String, id: UInt64, execution: CoreCloudPolicyExecution? = nil,
+                                     proofIssuer: CloudFetchProofIssuer? = nil) async throws -> CloudExchangeResult {
         let zones = ["meguri-root", zone]
         #if DEBUG
         let diagnostic = DebugCloudDiagnostics.sendFailureCapture
@@ -2540,7 +2544,7 @@ public actor CloudKitSyncAdapter {
         var operationError: (any Error)?
         do {
             try Task.checkCancellation()
-            fetched = try await fetch(zones: zones, origin: origin, execution: execution)
+            fetched = try await fetch(zones: zones, origin: origin, execution: execution, proofIssuer: proofIssuer)
             try Task.checkCancellation()
             if fetched {
                 #if DEBUG
@@ -2560,7 +2564,7 @@ public actor CloudKitSyncAdapter {
                 #if DEBUG
                 site = .exchangeFetch
                 #endif
-                fetched = try await fetch(zones: zones, origin: origin, execution: execution)
+                fetched = try await fetch(zones: zones, origin: origin, execution: execution, proofIssuer: proofIssuer)
             }
             try Task.checkCancellation()
         } catch {
@@ -2569,17 +2573,18 @@ public actor CloudKitSyncAdapter {
             #endif
             operationError = error
         }
+        // Account from the exact original error while retaining its sealed
+        // outcome for return after required Core completion succeeds.
+        let cancelled = cloudOperationWasCancelled((operationError as? CloudFetchProofError)?.error ?? operationError)
         #if DEBUG
         let result: CloudExchangeResult
         do {
             result = try await core.completeExchange(sdk: origin, id: id, fetched: fetched,
-                cancelled: cloudOperationWasCancelled(operationError),
-                failed: operationError != nil && !cloudOperationWasCancelled(operationError))
+                cancelled: cancelled, failed: operationError != nil && !cancelled)
         } catch { diagnostic?.record(.nativeExchangeCompletion, error: error); throw error }
         #else
         let result = try await core.completeExchange(sdk: origin, id: id, fetched: fetched,
-                                                     cancelled: cloudOperationWasCancelled(operationError),
-                                                     failed: operationError != nil && !cloudOperationWasCancelled(operationError))
+                                                     cancelled: cancelled, failed: operationError != nil && !cancelled)
         #endif
         exchangeRunning = false
         if execution == nil, let held = heldAutomatic {

@@ -1,3 +1,4 @@
+import CloudKit
 import Foundation
 import Instrumentation
 import func MeguriCoreBindings.testCloudPolicyExchangeObservation
@@ -568,9 +569,12 @@ extension EventTests {
 
     /// P12.2/P12.4: the existing worker completes the facade's actual capture.
     @Test func nativePolicyExchangeCompletesActualRuntimeCapture() async throws {
-        try await withNativePolicyFixture { fixture in
+        let transport = EpochPreparationTransport()
+        try await withNativePolicyFixture(assetReadTransport: transport) { fixture in
             let (policy, executor) = try await nativePolicy(fixture)
             let engine = try await fixture.engine()
+            try await requireUnknownEpochSyncNowBaseline(engine.instanceID)
+            transport.bind(engine, reply: .found(try await boundEpochBytes()), root: fixture.root.envelope)
             let originalAtSend = Mutex<UInt64?>(nil)
             await engine.observeNextSendFinalEntry { _ in
                 if case .some(.runExchange(let exchange, .command)) = CloudMediaCancellationContext.selectedAction {
@@ -585,6 +589,8 @@ extension EventTests {
             let command = try #require(try policyCommands(output).first { if case .runExchange = $0.action { true } else { false } })
             let before = try await observePolicyExchange(command)
             let result = await executor.execute(command)
+            #expect(transport.preparation == [.init(zone: fixture.zone, name: "epoch", recordType: "MGEpoch")])
+            #expect(try await epochAuthority() != nil)
             #expect(result.error == nil)
             #expect(originalAtSend.withLock { $0 } == before.policyExchange)
             let completed = try await qualifiedRecordExchange(command, result: result, fixture: fixture, before: before, outcome: .succeeded)
@@ -602,9 +608,12 @@ extension EventTests {
     /// P12.3/V3.4: cancellation after capture drains the original SDK and
     /// qualifies the result through Runtime before facade.completeExchange.
     @Test func nativePolicyPostCaptureCancellationDrainsOriginalOperation() async throws {
-        try await withNativePolicyFixture { fixture in
+        let transport = EpochPreparationTransport()
+        try await withNativePolicyFixture(assetReadTransport: transport) { fixture in
             let (policy, executor) = try await nativePolicy(fixture)
             let engine = try await fixture.engine()
+            try await requireUnknownEpochSyncNowBaseline(engine.instanceID)
+            transport.bind(engine, reply: .found(try await boundEpochBytes()), root: fixture.root.envelope)
             await engine.appendFetchScripts([.manual(fetchedZones: ["meguri-root", fixture.zone], records: [fixture.root], group: nil)])
             let gate = CloudCallbackGate()
             await engine.pauseAfterBatch(gate)
@@ -615,6 +624,7 @@ extension EventTests {
             try await withCloudTask(gates: [gate], operation: {
                 let result = await executor.execute(command)
                 #expect(result.error is CancellationError)
+                #expect(result.fetchProofOutcome == nil && result.nativeCancellation == nil)
                 try await qualifiedRecordExchange(command, result: result, fixture: fixture, before: before, outcome: .cancelled)
                 let policyOutputCommands: [CloudPolicyCommand] = try result.outputs.flatMap(policyCommands)
                 let records = policyOutputCommands.filter { if case .recordExchange = $0.action { true } else { false } }
@@ -624,6 +634,8 @@ extension EventTests {
                 }
             }, whileRunning: {
                 try await gate.waitForArrival()
+                #expect(transport.preparation == [.init(zone: fixture.zone, name: "epoch", recordType: "MGEpoch")])
+                #expect(try await epochAuthority() != nil)
                 let cancel = try await policy.input(.syncNowCancelled(exchange: id))
                 let retained = try #require(try policyCommands(cancel).first { if case .cancelExchange = $0.action { true } else { false } })
                 let result = await executor.execute(retained)
@@ -651,6 +663,170 @@ extension EventTests {
 }
 
 private final class NativePolicyOriginalFailure: Error {}
+
+#if DEBUG
+/// Keep the equal-Epoch SDK read outside the original exchange-read fault seam.
+/// Both paths deliver actual native callbacks; only Core can accept authority.
+private struct PolicyExchangeProofTransport: CloudOwnTransport {
+    let preparation: EpochPreparationTransport
+    let exchange: any CloudOwnTransport
+    func prepare(_ command: CloudOwnTransportCommand) throws -> any CloudPreparedOwnOperation {
+        guard case .read(let target) = command else { throw CloudOwnTransportFailure.unexpectedReply }
+        if target.name == "epoch" && target.recordType == "MGEpoch" {
+            return try preparation.prepare(command)
+        }
+        return try exchange.prepare(command)
+    }
+}
+
+enum NativePolicyExchangeProofCase: CaseIterable, Sendable, Equatable {
+    case caller, providerCancellation, providerFailure, readFailure, sdkCancellation, cleanup
+    var providerFirst: Bool { self == .providerCancellation || self == .providerFailure }
+    var failed: Bool { self == .providerFailure || self == .readFailure }
+}
+
+extension EventTests {
+    // Use the existing native control-read queue and canonical proof wait, but
+    // carry the actual issued RunExchange through Runtime completion and ACKs.
+    @Test(arguments: NativePolicyExchangeProofCase.allCases)
+    func nativePolicyExchangeFreshProofRetainsOriginalOutcome(mode: NativePolicyExchangeProofCase) async throws {
+        let preparation = EpochPreparationTransport()
+        let base = FetchControlTransport()
+        let original = NativePolicyOriginalFailure()
+        let sdkOriginal = CKError(.operationCancelled) as NSError
+        let sdkFailure = CloudKitSDKOperationFailure(underlying: sdkOriginal,
+            code: Int64(sdkOriginal.code), retryAfterMilliseconds: 123)
+        let transport: any CloudOwnTransport
+        switch mode {
+        case .readFailure: transport = FetchProofThrowingTransport(base: base, error: original)
+        case .sdkCancellation: transport = FetchProofThrowingTransport(base: base, error: sdkFailure)
+        default: transport = base
+        }
+        let reads = PolicyExchangeProofTransport(preparation: preparation, exchange: transport)
+        try await withNativePolicyFixture(assetReadTransport: reads, appOwnsAccountObservation: true) { f in
+            let (policy, _) = try await nativePolicy(f)
+            let engine = try await f.engine()
+            try await requireUnknownEpochSyncNowBaseline(engine.instanceID)
+            preparation.bind(engine, reply: .found(try await boundEpochBytes()), root: f.root.envelope)
+            // Reset the real SDK no-state point only after readiness/capture.
+            // This forces the exchange's fetch into its original Active read.
+            let executor = NativeCloudPolicyExecutor(policy: policy, adapter: f.adapter,
+                observeExchangeCapture: { _, _ in await engine.signInSameSyntheticIdentity() })
+            let command = try #require(try policyCommands(try await policy.input(.syncNowRequested(.command)))
+                .first { if case .runExchange = $0.action { true } else { false } })
+            let before = try await observePolicyExchange(command)
+            let calls = engine.acceptedNetworkCalls.value
+            let drains = try await f.core.fetchDrains()
+            base.setReplies([.found(f.root.envelope)])
+            await engine.appendFetchScripts([.manual(fetchedZones: [], records: [], group: nil)])
+            let provider = CloudCallbackGate(), selected = CloudCallbackGate(), cancelled = CloudCallbackGate()
+            await cancelled.open()
+            await engine.pauseCancellation(cancelled)
+            await f.adapter.setProofAdmission({ _ in
+                await provider.enter()
+                if mode == .providerFailure { throw original }
+                if mode == .providerCancellation { throw CancellationError() }
+                try Task.checkCancellation()
+            }, acknowledgeOutputs: { _ in })
+            await f.adapter.setFetchProofCompletionObserver { await selected.enter() }
+            let acknowledgements = Mutex(0)
+            let observed = Mutex<[BridgeCall]>([])
+            let discards = Mutex(0)
+            let cleanupFailure = NativePolicyOriginalFailure()
+            let fault: (@Sendable () throws -> Void)?
+            if mode == .cleanup {
+                fault = {
+                    discards.withLock { $0 += 1 }
+                    throw cleanupFailure
+                }
+            } else { fault = nil }
+            let exchange = Task {
+                await MaintenanceCallObservation.$capture.withValue({ call in observed.withLock { $0.append(call) } }) {
+                    await CloudFetchProofCompletionFault.$afterOriginalDiscard.withValue(fault) {
+                        await CloudPolicyOutputAcknowledgement.$input.withValue({ work in
+                            let output = try await work()
+                            acknowledgements.withLock { $0 += 1 }
+                            return output
+                        }) {
+                            await executor.execute(command, corePrepared: {}, acknowledgeOutputs: { outputs in
+                                acknowledgements.withLock { $0 += outputs.count }
+                            })
+                        }
+                    }
+                }
+            }
+            do {
+                try await withCloudTask(gates: [provider, selected, cancelled], operation: {
+                    let result = await withTaskCancellationHandler { await exchange.value }
+                        onCancel: { exchange.cancel() }
+                    if mode.failed { #expect((result.error as? NativePolicyOriginalFailure) === original) }
+                    else if mode == .sdkCancellation {
+                        let error = try #require(result.error as? CloudKitSDKOperationFailure)
+                        #expect((error.underlying as NSError) === sdkOriginal)
+                        #expect(error.code == sdkFailure.code && error.retryAfterMilliseconds == sdkFailure.retryAfterMilliseconds)
+                    } else { #expect(result.error is CancellationError) }
+                    #expect(!(result.error is CloudFetchProofError))
+                    let outcome = try #require(result.fetchProofOutcome)
+                    #expect(outcome.preservesFailure == (mode != .caller))
+                    #expect(!outcome.accountStopCancellation)
+                    #expect((result.nativeCancellation != nil) == (mode == .caller))
+                    #expect(result.originalGuardRefusal == nil && result.dependentFetchRefusal == nil)
+                    #expect(!result.outputs.isEmpty && result.acknowledgedOutputCount == result.outputs.count)
+                    #expect(acknowledgements.withLock { $0 } == result.outputs.count)
+                    try await qualifiedRecordExchange(command, result: result, fixture: f, before: before,
+                        outcome: mode.failed ? .failed : .cancelled)
+                    let record = try #require(try result.outputs.flatMap(policyCommands).first {
+                        if case .recordExchange = $0.action { true } else { false }
+                    })
+                    if let proof = result.nativeCancellation { #expect(proof.matches(command) && !proof.matches(record)) }
+                    #expect(discards.withLock { $0 } == (mode == .cleanup ? 1 : 0))
+                    if mode == .cleanup {
+                        // Existing seam reports a failure AFTER the real discard;
+                        // retain its diagnostic without requalifying cancellation.
+                        #expect((outcome.debugOriginalCompletionFailure as? NativePolicyOriginalFailure) === cleanupFailure)
+                    } else { #expect(outcome.debugOriginalCompletionFailure == nil) }
+                    let allCalls = observed.withLock { $0 }
+                    let capture = try #require(allCalls.firstIndex(of: .cloudPolicyStartCaptureExchange))
+                    let preparationCalls = allCalls[..<capture]
+                    #expect(preparationCalls.filter { $0 == .cloudFetchReadComplete }.count == 1)
+                    #expect(preparationCalls.filter { $0 == .cloudPolicyExecutionSyncNowEpochRead }.count == 1)
+                    let completedCalls = Array(allCalls[capture...])
+                    #expect(completedCalls.filter { $0 == .cloudFetchReadComplete }.count == 1)
+                    #expect(completedCalls.filter { $0 == .cloudWorkflowCompleteExchange }.count == 1)
+                    #expect(completedCalls.filter { $0 == .cloudPolicyStartCompleteExchange }.count == 1)
+                    #expect(engine.acceptedNetworkCalls.value == calls + 1)
+                    #expect(base.targets.map(\.name) == ["active"])
+                    #expect(try await f.core.fetchDrains() == drains)
+                    #expect(await executor.execute(record).error == nil)
+                }, whileRunning: {
+                    try await provider.waitForArrival()
+                    #expect(preparation.preparation == [.init(zone: f.zone, name: "epoch", recordType: "MGEpoch")])
+                    #expect(try await epochAuthority() != nil)
+                    // The read and real capture have finished; Core completion has
+                    // not yet run. No gate supplies a command, result or proof.
+                    #expect(observed.withLock { $0.filter { $0 == .cloudPolicyStartCaptureExchange }.count } == 1)
+                    #expect(!observed.withLock { $0.contains(.cloudWorkflowCompleteExchange) })
+                    if mode.providerFirst {
+                        await provider.open()
+                        try await selected.waitForArrival()
+                    }
+                    exchange.cancel()
+                    if !mode.providerFirst { try await selected.waitForArrival() }
+                    // Join the actual cancellation entry before releasing the
+                    // provider-first outcome to the original exchange worker.
+                    try await cancelled.waitForArrival()
+                    await provider.open(); await selected.open()
+                })
+            } catch {
+                exchange.cancel(); await provider.open(); await selected.open(); await cancelled.open()
+                _ = await exchange.value
+                throw error
+            }
+            await f.adapter.setFetchProofCompletionObserver(nil)
+        }
+    }
+}
+#endif
 
 private struct ImmediatePolicyReadinessDeadline: CloudPolicyReadinessClock {
     func waitForDeadline() async throws { try Task.checkCancellation() }
@@ -752,16 +928,22 @@ extension EventTests {
     }
 
     @Test func nativePolicyPostCaptureErrorRecordsActualFailureAndLaterSyncNowWorks() async throws {
-        try await withNativePolicyFixture { fixture in
+        let transport = EpochPreparationTransport()
+        try await withNativePolicyFixture(assetReadTransport: transport) { fixture in
             let (policy, executor) = try await nativePolicy(fixture)
             let engine = try await fixture.engine()
+            try await requireUnknownEpochSyncNowBaseline(engine.instanceID)
+            transport.bind(engine, reply: .found(try await boundEpochBytes()), root: fixture.root.envelope)
             let failure = NativePolicyOriginalFailure()
             await engine.failNextOperation(failure)
             let issued = try await policy.input(.syncNowRequested(.command))
             let command = try #require(try policyCommands(issued).first { if case .runExchange = $0.action { true } else { false } })
             let before = try await observePolicyExchange(command)
             let result = await executor.execute(command)
+            #expect(transport.preparation == [.init(zone: fixture.zone, name: "epoch", recordType: "MGEpoch")])
+            #expect(try await epochAuthority() != nil)
             #expect((result.error as? NativePolicyOriginalFailure) === failure)
+            #expect(result.fetchProofOutcome == nil && result.nativeCancellation == nil)
             let actual = try await qualifiedRecordExchange(command, result: result, fixture: fixture, before: before, outcome: .failed)
             #expect(actual.collection == .failed)
             #expect(!actual.selectedNames.isEmpty && !actual.outstandingNames.isEmpty)

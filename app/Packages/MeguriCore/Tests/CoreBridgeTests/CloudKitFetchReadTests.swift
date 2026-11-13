@@ -6,7 +6,7 @@ import Testing
 
 /// Delivers the original NativeCloudOwnTransport CKFetchRecordsOperation's
 /// callbacks. Only SDK records/errors are injected; Core outcomes stay real.
-private final class FetchControlTransport: CloudOwnTransport, NativeCloudDatabaseQueue, Sendable {
+final class FetchControlTransport: CloudOwnTransport, NativeCloudDatabaseQueue, Sendable {
     enum Reply: Sendable { case found(Data?), failure(CKError.Code) }
     private struct State {
         var replies: [Reply] = []
@@ -323,7 +323,7 @@ private final class FetchProofAcknowledgements: Sendable {
 private final class FetchProofOriginalFailure: Error {}
 
 // Inject only at the original transport reply boundary, after its SDK drain.
-private struct FetchProofThrowingTransport: CloudOwnTransport {
+struct FetchProofThrowingTransport: CloudOwnTransport {
     let base: FetchControlTransport
     let error: any Error
     func prepare(_ command: CloudOwnTransportCommand) throws -> any CloudPreparedOwnOperation {

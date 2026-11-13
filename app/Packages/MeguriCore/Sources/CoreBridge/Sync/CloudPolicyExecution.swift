@@ -1136,7 +1136,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                     site = .exchangePreparation
                     #endif
                     guard let execution = try await policy.prepareExecution(command) else { throw BridgeError.cloudPolicy(.staleCommand) }
-                    let preparedExchange = try await adapter.preparePolicyExchange(execution: execution)
+                    let preparedExchange = try await adapter.preparePolicyExchange(command: command, execution: execution)
                     try Task.checkCancellation()
                     #if DEBUG
                     site = .exchangeCapture
@@ -1203,7 +1203,9 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 }
             }
             await delivery.acknowledge(outputs)
-            return .init(outputs: outputs, error: failure, deferred: false, acknowledgedOutputCount: delivery.count)
+            let proof = failure as? CloudFetchProofError
+            return .init(outputs: outputs, error: proof?.error ?? failure, deferred: false, acknowledgedOutputCount: delivery.count,
+                fetchProofOutcome: proof?.outcome, nativeCancellation: proof?.outcome.nativeCancellation)
         } catch {
             #if DEBUG
             diagnostic?.record(site, error: error)
@@ -1213,7 +1215,11 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
             await delivery.acknowledge(outputs)
             _ = try? await delivery.appendInput(to: &outputs) { [policy] in try await policy.input(.refresh(.cloud)) }
             await delivery.acknowledge(outputs)
-            return .init(outputs: outputs, error: error, deferred: false, acknowledgedOutputCount: delivery.count)
+            // Qualify only the failure actually returned here. A different
+            // required completion failure supersedes the operation's outcome.
+            let proof = error as? CloudFetchProofError
+            return .init(outputs: outputs, error: proof?.error ?? error, deferred: false, acknowledgedOutputCount: delivery.count,
+                fetchProofOutcome: proof?.outcome, nativeCancellation: proof?.outcome.nativeCancellation)
         }
     }
 }
