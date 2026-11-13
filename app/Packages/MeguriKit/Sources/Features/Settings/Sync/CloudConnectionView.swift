@@ -129,6 +129,7 @@ public struct CloudConnectionView: View {
             }
         }
         .formStyle(.grouped)
+        .accessibilityIdentifier("sync.connection.form.\(page.rawValue)")
         .navigationTitle(title(page))
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
