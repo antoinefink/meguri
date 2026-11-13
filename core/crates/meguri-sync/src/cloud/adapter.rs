@@ -144,6 +144,8 @@ pub(crate) struct FetchCall {
     pub id: u64,
     pub scope: Vec<String>,
     pub boundary: Option<FetchBoundary>,
+    // A manual did event is evidence only; its API call must still return.
+    pub ended: Option<FetchBoundary>,
     pub completed: bool,
     pub own_eligible: bool,
     pub failed_zones: BTreeSet<String>,

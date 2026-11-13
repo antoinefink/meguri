@@ -118,6 +118,7 @@ impl Runtime {
         if !self.adapter_fetch_qualified(sdk, fetch)? {
             return Ok(Vec::new());
         }
+        self.adapter_finalize_fetch(sdk, fetch)?;
         // Reuse the runtime's existing qualification/due path. This fact is
         // permission to read a record, never confirmation of the root.
         self.sdk_fetch_completed_without_root(sdk)?;

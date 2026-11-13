@@ -991,6 +991,41 @@ impl Runtime {
         Ok(())
     }
     pub fn adapter_did_fetch(&self, sdk: &str, group: &str, manual: bool) -> Result<(), RuntimeError> {
+        let mut s = self.state();
+        Self::sdk_locked(&s, sdk)?;
+        let boundary = if s.adapter.fetch.is_some() {
+            s.adapter.fetch.as_mut().and_then(|c| c.boundary.take())
+        } else {
+            s.adapter.scheduled.take()
+        };
+        let Some(boundary) = boundary else { return Ok(()) };
+        if boundary.group != group || boundary.manual != manual {
+            return Ok(());
+        }
+        if manual {
+            if let Some(call) = s.adapter.fetch.as_mut() {
+                call.completed = boundary.owns_call;
+                if boundary.owns_call {
+                    call.ended = Some(boundary);
+                }
+            }
+            return Ok(());
+        }
+        let fetch = s.adapter.fetch.as_ref().map(|c| c.id);
+        drop(s);
+        self.adapter_commit_fetch_boundary(sdk, boundary, fetch)
+    }
+    /// Called only after the original manual fetch API returned successfully.
+    /// Read planning needs these drains before deciding which ID reads are due.
+    pub(super) fn adapter_finalize_fetch(&self, sdk: &str, id: u64) -> Result<(), RuntimeError> {
+        let mut s = self.state();
+        Self::sdk_locked(&s, sdk)?;
+        let call = s.adapter.fetch.as_mut().filter(|c| c.id == id).ok_or(Error::InvalidData)?;
+        let Some(boundary) = call.ended.take() else { return Ok(()) };
+        drop(s);
+        self.adapter_commit_fetch_boundary(sdk, boundary, Some(id))
+    }
+    fn adapter_commit_fetch_boundary(&self, sdk: &str, boundary: FetchBoundary, fetch: Option<u64>) -> Result<(), RuntimeError> {
         let at_ms = self.adapter_now()?;
         let verification_guard = {
             let s = self.state();
@@ -1012,7 +1047,7 @@ impl Runtime {
         };
         let mut s = self.state();
         Self::sdk_locked(&s, sdk)?;
-        if verification_guard.as_ref().is_some_and(|(guard, point)| {
+        if s.adapter.fetch.as_ref().map(|c| c.id) != fetch || verification_guard.as_ref().is_some_and(|(guard, point)| {
             *guard != Self::adapter_guard_locked(&s) || *point != s.adapter.no_state_point
         }) {
             return Err(RuntimeError::StaleIncarnation);
@@ -1022,16 +1057,8 @@ impl Runtime {
         if s.adapter.durable.collection_loss.is_some() {
             return Ok(());
         }
-        let boundary = if s.adapter.fetch.is_some() {
-            s.adapter.fetch.as_mut().and_then(|c| c.boundary.take())
-        } else {
-            s.adapter.scheduled.take()
-        };
-        let Some(boundary) = boundary else { return Ok(()) };
-        if boundary.group != group || boundary.manual != manual {
-            return Ok(());
-        }
         let scope = s.adapter.fetch.as_ref().map(|c| c.scope.clone());
+        let point = s.adapter.no_state_point;
         let owns_call = boundary.owns_call;
         let drains = if let Some(scope) = scope.filter(|_| owns_call) {
             scope
@@ -1111,6 +1138,12 @@ impl Runtime {
             }
             s = self.state();
             Self::sdk_locked(&s, sdk)?;
+            if s.adapter.fetch.as_ref().map(|c| c.id) != fetch {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+            if s.adapter.no_state_point != point {
+                return Ok(());
+            }
         }
         let old = s.adapter.durable.clone();
         if resolved_epoch.is_some() {
@@ -1173,16 +1206,24 @@ impl Runtime {
         Ok(())
     }
     pub fn adapter_finish_fetch(&self, sdk: &str, id: u64) -> Result<bool, RuntimeError> {
+        self.adapter_finalize_fetch(sdk, id)?;
+        self.adapter_take_fetch(sdk, id, true)
+    }
+    /// An API error must discard even a paired manual will/did boundary.
+    pub fn adapter_abort_fetch(&self, sdk: &str, id: u64) -> Result<bool, RuntimeError> {
+        self.adapter_take_fetch(sdk, id, false)
+    }
+    fn adapter_take_fetch(&self, sdk: &str, id: u64, successful: bool) -> Result<bool, RuntimeError> {
         let mut s = self.state();
         Self::sdk_locked(&s, sdk)?;
-        let call = s.adapter.fetch.take().ok_or(Error::InvalidData)?;
-        if call.id != id {
+        if !s.adapter.fetch.as_ref().is_some_and(|c| c.id == id) {
             return Err(Error::InvalidData.into());
         }
+        let call = s.adapter.fetch.take().ok_or(Error::InvalidData)?;
         if call.boundary.is_some() {
             s.adapter.missing_did += 1;
         }
-        Ok(call.completed && call.scope.iter().all(|z| call.drains.contains(z)))
+        Ok(successful && call.completed && call.scope.iter().all(|z| call.drains.contains(z)))
     }
     pub fn adapter_fetch_drains(&self) -> Vec<FetchDrain> {
         self.state().adapter.durable.drains.clone()

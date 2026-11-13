@@ -469,9 +469,19 @@ fn cursorless_first_fetch_half_zone_logs_exact_missing_acked_names_without_delet
 
 #[test]
 fn same_identity_signin_after_zone_end_defers_completion_until_next_zone_start() {
+    same_identity_signin_before_return(false);
+}
+
+#[test]
+fn same_identity_signin_after_did_fetch_defers_completion_until_next_zone_start() {
+    same_identity_signin_before_return(true);
+}
+
+fn same_identity_signin_before_return(after_did: bool) {
     let mut rig = fixture(10, false);
     let before = rows(&rig.host);
     let runtime = rig.host.cloud_runtime().unwrap();
+    let drains = runtime.adapter_fetch_drains();
     let id = begin(runtime, &rig.sdk, &rig.zone);
     let p = page(&mut rig.service, &rig.zone, None);
     assert!(!p.more);
@@ -479,6 +489,11 @@ fn same_identity_signin_after_zone_end_defers_completion_until_next_zone_start()
     runtime
         .adapter_fetch_zone(&rig.sdk, rig.zone.clone(), false, false)
         .unwrap();
+    if after_did {
+        runtime.adapter_did_fetch(&rig.sdk, &format!("absence-{id}"), true).unwrap();
+        assert!(!runtime.adapter_snapshot().unwrap().absence_pass_completed);
+        assert!(logged(runtime).is_empty());
+    }
     let guard = runtime.adapter_guard();
     rig.host
         .cloud_policy_input(DeviceEvent::Account {
@@ -487,10 +502,11 @@ fn same_identity_signin_after_zone_end_defers_completion_until_next_zone_start()
         })
         .unwrap();
     assert_eq!(runtime.adapter_guard(), guard);
-    runtime
-        .adapter_did_fetch(&rig.sdk, &format!("absence-{id}"), true)
-        .unwrap();
+    if !after_did {
+        runtime.adapter_did_fetch(&rig.sdk, &format!("absence-{id}"), true).unwrap();
+    }
     let call_completed = runtime.adapter_finish_fetch(&rig.sdk, id).unwrap();
+    assert_eq!(runtime.adapter_fetch_drains(), drains);
     safe(&rig.host, &before);
     assert!(!runtime.adapter_snapshot().unwrap().absence_pass_completed);
     assert!(logged(runtime).is_empty());
@@ -501,6 +517,112 @@ fn same_identity_signin_after_zone_end_defers_completion_until_next_zone_start()
     safe(&rig.host, &before);
     completed(&rig.host, &rig.zone, BTreeSet::new());
     assert!(!call_completed, "pre-event zone is no post-event drain");
+}
+
+#[test]
+fn manual_did_fetch_waits_for_successful_return_before_drain_and_absence() {
+    for failed_return in [false, true] {
+        let mut rig = fixture(10, false);
+        let runtime = rig.host.cloud_runtime().unwrap();
+        let before = rows(&rig.host);
+        let drains = runtime.adapter_fetch_drains();
+        let id = begin(runtime, &rig.sdk, &rig.zone);
+        let p = page(&mut rig.service, &rig.zone, None);
+        assert!(!p.more);
+        deliver(&rig.host, &rig.sdk, &rig.zone, &p, true);
+        runtime.adapter_fetch_zone(&rig.sdk, rig.zone.clone(), false, false).unwrap();
+        runtime.adapter_did_fetch(&rig.sdk, &format!("absence-{id}"), true).unwrap();
+        assert_eq!(runtime.adapter_fetch_drains(), drains);
+        assert!(!runtime.adapter_snapshot().unwrap().absence_pass_completed);
+        assert!(logged(runtime).is_empty());
+        if failed_return {
+            assert!(!runtime.adapter_abort_fetch(&rig.sdk, id).unwrap());
+            assert_eq!(runtime.adapter_fetch_drains(), drains);
+            assert!(!runtime.adapter_snapshot().unwrap().absence_pass_completed);
+            assert!(logged(runtime).is_empty());
+            // The failed API call keeps the pass for the next successful fetch.
+            let retry = begin(runtime, &rig.sdk, &rig.zone);
+            let p = page(&mut rig.service, &rig.zone, None);
+            deliver(&rig.host, &rig.sdk, &rig.zone, &p, true);
+            finish(runtime, &rig.sdk, &rig.zone, retry, false);
+        } else {
+            // Production asks for this plan only after a successful API return.
+            assert!(runtime.adapter_fetch_reads(&rig.sdk, id, &rig.host.collection().unwrap()).unwrap().is_empty());
+            assert_eq!(runtime.adapter_fetch_drains().len(), drains.len() + 1);
+            assert!(runtime.adapter_finish_fetch(&rig.sdk, id).unwrap());
+        }
+        assert_eq!(runtime.adapter_fetch_drains().len(), drains.len() + 1);
+        safe(&rig.host, &before);
+        completed(&rig.host, &rig.zone, BTreeSet::new());
+    }
+}
+
+#[test]
+fn scheduled_did_fetch_still_drains_and_joined_manual_call_requires_repeat() {
+    for joined in [false, true] {
+        let mut rig = fixture(10, false);
+        let runtime = rig.host.cloud_runtime().unwrap();
+        let drains = runtime.adapter_fetch_drains();
+        runtime.adapter_will_fetch(&rig.sdk, "scheduled".into(), false).unwrap();
+        runtime.adapter_fetch_zone(&rig.sdk, rig.zone.clone(), true, false).unwrap();
+        let id = joined.then(|| runtime.adapter_begin_fetch(&rig.sdk, vec![rig.zone.clone()]).unwrap());
+        let p = page(&mut rig.service, &rig.zone, None);
+        assert!(!p.more);
+        deliver(&rig.host, &rig.sdk, &rig.zone, &p, true);
+        runtime.adapter_fetch_zone(&rig.sdk, rig.zone.clone(), false, false).unwrap();
+        runtime.adapter_did_fetch(&rig.sdk, "scheduled", false).unwrap();
+        assert_eq!(runtime.adapter_fetch_drains().len(), drains.len() + 1);
+        completed(&rig.host, &rig.zone, BTreeSet::new());
+        if let Some(id) = id {
+            assert!(!runtime.adapter_finish_fetch(&rig.sdk, id).unwrap());
+            let retry = begin(runtime, &rig.sdk, &rig.zone);
+            let p = page(&mut rig.service, &rig.zone, None);
+            deliver(&rig.host, &rig.sdk, &rig.zone, &p, true);
+            finish(runtime, &rig.sdk, &rig.zone, retry, false);
+            assert_eq!(runtime.adapter_fetch_drains().len(), drains.len() + 2);
+        }
+    }
+}
+
+#[test]
+fn same_identity_signin_after_did_fetch_reads_deleted_active_without_root_drain() {
+    let mut rig = fixture(10, false);
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let collection = rig.host.collection().unwrap();
+    let before = runtime.adapter_snapshot().unwrap();
+    let drains = runtime.adapter_fetch_drains();
+    let id = begin(runtime, &rig.sdk, "meguri-root");
+    let p = page(&mut rig.service, "meguri-root", None);
+    assert!(!p.more);
+    deliver(&rig.host, &rig.sdk, "meguri-root", &p, false);
+    runtime.adapter_fetch_zone(&rig.sdk, "meguri-root".into(), false, false).unwrap();
+    runtime.adapter_did_fetch(&rig.sdk, &format!("absence-{id}"), true).unwrap();
+    assert_eq!(runtime.adapter_fetch_drains(), drains);
+    assert!(runtime.adapter_snapshot().unwrap().root == before.root);
+    rig.service.request(&scope(), Caller::default(), Operation::DeleteZone {
+        zone: "meguri-root".into(), cause: meguri_testkit::cloud::RemovalCause::Deleted,
+    }).unwrap().result.unwrap();
+    rig.host.cloud_policy_input(DeviceEvent::Account {
+        identity: identity(), origin_sdk: Some(rig.sdk.clone()),
+    }).unwrap();
+    let mut reads = runtime.adapter_fetch_reads(&rig.sdk, id, &collection).unwrap();
+    assert_eq!(reads.len(), 1);
+    let read = reads.remove(0);
+    assert!(read.is_active());
+    assert_eq!(runtime.adapter_fetch_drains(), drains);
+    assert_eq!(runtime.status().unwrap().binding.unwrap().facts.state, cloud::BindingState::Active);
+    let result = sign_out_absence::read_control(&mut rig.service, "meguri-root", "active");
+    assert!(matches!(&result, cloud::publication::RecordRead::ZoneMissing));
+    runtime.complete_fetch_read_with_account(&read, &collection, result, false, None, None).unwrap();
+    assert_eq!(runtime.status().unwrap().binding.unwrap().facts.state,
+        cloud::BindingState::Isolated(cloud::IsolationReason::ActiveMissing));
+    assert_eq!(runtime.adapter_fetch_drains(), drains);
+    let after = runtime.adapter_snapshot().unwrap();
+    assert!(after.entities == before.entities);
+    assert!(!after.absence_pass_completed);
+    assert!(runtime.adapter_root_read_diagnostics().iter().any(|r| r.active && r.accepted && r.outcome == "zoneNotFound"));
+    assert!(runtime.validate_sdk(&rig.sdk).is_err());
+    assert!(runtime.adapter_begin_fetch(&rig.sdk, vec!["meguri-root".into()]).is_err());
 }
 
 #[test]

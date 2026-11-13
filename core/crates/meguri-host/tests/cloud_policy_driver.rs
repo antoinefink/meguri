@@ -2360,7 +2360,7 @@ fn first_manual_capture_cannot_send_after_changed_or_deleted_root() {
         let id = first_manual_capture(&rig);
         let selection = runtime.exchange_result(id).unwrap();
         assert!(!selection.selected_names.is_empty());
-        runtime
+        let fetch = runtime
             .adapter_begin_fetch(&rig.sdk, vec!["meguri-root".into()])
             .unwrap();
         runtime
@@ -2396,7 +2396,8 @@ fn first_manual_capture_cannot_send_after_changed_or_deleted_root() {
             runtime
                 .adapter_fetch_zone(&rig.sdk, "meguri-root".into(), false, false)
                 .unwrap();
-            assert!(runtime.adapter_did_fetch(&rig.sdk, "rejected-root", true).is_err());
+            runtime.adapter_did_fetch(&rig.sdk, "rejected-root", true).unwrap();
+            assert!(runtime.adapter_finish_fetch(&rig.sdk, fetch).is_err());
         }
         assert!(!runtime.sdk_root_confirmed());
         let status = runtime.status().unwrap();

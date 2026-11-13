@@ -2,6 +2,8 @@
 @testable import AppModel
 @testable import CoreBridge
 import Foundation
+import Instrumentation
+import func MeguriCoreBindings.testCloudPolicyExchangeObservation
 import Synchronization
 import Testing
 
@@ -1340,7 +1342,13 @@ extension ReviewCollectionStartupTests {
     @Test func q11ServiceAppSignInAfterRootFetchReadsDeletedActiveWithoutDrain() async throws {
         try await withAutomaticServiceApp { app, _, wire in
             let sdk = try #require(await app.factory.engines.last)
-            let workflow = try app.backend.workflow
+            let backend = try app.backend
+            let workflow = backend.workflow
+            var original: CloudPolicyCommand?
+            backend.beforeExecution = { command in
+                if case .runExchange = command.action { original = command }
+            }
+            defer { backend.beforeExecution = nil }
             let before = try await workflow.durableSnapshot()
             let drains = try await workflow.fetchDrains()
             let returned = ServiceAutomaticGate()
@@ -1348,6 +1356,14 @@ extension ReviewCollectionStartupTests {
             app.sync.syncNow()
             do {
                 try #require(try await serviceAppSignal(returned.entered, stage: "Q11 C1 root zone fetch completed"))
+                let command = try #require(original)
+                let raw = command.raw
+                let mappedRuntimeID = try await MaintenanceLane.shared.call(.testCloudPolicyExchangeObservation) { @Sendable in
+                    try testCloudPolicyExchangeObservation(command: raw).mappedRuntimeId
+                }
+                let runtimeID = try #require(mappedRuntimeID)
+                let batches = await sdk.batchRequests
+                let emptyBatches = await sdk.emptyBatchRequests
                 let deleted = try await wire.call(.object(["DeleteZone": .object([
                     "zone": .string("meguri-root"), "cause": .string("Deleted")])]))
                 #expect(try deleted.ok().text == "Done")
@@ -1364,6 +1380,10 @@ extension ReviewCollectionStartupTests {
                 #expect(!after.absencePassCompleted)
                 let reads = try await workflow.diagnostics().rootReads
                 #expect(reads.contains { $0.active && $0.accepted && $0.outcome == "zoneNotFound" })
+                let result = try #require(try await workflow.exchangeResult(id: runtimeID))
+                #expect(result.id == runtimeID && result.collection == .failed)
+                #expect(await sdk.batchRequests == batches)
+                #expect(await sdk.emptyBatchRequests == emptyBatches)
             } catch { await returned.release(); throw error }
         }
     }

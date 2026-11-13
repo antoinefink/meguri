@@ -243,9 +243,12 @@ public actor CoreCloudWorkflowService {
         let raw = try await owner()
         return try await MaintenanceLane.shared.call(.cloudWorkflowDidFetch) { try raw.didFetch(sdk: sdk, group: group, manual: manual) }
     }
-     func finishFetch(sdk: String, id: UInt64) async throws -> Bool {
+     func finishFetch(sdk: String, id: UInt64, successful: Bool = true) async throws -> Bool {
         let raw = try await owner()
-        return try await MaintenanceLane.shared.call(.cloudWorkflowFinishFetch) { try raw.finishFetch(sdk: sdk, id: id) }
+        return try await MaintenanceLane.shared.call(successful ? .cloudWorkflowFinishFetch : .cloudWorkflowAbortFetch) {
+            if successful { return try raw.finishFetch(sdk: sdk, id: id) }
+            return try raw.abortFetch(sdk: sdk, id: id)
+        }
     }
      func beginExchange(sdk: String) async throws -> UInt64 {
         let raw = try await owner()

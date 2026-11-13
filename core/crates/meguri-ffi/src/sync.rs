@@ -1096,6 +1096,10 @@ impl CloudWorkflow {
         callback::enter("CloudWorkflow.finish_fetch");
         self.core.adapter_finish_fetch(&sdk, id).map_err(cloud_error)
     }
+    pub fn abort_fetch(&self, sdk: String, id: u64) -> Result<bool, CoreError> {
+        callback::enter("CloudWorkflow.abort_fetch");
+        self.core.adapter_abort_fetch(&sdk, id).map_err(cloud_error)
+    }
     pub fn begin_exchange(&self, sdk: String) -> Result<u64, CoreError> {
         callback::enter("CloudWorkflow.begin_exchange");
         self.core.sync_now(&sdk, &self.host.collection()?).map_err(cloud_error)

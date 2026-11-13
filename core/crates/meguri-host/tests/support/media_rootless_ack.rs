@@ -259,7 +259,16 @@ fn rootless_ack_rechecks_delayed_deletion(fetched: bool) {
         assert!(runtime.adapter_did_fetch(stale_sdk, "rootless-drain", true).is_err());
         assert!(runtime.adapter_snapshot().unwrap() == pending);
         assert!(runtime.media_blobs_for_testing().unwrap() == media);
+        let pending_durable = durable(host);
         runtime.adapter_did_fetch(sdk, "rootless-drain", true).unwrap();
+        // didFetch pairs callbacks; only successful API return commits completion.
+        assert_eq!(durable(host), pending_durable);
+        assert_eq!(
+            runtime.adapter_snapshot().unwrap().absence_pass_completed,
+            pending.absence_pass_completed
+        );
+        assert!(runtime.media_blobs_for_testing().unwrap() == media);
+        assert!(runtime.adapter_finish_fetch(sdk, id).unwrap());
         let after = durable(host);
         let old_drains = before["drains"].as_array().unwrap();
         let new_drains = after["drains"].as_array().unwrap();
@@ -281,7 +290,6 @@ fn rootless_ack_rechecks_delayed_deletion(fetched: bool) {
         } else {
             assert!(runtime.adapter_snapshot().unwrap().absence_pass_completed);
         }
-        assert!(runtime.adapter_finish_fetch(sdk, id).unwrap());
     };
     let entity_name;
     let stale_sdk;

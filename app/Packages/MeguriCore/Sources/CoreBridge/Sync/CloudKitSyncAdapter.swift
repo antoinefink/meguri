@@ -1698,7 +1698,7 @@ public actor CloudKitSyncAdapter {
                 #endif
                 policyOperationOutputs.append(contentsOf: invocationOutputs.take())
                 if await valid(origin) {
-                    _ = try await core.finishFetch(sdk: origin, id: id)
+                    _ = try await core.finishFetch(sdk: origin, id: id, successful: false)
                     try await reportOperation(execution, zones: [.root, .collection], kind: .fetch, started: false, error: error)
                 }
                 throw error
@@ -1729,7 +1729,7 @@ public actor CloudKitSyncAdapter {
                 let proof = error as? CloudFetchProofError
                 do {
                     if await valid(origin) {
-                        _ = try await core.finishFetch(sdk: origin, id: id)
+                        _ = try await core.finishFetch(sdk: origin, id: id, successful: false)
                         try await reportOperation(execution, zones: [.root, .collection], kind: .fetch, started: false, error: proof?.error ?? error)
                     }
                 } catch {
@@ -2542,11 +2542,11 @@ public actor CloudKitSyncAdapter {
             try Task.checkCancellation()
             fetched = try await fetch(zones: zones, origin: origin, execution: execution)
             try Task.checkCancellation()
-            #if DEBUG
-            site = .exchangeFetched
-            #endif
-            try await core.exchangeFetched(sdk: origin, complete: fetched)
             if fetched {
+                #if DEBUG
+                site = .exchangeFetched
+                #endif
+                try await core.exchangeFetched(sdk: origin, complete: true)
                 repeat {
                     try Task.checkCancellation()
                     #if DEBUG
