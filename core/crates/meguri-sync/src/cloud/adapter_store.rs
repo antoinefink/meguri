@@ -13,6 +13,8 @@ pub(super) struct AdapterCommitOptions {
     pub start_absence: bool,
     pub resolved_epoch: Option<super::adapter::EpochVerification>,
     pub fetched_epoch: Option<super::control_codec::Epoch>,
+    pub root_intake: bool,
+    pub epoch_readability: Option<bool>,
 }
 
 impl TrackingStore {
@@ -60,6 +62,8 @@ impl TrackingStore {
             start_absence,
             resolved_epoch,
             fetched_epoch,
+            root_intake,
+            epoch_readability,
         } = options;
         // All-or-nothing even for callers below Swift's classification boundary.
         let owner = self.binding(binding)?.ok_or(Error::BindingNotFound)?;
@@ -146,6 +150,9 @@ impl TrackingStore {
         if let Some(epoch) = &fetched_epoch {
             super::epoch_crt_store::put(&tx, binding, epoch, super::epoch_crt_store::Authority::Fetched)?;
         }
+        if root_intake || epoch_readability.is_some() {
+            super::root_readability_store::observe(&tx, binding, durable.active.as_ref(), epoch_readability)?;
+        }
         for zone in &deleted_collection_zones {
             tx.execute(
                 "DELETE FROM cloud_publication_zones WHERE binding=?1 AND zone=?2",
@@ -165,7 +172,7 @@ impl TrackingStore {
                 super::incoming_store::remove_server_cache(&tx, binding)?;
             }
         }
-        if !entries.is_empty() || !refused.is_empty() || !deleted_collection_zones.is_empty() || fetched_epoch.is_some() {
+        if !entries.is_empty() || !refused.is_empty() || !deleted_collection_zones.is_empty() || fetched_epoch.is_some() || root_intake || epoch_readability.is_some() {
             #[cfg(feature = "test-hooks")]
             super::testing::tracking_commit(&tx, "cloud.tracking.commit.inbox")?;
             meguri_model::faultpoint!("cloud.tracking.commit.inbox")?;

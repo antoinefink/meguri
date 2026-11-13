@@ -217,6 +217,8 @@ impl Runtime {
                             start_absence: false,
                             resolved_epoch: None,
                             fetched_epoch: None,
+                            root_intake: false,
+                            epoch_readability: None,
                         },
                     ) {
                         Self::invalidate_tracking_locked(s);
@@ -427,6 +429,8 @@ impl Runtime {
                         start_absence: false,
                         resolved_epoch,
                         fetched_epoch: None,
+                        root_intake: false,
+                        epoch_readability: Some(false),
                     },
                 ) {
                     Self::invalidate_tracking_locked(s);
@@ -448,6 +452,7 @@ impl Runtime {
             return Ok(Some(followup));
         }
         let mut fetched_epoch = None;
+        let mut epoch_readability = None;
         match result {
             RecordRead::Found(record) if read.is_active() => {
                 let readable = record
@@ -455,22 +460,29 @@ impl Runtime {
                     .as_ref()
                     .is_some_and(|envelope| crate::cloud::control_codec::Active::decode(envelope).is_ok());
                 if !readable {
+                    self.record_fetch_readability(read, collection, Some(workflow::Saved {
+                        name: "active".into(), envelope: record.encrypted.unwrap_or_default(),
+                        system_fields: record.system_fields.0,
+                    }), None)?;
                     if read.lost_collection {
                         self.isolate_fetch_read(read, collection, IsolationReason::ZoneMissing)?;
+                        return Ok(None);
                     }
-                    return Ok(None);
-                }
-                let envelope = record.encrypted.ok_or(Error::InvalidData)?;
-                self.accept_fetch_root_read(read, &envelope, &record.system_fields.0)?;
-                #[cfg(feature = "test-hooks")]
-                if read.lost_collection {
-                    self.incoming_hooks
-                        .hit(super::super::testing::IncomingStage::KnownLossAfterActiveResult);
-                }
-                // A lost collection result may isolate even with the same
-                // active epoch, and an epoch switch must never create a drain.
-                if read.lost_collection || self.validate_sdk(&read.sdk).is_err() {
-                    return Ok(None);
+                    // The typed record establishes zone existence only. The
+                    // false drain below grants neither an ACK nor absence.
+                } else {
+                    let envelope = record.encrypted.ok_or(Error::InvalidData)?;
+                    self.accept_fetch_root_read(read, &envelope, &record.system_fields.0)?;
+                    #[cfg(feature = "test-hooks")]
+                    if read.lost_collection {
+                        self.incoming_hooks
+                            .hit(super::super::testing::IncomingStage::KnownLossAfterActiveResult);
+                    }
+                    // A lost collection result may isolate even with the same
+                    // active epoch, and an epoch switch must never create a drain.
+                    if read.lost_collection || self.validate_sdk(&read.sdk).is_err() {
+                        return Ok(None);
+                    }
                 }
             }
             RecordRead::Found(record) => {
@@ -493,6 +505,8 @@ impl Runtime {
                         };
                         if outcome != EpochPreparationOutcome::Ready {
                             read.set_preparation_outcome(outcome);
+                            drop(s);
+                            self.record_fetch_readability(read, collection, None, Some(false))?;
                             return Ok(None);
                         }
                     }
@@ -502,9 +516,12 @@ impl Runtime {
                         name: "epoch".into(), envelope, system_fields: record.system_fields.0,
                     }]);
                 }
+                epoch_readability = Some(fetched_epoch.is_some());
                 // P3: typed epoch existence decides the no-state zone read even
                 // without authority. Preparation still needs a complete body.
                 if read.is_epoch_preparation() && fetched_epoch.is_none() {
+                    drop(s);
+                    self.record_fetch_readability(read, collection, None, epoch_readability)?;
                     return Ok(None);
                 }
             }
@@ -550,7 +567,7 @@ impl Runtime {
                     fetched: false,
                 });
             }
-            if new_drain || resolved_epoch.is_some() || fetched_epoch.is_some() {
+            if new_drain || resolved_epoch.is_some() || fetched_epoch.is_some() || epoch_readability.is_some() {
                 let binding = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
                 #[cfg(feature = "test-hooks")]
                 let fail = read.is_epoch_preparation() && std::mem::take(&mut s.adapter.fail_inbox);
@@ -569,6 +586,8 @@ impl Runtime {
                         start_absence: false,
                         resolved_epoch,
                         fetched_epoch,
+                        root_intake: false,
+                        epoch_readability,
                     },
                 ) {
                     Self::invalidate_tracking_locked(s);
@@ -605,6 +624,35 @@ impl Runtime {
             }
         }
         Ok(None)
+    }
+    fn record_fetch_readability(
+        &self, read: &FetchRead, collection: &Collection,
+        active: Option<workflow::Saved>, epoch_readability: Option<bool>,
+    ) -> Result<(), RuntimeError> {
+        let at_ms = self.adapter_now()?;
+        self.with_scan(&read.scan, collection, |s| {
+            Self::fetch_read_locked(s, read)?;
+            let binding = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
+            let mut durable = s.adapter.durable.clone();
+            let root_intake = active.is_some();
+            if let Some(active) = active { durable.active = Some(active); }
+            #[cfg(feature = "test-hooks")]
+            let fail = std::mem::take(&mut s.adapter.fail_inbox);
+            #[cfg(not(feature = "test-hooks"))]
+            let fail = false;
+            if let Err(error) = s.store.as_mut().ok_or(Error::Database)?.adapter_commit(
+                binding, &[], &[], None, &durable,
+                super::super::adapter_store::AdapterCommitOptions {
+                    deleted_collection_zones: Vec::new(), at_ms, fail, start_absence: false,
+                    resolved_epoch: None, fetched_epoch: None, root_intake, epoch_readability,
+                },
+            ) {
+                Self::invalidate_tracking_locked(s);
+                return Err(error.into());
+            }
+            s.adapter.durable = durable;
+            Ok(())
+        })
     }
     fn isolate_fetch_read(
         &self,

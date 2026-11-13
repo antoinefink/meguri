@@ -721,6 +721,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
             .optional()?;
         let mut durable: super::adapter::Durable = content.map(|text| decode(&text)).transpose()?.unwrap_or_default();
         durable.active = Some(active);
+        super::root_readability_store::observe(&tx, b, durable.active.as_ref(), None)?;
         // Keep the last applied Service fact and this open's confirmation atomic.
         tx.execute(
             "INSERT INTO cloud_adapter_state(binding,content) VALUES (?1,?2) ON CONFLICT(binding) DO UPDATE SET content=excluded.content",

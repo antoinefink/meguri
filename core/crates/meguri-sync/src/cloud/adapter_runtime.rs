@@ -615,6 +615,8 @@ impl Runtime {
                 start_absence: false,
                 resolved_epoch: None,
                 fetched_epoch: None,
+                root_intake: false,
+                epoch_readability: None,
             },
         )?;
         if !names.is_empty() {
@@ -650,6 +652,8 @@ impl Runtime {
                 start_absence: false,
                 resolved_epoch: None,
                 fetched_epoch: None,
+                root_intake: false,
+                epoch_readability: None,
             },
         )?;
         #[cfg(feature = "test-hooks")]
@@ -704,7 +708,11 @@ impl Runtime {
         deleted: &[String],
     ) -> Result<(), RuntimeError> {
         let at_ms = self.adapter_now()?;
-        let (key, epoch, binding, guard) = {
+        let observes_control = (zone == "meguri-root" && !inputs.is_empty()
+            && !deleted.iter().any(|name| name == "active"))
+            || (zone != "meguri-root" && (inputs.iter().any(|input| input.record.name == "epoch")
+                || deleted.iter().any(|name| name == "epoch")));
+        let (key, epoch, binding, guard, scan) = {
             let s = self.state();
             Self::sdk_locked(&s, sdk)?;
             let b = &s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding;
@@ -713,6 +721,7 @@ impl Runtime {
                 b.facts.epoch.0,
                 b.id,
                 Self::adapter_guard_locked(&s),
+                if observes_control { Some(Self::control_intake_guard_locked(&s, sdk)?) } else { None },
             )
         };
         let records: Vec<_> = inputs.iter().map(|input| input.record.clone()).collect();
@@ -725,11 +734,14 @@ impl Runtime {
                 if r.name != "active" {
                     return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
                 }
-                crate::cloud::control_codec::Active::decode(&r.envelope).map_err(|_| Error::InvalidData)?;
+                if r.system_fields.is_empty() { return Err(Error::InvalidData.into()); }
+                // An owned, typed Active may have an unreadable encrypted body.
+                // Retain its exact version for attention and conditional recovery.
             }
         } else if zone != collection_zone(EpochId(epoch)) {
             return Err(RuntimeError::Incomplete(Incomplete::WholeBindingReconciliation));
         }
+        if zone == "meguri-root" && records.len() > 1 { return Err(Error::InvalidData.into()); }
         if zone == "meguri-root" && deleted.iter().any(|name| name == "active") {
             return self
                 .adapter_observe_zone_losses(
@@ -747,99 +759,117 @@ impl Runtime {
             self.incoming_hooks
                 .hit(super::super::testing::IncomingStage::FetchBeforeInbox);
         }
-        let mut s = self.state();
-        Self::sdk_locked(&s, sdk)?;
-        if Self::adapter_guard_locked(&s) != guard {
-            return Err(RuntimeError::StaleIncarnation);
-        }
-        let intake = if zone != "meguri-root" {
-            Some(super::super::payload_asset::intake(
-                &self.directory,
-                binding,
-                &key,
-                inputs,
-                at_ms,
-            )?)
-        } else {
-            None
-        };
-        let mut entries = intake.as_ref().map_or_else(Vec::new, |intake| intake.entries.clone());
-        let refused = intake.as_ref().map_or_else(Vec::new, |intake| intake.refused.clone());
-        if zone != "meguri-root" {
-            for name in deleted {
-                entries.push(InboxEntry {
-                    record_type: RecordType::Entity,
-                    record_name: name.clone(),
-                    value: InboxValue::Deletion,
-                    reason: InboxReason::Ready,
-                    source: InboxSource::Fetch,
-                    absence_pass: None,
-                    retry_count: 0,
-                    fetched_at_ms: at_ms,
-                });
+        let commit = |s: &mut State| {
+            Self::sdk_locked(s, sdk)?;
+            if Self::adapter_guard_locked(s) != guard {
+                return Err(RuntimeError::StaleIncarnation);
             }
-        }
-        #[cfg(feature = "test-hooks")]
-        let fail = std::mem::take(&mut s.adapter.fail_inbox);
-        #[cfg(not(feature = "test-hooks"))]
-        let fail = false;
-        let previous = s.adapter.durable.clone();
-        let fetched_epoch = if zone == "meguri-root" || deleted.iter().any(|name| name == "epoch") {
-            None
-        } else {
-            super::super::epoch_crt_store::fetched(
-                &s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding,
-                &records,
-            )
-        };
-        if zone == "meguri-root" {
-            if deleted.iter().any(|name| name == "active") {
-                s.adapter.durable.active = None;
-                s.adapter.durable.active_deleted = true;
-            } else if !s.adapter.durable.active_deleted
-                && let Some(record) = records.last()
+            if let Some(scan) = &scan
+                && Self::control_intake_guard_locked(s, sdk)? != *scan
             {
-                s.adapter.durable.active = Some(record.clone());
+                return Err(RuntimeError::StaleIncarnation);
             }
-        }
-        if let Err(error) = Self::adapter_commit_locked(
-            &mut s,
-            &entries,
-            &refused,
-            None,
-            AdapterCommitOptions {
-                deleted_collection_zones: Vec::new(),
-                at_ms,
-                fail,
-                start_absence: false,
-                resolved_epoch: None,
-                fetched_epoch,
-            },
-        ) {
-            s.adapter.durable = previous;
-            return Err(error);
-        }
-        if let Some(intake) = intake {
-            with_tracking_access(|| -> Result<(), Error> {
-                let live = s.store.as_ref().ok_or(Error::Database)?.inbox(binding)?;
-                intake.commit(&live)?;
-                super::super::payload_asset::sweep(&self.directory, binding, &live)
-            })?;
-        }
-        if zone != "meguri-root" {
-            s.incoming.retry_granted = true;
-        }
-        if s.adapter.durable.active_deleted {
-            s.root_confirmed = false;
-            s.adapter.token = s.adapter.token.checked_add(1).ok_or(Error::InvalidData)?;
-            s.publish_authority();
-            if let Some(b) = s.bound.as_mut() {
-                b.verified = false;
-                b.usable = false;
-                b.binding.facts.state = BindingState::Isolated(IsolationReason::ActiveMissing);
+            let intake = if zone != "meguri-root" {
+                Some(super::super::payload_asset::intake(
+                    &self.directory,
+                    binding,
+                    &key,
+                    inputs,
+                    at_ms,
+                )?)
+            } else {
+                None
+            };
+            let mut entries = intake.as_ref().map_or_else(Vec::new, |intake| intake.entries.clone());
+            let refused = intake.as_ref().map_or_else(Vec::new, |intake| intake.refused.clone());
+            if zone != "meguri-root" {
+                for name in deleted.iter().filter(|name| name.as_str() != "epoch") {
+                    entries.push(InboxEntry {
+                        record_type: RecordType::Entity,
+                        record_name: name.clone(),
+                        value: InboxValue::Deletion,
+                        reason: InboxReason::Ready,
+                        source: InboxSource::Fetch,
+                        absence_pass: None,
+                        retry_count: 0,
+                        fetched_at_ms: at_ms,
+                    });
+                }
             }
+            #[cfg(feature = "test-hooks")]
+            let fail = std::mem::take(&mut s.adapter.fail_inbox);
+            #[cfg(not(feature = "test-hooks"))]
+            let fail = false;
+            let previous = s.adapter.durable.clone();
+            let fetched_epoch = if zone == "meguri-root" || deleted.iter().any(|name| name == "epoch") {
+                None
+            } else {
+                super::super::epoch_crt_store::fetched(
+                    &s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding,
+                    &records,
+                )
+            };
+            let epoch_readability = if zone == "meguri-root" { None } else {
+                super::super::root_readability_store::epoch_observation(
+                    &s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding, &records, deleted,
+                )?
+            };
+            if zone == "meguri-root" {
+                if deleted.iter().any(|name| name == "active") {
+                    s.adapter.durable.active = None;
+                    s.adapter.durable.active_deleted = true;
+                } else if !s.adapter.durable.active_deleted
+                    && let Some(record) = records.last()
+                {
+                    s.adapter.durable.active = Some(record.clone());
+                }
+            }
+            if let Err(error) = Self::adapter_commit_locked(
+                s,
+                &entries,
+                &refused,
+                None,
+                AdapterCommitOptions {
+                    deleted_collection_zones: Vec::new(),
+                    at_ms,
+                    fail,
+                    start_absence: false,
+                    resolved_epoch: None,
+                    fetched_epoch,
+                    root_intake: zone == "meguri-root" && !records.is_empty(),
+                    epoch_readability,
+                },
+            ) {
+                s.adapter.durable = previous;
+                return Err(error);
+            }
+            if let Some(intake) = intake {
+                with_tracking_access(|| -> Result<(), Error> {
+                    let live = s.store.as_ref().ok_or(Error::Database)?.inbox(binding)?;
+                    intake.commit(&live)?;
+                    super::super::payload_asset::sweep(&self.directory, binding, &live)
+                })?;
+            }
+            if zone != "meguri-root" {
+                s.incoming.retry_granted = true;
+            }
+            if s.adapter.durable.active_deleted {
+                s.root_confirmed = false;
+                s.adapter.token = s.adapter.token.checked_add(1).ok_or(Error::InvalidData)?;
+                s.publish_authority();
+                if let Some(b) = s.bound.as_mut() {
+                    b.verified = false;
+                    b.usable = false;
+                    b.binding.facts.state = BindingState::Isolated(IsolationReason::ActiveMissing);
+                }
+            }
+            Ok(())
+        };
+        if let Some(scan) = &scan {
+            self.with_scan_file(scan, &self.directory.join("collection.anki2"), commit)?;
+        } else {
+            commit(&mut self.state())?;
         }
-        drop(s);
         if zone != "meguri-root" {
             meguri_model::faultpoint!("cloud.fetch.after_inbox").map_err(Error::from)?;
             #[cfg(feature = "test-hooks")]
@@ -959,6 +989,8 @@ impl Runtime {
                     start_absence: true,
                     resolved_epoch: None,
                     fetched_epoch: None,
+                    root_intake: false,
+                    epoch_readability: None,
                 },
             ) {
                 s.adapter.durable = prior;
@@ -1133,7 +1165,7 @@ impl Runtime {
             };
             let request = s.adapter.fetch.as_ref().map_or(0, |c| c.id);
             drop(s);
-            if let Some(root) = root {
+            if let Some(root) = root.filter(|r| crate::cloud::control_codec::Active::decode(&r.envelope).is_ok()) {
                 self.accept_root_fetch(sdk, Some(&root), true, request)?;
             }
             s = self.state();
@@ -1162,6 +1194,8 @@ impl Runtime {
                 start_absence: false,
                 resolved_epoch,
                 fetched_epoch: None,
+                root_intake: false,
+                epoch_readability: None,
             },
         ) {
             s.adapter.durable = old;
@@ -1620,6 +1654,8 @@ impl Runtime {
                         start_absence: false,
                         resolved_epoch: None,
                         fetched_epoch: None,
+                        root_intake: false,
+                        epoch_readability: None,
                     },
                 )?;
                 Ok(())

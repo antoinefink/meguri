@@ -127,22 +127,22 @@ mod tests {
         store.accept_media_root(binding.id, [5; 32], 1234).unwrap();
         assert_eq!(store.epoch_crt(binding.id).unwrap(), None);
         // Recreate the historical publication V2 shape, retaining its local fallback.
-        store.connection.execute_batch("DROP TABLE cloud_epoch_crt; UPDATE cloud_publication_schema SET version=2;").unwrap();
+        store.connection.execute_batch("DROP TABLE cloud_root_readability; DROP TABLE cloud_epoch_crt; UPDATE cloud_publication_schema SET version=2;").unwrap();
         store.install_runtime().unwrap();
         assert_eq!(store.epoch_crt(binding.id).unwrap(), None);
         assert_eq!(store.publication_media(binding.id).unwrap().unwrap().2, 1234);
         let version: i64 = store.connection.query_row("SELECT version FROM cloud_publication_schema", [], |r| r.get(0)).unwrap();
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
     }
 
     #[test]
     fn epoch_crt_version_and_ownership_guards_are_preserved() {
         let (_directory, mut store, binding) = fixture();
-        store.connection.execute("UPDATE cloud_publication_schema SET version=4", []).unwrap();
+        store.connection.execute("UPDATE cloud_publication_schema SET version=5", []).unwrap();
         assert!(matches!(runtime_store::check_version(&store.connection), Err(Error::RuntimeSchemaUnsupported)));
         store.connection.execute("UPDATE cloud_publication_schema SET version=2", []).unwrap();
         assert!(matches!(runtime_store::check_version(&store.connection), Err(Error::InvalidData)));
-        store.connection.execute("UPDATE cloud_publication_schema SET version=3", []).unwrap();
+        store.connection.execute("UPDATE cloud_publication_schema SET version=4", []).unwrap();
         store.scope.environment = Environment::Production;
         assert!(matches!(store.epoch_crt(binding.id), Err(Error::BindingNotFound)));
     }
@@ -184,7 +184,7 @@ mod tests {
             fetched_at_ms: 1000,
         };
         store.connection.execute_batch("CREATE TEMP TRIGGER reject_epoch_crt BEFORE INSERT ON cloud_epoch_crt BEGIN SELECT RAISE(ABORT,'epoch knowledge constraint'); END;").unwrap();
-        assert!(store.receive_records(binding.id, &[entry], &[], Some(&fetched)).is_err());
+        assert!(store.receive_records(binding.id, &[entry], &[], Some(&fetched), Some(true)).is_err());
         assert!(store.inbox(binding.id).unwrap().is_empty());
         assert_eq!(store.epoch_crt(binding.id).unwrap(), None);
     }

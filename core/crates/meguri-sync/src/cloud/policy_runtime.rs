@@ -117,6 +117,9 @@ impl Runtime {
                     verified: b.verified,
                     publish_step,
                 });
+                if store.root_unreadable(b.binding.id)?.is_some() {
+                    summary.attention.insert(Attention::RootUnreadable, 1);
+                }
                 summary.crt_known = b.epoch_crt.is_some();
                 summary.crt_mismatch = b.epoch_crt.is_some_and(|crt| crt != b.current_crt.1);
                 let work = Self::exchange_work_locked(&s, store, b.binding.id)?;

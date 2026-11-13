@@ -259,7 +259,7 @@ fn staging_inbox_reference_survives_copy_expiry_finish_sweep_and_reopen() {
             fetched_at_ms: 1,
         };
         store
-            .receive_records(binding, std::slice::from_ref(&entry), &[], None)
+            .receive_records(binding, std::slice::from_ref(&entry), &[], None, None)
             .unwrap();
         if reference_first {
             expire_pending_asset_copy(&mut store, &path);

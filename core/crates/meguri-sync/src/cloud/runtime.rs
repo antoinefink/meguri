@@ -1306,9 +1306,25 @@ impl Runtime {
         collection: &Collection,
         work: impl FnOnce(&mut State) -> Result<T, RuntimeError>,
     ) -> Result<T, RuntimeError> {
+        self.with_scan_file(guard, collection.path(), |state| {
+            if !collection.is_current() || collection.generation() != guard.generation {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+            with_tracking_access(|| work(state))
+        })
+    }
+
+    // Control intake without a Collection uses the same live file/publication
+    // and retained scan ownership checks as with_scan.
+    fn with_scan_file<T>(
+        &self,
+        guard: &ScanGuard,
+        path: &Path,
+        work: impl FnOnce(&mut State) -> Result<T, RuntimeError>,
+    ) -> Result<T, RuntimeError> {
         // Platform and sidecar reads precede writer-shared guards.
-        let file = self.inputs.files.identity(collection.path())?;
-        let publication = meguri_engine::device_state::DeviceState::for_collection(collection.path()).publication()?;
+        let file = self.inputs.files.identity(path)?;
+        let publication = meguri_engine::device_state::DeviceState::for_collection(path).publication()?;
         if file != guard.file || file.created_nanos >= 1_000_000_000 {
             return Err(RuntimeError::FileIdentityUnavailable);
         }
@@ -1325,8 +1341,6 @@ impl Runtime {
             || !bound.verified
             || state.invalidation != guard.invalidation
             || state.invalidation_exhausted
-            || !collection.is_current()
-            || collection.generation() != guard.generation
             || !publication.as_ref().is_some_and(|p| {
                 p.identity == bound.binding.facts.publication
                     && p.decision == meguri_engine::device_state::PublicationDecision::Clear
@@ -1334,7 +1348,7 @@ impl Runtime {
         {
             return Err(RuntimeError::StaleIncarnation);
         }
-        with_tracking_access(|| work(&mut state))
+        work(&mut state)
     }
 
     /// Compare bounded pages through one held CloudReader snapshot and its
@@ -1979,6 +1993,14 @@ pub(super) fn note_image(row: &[Cell], nt_struct_gen: u64) -> Result<codec::Note
 
 #[cfg(feature = "test-hooks")]
 impl Runtime {
+    /// Read only the durable attention version; never supply policy facts.
+    pub fn root_unreadable_for_testing(&self) -> Result<Option<OpaqueBytes>, RuntimeError> {
+        let s = self.state();
+        let Some(bound) = &s.bound else { return Ok(None); };
+        with_tracking_access(|| {
+            Ok(s.store.as_ref().ok_or(Error::Database)?.root_unreadable(bound.binding.id)?)
+        })
+    }
     /// Read only the qualified durable P6 ledger; never the media fallback.
     pub fn epoch_crt_for_testing(&self) -> Result<Option<i64>, RuntimeError> {
         let s = self.state();

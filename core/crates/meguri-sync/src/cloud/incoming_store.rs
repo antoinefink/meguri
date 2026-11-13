@@ -364,6 +364,7 @@ impl TrackingStore {
         entries: &[InboxEntry],
         refused: &[RefusedEntry],
         fetched_epoch: Option<&super::control_codec::Epoch>,
+        epoch_readability: Option<bool>,
     ) -> Result<(), Error> {
         if self.binding(b)?.ok_or(Error::BindingNotFound)?.facts.state != BindingState::Active {
             return Err(Error::IsolatedBinding);
@@ -372,6 +373,11 @@ impl TrackingStore {
         receive(&tx, b, entries, refused)?;
         if let Some(epoch) = fetched_epoch {
             super::epoch_crt_store::put(&tx, b, epoch, super::epoch_crt_store::Authority::Fetched)?;
+        }
+        if epoch_readability.is_some() {
+            let text: Option<String> = tx.query_row("SELECT content FROM cloud_adapter_state WHERE binding=?1", [b.0.as_slice()], |r| r.get(0)).optional()?;
+            let durable: super::adapter::Durable = text.map(|s| decode(&s)).transpose()?.unwrap_or_default();
+            super::root_readability_store::observe(&tx, b, durable.active.as_ref(), epoch_readability)?;
         }
         #[cfg(feature = "test-hooks")]
         super::testing::tracking_commit(&tx, "cloud.tracking.commit.inbox")?;

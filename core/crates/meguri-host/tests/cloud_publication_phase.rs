@@ -4,6 +4,8 @@
 mod epoch_crt_knowledge;
 #[path = "cloud_publication_phase/epoch_crt_gate.rs"]
 mod epoch_crt_gate;
+#[path = "cloud_publication_phase/root_unreadable.rs"]
+mod root_unreadable;
 #[path = "cloud_publication_phase/media_r2.rs"]
 mod media_r2;
 #[path = "support/cloud_media_protocol.rs"]

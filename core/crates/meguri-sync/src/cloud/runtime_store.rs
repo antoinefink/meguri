@@ -234,15 +234,23 @@ impl TrackingStore {
 
     pub(super) fn isolate_runtime_binding(&mut self, binding: BindingId, reason: IsolationReason) -> Result<(), Error> {
         let mut value = self.binding(binding)?.ok_or(Error::BindingNotFound)?;
-        if !isolation_replaces(value.facts.state, reason) {
+        let replaces = isolation_replaces(value.facts.state, reason);
+        if !replaces && reason != IsolationReason::Stopped {
             return Ok(());
         }
-        value.facts.state = BindingState::Isolated(reason);
         let transaction = self.connection.transaction()?;
-        transaction.execute(
-            "UPDATE bindings SET facts=?2 WHERE id=?1",
-            params![binding.0.as_slice(), encode(&value.facts)?],
-        )?;
+        if replaces {
+            value.facts.state = BindingState::Isolated(reason);
+            transaction.execute(
+                "UPDATE bindings SET facts=?2 WHERE id=?1",
+                params![binding.0.as_slice(), encode(&value.facts)?],
+            )?;
+        }
+        if reason == IsolationReason::Stopped {
+            // V16 is an actual local-only decision, not a fetched success.
+            // Keep work/epoch knowledge, and end this attention obligation.
+            transaction.execute("UPDATE cloud_root_readability SET status='unknown',active_system_fields=NULL WHERE binding=?1", [binding.0.as_slice()])?;
+        }
         if matches!(
             reason,
             IsolationReason::EncryptedDataReset | IsolationReason::ZoneDeletedByUser
@@ -271,6 +279,7 @@ impl TrackingStore {
             .optional()?;
         let mut durable: super::adapter::Durable = content.map(|text| decode(&text)).transpose()?.unwrap_or_default();
         durable.active = Some(active);
+        super::root_readability_store::observe(&transaction, binding, durable.active.as_ref(), None)?;
         // Persist before isolation: its trigger must clear absence and seen
         // state without a later write restoring the previous absence ledger.
         transaction.execute(

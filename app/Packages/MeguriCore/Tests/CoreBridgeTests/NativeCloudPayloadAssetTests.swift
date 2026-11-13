@@ -294,6 +294,23 @@ struct NativeCloudPayloadAssetTests {
         #expect(!FileManager.default.fileExists(atPath: copied.path))
     }
 
+    @Test func unreadableControlKeepsRoutingAndOriginalSystemFields() throws {
+        for (type, zone, name) in [("MGActive", "meguri-root", "active"), ("MGEpoch", "c-synthetic", "epoch")] {
+            let record = CKRecord(recordType: type, recordID: .init(recordName: name, zoneID: NativeCloudOwnRecords.zone(zone)))
+            let expected = try NativeCloudKitSystemFields.encode(record)
+            let value = try NativeCloudRecordConversion.decode(record)
+            #expect(value.name == name && value.zone == zone && value.recordType == type)
+            #expect(value.envelope.isEmpty && value.systemFields == expected)
+            // Malformed encrypted fields remain a native shape failure.
+            record.encryptedValues["e"] = "synthetic-wrong-type" as CKRecordValue
+            #expect(throws: NativeCloudKitFailure.self) { try NativeCloudRecordConversion.decode(record) }
+        }
+        let entity = CKRecord(recordType: "MGEntity", recordID: .init(recordName: "ordinary-note", zoneID: NativeCloudOwnRecords.zone("c-synthetic")))
+        #expect(throws: NativeCloudKitFailure.self) { try NativeCloudRecordConversion.decode(entity) }
+        let wrongRoute = CKRecord(recordType: "MGActive", recordID: .init(recordName: "epoch", zoneID: NativeCloudOwnRecords.zone("c-synthetic")))
+        #expect(throws: NativeCloudKitFailure.self) { try NativeCloudRecordConversion.decode(wrongRoute) }
+    }
+
     @Test func entityPayloadFieldDoesNotRelaxControlOrOtherAssetFields() throws {
         let zone = NativeCloudOwnRecords.zone("c-synthetic")
         for type in ["MGEntity", "MGEpoch"] {

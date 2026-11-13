@@ -26,7 +26,15 @@ enum NativeCloudRecordConversion {
                 try NativeCloudOwnRecords.requireNoAssets(record)
             }
         }
-        guard let envelope = record.encryptedValues["e"] as? Data, envelope.count <= 1_000_000 else { throw NativeCloudKitFailure.unsupportedRecord }
+        let envelope: Data
+        if record.encryptedValues["e"] == nil && ["MGActive", "MGEpoch"].contains(record.recordType) {
+            // Preserve a typed unreadable control and its conditional version.
+            // Empty bytes cannot decode as a supported Active or Epoch in Rust.
+            envelope = Data()
+        } else {
+            guard let bytes = record.encryptedValues["e"] as? Data, bytes.count <= 1_000_000 else { throw NativeCloudKitFailure.unsupportedRecord }
+            envelope = bytes
+        }
         // Sent callbacks need metadata only. The original upload file remains
         // in Rust's batch registry; never adopt an SDK-returned asset URL here.
         return .init(name: name, envelope: envelope, systemFields: try NativeCloudKitSystemFields.encode(record), recordType: record.recordType, zone: zone)

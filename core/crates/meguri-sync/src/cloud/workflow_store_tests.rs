@@ -118,7 +118,7 @@ fn exchange_blocks_follow_pending_references_and_stop_at_clean_images() {
         seen_at_ms: 1000,
     };
     store
-        .receive_records(binding, &[], std::slice::from_ref(&refused), None)
+        .receive_records(binding, &[], std::slice::from_ref(&refused), None, None)
         .unwrap();
     assert_eq!(store.blocked_exchange_names(binding, &names).unwrap(), names);
 
@@ -142,7 +142,7 @@ fn exchange_blocks_follow_pending_references_and_stop_at_clean_images() {
         record_name: clean.name,
         ..refused
     };
-    store.receive_records(binding, &[], &[note_refusal], None).unwrap();
+    store.receive_records(binding, &[], &[note_refusal], None, None).unwrap();
     assert_eq!(store.blocked_exchange_names(binding, &selected).unwrap(), selected);
 }
 

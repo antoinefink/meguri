@@ -144,6 +144,13 @@ impl TrackingStore {
             return Err(Error::InvalidData);
         }
         super::epoch_crt_store::put(&tx, op.binding_after, &epoch, super::epoch_crt_store::Authority::Adopted)?;
+        let active = super::workflow::Saved {
+            name: "active".into(), envelope: op.active.encrypted.clone().ok_or(Error::InvalidData)?,
+            system_fields: op.active.system_fields.0.clone(),
+        };
+        super::root_readability_store::observe(&tx, op.binding_after, Some(&active), Some(true))?;
+        let durable = super::adapter::Durable { active: Some(active), ..Default::default() };
+        tx.execute("INSERT INTO cloud_adapter_state(binding,content) VALUES(?1,?2)", params![op.binding_after.0.as_slice(), encode(&durable)?])?;
         for entity in entities {
             super::workflow_store::put(&tx, op.binding_after, &entity?)?;
         }

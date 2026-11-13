@@ -154,7 +154,7 @@ fn epoch_crt_gate_legacy_unknown_blocks_send_until_actual_complete_epoch_is_acce
     // Keep the account decision, binding, epoch and actual Saved receipts intact.
     cloud::runtime::with_tracking_access(|| {
         let db = PlainDatabase::open(&dir.join(cloud::TRACKING_FILE)).unwrap();
-        db.execute_batch("DROP TABLE cloud_epoch_crt; UPDATE cloud_publication_schema SET version=2;").unwrap();
+        db.execute_batch("DROP TABLE cloud_root_readability; DROP TABLE cloud_epoch_crt; UPDATE cloud_publication_schema SET version=2;").unwrap();
     });
     let host = open_host(&dir, keys());
     let runtime = host.cloud_runtime().unwrap();

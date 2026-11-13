@@ -94,6 +94,18 @@ impl Runtime {
         }
         Ok(())
     }
+    pub(super) fn control_intake_guard_locked(s: &State, instance: &str) -> Result<ScanGuard, RuntimeError> {
+        Self::caller_locked(s, instance)?;
+        if s.tracking_stopped {
+            return Err(RuntimeError::Incomplete(Incomplete::WholeBindingReconciliation));
+        }
+        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+        Ok(ScanGuard {
+            invalidation: s.invalidation, binding: b.binding.id, open: b.open_counter,
+            generation: b.evidence.generation, file: b.file, incarnation: s.incarnation,
+        })
+    }
+
     /// SDKs call this before changing their own pending state for a delivery.
     /// Every mutating core API repeats the check under its commit's state lock.
     pub fn validate_caller(&self, instance: &str) -> Result<(), RuntimeError> {
@@ -1001,94 +1013,124 @@ impl Runtime {
         source: (bool, Option<&super::super::adapter::FetchRead>),
     ) -> Result<bool, RuntimeError> {
         let (completed_fetch, read) = source;
-        let _ = self.adapter_now();
-        let active = super::super::control_codec::Active::decode(envelope).map_err(|_| Error::InvalidData)?;
-        let mut s = self.state();
-        if Self::caller_locked(&s, instance).is_err() {
-            return Ok(false);
-        }
-        if let Some(read) = read {
-            Self::fetch_read_locked(&s, read)?;
-        }
-        if !completed_fetch && !read.is_some_and(|r| r.is_known_loss()) {
-            s.trace.push(TraceEvent::RootReadRecorded {
-                instance: instance.into(),
-                request_id,
-            });
-        }
-        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
-        let id = b.binding.id;
-        if Self::publication_allows_send_locked(&s) {
-            return Ok(false);
-        }
-        if !b.verified
-            || !b.usable
-            || s.adapter.known_loss.is_some()
-            || (s.adapter.durable.collection_loss.is_some() && !lost_zone)
-            || (s.adapter.durable.epoch_verification.is_some() && read.is_none())
-            || !s.whole_complete
-            || s.scan_required
-            || (!s.root_fetch_qualified && !lost_zone && !completed_fetch)
-        {
-            return Ok(false);
-        }
-        let reason = if active.epoch != b.binding.facts.epoch.0 {
-            Some(IsolationReason::EpochSwitched)
-        } else if lost_zone {
-            Some(IsolationReason::ZoneMissing)
-        } else {
-            None
+        let at_ms = self.adapter_now()?;
+        let guard = {
+            let s = self.state();
+            if Self::caller_locked(&s, instance).is_err() {
+                return Ok(false);
+            }
+            Self::control_intake_guard_locked(&s, instance)?
         };
-        if let Some(reason) = reason {
-            let (binding, durable) = with_tracking_access(|| {
-                let store = s.store.as_mut().ok_or(Error::Database)?;
-                let durable = store.isolate_runtime_binding_with_active(
+        self.with_scan_file(&guard, &self.directory.join("collection.anki2"), |s| {
+            if Self::control_intake_guard_locked(s, instance)? != guard {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+            if let Some(read) = read {
+                Self::fetch_read_locked(s, read)?;
+            }
+            if !completed_fetch && !read.is_some_and(|r| r.is_known_loss()) {
+                s.trace.push(TraceEvent::RootReadRecorded {
+                    instance: instance.into(),
+                    request_id,
+                });
+            }
+            let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+            let id = b.binding.id;
+            if with_tracking_access(|| Self::publication_allows_send_locked(s)) {
+                return Ok(false);
+            }
+            if !b.verified
+                || !b.usable
+                || s.adapter.known_loss.is_some()
+                || (s.adapter.durable.collection_loss.is_some() && !lost_zone)
+                || (s.adapter.durable.epoch_verification.is_some() && read.is_none())
+                || !s.whole_complete
+                || s.scan_required
+                || (!s.root_fetch_qualified && !lost_zone && !completed_fetch)
+            {
+                return Ok(false);
+            }
+            // After ownership checks, retain unreadable Active bytes and their
+            // Service version atomically with attention, without confirming root.
+            let active = match super::super::control_codec::Active::decode(envelope) {
+                Ok(active) => active,
+                Err(_) => {
+                    let mut durable = s.adapter.durable.clone();
+                    durable.active = Some(Saved {
+                        name: "active".into(), envelope: envelope.to_vec(), system_fields: system_fields.to_vec(),
+                    });
+                    if let Err(error) = with_tracking_access(|| s.store.as_mut().ok_or(Error::Database)?.adapter_commit(
+                        id, &[], &[], None, &durable,
+                        super::super::adapter_store::AdapterCommitOptions {
+                            deleted_collection_zones: Vec::new(), at_ms, fail: false, start_absence: false,
+                            resolved_epoch: None, fetched_epoch: None, root_intake: true, epoch_readability: None,
+                        },
+                    )) {
+                        Self::invalidate_tracking_locked(s);
+                        return Err(error.into());
+                    }
+                    s.adapter.durable = durable;
+                    return Ok(false);
+                }
+            };
+            let reason = if active.epoch != b.binding.facts.epoch.0 {
+                Some(IsolationReason::EpochSwitched)
+            } else if lost_zone {
+                Some(IsolationReason::ZoneMissing)
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                let (binding, durable) = with_tracking_access(|| {
+                    let store = s.store.as_mut().ok_or(Error::Database)?;
+                    let durable = store.isolate_runtime_binding_with_active(
+                        id,
+                        reason,
+                        Saved {
+                            name: "active".into(),
+                            envelope: envelope.to_vec(),
+                            system_fields: system_fields.to_vec(),
+                        },
+                    )?;
+                    let binding = store.binding(id)?.ok_or(Error::BindingNotFound)?;
+                    Ok::<_, Error>((binding, durable))
+                })?;
+                s.adapter.durable = durable;
+                let b = s.bound.as_mut().ok_or(RuntimeError::StaleIncarnation)?;
+                b.usable = false;
+                b.verified = false;
+                b.binding = binding;
+                s.publish_authority();
+                if read.is_some_and(|read| read.lost_collection) {
+                    s.adapter.pending_collection_loss = None;
+                }
+                return Ok(false);
+            }
+            let open = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.open_counter;
+            let durable = with_tracking_access(|| {
+                s.store.as_mut().ok_or(Error::Database)?.save_root_ack(
                     id,
-                    reason,
-                    Saved {
-                        name: "active".into(),
-                        envelope: envelope.to_vec(),
-                        system_fields: system_fields.to_vec(),
+                    RootAcknowledgement {
+                        open,
+                        request_id,
+                        epoch: EpochId(active.epoch),
+                        envelope: OpaqueBytes(envelope.to_vec()),
+                        system_fields: OpaqueBytes(system_fields.to_vec()),
                     },
-                )?;
-                let binding = store.binding(id)?.ok_or(Error::BindingNotFound)?;
-                Ok::<_, Error>((binding, durable))
+                )
             })?;
             s.adapter.durable = durable;
-            let b = s.bound.as_mut().ok_or(RuntimeError::StaleIncarnation)?;
-            b.usable = false;
-            b.verified = false;
-            b.binding = binding;
-            s.publish_authority();
-            if read.is_some_and(|read| read.lost_collection) {
-                s.adapter.pending_collection_loss = None;
+            s.root_reads.insert(request_id);
+            let first = !s.root_confirmed;
+            s.root_confirmed = true;
+            if first {
+                s.trace.push(TraceEvent::RootConfirmed {
+                    instance: instance.into(),
+                });
+                self.emit_pending_locked(s, UpdateKind::Full, BTreeSet::new())?;
             }
-            return Ok(false);
-        }
-        let open = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.open_counter;
-        let durable = with_tracking_access(|| {
-            s.store.as_mut().ok_or(Error::Database)?.save_root_ack(
-                id,
-                RootAcknowledgement {
-                    open,
-                    request_id,
-                    epoch: EpochId(active.epoch),
-                    envelope: OpaqueBytes(envelope.to_vec()),
-                    system_fields: OpaqueBytes(system_fields.to_vec()),
-                },
-            )
-        })?;
-        s.adapter.durable = durable;
-        s.root_reads.insert(request_id);
-        let first = !s.root_confirmed;
-        s.root_confirmed = true;
-        if first {
-            s.trace.push(TraceEvent::RootConfirmed {
-                instance: instance.into(),
-            });
-            self.emit_pending_locked(&mut s, UpdateKind::Full, BTreeSet::new())?;
-        }
-        Ok(first)
+            Ok(first)
+        })
     }
     pub fn accept_root_fetch(
         &self,

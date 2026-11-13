@@ -173,6 +173,8 @@ impl Runtime {
                         start_absence: false,
                         resolved_epoch: None,
                         fetched_epoch: None,
+                        root_intake: false,
+                        epoch_readability: None,
                     },
                     Some((reason, media, publisher && root && reason.is_none())),
                 )

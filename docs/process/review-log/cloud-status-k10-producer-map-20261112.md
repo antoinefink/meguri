@@ -34,7 +34,7 @@ map can support readiness.
 |---|---|---|
 | Binding/account isolation; K10.2, V9, P14.4 `isolated` | `runtime.rs::Bound`; account and known-loss paths persist `bindings` state/reason; publication identity, scope, file and current-process identity guard usability | `policy_runtime` supplies BindingView; `policy/status.rs` adds the count with its isolation/recovery exclusions. Preserve these fences. |
 | `chooseCollection`; K10.1, V8/V11/V13 | Selected ordinary binding and sidecar publication decision; salvage owners are separate | Status derives from absence/fence. No-bound projection currently supplies no full attention ledger; do not mark an absent binding clean. |
-| `rootUnreadable`; K10.3 bindings, P3, V10.2 | Active/root ACKs exist in runtime scan state and `adapter::Durable.active`; `workflow_runtime::accept_active_proof` validates current-instance proof | **Missing durable mark and ordinary set/clear producer.** `fetch_read_runtime::adapter_complete_fetch_read`'s unreadable Found Active branch returns without storing the required mark (loss handling remains separate). Ordinary root intake decodes Active or returns an error. A confirmed epoch is not proof that every required root/complete-MGEpoch fact is known. |
+| `rootUnreadable`; K10.3 bindings, P3, V10.2 | Active/root ACKs exist in runtime scan state and `adapter::Durable.active`; `workflow_runtime::accept_active_proof` validates current-instance proof | Publication V4 and guarded SDK/non-SDK intake now supply this producer. See [root readability checkpoint](root-unreadable-producer-20261113.md). Unknown Epoch knowledge stays distinct from an observed incomplete body. The known-loss warning edge remains open; global attention completeness stays false. |
 | `conflicts`; K10.3 conflicts, V17 | Inbox merges / conflict insertion persist conflict copies; resolution retains resolved-at | Projection counts unresolved copies of the bound binding only. Audit required V11/V17 listing/count scope, including preserved copies when no ordinary binding is selected. Never infer zero from absence of a usable binding. |
 | `conflictsUnreadable`; V8.1 | `recovery.rs::salvage`/`finalize` preserve incomplete salvage files; `TrackingStore::retained_damaged_sources` exposes `recovery::retained_sources` | Integrated by the 2026-11-13 retained-conflict producer: policy reads the existing finalized-source count under State/tracking order, including without an ordinary binding. Unsafe identities remain errors. See `k10-retained-conflicts-producer-20261113.md` for scope and verification. |
 | `refused`; K10.3, K20, P14.4 | `incoming::classify`, `incoming_store` persist refused names/envelopes; ordinary sends consult them | Projected as bound-binding refused row count. Detail/blocked-entity accounting remains distinct; never clear a refusal to obtain readiness. |
@@ -61,10 +61,9 @@ map can support readiness.
 
 ## Required contract before a production fix
 
-A projection-only patch cannot complete this. The smallest required *logical*
-additions are the missing entity classifications, durable root-unreadable mark,
-authoritative epoch-crt observation plus current-collection check, and integrated
-local/remote generation attempt/progress facts. Each needs actual producers,
+A projection-only patch cannot complete this. The root-readability and qualified epoch-crt additions have since landed or
+reached the documented checkpoint above. Remaining logical additions include
+entity classifications and integrated local/remote generation progress facts. Each needs actual producers,
 ownership, completeness and invalidation rules, then a coherent read under the
 existing State/tracking order. Missing legacy facts must remain unknown until
 real work establishes them; default values cannot certify old rows.

@@ -32,23 +32,30 @@ pub(super) fn check_version(c: &Connection) -> Result<(), Error> {
         let versions = s
             .query_map([], |r| r.get::<_, i64>(0))?
             .collect::<Result<Vec<_>, _>>()?;
-        if versions != [1] && versions != [2] && versions != [3] {
+        if versions != [1] && versions != [2] && versions != [3] && versions != [4] {
             return Err(Error::RuntimeSchemaUnsupported);
         }
         let ledger: Option<String> = c.query_row(
             "SELECT type FROM sqlite_master WHERE name='cloud_epoch_crt'",
             [], |r| r.get(0),
         ).optional()?;
-        if (versions == [3] && ledger.as_deref() != Some("table"))
-            || (versions != [3] && ledger.is_some())
+        if ((versions == [3] || versions == [4]) && ledger.as_deref() != Some("table"))
+            || (versions != [3] && versions != [4] && ledger.is_some())
         {
             return Err(Error::InvalidData);
         }
         if ledger.is_some() {
             c.prepare("SELECT binding,crt,authority FROM cloud_epoch_crt LIMIT 0")?;
         }
+        let root_table: Option<String> = c.query_row(
+            "SELECT type FROM sqlite_master WHERE name='cloud_root_readability'", [], |r| r.get(0),
+        ).optional()?;
+        if (versions == [4] && root_table.as_deref() != Some("table")) || (versions != [4] && root_table.is_some()) {
+            return Err(Error::InvalidData);
+        }
+        if root_table.is_some() { super::root_readability_store::validate(c)?; }
     } else {
-        let orphan: bool = c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name IN ('cloud_publication_ops','cloud_publication_bindings','cloud_publication_zones','cloud_epoch_crt'))", [], |r| r.get(0))?;
+        let orphan: bool = c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name IN ('cloud_publication_ops','cloud_publication_bindings','cloud_publication_zones','cloud_epoch_crt','cloud_root_readability'))", [], |r| r.get(0))?;
         if orphan {
             return Err(Error::InvalidData);
         }
@@ -91,6 +98,7 @@ pub(super) const WORK_TABLES: &[&str] = &[
     "cloud_adapter_state",
     "cloud_publication_bindings",
     "cloud_epoch_crt",
+    "cloud_root_readability",
     "cloud_adoption_authority",
     "cloud_publication_zones",
 ];
@@ -216,6 +224,11 @@ impl TrackingStore {
             // No backfill: legacy crt may have come from media-root-local fallback.
             tx.execute_batch(super::epoch_crt_store::SCHEMA)?;
             tx.execute("UPDATE cloud_publication_schema SET version=3", [])?;
+        }
+        if version < 4 {
+            // Legacy absence proves nothing: install an empty unknown ledger.
+            tx.execute_batch(super::root_readability_store::SCHEMA)?;
+            tx.execute("UPDATE cloud_publication_schema SET version=4", [])?;
         }
         tx.commit()?;
         if let Some(op) = self.publication_op()? {
@@ -441,6 +454,7 @@ impl TrackingStore {
         let tx = self.connection.transaction()?;
         if let Some(epoch) = accepted_epoch {
             super::epoch_crt_store::put(&tx, id, epoch, super::epoch_crt_store::Authority::Published)?;
+            super::root_readability_store::observe(&tx, id, None, Some(epoch.state == super::control_codec::EpochState::Complete))?;
         }
         tx.execute(
             "UPDATE cloud_publication_bindings SET media_key=?2,root_acked=?3 WHERE binding=?1",
@@ -497,6 +511,7 @@ impl TrackingStore {
             envelope: saved.encrypted.clone().ok_or(Error::InvalidData)?,
             system_fields: saved.system_fields.0.clone(),
         });
+        super::root_readability_store::observe(&tx, id, durable.active.as_ref(), None)?;
         tx.execute("INSERT INTO cloud_adapter_state(binding,content) VALUES(?1,?2) ON CONFLICT(binding) DO UPDATE SET content=excluded.content", params![id.0.as_slice(), encode(&durable)?])?;
         // E0/E1 and an earlier landed attempt's clock come from the actual
         // accepted Active, while local retention starts no earlier than done.

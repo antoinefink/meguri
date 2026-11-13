@@ -544,41 +544,41 @@ impl Runtime {
     /// Non-SDK transport boundary. It persists the very same facts as adapter_fetched.
     pub fn receive_collection_records(&self, instance: &str, records: &[Saved]) -> Result<(), RuntimeError> {
         let at = self.adapter_now()?;
-        let binding = {
+        let (binding, guard) = {
             let s = self.state();
-            Self::caller_locked(&s, instance)?;
-            s.bound
-                .as_ref()
-                .ok_or(RuntimeError::StaleIncarnation)?
-                .binding
-                .clone()
+            let guard = Self::control_intake_guard_locked(&s, instance)?;
+            (s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.clone(), guard)
         };
         let entities: Vec<_> = records.iter().filter(|r| r.name != "epoch").cloned().collect();
         let (entries, refused) = classify(&binding.facts.record_key.0, &entities, at);
         let fetched_epoch = super::super::epoch_crt_store::fetched(&binding, records);
+        let epoch_readability = super::super::root_readability_store::epoch_observation(&binding, records, &[])?;
         meguri_model::faultpoint!("cloud.fetch.before_inbox").map_err(Error::from)?;
         #[cfg(feature = "test-hooks")]
         self.incoming_hooks
             .hit(super::super::testing::IncomingStage::FetchBeforeInbox);
-        let mut s = self.state();
-        Self::caller_locked(&s, instance)?;
-        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
-        let result = with_tracking_access(|| {
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                s.store
-                    .as_mut()
-                    .ok_or(Error::Database)?
-                    .receive_records(b, &entries, &refused, fetched_epoch.as_ref())?;
-                Self::refresh_epoch_crt_locked(&mut s)
-            }))
-            .unwrap_or(Err(RuntimeError::Tracking(Error::Database)))
-        });
-        if result.is_err() {
-            Self::invalidate_locked(&mut s);
-        }
-        result?;
-        s.incoming.retry_granted = true;
-        drop(s);
+        self.with_scan_file(&guard, &self.directory.join("collection.anki2"), |s| {
+            if Self::control_intake_guard_locked(s, instance)? != guard {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+            let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
+            let result = with_tracking_access(|| {
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    s.store
+                        .as_mut()
+                        .ok_or(Error::Database)?
+                        .receive_records(b, &entries, &refused, fetched_epoch.as_ref(), epoch_readability)?;
+                    Self::refresh_epoch_crt_locked(s)
+                }))
+                .unwrap_or(Err(RuntimeError::Tracking(Error::Database)))
+            });
+            if result.is_err() {
+                Self::invalidate_locked(s);
+            }
+            result?;
+            s.incoming.retry_granted = true;
+            Ok(())
+        })?;
         meguri_model::faultpoint!("cloud.fetch.after_inbox").map_err(Error::from)?;
         #[cfg(feature = "test-hooks")]
         self.incoming_hooks

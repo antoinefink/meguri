@@ -1,6 +1,6 @@
 use std::{
     fs::{File, OpenOptions},
-    os::unix::fs::{MetadataExt, OpenOptionsExt},
+    os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
 };
 
@@ -223,7 +223,7 @@ impl RetainedAdoptionStore {
         for (table, expected) in [
             ("cloud_runtime_schema", super::runtime_store::VERSION),
             ("cloud_workflow_schema", 2),
-            ("cloud_publication_schema", 3),
+            ("cloud_publication_schema", 4),
         ] {
             let versions = store
                 .connection
@@ -264,8 +264,12 @@ fn private_copy(path: &Path) -> Result<(tempfile::TempDir, PathBuf), Error> {
     let private = tempfile::tempdir()?;
     let copy = private.path().join(TRACKING_FILE);
     std::fs::copy(path, &copy)?;
+    // fs::copy retains source modes. SQLite may recover/checkpoint this private
+    // copy even when the original home is read-only; source permissions stay
+    // untouched and version refusal must not depend on its write bits.
+    std::fs::set_permissions(&copy, std::fs::Permissions::from_mode(0o600))?;
     match std::fs::copy(sidecar(path, "-wal"), sidecar(&copy, "-wal")) {
-        Ok(_) => {}
+        Ok(_) => std::fs::set_permissions(sidecar(&copy, "-wal"), std::fs::Permissions::from_mode(0o600))?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error.into()),
     }
