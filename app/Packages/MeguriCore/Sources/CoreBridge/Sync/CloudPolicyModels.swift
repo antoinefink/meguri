@@ -414,33 +414,33 @@ public struct CloudPolicyMediaFacts: Sendable, Equatable {
 public enum CloudPolicyExchangeOutcome: Sendable {
     case succeeded(selected: UInt64, heldBack: UInt64, newerPending: UInt64, incomingWaiting: UInt64, media: CloudPolicyMediaFacts)
     case incomplete(outstanding: UInt64, blocked: UInt64)
-    case waiting(CloudPolicyOperationError, retryAfterMilliseconds: Int64?)
+    case waiting(CloudPolicyOperationError?, retryAfterMilliseconds: Int64?)
     case failed(CloudPolicyOperationError)
     case cancelled
     init(_ v: MeguriCoreBindings.CloudPolicyExchangeOutcome) {
         self = switch v {
         case .succeeded(let selected, let held, let newer, let incoming, let media): .succeeded(selected: selected, heldBack: held, newerPending: newer, incomingWaiting: incoming, media: .init(media))
         case .incomplete(let outstanding, let blocked): .incomplete(outstanding: outstanding, blocked: blocked)
-        case .waiting(let error, let retry): .waiting(.init(error), retryAfterMilliseconds: retry)
+        case .waiting(let error, let retry): .waiting(error.map(CloudPolicyOperationError.init), retryAfterMilliseconds: retry)
         case .failed(let error): .failed(.init(error))
         case .cancelled: .cancelled
         }
     }
 }
 public enum CloudPolicyEarlyEnd: Sendable {
-    case waiting(CloudPolicyOperationError, retryAfterMilliseconds: Int64?)
+    case waiting(CloudPolicyOperationError?, retryAfterMilliseconds: Int64?)
     case failed(CloudPolicyOperationError)
     case cancelled
     init(_ raw: MeguriCoreBindings.CloudPolicyEarlyEnd) {
         switch raw {
-        case .waiting(let kind, let retry): self = .waiting(.init(kind), retryAfterMilliseconds: retry)
+        case .waiting(let kind, let retry): self = .waiting(kind.map(CloudPolicyOperationError.init), retryAfterMilliseconds: retry)
         case .failed(let kind): self = .failed(.init(kind))
         case .cancelled: self = .cancelled
         }
     }
     var raw: MeguriCoreBindings.CloudPolicyEarlyEnd {
         switch self {
-        case .waiting(let error, let retry): .waiting(class: error.raw, retryAfterMs: retry)
+        case .waiting(let error, let retry): .waiting(class: error?.raw, retryAfterMs: retry)
         case .failed(let error): .failed(class: error.raw)
         case .cancelled: .cancelled
         }

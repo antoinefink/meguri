@@ -619,7 +619,7 @@ pub enum CloudPolicyExchangeOutcome {
         blocked: u64,
     },
     Waiting {
-        class: CloudPolicyOperationError,
+        class: Option<CloudPolicyOperationError>,
         retry_after_ms: Option<i64>,
     },
     Failed {
@@ -645,7 +645,7 @@ impl From<p::ExchangeOutcome> for CloudPolicyExchangeOutcome {
             },
             p::ExchangeOutcome::Incomplete { outstanding, blocked } => Self::Incomplete { outstanding, blocked },
             p::ExchangeOutcome::Waiting { class, retry_after_ms } => Self::Waiting {
-                class: class.into(),
+                class: class.map(Into::into),
                 retry_after_ms,
             },
             p::ExchangeOutcome::Failed { class } => Self::Failed { class: class.into() },
@@ -656,7 +656,7 @@ impl From<p::ExchangeOutcome> for CloudPolicyExchangeOutcome {
 #[derive(Clone, Debug, uniffi::Enum)]
 pub enum CloudPolicyEarlyEnd {
     Waiting {
-        class: CloudPolicyOperationError,
+        class: Option<CloudPolicyOperationError>,
         retry_after_ms: Option<i64>,
     },
     Failed {
@@ -668,7 +668,7 @@ impl From<CloudPolicyEarlyEnd> for p::ExchangeOutcome {
     fn from(v: CloudPolicyEarlyEnd) -> Self {
         match v {
             CloudPolicyEarlyEnd::Waiting { class, retry_after_ms } => Self::Waiting {
-                class: class.into(),
+                class: class.map(Into::into),
                 retry_after_ms,
             },
             CloudPolicyEarlyEnd::Failed { class } => Self::Failed { class: class.into() },

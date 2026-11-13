@@ -198,6 +198,18 @@ impl Epoch {
         Ok(w.finish())
     }
 
+    /// Probe only the declared schema for K20's newer-schema refusal. This
+    /// never establishes authority or makes a future body a supported epoch.
+    pub fn schema_version(bytes: &[u8]) -> Result<u32, CodecError> {
+        let mut reader = Reader::new(bytes);
+        let mut previous = 0;
+        while let Some((tag, value)) = reader.next()? {
+            if tag <= previous { return Err(CodecError::NonCanonical); }
+            previous = tag;
+            if tag == 5 { return u32::try_from(value.integer()?).map_err(|_| CodecError::NonCanonical); }
+        }
+        Err(CodecError::NonCanonical)
+    }
     pub fn decode(bytes: &[u8]) -> Result<DecodeOutcome<Self>, CodecError> {
         let format = control_format(bytes)?;
         if format > 1 {

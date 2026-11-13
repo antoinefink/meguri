@@ -509,6 +509,13 @@ pub fn step(mut s: State, input: Input) -> (State, Vec<Action>) {
     match &input.event {
         Event::SyncNowRequested(source) if s.sync_now_availability().is_ok() && s.exchange.is_none() => {
             probe(&mut s, &mut a);
+            if s.read_gate_open() && !s.facts.summary.crt_known && !s.facts.summary.crt_mismatch
+                && !s.facts.summary.apply_in_progress && !s.engine_runs()
+                && !a.iter().any(|kind| matches!(kind, ActionKind::StartEngine { .. }))
+                && let Some(binding) = s.facts.binding.as_ref()
+            {
+                a.push(ActionKind::StartEngine { binding: binding.id, automatic: s.automatic() });
+            }
             if let Some(id) = s.next_exchange.checked_add(1) {
                 s.next_exchange = id;
                 s.exchange = Some(Exchange {

@@ -78,8 +78,22 @@ fn policy_initial_automatic_closed_gate_retains_preference_without_engine_work()
         let mut settings = state.settings;
         settings.automatic = true;
         let (state, actions) = run(state, Event::DeviceSettings(settings));
-        assert!(state.settings.automatic && state.engine.is_none());
-        assert!(actions.iter().all(|a| matches!(a.kind, ActionKind::StatusChanged(_))));
+        assert!(state.settings.automatic && state.engine.is_none(), "reason={reason}, actions={actions:?}");
+        let status = ActionKind::StatusChanged(Box::new(state.status()));
+        if reason == 8 {
+            // Approved P6: known crt mismatch closes writes/apply, retaining
+            // the read gate. Configure + full pending update + fetch are due.
+            assert_eq!(kinds(&actions), vec![
+                ActionKind::ConfigureAutomatic { on: true },
+                ActionKind::UpdatePending(Update::Full),
+                ActionKind::RequestFetch { zones: vec![Zone::Root, Zone::Collection] },
+                status,
+            ], "reason={reason}, actions={actions:?}");
+            assert!(!actions.iter().any(|a| matches!(a.kind, ActionKind::RequestSend { .. } | ActionKind::ApplyReady { .. })),
+                "reason={reason}, actions={actions:?}");
+        } else {
+            assert_eq!(kinds(&actions), vec![status], "reason={reason}, actions={actions:?}");
+        }
     }
 }
 
@@ -572,7 +586,7 @@ fn exchange_completion_requires_media_preference_and_current_open_gate_to_resume
 fn early_stop_exchange_outcomes_record_without_resuming_media() {
     for outcome in [
         ExchangeOutcome::Waiting {
-            class: OperationError::Offline,
+            class: Some(OperationError::Offline),
             retry_after_ms: None,
         },
         ExchangeOutcome::Failed {
@@ -1060,4 +1074,45 @@ fn epoch_crt_known_mismatch_keeps_automatic_fetch_and_reports_recovery_required(
     let (_, actions) = run(state, Event::Foreground);
     assert!(actions.iter().any(|a| matches!(a.kind, ActionKind::RequestFetch { .. })));
     assert!(!actions.iter().any(|a| matches!(a.kind, ActionKind::RequestSend { .. } | ActionKind::StopEngine { .. } | ActionKind::RecordQuietPoint { .. })));
+}
+
+#[test]
+fn sync_now_unknown_epoch_starts_preparation_with_current_automatic_setting() {
+    for automatic in [false, true] {
+        let mut state = ready();
+        state.engine = None;
+        state.settings.automatic = automatic;
+        state.facts.summary.crt_known = false;
+        state.facts.summary.attention_known = false;
+        let (state, actions) = run(state, Event::SyncNowRequested(Source::Command));
+        assert!(!state.gate_open());
+        assert!(!state.facts.summary.attention_known);
+        assert_eq!(actions.iter().filter(|a| matches!(a.kind, ActionKind::StartEngine { automatic: on, .. } if on == automatic)).count(), 1);
+        assert_eq!(actions.iter().filter(|a| matches!(a.kind, ActionKind::RunExchange { .. })).count(), 1);
+        assert!(!actions.iter().any(|a| matches!(a.kind, ActionKind::RequestSend { .. } | ActionKind::ApplyReady { .. } | ActionKind::RecordQuietPoint { .. })));
+    }
+}
+
+#[test]
+fn waiting_exchange_record_roundtrips_absent_and_legacy_classes() {
+    let classes = [
+        OperationError::NoAccount, OperationError::Configuration, OperationError::Offline,
+        OperationError::Throttled, OperationError::QuotaFull, OperationError::LocalStorageFull,
+        OperationError::TrackingError, OperationError::ConflictRecovery, OperationError::UnsupportedSchema,
+        OperationError::Other,
+    ];
+    for class in std::iter::once(None).chain(classes.into_iter().map(Some)) {
+        let record = ExchangeRecord {
+            exchange: 1, ended_ms: 100_000, source: Source::Command,
+            outcome: ExchangeOutcome::Waiting { class, retry_after_ms: Some(5_000) },
+        };
+        let encoded = serde_json::to_value(&record).unwrap();
+        let expected_class = class.map_or(serde_json::Value::Null, |value| serde_json::to_value(value).unwrap());
+        assert_eq!(encoded["outcome"]["Waiting"]["class"], expected_class);
+        assert_eq!(serde_json::from_value::<ExchangeRecord>(encoded).unwrap(), record);
+    }
+    // The pre-optional durable shape still decodes as its original class.
+    let legacy = r#"{"Waiting":{"class":"Offline","retry_after_ms":9000}}"#;
+    assert_eq!(serde_json::from_str::<ExchangeOutcome>(legacy).unwrap(),
+        ExchangeOutcome::Waiting { class: Some(OperationError::Offline), retry_after_ms: Some(9_000) });
 }

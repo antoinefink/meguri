@@ -514,7 +514,7 @@ fn early_exchange_clock_and_receipt_survive_repeat_and_tracking_failure() {
         .end_before_capture(
             exchange,
             ExchangeOutcome::Waiting {
-                class: OperationError::NoAccount,
+                class: Some(OperationError::NoAccount),
                 retry_after_ms: None,
             },
             rig.host.engine().state(),

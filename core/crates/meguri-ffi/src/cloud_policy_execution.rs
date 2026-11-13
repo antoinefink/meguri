@@ -210,7 +210,7 @@ impl CloudPolicyExecution {
             instance_id,
             serialization,
             collection_zone,
-            needs_root_fetch: automatic && !runtime.sdk_root_confirmed(),
+            needs_root_fetch: automatic && runtime.adapter_epoch_crt_known() && !runtime.sdk_root_confirmed(),
         })
     }
     pub(super) fn retire_original_with_work(&self, work: &mut p::PolicyWork) -> Result<(), CoreError> {
@@ -367,6 +367,17 @@ impl CloudPolicy {
 #[uniffi::export]
 impl CloudPolicyExecution {
     /// Metadata of the pinned original, never a fresh-current SDK lookup.
+    pub fn sync_now_epoch_read(&self) -> Result<Option<Arc<crate::cloud_fetch_reads::CloudFetchRead>>, CoreError> {
+        callback::enter("CloudPolicyExecution.sync_now_epoch_read");
+        let policy = self.policy();
+        let collection = policy.host.collection()?;
+        if !matches!(policy.host.engine().state(), meguri_engine::LifecycleState::Ready { .. }) { return Ok(None); }
+        let Some(sdk) = self.original_sdk()? else { return Ok(None); };
+        let read = policy.driver()?.native_sync_now_epoch_read(&self.command.command, &sdk, &collection)
+            .map_err(execution_error)?;
+        let core = policy.host.cloud_runtime().ok_or_else(|| crate::sync::cloud_error("cloud runtime unavailable"))?;
+        Ok(read.map(|read| crate::cloud_fetch_reads::CloudFetchRead::epoch(policy.host.clone(), core.clone(), collection, read)))
+    }
     pub fn original_sdk(&self) -> Result<Option<String>, CoreError> {
         callback::enter("CloudPolicyExecution.original_sdk");
         Ok(self.original_sdk.clone())
@@ -456,7 +467,7 @@ impl CloudPolicy {
         Ok(match outcome {
             Some(p::ExchangeOutcome::Waiting { class, retry_after_ms }) => CloudPolicyReadiness::End {
                 outcome: CloudPolicyEarlyEnd::Waiting {
-                    class: class.into(),
+                    class: class.map(Into::into),
                     retry_after_ms,
                 },
             },

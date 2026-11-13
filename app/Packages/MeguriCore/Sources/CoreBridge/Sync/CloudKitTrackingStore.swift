@@ -135,6 +135,12 @@ public actor CoreCloudWorkflowService {
         let raw = try await owner()
         return try await MaintenanceLane.shared.call(.cloudWorkflowValidateSdk) { try raw.validateSdk(sdk: sdk) }
     }
+    func syncNowRequest(sdk: String) async throws -> CoreCloudSyncNowRequest {
+        let raw = try await owner()
+        return try await MaintenanceLane.shared.call(.cloudWorkflowSyncNowRequest) {
+            CoreCloudSyncNowRequest(raw: try raw.syncNowRequest(sdk: sdk))
+        }
+    }
     func finalSDKAuthorization(_ sdk: String, media: Bool = false) async throws -> @Sendable () throws -> Void {
         let raw = try await owner()
         return { try cloudFinalCoreCall(.cloudWorkflowValidateNetworkSdk) { try raw.validateNetworkSdk(sdk: sdk, media: media) } }
@@ -278,6 +284,12 @@ extension CoreCloudWorkflowService {
 }
 
 extension CoreCloudWorkflowService {
+    func syncNowEpochRead(sdk: String) async throws -> CoreCloudFetchRead? {
+        let raw = try await owner()
+        return try await MaintenanceLane.shared.call(.cloudWorkflowSyncNowEpochRead) {
+            try raw.syncNowEpochRead(sdk: sdk).map(CoreCloudFetchRead.init)
+        }
+    }
     func fetchReadPlan(sdk: String, id: UInt64) async throws -> CloudFetchReadPlan {
         let raw = try await owner()
         return try await MaintenanceLane.shared.call(.cloudWorkflowFetchReadPlan) {

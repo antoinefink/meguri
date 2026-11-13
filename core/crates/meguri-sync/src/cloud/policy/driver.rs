@@ -1406,7 +1406,7 @@ impl Driver {
             .ok_or(DriverError::StaleCommand)?
             .instance
             .clone();
-        let capture = self.runtime.sync_now_with_work(&sdk, collection, work);
+        let capture = self.runtime.sync_now_accepted_with_work(&sdk, collection, work);
         #[cfg(feature = "test-hooks")]
         let capture = capture.inspect_err(|error| {
             let (kind, variant) = error.refusal_tags_for_testing();
@@ -1458,7 +1458,7 @@ impl Driver {
                 media: frozen.map_or_else(|| summary.media.clone(), |snapshot| snapshot.media.clone()),
             },
             CollectionOutcome::WaitingNoAccount => ExchangeOutcome::Waiting {
-                class: OperationError::NoAccount,
+                class: Some(OperationError::NoAccount),
                 retry_after_ms: None,
             },
             CollectionOutcome::Incomplete => ExchangeOutcome::Incomplete {

@@ -49,6 +49,8 @@ private func qualifiedRecordExchange(_ command: CoreBridge.CloudPolicyCommand, r
     switch (record.outcome, stored.collection) {
     case (.succeeded(let selected, _, _, _, _), .succeeded):
         #expect(selected == UInt64(stored.selectedNames.count))
+    case (.incomplete(let outstanding, let blocked), .incomplete):
+        #expect(outstanding == UInt64(stored.outstandingNames.count) && blocked == 0)
     case (.cancelled, .cancelled): break
     case (.failed(let error), .failed): #expect(error == .other)
     default: Issue.record("RecordExchange outcome differs from the actual stored Runtime result")
@@ -1888,6 +1890,295 @@ extension EventTests {
                 }
             }
             #expect(parks.withLock { $0 } == 0 && engine.acceptedNetworkCalls.value == calls)
+        }
+    }
+}
+#endif
+
+extension EventTests {
+    @Test func nativePolicyUnknownEpochPreparationPrecedesReadinessAndCapture() async throws {
+        let transport = EpochPreparationTransport()
+        try await withNativePolicyFixture(assetReadTransport: transport) { f in
+            let (policy, executor) = try await nativePolicy(f)
+            let engine = try await f.engine()
+            transport.bind(engine, reply: .found(try await boundEpochBytes()), root: f.root.envelope)
+            await engine.appendFetchScripts([
+                .manual(fetchedZones: ["meguri-root", f.zone], records: [f.root], group: nil),
+                .manual(fetchedZones: ["meguri-root", f.zone], records: [], group: nil),
+            ])
+            let commands = try policyCommands(try await policy.input(.syncNowRequested(.command)))
+            let command = try #require(commands.first { if case .runExchange = $0.action { true } else { false } })
+            let before = try await observePolicyExchange(command)
+            #expect(before.activeID == nil && before.mappedRuntimeID == nil)
+            let result = await executor.execute(command)
+            #expect(result.error == nil)
+            #expect(transport.preparation == [.init(zone: f.zone, name: "epoch", recordType: "MGEpoch")])
+            #expect(try await epochAuthority() != nil)
+            _ = try await qualifiedRecordExchange(command, result: result, fixture: f, before: before, outcome: .succeeded)
+        }
+    }
+}
+
+private func expectEpochPreparationOutcome(_ actual: CloudPolicyExchangeOutcome, _ expected: CloudPolicyEarlyEnd) {
+    switch (actual, expected) {
+    case (.waiting(let actual, let retry), .waiting(let wanted, let wantedRetry)):
+        #expect(actual == wanted && retry == wantedRetry)
+    case (.failed(let actual), .failed(let wanted)): #expect(actual == wanted)
+    case (.cancelled, .cancelled): break
+    default: Issue.record("Wrong typed epoch preparation attempt: actual=\(actual), expected=\(expected)")
+    }
+}
+
+private func recordEpochPreparationAttempt(_ command: CloudPolicyCommand, result: CloudPolicyNativeResult,
+    policy: CoreCloudPolicyService, executor: NativeCloudPolicyExecutor, expected: CloudPolicyEarlyEnd) async throws {
+    guard case .runExchange(let id, let source) = command.action else {
+        throw BridgeError.internal("Expected the original RunExchange")
+    }
+    let records = try result.outputs.flatMap(policyCommands).filter { if case .recordExchange = $0.action { true } else { false } }
+    try #require(records.count == 1)
+    let issued = try #require(records.first)
+    guard case .recordExchange(let record) = issued.action else {
+        throw BridgeError.internal("Missing preparation attempt")
+    }
+    #expect(record.exchange == id && record.source == source)
+    expectEpochPreparationOutcome(record.outcome, expected)
+    #expect(await executor.execute(issued).error == nil)
+    let status = try await policy.status()
+    let stored = try #require(status.lastAttempt)
+    #expect(stored.exchange == id && stored.source == source && stored.endedMilliseconds == record.endedMilliseconds)
+    expectEpochPreparationOutcome(stored.outcome, expected)
+    #expect(status.lastCompleted == nil)
+}
+
+extension EventTests {
+    @Test(arguments: [EpochPreparationRefusal.publishing, .absentEncryptedField, .network])
+    func nativePolicyUnknownEpochPreparationRecordsTypedWaiting(kind: EpochPreparationRefusal) async throws {
+        let transport = EpochPreparationTransport()
+        try await withNativePolicyFixture(assetReadTransport: transport) { f in
+            let (policy, executor) = try await nativePolicy(f)
+            let engine = try await f.engine()
+            let reply: EpochPreparationTransport.Reply
+            let expected: CloudPolicyEarlyEnd
+            switch kind {
+            case .publishing: reply = .found(try await boundEpochBytes(publishing: true)); expected = .waiting(nil, retryAfterMilliseconds: nil)
+            case .absentEncryptedField: reply = .found(nil); expected = .waiting(nil, retryAfterMilliseconds: nil)
+            case .network: reply = .failure(.networkFailure); expected = .waiting(.offline, retryAfterMilliseconds: nil)
+            default: throw BridgeError.internal("Unexpected waiting fixture")
+            }
+            transport.bind(engine, reply: reply, root: f.root.envelope)
+            let commands = try policyCommands(try await policy.input(.syncNowRequested(.command)))
+            let command = try #require(commands.first { if case .runExchange = $0.action { true } else { false } })
+            let before = try await observePolicyExchange(command)
+            let pending = try await f.core.durableSnapshot()
+            let drains = try await f.core.fetchDrains()
+            let result = await executor.execute(command)
+            #expect(result.error is CloudEpochPreparationError)
+            #expect(try await observePolicyExchange(command) == before)
+            #expect(try await f.core.durableSnapshot() == pending)
+            #expect(try await f.core.fetchDrains() == drains)
+            #expect(try await epochAuthority() == nil)
+            #expect(engine.acceptedNetworkCalls.value == 0)
+            #expect(transport.preparation == [.init(zone: f.zone, name: "epoch", recordType: "MGEpoch")])
+            try await recordEpochPreparationAttempt(command, result: result, policy: policy, executor: executor, expected: expected)
+        }
+    }
+}
+
+#if DEBUG
+extension EventTests {
+    @Test(arguments: [false, true])
+    func nativePolicyUnknownEpochPreparationOriginalGuardRefusalBeforeIssuance(accountChange: Bool) async throws {
+        let transport = EpochPreparationTransport()
+        try await withNativePolicyFixture(assetReadTransport: transport) { f in
+            let (policy, executor) = try await nativePolicy(f)
+            let engine = try await f.engine()
+            transport.bind(engine, reply: .found(try await boundEpochBytes()), root: f.root.envelope)
+            let commands = try policyCommands(try await policy.input(.syncNowRequested(.command)))
+            let command = try #require(commands.first { if case .runExchange = $0.action { true } else { false } })
+            let before = try await observePolicyExchange(command)
+            let drains = try await f.core.fetchDrains()
+            let held = CloudCallbackGate()
+            // This observer runs after prepareExecution, before syncNowEpochRead.
+            await f.adapter.setPolicyOperationOriginObserver { await held.enter() }
+            try await withCloudTask(gates: [held], operation: {
+                let result = await executor.execute(command)
+                #expect(result.error is CloudEpochPreparationError)
+                #expect(try await observePolicyExchange(command) == before)
+                #expect(try await f.core.fetchDrains() == drains)
+                #expect(try await epochAuthority() == nil)
+                #expect(transport.preparation.isEmpty && engine.acceptedNetworkCalls.value == 0)
+                try await recordEpochPreparationAttempt(command, result: result, policy: policy, executor: executor,
+                    expected: accountChange ? .failed(.noAccount) : .cancelled)
+            }, whileRunning: {
+                try await held.waitForArrival()
+                if accountChange {
+                    let read = try await f.core.beginIdentityRead(transition: true)
+                    try #require(try await f.core.completeIdentityRead(id: read, status: .available,
+                        identity: Data("synthetic-account-B".utf8)))
+                    _ = try await policy.projectIdentityRead(read)
+                } else {
+                    _ = try await policy.input(.settings(.init(enabled: true, paused: true, automatic: false, media: false)))
+                }
+                await held.open()
+            })
+            await f.adapter.setPolicyOperationOriginObserver(nil)
+        }
+    }
+}
+#endif
+
+#if DEBUG
+extension EventTests {
+    @Test(arguments: [false, true])
+    func nativePolicyUnknownEpochPreparationSurvivesRealReviewStart(beforeIssuance: Bool) async throws {
+        let held = CloudCallbackGate()
+        let transport = EpochPreparationTransport(gate: beforeIssuance ? nil : held)
+        try await withNativePolicyFixture(assetReadTransport: transport) { f in
+            let (policy, executor) = try await nativePolicy(f)
+            let engine = try await f.engine()
+            transport.bind(engine, reply: .found(try await boundEpochBytes()), root: f.root.envelope)
+            await engine.appendFetchScripts([
+                .manual(fetchedZones: ["meguri-root", f.zone], records: [f.root], group: nil),
+                .manual(fetchedZones: ["meguri-root", f.zone], records: [], group: nil),
+            ])
+            let commands = try policyCommands(try await policy.input(.syncNowRequested(.command)))
+            let command = try #require(commands.first { if case .runExchange = $0.action { true } else { false } })
+            let before = try await observePolicyExchange(command)
+            if beforeIssuance { await f.adapter.setPolicyOperationOriginObserver { await held.enter() } }
+            let session = Mutex<UInt64?>(nil)
+            do {
+                try await withCloudTask(gates: [held], operation: {
+                    let result = await executor.execute(command)
+                    if let error = result.error { throw error }
+                    let stored = try await qualifiedRecordExchange(command, result: result, fixture: f, before: before, outcome: .incomplete)
+                    #expect(stored.selectedNames.contains(f.reviewName) && stored.outstandingNames.contains(f.reviewName))
+                    #expect(!stored.ackedNames.contains(f.reviewName))
+                    #expect(try await epochAuthority() != nil)
+                    #expect(!(await engine.recordedTrace()).contains {
+                        if case .handed(_, let names) = $0 { names.contains(f.reviewName) } else { false }
+                    })
+                }, whileRunning: {
+                    try await held.waitForArrival()
+                    let started = try await startEpochPreparationReview(f); session.withLock { $0 = started }
+                    let refresh = try policyCommands(try await policy.input(.refresh(.cloud)))
+                    #expect(!refresh.contains { if case .applyReady = $0.action { true } else { false } })
+                    let fresh = try policyCommands(try await policy.input(.syncNowRequested(.command)))
+                    #expect(!fresh.contains { if case .runExchange = $0.action { true } else { false } })
+                    #expect(try await observePolicyExchange(command) == before)
+                    try await requireUnknownEpochSyncNowBaseline(engine.instanceID)
+                    #expect(engine.acceptedNetworkCalls.value == 0)
+                    #expect(transport.preparation.count == (beforeIssuance ? 0 : 1))
+                    await held.open()
+                })
+                await f.adapter.setPolicyOperationOriginObserver(nil)
+                if let session = session.withLock({ $0 }) { try await Core.endSession(sessionID: session) }
+            } catch {
+                await held.open(); await f.adapter.setPolicyOperationOriginObserver(nil)
+                if let session = session.withLock({ $0 }) { try? await Core.endSession(sessionID: session) }
+                throw error
+            }
+        }
+    }
+}
+#endif
+
+#if DEBUG
+/// Retain only typed outcomes and the existing payload-free error categories.
+private func epochPreparationFailureTrace(_ error: (any Error)?) -> String {
+    guard let error else { return "none" }
+    if let preparation = error as? CloudEpochPreparationError {
+        return "preparation(outcome=\(preparation.outcome), original=\(epochPreparationFailureTrace(preparation.original)))"
+    }
+    return DebugCloudDiagnostics.Value(.policyExchange, error: error).formatted
+}
+
+extension EventTests {
+    @Test func nativePolicyUnknownEpochPreparationAccountProofKeepsScheduledFetchExcluded() async throws {
+        let reservation = CloudCallbackGate(), callback = CloudCallbackGate(), reply = CloudCallbackGate(), proof = CloudCallbackGate()
+        let transport = EpochPreparationTransport(gate: reply)
+        try await withNativePolicyFixture(assetReadTransport: transport, appOwnsAccountObservation: true) { f in
+            let (policy, executor) = try await nativePolicy(f)
+            let accounts = await CloudAppAccountReader(workflow: f.core, policy: policy, factory: f.factory, adapter: f.adapter)
+            for _ in 0..<2 {
+                await f.factory.appendAccountRead(.success(.init(status: .available, identity: Data("synthetic-account-A".utf8))))
+            }
+            let engine = try await f.engine()
+            transport.bind(engine, reply: .failure(.unknownItem), root: f.root.envelope)
+            let proofs = Mutex(0)
+            let proofTrace = Mutex("notEntered")
+            await f.adapter.setProofAdmission({ _ in
+                proofTrace.withLock { $0 = "admission" }
+                await proof.enter()
+                do {
+                    proofTrace.withLock { $0 = "begin" }
+                    let id = try await accounts.begin(transition: false)
+                    proofTrace.withLock { $0 = "read" }
+                    let result = await accounts.read(id)
+                    proofTrace.withLock {
+                        $0 = "read verified=\(result.verified) outputs=\(result.outputs.count) error=\(epochPreparationFailureTrace(result.error))"
+                    }
+                    if let error = result.error { throw error }
+                    try #require(result.verified)
+                    proofTrace.withLock { $0 = "consumePolicySetup outputs=\(result.outputs.count)" }
+                    for output in result.outputs { try await consumePolicySetup(output, executor: executor) }
+                    proofs.withLock { $0 += 1 }
+                    proofTrace.withLock { $0 = "completed" }
+                } catch {
+                    proofTrace.withLock { $0 += " failed=\(epochPreparationFailureTrace(error))" }
+                    throw error
+                }
+            }, acknowledgeOutputs: { outputs in #expect(outputs.isEmpty) })
+            await f.adapter.setEpochReservationObserver { await reservation.enter() }
+            await f.adapter.setFetchReservationObserver { await callback.enter() }
+            let commands = try policyCommands(try await policy.input(.syncNowRequested(.command)))
+            let command = try #require(commands.first { if case .runExchange = $0.action { true } else { false } })
+            let before = try await observePolicyExchange(command)
+            let drains = try await f.core.fetchDrains()
+            let scheduled = Task {
+                try await reservation.waitForArrival()
+                await engine.emitRetained(.willFetch(groupID: "scheduled-proof", reason: .scheduled), label: "scheduledProof")
+            }
+            do {
+                try await withCloudTask(gates: [reservation, callback, reply, proof], operation: {
+                    let failure = DebugCloudDiagnostics.SendFailureCapture()
+                    let fetchFailure = DebugCloudDiagnostics.FetchReadFailureCapture()
+                    let result = await DebugCloudDiagnostics.$sendFailureCapture.withValue(failure) {
+                        await DebugCloudDiagnostics.$fetchReadFailureCapture.withValue(fetchFailure) {
+                            await executor.execute(command)
+                        }
+                    }
+                    print("epochPreparationAccountProof result=\(epochPreparationFailureTrace(result.error)) proof=\(proofTrace.withLock { $0 }) proofs=\(proofs.withLock { $0 }) accountReads=\(await f.factory.resolvedAccountReadCount()) \(failure.firstValue ?? "firstSite=none") \(fetchFailure.firstValue ?? "fetchReadRefresh=none")")
+                    #expect(result.error is CloudEpochPreparationError)
+                    #expect(try await observePolicyExchange(command) == before)
+                    #expect(try await epochAuthority() == nil)
+                    #expect(try await f.core.fetchDrains() == drains)
+                    try await recordEpochPreparationAttempt(command, result: result, policy: policy, executor: executor,
+                        expected: .failed(.conflictRecovery))
+                }, whileRunning: {
+                    try await reservation.waitForArrival()
+                    try await callback.waitForArrival()
+                    #expect(transport.preparation.isEmpty)
+                    await reservation.open()
+                    try await reply.waitForArrival()
+                    await callback.open()
+                    try await f.adapter.waitForBlockedFetchForTesting(engine.instanceID)
+                    await reply.open()
+                    try await proof.waitForArrival()
+                    #expect(!(await engine.recordedTrace()).contains(.eventReturned("scheduledProof")))
+                    #expect(engine.acceptedNetworkCalls.value == 0)
+                    await proof.open()
+                })
+                try await scheduled.value
+                #expect(proofs.withLock { $0 } == 2)
+            } catch {
+                await reservation.open(); await callback.open(); await reply.open(); await proof.open()
+                scheduled.cancel(); _ = try? await scheduled.value
+                await accounts.close()
+                throw error
+            }
+            await f.adapter.setEpochReservationObserver(nil)
+            await f.adapter.setFetchReservationObserver(nil)
+            await accounts.close()
         }
     }
 }

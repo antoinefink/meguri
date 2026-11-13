@@ -40,8 +40,10 @@ root filesystem and only SETFCAP retained. SETFCAP permits the root UID mapping;
 SYS_ADMIN and privileged mode are not used. These options apply only to this
 container. The Codex command sandbox remains mandatory.
 
-Review `changes.patch` before applying it to master. The runner never writes to
-the real checkout. Run builds and tests through `tools/mg` from the orchestrator;
+Review `changes.patch` before applying it to master. Source review uses a fresh
+implementer-role session with a read-only task. The critic role grades rendered
+screen packets only. The runner never writes to the real checkout. Run builds
+and tests through `tools/mg` from the orchestrator;
 the restricted runner has no Docker socket or warmed dependency cache. Main
 checkout access remains necessary for integration and black-box verification;
 its owner must not read forbidden sources or raw similarity reports.

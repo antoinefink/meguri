@@ -1957,6 +1957,17 @@
         }
       }
     },
+    "sync.result.notReady": {
+      "comment": "Approved sync/status-strings T7 copy for a waiting result with no error class.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meguri is still getting ready to sync. Try again in a moment."
+          }
+        }
+      }
+    },
     "sync.result.outstanding": {
       "comment": "Approved sync/status-strings copy; shown for the corresponding typed backend fact.",
       "localizations": {

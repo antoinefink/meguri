@@ -1010,7 +1010,7 @@ impl Runtime {
         if let Some(read) = read {
             Self::fetch_read_locked(&s, read)?;
         }
-        if !completed_fetch && !read.is_some_and(|r| r.known_loss) {
+        if !completed_fetch && !read.is_some_and(|r| r.is_known_loss()) {
             s.trace.push(TraceEvent::RootReadRecorded {
                 instance: instance.into(),
                 request_id,
@@ -2185,13 +2185,28 @@ impl Runtime {
         collection: &Collection,
         work: &mut PolicyWork,
     ) -> Result<u64, RuntimeError> {
+        if self.active_review().is_some() {
+            return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
+        }
+        self.sync_now_accepted_with_work(instance, collection, work)
+    }
+    pub fn capture_sync_now_request(&self, request: &super::adapter::SyncNowRequest, collection: &Collection) -> Result<u64, RuntimeError> {
+        self.validate_sync_now_request(request, collection)?;
+        self.capture_owned_sync_now(&request.sdk, collection, &mut PolicyWork::default(), Some(request))
+    }
+    pub(crate) fn sync_now_accepted_with_work(
+        &self, instance: &str, collection: &Collection, work: &mut PolicyWork,
+    ) -> Result<u64, RuntimeError> {
+        self.capture_owned_sync_now(instance, collection, work, None)
+    }
+    fn capture_owned_sync_now(
+        &self, instance: &str, collection: &Collection, work: &mut PolicyWork,
+        original: Option<&super::adapter::SyncNowRequest>,
+    ) -> Result<u64, RuntimeError> {
         let _ = self.adapter_now();
         self.poll_review_with_work(instance, work)?;
         let media = self.media_service_with_work(collection, work)?;
         self.consume_media_feed_with_work(collection, &media, work)?;
-        if self.active_review().is_some() {
-            return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
-        }
         Self::capture_gate_locked(&self.state())?;
         let lease = collection.reader(ReaderRole::Cloud)?;
         let snapshot = lease.snapshot()?;
@@ -2200,6 +2215,14 @@ impl Runtime {
         let mut s = self.state();
         Self::caller_locked(&s, instance)?;
         Self::capture_gate_locked(&s)?;
+        if let Some(request) = original {
+            let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+            let current = ScanGuard { invalidation: s.invalidation, binding: b.binding.id, open: b.open_counter,
+                generation: b.evidence.generation, file: b.file, incarnation: s.incarnation };
+            if Self::adapter_guard_locked(&s) != request.guard || current != request.scan {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+        }
         if !s.bound.as_ref().is_some_and(|b| b.epoch_crt == Some(snapshot_crt)) {
             return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
         }

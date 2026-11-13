@@ -183,7 +183,8 @@ enum SyncStatusCopy {
             if outstanding > 0 { lines.append(SyncText.format("sync.result.outstanding", Int64(clamping: outstanding))) }
             if blocked > 0 { lines.append(SyncText.format("sync.result.blocked", Int64(clamping: blocked))) }
             return lines
-        case .waiting(let error, _), .failed(let error): return [SyncText.value(SyncStatusPresentation.errorKey(error))]
+        case .waiting(let error, _): return [SyncText.value(error.map(SyncStatusPresentation.errorKey) ?? "sync.result.notReady")]
+        case .failed(let error): return [SyncText.value(SyncStatusPresentation.errorKey(error))]
         case .cancelled:
             let savingFailure = [CloudPolicyAttention.collectionCorrupt, .localStorageFull, .trackingError].contains { status.attention[$0] != nil }
             return savingFailure ? [] : [SyncText.value("sync.status.keptLocally")]

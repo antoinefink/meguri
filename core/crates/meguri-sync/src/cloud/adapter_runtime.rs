@@ -1371,6 +1371,56 @@ impl Runtime {
 
 #[cfg(feature = "test-hooks")]
 impl Runtime {
+    /// Synthetic canonical bytes only: this does not accept any record or change knowledge.
+    pub fn bound_epoch_bytes_for_testing(&self, crt_delta: i64, publishing: bool) -> Result<Vec<u8>, RuntimeError> {
+        use crate::cloud::control_codec::{Epoch, EpochReason, EpochState};
+        if self.inputs.scope.container.as_str() != "synthetic-u114" { return Err(Error::InvalidData.into()); }
+        let s = self.state();
+        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+        Epoch { epoch_id: b.binding.facts.epoch.0, record_key: b.binding.facts.record_key.0,
+            crt: b.current_crt.1.checked_add(crt_delta).ok_or(Error::InvalidData)?, ver: 18,
+            state: if publishing { EpochState::Publishing } else { EpochState::Complete },
+            reason: EpochReason::Initial, published_at_ms: 1000, counts: Vec::new(),
+        }.encode().map_err(|_| Error::InvalidData.into())
+    }
+    /// Read-only witness for the legacy Sync Now regression. Never qualifies a
+    /// control read, changes epoch knowledge, or captures an exchange.
+    pub fn require_unknown_epoch_sync_now_baseline_for_testing(&self, sdk: &str) -> Result<(), RuntimeError> {
+        let s = self.state();
+        Self::sdk_locked(&s, sdk)?;
+        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+        if !b.usable || !b.verified || b.binding.facts.state != BindingState::Active || b.epoch_crt.is_some() {
+            return Err(Error::InvalidData.into());
+        }
+        if !s.whole_complete
+            || s.scan_required
+            || s.scan_running
+            || s.tracking_stopped
+            || s.adapter.paused
+            || s.actions.automatic
+            || s.incoming.running
+            || !s.root_confirmed
+            || s.adapter.known_loss.is_some()
+            || s.adapter.durable.collection_loss.is_some()
+            || s.adapter.durable.epoch_verification.is_some()
+            || s.actions.exchange.is_some()
+            || !s.adapter.durable.exchanges.is_empty()
+            || s.adapter.fetch.is_some()
+        {
+            return Err(Error::InvalidData.into());
+        }
+        with_tracking_access(|| {
+            let store = s.store.as_ref().ok_or(Error::Database)?;
+            if store.epoch_crt(b.binding.id)?.is_some()
+                || store.publication_op()?.is_some()
+                || store.apply_intents(b.binding.id)?.iter().any(|intent| intent.result_seq.is_none())
+            {
+                return Err(Error::InvalidData.into());
+            }
+            Ok(())
+        })
+    }
+
     /// Preparation only: a synthetic previously confirmed service baseline.
     /// All later edits, review commits, scans, flights and acks use normal paths.
     pub fn prepare_adapter_baseline_for_testing(

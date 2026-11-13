@@ -227,7 +227,25 @@ pub fn collection_zone(epoch: EpochId) -> String {
     )
 }
 
-/// Issued only from the original completed scoped SDK fetch. Fields cannot be
+/// P12.1 admission retained until capture; it supplies no boundary or write authority.
+#[derive(Clone)]
+pub struct SyncNowRequest {
+    pub(crate) sdk: String,
+    pub(super) scan: super::runtime::ScanGuard,
+    pub(crate) guard: Guard,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EpochPreparationOutcome { Unknown, Ready, Conflict, Unsupported }
+
+#[derive(Clone)]
+pub(crate) enum FetchReadPurpose {
+    Fetch,
+    KnownLoss,
+    SyncNowEpoch(std::sync::Arc<std::sync::Mutex<EpochPreparationOutcome>>),
+}
+
+/// Issued for one original SDK and purpose. Fields cannot be
 /// reconstructed by a transport caller to select a different zone or point.
 #[derive(Clone)]
 pub struct FetchRead {
@@ -239,11 +257,27 @@ pub struct FetchRead {
     pub(crate) zone: String,
     pub(crate) lost_collection: bool,
     pub(crate) a7_failure: bool,
-    pub(crate) known_loss: bool,
+    pub(crate) purpose: FetchReadPurpose,
     pub(crate) after_identity: u64,
     pub(crate) loss_identity_after: u64,
 }
 impl FetchRead {
+    pub fn is_epoch_preparation(&self) -> bool {
+        matches!(self.purpose, FetchReadPurpose::SyncNowEpoch(_))
+    }
+    pub fn epoch_preparation_outcome(&self) -> Option<EpochPreparationOutcome> {
+        match &self.purpose {
+            FetchReadPurpose::SyncNowEpoch(result) => Some(*result.lock().unwrap_or_else(std::sync::PoisonError::into_inner)),
+            _ => None,
+        }
+    }
+    pub(crate) fn set_preparation_outcome(&self, outcome: EpochPreparationOutcome) {
+        if let FetchReadPurpose::SyncNowEpoch(result) = &self.purpose {
+            *result.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = outcome;
+        }
+    }
+    pub(crate) fn is_known_loss(&self) -> bool { matches!(self.purpose, FetchReadPurpose::KnownLoss) }
+
     pub fn zone(&self) -> &str {
         &self.zone
     }

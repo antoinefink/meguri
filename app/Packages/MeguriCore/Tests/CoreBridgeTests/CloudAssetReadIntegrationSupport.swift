@@ -51,8 +51,25 @@ func withWiredAssetReadFixture(
             reviewCard: original.reviewCard, reviewName: original.reviewName, zone: original.zone,
             incoming: original.incoming, root: original.root)
         do {
-            let policy = try await assetExecutorPolicy(fixture)
-            let executor = NativeCloudPolicyExecutor(policy: policy, adapter: adapter)
+            let (policy, executor) = try await nativePolicy(fixture)
+            let engine = try await fixture.engine()
+            // These tests begin after a complete epoch was accepted, rather
+            // than exercising LegacyUnknown upgrade. Supply only metadata to
+            // the real SDK-bound intake and its tracking/comparison commit.
+            let epoch = CloudRecord(name: "epoch", envelope: try await boundEpochBytes(),
+                systemFields: Data([0x65, 0x70, 0x01]), recordType: "MGEpoch", zone: fixture.zone)
+            try await fixture.core.fetched(sdk: engine.instanceID, zone: fixture.zone, records: [epoch], deleted: [])
+            try #require(try await epochAuthority() != nil, "Wired asset fixture requires accepted epoch authority")
+            await engine.appendFetchScripts([
+                .manual(fetchedZones: ["meguri-root", fixture.zone], records: [fixture.root], group: nil),
+            ])
+            try await adapter.requestFetch(zones: ["meguri-root", fixture.zone])
+            try await consumePolicySetup(policy.input(.refresh(.cloud)), executor: executor)
+            try await adapter.waitForIdle()
+            let pending = await engine.pendingRecordZoneChanges()
+            let sendables = try await fixture.core.trackingSendables()
+            try #require(!sendables.isEmpty && pending == sendables,
+                         "Wired asset setup must drain the real pending update acknowledgements")
             try await body(fixture, policy, executor, transport, completions)
         } catch { try? await adapter.stop(); throw error }
         try? await adapter.stop()

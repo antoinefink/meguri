@@ -3,10 +3,24 @@ import Instrumentation
 import Synchronization
 internal import MeguriCoreBindings
 
+/// Carries only the adapter reservation back from the readiness worker. The
+/// existing readiness task group joins that worker before cleanup takes it.
+private final class CloudExchangeReservation: Sendable {
+    private let value = Mutex<UUID?>(nil)
+    func store(_ id: UUID) { value.withLock { $0 = id } }
+    func take() -> UUID? { value.withLock { let id = $0; $0 = nil; return id } }
+}
+
 /// Only CoreCloudPolicyService can obtain this retained Rust capability.
 struct CoreCloudPolicyExecution: Sendable {
     let raw: MeguriCoreBindings.CloudPolicyExecution
     init(_ raw: MeguriCoreBindings.CloudPolicyExecution) { self.raw = raw }
+    func syncNowEpochRead() async throws -> CoreCloudFetchRead? {
+        let raw = self.raw
+        return try await CoreCloudPolicyService.call(.cloudPolicyExecutionSyncNowEpochRead) {
+            try raw.syncNowEpochRead().map(CoreCloudFetchRead.init)
+        }
+    }
     func beginAssetReadPass() async throws -> CoreCloudAssetReadPass {
         let raw = self.raw
         let pass: MeguriCoreBindings.CloudAssetReadPass = try await CoreCloudPolicyService.runOrdered(
@@ -1006,7 +1020,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
         }
     }
 
-    private func waitForReadiness(_ command: CloudPolicyCommand) async throws -> CloudPolicyEarlyEnd? {
+    private func waitForReadiness(_ command: CloudPolicyCommand, reservation: CloudExchangeReservation) async throws -> CloudPolicyEarlyEnd? {
         let policyChanges = await policy.readinessChanges()
         let nativeChanges = await adapter.readinessChanges()
         let (changes, changeContinuation) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
@@ -1017,9 +1031,28 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
         let decision = CloudPolicyReadinessDecision()
         return try await withThrowingTaskGroup(of: CloudPolicyEarlyEnd?.self) { group in
             group.addTask {
+                reservation.store(try await adapter.reservePolicyExchange())
                 var events = changes.makeAsyncIterator()
                 while true {
                     try Task.checkCancellation()
+                    do {
+                        if await adapter.policySDKReady(), let execution = try await policy.prepareExecution(command),
+                           try await adapter.prepareSyncNowEpoch(execution: execution) {
+                            await adapter.retainPreparationOutput(try await policy.input(.refresh(.cloud)))
+                        }
+                    } catch {
+                        // An earlier typed failure outranks a later guard change.
+                        if let preparation = error as? CloudEpochPreparationError,
+                           case .failed = preparation.outcome { throw preparation }
+                        // Issuance and final validation can refuse before a read
+                        // has an outcome. Qualify that refusal with this request's
+                        // original guard, never a replacement command or SDK.
+                        if let readiness = try? await policy.exchangeReadiness(command, nativeReady: false),
+                           case .end(let outcome) = readiness {
+                            throw CloudEpochPreparationError(outcome: CloudPolicyEarlyEnd(outcome), original: error)
+                        }
+                        throw error
+                    }
                     switch try await policy.exchangeReadiness(command, nativeReady: await adapter.policySDKReady()) {
                     case .ready:
                         if decision.observeReady() { return nil }
@@ -1045,7 +1078,20 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 }
             }
             defer { group.cancelAll() }
-            return try await group.next()!
+            let first = try await group.next()!
+            group.cancelAll()
+            // The timer cannot discard an earlier native failure whose
+            // original reply was still being joined at expiry.
+            while let result = await group.nextResult() {
+                if case .failure(let error) = result, let preparation = error as? CloudEpochPreparationError {
+                    switch preparation.outcome {
+                    case .failed: throw preparation
+                    case .waiting where preparation.original != nil: throw preparation
+                    default: break
+                    }
+                }
+            }
+            return first
         }
     }
     private func performExchange(_ command: CloudPolicyCommand, id: UInt64,
@@ -1056,12 +1102,16 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
         let diagnostic = DebugCloudDiagnostics.sendFailureCapture
         var site = DebugCloudDiagnostics.SendFailureSite.exchangeReadiness
         #endif
-        var reservation: UUID?
+        let reservation = CloudExchangeReservation()
         do {
             var captured = false
             var failure: (any Error)?
             do {
-                let readiness = try await waitForReadiness(command)
+                // Reserve the same adapter owner before preparation. The read
+                // runs inside the existing readiness deadline and joins on cancel.
+                let readiness = try await waitForReadiness(command, reservation: reservation)
+                outputs.append(contentsOf: await adapter.takePolicyOperationOutputs())
+                await delivery.acknowledge(outputs)
                 let early: CloudPolicyEarlyEnd?
                 if let readiness { early = readiness }
                 else {
@@ -1082,8 +1132,6 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                     try Task.checkCancellation()
                     // Readiness retains its original deadline scope. Only
                     // causal native admission moves before Core preparation.
-                    let reserved = try await adapter.reservePolicyExchange()
-                    reservation = reserved
                     #if DEBUG
                     site = .exchangePreparation
                     #endif
@@ -1123,11 +1171,12 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 #if DEBUG
                 site = .exchangeEndBeforeCapture
                 #endif
-                let outcome: CloudPolicyEarlyEnd = failure is CancellationError ? .cancelled : .failed(.other)
+                let outcome: CloudPolicyEarlyEnd
+                if let preparation = failure as? CloudEpochPreparationError { outcome = preparation.outcome }
+                else { outcome = failure is CancellationError ? .cancelled : .failed(.other) }
                 try await delivery.appendInput(to: &outputs) { [policy] in try await policy.endBeforeCapture(id, outcome: outcome) }
             }
-            if let reservation { await adapter.releasePolicyExchange(reservation) }
-            reservation = nil
+            if let id = reservation.take() { await adapter.releasePolicyExchange(id) }
             await delivery.acknowledge(outputs)
             if let held = heldConfigure {
                 heldConfigure = nil
@@ -1160,7 +1209,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
             diagnostic?.record(site, error: error)
             DebugCloudDiagnostics.record(.policyExchange, action: command.action, error: error)
             #endif
-            if let reservation { await adapter.releasePolicyExchange(reservation) }
+            if let id = reservation.take() { await adapter.releasePolicyExchange(id) }
             await delivery.acknowledge(outputs)
             _ = try? await delivery.appendInput(to: &outputs) { [policy] in try await policy.input(.refresh(.cloud)) }
             await delivery.acknowledge(outputs)

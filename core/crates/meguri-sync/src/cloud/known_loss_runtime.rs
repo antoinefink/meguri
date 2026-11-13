@@ -222,7 +222,7 @@ impl Runtime {
                     zone: "meguri-root".into(),
                     lost_collection: true,
                     a7_failure: false,
-                    known_loss: true,
+                    purpose: super::super::adapter::FetchReadPurpose::KnownLoss,
                     after_identity: request,
                     loss_identity_after: pending.after_read,
                 });
@@ -304,7 +304,7 @@ impl Runtime {
         Ok(s.adapter
             .pending_collection_loss
             .as_ref()
-            .filter(|r| r.sdk == sdk && r.known_loss)
+            .filter(|r| r.sdk == sdk && r.is_known_loss())
             .cloned())
     }
     fn recover_collection_loss(&self, request: u64, collection: &Collection) -> Result<(), RuntimeError> {

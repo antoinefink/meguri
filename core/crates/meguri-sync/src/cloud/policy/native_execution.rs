@@ -173,6 +173,22 @@ impl Driver {
 }
 
 impl Driver {
+    /// Qualify only the owned RunExchange preparation; this supplies no fetch evidence.
+    pub fn native_sync_now_epoch_read(&self, command: &Command, sdk: &str, collection: &Collection)
+        -> Result<Option<crate::cloud::adapter::FetchRead>, DriverError>
+    {
+        {
+            let owned = self.lock_for_work(&PolicyWork::default())?;
+            self.validate_locked(&owned, command)?;
+            if !matches!(command.action.kind, ActionKind::RunExchange { .. }) { return Err(DriverError::NotCoreAction); }
+            let s = &owned.state;
+            if !s.read_gate_open() || s.facts.summary.crt_known || s.facts.summary.crt_mismatch
+                || s.facts.summary.apply_in_progress || !s.engine_runs()
+            { return Ok(None); }
+        }
+        self.validate_native_sdk(command, sdk)?;
+        Ok(self.runtime.sync_now_epoch_read_for_exchange(sdk, collection)?)
+    }
     /// P12.3 step 1. Only this query decides whether native may keep waiting.
     /// The original command guard is never rebound to a fresh account/token.
     pub fn native_exchange_readiness(
@@ -238,7 +254,7 @@ impl Driver {
             }
         } else if temporary {
             ExchangeOutcome::Waiting {
-                class: OperationError::Other,
+                class: Some(OperationError::Other),
                 retry_after_ms: None,
             }
         } else {

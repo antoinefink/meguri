@@ -115,6 +115,16 @@ actor CloudPersistedEventProbe {
 /// Q3.6: 2025-01-01T00:00:00Z. Review timestamps share the fixture clock.
 let cloudFixtureOriginMilliseconds: Int64 = 1_735_689_600_000
 
+/// Canonical synthetic wire input only; authority still requires Core intake.
+func boundEpochBytes(delta: Int64 = 0, publishing: Bool = false) async throws -> Data {
+    try await MaintenanceLane.shared.call("test.cloudBoundEpochBytes") {
+        try MeguriCoreBindings.testCloudBoundEpochBytes(crtDelta: delta, publishing: publishing)
+    }
+}
+func epochAuthority() async throws -> Int64? {
+    try await MaintenanceLane.shared.call("test.cloudEpochCrt") { try MeguriCoreBindings.testCloudEpochCrt() }
+}
+
 private struct CloudFixtureClock: CollectionClock {
     func nowMilliseconds() -> Int64 { cloudFixtureOriginMilliseconds }
     func utcOffsetSeconds(atMilliseconds: Int64) -> Int32 { 0 }

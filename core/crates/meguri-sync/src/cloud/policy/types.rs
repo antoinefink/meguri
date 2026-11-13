@@ -235,7 +235,8 @@ pub enum ExchangeOutcome {
         blocked: u64,
     },
     Waiting {
-        class: OperationError,
+        /// No classified error is distinct from every existing error class.
+        class: Option<OperationError>,
         retry_after_ms: Option<i64>,
     },
     Failed {

@@ -3,7 +3,102 @@
 use super::*;
 use crate::cloud::{adapter::*, publication::RecordRead};
 
+enum FetchReadCompletion {
+    Record(RecordRead),
+    NativeMalformed,
+}
+
 impl Runtime {
+    pub fn adapter_epoch_crt_known(&self) -> bool {
+        self.state().bound.as_ref().is_some_and(|b| b.epoch_crt.is_some())
+    }
+    pub fn epoch_preparation_failure_class(&self, read: &FetchRead) -> Option<policy::OperationError> {
+        let s = self.state();
+        let b = s.bound.as_ref()?;
+        if s.tracking_stopped { return Some(policy::OperationError::TrackingError); }
+        if b.binding.id != read.scan.binding || (!b.verified && b.binding.facts.state == BindingState::Active)
+            || matches!(b.binding.facts.state, BindingState::Isolated(IsolationReason::SignedOut | IsolationReason::AccountChanged))
+        { return Some(policy::OperationError::NoAccount); }
+        if matches!(b.binding.facts.state, BindingState::Isolated(IsolationReason::ZoneMissing | IsolationReason::ActiveMissing
+            | IsolationReason::EpochSwitched | IsolationReason::ZoneDeletedByUser | IsolationReason::EncryptedDataReset)) {
+            return Some(policy::OperationError::ConflictRecovery);
+        }
+        if b.epoch_crt.is_some_and(|crt| crt != b.current_crt.1) { return Some(policy::OperationError::ConflictRecovery); }
+        None
+    }
+    /// P12.3/V26.1: this capability cannot qualify a fetch/no-state read.
+    pub fn adapter_sync_now_epoch_read(&self, sdk: &str, collection: &Collection) -> Result<Option<FetchRead>, RuntimeError> {
+        let request = self.admit_sync_now(sdk, collection)?;
+        self.sync_now_epoch_read_owned(&request, collection)
+    }
+    pub fn admit_sync_now(&self, sdk: &str, collection: &Collection) -> Result<SyncNowRequest, RuntimeError> {
+        if self.active_review().is_some() {
+            return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
+        }
+        let s = self.state();
+        Self::sdk_locked(&s, sdk)?;
+        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+        if s.adapter.paused || !b.usable || !b.verified || b.binding.facts.state != BindingState::Active
+            || b.epoch_crt.is_some_and(|crt| crt != b.current_crt.1)
+        { return Err(RuntimeError::StaleIncarnation); }
+        let request = SyncNowRequest { sdk: sdk.into(), guard: Self::adapter_guard_locked(&s),
+            scan: ScanGuard { invalidation: s.invalidation, binding: b.binding.id, open: b.open_counter,
+                generation: b.evidence.generation, file: b.file, incarnation: s.incarnation } };
+        drop(s);
+        self.validate_sync_now_request(&request, collection)?;
+        Ok(request)
+    }
+    pub fn validate_sync_now_request(&self, request: &SyncNowRequest, collection: &Collection) -> Result<(), RuntimeError> {
+        self.with_scan(&request.scan, collection, |s| {
+            Self::sdk_locked(s, &request.sdk)?;
+            if Self::adapter_guard_locked(s) != request.guard || s.adapter.paused {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+            Ok(())
+        })
+    }
+    pub fn sync_now_epoch_read_owned(&self, request: &SyncNowRequest, collection: &Collection) -> Result<Option<FetchRead>, RuntimeError> {
+        self.validate_sync_now_request(request, collection)?;
+        self.sync_now_epoch_read_for_exchange(&request.sdk, collection)
+    }
+    pub(crate) fn sync_now_epoch_read_for_exchange(&self, sdk: &str, collection: &Collection) -> Result<Option<FetchRead>, RuntimeError> {
+        let s = self.state();
+        Self::sdk_locked(&s, sdk)?;
+        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+        if b.epoch_crt.is_some() { return Ok(None); }
+        let read = FetchRead {
+            sdk: sdk.into(), scan: ScanGuard {
+                invalidation: s.invalidation, binding: b.binding.id, open: b.open_counter,
+                generation: b.evidence.generation, file: b.file, incarnation: s.incarnation,
+            }, guard: Self::adapter_guard_locked(&s), fetch: None,
+            point: s.adapter.no_state_point, zone: collection_zone(b.binding.facts.epoch),
+            lost_collection: false, a7_failure: false,
+            purpose: FetchReadPurpose::SyncNowEpoch(std::sync::Arc::new(std::sync::Mutex::new(EpochPreparationOutcome::Unknown))),
+            after_identity: s.adapter.next_identity, loss_identity_after: s.adapter.next_identity,
+        };
+        drop(s);
+        self.validate_fetch_read(&read, collection)?;
+        Ok(Some(read))
+    }
+    fn epoch_preparation_locked(s: &State, read: &FetchRead) -> Result<(), RuntimeError> {
+        if Self::adapter_guard_locked(s) != read.guard || s.tracking_stopped || s.adapter.paused
+            || !s.whole_complete || s.scan_required || s.scan_running || s.incoming.running
+            || s.actions.exchange.is_some() || Self::publication_allows_send_locked(s)
+            || s.adapter.known_loss.is_some()
+            || s.adapter.fetch.as_ref().is_some_and(|call| !call.completed) || s.adapter.scheduled.is_some()
+        { return Err(RuntimeError::StaleIncarnation); }
+        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+        // The missing-zone followup retains this purpose and original guard.
+        if read.lost_collection {
+            if !read.is_active() || !s.adapter.pending_collection_loss.as_ref().is_some_and(|pending| {
+                pending.sdk == read.sdk && pending.guard == read.guard && pending.scan.file == read.scan.file
+                    && pending.is_epoch_preparation()
+            }) { return Err(RuntimeError::StaleIncarnation); }
+        } else if b.epoch_crt.is_some() || read.zone != collection_zone(b.binding.facts.epoch)
+            || s.adapter.durable.collection_loss.is_some() || s.adapter.durable.epoch_verification.is_some()
+        { return Err(RuntimeError::StaleIncarnation); }
+        Ok(())
+    }
     pub fn adapter_fetch_qualified(&self, sdk: &str, fetch: u64) -> Result<bool, RuntimeError> {
         let s = self.state();
         Self::sdk_locked(&s, sdk)?;
@@ -75,7 +170,7 @@ impl Runtime {
                 zone: zone.clone(),
                 lost_collection: false,
                 a7_failure: s.adapter.no_state_creation && !s.adapter.zone_wills.contains(zone),
-                known_loss: false,
+                purpose: FetchReadPurpose::Fetch,
                 after_identity: s.adapter.next_identity,
                 loss_identity_after: s.adapter.next_identity,
             })
@@ -135,7 +230,10 @@ impl Runtime {
     }
     pub(super) fn fetch_read_locked(s: &State, read: &FetchRead) -> Result<(), RuntimeError> {
         Self::sdk_locked(s, &read.sdk)?;
-        if read.known_loss {
+        if read.is_epoch_preparation() {
+            return Self::epoch_preparation_locked(s, read);
+        }
+        if read.is_known_loss() {
             if Self::adapter_guard_locked(s) != read.guard
                 || !read.lost_collection
                 || !read.is_active()
@@ -182,8 +280,24 @@ impl Runtime {
         }
         Ok(())
     }
+    pub fn validate_fetch_read_enqueue(&self, read: &FetchRead, collection: &Collection) -> Result<(), RuntimeError> {
+        if !collection.is_current() { return Err(RuntimeError::StaleIncarnation); }
+        let authority = self.native_authority();
+        if authority.guard != read.guard { return Err(RuntimeError::StaleIncarnation); }
+        authority.validate_sdk(&read.sdk)
+    }
     pub fn validate_fetch_read(&self, read: &FetchRead, collection: &Collection) -> Result<(), RuntimeError> {
-        self.with_scan(&read.scan, collection, |s| Self::fetch_read_locked(s, read))
+        self.with_scan(&read.scan, collection, |s| {
+            Self::fetch_read_locked(s, read)?;
+            if read.is_epoch_preparation() {
+                let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+                let store = s.store.as_ref().ok_or(Error::Database)?;
+                if store.publication_op()?.is_some()
+                    || store.apply_intents(b.binding.id)?.iter().any(|intent| intent.result_seq.is_none())
+                { return Err(RuntimeError::StaleIncarnation); }
+            }
+            Ok(())
+        })
     }
     pub fn adapter_complete_fetch_read(
         &self,
@@ -194,6 +308,33 @@ impl Runtime {
         failure: Option<crate::cloud::zone_deletion::FailureFacts>,
         terminal: Option<crate::cloud::zone_deletion::FailureFacts>,
     ) -> Result<Option<FetchRead>, RuntimeError> {
+        self.complete_fetch_read(read, collection, FetchReadCompletion::Record(result), discard, failure, terminal)
+    }
+    /// Refusal of an original native reply with an invalid record shape. It
+    /// shares ordinary completion's guards and cannot supply record authority.
+    pub fn adapter_complete_malformed_fetch_read(
+        &self,
+        read: &FetchRead,
+        collection: &Collection,
+        discard: bool,
+        failure: Option<crate::cloud::zone_deletion::FailureFacts>,
+        terminal: Option<crate::cloud::zone_deletion::FailureFacts>,
+    ) -> Result<Option<FetchRead>, RuntimeError> {
+        self.complete_fetch_read(read, collection, FetchReadCompletion::NativeMalformed, discard, failure, terminal)
+    }
+    fn complete_fetch_read(
+        &self,
+        read: &FetchRead,
+        collection: &Collection,
+        completion: FetchReadCompletion,
+        discard: bool,
+        failure: Option<crate::cloud::zone_deletion::FailureFacts>,
+        terminal: Option<crate::cloud::zone_deletion::FailureFacts>,
+    ) -> Result<Option<FetchRead>, RuntimeError> {
+        let (result, native_malformed) = match completion {
+            FetchReadCompletion::Record(result) => (result, false),
+            FetchReadCompletion::NativeMalformed => (RecordRead::Failed, true),
+        };
         let validation = self.validate_fetch_read(read, collection);
         let accepted = !discard && validation.is_ok();
         let outcome = match &result {
@@ -241,8 +382,21 @@ impl Runtime {
                 .request;
             Self::fresh_loss_identity_locked(&s, request, read.after_identity)?;
         }
+        if read.is_epoch_preparation() && (native_loss.is_some() || matches!(&result, RecordRead::Missing | RecordRead::ZoneMissing)) {
+            read.set_preparation_outcome(EpochPreparationOutcome::Conflict);
+        }
         if let Some(reason) = native_loss {
             self.isolate_fetch_read(read, collection, reason)?;
+            return Ok(None);
+        }
+        if native_malformed && read.is_epoch_preparation() {
+            // Recheck the original file, account, binding, SDK and read point
+            // under the same acceptance scope used for record bodies.
+            self.with_scan(&read.scan, collection, |s| {
+                Self::fetch_read_locked(s, read)?;
+                read.set_preparation_outcome(EpochPreparationOutcome::Conflict);
+                Ok(())
+            })?;
             return Ok(None);
         }
         if !read.is_active() && matches!(&result, RecordRead::Missing | RecordRead::ZoneMissing) {
@@ -324,6 +478,24 @@ impl Runtime {
                 let s = self.state();
                 Self::fetch_read_locked(&s, read)?;
                 let binding = &s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding;
+                if read.is_epoch_preparation() {
+                    use crate::cloud::control_codec::{DecodeOutcome, Epoch, EpochState};
+                    if let Some(envelope) = &record.encrypted {
+                        let outcome = match Epoch::decode(envelope) {
+                            Ok(DecodeOutcome::UnsupportedFormat(_)) => EpochPreparationOutcome::Unsupported,
+                            Ok(DecodeOutcome::Supported(epoch)) if epoch.epoch_id != binding.facts.epoch.0
+                                || epoch.record_key != binding.facts.record_key.0 || record.system_fields.0.is_empty() => EpochPreparationOutcome::Conflict,
+                            Ok(DecodeOutcome::Supported(epoch)) if epoch.state == EpochState::Publishing => EpochPreparationOutcome::Unknown,
+                            Ok(DecodeOutcome::Supported(_)) => EpochPreparationOutcome::Ready,
+                            Err(_) if Epoch::schema_version(envelope).is_ok_and(|ver| ver > 18) => EpochPreparationOutcome::Unsupported,
+                            Err(_) => EpochPreparationOutcome::Conflict,
+                        };
+                        if outcome != EpochPreparationOutcome::Ready {
+                            read.set_preparation_outcome(outcome);
+                            return Ok(None);
+                        }
+                    }
+                }
                 if let Some(envelope) = record.encrypted {
                     fetched_epoch = super::super::epoch_crt_store::fetched(binding, &[workflow::Saved {
                         name: "epoch".into(), envelope, system_fields: record.system_fields.0,
@@ -346,6 +518,13 @@ impl Runtime {
         let at_ms = self.adapter_now()?;
         let resolved = self.with_scan(&read.scan, collection, |s| {
             Self::fetch_read_locked(s, read)?;
+            if read.is_epoch_preparation() {
+                let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+                let store = s.store.as_ref().ok_or(Error::Database)?;
+                if store.publication_op()?.is_some()
+                    || store.apply_intents(b.binding.id)?.iter().any(|intent| intent.result_seq.is_none())
+                { return Err(RuntimeError::StaleIncarnation); }
+            }
             let mut durable = s.adapter.durable.clone();
             // Only the qualified complete body resolves ordinary verification.
             let resolved_epoch = if read.is_active() {
@@ -355,7 +534,7 @@ impl Runtime {
             };
             let resolved = resolved_epoch.is_some();
             // A root read can be due for a drain already emitted by a real fetch.
-            let new_drain = !s
+            let new_drain = !read.is_epoch_preparation() && !s
                 .adapter
                 .fetch
                 .as_ref()
@@ -370,6 +549,10 @@ impl Runtime {
             }
             if new_drain || resolved_epoch.is_some() || fetched_epoch.is_some() {
                 let binding = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
+                #[cfg(feature = "test-hooks")]
+                let fail = read.is_epoch_preparation() && std::mem::take(&mut s.adapter.fail_inbox);
+                #[cfg(not(feature = "test-hooks"))]
+                let fail = false;
                 if let Err(error) = s.store.as_mut().ok_or(Error::Database)?.adapter_commit(
                     binding,
                     &[],
@@ -379,7 +562,7 @@ impl Runtime {
                     super::super::adapter_store::AdapterCommitOptions {
                         deleted_collection_zones: Vec::new(),
                         at_ms,
-                        fail: false,
+                        fail,
                         start_absence: false,
                         resolved_epoch,
                         fetched_epoch,
@@ -403,7 +586,12 @@ impl Runtime {
                     s.media.observed_now_ms = at_ms;
                 }
             }
-            s.adapter.decided_zones.insert(read.zone.clone());
+            if read.is_epoch_preparation() {
+                let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+                read.set_preparation_outcome(if b.crt_equal() { EpochPreparationOutcome::Ready } else { EpochPreparationOutcome::Conflict });
+            } else {
+                s.adapter.decided_zones.insert(read.zone.clone());
+            }
             Ok(resolved)
         })?;
         if resolved {

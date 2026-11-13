@@ -606,6 +606,44 @@ pub struct CloudAdapterBaseline {
     pub incoming_record: crate::sync::CloudRecord,
     pub root_record: crate::sync::CloudRecord,
 }
+
+/// Builds synthetic input using the approved canonical codec; never installs authority.
+#[uniffi::export]
+pub fn test_cloud_bound_epoch_bytes(crt_delta: i64, publishing: bool) -> Result<Vec<u8>, CoreError> {
+    callback::enter("test_cloud_bound_epoch_bytes");
+    runtime::host()?.cloud_runtime().ok_or_else(|| crate::sync::cloud_error("cloud runtime unavailable"))?
+        .bound_epoch_bytes_for_testing(crt_delta, publishing).map_err(crate::sync::cloud_error)
+}
+#[uniffi::export]
+pub fn test_cloud_epoch_crt() -> Result<Option<i64>, CoreError> {
+    callback::enter("test_cloud_epoch_crt");
+    runtime::host()?.cloud_runtime().ok_or_else(|| crate::sync::cloud_error("cloud runtime unavailable"))?
+        .epoch_crt_for_testing().map_err(crate::sync::cloud_error)
+}
+
+/// Checks the actual Host and Runtime without repairing the legacy fixture.
+#[uniffi::export]
+pub fn test_cloud_require_unknown_epoch_sync_now_baseline(sdk: String) -> Result<(), CoreError> {
+    callback::enter("test_cloud_require_unknown_epoch_sync_now_baseline");
+    let host = runtime::host()?;
+    if !matches!(host.engine().state(), meguri_engine::LifecycleState::Ready { .. }) {
+        return Err(crate::sync::cloud_error("epoch preparation fixture must be Ready"));
+    }
+    let core = host
+        .cloud_runtime()
+        .ok_or_else(|| crate::sync::cloud_error("epoch preparation fixture has no cloud runtime"))?;
+    core.require_unknown_epoch_sync_now_baseline_for_testing(&sdk)
+        .map_err(crate::sync::cloud_error)?;
+    let collection = host.collection()?;
+    let projection = core
+        .policy_projection(meguri_sync::cloud::policy::Lifecycle::Ready, collection.generation().0)
+        .map_err(crate::sync::cloud_error)?;
+    if projection.facts.summary.attention_known {
+        return Err(crate::sync::cloud_error("epoch preparation fixture must retain unknown attention"));
+    }
+    Ok(())
+}
+
 #[uniffi::export]
 pub fn test_cloud_prepare_adapter_baseline(
     entity_count: u32,

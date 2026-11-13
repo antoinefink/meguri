@@ -608,7 +608,7 @@ impl CloudWorkflow {
             instance_id,
             serialization,
             collection_zone,
-            needs_root_fetch: !self.core.sdk_root_confirmed(),
+            needs_root_fetch: self.core.adapter_epoch_crt_known() && !self.core.sdk_root_confirmed(),
         })
     }
     pub fn validate_prepared_batch(&self, sdk: String, zone: String, batch: u64) -> Result<(), CoreError> {
