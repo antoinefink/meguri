@@ -207,7 +207,8 @@ impl TrackingStore {
 }
 
 impl TrackingStore {
-    pub(super) fn adapter_record_exchange(&mut self, binding: BindingId, durable: &Durable) -> Result<(), Error> {
+    pub(super) fn adapter_record_exchange(&mut self, binding: BindingId, durable: &Durable,
+        ended: &super::incomplete_store::Ended) -> Result<(), Error> {
         self.binding(binding)?.ok_or(Error::BindingNotFound)?;
         let mut durable = durable.clone();
         let prior = self.adapter_durable(binding)?;
@@ -215,6 +216,7 @@ impl TrackingStore {
         durable.collection_loss = prior.collection_loss.or(durable.collection_loss);
         durable.epoch_verification = prior.epoch_verification.or(durable.epoch_verification);
         let tx = self.connection.transaction()?;
+        super::incomplete_store::record_end(&tx, binding, ended)?;
         tx.execute("INSERT INTO cloud_adapter_state(binding,content) VALUES (?1,?2) ON CONFLICT(binding) DO UPDATE SET content=excluded.content", params![binding.0.as_slice(),encode(&durable)?])?;
         meguri_model::faultpoint!("cloud.adapter.before_commit")?;
         tx.commit()?;

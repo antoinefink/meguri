@@ -194,6 +194,132 @@ fn deck_row(rig: &Rig, id: i64) -> Vec<Cell> {
     reader.row_image(Table::Decks, &RowKey::Id(id)).unwrap().unwrap()
 }
 
+#[test]
+fn cloud_scan_unsent_deck_undo_reopen_drops_only_never_handed_tracking() {
+    let mut fixture = rig();
+    let collection = fixture.host.collection().unwrap();
+    let cloud = fixture.host.cloud_runtime().unwrap();
+    let owner = cloud.status().unwrap().binding.unwrap().id;
+    let original = cloud.entity_facts_page(codec::Kind::Deck, None).unwrap();
+    let baseline = original.iter().find(|entity| entity.key == codec::id_key(fixture.baseline_deck.0)).unwrap().clone();
+    let created = meguri_engine::decks::add(&collection, "Local deck removed before handoff".into()).unwrap().value.id;
+    let pending = cloud.entity_facts_page(codec::Kind::Deck, None).unwrap().into_iter()
+        .find(|entity| entity.key == codec::id_key(created.0)).unwrap();
+    let never_handed = |entity: &meguri_sync::cloud::workflow::EntityFacts| {
+        assert!(!entity.sent);
+        assert_eq!(entity.server_erev, 0);
+        assert_eq!(entity.acked_rev, 0);
+        assert!(entity.in_flight.is_empty());
+        assert!(entity.acked_system_fields.is_empty());
+        assert!(entity.acked_payload.is_none());
+        assert!(entity.acked_envelope.0.is_empty());
+    };
+    never_handed(&pending);
+    {
+        let reader = collection.reader(ReaderRole::Query).unwrap();
+        assert!(reader.row_image(Table::Decks, &RowKey::Id(created.0)).unwrap().is_some());
+    }
+    collection.undo(meguri_engine::undo::UndoScope::Global).unwrap();
+    {
+        let current = fixture.host.collection().unwrap();
+        let reader = current.reader(ReaderRole::Query).unwrap();
+        assert!(reader.row_image(Table::Decks, &RowKey::Id(created.0)).unwrap().is_none());
+    }
+    never_handed(&cloud.entity_facts(&pending.name).unwrap().unwrap());
+    assert!(matches!(cloud.adapter_fetched(&fixture.sdk, &fixture.zone, &[], &[]), Err(RuntimeError::StaleIncarnation)));
+    drop(collection);
+    fixture.host.close().unwrap();
+    fixture.host = Arc::new(CoreHost::open(fixture.config.clone()).unwrap());
+    fixture.host.cloud_policy_input(DeviceEvent::Settings(DeviceSettings {
+        enabled: true, paused: false, automatic: false, media: false,
+    })).unwrap();
+    fixture.host.cloud_policy_input(DeviceEvent::Account {
+        identity: IdentityStatus::Available(OpaqueBytes(b"synthetic-account-A".to_vec())), origin_sdk: None,
+    }).unwrap();
+    fixture.host.cloud_policy_input(DeviceEvent::Network { reachable: true }).unwrap();
+    let collection = fixture.host.collection().unwrap();
+    let cloud = fixture.host.cloud_runtime().unwrap();
+    assert_eq!(cloud.status().unwrap().binding.unwrap().id, owner);
+    never_handed(&cloud.entity_facts(&pending.name).unwrap().unwrap());
+    {
+        let reader = collection.reader(ReaderRole::Query).unwrap();
+        assert!(reader.row_image(Table::Decks, &RowKey::Id(created.0)).unwrap().is_none());
+    }
+    cloud.reconcile_binding(&collection, &fixture.host.media().unwrap(), Duration::from_secs(10)).unwrap();
+    assert!(cloud.entity_facts(&pending.name).unwrap().is_none());
+    assert_eq!(cloud.entity_facts_page(codec::Kind::Deck, None).unwrap().len(), original.len());
+    let retained = cloud.entity_facts(&baseline.name).unwrap().unwrap();
+    assert!(retained.payload == baseline.payload);
+    assert_eq!(retained.sent, baseline.sent);
+    assert_eq!(retained.local_rev, baseline.local_rev);
+    assert_eq!(retained.acked_rev, baseline.acked_rev);
+    assert_eq!(retained.server_erev, baseline.server_erev);
+    assert_eq!(retained.mark, baseline.mark);
+    assert!(retained.in_flight == baseline.in_flight);
+    assert!(cloud.inbox_entries(owner).unwrap().is_empty());
+    assert!(cloud.apply_intents(owner).unwrap().is_empty());
+    assert!(cloud.accept_root_fetch(&cloud.instance().unwrap(), Some(&fixture.active), true, 1).unwrap());
+    let (sdk, _, _) = cloud.register_sdk(false).unwrap();
+    cloud.validate_sdk(&sdk).unwrap();
+    assert!(!cloud.tracking_sendables().contains_key(&pending.name));
+    let batch = cloud.build_collection_batch(&sdk, &collection, &[pending.name.clone()].into()).unwrap();
+    assert!(batch.saves.is_empty());
+    assert!(cloud.entity_facts(&pending.name).unwrap().is_none());
+    let projection = cloud.policy_projection(meguri_sync::cloud::policy::Lifecycle::Ready, collection.generation().0).unwrap();
+    assert!(!projection.facts.summary.attention.contains_key(&meguri_sync::cloud::policy::Attention::ExchangeIncomplete));
+    assert!(!projection.facts.summary.attention_known);
+    fixture.host.close().unwrap();
+}
+
+#[test]
+fn cloud_scan_handed_deck_keeps_tracking_and_uploaded_undo_refusal_after_reopen() {
+    let mut fixture = rig();
+    let collection = fixture.host.collection().unwrap();
+    let created = meguri_engine::decks::add(&collection, "Deck handed to the SDK".into()).unwrap().value.id;
+    let cloud = fixture.host.cloud_runtime().unwrap();
+    let pending = cloud.entity_facts_page(codec::Kind::Deck, None).unwrap().into_iter()
+        .find(|entity| entity.key == codec::id_key(created.0)).unwrap();
+    let batch = cloud.build_collection_batch(&fixture.sdk, &collection, &[pending.name.clone()].into()).unwrap();
+    cloud.validate_sdk(&fixture.sdk).unwrap();
+    assert_eq!(batch.saves.len(), 1);
+    assert_eq!(batch.saves[0].name, pending.name);
+    let handed = cloud.entity_facts(&pending.name).unwrap().unwrap();
+    assert!(handed.sent);
+    assert!(!handed.in_flight.is_empty());
+    assert_eq!(handed.server_erev, 0);
+    assert_eq!(handed.acked_rev, 0);
+    assert!(matches!(collection.undo(meguri_engine::undo::UndoScope::Global),
+        Err(meguri_engine::EngineError::UndoUnavailable {
+            reason: meguri_engine::undo::reasons::DisabledReason::UploadPending,
+        })));
+    incomplete_ack_batch(&fixture, batch);
+    let acked = cloud.entity_facts(&pending.name).unwrap().unwrap();
+    assert!(acked.sent);
+    assert!(acked.server_erev > 0);
+    assert_eq!(acked.acked_rev, acked.local_rev);
+    assert!(acked.in_flight.is_empty());
+    assert!(matches!(collection.undo(meguri_engine::undo::UndoScope::Global),
+        Err(meguri_engine::EngineError::UndoUnavailable {
+            reason: meguri_engine::undo::reasons::DisabledReason::AlreadyUploaded,
+        })));
+    let row = deck_row(&fixture, created.0);
+    drop(collection);
+    incomplete_reopen(&mut fixture);
+    let cloud = fixture.host.cloud_runtime().unwrap();
+    let retained = cloud.entity_facts(&pending.name).unwrap().unwrap();
+    assert!(retained.sent);
+    assert_eq!(retained.server_erev, acked.server_erev);
+    assert_eq!(retained.local_rev, acked.local_rev);
+    assert_eq!(retained.acked_rev, acked.acked_rev);
+    assert!(retained.in_flight.is_empty());
+    assert!(retained.mark.is_none());
+    assert_eq!(deck_row(&fixture, created.0), row);
+    assert_eq!(incomplete_count(&fixture.host), None);
+    assert!(!cloud.policy_projection(meguri_sync::cloud::policy::Lifecycle::Ready,
+        fixture.host.engine().generation().0).unwrap().facts.summary.attention_known);
+    fixture.host.close().unwrap();
+}
+
 fn incoming_deck(rig: &Rig) -> (i64, Vec<Cell>, Command) {
     let (saved, entity, mut deck) = rig
         .records
@@ -238,6 +364,67 @@ fn incoming_deck(rig: &Rig) -> (i64, Vec<Cell>, Command) {
         |kind| matches!(kind, ActionKind::ApplyReady { .. }),
     );
     (id, before, apply)
+}
+
+// Baseline-only regression: every observation below uses an existing public seam.
+#[test]
+fn exchange_incomplete_real_rename_produces_attention() {
+    let rig = rig();
+    meguri_engine::decks::rename(
+        &rig.host.collection().unwrap(), rig.baseline_deck, "Incomplete selected deck".into(),
+    ).unwrap();
+    let action = incomplete_end(&rig);
+    rig.host.execute_cloud_policy_core(&action, Duration::from_secs(10)).unwrap();
+    assert_eq!(incomplete_count(&rig.host), Some(1));
+    assert!(!rig.host.cloud_policy_driver().unwrap().state().facts.summary.attention_known);
+    rig.host.close().unwrap();
+}
+
+fn incomplete_count(host: &CoreHost) -> Option<u64> {
+    let collection = host.collection().unwrap();
+    host.cloud_runtime().unwrap().policy_projection(
+        meguri_sync::cloud::policy::Lifecycle::Ready, collection.generation().0,
+    ).unwrap().facts.summary.attention.get(&meguri_sync::cloud::policy::Attention::ExchangeIncomplete).copied()
+}
+
+fn incomplete_end(rig: &Rig) -> Command {
+    let action = policy_native_end(rig, true, None);
+    assert!(matches!(&action.action.kind, ActionKind::RecordExchange(record)
+        if matches!(record.outcome, ExchangeOutcome::Incomplete { .. })));
+    action
+}
+
+fn policy_native_end(rig: &Rig, fetched: bool,
+    terminal: Option<meguri_sync::cloud::adapter::CollectionOutcome>) -> Command {
+    let driver = rig.host.cloud_policy_driver().unwrap();
+    let run = command(rig.host.cloud_policy_input(DeviceEvent::SyncNowRequested(Source::Command)).unwrap(),
+        |k| matches!(k, ActionKind::RunExchange { .. }));
+    let ActionKind::RunExchange { exchange, .. } = run.action.kind else { unreachable!() };
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let native = driver.capture_exchange(&run, &rig.host.collection().unwrap()).unwrap();
+    policy_fetch_snapshot(rig);
+    runtime.adapter_complete_exchange(&rig.sdk, native, fetched, terminal).unwrap();
+    command(driver.complete_exchange(exchange, rig.host.engine().state(), rig.host.engine().generation()).unwrap(),
+        |k| matches!(k, ActionKind::RecordExchange(_)))
+}
+
+fn policy_fetch_snapshot(rig: &Rig) {
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let fetch = runtime.adapter_begin_fetch(&rig.sdk, vec!["meguri-root".into(), rig.zone.clone()]).unwrap();
+    let group = format!("incomplete:{fetch}");
+    runtime.adapter_will_fetch(&rig.sdk, group.clone(), true).unwrap();
+    for zone in ["meguri-root".to_owned(), rig.zone.clone()] {
+        runtime.adapter_fetch_zone(&rig.sdk, zone.clone(), true, false).unwrap();
+        if zone == rig.zone {
+            runtime.adapter_fetched(&rig.sdk, &zone, &rig.records, &[]).unwrap();
+        } else {
+            runtime.adapter_fetched(&rig.sdk, &zone, std::slice::from_ref(&rig.active), &[]).unwrap();
+        }
+        runtime.adapter_fetch_zone(&rig.sdk, zone, false, false).unwrap();
+    }
+    runtime.adapter_did_fetch(&rig.sdk, &group, true).unwrap();
+    assert!(runtime.adapter_finish_fetch(&rig.sdk, fetch).unwrap());
+    runtime.adapter_exchange_fetch(&rig.sdk, true).unwrap();
 }
 
 fn cancelled_exchange(rig: &Rig) -> Command {
@@ -2809,4 +2996,969 @@ fn original_refusal_attempt_rejects_foreign_owner_binding_and_generation_without
         .unwrap_err();
     assert!(error.refusal.is_none());
     original.host.close().unwrap();
+}
+
+fn incomplete_record(rig: &Rig, action: &Command) {
+    rig.host.execute_cloud_policy_core(action, Duration::from_secs(10)).unwrap();
+}
+fn incomplete_pending_batch(rig: &Rig) -> meguri_sync::cloud::workflow::BuiltBatch {
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let names = runtime.tracking_sendables().into_keys().collect();
+    let batch = runtime.build_collection_batch(&rig.sdk, &rig.host.collection().unwrap(), &names).unwrap();
+    assert!(!batch.saves.is_empty());
+    batch
+}
+fn incomplete_ack_batch(rig: &Rig, batch: meguri_sync::cloud::workflow::BuiltBatch) {
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let saved = batch.saves.into_iter().map(|r| Saved {
+        name: r.name, envelope: r.envelope, system_fields: format!("incomplete-save:{}", batch.id).into_bytes(),
+    }).collect::<Vec<_>>();
+    runtime.enter_sent_handler(&rig.sdk, batch.id).unwrap();
+    runtime.sent_results(&rig.sdk, &rig.host.collection().unwrap(), batch.id, &saved, &[], saved.len()).unwrap();
+    runtime.return_sent_handler(&rig.sdk).unwrap();
+}
+
+#[test]
+fn exchange_incomplete_accumulates_original_boundaries_through_other_results_and_duplicates() {
+    use meguri_sync::cloud::adapter::CollectionOutcome;
+    let rig = rig();
+    let collection = rig.host.collection().unwrap();
+    meguri_engine::decks::rename(&collection, rig.baseline_deck, "First incomplete revision".into()).unwrap();
+    let first = incomplete_end(&rig);
+    incomplete_record(&rig, &first);
+    let old_batch = incomplete_pending_batch(&rig);
+    for (fetched, terminal) in [(false, None), (true, Some(CollectionOutcome::Failed)), (true, Some(CollectionOutcome::Cancelled))] {
+        let result = policy_native_end(&rig, fetched, terminal);
+        incomplete_record(&rig, &result);
+        incomplete_record(&rig, &result);
+        assert_eq!(incomplete_count(&rig.host), Some(1));
+    }
+    meguri_engine::decks::rename(&collection, rig.baseline_deck, "Second incomplete revision".into()).unwrap();
+    let second = incomplete_end(&rig);
+    incomplete_record(&rig, &second);
+    incomplete_record(&rig, &second);
+    incomplete_ack_batch(&rig, old_batch);
+    assert_eq!(incomplete_count(&rig.host), Some(1));
+    incomplete_ack_batch(&rig, incomplete_pending_batch(&rig));
+    assert_eq!(incomplete_count(&rig.host), None);
+    incomplete_record(&rig, &first);
+    incomplete_record(&rig, &second);
+    assert_eq!(incomplete_count(&rig.host), None);
+    rig.host.close().unwrap();
+}
+
+#[test]
+fn exchange_incomplete_late_ack_survives_newer_edit_and_reopen_before_or_after_recording() {
+    for record_before_ack in [false, true] {
+        let rig = rig();
+        let collection = rig.host.collection().unwrap();
+        meguri_engine::decks::rename(&collection, rig.baseline_deck, "Original obligation".into()).unwrap();
+        let action = incomplete_end(&rig);
+        let batch = incomplete_pending_batch(&rig);
+        if record_before_ack { incomplete_record(&rig, &action); }
+        meguri_engine::decks::rename(&collection, rig.baseline_deck, "Newer pending local edit".into()).unwrap();
+        incomplete_ack_batch(&rig, batch);
+        if !record_before_ack { incomplete_record(&rig, &action); }
+        assert_eq!(incomplete_count(&rig.host), None);
+        assert!(!rig.host.cloud_runtime().unwrap().tracking_sendables().is_empty());
+        meguri_engine::decks::rename(&collection, rig.baseline_deck, "Even newer local edit".into()).unwrap();
+        assert_eq!(incomplete_count(&rig.host), None);
+        incomplete_record(&rig, &action);
+        rig.host.close().unwrap();
+        let reopened = CoreHost::open(rig.config.clone()).unwrap();
+        assert_eq!(incomplete_count(&reopened), None);
+        assert!(!reopened.cloud_runtime().unwrap().policy_projection(
+            meguri_sync::cloud::policy::Lifecycle::Ready, reopened.collection().unwrap().generation().0,
+        ).unwrap().facts.summary.attention_known);
+        reopened.close().unwrap();
+    }
+}
+
+#[test]
+fn exchange_incomplete_reopen_retains_none_some_and_all_done() {
+    use meguri_sync::cloud::InboxReason;
+    for done in 0..=2 {
+        let rig = rig();
+        let collection = rig.host.collection().unwrap();
+        meguri_engine::decks::rename(&collection, rig.baseline_deck, "Two directions pending".into()).unwrap();
+        incoming_deck(&rig);
+        let runtime = rig.host.cloud_runtime().unwrap();
+        let binding = runtime.status().unwrap().binding.unwrap().id;
+        let entry = runtime.inbox_entries(binding).unwrap().remove(0);
+        let action = incomplete_end(&rig);
+        incomplete_record(&rig, &action);
+        assert_eq!(incomplete_count(&rig.host), Some(1));
+        if done >= 1 {
+            runtime.set_inbox_reason_for_testing(binding, entry.id, InboxReason::Reference).unwrap();
+            assert_eq!(incomplete_count(&rig.host), Some(1)); // outgoing still blocked
+        }
+        if done == 2 {
+            runtime.set_inbox_reason_for_testing(binding, entry.id, InboxReason::Ready).unwrap();
+            let apply = command(rig.host.cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Cloud)).unwrap(),
+                |kind| matches!(kind, ActionKind::ApplyReady { .. }));
+            rig.host.execute_cloud_policy_core(&apply, Duration::from_secs(10)).unwrap();
+            if !runtime.tracking_sendables().is_empty() { incomplete_ack_batch(&rig, incomplete_pending_batch(&rig)); }
+            assert_eq!(incomplete_count(&rig.host), None);
+        }
+        rig.host.close().unwrap();
+        let reopened = CoreHost::open(rig.config.clone()).unwrap();
+        assert_eq!(incomplete_count(&reopened), if done == 2 { None } else { Some(1) });
+        reopened.close().unwrap();
+    }
+}
+
+#[test]
+fn exchange_incomplete_every_original_incoming_reason_can_become_nonblocking_only_for_itself() {
+    use meguri_sync::cloud::{InboxReason, ApplyFailure};
+    for original in [InboxReason::Ready, InboxReason::Format, InboxReason::Asset,
+        InboxReason::ApplyFailed { failure: ApplyFailure::Apply, error: OpaqueBytes(vec![1]) }] {
+        for later in [InboxReason::Generation, InboxReason::Reference, InboxReason::Structure] {
+            let rig = rig();
+            incoming_deck(&rig);
+            let runtime = rig.host.cloud_runtime().unwrap();
+            let binding = runtime.status().unwrap().binding.unwrap().id;
+            let entry = runtime.inbox_entries(binding).unwrap().remove(0);
+            runtime.set_inbox_reason_for_testing(binding, entry.id, original.clone()).unwrap();
+            let action = incomplete_end(&rig);
+            if original == InboxReason::Ready {
+                assert!(matches!(&action.action.kind, ActionKind::RecordExchange(record)
+                    if matches!(record.outcome, ExchangeOutcome::Incomplete { outstanding: 0, blocked: 0 })));
+            }
+            incomplete_record(&rig, &action);
+            assert_eq!(incomplete_count(&rig.host), Some(1));
+            runtime.set_inbox_reason_for_testing(binding, entry.id, later).unwrap();
+            assert_eq!(incomplete_count(&rig.host), None);
+            runtime.set_inbox_reason_for_testing(binding, entry.id, InboxReason::Format).unwrap();
+            incomplete_record(&rig, &action);
+            assert_eq!(incomplete_count(&rig.host), None);
+            let projection = runtime.policy_projection(meguri_sync::cloud::policy::Lifecycle::Ready, rig.host.engine().generation().0).unwrap();
+            assert!(projection.facts.summary.attention.contains_key(&meguri_sync::cloud::policy::Attention::UnsupportedSchema));
+            assert!(!projection.facts.summary.attention_known);
+            rig.host.close().unwrap();
+        }
+    }
+}
+
+// P12.6.1 follows K13 acceptance of the captured version.
+#[test]
+fn exchange_incomplete_k13_proofs_exclude_unaccepted_deliveries() {
+    use meguri_sync::cloud::{InboxReason, InboxValue};
+    enum Evidence { Applied, Replaced, Removed, Unsupported, Malformed, Older, Unrelated }
+    for evidence in [Evidence::Applied, Evidence::Replaced, Evidence::Removed,
+        Evidence::Unsupported, Evidence::Malformed, Evidence::Older, Evidence::Unrelated] {
+        let fixture = rig();
+        let (_, _, worker) = incoming_deck(&fixture);
+        let cloud = fixture.host.cloud_runtime().unwrap();
+        let owner = cloud.status().unwrap().binding.unwrap().id;
+        let captured = cloud.inbox_entries(owner).unwrap().remove(0);
+        let name = &captured.entry.record_name;
+        let end = incomplete_end(&fixture);
+        incomplete_record(&fixture, &end);
+        assert_eq!(incomplete_count(&fixture.host), Some(1));
+        let settles = match evidence {
+            Evidence::Applied => {
+                fixture.host.execute_cloud_policy_core(&worker, Duration::from_secs(10)).unwrap();
+                true
+            }
+            Evidence::Removed => {
+                cloud.adapter_fetched(&fixture.sdk, &fixture.zone, &[], std::slice::from_ref(name)).unwrap();
+                true
+            }
+            Evidence::Replaced | Evidence::Unsupported => {
+                let InboxValue::Record { envelope, system_fields, .. } = &captured.entry.value else { unreachable!() };
+                let mut update = advance_server_record(&Saved { name: name.clone(), envelope: envelope.0.clone(),
+                    system_fields: system_fields.0.clone() });
+                let supported = matches!(evidence, Evidence::Replaced);
+                if !supported {
+                    assert_eq!(update.envelope[..2], [8, 1]);
+                    update.envelope[1] = 2;
+                }
+                cloud.adapter_fetched(&fixture.sdk, &fixture.zone, &[update], &[]).unwrap();
+                supported
+            }
+            Evidence::Malformed => {
+                cloud.adapter_fetched(&fixture.sdk, &fixture.zone,
+                    &[Saved { name: name.clone(), envelope: vec![1], system_fields: vec![2] }], &[]).unwrap();
+                false
+            }
+            Evidence::Older => {
+                let baseline = fixture.records.iter().find(|record| &record.name == name).unwrap();
+                cloud.adapter_fetched(&fixture.sdk, &fixture.zone, std::slice::from_ref(baseline), &[]).unwrap();
+                false
+            }
+            Evidence::Unrelated => {
+                let baseline = fixture.records.iter().find(|record| &record.name != name && matches!(
+                    codec::Entity::decode(&record.envelope).unwrap(),
+                    codec::DecodeOutcome::Supported(entity) if entity.fields.kind == codec::Kind::Deck)).unwrap();
+                let update = advance_server_record(baseline);
+                let codec::DecodeOutcome::Supported(mut entity) = codec::Entity::decode(&update.envelope).unwrap() else { unreachable!() };
+                entity.fields.generation = Some([71; 16]);
+                let bytes = codec::Entity::build(entity.fields, entity.payload.as_deref().unwrap()).unwrap().encode().unwrap();
+                cloud.adapter_fetched(&fixture.sdk, &fixture.zone,
+                    &[Saved { envelope: bytes, ..update }], &[]).unwrap();
+                let waiting = cloud.inbox_entries(owner).unwrap().into_iter().find(|item| item.entry.record_name == baseline.name).unwrap();
+                assert_eq!(waiting.entry.reason, InboxReason::Generation);
+                false
+            }
+        };
+        let attention = if settles { None } else { Some(1) };
+        assert_eq!(incomplete_count(&fixture.host), attention);
+        incomplete_record(&fixture, &end);
+        assert_eq!(incomplete_count(&fixture.host), attention);
+        assert!(!cloud.policy_projection(meguri_sync::cloud::policy::Lifecycle::Ready,
+            fixture.host.engine().generation().0).unwrap().facts.summary.attention_known);
+        fixture.host.close().unwrap();
+        let reopened = CoreHost::open(fixture.config.clone()).unwrap();
+        assert_eq!(incomplete_count(&reopened), attention);
+        reopened.close().unwrap();
+    }
+}
+
+fn advance_server_record(previous: &Saved) -> Saved {
+    let codec::DecodeOutcome::Supported(mut decoded) = codec::Entity::decode(&previous.envelope).unwrap()
+        else { panic!("fixture requires a supported entity") };
+    decoded.fields.erev += 1;
+    Saved {
+        name: previous.name.clone(),
+        system_fields: b"next-server-receipt".to_vec(),
+        envelope: codec::Entity::build(decoded.fields, decoded.payload.as_deref().unwrap()).unwrap().encode().unwrap(),
+    }
+}
+
+#[test]
+fn exchange_incomplete_clean_and_unsent_drop_are_durable_done_proofs() {
+    let rig = rig();
+    let collection = rig.host.collection().unwrap();
+    meguri_engine::decks::rename(&collection, rig.baseline_deck, "Undo will make this clean".into()).unwrap();
+    let action = incomplete_end(&rig);
+    incomplete_record(&rig, &action);
+    collection.undo(meguri_engine::undo::UndoScope::Global).unwrap();
+    assert_eq!(incomplete_count(&rig.host), None);
+    meguri_engine::decks::rename(&collection, rig.baseline_deck, "Later dirty again".into()).unwrap();
+    assert_eq!(incomplete_count(&rig.host), None);
+    rig.host.close().unwrap();
+
+    let rig = rig_with_root(false);
+    fetch_first_root(&rig);
+    let collection = rig.host.collection().unwrap();
+    let notetype = rig.records.iter().find_map(|r| {
+        let codec::DecodeOutcome::Supported(e) = codec::Entity::decode(&r.envelope).ok()? else { return None; };
+        match Payload::decode(e.fields.kind, e.payload.as_deref()?).ok()? {
+            Payload::Notetype(nt) => Some(meguri_model::ids::NotetypeId(nt.id)), _ => None,
+        }
+    }).unwrap();
+    let added = meguri_engine::notes::add(&collection, meguri_engine::notes::AddNote {
+        notetype_id: notetype, fields: vec!["Incomplete public question".into(), "Public answer".into()],
+        tags: Vec::new(), deck_id: rig.baseline_deck, guid: None, update_add_defaults: false,
+    }, meguri_engine::OpSource::UserUndoable).unwrap().value;
+    let action = incomplete_end(&rig);
+    incomplete_record(&rig, &action);
+    meguri_engine::notes::delete(&collection, vec![added.id], meguri_engine::OpSource::UserUndoable).unwrap();
+    // The note and card drop unsent; the separate selected config key remains.
+    assert_eq!(incomplete_count(&rig.host), Some(1));
+    incomplete_ack_batch(&rig, incomplete_pending_batch(&rig));
+    assert_eq!(incomplete_count(&rig.host), None);
+    collection.undo(meguri_engine::undo::UndoScope::Global).unwrap();
+    assert_eq!(incomplete_count(&rig.host), None);
+    rig.host.close().unwrap();
+}
+
+#[test]
+fn exchange_incomplete_original_success_order_ignores_backward_clock_and_first_late_delivery() {
+    for late_old_success in [false, true] {
+        let rig = rig();
+        // An older original success can be delivered for the first time later.
+        let older = policy_native_end(&rig, true, None);
+        assert!(matches!(&older.action.kind, ActionKind::RecordExchange(r) if matches!(r.outcome, ExchangeOutcome::Succeeded { .. })));
+        if !late_old_success { incomplete_record(&rig, &older); }
+        rig.clock.step_ms(-10_000);
+        meguri_engine::decks::rename(&rig.host.collection().unwrap(), rig.baseline_deck, "Newer incomplete original".into()).unwrap();
+        let incomplete = incomplete_end(&rig);
+        incomplete_record(&rig, &incomplete);
+        incomplete_record(&rig, &older);
+        incomplete_record(&rig, &older);
+        assert_eq!(incomplete_count(&rig.host), Some(1));
+        // Work remaining outside the selection is allowed by a later success.
+        // The original's incoming transition clears only the work it owns.
+        rig.clock.step_ms(-100_000);
+        incomplete_ack_batch(&rig, incomplete_pending_batch(&rig));
+        let later = policy_native_end(&rig, true, None);
+        incomplete_record(&rig, &later);
+        incomplete_record(&rig, &later);
+        assert_eq!(incomplete_count(&rig.host), None);
+        rig.host.close().unwrap();
+        let reopened = CoreHost::open(rig.config.clone()).unwrap();
+        assert_eq!(incomplete_count(&reopened), None);
+        reopened.close().unwrap();
+    }
+}
+
+#[test]
+fn exchange_incomplete_stale_close_and_foreign_result_cannot_add_or_clear_state() {
+    let rig = rig();
+    meguri_engine::decks::rename(&rig.host.collection().unwrap(), rig.baseline_deck, "Scoped incomplete".into()).unwrap();
+    let action = incomplete_end(&rig);
+    let other = rig_with_root_seed(true, 1915);
+    assert!(other.host.execute_cloud_policy_core(&action, Duration::from_secs(10)).is_err());
+    assert_eq!(incomplete_count(&other.host), None);
+    incomplete_record(&rig, &action);
+    assert_eq!(incomplete_count(&rig.host), Some(1));
+    other.host.close().unwrap();
+    rig.host.close().unwrap();
+    assert!(rig.host.execute_cloud_policy_core(&action, Duration::from_secs(10)).is_err());
+    let reopened = CoreHost::open(rig.config.clone()).unwrap();
+    assert!(reopened.execute_cloud_policy_core(&action, Duration::from_secs(10)).is_err());
+    assert_eq!(incomplete_count(&reopened), Some(1));
+    reopened.close().unwrap();
+}
+
+fn incomplete_reopen(rig: &mut Rig) {
+    rig.host.close().unwrap();
+    rig.host = Arc::new(CoreHost::open(rig.config.clone()).unwrap());
+    rig.host.cloud_policy_input(DeviceEvent::Settings(DeviceSettings {
+        enabled: true, paused: false, automatic: false, media: false,
+    })).unwrap();
+    rig.host.cloud_policy_input(DeviceEvent::Account {
+        identity: IdentityStatus::Available(OpaqueBytes(b"synthetic-account-A".to_vec())), origin_sdk: None,
+    }).unwrap();
+    rig.host.cloud_policy_input(DeviceEvent::Network { reachable: true }).unwrap();
+    let runtime = rig.host.cloud_runtime().unwrap();
+    runtime.reconcile_binding(&rig.host.collection().unwrap(), &rig.host.media().unwrap(), Duration::from_secs(10)).unwrap();
+    runtime.accept_root_fetch(&runtime.instance().unwrap(), Some(&rig.active), true, 1).unwrap();
+    let (sdk, _, zone) = runtime.register_sdk(false).unwrap();
+    rig.sdk = sdk;
+    rig.zone = zone;
+    rig.host.cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Cloud)).unwrap();
+}
+
+#[test]
+fn exchange_incomplete_accepted_ack_after_reopen_uses_original_boundary_and_keeps_newer_pending() {
+    for discover_by_fetch in [false, true] {
+        let mut rig = rig();
+        let collection = rig.host.collection().unwrap();
+        meguri_engine::decks::rename(&collection, rig.baseline_deck, "Original durable boundary".into()).unwrap();
+        let action = incomplete_end(&rig);
+        incomplete_record(&rig, &action);
+        let batch = incomplete_pending_batch(&rig);
+        let original = Saved { name: batch.saves[0].name.clone(), envelope: batch.saves[0].envelope.clone(),
+            system_fields: b"original-flight-landed".to_vec() };
+        meguri_engine::decks::rename(&collection, rig.baseline_deck, "Unacknowledged newer revision".into()).unwrap();
+        incomplete_reopen(&mut rig);
+        assert_eq!(incomplete_count(&rig.host), Some(1));
+        if discover_by_fetch {
+            let runtime = rig.host.cloud_runtime().unwrap();
+            runtime.adapter_fetched(&rig.sdk, &rig.zone, &[original], &[]).unwrap();
+            runtime.drain_native_incoming(&rig.host.collection().unwrap(), &rig.sdk, Duration::from_secs(10)).unwrap();
+        } else {
+            let batch = incomplete_pending_batch(&rig);
+            meguri_engine::decks::rename(&rig.host.collection().unwrap(), rig.baseline_deck, "Newer after reopen handoff".into()).unwrap();
+            incomplete_ack_batch(&rig, batch);
+        }
+        assert_eq!(incomplete_count(&rig.host), None);
+        assert!(!rig.host.cloud_runtime().unwrap().tracking_sendables().is_empty());
+        incomplete_reopen(&mut rig);
+        assert_eq!(incomplete_count(&rig.host), None);
+        rig.host.close().unwrap();
+    }
+}
+
+#[test]
+fn exchange_incomplete_actual_later_success_clears_unsettled_original_with_backward_clock() {
+    let mut rig = rig();
+    incoming_deck(&rig);
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let binding = runtime.status().unwrap().binding.unwrap().id;
+    let entry = runtime.inbox_entries(binding).unwrap().remove(0).entry;
+    let incomplete = incomplete_end(&rig);
+    incomplete_record(&rig, &incomplete);
+    let meguri_sync::cloud::InboxValue::Record { envelope, .. } = &entry.value else { unreachable!() };
+    let codec::DecodeOutcome::Supported(mut entity) = codec::Entity::decode(&envelope.0).unwrap() else { unreachable!() };
+    entity.fields.erev += 1;
+    // A newer malformed payload is refused by K20. Its typed version removes
+    // the old queued entry, but refusal supplies no incoming-done receipt.
+    let mut payload = entity.payload.unwrap();
+    payload.push(0);
+    let refused = Saved { name: entry.record_name, envelope: codec::Entity::build(entity.fields, &payload).unwrap().encode().unwrap(),
+        system_fields: b"refused-newer-record".to_vec() };
+    runtime.adapter_fetched(&rig.sdk, &rig.zone, &[refused], &[]).unwrap();
+    assert!(runtime.inbox_entries(binding).unwrap().is_empty());
+    assert_eq!(runtime.refused_entries(binding).unwrap().len(), 1);
+    assert_eq!(incomplete_count(&rig.host), Some(1));
+    rig.clock.step_ms(-100_000);
+    let later = policy_native_end(&rig, true, None);
+    assert!(matches!(&later.action.kind, ActionKind::RecordExchange(record) if matches!(record.outcome, ExchangeOutcome::Succeeded { .. })));
+    // Original completion alone is not its durable P12.7 acceptance.
+    assert_eq!(incomplete_count(&rig.host), Some(1));
+    incomplete_record(&rig, &later);
+    assert_eq!(incomplete_count(&rig.host), None);
+    incomplete_record(&rig, &later);
+    incomplete_record(&rig, &incomplete);
+    assert_eq!(incomplete_count(&rig.host), None);
+    assert!(rig.host.cloud_runtime().unwrap().policy_projection(
+        meguri_sync::cloud::policy::Lifecycle::Ready, rig.host.engine().generation().0,
+    ).unwrap().facts.summary.attention.contains_key(&meguri_sync::cloud::policy::Attention::Refused));
+    incomplete_reopen(&mut rig);
+    assert_eq!(incomplete_count(&rig.host), None);
+    rig.host.close().unwrap();
+}
+
+#[test]
+fn exchange_incomplete_tombstone_ack_survives_refused_undo_and_permitted_edit() {
+    let rig = rig_with_root(false);
+    fetch_first_root(&rig);
+    let collection = rig.host.collection().unwrap();
+    let note = rig.records.iter().find_map(|r| {
+        let codec::DecodeOutcome::Supported(e) = codec::Entity::decode(&r.envelope).ok()? else { return None; };
+        match Payload::decode(e.fields.kind, e.payload.as_deref()?).ok()? {
+            Payload::Note(note) => Some(meguri_model::ids::NoteId(note.id)), _ => None,
+        }
+    }).unwrap();
+    meguri_engine::notes::delete(&collection, vec![note], meguri_engine::OpSource::UserUndoable).unwrap();
+    let action = incomplete_end(&rig);
+    incomplete_record(&rig, &action);
+    let batch = incomplete_pending_batch(&rig);
+    assert!(batch.saves.iter().any(|r| matches!(codec::Entity::decode(&r.envelope).unwrap(), codec::DecodeOutcome::Supported(e) if e.fields.tombstone)));
+    assert_eq!(incomplete_count(&rig.host), Some(1));
+    incomplete_ack_batch(&rig, batch);
+    assert_eq!(incomplete_count(&rig.host), None);
+    assert!(matches!(collection.undo(meguri_engine::undo::UndoScope::Global),
+        Err(meguri_engine::EngineError::UndoUnavailable {
+            reason: meguri_engine::undo::reasons::DisabledReason::AlreadyUploaded,
+        })));
+    assert_eq!(incomplete_count(&rig.host), None);
+    meguri_engine::decks::rename(&collection, rig.baseline_deck, "Permitted edit after deletion ACK".into()).unwrap();
+    assert_eq!(incomplete_count(&rig.host), None);
+    incomplete_record(&rig, &action);
+    assert_eq!(incomplete_count(&rig.host), None);
+    rig.host.close().unwrap();
+    let reopened = CoreHost::open(rig.config.clone()).unwrap();
+    assert_eq!(incomplete_count(&reopened), None);
+    assert!(!reopened.cloud_policy_driver().unwrap().state().facts.summary.attention_known);
+    reopened.close().unwrap();
+}
+
+#[test]
+fn exchange_incomplete_held_selection_only_finishes_on_qualified_image_ack() {
+    let rig = rig_with_root(false);
+    fetch_first_root(&rig);
+    let collection = rig.host.collection().unwrap();
+    let driver = rig.host.cloud_policy_driver().unwrap();
+    let run = command(rig.host.cloud_policy_input(DeviceEvent::SyncNowRequested(Source::Command)).unwrap(),
+        |k| matches!(k, ActionKind::RunExchange { .. }));
+    let ActionKind::RunExchange { exchange, .. } = run.action.kind else { unreachable!() };
+    let meguri_engine::session::StartResult::Started { session_id, head, .. } = rig.host.review().start(rig.baseline_deck, None).unwrap() else { panic!("real review must start") };
+    let item = &head.items[0];
+    assert!(matches!(rig.host.review().answer(session_id, item.card_id,
+        meguri_sched::answer::Rating::Easy, item.state_token,
+        meguri_model::time::EpochMillis(rig.clock.now_ms()), 123).unwrap(),
+        meguri_engine::session::AnswerOutcome::Accepted { .. }));
+    rig.host.review().flush_for_background().unwrap();
+    meguri_engine::decks::rename(&collection, rig.baseline_deck, "Edit inside the newest answer run".into()).unwrap();
+    let created = meguri_engine::decks::add(&collection, "Deck created in the answer run".into()).unwrap().value.id;
+    let held = collection.cloud_held_run(Some(session_id)).unwrap();
+    assert!(!held.is_empty());
+    assert!(held.touches(Table::Decks, &RowKey::Id(rig.baseline_deck.0)));
+    assert!(held.touches(Table::Decks, &RowKey::Id(created.0)));
+    let runtime = rig.host.cloud_runtime().unwrap();
+    runtime.poll_review(&rig.sdk).unwrap();
+    let native = driver.capture_exchange(&run, &collection).unwrap();
+    // The baseline rows may have eligible older images. This held creation has
+    // no row before the answer run, so it must remain deferred at capture.
+    let selected = runtime.exchange_result(native).unwrap().selected_names;
+    let created_name = runtime.entity_facts_page(codec::Kind::Deck, None).unwrap().into_iter()
+        .find(|e| e.key == codec::id_key(created.0)).unwrap().name;
+    assert!(selected.contains(&created_name));
+    let held_batch = runtime.build_collection_batch(&rig.sdk, &collection, &selected).unwrap();
+    assert!(!held_batch.saves.iter().any(|r| r.name == created_name));
+    assert!(held_batch.saves.len() < selected.len());
+    let completed = runtime.adapter_complete_exchange(&rig.sdk, native, true, None).unwrap();
+    assert_eq!(completed.collection, meguri_sync::cloud::adapter::CollectionOutcome::Incomplete);
+    assert!(completed.work.as_ref().unwrap().held_pending_names.contains(&created_name));
+    assert!(completed.result.outstanding_names.contains(&created_name));
+    let record = command(driver.complete_exchange(exchange, rig.host.engine().state(), rig.host.engine().generation()).unwrap(),
+        |k| matches!(k, ActionKind::RecordExchange(_)));
+    incomplete_record(&rig, &record);
+    assert_eq!(incomplete_count(&rig.host), Some(1));
+    if !held_batch.saves.is_empty() {
+        incomplete_ack_batch(&rig, held_batch);
+        assert_eq!(incomplete_count(&rig.host), Some(1));
+    }
+    meguri_engine::decks::rename(&collection, created, "New held edit cannot finish work".into()).unwrap();
+    let newer_held = runtime.build_collection_batch(&rig.sdk, &collection, &selected).unwrap();
+    assert!(!newer_held.saves.iter().any(|r| r.name == created_name));
+    assert_eq!(incomplete_count(&rig.host), Some(1));
+    rig.host.review().end(session_id).unwrap();
+    runtime.poll_review(&rig.sdk).unwrap();
+    let qualified = incomplete_pending_batch(&rig);
+    assert!(qualified.saves.iter().any(|r| r.name == created_name));
+    let proof = runtime.smoke_batch_for_testing(&rig.sdk, qualified.id).unwrap();
+    assert!(proof.save_images.iter().any(|image| image.name == created_name && !image.held
+        && image.image_seq >= completed.result.boundary_seq));
+    incomplete_ack_batch(&rig, qualified);
+    assert_eq!(incomplete_count(&rig.host), None);
+    rig.host.close().unwrap();
+}
+
+#[test]
+fn exchange_incomplete_changed_account_refuses_original_success_without_clearing() {
+    let rig = rig();
+    let old_success = policy_native_end(&rig, true, None);
+    meguri_engine::decks::rename(&rig.host.collection().unwrap(), rig.baseline_deck, "Account scoped obligation".into()).unwrap();
+    incomplete_record(&rig, &incomplete_end(&rig));
+    rig.host.cloud_policy_input(DeviceEvent::Account {
+        identity: IdentityStatus::Available(OpaqueBytes(b"synthetic-account-B".to_vec())), origin_sdk: None,
+    }).unwrap();
+    assert!(rig.host.execute_cloud_policy_core(&old_success, Duration::from_secs(10)).is_err());
+    assert_eq!(incomplete_count(&rig.host), Some(1));
+    rig.host.close().unwrap();
+}
+
+#[test]
+fn exchange_incomplete_remote_merge_requires_separate_own_ack() {
+    let fixture = rig();
+    let db = fixture.host.collection().unwrap();
+    let cloud = fixture.host.cloud_runtime().unwrap();
+    meguri_engine::decks::rename(&db, fixture.baseline_deck, "Outgoing deck revision".into()).unwrap();
+    meguri_engine::decks::select(&db, fixture.baseline_deck).unwrap();
+    let result = incomplete_end(&fixture);
+    incomplete_record(&fixture, &result);
+    let name = cloud.entity_facts_page(codec::Kind::Deck, None).unwrap().into_iter()
+        .find(|entity| entity.key == codec::id_key(fixture.baseline_deck.0)).unwrap().name;
+    let batch = cloud.build_collection_batch(&fixture.sdk, &db, &[name.clone()].into()).unwrap();
+    assert_eq!(batch.saves.len(), 1);
+    let save = &batch.saves[0];
+    let codec::DecodeOutcome::Supported(mut decoded) = codec::Entity::decode(&save.envelope).unwrap() else { unreachable!() };
+    decoded.fields.writer = [88; 16];
+    let remote = Saved { name: name.clone(), system_fields: b"remote-writer-receipt".to_vec(),
+        envelope: codec::Entity::build(decoded.fields, decoded.payload.as_deref().unwrap()).unwrap().encode().unwrap() };
+    fixture.clock.step_ms(2000);
+    meguri_engine::decks::rename(&db, fixture.baseline_deck, "Deck edited after handoff".into()).unwrap();
+    cloud.adapter_fetched(&fixture.sdk, &fixture.zone, &[remote], &[]).unwrap();
+    cloud.drain_native_incoming(&db, &fixture.sdk, Duration::from_secs(10)).unwrap();
+    let current = cloud.entity_facts(&name).unwrap().unwrap();
+    assert!(current.mark.is_some());
+    assert!(current.local_rev >= current.acked_rev);
+    let independent = cloud.tracking_sendables().into_keys().filter(|candidate| candidate != &name).collect();
+    let other_batch = cloud.build_collection_batch(&fixture.sdk, &db, &independent).unwrap();
+    if !other_batch.saves.is_empty() { incomplete_ack_batch(&fixture, other_batch); }
+    assert_eq!(incomplete_count(&fixture.host), Some(1));
+    incomplete_ack_batch(&fixture, incomplete_pending_batch(&fixture));
+    assert_eq!(incomplete_count(&fixture.host), None);
+    fixture.host.close().unwrap();
+}
+
+#[test]
+fn exchange_incomplete_repeated_handoff_qualifies_in_memory_and_after_reopen() {
+    for fetch_ack in [false, true] {
+        for during_capture in [false, true] {
+            let mut fixture = rig();
+            let db = fixture.host.collection().unwrap();
+            meguri_engine::decks::rename(&db, fixture.baseline_deck, "Deck awaiting acknowledgement".into()).unwrap();
+            let prepared = incomplete_pending_batch(&fixture);
+            assert_eq!(prepared.saves.len(), 1);
+            let save = &prepared.saves[0];
+            let cloud = fixture.host.cloud_runtime().unwrap();
+            let first_seq = cloud.entity_facts(&save.name).unwrap().unwrap().in_flight[0].image_seq;
+            meguri_engine::decks::select(&db, fixture.baseline_deck).unwrap();
+            let driver = fixture.host.cloud_policy_driver().unwrap();
+            let run = command(fixture.host.cloud_policy_input(DeviceEvent::SyncNowRequested(Source::Command)).unwrap(),
+                |action| matches!(action, ActionKind::RunExchange { .. }));
+            let ActionKind::RunExchange { exchange, .. } = run.action.kind else { unreachable!() };
+            let capture = driver.capture_exchange(&run, &db).unwrap();
+            policy_fetch_snapshot(&fixture);
+            let boundary = cloud.exchange_result(capture).unwrap().boundary_seq;
+            assert!(boundary > first_seq);
+            if !during_capture {
+                let finished = cloud.adapter_complete_exchange(&fixture.sdk, capture, true, None).unwrap();
+                assert_eq!(finished.collection, meguri_sync::cloud::adapter::CollectionOutcome::Incomplete);
+                let action = command(driver.complete_exchange(exchange, fixture.host.engine().state(), fixture.host.engine().generation()).unwrap(),
+                    |kind| matches!(kind, ActionKind::RecordExchange(_)));
+                incomplete_record(&fixture, &action);
+                assert_eq!(incomplete_count(&fixture.host), Some(1));
+            }
+            let again = cloud.build_collection_batch(&fixture.sdk, &db, &[save.name.clone()].into()).unwrap();
+            assert_eq!(again.saves.len(), 1);
+            assert_eq!(again.saves[0].envelope, save.envelope);
+            assert!(db.last_seq().0 >= boundary);
+            let other_names = cloud.tracking_sendables().into_keys().filter(|name| name != &save.name).collect();
+            // The config remains independent work, so both paths must retain
+            // an incomplete until its own qualifying acknowledgement arrives.
+            if !during_capture {
+                let config_batch = cloud.build_collection_batch(&fixture.sdk, &db, &other_names).unwrap();
+                incomplete_ack_batch(&fixture, config_batch);
+            }
+            meguri_engine::decks::rename(&db, fixture.baseline_deck, "Newer unsent deck value".into()).unwrap();
+            let accepted = Saved { name: save.name.clone(), envelope: save.envelope.clone(),
+                system_fields: b"repeated-image-server-receipt".to_vec() };
+            if !during_capture {
+                incomplete_reopen(&mut fixture);
+                assert_eq!(incomplete_count(&fixture.host), Some(1));
+            }
+            let cloud = fixture.host.cloud_runtime().unwrap();
+            let db = fixture.host.collection().unwrap();
+            if fetch_ack {
+                cloud.adapter_fetched(&fixture.sdk, &fixture.zone, &[accepted], &[]).unwrap();
+                cloud.drain_native_incoming(&db, &fixture.sdk, Duration::from_secs(10)).unwrap();
+            } else {
+                let current = incomplete_pending_batch(&fixture);
+                cloud.enter_sent_handler(&fixture.sdk, current.id).unwrap();
+                assert_eq!(cloud.sent_results_with_conflicts(&fixture.sdk, &db, current.id, &[], &[accepted], &[], 1).unwrap(), 1);
+                cloud.return_sent_handler(&fixture.sdk).unwrap();
+            }
+            if during_capture {
+                let finished = cloud.adapter_complete_exchange(&fixture.sdk, capture, true, None).unwrap();
+                assert_eq!(finished.collection, meguri_sync::cloud::adapter::CollectionOutcome::Incomplete);
+                assert!(finished.result.acked_names.contains(&save.name));
+                assert!(!finished.result.outstanding_names.contains(&save.name));
+                assert!(!finished.result.blocked_names.contains(&save.name));
+                let driver = fixture.host.cloud_policy_driver().unwrap();
+                let action = command(driver.complete_exchange(exchange, fixture.host.engine().state(), fixture.host.engine().generation()).unwrap(),
+                    |kind| matches!(kind, ActionKind::RecordExchange(_)));
+                incomplete_record(&fixture, &action);
+                assert_eq!(incomplete_count(&fixture.host), Some(1));
+                let config_batch = cloud.build_collection_batch(&fixture.sdk, &db, &other_names).unwrap();
+                incomplete_ack_batch(&fixture, config_batch);
+                incomplete_record(&fixture, &action);
+            }
+            assert_eq!(incomplete_count(&fixture.host), None);
+            assert!(cloud.entity_facts(&save.name).unwrap().unwrap().mark.is_some());
+            assert!(cloud.tracking_sendables().contains_key(&save.name));
+            assert!(!cloud.policy_projection(meguri_sync::cloud::policy::Lifecycle::Ready,
+                db.generation().0).unwrap().facts.summary.attention_known);
+            fixture.host.close().unwrap();
+            let reopened = CoreHost::open(fixture.config.clone()).unwrap();
+            assert_eq!(incomplete_count(&reopened), None);
+            reopened.close().unwrap();
+        }
+    }
+}
+
+#[test]
+fn exchange_incomplete_qualified_held_image_ack_survives_newer_held_edits() {
+    let rig = rig_with_root(false);
+    fetch_first_root(&rig);
+    let collection = rig.host.collection().unwrap();
+    let runtime = rig.host.cloud_runtime().unwrap();
+    meguri_engine::decks::rename(&collection, rig.baseline_deck, "Eligible image before the answer".into()).unwrap();
+    let record = incomplete_end(&rig);
+    incomplete_record(&rig, &record);
+    let meguri_engine::session::StartResult::Started { session_id, head, .. } = rig.host.review().start(rig.baseline_deck, None).unwrap() else { panic!("review starts") };
+    let item = &head.items[0];
+    assert!(matches!(rig.host.review().answer(session_id, item.card_id,
+        meguri_sched::answer::Rating::Easy, item.state_token,
+        meguri_model::time::EpochMillis(rig.clock.now_ms()), 123).unwrap(),
+        meguri_engine::session::AnswerOutcome::Accepted { .. }));
+    rig.host.review().flush_for_background().unwrap();
+    meguri_engine::decks::rename(&collection, rig.baseline_deck, "New deck value held with the answer".into()).unwrap();
+    let held = collection.cloud_held_run(Some(session_id)).unwrap();
+    assert!(!held.is_empty());
+    assert!(held.touches(Table::Decks, &RowKey::Id(rig.baseline_deck.0)));
+    runtime.poll_review(&rig.sdk).unwrap();
+    let batch = incomplete_pending_batch(&rig);
+    let smoke = runtime.smoke_batch_for_testing(&rig.sdk, batch.id).unwrap();
+    assert!(smoke.save_images.iter().any(|image| image.held));
+    assert_eq!(incomplete_count(&rig.host), Some(1));
+    incomplete_ack_batch(&rig, batch);
+    assert_eq!(incomplete_count(&rig.host), None);
+    meguri_engine::decks::rename(&collection, rig.baseline_deck, "Another held edit after the accepted image".into()).unwrap();
+    let held = runtime.build_collection_batch(&rig.sdk, &collection, &runtime.tracking_sendables().into_keys().collect()).unwrap();
+    assert!(held.saves.is_empty());
+    assert_eq!(incomplete_count(&rig.host), None);
+    assert!(!runtime.policy_projection(meguri_sync::cloud::policy::Lifecycle::Ready, collection.generation().0).unwrap().facts.summary.attention_known);
+    rig.host.review().end(session_id).unwrap();
+    rig.host.close().unwrap();
+}
+
+// These cases prove accepted replacement of an earlier version. The separate
+// same-entry cases below exercise the worker without replacing that version.
+#[test]
+fn exchange_incomplete_supported_successors_settle_each_original_queue_category() {
+    use meguri_sync::cloud::{InboxReason, InboxValue, incoming::AssetReadKind, workflow::FetchedRecord};
+    enum QueueCategory { Ordinary, UnknownFormat, NeedsPayload, FailedApply }
+    for category in [QueueCategory::Ordinary, QueueCategory::UnknownFormat,
+        QueueCategory::NeedsPayload, QueueCategory::FailedApply] {
+        for destination in [InboxReason::Generation, InboxReason::Reference, InboxReason::Structure] {
+            let fixture = rig();
+            let (deck_id, unchanged, worker) = incoming_deck(&fixture);
+            let cloud = fixture.host.cloud_runtime().unwrap();
+            let db = fixture.host.collection().unwrap();
+            let owner = cloud.status().unwrap().binding.unwrap().id;
+            let first = cloud.inbox_entries(owner).unwrap().remove(0).entry;
+            let InboxValue::Record { envelope, system_fields, .. } = first.value else { unreachable!() };
+            let source = Saved { name: first.record_name, system_fields: system_fields.0, envelope: envelope.0 };
+            let expected = match category {
+                QueueCategory::Ordinary => InboxReason::Ready,
+                QueueCategory::UnknownFormat => {
+                    fixture.host.execute_cloud_policy_core(&worker, Duration::from_secs(10)).unwrap();
+                    let mut future = advance_server_record(&source);
+                    future.envelope[1] = 2;
+                    cloud.adapter_fetched(&fixture.sdk, &fixture.zone, &[future], &[]).unwrap();
+                    InboxReason::Format
+                }
+                QueueCategory::NeedsPayload => {
+                    let update = advance_server_record(&source);
+                    let codec::DecodeOutcome::Supported(entity) = codec::Entity::decode(&update.envelope).unwrap() else { unreachable!() };
+                    let Payload::Deck(mut payload) = Payload::decode(entity.fields.kind, entity.payload.as_deref().unwrap()).unwrap() else { unreachable!() };
+                    payload.name.resize(codec::INLINE_ENVELOPE_BYTES + 1, b'x');
+                    let large = codec::Entity::build(entity.fields, &Payload::Deck(payload).encode().unwrap()).unwrap().encode().unwrap();
+                    cloud.adapter_fetched(&fixture.sdk, &fixture.zone, &[Saved { envelope: large, ..update }], &[]).unwrap();
+                    InboxReason::Asset
+                }
+                QueueCategory::FailedApply => {
+                    cloud.interrupt_next_incoming_for_testing(ApplyInterruption::Error);
+                    assert!(matches!(fixture.host.execute_cloud_policy_core(&worker, Duration::from_secs(10)),
+                        Err(DriverError::ApplyDeferred(_))));
+                    assert_eq!(deck_row(&fixture, deck_id), unchanged);
+                    assert!(cloud.apply_intents(owner).unwrap().is_empty());
+                    let reason = cloud.inbox_entries(owner).unwrap().remove(0).entry.reason;
+                    assert!(matches!(reason, InboxReason::ApplyFailed { .. }));
+                    reason
+                }
+            };
+            let original = cloud.inbox_entries(owner).unwrap().remove(0);
+            assert_eq!(original.entry.reason, expected);
+            let end = incomplete_end(&fixture);
+            incomplete_record(&fixture, &end);
+            assert_eq!(incomplete_count(&fixture.host), Some(1));
+            let later = advance_server_record(&advance_server_record(&source));
+            let codec::DecodeOutcome::Supported(mut entity) = codec::Entity::decode(&later.envelope).unwrap() else { unreachable!() };
+            let Payload::Deck(mut payload) = Payload::decode(entity.fields.kind, entity.payload.as_deref().unwrap()).unwrap() else { unreachable!() };
+            match destination {
+                InboxReason::Generation => entity.fields.generation = Some([72; 16]),
+                InboxReason::Reference => payload.parent_id = 9_000_001,
+                InboxReason::Structure => {
+                    entity.fields.tombstone = true;
+                    entity.fields.deleted_at_ms = fixture.clock.now_ms();
+                }
+                _ => unreachable!(),
+            }
+            let replacement = Saved { envelope: codec::Entity::build(entity.fields, &Payload::Deck(payload).encode().unwrap()).unwrap().encode().unwrap(), ..later };
+            if matches!(category, QueueCategory::NeedsPayload) && destination != InboxReason::Generation {
+                let pass = cloud.begin_asset_read_pass(&fixture.sdk, &db, AssetReadKind::Retry).unwrap();
+                let request = cloud.next_asset_read(&db, &pass).unwrap().unwrap();
+                assert!(cloud.submit_asset_read_queue(&db, &request, || true).unwrap());
+                assert!(cloud.asset_read_result(&fixture.sdk, &db, &request,
+                    Some(&FetchedRecord { record: replacement, asset_path: None })).unwrap());
+                cloud.cancel_asset_read_pass(&pass);
+            } else {
+                cloud.adapter_fetched(&fixture.sdk, &fixture.zone, &[replacement], &[]).unwrap();
+            }
+            cloud.drain_native_incoming(&db, &fixture.sdk, Duration::from_secs(10)).unwrap();
+            let pending = cloud.inbox_entries(owner).unwrap();
+            assert_eq!(pending.len(), 1);
+            assert_eq!(pending[0].entry.reason, destination);
+            assert_ne!(pending[0].entry.value, original.entry.value);
+            assert_eq!(incomplete_count(&fixture.host), None);
+            incomplete_record(&fixture, &end);
+            assert_eq!(incomplete_count(&fixture.host), None);
+            let summary = cloud.policy_projection(meguri_sync::cloud::policy::Lifecycle::Ready, db.generation().0).unwrap().facts.summary;
+            assert_eq!(summary.incoming_waiting, 1);
+            assert!(!summary.attention_known);
+            fixture.host.close().unwrap();
+            let reopened = CoreHost::open(fixture.config.clone()).unwrap();
+            assert_eq!(incomplete_count(&reopened), None);
+            reopened.close().unwrap();
+        }
+    }
+}
+
+#[test]
+fn exchange_incomplete_replaced_generation_rejects_result_without_tracking_writes() {
+    let rig = rig();
+    meguri_engine::decks::rename(&rig.host.collection().unwrap(), rig.baseline_deck, "Before generation replacement".into()).unwrap();
+    let old = incomplete_end(&rig);
+    let slot = rig.host.engine().acquire_slot(meguri_engine::LongOp::Restore).unwrap();
+    slot.enter_exclusive(true).unwrap().replace(|_| Ok(())).unwrap();
+    drop(slot);
+    rig.host.cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Cloud)).unwrap();
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let before = runtime.policy_projection(meguri_sync::cloud::policy::Lifecycle::Ready, rig.host.engine().generation().0).unwrap();
+    let tracking_bytes = || ["meguri-cloud.db", "meguri-cloud.db-wal"].map(|name| {
+        match std::fs::read(rig._root.path().join("collection").join(name)) {
+            Ok(bytes) => Some(bytes),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => panic!("synthetic tracking file: {error}"),
+        }
+    });
+    let saved = tracking_bytes();
+    assert!(rig.host.execute_cloud_policy_core(&old, Duration::from_secs(10)).is_err());
+    assert_eq!(tracking_bytes(), saved);
+    let after = runtime.policy_projection(meguri_sync::cloud::policy::Lifecycle::Ready, rig.host.engine().generation().0).unwrap();
+    assert_eq!(after.evidence, before.evidence);
+    assert_eq!(after.facts.summary.attention, before.facts.summary.attention);
+    assert!(!after.facts.summary.attention_known);
+    rig.host.close().unwrap();
+}
+
+#[test]
+fn exchange_incomplete_same_entry_classification_and_asset_completion_are_durable_proofs() {
+    use meguri_sync::cloud::{InboxReason, incoming::AssetReadKind, workflow::FetchedRecord};
+    for asset in [false, true] {
+        for outcome in 0..3 {
+            let rig = rig();
+            let runtime = rig.host.cloud_runtime().unwrap();
+            let collection = rig.host.collection().unwrap();
+            let (_, _, _) = incoming_deck(&rig);
+            let binding = runtime.status().unwrap().binding.unwrap().id;
+            let queued = runtime.inbox_entries(binding).unwrap().remove(0);
+            let meguri_sync::cloud::InboxValue::Record { envelope, .. } = queued.entry.value else { unreachable!() };
+            let codec::DecodeOutcome::Supported(mut entity) = codec::Entity::decode(&envelope.0).unwrap() else { unreachable!() };
+            let Payload::Deck(mut deck) = Payload::decode(entity.fields.kind, entity.payload.as_deref().unwrap()).unwrap() else { unreachable!() };
+            entity.fields.erev += 1;
+            if outcome == 2 {
+                entity.fields.tombstone = true;
+                entity.fields.deleted_at_ms = rig.clock.now_ms();
+            } else if outcome == 1 {
+                deck.parent_id = 9_000_002;
+            }
+            if asset { deck.name = vec![b'y'; codec::INLINE_ENVELOPE_BYTES + 1]; }
+            let payload = Payload::Deck(deck).encode().unwrap();
+            let remote = Saved { name: queued.entry.record_name, system_fields: b"same-entry-classification".to_vec(),
+                envelope: codec::Entity::build(entity.fields, &payload).unwrap().encode().unwrap() };
+            runtime.adapter_fetched(&rig.sdk, &rig.zone, std::slice::from_ref(&remote), &[]).unwrap();
+            let original = runtime.inbox_entries(binding).unwrap().remove(0);
+            assert_eq!(original.entry.reason, if asset { InboxReason::Asset } else { InboxReason::Ready });
+            let record = incomplete_end(&rig);
+            incomplete_record(&rig, &record);
+            assert_eq!(incomplete_count(&rig.host), Some(1));
+            if asset {
+                let downloaded = tempfile::NamedTempFile::new().unwrap();
+                std::fs::write(downloaded.path(), &payload).unwrap();
+                let pass = runtime.begin_asset_read_pass(&rig.sdk, &collection, AssetReadKind::Retry).unwrap();
+                let request = runtime.next_asset_read(&collection, &pass).unwrap().unwrap();
+                assert!(runtime.submit_asset_read_queue(&collection, &request, || true).unwrap());
+                assert!(runtime.asset_read_result(&rig.sdk, &collection, &request,
+                    Some(&FetchedRecord { record: remote, asset_path: Some(downloaded.path().to_owned()) })).unwrap());
+                runtime.cancel_asset_read_pass(&pass);
+                let staged = runtime.inbox_entries(binding).unwrap().remove(0);
+                assert_eq!(staged.id, original.id);
+                assert_eq!(staged.entry.reason, InboxReason::Ready);
+                assert_eq!(incomplete_count(&rig.host), Some(1));
+            }
+            runtime.drain_native_incoming(&collection, &rig.sdk, Duration::from_secs(10)).unwrap();
+            let remaining = runtime.inbox_entries(binding).unwrap();
+            if outcome == 0 {
+                assert!(remaining.is_empty());
+                assert!(runtime.apply_intents(binding).unwrap().is_empty());
+                assert_eq!(runtime.entity_facts(&original.entry.record_name).unwrap().unwrap().server_erev,
+                    match original.entry.value { meguri_sync::cloud::InboxValue::Record { erev, .. } => erev, _ => unreachable!() });
+            } else {
+                assert_eq!(remaining.len(), 1);
+                assert_eq!(remaining[0].id, original.id);
+                assert_eq!(remaining[0].entry.reason, if outcome == 2 { InboxReason::Structure } else { InboxReason::Reference });
+            }
+            assert_eq!(incomplete_count(&rig.host), None);
+            incomplete_record(&rig, &record);
+            assert_eq!(incomplete_count(&rig.host), None);
+            rig.host.close().unwrap();
+            let reopened = CoreHost::open(rig.config.clone()).unwrap();
+            assert_eq!(incomplete_count(&reopened), None);
+            reopened.close().unwrap();
+        }
+    }
+}
+
+// An apply failure can be retried without accepting a newer server version.
+#[test]
+fn exchange_incomplete_failed_entry_retries_to_apply_or_reference_without_replacement() {
+    use meguri_sync::cloud::{InboxReason, InboxValue};
+    for lose_parent in [false, true] {
+        let mut fixture = rig();
+        let db = fixture.host.collection().unwrap();
+        let parent = lose_parent.then(|| meguri_engine::decks::add(&db, "Temporary parent".into()).unwrap().value.id);
+        let (deck_id, unchanged, worker) = incoming_deck(&fixture);
+        let cloud = fixture.host.cloud_runtime().unwrap();
+        let owner = cloud.status().unwrap().binding.unwrap().id;
+        if let Some(parent) = parent {
+            let queued = cloud.inbox_entries(owner).unwrap().remove(0).entry;
+            let InboxValue::Record { envelope, system_fields, .. } = queued.value else { unreachable!() };
+            let update = advance_server_record(&Saved { name: queued.record_name, envelope: envelope.0, system_fields: system_fields.0 });
+            let codec::DecodeOutcome::Supported(entity) = codec::Entity::decode(&update.envelope).unwrap() else { unreachable!() };
+            let Payload::Deck(mut payload) = Payload::decode(entity.fields.kind, entity.payload.as_deref().unwrap()).unwrap() else { unreachable!() };
+            payload.parent_id = parent.0;
+            let bytes = codec::Entity::build(entity.fields, &Payload::Deck(payload).encode().unwrap()).unwrap().encode().unwrap();
+            cloud.adapter_fetched(&fixture.sdk, &fixture.zone, &[Saved { envelope: bytes, ..update }], &[]).unwrap();
+        }
+        cloud.interrupt_next_incoming_for_testing(ApplyInterruption::Error);
+        assert!(matches!(fixture.host.execute_cloud_policy_core(&worker, Duration::from_secs(10)), Err(DriverError::ApplyDeferred(_))));
+        assert_eq!(deck_row(&fixture, deck_id), unchanged);
+        assert!(cloud.apply_intents(owner).unwrap().is_empty());
+        let failed = cloud.inbox_entries(owner).unwrap().remove(0);
+        assert!(matches!(failed.entry.reason, InboxReason::ApplyFailed { .. }));
+        let end = incomplete_end(&fixture);
+        incomplete_record(&fixture, &end);
+        incomplete_record(&fixture, &end);
+        assert_eq!(incomplete_count(&fixture.host), Some(1));
+        if let Some(parent) = parent {
+            let parent_facts = cloud.entity_facts_page(codec::Kind::Deck, None).unwrap().into_iter()
+                .find(|entity| entity.key == codec::id_key(parent.0)).unwrap();
+            assert!(!parent_facts.sent);
+            assert_eq!(parent_facts.server_erev, 0);
+            assert_eq!(parent_facts.acked_rev, 0);
+            assert!(parent_facts.in_flight.is_empty());
+            // The unuploaded parent creation remains undoable. Removing it
+            // changes the classifier's live references, not the server entry.
+            db.undo(meguri_engine::undo::UndoScope::Global).unwrap();
+            {
+                let current = fixture.host.collection().unwrap();
+                let reader = current.reader(ReaderRole::Query).unwrap();
+                assert!(reader.row_image(Table::Decks, &RowKey::Id(parent.0)).unwrap().is_none());
+            }
+            let absent = cloud.entity_facts(&parent_facts.name).unwrap().unwrap();
+            assert!(!absent.sent);
+            assert_eq!(absent.server_erev, 0);
+            assert_eq!(absent.acked_rev, 0);
+            assert!(absent.in_flight.is_empty());
+            assert_eq!(incomplete_count(&fixture.host), Some(1));
+            let tracking_bytes = || ["meguri-cloud.db", "meguri-cloud.db-wal"].map(|name| {
+                match std::fs::read(fixture._root.path().join("collection").join(name)) {
+                    Ok(bytes) => Some(bytes),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                    Err(error) => panic!("synthetic tracking file: {error}"),
+                }
+            });
+            let before = tracking_bytes();
+            assert!(matches!(cloud.adapter_fetched(&fixture.sdk, &fixture.zone, &[], &[]), Err(RuntimeError::StaleIncarnation)));
+            assert_eq!(tracking_bytes(), before);
+            assert!(fixture.host.execute_cloud_policy_core(&end, Duration::from_secs(10)).is_err());
+            assert_eq!(tracking_bytes(), before);
+            // Undo retired the original authority. Reopen, reconcile and register
+            // a current SDK before granting another attempt to this inbox row.
+            drop(db);
+            incomplete_reopen(&mut fixture);
+            assert!(fixture.host.cloud_runtime().unwrap().entity_facts(&parent_facts.name).unwrap().is_none());
+            assert_eq!(incomplete_count(&fixture.host), Some(1));
+        }
+        let db = fixture.host.collection().unwrap();
+        let cloud = fixture.host.cloud_runtime().unwrap();
+        assert_eq!(cloud.status().unwrap().binding.unwrap().id, owner);
+        let before_retry = cloud.inbox_entries(owner).unwrap().remove(0);
+        assert_eq!(before_retry.id, failed.id);
+        assert_eq!(before_retry.entry.value, failed.entry.value);
+        assert!(matches!(before_retry.entry.reason, InboxReason::ApplyFailed { .. }));
+        // A real SDK delivery grants the bounded worker another attempt.
+        cloud.adapter_fetched(&fixture.sdk, &fixture.zone, &[], &[]).unwrap();
+        cloud.drain_native_incoming(&db, &fixture.sdk, Duration::from_secs(10)).unwrap();
+        let after = cloud.inbox_entries(owner).unwrap();
+        if lose_parent {
+            assert_eq!(after.len(), 1);
+            assert_eq!(after[0].id, failed.id);
+            assert_eq!(after[0].entry.value, failed.entry.value);
+            assert_eq!(after[0].entry.reason, InboxReason::Reference);
+        } else {
+            assert!(after.is_empty());
+            assert_ne!(deck_row(&fixture, deck_id), unchanged);
+        }
+        assert!(cloud.apply_intents(owner).unwrap().is_empty());
+        assert_eq!(incomplete_count(&fixture.host), None);
+        if !lose_parent { incomplete_record(&fixture, &end); }
+        assert_eq!(incomplete_count(&fixture.host), None);
+        let projection = cloud.policy_projection(meguri_sync::cloud::policy::Lifecycle::Ready, db.generation().0).unwrap();
+        assert_eq!(projection.facts.summary.incoming_waiting, u64::from(lose_parent));
+        assert!(!projection.facts.summary.attention_known);
+        fixture.host.close().unwrap();
+        let reopened = CoreHost::open(fixture.config.clone()).unwrap();
+        assert_eq!(incomplete_count(&reopened), None);
+        reopened.close().unwrap();
+    }
 }

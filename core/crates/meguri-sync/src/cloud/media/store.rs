@@ -330,6 +330,9 @@ impl TrackingStore {
             }
             if remove_inbox {
                 for id in &intent.inbox_ids {
+                    let text: String = tx.query_row("SELECT entry FROM inbox WHERE binding=?1 AND id=?2",
+                        params![binding_id.0.as_slice(), id], |r| r.get(0))?;
+                    crate::cloud::incomplete_store::incoming_done(&tx, binding_id, *id, &decode(&text)?)?;
                     tx.execute(
                         "DELETE FROM inbox WHERE binding=?1 AND id=?2",
                         params![binding_id.0.as_slice(), id],
@@ -376,6 +379,7 @@ impl TrackingStore {
         r: c::Received,
         now_ms: i64,
         mut references: Option<&mut super::cleanup::SavedReferences>,
+        accepted_image: Option<(u64, u64)>,
     ) -> Result<bool, Error> {
         let mut e = self.entity_facts(b, &saved.name)?.ok_or(Error::InvalidData)?;
         if e.origin != r.entity.fields.origin
@@ -432,6 +436,11 @@ impl TrackingStore {
             update_blob_reference_age(&tx, b, &mut ledger, now_ms)?;
             None
         };
+        if let Some((opened, seq)) = accepted_image {
+            crate::cloud::incomplete_store::ack_image(&tx, b, &saved.name, opened, seq)?;
+        } else {
+            crate::cloud::incomplete_store::ack(&tx, b, &saved.name, &flight)?;
+        }
         workflow_store::put(&tx, b, &e)?;
         if let (Some(refs), Some(delta)) = (references.as_deref(), &delta) {
             refs.after(&mut ledger, now_ms, delta);

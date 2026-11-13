@@ -20,6 +20,7 @@ CREATE TABLE cloud_policy_exchanges(
 );";
 
 pub(super) fn check_version(c: &Connection) -> Result<bool, Error> {
+    super::incomplete_store::check_version(c)?;
     let exists: bool = c.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='cloud_policy_schema')",
         [],
@@ -48,6 +49,7 @@ impl TrackingStore {
             tx.execute_batch(SCHEMA)?;
             tx.commit()?;
         }
+        self.install_incomplete()?;
         let mut q = self.connection.prepare("SELECT e.content FROM cloud_policy_evidence e JOIN bindings b ON e.binding=b.id WHERE b.container=?1 AND b.environment=?2 AND b.salvage=0")?;
         for row in q.query_map(
             params![self.scope.container.as_str(), self.scope.environment.code()],
@@ -131,11 +133,17 @@ impl TrackingStore {
         }
         Ok(found)
     }
+    #[cfg(test)]
     pub(super) fn record_cloud_policy_exchange(
         &mut self,
         binding: BindingId,
         owner: &str,
         record: &ExchangeRecord,
+    ) -> Result<Evidence, Error> {
+        self.record_cloud_policy_exchange_original(binding, owner, record, None)
+    }
+    pub(super) fn record_cloud_policy_exchange_original(
+        &mut self, binding: BindingId, owner: &str, record: &ExchangeRecord, native: Option<u64>,
     ) -> Result<Evidence, Error> {
         self.binding(binding)?.ok_or(Error::BindingNotFound)?;
         if owner.is_empty() || record.exchange == 0 {
@@ -151,6 +159,7 @@ impl TrackingStore {
             evidence.last_attempt = Some(record.clone());
         }
         let tx = self.connection.transaction()?;
+        super::incomplete_store::accept(&tx, binding, owner, record, native)?;
         tx.execute(
             "INSERT INTO cloud_policy_exchanges(binding,owner,exchange,content) VALUES(?1,?2,?3,?4)",
             params![

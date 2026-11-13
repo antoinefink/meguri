@@ -93,6 +93,101 @@ fn isolated_owner_with_only_real_policy_evidence_keeps_it_when_last_copy_expires
 }
 
 #[test]
+fn isolated_owner_with_only_incomplete_evidence_survives_last_copy_expiry_and_reopen() {
+    for accepted_incomplete in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let mut store = open(root.path());
+        store.install_cloud_policy().unwrap();
+        let binding = store
+            .create_binding(
+                BindingFacts {
+                    account: OpaqueBytes(vec![7]),
+                    epoch: EpochId([8; 16]),
+                    record_key: RecordKey([9; 32]),
+                    publication: serde_json::from_str("[1,2]").unwrap(),
+                    state: BindingState::Isolated(IsolationReason::SignedOut),
+                },
+                &FixedClock::new(1, UtcOffset::UTC),
+                &SeededRandom::new(114),
+            )
+            .unwrap();
+        if accepted_incomplete {
+            // Use the real result-storage transaction without a display-policy
+            // row that could independently keep the owner alive. Unknown
+            // original work/order must remain incomplete across expiry.
+            let tx = store.connection.transaction().unwrap();
+            incomplete_store::accept(
+                &tx,
+                binding.id,
+                "synthetic-ended-exchange",
+                &policy::ExchangeRecord {
+                    exchange: 1,
+                    ended_ms: 1,
+                    source: policy::Source::Command,
+                    outcome: policy::ExchangeOutcome::Incomplete { outstanding: 1, blocked: 0 },
+                },
+                None,
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        // Only the extension retains this owner: no runtime or policy display
+        // work may mask a missing expiry inventory entry.
+        for table in WORK_TABLES.iter().chain(EXTRA_WORK_TABLES).copied() {
+            if !table.starts_with("cloud_incomplete_") && table_exists(&store.connection, table).unwrap() {
+                let count: i64 = store.connection.query_row(
+                    &format!("SELECT count(*) FROM {table} WHERE binding=?1"),
+                    [binding.id.0.as_slice()],
+                    |r| r.get(0),
+                ).unwrap();
+                assert_eq!(count, 0, "unexpected owner work in {table}");
+            }
+        }
+        store.store_conflict(binding.id, &ConflictCopy {
+            id: CopyId([1; 16]),
+            kind: ConflictKind::Note,
+            key: OpaqueBytes(vec![1]),
+            reason: ConflictReason::FieldConflict,
+            losing_envelope: OpaqueBytes(vec![2]),
+            losing_payload_digest: PayloadDigest([2; 32]),
+            winning_payload_digest: PayloadDigest([3; 32]),
+            field_names: None,
+            template_names: None,
+            note_deck: None,
+            staged_path: None,
+            created_at_ms: 1,
+            resolved_at_ms: Some(2),
+        }).unwrap();
+        let evidence = |store: &TrackingStore| {
+            assert_eq!(store.binding(binding.id).unwrap(), Some(binding.clone()));
+            assert_eq!(store.exchange_incomplete(binding.id).unwrap(), accepted_incomplete);
+            let known: bool = store.connection.query_row(
+                "SELECT history_known FROM cloud_incomplete_bindings WHERE binding=?1",
+                [binding.id.0.as_slice()], |r| r.get(0),
+            ).unwrap();
+            assert!(known);
+            for table in ["cloud_incomplete_legacy", "cloud_incomplete_results"] {
+                let rows: Vec<(String, i64)> = store.connection.prepare(
+                    &format!("SELECT owner,exchange FROM {table} WHERE binding=?1"),
+                ).unwrap().query_map([binding.id.0.as_slice()], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .unwrap().collect::<Result<_, _>>().unwrap();
+                assert_eq!(rows, if accepted_incomplete {
+                    vec![("synthetic-ended-exchange".into(), 1)]
+                } else { Vec::new() });
+            }
+        };
+        evidence(&store);
+        assert_eq!(store.expire_resolved_conflicts(2 + RETENTION_MS).unwrap(), 1);
+        assert!(store.conflict_copies().unwrap().is_empty());
+        evidence(&store);
+        drop(store);
+        let store = open(root.path());
+        assert!(store.conflict_copies().unwrap().is_empty());
+        evidence(&store);
+    }
+}
+
+#[test]
 fn staging_sweep_retains_resolved_copy_until_its_expiry_commit() {
     let root = tempfile::tempdir().unwrap();
     let mut store = open(root.path());

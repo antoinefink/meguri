@@ -28,6 +28,7 @@ mod generation_store;
 mod held_view;
 pub mod policy;
 mod policy_store;
+mod incomplete_store;
 pub mod publication;
 mod publication_store;
 pub mod row_payload;

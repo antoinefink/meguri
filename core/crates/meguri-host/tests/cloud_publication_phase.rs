@@ -4935,3 +4935,33 @@ fn publisher_committed_loss_revokes_native_authority_before_readback_error_or_pa
         host.close().unwrap();
     }
 }
+
+#[test]
+fn exchange_incomplete_publication_creates_known_empty_history_atomically() {
+    let fixture = tempfile::tempdir().unwrap();
+    let collection_path = fixture.path().join("publication-ledger");
+    generated(&collection_path);
+    let app = open_host(&collection_path, keys());
+    let mut server = Service::open(fixture.path(), Config::default(), SeededRandom::new(812)).unwrap();
+    let published = publish_actual_collection(&app, &mut server);
+    app.close().unwrap();
+    drop(app);
+    let container = cloud::BuildScope {
+        environment: cloud::Environment::Development,
+        container: cloud::ContainerId::new(scope().container).unwrap(),
+    };
+    for install_runtime in [false, true] {
+        if install_runtime {
+            let app = open_host(&collection_path, keys());
+            let facts = app.cloud_runtime().unwrap().policy_projection(
+                cloud::policy::Lifecycle::Ready, app.engine().generation().0).unwrap().facts;
+            assert!(!facts.summary.attention_known);
+            app.close().unwrap();
+            drop(app);
+        }
+        let cloud::OpenOutcome::Opened(database) = cloud::TrackingStore::open(&collection_path, container.clone()).unwrap()
+            else { panic!("publication must have created tracking") };
+        assert_eq!(database.incomplete_history_for_testing(published.id).unwrap(), Some(true));
+        assert!(!database.incomplete_pending_for_testing(published.id).unwrap());
+    }
+}

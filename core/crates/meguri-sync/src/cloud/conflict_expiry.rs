@@ -15,12 +15,21 @@ use std::{
 const RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
 const STAGING: &str = "meguri-cloud-staging";
 // Additional actual tables not removed by publication_store::remove_work.
-// Policy rows have ON DELETE CASCADE, so FK refusal alone cannot protect them.
+// Policy and incomplete rows have ON DELETE CASCADE, so FK refusal alone
+// cannot protect them. Keep ended-exchange evidence with the policy evidence;
+// publication cleanup does not acquire authority to clear it.
 const EXTRA_WORK_TABLES: &[&str] = &[
     "cloud_apply_intents",
     "cloud_asset_first_reads",
     "cloud_policy_evidence",
     "cloud_policy_exchanges",
+    "cloud_incomplete_bindings",
+    "cloud_incomplete_legacy",
+    "cloud_incomplete_ends",
+    "cloud_incomplete_outgoing",
+    "cloud_incomplete_incoming",
+    "cloud_incomplete_results",
+    "cloud_incomplete_flights",
 ];
 const UNLINKS: &str = "CREATE TABLE IF NOT EXISTS cloud_conflict_unlinks(
  name TEXT PRIMARY KEY, evidence TEXT NOT NULL CHECK(json_valid(evidence)));";

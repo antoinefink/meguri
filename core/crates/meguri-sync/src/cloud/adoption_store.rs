@@ -128,6 +128,7 @@ impl TrackingStore {
                 encode(&facts)?
             ],
         )?;
+        super::incomplete_store::start_binding_ledger(&tx, op.binding_after)?;
         super::runtime_store::put_binding(&tx, op.binding_after, &StoredRuntimeState::default())?;
         tx.execute(
             "INSERT INTO cloud_publication_bindings(binding,media_key,root_acked,crt) VALUES(?1,?2,1,?3)",

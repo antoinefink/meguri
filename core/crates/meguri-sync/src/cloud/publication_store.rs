@@ -385,6 +385,7 @@ impl TrackingStore {
                 encode(&b.facts)?
             ],
         )?;
+        super::incomplete_store::start_binding_ledger(&tx, id)?;
         super::runtime_store::put_binding(
             &tx,
             id,

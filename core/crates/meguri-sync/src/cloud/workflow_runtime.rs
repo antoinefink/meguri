@@ -677,10 +677,13 @@ impl Runtime {
                                     .ok_or(Error::InvalidData)?)
                             })?;
                             e.validate()?;
-                            if kind == codec::Kind::Revlog && !e.sent && e.server_erev == 0 && e.in_flight.is_empty() {
+                            if matches!(kind, codec::Kind::Revlog | codec::Kind::Deck)
+                                && !e.sent && e.server_erev == 0 && e.in_flight.is_empty()
+                            {
                                 let removed = self.with_scan(&guard, collection, |s| {
-                                    Ok(s.store.as_mut().ok_or(Error::Database)?.remove_unsent_scan_revlog(
+                                    Ok(s.store.as_mut().ok_or(Error::Database)?.remove_unsent_scan_entity(
                                         guard.binding,
+                                        kind,
                                         &key,
                                         guard.open,
                                         &scan_cursor,
@@ -1610,9 +1613,8 @@ impl Runtime {
                 {
                     return Ok(false);
                 }
-                if store.persist_flight(guard.binding, &name, flight)? {
-                    s.cloud.remember_flight(guard.binding, name.clone(), identity);
-                }
+                store.persist_flight(guard.binding, &name, flight)?;
+                s.cloud.remember_flight(guard.binding, name.clone(), identity);
                 Ok(true)
             })?;
             if !committed {
@@ -1683,8 +1685,10 @@ impl Runtime {
                 s.cloud.deferred.extend(deferred);
             }
             let pending = Self::sendables_locked(s)?;
-            for ((name, ..), identity) in images {
-                s.cloud.mark_flight_handed(guard.binding, &name, identity);
+            let handed: Vec<_> = images.iter().map(|((name, _, _, seq, _), identity)| (name.clone(), *identity, *seq)).collect();
+            s.store.as_mut().ok_or(Error::Database)?.record_incomplete_handoffs(guard.binding, guard.open, &handed)?;
+            for ((name, _, _, seq, held), identity) in images {
+                s.cloud.mark_flight_handed(guard.binding, &name, identity, FlightImage { seq, held });
             }
             s.actions.update(UpdateKind::Changes, pending, BTreeSet::new());
             let _covered = &receipt;
@@ -1911,6 +1915,7 @@ impl Runtime {
         now_ms: i64,
         force: &mut BTreeSet<String>,
         references: Option<&mut media::cleanup::SavedReferences>,
+        accepted_image: Option<FlightImage>,
     ) -> Result<(), RuntimeError> {
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
         let image_key = (
@@ -1919,12 +1924,10 @@ impl Runtime {
             received.entity.payload_sha256,
         );
         let image = s.cloud.handed_images.get(&image_key).copied();
+        let opened = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.open_counter;
         let store = s.store.as_mut().ok_or(Error::Database)?;
-        let pending = if let Some(references) = references {
-            store.acknowledge_with_references(b, saved, received, now_ms, Some(references))?
-        } else {
-            store.acknowledge(b, saved, received, now_ms)?
-        };
+        let pending = store.acknowledge_with_references(b, saved, received, now_ms, references,
+            accepted_image.map(|image| (opened, image.seq)))?;
         if pending {
             force.insert(saved.name.clone());
         }
@@ -2048,6 +2051,7 @@ impl Runtime {
                     at_ms,
                     &mut force,
                     Some(&mut references),
+                    Some(image),
                 )?;
                 if s.actions.exchange.is_some() {
                     acknowledged.push((&saved.name, image));
@@ -2063,7 +2067,7 @@ impl Runtime {
             drop(references);
             for server in conflicts {
                 if let Some((received, image)) = Self::decode_save_conflict_locked(&s, instance, request_id, server)? {
-                    Self::acknowledge_sent_locked(&mut s, collection, server, received, at_ms, &mut force, None)?;
+                    Self::acknowledge_sent_locked(&mut s, collection, server, received, at_ms, &mut force, None, None)?;
                     if let Some(image) = image {
                         acknowledged.push((&server.name, image));
                         #[cfg(feature = "test-hooks")]

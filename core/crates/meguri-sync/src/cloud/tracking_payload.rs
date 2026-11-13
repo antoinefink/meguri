@@ -366,6 +366,8 @@ pub(super) fn put_header(tx: &Transaction<'_>, b: BindingId, h: &Header) -> Resu
             params![b.0.as_slice(), e.kind as i64, &e.key, encode(&Stored { value: &e, payload_images: h.images.clone() })?])?;
     }
     super::acknowledgement_store::observe(tx, b, e, old_text.as_deref())?;
+    super::incomplete_store::clean(tx, b, e)?;
+    super::incomplete_store::retain_flights(tx, b, &e.name, &e.in_flight)?;
     if let Some(old) = old_images {
         collect(
             tx,
@@ -468,6 +470,7 @@ pub(super) fn collect_removed(
     images: Option<Images>,
 ) -> Result<(), Error> {
     super::acknowledgement_store::forget(tx, b, name)?;
+    super::incomplete_store::retain_flights(tx, b, name, &[])?;
     if let Some(images) = images {
         collect(tx, b, name, images.all())?;
     }

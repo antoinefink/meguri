@@ -321,6 +321,7 @@ fn receive_selected(
             )?;
         }
         if let Some(id) = settle {
+            super::incomplete_store::nonblocking(tx, b, id, e)?;
             // The caller checked this entry and its exact version in this transaction.
             tx.execute(
                 "UPDATE inbox SET entry=?3 WHERE binding=?1 AND id=?2",
@@ -328,8 +329,9 @@ fn receive_selected(
             )?;
             continue;
         }
-        for (id, _) in queued {
+        for (id, original) in queued {
             if !protected.contains(&id) && (version(e).is_some() || matches!(e.value, InboxValue::Deletion)) {
+                super::incomplete_store::incoming_done(tx, b, id, &original)?;
                 tx.execute("DELETE FROM inbox WHERE id=?1", [id])?;
             }
         }
@@ -467,8 +469,10 @@ impl TrackingStore {
         )?;
         let mut e: InboxEntry = decode(&text)?;
         e.reason = reason;
-        self.connection
-            .execute("UPDATE inbox SET entry=?2 WHERE id=?1", params![id, encode(&e)?])?;
+        let tx = self.connection.transaction()?;
+        super::incomplete_store::nonblocking(&tx, b, id, &e)?;
+        tx.execute("UPDATE inbox SET entry=?2 WHERE id=?1", params![id, encode(&e)?])?;
+        tx.commit()?;
         Ok(())
     }
     pub(super) fn rollback_apply(&mut self, b: BindingId, ids: &[i64], cancel: bool) -> Result<(), Error> {
@@ -708,6 +712,7 @@ impl TrackingStore {
                     }
                     super::workflow_store::put(&tx, i.binding, &e)?;
                     entry.reason = InboxReason::Structure;
+                    super::incomplete_store::nonblocking(&tx, i.binding, *id, &entry)?;
                     tx.execute("UPDATE inbox SET entry=?2 WHERE id=?1", params![id, encode(&entry)?])?;
                     parked.insert(*id);
                     continue;
@@ -770,6 +775,9 @@ impl TrackingStore {
             if parked.contains(id) {
                 continue;
             }
+            let text: String = tx.query_row("SELECT entry FROM inbox WHERE binding=?1 AND id=?2",
+                params![i.binding.0.as_slice(), id], |r| r.get(0))?;
+            super::incomplete_store::incoming_done(&tx, i.binding, *id, &decode(&text)?)?;
             tx.execute(
                 "DELETE FROM inbox WHERE binding=?1 AND id=?2",
                 params![i.binding.0.as_slice(), id],
@@ -889,6 +897,7 @@ fn settle_own_live(
         envelope: envelope.0.clone(),
         system_fields: system_fields.0.clone(),
     };
+    super::incomplete_store::ack(tx, intent.binding, &key.name, &h.facts.in_flight[index])?;
     h.ack(index, &saved)?;
     if h.images.local_row_digest != h.facts.acked_row_digest {
         // A real edit back to the old ACK may have cleared the observer mark.
@@ -929,6 +938,7 @@ fn settle_absent_key(
         // This is the exact intent before-image when the entity was clean.
         // A dirty entity keeps its earlier pending base instead.
         if !e.sent && e.server_erev == 0 && e.in_flight.is_empty() {
+            super::incomplete_store::dropped(tx, intent.binding, &e.name, e.local_rev)?;
             return super::workflow_store::remove_entity(tx, intent.binding, &e);
         }
         e.remove(before, intent.planned_at_ms, &mut state.change_counter)?;
@@ -1021,6 +1031,7 @@ fn settle_absent_key(
             if Some(flight.local_rev) != key.own_flight {
                 return Err(Error::InvalidData);
             }
+            super::incomplete_store::ack(tx, intent.binding, &key.name, &flight)?;
             Some(flight)
         } else {
             None

@@ -120,6 +120,9 @@ impl Runtime {
                 if store.root_unreadable(b.binding.id)?.is_some() {
                     summary.attention.insert(Attention::RootUnreadable, 1);
                 }
+                if store.exchange_incomplete(b.binding.id)? {
+                    summary.attention.insert(Attention::ExchangeIncomplete, 1);
+                }
                 summary.crt_known = b.epoch_crt.is_some();
                 summary.crt_mismatch = b.epoch_crt.is_some_and(|crt| crt != b.current_crt.1);
                 let work = Self::exchange_work_locked(&s, store, b.binding.id)?;
@@ -374,6 +377,7 @@ impl Runtime {
         guard: &crate::cloud::adapter::Guard,
         owner: &str,
         record: &ExchangeRecord,
+        native: Option<u64>,
         work: &mut PolicyWork,
     ) -> Result<Evidence, RuntimeError> {
         let key = (owner.to_owned(), record.exchange);
@@ -434,7 +438,7 @@ impl Runtime {
             Ok(s.store
                 .as_mut()
                 .ok_or(Error::Database)?
-                .record_cloud_policy_exchange(binding, owner, record))
+                .record_cloud_policy_exchange_original(binding, owner, record, native))
         })?;
         if result.is_err() {
             s.tracking_stopped = true;

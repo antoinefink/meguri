@@ -177,7 +177,7 @@ pub struct Flight {
     #[serde(default)]
     pub tombstone_envelope_digest: Option<[u8; 32]>,
 }
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub(crate) struct FlightIdentity {
     pub erev: u64,
     local_rev: u64,
@@ -499,7 +499,7 @@ pub(crate) struct CloudFrontier {
     // opening's undo ids, even if its numeric image seq happens to match.
     pub handed_images: BTreeMap<(String, u64, [u8; 32]), u64>,
     pub(crate) open_flight_binding: Option<BindingId>,
-    pub(crate) open_flights: BTreeMap<String, BTreeMap<FlightIdentity, bool>>,
+    pub(crate) open_flights: BTreeMap<String, BTreeMap<FlightIdentity, Option<FlightImage>>>,
     pub incoming_seq: u64,
 }
 impl CloudFrontier {
@@ -513,29 +513,20 @@ impl CloudFrontier {
             .entry(name)
             .or_default()
             .entry(flight)
-            .or_insert(false);
+            .or_insert(None);
     }
-    pub(crate) fn mark_flight_handed(&mut self, binding: BindingId, name: &str, flight: FlightIdentity) {
-        if self.open_flight_binding == Some(binding)
-            && let Some(handed) = self
-                .open_flights
-                .get_mut(name)
-                .and_then(|flights| flights.get_mut(&flight))
+    pub(crate) fn mark_flight_handed(&mut self, binding: BindingId, name: &str,
+        flight: FlightIdentity, image: FlightImage) {
+        if self.open_flight_binding != Some(binding) { return; }
+        if let Some(slot) = self.open_flights.get_mut(name).and_then(|flights| flights.get_mut(&flight))
+            && slot.is_none_or(|previous| previous.seq <= image.seq)
         {
-            *handed = true;
+            *slot = Some(image);
         }
     }
     pub(crate) fn flight_image(&self, binding: BindingId, name: &str, flight: &Flight) -> Option<FlightImage> {
-        (self.open_flight_binding == Some(binding)
-            && self
-                .open_flights
-                .get(name)
-                .and_then(|flights| flights.get(&flight.identity()))
-                == Some(&true))
-        .then_some(FlightImage {
-            seq: flight.image_seq,
-            held: flight.held,
-        })
+        if self.open_flight_binding != Some(binding) { return None; }
+        self.open_flights.get(name)?.get(&flight.identity()).copied().flatten()
     }
     pub(crate) fn retire_flights(&mut self, name: &str, through: u64) {
         if let Some(flights) = self.open_flights.get_mut(name) {
@@ -824,14 +815,20 @@ mod exchange_tests {
             tombstone: false,
             tombstone_envelope_digest: None,
         };
-        frontier.mark_flight_handed(binding, "card", flight.identity());
+        frontier.mark_flight_handed(binding, "card", flight.identity(), FlightImage { seq: 8, held: true });
         assert!(frontier.flight_image(binding, "card", &flight).is_none());
         frontier.remember_flight(binding, "card".into(), flight.identity());
         assert!(frontier.flight_image(binding, "card", &flight).is_none());
-        frontier.mark_flight_handed(binding, "card", flight.identity());
+        frontier.mark_flight_handed(binding, "card", flight.identity(), FlightImage { seq: 8, held: true });
         let image = frontier.flight_image(binding, "card", &flight).unwrap();
         assert_eq!(image.seq, 8);
         assert!(image.held);
+        frontier.mark_flight_handed(binding, "card", flight.identity(), FlightImage { seq: 12, held: false });
+        let repeated = frontier.flight_image(binding, "card", &flight).unwrap();
+        assert_eq!(repeated.seq, 12);
+        assert!(!repeated.held);
+        frontier.mark_flight_handed(binding, "card", flight.identity(), FlightImage { seq: 8, held: true });
+        assert_eq!(frontier.flight_image(binding, "card", &flight).unwrap().seq, 12);
         assert!(frontier.flight_image(BindingId([2; 16]), "card", &flight).is_none());
         frontier.retire_flights("card", flight.erev);
         assert!(frontier.flight_image(binding, "card", &flight).is_none());

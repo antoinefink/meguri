@@ -515,15 +515,18 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         if !exists && h.facts.in_flight.len() >= 250 {
             return Err(Error::InvalidData);
         }
+        let opened = self.runtime_binding(b)?.open_counter;
         let tx = self.connection.transaction()?;
         h.facts.sent = true;
         if !exists {
             h.append_flight(&tx, b, &flight)?;
         }
+        super::incomplete_store::stage_flight_origin(&tx, b, name, &flight, opened)?;
         super::tracking_payload::put_header(&tx, b, &h)?;
         tx.commit()?;
         Ok(!exists)
     }
+    #[cfg(test)]
     pub(super) fn acknowledge(
         &mut self,
         b: BindingId,
@@ -531,7 +534,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         received: codec::Received,
         now_ms: i64,
     ) -> Result<bool, Error> {
-        self.acknowledge_with_references(b, saved, received, now_ms, None)
+        self.acknowledge_with_references(b, saved, received, now_ms, None, None)
     }
 
     pub(super) fn acknowledge_with_references(
@@ -541,6 +544,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         received: codec::Received,
         now_ms: i64,
         mut references: Option<&mut media::cleanup::SavedReferences>,
+        accepted_image: Option<(u64, u64)>,
     ) -> Result<bool, Error> {
         if received.entity.fields.tombstone
             && matches!(
@@ -548,10 +552,10 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                 codec::Kind::Note | codec::Kind::Card | codec::Kind::Config
             )
         {
-            return self.acknowledge_row_tombstone(b, saved, received);
+            return self.acknowledge_row_tombstone(b, saved, received, accepted_image);
         }
         if received.entity.fields.kind == codec::Kind::MediaName && received.entity.fields.tombstone {
-            return self.acknowledge_media_tombstone(b, saved, received, now_ms, references);
+            return self.acknowledge_media_tombstone(b, saved, received, now_ms, references, accepted_image);
         }
         let mut h = self.entity_header(b, &saved.name)?.ok_or(Error::InvalidData)?;
         let e = &h.facts;
@@ -569,7 +573,8 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
             .iter()
             .position(|f| f.payload_digest == digest && f.erev == received.entity.fields.erev)
             .ok_or(Error::InvalidData)?;
-        let flight_rev = e.in_flight[index].local_rev;
+        let accepted_flight = e.in_flight[index].clone();
+        let flight_rev = accepted_flight.local_rev;
         // Header payloads can be placeholders. Materialize the complete prior
         // local/ACK images before replacing the header's ACK references.
         let prior_media = if h.facts.kind == codec::Kind::MediaName {
@@ -637,6 +642,11 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                 super::media::store::update_blob_reference_age(&tx, b, ledger, now_ms)?;
             }
         }
+        if let Some((opened, seq)) = accepted_image {
+            super::incomplete_store::ack_image(&tx, b, &saved.name, opened, seq)?;
+        } else {
+            super::incomplete_store::ack(&tx, b, &saved.name, &accepted_flight)?;
+        }
         super::tracking_payload::put_header(&tx, b, &h)?;
         if let Some(ledger) = &mut media_ledger {
             if let (Some(refs), Some(delta)) = (references.as_deref(), &reference_delta) {
@@ -657,19 +667,23 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         }
         Ok(pending)
     }
-    pub(super) fn remove_unsent_scan_revlog(
+    pub(super) fn remove_unsent_scan_entity(
         &mut self,
         b: BindingId,
+        kind: codec::Kind,
         key: &[u8],
         open: u64,
         cursor: &runtime::NoteScanCursor,
     ) -> Result<bool, Error> {
+        if !matches!(kind, codec::Kind::Revlog | codec::Kind::Deck) {
+            return Err(Error::InvalidData);
+        }
         let state = self.runtime_binding(b)?;
         if state.open_counter != open || state.file != Some(cursor.native_file) {
             return Err(Error::InvalidData);
         }
         let tx = self.connection.transaction()?;
-        let e = entity(&tx, b, codec::Kind::Revlog, key)?.ok_or(Error::InvalidData)?;
+        let e = entity(&tx, b, kind, key)?.ok_or(Error::InvalidData)?;
         if e.sent
             || e.server_erev != 0
             || !e.in_flight.is_empty()
@@ -679,6 +693,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         }
         // The caller holds the matching reader snapshot and WAL receipt under
         // with_scan's incarnation/account/file guards. Never synthesize an ACK.
+        super::incomplete_store::dropped(&tx, b, &e.name, e.local_rev)?;
         remove_entity(&tx, b, &e)?;
         tx.commit()?;
         Ok(true)
@@ -930,6 +945,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                     };
                     if matches!(kind, codec::Kind::Note | codec::Kind::Card) {
                         if !e.sent && e.server_erev == 0 && e.in_flight.is_empty() {
+                            super::incomplete_store::dropped(&tx, b, &e.name, e.local_rev)?;
                             remove_entity(&tx, b, &e)?;
                             dropped.push((e.name, e.local_rev));
                             continue;
@@ -968,6 +984,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                     if kind != codec::Kind::Revlog || e.sent || e.server_erev != 0 || !e.in_flight.is_empty() {
                         return Err(Error::InvalidData.into());
                     }
+                    super::incomplete_store::dropped(&tx, b, &e.name, e.local_rev)?;
                     remove_entity(&tx, b, &e)?;
                     dropped.push((e.name, e.local_rev));
                     continue;
@@ -1278,6 +1295,7 @@ impl TrackingStore {
         b: BindingId,
         saved: &Saved,
         received: codec::Received,
+        accepted_image: Option<(u64, u64)>,
     ) -> Result<bool, Error> {
         let mut e = self.entity_facts(b, &saved.name)?.ok_or(Error::InvalidData)?;
         let remote = &received.entity;
@@ -1325,6 +1343,11 @@ impl TrackingStore {
         }
         let pending = e.mark.is_some();
         let tx = self.connection.transaction()?;
+        if let Some((opened, seq)) = accepted_image {
+            super::incomplete_store::ack_image(&tx, b, &saved.name, opened, seq)?;
+        } else {
+            super::incomplete_store::ack(&tx, b, &saved.name, &flight)?;
+        }
         put(&tx, b, &e)?;
         put_binding(&tx, b, &state)?;
         super::adapter_store::mark_ack(&tx, b, &e.name)?;

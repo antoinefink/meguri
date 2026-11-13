@@ -117,6 +117,7 @@ impl TrackingStore {
                 encoded
             ],
         )?;
+        super::incomplete_store::start_binding_ledger(&transaction, binding.id)?;
         transaction.commit()?;
         Ok(binding)
     }

@@ -121,6 +121,16 @@ fn epoch_crt_adoption_records_actual_complete_epoch_knowledge() {
     assert_eq!(pair.receiver.collection_header().unwrap().crt, expected);
     pair.receiver.close_clean().unwrap();
     assert_eq!(store(&pair.directory).epoch_crt_for_testing(binding).unwrap(), Some(expected));
+    let tracking = store(&pair.directory);
+    assert_eq!(tracking.incomplete_history_for_testing(binding).unwrap(), Some(true));
+    assert!(!tracking.incomplete_pending_for_testing(binding).unwrap());
+    drop(tracking);
+    let mut reopened = online(&pair.directory);
+    reopened.close_clean().unwrap();
+    let tracking = store(&pair.directory);
+    assert_eq!(tracking.incomplete_history_for_testing(binding).unwrap(), Some(true));
+    assert!(!tracking.incomplete_pending_for_testing(binding).unwrap());
+    drop(tracking);
     pair.sender.close_clean().unwrap();
 }
 fn cloud_disabled_config(directory: &Path, op: &cloud::adoption::AdoptOp) -> meguri_host::HostConfig {

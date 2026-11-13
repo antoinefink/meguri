@@ -1317,7 +1317,8 @@ impl Driver {
                         return Err(DriverError::UnqualifiedCompletion);
                     }
                     self.runtime
-                        .policy_record_exchange_with_work(collection, guard, &command.owner, record, work)
+                        .policy_record_exchange_with_work(collection, guard, &command.owner, record,
+                            owned.captures.get(&record.exchange).map(|(_, native)| *native), work)
                         .map(|evidence| Event::EvidenceCommitted(Box::new(evidence)))
                 }
                 ActionKind::RunCleanup => {
