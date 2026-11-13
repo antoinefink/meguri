@@ -61,6 +61,12 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
     // A focused shutdown regression can hold delivery of an actual completed
     // command result; it never substitutes execution or issues a capability.
     var afterExecution: (@MainActor (CloudPolicyCommand, SyncCommandResult) async -> Void)?
+    // Negatives register exact issued commands and inspect their actual errors
+    // once. Every unregistered failure still trips the strict backend check.
+    var expectedCommandFailures: [ObjectIdentifier: @MainActor (SyncCommandResult) -> Void] = [:]
+    #if DEBUG
+    var originalDiscardFaults: [ObjectIdentifier: @Sendable () throws -> Void] = [:]
+    #endif
     // Runs at the coordinator's existing shutdown boundary, after admission
     // closes and original command tasks receive owned cancellation.
     var beforeQuiesce: (@MainActor () async -> Void)?
@@ -313,13 +319,16 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
         let fetchReadCapture = DebugCloudDiagnostics.FetchReadFailureCapture()
         let mediaRecorder = DebugCloudDiagnostics.Recorder()
         let observe = observeCoreCall
+        let discardFault = originalDiscardFaults.removeValue(forKey: ObjectIdentifier(command.raw))
         let result = await MaintenanceCallObservation.$capture.withValue({ observe?(command, $0) }) {
+            await CloudFetchProofCompletionFault.$afterOriginalDiscard.withValue(discardFault) {
             await DebugCloudDiagnostics.$sendFailureCapture.withValue(sendCapture) {
                 await DebugCloudDiagnostics.$fetchReadFailureCapture.withValue(fetchReadCapture) {
                     await DebugCloudDiagnostics.$mediaRecorder.withValue(mediaRecorder) {
                         await production.execute(command, corePrepared: corePrepared)
                     }
                 }
+            }
             }
         }
         // Last retained media failure, not necessarily the first. Absence does
@@ -361,8 +370,11 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
             } == true
             let diagnostic = capture(error, stage: .executeError, action: command.action, sendFailure: sendFailure, latestMedia: latestMedia, fetchReadFailure: fetchReadFailure, expectedRefusal: ownedCancellation || result.originalGuardRefusal != nil || result.dependentFetchRefusal != nil || result.fetchProofOutcome?.accountStopCancellation == true)
             if !ownedCancellation, result.originalGuardRefusal == nil, result.dependentFetchRefusal == nil, result.fetchProofOutcome?.accountStopCancellation != true, !(error is CancellationError && SyncCommandTaskContext.current?.shutdownCancelled == true && result.fetchProofOutcome?.preservesFailure != true) {
-                causalTrace?.expectation(false)
-                Issue.record("Service app command failed; \(diagnostic)")
+                if let inspect = expectedCommandFailures.removeValue(forKey: ObjectIdentifier(command.raw)) { inspect(result) }
+                else {
+                    causalTrace?.expectation(false)
+                    Issue.record("Service app command failed; \(diagnostic)")
+                }
             }
         }
         return result
@@ -444,7 +456,8 @@ private nonisolated struct ServiceMediaCompletion: Sendable {
     let receipts: [ServiceSavedReceipt]
 }
 private nonisolated struct ServiceAppTimeout: Error { let stage: String }
-nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String, trace: ServiceAppCausalTrace? = nil, line: UInt = #line) async throws -> Bool {
+nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String, trace: ServiceAppCausalTrace? = nil,
+                                 failure: AsyncStream<any Error>? = nil, line: UInt = #line) async throws -> Bool {
     var completed = false
     defer { if !completed { trace?.expectation(false, line: line) } }
     return try await withThrowingTaskGroup(of: Bool.self) { group in
@@ -453,6 +466,13 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String, tr
             throw CloudOwnTransportFailure.missingReply
         }
         group.addTask { try await Task.sleep(for: .seconds(10)); throw ServiceAppTimeout(stage: stage) }
+        if let failure {
+            group.addTask {
+                for await error in failure { throw error }
+                try Task.checkCancellation()
+                throw CloudOwnTransportFailure.missingReply
+            }
+        }
         defer { group.cancelAll() }
         let result = try await group.next()
         let value = try serviceRequired(result)

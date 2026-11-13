@@ -123,17 +123,27 @@ enum SyncOwnerFailure: Error { case configurationUnavailable }
         return originalCommands[index]
     }
     private var firstCancellation: Cancellation?
+    let cancellationIntent: CloudPolicyCancellationContext
     private var cancelledCommands: [CloudPolicyCommand] = []
     private(set) var shutdownCancellationRequested = false
     var shutdownCancelled: Bool { shutdownCancellationRequested && Task.isCancelled }
     init(generation: UInt64, revision: UInt64, backend: any SyncCoordinatorBackend,
-         originalCommands: [CloudPolicyCommand]) {
+         originalCommands: [CloudPolicyCommand], cancellationIntent: CloudPolicyCancellationContext = CloudPolicyCancellationContext()) {
         self.generation = generation; self.revision = revision; self.backend = backend
         self.originalCommands = originalCommands
+        self.cancellationIntent = cancellationIntent
     }
-    func recordCancellation(_ intent: Cancellation, alreadyCancelled: Bool) {
+    func recordCancellation(_ intent: Cancellation, alreadyCancelled: Bool, event: UUID = UUID()) {
         guard firstCancellation == nil else { return }
         firstCancellation = alreadyCancelled ? .other : intent
+        let request: CloudPolicyCancellationContext.Trigger
+        switch firstCancellation {
+        case .expiry: request = .expiry
+        case .replacement: request = .replacement
+        case .shutdown: request = .shutdown
+        default: request = .other
+        }
+        cancellationIntent.record(request, sequence: event)
         if let index = activeCommandIndex {
             // An invalid position cannot identify a remaining original queue.
             if originalCommands.indices.contains(index) { cancelledCommands = Array(originalCommands[index...]) }
@@ -142,13 +152,18 @@ enum SyncOwnerFailure: Error { case configurationUnavailable }
     }
     func ownsNativeCancellation(_ result: SyncCommandResult, command: CloudPolicyCommand,
                                 backend: any SyncCoordinatorBackend, generation: UInt64, revision: UInt64) -> Bool {
-        guard firstCancellation == .expiry || firstCancellation == .replacement,
-              self.backend === backend, self.generation == generation, self.revision == revision,
+        guard self.backend === backend, self.generation == generation, self.revision == revision,
               result.error is CancellationError, result.fetchProofOutcome?.preservesFailure != true,
               let proof = result.nativeCancellation, let activeCommand,
-              proof.matches(activeCommand), proof.matches(command),
-              cancelledCommands.contains(where: { proof.matches($0) }) else { return false }
-        return true
+              proof.matches(activeCommand), proof.matches(command) else { return false }
+        if firstCancellation == .expiry || firstCancellation == .replacement {
+            return cancelledCommands.contains(where: { proof.matches($0) }) &&
+                (proof.matchesIntent(cancellationIntent) || proof.ownsDeadline(cancellationIntent))
+        }
+        // The executor's own P11 deadline has no outer cancellation request.
+        // Its immutable native cause still belongs to this exact task/command.
+        return firstCancellation == nil && proof.ownsDeadline(cancellationIntent) &&
+            originalCommands.contains(where: { proof.matches($0) })
     }
 }
 
@@ -1780,7 +1795,8 @@ public final class SyncCoordinator {
                         #endif
                     }
                     context.activeCommandIndex = index
-                    result = await CloudQuiescentDependencyWait.$transition.withValue(park) {
+                    result = await CloudPolicyCancellationContext.$current.withValue(context.cancellationIntent) {
+                    await CloudQuiescentDependencyWait.$transition.withValue(park) {
                     await backend.execute(command, corePrepared: { [self] in
                         // The qualified local cleanup pass returned; inventory
                         // remains owned by the original command task.
@@ -1803,6 +1819,7 @@ public final class SyncCoordinator {
                                 phaseOwner: corePhaseOwner ? id : nil, acknowledged: acknowledged))
                         }
                     })
+                    }
                     }
                     // The native executor validates control capabilities as well
                     // as network work. UI effects occur only after that admission.
@@ -2001,14 +2018,17 @@ public final class SyncCoordinator {
         } while !operationTasks.isEmpty || ownTask != nil
     }
     private func cancelCommands(_ intent: SyncCommandTaskContext.Cancellation) {
+        let event = UUID()
+        // Record the common request on every original before any onCancel can
+        // run. Dictionary iteration order must not choose the native cause.
         for (id, task) in operationTasks {
             if let context = operationContexts[id] {
                 let originalOwner = context.generation == generation && context.revision == hostRevision
                 context.recordCancellation(intent == .shutdown && !originalOwner ? .other : intent,
-                    alreadyCancelled: task.isCancelled)
+                    alreadyCancelled: task.isCancelled, event: event)
             }
-            task.cancel()
         }
+        for task in operationTasks.values { task.cancel() }
     }
     private func cancelCommandsForShutdown() { cancelCommands(.shutdown) }
 

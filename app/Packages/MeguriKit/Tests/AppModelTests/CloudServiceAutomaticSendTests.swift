@@ -609,9 +609,23 @@ extension ReviewCollectionStartupTests {
             backend.afterExecution = { command, result in
                 if let flush, command.raw === flush.raw {
                     #expect(result.error is CancellationError && !result.deferred)
+                    #expect(result.nativeCancellation?.matches(command) == true)
+                    if let exchange { #expect(result.nativeCancellation?.matches(exchange) == false) }
+                    if let context = SyncCommandTaskContext.current {
+                        #expect(context.ownsNativeCancellation(result, command: command, backend: backend,
+                            generation: context.generation, revision: context.revision))
+                    } else { Issue.record("Missing original flush context") }
                     flushResults += 1
                 }
-                if let exchange, command.raw === exchange.raw { exchangeResults += 1 }
+                if let exchange, command.raw === exchange.raw {
+                    #expect(result.nativeCancellation?.matches(command) == true)
+                    if let flush { #expect(result.nativeCancellation?.matches(flush) == false) }
+                    if let context = SyncCommandTaskContext.current {
+                        #expect(context.ownsNativeCancellation(result, command: command, backend: backend,
+                            generation: context.generation, revision: context.revision))
+                    } else { Issue.record("Missing original exchange context") }
+                    exchangeResults += 1
+                }
             }
             backend.observeCoreCall = { command, call in
                 guard case .quitFlush = command.action,
@@ -665,6 +679,146 @@ extension ReviewCollectionStartupTests {
                 #expect(try await successor.workflow.durableSnapshot() == snapshot)
                 #expect(try await successor.workflow.currentGuard() == guardBefore)
             } catch { await native.release(); await proof.release(); throw error }
+        }
+    }
+
+    @Test(arguments: ServiceParkedFailureCase.allCases)
+    func serviceAppParkedFlushPreservesOriginalFailureAcrossLaterExpiry(mode: ServiceParkedFailureCase) async throws {
+        let original = ServiceParkedOriginalFailure()
+        let sdkFailure = CloudKitSDKOperationFailure(underlying: original, code: 4, retryAfterMilliseconds: 123)
+        let fault = ServiceParkedReadFault()
+        try await withAutomaticServiceApp(prepare: { app in
+            app.ownTransport = ServiceParkedReadTransport(original: ServiceOwnTransport(wire: app.wire), fault: fault)
+        }) { app, _, _ in
+            let backend = try app.backend
+            let sdk = try #require(await app.factory.engines.last)
+            try await sdk.signInSameServiceIdentity()
+            await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
+            await sdk.omitNextZoneCallbacks()
+            let native = ServiceAutomaticGate(), provider = ServiceAutomaticGate()
+            let exchangeDelivery = ServiceAutomaticGate(), flushDelivery = ServiceAutomaticGate()
+            let parked = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let results = AsyncStream<Bool>.makeStream(bufferingPolicy: .unbounded)
+            let lateProvider = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            // One terminal subscription per stage; cancelling an earlier stage's
+            // iterator must not terminate a later stage's failure observation.
+            let nativeFailure = AsyncStream<any Error>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let parkFailure = AsyncStream<any Error>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let providerFailure = AsyncStream<any Error>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            var exchange: CloudPolicyCommand?, flush: CloudPolicyCommand?
+            var exchangeResult: SyncCommandResult?, flushResult: SyncCommandResult?
+            var acknowledgements = 0, inspected = 0
+            let discards = Mutex(0)
+            let verify: @MainActor (SyncCommandResult) -> Void = { result in
+                #expect(result.error != nil && !result.deferred)
+                #expect(result.nativeCancellation == nil)
+                if mode.failsBeforeProof {
+                    #expect(result.fetchProofOutcome == nil)
+                } else {
+                    let outcome = result.fetchProofOutcome
+                    #expect(outcome != nil && outcome?.preservesFailure == true)
+                }
+                #expect(result.acknowledgedOutputCount == result.outputs.count)
+                switch mode {
+                case .providerCancellation, .cleanup: #expect(result.error is CancellationError)
+                case .providerFailure, .readFailure: #expect((result.error as? ServiceParkedOriginalFailure) === original)
+                case .sdkFailure:
+                    let failure = result.error as? CloudKitSDKOperationFailure
+                    #expect((failure?.underlying as? ServiceParkedOriginalFailure) === original)
+                    #expect(failure?.code == 4 && failure?.retryAfterMilliseconds == 123)
+                }
+                if mode == .cleanup {
+                    #expect((result.fetchProofOutcome?.debugOriginalCompletionFailure as? ServiceParkedOriginalFailure) === original)
+                }
+            }
+            backend.beforeExecution = { command in
+                let selected: Bool
+                switch command.action {
+                case .runExchange:
+                    exchange = command; selected = true
+                    if mode == .cleanup {
+                        backend.originalDiscardFaults[ObjectIdentifier(command.raw)] = {
+                            discards.withLock { $0 += 1 }; throw original
+                        }
+                    }
+                case .quitFlush: flush = command; selected = true
+                default: selected = false
+                }
+                if selected {
+                    backend.expectedCommandFailures[ObjectIdentifier(command.raw)] = { result in verify(result); inspected += 1 }
+                }
+            }
+            backend.afterExecution = { command, result in
+                let delivery: ServiceAutomaticGate
+                if let exchange, command.raw === exchange.raw { exchangeResult = result; delivery = exchangeDelivery }
+                else if let flush, command.raw === flush.raw { flushResult = result; delivery = flushDelivery }
+                else { return }
+                // Always signal a terminal, including an unexpectedly early
+                // error, before holding the actual result's delivery.
+                results.continuation.yield(result.error != nil)
+                if let failure = result.error {
+                    nativeFailure.continuation.yield(failure)
+                    parkFailure.continuation.yield(failure)
+                    providerFailure.continuation.yield(failure)
+                }
+                await delivery.hold()
+            }
+            app.sync.observeQuiescentDependency = { if $0 { parked.continuation.yield(true) } }
+            app.sync.observeCausalBoundary = { boundary, command in
+                guard case .commandAcknowledgementJoined = boundary, let command else { return }
+                if command.raw === exchange?.raw || command.raw === flush?.raw { acknowledgements += 1 }
+            }
+            defer {
+                backend.beforeExecution = nil; backend.afterExecution = nil
+                app.sync.observeQuiescentDependency = nil; app.sync.observeCausalBoundary = nil
+                parked.continuation.finish(); results.continuation.finish(); lateProvider.continuation.finish()
+                nativeFailure.continuation.finish(); parkFailure.continuation.finish(); providerFailure.continuation.finish()
+            }
+            await sdk.holdNextFetchReturn { await native.hold() }
+            app.sync.syncNow()
+            do {
+                try #require(try await serviceAppSignal(native.entered, stage: "negative original native terminal", failure: nativeFailure.stream))
+                app.sync.receive(.quitRequested)
+                try #require(try await serviceAppSignal(parked.stream, stage: "negative real flush park", failure: parkFailure.stream))
+                try #require(exchange != nil && flush != nil)
+                switch mode {
+                case .providerCancellation: await app.factory.resolveNextAccountRead(with: .failure(CancellationError()))
+                case .providerFailure: await app.factory.resolveNextAccountRead(with: .failure(original))
+                case .readFailure: fault.arm(original)
+                case .sdkFailure: fault.arm(sdkFailure)
+                case .cleanup: break
+                }
+                // The raw transport faults occur before any proof read. The
+                // provider/cleanup rows instead retain the actual proof outcome.
+                if !mode.failsBeforeProof {
+                    await app.factory.holdNextAccountRead { await provider.hold(); lateProvider.continuation.yield(true) }
+                }
+                await native.release()
+                if !mode.failsBeforeProof {
+                    try #require(try await serviceAppSignal(provider.entered, stage: "negative original proof provider", failure: providerFailure.stream))
+                    if mode == .cleanup { app.sync.backgroundExpired() }
+                    else { await provider.release() }
+                }
+                try #require(try await serviceAppSignal(results.stream, stage: "negative first original result"))
+                try #require(try await serviceAppSignal(results.stream, stage: "negative second original result"))
+                let a = try #require(exchangeResult), b = try #require(flushResult)
+                verify(a); verify(b)
+                #expect(acknowledgements == 0)
+                // Both actual native outcomes already exist. Later expiry and
+                // held result delivery cannot turn either into owned cancel.
+                app.sync.backgroundExpired()
+                await exchangeDelivery.release(); await flushDelivery.release(); await app.sync.drainOperations()
+                #expect(inspected == 2 && backend.expectedCommandFailures.isEmpty)
+                #expect(acknowledgements == 2 && app.sync.operationFailed)
+                #expect(discards.withLock { $0 } == (mode == .cleanup ? 1 : 0))
+                await provider.release()
+                if !mode.failsBeforeProof {
+                    try #require(try await serviceAppSignal(lateProvider.stream, stage: "negative original provider joined"))
+                }
+            } catch {
+                await native.release(); await provider.release(); await exchangeDelivery.release(); await flushDelivery.release()
+                throw error
+            }
         }
     }
 
@@ -1589,6 +1743,40 @@ private nonisolated struct HeldServicePublicationReply: CloudPreparedOwnOperatio
     try await app.backend.workflow.awaitTracking(generation: mutation.summary.generation, seq: mutation.summary.seq)
     await app.sync.waitForInputs()
 }
+
+#if DEBUG
+nonisolated enum ServiceParkedFailureCase: CaseIterable, Sendable, Equatable {
+    case providerCancellation, providerFailure, readFailure, sdkFailure, cleanup
+    var failsBeforeProof: Bool { self == .readFailure || self == .sdkFailure }
+}
+private nonisolated final class ServiceParkedOriginalFailure: Error {}
+private nonisolated final class ServiceParkedReadFault: Sendable {
+    private let error = Mutex<(any Error)?>(nil)
+    func arm(_ value: any Error) { error.withLock { $0 = value } }
+    func take() -> (any Error)? { error.withLock { let value = $0; $0 = nil; return value } }
+}
+private nonisolated struct ServiceParkedReadTransport: CloudOwnTransport {
+    let original: ServiceOwnTransport
+    let fault: ServiceParkedReadFault
+    func prepare(_ command: CloudOwnTransportCommand) throws -> any CloudPreparedOwnOperation {
+        let operation = try original.prepare(command)
+        guard case .read(let target) = command, target.name == "active" else { return operation }
+        return ServiceParkedReadReply(original: operation, fault: fault)
+    }
+}
+private nonisolated struct ServiceParkedReadReply: CloudPreparedOwnOperation {
+    let original: any CloudPreparedOwnOperation
+    let fault: ServiceParkedReadFault
+    func enqueue() -> Bool { original.enqueue() }
+    func cancel() { original.cancel() }
+    func controlReadEvidence() -> CloudZoneDeletionRead? { original.controlReadEvidence() }
+    func reply() async throws -> CloudOwnTransportReply {
+        let reply = try await original.reply()
+        if let error = fault.take() { throw error }
+        return reply
+    }
+}
+#endif
 
 private actor ServiceAutomaticGate {
     nonisolated let entered: AsyncStream<Bool>

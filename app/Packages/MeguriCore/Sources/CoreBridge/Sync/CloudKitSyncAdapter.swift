@@ -71,26 +71,47 @@ fileprivate struct CloudFetchProofCompletion: Sendable {
         let command: CloudPolicyCommand
         let execution: CoreCloudPolicyExecution
     }
-    enum Producer: Sendable { case provider, caller, adapterStop, accountStop(AccountStop) }
+    enum Producer: Sendable { case provider, caller(CloudPolicyCancellationContext.Snapshot?), adapterStop, accountStop(AccountStop) }
     let result: Result<Void, any Error>
     let producer: Producer
 }
 
-fileprivate struct CloudFetchProofIssuer: Sendable {
+struct CloudFetchProofIssuer: Sendable {
     let command: CloudPolicyCommand
     let execution: CoreCloudPolicyExecution
     let original: CloudSDKStopWitness
 }
 
-// Constructed only where this adapter observes the original cancellation edge.
+// Captured from the adapter's retained instance at a real cancellation boundary.
 struct CloudAdapterNativeCancellationEdge: Sendable {
     let command: CloudPolicyCommand
     let execution: CoreCloudPolicyExecution
     let sdk: String
     let dependency: CloudQuiescentDependencyWait?
-    fileprivate init(issuer: CloudFetchProofIssuer, dependency: CloudQuiescentDependencyWait? = nil) {
-        command = issuer.command; execution = issuer.execution
-        sdk = issuer.original.sdk; self.dependency = dependency
+    let original: CloudSDKStopWitness
+    let cause: CloudPolicyCancellationContext.Snapshot?
+    init(issuer: CloudFetchProofIssuer, dependency: CloudQuiescentDependencyWait? = nil,
+         cause: CloudPolicyCancellationContext.Snapshot? = CloudPolicyCancellationContext.current?.capture()) {
+        self.command = issuer.command
+        self.execution = issuer.execution
+        self.original = issuer.original
+        self.sdk = issuer.original.sdk
+        self.dependency = dependency
+        self.cause = cause
+    }
+}
+
+// Only cancelPolicyFlush can issue this receipt, after the retained SDK returns.
+// Matching includes the execution object and instance witness, not an SDK name.
+struct CloudFlushCancellationReceipt: Sendable {
+    private let execution: CoreCloudPolicyExecution
+    private let instance: CloudSDKStopWitness
+    fileprivate init(execution: CoreCloudPolicyExecution, instance: CloudSDKStopWitness) {
+        self.execution = execution
+        self.instance = instance
+    }
+    func matches(_ issuer: CloudFetchProofIssuer) -> Bool {
+        execution.raw === issuer.execution.raw && instance === issuer.original
     }
 }
 
@@ -122,9 +143,9 @@ public struct CloudPolicyFetchProofOutcome: Sendable {
     }
     var nativeCancellation: CloudPolicyNativeCancellation? {
         guard callerCancelled, earlierFailure == nil, cleanupFailure == nil,
-              case .caller = completion.producer, case .failure(let error) = completion.result,
+              case .caller(let cause) = completion.producer, case .failure(let error) = completion.result,
               error is CancellationError, let issuer, issuer.original === original else { return nil }
-        return .init(adapterEdge: .init(issuer: issuer))
+        return .init(adapterEdge: .init(issuer: issuer, cause: cause))
     }
     #if DEBUG
     var debugOriginalCompletionFailure: (any Error)? { cleanupFailure }
@@ -438,7 +459,10 @@ public actor CloudKitSyncAdapter {
                 else if version != old { continuation.resume() }
                 else { waiters[id] = continuation }
             }
-        } onCancel: { Task { await self.cancelWait(id, error: cancellationError()) } }
+        } onCancel: {
+            let error = cancellationError()
+            Task { await self.cancelWait(id, error: error) }
+        }
     }
     private func valid(_ origin: String) async -> Bool {
         guard let instance = owned[origin], !instance.stopping, current == origin else { return false }
@@ -2100,6 +2124,7 @@ public actor CloudKitSyncAdapter {
     }
     #endif
     private func refreshFetchReadIdentity(instance: Instance, issuer: CloudFetchProofIssuer?) async throws {
+        let cancellationIntent = CloudPolicyCancellationContext.current
         let wait = CloudFetchProofWait(issuer: issuer, original: instance.stopWitness)
         let task = Task {
             do {
@@ -2126,7 +2151,9 @@ public actor CloudKitSyncAdapter {
             }
             try Task.checkCancellation()
         } onCancel: {
-            wait.complete(.failure(CancellationError()), producer: .caller)
+            let observation = cancellationIntent?.capture()
+            let terminal = CloudFetchProofCompletion.Producer.caller(observation)
+            wait.complete(.failure(CancellationError()), producer: terminal)
             task.cancel()
         }
     }
@@ -2201,15 +2228,22 @@ public actor CloudKitSyncAdapter {
     }
     // Call only between this command's actual completed/ACKed stages. The
     // busy owner's callbacks stay live and continue to fence its own admission.
-    private struct DependencyCancellation: Error { let error: CancellationError }
+    private struct DependencyCancellation: Error {
+        let error: CancellationError
+        let cause: CloudPolicyCancellationContext.Snapshot?
+    }
     private func waitForQuiescentFetchDependency(issuer: CloudFetchProofIssuer? = nil) async throws -> [CloudQuiescentDependencyWait] {
+        let cancellationIntent = CloudPolicyCancellationContext.current
         var joined: [CloudQuiescentDependencyWait] = []
         while fetchBusy {
             let parked = try await CloudQuiescentDependencyWait.park()
             do {
                 while fetchBusy {
                     let old = version
-                    try await waitForChange(after: old, cancellationError: { DependencyCancellation(error: CancellationError()) })
+                    try await waitForChange(after: old, cancellationError: {
+                        let observation = cancellationIntent?.capture()
+                        return DependencyCancellation(error: CancellationError(), cause: observation)
+                    })
                 }
             } catch {
                 try await parked?.revoke()
@@ -2217,7 +2251,7 @@ public actor CloudKitSyncAdapter {
                     let original = cancellation.error
                     if let issuer, let parked {
                         throw CloudNativeCancellationError(error: original, proof:
-                            .init(adapterEdge: .init(issuer: issuer, dependency: parked)))
+                            .init(adapterEdge: .init(issuer: issuer, dependency: parked, cause: cancellation.cause)))
                     }
                     throw original
                 }
@@ -2358,10 +2392,23 @@ public actor CloudKitSyncAdapter {
         try await send(zones: [instance.zone], origin: origin, execution: execution)
         try await waitForDeferredUpdates(origin: origin)
     }
-    func cancelPolicyFlush(execution: CoreCloudPolicyExecution) async throws {
+    @discardableResult
+    func cancelPolicyFlush(execution: CoreCloudPolicyExecution) async throws -> CloudFlushCancellationReceipt? {
         try await execution.validateControl()
-        guard let origin = try await execution.originalSDK(), let instance = owned[origin] else { return }
+        guard let origin = try await execution.originalSDK(), let instance = owned[origin] else { return nil }
+        let wasEligible = current == origin && !instance.stopping && !instance.authorityRetired && !instance.failed
         await instance.engine.cancelOperations()
+        guard wasEligible, owned[origin] === instance, current == origin,
+              !instance.stopping, !instance.authorityRetired, !instance.failed else { return nil }
+        return CloudFlushCancellationReceipt(execution: execution, instance: instance.stopWitness)
+    }
+    // Pin B's own issued command and SDK before its dependency park. This
+    // read grants no native admission and cannot borrow A's command witness.
+    func retainFlushIssuer(command: CloudPolicyCommand, execution: CoreCloudPolicyExecution) async throws -> CloudFetchProofIssuer? {
+        guard let origin = try await execution.originalSDK() else { return nil }
+        guard let instance = owned[origin], current == origin, !instance.stopping,
+              !instance.authorityRetired, !instance.failed else { return nil }
+        return .init(command: command, execution: execution, original: instance.stopWitness)
     }
     func sendPolicyMedia(execution: CoreCloudPolicyExecution) async throws {
         guard let origin = try await execution.originalSDK(), let instance = owned[origin], await valid(origin) else {

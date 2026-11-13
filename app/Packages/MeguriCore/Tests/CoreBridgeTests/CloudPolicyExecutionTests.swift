@@ -828,6 +828,588 @@ extension EventTests {
 }
 #endif
 
+#if DEBUG
+enum NativeParkedFlushCauseCase: CaseIterable, Sendable, Equatable {
+    case expiry, unrelatedCaller, providerCancellation, providerFailure, readFailure, sdkCancellation, cleanup
+    case revocationFailure, cancelCoreFailure
+    var providerFirst: Bool { self == .providerCancellation || self == .providerFailure }
+}
+
+extension EventTests {
+    @Test(arguments: NativeParkedFlushCauseCase.allCases)
+    func nativeParkedFlushRequiresOwnFirstCauseAndSuccessfulOriginalCancellation(mode: NativeParkedFlushCauseCase) async throws {
+        let preparation = EpochPreparationTransport(), base = FetchControlTransport()
+        let original = NativePolicyOriginalFailure(), cleanupFailure = NativePolicyOriginalFailure()
+        let revocationFailure = NativePolicyOriginalFailure()
+        let sdkOriginal = CKError(.operationCancelled) as NSError
+        let sdkFailure = CloudKitSDKOperationFailure(underlying: sdkOriginal, code: Int64(sdkOriginal.code), retryAfterMilliseconds: 123)
+        let transport: any CloudOwnTransport
+        switch mode {
+        case .readFailure: transport = FetchProofThrowingTransport(base: base, error: original)
+        case .sdkCancellation: transport = FetchProofThrowingTransport(base: base, error: sdkFailure)
+        default: transport = base
+        }
+        let reads = PolicyExchangeProofTransport(preparation: preparation, exchange: transport)
+        let exercise: (CloudKitBridgeFixture) async throws -> Void = { fixture in
+            try await runNativeParkedFlushScenario(mode: mode, fixture: fixture,
+                preparation: preparation, base: base, original: original,
+                cleanupFailure: cleanupFailure, revocationFailure: revocationFailure,
+                sdkOriginal: sdkOriginal, sdkFailure: sdkFailure)
+        }
+        try await withNativePolicyFixture(assetReadTransport: reads, appOwnsAccountObservation: true, exercise)
+    }
+}
+
+private enum NativeRefreshFailureSetupError: Error {
+    case unsupportedSetupAction
+}
+
+// Prepare the native admission state used by the refresh failure cases.
+private func prepareNativeRefreshFailurePolicy(_ fixture: CloudKitBridgeFixture,
+    preparation: EpochPreparationTransport,
+    wrapAutomaticEngine: (@Sendable (CloudKitEngineFake) -> any CloudKitEngine)? = nil
+) async throws -> (CoreCloudPolicyService, NativeCloudPolicyExecutor) {
+    let (policy, executor) = try await nativePolicy(fixture)
+    let zones = ["meguri-root", fixture.zone]
+
+    func finishSetup(_ outputs: [CloudPolicyOutput]) async throws {
+        var pending = try outputs.flatMap(policyCommands)
+        var processed = 0
+        while processed < pending.count {
+            try #require(processed < 64, "Native admission setup exceeded its command budget")
+            let command = pending[processed]
+            processed += 1
+
+            switch command.action {
+            case .runCleanup, .deleteZones:
+                // This component has no maintenance services; leave this work unexecuted.
+                continue
+            case .armFlushTimer, .cancelFlushTimer:
+                // Timer scheduling belongs to the coordinator, outside this setup.
+                continue
+            case .requestFetch:
+                let sdk = try await fixture.engine()
+                preparation.bind(sdk, reply: .found(try await boundEpochBytes()), root: fixture.root.envelope)
+                await sdk.appendFetchScripts([
+                    .manual(fetchedZones: zones, records: [fixture.root], group: nil),
+                ])
+            case .configureAutomatic, .updatePending, .applyReady, .requestSend,
+                 .statusChanged, .recordExchange, .recordQuietPoint, .probeTracking:
+                break
+            default:
+                throw NativeRefreshFailureSetupError.unsupportedSetupAction
+            }
+
+            let result = await executor.execute(command)
+            if let error = result.error { throw error }
+            try #require(!result.deferred && result.afterOutputs == nil)
+            pending.append(contentsOf: try result.outputs.flatMap(policyCommands))
+        }
+    }
+
+    let originalSDK = try await fixture.engine()
+    preparation.bind(originalSDK, reply: .found(try await boundEpochBytes()), root: fixture.root.envelope)
+    await originalSDK.appendFetchScripts([
+        .manual(fetchedZones: zones, records: [fixture.root], group: nil),
+        .manual(fetchedZones: zones, records: [], group: nil),
+    ])
+    let requested = try await policy.input(.syncNowRequested(.command))
+    let exchange = try #require(try policyCommands(requested).first {
+        if case .runExchange = $0.action { true } else { false }
+    })
+    let observation = try await observePolicyExchange(exchange)
+    let result = await executor.execute(exchange)
+    if let error = result.error { throw error }
+    try await qualifiedRecordExchange(exchange, result: result, fixture: fixture,
+        before: observation, outcome: .succeeded)
+    try #require(try await epochAuthority() != nil)
+    try await finishSetup(result.outputs)
+
+    if let wrapAutomaticEngine {
+        await fixture.factory.wrapNextEngine(wrapAutomaticEngine)
+    }
+    let automatic = try await policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false)))
+    try await finishSetup([automatic])
+    try await fixture.adapter.waitForDeferredUpdates()
+
+    let automaticSDK = try await fixture.engine()
+    try #require(automaticSDK.instanceID != originalSDK.instanceID && automaticSDK.automaticallySync)
+    try #require(await fixture.adapter.retainedInstanceIDs() == [automaticSDK.instanceID])
+    try await fixture.core.validateSDK(automaticSDK.instanceID)
+    try #require(try await epochAuthority() != nil)
+    let drained = try await fixture.core.fetchDrains()
+    try #require(drained.contains { $0.zone == "meguri-root" } && drained.contains { $0.zone == fixture.zone })
+    return (policy, executor)
+}
+
+extension EventTests {
+    @Test(arguments: [false, true])
+    func nativeRequiredRefreshFailureReplacesExactCommandQualification(staleOriginal: Bool) async throws {
+        let preparation = EpochPreparationTransport()
+        try await withNativePolicyFixture(assetReadTransport: preparation) { fixture in
+            let (policy, _) = try await prepareNativeRefreshFailurePolicy(fixture, preparation: preparation)
+            let issued = try await policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: true)))
+            let command = try #require(try policyCommands(issued).first { if case .resumeMedia = $0.action { true } else { false } })
+            let queue = NativeOwnCapturingQueue()
+            let transport = try NativeCloudMediaTransport(queue: queue,
+                staging: .init(directory: fixture.directory.appending(path: "refresh-failure"), available: { UInt64.max }))
+            let executor = NativeCloudPolicyExecutor(policy: policy, adapter: fixture.adapter,
+                mediaService: try await fixture.core.media(), mediaTransport: transport)
+            if staleOriginal {
+                _ = try await policy.input(.settings(.init(enabled: true, paused: true, automatic: true, media: true)))
+            }
+            let refreshFailure = NativePolicyOriginalFailure()
+            let refreshAttempts = Mutex(0)
+            let acknowledged = Mutex(0)
+            let originalContext = CloudPolicyCancellationContext()
+            originalContext.record(.expiry, sequence: UUID())
+            let running = Task {
+                await CloudPolicyCancellationContext.$current.withValue(originalContext) {
+                    await MaintenanceCallObservation.$capture.withValue({ call in
+                        if !staleOriginal && call == .cloudPolicyExecutionOriginalSdk {
+                            withUnsafeCurrentTask { $0?.cancel() }
+                        }
+                    }) {
+                        await CloudPolicyOutputAcknowledgement.$input.withValue({ _ in
+                            refreshAttempts.withLock { $0 += 1 }
+                            throw refreshFailure
+                        }) {
+                            await executor.execute(command, corePrepared: {}, acknowledgeOutputs: { outputs in
+                                acknowledged.withLock { $0 += outputs.count }
+                            })
+                        }
+                    }
+                }
+            }
+            let result = await running.value
+            #expect((result.error as? NativePolicyOriginalFailure) === refreshFailure)
+            #expect(refreshAttempts.withLock { $0 } == 1)
+            #expect(result.nativeCancellation == nil && result.fetchProofOutcome == nil)
+            #expect(result.originalGuardRefusal == nil && result.dependentFetchRefusal == nil)
+            #expect(!result.mediaCancellation && !result.deferred && result.afterOutputs == nil)
+            #expect(result.acknowledgedOutputCount == result.outputs.count)
+            #expect(acknowledged.withLock { $0 } == result.outputs.count)
+            if staleOriginal {
+                let originalAttempt = try #require(result.priorError as? CloudPolicyAttemptError)
+                #expect(originalAttempt.error == .cloudPolicy(.staleCommand))
+                #expect(originalAttempt.refusal != nil)
+            } else {
+                let originalCancellation = try #require(result.priorError as? CloudNativeCancellationError)
+                #expect(originalCancellation.error is CancellationError)
+                #expect(originalCancellation.proof.matches(command))
+                #expect(originalCancellation.proof.matchesIntent(originalContext))
+                let disabledMedia = try await policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false)))
+                let unrelatedCommand = try #require(try policyCommands(disabledMedia).first { if case .pauseMedia = $0.action { true } else { false } })
+                #expect(!originalCancellation.proof.matches(unrelatedCommand))
+            }
+            #expect(queue.operations.withLock { $0.isEmpty })
+        }
+    }
+
+    @Test func nativeDeferredRequiredRefreshFailurePreservesOriginalFaultAndOutputPrefix() async throws {
+        let preparation = EpochPreparationTransport()
+        try await withNativePolicyFixture(assetReadTransport: preparation) { fixture in
+            let wrapped = Mutex<PolicyPendingEngine?>(nil)
+            let (policy, executor) = try await prepareNativeRefreshFailurePolicy(fixture, preparation: preparation, wrapAutomaticEngine: { sdk in
+                let engine = PolicyPendingEngine(sdk)
+                wrapped.withLock { $0 = engine }
+                return engine
+            })
+            let engine = try #require(wrapped.withLock { $0 })
+            let current = try await fixture.engine()
+            try #require(engine.instanceID == current.instanceID && current.automaticallySync)
+            try #require(await fixture.adapter.retainedInstanceIDs() == [engine.instanceID])
+            try await fixture.core.validateSDK(engine.instanceID)
+            try await addPendingDeck(fixture, name: "Required refresh output prefix")
+            let command = try await pendingCommand(policy)
+            let originalFailure = NativePolicyOriginalFailure()
+            let refreshFailure = NativePolicyOriginalFailure()
+            await engine.failNextApply(originalFailure)
+            let refreshAttempts = Mutex(0)
+            let acknowledgements = Mutex(0)
+            let result = await CloudPolicyOutputAcknowledgement.$current.withValue({ outputs in
+                acknowledgements.withLock { $0 += outputs.count }
+            }) {
+                await CloudPolicyOutputAcknowledgement.$input.withValue({ _ in
+                    refreshAttempts.withLock { $0 += 1 }
+                    throw refreshFailure
+                }) { await executor.execute(command) }
+            }
+            #expect((result.error as? NativePolicyOriginalFailure) === originalFailure)
+            #expect(result.outputs.count == 1 && result.acknowledgedOutputCount == 0)
+            #expect(refreshAttempts.withLock { $0 } == 0)
+            _ = try policyCommands(try #require(result.outputs.first))
+            let requiredRefresh = try #require(result.afterOutputs)
+            let refreshed = await requiredRefresh()
+            #expect((refreshed.error as? NativePolicyOriginalFailure) === refreshFailure)
+            #expect((refreshed.priorError as? NativePolicyOriginalFailure) === originalFailure)
+            #expect(refreshAttempts.withLock { $0 } == 1)
+            #expect(refreshed.outputs.isEmpty && refreshed.acknowledgedOutputCount == 0)
+            #expect(refreshed.nativeCancellation == nil && refreshed.fetchProofOutcome == nil)
+            #expect(refreshed.originalGuardRefusal == nil && refreshed.dependentFetchRefusal == nil)
+            #expect(!refreshed.mediaCancellation && !refreshed.deferred && refreshed.afterOutputs == nil)
+            #expect(acknowledgements.withLock { $0 } == 0)
+            #expect((result.error as? NativePolicyOriginalFailure) === originalFailure)
+            #expect(result.outputs.count == 1 && result.acknowledgedOutputCount == 0)
+        }
+    }
+}
+
+extension EventTests {
+    @Test func nativeFlushCancellationWithoutOriginalSDKReturnsNoReceipt() async throws {
+        try await withNativePolicyFixture { fixture in
+            let (policy, executor) = try await nativePolicy(fixture)
+            let engine = try await fixture.engine()
+            _ = try await policy.input(.syncNowRequested(.command))
+            let quit = try policyCommands(try await policy.input(.quitRequested))
+            let command = try #require(quit.first { if case .quitFlush = $0.action { true } else { false } })
+            let execution = try #require(try await policy.prepareExecution(command))
+            let issuer = try #require(try await fixture.adapter.retainFlushIssuer(command: command, execution: execution))
+            #expect(issuer.original.sdk == engine.instanceID)
+            let changed = try await policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false)))
+            let configure = try #require(try policyCommands(changed).first { if case .configureAutomatic = $0.action { true } else { false } })
+            let configured = await executor.execute(configure)
+            if let failure = configured.error { throw failure }
+            #expect(!configured.deferred)
+            let replacement = try await fixture.engine()
+            #expect(replacement.instanceID != engine.instanceID)
+            #expect(!(await fixture.adapter.retainedInstanceIDs().contains(engine.instanceID)))
+            #expect(await engine.recordedTrace().contains(.released))
+            try await execution.validateControl()
+            #expect(try await execution.originalSDK() == engine.instanceID)
+            let originalTrace = await engine.recordedTrace()
+            let replacementTrace = await replacement.recordedTrace()
+            let receipt = try await fixture.adapter.cancelPolicyFlush(execution: execution)
+            #expect(receipt == nil)
+            #expect(await engine.recordedTrace() == originalTrace)
+            #expect(await replacement.recordedTrace() == replacementTrace)
+        }
+    }
+
+    @Test func nativeReplacementCancellationReceiptCannotCompletePredecessor() async throws {
+        try await withNativePolicyFixture { fixture in
+            let (policy, executor) = try await nativePolicy(fixture)
+            let predecessor = try await fixture.engine()
+            _ = try await policy.input(.syncNowRequested(.command))
+            let quit = try policyCommands(try await policy.input(.quitRequested))
+            let command = try #require(quit.first { if case .quitFlush = $0.action { true } else { false } })
+            let originalExecution = try #require(try await policy.prepareExecution(command))
+            let issuer = try #require(try await fixture.adapter.retainFlushIssuer(command: command, execution: originalExecution))
+            let changed = try await policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false)))
+            let configure = try #require(try policyCommands(changed).first { if case .configureAutomatic = $0.action { true } else { false } })
+            let configured = await executor.execute(configure)
+            if let failure = configured.error { throw failure }
+            #expect(!configured.deferred)
+            let replacement = try await fixture.engine()
+            #expect(replacement.instanceID != predecessor.instanceID)
+            #expect(await predecessor.recordedTrace().contains(.released))
+            let controls = try policyCommands(try await policy.input(.backgroundExpiring))
+            let cancel = try #require(controls.first { if case .cancelBackgroundFlush = $0.action { true } else { false } })
+            let execution = try #require(try await policy.prepareExecution(cancel))
+            let successorIssuer = try #require(try await fixture.adapter.retainFlushIssuer(command: cancel, execution: execution))
+            #expect(successorIssuer.original.sdk == replacement.instanceID)
+            let receipt = try #require(try await fixture.adapter.cancelPolicyFlush(execution: execution))
+            #expect(receipt.matches(successorIssuer))
+            #expect(!receipt.matches(issuer))
+            #expect(await replacement.recordedTrace().contains(.cancelReturned))
+        }
+    }
+}
+
+private func runNativeParkedFlushScenario(
+    mode: NativeParkedFlushCauseCase, fixture: CloudKitBridgeFixture,
+    preparation: EpochPreparationTransport, base: FetchControlTransport,
+    original: NativePolicyOriginalFailure, cleanupFailure: NativePolicyOriginalFailure,
+    revocationFailure: NativePolicyOriginalFailure, sdkOriginal: NSError,
+    sdkFailure: CloudKitSDKOperationFailure
+) async throws {
+    let (policy, _) = try await nativePolicy(fixture)
+    let engine = try await fixture.engine()
+    try await requireUnknownEpochSyncNowBaseline(engine.instanceID)
+    preparation.bind(engine, reply: .found(try await boundEpochBytes()), root: fixture.root.envelope)
+    // The fixture clock is frozen; only the staged cancellation ends this deadline.
+    let deadline = CloudCallbackGate()
+    let executor = NativeCloudPolicyExecutor(policy: policy, adapter: fixture.adapter,
+        observeExchangeCapture: { _, _ in await engine.signInSameSyntheticIdentity() },
+        flushDeadline: { _ in
+            try await withTaskCancellationHandler { await deadline.enter(); try Task.checkCancellation() }
+                onCancel: { Task { await deadline.open() } }
+        })
+    let originalCommand = try #require(try policyCommands(try await policy.input(.syncNowRequested(.command)))
+        .first { if case .runExchange = $0.action { true } else { false } })
+    let originalObservation = try await observePolicyExchange(originalCommand)
+    base.setReplies([.found(fixture.root.envelope)])
+    await engine.appendFetchScripts([.manual(fetchedZones: [], records: [], group: nil)])
+    let provider = CloudCallbackGate(), selected = CloudCallbackGate()
+    let park = CloudCallbackGate(), revoke = CloudCallbackGate()
+    let dependentReturned = CloudCallbackGate()
+    let originalContext = CloudPolicyCancellationContext(), dependentContext = CloudPolicyCancellationContext()
+    let dependentTask = Mutex<Task<CloudPolicyNativeResult, Never>?>(nil)
+    let issuedDependentCommand = Mutex<CoreBridge.CloudPolicyCommand?>(nil)
+    let dependentControlFailure = Mutex<BridgeError?>(nil)
+    let transitions = Mutex<[(UUID, CloudQuiescentDependencyWait.Phase)]>([])
+    let removalAcknowledgements = Mutex(0)
+    let originalAcknowledgements = Mutex(0), dependentAcknowledgements = Mutex(0)
+    let cleanup: (@Sendable () throws -> Void)?
+    if mode == .cleanup { cleanup = { @Sendable () throws -> Void in throw cleanupFailure } }
+    else { cleanup = nil }
+    let predecessorReturned = Mutex(0)
+    let cancellationEntries = await engine.recordedTrace().filter { $0 == .cancelEntered }.count
+    let predecessorCalls = Mutex<[BridgeCall]>([])
+    await fixture.adapter.setProofAdmission({ _ in
+        await provider.enter()
+        if mode == .providerFailure || mode == .revocationFailure { throw original }
+        if mode == .providerCancellation { throw CancellationError() }
+        try Task.checkCancellation()
+    }, acknowledgeOutputs: { _ in })
+    await fixture.adapter.setFetchProofCompletionObserver { await selected.enter() }
+    let originalTask = Task {
+        await CloudPolicyCancellationContext.$current.withValue(originalContext) {
+            await CloudFetchProofCompletionFault.$afterOriginalDiscard.withValue(cleanup) {
+                await CloudPolicyOutputAcknowledgement.$input.withValue({ work in
+                    let output = try await work(); originalAcknowledgements.withLock { $0 += 1 }; return output
+                }) {
+                    let result = await MaintenanceCallObservation.$capture.withValue({ call in
+                        predecessorCalls.withLock { $0.append(call) }
+                    }) {
+                        await executor.execute(originalCommand, corePrepared: {}, acknowledgeOutputs: { outputs in originalAcknowledgements.withLock { $0 += outputs.count } })
+                    }
+                    predecessorReturned.withLock { $0 += 1 }
+                    return result
+                }
+            }
+        }
+    }
+    let verifyResults: @Sendable () async throws -> Void = {
+        let originalResult = await withTaskCancellationHandler {
+            await originalTask.value
+        } onCancel: { originalTask.cancel() }
+        let runningDependent = try #require(dependentTask.withLock { $0 })
+        let dependentResult = await withTaskCancellationHandler {
+            await runningDependent.value
+        } onCancel: { runningDependent.cancel() }
+        let dependentCommand = try #require(issuedDependentCommand.withLock { $0 })
+        #expect(originalResult.acknowledgedOutputCount == originalResult.outputs.count)
+        #expect(originalAcknowledgements.withLock { $0 } == originalResult.outputs.count)
+        #expect(dependentResult.acknowledgedOutputCount == dependentResult.outputs.count)
+        #expect(dependentAcknowledgements.withLock { $0 } == dependentResult.outputs.count)
+        let dependencyTransitions = transitions.withLock { $0 }
+        #expect(dependencyTransitions.count == 2)
+        if let firstTransition = dependencyTransitions.first {
+            if case .park = firstTransition.1 {} else { Issue.record("Dependency did not begin with its park") }
+        }
+        if let lastTransition = dependencyTransitions.last {
+            if case .revoke = lastTransition.1 {} else { Issue.record("Dependency did not end with its revoke") }
+        }
+        #expect(dependencyTransitions.first?.0 == dependencyTransitions.last?.0)
+        #expect(predecessorReturned.withLock { $0 } == 1)
+
+        if mode == .revocationFailure {
+            #expect((dependentResult.error as? NativePolicyOriginalFailure) === revocationFailure)
+            #expect((originalResult.error as? NativePolicyOriginalFailure) === revocationFailure)
+            let prior = try #require(originalResult.priorError as? CloudFetchProofError)
+            #expect((prior.error as? NativePolicyOriginalFailure) === original)
+            let originalOutcome = prior.outcome
+            #expect(originalOutcome.preservesFailure && !originalOutcome.accountStopCancellation)
+            #expect(originalResult.fetchProofOutcome == nil)
+            #expect(dependentResult.fetchProofOutcome == nil)
+            #expect(originalResult.nativeCancellation == nil)
+            #expect(dependentResult.nativeCancellation == nil)
+            #expect(await fixture.adapter.retainedInstanceIDs() == [engine.instanceID])
+            try await fixture.core.validateSDK(engine.instanceID)
+            #expect(await fixture.factory.engines().count == 1)
+            #expect(await engine.recordedTrace().filter { $0 == .cancelEntered }.count == cancellationEntries)
+            #expect(!(await engine.recordedTrace().contains(.released)))
+            #expect(removalAcknowledgements.withLock { $0 } == 0)
+            try await qualifiedRecordExchange(originalCommand, result: originalResult,
+                fixture: fixture, before: originalObservation, outcome: .failed)
+            return
+        }
+
+        let originalOutcome = try #require(originalResult.fetchProofOutcome)
+        let originalFailureMustPersist = mode != .expiry && mode != .unrelatedCaller && mode != .cancelCoreFailure
+        #expect(originalOutcome.preservesFailure == originalFailureMustPersist)
+        #expect(!originalOutcome.accountStopCancellation)
+        #expect(originalResult.originalGuardRefusal == nil)
+        #expect(originalResult.dependentFetchRefusal == nil)
+        if mode == .cancelCoreFailure {
+            let expectedControlFailure = try #require(dependentControlFailure.withLock { $0 })
+            let returnedControlFailure = try #require(dependentResult.error)
+            #expect(BridgeError(returnedControlFailure) == expectedControlFailure)
+            #expect(dependentResult.nativeCancellation == nil)
+            #expect(dependentResult.originalGuardRefusal == nil)
+            #expect(dependentResult.dependentFetchRefusal == nil)
+            #expect(dependentResult.fetchProofOutcome == nil)
+            #expect(originalResult.error is CancellationError)
+        } else {
+            let dependentOutcome = try #require(dependentResult.fetchProofOutcome)
+            #expect(dependentOutcome.preservesFailure == originalFailureMustPersist)
+            #expect(!dependentOutcome.accountStopCancellation)
+            if mode == .providerFailure || mode == .readFailure {
+                #expect((originalResult.error as? NativePolicyOriginalFailure) === original)
+                #expect((dependentResult.error as? NativePolicyOriginalFailure) === original)
+            } else if mode == .sdkCancellation {
+                for completedResult in [originalResult, dependentResult] {
+                    let returnedSDKFailure = try #require(completedResult.error as? CloudKitSDKOperationFailure)
+                    #expect((returnedSDKFailure.underlying as NSError) === sdkOriginal)
+                    #expect(returnedSDKFailure.code == sdkFailure.code)
+                    #expect(returnedSDKFailure.retryAfterMilliseconds == 123)
+                }
+            } else {
+                #expect(originalResult.error is CancellationError)
+                #expect(dependentResult.error is CancellationError)
+            }
+            if mode == .cleanup {
+                #expect((originalOutcome.debugOriginalCompletionFailure as? NativePolicyOriginalFailure) === cleanupFailure)
+                #expect((dependentOutcome.debugOriginalCompletionFailure as? NativePolicyOriginalFailure) === cleanupFailure)
+            }
+        }
+        let originalQualifies = mode == .expiry || mode == .unrelatedCaller || mode == .cancelCoreFailure
+        #expect((originalResult.nativeCancellation != nil) == originalQualifies)
+        #expect((dependentResult.nativeCancellation != nil) == (mode == .expiry))
+        if originalQualifies {
+            let originalProof = try #require(originalResult.nativeCancellation)
+            #expect(originalProof.matches(originalCommand))
+            #expect(!originalProof.matches(dependentCommand))
+            #expect(originalProof.matchesIntent(originalContext) == (mode != .unrelatedCaller))
+            #expect(!originalProof.matchesIntent(dependentContext))
+        }
+        if mode == .expiry {
+            let dependentProof = try #require(dependentResult.nativeCancellation)
+            #expect(dependentProof.matches(dependentCommand))
+            #expect(!dependentProof.matches(originalCommand))
+            #expect(dependentProof.matchesIntent(dependentContext))
+            #expect(!dependentProof.matchesIntent(originalContext))
+        }
+        try await qualifiedRecordExchange(originalCommand, result: originalResult,
+            fixture: fixture, before: originalObservation,
+            outcome: mode == .providerFailure || mode == .readFailure ? .failed : .cancelled)
+    }
+    let driveCancellation: @Sendable () async throws -> Void = {
+            try await provider.waitForArrival()
+            if mode == .revocationFailure {
+                let changed = try await policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false)))
+                let configure = try #require(try policyCommands(changed).first { if case .configureAutomatic = $0.action { true } else { false } })
+                let held = await executor.execute(configure)
+                #expect(held.error == nil && held.deferred && held.outputs.isEmpty)
+                #expect(await fixture.adapter.retainedInstanceIDs() == [engine.instanceID])
+                #expect(await fixture.factory.engines().count == 1)
+                #expect(!(await engine.recordedTrace().contains(.released)))
+            }
+            let dependentCommand = try #require(try policyCommands(try await policy.input(.quitRequested))
+                .first { if case .quitFlush = $0.action { true } else { false } })
+            issuedDependentCommand.withLock { $0 = dependentCommand }
+            let runningDependent = Task {
+                await CloudPolicyCancellationContext.$current.withValue(dependentContext) {
+                    await CloudQuiescentDependencyWait.$transition.withValue({ wait, phase in
+                        transitions.withLock { $0.append((wait.id, phase)) }
+                        switch phase {
+                        case .park: await park.enter()
+                        case .revoke:
+                            await revoke.enter()
+                            if mode == .revocationFailure { throw revocationFailure }
+                            removalAcknowledgements.withLock { $0 += 1 }
+                        }
+                    }) {
+                        await CloudPolicyOutputAcknowledgement.$input.withValue({ work in
+                            let output = try await work(); dependentAcknowledgements.withLock { $0 += 1 }; return output
+                        }) {
+                            let result = await executor.execute(dependentCommand, corePrepared: {}, acknowledgeOutputs: { outputs in dependentAcknowledgements.withLock { $0 += outputs.count } })
+                            if mode == .revocationFailure { await dependentReturned.enter() }
+                            return result
+                        }
+                    }
+                }
+            }
+            dependentTask.withLock { $0 = runningDependent }
+            try await park.waitForArrival(); await park.open()
+            if mode == .cancelCoreFailure {
+                let execution = try #require(try await policy.prepareExecution(dependentCommand))
+                _ = try await policy.input(.settings(.init(enabled: true, paused: true, automatic: false, media: false)))
+                var refusal: BridgeError?
+                do { try await execution.validateControl() }
+                catch { refusal = BridgeError(error) }
+                let actual = try #require(refusal)
+                dependentControlFailure.withLock { $0 = actual }
+            }
+            if mode.providerFirst { await provider.open(); try await selected.waitForArrival() }
+            if mode == .unrelatedCaller { originalTask.cancel() }
+            let event = UUID()
+            originalContext.record(.expiry, sequence: event); dependentContext.record(.expiry, sequence: event)
+            runningDependent.cancel(); originalTask.cancel()
+            try await revoke.waitForArrival(); await revoke.open()
+            if mode == .revocationFailure {
+                // B must expose the failed ordered removal while the real
+                // account provider is still held and A has never returned.
+                try await dependentReturned.waitForArrival()
+                await dependentReturned.open()
+                let failedDependent = await runningDependent.value
+                #expect((failedDependent.error as? NativePolicyOriginalFailure) === revocationFailure)
+                #expect(failedDependent.outputs.isEmpty && failedDependent.acknowledgedOutputCount == 0)
+                #expect(failedDependent.nativeCancellation == nil && failedDependent.fetchProofOutcome == nil)
+                #expect(predecessorReturned.withLock { $0 } == 0)
+                #expect(!predecessorCalls.withLock { $0.contains(.cloudWorkflowCompleteExchange) })
+                #expect(await engine.recordedTrace().filter { $0 == .cancelEntered }.count == cancellationEntries)
+                // Exercise the public control route after B is gone. The
+                // retained failed fence must still prevent native cleanup.
+                let controls = try policyCommands(try await policy.input(.backgroundExpiring))
+                let cancellation = try #require(controls.first { if case .cancelExchange = $0.action { true } else { false } })
+                let refused = await executor.execute(cancellation)
+                #expect((refused.error as? NativePolicyOriginalFailure) === revocationFailure)
+                #expect(await engine.recordedTrace().filter { $0 == .cancelEntered }.count == cancellationEntries)
+                #expect(!predecessorCalls.withLock { $0.contains(.cloudWorkflowCompleteExchange) })
+                let laterCommand = try #require(try policyCommands(try await policy.input(.quitRequested))
+                    .first { if case .quitFlush = $0.action { true } else { false } })
+                let laterPark = CloudCallbackGate()
+                let laterDependent = Task {
+                    await CloudQuiescentDependencyWait.$transition.withValue({ _, phase in
+                        if case .park = phase { await laterPark.enter() }
+                    }) { await executor.execute(laterCommand) }
+                }
+                do {
+                    try await laterPark.waitForArrival()
+                    await laterPark.open()
+                    laterDependent.cancel()
+                    let laterResult = await laterDependent.value
+                    #expect((laterResult.error as? NativePolicyOriginalFailure) === revocationFailure)
+                    #expect(laterResult.nativeCancellation == nil && laterResult.fetchProofOutcome == nil)
+                    #expect(predecessorReturned.withLock { $0 } == 0)
+                    #expect(await engine.recordedTrace().filter { $0 == .cancelEntered }.count == cancellationEntries)
+                    #expect(!predecessorCalls.withLock { $0.contains(.cloudWorkflowCompleteExchange) })
+                } catch {
+                    await laterPark.open()
+                    laterDependent.cancel()
+                    _ = await laterDependent.value
+                    throw error
+                }
+                var quiesceFailure: (any Error)?
+                do { try await executor.quiesce() }
+                catch { quiesceFailure = error }
+                #expect((quiesceFailure as? NativePolicyOriginalFailure) === revocationFailure)
+                #expect(predecessorReturned.withLock { $0 } == 0)
+                #expect(!predecessorCalls.withLock { $0.contains(.cloudWorkflowCompleteExchange) })
+                #expect(await fixture.adapter.retainedInstanceIDs() == [engine.instanceID])
+                #expect(await engine.recordedTrace().filter { $0 == .cancelEntered }.count == cancellationEntries)
+                #expect(!(await engine.recordedTrace().contains(.released)))
+                await provider.open()
+            }
+            try await selected.waitForArrival()
+            await provider.open(); await selected.open()
+    }
+    do {
+        try await withCloudTask(gates: [provider, selected, park, revoke, dependentReturned, deadline],
+            expectedArrivals: [provider, selected, park, revoke],
+            operation: verifyResults, whileRunning: driveCancellation)
+    } catch {
+        originalTask.cancel(); dependentTask.withLock { $0 }?.cancel()
+        await provider.open(); await selected.open(); await park.open(); await revoke.open(); await dependentReturned.open(); await deadline.open()
+        _ = await originalTask.value; _ = await dependentTask.withLock { $0 }?.value
+        throw error
+    }
+    await fixture.adapter.setFetchProofCompletionObserver(nil)
+}
+#endif
+
 private struct ImmediatePolicyReadinessDeadline: CloudPolicyReadinessClock {
     func waitForDeadline() async throws { try Task.checkCancellation() }
 }

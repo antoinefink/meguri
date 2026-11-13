@@ -1120,13 +1120,16 @@ extension ReviewCollectionStartupTests {
 }
 
 #if DEBUG
-// Every row uses the real media executor's sealed result above.
+// Every row reuses the real media executor's sealed result and original intent
+// channel above, then independently checks frozen queue/active-command guards.
 @MainActor private func checkFrozenQueueOwnership(
     _ result: SyncCommandResult, command: CloudPolicyCommand, other: CloudPolicyCommand,
     unissued: CloudPolicyCommand, backend: any SyncCoordinatorBackend
 ) {
+    let originalIntent = SyncCommandTaskContext.current?.cancellationIntent ?? CloudPolicyCancellationContext()
     func make(_ commands: [CloudPolicyCommand]) -> SyncCommandTaskContext {
-        SyncCommandTaskContext(generation: 179, revision: 3, backend: backend, originalCommands: commands)
+        SyncCommandTaskContext(generation: 179, revision: 3, backend: backend, originalCommands: commands,
+                               cancellationIntent: originalIntent)
     }
     func owns(_ context: SyncCommandTaskContext, _ actual: CloudPolicyCommand) -> Bool {
         context.ownsNativeCancellation(result, command: actual, backend: backend, generation: 179, revision: 3)
