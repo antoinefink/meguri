@@ -671,9 +671,13 @@ extension ReviewCollectionStartupTests {
     @Test
     func serviceAppPredecessorCorePhaseRetainsRealResultACKBeforeAccountProof() async throws {
         try await withAutomaticServiceApp { app, _, _ in
+            // AutomaticOff masks B's completion status transition; enabling automatic mode rotates the SDK.
+            app.sync.setDeviceSettings(paused: false, automatic: true, media: app.sync.settings.media)
+            await app.sync.waitForInputs(); await app.sync.drainOperations()
             let sdk = try #require(await app.factory.engines.last)
             try await sdk.signInSameServiceIdentity()
             await app.sync.prepareConnectionAuthority(); await app.sync.drainOperations()
+            await sdk.waitForAutomaticSend(); await app.sync.drainOperations()
             let backend = try app.backend
             let native = ServiceAutomaticGate(), provider = ServiceAutomaticGate()
             let firstResultGate = ServiceAutomaticGate(), resultB = ServiceAutomaticGate()
