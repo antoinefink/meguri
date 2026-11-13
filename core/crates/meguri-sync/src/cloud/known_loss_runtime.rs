@@ -174,7 +174,10 @@ impl Runtime {
                         resolved_epoch: None,
                         fetched_epoch: None,
                         root_intake: false,
-                        epoch_readability: None,
+                        // Only the deferred bound-zone Active follow-up needs
+                        // Epoch-proof revocation. Immediate isolation preserves
+                        // historical evidence and cannot accept that follow-up.
+                        epoch_readability: (lost_collection && reason.is_none()).then_some(false),
                     },
                     Some((reason, media, publisher && root && reason.is_none())),
                 )

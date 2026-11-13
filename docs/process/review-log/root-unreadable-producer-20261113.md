@@ -157,3 +157,120 @@ Final static `static-checks/20261113T131425Z-46554` passes 3/3.
 Similarity `20261113T130746Z-33764` covers the 26 R3 source files;
 `20261113T131422Z-46218` covers the one final style delta. Both pass
 with zero exemptions. The final staged privacy receipt is in commit metadata.
+
+## Remaining P2: source-only loss follow-up
+
+Canonical start supplied by Root: `7fef9404`; root session
+`s-20261110T214025Z-20fa15fd`; original pending batch base
+`1416a520542a8c5daa38a23bfe398da704c3d6c9`. This bounded fixer pass follows
+independent R3 `cleanroom/20261113T130525Z-25971` and the checkpoint above.
+Its filtered synthetic HEAD is `6d8fc5e21ac40b9193ab0986cdf555dd97eba541`,
+not evidence of canonical equivalence. Root applies the exported source later;
+the main checkout and installed apps remain frozen for the live phone check.
+
+The R3 P2 was retained at that checkpoint: accepted known bound collection-zone
+loss left complete Epoch knowledge available to its later owned readable Active
+result. The source repair passes `Some(false)` only on the deferred Active
+follow-up branch, `lost_collection && reason.is_none()`, in the same
+`adapter_commit_loss` transaction. Immediate isolation keeps its historical
+Epoch/body evidence in the inactive scope; it cannot accept that follow-up or
+gain sending or clean-status authority. Historical qualified crt remains
+untouched. Original fresh account, scan, file
+and publication guards, loss-read routing, isolation, ACK, cursor and absence
+ordering are unchanged. Missing first-fetch inference, network failures,
+media-only and unrelated-zone losses gain no bound-Epoch deletion meaning;
+reset/account rules and storage/ABI/UI/tooling are unchanged.
+
+The Host `root_unreadable` regression starts with actual Service publication,
+complete Epoch intake/qualified crt and a projected bad Active mark. It deletes
+the bound zone through Service, then uses original `adapter_observe_zone_losses`,
+a fresh identity read, `adapter_accept_zone_losses`, `adapter_known_loss_read`,
+another fresh identity read and the actual same-epoch readable Service Active.
+There is no preceding Epoch-deletion intake. Assertions retain the mark through
+loss acceptance, owned Active isolation and reopening the selected isolated
+binding; crt and root ACK stay historical, SDK root stays unconfirmed, cursor
+and drain/absence state gain no completion, and the batch has no sends.
+Separate actual media-only/unrelated-zone deletion cases preserve the mark
+until readable Active arrives, which can still use retained complete Epoch proof.
+No summary, readiness or server-state fixtures are injected.
+
+Exact regression selector for Root (not executed by this fixer):
+
+```sh
+tools/mg core-test -- --test cloud_publication_phase -E 'package(meguri-host) & (test(root_unreadable::root_unreadable_known_bound_zone_loss_retains_mark_after_owned_readable_active_and_reopen) | test(root_unreadable::root_unreadable_known_media_or_unrelated_zone_loss_preserves_complete_epoch_proof) | test(root_unreadable::root_unreadable_combined_root_and_bound_zone_loss_preserves_immediate_active_missing_isolation))'
+```
+
+The filtered run exports two Rust files and this log after one static
+consistency check. Root owns execution and the required independent review.
+Earlier failure evidence, assertions and budgets remain; the sequence failure
+has no diagnosis yet. This source report grants no acceptance.
+
+### Predicate follow-up before production application
+
+Root reports the main checkout clean and installed apps still at canonical
+`7fef9404` while the phone owner unlock waits. This filtered follow-up starts
+at synthetic `c7f4de5d22d4186a77238eced1d328b9a5686664` with the prepared
+three-file patch already present; it does not establish canonical equivalence.
+
+The baseline receipt `core-test/20261113T133741Z-91598` selected the two
+new tests with production left at the starting revision. One passed; the
+bound-zone warning case failed. The media/unrelated preservation case passed.
+Retain this receipt with the earlier failures. Independent review
+`cleanroom/20261113T133446Z-88646` covered the first patch; the narrower
+condition and additional test require their own review.
+
+The first condition, `lost_collection.then_some(false)`, also applied to a
+combined root and bound-zone `Deleted` event. That path isolates immediately
+as `ActiveMissing`, clears stored Active and sets `active_deleted`. Passing
+`observe(None, Some(false))` to a readable ledger then returns `InvalidData`
+instead of accepting the loss. The narrower condition invalidates Epoch proof
+only in the branch that can later accept the owned Active read. Storage
+validation stays strict, and the physical representation stays the same.
+K12.5 requires `active_missing` for root deletion; its later bound-zone read
+uses an admitted original instance. K12.5/V26.1 supplies no requirement to
+extend this repair to the immediate-isolation branch.
+
+The additional Host test uses actual Service deletion of both root and bound
+zones in one original loss callback, with a fresh issued identity read and
+Runtime acceptance. It covers initially readable Root and already-unreadable
+Root separately within the test. Assertions require successful immediate
+`ActiveMissing`, historical qualified crt and any existing mark retained across
+reopen, no tracking stop/error, no root confirmation/absence/drain/send, and
+late original SDK Active/Epoch intake refused without changing tracking.
+Original two regression tests, their assertions and limits remain intact.
+No fabricated policy facts, tooling, schema or unrelated cleanup is added.
+
+### Canonical integration of the loss follow-up
+
+Root applied only the three reviewed files after the live phone checks.
+Filtered author: `cleanroom/20261113T134157Z-94443`. Independent scoped
+review: `cleanroom/20261113T134707Z-1968`, no P0, P1 or P2 findings.
+The exported patch applied cleanly to canonical `7fef9404`. The earlier
+failed baseline remains retained.
+
+`core-test/20261113T140429Z-22856` passes all 71 selected tests, with
+zero skipped selected tests; 187 unrelated tests were filtered. This includes
+the three added loss regressions and the prior readability, qualified-crt,
+conflict, workflow-store and initial-adoption coverage. This run does not
+explain or erase the earlier sequence failure.
+
+The live apps remained on signed `7fef9404` during the phone checks. Both
+normal apps showed the same saved review. A new Mac-created deck appeared on
+the phone, and a new phone-created deck later appeared on the Mac. The latter
+was observed after the fresh-process fetch; immediate absence after an earlier
+exchange was retained as an observation, not declared a source defect.
+Phone inspection and explicit-send drives passed, including process continuity.
+Two intervening drive receipts remain failed for their recorded action and
+hierarchy findings. These observations establish the two new deck transfers,
+not a new review, media playback, a signed conformance leg or a passing gate.
+Local device and native evidence remains in gitignored build artifacts.
+
+The bounded deferred-loss warning finding is repaired by the source above.
+Other K10 producers, the two retained native ownership failures and the
+original batch gate remain open. No Unit or P24 closure is claimed.
+
+Correctness lint `core-lint/20261113T140512Z-25559` and static checks
+`static-checks/20261113T140513Z-25824` each pass 3/3. Similarity
+`similarity/20261113T140546Z-26503` passes both Rust files without exceptions.
+Privacy initially rejected prose in this log; Root rewrote the cited paragraphs
+and retains that failed receipt. Final staged privacy is recorded in metadata.

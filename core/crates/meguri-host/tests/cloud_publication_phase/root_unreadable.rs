@@ -263,6 +263,212 @@ fn root_unreadable_missing_epoch_read_keeps_mark_and_cannot_finish_absence() {
 }
 
 #[test]
+fn root_unreadable_known_bound_zone_loss_retains_mark_after_owned_readable_active_and_reopen() {
+    use cloud::adapter::{ZoneLoss, ZoneLossCause};
+    let (_temp, dir, host, mut service, sdk) = setup();
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let binding = runtime.status().unwrap().binding.unwrap();
+    let zone = cloud::adapter::collection_zone(binding.facts.epoch);
+    let complete = control(&mut service, &zone, "epoch", RequestedFields::All);
+    let DecodeOutcome::Supported(epoch) = Epoch::decode(complete.encrypted.as_deref().unwrap()).unwrap() else { panic!("supported epoch"); };
+    assert_eq!(epoch.epoch_id, binding.facts.epoch.0);
+    assert_eq!(epoch.state, EpochState::Complete);
+    runtime.adapter_fetched(&sdk, &zone, &[saved("epoch", &complete)], &[]).unwrap();
+    let crt = runtime.epoch_crt_for_testing().unwrap();
+    assert_eq!(crt, Some(epoch.crt));
+    let bad = control(&mut service, "meguri-root", "active", RequestedFields::Named(Vec::new()));
+    assert!(bad.encrypted.is_none() && !bad.system_fields.0.is_empty());
+    runtime.adapter_fetched(&sdk, "meguri-root", &[saved("active", &bad)], &[]).unwrap();
+    let mark = Some(bad.system_fields.clone());
+    assert_eq!(runtime.root_unreadable_for_testing().unwrap(), mark);
+    let before = runtime.adapter_snapshot().unwrap();
+    let drains = runtime.adapter_fetch_drains();
+    assert!(!before.absence_pass_completed);
+
+    let response = service.request(&scope(), Caller::default(), Operation::DeleteZone {
+        zone: zone.clone(), cause: meguri_testkit::cloud::RemovalCause::Deleted,
+    }).unwrap();
+    assert!(matches!(response.result, Ok(Reply::Done)));
+    // No Epoch-deletion intake precedes this native loss: retained complete
+    // knowledge must be revoked by the accepted loss transaction itself.
+    assert!(runtime.adapter_observe_zone_losses(&sdk, &[ZoneLoss {
+        zone, cause: ZoneLossCause::Deleted,
+    }]).unwrap());
+    let request = runtime.adapter_begin_identity_read(false, None).unwrap();
+    assert!(runtime.adapter_complete_identity_read(request, IdentityStatus::Available(cloud::OpaqueBytes(scope().account.into_bytes()))).unwrap());
+    runtime.adapter_accept_zone_losses(request, &collection).unwrap();
+    assert_eq!(runtime.root_unreadable_for_testing().unwrap(), mark);
+    assert_eq!(runtime.epoch_crt_for_testing().unwrap(), crt);
+    assert!(!runtime.sdk_root_confirmed());
+    let read = runtime.adapter_known_loss_read(&sdk).unwrap().expect("original known-loss Active read");
+    assert!(read.is_active());
+    let full = control(&mut service, "meguri-root", "active", RequestedFields::All);
+    let active = cloud::control_codec::Active::decode(full.encrypted.as_deref().unwrap()).unwrap();
+    assert_eq!(active.epoch, binding.facts.epoch.0);
+    fresh_identity(runtime);
+    assert!(runtime.adapter_complete_fetch_read(&read, &collection, RecordRead::Found(full), false, None, None).unwrap().is_none());
+    assert_eq!(runtime.root_unreadable_for_testing().unwrap(), mark);
+    assert_eq!(runtime.epoch_crt_for_testing().unwrap(), crt, "historical qualified crt survives the loss");
+    assert_eq!(runtime.status().unwrap().binding.unwrap().facts.state, cloud::BindingState::Isolated(cloud::IsolationReason::ZoneMissing));
+    assert!(!runtime.sdk_root_confirmed());
+    assert!(runtime.validate_sdk(&sdk).is_err());
+    let after = runtime.adapter_snapshot().unwrap();
+    assert_eq!(after.serialization, before.serialization);
+    assert_eq!(after.root, before.root);
+    assert_eq!(runtime.adapter_fetch_drains(), drains);
+    assert!(!after.absence_pass_completed);
+    let batch = runtime.build_collection_batch(&sdk, &collection, &entity_names(runtime)).unwrap();
+    assert_eq!(batch.id, 0);
+    assert!(batch.saves.is_empty());
+    assert_attention(&host, true);
+    drop(collection);
+    host.close().unwrap();
+    drop(host);
+    let host = open_host(&dir, keys());
+    let runtime = host.cloud_runtime().unwrap();
+    assert_eq!(runtime.status().unwrap().binding.unwrap().id, binding.id);
+    assert_eq!(runtime.status().unwrap().binding.unwrap().facts.state, cloud::BindingState::Isolated(cloud::IsolationReason::ZoneMissing));
+    assert_eq!(runtime.root_unreadable_for_testing().unwrap(), mark);
+    assert_eq!(runtime.epoch_crt_for_testing().unwrap(), crt);
+    assert!(!runtime.sdk_root_confirmed());
+    host.close().unwrap();
+}
+
+#[test]
+fn root_unreadable_known_media_or_unrelated_zone_loss_preserves_complete_epoch_proof() {
+    use cloud::adapter::{ZoneLoss, ZoneLossCause};
+    for media in [true, false] {
+        let (_temp, _dir, host, mut service, sdk) = setup();
+        let runtime = host.cloud_runtime().unwrap();
+        let collection = host.collection().unwrap();
+        let binding = runtime.status().unwrap().binding.unwrap();
+        let zone = if media { "meguri-media".into() } else { cloud::adapter::collection_zone(cloud::EpochId([99; 16])) };
+        assert_ne!(zone, cloud::adapter::collection_zone(binding.facts.epoch));
+        if !media {
+            let response = service.request(&scope(), Caller::default(), Operation::CreateZone { zone: zone.clone() }).unwrap();
+            assert!(matches!(response.result, Ok(Reply::Done)));
+        }
+        let bad = control(&mut service, "meguri-root", "active", RequestedFields::Named(Vec::new()));
+        runtime.adapter_fetched(&sdk, "meguri-root", &[saved("active", &bad)], &[]).unwrap();
+        let mark = runtime.root_unreadable_for_testing().unwrap();
+        assert_eq!(mark, Some(bad.system_fields));
+        let crt = runtime.epoch_crt_for_testing().unwrap();
+        assert!(crt.is_some());
+        let response = service.request(&scope(), Caller::default(), Operation::DeleteZone {
+            zone: zone.clone(), cause: meguri_testkit::cloud::RemovalCause::Deleted,
+        }).unwrap();
+        assert!(matches!(response.result, Ok(Reply::Done)));
+        assert_eq!(runtime.adapter_observe_zone_losses(&sdk, &[ZoneLoss {
+            zone, cause: ZoneLossCause::Deleted,
+        }]).unwrap(), media);
+        let request = runtime.adapter_begin_identity_read(false, None).unwrap();
+        assert!(runtime.adapter_complete_identity_read(request, IdentityStatus::Available(cloud::OpaqueBytes(scope().account.into_bytes()))).unwrap());
+        runtime.adapter_accept_zone_losses(request, &collection).unwrap();
+        assert!(runtime.adapter_known_loss_read(&sdk).unwrap().is_none());
+        assert_eq!(runtime.status().unwrap().binding.unwrap().facts.state, cloud::BindingState::Active);
+        assert_eq!(runtime.root_unreadable_for_testing().unwrap(), mark);
+        assert_eq!(runtime.epoch_crt_for_testing().unwrap(), crt);
+        runtime.validate_sdk(&sdk).unwrap();
+        let full = control(&mut service, "meguri-root", "active", RequestedFields::All);
+        runtime.adapter_fetched(&sdk, "meguri-root", &[saved("active", &full)], &[]).unwrap();
+        assert_eq!(runtime.root_unreadable_for_testing().unwrap(), None, "these losses preserve complete bound-Epoch knowledge");
+        host.close().unwrap();
+    }
+}
+
+#[test]
+fn root_unreadable_combined_root_and_bound_zone_loss_preserves_immediate_active_missing_isolation() {
+    use cloud::adapter::{ZoneLoss, ZoneLossCause};
+    for unreadable in [false, true] {
+        let (_temp, dir, host, mut service, sdk) = setup();
+        let runtime = host.cloud_runtime().unwrap();
+        let collection = host.collection().unwrap();
+        let binding = runtime.status().unwrap().binding.unwrap();
+        let zone = cloud::adapter::collection_zone(binding.facts.epoch);
+        let complete = control(&mut service, &zone, "epoch", RequestedFields::All);
+        let full = control(&mut service, "meguri-root", "active", RequestedFields::All);
+        runtime.adapter_fetched(&sdk, &zone, &[saved("epoch", &complete)], &[]).unwrap();
+        runtime.adapter_fetched(&sdk, "meguri-root", &[saved("active", &full)], &[]).unwrap();
+        assert_eq!(runtime.root_unreadable_for_testing().unwrap(), None);
+        let mark = if unreadable {
+            let bad = control(&mut service, "meguri-root", "active", RequestedFields::Named(Vec::new()));
+            assert!(bad.encrypted.is_none() && !bad.system_fields.0.is_empty());
+            runtime.adapter_fetched(&sdk, "meguri-root", &[saved("active", &bad)], &[]).unwrap();
+            Some(bad.system_fields)
+        } else { None };
+        assert_eq!(runtime.root_unreadable_for_testing().unwrap(), mark);
+        let crt = runtime.epoch_crt_for_testing().unwrap();
+        assert!(crt.is_some());
+        let names = entity_names(runtime);
+        assert!(!names.is_empty());
+        let before = runtime.adapter_snapshot().unwrap();
+        let drains = runtime.adapter_fetch_drains();
+        assert!(!before.tracking_stopped && !before.absence_pass_completed);
+
+        for deleted_zone in ["meguri-root", zone.as_str()] {
+            let response = service.request(&scope(), Caller::default(), Operation::DeleteZone {
+                zone: deleted_zone.into(), cause: meguri_testkit::cloud::RemovalCause::Deleted,
+            }).unwrap();
+            assert!(matches!(response.result, Ok(Reply::Done)));
+        }
+        // Both native facts arrive together, with no preceding control deletion
+        // intake. Root loss must retain its immediate ActiveMissing outcome.
+        assert!(runtime.adapter_observe_zone_losses(&sdk, &[
+            ZoneLoss { zone: "meguri-root".into(), cause: ZoneLossCause::Deleted },
+            ZoneLoss { zone: zone.clone(), cause: ZoneLossCause::Deleted },
+        ]).unwrap());
+        let request = runtime.adapter_begin_identity_read(false, None).unwrap();
+        assert!(runtime.adapter_complete_identity_read(request, IdentityStatus::Available(cloud::OpaqueBytes(scope().account.into_bytes()))).unwrap());
+        runtime.adapter_accept_zone_losses(request, &collection).unwrap();
+        let status = runtime.status().unwrap();
+        assert_eq!(status.binding.unwrap().facts.state, cloud::BindingState::Isolated(cloud::IsolationReason::ActiveMissing));
+        assert!(!status.tracking_stopped && !status.stored_usable && !status.identity_verified);
+        assert_eq!(runtime.root_unreadable_for_testing().unwrap(), mark);
+        assert_eq!(runtime.epoch_crt_for_testing().unwrap(), crt);
+        assert!(!runtime.sdk_root_confirmed());
+        let after = runtime.adapter_snapshot().unwrap();
+        assert!(!after.tracking_stopped && !after.absence_pass_completed);
+        assert_eq!(after.serialization, before.serialization);
+        assert!(after.root.is_none(), "root loss clears its old ACK without confirming anything");
+        assert_eq!(runtime.adapter_fetch_drains(), drains);
+        let content: serde_json::Value = serde_json::from_slice(&after.tracking_content).unwrap();
+        assert!(content[4]["active"].is_null());
+        assert_eq!(content[4]["active_deleted"], true);
+        assert!(content[4]["collection_loss"].is_null(), "immediate isolation has no deferred Active follow-up");
+        assert!(runtime.validate_sdk(&sdk).is_err());
+        assert!(runtime.adapter_known_loss_read(&sdk).is_err());
+        assert!(runtime.adapter_fetched(&sdk, "meguri-root", &[saved("active", &full)], &[]).is_err());
+        assert!(runtime.adapter_fetched(&sdk, &zone, &[saved("epoch", &complete)], &[]).is_err());
+        let batch = runtime.build_collection_batch(&sdk, &collection, &names).unwrap();
+        assert_eq!(batch.id, 0);
+        assert!(batch.saves.is_empty());
+        assert_eq!(runtime.adapter_snapshot().unwrap().tracking_content, after.tracking_content);
+        assert_eq!(runtime.root_unreadable_for_testing().unwrap(), mark);
+        assert_eq!(runtime.epoch_crt_for_testing().unwrap(), crt);
+        assert!(!runtime.status().unwrap().tracking_stopped && !runtime.sdk_root_confirmed());
+        assert_eq!(runtime.adapter_fetch_drains(), drains);
+        assert_attention(&host, unreadable);
+        let policy = host.cloud_policy_driver().unwrap().state();
+        assert!(!policy.status().attention.contains_key(&Attention::TrackingError));
+        assert!(!policy.status().attention.contains_key(&Attention::CloudError));
+        assert!(!policy.controls().automatic_eligible);
+        drop(collection);
+        host.close().unwrap();
+        drop(host);
+        let host = open_host(&dir, keys());
+        let runtime = host.cloud_runtime().unwrap();
+        let status = runtime.status().unwrap();
+        assert_eq!(status.binding.as_ref().unwrap().id, binding.id);
+        assert_eq!(status.binding.unwrap().facts.state, cloud::BindingState::Isolated(cloud::IsolationReason::ActiveMissing));
+        assert!(!status.tracking_stopped && !runtime.sdk_root_confirmed());
+        assert_eq!(runtime.root_unreadable_for_testing().unwrap(), mark);
+        assert_eq!(runtime.epoch_crt_for_testing().unwrap(), crt);
+        host.close().unwrap();
+    }
+}
+
+#[test]
 fn root_unreadable_only_actual_stop_or_publication_switch_ends_old_obligation() {
     for stop in [true, false] {
         let (_temp, _dir, host, mut service, sdk) = setup();
