@@ -320,7 +320,7 @@ fn incomplete_store_incoming_identity_is_separate_from_outgoing_and_survives_raw
     let mut store = open(root.path());
     let b = binding(&mut store, 11);
     let original = queued_config(2);
-    store.receive_records(b, &[original.clone()], &[], None, None).unwrap();
+    store.receive_records(b, std::slice::from_ref(&original), &[], None, None).unwrap();
     let inbox = store.inbox(b).unwrap()[0].id;
     let mut end = ended(1, 1, CollectionOutcome::Incomplete);
     end.incoming.push(Incoming { inbox, identity: incoming_version_key(&original).unwrap(), done: false });

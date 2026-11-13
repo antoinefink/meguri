@@ -1907,6 +1907,7 @@ impl Runtime {
     }
     /// Shared durable ACK and opening-local upload bookkeeping. The caller
     /// independently proves either an exact Saved result or a historical flight.
+    #[allow(clippy::too_many_arguments)]
     fn acknowledge_sent_locked(
         s: &mut State,
         collection: &Collection,

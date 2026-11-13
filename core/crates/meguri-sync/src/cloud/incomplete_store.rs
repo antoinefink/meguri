@@ -208,8 +208,8 @@ pub(super) fn record_end(tx: &Transaction<'_>, b: BindingId, end: &Ended) -> Res
         && end.incoming.iter().all(|work| work.done);
     let receipt = Receipt { end: compact, outgoing_count: end.outgoing.len() as u64, incoming_count: end.incoming.len() as u64,
         cause_digest: entity_codec::sha256(encode(&(&end.outgoing, &end.incoming))?.as_bytes()),
-        outgoing_left: if active(&end) { end.outgoing.values().filter(|w| !w.done).count() as u64 } else { 0 },
-        incoming_left: if active(&end) { end.incoming.iter().filter(|w| !w.done).count() as u64 } else { 0 } };
+        outgoing_left: if active(end) { end.outgoing.values().filter(|w| !w.done).count() as u64 } else { 0 },
+        incoming_left: if active(end) { end.incoming.iter().filter(|w| !w.done).count() as u64 } else { 0 } };
     tx.execute("INSERT INTO cloud_incomplete_ends(binding,native,content,opened,active,accepted,success) VALUES(?1,?2,?3,?4,?5,?6,?7)",
         params![b.0.as_slice(), native, encode(&receipt)?, super::runtime_store::checked(end.order.opened)?, active(&receipt.end),
             end.accepted, end.outcome == CollectionOutcome::Succeeded])?;
