@@ -493,6 +493,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         guard case .ready(let value) = lifecycle else { state = .unavailable; return }
         if generation != value { endGoToDeckGeneration(); invalidateDeckActions(); exportOwner?.generationChanged() }
         generation = value; state = .ready; error = nil; closed = false; releasedManualHostState = nil
+        try sync.releaseEntryActivation()
         await sync.completeOpenedHost(generation: value)
         if loadRecord {
             do { previousRecord = try await records.load() }
@@ -564,6 +565,10 @@ public final class ReviewCollection: ChangeFanoutSink {
         guard entryAllowed else { throw BridgeError.busy(runningOperation: "collection preparation") }
         opening = true
         day?.pause(); countTimer?.invalidate(); countsTask?.cancel()
+        sync.beginEntryActivation()
+    }
+    func drainEntryActivation() async throws {
+        guard await sync.drainEntryActivation() else { throw BridgeError.busy(runningOperation: "iCloud drain") }
     }
     @discardableResult func finishEntryActivation(candidateActive: Bool) async -> Bool {
         defer { opening = false }
@@ -575,8 +580,10 @@ public final class ReviewCollection: ChangeFanoutSink {
                 try await completeOpenedHost(loadRecord: false)
             } else {
                 lifecycle = try await collection.lifecycle()
+                let syncWasHeld = try sync.releaseEntryActivation()
                 switch lifecycle {
                 case .ready(let next): generation = next; state = .ready
+                    if syncWasHeld { await sync.completeOpenedHost(generation: next) }
                     if foreground { await day?.checkNow() }
                     await loadCounts()
                 case .noCollection: state = .noFile

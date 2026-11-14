@@ -8,6 +8,114 @@ import Testing
 // These tests share the production host with the existing serialized startup
 // suite. No launch hook creates the destination; it is absent at start().
 extension ReviewCollectionStartupTests {
+    @Test(arguments: EntrySyncOutcome.allCases)
+    func entryDrainsOldSyncBeforeActivationAndRestoresRetainedHost(outcome: EntrySyncOutcome) async throws {
+        let files = FileManager.default
+        let root = files.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? files.removeItem(at: root) }
+        try files.createDirectory(at: root, withIntermediateDirectories: true)
+        try files.copyItem(at: #require(Bundle.module.url(forResource: "schema-18", withExtension: "anki2")),
+                           to: root.appending(path: "collection.anki2"))
+        var configuration = LaunchConfiguration()
+        configuration.collectionLocation = AppModel.CollectionLocation(directory: root)
+        let original = SyncOwnerFake(), successor = SyncOwnerFake()
+        let drain = SyncOwnerGate(), activation = SyncOwnerGate()
+        defer { drain.release(); activation.release() }
+        var activationOperation: CollectionEntryOperation?
+        var activationReturned = false, factories = 0, bootstraps = 0
+        var appliedSettings: CloudPolicyDeviceSettings?
+        successor.routeInput = { [weak successor] event in
+            if case .settings(let settings) = event { appliedSettings = settings }
+            if case .foreground = event { successor?.events.append("foreground") }
+            return .commands([])
+        }
+        let service = EntryGatedActivationService(before: { operation in
+            #expect(original.closed && original.closeCount == 1 && factories == 1)
+            activationOperation = operation
+            await activation.hold()
+        }, after: { activationReturned = true })
+        let sync = SyncCoordinator(bootstrap: { bootstraps += 1 }, makeBackend: { _ in
+            factories += 1
+            if factories == 1 { return original }
+            #expect(factories == 2 && original.closed && activationReturned)
+            return successor
+        }, defaults: nil)
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), entryService: service, sync: sync)
+        await owner.start()
+        do {
+            try #require(owner.state == .ready)
+            await sync.prepareConnectionAuthority()
+            let generation = owner.generation
+            original.onQuiesce = {
+                #expect(activationOperation == nil)
+                #expect(try await CoreCollectionService().lifecycle() == .ready(generation: generation))
+                await drain.hold()
+                if outcome == .drainFailure { throw BridgeError.internal("Synthetic native drain failure") }
+            }
+            original.onClose = {
+                #expect(activationOperation == nil)
+                do {
+                    #expect(try await CoreCollectionService().lifecycle() == .ready(generation: generation))
+                } catch {
+                    Issue.record(error)
+                }
+            }
+            let source = try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg"))
+            owner.entry.inspect(source); await owner.entry.waitForCompletion()
+            try #require(owner.entry.preview != nil)
+            if outcome == .stale { _ = try await CoreDeckService().addDeck(name: "Kept after refused activation") }
+            owner.entry.confirm()
+            await drain.waitUntilHeld()
+            #expect(owner.entry.busy && !owner.canStudy && activationOperation == nil)
+            let oldEvents = original.events
+            sync.receive(.foreground)
+            await sync.waitForInputs()
+            #expect(original.events == oldEvents && factories == 1)
+            drain.release()
+            if outcome == .drainFailure {
+                await owner.entry.waitForCompletion()
+                #expect(activationOperation == nil && factories == 1 && !original.closed)
+                #expect(owner.generation == generation && sync.operationFailed && !owner.canStudy)
+                #expect(try await CoreCollectionService().lifecycle() == .ready(generation: generation))
+                sync.receive(.foreground); await sync.waitForInputs()
+                #expect(original.events == oldEvents)
+                original.onQuiesce = nil
+                #expect(await owner.close())
+                return
+            }
+            await activation.waitUntilHeld()
+            #expect(owner.generation == generation && factories == 1)
+            sync.receive(.foreground)
+            sync.setDeviceSettings(paused: true, automatic: false, media: false)
+            await sync.preparePlatform(); await sync.waitForInputs()
+            #expect(factories == 1 && bootstraps == 1 && successor.events.isEmpty)
+            if outcome == .cancelled { await activationOperation?.cancel() }
+            activation.release()
+            await owner.entry.waitForCompletion()
+            await sync.prepareConnectionAuthority(); await sync.waitForReplacement()
+            #expect(owner.state == .ready && owner.error == nil && owner.entry.preview == nil)
+            #expect(factories == 2 && bootstraps == 1 && successor.accountReads == 1)
+            #expect(sync.generation == owner.generation && sync.setupState == .attached && !sync.operationFailed)
+            #expect(appliedSettings == sync.settings)
+            switch outcome {
+            case .replace: #expect(owner.generation > generation && owner.entry.lastActivation != nil)
+            case .stale:
+                #expect(owner.generation == generation && owner.entry.failure?.issue == .staleConfirmation)
+                let tree = try await CoreDeckService().treeWithCounts()
+                #expect(tree.nodes.contains { $0.name == "Kept after refused activation" })
+            case .cancelled: #expect(owner.generation == generation && owner.entry.failure?.issue == .cancelled)
+            case .drainFailure: Issue.record("Drain failure must not reach activation")
+            }
+            sync.receive(.foreground); await sync.waitForInputs()
+            #expect(successor.events.contains("foreground"))
+            #expect(await owner.close())
+        } catch {
+            drain.release(); activation.release()
+            _ = await owner.close()
+            throw error
+        }
+    }
+
     @Test func missingDirectoryImportRetainsHostReviewsSavesAndReopens() async throws {
         let files = FileManager.default
         let root = files.temporaryDirectory.appending(path: UUID().uuidString)
@@ -344,6 +452,30 @@ extension ReviewCollectionStartupTests {
 
 /// Controlled terminal delivery at the existing service seam. Inspection and
 /// successful activation still use the production service and real host owner.
+nonisolated enum EntrySyncOutcome: CaseIterable, Equatable, Sendable { case replace, stale, cancelled, drainFailure }
+
+private nonisolated struct EntryGatedActivationService: CollectionEntryService {
+    let before: @MainActor @Sendable (CollectionEntryOperation) async -> Void
+    let after: @MainActor @Sendable () -> Void
+    private let core = CoreCollectionEntryService()
+    func inspect(source: URL, location: CoreBridge.CollectionLocation, operation: CollectionEntryOperation,
+                 progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> InspectedCollection {
+        try await core.inspect(source: source, location: location, operation: operation, progress: progress)
+    }
+    func activate(_ inspection: InspectedCollection, operation: CollectionEntryOperation,
+                  progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> CollectionActivation {
+        await before(operation)
+        do {
+            let result = try await core.activate(inspection, operation: operation, progress: progress)
+            await after()
+            return result
+        } catch {
+            await after()
+            throw error
+        }
+    }
+}
+
 private nonisolated struct EntryTerminalFailureService: CollectionEntryService {
     let afterActivation: Bool
     private let core = CoreCollectionEntryService()

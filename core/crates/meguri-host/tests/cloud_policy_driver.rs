@@ -962,7 +962,8 @@ fn quiet_without_root_database_failure_preserves_error_and_required_stop() {
     let mut work = PolicyWork::new(&cancel);
     let failed = rig.host.execute_cloud_policy_core_with_work(&quiet, Duration::from_secs(10), &mut work);
     runtime.policy_evidence_constraint_for_testing(false).unwrap();
-    let Err(DriverError::CoreActionFailed { commands, .. }) = failed else { panic!("real evidence constraint must fail"); };
+    let Err(DriverError::CoreActionFailed { error, commands }) = failed else { panic!("real evidence constraint must fail"); };
+    assert!(matches!(error, RuntimeError::Tracking(meguri_sync::cloud::Error::Constraint)));
     assert!(commands.iter().any(|command| matches!(command.action.kind, ActionKind::StopEngine { .. })));
     cancel.cancel();
     assert!(work.check().is_ok());

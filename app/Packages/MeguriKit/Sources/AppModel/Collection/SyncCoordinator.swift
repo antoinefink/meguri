@@ -410,6 +410,7 @@ public final class SyncCoordinator {
     private var networkMonitor: NWPathMonitor?
     private var accountObserver: (any NSObjectProtocol)?
     private var closing = false
+    private var entryActivationHeld = false
     private var drained = false
     private var closeTask: Task<Bool, Never>?
     private var attachmentTask: Task<Void, Never>?
@@ -456,6 +457,7 @@ public final class SyncCoordinator {
     /// Both open and prepareEntry call this before either can create a Host.
     /// Missing setup is local-only availability, not a local opening failure.
     func preparePlatform() async {
+        guard !entryActivationHeld else { return }
         if let platformTask { await platformTask.value; return }
         if drained { closing = false; drained = false }
         guard !platformPrepared else { return }
@@ -2032,11 +2034,40 @@ public final class SyncCoordinator {
     }
     private func cancelCommandsForShutdown() { cancelCommands(.shutdown) }
 
+    // Local entry must finish original completion/ACK/refresh before Core's
+    // exclusive activation can invalidate the original generation.
+    func beginEntryActivation() {
+        guard !entryActivationHeld else { return }
+        entryActivationHeld = true
+        closing = true
+        cancelCommands(.replacement)
+        cancelAccountTask(shutdown: true)
+        revokeProofWaits()
+    }
+    func drainEntryActivation() async -> Bool {
+        guard entryActivationHeld else { return false }
+        return await cancelAndDrain(entryActivation: true)
+    }
+    @discardableResult func releaseEntryActivation() throws -> Bool {
+        guard entryActivationHeld else { return false }
+        guard drained, closeTask == nil else { throw BridgeError.busy(runningOperation: "iCloud drain") }
+        entryActivationHeld = false
+        closing = false; drained = false; replacing = false
+        if platformPrepared { setupState = .prepared }
+        return true
+    }
+
     /// Stops native admissions and joins original SDK/own/media callbacks while
     /// Core is OPEN. A failed drain leaves the backend retained for close retry.
     func cancelAndDrain() async -> Bool {
+        await cancelAndDrain(entryActivation: false)
+    }
+    private func cancelAndDrain(entryActivation: Bool) async -> Bool {
         if let closeTask { return await closeTask.value }
-        if drained { return true }
+        if drained {
+            if !entryActivation { platformPrepared = false; entryActivationHeld = false }
+            return true
+        }
         closing = true
         revokeProofWaits()
         retainedRecoveryStart = nil
@@ -2051,11 +2082,11 @@ public final class SyncCoordinator {
             flushTimer?.invalidate(); flushTimer = nil
             // A core-phase barrier joins original results. Cancel their jobs
             // before joining it, including queued work that has no effect yet.
-            cancelCommandsForShutdown()
+            if entryActivation { cancelCommands(.replacement) } else { cancelCommandsForShutdown() }
             cancelAccountTask(shutdown: true); ownTask?.cancel()
             retryAccountCompletion()
             await waitForInputs()
-            cancelCommandsForShutdown()
+            if entryActivation { cancelCommands(.replacement) } else { cancelCommandsForShutdown() }
             cancelAccountTask(shutdown: true); ownTask?.cancel()
             retryAccountCompletion()
             do {
@@ -2082,7 +2113,8 @@ public final class SyncCoordinator {
                 backend = nil; suspended = false; awaitingResumeProof = false; networkMonitor = nil; status = nil; preview = nil; recovery = nil
                 desiredVisibleMedia = nil; deliveredVisibleMedia = nil
                 hasDeferredNativeWork = false
-                hostRevision &+= 1; drained = true; platformPrepared = false; retainedHostAdmitted = false
+                hostRevision &+= 1; drained = true; retainedHostAdmitted = false
+                if !entryActivation { platformPrepared = false; entryActivationHeld = false }
                 return true
             } catch {
                 #if DEBUG

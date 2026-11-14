@@ -96,6 +96,7 @@ public final class CollectionEntryCoordinator {
         let actualPrepared = PreparedMediaSnapshot()
         task = Task {
             do {
+                try await owner.drainEntryActivation()
                 let activated = try await service.activate(preview, operation: operation, progress: progressReceiver(expected, prepared: actualPrepared))
                 if let media = actualPrepared.value.withLock({ $0 }) {
                     preparedMedia = media; owner.configuration.nativeReviewInput?.prepared(media)
@@ -147,6 +148,11 @@ public final class CollectionEntryCoordinator {
     }
     public func continueAfterActivation() async {
         guard canContinueRecovery, let owner else { return }
+        do { try await owner.drainEntryActivation() }
+        catch {
+            message = "The new collection remains active. Quit and reopen Meguri to finish recovery. Any pre-import safety backup remains available."
+            return
+        }
         let recoveryFinished = await owner.finishEntryActivation(candidateActive: true)
         if recoveryFinished {
             self.recoveryFinished = true; message = "The new collection is available. Retained import details are shown below."
