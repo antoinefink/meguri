@@ -41,3 +41,21 @@ identifier to the existing native Done button. Integrator inspection confirms
 that its action, label and styling are unchanged. Privacy
 20261114T220123Z-73245 and similarity 20261114T220127Z-73508 passed. The
 physical check will use that button to return from Account & Sync to review.
+
+## Exact phone preview
+
+Signed normal run 20261114T220213Z-73998 passed on clean 5c4fcfdc. Physical
+drive 20261114T220314Z-73996 then executed all 23 actions. Account & Sync
+opened from status during review; Done returned to the same question with
+Show Answer enabled. The test revealed that answer without grading, closed
+the review with three new cards still present, then opened the ordinary
+Settings route from status. Sync Now was disabled during review and enabled
+outside it, as required. The rendered sheet and returned question were
+inspected directly; their native layout matches the active touch contract.
+N13 deliberately puts Show Answer in the trailing half of the bottom row.
+
+The whole drive failed with five missing-identifier findings on the rendered
+Play audio link. All navigation actions succeeded, but that does not clear
+the accessibility failure or make the full job pass. Status-to-Connect still
+needs its own exact-build observation when that entry is offered. Other
+platform checks and the batch gate remain open.
