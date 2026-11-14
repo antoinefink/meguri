@@ -48,30 +48,12 @@ public struct ReviewView: View {
                 #if DEBUG
                 .debugStatusAccessibilityValue(model.debugSessionStatus)
                 #endif
-        case .waiting:
+        case .waiting, .finished:
             ReviewStatusLayout {
-                EmptyStateView(Text("Waiting for Learning", bundle: .module), systemImage: "clock",
-                    description: Text("Your next learning card is not ready yet.", bundle: .module)) {
-                        Button { model.retry() } label: { Text("Check Now", bundle: .module) }.accessibilityIdentifier("review.session.refresh")
-                            #if os(macOS)
-                            .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
-                            .contentShape(Rectangle())
-                            #endif
-                    }
-            }
-            #if DEBUG
-            .debugStatusAccessibilityValue(model.debugSessionStatus)
-            #endif
-        case .finished:
-            ReviewStatusLayout {
-                EmptyStateView(Text("Finished for Now", bundle: .module), systemImage: "checkmark.circle",
-                    description: Text("Your answers have been recorded. You can go back to your last answer or close the session.", bundle: .module)) {
-                        Button(action: close) { Text("Done", bundle: .module) }.accessibilityIdentifier("review.session.done")
-                            #if os(macOS)
-                            .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
-                            .contentShape(Rectangle())
-                            #endif
-                    }
+                ReviewTerminalContent(waiting: model.phase == .waiting,
+                    continueAvailable: model.continueAvailable, canContinue: model.canContinue,
+                    canRefresh: model.canRefresh, canFinish: model.canFinish,
+                    refresh: model.retry, continueReview: model.continueReview, close: close)
             }
             #if DEBUG
             .debugStatusAccessibilityValue(model.debugSessionStatus)

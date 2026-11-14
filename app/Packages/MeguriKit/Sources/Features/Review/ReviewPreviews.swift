@@ -33,33 +33,32 @@ public enum ReviewAnswerPreview: PreviewStates {
 }
 public enum ReviewFinishedPreview: PreviewStates {
     public static let previewID = "review.congratulations"
+    public nonisolated enum State: String, CaseIterable, Sendable {
+        case waitingUnavailable, readyToContinue, finished, finishedWithNewWork
+    }
     public static var previewFixtures: [PreviewFixture] {
-        [PreviewFixture(.empty) { ReviewFinishedFixture(waiting: true) },
-         PreviewFixture(.typical) { ReviewFinishedFixture(waiting: false) }]
+        [PreviewFixture(.empty) { preview(.waitingUnavailable) },
+         PreviewFixture(.typical) { preview(State.finished) }]
+    }
+    /// Static production-content fixtures; no Core session or media is exercised.
+    public static func preview(_ state: State) -> some View {
+        ReviewFinishedFixture(state: state)
     }
 }
 private struct ReviewFinishedFixture: View {
-    let waiting: Bool
+    let state: ReviewFinishedPreview.State
+    private var waiting: Bool { state == .waitingUnavailable || state == .readyToContinue }
+    private var ready: Bool { state == .readyToContinue || state == .finishedWithNewWork }
     var body: some View {
-        ReviewLayout(progress: waiting ? 0.9 : 1,
-            remaining: waiting ? "0 new, 1 learning, 0 to review" : "0 new, 0 learning, 0 to review",
+        ReviewLayout(progress: waiting || state == .finishedWithNewWork ? 0.9 : 1,
+            remaining: state == .finishedWithNewWork ? "0 new, 0 learning, 1 to review" :
+                (waiting ? "0 new, 1 learning, 0 to review" : "0 new, 0 learning, 0 to review"),
             notice: nil, undoDescription: "Undo Answer Card", canUndo: true, canRedo: false,
             phase: waiting ? .waiting : .finished, states: nil, enabled: true,
             close: {}, undo: {}, redo: {}, reveal: {}, rate: { _ in }) {
                 ReviewStatusLayout {
-                    if waiting {
-                        EmptyStateView(Text("Waiting for Learning", bundle: .module), systemImage: "clock",
-                            description: Text("Your next learning card is not ready yet.", bundle: .module)) {
-                                Button {} label: { Text("Check Now", bundle: .module) }
-                                    .accessibilityIdentifier("review.session.refresh")
-                            }
-                    } else {
-                        EmptyStateView(Text("Finished for Now", bundle: .module), systemImage: "checkmark.circle",
-                            description: Text("Your answers have been recorded. You can go back to your last answer or close the session.", bundle: .module)) {
-                                Button {} label: { Text("Done", bundle: .module) }
-                                    .accessibilityIdentifier("review.session.done")
-                            }
-                    }
+                    ReviewTerminalContent(waiting: waiting, continueAvailable: ready, canContinue: ready,
+                        canRefresh: true, canFinish: true, refresh: {}, continueReview: {}, close: {})
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

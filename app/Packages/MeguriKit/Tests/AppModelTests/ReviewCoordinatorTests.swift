@@ -780,6 +780,10 @@ extension ReviewCollectionStartupTests {
         fixture.model.requestRefresh(); await fixture.model.settled()
         fixture.model.terminalChanged(.waitingUntil(instant: instant))
         await fixture.model.settled()
+        #expect(fixture.model.phase == .waiting)
+        #expect(fixture.surface.presented.isEmpty)
+        #expect(fixture.model.canContinue)
+        fixture.model.continueReview(); await fixture.model.settled()
         #expect(fixture.model.phase == .question)
         #expect(fixture.model.item?.cardId == 2)
         #expect(fixture.model.waitingUntil == nil)
@@ -857,6 +861,10 @@ extension ReviewCollectionStartupTests {
                 await summaryTask?.value
                 switch next {
                 case "active":
+                    #expect(fixture.model.phase == expectedPhase)
+                    #expect(fixture.surface.presented.isEmpty)
+                    #expect(fixture.model.canContinue)
+                    fixture.model.continueReview(); await fixture.model.settled()
                     #expect(fixture.model.phase == .question)
                     #expect(fixture.model.item?.cardId == 2)
                     #expect(fixture.model.studyState == nil)
@@ -1133,6 +1141,7 @@ extension ReviewCollectionStartupTests {
         var elapsed: [UInt64] = []
         var used: [(session: UInt64, item: ReviewHeadItem, rating: ReviewRating, wall: Int64)] = []
         var restores: [Bool] = []
+        var restoredHead: ReviewHead?
         var ends = 0
         var headReads = 0
         var refusal: ReviewRefusal?
@@ -1142,6 +1151,7 @@ extension ReviewCollectionStartupTests {
         var onAnswerResult: (() async throws -> Void)?
         var onRestoreResult: (() async throws -> Void)?
         var onEnd: (() async throws -> Void)?
+        var onHeadResult: (() async throws -> Void)?
         #if DEBUG
         var onStartObservation: ((ReviewStartObservation) -> Void)?
         func start(deckID: Int64, observation: ReviewStartObservation) async throws -> ReviewStartResult {
@@ -1158,7 +1168,12 @@ extension ReviewCollectionStartupTests {
             try await onStartResult?()
             return result
         }
-        func head(sessionID: UInt64) async throws -> ReviewHead { headReads += 1; return currentHead }
+        func head(sessionID: UInt64) async throws -> ReviewHead {
+            headReads += 1
+            let head = currentHead
+            try await onHeadResult?()
+            return head
+        }
         func answer(sessionID: UInt64, item: ReviewHeadItem, rating: ReviewRating, at: Int64, elapsed: UInt64) async throws -> ReviewAnswerOutcome {
             answers += 1
             try await onAnswerResult?()
@@ -1174,7 +1189,7 @@ extension ReviewCollectionStartupTests {
         func restore(sessionID: UInt64, redo: Bool) async throws -> ReviewHead {
             restores.append(redo)
             try await onRestoreResult?()
-            currentHead = ReviewCoordinatorTests.head(redo ? 2 : 1)
+            currentHead = restoredHead ?? ReviewCoordinatorTests.head(redo ? 2 : 1)
             return currentHead
         }
         func studyState(deckID: Int64) async throws -> ReviewDeckStudyState {
@@ -1184,10 +1199,10 @@ extension ReviewCollectionStartupTests {
         }
         func end(sessionID: UInt64) async throws { try await onEnd?(); ends += 1 }
     }
-    private static func emptyHead(_ terminal: ReviewTerminalState) -> ReviewHead {
+    static func emptyHead(_ terminal: ReviewTerminalState) -> ReviewHead {
         ReviewHead(items: [], counts: .init(new: 0, learning: 0, review: 0), validUntil: Int64.max, terminalState: terminal)
     }
-    private static func summary(waiting: Bool) -> ReviewDeckStudyState {
+    static func summary(waiting: Bool) -> ReviewDeckStudyState {
         let counts = ReviewCounts(new: 0, learning: waiting ? 1 : 0, review: 0)
         return ReviewDeckStudyState(deck: 1, queueCounts: counts, listCounts: counts,
             difference: .init(new: 0, learning: 0, review: 0), finished: !waiting,

@@ -41,6 +41,11 @@ public final class ReviewCoordinator {
     private var frozenDisplaySeconds: UInt64?
     private var presentedKey: ReviewRenderKey?
     private var terminalState: ReviewTerminalState?
+    // Presentation ownership survives refresh's phase changes. Head facts remain
+    // authoritative, but only an explicit action may leave terminal content.
+    private var terminalPresentation: Phase?
+    private enum PresentationIntent: Equatable { case automatic, explicit, restoration(UUID) }
+    private var restorationID: UUID?
     private var busy = false
     private var refreshPending = false
     private var forceQuestion = false
@@ -94,6 +99,19 @@ public final class ReviewCoordinator {
     }
     public var pair: CardPagePair? { surface.pair }
     public var canFinish: Bool { !busy && phase != .ended }
+    public var continueAvailable: Bool {
+        guard terminalPresentation != nil else { return false }
+        switch terminalState {
+        case .active: return true
+        case .waitingUntil(let instant): return Double(instant) <= clock.now().timeIntervalSince1970
+        default: return false
+        }
+    }
+    public var canContinue: Bool {
+        continueAvailable && !busy && !paused && !closingAdmission && sessionID != nil &&
+            (phase == .waiting || phase == .finished)
+    }
+    public var canRefresh: Bool { !busy && !paused && !closingAdmission && sessionID != nil && phase != .ended }
     public var canReveal: Bool { phase == .question && !busy && !paused }
     public var canRate: Bool { phase == .answer && !busy && !paused }
     public var canUndo: Bool { if case .available = undoStatus { return !busy && !paused && phase != .ended }; return false }
@@ -108,7 +126,7 @@ public final class ReviewCoordinator {
         let milliseconds = frozenDisplaySeconds.map { $0 * 1_000 }
             ?? timer.milliseconds(at: uptime(), capSeconds: cap)
         return ReviewTimerPresentation(milliseconds: milliseconds, capSeconds: cap,
-            isVisible: item?.homePreset.showTimer == true,
+            isVisible: terminalPresentation == nil && item?.homePreset.showTimer == true,
             isCounting: timer.isRunning && !paused && frozenDisplaySeconds == nil,
             clockIdentity: timer.displayClockIdentity)
     }
@@ -288,10 +306,12 @@ public final class ReviewCoordinator {
                     if leech { notice = suspended ? "Card was a leech. It has been suspended." : "Card was a leech." }
                     if suspended { record.suspended.insert(item.cardId) }
                     enqueuePersistence()
-                    let head = refreshPending ? try await client.head(sessionID: sessionID) : diff.head
-                    refreshPending = false
+                    let needsRefresh = refreshPending
+                    let intent = restorationIntent
+                    refreshPending = false; forceQuestion = false
+                    let head = needsRefresh ? try await client.head(sessionID: sessionID) : diff.head
                     do {
-                        try await apply(head, question: true, inputTime: inputTime)
+                        try await apply(head, question: true, inputTime: inputTime, intent: intent)
                     } catch {
                         // Presentation failure cannot skip the accepted record.
                         try await persist()
@@ -313,7 +333,9 @@ public final class ReviewCoordinator {
                 pendingAnswer = nil
                 notice = String(describing: error)
                 // An uncertain answer is never retried; ask the authoritative head.
-                do { try await apply(client.head(sessionID: sessionID), question: true) }
+                let intent = restorationIntent
+                refreshPending = false; forceQuestion = false
+                do { try await apply(client.head(sessionID: sessionID), question: true, intent: intent) }
                 catch { fail(error) }
             }
             completeOperation()
@@ -323,6 +345,7 @@ public final class ReviewCoordinator {
     public func restore(redo: Bool = false) {
         guard (redo ? canRedo : canUndo), let sessionID else { return }
         busy = true; phase = .transition
+        let intent = beginRestoration()
         timer.pause(at: uptime())
         operation = Task {
             do {
@@ -330,7 +353,7 @@ public final class ReviewCoordinator {
                 if redo {
                     if var answer = record.undone.popLast() { answer.durable = false; record.answers.append(answer) }
                 } else if let answer = record.answers.popLast() { record.undone.append(answer) }
-                do { try await apply(head, question: true) }
+                do { try await apply(head, question: true, intent: intent) }
                 catch {
                     // The original Undo/Redo record must drain even if rendering fails.
                     try await persist()
@@ -339,7 +362,9 @@ public final class ReviewCoordinator {
                 try await persist()
             } catch {
                 notice = String(describing: error)
-                do { try await apply(client.head(sessionID: sessionID), question: true) }
+                let recoveryIntent = restorationIntent
+                refreshPending = false; forceQuestion = false
+                do { try await apply(client.head(sessionID: sessionID), question: true, intent: recoveryIntent) }
                 catch { fail(error) }
             }
             completeOperation()
@@ -383,23 +408,49 @@ public final class ReviewCoordinator {
         record.reject(cardID: cardID)
         pendingAnswer = nil
         notice = "Couldn’t save the answer. \(error)"
+        _ = beginRestoration()
         requestRefresh(question: true)
         enqueuePersistence()
     }
 
     public func requestRefresh(question: Bool = false) {
-        guard sessionID != nil, phase != .ended else { return }
+        guard !closingAdmission, sessionID != nil, phase != .ended else { return }
         refreshPending = true; forceQuestion = forceQuestion || question
-        if !paused { phase = .transition }
+        if !paused && terminalPresentation == nil { phase = .transition }
         if !busy && !paused { refresh() }
     }
-    public func retry() { requestRefresh(question: true) }
-    private func refresh() {
-        guard let sessionID, !busy, !paused else { return }
-        busy = true; phase = .transition
+    public func retry() {
+        // Check Now refreshes facts. Error Retry explicitly recovers presentation.
+        if phase == .error { _ = beginRestoration() }
+        requestRefresh(question: true)
+    }
+    public func continueReview() {
+        guard canContinue else { return }
+        forceQuestion = true
+        refresh(intent: .explicit)
+    }
+    private var restorationIntent: PresentationIntent {
+        restorationID.map { .restoration($0) } ?? .automatic
+    }
+    private func beginRestoration() -> PresentationIntent {
+        guard !closingAdmission, sessionID != nil, phase != .ended else { return .automatic }
+        let id = UUID()
+        restorationID = id
+        return .restoration(id)
+    }
+    private func finishRestoration(_ intent: PresentationIntent) {
+        // Older reads/presentations cannot consume a newer recovery event.
+        if case .restoration(let id) = intent, restorationID == id { restorationID = nil }
+    }
+    private func refresh(intent: PresentationIntent = .automatic) {
+        guard !closingAdmission, let sessionID, !busy, !paused else { return }
+        let restoration = restorationIntent
+        let presentationIntent = restoration == .automatic ? intent : restoration
+        busy = true
+        if terminalPresentation == nil { phase = .transition }
         let question = forceQuestion; forceQuestion = false; refreshPending = false
         operation = Task {
-            do { try await apply(client.head(sessionID: sessionID), question: question); try await persist() }
+            do { try await apply(client.head(sessionID: sessionID), question: question, intent: presentationIntent); try await persist() }
             catch { fail(error) }
             completeOperation()
         }
@@ -447,7 +498,8 @@ public final class ReviewCoordinator {
     }
 
     private func apply(_ head: ReviewHead, question: Bool, inputTime: TimeInterval? = nil,
-                       whilePaused: Bool = false) async throws {
+                       whilePaused: Bool = false, intent: PresentationIntent = .automatic) async throws {
+        guard !closingAdmission, sessionID != nil, phase != .ended else { return }
         summaryTask?.cancel(); summaryTask = nil
         counts = head.counts
         terminalState = head.terminalState
@@ -457,11 +509,18 @@ public final class ReviewCoordinator {
         switch head.terminalState {
         case .active:
             guard item != nil else { throw BridgeError.internal("Active review head has no item") }
-            if !paused { activeTime.resume(at: uptime()) }
             studyState = nil; waitingUntil = nil
-            _ = try await preparePages(whilePaused: whilePaused) {
-                try await self.preparePresentation(head, sessionID: sessionID, previous: previous,
-                                                   question: question, inputTime: inputTime)
+            if let terminalPresentation, intent == .automatic {
+                // No render, present or autoplay while terminal content owns the
+                // screen, including deadline, event and resume reads.
+                phase = terminalPresentation
+                timer.pause(at: uptime()); activeTime.pause(at: uptime())
+                clearVisibleMedia()
+            } else {
+                _ = try await preparePages(whilePaused: whilePaused) {
+                    try await self.preparePresentation(head, sessionID: sessionID, previous: previous,
+                                                       question: question, inputTime: inputTime, intent: intent)
+                }
             }
         case .waitingUntil, .finished:
             clearVisibleMedia()
@@ -471,6 +530,10 @@ public final class ReviewCoordinator {
             if case .waitingUntil(let instant) = head.terminalState {
                 waitingUntil = Date(timeIntervalSince1970: Double(instant)); phase = .waiting
             } else { waitingUntil = nil; phase = .finished }
+            terminalPresentation = phase
+            // An empty head settles the restoration it belongs to.
+            // Later work still requires a new explicit action.
+            finishRestoration(intent)
             // Committed facts are optional and must not hold operation/lifecycle admission.
             let revision = pauseRevision
             summaryTask = Task { [weak self, client, deckID = record.deckID] in
@@ -529,7 +592,7 @@ public final class ReviewCoordinator {
     }
 
     private func preparePresentation(_ head: ReviewHead, sessionID: UInt64, previous: ReviewHeadItem?,
-                                     question: Bool, inputTime: TimeInterval?) async throws {
+                                     question: Bool, inputTime: TimeInterval?, intent: PresentationIntent) async throws {
         guard let item = head.items.first else { throw BridgeError.internal("Active review head has no item") }
         #if DEBUG
         let logger = Logger(subsystem: "Meguri", category: "ReviewStartup")
@@ -565,7 +628,10 @@ public final class ReviewCoordinator {
             if keepAnswer { try await surface.reveal(inputTime: uptime()); sideIsAnswer = true }
         }
         try Task.checkCancellation()
+        terminalPresentation = nil
         phase = sideIsAnswer ? .answer : .question
+        finishRestoration(intent)
+        if !paused { activeTime.resume(at: uptime()) }
         if let next = head.items.dropFirst().first {
             preload?.cancel(); await preload?.value
             try Task.checkCancellation()
@@ -641,21 +707,24 @@ public final class ReviewCoordinator {
             }
             guard ready, !closingAdmission, revision == pauseRevision else { busy = false; return }
             startupNeedsPreparation = false
+            // Consume only requests known before this read. Later events own
+            // another fresh read, including those received during presentation.
+            let intent = restorationIntent
+            let question = forceQuestion
+            forceQuestion = false; refreshPending = false
             // Read the retained Core session afresh, outside cancellable visuals.
             let head = try await client.head(sessionID: sessionID)
             guard !closingAdmission, self.sessionID == sessionID, phase != .ended,
                   revision == pauseRevision else { busy = false; return }
-            try await apply(head, question: forceQuestion, whilePaused: true)
+            try await apply(head, question: question, whilePaused: true, intent: intent)
             try Task.checkCancellation()
             guard !closingAdmission, revision == pauseRevision else { busy = false; return }
-            forceQuestion = false; refreshPending = false
             paused = false
             (surface as? ReviewPages)?.inputActive = true
             if item != nil, phase == .question || phase == .answer {
                 timer.resume(at: uptime()); activeTime.resume(at: uptime())
             }
-            busy = false
-            retryArrivedMedia()
+            completeOperation()
         } catch {
             paused = true; busy = false
             fail(error); throw error
@@ -689,6 +758,7 @@ public final class ReviewCoordinator {
     @discardableResult public func end() async -> Bool {
         if let endTask { return await endTask.value }
         closingAdmission = true
+        restorationID = nil
         beginPause()
         let task = Task { () -> Bool in
             do {
@@ -713,6 +783,7 @@ public final class ReviewCoordinator {
     }
     public func generationEnded() {
         closingAdmission = true
+        restorationID = nil
         summaryTask?.cancel()
         paused = true; deadlineTimer?.invalidate(); preload?.cancel()
         sessionID = nil; phase = .ended; surface.close()

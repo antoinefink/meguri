@@ -41,6 +41,16 @@
         }
       }
     },
+    "review.congrats.continue": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continue"
+          }
+        }
+      }
+    },
     "Done": {
       "localizations": {
         "en": {
