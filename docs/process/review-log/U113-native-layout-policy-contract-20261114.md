@@ -23,3 +23,28 @@ Retained report: `build/cloud-resume-diagnosis/U113-r3-contract-review-20261114.
 The exact public-rule approval is recorded separately in
 `recovery-rule-publication-approval-20261114.md`. This contract review supplies
 no implementation, focused-check, Unit, P24, gate or release acceptance.
+
+## Narrower retention amendment
+
+Antoine approved the fallback-first alternative and rounds 5–6 in
+`cloud-recovery-fallback-approval-20261114.md` (`b71acf82`). This supersedes
+only the mandatory new asynchronous holder in K13.4 and its S2.5 reference.
+Available valid checked authority remains automatic. A validated missing map
+uses the existing collection choice, including in the same process.
+
+The same author and independent reviewer checked the minimal publication
+patch: `40654261089da2087de8d4f8aa15d179b180ba2a5f1b7ae5f92f4787a481fafe`.
+The reviewer found no P0/P1; the original Durable admission paragraph changes
+only its live-holder sentence. WAL coverage, ownership, error classification,
+replacement safeguards and performance limits remain.
+
+The installed patch adds only the scoped approval labels to that text:
+`661336a70f3bdf0d3a208a3723a7bd9a2559a9f82a217ca113591dbb06328357`.
+K13.4's retention variation, that single admission sentence and S2.5's reference
+are Approved 2026-11-14 (R2066). Other status scopes remain unchanged.
+The retained review is
+`build/cloud-resume-diagnosis/U113-fallback-first-reassessment-review-20261114.md`,
+section “Owner-authorized minimal publication text.” Publication preflight
+`private/20261114T143456Z-56499` passed before the label-only edits.
+
+This approves the contract, not source, tests, Unit/P24/gate or release acceptance.
