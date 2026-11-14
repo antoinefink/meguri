@@ -41,9 +41,12 @@ extension TestHooks {
             var protocolSupported = false
             var writeReadbackMatched = false
             var rehitReadbackMatched = false
+            var originalReadObserved = false
+            var originalIdentifierPresent = false
+            var originalIdentifierMatched = false
 
             var state: String {
-                "leafFound=\(leafFound) protocolSupported=\(protocolSupported) writeReadbackMatched=\(writeReadbackMatched) rehitReadbackMatched=\(rehitReadbackMatched)"
+                "leafFound=\(leafFound) protocolSupported=\(protocolSupported) writeReadbackMatched=\(writeReadbackMatched) rehitReadbackMatched=\(rehitReadbackMatched) originalReadObserved=\(originalReadObserved) originalIdentifierPresent=\(originalIdentifierPresent) originalIdentifierMatched=\(originalIdentifierMatched)"
             }
         }
         var state: String {
@@ -271,6 +274,11 @@ extension TestHooks {
             guard let identified = leaf as? any UIAccessibilityIdentification else { return }
             replayIdentifierResult.protocolSupported = true
             guard isCurrent() else { return }
+            // Original pre-setter observation of the geometry-selected diagnostic leaf only.
+            let originalIdentifier: String? = identified.accessibilityIdentifier
+            replayIdentifierResult.originalReadObserved = true
+            replayIdentifierResult.originalIdentifierPresent = originalIdentifier?.isEmpty == false
+            replayIdentifierResult.originalIdentifierMatched = originalIdentifier == Self.replayIdentifier
             identified.accessibilityIdentifier = Self.replayIdentifier
             replayIdentifierResult.writeReadbackMatched = identified.accessibilityIdentifier == Self.replayIdentifier
             guard isCurrent(), let rehit = nativeLeaf(),
