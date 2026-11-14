@@ -132,6 +132,53 @@ impl Fixture {
     fn baseline(&self) -> (CloudEngineRegistration, CloudRecord, CloudRecord) {
         self.baseline_with_root(true)
     }
+    fn baseline_with_accepted_epoch(&self) -> (CloudEngineRegistration, CloudRecord, CloudRecord) {
+        let (sdk, root, incoming) = self.baseline();
+        let workflow = &self.workflow;
+        let collection = workflow.host.collection().unwrap();
+        let projection = || {
+            workflow
+                .core
+                .policy_projection(c::policy::Lifecycle::Ready, collection.generation().0)
+                .unwrap()
+        };
+        let before = projection();
+        assert!(!before.facts.summary.crt_known && !before.facts.summary.crt_mismatch);
+        assert_eq!(before.engine.as_ref().unwrap().instance, sdk.instance_id);
+        assert!(!before.engine.as_ref().unwrap().stopping);
+        let seq = collection.last_seq();
+        let cursor = workflow.durable_snapshot().unwrap().serialization;
+        // P6 authority comes from accepted SDK intake, independently of Active/root
+        // proof. This byte producer alone neither accepts an epoch nor opens apply.
+        workflow
+            .fetched(
+                sdk.instance_id.clone(),
+                sdk.collection_zone.clone(),
+                vec![CloudRecord {
+                    name: "epoch".into(),
+                    envelope: workflow.core.bound_epoch_bytes_for_testing(0, false).unwrap(),
+                    system_fields: Some(vec![1]),
+                    record_type: Some("MGEpoch".into()),
+                    zone: Some(sdk.collection_zone.clone()),
+                    ..Default::default()
+                }],
+                vec![],
+            )
+            .unwrap();
+        let after = projection();
+        assert!(after.facts.summary.crt_known && !after.facts.summary.crt_mismatch);
+        assert_eq!(after.engine, before.engine);
+        assert_eq!(after.backend_guard, before.backend_guard);
+        assert_eq!(after.root_confirmed, before.root_confirmed);
+        assert_eq!(after.drains, before.drains);
+        assert_eq!(after.evidence, before.evidence);
+        workflow.validate_sdk(sdk.instance_id.clone()).unwrap();
+        assert_eq!(collection.last_seq(), seq);
+        assert_eq!(workflow.durable_snapshot().unwrap().serialization, cursor);
+        assert!(workflow.core.incoming_runs().is_empty());
+        assert!(workflow.core.inbox_entries(after.facts.binding.unwrap().id).unwrap().is_empty());
+        (sdk, root, incoming)
+    }
     fn baseline_with_root(&self, confirm_root: bool) -> (CloudEngineRegistration, CloudRecord, CloudRecord) {
         let collection = self.workflow.host.collection().unwrap();
         let media = self.workflow.host.media().unwrap();
@@ -208,7 +255,7 @@ impl Drop for Fixture {
 #[test]
 fn fetched_applies_to_real_collection_and_redelivery_does_not_write_again() {
     let fixture = Fixture::new(Keys::new([]));
-    let (sdk, _, incoming) = fixture.baseline();
+    let (sdk, _, incoming) = fixture.baseline_with_accepted_epoch();
     let workflow = &fixture.workflow;
     assert_eq!(fixture.incoming_value(), None);
     workflow
@@ -290,7 +337,7 @@ fn blocked_record(erev: u64) -> CloudRecord {
 #[test]
 fn native_fetched_drains_502_exactly_once_in_operations_of_at_most_500() {
     let fixture = Fixture::new(Keys::new([]));
-    let (sdk, _, _) = fixture.baseline();
+    let (sdk, _, _) = fixture.baseline_with_accepted_epoch();
     let workflow = &fixture.workflow;
     let records: Vec<_> = (0..502)
         .map(|i| {
@@ -342,7 +389,7 @@ fn native_fetched_drains_502_exactly_once_in_operations_of_at_most_500() {
 #[test]
 fn native_deferred_reference() {
     let fixture = Fixture::new(Keys::new([]));
-    let (sdk, _, _) = fixture.baseline();
+    let (sdk, _, _) = fixture.baseline_with_accepted_epoch();
     let workflow = &fixture.workflow;
     let record = blocked_record(2);
     workflow
@@ -367,7 +414,7 @@ fn native_deferred_reference() {
 #[test]
 fn native_fetched_advances_ready_content_after_500_notes_park_on_references() {
     let fixture = Fixture::new(Keys::new([]));
-    let (sdk, _, incoming) = fixture.baseline();
+    let (sdk, _, incoming) = fixture.baseline_with_accepted_epoch();
     let workflow = &fixture.workflow;
     let mut records: Vec<_> = (0..500)
         .map(|i| {
@@ -440,7 +487,7 @@ fn incoming_deck(fixture: &Fixture, id: i64, parent_id: i64, name: &[u8]) -> Clo
 #[test]
 fn native_fetched_retries_a_parked_reference_when_its_real_parent_arrives() {
     let fixture = Fixture::new(Keys::new([]));
-    let (sdk, _, _) = fixture.baseline();
+    let (sdk, _, _) = fixture.baseline_with_accepted_epoch();
     let workflow = &fixture.workflow;
     let child = incoming_deck(&fixture, 116_002, 116_001, b"RemoteParent\x1fRemoteChild");
     workflow
@@ -490,7 +537,7 @@ fn native_fetched_retries_a_parked_reference_when_its_real_parent_arrives() {
 fn failed_rollback_tracking_transaction_stops_the_sdk_and_retains_intent_and_cursor() {
     use c::testing::{ApplyInterruption, TrackingFault};
     let fixture = Fixture::new(Keys::new([]));
-    let (sdk, _, incoming) = fixture.baseline();
+    let (sdk, _, incoming) = fixture.baseline_with_accepted_epoch();
     let workflow = &fixture.workflow;
     let before = workflow.durable_snapshot().unwrap();
     let seq = workflow.host.collection().unwrap().last_seq();
@@ -535,7 +582,7 @@ fn failed_rollback_tracking_transaction_stops_the_sdk_and_retains_intent_and_cur
 #[test]
 fn native_fetched_refuses_retired_sdk_between_bounded_operations_without_tracking_stop() {
     let fixture = Fixture::new(Keys::new([]));
-    let (sdk, _, _) = fixture.baseline();
+    let (sdk, _, _) = fixture.baseline_with_accepted_epoch();
     let workflow = &fixture.workflow;
     let before = workflow.durable_snapshot().unwrap();
     let core = Arc::downgrade(&workflow.core);
@@ -598,7 +645,7 @@ fn native_fetched_keeps_a_real_commit_completed_error_fatal_and_retains_replay_i
         }
     }
     let fixture = Fixture::new(Keys::new([]));
-    let (sdk, _, incoming) = fixture.baseline();
+    let (sdk, _, incoming) = fixture.baseline_with_accepted_epoch();
     let workflow = &fixture.workflow;
     let before = workflow.durable_snapshot().unwrap();
     let seq = workflow.host.collection().unwrap().last_seq();
@@ -641,7 +688,7 @@ fn native_fetched_keeps_rolled_back_and_cancelled_work_without_a_retry_grant() {
     use c::testing::ApplyInterruption;
     for interruption in [ApplyInterruption::Error, ApplyInterruption::Cancel] {
         let fixture = Fixture::new(Keys::new([]));
-        let (sdk, _, incoming) = fixture.baseline();
+        let (sdk, _, incoming) = fixture.baseline_with_accepted_epoch();
         let workflow = &fixture.workflow;
         let seq = workflow.host.collection().unwrap().last_seq();
         workflow.core.interrupt_next_incoming_for_testing(interruption);
@@ -687,7 +734,7 @@ fn native_fetched_keeps_rolled_back_and_cancelled_work_without_a_retry_grant() {
 #[test]
 fn legacy_drain_still_returns_the_actual_rolled_back_engine_error() {
     let fixture = Fixture::new(Keys::new([]));
-    let (sdk, _, incoming) = fixture.baseline();
+    let (sdk, _, incoming) = fixture.baseline_with_accepted_epoch();
     let workflow = &fixture.workflow;
     workflow
         .core
