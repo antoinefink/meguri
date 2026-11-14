@@ -41,6 +41,14 @@
       }
     },
     {
+      "parallelizable" : true,
+      "target" : {
+        "containerPath" : "container:Packages/MeguriKit",
+        "identifier" : "ReviewTests",
+        "name" : "ReviewTests"
+      }
+    },
+    {
       "parallelizable" : false,
       "target" : {
         "containerPath" : "container:Packages/MeguriKit",

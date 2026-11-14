@@ -105,3 +105,34 @@ hosted live-view transitions; preset fallback and timebox integration; the
 remaining U177 progress/chrome requirements; required mobile and integration
 gates. No Unit trailer, P24 closure, full gate, milestone or release acceptance.
 The held U113 repairs and native quiet-point failures remain unchanged.
+
+## Mobile Unit-plan coverage
+
+Continuation base: `582026d42a5c867a355a738da3c3afb4e3d943de`.
+The original U177 and integration bases remain unchanged. The Unit plan omitted
+ReviewTests, although its seven timer tests already passed on the host. The
+earlier iPad model result covered other suites and did not run this bundle.
+
+`cleanroom/20261114T040727Z-11265` adds one target block to
+`app/TestPlans/Unit.xctestplan`. Its identity matches the existing package
+target. All prior targets, options and no-retry behavior remain unchanged;
+production code, views and assertions are byte-identical.
+
+Independent round 2, `cleanroom/20261114T040858Z-11792`, reports no P0, P1
+or P2 findings. Its export equals the seed. The original review count is not
+reset. Privacy `20261114T040932Z-12800` and static checks
+`20261114T040933Z-12799` pass. Prior source similarity receipts retain their
+unchanged inputs; this continuation adds no algorithm or product text.
+
+| Focused receipt | Result |
+| --- | --- |
+| `unit-sim/20261114T040931Z-12245` | iPhone simulator: seven passes, no failure or skip |
+| `unit-sim/20261114T041154Z-14778` | iPad simulator: seven passes, no failure or skip |
+
+Both runs select only ReviewTests in the dedicated VM. Apple jobs run in
+sequence, reusing the Debug products, and both pool leases are released.
+The added bundle now exercises the finite schedule and localized cap value on
+mobile. This does not establish live screen transitions, full UI accessibility,
+user design agreement or iCloud delivery. No further render round is needed
+for the plan-only change. Remaining U177 and integration acceptance stays due;
+the sync repairs still await the reserved extra-round decision.
