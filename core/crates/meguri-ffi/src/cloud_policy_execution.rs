@@ -62,6 +62,7 @@ fn operation_driver_refusal(site: &'static str, error: &p::DriverError) {
 pub struct CloudPolicyExecution {
     pub(super) command: Arc<CloudPolicyCommand>,
     original_sdk: Option<String>,
+    media_origin: Option<meguri_sync::cloud::adapter::PolicyMediaOrigin>,
     registration: Mutex<Registration>,
     pub(crate) cleanup_begun: std::sync::atomic::AtomicBool,
     pub(crate) zone_deletion_begun: std::sync::atomic::AtomicBool,
@@ -232,7 +233,9 @@ impl CloudPolicyExecution {
         self.policy().owns(&self.command)?;
         self.policy()
             .driver()?
-            .begin_native_media_with_work(&self.command.command, self.original_sdk.as_deref(), work)
+            .begin_native_media_origin_with_work(
+                &self.command.command, self.original_sdk.as_deref(), self.media_origin.as_ref(), work,
+            )
             .map_err(execution_error)
     }
     pub(super) fn begin_fetch_with_work(&self, zones: Vec<String>, work: &mut p::PolicyWork) -> Result<u64, CoreError> {
@@ -526,14 +529,27 @@ impl CloudPolicy {
         {
             return Ok(None);
         }
-        let original_sdk = self
-            .driver()?
-            .native_origin_attempt_with_work(&command.command, work)
-            .map_err(|failure| super::policy_jobs::AttemptFailure::from_driver(failure, execution_error, &self))?;
+        let media_origin = if matches!(command.command.action.kind, p::ActionKind::ResumeMedia) {
+            let origin = self.driver()?
+                .native_media_origin_with_work(&command.command, work)
+                .map_err(|failure| super::policy_jobs::AttemptFailure::from_driver(failure, execution_error, &self))?;
+            let Some(origin) = origin else { return Ok(None) };
+            Some(origin)
+        } else {
+            None
+        };
+        let original_sdk = if let Some(origin) = &media_origin {
+            Some(origin.sdk().to_owned())
+        } else {
+            self.driver()?
+                .native_origin_attempt_with_work(&command.command, work)
+                .map_err(|failure| super::policy_jobs::AttemptFailure::from_driver(failure, execution_error, &self))?
+        };
         work.check().map_err(crate::cloud_connection::error)?;
         Ok(Some(Arc::new(CloudPolicyExecution {
             command,
             original_sdk,
+            media_origin,
             registration: Mutex::new(Registration::default()),
             cleanup_begun: std::sync::atomic::AtomicBool::new(false),
             zone_deletion_begun: std::sync::atomic::AtomicBool::new(false),

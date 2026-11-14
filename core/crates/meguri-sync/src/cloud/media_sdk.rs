@@ -492,6 +492,9 @@ impl Runtime {
         let mut s = self.state();
         Self::sdk_locked(&s, sdk)?;
         work.check()?;
+        Self::prepare_cloud_media_sdk_locked(&mut s, sdk, work)
+    }
+    fn prepare_cloud_media_sdk_locked(s: &mut State, sdk: &str, work: &mut PolicyWork) -> Result<(), RuntimeError> {
         if s.media.sdk.as_deref() != Some(sdk) {
             work.effect()?;
             // A replacement is registered only after the old native object has
@@ -509,11 +512,32 @@ impl Runtime {
         Ok(())
     }
 
+    fn media_configuration_retired_locked(
+        s: &State,
+        guard: &crate::cloud::adapter::Guard,
+        sdk: &str,
+        origin: &crate::cloud::adapter::PolicyMediaOrigin,
+    ) -> Result<bool, RuntimeError> {
+        if origin.sdk != sdk
+            || &origin.guard != guard
+            || Self::adapter_guard_locked(s) != *guard
+            || Self::instance_locked(s)? != origin.opening
+        {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        // Check original opening/account authority independently of the retired
+        // SDK. The private lifetime bit proves the first committed cause; it is
+        // never inferred from a later missing SDK, error or stopping flag.
+        Self::caller_locked(s, &origin.opening)?;
+        Ok(origin.configuration_retired.load(std::sync::atomic::Ordering::Acquire))
+    }
+
     pub(crate) fn policy_begin_media_with_work(
         &self,
         guard: &crate::cloud::adapter::Guard,
         sdk: Option<&str>,
         action: &crate::cloud::policy::ActionKind,
+        origin: Option<&crate::cloud::adapter::PolicyMediaOrigin>,
         work: &mut PolicyWork,
     ) -> Result<bool, RuntimeError> {
         let _ = self.adapter_now();
@@ -522,7 +546,17 @@ impl Runtime {
         if !matches!(action, crate::cloud::policy::ActionKind::PauseMedia)
             && let Some(sdk) = sdk
         {
-            self.prepare_cloud_media_sdk_with_work(sdk, work)?;
+            if matches!(action, crate::cloud::policy::ActionKind::ResumeMedia) && let Some(origin) = origin {
+                let mut s = self.state();
+                work.check()?;
+                if Self::media_configuration_retired_locked(&s, guard, sdk, origin)? {
+                    return Ok(false);
+                }
+                Self::sdk_locked(&s, sdk)?;
+                Self::prepare_cloud_media_sdk_locked(&mut s, sdk, work)?;
+            } else {
+                self.prepare_cloud_media_sdk_with_work(sdk, work)?;
+            }
             #[cfg(feature = "test-hooks")]
             self.incoming_hooks
                 .hit(crate::cloud::testing::IncomingStage::PolicyMediaPrepared);
@@ -531,6 +565,12 @@ impl Runtime {
         work.check()?;
         if Self::adapter_guard_locked(&s) != *guard {
             return Err(RuntimeError::StaleIncarnation);
+        }
+        if matches!(action, crate::cloud::policy::ActionKind::ResumeMedia)
+            && let (Some(sdk), Some(origin)) = (sdk, origin)
+            && Self::media_configuration_retired_locked(&s, guard, sdk, origin)?
+        {
+            return Ok(false);
         }
         match action {
             crate::cloud::policy::ActionKind::PauseMedia => {

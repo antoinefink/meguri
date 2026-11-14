@@ -15,6 +15,21 @@ pub(crate) struct SDKAuthority {
     pub id: String,
     pub guard: Guard,
     pub stopping: bool,
+    pub configuration_retired: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// A prepared action keeps this original SDK proof after release.
+#[derive(Clone)]
+pub struct PolicyMediaOrigin {
+    pub(crate) sdk: String,
+    pub(crate) guard: Guard,
+    pub(crate) opening: String,
+    pub(crate) configuration_retired: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+impl PolicyMediaOrigin {
+    pub fn sdk(&self) -> &str {
+        &self.sdk
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FetchDrain {

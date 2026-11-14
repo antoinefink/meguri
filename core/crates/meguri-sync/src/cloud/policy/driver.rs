@@ -1007,7 +1007,7 @@ impl Driver {
             }
             if matches!(
                 command.action.kind,
-                ActionKind::RequestFetch { .. } | ActionKind::RequestSend { .. }
+                ActionKind::RequestFetch { .. } | ActionKind::RequestSend { .. } | ActionKind::ResumeMedia
             ) {
                 let engine = self.runtime.policy_engine(&command.backend_guard)?;
                 if !engine.as_ref().is_some_and(|engine| {

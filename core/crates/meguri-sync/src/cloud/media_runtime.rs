@@ -3389,6 +3389,7 @@ mod recovery_authority_tests {
                     id: "synthetic-stopping-sdk".into(),
                     guard: Runtime::adapter_guard_locked(s),
                     stopping: true,
+                    configuration_retired: Default::default(),
                 })
             },
         ];
@@ -3406,6 +3407,7 @@ mod recovery_authority_tests {
             id: "synthetic-retained-sdk".into(),
             guard: Runtime::adapter_guard_locked(&state),
             stopping: true,
+            configuration_retired: Default::default(),
         });
         assert!(matches!(
             Runtime::check_media_recovery_locked(&state, &old),

@@ -347,6 +347,21 @@ impl Driver {
         Ok(sdk)
     }
 
+    pub fn native_media_origin_with_work(
+        &self,
+        command: &Command,
+        work: &mut PolicyWork,
+    ) -> Result<Option<crate::cloud::adapter::PolicyMediaOrigin>, CommandAttemptFailure> {
+        let owned = self.lock_for_work(work)?;
+        self.validate_original_attempt(&owned, command, true)?;
+        if command.action.kind != ActionKind::ResumeMedia {
+            return Err(DriverError::NotCoreAction.into());
+        }
+        let origin = self.runtime.policy_media_origin(&command.backend_guard).map_err(DriverError::from)?;
+        work.check().map_err(DriverError::from)?;
+        Ok(origin)
+    }
+
     pub fn register_native_sdk(&self, command: &Command) -> Result<(String, Option<Vec<u8>>, String), DriverError> {
         self.register_native_sdk_with_work(command, &mut PolicyWork::default())
     }
@@ -430,7 +445,13 @@ impl Driver {
         work.check()?;
         match origin {
             None => Ok(()), // The original creation/stop already drained its own SDK.
-            Some(current) if current == sdk => Ok(self.runtime.retire_sdk_with_work(sdk, false, work)?),
+            Some(current) if current == sdk => {
+                if matches!(command.action.kind, ActionKind::ConfigureAutomatic { .. }) {
+                    Ok(self.runtime.retire_sdk_for_configuration_with_work(sdk, work)?)
+                } else {
+                    Ok(self.runtime.retire_sdk_with_work(sdk, false, work)?)
+                }
+            }
             Some(_) => Err(DriverError::StaleCommand),
         }
     }
@@ -512,6 +533,15 @@ impl Driver {
         sdk: Option<&str>,
         work: &mut PolicyWork,
     ) -> Result<bool, DriverError> {
+        self.begin_native_media_origin_with_work(command, sdk, None, work)
+    }
+    pub fn begin_native_media_origin_with_work(
+        &self,
+        command: &Command,
+        sdk: Option<&str>,
+        origin: Option<&crate::cloud::adapter::PolicyMediaOrigin>,
+        work: &mut PolicyWork,
+    ) -> Result<bool, DriverError> {
         let owned = self.lock_for_work(work)?;
         self.validate_locked(&owned, command)?;
         work.check()?;
@@ -522,9 +552,9 @@ impl Driver {
             ActionKind::PauseMedia | ActionKind::PrioritizeMedia { .. } => {}
             _ => return Err(DriverError::StaleCommand),
         }
-        Ok(self
-            .runtime
-            .policy_begin_media_with_work(&command.backend_guard, sdk, &command.action.kind, work)?)
+        Ok(self.runtime.policy_begin_media_with_work(
+            &command.backend_guard, sdk, &command.action.kind, origin, work,
+        )?)
     }
 }
 

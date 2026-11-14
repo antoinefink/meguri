@@ -3,6 +3,21 @@ import Instrumentation
 import Synchronization
 internal import MeguriCoreBindings
 
+#if DEBUG
+// Module-private test hold for an issued ResumeMedia whose real preparation
+// and pinned SDK lookup have returned, before it joins a drain or registers a
+// run/context. Backend before/afterExecution cannot suspend in this interval.
+enum CloudMediaRegistrationBoundary {
+    struct Observation: Sendable {
+        let command: CloudPolicyCommand
+        let sdk: String
+        let runRegistered: Bool
+        let contextRegistered: Bool
+    }
+    @TaskLocal static var afterOriginalLookup: (@Sendable (Observation) async -> Void)?
+}
+#endif
+
 /// Carries only the adapter reservation back from the readiness worker. The
 /// existing readiness task group joins that worker before cleanup takes it.
 private final class CloudExchangeReservation: Sendable {
@@ -683,7 +698,12 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 let prepared: CoreCloudPolicyExecution?
                 if case .resumeMedia = command.action { prepared = try await policy.prepareExecutionAttempt(command) }
                 else { prepared = try await policy.prepareExecution(command) }
-                guard let permit = prepared else { throw BridgeError.cloudPolicy(.staleCommand) }
+                guard let permit = prepared else {
+                    // P4: a still-current ResumeMedia with no running SDK is
+                    // Core's NoOperation, independent of cancellation.
+                    if case .resumeMedia = command.action { return .init(outputs: [], error: nil, deferred: false) }
+                    throw BridgeError.cloudPolicy(.staleCommand)
+                }
                 #if DEBUG
                 site = .mediaOriginalSDK
                 #endif
@@ -699,6 +719,16 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                     _ = try await permit.beginMedia()
                 } else {
                     guard let instance else { throw BridgeError.cloudPolicy(.staleCommand) }
+                    #if DEBUG
+                    if case .resumeMedia = command.action, let observe = CloudMediaRegistrationBoundary.afterOriginalLookup {
+                        await observe(.init(command: command, sdk: instance,
+                            runRegistered: mediaRuns[instance] != nil, contextRegistered: mediaRunContexts[instance] != nil))
+                    }
+                    #endif
+                    if case .resumeMedia = command.action,
+                       try await adapter.policyMediaAwaitsCreation(instance, execution: permit) {
+                        return .init(outputs: [], error: nil, deferred: false)
+                    }
                     if let joining = mediaDrains[instance] { await joining.value }
                     #if DEBUG
                     site = .mediaQuiescing
@@ -1143,7 +1173,15 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 let (issued, permit) = selected
                 await delivery.acknowledge(outputs)
                 try Task.checkCancellation()
-                guard try await permit.beginMedia() else { break }
+                guard try await permit.beginMedia() else {
+                    // A prepared original may outlive its configure drain
+                    // without ever registering a worker there. Release this
+                    // unstarted executor instead of retaining one per old SDK.
+                    heldMediaResume.removeValue(forKey: instance)
+                    if mediaExecutors[instance] === worker { mediaExecutors.removeValue(forKey: instance) }
+                    await worker.close()
+                    break
+                }
                 let onlyEnvelopes: Bool
                 if case .readBlobs = issued.action { onlyEnvelopes = true } else { onlyEnvelopes = false }
                 await worker.beginRound()

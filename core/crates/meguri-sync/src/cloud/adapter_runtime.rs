@@ -134,6 +134,7 @@ impl Runtime {
             id: id.clone(),
             guard: Self::adapter_guard_locked(s),
             stopping: false,
+            configuration_retired: Default::default(),
         });
         Ok((id, serialization, collection_zone(b.facts.epoch)))
     }
@@ -143,6 +144,20 @@ impl Runtime {
             return Err(RuntimeError::StaleIncarnation);
         }
         Ok(s.adapter.sdk.as_ref().map(|sdk| sdk.id.clone()))
+    }
+    pub(crate) fn policy_media_origin(&self, guard: &Guard) -> Result<Option<PolicyMediaOrigin>, RuntimeError> {
+        let s = self.state();
+        if &Self::adapter_guard_locked(&s) != guard {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        let Some(sdk) = s.adapter.sdk.as_ref().filter(|sdk| !sdk.stopping) else { return Ok(None) };
+        Self::sdk_locked(&s, &sdk.id)?;
+        Ok(Some(PolicyMediaOrigin {
+            sdk: sdk.id.clone(),
+            guard: sdk.guard.clone(),
+            opening: Self::instance_locked(&s)?,
+            configuration_retired: sdk.configuration_retired.clone(),
+        }))
     }
     pub(crate) fn policy_fetch_scope(
         &self,
@@ -255,6 +270,20 @@ impl Runtime {
         policy_stop: bool,
         work: &mut PolicyWork,
     ) -> Result<(), RuntimeError> {
+        self.retire_sdk_for_policy_with_work(sdk, policy_stop, false, work)
+    }
+    pub(crate) fn retire_sdk_for_configuration_with_work(
+        &self, sdk: &str, work: &mut PolicyWork,
+    ) -> Result<(), RuntimeError> {
+        self.retire_sdk_for_policy_with_work(sdk, false, true, work)
+    }
+    fn retire_sdk_for_policy_with_work(
+        &self,
+        sdk: &str,
+        policy_stop: bool,
+        configuration: bool,
+        work: &mut PolicyWork,
+    ) -> Result<(), RuntimeError> {
         let mut s = self.state();
         work.check()?;
         if !s.adapter.sdk.as_ref().is_some_and(|a| a.id == sdk) {
@@ -346,6 +375,7 @@ impl Runtime {
                 s.adapter.pending_collection_loss = None;
             }
         }
+        let current_guard = Self::adapter_guard_locked(&s);
         let authority = s
             .adapter
             .sdk
@@ -353,6 +383,10 @@ impl Runtime {
             .filter(|a| a.id == sdk)
             .ok_or(RuntimeError::StaleIncarnation)?;
         work.effect()?;
+        // Record only a configuration stop that still owns this guard.
+        if configuration && !authority.stopping && authority.guard == current_guard {
+            authority.configuration_retired.store(true, std::sync::atomic::Ordering::Release);
+        }
         authority.stopping = true;
         if s.adapter.known_loss.as_ref().is_some_and(|loss| loss.sdk == sdk) {
             s.adapter.known_loss = None;

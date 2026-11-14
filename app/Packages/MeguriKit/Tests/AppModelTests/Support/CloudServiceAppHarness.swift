@@ -57,6 +57,9 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
     var beforeExecution: (@MainActor (CloudPolicyCommand) async -> Void)?
     #if DEBUG
     var observeCoreCall: (@Sendable (CloudPolicyCommand, BridgeCall) -> Void)?
+    var afterMediaOriginalLookup: (@Sendable (CloudMediaRegistrationBoundary.Observation) async -> Void)?
+    var afterSDKRegistration: (@Sendable (String) async -> Void)?
+    var afterFailedSDKRetirement: (@Sendable (String) async -> Void)?
     #endif
     // A focused shutdown regression can hold delivery of an actual completed
     // command result; it never substitutes execution or issues a capability.
@@ -325,7 +328,13 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
             await DebugCloudDiagnostics.$sendFailureCapture.withValue(sendCapture) {
                 await DebugCloudDiagnostics.$fetchReadFailureCapture.withValue(fetchReadCapture) {
                     await DebugCloudDiagnostics.$mediaRecorder.withValue(mediaRecorder) {
-                        await production.execute(command, corePrepared: corePrepared)
+                        await CloudMediaRegistrationBoundary.$afterOriginalLookup.withValue(afterMediaOriginalLookup) {
+                            await CloudSDKConstructionBoundary.$registered.withValue(afterSDKRegistration) {
+                            await CloudSDKConstructionBoundary.$failedRetirement.withValue(afterFailedSDKRetirement) {
+                            await production.execute(command, corePrepared: corePrepared)
+                            }
+                            }
+                        }
                     }
                 }
             }

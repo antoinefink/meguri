@@ -9,6 +9,335 @@ import Testing
 
 // The existing suite serializes the process-global Core owner.
 extension ReviewCollectionStartupTests {
+    #if DEBUG
+    // A characterization/control pair, not a reproduction claim for the old
+    // connection.incomplete receipt. Both retire through ConfigureAutomatic;
+    // only the second suspends after real preparation and pinned SDK lookup.
+    @Test(arguments: [false, true])
+    func serviceAppConfigureAutomaticDisposesIssuedResumeMediaAcrossRegistration(afterOriginalLookup: Bool) async throws {
+        try await checkMediaConstruction(afterOriginalLookup: afterOriginalLookup, handoff: false)
+    }
+    @Test func serviceAppMediaJoinsTheActualRegistrationResult() async throws {
+        try await checkMediaConstruction(afterOriginalLookup: false, handoff: true)
+    }
+    private func checkMediaConstruction(afterOriginalLookup: Bool, handoff: Bool) async throws {
+        try await withAutomaticServiceApp { app, _, wire in
+            let backend = try app.backend
+            app.sync.setDeviceSettings(paused: false, automatic: true, media: false)
+            await app.sync.waitForInputs(); await app.sync.drainOperations()
+            let sdk = try #require(await app.factory.engines.last)
+            await sdk.waitForAutomaticSend(); await app.sync.drainOperations()
+            try #require(!app.sync.operationFailed && backend.firstFailureDiagnostic == nil)
+            try await backend.workflow.validateSDK(sdk.instanceID)
+            let generation = app.owner.generation, failureRevision = app.sync.failureRevision
+            let engineCount = await app.factory.engines.count
+            let held = ServiceAutomaticGate(), returned = ServiceAutomaticGate(), creation = ServiceAutomaticGate()
+            let registration = ServiceAutomaticGate()
+            let originalID = Mutex<ObjectIdentifier?>(nil)
+            let lookup = Mutex<CloudMediaRegistrationBoundary.Observation?>(nil)
+            let replacementID = Mutex<String?>(nil)
+            let calls = Mutex<[String]>([])
+            let retirements = Mutex(0)
+            let registrations = Mutex(0)
+            var original: CloudPolicyCommand?, configure: CloudPolicyCommand?, observed: SyncCommandResult?
+            var results = 0, acknowledgements = 0
+            backend.beforeExecution = { command in
+                if case .resumeMedia = command.action, original == nil {
+                    original = command; originalID.withLock { $0 = ObjectIdentifier(command.raw) }
+                    if !afterOriginalLookup { await held.hold() }
+                }
+                if case .configureAutomatic(false) = command.action {
+                    #expect(configure == nil)
+                    configure = command
+                }
+            }
+            backend.afterMediaOriginalLookup = { observation in
+                guard originalID.withLock({ $0 == ObjectIdentifier(observation.command.raw) }) else { return }
+                lookup.withLock { $0 = observation }
+                if afterOriginalLookup { await held.hold() }
+            }
+            backend.observeCoreCall = { command, call in
+                if originalID.withLock({ $0 == ObjectIdentifier(command.raw) }) {
+                    calls.withLock { $0.append(call.description) }
+                }
+                if case .configureAutomatic(false) = command.action, call == .cloudPolicyExecutionStartRetireOriginal {
+                    retirements.withLock { $0 += 1 }
+                }
+                if case .configureAutomatic(false) = command.action, call == .cloudPolicyExecutionStartRegisterSdk {
+                    registrations.withLock { $0 += 1 }
+                }
+            }
+            backend.afterExecution = { command, result in
+                guard let original, command.raw === original.raw else { return }
+                results += 1; observed = result
+                #expect(!Task.isCancelled && SyncCommandTaskContext.current?.shutdownCancelled == false)
+                await returned.hold()
+            }
+            app.sync.observeCausalBoundary = { boundary, command in
+                if case .commandAcknowledgementJoined = boundary, let command, let original, command.raw === original.raw {
+                    acknowledgements += 1
+                }
+            }
+            await app.factory.inspectCreation { configuration in
+                // Observe the replacement after the previous SDK has drained.
+                #expect(configuration.instanceID != sdk.instanceID && !configuration.automaticallySync)
+                replacementID.withLock { $0 = configuration.instanceID }
+                await creation.hold()
+            }
+            if handoff {
+                backend.afterSDKRegistration = { sdk in
+                    replacementID.withLock { $0 = sdk }
+                    await registration.hold()
+                }
+            }
+            defer {
+                backend.beforeExecution = nil; backend.afterExecution = nil
+                backend.afterMediaOriginalLookup = nil; backend.observeCoreCall = nil
+                backend.afterSDKRegistration = nil
+                app.sync.observeCausalBoundary = nil
+            }
+            do {
+                app.sync.setDeviceSettings(paused: false, automatic: true, media: true)
+                try #require(try await serviceAppSignal(held.entered, stage: afterOriginalLookup
+                    ? "media lookup reached"
+                    : "media preparation held"))
+                let issued = try #require(original)
+                if afterOriginalLookup {
+                    let boundary = try #require(lookup.withLock { $0 })
+                    #expect(boundary.command.raw === issued.raw && boundary.sdk == sdk.instanceID)
+                    #expect(!boundary.runRegistered && !boundary.contextRegistered)
+                    #expect(calls.withLock { $0.filter { $0 == "CloudPolicy.start_prepare_execution" }.count } == 1)
+                    #expect(calls.withLock { $0.filter { $0 == "CloudPolicyExecution.original_sdk" }.count } == 1)
+                } else {
+                    #expect(lookup.withLock { $0 } == nil && calls.withLock { $0.isEmpty })
+                }
+                #expect(results == 0 && acknowledgements == 0)
+                app.sync.setDeviceSettings(paused: false, automatic: false, media: true)
+                try #require(try await serviceAppSignal(handoff ? registration.entered : creation.entered,
+                    stage: "replacement construction held"))
+                let retirementCommand = try #require(configure)
+                #expect(retirementCommand.raw !== issued.raw && retirements.withLock { $0 } == 1)
+                #expect(registrations.withLock { $0 } == 1)
+                #expect(await app.factory.engines.count == engineCount)
+                await #expect(throws: (any Error).self) { try await backend.workflow.validateSDK(sdk.instanceID) }
+                await #expect(throws: (any Error).self) { _ = try await sdk.prepareSend(zones: []) }
+                let before = try await backend.workflow.durableSnapshot()
+                let updates = try await backend.workflow.emittedUpdateIDs()
+                let pending = await sdk.pendingRecordZoneChanges(), additions = await sdk.pendingAdditionUpdates
+                let batches = await sdk.batchRequests, fetches = await sdk.manualFetchGroups
+                let receipts = await wire.receipts.count
+                let media = try await serviceMediaProof(generation: generation)
+                await held.release()
+                try #require(try await serviceAppSignal(returned.entered, stage: "same original ResumeMedia actual Core result"))
+                let result = try #require(observed)
+                #expect(results == 1 && acknowledgements == 0 && !result.deferred)
+                // The issued task was active when scheduling changed.
+                #expect(result.nativeCancellation == nil && !result.mediaCancellation)
+                // P4 waits for native construction before starting media.
+                #expect(result.error == nil && result.originalGuardRefusal == nil)
+                #expect(result.outputs.isEmpty)
+                if !afterOriginalLookup {
+                    let boundary = try #require(lookup.withLock { $0 })
+                    #expect(boundary.command.raw === issued.raw && boundary.sdk == replacementID.withLock { $0 })
+                    #expect(boundary.sdk != sdk.instanceID && !boundary.runRegistered && !boundary.contextRegistered)
+                }
+                let originalCalls = calls.withLock { $0 }
+                #expect(originalCalls.filter { $0 == "CloudPolicy.start_prepare_execution" }.count == 1)
+                #expect(originalCalls.filter { $0 == "CloudPolicyExecutionResult.detailed_result" }.count == 1)
+                #expect(originalCalls.filter { $0 == "CloudPolicyExecution.original_sdk" }.count == 1)
+                #expect(originalCalls.filter { $0 == "CloudPolicyExecution.start_validate_control" }.count == (afterOriginalLookup ? 0 : 1))
+                #expect(originalCalls.filter { $0 == "CloudPolicyExecution.start_begin_media" }.count == (afterOriginalLookup ? 1 : 0))
+                #expect(originalCalls.filter { $0 == "CloudPolicyMediaResult.result" }.count == (afterOriginalLookup ? 1 : 0))
+                #expect(!originalCalls.contains("CloudPolicyExecution.start_begin_fetch"))
+                #expect(!originalCalls.contains("CloudPolicyExecution.start_begin_send"))
+                #expect(!originalCalls.contains("CloudWorkflow.take_pending_updates"))
+                #expect(await sdk.pendingRecordZoneChanges() == pending)
+                #expect(await sdk.pendingAdditionUpdates == additions)
+                #expect(await sdk.batchRequests == batches)
+                #expect(await sdk.manualFetchGroups == fetches)
+                #expect(await wire.receipts.count == receipts)
+                #expect(try await backend.workflow.emittedUpdateIDs() == updates)
+                let after = try await backend.workflow.durableSnapshot()
+                #expect(after.entities == before.entities && after.inboxNames == before.inboxNames)
+                #expect(after.trackingContent == before.trackingContent)
+                let afterMedia = try await serviceMediaProof(generation: generation)
+                #expect(afterMedia.names == media.names && afterMedia.bytes == media.bytes)
+                // Keep the real strict ServiceAppBackend callback enabled. This
+                // contract assertion also retains the error for the red run;
+                // it neither supplies success nor registers an expected error.
+                #expect(result.error == nil || result.originalGuardRefusal != nil,
+                    "ConfigureAutomatic left an active issued ResumeMedia with an unqualified error; original Core calls: \(originalCalls)")
+                await returned.release()
+                await registration.release()
+                if handoff {
+                    try #require(try await serviceAppSignal(creation.entered, stage: "replacement factory entered"))
+                }
+                await creation.release()
+                await app.sync.waitForInputs(); await app.sync.drainOperations()
+                #expect(acknowledgements == 1)
+                #expect(await app.factory.engines.count == engineCount + 1)
+                #expect(registrations.withLock { $0 } == 1)
+                let successor = try #require(await app.factory.engines.last)
+                #expect(successor !== sdk && successor.instanceID != sdk.instanceID)
+                try await backend.workflow.validateSDK(successor.instanceID)
+                #expect(app.owner.state == .ready && app.owner.generation == generation && !backend.closed)
+                #expect(try app.backend === backend)
+                #expect(!app.sync.operationFailed && app.sync.failureRevision == failureRevision)
+                #expect(backend.firstFailureDiagnostic == nil)
+            } catch {
+                await held.release(); await returned.release(); await registration.release(); await creation.release()
+                await app.sync.waitForInputs(); await app.sync.drainOperations()
+                throw error
+            }
+        }
+    }
+    @Test func serviceAppMediaKeepsFailureDuringConstructionCleanup() async throws {
+        try await withAutomaticServiceApp { app, _, wire in
+            let backend = try app.backend
+            app.sync.setDeviceSettings(paused: false, automatic: true, media: false)
+            await app.sync.waitForInputs(); await app.sync.drainOperations()
+            let sdk = try #require(await app.factory.engines.last)
+            await sdk.waitForAutomaticSend(); await app.sync.drainOperations()
+            try #require(!app.sync.operationFailed && backend.firstFailureDiagnostic == nil)
+            let generation = app.owner.generation
+            let engineCount = await app.factory.engines.count
+            let issuedGate = ServiceAutomaticGate(), factoryGate = ServiceAutomaticGate()
+            let preparedGate = ServiceAutomaticGate(), cleanupGate = ServiceAutomaticGate(), returnedGate = ServiceAutomaticGate()
+            let originalID = Mutex<ObjectIdentifier?>(nil), replacementID = Mutex<String?>(nil)
+            let lookup = Mutex<CloudMediaRegistrationBoundary.Observation?>(nil)
+            let calls = Mutex<[String]>([])
+            var original: CloudPolicyCommand?, configure: CloudPolicyCommand?
+            var observed: SyncCommandResult?, configureResult: SyncCommandResult?
+            var results = 0, acknowledgements = 0, inspected = 0, configureACKs = 0
+            backend.beforeExecution = { command in
+                if case .resumeMedia = command.action, original == nil {
+                    original = command; originalID.withLock { $0 = ObjectIdentifier(command.raw) }
+                    backend.expectedCommandFailures[ObjectIdentifier(command.raw)] = { result in
+                        #expect((result.error as? BridgeError) == .cloudConnection(.authorityChanged))
+                        #expect(result.originalGuardRefusal == nil && !result.deferred)
+                        inspected += 1
+                    }
+                    await issuedGate.hold()
+                }
+                if case .configureAutomatic(false) = command.action {
+                    #expect(configure == nil); configure = command
+                    backend.expectedCommandFailures[ObjectIdentifier(command.raw)] = { result in
+                        guard case .wire? = result.error as? ServiceWorkflowFailure else {
+                            Issue.record("Construction lost its factory error"); return
+                        }
+                        #expect(result.originalGuardRefusal == nil && !result.deferred)
+                        inspected += 1
+                    }
+                }
+            }
+            backend.afterMediaOriginalLookup = { observation in
+                guard originalID.withLock({ $0 == ObjectIdentifier(observation.command.raw) }) else { return }
+                lookup.withLock { $0 = observation }
+                await preparedGate.hold()
+            }
+            backend.afterFailedSDKRetirement = { sdk in
+                #expect(replacementID.withLock { $0 } == sdk)
+                await cleanupGate.hold()
+            }
+            backend.observeCoreCall = { command, call in
+                if originalID.withLock({ $0 == ObjectIdentifier(command.raw) }) {
+                    calls.withLock { $0.append(call.description) }
+                }
+            }
+            backend.afterExecution = { command, result in
+                if let original, command.raw === original.raw {
+                    #expect(!Task.isCancelled && SyncCommandTaskContext.current?.shutdownCancelled == false)
+                    results += 1; observed = result
+                    await returnedGate.hold()
+                } else if let configure, command.raw === configure.raw { configureResult = result }
+            }
+            app.sync.observeCausalBoundary = { boundary, command in
+                guard case .commandAcknowledgementJoined = boundary, let command else { return }
+                if let original, command.raw === original.raw { acknowledgements += 1 }
+                if let configure, command.raw === configure.raw { configureACKs += 1 }
+            }
+            await app.factory.inspectCreation { configuration in
+                #expect(configuration.instanceID != sdk.instanceID && !configuration.automaticallySync)
+                replacementID.withLock { $0 = configuration.instanceID }
+                await factoryGate.hold()
+                throw ServiceWorkflowFailure.wire
+            }
+            defer {
+                backend.beforeExecution = nil; backend.afterExecution = nil
+                backend.afterMediaOriginalLookup = nil; backend.afterFailedSDKRetirement = nil
+                backend.observeCoreCall = nil; app.sync.observeCausalBoundary = nil
+            }
+            do {
+                app.sync.setDeviceSettings(paused: false, automatic: true, media: true)
+                try #require(try await serviceAppSignal(issuedGate.entered, stage: "media issued"))
+                app.sync.setDeviceSettings(paused: false, automatic: false, media: true)
+                try #require(try await serviceAppSignal(factoryGate.entered, stage: "factory pending"))
+                await issuedGate.release()
+                try #require(try await serviceAppSignal(preparedGate.entered, stage: "replacement media prepared"))
+                let issued = try #require(original), boundary = try #require(lookup.withLock { $0 })
+                let replacement = try #require(replacementID.withLock { $0 })
+                #expect(boundary.command.raw === issued.raw && boundary.sdk == replacement && replacement != sdk.instanceID)
+                #expect(!boundary.runRegistered && !boundary.contextRegistered)
+                try await backend.workflow.validateSDK(replacement)
+                await factoryGate.release()
+                try #require(try await serviceAppSignal(cleanupGate.entered, stage: "cleanup paused"))
+                await #expect(throws: (any Error).self) { try await backend.workflow.validateSDK(replacement) }
+                #expect(results == 0 && configureResult == nil && acknowledgements == 0 && configureACKs == 0)
+                let before = try await backend.workflow.durableSnapshot()
+                let updates = try await backend.workflow.emittedUpdateIDs()
+                let pending = await sdk.pendingRecordZoneChanges(), additions = await sdk.pendingAdditionUpdates
+                let batches = await sdk.batchRequests, fetches = await sdk.manualFetchGroups
+                let receipts = await wire.receipts.count
+                let media = try await serviceMediaProof(generation: generation)
+                await preparedGate.release()
+                try #require(try await serviceAppSignal(returnedGate.entered, stage: "media failure retained"))
+                let result = try #require(observed)
+                #expect(results == 1 && acknowledgements == 0 && !result.deferred && result.outputs.isEmpty)
+                #expect((result.error as? BridgeError) == .cloudConnection(.authorityChanged))
+                #expect(result.originalGuardRefusal == nil && result.nativeCancellation == nil && !result.mediaCancellation)
+                let originalCalls = calls.withLock { $0 }
+                #expect(originalCalls.filter { $0 == "CloudPolicy.start_prepare_execution" }.count == 1)
+                #expect(originalCalls.filter { $0 == "CloudPolicyExecutionResult.detailed_result" }.count == 1)
+                #expect(originalCalls.filter { $0 == "CloudPolicyExecution.original_sdk" }.count == 1)
+                #expect(originalCalls.filter { $0 == "CloudPolicyExecution.start_begin_media" }.count == 1)
+                #expect(originalCalls.filter { $0 == "CloudPolicyMediaResult.result" }.count == 1)
+                #expect(!originalCalls.contains("CloudPolicyExecution.start_validate_control"))
+                #expect(!originalCalls.contains("CloudPolicyExecution.start_begin_fetch"))
+                #expect(!originalCalls.contains("CloudPolicyExecution.start_begin_send"))
+                #expect(!originalCalls.contains("CloudWorkflow.take_pending_updates"))
+                #expect(await sdk.pendingRecordZoneChanges() == pending)
+                #expect(await sdk.pendingAdditionUpdates == additions)
+                #expect(await sdk.batchRequests == batches)
+                #expect(await sdk.manualFetchGroups == fetches)
+                #expect(await wire.receipts.count == receipts)
+                #expect(await app.factory.engines.count == engineCount)
+                #expect(try await backend.workflow.emittedUpdateIDs() == updates)
+                let after = try await backend.workflow.durableSnapshot()
+                #expect(after.entities == before.entities && after.inboxNames == before.inboxNames && after.trackingContent == before.trackingContent)
+                let afterMedia = try await serviceMediaProof(generation: generation)
+                #expect(afterMedia.names == media.names && afterMedia.bytes == media.bytes)
+                await returnedGate.release(); await cleanupGate.release()
+                await app.sync.waitForInputs(); await app.sync.drainOperations()
+                let failed = try #require(configureResult)
+                guard case .wire? = failed.error as? ServiceWorkflowFailure else {
+                    Issue.record("Cleanup replaced the factory error"); return
+                }
+                #expect(acknowledgements == 1 && configureACKs == 1 && inspected == 2)
+                #expect(backend.expectedCommandFailures.isEmpty)
+                #expect(await app.factory.engines.count == engineCount)
+                #expect(app.owner.state == .ready && app.owner.generation == generation && !backend.closed)
+                #expect(try app.backend === backend)
+                await #expect(throws: (any Error).self) { try await backend.workflow.validateSDK(replacement) }
+            } catch {
+                await issuedGate.release(); await factoryGate.release(); await preparedGate.release()
+                await returnedGate.release(); await cleanupGate.release()
+                await app.sync.waitForInputs(); await app.sync.drainOperations()
+                throw error
+            }
+        }
+    }
+    #endif
+
     @Test(arguments: [false, true])
     func serviceAppPauseAndResumeWithMediaRetiresOriginalSDKWithoutOperationFailure(automatic: Bool) async throws {
         try await withAutomaticServiceApp { app, _, _ in

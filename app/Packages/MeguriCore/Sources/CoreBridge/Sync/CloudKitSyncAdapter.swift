@@ -1,6 +1,21 @@
 import Foundation
 import Synchronization
 
+#if DEBUG
+// Tests pause at completed Core calls.
+enum CloudSDKConstructionBoundary {
+    @TaskLocal static var registered: (@Sendable (String) async -> Void)?
+    @TaskLocal static var failedRetirement: (@Sendable (String) async -> Void)?
+}
+#endif
+
+private final class CloudSDKRegistration: Sendable {
+    let task: Task<CloudRegistration, any Error>
+    init(_ operation: @escaping @Sendable () async throws -> CloudRegistration) {
+        task = Task { try await operation() }
+    }
+}
+
 /// Immutable callback origin. An old delivery never looks up a replacement's id.
 private actor CloudSDKDelegate: CloudKitEngineDelegate {
     private weak var adapter: CloudKitSyncAdapter?
@@ -334,6 +349,7 @@ public actor CloudKitSyncAdapter {
     private var requestedRunning = false
     private var intentGeneration: UInt64 = 0
     private var creatingSDK = false
+    private var creatingSDKRegistration: CloudSDKRegistration?
     private var identityReads: Set<UInt64> = []
     private var identityResolutions: [UInt64: CloudAccountResolution] = [:]
     private var proofAdmission: (@Sendable (CloudOriginalCommandProofYield) async throws -> Void)?
@@ -517,10 +533,20 @@ public actor CloudKitSyncAdapter {
             if execution != nil { throw BridgeError.cloudPolicy(.staleCommand) }; return
         }
         creatingSDK = true
-        defer { creatingSDK = false; changed() }
-        let registration: CloudRegistration
-        if let execution { registration = try await execution.registerSDK() }
-        else { registration = try await core.registerSDK(automatic: automaticallySync) }
+        defer { creatingSDK = false; creatingSDKRegistration = nil; changed() }
+        // One owned task performs registration. Media can join its exact result
+        // even before this lifecycle continuation receives the new identity.
+        let pending = CloudSDKRegistration { [core] in
+            if let execution { return try await execution.registerSDK() }
+            return try await core.registerSDK(automatic: automaticallySync)
+        }
+        creatingSDKRegistration = pending
+        let registration = try await withTaskCancellationHandler {
+            try await pending.task.value
+        } onCancel: { pending.task.cancel() }
+        #if DEBUG
+        if let observe = CloudSDKConstructionBoundary.registered { await observe(registration.instanceID) }
+        #endif
         let delegate = CloudSDKDelegate(adapter: self, origin: registration.instanceID)
         var created: (any CloudKitEngine)?
         var published = false
@@ -551,6 +577,7 @@ public actor CloudKitSyncAdapter {
             try checkIntent(intent)
         } catch {
             let operationError = error
+            creatingSDKRegistration = nil
             if published {
                 do { try await stopInstance(registration.instanceID, reason: .registrationFailure, policyStop: false) }
                 catch { lastFailure = error }
@@ -560,6 +587,9 @@ public actor CloudKitSyncAdapter {
             // Native callback/staging ownership must still drain and release.
             do { try await core.retireSDK(registration.instanceID, policyStop: false) }
             catch { lastFailure = error }
+            #if DEBUG
+            if let observe = CloudSDKConstructionBoundary.failedRetirement { await observe(registration.instanceID) }
+            #endif
             if let created { await created.cancelOperations(); await created.release() }
             do { try await core.releaseSDK(registration.instanceID) }
             catch { lastFailure = error }
@@ -2435,6 +2465,20 @@ public actor CloudKitSyncAdapter {
         guard let instance = owned[origin], current == origin, !instance.stopping,
               !instance.authorityRetired, !instance.failed else { return nil }
         return .init(command: command, execution: execution, original: instance.stopWitness)
+    }
+    // Core registration precedes the async factory. A selected namespace in
+    // that precise phase has no native engine to run P4 media work yet. Validate
+    // the original control guard before returning this no-operation decision.
+    func policyMediaAwaitsCreation(_ sdk: String, execution: CoreCloudPolicyExecution) async throws -> Bool {
+        guard let pending = creatingSDKRegistration else { return false }
+        let registration = try await pending.task.value
+        func awaitingCreation() -> Bool {
+            creatingSDKRegistration === pending && registration.instanceID == sdk
+                && current == nil && owned[sdk] == nil
+        }
+        guard awaitingCreation() else { return false }
+        try await execution.validateControl()
+        return awaitingCreation()
     }
     func sendPolicyMedia(execution: CoreCloudPolicyExecution) async throws {
         guard let origin = try await execution.originalSDK(), let instance = owned[origin], await valid(origin) else {

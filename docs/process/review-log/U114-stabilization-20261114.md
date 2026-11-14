@@ -107,3 +107,65 @@ The review identifies preparation-to-registration media ordering as an
 unproved interval, not an established cause. Round four remains available
 for that finding. U113, P24, signed delivery and the batch gate remain open.
 No Unit trailer or acceptance claim.
+
+## Fourth stabilization round
+
+Base: `1ae90c34`. This uses the second round approved by
+`cloud-recovery-extension-20261114.md`; earlier counts remain unchanged.
+
+| Receipt | Result |
+| --- | --- |
+| swift-test/20261114T124234Z-68059 | Original two cases fail, 15 issues |
+| cleanroom/20261114T125448Z-77155 | First media repair |
+| swift-test/20261114T131457Z-98916 | Two cases pass |
+| swift-test/20261114T131737Z-1035 | Existing 14 native cases pass |
+| cleanroom/20261114T131249Z-96665 | P1 registration handoff; P2 cleanup scope |
+| core-test/20261114T131314Z-97575 | Six cases stop at command setup |
+| core-test/20261114T132334Z-5317 | Explicit test-hooks has the same six failures |
+| cleanroom/20261114T131903Z-2924 | Fixes handoff, cleanup and epoch setup |
+| core-test/20261114T133015Z-8176 | All six focused cases pass |
+
+P4 keeps the token during scheduling changes. Media may do no work while its
+selected native engine is being built. One registration task now provides the
+actual SDK result to both waiters. Failed construction ends this scope before
+cleanup. An earlier prepared command keeps proof of its original SDK's first
+configuration stop. Real errors and ordinary stops retain their own outcomes.
+
+The Rust fixture lacked epoch intake. It now uses the normal record path and
+checks known equal crt, the same SDK and unchanged root proof. The original
+negative assertions remain. B/C fixtures are unchanged.
+
+The final source check and broader tests are pending. Integration changed only
+comments, one test identifier and diagnostic text. It kept every assertion and
+all runtime code. Failed privacy receipts remain available; the guard is intact.
+The historical 095102 owner is unknown. U114 has no acceptance claim.
+
+
+### Final source verification and focused checks
+
+Source review `cleanroom/20261114T132926Z-7227`: no P0/P1/P2 in the export.
+Integration afterward changed comments, one test name and diagnostic text only.
+
+| Receipt | Result |
+| --- | --- |
+| core-test/20261114T133239Z-10934 | FFI suite: 340 pass, 44 fail |
+| core-test/20261114T133629Z-13624 | Clean a887852f comparison: 43 fail, 1 pass |
+| swift-test/20261114T133842Z-15679 | Three native cases pass; cleanup has two failed expectations |
+| swift-test/20261114T134441Z-21181 | Existing 14 native cases pass |
+| static-checks/20261114T134551Z-22939 | Pass |
+| similarity/20261114T134552Z-23199 | Pass, 12 files, zero flags |
+| private/20261114T133846Z-16829 | Final source and log pass |
+
+The export test differs between the broad run and the clean comparison. Its
+Busy and zero-preflight checks passed; its tree comparison failed. Its cause
+remains open. The other 43 failures reproduce on clean master.
+
+The catch performs a cloud refresh. That result belongs in outputs; P10.1 also
+allows a Changes emission. Our new test expects neither. The source/contract
+reading is `build/cloud-resume-diagnosis/U114-cleanup-expectations-reading-20261114.md`.
+Round-four verification will correct those new expectations to check the exact
+refresh and emission. Errors, ACKs, prior IDs and data checks stay required.
+This fixture correction is covered by the extension; runtime code stays fixed.
+
+This is WIP. Required test failures, the historical failure and batch gate remain
+recorded. There is no Unit or release acceptance.

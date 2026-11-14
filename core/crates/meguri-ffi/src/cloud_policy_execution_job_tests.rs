@@ -1732,7 +1732,26 @@ fn generic_started_job_rechecks_command_and_sdk_after_existing_pool_wait() {
     }
 }
 
-fn original_attempt_command(policy: &Arc<CloudPolicy>, media: bool) -> Arc<CloudPolicyCommand> {
+fn original_attempt_command(fixture: &Fixture, policy: &Arc<CloudPolicy>, media: bool) -> Arc<CloudPolicyCommand> {
+    // P6 needs an accepted complete epoch, independently of Active/root proof.
+    // The baseline has no epoch observation. Intake uses the actual live SDK.
+    let driver = fixture.workflow.host.cloud_policy_driver().unwrap();
+    let sdk = driver.state().engine.unwrap().instance;
+    let zone = c::adapter::collection_zone(fixture.workflow.core.status().unwrap().binding.unwrap().facts.epoch);
+    let root_confirmed = fixture.workflow.core.sdk_root_confirmed();
+    fixture.workflow.fetched(sdk.clone(), zone, vec![CloudRecord {
+        name: "epoch".into(),
+        envelope: fixture.workflow.core.bound_epoch_bytes_for_testing(0, false).unwrap(),
+        system_fields: Some(vec![1]),
+        record_type: Some("MGEpoch".into()),
+        ..Default::default()
+    }], vec![]).unwrap();
+    policy.clone().input(CloudPolicyEvent::Refresh { cause: CloudPolicyChangeCause::Cloud }).unwrap();
+    let state = driver.state();
+    assert!(state.facts.summary.crt_known && !state.facts.summary.crt_mismatch);
+    assert!(state.gate_open());
+    assert_eq!(state.engine.as_ref().unwrap().instance, sdk);
+    assert_eq!(fixture.workflow.core.sdk_root_confirmed(), root_confirmed);
     commands(
         policy
             .clone()
@@ -1768,7 +1787,7 @@ fn original_attempt_command(policy: &Arc<CloudPolicy>, media: bool) -> Arc<Cloud
 fn original_attempt_detail_retains_refusal_and_failed_terminal_across_reuse_pause_and_close() {
     for media in [false, true] {
         let (fixture, policy, _, _) = admission_fixture(AdmissionKind::Send);
-        let command = original_attempt_command(&policy, media);
+        let command = original_attempt_command(&fixture, &policy, media);
         let events = fixture.workflow.host.engine().stream().subscribe();
         let pool = hold_pool(&fixture);
         // Queue the actual original command before Pause, not a replacement guard.
@@ -1859,7 +1878,7 @@ fn original_attempt_detail_retains_refusal_and_failed_terminal_across_reuse_paus
 #[test]
 fn original_attempt_detail_current_wrong_action_then_pause_remains_unqualified() {
     let (fixture, policy, _, _) = admission_fixture(AdmissionKind::Send);
-    let media = original_attempt_command(&policy, true);
+    let media = original_attempt_command(&fixture, &policy, true);
     let events = fixture.workflow.host.engine().stream().subscribe();
     // A genuinely issued CURRENT native command sent to the core-action port.
     let invalid = policy.clone().start_execute_core(media.clone()).unwrap();
@@ -1889,7 +1908,7 @@ fn original_attempt_detail_current_wrong_action_then_pause_remains_unqualified()
 fn original_attempt_detail_queued_cancellation_and_generation_rejection_never_qualify() {
     for replace in [false, true] {
         let (fixture, policy, _, _) = admission_fixture(AdmissionKind::Send);
-        let command = original_attempt_command(&policy, false);
+        let command = original_attempt_command(&fixture, &policy, false);
         let engine = fixture.workflow.host.engine();
         let events = engine.stream().subscribe();
         let pool = hold_pool(&fixture);
@@ -1922,7 +1941,7 @@ fn original_attempt_detail_queued_cancellation_and_generation_rejection_never_qu
 #[test]
 fn original_attempt_detail_foreign_facade_cannot_admit_or_qualify_command() {
     let (fixture, original, _, _) = admission_fixture(AdmissionKind::Send);
-    let command = original_attempt_command(&original, false);
+    let command = original_attempt_command(&fixture, &original, false);
     let (foreign_fixture, foreign, _, _) = admission_fixture(AdmissionKind::Send);
     assert!(!Arc::ptr_eq(&original, &foreign));
     let before = [&fixture, &foreign_fixture].map(|fixture| {
@@ -1947,11 +1966,72 @@ fn original_attempt_detail_foreign_facade_cannot_admit_or_qualify_command() {
 }
 
 #[test]
+fn media_start_checks_original_lifetime() {
+    for mode in ["configure", "ordinaryFirst", "guardChanged", "earlierIncomplete"] {
+        let (fixture, policy, _, sdk) = admission_fixture(if mode == "earlierIncomplete" {
+            AdmissionKind::Started
+        } else { AdmissionKind::Send });
+        let sdk = sdk.unwrap();
+        let command = original_attempt_command(&fixture, &policy, true);
+        let execution = policy.clone().prepare_execution(command.clone()).unwrap().unwrap();
+        assert_eq!(execution.original_sdk().unwrap().as_deref(), Some(sdk.as_str()));
+        let events = fixture.workflow.host.engine().stream().subscribe();
+        // Root admission fails before the scheduling change. Retain that first
+        // result while exercising a later begin against the same SDK lifetime.
+        let earlier = if mode == "earlierIncomplete" {
+            let job = execution.clone().start_begin_media().unwrap();
+            assert!(matches!(finished(&events, job.handle.id), JobOutcome::Failed { .. }));
+            let expected = CoreError::CloudConnection { failure: crate::cloud_connection::CloudConnectionFailure::Incomplete };
+            assert!(matches!(job.result.result(), Err(error) if error == expected));
+            Some((job, expected))
+        } else { None };
+        if mode == "ordinaryFirst" { fixture.workflow.core.retire_sdk(&sdk, false).unwrap(); }
+        let configure = commands(policy.clone().input(CloudPolicyEvent::Settings {
+            settings: CloudPolicyDeviceSettings { enabled: true, paused: false, automatic: false, media: true },
+        }).unwrap()).into_iter().find(|c| matches!(c.action, CloudPolicyAction::ConfigureAutomatic { on: false })).unwrap();
+        let configure = policy.clone().prepare_execution(configure.handle).unwrap().unwrap();
+        assert_eq!(configure.original_sdk().unwrap().as_deref(), Some(sdk.as_str()));
+        configure.retire_original().unwrap();
+        fixture.workflow.core.release_sdk(&sdk).unwrap();
+        // A successor exists in Core, as at the native factory gate. Never
+        // resample it to fill the prepared original's namespace or lifetime.
+        let successor = configure.register_sdk().unwrap();
+        assert_ne!(successor.instance_id, sdk);
+        if mode == "guardChanged" { fixture.workflow.core.adapter_pause(true).unwrap(); }
+        let before = fixture.workflow.core.emitted_update_ids();
+        let cycles = fixture.workflow.host.cloud_policy_driver().unwrap().state().cycles;
+        let job = execution.start_begin_media().unwrap();
+        let outcome = finished(&events, job.handle.id);
+        let detail = job.result.detailed_result().unwrap().unwrap();
+        assert!(detail.original_guard_refusal.is_none());
+        if mode == "ordinaryFirst" || mode == "guardChanged" {
+            assert!(matches!(outcome, JobOutcome::Failed { .. }));
+            assert!(detail.value.is_none() && detail.error.is_some());
+            assert!(matches!(job.result.result(), Err(error) if Some(&error) == detail.error.as_ref()));
+        } else {
+            assert_eq!(outcome, JobOutcome::Succeeded);
+            assert_eq!(detail.value, Some(false));
+            assert!(detail.error.is_none());
+            assert_eq!(job.result.result(), Ok(Some(false)));
+        }
+        if let Some((earlier, expected)) = earlier {
+            let detail = earlier.result.detailed_result().unwrap().unwrap();
+            assert_eq!(detail.error, Some(expected.clone()));
+            assert!(detail.value.is_none() && detail.original_guard_refusal.is_none());
+            assert!(matches!(earlier.result.result(), Err(error) if error == expected));
+        }
+        assert_eq!(fixture.workflow.core.emitted_update_ids(), before);
+        assert_eq!(fixture.workflow.host.cloud_policy_driver().unwrap().state().cycles, cycles);
+        fixture.workflow.host.close().unwrap();
+    }
+}
+
+#[test]
 fn original_attempt_current_invalid_media_and_retired_or_missing_sdk_never_qualify() {
     for condition in 0..3 {
         let (fixture, policy, _, sdk) = admission_fixture(AdmissionKind::Send);
         let sdk = sdk.unwrap();
-        let command = original_attempt_command(&policy, true);
+        let command = original_attempt_command(&fixture, &policy, true);
         let execution = policy.clone().prepare_execution(command).unwrap().unwrap();
         match condition {
             0 => {
