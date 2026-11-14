@@ -100,3 +100,8 @@ that is not an Error. The R7 export is retained for its final repair; it is
 removed from this WIP checkpoint. No diagnostic test pass is inferred.
 The combined privacy scan `private/20261114T164240Z-36411` flags four R7
 files and no diagnostic file. Earlier failed scans remain retained.
+
+Checkpoint `f4b3160d`: `static-checks/20261114T164611Z-38022` passes.
+Similarity `20261114T164614Z-38371` scans eight files with no flags; the
+review log is outside its source scope. Normal app wiring is a separate
+filtered implementation pass. This checkpoint remains WIP.

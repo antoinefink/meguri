@@ -124,3 +124,32 @@ The unit remains unaccepted. A proposal for at most rounds 7–8 is prepared
 in `build/cloud-resume-diagnosis/U113-integration-rounds-owner-decision-20261114.md`.
 Further U113 source repair needs the owner's decision. Independent app work
 continues while that decision waits.
+
+## Round 7 integration result
+
+Authority: `cloud-recovery-integration-extension-20261114.md`. The source
+starts at `d793c196`; author `cleanroom/20261114T161216Z-22839` exports
+23 files. The export remains retained locally, pending round 8.
+
+`core-test/20261114T163922Z-34353` ends in error after interruption:
+two tests reported pass, five failed, and the adoption test was still running
+past 120 seconds. Its result is not a suite pass. The failures include invalid
+sent-creation Undo expectations, fixture counts, cancellation, and incomplete
+adoption. `swift-test/20261114T164225Z-35243` fails compilation in the new
+coordinator guard, which throws a value that is not an Error.
+
+Independent review `cleanroom/20261114T163901Z-33878`: HOLD, no P0,
+three P1 findings. Field/template pages lack a byte bound; publication Cancel
+is unavailable in valid waiting states; sent-creation Undo tests contradict
+the existing send barrier. Coverage for replacement scope, restart, mixed
+work and native actions is incomplete. Two P2 findings concern typed Busy
+presentation and Stop cancelling an operation implicitly.
+
+The reviewer inspected operation-specific cleanup and found no source defect
+that deletes the old work before success. Execution coverage remains open.
+`private/20261114T164240Z-36411` rejects comments in four R7 files; those
+comments must be rewritten with the guard unchanged.
+
+Round 8 starts at `f4b3160d` from the complete retained R7 export and the
+review report. This is the final authorized round. No Unit, P24, gate or
+release acceptance is claimed.
