@@ -38,3 +38,14 @@ Rust lint 20261114T221213Z-80071 passed all three checks. Similarity
 20261114T221217Z-80348 scanned all four files with no findings. Only its
 implementation report was read. The unit, CloudKit acceptance lanes and full batch gate
 remain open.
+
+## Safe failure observation
+
+Filtered diagnostic run 20261114T221353Z-81141 changes only the test helper:
+it now compares the payload-free public failure enum directly. It still
+rejects success and every other error family, without printing arbitrary
+error data. Integrator inspection confirmed equivalent exact-match checks.
+Focused observation 20261114T221537Z-84173 retained all four failures and
+showed AuthorityChanged instead of FileIdentityUnavailable in each. This is
+an observation, not a repair or a decision to change the expected result.
+Privacy 20261114T221658Z-84941 and similarity 20261114T221702Z-85201 passed.

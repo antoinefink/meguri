@@ -550,7 +550,11 @@ impl CloudPublicationQueue for Queue {
     }
 }
 fn failure_is<T>(result: Result<T, CoreError>, expected: CloudConnectionFailure) {
-    assert!(matches!(result, Err(CoreError::CloudConnection { failure }) if failure == expected));
+    match result {
+        Err(CoreError::CloudConnection { failure }) => assert_eq!(failure, expected),
+        Err(_) => panic!("expected CloudConnection failure, received another error family"),
+        Ok(_) => panic!("expected CloudConnection failure, received success"),
+    }
 }
 fn control(v: p::ControlRecord) -> CloudControlRecord {
     CloudControlRecord {
