@@ -174,3 +174,18 @@ Independent review `cleanroom/20261114T171100Z-51496` is running. Native
 integration, the full cleanup-scope matrix, required wider checks and the
 peer round trip remain open. Both authorized rounds are used. This saves
 partial work and failure evidence; it does not accept the unit or any gate.
+
+### Final round-8 review
+
+`cleanroom/20261114T171100Z-51496`: no P0, three P1s remain. The ordinary
+selector excludes note types; identity invalidation loses the outstanding-save
+barrier; adoption waiting for review offers no Cancel. Two P2s concern progress
+cancellation and its required confirmation. The cleanup-scope matrix remains
+incomplete. The unit is not accepted.
+
+A separate read-only audit distinguishes fixture proof gaps from product
+failures and leaves the exact bootstrap constraint unresolved. Native
+`swift-test/20261114T172338Z-60626` passes all nine focused tests. It follows
+retention of a generated test bundle left by a failed compile; the failed
+signing run is retained. Similarity `20261114T172007Z-59022` scans 23 source
+files with no flags. No wider gate or peer pass follows from these controls.

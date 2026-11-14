@@ -13,6 +13,7 @@
 - A readable stat/signature does not grant app-data access. Preserve privacy refusals; normal-app media diagnostics use explicit `prepare-ui` plus an authorized Finder copy, never a raw-container fallback.
 
 - For long jobs, save stdout/stderr to a file. Lost session handle: check PID/result before relaunching.
+- A failed Swift compile can leave `.cstemp` files inside generated test bundles and break the next CodeSign step. After Apple jobs end, retain the affected bundle outside the generated products directory and let MG rebuild it; never re-sign it by hand. Keep the failed receipts.
 - Use `NSUnbufferedIO=YES` for `swift-test` diagnostics so active test cases and failures remain visible during a stalled run.
 
 - APFS directory `st_nlink` changes when entries are added. Pin directory device/inode/mode and nofollow bindings; keep regular-file link limits separate.
