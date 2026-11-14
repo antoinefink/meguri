@@ -454,7 +454,11 @@ fn connection_successful_suspend_then_close_uses_retained_adoption_tracking_and_
             let version: i64 = db
                 .query_row("SELECT version FROM cloud_publication_schema", [], |row| row.get(0))
                 .unwrap();
-            assert_eq!(version, 3, "actual Runtime installation must use publication V3");
+            assert_eq!(version, 4, "actual Runtime installation must use publication V4");
+            db.prepare(
+                "SELECT binding,epoch_knowledge,status,active_system_fields FROM cloud_root_readability LIMIT 0",
+            )
+            .expect("actual publication V4 installation must include the root-readability ledger");
         }
         assert_eq!(
             host.engine().suspend(Duration::from_secs(5)).unwrap(),
@@ -468,7 +472,7 @@ fn connection_successful_suspend_then_close_uses_retained_adoption_tracking_and_
         assert_eq!(
             fixture.workflow.core.adoption_op_for_host_close(host.engine()).unwrap(),
             Some(op),
-            "retained V3 reopen must preserve the exact adoption instead of RecoveryRefused"
+            "retained V4 reopen must preserve the exact adoption instead of RecoveryRefused"
         );
         if fail_cleanup {
             let path = collection.path();
@@ -535,19 +539,19 @@ fn connection_suspended_adoption_close_refuses_missing_replaced_or_older_store_w
         let publication_change = match change {
             "publication-v2" => Some((
                 "UPDATE cloud_publication_schema SET version=2",
-                "UPDATE cloud_publication_schema SET version=3",
+                "UPDATE cloud_publication_schema SET version=4",
             )),
             "publication-newer" => Some((
+                "UPDATE cloud_publication_schema SET version=5",
                 "UPDATE cloud_publication_schema SET version=4",
-                "UPDATE cloud_publication_schema SET version=3",
             )),
             "publication-empty" => Some((
                 "DELETE FROM cloud_publication_schema",
-                "INSERT INTO cloud_publication_schema VALUES(3)",
+                "INSERT INTO cloud_publication_schema VALUES(4)",
             )),
             "publication-duplicate" => Some((
-                "INSERT INTO cloud_publication_schema VALUES(3)",
-                "DELETE FROM cloud_publication_schema; INSERT INTO cloud_publication_schema VALUES(3)",
+                "INSERT INTO cloud_publication_schema VALUES(4)",
+                "DELETE FROM cloud_publication_schema; INSERT INTO cloud_publication_schema VALUES(4)",
             )),
             "publication-missing-ledger" => Some((
                 "ALTER TABLE cloud_epoch_crt RENAME TO parked_epoch_crt",
