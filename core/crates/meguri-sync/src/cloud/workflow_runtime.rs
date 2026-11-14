@@ -1492,10 +1492,13 @@ impl Runtime {
                 }
                 if (e.acked_tombstone() && e.kind != codec::Kind::MediaName)
                     || e.mark.is_none()
+                    // Ordinary structural deletion has no supported generation path.
+                    || (!publishing && e.kind == codec::Kind::Notetype && e.tombstone_at.is_some())
                     || (!publishing
                         && !matches!(
                             e.kind,
                             codec::Kind::Note
+                                | codec::Kind::Notetype
                                 | codec::Kind::Card
                                 | codec::Kind::Revlog
                                 | codec::Kind::Deck

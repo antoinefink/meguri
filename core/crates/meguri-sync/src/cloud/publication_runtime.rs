@@ -1160,54 +1160,56 @@ impl Runtime {
             s.publication.waiting = true;
             return Ok(());
         }
-        // Reject stale replies before consulting the host clock. Recheck after
-        // provider reads, since they run outside Runtime/tracking locks.
+        // Only this exact original delivery settles its outstanding attempt.
+        // Account/lifecycle invalidation can refuse its facts, never supply a
+        // completion. Keep ownership across provider reads and recheck it after.
         {
             let s = self.state();
-            if s.publication.running.as_ref() != Some(request)
-                || !s.publication.submitted
-                || s.incarnation != request.incarnation
-                || Self::instance_locked(&s)? != request.instance
-                || collection.generation().0 != request.generation
-                || !collection.is_current()
-            {
+            if s.publication.running.as_ref() != Some(request) || !s.publication.submitted {
                 return Err(RuntimeError::StaleIncarnation);
             }
         }
-        // Provider/sidecar access occurs before acquiring either writer-shared lock.
-        let account = self.publication_account()?;
-        let file = self.inputs.files.identity(collection.path())?;
-        let decision = self.publication_decision()?;
-        let now = self.adapter_now()?;
+        let account = self.publication_account();
+        let file = self.inputs.files.identity(collection.path());
+        let decision = self.publication_decision();
+        let now = self.adapter_now();
         let mut s = self.state();
-        if s.publication.running.as_ref() != Some(request)
-            || !s.publication.submitted
-            || s.incarnation != request.incarnation
-            || Self::instance_locked(&s)? != request.instance
+        if s.publication.running.as_ref() != Some(request) || !s.publication.submitted {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        s.publication.running = None;
+        s.publication.submitted = false;
+        s.publication.waiting = true;
+        if s.incarnation != request.incarnation
+            || Self::instance_locked(&s).ok().as_ref() != Some(&request.instance)
             || collection.generation().0 != request.generation
             || !collection.is_current()
+            || s.tracking_stopped
         {
             return Err(RuntimeError::StaleIncarnation);
         }
+        let account = account?;
+        let file = file?;
+        let decision = decision?;
+        let now = now?;
         if request.kind == OwnKind::ReadResetMediaRoot
             && s.publication.reset_root_read_guard.as_ref() != Some(&Self::adapter_guard_locked(&s))
         {
             return Err(RuntimeError::StaleIncarnation);
         }
-        s.publication.running = None;
         let mut op = with_tracking_access(|| s.store.as_ref().ok_or(Error::Database)?.publication_op())?
             .filter(|o| o.id == request.op)
             .ok_or(RuntimeError::StaleIncarnation)?;
         if account != op.account
             || file != op.confirmed_file
             || decision != op.decision_written(&self.inputs.scope)?
-            || !s
-                .bound
-                .as_ref()
-                .is_some_and(|b| Some(b.binding.id) == op.binding_after && b.usable && b.verified)
+            || !s.bound.as_ref().is_some_and(|b| {
+                Some(b.binding.id) == op.binding_after && b.usable && b.verified
+            })
         {
             return Err(RuntimeError::StaleIncarnation);
         }
+        s.publication.waiting = false;
         if let OwnResult::ZoneLosses(losses) = &result {
             use crate::cloud::adapter::ZoneLossCause;
             if losses.is_empty()

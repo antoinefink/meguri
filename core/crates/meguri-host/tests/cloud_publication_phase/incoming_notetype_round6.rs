@@ -136,6 +136,8 @@ fn ordinary_notetype_native_add_and_clone_after_publication_bootstrap_and_reopen
         assert_eq!(current.payload, entity.payload);
         assert_eq!(current.acked_rev, 0);
     }
+    // Establish the actual current-open send gate before testing dependencies.
+    confirm_current_service_active(&host, &mut service);
     // Deliver through ordinary batches, in real reference dependency order.
     let runtime = host.cloud_runtime().unwrap();
     let collection = host.collection().unwrap();

@@ -669,6 +669,7 @@ pub struct CloudRecoveryStatus {
     pub switch_conflict: bool,
     pub retry_after_ms: Option<i64>,
     pub adoption_transport_wait: bool,
+    pub adoption_cancellable: bool,
     pub publication_conflict_cancellable: bool,
     pub publication_cancellable: bool,
 }
@@ -1103,6 +1104,7 @@ impl CloudConnection {
                 switch_conflict: false,
                 retry_after_ms: op.retry_after_ms,
                 adoption_transport_wait: op.transport_wait,
+                adoption_cancellable: self.owner.host.cloud_adoption_cancellable(op.id).map_err(error)?,
                 publication_conflict_cancellable: false,
                 publication_cancellable: false,
             }));
@@ -1128,6 +1130,7 @@ impl CloudConnection {
                     switch_conflict: op.switch_conflict.is_some(),
                     retry_after_ms: op.retry_after_ms,
                     adoption_transport_wait: false,
+                    adoption_cancellable: false,
                     publication_conflict_cancellable: cancellable,
                     publication_cancellable: self.owner.core.publication_cancellable(op.id).map_err(error)?,
                 })

@@ -235,6 +235,7 @@ enum SyncStatusCopy {
 struct CloudRecoveryContent: View {
     let collection: ReviewCollection
     let recovery: CloudRecoveryStatus
+    private var cancellable: Bool { recovery.adoptionCancellable || recovery.publicationCancellable }
     var body: some View {
         Text(SyncText.value(stepKey))
             .accessibilityIdentifier("sync.recovery.status")
@@ -248,12 +249,8 @@ struct CloudRecoveryContent: View {
         }
             .disabled(recovery.switchConflict || recovery.step == .cancelling || collection.sync.settings.paused)
             .accessibilityIdentifier("sync.recovery.resume")
-        // Eligibility comes from the native operation's accepted outcome.
-        Button(SyncText.value("sync.action.cancelOp")) {
-            Task { await collection.sync.cancelConnectionOperation() }
-        }.disabled(!recovery.adoptionTransportWait && !recovery.publicationCancellable)
-            .accessibilityIdentifier("sync.recovery.cancel")
-        if !recovery.adoptionTransportWait && !recovery.publicationCancellable {
+        CloudRecoveryCancelButton(collection: collection, recovery: recovery)
+        if !cancellable {
             Text(SyncText.value("sync.recovery.error.notOffered")).foregroundStyle(.secondary)
                 .accessibilityIdentifier("sync.recovery.cancelUnavailableReason")
         }
@@ -267,5 +264,51 @@ struct CloudRecoveryContent: View {
         case .staging: "sync.adopt.staging"
         case .staged: "sync.adopt.validating"
         }
+    }
+}
+
+struct CloudRecoveryCancelButton: View {
+    let collection: ReviewCollection
+    let recovery: CloudRecoveryStatus
+    var label = SyncText.value("sync.action.cancelOp")
+    var identifier = "sync.recovery.cancel"
+    var onCancelled: (() -> Void)?
+    @State private var confirmingCancellation = false
+    @State private var cancellation: CloudRecoveryCancellation?
+    @State private var cancelling = false
+    private var cancellable: Bool { recovery.adoptionCancellable || recovery.publicationCancellable }
+    private var adoption: Bool {
+        switch cancellation?.recovery.step ?? recovery.step {
+        case .staging, .staged, .ready: true
+        default: false
+        }
+    }
+    var body: some View {
+        Button(label) {
+            cancelling = true
+            Task {
+                cancellation = await collection.sync.prepareConnectionCancellation()
+                cancelling = false
+                confirmingCancellation = cancellation != nil
+            }
+        }.disabled(!cancellable || cancelling)
+            .accessibilityIdentifier(identifier)
+            .confirmationDialog(SyncText.value(adoption ? "sync.cancelOp.adopt.title" : "sync.cancelOp.publish.title"),
+                                isPresented: $confirmingCancellation, titleVisibility: .visible) {
+                Button(SyncText.value("sync.cancelOp.confirm"), role: .destructive) {
+                    guard let cancellation else { return }
+                    cancelling = true
+                    Task {
+                        await collection.sync.cancelConnectionOperation(confirmation: cancellation)
+                        cancelling = false
+                        if collection.sync.connectionFailure == nil, collection.sync.recovery == nil { onCancelled?() }
+                    }
+                }.disabled(!cancellable || cancelling)
+                Button(SyncText.value("sync.cancelOp.keep"), role: .cancel) { }
+            } message: {
+                if let cancellation {
+                    Text(SyncText.value(SyncStatusPresentation.cancellationMessageKey(cancellation.recovery)))
+                }
+            }
     }
 }

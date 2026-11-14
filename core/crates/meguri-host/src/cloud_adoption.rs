@@ -172,6 +172,10 @@ impl CoreHost {
             self.engine(),
         )
     }
+    pub fn cloud_adoption_cancellable(&self, id: [u8; 16]) -> Result<bool, RuntimeError> {
+        self.cloud_adoption_collection()?;
+        self.cloud_runtime().ok_or_else(unavailable)?.cloud_adoption_cancellable(id)
+    }
     pub fn cancel_cloud_adoption(&self, id: [u8; 16]) -> Result<(), RuntimeError> {
         self.cloud_runtime()
             .ok_or_else(unavailable)?

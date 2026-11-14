@@ -48,6 +48,7 @@ fn native_notetype_add_clone_undo_redo_unsent_handed_and_accepted_reopen() {
                 assert_eq!(restored.acked_rev, 0);
                 assert!(restored.mark.is_some() && restored.acked_payload.is_none() && restored.base_payload.is_none());
             } else {
+                runtime.require_collection_sending().unwrap();
                 let instance = runtime.instance().unwrap();
                 let batch = runtime.build_collection_batch(&instance, &collection, &BTreeSet::from([name.clone()])).unwrap();
                 assert_eq!(batch.saves.len(), 1);
@@ -162,6 +163,9 @@ fn replacement_blocked_ordinary_worker() {
 }
 
 fn blocked_replacement(root: &Path) -> (CoreHost, Service<SeededRandom>, cloud::Binding, Vec<cloud::incoming::ApplyIntent>) {
+    blocked_replacement_with_random(root, None)
+}
+fn blocked_replacement_with_random(root: &Path, random: Option<Arc<dyn RandomSource>>) -> (CoreHost, Service<SeededRandom>, cloud::Binding, Vec<cloud::incoming::ApplyIntent>) {
     use std::os::unix::process::ExitStatusExt;
     let status = std::process::Command::new(std::env::current_exe().unwrap())
         .args(["--exact", "incoming_notetype::round7::replacement_blocked_ordinary_worker", "--nocapture"])
@@ -171,7 +175,7 @@ fn blocked_replacement(root: &Path) -> (CoreHost, Service<SeededRandom>, cloud::
     let db = PlainDatabase::open(&dir.join("collection.anki2")).unwrap();
     db.execute_batch("BEGIN IMMEDIATE; UPDATE templates SET ord=-ord-1 WHERE ntid IN (SELECT ntid FROM templates GROUP BY ntid HAVING count(*)=2); UPDATE templates SET ord=ord+2 WHERE ord<0; COMMIT").unwrap();
     db.close().unwrap();
-    let host = open_host(&dir, keys());
+    let host = open_host_with_random(&dir, keys(), Arc::new(Account), scope(), random);
     let binding = host.cloud_runtime().unwrap().status().unwrap().binding.unwrap();
     prove_reopened_binding(&host, &binding);
     host.prepare_cloud_runtime(Duration::from_secs(30)).unwrap();
@@ -219,7 +223,10 @@ fn adoption_reply(service: &mut Service<SeededRandom>, epoch: cloud::EpochId, ta
 #[test]
 fn publication_retains_blocked_work_until_switch_acceptance() {
     let temp = tempfile::tempdir().unwrap();
-    let (host, mut service, binding, intents) = blocked_replacement(temp.path());
+    // The aborted producer used stream 91. This scenario's parent has its own
+    // continuous stream, shared by every real reopen; retained producer IDs stay.
+    let random: Arc<dyn RandomSource> = Arc::new(SeededRandom::new(11310));
+    let (host, mut service, binding, intents) = blocked_replacement_with_random(temp.path(), Some(random.clone()));
     let runtime = host.cloud_runtime().unwrap();
     let collection = host.collection().unwrap();
     let preview = actual_preview(&host, &mut service, &scope());
@@ -232,7 +239,7 @@ fn publication_retains_blocked_work_until_switch_acceptance() {
     assert_eq!(runtime.apply_intents(binding.id).unwrap(), intents);
     assert!(runtime.register_sdk(true).is_err());
     host.close().unwrap(); drop(collection); drop(host);
-    let host = open_host(&temp.path().join("device"), keys());
+    let host = open_host_with_random(&temp.path().join("device"), keys(), Arc::new(Account), scope(), Some(random.clone()));
     prove_reopened_binding(&host, &binding);
     host.prepare_cloud_runtime(Duration::from_secs(30)).unwrap();
     let runtime = host.cloud_runtime().unwrap();
@@ -273,6 +280,17 @@ fn publication_retains_blocked_work_until_switch_acceptance() {
     assert!(runtime.publication_op().unwrap().is_none());
     assert!(matches!(runtime.apply_intents(binding.id), Err(cloud::runtime::RuntimeError::Tracking(cloud::Error::BindingNotFound))));
     assert!(matches!(runtime.inbox_entries(binding.id), Err(cloud::runtime::RuntimeError::Tracking(cloud::Error::BindingNotFound))));
+    let accepted_type = runtime.entity_facts(&codec::entity_name(&new_binding.facts.record_key.0,
+        codec::Kind::Notetype, &codec::id_key(local_type.0)).unwrap()).unwrap().unwrap();
+    host.close().unwrap(); drop(collection); drop(host);
+    let host = open_host_with_random(&temp.path().join("device"), keys(), Arc::new(Account), scope(), Some(random));
+    prove_reopened_binding(&host, &new_binding);
+    let runtime = host.cloud_runtime().unwrap();
+    assert!(runtime.publication_op().unwrap().is_none());
+    assert!(matches!(runtime.apply_intents(binding.id), Err(cloud::runtime::RuntimeError::Tracking(cloud::Error::BindingNotFound))));
+    let reopened_type = runtime.entity_facts(&accepted_type.name).unwrap().unwrap();
+    assert_eq!(reopened_type, accepted_type);
+    assert_eq!((nt(&reopened_type).fields.len(), nt(&reopened_type).templates.len()), (3, 1));
     host.close().unwrap();
 }
 
@@ -307,6 +325,55 @@ fn adoption_retains_blocked_work_until_activation() {
         }
         assert!(host.cloud_runtime().unwrap().adoption_op().unwrap().is_none());
     }
+    host.close().unwrap();
+}
+
+#[test]
+fn adoption_started_review_during_staging_ready_wait_session_ended_offers_guarded_cancel() {
+    use cloud::adoption::{AdoptStep, AdoptionTask as T};
+    use meguri_engine::session::StartResult;
+    use meguri_model::ids::DeckId;
+    let temp = tempfile::tempdir().unwrap();
+    let (host, mut service, binding, intents) = blocked_replacement(temp.path());
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let preview = actual_preview(&host, &mut service, &scope());
+    let operation = host.confirm_cloud_adoption(&preview).unwrap();
+    assert_eq!(runtime.adoption_op().unwrap().unwrap().step, AdoptStep::Staging);
+    assert!(host.cloud_adoption_cancellable(operation).unwrap());
+    let Payload::Card(card) = runtime.entity_facts_page(codec::Kind::Card, None).unwrap().remove(0).payload else { panic!("published card"); };
+    let StartResult::Started { session_id, .. } = host.review().start(DeckId(card.did), None).unwrap() else { panic!("review can begin during staging"); };
+    let mut ready_wait = false;
+    for _ in 0..32 {
+        match host.next_cloud_publication_work().unwrap() {
+            PublicationWork::Adoption(work) => {
+                let op = runtime.adoption_op().unwrap().unwrap();
+                assert_ne!(work.task, T::Activate, "active review holds activation");
+                if work.task == T::Validate { host.perform_cloud_adoption_local(&work).unwrap(); }
+                else { host.cloud_adoption_reply(&work, adoption_reply(&mut service, op.epoch, &work.task)).unwrap(); }
+            }
+            PublicationWork::Idle => {
+                let op = runtime.adoption_op().unwrap().unwrap();
+                assert_eq!(op.step, AdoptStep::Ready);
+                assert!(!op.transport_wait);
+                assert!(host.cloud_adoption_cancellable(operation).unwrap());
+                ready_wait = true;
+                break;
+            }
+            _ => panic!("adoption owns this workflow"),
+        }
+    }
+    assert!(ready_wait, "actual validation must reach Ready waiting for SessionEnded");
+    assert!(host.review().active_session().is_some());
+    host.cancel_cloud_adoption(operation).unwrap();
+    assert!(runtime.adoption_op().unwrap().is_none());
+    assert_eq!(host.engine().slot_holder(), None);
+    assert_eq!(host.collection().unwrap().generation(), collection.generation());
+    assert_eq!(runtime.status().unwrap().binding.unwrap().id, binding.id);
+    assert!(runtime.require_collection_sending().is_err(), "restored binding still requires current-open root proof");
+    assert_eq!(runtime.apply_intents(binding.id).unwrap(), intents);
+    assert!(runtime.register_sdk(true).is_err(), "cancellation preserves the original layout refusal");
+    host.review().end(session_id).unwrap();
     host.close().unwrap();
 }
 
@@ -364,6 +431,7 @@ fn published_native_notetype_local_edit_undo_redo_send_accept_and_reopen() {
         let name = codec::entity_name(&binding.facts.record_key.0, codec::Kind::Notetype, &codec::id_key(id.0)).unwrap();
         let runtime = host.cloud_runtime().unwrap();
         let collection = host.collection().unwrap();
+        runtime.require_collection_sending().unwrap();
         let instance = runtime.instance().unwrap();
         let batch = runtime.build_collection_batch(&instance, &collection, &BTreeSet::from([name.clone()])).unwrap();
         assert_eq!(batch.saves.len(), 1);
@@ -501,6 +569,7 @@ fn published_note_deletion_unsent_undo_redo_then_tombstone_send_accept_reopen() 
     let host = open_host(&dir, keys());
     prove_reopened_binding(&host, &binding);
     host.prepare_cloud_runtime(Duration::from_secs(30)).unwrap();
+    confirm_current_service_active(&host, &mut service);
     let runtime = host.cloud_runtime().unwrap();
     let batch = runtime.build_collection_batch(&start(&host), &host.collection().unwrap(), &BTreeSet::from([original.name.clone()])).unwrap();
     assert_eq!(batch.saves.len(), 1);

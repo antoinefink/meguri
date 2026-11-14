@@ -368,6 +368,12 @@ private struct AdmittedCloudOwnQueue: CloudPublicationQueue {
     func enqueue() -> Bool { admission.enqueue(operation) }
 }
 
+public struct CloudRecoveryCancellation: Sendable {
+    public let recovery: CloudRecoveryStatus
+    fileprivate let owner: UUID
+    fileprivate let workRevision: UInt64
+}
+
 /// Runs outside CKSyncEngine event delivery. Own requests always cross Rust's
 /// submit guard after their last suspension and immediately before queue add.
 public actor CloudOwnExecutor {
@@ -378,6 +384,10 @@ public actor CloudOwnExecutor {
     private var active: (id: UUID, task: Task<CloudConnectionProgress, any Error>)?
     private var prepared: (any CloudPreparedOwnOperation)?
     private var previewTask: Task<CloudConnectionPreviewWork, any Error>?
+    private let cancellationOwner = UUID()
+    private var workRevision: UInt64 = 0
+    private var selectingPublicationWork = false
+    private var outstandingSwitch: CloudPublicationRequest?
     private var stopping = false
     private var closed = false
     #if DEBUG
@@ -570,7 +580,19 @@ public actor CloudOwnExecutor {
         #if DEBUG
         recordWorkStage(.nextPublicationWork)
         #endif
-        let work = try await core.nextPublicationWork()
+        try checkStopping()
+        workRevision &+= 1
+        selectingPublicationWork = true
+        let work: CloudPublicationWork
+        do { work = try await core.nextPublicationWork() }
+        catch { selectingPublicationWork = false; throw error }
+        selectingPublicationWork = false
+        if case .own(let request, _, _, let metadata) = work, case .saveActive = metadata.kind {
+            outstandingSwitch = request
+        }
+        // Retain the original request through Core's terminal result delivery,
+        // including a refused/stale reply after an identity change.
+        defer { outstandingSwitch = nil }
         try checkStopping()
         try admission?.check()
         switch work {
@@ -784,12 +806,39 @@ public actor CloudOwnExecutor {
         try checkStopping()
         return resumed
     }
-    /// Stop queue admission first, cancel the current operation, then await its
-    /// original reply/delivery before asking Rust to cancel the exact recovery.
-    public func cancel(_ operation: CloudRecoveryOperation) async throws {
+    private func checkCancellationAdmission() throws {
         guard !closed, !stopping else { throw CloudOwnTransportFailure.closed }
+        guard !selectingPublicationWork, outstandingSwitch == nil else {
+            throw BridgeError.cloudConnection(.busy)
+        }
+    }
+    public func prepareCancellation() async throws -> CloudRecoveryCancellation {
+        try checkCancellationAdmission()
+        let revision = workRevision
+        guard let current = try await core.recoveryStatus() else { throw BridgeError.cloudConnection(.notOffered) }
+        try checkCancellationAdmission()
+        guard revision == workRevision else { throw BridgeError.cloudConnection(.busy) }
+        guard current.adoptionCancellable || current.publicationCancellable else { throw BridgeError.cloudConnection(.busy) }
+        return .init(recovery: current, owner: cancellationOwner, workRevision: revision)
+    }
+    /// Refuse an outstanding switch before touching its transport. Otherwise
+    /// close admission, revalidate confirmation, then join the original task.
+    public func cancel(_ operation: CloudRecoveryOperation, confirmation: CloudRecoveryCancellation? = nil) async throws {
+        try checkCancellationAdmission()
+        if let confirmation {
+            guard confirmation.owner == cancellationOwner, confirmation.workRevision == workRevision else {
+                throw BridgeError.cloudConnection(.busy)
+            }
+        }
         stopping = true
         defer { stopping = false }
+        let current = try await core.recoveryStatus()
+        guard let current, current.adoptionCancellable || current.publicationCancellable else {
+            throw BridgeError.cloudConnection(.busy)
+        }
+        if let confirmation, current.switchSent != confirmation.recovery.switchSent {
+            throw BridgeError.cloudConnection(.busy)
+        }
         prepared?.cancel()
         if let active { _ = await active.task.result }
         try await core.cancelOperation(operation)

@@ -1659,6 +1659,19 @@ impl Runtime {
         }
         Ok(())
     }
+    /// The same live owner/task authority consumed by Cancel, including a
+    /// Ready operation waiting for SessionEnded. A step or transport wait alone
+    /// cannot establish that activation has not started.
+    pub fn cloud_adoption_cancellable(&self, id: [u8; 16]) -> Result<bool, RuntimeError> {
+        if !self.adoption_op()?.is_some_and(|op| op.id == id) {
+            return Ok(false);
+        }
+        let Some(owner) = self.adoption.lock().unwrap_or_else(PoisonError::into_inner).clone() else {
+            return Ok(false);
+        };
+        let next = owner.next.lock().unwrap_or_else(PoisonError::into_inner);
+        Ok(next.is_some() && !owner.uncertain_activation.load(std::sync::atomic::Ordering::Acquire))
+    }
     pub fn cancel_cloud_adoption(&self, id: [u8; 16], collection: Option<&Collection>) -> Result<(), RuntimeError> {
         self.cancel_cloud_adoption_with_work(id, collection, &crate::cloud::policy::PolicyWork::default())
     }
@@ -1673,10 +1686,18 @@ impl Runtime {
             .filter(|p| p.id == id)
             .ok_or(PublicationError::NotOffered)?;
         let owner = self.adoption_owner()?;
-        if owner.next.lock().unwrap_or_else(PoisonError::into_inner).is_none() {
-            return Err(PublicationError::Busy.into());
-        }
-        self.abort_adoption_with_work(&op, collection, work)
+        let pending = {
+            let mut next = owner.next.lock().unwrap_or_else(PoisonError::into_inner);
+            if owner.uncertain_activation.load(std::sync::atomic::Ordering::Acquire) {
+                return Err(PublicationError::Busy.into());
+            }
+            // Claim the original pending task before releasing the guard; a
+            // concurrent worker cannot enter activation during cancellation.
+            next.take().ok_or(PublicationError::Busy)?
+        };
+        let result = self.abort_adoption_with_work(&op, collection, work);
+        if result.is_err() { owner.set_next(pending); }
+        result
     }
     pub fn perform_cloud_adoption_local(
         &self,

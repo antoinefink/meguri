@@ -805,6 +805,8 @@ fn assert_adoption_recovery_operation(fixture: Fixture) {
     let before = fixture.workflow.core.adoption_op().unwrap().unwrap();
     let status = connection.recovery_status().unwrap().unwrap();
     assert!(matches!(status.step, CloudRecoveryStep::Staging));
+    assert!(status.adoption_cancellable && !status.publication_cancellable);
+    assert!(!status.adoption_transport_wait);
     assert!(!status.switch_sent && !status.switch_conflict && status.retry_after_ms.is_none());
     assert_eq!(fixture.workflow.core.adoption_op().unwrap().as_ref(), Some(&before));
     let other = fixture.workflow.connection().unwrap();

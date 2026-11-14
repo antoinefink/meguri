@@ -512,6 +512,13 @@ impl TrackingStore {
                 params![before.id.0.as_slice(), encode(&before.facts)?],
             )?;
         }
+        #[cfg(feature = "test-hooks")]
+        let collision = (
+            tx.query_row("SELECT EXISTS(SELECT 1 FROM bindings WHERE id=?1)",
+                [id.0.as_slice()], |r| r.get::<_, bool>(0))?,
+            tx.query_row("SELECT EXISTS(SELECT 1 FROM bindings WHERE container=?1 AND environment=?2 AND active=1)",
+                params![self.scope.container.as_str(), self.scope.environment.code()], |r| r.get::<_, bool>(0))?,
+        );
         tx.execute(
             "INSERT INTO bindings(id,container,environment,created_at_ms,facts) VALUES(?1,?2,?3,?4,?5)",
             params![
@@ -521,7 +528,21 @@ impl TrackingStore {
                 now,
                 encode(&b.facts)?
             ],
-        )?;
+        ).inspect_err(|_error| {
+            #[cfg(feature = "test-hooks")]
+            {
+                // Never emit SQLite's message, SQL parameters or identities.
+                let class = match _error.sqlite_error().map(|e| e.extended_code) {
+                    Some(rusqlite::ffi::SQLITE_CONSTRAINT_PRIMARYKEY) => "primary_key",
+                    Some(rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE) => "unique",
+                    Some(rusqlite::ffi::SQLITE_CONSTRAINT_CHECK) => "check",
+                    Some(rusqlite::ffi::SQLITE_CONSTRAINT_FOREIGNKEY) => "foreign_key",
+                    Some(rusqlite::ffi::SQLITE_CONSTRAINT_NOTNULL) => "not_null",
+                    _ => "other",
+                };
+                eprintln!("publication-local work=Bind phase=binding_insert id_collision={} active_collision={} constraint_class={class}", collision.0, collision.1);
+            }
+        })?;
         super::incomplete_store::start_binding_ledger(&tx, id)?;
         super::runtime_store::put_binding(
             &tx,

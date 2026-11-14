@@ -42,6 +42,12 @@ public enum CloudConnectionConfirmation: Sendable, Equatable { case publication,
 }
 
 public struct SyncStatusPresentation {
+    public static func cancellationMessageKey(_ recovery: CloudRecoveryStatus) -> String {
+        switch recovery.step {
+        case .staging, .staged, .ready: "sync.cancelOp.adopt.message"
+        default: recovery.switchSent ? "sync.cancelOp.publish.message.switchSent" : "sync.cancelOp.publish.message"
+        }
+    }
     public let symbol: String
     public let titleKey: String
     public let detailKey: String?

@@ -212,8 +212,10 @@ public struct CloudRecoveryStatus: Sendable {
     public let publicationConflictCancellable: Bool
     public let publicationCancellable: Bool
     public let retryAfterMilliseconds: Int64?
+    public let adoptionCancellable: Bool
     public let adoptionTransportWait: Bool
     init(_ v: MeguriCoreBindings.CloudRecoveryStatus) {
+        adoptionCancellable = v.adoptionCancellable
         adoptionTransportWait = v.adoptionTransportWait
         operation = .init(raw: v.operation); switchSent = v.switchSent; switchConflict = v.switchConflict;
         publicationCancellable = v.publicationCancellable

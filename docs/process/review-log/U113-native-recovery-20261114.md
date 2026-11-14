@@ -189,3 +189,38 @@ failures and leaves the exact bootstrap constraint unresolved. Native
 retention of a generated test bundle left by a failed compile; the failed
 signing run is retained. Similarity `20261114T172007Z-59022` scans 23 source
 files with no flags. No wider gate or peer pass follows from these controls.
+
+### Rounds 9–10: verified progress and retained failures
+
+Approval: `cloud-recovery-r9-r10-approval-20261114.md`.
+R9 starts at `f6f7efff`; R10 starts at `149069db`. Authors:
+`cleanroom/20261114T180700Z-81049` and `182546Z-334`.
+
+R9 review `181834Z-92363` finds one P1 in native cancellation and one P2
+in toolbar Close. R10 review `183608Z-7223` finds no P0/P1 in the scoped
+correction. Busy feedback on the publication sheet remains a P2.
+
+R9 Host `core-test/20261114T181856Z-93399` passes 12 of 13 tests. The
+remaining failure proves a fixture binding-ID collision. R10 uses a shared,
+scenario-local deterministic stream across real reopens; constraints remain.
+`core-test/20261114T183630Z-7649` passes all 13, including the original
+large-note memory checks. FFI `181947Z-94566` passes three controls; all
+seven Rust production file patches are identical between R9 and R10.
+
+R9 native `swift-test/20261114T182042Z-95468` passes 32 tests. R10
+`183717Z-8830` passes 32 of 33 tests. The new parameterized test has 11
+issues. Its ownership assertion spans a real task handoff; three account
+cases call startup composition while the host is open. The lost-reply case
+also reports a separate stale StopEngine command. The exact cause of that
+command failure is unresolved. These failures are retained, not waived.
+
+The read-only diagnosis is retained under
+`build/cloud-resume-diagnosis/U113-r10-native-failure-diagnosis-20261114.md`.
+Both authorized rounds are used; a new bounded decision is requested before
+further behavior repair. Full matrices, P24, wider checks and the peer trial
+remain open. No Unit or acceptance claim is made.
+
+Publication finish `cleanroom/20261114T184343Z-15121` removes one test
+comment only. Privacy `184514Z-17033`, static `184524Z-17655` and
+similarity `184518Z-17315` pass; the latter scans 19 files with no flags.
+The failed native result remains failed. This checkpoint is WIP.

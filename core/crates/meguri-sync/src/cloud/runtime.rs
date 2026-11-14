@@ -975,7 +975,7 @@ impl Runtime {
         state.root_reads.clear();
         state.publication.resume = None;
         state.publication.preview = None;
-        state.publication.running = None;
+        // A live original request survives rebinding until its matching delivery.
         state.publication.zones_created = false;
         state.publication.reset_root_missing = None;
         state.publication.reset_root_read_guard = None;
@@ -1255,7 +1255,8 @@ impl Runtime {
                 .push(super::workflow::TraceEvent::IdentityVerified { instance, account });
         }
         if !state.bound.as_ref().is_some_and(|bound| bound.verified) {
-            state.publication.running = None;
+            // Losing account authority closes admission; it does not drain
+            // an already accepted original own operation.
             state.publication.own_epoch_read = false;
         }
         if result.is_err() {

@@ -994,9 +994,30 @@ public final class SyncCoordinator {
         retryAccountCompletion()
         if ownWorkRequested, !cancellingConnectionOperation, !closing, !replacing, !suspended, !settings.paused, !awaitingInitialOwnProof, initialOwnDrain == nil { ownWorkRequested = false; resumeConnection() }
     }
-    public func cancelConnectionOperation() async {
+    public func prepareConnectionCancellation() async -> CloudRecoveryCancellation? {
         guard !closing, !suspended, !replacing, !activatingInitialAdoption,
-              let backend, let own = backend.own, let operation = recovery?.operation else { return }
+              let backend, let own = backend.own else { return nil }
+        let expected = generation, revision = hostRevision
+        do {
+            let confirmation = try await own.prepareCancellation()
+            guard !closing, !suspended, !replacing, expected == generation,
+                  revision == hostRevision, self.backend === backend else { return nil }
+            recovery = confirmation.recovery
+            connectionFailure = nil
+            return confirmation
+        } catch {
+            guard !closing, expected == generation, revision == hostRevision, self.backend === backend else { return nil }
+            if case BridgeError.cloudConnection(let failure) = error { connectionFailure = failure }
+            return nil
+        }
+    }
+    public func cancelConnectionOperation(confirmation: CloudRecoveryCancellation? = nil) async {
+        guard !closing, !suspended, !replacing, !activatingInitialAdoption,
+              let backend, let own = backend.own else { return }
+        guard let operation = recovery?.operation else {
+            if confirmation != nil { connectionFailure = .busy }
+            return
+        }
         guard !cancellingConnectionOperation else { connectionFailure = .busy; return }
         cancellingConnectionOperation = true
         defer { cancellingConnectionOperation = false }
@@ -1006,7 +1027,7 @@ public final class SyncCoordinator {
         let earlierInitialCancellation = initialAdoptionCancelled
         initialAdoptionCancelled = true
         do {
-            try await own.cancel(operation)
+            try await own.cancel(confirmation?.recovery.operation ?? operation, confirmation: confirmation)
             await originalTask?.value
             guard !closing, expected == generation, revision == hostRevision else { return }
             let current = try await backend.connection?.recoveryStatus()

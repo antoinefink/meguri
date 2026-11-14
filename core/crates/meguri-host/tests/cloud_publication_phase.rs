@@ -83,7 +83,12 @@ fn open_host(dir: &Path, keys: Arc<Keys>) -> CoreHost {
     open_host_with(dir, keys, Arc::new(Account), scope())
 }
 fn open_host_with(dir: &Path, keys: Arc<Keys>, identity: Arc<dyn IdentityProvider>, scope: Scope) -> CoreHost {
+    open_host_with_random(dir, keys, identity, scope, None)
+}
+fn open_host_with_random(dir: &Path, keys: Arc<Keys>, identity: Arc<dyn IdentityProvider>, scope: Scope,
+    random: Option<Arc<dyn RandomSource>>) -> CoreHost {
     let mut config = options(dir, NOW, 91);
+    if let Some(random) = random { config.random = random; }
     config.clock = Arc::new(StepClock::new(NOW, UtcOffset::UTC, "UTC"));
     config.cloud = Some(CloudInputs {
         scope: cloud::BuildScope {
@@ -1343,7 +1348,13 @@ fn until_active_observing_work(
         let work = runtime.next_publication_work(&collection).unwrap();
         let selected_sdk = observe(runtime, &work);
         match work {
-            PublicationWork::Local { op, work } => runtime.perform_publication_local(op, work, &collection).unwrap(),
+            PublicationWork::Local { op, work } => {
+                let phase = runtime.publication_op().unwrap().map(|op| op.step);
+                runtime.perform_publication_local(op, work, &collection).unwrap_or_else(|error| {
+                    let (domain, class) = error.refusal_tags_for_testing();
+                    panic!("publication-local work={work:?} phase={phase:?} failure={domain}/{class}");
+                });
+            },
             PublicationWork::Own(request) => {
                 if request.kind == OwnKind::SaveActive {
                     return *request;
@@ -1748,6 +1759,88 @@ fn held_active_is_not_sent_and_actual_lost_reply_retains_submission_evidence_on_
         assert_eq!(db.zones["meguri-root"].records.contains_key("active"), submit);
         reopened.close().unwrap();
     }
+}
+
+#[test]
+fn accepted_original_active_delivery_survives_live_identity_invalidation_without_accepting_new_account() {
+    for identity in [IdentityStatus::SignedOut,
+        IdentityStatus::Available(cloud::OpaqueBytes(b"other-synthetic-account".to_vec())),
+        IdentityStatus::TemporarilyUnavailable] {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("device");
+        generated(&dir);
+        let account = Arc::new(MutableAccount(Mutex::new(IdentityStatus::Available(
+            cloud::OpaqueBytes(scope().account.into_bytes()),
+        ))));
+        let host = open_host_with(&dir, keys(), account.clone(), scope());
+        let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(479)).unwrap();
+        let before_binding = publish_actual_collection(&host, &mut service);
+        let runtime = host.cloud_runtime().unwrap();
+        let collection = host.collection().unwrap();
+        let preview = actual_preview(&host, &mut service, &scope());
+        let operation = runtime.confirm_connection_publication(&preview, &collection).unwrap();
+        let request = until_active(&host, &mut service);
+        // Execute the accepted original queue request against Service, but hold
+        // its actual Saved callback undelivered across the account event.
+        let (reply, _) = execute_publication_request(&mut service, &scope(), &request, runtime, &collection).unwrap();
+        assert!(matches!(reply, OwnResult::Saved(_)));
+        let op = runtime.publication_op().unwrap().unwrap();
+        let zone = cloud::adapter::collection_zone(op.epoch);
+        assert!(op.switch_sent && op.active_attempt.is_some());
+        let notes = runtime.entity_facts_page(cloud::entity_codec::Kind::Note, None).unwrap();
+        *account.0.lock().unwrap() = identity;
+        runtime.refresh_identity().unwrap();
+        assert!(!runtime.publication_cancellable(operation).unwrap());
+        assert!(matches!(runtime.cancel_publication(operation, &collection),
+            Err(cloud::runtime::RuntimeError::Publication(PublicationError::Busy))));
+        assert_eq!(runtime.publication_op().unwrap().unwrap(), op);
+        assert_eq!(runtime.entity_facts_page(cloud::entity_codec::Kind::Note, None).unwrap(), notes);
+        assert!(service.inspect(&scope()).unwrap().unwrap().zones.contains_key(&zone));
+        assert!(runtime.require_collection_sending().is_err());
+        // Only this matching actual delivery settles the original barrier. Its
+        // old Saved facts cannot confirm Active or finish the op for this owner.
+        assert!(runtime.publication_result(&request, reply.clone(), &collection).is_err());
+        assert_eq!(runtime.publication_op().unwrap().unwrap(), op);
+        assert_eq!(runtime.entity_facts_page(cloud::entity_codec::Kind::Note, None).unwrap(), notes);
+        assert!(runtime.require_collection_sending().is_err());
+        assert!(runtime.publication_cancellable(operation).unwrap());
+        *account.0.lock().unwrap() = IdentityStatus::Available(cloud::OpaqueBytes(scope().account.into_bytes()));
+        runtime.cancel_publication(operation, &collection).unwrap();
+        assert!(runtime.publication_op().unwrap().is_none());
+        assert_eq!(runtime.status().unwrap().binding.unwrap().id, before_binding.id);
+        assert!(runtime.require_collection_sending().is_err(), "restored binding needs new current-open Active proof");
+        assert!(service.inspect(&scope()).unwrap().unwrap().zones.contains_key(&zone));
+        assert!(runtime.publication_result(&request, reply, &collection).is_err(), "late original facts never transfer to restored owner");
+        assert!(runtime.require_collection_sending().is_err());
+        host.close().unwrap();
+        drop(collection); drop(host);
+        let build = cloud::BuildScope { container: cloud::ContainerId::new(scope().container).unwrap(), environment: cloud::Environment::Development };
+        let cloud::OpenOutcome::Opened(store) = cloud::TrackingStore::open(&dir, build).unwrap() else { panic!("tracking"); };
+        assert!(store.publication_op().unwrap().is_none());
+        assert!(!store.retained_zones(before_binding.id).unwrap().get(&zone).is_some_and(|z| z.deletion_due));
+    }
+}
+
+// A current-open Service fetch proves Active; identity/start/reconcile and
+// connection previews alone deliberately do not satisfy the root send gate.
+fn confirm_current_service_active(host: &CoreHost, service: &mut Service<SeededRandom>) {
+    let runtime = host.cloud_runtime().unwrap();
+    let response = service.request(&scope(), Caller::default(), Operation::FetchZone {
+        zone: "meguri-root".into(), token: None,
+    }).unwrap();
+    let Ok(Reply::ZoneChanges(page)) = response.result else { panic!("actual root fetch required"); };
+    assert!(!page.more, "current-open root proof needs a completed fetch");
+    let active = page.changes.into_iter().find_map(|change| match change {
+        meguri_testkit::cloud::RecordChange::Saved(record)
+            if record.name == "active" && record.record_type == "MGActive" => {
+                let control = publication_control_record(&record).unwrap();
+                Some(Saved { name: record.name, envelope: control.encrypted.unwrap(),
+                    system_fields: control.system_fields.0 })
+            }
+        _ => None,
+    }).expect("actual published Active");
+    assert!(runtime.accept_root_fetch(&runtime.instance().unwrap(), Some(&active), true, response.request_id).unwrap());
+    runtime.require_collection_sending().unwrap();
 }
 
 fn restore_collection(host: &CoreHost, dir: &Path) {

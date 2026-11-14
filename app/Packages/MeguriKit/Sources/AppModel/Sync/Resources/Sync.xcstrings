@@ -1,6 +1,94 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "sync.cancelOp.adopt.title": {
+      "comment": "Approved sync/status-strings T13.5 cancellation confirmation.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel Replacing This Collection?"
+          }
+        }
+      }
+    },
+    "sync.cancelOp.adopt.message": {
+      "comment": "Approved sync/status-strings T13.5 cancellation confirmation.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This device keeps its current collection."
+          }
+        }
+      }
+    },
+    "sync.cancelOp.adoptUnproven.message": {
+      "comment": "Approved sync/status-strings T13.5 cancellation confirmation.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meguri then asks how this collection syncs with iCloud."
+          }
+        }
+      }
+    },
+    "sync.cancelOp.publish.title": {
+      "comment": "Approved sync/status-strings T13.5 cancellation confirmation.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel Replacing the iCloud Collection?"
+          }
+        }
+      }
+    },
+    "sync.cancelOp.publish.message": {
+      "comment": "Approved sync/status-strings T13.5 cancellation confirmation.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The iCloud collection stays as it was."
+          }
+        }
+      }
+    },
+    "sync.cancelOp.publish.message.switchSent": {
+      "comment": "Approved sync/status-strings T13.5 cancellation confirmation.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The upload may already have replaced the iCloud collection. If it did, Meguri asks what to do next."
+          }
+        }
+      }
+    },
+    "sync.cancelOp.confirm": {
+      "comment": "Approved sync/status-strings T13.5 cancellation confirmation.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel Replacement"
+          }
+        }
+      }
+    },
+    "sync.cancelOp.keep": {
+      "comment": "Approved sync/status-strings T13.5 cancellation confirmation.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continue"
+          }
+        }
+      }
+    },
     "sync.action.cancelOp": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {

@@ -2,6 +2,7 @@
 @testable import AppModel
 @testable import CoreBridge
 import Foundation
+import Instrumentation
 import Observation
 import Synchronization
 import Testing
@@ -9,6 +10,127 @@ import Testing
 // Real CoreHost, coordinator, adapter and Service. Generated local data only;
 // transport execution uses the Service's actual original replies, never verdicts.
 extension ReviewCollectionStartupTests {
+    @Test(arguments: [0, 1, 2, 3, 4])
+    func heldOriginalActiveRefusesNativeCancellationBeforeDrainAndRevalidatesConfirmation(mode: Int) async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "synthetic-held-active-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let input = try await selectedBootstrapSource(root: root)
+        let service = root.appending(path: "service")
+        try FileManager.default.createDirectory(at: service, withIntermediateDirectories: false)
+        let process = try await CloudServiceProcess.open(stateDirectory: service, pageSize: 32)
+        let beforeSwitch = SelectedSwitchReplyGate(), switchReply = SelectedSwitchReplyGate()
+        var active: ServiceAppHarness?, publication: Task<Void, Never>?, cancellation: Task<Void, Never>?
+        let coreCancels = Mutex(0)
+        let observeCancel: @Sendable (BridgeCall) -> Void = { call in
+            if call == .cloudConnectionCancelOperation { coreCancels.withLock { $0 += 1 } }
+        }
+        do {
+            let wire = try ServiceWorkflowWire(process: process, directory: root.appending(path: "transport"))
+            let a = try ServiceAppHarness(root: root.appending(path: "A"), wire: wire, clock: .system)
+            active = a
+            defer { a.defaults.removePersistentDomain(forName: a.suite) }
+            try FileManager.default.createDirectory(at: a.root, withIntermediateDirectories: false)
+            try input.bytes.write(to: a.root.appending(path: "collection.anki2"))
+            a.ownTransport = SelectedHeldSwitchTransport(original: ServiceOwnTransport(wire: wire),
+                beforeSwitch: beforeSwitch, switchReply: switchReply, loseReply: mode == 1)
+            await a.owner.start(); await a.sync.prepareConnectionAuthority()
+            try await a.owner.prepareCloudConnectionPreview()
+            await a.sync.waitForConnectionPreview()
+            guard case .ready(_, let summary) = a.sync.preview else { throw ServiceWorkflowFailure.wire }
+            try #require(summary.decision == .confirmUpload)
+            var returned = false
+            publication = Task { await a.sync.confirmPublication(); returned = true }
+            try #require(try await serviceAppSignal(beforeSwitch.reached.stream, stage: "original ReadOwnEpoch reply held"))
+            let oldDialog = try #require(await a.sync.prepareConnectionCancellation())
+            #expect(oldDialog.recovery.publicationCancellable && !oldDialog.recovery.switchSent)
+            #expect(SyncStatusPresentation.cancellationMessageKey(oldDialog.recovery) == "sync.cancelOp.publish.message")
+            beforeSwitch.release()
+            try #require(try await serviceAppSignal(switchReply.reached.stream, stage: "original accepted Active reply held"))
+            let connection = try #require(try a.backend.connection)
+            let executor = try #require(try a.backend.own)
+            let before = try #require(try await connection.recoveryStatus())
+            #expect(before.switchSent && !before.publicationCancellable && before.step == .complete)
+            #expect(a.sync.recovery?.switchSent == false, "The actual coordinator snapshot precedes SaveActive")
+            #expect(!returned && a.sync.connectionOperationActive && switchReply.enqueues == 1)
+            if mode >= 2 {
+                let status: CloudAccountStatus = mode == 2 ? .temporarilyUnavailable : mode == 3 ? .noAccount : .available
+                let identity = mode == 4 ? Data("synthetic-different-account".utf8) : nil
+                try await CoreCloudWorkflowService.configurePlatform(container: "synthetic-initial-app", environment: .development,
+                    status: status, identity: identity)
+                let policy = try await CoreCloudWorkflowService().policy()
+                _ = try await policy.refreshAccount()
+            }
+            let refused = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            cancellation = Task {
+                await MaintenanceCallObservation.$capture.withValue(observeCancel) {
+                    do { try await executor.cancel(oldDialog.recovery.operation); Issue.record("Outstanding switch cancelled") }
+                    catch { #expect(error as? BridgeError == .cloudConnection(.busy)) }
+                    await a.sync.cancelConnectionOperation(confirmation: oldDialog)
+                    #expect(a.sync.connectionFailure == .busy)
+                    #expect(await a.sync.prepareConnectionCancellation() == nil)
+                }
+                refused.continuation.yield(true); refused.continuation.finish()
+            }
+            try #require(try await serviceAppSignal(refused.stream, stage: "Busy before original Active callback"))
+            await cancellation?.value
+            #expect(coreCancels.withLock { $0 } == 0 && switchReply.cancels == 0)
+            #expect(!returned && a.sync.connectionOperationActive && switchReply.enqueues == 1)
+            let retained = try #require(try await connection.recoveryStatus())
+            #expect(retained.step == before.step && retained.switchSent && !retained.publicationCancellable)
+            #expect(try await SelectedCloudControlInspection().current().publicationDoneActive == nil)
+            switchReply.release() // Only the original matching callback may settle ownership.
+            await publication?.value
+            await a.sync.waitForInputs(); await a.sync.drainOperations()
+            #expect(returned && !a.sync.connectionOperationActive && switchReply.cancels == 0)
+            if mode == 0 {
+                #expect(try await connection.recoveryStatus() == nil)
+                let accepted = try await SelectedCloudControlInspection().current()
+                #expect(accepted.status == .proven && accepted.publicationDoneActive != nil)
+                await MaintenanceCallObservation.$capture.withValue(observeCancel) {
+                    await a.sync.cancelConnectionOperation(confirmation: oldDialog)
+                }
+                #expect(a.sync.connectionFailure == .busy && coreCancels.withLock { $0 } == 0)
+            } else {
+                let settled = try #require(try await connection.recoveryStatus())
+                #expect(settled.switchSent && settled.publicationCancellable)
+                #expect(try await SelectedCloudControlInspection().current().publicationDoneActive == nil)
+                if mode >= 2 {
+                    // The delayed old-account Saved result must not prove Active.
+                    #expect(try await SelectedCloudControlInspection().current().status != .proven)
+                    try await CoreCloudWorkflowService.configurePlatform(container: "synthetic-initial-app", environment: .development,
+                        status: .available, identity: Data("synthetic-initial-account".utf8))
+                    let policy = try await CoreCloudWorkflowService().policy()
+                    _ = try await policy.refreshAccount()
+                }
+                await MaintenanceCallObservation.$capture.withValue(observeCancel) {
+                    await a.sync.cancelConnectionOperation(confirmation: oldDialog)
+                }
+                #expect(a.sync.connectionFailure == .busy && coreCancels.withLock { $0 } == 0)
+                #expect(try await connection.recoveryStatus() != nil)
+                let fresh = try #require(await a.sync.prepareConnectionCancellation())
+                #expect(fresh.recovery.switchSent)
+                #expect(SyncStatusPresentation.cancellationMessageKey(fresh.recovery) == "sync.cancelOp.publish.message.switchSent")
+                #expect(SyncText.value(SyncStatusPresentation.cancellationMessageKey(fresh.recovery))
+                    != SyncText.value(SyncStatusPresentation.cancellationMessageKey(oldDialog.recovery)))
+                await a.sync.cancelConnectionOperation(confirmation: fresh)
+                #expect(a.sync.connectionFailure == nil && a.sync.recovery == nil)
+                #expect(try await connection.recoveryStatus() == nil)
+                #expect(try await SelectedCloudControlInspection().current().publicationDoneActive == nil)
+            }
+            try #require(await a.owner.close())
+            let exit = await process.close()
+            try #require(exit.status == 0 && exit.joined && !exit.unexpectedOutput && !exit.ioFailed)
+            try #require(exit.diagnostics.isEmpty && !exit.diagnosticLimitExceeded)
+        } catch {
+            beforeSwitch.release(); switchReply.release()
+            await cancellation?.value; await publication?.value
+            await active?.cleanup()
+            _ = await process.cancel()
+            throw error
+        }
+    }
+
     @Test func selectedPublicationRebindWaitsForOriginalStatusCoreAcknowledgement() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "synthetic-p4-publication-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
@@ -423,6 +545,64 @@ extension ReviewCollectionStartupTests {
     let complete = try #require(control.publicationComplete)
     let done = try #require(control.publicationDoneActive)
     try replies.requireOriginalCommit(complete, before: done)
+}
+
+private nonisolated final class SelectedSwitchReplyGate: Sendable {
+    let reached = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+    private let delivery = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+    private let state = Mutex((enqueues: 0, cancels: 0))
+    var enqueues: Int { state.withLock { $0.enqueues } }
+    var cancels: Int { state.withLock { $0.cancels } }
+    func enqueued() { state.withLock { $0.enqueues += 1 } }
+    func cancelled() { state.withLock { $0.cancels += 1 } }
+    func hold() async throws {
+        reached.continuation.yield(true)
+        try #require(try await serviceAppSignal(delivery.stream, stage: "original control callback release"))
+    }
+    func release() { delivery.continuation.yield(true); delivery.continuation.finish() }
+}
+private nonisolated struct SelectedHeldSwitchTransport: CloudOwnTransport {
+    let original: ServiceOwnTransport
+    let beforeSwitch: SelectedSwitchReplyGate
+    let switchReply: SelectedSwitchReplyGate
+    let loseReply: Bool
+    func prepare(_ command: CloudOwnTransportCommand) throws -> any CloudPreparedOwnOperation {
+        let actual = try original.prepare(command)
+        if case .publication(.read(let target)) = command, target.recordType == "MGEpoch" {
+            return SelectedHeldSwitchOperation(actual: actual, gate: beforeSwitch, loseReply: false, active: false)
+        }
+        if case .publication(.save(let target, _, _)) = command, target.recordType == "MGActive" {
+            return SelectedHeldSwitchOperation(actual: actual, gate: switchReply, loseReply: loseReply, active: true)
+        }
+        return actual
+    }
+}
+private nonisolated struct SelectedOriginalReplyLost: Error {}
+private nonisolated final class SelectedHeldSwitchOperation: CloudPreparedOwnOperation, Sendable {
+    let actual: any CloudPreparedOwnOperation
+    let gate: SelectedSwitchReplyGate
+    let loseReply: Bool
+    let active: Bool
+    init(actual: any CloudPreparedOwnOperation, gate: SelectedSwitchReplyGate, loseReply: Bool, active: Bool) {
+        self.actual = actual; self.gate = gate; self.loseReply = loseReply; self.active = active
+    }
+    func enqueue() -> Bool {
+        let accepted = actual.enqueue()
+        if accepted { gate.enqueued() }
+        return accepted
+    }
+    func cancel() { gate.cancelled(); actual.cancel() }
+    func reply() async throws -> CloudOwnTransportReply {
+        let reply = try await actual.reply()
+        if active {
+            guard case .publication(.saved(_)) = reply else { throw ServiceWorkflowFailure.wire }
+        } else {
+            guard case .publication(.read(.found(_))) = reply else { throw ServiceWorkflowFailure.wire }
+        }
+        try await gate.hold()
+        if loseReply { throw SelectedOriginalReplyLost() }
+        return reply
+    }
 }
 
 private nonisolated final class SelectedAdoptionPageDelivery: Sendable {
