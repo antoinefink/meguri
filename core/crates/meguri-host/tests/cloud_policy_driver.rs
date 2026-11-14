@@ -64,6 +64,12 @@ fn rig_with_files(
     confirm_root: bool, seed: u64, known_epoch: bool,
     files: Arc<dyn meguri_sync::cloud::runtime::FileIdentityProvider>,
 ) -> Rig {
+    rig_with_files_and_state(confirm_root, seed, known_epoch, files, confirm_root)
+}
+fn rig_with_files_and_state(
+    confirm_root: bool, seed: u64, known_epoch: bool,
+    files: Arc<dyn meguri_sync::cloud::runtime::FileIdentityProvider>, saved_state: bool,
+) -> Rig {
     let root = tempfile::tempdir().unwrap();
     let directory = root.path().join("collection");
     std::fs::create_dir_all(&directory).unwrap();
@@ -129,7 +135,7 @@ fn rig_with_files(
             &collection,
             config.clock.as_ref(),
             config.random.as_ref(),
-            confirm_root.then(|| b"synthetic-sdk-state".to_vec()),
+            saved_state.then(|| b"synthetic-sdk-state".to_vec()),
         )
         .unwrap();
     if known_epoch {
@@ -841,6 +847,130 @@ fn actual_sdk_drains_qualify_quiet_only_after_both_zones_and_durable_evidence_wr
         rig.host.cloud_policy_driver().unwrap().status().state,
         StatusState::AwaitingEvidence
     );
+    rig.host.close().unwrap();
+}
+
+fn quiet_rig() -> Rig {
+    rig_with_files_and_state(false, 1914, true, Arc::new(NativeFiles), true)
+}
+
+// An SDK with saved state can drain unchanged zones before root confirmation.
+// The existing baseline has no stored Active record; no root proof is supplied.
+fn quiet_without_root(rig: &Rig) -> Command {
+    let runtime = rig.host.cloud_runtime().unwrap();
+    assert!(!runtime.sdk_root_confirmed());
+    rig.host.cloud_policy_input(DeviceEvent::Settings(DeviceSettings {
+        enabled: true, paused: false, automatic: true, media: false,
+    })).unwrap();
+    let call = runtime.adapter_begin_fetch(&rig.sdk, vec!["meguri-root".into(), rig.zone.clone()]).unwrap();
+    let group = format!("quiet:{call}");
+    runtime.adapter_will_fetch(&rig.sdk, group.clone(), true).unwrap();
+    runtime.adapter_did_fetch(&rig.sdk, &group, true).unwrap();
+    assert!(runtime.adapter_finish_fetch(&rig.sdk, call).unwrap());
+    assert!(!runtime.sdk_root_confirmed());
+    let commands = rig.host.cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Cloud)).unwrap();
+    let driver = rig.host.cloud_policy_driver().unwrap();
+    assert!(driver.state().gate_open());
+    assert!(!driver.state().root_confirmed);
+    assert!(driver.status().evidence.quiet_ms.is_none());
+    command(commands, |kind| matches!(kind, ActionKind::RecordQuietPoint { .. }))
+}
+
+#[test]
+fn quiet_without_root_is_durable_but_never_authorizes_collection_sending() {
+    use meguri_sync::cloud::policy::{Lifecycle, PolicyWork};
+    let rig = quiet_rig();
+    let quiet = quiet_without_root(&rig);
+    let ActionKind::RecordQuietPoint { at_ms } = quiet.action.kind else { unreachable!() };
+    let cancel = meguri_engine::CancelToken::new();
+    let mut work = PolicyWork::new(&cancel);
+    rig.host.execute_cloud_policy_core_with_work(&quiet, Duration::from_secs(10), &mut work).unwrap();
+    // The actual write latched this job's receipt. Later cancellation cannot
+    // replace its result; the candidate was not merely consumed as superseded.
+    cancel.cancel();
+    assert!(work.check().is_ok());
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let evidence = rig.host.cloud_policy_driver().unwrap().status().evidence;
+    assert_eq!(evidence.quiet_ms, Some(at_ms));
+    assert!(evidence.last_completed.is_none());
+    assert!(evidence.last_attempt.is_none());
+    assert!(!runtime.sdk_root_confirmed());
+    let collection = rig.host.collection().unwrap();
+    meguri_engine::decks::rename(&collection, rig.baseline_deck, "Still awaiting root".into()).unwrap();
+    let dirty = runtime.entity_facts_page(codec::Kind::Deck, None).unwrap().into_iter()
+        .find(|entity| entity.key == codec::id_key(rig.baseline_deck.0)).unwrap();
+    assert!(dirty.mark.is_some());
+    runtime.validate_sdk(&rig.sdk).unwrap();
+    assert!(runtime.start_manual_send_call(&rig.sdk).unwrap().is_none());
+    let batch = runtime.build_collection_batch(&rig.sdk, &collection, &[dirty.name].into()).unwrap();
+    assert_eq!(batch.id, 0);
+    assert!(batch.saves.is_empty());
+    assert!(!runtime.sdk_root_confirmed());
+    assert!(!rig.host.cloud_policy_driver().unwrap().state().facts.summary.attention_known);
+    rig.host.close().unwrap();
+    let reopened = CoreHost::open(rig.config.clone()).unwrap();
+    let projection = reopened.cloud_runtime().unwrap().policy_projection(
+        Lifecycle::Ready, reopened.engine().generation().0,
+    ).unwrap();
+    assert_eq!(projection.evidence, evidence);
+    assert!(!projection.facts.summary.attention_known);
+    reopened.close().unwrap();
+}
+
+#[test]
+fn quiet_without_root_cancelled_work_leaves_qualifying_candidate_available() {
+    use meguri_sync::cloud::policy::PolicyWork;
+    let rig = quiet_rig();
+    let quiet = quiet_without_root(&rig);
+    let cancel = meguri_engine::CancelToken::new();
+    cancel.cancel();
+    let mut work = PolicyWork::new(&cancel);
+    assert!(rig.host.execute_cloud_policy_core_with_work(&quiet, Duration::from_secs(10), &mut work).is_err());
+    assert!(work.check().is_err());
+    assert!(rig.host.cloud_policy_driver().unwrap().status().evidence.quiet_ms.is_none());
+    rig.host.execute_cloud_policy_core(&quiet, Duration::from_secs(10)).unwrap();
+    assert!(rig.host.cloud_policy_driver().unwrap().status().evidence.quiet_ms.is_some());
+    rig.host.close().unwrap();
+}
+
+#[test]
+fn quiet_without_root_stale_candidate_cannot_stamp_after_pause() {
+    use meguri_sync::cloud::policy::PolicyWork;
+    let rig = quiet_rig();
+    let quiet = quiet_without_root(&rig);
+    rig.host.cloud_policy_input(DeviceEvent::Settings(DeviceSettings {
+        enabled: true, paused: true, automatic: true, media: false,
+    })).unwrap();
+    let cancel = meguri_engine::CancelToken::new();
+    let mut work = PolicyWork::new(&cancel);
+    assert!(matches!(rig.host.execute_cloud_policy_core_with_work(&quiet, Duration::from_secs(10), &mut work),
+        Err(DriverError::StaleCommand)));
+    cancel.cancel();
+    assert!(work.check().is_err());
+    assert!(rig.host.cloud_policy_driver().unwrap().status().evidence.quiet_ms.is_none());
+    rig.host.close().unwrap();
+}
+
+#[test]
+fn quiet_without_root_database_failure_preserves_error_and_required_stop() {
+    use meguri_sync::cloud::policy::{Attention, PolicyWork};
+    let rig = quiet_rig();
+    let quiet = quiet_without_root(&rig);
+    let runtime = rig.host.cloud_runtime().unwrap();
+    runtime.policy_evidence_constraint_for_testing(true).unwrap();
+    let cancel = meguri_engine::CancelToken::new();
+    let mut work = PolicyWork::new(&cancel);
+    let failed = rig.host.execute_cloud_policy_core_with_work(&quiet, Duration::from_secs(10), &mut work);
+    runtime.policy_evidence_constraint_for_testing(false).unwrap();
+    let Err(DriverError::CoreActionFailed { commands, .. }) = failed else { panic!("real evidence constraint must fail"); };
+    assert!(commands.iter().any(|command| matches!(command.action.kind, ActionKind::StopEngine { .. })));
+    cancel.cancel();
+    assert!(work.check().is_ok());
+    assert!(runtime.status().unwrap().tracking_stopped);
+    let status = rig.host.cloud_policy_driver().unwrap().status();
+    assert!(status.evidence.quiet_ms.is_none());
+    assert!(status.evidence.last_completed.is_none());
+    assert!(status.attention.contains_key(&Attention::TrackingError));
     rig.host.close().unwrap();
 }
 

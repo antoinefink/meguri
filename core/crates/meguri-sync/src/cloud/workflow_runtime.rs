@@ -159,11 +159,19 @@ impl Runtime {
         Self::gate_locked(&s)
     }
     pub(super) fn gate_locked(s: &State) -> Result<(), RuntimeError> {
+        Self::general_gate_locked(s)?;
+        if !s.root_confirmed && !Self::publication_allows_send_locked(s) {
+            return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
+        }
+        Ok(())
+    }
+    // P6/P14.3 admit quiet metadata before root confirmation. Collection sends
+    // additionally require K12.1/V10.2 authority through gate_locked.
+    pub(super) fn general_gate_locked(s: &State) -> Result<(), RuntimeError> {
         Self::capture_gate_locked(s)?;
         if s.adapter.known_loss.is_some()
             || s.adapter.durable.collection_loss.is_some()
             || s.adapter.durable.epoch_verification.is_some()
-            || (!s.root_confirmed && !Self::publication_allows_send_locked(s))
         {
             return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
         }

@@ -358,7 +358,7 @@ impl Runtime {
         if &Self::adapter_guard_locked(&s) != guard {
             return Err(RuntimeError::StaleIncarnation);
         }
-        Self::gate_locked(&s)?;
+        Self::general_gate_locked(&s)?;
         let binding = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
         let result = with_tracking_access(|| -> Result<_, RuntimeError> {
             work.effect()?;
