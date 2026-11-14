@@ -18,9 +18,11 @@ removed. The original received type stays queued: `reason=structure`,
 The type worker and its layout state need further work. The test still checks
 the final inbox and ACK; no expectation was removed. The unit is not accepted.
 
-Lint `core-lint/20261114T014111Z-56583` still fails one test-only clone
-warning; layering and feature-boundary checks pass. The warning can be fixed
-in the next source pass. No lint rule or limit was suppressed.
+Lint `core-lint/20261114T020124Z-61198` passes after replacing one test-only
+clone with a borrow of the same value. Layering and feature-boundary checks
+pass. No lint rule or limit was suppressed. Focused test
+`core-test/20261114T020152Z-61525` retains the same enabled collision failure
+at the final inbox check: `structure`, zero attempts. All assertions remain.
 
 Privacy `private/20261114T013744Z-55749` passes all 32 paths. Static checks
 `20261114T013745Z-55949` pass. Similarity `20261114T014112Z-56840` passes
@@ -82,6 +84,13 @@ V7-reader execution against a valid V8 file remains outstanding. The independent
 native quiet-point failure stays enabled. Normal-device media transfer evidence
 is separate from this producer and does not complete the two-way review trial.
 
+The signed Mac preview builds at `67ff77b9` in
+`build-app/20261114T015345Z-58539`. A normal quit and reopen of that exact
+product retains 4 notes, 4 cards, 4 reviews and 4 media files. The local
+replacement preview shows those counts and is cancelled without replacement.
+The sync status remains Unknown. This is a native reopen check, not a new
+two-way review trial; the phone still has the earlier verified build.
+
 This commit is WIP: no Unit trailer, P24 closure, full gate, milestone, signed
 lane or release acceptance. Required verification still uses the original
-integration base. Both native previews remain on the earlier verified build.
+integration base.

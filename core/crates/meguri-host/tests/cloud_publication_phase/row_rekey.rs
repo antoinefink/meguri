@@ -117,7 +117,7 @@ fn k14_type_collision_preserves_tracking_until_paired_intents_settle() {
     });
     assert_eq!(captured.layout.in_flight.len(), 1);
     let (saved, server_payload) = publish_other_origin(&mut service, &binding, &captured.layout);
-    runtime.receive_collection_records(&instance, &[saved.clone()]).unwrap();
+    runtime.receive_collection_records(&instance, std::slice::from_ref(&saved)).unwrap();
 
     let saw_commit = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let callback_flag = Arc::clone(&saw_commit);
