@@ -202,6 +202,10 @@ public struct CloudConnectionView: View {
                 CloudCountSection(counts: counts, cloud: true, publishedAt: summary.publishedAtMilliseconds)
             }
             Section {
+                if !summary.unsentCountsExact {
+                    Text(SyncText.format("sync.preview.ownUnsentUnknown", Int64(clamping: summary.unsentChangeCount)))
+                        .accessibilityIdentifier("sync.preview.ownUnsentUnknown")
+                }
                 ForEach(Self.kindKeys, id: \.0) { kind, key in
                     if let count = summary.unpublishedCounts[kind], count > 0 {
                         Text(SyncText.format(key, Int64(clamping: count)))

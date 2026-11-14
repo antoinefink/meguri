@@ -62,3 +62,29 @@ The idempotence assertion covers a repeated settled drain only.
 The export stays in build; master has none of these source edits. Both approved
 rounds are used. Antoine must decide whether to permit another source pass.
 U113 remains unaccepted, with its P24 checks, gate and release evidence open.
+
+## Round 5: available-evidence fallback
+
+Owner approval: `cloud-recovery-fallback-approval-20261114.md`; source start
+`cbc09dc5562fea2303c9954527ef4dbd4490364f`. The narrowed K13.4/S2.5 contract
+is committed at `b636a4cb`; the approval decision is resolved, not the unit.
+
+Author: `cleanroom/20261114T144251Z-58500`. The patch is partial. Its retained
+`codex.out` lists the completed paths and required remaining source work.
+
+Verification of the implemented portion:
+
+- Before integration, `core-test/20261114T150147Z-66249`: 16 existing cases pass.
+- `core-test/20261114T150252Z-69766`: 17 focused cases pass.
+- `core-test/20261114T150413Z-70999`: all 104 Host workflow cases pass.
+- `swift-test/20261114T150507Z-72210`: five connection model tests pass after
+  native binding regeneration.
+- `similarity/20261114T150505Z-71921`: 18 files, no flagged matches.
+- `private/20261114T150241Z-69382` flagged two new comments. Both complete
+  comments were rewritten without changing code or guard behavior.
+  `private/20261114T150403Z-70717` passes for the resulting source.
+
+Independent review `cleanroom/20261114T150127Z-65745` is still running.
+This is WIP, with no Unit/P24/gate or release acceptance. Round 6 remains for
+required gaps and review findings. The live Mac and phone still show unknown
+sync status; a phone request reports incomplete. No new peer-delivery claim.

@@ -74,6 +74,9 @@ impl Runtime {
             _ => Fence::Clear,
         };
         let s = self.state();
+        if Self::layout_refused_locked(&s) && fence == Fence::Clear {
+            fence = Fence::ChooseCollection;
+        }
         let mut summary = Summary {
             scan: if s.scan_running {
                 Scan::Running

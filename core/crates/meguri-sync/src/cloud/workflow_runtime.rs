@@ -89,6 +89,9 @@ impl Runtime {
             return Err(RuntimeError::StaleIncarnation);
         }
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+        if Self::layout_refused_locked(s) {
+            return Err(RuntimeError::Incomplete(Incomplete::StructuralLayout));
+        }
         if !b.usable || !b.verified || b.binding.facts.state != BindingState::Active {
             return Err(RuntimeError::IdentityUnverified);
         }
@@ -181,6 +184,9 @@ impl Runtime {
     // This grants selection only; physical sends still use gate_locked.
     fn capture_gate_locked(s: &State) -> Result<(), RuntimeError> {
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+        if Self::layout_refused_locked(s) {
+            return Err(RuntimeError::Incomplete(Incomplete::StructuralLayout));
+        }
         if !b.usable || !b.verified {
             return Err(RuntimeError::IdentityUnverified);
         }
@@ -558,9 +564,82 @@ impl Runtime {
         }
         Ok(request)
     }
+    pub(super) fn layout_refused_locked(s: &State) -> bool {
+        s.bound.as_ref().is_some_and(|b| s.layout_refusal == Some(b.binding.id))
+    }
+
+    fn clear_layout_refusal_on_error(&self, collection: &Collection) {
+        let mut s = self.state();
+        if collection.is_current() && s.bound.as_ref().is_some_and(|b| b.evidence.generation == collection.generation())
+            && s.layout_refusal.take().is_some()
+        {
+            // A different failure retires this instance through the normal path.
+            Self::invalidate_locked(&mut s);
+        }
+    }
+
+    fn remember_layout_refusal(&self, collection: &Collection, error: RuntimeError) -> RuntimeError {
+        if !matches!(&error, RuntimeError::Tracking(Error::ValidatedUnprovedLayout { .. })) {
+            self.clear_layout_refusal_on_error(collection);
+            return error;
+        }
+        // A scan/replay error is not itself fresh identity authority. Re-read
+        // the existing evidence before publishing a collection-choice outcome.
+        let checked = (|| -> Result<(), RuntimeError> {
+            let account = self.publication_account()?;
+            let decision = self.publication_decision()?;
+            let file = self.inputs.files.identity(collection.path())?;
+            let incarnation = self.state().incarnation;
+            let lease = collection.reader(ReaderRole::Cloud)?;
+            let snapshot = lease.snapshot()?;
+            match self.preview_native_layouts(&*snapshot, file, &account, &decision) {
+                Err(RuntimeError::Tracking(Error::ValidatedUnprovedLayout { .. })) => {},
+                Err(other) => return Err(other),
+                Ok(()) => return Err(RuntimeError::StaleIncarnation),
+            }
+            if self.publication_account()? != account || self.publication_decision()? != decision
+                || self.inputs.files.identity(collection.path())? != file
+                || collection.last_seq() != snapshot.seq() || !collection.is_current()
+            { return Err(RuntimeError::StaleIncarnation); }
+            let mut s = self.state();
+            let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+            if s.incarnation != incarnation || b.evidence.generation != collection.generation()
+                || b.file != file || b.binding.facts.account != account
+                || b.binding.facts.publication != decision.publication.identity
+            { return Err(RuntimeError::StaleIncarnation); }
+            s.layout_refusal = Some(b.binding.id);
+            s.scan_required = true;
+            s.whole_complete = false;
+            s.tracking_stopped = false;
+            s.publish_authority();
+            Ok(())
+        })();
+        match checked {
+            Ok(()) => error,
+            Err(other) => {
+                self.clear_layout_refusal_on_error(collection);
+                other
+            }
+        }
+    }
+
     /// V2.4 settles intents before a scan. A publisher's new binding cannot
     /// seed structural rows until its own controls have reached Zones (V15.2).
     pub fn prepare_binding(
+        &self,
+        collection: &Collection,
+        media: &meguri_engine::media::MediaService,
+        timeout: Duration,
+    ) -> Result<(), RuntimeError> {
+        match self.prepare_binding_inner(collection, media, timeout)
+            .map_err(|e| self.remember_layout_refusal(collection, e))
+        {
+            Err(RuntimeError::Tracking(Error::ValidatedUnprovedLayout { .. })) => Ok(()),
+            result => result,
+        }
+    }
+
+    fn prepare_binding_inner(
         &self,
         collection: &Collection,
         media: &meguri_engine::media::MediaService,
@@ -619,7 +698,7 @@ impl Runtime {
         media: &meguri_engine::media::MediaService,
         timeout: Duration,
     ) -> Result<NoteScanProof, RuntimeError> {
-        self.settle_before_transition(collection, timeout)?;
+        self.settle_before_transition(collection, timeout).map_err(|e| self.remember_layout_refusal(collection, e))?;
         #[cfg(feature = "test-hooks")]
         let mut scan_pause = self.scan_pause.lock().unwrap_or_else(PoisonError::into_inner).take();
         let guard = {
@@ -807,7 +886,7 @@ impl Runtime {
                                 let raw = view.row(Table::Notetypes, &RowKey::Id(id))?.ok_or(Error::InvalidData)?;
                                 row_payload::notetype(&view, &raw, 1)
                             } else {
-                                Err(Error::InvalidData)
+                                row_payload::missing_layout(&view, id)
                             }
                         });
                         let failure = match &projected { Err(Error::RowFailure(f)) => Some(*f), _ => None };
@@ -952,6 +1031,7 @@ impl Runtime {
                     .observe_crt(snapshot.seq().0, col.created.0);
                 Self::refresh_epoch_crt_locked(s)?;
                 s.whole_complete = true;
+                s.layout_refusal = None;
                 s.scan_required = false;
                 s.tracking_stopped = false;
                 for (kind, row_count) in counts {
@@ -979,7 +1059,7 @@ impl Runtime {
             Ok((proof, file, publication))
         });
         let mut s = self.state();
-        if s.incarnation == guard.incarnation {
+        let result = if s.incarnation == guard.incarnation {
             s.scan_running = false;
             let result = result.and_then(|(proof, file, publication)| {
                 let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
@@ -1018,7 +1098,9 @@ impl Runtime {
             result
         } else {
             Err(RuntimeError::StaleIncarnation)
-        }
+        };
+        drop(s);
+        result.map_err(|e| self.remember_layout_refusal(collection, e))
     }
     /// A completed SDK fetch at the current no-state point, with no root-zone
     /// delivery, permits the V26.1 record-ID fallback. It is not confirmation.

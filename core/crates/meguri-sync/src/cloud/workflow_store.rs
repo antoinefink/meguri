@@ -1082,7 +1082,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                             commit,
                         };
                         let before = before_row.ok_or(Error::InvalidData)?;
-                        let payload = match row_payload::project_ordinary(&view, kind, before, |id| layout(&tx, b, id)) {
+                        let payload = match row_payload::project_ordinary(&view, kind, before, |id| layout(&view.inner, id)) {
                             Ok(p) => p,
                             // Tombstone has no wire payload. Keep the last real
                             // retained image as bookkeeping when the removed row
@@ -1126,7 +1126,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                 };
                 let raw = raw.ok_or(Error::InvalidData)?;
                 let projected = row_payload::project_ordinary(&view, kind, &raw, |id| {
-                    intent_layouts.get(&id).cloned().map(Ok).unwrap_or_else(|| layout(&tx, b, id))
+                    intent_layouts.get(&id).cloned().map(Ok).unwrap_or_else(|| layout(&view, id))
                 });
                 if applying && let Some(protected) = protected {
                     let actual = projected.as_ref().map_err(|_| Error::InvalidData)?;
@@ -1214,9 +1214,10 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         Ok(dropped)
     }
 }
-fn layout(c: &Connection, b: BindingId, id: i64) -> Result<codec::Notetype, Error> {
-    match entity(c, b, codec::Kind::Notetype, &codec::id_key(id))?.map(|e| e.payload) {
+fn layout(view: &CommitView<'_, '_>, id: i64) -> Result<codec::Notetype, Error> {
+    match entity(view.c, view.b, codec::Kind::Notetype, &codec::id_key(id))?.map(|e| e.payload) {
         Some(codec::Payload::Notetype(n)) if n.struct_gen > 0 => Ok(n),
+        None => row_payload::missing_layout(view, id),
         _ => Err(Error::InvalidData),
     }
 }
@@ -1226,7 +1227,7 @@ fn observed_layout(
     view: &CommitView<'_, '_>, commit: &meguri_engine::ObservedCommit<'_>,
     intents: &std::collections::BTreeMap<i64, codec::Notetype>, id: i64,
 ) -> Result<codec::Notetype, Error> {
-    let authority = intents.get(&id).cloned().map(Ok).unwrap_or_else(|| layout(view.c, view.b, id))?;
+    let authority = intents.get(&id).cloned().map(Ok).unwrap_or_else(|| layout(view, id))?;
     let head = view.row(Table::Notetypes, &RowKey::Id(id))?.ok_or(Error::InvalidData)?;
     let actual = row_payload::notetype(view, &head, authority.struct_gen)?;
     if actual == authority { return Ok(actual); }

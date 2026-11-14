@@ -97,6 +97,7 @@ impl State {
     pub fn controls(&self) -> Controls {
         let binding = self.facts.binding.as_ref();
         let usable = binding.is_some_and(|b| b.usable && b.state == BindingState::Active);
+        let choice = self.facts.fence == Fence::ChooseCollection;
         let active = binding.is_some_and(|b| b.state == BindingState::Active);
         let stopped = binding.is_some_and(|b| b.state == BindingState::Isolated(IsolationReason::Stopped));
         let decision = self.facts.fence == Fence::DecisionRequired;
@@ -104,6 +105,8 @@ impl State {
             EnableControl::ResumePause
         } else if decision {
             EnableControl::DecisionRequired
+        } else if choice {
+            EnableControl::Connect
         } else if stopped {
             EnableControl::AwaitingResumeOffer
         } else if !usable {

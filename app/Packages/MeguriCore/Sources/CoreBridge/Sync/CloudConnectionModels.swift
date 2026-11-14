@@ -56,6 +56,8 @@ public struct CloudConnectionSummary: Sendable {
     /// Informational only. Confirmation always passes the original opaque preview.
     public let resumeBindingId: Data?
     public let unsentCounts: [CloudCountKind: UInt64]
+    /// When false, unsentCounts and unsentChangeCount are only lower bounds.
+    public let unsentCountsExact: Bool
     public var unsentChangeCount: UInt64 {
         unsentCounts.values.reduce(0) { total, count in
             let sum = total.addingReportingOverflow(count)
@@ -70,6 +72,7 @@ public struct CloudConnectionSummary: Sendable {
         unpublishedCounts = cloudKindCounts(v.unpublishedCounts)
         resumeBindingId = v.resumeBindingId
         unsentCounts = cloudKindCounts(v.unsentCounts)
+        unsentCountsExact = v.unsentCountsExact
         decision = switch v.decision { case .noCollection: .noCollection; case .confirmUpload: .confirmUpload; case .confirmAdoption: .confirmAdoption; case .confirmResume: .confirmResume; case .chooseCollection: .chooseCollection; case .cloudUnreadable: .cloudUnreadable }
     }
 }

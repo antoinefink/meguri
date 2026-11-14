@@ -70,6 +70,8 @@ pub enum Error {
     Constraint,
     InvalidIdentifier,
     InvalidData,
+    /// Valid aggregates, but no authorized ordinal map for this native layout.
+    ValidatedUnprovedLayout { notetype: i64 },
     RowFailure(row_payload::RowFailure),
     BindingNotFound,
     IsolatedBinding,
@@ -86,6 +88,7 @@ impl std::fmt::Display for Error {
             Self::Constraint => "cloud tracking constraint failed",
             Self::InvalidIdentifier => "invalid cloud tracking identifier",
             Self::InvalidData => "invalid cloud tracking data",
+            Self::ValidatedUnprovedLayout { .. } => "cloud native layout requires a collection choice",
             Self::RowFailure(_) => "cloud entity raw row cannot be sent",
             Self::BindingNotFound => "cloud binding not found in this build",
             Self::IsolatedBinding => "cloud binding is isolated",

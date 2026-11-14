@@ -23,13 +23,24 @@ struct CloudConnectionModelTests {
             localCounts: [.init(kind: .note, count: 12)], localEmpty: false,
             manifestCounts: [.init(kind: .card, count: 15)], publishedAtMs: 123,
             decision: .confirmResume, unpublishedCounts: [.init(kind: .tag, count: 2)],
-            resumeBindingId: Data([1, 2]), unsentCounts: [.init(kind: .note, count: 3), .init(kind: .revlog, count: 4)]))
+            resumeBindingId: Data([1, 2]), unsentCounts: [.init(kind: .note, count: 3), .init(kind: .revlog, count: 4)], unsentCountsExact: true))
         #expect(summary.decision == .confirmResume && !summary.initialAdoptionRequired)
         #expect(summary.resumeBindingId == Data([1, 2]))
-        #expect(summary.unsentCounts == [.note: 3, .revlog: 4] && summary.unsentChangeCount == 7)
+        #expect(summary.unsentCountsExact && summary.unsentCounts == [.note: 3, .revlog: 4] && summary.unsentChangeCount == 7)
         #expect(summary.unpublishedCounts == [.tag: 2])
         #expect(summary.localCounts == [.note: 12] && summary.manifestCounts == [.card: 15])
         #expect(summary.publishedAtMilliseconds == 123)
+    }
+    @Test func unprovedOwnWorkKeepsUnknownAndLowerBoundSeparateFromLocalCounts() {
+        let summary = CoreBridge.CloudConnectionSummary(MeguriCoreBindings.CloudConnectionSummary(
+            localCollectionPresent: true, initialAdoptionRequired: false,
+            localCounts: [.init(kind: .note, count: 12)], localEmpty: false,
+            manifestCounts: [.init(kind: .note, count: 8)], publishedAtMs: 123,
+            decision: .chooseCollection, unpublishedCounts: [], resumeBindingId: nil,
+            unsentCounts: [.init(kind: .note, count: 3)], unsentCountsExact: false))
+        #expect(!summary.unsentCountsExact && summary.unsentChangeCount == 3)
+        #expect(summary.localCounts[.note] == 12 && summary.manifestCounts?[.note] == 8)
+        #expect(summary.decision == .chooseCollection && summary.resumeBindingId == nil)
     }
     @Test func allConnectionDecisionsAndAbsentResumeFieldsMap() {
         let decisions: [(MeguriCoreBindings.CloudConnectionDecision, CoreBridge.CloudConnectionDecision)] = [
@@ -39,7 +50,7 @@ struct CloudConnectionModelTests {
         for (raw, expected) in decisions {
             let summary = CoreBridge.CloudConnectionSummary(MeguriCoreBindings.CloudConnectionSummary(
                 localCollectionPresent: false, initialAdoptionRequired: false, localCounts: [], localEmpty: true,
-                manifestCounts: nil, publishedAtMs: nil, decision: raw, unpublishedCounts: [], resumeBindingId: nil, unsentCounts: []))
+                manifestCounts: nil, publishedAtMs: nil, decision: raw, unpublishedCounts: [], resumeBindingId: nil, unsentCounts: [], unsentCountsExact: true))
             #expect(summary.decision == expected && summary.resumeBindingId == nil)
             #expect(summary.unsentCounts.isEmpty && summary.unsentChangeCount == 0)
         }
@@ -48,7 +59,7 @@ struct CloudConnectionModelTests {
         let summary = CoreBridge.CloudConnectionSummary(MeguriCoreBindings.CloudConnectionSummary(
             localCollectionPresent: true, initialAdoptionRequired: false, localCounts: [], localEmpty: false,
             manifestCounts: nil, publishedAtMs: nil, decision: .confirmResume, unpublishedCounts: [], resumeBindingId: nil,
-            unsentCounts: [.init(kind: .note, count: .max), .init(kind: .card, count: 1)]))
+            unsentCounts: [.init(kind: .note, count: .max), .init(kind: .card, count: 1)], unsentCountsExact: true))
         #expect(summary.unsentChangeCount == .max)
         #expect(CoreBridge.CloudConnectionFailure(MeguriCoreBindings.CloudConnectionFailure.accountMismatch) == .accountMismatch)
     }

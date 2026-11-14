@@ -79,6 +79,8 @@ pub struct Preview {
     pub unpublished_by_kind: BTreeMap<Kind, u64>,
     pub resume_binding: Option<BindingId>,
     pub unsent_by_kind: BTreeMap<Kind, u64>,
+    /// False means own work is unknown; the counts are sound lower bounds.
+    pub unsent_counts_exact: bool,
 }
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PreviewWork {

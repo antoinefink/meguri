@@ -1657,6 +1657,18 @@
         }
       }
     },
+    "sync.preview.ownUnsentUnknown": {
+      "comment": "V13.6: own unsent total is unknown; the argument is a sound known lower bound, separate from other devices' unknown changes.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unsent changes on this device: unknown. At least %lld known."
+          }
+        }
+      }
+    },
     "sync.preview.otherDevicesUnknown": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {

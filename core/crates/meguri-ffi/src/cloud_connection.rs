@@ -283,6 +283,8 @@ pub struct CloudConnectionSummary {
     /// Present “Continue syncing this collection” and these unsent counts.
     pub resume_binding_id: Option<Vec<u8>>,
     pub unsent_counts: Vec<CloudKindCount>,
+    /// False: own total is unknown; unsent_counts are only known lower bounds.
+    pub unsent_counts_exact: bool,
 }
 impl From<&p::Preview> for CloudConnectionSummary {
     fn from(v: &p::Preview) -> Self {
@@ -306,6 +308,7 @@ impl From<&p::Preview> for CloudConnectionSummary {
             unpublished_counts: counts(&v.unpublished_by_kind),
             resume_binding_id: v.resume_binding.map(|b| b.0.to_vec()),
             unsent_counts: counts(&v.unsent_by_kind),
+            unsent_counts_exact: v.unsent_counts_exact,
         }
     }
 }

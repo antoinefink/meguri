@@ -61,6 +61,65 @@ impl Runtime {
         self.emit_pending_locked(&mut s, workflow::UpdateKind::Full, BTreeSet::new())?;
         Ok(())
     }
+    /// Checks retained type images for a connection preview.
+    pub(super) fn preview_native_layouts(
+        &self, rows: &(impl ReadRows + ?Sized), file: NativeFileIdentity,
+        account: &OpaqueBytes, decision: &crate::cloud::publication::DecisionSnapshot,
+    ) -> Result<(), RuntimeError> {
+        let context = {
+            let s = self.state();
+            let Some(b) = s.bound.as_ref().filter(|b| b.file == file && b.binding.scope == self.inputs.scope
+                && b.binding.facts.account == *account
+                && b.binding.facts.publication == decision.publication.identity
+                && !matches!(b.binding.facts.state, BindingState::Isolated(
+                    IsolationReason::FileMismatch | IsolationReason::ReplacedLocally | IsolationReason::EncryptedDataReset)))
+            else { return Ok(()); };
+            with_tracking_access(|| -> Result<_, RuntimeError> {
+                let store = s.store.as_ref().ok_or(Error::Database)?;
+                // Initial publication defines an independent layout in its new
+                // epoch. Its absent baseline must not be treated as old authority.
+                if store.publication_op()?.is_some() || store.adoption_op()?.is_some() { return Ok(None); }
+                if store.runtime_binding(b.binding.id)?.file != Some(file) { return Err(RuntimeError::FileIdentityUnavailable); }
+                let expected = super::super::incoming_store::intent_layouts(&store.connection,
+                    b.binding.id, file, &b.binding.facts.record_key.0, &store.directory, &store.apply_intents(b.binding.id)?)?;
+                Ok(Some((b.binding.id, expected)))
+            })?
+        };
+        let Some((binding, expected)) = context else { return Ok(()); };
+        let view = row_payload::ReadView(rows);
+        let mut after = None;
+        let mut refusal = None;
+        loop {
+            let page = rows.row_page(Table::Notetypes, after.as_ref())?;
+            if page.is_empty() { break; }
+            for head in page {
+                let id = row_payload::int(&head, 0)?;
+                after = Some(RowKey::Id(id));
+                let tracked = {
+                    let s = self.state();
+                    with_tracking_access(|| s.store.as_ref().ok_or(Error::Database)?
+                        .entity_image(binding, codec::Kind::Notetype, &codec::id_key(id)))?
+                };
+                let admitted = match tracked.map(|e| e.payload) {
+                    Some(codec::Payload::Notetype(n)) if n.id == id && n.struct_gen > 0 => Some(n),
+                    None => None,
+                    _ => return Err(Error::InvalidData.into()),
+                };
+                let generation = admitted.as_ref().or_else(|| expected.get(&id)).map_or(1, |n| n.struct_gen);
+                let actual = row_payload::notetype(&view, &head, generation)?;
+                if admitted.as_ref() == Some(&actual) || expected.get(&id) == Some(&actual) { continue; }
+                // Continue validating all aggregates before surfacing a refusal.
+                row_payload::validate_notetype(&actual)?;
+                if let Some(n) = admitted.as_ref() { row_payload::validate_notetype(n)?; }
+                refusal.get_or_insert(id);
+            }
+        }
+        match refusal {
+            Some(notetype) => Err(Error::ValidatedUnprovedLayout { notetype }.into()),
+            None => Ok(()),
+        }
+    }
+
     pub(super) fn wait_incoming_idle(&self) {
         let mut s = self.state();
         while s.incoming.running {
@@ -656,6 +715,9 @@ impl Runtime {
                 .into());
             }
             let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+            if Self::layout_refused_locked(&s) {
+                return Err(RuntimeError::Incomplete(Incomplete::StructuralLayout));
+            }
             if !b.verified || !b.usable {
                 return Err(RuntimeError::IdentityUnverified);
             }
@@ -1476,7 +1538,7 @@ fn layouts(store: &TrackingStore, b: BindingId) -> Result<BTreeMap<i64, codec::N
     Ok(layouts)
 }
 // Select exact admitted images, never infer origins from the row's optional IDs.
-fn select_intent_layouts(
+pub(super) fn select_intent_layouts(
     rows: &(impl ReadRows + ?Sized), layouts: &mut BTreeMap<i64, codec::Notetype>,
     expected: BTreeMap<i64, codec::Notetype>,
 ) -> Result<(), Error> {
@@ -1486,7 +1548,9 @@ fn select_intent_layouts(
         if actual.as_ref().is_some_and(|actual| layouts.get(&id) == Some(actual)) { continue; }
         if actual.as_ref().is_none_or(|actual| *actual == intent) {
             layouts.insert(id, intent);
-        } else { return Err(Error::InvalidData); }
+        } else if let Some(actual) = actual {
+            row_payload::unproved_layout(&actual, &intent)?;
+        }
     }
     Ok(())
 }
@@ -1501,7 +1565,8 @@ fn project(
     rows.row_image(table, &key)?
         .map(|row| {
             row_payload::project_ordinary(&row_payload::ReadView(rows), kind, &row, |id| {
-                layouts.get(&id).cloned().ok_or(Error::InvalidData)
+                layouts.get(&id).cloned().map(Ok)
+                    .unwrap_or_else(|| row_payload::missing_layout(&row_payload::ReadView(rows), id))
             })
         })
         .transpose()

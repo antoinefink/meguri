@@ -137,6 +137,7 @@ impl RuntimeError {
                     Error::Constraint => "Constraint",
                     Error::InvalidIdentifier => "InvalidIdentifier",
                     Error::InvalidData => "InvalidData",
+                    Error::ValidatedUnprovedLayout { .. } => "ValidatedUnprovedLayout",
                     Error::RowFailure(_) => "RowFailure",
                     Error::BindingNotFound => "BindingNotFound",
                     Error::IsolatedBinding => "IsolatedBinding",
@@ -515,6 +516,8 @@ struct State {
     scan_required: bool,
     scan_running: bool,
     tracking_stopped: bool,
+    // Process-only outcome, reconstructed from retained rows/intents each open.
+    layout_refusal: Option<BindingId>,
     last_capture: Option<CaptureProof>,
     note_scan: Option<NoteScanProof>,
     whole_complete: bool,
@@ -567,7 +570,7 @@ impl NativeAuthority {
             service_pending: s.adapter.known_loss.is_some() || s.adapter.durable.collection_loss.is_some(),
             media_missing: s.media.zone_missing,
             crt_equal: s.bound.as_ref().is_some_and(Bound::crt_equal),
-            usable: s.bound.as_ref().is_some_and(|b| b.usable),
+            usable: s.bound.as_ref().is_some_and(|b| b.usable) && !Runtime::layout_refused_locked(s),
             verified: s.bound.as_ref().is_some_and(|b| b.verified),
             active: s
                 .bound
@@ -925,6 +928,7 @@ impl Runtime {
             .filter(|b| b.evidence.generation == evidence.generation && b.file == file)
             .map_or((0, evidence.opened_crt), |b| b.current_crt);
         state.suspended_adoption_cleanup = None;
+        state.layout_refusal = None;
         state.connection_lifecycle = live_resume_impl::ConnectionLifecycle::Active;
         Self::adapter_close_exchange_locked(&mut state);
         state.incarnation = state.incarnation.checked_add(1).ok_or(Error::InvalidData)?;
@@ -1761,7 +1765,13 @@ impl ChangeObserver for Runtime {
             )
         });
         if result.is_err() {
+            state.layout_refusal = None;
             Self::invalidate_locked(&mut state);
+            if matches!(&result, Err(RuntimeError::Tracking(Error::ValidatedUnprovedLayout { .. }))) {
+                state.layout_refusal = Some(binding);
+                state.tracking_stopped = false;
+                state.publish_authority();
+            }
         } else {
             if let Some(proof) = state.last_capture.as_mut() {
                 proof.persisted = true;
@@ -1783,6 +1793,11 @@ impl ChangeObserver for Runtime {
         #[cfg(feature = "test-hooks")]
         {
             state.last_capture_body_reads = super::workflow_store::body_reads().saturating_sub(body_reads_before);
+        }
+        // The collection commit remains valid. Keep the failed capture proof
+        // and scan requirement, while the explicit choice closes cloud admission.
+        if matches!(&result, Err(RuntimeError::Tracking(Error::ValidatedUnprovedLayout { .. }))) {
+            return Ok(());
         }
         result.map_err(engine_error)
     }

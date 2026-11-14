@@ -89,7 +89,7 @@ impl Runtime {
         let Some(b) = s.bound.as_ref().filter(|b| Self::resumable(&b.binding)) else {
             return Ok(None);
         };
-        if b.binding.scope != self.inputs.scope
+        if Self::layout_refused_locked(s) || b.binding.scope != self.inputs.scope
             || &b.binding.facts.account != account
             || b.binding.facts.publication != decision.publication.identity
             || decision.publication.decision != meguri_engine::device_state::PublicationDecision::Clear
@@ -133,7 +133,7 @@ impl Runtime {
     /// Caller holds state; providers and sidecar access must precede this check.
     pub(super) fn validate_resume_context_locked(&self, s: &State, c: &ResumeContext) -> Result<(), RuntimeError> {
         let b = s.bound.as_ref().ok_or(PublicationError::NotOffered)?;
-        if s.incarnation != c.scan.incarnation
+        if Self::layout_refused_locked(s) || s.incarnation != c.scan.incarnation
             || s.invalidation != c.scan.invalidation
             || s.invalidation_exhausted
             || s.scan_running
@@ -402,6 +402,33 @@ impl Runtime {
         Ok(())
     }
 
+    /// Stored pending entities are a lower bound when native projection is
+    /// unproved. Page bodies rather than retaining another collection image.
+    pub(super) fn known_unsent_lower_bounds(&self) -> Result<BTreeMap<codec::Kind, u64>, RuntimeError> {
+        let s = self.state();
+        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+        with_tracking_access(|| -> Result<_, RuntimeError> {
+            let store = s.store.as_ref().ok_or(Error::Database)?;
+            let mut counts = BTreeMap::new();
+            for kind in crate::cloud::row_payload::KINDS {
+                let mut count = 0u64;
+                let mut after = None;
+                loop {
+                    let page = store.entity_page(b.binding.id, kind, after.as_deref())?;
+                    if page.is_empty() { break; }
+                    for e in page {
+                        after = Some(e.key.clone());
+                        if e.mark.is_some() || e.local_rev > e.acked_rev {
+                            count = count.checked_add(1).ok_or(Error::InvalidData)?;
+                        }
+                    }
+                }
+                counts.insert(kind, count);
+            }
+            Ok(counts)
+        })
+    }
+
     /// Preview counts include actual isolated local edits which capture skipped.
     /// Read-only: no ACK, dirty mark, cursor, retry budget or file is changed.
     /// Reuse the preview's held snapshot; the Cloud reader cannot be leased twice.
@@ -409,11 +436,11 @@ impl Runtime {
         &self,
         snapshot: &(impl ReadRows + ?Sized),
         media: &meguri_engine::media::MediaService,
-    ) -> Result<BTreeMap<codec::Kind, u64>, RuntimeError> {
-        let entities = {
+    ) -> Result<(BTreeMap<codec::Kind, u64>, bool), RuntimeError> {
+        let (entities, expected) = {
             let s = self.state();
-            let Some(b) = s.bound.as_ref().filter(|b| Self::resumable(&b.binding)) else {
-                return Ok(BTreeMap::new());
+            let Some(b) = s.bound.as_ref().filter(|b| Self::resumable(&b.binding) || Self::layout_refused_locked(&s)) else {
+                return Ok((BTreeMap::new(), true));
             };
             with_tracking_access(|| -> Result<_, RuntimeError> {
                 let store = s.store.as_ref().ok_or(Error::Database)?;
@@ -431,9 +458,20 @@ impl Runtime {
                         }
                     }
                 }
-                Ok(entities)
+                let expected = super::super::incoming_store::intent_layouts(&store.connection, b.binding.id,
+                    b.file, &b.binding.facts.record_key.0, &store.directory, &store.apply_intents(b.binding.id)?)?;
+                Ok((entities, expected))
             })?
         };
+        let mut exact = true;
+        let mut layouts = entities.iter().filter_map(|(_, e)| match &e.payload {
+            codec::Payload::Notetype(n) => Some((n.id, n.clone())), _ => None,
+        }).collect();
+        match incoming_impl::select_intent_layouts(snapshot, &mut layouts, expected) {
+            Ok(()) => {},
+            Err(Error::ValidatedUnprovedLayout { .. }) => exact = false,
+            Err(e) => return Err(e.into()),
+        }
         let mut pending: BTreeSet<_> = entities
             .iter()
             .filter(|(_, e)| e.mark.is_some() || e.local_rev > e.acked_rev)
@@ -454,15 +492,19 @@ impl Runtime {
                 for row in page {
                     after = Some(RowKey::from_stored(table, &row).map_err(meguri_storage::StorageError::from)?);
                     let key = (kind, crate::cloud::row_payload::key(kind, &row)?);
-                    let payload = crate::cloud::row_payload::project_ordinary(&view, kind, &row, |id| {
-                        match entities
-                            .get(&(codec::Kind::Notetype, codec::id_key(id).to_vec()))
-                            .map(|e| e.acked_payload.as_ref().unwrap_or(&e.payload))
-                        {
-                            Some(codec::Payload::Notetype(n)) => Ok(n.clone()),
-                            _ => Err(Error::InvalidData),
+                    let projected = crate::cloud::row_payload::project_ordinary(&view, kind, &row, |id| {
+                        layouts.get(&id).cloned().map(Ok)
+                            .unwrap_or_else(|| crate::cloud::row_payload::missing_layout(&view, id))
+                    });
+                    let payload = match projected {
+                        Ok(payload) => payload,
+                        Err(Error::ValidatedUnprovedLayout { .. }) => {
+                            exact = false;
+                            seen.insert(key);
+                            continue;
                         }
-                    })?;
+                        Err(e) => return Err(e.into()),
+                    };
                     if entities
                         .get(&key)
                         .is_none_or(|e| payload.row_digest().ok() != Some(e.acked_row_digest))
@@ -502,6 +544,6 @@ impl Runtime {
         for (kind, _) in pending {
             *counts.get_mut(&kind).ok_or(Error::InvalidData)? += 1;
         }
-        Ok(counts)
+        Ok((counts, exact))
     }
 }

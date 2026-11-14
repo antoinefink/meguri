@@ -701,14 +701,31 @@ fn prove_reopened_binding(host: &CoreHost, binding: &cloud::Binding) {
 
 #[test]
 fn ordinary_notetype_legacy_external_template_reorder_reopen_holds_counter_and_dependents() {
+    validated_layout_choice_case(false);
+}
+
+#[test]
+fn ordinary_notetype_empty_local_same_epoch_refusal_uses_choice_with_unknown_own_work() {
+    validated_layout_choice_case(true);
+}
+
+fn validated_layout_choice_case(empty: bool) {
     use meguri_storage::raw::{PlainDatabase, RawValue};
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("device");
     generated_legacy_reversed(&dir);
+    if empty {
+        let db = PlainDatabase::open(&dir.join("collection.anki2")).unwrap();
+        db.execute_batch("DELETE FROM revlog; DELETE FROM cards; DELETE FROM notes; DELETE FROM decks WHERE id<>1").unwrap();
+        db.close().unwrap();
+    }
     let host = open_host(&dir, keys());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(455)).unwrap();
     let binding = publish_actual_collection(&host, &mut service);
-    let source = source_type(&host);
+    let source = if empty {
+        host.cloud_runtime().unwrap().entity_facts_page(codec::Kind::Notetype, None).unwrap().into_iter()
+            .find(|e| matches!(&e.payload, Payload::Notetype(n) if n.templates.len() == 2)).unwrap()
+    } else { source_type(&host) };
     let original = nt(&source);
     assert_eq!(original.templates.len(), 2);
     assert!(original.templates.iter().all(|t| TemplateConfig::decode(&t.config).unwrap().id.is_none()));
@@ -730,7 +747,27 @@ fn ordinary_notetype_legacy_external_template_reorder_reopen_holds_counter_and_d
     let collection = host.collection().unwrap();
     prove_reopened_binding(&host, &binding);
     assert_eq!(bookkeeping(&host), before);
-    assert!(runtime.reconcile_binding(&collection, &host.media().unwrap(), Duration::from_secs(30)).is_err());
+    let refusal = runtime.reconcile_binding(&collection, &host.media().unwrap(), Duration::from_secs(30)).unwrap_err();
+    assert!(matches!(refusal, cloud::runtime::RuntimeError::Tracking(
+        cloud::Error::ValidatedUnprovedLayout { notetype }) if notetype == original.id));
+    runtime.prepare_binding(&collection, &host.media().unwrap(), Duration::from_secs(30)).unwrap();
+    assert!(matches!(host.engine().state(), meguri_engine::LifecycleState::Ready { .. }));
+    assert!(!runtime.status().unwrap().tracking_stopped);
+    assert!(runtime.require_collection_sending().is_err());
+    let projection = runtime.policy_projection(cloud::policy::Lifecycle::Ready, collection.generation().0).unwrap();
+    assert_eq!(projection.facts.fence, cloud::policy::Fence::ChooseCollection);
+    let p = actual_preview(&host, &mut service, &scope());
+    assert!(p.decision == ConnectDecision::ChooseCollection);
+    assert_eq!(p.active_epoch, Some(binding.facts.epoch));
+    assert_eq!(p.local.empty, empty);
+    assert!(!p.unsent_counts_exact && p.resume_binding.is_none());
+    assert_eq!(p.local.counts[&codec::Kind::Note], if empty { 0 } else { notes.len() as u64 });
+    let lower_bounds = p.unsent_by_kind.clone();
+    runtime.cancel_connection_preview_id(p.id).unwrap();
+    let again = actual_preview(&host, &mut service, &scope());
+    assert!(again.decision == ConnectDecision::ChooseCollection && !again.unsent_counts_exact);
+    assert_eq!(again.unsent_by_kind, lower_bounds);
+    runtime.cancel_connection_preview_id(again.id).unwrap();
     assert_eq!(bookkeeping(&host), before);
     assert!(runtime.entity_facts(&source.name).unwrap().unwrap() == source);
     assert_eq!(runtime.entity_facts_page(codec::Kind::Card, None).unwrap(), cards);
@@ -744,8 +781,17 @@ fn ordinary_notetype_legacy_external_template_reorder_reopen_holds_counter_and_d
     let actual = cloud::row_payload::notetype(&cloud::row_payload::ReadView(&*snapshot), &head, original.struct_gen).unwrap();
     assert_eq!(actual.templates[0].name, original.templates[1].name);
     assert_eq!(actual.templates[1].name, original.templates[0].name);
-    assert!(cloud::row_payload::project_ordinary(&cloud::row_payload::ReadView(&*snapshot), codec::Kind::Notetype, &head,
-        |_| Ok(original.clone())).is_err());
+    assert!(matches!(cloud::row_payload::project_ordinary(&cloud::row_payload::ReadView(&*snapshot), codec::Kind::Notetype, &head,
+        |_| Ok(original.clone())), Err(cloud::Error::ValidatedUnprovedLayout { notetype }) if notetype == original.id));
+    let mut invalid = head.clone();
+    invalid[4] = meguri_storage::Cell::Blob(vec![0xff]);
+    assert!(matches!(cloud::row_payload::project_ordinary(&cloud::row_payload::ReadView(&*snapshot), codec::Kind::Notetype, &invalid,
+        |_| Ok(original.clone())), Err(cloud::Error::RowFailure(_))));
+    let mut unsupported = NotetypeConfig::decode(&actual.config).unwrap();
+    unsupported.kind = 2;
+    invalid[4] = meguri_storage::Cell::Blob(unsupported.encode());
+    assert!(matches!(cloud::row_payload::project_ordinary(&cloud::row_payload::ReadView(&*snapshot), codec::Kind::Notetype, &invalid,
+        |_| Ok(original.clone())), Err(cloud::Error::InvalidData)));
     drop(snapshot);
     drop(lease);
     host.close().unwrap();
@@ -754,8 +800,14 @@ fn ordinary_notetype_legacy_external_template_reorder_reopen_holds_counter_and_d
     let reopened = open_host(&dir, keys());
     prove_reopened_binding(&reopened, &binding);
     assert_eq!(bookkeeping(&reopened), before);
-    assert!(reopened.cloud_runtime().unwrap().reconcile_binding(&reopened.collection().unwrap(),
-        &reopened.media().unwrap(), Duration::from_secs(30)).is_err());
+    // Preview itself reconstructs the decision before a preparation/scan call.
+    let p = actual_preview(&reopened, &mut service, &scope());
+    assert!(p.decision == ConnectDecision::ChooseCollection && !p.unsent_counts_exact);
+    assert_eq!(p.unsent_by_kind, lower_bounds);
+    assert!(p.resume_binding.is_none());
+    let error = reopened.cloud_runtime().unwrap().reconcile_binding(&reopened.collection().unwrap(),
+        &reopened.media().unwrap(), Duration::from_secs(30)).unwrap_err();
+    assert!(matches!(error, cloud::runtime::RuntimeError::Tracking(cloud::Error::ValidatedUnprovedLayout { .. })));
     assert!(reopened.cloud_runtime().unwrap().entity_facts(&source.name).unwrap().unwrap() == source);
     reopened.close().unwrap();
 }

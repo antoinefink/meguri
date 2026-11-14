@@ -127,6 +127,7 @@ impl Runtime {
                 unpublished_by_kind: BTreeMap::new(),
                 resume_binding: None,
                 unsent_by_kind: BTreeMap::new(),
+                unsent_counts_exact: true,
             },
             false,
         ));
@@ -188,11 +189,20 @@ impl Runtime {
         let lease = collection.reader(ReaderRole::Cloud)?;
         let snapshot = lease.snapshot()?;
         let local = super::super::local_publication::count_local_rows(&*snapshot, media.tracked_names()?.names.len())?;
-        let unsent_by_kind = self.resume_unsent_counts(&*snapshot, media)?;
+        let layout_refused = match self.preview_native_layouts(&*snapshot, file, &account, &decision) {
+            Ok(()) => false,
+            Err(RuntimeError::Tracking(Error::ValidatedUnprovedLayout { .. })) => true,
+            Err(error) => return Err(error),
+        };
+        let (unsent_by_kind, counted_exact) = if layout_refused {
+            (self.known_unsent_lower_bounds()?, false)
+        } else { self.resume_unsent_counts(&*snapshot, media)? };
+        let unsent_counts_exact = counted_exact && !layout_refused;
         if self.inputs.files.identity(collection.path())? != file
             || self.publication_decision()? != decision
             || self.publication_account()? != account
             || !collection.is_current()
+            || collection.last_seq() != snapshot.seq()
         {
             return Err(PublicationError::AuthorityChanged.into());
         }
@@ -202,7 +212,16 @@ impl Runtime {
         }
         s.publication.next_preview = s.publication.next_preview.checked_add(1).ok_or(Error::InvalidData)?;
         let id = s.publication.next_preview;
-        s.publication.resume = self.retain_resume_context_locked(&s, collection, file, &decision, &account)?;
+        s.publication.resume = if unsent_counts_exact {
+            self.retain_resume_context_locked(&s, collection, file, &decision, &account)?
+        } else {
+            let binding = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
+            s.layout_refusal = Some(binding);
+            s.scan_required = true;
+            s.whole_complete = false;
+            s.publish_authority();
+            None
+        };
         let mut unpublished_by_kind = row_payload::KINDS
             .into_iter()
             .map(|k| (k, 0))
@@ -248,6 +267,7 @@ impl Runtime {
                 unpublished_by_kind,
                 resume_binding: None,
                 unsent_by_kind,
+                unsent_counts_exact,
             },
             false,
         ));
@@ -334,7 +354,7 @@ impl Runtime {
         p.published_at_ms = Some(epoch.published_at_ms);
         p.decision = if p.native_file.is_none() {
             ConnectDecision::NoCollection
-        } else if p.local.empty {
+        } else if p.local.empty && p.unsent_counts_exact {
             ConnectDecision::ConfirmAdoption
         } else {
             ConnectDecision::ChooseCollection

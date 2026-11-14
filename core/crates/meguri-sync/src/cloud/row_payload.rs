@@ -346,6 +346,26 @@ pub(super) fn validate_notetype(n: &c::Notetype) -> Result<(), Error> {
     Ok(())
 }
 
+/// An absent retained image grants no ordinal map. Validate the native
+/// aggregate independently before giving the typed collection-choice outcome.
+pub(super) fn missing_layout(view: &impl View, id: i64) -> Result<c::Notetype, Error> {
+    let head = view.row(Table::Notetypes, &RowKey::Id(id))?.ok_or(Error::InvalidData)?;
+    let actual = notetype(view, &head, 1)?;
+    validate_notetype(&actual)?;
+    Err(Error::ValidatedUnprovedLayout { notetype: id })
+}
+
+/// Classify only a fully validated aggregate mismatch. Exact retained images
+/// remain ordinary authority; neither equal endpoints nor optional IDs infer a map.
+pub(super) fn unproved_layout(actual: &c::Notetype, authority: &c::Notetype) -> Result<(), Error> {
+    validate_notetype(actual)?;
+    validate_notetype(authority)?;
+    if actual.id != authority.id || actual.struct_gen != authority.struct_gen {
+        return Err(Error::InvalidData);
+    }
+    Err(Error::ValidatedUnprovedLayout { notetype: actual.id })
+}
+
 /// Stable-layout runtime projection. The strict `project` API still verifies
 /// exact images for unpublished stages and diagnostics.
 pub fn project_ordinary(
@@ -381,7 +401,7 @@ fn project_with(
             // failure; the reference eligibility fence still holds dependents.
             Err(Error::RowFailure(_)) => Ok(authority.struct_gen),
             Err(error) => Err(error),
-            _ => Err(Error::InvalidData),
+            Ok(actual) => unproved_layout(&actual, authority).map(|()| authority.struct_gen),
         }
     };
     let t = table(kind).ok_or(Error::InvalidData)?;
@@ -488,7 +508,8 @@ fn project_with(
             let ack = acknowledged(id)?;
             let actual = notetype(view, row, ack.struct_gen)?;
             if actual != ack {
-                return Err(Error::InvalidData);
+                if ordinary { unproved_layout(&actual, &ack)?; }
+                else { return Err(Error::InvalidData); }
             }
             P::Notetype(actual)
         }
