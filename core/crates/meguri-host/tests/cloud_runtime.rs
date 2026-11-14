@@ -740,6 +740,7 @@ fn historical_birthtime_mismatch_reopen_durably_isolates_and_preserves_pending_a
     historical.file = Some(historical_file);
     historical.durable_file.as_mut().unwrap().created_seconds = historical_file.created_seconds;
     historical.note_scan.as_mut().unwrap().native_file = historical_file;
+    if let Some(coverage) = &mut historical.coverage { coverage.cursor.native_file = historical_file; }
     let (binding, notes) = with_store(&fixture.options.collection_directory, fixture.scope(), |store| {
         store
             .prepare_runtime_state_for_testing(fixture.binding, &historical)
@@ -840,6 +841,37 @@ fn isolation_account_precedence_preserves_pending_and_permanent_reasons() {
 
 #[test]
 fn malformed_other_build_runtime_payloads_do_not_block_current_build_but_future_version_does() {
+    fn disk(directory: &Path) -> [Option<Vec<u8>>; 3] {
+        ["", "-wal", "-shm"].map(|suffix| match std::fs::read(directory.join(format!("{}{suffix}", cloud::TRACKING_FILE))) {
+            Ok(bytes) => Some(bytes),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => panic!("cannot read synthetic tracking file: {e}"),
+        })
+    }
+    fn owner_rows(directory: &Path, owner: BindingId) -> std::collections::BTreeMap<String, Vec<Vec<meguri_storage::rusqlite::types::Value>>> {
+        use meguri_storage::rusqlite::{Connection, OpenFlags, types::Value};
+        let copy = tempfile::tempdir().unwrap();
+        for (suffix, bytes) in ["", "-wal"].into_iter().zip(disk(directory)) {
+            if let Some(bytes) = bytes {
+                std::fs::write(copy.path().join(format!("{}{suffix}", cloud::TRACKING_FILE)), bytes).unwrap();
+            }
+        }
+        let read = Connection::open_with_flags(copy.path().join(cloud::TRACKING_FILE), OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        let tables = read.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").unwrap()
+            .query_map([], |r| r.get::<_, String>(0)).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+        let mut result = std::collections::BTreeMap::new();
+        for table in tables {
+            let columns = read.prepare(&format!("PRAGMA table_info({table})")).unwrap()
+                .query_map([], |r| r.get::<_, String>(1)).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+            let column = if table == "bindings" { "id" } else if columns.iter().any(|c| c == "binding") { "binding" } else { continue; };
+            let mut query = read.prepare(&format!("SELECT * FROM {table} WHERE {column}=?1 ORDER BY rowid")).unwrap();
+            let width = query.column_count();
+            let rows = query.query_map([owner.0.as_slice()], |r| (0..width).map(|i| r.get::<_, Value>(i)).collect::<Result<Vec<_>, _>>())
+                .unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+            result.insert(table, rows);
+        }
+        result
+    }
     for other_scope in [
         scope("test.other-runtime", Environment::Development),
         scope("test.runtime", Environment::Production),
@@ -857,6 +889,11 @@ fn malformed_other_build_runtime_payloads_do_not_block_current_build_but_future_
                 .damage_runtime_payload_for_testing(other, Some(fixture.ids[0].0))
                 .unwrap();
         });
+        let foreign = owner_rows(&fixture.options.collection_directory, other);
+        assert!(!foreign["cloud_runtime_payload_owners"].is_empty());
+        for table in ["cloud_runtime_bindings", "cloud_runtime_notes"] {
+            assert!(foreign[table].iter().any(|r| r.last() == Some(&meguri_storage::rusqlite::types::Value::Text("{}".into()))));
+        }
         let host = fixture.open();
         let runtime = host.cloud_runtime().unwrap();
         assert!(runtime.status().unwrap().stored_usable);
@@ -864,13 +901,19 @@ fn malformed_other_build_runtime_payloads_do_not_block_current_build_but_future_
         let edit = edit(&collection, fixture.ids[0], "current build capture");
         assert!(runtime.capture_proof(edit.seq, edit.generation).unwrap().persisted);
         host.close().unwrap();
-        with_store(&fixture.options.collection_directory, other_scope, |store| {
-            assert!(store.stored_runtime_state(other).is_err());
-            assert!(store.tracked_note(other, fixture.ids[0].0).is_err());
-        });
+        assert_eq!(owner_rows(&fixture.options.collection_directory, other), foreign);
+        let before = disk(&fixture.options.collection_directory);
+        let refused = with_tracking_access(|| matches!(
+            TrackingStore::open(&fixture.options.collection_directory, other_scope).unwrap(),
+            OpenOutcome::Damaged
+        ));
+        assert!(refused);
+        assert_eq!(disk(&fixture.options.collection_directory), before);
+        assert_eq!(owner_rows(&fixture.options.collection_directory, other), foreign);
         with_store(&fixture.options.collection_directory, fixture.scope(), |store| {
             store.future_runtime_version_for_testing().unwrap();
         });
+        let before_future = disk(&fixture.options.collection_directory);
         let refused = with_tracking_access(|| {
             matches!(
                 TrackingStore::open(&fixture.options.collection_directory, fixture.scope()),
@@ -878,6 +921,8 @@ fn malformed_other_build_runtime_payloads_do_not_block_current_build_but_future_
             )
         });
         assert!(refused);
+        assert_eq!(disk(&fixture.options.collection_directory), before_future);
+        assert_eq!(owner_rows(&fixture.options.collection_directory, other), foreign);
         let local = fixture.open();
         let stopped = local.cloud_runtime().unwrap();
         assert!(stopped.status().unwrap().tracking_stopped);

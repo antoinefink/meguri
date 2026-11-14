@@ -40,6 +40,20 @@ impl ObserverRows<'_> {
         self.writer.max_revlog_id(card)
     }
 
+    /// Raw notetype parts from this same committed image, including parts
+    /// newly added or removed by the op (never a tracking-layout enumeration).
+    pub fn notetype_fields_page(&self, id: meguri_model::ids::NotetypeId, after: Option<i64>) -> Result<Vec<RowImage>, StorageError> {
+        self.writer.notetype_fields_page(id, after)
+    }
+    pub fn notetype_templates_page(&self, id: meguri_model::ids::NotetypeId, after: Option<i64>) -> Result<Vec<RowImage>, StorageError> {
+        self.writer.notetype_templates_page(id, after)
+    }
+
+    /// Raw ordinal keys, including malformed classes, on this committed view.
+    pub fn notetype_parts_raw_page(&self, table: Table, id: meguri_model::ids::NotetypeId, after: Option<&meguri_storage::Cell>) -> Result<Vec<RowImage>, StorageError> {
+        self.writer.notetype_parts_raw_page(table, id, after)
+    }
+
     /// Reads a real stored row from this commit, before any later op runs.
     pub fn row_image(&self, table: Table, key: &RowKey) -> Result<Option<RowImage>, StorageError> {
         self.writer.row_image(table, key)
@@ -134,6 +148,13 @@ fn row_delta(journal: &Journal, entry: &Entry) -> Result<RowDelta, StorageError>
     })
 }
 
+/// Journal presence facts, read without decoding either stored image.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RowPresence {
+    pub before: bool,
+    pub after: bool,
+}
+
 /// Owned immutable capability for one commit. It contains no collection reader
 /// or decoded cache. Keys can be enumerated and handles cloned without I/O;
 /// each independent keyed read decodes at most that row on each side.
@@ -183,6 +204,14 @@ impl CommitPayload {
     /// invalidations without a journal have no keys or row deltas.
     pub fn row_keys(&self, table: Table) -> impl Iterator<Item = &RowKey> {
         self.entries(table).map(Entry::key)
+    }
+
+    /// `None` means no effective journal entry for this key. Presence comes
+    /// from the journal itself, including entries whose images were spilled.
+    pub fn row_presence(&self, table: Table, key: &RowKey) -> Option<RowPresence> {
+        let entry = self.journal.as_ref()?.entry(table, key)?;
+        let presence = RowPresence { before: entry.existed_before(), after: entry.exists_after() };
+        (presence.before || presence.after).then_some(presence)
     }
 
     /// Reads only this key's stored sides. `None` means no journalled change;

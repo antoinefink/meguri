@@ -4,6 +4,105 @@ use c::wire::Message;
 use meguri_model::ids::{CardId, NotetypeId};
 use meguri_storage::{Cell, ReadRows, RowImage, RowKey, Table};
 
+/// Only raw R1–R10 failures and the canonical K7 cap are entity flags.
+/// Provider, layout, SQL and identity failures retain their original errors.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+pub enum RowFailure {
+    Oversize,
+    Unreadable { table: &'static str, column: &'static str },
+}
+impl<'de> serde::Deserialize<'de> for RowFailure {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        enum Value { Oversize, Unreadable { table: String, column: String } }
+        Ok(match <Value as serde::Deserialize>::deserialize(deserializer)? {
+            Value::Oversize => Self::Oversize,
+            Value::Unreadable { table, column } => {
+                let t = Table::ALL.into_iter().find(|t| t.name() == table)
+                    .ok_or_else(|| serde::de::Error::custom("invalid raw row table"))?;
+                let column = t.columns().iter().copied().find(|c| *c == column)
+                    .ok_or_else(|| serde::de::Error::custom("invalid raw row column"))?;
+                Self::Unreadable { table: t.name(), column }
+            }
+        })
+    }
+}
+pub(super) fn codec_error(error: c::CodecError) -> Error {
+    match error {
+        c::CodecError::Oversize => Error::RowFailure(RowFailure::Oversize),
+        _ => Error::InvalidData,
+    }
+}
+
+/// Validate storage classes/ranges without decoding TEXT into Rust strings or
+/// replacing tolerant values. Payload projection below always uses raw cells.
+pub(super) fn readable(t: Table, r: &[Cell]) -> Result<(), Error> {
+    use meguri_model::proto::{BlobMessage, deck::*, deck_config::*, notetype::*};
+    let bad = |i: usize| Error::RowFailure(RowFailure::Unreadable {
+        table: t.name(), column: t.columns()[i],
+    });
+    if r.len() != t.columns().len() { return Err(Error::InvalidData); }
+    let integer = |i: usize, lo: i64, hi: i64| match r.get(i) {
+        Some(Cell::Integer(v)) if (lo..=hi).contains(v) => Ok(()),
+        _ => Err(bad(i)),
+    };
+    let text = |i: usize| if matches!(r[i], Cell::Text(_)) { Ok(()) } else { Err(bad(i)) };
+    let blob = |i: usize| match &r[i] { Cell::Blob(v) => Ok(v.as_slice()), _ => Err(bad(i)) };
+    let i64s = |indices: &[usize]| -> Result<(), Error> {
+        for i in indices { integer(*i, i64::MIN, i64::MAX)?; } Ok(())
+    };
+    if let Some(i) = t.usn_column() { integer(i, i32::MIN.into(), i32::MAX.into())?; }
+    match t {
+        Table::Notes => {
+            i64s(&[0, 2, 3, 8, 9])?;
+            for i in [1, 5, 6, 10] { text(i)?; }
+            if !matches!(r[7], Cell::Text(_) | Cell::Integer(_) | Cell::Real(_)) { return Err(bad(7)); }
+        }
+        Table::Cards => {
+            if let Err(error) = meguri_storage::rows::cards::validated_note_id(r) {
+                return Err(Error::RowFailure(RowFailure::Unreadable {
+                    table: error.table,
+                    column: error.column,
+                }));
+            }
+        }
+        Table::Revlog => {
+            i64s(&[0, 1, 8])?;
+            integer(3, 0, u8::MAX.into())?;
+            integer(6, 0, u32::MAX.into())?;
+            for i in [4, 5] {
+                match &r[i] {
+                    Cell::Real(v) if v.is_finite() && v.trunc() >= i32::MIN as f64 && v.trunc() <= i32::MAX as f64 => (),
+                    _ => integer(i, i32::MIN.into(), i32::MAX.into())?,
+                }
+            }
+        }
+        Table::Notetypes | Table::Decks | Table::DeckConfig => {
+            i64s(&[0, 2])?; text(1)?;
+            match t {
+                Table::Notetypes => { NotetypeConfig::decode(blob(4)?).map_err(|_| bad(4))?; }
+                Table::Decks => {
+                    DeckCommon::decode(blob(4)?).map_err(|_| bad(4))?;
+                    DeckKindMessage::decode(blob(5)?).map_err(|_| bad(5))?;
+                }
+                _ => { DeckConfigMessage::decode(blob(4)?).map_err(|_| bad(4))?; }
+            }
+        }
+        Table::Fields | Table::Templates => {
+            i64s(&[0])?; integer(1, 0, u32::MAX.into())?; text(2)?;
+            if t == Table::Fields { FieldConfig::decode(blob(3)?).map_err(|_| bad(3))?; }
+            else { i64s(&[3])?; integer(4, i32::MIN.into(), i32::MAX.into())?; TemplateConfig::decode(blob(5)?).map_err(|_| bad(5))?; }
+        }
+        Table::Tags => { text(0)?; integer(2, 0, 1)?; if !matches!(r[3], Cell::Null) { blob(3)?; } }
+        // R9's non-BLOB value is tolerant, not an unreadable row. The wire
+        // format has no Stored alternative here, so projection still refuses it.
+        Table::Config => { text(0)?; i64s(&[2])?; }
+        _ => return Err(Error::InvalidData),
+    }
+    Ok(())
+}
+
 pub const KINDS: [c::Kind; 9] = [
     c::Kind::Note,
     c::Kind::Card,
@@ -32,6 +131,10 @@ pub trait View {
     fn row(&self, table: Table, key: &RowKey) -> Result<Option<RowImage>, Error>;
     fn page(&self, table: Table, after: Option<&RowKey>) -> Result<Vec<RowImage>, Error>;
     fn parts(&self, table: Table, id: i64, after: Option<i64>) -> Result<Vec<RowImage>, Error>;
+    fn raw_parts(&self, table: Table, id: i64, after: Option<&Cell>) -> Result<Vec<RowImage>, Error> {
+        let ord = after.map(|c| int(std::slice::from_ref(c), 0)).transpose()?;
+        self.parts(table, id, ord)
+    }
     fn history(&self, id: i64) -> Result<i64, Error>;
 }
 pub struct ReadView<'a, T: ReadRows + ?Sized>(pub &'a T);
@@ -48,6 +151,9 @@ impl<T: ReadRows + ?Sized> View for ReadView<'_, T> {
             Table::Templates => self.0.notetype_templates_page(NotetypeId(id), k)?,
             _ => return Err(Error::InvalidData),
         })
+    }
+    fn raw_parts(&self, table: Table, id: i64, after: Option<&Cell>) -> Result<Vec<RowImage>, Error> {
+        Ok(self.0.notetype_parts_raw_page(table, NotetypeId(id), after)?)
     }
     fn history(&self, id: i64) -> Result<i64, Error> {
         Ok(self.0.max_revlog_id(CardId(id))?)
@@ -108,6 +214,7 @@ pub fn notetype(view: &impl View, row: &[Cell], generation: u64) -> Result<c::No
     if generation == 0 {
         return Err(Error::InvalidData);
     }
+    readable(Table::Notetypes, row)?;
     let id = int(row, 0)?;
     let mut n = c::Notetype {
         id,
@@ -126,9 +233,11 @@ pub fn notetype(view: &impl View, row: &[Cell], generation: u64) -> Result<c::No
                 break;
             }
             for p in page {
+                readable(t, &p)?;
                 let ord = int(&p, 1)?;
-                if after.is_some_and(|a| ord <= a) || int(&p, 0)? != id {
-                    return Err(Error::InvalidData);
+                if int(&p, 0)? != id { return Err(Error::InvalidData); }
+                if ord != after.map_or(0, |a| a + 1) {
+                    return Err(Error::RowFailure(RowFailure::Unreadable { table: t.name(), column: "ord" }));
                 }
                 let name = bytes(&p, 2, false)?;
                 let config = bytes(&p, if t == Table::Fields { 3 } else { 5 }, true)?;
@@ -145,16 +254,24 @@ pub fn notetype(view: &impl View, row: &[Cell], generation: u64) -> Result<c::No
                 after = Some(ord);
             }
             // Bound each assembled page by its actual canonical payload length.
-            n.encoded_len(false).map_err(|_| Error::InvalidData)?;
+            n.encoded_len(false).map_err(codec_error)?;
         }
     }
-    n.encoded_len(false).map_err(|_| Error::InvalidData)?;
+    n.encoded_len(false).map_err(codec_error)?;
     Ok(n)
 }
 /// An acknowledged generation is usable only when the complete raw layout agrees.
 pub fn layout(view: &impl View, id: i64, acked: &c::Notetype) -> Result<u64, Error> {
     let row = view.row(Table::Notetypes, &RowKey::Id(id))?.ok_or(Error::InvalidData)?;
-    if notetype(view, &row, acked.struct_gen)? != *acked {
+    let actual = match notetype(view, &row, acked.struct_gen) {
+        Ok(actual) => actual,
+        // A dependency's bad row does not make this row unreadable. Retain
+        // the acknowledged layout for projection; the send reference guard
+        // holds every dependent until that notetype's own flag is repaired.
+        Err(Error::RowFailure(_)) => return Ok(acked.struct_gen),
+        Err(other) => return Err(other),
+    };
+    if actual != *acked {
         return Err(Error::InvalidData);
     }
     Ok(acked.struct_gen)
@@ -169,6 +286,7 @@ pub fn project(
     if row.len() != t.columns().len() {
         return Err(Error::InvalidData);
     }
+    readable(t, row)?;
     use c::Payload as P;
     let p = match kind {
         c::Kind::Note => {
@@ -266,8 +384,9 @@ pub fn project(
         c::Kind::Notetype => {
             let id = int(row, 0)?;
             let ack = acknowledged(id)?;
-            layout(view, id, &ack)?;
-            P::Notetype(ack)
+            let actual = notetype(view, row, ack.struct_gen)?;
+            if actual != ack { return Err(Error::InvalidData); }
+            P::Notetype(actual)
         }
         c::Kind::Tag => P::Tag(c::Tag {
             tag: bytes(row, 0, false)?,
@@ -285,8 +404,54 @@ pub fn project(
         c::Kind::MediaName => return Err(Error::InvalidData),
     };
     // The codec enforces the payload cap; envelope placement owns the inline limit.
-    p.encoded_len().map_err(|_| Error::InvalidData)?;
+    p.encoded_len().map_err(codec_error)?;
     Ok(p)
+}
+
+/// Identity of the real image, separate from a canonical payload (which may
+/// not exist). Call only on a pinned reader or the committed writer view.
+pub(super) fn raw_identity(view: &impl View, kind: c::Kind, row: &[Cell]) -> Result<[u8; 32], Error> {
+    identity(view, kind, row, false)
+}
+pub(super) fn logical_identity(view: &impl View, kind: c::Kind, row: &[Cell]) -> Result<[u8; 32], Error> {
+    identity(view, kind, row, true)
+}
+pub(super) fn logical_row_digest(table: Table, row: &[Cell]) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    for (i, cell) in row.iter().enumerate() {
+        if Some(i) != table.usn_column() {
+            hash.update((i as u64).to_le_bytes());
+            hash.update(meguri_storage::journal::digest(std::slice::from_ref(cell)));
+        }
+    }
+    hash.finalize().into()
+}
+fn identity(view: &impl View, kind: c::Kind, row: &[Cell], logical: bool) -> Result<[u8; 32], Error> {
+    use sha2::{Digest, Sha256};
+    let digest = |table, cells: &[Cell]| if logical { logical_row_digest(table, cells) } else { meguri_storage::journal::digest(cells) };
+    let head = table(kind).ok_or(Error::InvalidData)?;
+    if kind != c::Kind::Notetype { return Ok(digest(head, row)); }
+    let mut hash = Sha256::new();
+    hash.update(digest(head, row));
+    if kind == c::Kind::Notetype {
+        let id = int(row, 0)?;
+        for t in [Table::Fields, Table::Templates] {
+            hash.update(t.name().as_bytes());
+            let mut after = None;
+            loop {
+                let page = view.raw_parts(t, id, after.as_ref())?;
+                if page.is_empty() { break; }
+                for part in page {
+                    if int(&part, 0)? != id { return Err(Error::InvalidData); }
+                    let ord = part.get(1).ok_or(Error::InvalidData)?.clone();
+                    hash.update(digest(t, &part));
+                    after = Some(ord);
+                }
+            }
+        }
+    }
+    Ok(hash.finalize().into())
 }
 
 pub fn payload_key(payload: &c::Payload) -> Result<Vec<u8>, Error> {
@@ -526,5 +691,92 @@ mod tests {
                 ));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod classification_tests {
+    use super::*;
+    struct Rows;
+    impl View for Rows {
+        fn row(&self, t: Table, _: &RowKey) -> Result<Option<RowImage>, Error> {
+            Ok(match t {
+                Table::Notetypes => Some(vec![Cell::Integer(2), Cell::text("Type"), Cell::Integer(0), Cell::Integer(-1), Cell::Blob(vec![])]),
+                Table::Notes => Some(note()),
+                _ => None,
+            })
+        }
+        fn page(&self, _: Table, _: Option<&RowKey>) -> Result<Vec<RowImage>, Error> { Err(Error::Database) }
+        fn parts(&self, _: Table, _: i64, _: Option<i64>) -> Result<Vec<RowImage>, Error> { Ok(vec![]) }
+        fn history(&self, _: i64) -> Result<i64, Error> { Ok(0) }
+    }
+    fn ack(_: i64) -> Result<c::Notetype, Error> { notetype(&Rows, &Rows.row(Table::Notetypes, &RowKey::Id(2))?.unwrap(), 1) }
+    fn note() -> RowImage {
+        vec![Cell::Integer(1), Cell::Text(vec![0xff]), Cell::Integer(2), Cell::Integer(0), Cell::Integer(-1), Cell::text(""), Cell::text("q\x1fa"), Cell::Integer(1), Cell::Integer(-1), Cell::Integer(0), Cell::text("")]
+    }
+    #[test]
+    fn k10_raw_readability_preserves_bytes_tolerances_and_distinguishes_dependencies() {
+        let mut raw = note();
+        let c::Payload::Note(projected) = project(&Rows, c::Kind::Note, &raw, ack).unwrap() else { panic!() };
+        assert_eq!(projected.guid, vec![0xff]);
+        assert_eq!(projected.csum, -1);
+        let first = c::Payload::Note(projected);
+        raw[4] = Cell::Integer(77);
+        assert_eq!(project(&Rows, c::Kind::Note, &raw, ack).unwrap(), first, "usn stays out of the payload");
+        raw[6] = Cell::Null;
+        assert_eq!(key(c::Kind::Note, &raw).unwrap(), c::id_key(1));
+        assert!(matches!(project(&Rows, c::Kind::Note, &raw, ack), Err(Error::RowFailure(RowFailure::Unreadable { table, column })) if table=="notes" && column=="flds"));
+        assert!(matches!(project(&Rows, c::Kind::Note, &note(), |_| Err(Error::Database)), Err(Error::Database)));
+        assert!(matches!(project(&Rows, c::Kind::Note, &note(), |_| Err(Error::InvalidData)), Err(Error::InvalidData)));
+        let mut card = vec![Cell::Integer(0); Table::Cards.columns().len()];
+        card[0]=Cell::Integer(3); card[1]=Cell::Integer(1);
+        card[6]=Cell::Integer(258); // R4 takes the low eight bits.
+        card[8]=Cell::Text(b"tolerated due".to_vec());
+        card[17]=Cell::Blob(vec![0xff]);
+        let c::Payload::Card(projected) = project(&Rows, c::Kind::Card, &card, ack).unwrap() else { panic!() };
+        assert_eq!(projected.card_type, 258);
+        assert_eq!(projected.due, c::Stored::Text(b"tolerated due".to_vec()));
+        assert_eq!(projected.data, c::Stored::Blob(vec![0xff]));
+        card[9]=Cell::Integer(-1);
+        assert!(matches!(project(&Rows, c::Kind::Card, &card, ack), Err(Error::RowFailure(RowFailure::Unreadable { column, .. })) if column=="ivl"));
+        let tolerant_config = [Cell::text("read-default"), Cell::Integer(-1), Cell::Integer(0), Cell::Integer(1)];
+        assert!(matches!(project(&Rows, c::Kind::Config, &tolerant_config, ack), Err(Error::InvalidData)), "a non-BLOB config value is not an R9 unreadable row");
+    }
+    #[test]
+    fn k10_notetype_raw_part_failure_is_distinct_from_layout_and_provider_errors() {
+        struct Parts;
+        impl View for Parts {
+            fn row(&self, t: Table, k: &RowKey) -> Result<Option<RowImage>, Error> { Rows.row(t,k) }
+            fn page(&self, t: Table, k: Option<&RowKey>) -> Result<Vec<RowImage>, Error> { Rows.page(t,k) }
+            fn history(&self, id: i64) -> Result<i64, Error> { Rows.history(id) }
+            fn parts(&self, t: Table, _: i64, after: Option<i64>) -> Result<Vec<RowImage>, Error> {
+                Ok(if t==Table::Fields && after.is_none() { vec![vec![Cell::Integer(2), Cell::Integer(0), Cell::text("field"), Cell::Blob(vec![0xff])]] } else { vec![] })
+            }
+        }
+        let raw = Rows.row(Table::Notetypes, &RowKey::Id(2)).unwrap().unwrap();
+        assert!(matches!(project(&Parts, c::Kind::Notetype, &raw, ack), Err(Error::RowFailure(RowFailure::Unreadable { table, column })) if table=="fields" && column=="config"));
+        let mut changed=ack(2).unwrap(); changed.name=b"other layout".to_vec();
+        assert!(matches!(project(&Rows,c::Kind::Notetype,&raw, |_| Ok(changed.clone())),Err(Error::InvalidData)));
+    }
+    #[test]
+    fn k10_raw_canonical_cap_boundary_and_asset_placement_are_distinct() {
+        // key tag+length+three bytes, val tag+four-byte length at 100 MiB.
+        let cap = c::MAX_PAYLOAD_BYTES as usize;
+        let mut raw = vec![Cell::text("cap"), Cell::Integer(-1), Cell::Integer(0), Cell::Blob(vec![0; cap-10])];
+        {
+            let payload = project(&Rows, c::Kind::Config, &raw, ack).unwrap();
+            assert_eq!(payload.encoded_len().unwrap(), cap, "exactly 100 MiB is valid");
+        }
+        let Cell::Blob(value)=&mut raw[3] else { unreachable!() }; value.push(0);
+        assert!(matches!(project(&Rows,c::Kind::Config,&raw,ack),Err(Error::RowFailure(RowFailure::Oversize))));
+        drop(raw);
+        let raw = vec![Cell::text("asset"), Cell::Integer(-1), Cell::Integer(0), Cell::Blob(vec![0; c::INLINE_ENVELOPE_BYTES])];
+        let payload=project(&Rows,c::Kind::Config,&raw,ack).unwrap();
+        let encoded=payload.encode().unwrap();
+        let entity=c::Entity::build(c::EntityFields {
+            kind:c::Kind::Config,key:b"asset".to_vec(),origin:[1;16],erev:1,generation:None,
+            tombstone:false,deleted_at_ms:0,writer:[2;16],base_sha256:None,
+        },&encoded).unwrap();
+        assert!(entity.payload.is_none(), "inline threshold chooses an asset, never an oversize flag");
     }
 }

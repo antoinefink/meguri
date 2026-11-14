@@ -164,7 +164,7 @@ fn owner_v5(cn: &Connection, b: BindingId) -> Result<bool, Error> {
     }
     match cn.query_row("SELECT version FROM cloud_runtime_schema", [], |r| r.get::<_, i64>(0))? {
         5 => Ok(true),                    // Historical markerless V5 representation.
-        6 | 7 => Err(Error::InvalidData), // Never reconstruct fenced handoff history.
+        6..=8 => Err(Error::InvalidData), // Never reconstruct fenced handoff history.
         _ => Ok(false),
     }
 }
@@ -724,7 +724,7 @@ impl Header {
             .push(flights(std::slice::from_ref(f), self.facts.kind, &self.facts.key)?.remove(0));
         Ok(())
     }
-    pub fn ack(&mut self, index: usize, saved: &Saved) -> Result<bool, Error> {
+    pub fn ack(&mut self, index: usize, saved: &Saved, allow_clean: bool) -> Result<bool, Error> {
         let f = self.facts.in_flight.get(index).ok_or(Error::InvalidData)?;
         let (erev, local_rev, row_digest, payload_digest) = (f.erev, f.local_rev, f.row_digest, f.payload_digest);
         let digest = *self.images.flights.get(index).ok_or(Error::InvalidData)?;
@@ -738,7 +738,7 @@ impl Header {
         e.acked_envelope = OpaqueBytes(saved.envelope.clone());
         e.acked_payload = Some(empty(e.kind));
         self.images.acked = Some(digest);
-        if e.tombstone_at.is_none() && self.images.local_row_digest == row_digest {
+        if allow_clean && e.tombstone_at.is_none() && self.images.local_row_digest == row_digest {
             e.acked_rev = e.local_rev;
             e.mark = None;
             e.base_payload = None;
@@ -758,8 +758,8 @@ impl Header {
     }
 }
 
-/// Only ordinary owners in this build scope may change. V5 is the shared
-/// older-reader fence; per-binding markers record actual representation progress.
+/// Only ordinary owners in this build scope may change. The runtime marker
+/// fences the shared layout; per-binding markers record payload representation progress.
 pub(super) fn migrate(tx: &Transaction<'_>, scope: &BuildScope) -> Result<(), Error> {
     // Refuse future or markerless V6 before DDL, including direct migration calls.
     super::runtime_store::check_version(tx)?;
@@ -802,6 +802,8 @@ pub(super) fn migrate(tx: &Transaction<'_>, scope: &BuildScope) -> Result<(), Er
         }
     }
     tx.execute("INSERT INTO cloud_runtime_payload_owners SELECT id,5 FROM bindings WHERE container=?1 AND environment=?2 AND salvage=0 ON CONFLICT(binding) DO NOTHING", params![scope.container.as_str(), scope.environment.code()])?;
+    let version: i64 = tx.query_row("SELECT version FROM cloud_runtime_schema", [], |r| r.get(0))?;
+    if version < 8 { tx.execute_batch(super::row_classification::SCHEMA)?; }
     meguri_model::faultpoint!("cloud.payload_migration.before_commit")?;
     tx.execute(
         "UPDATE cloud_runtime_schema SET version=?1",
@@ -914,15 +916,22 @@ mod tests {
     fn legacy() -> (Connection, BindingId, NoteTracking, EntityFacts, String, String) {
         let cn = Connection::open_in_memory().unwrap();
         cn.execute_batch("PRAGMA foreign_keys=ON;
-            CREATE TABLE bindings(id BLOB PRIMARY KEY,container TEXT NOT NULL,environment INTEGER NOT NULL,salvage INTEGER NOT NULL);
+            CREATE TABLE bindings(id BLOB PRIMARY KEY,container TEXT NOT NULL,environment INTEGER NOT NULL,salvage INTEGER NOT NULL,facts TEXT NOT NULL CHECK(json_valid(facts)));
+            CREATE TABLE cloud_runtime_bindings(binding BLOB PRIMARY KEY REFERENCES bindings(id),content TEXT NOT NULL CHECK(json_valid(content)));
             CREATE TABLE cloud_runtime_schema(version INTEGER); INSERT INTO cloud_runtime_schema VALUES(4);
             CREATE TABLE cloud_workflow_schema(version INTEGER); INSERT INTO cloud_workflow_schema VALUES(1);
             CREATE TABLE cloud_runtime_notes(binding BLOB REFERENCES bindings(id),id INTEGER,content TEXT CHECK(json_valid(content)),PRIMARY KEY(binding,id));
             CREATE TABLE cloud_runtime_entities(binding BLOB REFERENCES bindings(id),kind INTEGER,key BLOB,content TEXT CHECK(json_valid(content)),PRIMARY KEY(binding,kind,key));").unwrap();
+        // These owning tables existed in V4 too. V8 semantic admission needs
+        // their shape on reopen; no V8 tables or accepted row evidence is seeded.
         let b = BindingId([71; 16]);
+        let facts = BindingFacts {
+            account: OpaqueBytes(vec![1]), epoch: EpochId([2;16]), record_key: RecordKey([3;32]),
+            publication: meguri_engine::device_state::PublicationId::from_bytes([4;16]), state: BindingState::Active,
+        };
         cn.execute(
-            "INSERT INTO bindings VALUES(?1,?2,?3,0)",
-            params![b.0.as_slice(), scope().container.as_str(), scope().environment.code()],
+            "INSERT INTO bindings(id,container,environment,salvage,facts) VALUES(?1,?2,?3,0,?4)",
+            params![b.0.as_slice(), scope().container.as_str(), scope().environment.code(), encode(&facts).unwrap()],
         )
         .unwrap();
         let old = c::Payload::Note(c::Note {
@@ -1095,7 +1104,7 @@ mod tests {
         assert_eq!(
             cn.query_row("SELECT version FROM cloud_runtime_schema", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            7
+            super::super::runtime_store::VERSION
         );
         let text: String = cn
             .query_row("SELECT content FROM cloud_runtime_notes", [], |r| r.get(0))
@@ -1114,7 +1123,7 @@ mod tests {
             3
         );
         assert!(super::super::runtime_store::check_version(&cn).unwrap());
-        cn.execute("UPDATE cloud_runtime_schema SET version=8", []).unwrap();
+        cn.execute("UPDATE cloud_runtime_schema SET version=9", []).unwrap();
         assert!(matches!(
             super::super::runtime_store::check_version(&cn),
             Err(Error::RuntimeSchemaUnsupported)
@@ -1136,7 +1145,7 @@ mod tests {
             cn.execute(&format!("UPDATE {table} SET content=?1"), [without_sent(&text)])
                 .unwrap();
         }
-        cn.execute("UPDATE cloud_runtime_schema SET version=5", []).unwrap();
+        cn.execute_batch("DROP TABLE cloud_row_classifications; DROP TABLE cloud_row_classification_coverage; UPDATE cloud_runtime_schema SET version=5;").unwrap();
         assert!(super::super::runtime_store::check_version(&cn).unwrap());
         // Also preserve the historical markerless-V5 fallback. V6 never uses it.
         cn.execute("DROP TABLE cloud_runtime_payload_owners", []).unwrap();
@@ -1149,7 +1158,7 @@ mod tests {
         assert_eq!(
             cn.query_row("SELECT version FROM cloud_runtime_schema", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            7
+            super::super::runtime_store::VERSION
         );
         assert!(owner_v5(&cn, b).unwrap());
         assert!(
@@ -1189,7 +1198,7 @@ mod tests {
             reopened
                 .query_row("SELECT version FROM cloud_runtime_schema", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            7
+            super::super::runtime_store::VERSION
         );
         assert!(
             stored_header(&reopened, b, c::Kind::Note, &c::id_key(note.id))
@@ -1208,17 +1217,17 @@ mod tests {
         assert_eq!(
             cn.query_row("SELECT version FROM cloud_runtime_schema", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            7
+            super::super::runtime_store::VERSION
         );
-        cn.execute("UPDATE cloud_runtime_schema SET version=6", []).unwrap();
         for _ in 0..2 {
+            cn.execute_batch("DROP TABLE cloud_row_classifications; DROP TABLE cloud_row_classification_coverage; UPDATE cloud_runtime_schema SET version=6;").unwrap();
             let tx = cn.transaction().unwrap();
             migrate(&tx, &scope()).unwrap();
             tx.commit().unwrap();
             assert_eq!(
                 cn.query_row("SELECT version FROM cloud_runtime_schema", [], |r| r.get::<_, i64>(0))
                     .unwrap(),
-                7
+                super::super::runtime_store::VERSION
             );
             assert!(owner_v5(&cn, b).unwrap());
             assert!(
@@ -1270,12 +1279,12 @@ mod tests {
                 .unwrap();
             assert!(super::super::runtime_store::check_version(&cn).unwrap());
         }
-        for version in [6, 7, 8] {
+        for version in [6, 7, 8, 9] {
             cn.execute("UPDATE cloud_runtime_schema SET version=?1", [version])
                 .unwrap();
             let tx = cn.transaction().unwrap();
             let error = migrate(&tx, &scope()).unwrap_err();
-            if version == 8 {
+            if version == 9 {
                 assert!(matches!(error, Error::RuntimeSchemaUnsupported));
             } else {
                 assert!(matches!(error, Error::InvalidData));
@@ -1315,7 +1324,7 @@ mod tests {
         tx.commit().unwrap();
         assert!(super::super::runtime_store::check_version(&cn).unwrap());
         // A populated fenced store with a future marker also remains byte-identical.
-        cn.execute("UPDATE cloud_runtime_schema SET version=8", []).unwrap();
+        cn.execute("UPDATE cloud_runtime_schema SET version=9", []).unwrap();
         let note_before: String = cn
             .query_row("SELECT content FROM cloud_runtime_notes", [], |r| r.get(0))
             .unwrap();
@@ -1356,8 +1365,8 @@ mod tests {
             ),
         ] {
             cn.execute(
-                "INSERT INTO bindings VALUES(?1,?2,?3,?4)",
-                params![owner.0.as_slice(), container, environment, salvage],
+                "INSERT INTO bindings(id,container,environment,salvage,facts) SELECT ?1,?2,?3,?4,facts FROM bindings WHERE id=?5",
+                params![owner.0.as_slice(), container, environment, salvage, b.0.as_slice()],
             )
             .unwrap();
             cn.execute(
@@ -1471,144 +1480,139 @@ mod tests {
     fn actual_two_scope_v4_open_ignores_malformed_foreign_runtime_and_refuses_it_for_its_owner() {
         two_scope_upgrade(true);
     }
-    fn two_scope_upgrade(malformed: bool) {
-        let (_cn, _, note, entity, old_note, old_entity) = legacy();
-        let run = tempfile::tempdir().unwrap();
-        let a_scope = scope();
-        let b_scope = if malformed {
-            BuildScope {
-                environment: Environment::Production,
-                ..scope()
+
+    fn tracking_file_bytes(directory: &std::path::Path) -> [Option<Vec<u8>>; 3] {
+        ["", "-wal", "-shm"].map(|suffix| {
+            let path = directory.join(format!("{}{suffix}", super::super::TRACKING_FILE));
+            match std::fs::read(path) {
+                Ok(bytes) => Some(bytes),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => panic!("tracking fixture read failed: {error}"),
             }
+        })
+    }
+
+    fn inspect_closed_tracking<T>(files: &[Option<Vec<u8>>; 3], inspect: impl FnOnce(&mut Connection) -> T) -> T {
+        let directory = tempfile::tempdir().unwrap();
+        for (index, suffix) in ["", "-wal"].iter().enumerate() {
+            if let Some(bytes) = &files[index] {
+                std::fs::write(directory.path().join(format!("{}{suffix}", super::super::TRACKING_FILE)), bytes).unwrap();
+            }
+        }
+        let mut database = Connection::open_with_flags(
+            directory.path().join(super::super::TRACKING_FILE),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        ).unwrap();
+        inspect(&mut database)
+    }
+
+    fn two_scope_upgrade(damaged: bool) {
+        let (_legacy, _, expected_note, expected_entity, note_text, entity_text) = legacy();
+        let directory = tempfile::tempdir().unwrap();
+        let primary_scope = scope();
+        let foreign_scope = if damaged {
+            BuildScope { environment: Environment::Production, ..scope() }
         } else {
-            BuildScope {
-                container: ContainerId::new("payload.scope-b").unwrap(),
-                ..scope()
-            }
+            BuildScope { container: ContainerId::new("payload.scope-b").unwrap(), ..scope() }
         };
-        let mut a = opened(run.path(), a_scope.clone());
-        let a_id = binding(&mut a, 21);
-        drop(a);
-        let mut b = opened(run.path(), b_scope.clone());
-        let b_id = binding(&mut b, 22);
-        let tx = b.connection.transaction().unwrap();
-        tx.execute_batch("CREATE TABLE cloud_runtime_schema(version INTEGER NOT NULL); INSERT INTO cloud_runtime_schema VALUES(4);
-            CREATE TABLE cloud_runtime_bindings(binding BLOB PRIMARY KEY REFERENCES bindings(id),content TEXT NOT NULL CHECK(json_valid(content)));
-            CREATE TABLE cloud_runtime_notes(binding BLOB REFERENCES bindings(id),id INTEGER,content TEXT NOT NULL CHECK(json_valid(content)),PRIMARY KEY(binding,id));
-            CREATE TABLE cloud_workflow_schema(version INTEGER NOT NULL); INSERT INTO cloud_workflow_schema VALUES(1);
-            CREATE TABLE cloud_runtime_entities(binding BLOB REFERENCES bindings(id),kind INTEGER,key BLOB,content TEXT NOT NULL CHECK(json_valid(content)),PRIMARY KEY(binding,kind,key));").unwrap();
-        // V4 includes the real V3 adapter metadata and absence triggers; the
-        // private open probe must validate the complete on-disk schema.
-        super::super::adapter_store::install(&tx).unwrap();
-        let foreign_note = if malformed { "{}" } else { old_note.as_str() };
-        for (owner, text) in [(a_id, old_note.as_str()), (b_id, foreign_note)] {
-            tx.execute(
-                "INSERT INTO cloud_runtime_notes VALUES(?1,11,?2)",
-                params![owner.0.as_slice(), text],
-            )
-            .unwrap();
-            tx.execute(
-                "INSERT INTO cloud_runtime_entities VALUES(?1,2,?2,?3)",
-                params![owner.0.as_slice(), &entity.key, &old_entity],
-            )
-            .unwrap();
+        let primary_id = {
+            let mut store = opened(directory.path(), primary_scope.clone());
+            binding(&mut store, 21)
+        };
+        let foreign_id;
+        let foreign_note = if damaged { "{}" } else { note_text.as_str() };
+        // The opening-local counter has an invalid type, independently of the
+        // incomplete note. Both are valid JSON and invalid runtime metadata.
+        let invalid_binding = r#"{"open_counter":[]}"#;
+        {
+            let mut store = opened(directory.path(), foreign_scope.clone());
+            foreign_id = binding(&mut store, 22);
+            let tx = store.connection.transaction().unwrap();
+            tx.execute_batch("CREATE TABLE cloud_runtime_schema(version INTEGER NOT NULL);
+                INSERT INTO cloud_runtime_schema VALUES(4);
+                CREATE TABLE cloud_runtime_bindings(binding BLOB PRIMARY KEY REFERENCES bindings(id),content TEXT NOT NULL CHECK(json_valid(content)));
+                CREATE TABLE cloud_runtime_notes(binding BLOB REFERENCES bindings(id),id INTEGER,content TEXT NOT NULL CHECK(json_valid(content)),PRIMARY KEY(binding,id));
+                CREATE TABLE cloud_workflow_schema(version INTEGER NOT NULL);
+                INSERT INTO cloud_workflow_schema VALUES(1);
+                CREATE TABLE cloud_runtime_entities(binding BLOB REFERENCES bindings(id),kind INTEGER,key BLOB,content TEXT NOT NULL CHECK(json_valid(content)),PRIMARY KEY(binding,kind,key));").unwrap();
+            super::super::adapter_store::install(&tx).unwrap();
+            for (owner, contents) in [(primary_id, note_text.as_str()), (foreign_id, foreign_note)] {
+                tx.execute("INSERT INTO cloud_runtime_notes VALUES(?1,11,?2)", params![owner.0.as_slice(), contents]).unwrap();
+                tx.execute("INSERT INTO cloud_runtime_entities VALUES(?1,2,?2,?3)",
+                    params![owner.0.as_slice(), &expected_entity.key, &entity_text]).unwrap();
+            }
+            if damaged {
+                tx.execute("INSERT INTO cloud_runtime_bindings VALUES(?1,?2)",
+                    params![foreign_id.0.as_slice(), invalid_binding]).unwrap();
+            }
+            tx.commit().unwrap();
         }
-        if malformed {
-            tx.execute(
-                "INSERT INTO cloud_runtime_bindings VALUES(?1,?2)",
-                params![b_id.0.as_slice(), "{\"open_counter\":\"broken\"}"],
-            )
-            .unwrap();
-        }
-        tx.commit().unwrap();
-        drop(b);
-        let mut a = opened(run.path(), a_scope.clone());
-        a.install_runtime().unwrap();
-        assert!(a.tracked_note(a_id, 11).unwrap().unwrap() == note);
-        assert_eq!(
-            a.connection
-                .query_row(
-                    "SELECT content FROM cloud_runtime_notes WHERE binding=?1",
-                    [b_id.0.as_slice()],
-                    |r| r.get::<_, String>(0)
-                )
-                .unwrap(),
-            foreign_note
-        );
-        assert_eq!(
-            a.connection
-                .query_row(
-                    "SELECT content FROM cloud_runtime_entities WHERE binding=?1",
-                    [b_id.0.as_slice()],
-                    |r| r.get::<_, String>(0)
-                )
-                .unwrap(),
-            old_entity
-        );
-        assert!(!owner_v5(&a.connection, b_id).unwrap());
-        assert_eq!(
-            a.connection
-                .query_row(
-                    "SELECT count(*) FROM cloud_runtime_payloads WHERE binding=?1",
-                    [b_id.0.as_slice()],
-                    |r| r.get::<_, i64>(0)
-                )
-                .unwrap(),
-            0
-        );
-        let a_header: String = a
-            .connection
-            .query_row(
+        let primary_header;
+        {
+            let mut store = opened(directory.path(), primary_scope.clone());
+            store.install_runtime().unwrap();
+            assert!(store.tracked_note(primary_id, 11).unwrap().unwrap() == expected_note);
+            assert!(!owner_v5(&store.connection, foreign_id).unwrap());
+            assert_eq!(store.connection.query_row(
+                "SELECT count(*) FROM cloud_runtime_payloads WHERE binding=?1",
+                [foreign_id.0.as_slice()], |row| row.get::<_, i64>(0)).unwrap(), 0);
+            let retained_note: String = store.connection.query_row(
                 "SELECT content FROM cloud_runtime_notes WHERE binding=?1",
-                [a_id.0.as_slice()],
-                |r| r.get(0),
-            )
-            .unwrap();
-        drop(a);
-        let mut b = opened(run.path(), b_scope);
-        if malformed {
-            assert!(b.install_runtime().is_err());
-            assert!(!owner_v5(&b.connection, b_id).unwrap());
-            assert_eq!(
-                b.connection
-                    .query_row(
-                        "SELECT content FROM cloud_runtime_notes WHERE binding=?1",
-                        [b_id.0.as_slice()],
-                        |r| r.get::<_, String>(0)
-                    )
-                    .unwrap(),
-                foreign_note
-            );
-            assert_eq!(
-                b.connection
-                    .query_row(
-                        "SELECT content FROM cloud_runtime_bindings WHERE binding=?1",
-                        [b_id.0.as_slice()],
-                        |r| r.get::<_, String>(0)
-                    )
-                    .unwrap(),
-                "{\"open_counter\":\"broken\"}"
-            );
-        } else {
-            b.install_runtime().unwrap();
-            assert!(owner_v5(&b.connection, b_id).unwrap());
-            assert!(b.tracked_note(b_id, 11).unwrap().unwrap() == note);
-            assert!(b.entity_dump(b_id, &entity.name).unwrap().unwrap() == entity);
+                [foreign_id.0.as_slice()], |row| row.get(0)).unwrap();
+            let retained_entity: String = store.connection.query_row(
+                "SELECT content FROM cloud_runtime_entities WHERE binding=?1",
+                [foreign_id.0.as_slice()], |row| row.get(0)).unwrap();
+            assert_eq!(retained_note, foreign_note);
+            assert_eq!(retained_entity, entity_text);
+            primary_header = store.connection.query_row(
+                "SELECT content FROM cloud_runtime_notes WHERE binding=?1",
+                [primary_id.0.as_slice()], |row| row.get::<_, String>(0)).unwrap();
         }
-        assert_eq!(
-            b.connection
-                .query_row(
+        if damaged {
+            let original_files = tracking_file_bytes(directory.path());
+            let outcome = TrackingStore::open(directory.path(), foreign_scope.clone()).unwrap();
+            assert!(matches!(outcome, OpenOutcome::Damaged));
+            assert_eq!(tracking_file_bytes(directory.path()), original_files);
+            inspect_closed_tracking(&original_files, |database| {
+                let tx = database.transaction().unwrap();
+                assert!(matches!(migrate(&tx, &foreign_scope), Err(Error::InvalidData)));
+                tx.rollback().unwrap();
+                assert!(!owner_v5(database, foreign_id).unwrap());
+                assert_eq!(database.query_row(
+                    "SELECT count(*) FROM cloud_runtime_payloads WHERE binding=?1",
+                    [foreign_id.0.as_slice()], |row| row.get::<_, i64>(0)).unwrap(), 0);
+                let retained_note: String = database.query_row(
                     "SELECT content FROM cloud_runtime_notes WHERE binding=?1",
-                    [a_id.0.as_slice()],
-                    |r| r.get::<_, String>(0)
-                )
-                .unwrap(),
-            a_header
-        );
-        drop(b);
-        let mut a = opened(run.path(), a_scope);
-        a.install_runtime().unwrap();
-        assert!(a.tracked_note(a_id, 11).unwrap().unwrap() == note);
+                    [foreign_id.0.as_slice()], |row| row.get(0)).unwrap();
+                let retained_entity: String = database.query_row(
+                    "SELECT content FROM cloud_runtime_entities WHERE binding=?1",
+                    [foreign_id.0.as_slice()], |row| row.get(0)).unwrap();
+                let retained_binding: String = database.query_row(
+                    "SELECT content FROM cloud_runtime_bindings WHERE binding=?1",
+                    [foreign_id.0.as_slice()], |row| row.get(0)).unwrap();
+                assert_eq!(retained_note, foreign_note);
+                assert_eq!(retained_entity, entity_text);
+                assert_eq!(retained_binding, invalid_binding);
+                assert!(decode::<EntityFacts>(&retained_entity).unwrap() == expected_entity);
+                assert_eq!(database.query_row(
+                    "SELECT content FROM cloud_runtime_notes WHERE binding=?1",
+                    [primary_id.0.as_slice()], |row| row.get::<_, String>(0)).unwrap(), primary_header);
+            });
+            assert_eq!(tracking_file_bytes(directory.path()), original_files);
+        } else {
+            let mut store = opened(directory.path(), foreign_scope);
+            store.install_runtime().unwrap();
+            assert!(owner_v5(&store.connection, foreign_id).unwrap());
+            assert!(store.tracked_note(foreign_id, 11).unwrap().unwrap() == expected_note);
+            assert!(store.entity_dump(foreign_id, &expected_entity.name).unwrap().unwrap() == expected_entity);
+            assert_eq!(store.connection.query_row(
+                "SELECT content FROM cloud_runtime_notes WHERE binding=?1",
+                [primary_id.0.as_slice()], |row| row.get::<_, String>(0)).unwrap(), primary_header);
+        }
+        let mut primary = opened(directory.path(), primary_scope);
+        primary.install_runtime().unwrap();
+        assert!(primary.tracked_note(primary_id, 11).unwrap().unwrap() == expected_note);
+        assert!(primary.entity_dump(primary_id, &expected_entity.name).unwrap().unwrap() == expected_entity);
     }
     #[test]
     fn never_sent_large_add_remove_collects_only_unshared_images_and_rolls_back_atomically() {

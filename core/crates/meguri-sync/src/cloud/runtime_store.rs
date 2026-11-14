@@ -9,7 +9,7 @@ use super::{
     *,
 };
 
-pub(super) const VERSION: i64 = 7;
+pub(super) const VERSION: i64 = 8;
 const SCHEMA: &str = "
 CREATE TABLE cloud_runtime_schema(version INTEGER NOT NULL CHECK(version > 0));
 INSERT INTO cloud_runtime_schema VALUES (2);
@@ -45,11 +45,18 @@ pub(super) fn check_version(connection: &rusqlite::Connection) -> Result<bool, E
             && versions != [4]
             && versions != [5]
             && versions != [6]
+            && versions != [7]
             && versions != [VERSION]
         {
             return Err(Error::RuntimeSchemaUnsupported);
         }
-        if versions == [6] || versions == [7] {
+        let classifications: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name IN ('cloud_row_classifications','cloud_row_classification_coverage'))", [], |r| r.get(0))?;
+        if versions == [8] {
+            let tables: i64 = connection.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('cloud_row_classifications','cloud_row_classification_coverage')", [], |r| r.get(0))?;
+            if tables != 2 { return Err(Error::InvalidData); }
+            super::row_classification::validate_shape(connection)?;
+        } else if classifications { return Err(Error::InvalidData); }
+        if versions == [6] || versions == [7] || versions == [8] {
             let owners: bool = connection.query_row(
                 "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='cloud_runtime_payload_owners')",
                 [],
@@ -61,7 +68,7 @@ pub(super) fn check_version(connection: &rusqlite::Connection) -> Result<bool, E
         }
     } else {
         let orphan: bool = connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name IN ('cloud_runtime_bindings','cloud_runtime_notes'))",
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name IN ('cloud_runtime_bindings','cloud_runtime_notes','cloud_row_classifications','cloud_row_classification_coverage'))",
             [],
             |row| row.get(0),
         )?;
@@ -74,8 +81,10 @@ pub(super) fn check_version(connection: &rusqlite::Connection) -> Result<bool, E
 
 fn decode_binding(connection: &rusqlite::Connection, content: &str) -> Result<StoredRuntimeState, Error> {
     let version: i64 = connection.query_row("SELECT version FROM cloud_runtime_schema", [], |r| r.get(0))?;
+    #[cfg(any(test, feature = "test-hooks"))]
+    super::row_classification::owner_read();
     let value: StoredRuntimeState = decode(content)?;
-    if version != VERSION && value.durable_file.is_some() {
+    if version < 7 && value.durable_file.is_some() {
         return Err(Error::InvalidData);
     }
     value.validate()?;
@@ -83,6 +92,11 @@ fn decode_binding(connection: &rusqlite::Connection, content: &str) -> Result<St
 }
 
 pub(super) fn validate_bindings(connection: &rusqlite::Connection, scope: &BuildScope) -> Result<(), Error> {
+    let runtime_present = check_version(connection)?;
+    if runtime_present {
+        let version: i64 = connection.query_row("SELECT version FROM cloud_runtime_schema", [], |r| r.get(0))?;
+        if version == VERSION { super::row_classification::validate(connection, scope)?; }
+    }
     let exists: bool = connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='cloud_runtime_bindings')",
         [],
@@ -188,9 +202,12 @@ impl TrackingStore {
                 |row| row.get(0),
             )
             .optional()?;
-        content
-            .map(|value| decode_binding(&self.connection, &value))
-            .transpose()
+        let state = content.map(|value| decode_binding(&self.connection, &value)).transpose()?;
+        let version: i64 = self.connection.query_row("SELECT version FROM cloud_runtime_schema", [], |r| r.get(0))?;
+        if version == VERSION {
+            super::row_classification::validate_selected(&self.connection, binding, state.as_ref())?;
+        }
+        Ok(state)
     }
 
     pub(super) fn open_runtime_binding(
@@ -324,6 +341,7 @@ impl TrackingStore {
     ) -> Result<(), RuntimeError> {
         checked(commit.seq.0)?;
         checked(commit.generation.0)?;
+        let owner = self.binding(binding)?.ok_or(Error::BindingNotFound)?;
         let mut state = self.runtime_binding(binding)?;
         if state.open_counter != open {
             return Err(Error::InvalidData.into());
@@ -331,35 +349,56 @@ impl TrackingStore {
         let transaction = self.connection.transaction().map_err(Error::from)?;
         // Journal iteration and all image reads remain inside this transaction.
         // Dropping it on any later failure also rolls back earlier entries.
+        let mut unsupported_absence = false;
         for (index, delta) in commit.payload.rows(meguri_storage::Table::Notes).enumerate() {
             let delta = delta?;
             let meguri_storage::RowKey::Id(id) = delta.key else {
                 return Err(Error::InvalidData.into());
             };
-            let mut tracked = note(&transaction, binding, id)?
-                .ok_or(RuntimeError::Incomplete(super::runtime::Incomplete::NewOrRemovedNote))?;
-            let layout = tracked.layout_generation()?;
-            let before = delta
-                .before
-                .as_ref()
-                .map(|row| super::runtime::note_image(row, layout))
-                .transpose()?;
-            let after = rows
-                .row_image(meguri_storage::Table::Notes, &meguri_storage::RowKey::Id(id))?
-                .as_ref()
-                .map(|row| super::runtime::note_image(row, layout))
-                .transpose()?;
-            if before.is_none() || after.is_none() {
-                return Err(RuntimeError::Incomplete(super::runtime::Incomplete::NewOrRemovedNote));
+            let raw = rows.row_image(meguri_storage::Table::Notes, &meguri_storage::RowKey::Id(id))?;
+            let tracked = note(&transaction, binding, id)?;
+            let previous_failed = super::row_classification::get(&transaction, binding, codec::Kind::Note, &codec::id_key(id))?
+                .is_some_and(|f| f.failure.is_some());
+            if raw.is_none() && previous_failed {
+                super::row_classification::accept(&transaction, binding, &super::RowClassification {
+                    kind: codec::Kind::Note, key: codec::id_key(id).to_vec(), open, seq: commit.seq.0,
+                    generation: commit.generation.0, file: state.file.ok_or(Error::InvalidData)?, raw_digest: None, logical_digest: None, failure: None,
+                }, &mut state, &owner.facts.record_key, DirtySource::Observer)?;
+                // This legacy API cannot construct deletion bookkeeping. Keep
+                // its gate closed after committing the actual absence fact.
+                unsupported_absence = true;
+                after_write(index + 1)?;
+                continue;
             }
+            let projected = raw.as_ref().map(|row| {
+                super::row_payload::readable(meguri_storage::Table::Notes, row)?;
+                let generation = tracked.as_ref().ok_or(Error::InvalidData)?.layout_generation()?;
+                let image = super::runtime::note_image(row, generation)?;
+                codec::Payload::Note(image.clone()).encoded_len().map_err(super::row_payload::codec_error)?;
+                Ok::<_, Error>(image)
+            }).transpose();
+            let failure = match &projected { Err(Error::RowFailure(f)) => Some(*f), _ => None };
+            let classification = super::RowClassification {
+                kind: codec::Kind::Note, key: codec::id_key(id).to_vec(), open,
+                seq: commit.seq.0, generation: commit.generation.0, file: state.file.ok_or(Error::InvalidData)?,
+                raw_digest: raw.as_ref().map(|r| meguri_storage::journal::digest(r)),
+                logical_digest: raw.as_ref().map(|r| super::row_payload::logical_row_digest(meguri_storage::Table::Notes,r)), failure,
+            };
+            if classification.failure.is_some() {
+                super::row_classification::accept(&transaction, binding, &classification, &mut state, &owner.facts.record_key, DirtySource::Observer)?;
+                after_write(index + 1)?;
+                continue;
+            }
+            let after = projected?;
+            let mut tracked = tracked.ok_or(RuntimeError::Incomplete(super::runtime::Incomplete::NewOrRemovedNote))?;
+            let layout = tracked.layout_generation()?;
+            let before = if previous_failed { None } else {
+                delta.before.as_ref().map(|row| super::runtime::note_image(row, layout)).transpose()?
+            };
+            if after.is_none() { return Err(RuntimeError::Incomplete(super::runtime::Incomplete::NewOrRemovedNote)); }
             tracked.require_supported_update(before.as_ref(), after.as_ref())?;
-            apply_image(
-                &mut state,
-                &mut tracked,
-                before.as_ref(),
-                after.as_ref(),
-                DirtySource::Observer,
-            )?;
+            if !super::row_classification::accept(&transaction, binding, &classification, &mut state, &owner.facts.record_key, DirtySource::Observer)? { continue; }
+            apply_image(&mut state, &mut tracked, before.as_ref(), after.as_ref(), DirtySource::Observer)?;
             tracked.observer_open = open;
             tracked.observed_seq = commit.seq.0;
             tracked.observed_generation = commit.generation.0;
@@ -368,6 +407,7 @@ impl TrackingStore {
         }
         put_binding(&transaction, binding, &state)?;
         transaction.commit().map_err(Error::from)?;
+        if unsupported_absence { return Err(RuntimeError::Incomplete(super::runtime::Incomplete::NewOrRemovedNote)); }
         Ok(())
     }
 
@@ -476,16 +516,47 @@ impl TrackingStore {
         self.isolate_runtime_binding(binding, reason)
     }
 
-    /// Seed validated historical state for a generated, closed collection fixture.
+    /// Install one coherent synthetic historical file image, after validating
+    /// the original fixture. Only its file evidence may differ; ACKs and work
+    /// remain byte-identical. Not a recovery or malformed-store repair API.
     #[cfg(feature = "test-hooks")]
     pub fn prepare_runtime_state_for_testing(
         &mut self,
         binding: BindingId,
         value: &StoredRuntimeState,
     ) -> Result<(), Error> {
-        self.stored_runtime_state(binding)?.ok_or(Error::InvalidData)?;
+        let previous = self.stored_runtime_state(binding)?.ok_or(Error::InvalidData)?;
+        value.validate()?;
+        let old_file = previous.file.ok_or(Error::InvalidData)?;
+        let new_file = value.file.ok_or(Error::InvalidData)?;
+        let old_durable = previous.durable_file.ok_or(Error::InvalidData)?;
+        let new_durable = value.durable_file.ok_or(Error::InvalidData)?;
+        if (new_file.device, new_file.inode) != (old_file.device, old_file.inode) || new_durable.identity != old_durable.identity
+            || new_durable.version != old_durable.version
+            || (new_durable.created_seconds, new_durable.created_nanos) != (new_file.created_seconds, new_file.created_nanos)
+        { return Err(Error::InvalidData); }
+        let mut normalized = value.clone();
+        normalized.file = previous.file;
+        normalized.durable_file = previous.durable_file;
+        if let (Some(new), Some(old)) = (&mut normalized.note_scan, &previous.note_scan) {
+            new.native_file = old.native_file;
+        }
+        if let (Some(new), Some(old)) = (&mut normalized.coverage, &previous.coverage) {
+            new.cursor.native_file = old.cursor.native_file;
+        }
+        if normalized != previous { return Err(Error::InvalidData); }
+        let rows = self.row_classifications(binding, false)?;
+        let covered = self.connection.query_row("SELECT EXISTS(SELECT 1 FROM cloud_row_classification_coverage WHERE binding=?1)", [binding.0.as_slice()], |r| r.get::<_, bool>(0))?;
         let transaction = self.connection.transaction()?;
+        for mut row in rows.into_iter().filter(|row| row.open == value.open_counter) {
+            row.file = value.file.ok_or(Error::InvalidData)?;
+            transaction.execute("UPDATE cloud_row_classifications SET content=?1 WHERE binding=?2 AND kind=?3 AND key=?4", params![encode(&row)?, binding.0.as_slice(), row.kind as i64, row.key])?;
+        }
+        if covered {
+            transaction.execute("UPDATE cloud_row_classification_coverage SET content=?1 WHERE binding=?2", params![encode(value.coverage.as_ref().ok_or(Error::InvalidData)?)?, binding.0.as_slice()])?;
+        }
         put_binding(&transaction, binding, value)?;
+        super::row_classification::validate(&transaction, &self.scope)?;
         transaction.commit()?;
         Ok(())
     }
@@ -625,6 +696,12 @@ pub(super) fn put_binding(
     value: &StoredRuntimeState,
 ) -> Result<(), Error> {
     value.validate()?;
+    if value.coverage.is_none() {
+        let version: i64 = transaction.query_row("SELECT version FROM cloud_runtime_schema", [], |r| r.get(0))?;
+        if version == VERSION {
+            transaction.execute("DELETE FROM cloud_row_classification_coverage WHERE binding=?1", [binding.0.as_slice()])?;
+        }
+    }
     if value.durable_file.is_some() {
         let version: i64 = transaction.query_row("SELECT version FROM cloud_runtime_schema", [], |r| r.get(0))?;
         if version != VERSION {

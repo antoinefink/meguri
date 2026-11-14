@@ -1356,7 +1356,7 @@ impl Runtime {
             let store = s.store.as_ref().ok_or(Error::Database)?;
             let mut accounting = cfg!(feature = "test-hooks").then(ExchangeAccounting::default);
             for name in std::mem::take(&mut result.outstanding_names) {
-                if store
+                if !store.row_failed(binding, &name)? && store
                     .entity_header(binding, &name)?
                     .is_some_and(|header| header.facts.server_erev > 0 && header.facts.mark.is_none())
                 {
@@ -1368,6 +1368,11 @@ impl Runtime {
                 }
             }
             result.blocked_names = store.blocked_exchange_names(binding, &result.outstanding_names)?;
+            // Selection stays immutable. A landed older flight cannot satisfy
+            // that selected row while its actual accepted image is unreadable.
+            for name in &result.selected_names {
+                if store.row_failed(binding, name)? { result.blocked_names.insert(name.clone()); }
+            }
             result
                 .outstanding_names
                 .retain(|name| !result.blocked_names.contains(name));

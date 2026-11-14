@@ -59,7 +59,7 @@ pub(super) fn validate(c: &Connection) -> Result<(), Error> {
     }
     Ok(())
 }
-fn validate_pair(i: &ApplyIntent, r: &Rekey) -> Result<(), Error> {
+pub(super) fn validate_pair(i: &ApplyIntent, r: &Rekey) -> Result<(), Error> {
     let old = i64::from_be_bytes(r.old.as_slice().try_into().map_err(|_| Error::InvalidData)?);
     let new = i64::from_be_bytes(r.new.as_slice().try_into().map_err(|_| Error::InvalidData)?);
     if r.format != 1

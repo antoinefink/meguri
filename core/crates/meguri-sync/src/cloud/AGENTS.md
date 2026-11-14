@@ -24,3 +24,4 @@
 
 - Final native validation alone reads `NativeAuthority`. Actual State guards publish before unlock; direct shared-State aliases must use `StateGuard`, including Condvar wait/reacquisition. Prepared State never publishes.
 - Publish actual authority changes before later tracking/I/O/waits. Compact authority locks never span another lock acquisition, provider, store operation or callback; SDK isolation readback failure retains committed unusability.
+- Unpublished Runtime V8 fences classification metadata, indexed failure membership and scan coverage in one migration transaction. Older markers with these tables are invalid. Failure acceptance advances payload-independent revisions; ACK/intake never clears it. Repairs need actual projected images; coverage must equal accepted runtime coverage. Keep candidate checks keyed and reconcile pages bounded.

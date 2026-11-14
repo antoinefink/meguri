@@ -452,7 +452,7 @@ pub(super) fn recover(
     replay_moves(&directory)?;
     let current = directory.path.join(TRACKING_FILE);
     match identity(&current)? {
-        Some(_) => match open::probe(&current)? {
+        Some(_) => match open::probe(&current, &scope)? {
             Probe::Newer(found) => return Ok(OpenOutcome::NewerSchema { found }),
             Probe::Damaged => move_damaged(&directory, clock)?,
             Probe::Supported => {}

@@ -231,7 +231,7 @@ fn durable_identity_native_and_durable_pair_rollback_and_reopen() {
     assert_eq!(store.connection.total_changes(), changes);
     store
         .connection
-        .execute("UPDATE cloud_runtime_schema SET version=7", [])
+        .execute("UPDATE cloud_runtime_schema SET version=8", [])
         .unwrap();
     store
         .isolate_runtime_binding(binding, IsolationReason::SignedOut)

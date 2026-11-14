@@ -902,7 +902,7 @@ fn settle_own_live(
         system_fields: system_fields.0.clone(),
     };
     super::incomplete_store::ack(tx, intent.binding, &key.name, &h.facts.in_flight[index])?;
-    h.ack(index, &saved)?;
+    h.ack(index, &saved, !super::row_classification::failed(tx, intent.binding, &key.name)?)?;
     if h.images.local_row_digest != h.facts.acked_row_digest {
         // A real edit back to the old ACK may have cleared the observer mark.
         // This newly acknowledged flight changes the base, so refresh pending

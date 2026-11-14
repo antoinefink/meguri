@@ -3971,3 +3971,6 @@ fn exchange_incomplete_failed_entry_retries_to_apply_or_reference_without_replac
         reopened.close().unwrap();
     }
 }
+
+#[path = "support/row_classification.rs"]
+mod row_classification;

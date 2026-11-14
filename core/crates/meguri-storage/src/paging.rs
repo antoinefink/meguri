@@ -89,6 +89,15 @@ pub trait ReadRows: sealed::Connected {
         notetype_parts_page(self.connection(), Table::Templates, notetype, after)
     }
 
+    /// Bounded keyset enumeration for raw identity, including invalid stored
+    /// ordinal classes. The continuation is the actual last stored cell.
+    fn notetype_parts_raw_page(&self, table: Table, notetype: NotetypeId, after: Option<&Cell>) -> Result<Vec<RowImage>, StorageError> {
+        if !matches!(table, Table::Fields | Table::Templates) {
+            return Err(StorageError::Io { detail: "invalid notetype part table".into() });
+        }
+        notetype_parts_raw_page(self.connection(), table, notetype, after)
+    }
+
     /// Unfiltered maximum stored revlog id for this card on this connection's
     /// view, or 0 when no row exists. Keeps signed millisecond ids as is.
     /// This reads live rows (or the reader's snapshot); a future held-image
@@ -512,6 +521,15 @@ fn notetype_parts_page(
     notetype: NotetypeId,
     after: Option<i64>,
 ) -> Result<Vec<RowImage>, StorageError> {
+    notetype_parts_raw_page(conn, table, notetype, after.map(Cell::Integer).as_ref())
+}
+
+fn notetype_parts_raw_page(
+    conn: &Connection,
+    table: Table,
+    notetype: NotetypeId,
+    after: Option<&Cell>,
+) -> Result<Vec<RowImage>, StorageError> {
     let columns = table
         .columns()
         .iter()
@@ -527,7 +545,7 @@ fn notetype_parts_page(
     ))?;
     let mut params = vec![Cell::Integer(notetype.0)];
     if let Some(ord) = after {
-        params.push(Cell::Integer(ord));
+        params.push(ord.clone());
     }
     Ok(statement
         .query_map(params_from_iter(params), |row| rows::row_image(row, table))?

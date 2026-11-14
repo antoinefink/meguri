@@ -30,6 +30,7 @@ impl TrackingStore {
             if !visited.insert(name.clone()) || blocked.contains(&name) {
                 continue;
             }
+            if self.row_failed(binding, &name)? { blocked.insert(name); continue; }
             let Some(header) = self.entity_header(binding, &name)? else {
                 continue;
             };

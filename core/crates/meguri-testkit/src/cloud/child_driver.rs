@@ -628,7 +628,7 @@ impl StoreFailure {
             core::Error::Database => Self::Database,
             core::Error::Constraint => Self::Constraint,
             core::Error::InvalidIdentifier => Self::InvalidIdentifier,
-            core::Error::InvalidData => Self::InvalidData,
+            core::Error::InvalidData | core::Error::RowFailure(_) => Self::InvalidData,
             core::Error::BindingNotFound => Self::BindingNotFound,
             core::Error::IsolatedBinding => Self::IsolatedBinding,
             core::Error::RecoveryRequired => Self::RecoveryRequired,

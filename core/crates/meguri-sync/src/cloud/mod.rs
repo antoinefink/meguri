@@ -50,6 +50,8 @@ mod payload_asset;
 mod recovery;
 mod rekey_store;
 mod runtime_store;
+mod row_classification;
+pub use row_classification::RowClassification;
 mod store;
 #[cfg(feature = "test-hooks")]
 pub mod testing;
@@ -68,6 +70,7 @@ pub enum Error {
     Constraint,
     InvalidIdentifier,
     InvalidData,
+    RowFailure(row_payload::RowFailure),
     BindingNotFound,
     IsolatedBinding,
     RecoveryRequired,
@@ -83,6 +86,7 @@ impl std::fmt::Display for Error {
             Self::Constraint => "cloud tracking constraint failed",
             Self::InvalidIdentifier => "invalid cloud tracking identifier",
             Self::InvalidData => "invalid cloud tracking data",
+            Self::RowFailure(_) => "cloud entity raw row cannot be sent",
             Self::BindingNotFound => "cloud binding not found in this build",
             Self::IsolatedBinding => "cloud binding is isolated",
             Self::RecoveryRequired => "cloud tracking recovery must finish before opening",

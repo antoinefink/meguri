@@ -12,7 +12,7 @@ use super::{
     workflow::*,
     *,
 };
-use meguri_storage::{RowImage, RowKey, Table};
+use meguri_storage::{Cell, RowImage, RowKey, Table};
 use rusqlite::{Connection, OptionalExtension, params};
 #[cfg(feature = "test-hooks")]
 thread_local! {
@@ -186,6 +186,24 @@ pub(super) fn new_pending_entity(
         observed_seq: observed.1,
         observed_generation: observed.2,
     })
+}
+fn observe_classified(e: &mut EntityFacts, p: codec::Payload, failed: bool,
+    source: DirtySource, counter: &mut u64) -> Result<(), Error>
+{
+    if failed && e.base_payload.is_none() { e.base_payload = e.acked_payload.clone(); }
+    let changed = e.observe(p, source, counter)?;
+    if failed && !changed {
+        e.local_rev = next(e.local_rev)?;
+        if e.server_erev > 0 && e.payload.row_digest().map_err(|_| Error::InvalidData)? == e.acked_row_digest {
+            e.mark = None;
+            e.base_payload = None;
+        } else {
+            *counter = next(*counter)?;
+            e.mark = Some(runtime::DirtyMark { source, change_seq: *counter,
+                payload_digest: e.payload.payload_digest().map_err(|_| Error::InvalidData)? });
+        }
+    }
+    Ok(())
 }
 fn keys(c: &Connection, b: BindingId, kind: codec::Kind, after: Option<&[u8]>) -> Result<Vec<Vec<u8>>, Error> {
     if kind == codec::Kind::Note {
@@ -444,6 +462,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         tx.commit()?;
         Ok(())
     }
+    #[cfg(test)]
     pub(super) fn insert_workflow_entity(
         &mut self,
         b: BindingId,
@@ -482,6 +501,34 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         tx.commit()?;
         Ok(e)
     }
+    /// New scan images install classification and payload atomically. In
+    /// particular a newer failed create has no placeholder payload to overwrite.
+    pub(super) fn insert_classified_scan_entity(
+        &mut self, b: BindingId, payload: codec::Payload, origin: [u8; 16],
+        classification: &super::RowClassification, publishing: bool,
+    ) -> Result<Option<EntityFacts>, Error> {
+        let binding = self.binding(b)?.ok_or(Error::BindingNotFound)?;
+        let mut state = self.runtime_binding(b)?;
+        if state.open_counter != classification.open || payload.kind() != classification.kind
+            || row_payload::payload_key(&payload)? != classification.key || classification.failure.is_some() || classification.raw_digest.is_none()
+        { return Err(Error::InvalidData); }
+        if publishing {
+            let op = self.publication_op()?.ok_or(Error::InvalidData)?;
+            if op.step != super::publication::PublishStep::Zones || op.binding_after != Some(b) { return Err(Error::InvalidData); }
+        } else if !matches!(payload.kind(), codec::Kind::Note | codec::Kind::Card | codec::Kind::Revlog | codec::Kind::Config) {
+            return Err(Error::InvalidData);
+        }
+        if let Some(e) = entity(&self.connection, b, classification.kind, &classification.key)? { return Ok(Some(e)); }
+        let tx = self.connection.transaction()?;
+        if !super::row_classification::accept(&tx, b, classification, &mut state, &binding.facts.record_key, DirtySource::Snapshot)? { return Ok(None); }
+        let mut e = new_pending_entity(&binding.facts.record_key, payload, origin, DirtySource::Snapshot,
+            &mut state.change_counter, (classification.open, classification.seq, classification.generation))?;
+        e.local_rev = e.local_rev.max(next(super::row_classification::revision(&tx,b,e.kind,&e.key)?)?);
+        put(&tx, b, &e)?;
+        put_binding(&tx, b, &state)?;
+        tx.commit()?;
+        Ok(Some(e))
+    }
     pub(super) fn workflow_merge(
         &mut self,
         b: BindingId,
@@ -489,7 +536,13 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         seq: u64,
         generation: u64,
         mut image: EntityFacts,
+        classification: &super::RowClassification,
     ) -> Result<(), Error> {
+        if classification.kind != image.kind || classification.key != image.key || classification.open != open
+            || classification.seq != seq || classification.generation != generation
+            || classification.failure.is_some() || classification.raw_digest.is_none()
+        { return Err(Error::InvalidData); }
+        let binding = self.binding(b)?.ok_or(Error::BindingNotFound)?;
         let mut state = self.runtime_binding(b)?;
         if state.open_counter != open {
             return Err(Error::InvalidData);
@@ -498,12 +551,14 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         if current.observer_open == open && current.observed_generation == generation && current.observed_seq > seq {
             return Ok(());
         }
-        current.observe(image.payload, DirtySource::Snapshot, &mut state.change_counter)?;
+        let failed = super::row_classification::get(&self.connection,b,image.kind,&image.key)?.is_some_and(|f| f.failure.is_some());
+        observe_classified(&mut current,image.payload,failed,DirtySource::Snapshot,&mut state.change_counter)?;
         current.observer_open = open;
         current.observed_seq = seq;
         current.observed_generation = generation;
         image = current;
         let tx = self.connection.transaction()?;
+        if !super::row_classification::accept(&tx, b, classification, &mut state, &binding.facts.record_key, DirtySource::Snapshot)? { return Ok(()); }
         put(&tx, b, &image)?;
         put_binding(&tx, b, &state)?;
         tx.commit()?;
@@ -600,7 +655,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         } else {
             None
         };
-        h.ack(index, saved)?;
+        h.ack(index, saved, !self.row_failed(b, &saved.name)?)?;
         let media_removal_pending = media_ledger.as_ref().is_some_and(|ledger| {
             std::str::from_utf8(&h.facts.key)
                 .ok()
@@ -707,6 +762,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         s.coverage = Some(ledger);
         let tx = self.connection.transaction()?;
         put_binding(&tx, b, &s)?;
+        tx.execute("INSERT INTO cloud_row_classification_coverage VALUES(?1,?2) ON CONFLICT(binding) DO UPDATE SET content=excluded.content", params![b.0.as_slice(), encode(s.coverage.as_ref().ok_or(Error::InvalidData)?)?])?;
         super::publication_store::advance_sent(&tx, &self.scope, b)?;
         tx.commit()?;
         Ok(())
@@ -855,8 +911,6 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         mut hook: impl FnMut(usize) -> Result<(), Error>,
     ) -> Result<Vec<(String, u64)>, runtime::RuntimeError> {
         if commit.changes.whole_collection
-            || (!commit.changes.notetypes.is_empty()
-                && commit.changes.source != meguri_model::changes::OpSource::CloudRekey)
             || !commit.changes.media_added.is_empty()
             || !commit.changes.media_removed.is_empty()
         {
@@ -873,12 +927,17 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
             commit.changes.source,
             meguri_model::changes::OpSource::CloudIncoming | meguri_model::changes::OpSource::CloudRekey
         );
+        let mut active_intents = std::collections::BTreeSet::new();
         if applying {
             for mut intent in incoming.iter().filter(|i| i.result_seq.is_none()).cloned() {
-                let rekey = super::rekey_store::get(&tx, intent.id)?.is_some();
-                if rekey != (commit.changes.source == meguri_model::changes::OpSource::CloudRekey) {
+                let rekey = super::rekey_store::get(&tx, intent.id)?;
+                if rekey.is_some() != (commit.changes.source == meguri_model::changes::OpSource::CloudRekey) {
                     continue;
                 }
+                if intent.originating_open.is_some_and(|n| n == 0 || n > open) || intent.generation != commit.generation.0
+                    || Some(intent.native_file) != state.file { return Err(Error::InvalidData.into()); }
+                if let Some(rekey) = &rekey { super::rekey_store::validate_pair(&intent, rekey)?; }
+                active_intents.insert(intent.id);
                 intent.result_seq = Some(commit.seq.0);
                 tx.execute(
                     "UPDATE cloud_apply_intents SET content=?2 WHERE id=?1",
@@ -896,6 +955,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
             if applying
                 && let Some(protected) = incoming
                     .iter()
+                    .filter(|i| !applying || active_intents.contains(&i.id))
                     .flat_map(|i| &i.keys)
                     .find(|k| k.kind == codec::Kind::Deck && k.key == key)
             {
@@ -904,46 +964,83 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                 }
                 continue;
             }
-            let delta = commit.payload.row(Table::Decks, row_key)?.ok_or(Error::InvalidData)?;
-            if delta.before.is_none() && matches!(delta.after, meguri_engine::changes::observers::RowAfter::Row(_)) {
+            let presence = commit.payload.row_presence(Table::Decks, row_key).ok_or(Error::InvalidData)?;
+            if !presence.before && presence.after {
                 added_decks.push(key);
             }
         }
+        let intent_layouts = if applying {
+            protected_layouts(
+                &CommitView { c: &tx, b, rows, added_decks: &added_decks },
+                &incoming,
+                &active_intents,
+            )?
+        } else {
+            std::collections::BTreeMap::new()
+        };
         let mut written = 0;
         let mut dropped = Vec::new();
         for kind in row_payload::KINDS {
             let Some(table) = row_payload::table(kind) else {
                 continue;
             };
-            for row_key in commit.payload.row_keys(table) {
+            let mut row_keys: std::collections::BTreeSet<_> = commit.payload.row_keys(table).cloned().collect();
+            if kind == codec::Kind::Notetype {
+                for part in [Table::Fields, Table::Templates] {
+                    for key in commit.payload.row_keys(part) {
+                        let RowKey::Pair(id, _) = key else { return Err(Error::InvalidData.into()); };
+                        row_keys.insert(RowKey::Id(*id));
+                    }
+                }
+            }
+            for row_key in &row_keys {
                 let key = row_payload::tracking_key(kind, row_key)?;
                 let protected = incoming
                     .iter()
+                    .filter(|i| !applying || active_intents.contains(&i.id))
                     .flat_map(|i| &i.keys)
                     .find(|k| k.kind == kind && k.key == key);
-                if applying && protected.is_some() {
-                    continue;
-                }
-                let delta = commit.payload.row(table, row_key)?.ok_or(Error::InvalidData)?;
-                let raw = rows.row_image(table, &delta.key)?;
-                let actual_key = match raw.as_ref().or(delta.before.as_ref()) {
-                    Some(r) => row_payload::key(kind, r)?,
-                    None => return Err(Error::InvalidData.into()),
-                };
-                if actual_key != key {
+                let presence = commit.payload.row_presence(table, row_key);
+                if presence.is_none() && kind != codec::Kind::Notetype { return Err(Error::InvalidData.into()); }
+                let raw = rows.row_image(table, row_key)?;
+                if presence.is_some_and(|p| p.after != raw.is_some()) {
                     return Err(Error::InvalidData.into());
                 }
-                let existing = entity(&tx, b, kind, &key)?;
+                if let Some(raw) = &raw
+                    && row_payload::key(kind, raw)? != key {
+                    return Err(Error::InvalidData.into());
+                }
+                let was_failed = super::row_classification::get(&tx, b, kind, &key)?.is_some_and(|f| f.failure.is_some());
                 if raw.is_none() {
+                    if applying && protected.is_some_and(|k| k.after_digest.is_some()) { return Err(Error::InvalidData.into()); }
+                    let classification = super::RowClassification {
+                        kind, key: key.clone(), open, seq: commit.seq.0, generation: commit.generation.0,
+                        file: state.file.ok_or(Error::InvalidData)?, raw_digest: None, logical_digest: None, failure: None,
+                    };
+                    super::row_classification::accept(&tx, b, &classification, &mut state, &binding.facts.record_key, DirtySource::Observer)?;
+                    if applying && protected.is_some() { written += 1; hook(written)?; continue; }
+                    let existing = entity(&tx, b, kind, &key)?;
+                    let delta = commit.payload.row(table, row_key)?;
+                    let before_row = delta.as_ref().and_then(|d| d.before.as_ref());
+                    if let Some(before) = before_row
+                        && row_payload::key(kind, before)? != key {
+                        return Err(Error::InvalidData.into());
+                    }
+                    // A row that never had a payload needs no server tombstone.
+                    if existing.is_none() && was_failed {
+                        let name = codec::entity_name(&binding.facts.record_key.0, kind, &key).map_err(|_| Error::InvalidData)?;
+                        dropped.push((name, super::row_classification::revision(&tx,b,kind,&key)?));
+                        written += 1; hook(written)?; continue;
+                    }
                     // Only explicit committed removals create tombstones. A
                     // missing scan row never supplies a deletion or its base.
                     let Some(mut e) = existing else {
-                        if matches!(kind, codec::Kind::Note | codec::Kind::Card) && delta.before.is_none() {
+                        if matches!(kind, codec::Kind::Note | codec::Kind::Card | codec::Kind::Config) && before_row.is_none() {
                             continue; // created and removed within this commit
                         }
                         return Err(Error::InvalidData.into());
                     };
-                    if matches!(kind, codec::Kind::Note | codec::Kind::Card) {
+                    if matches!(kind, codec::Kind::Note | codec::Kind::Card | codec::Kind::Config) {
                         if !e.sent && e.server_erev == 0 && e.in_flight.is_empty() {
                             super::incomplete_store::dropped(&tx, b, &e.name, e.local_rev)?;
                             remove_entity(&tx, b, &e)?;
@@ -959,8 +1056,15 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                             },
                             commit,
                         };
-                        let before = delta.before.as_ref().ok_or(Error::InvalidData)?;
-                        let payload = row_payload::project(&view, kind, before, |id| layout(&tx, b, id))?;
+                        let before = before_row.ok_or(Error::InvalidData)?;
+                        let payload = match row_payload::project(&view, kind, before, |id| layout(&tx, b, id)) {
+                            Ok(p) => p,
+                            // Tombstone has no wire payload. Keep the last real
+                            // retained image as bookkeeping when the removed row
+                            // itself had no encodable payload.
+                            Err(Error::RowFailure(_)) if was_failed => e.payload.clone(),
+                            Err(error) => return Err(error.into()),
+                        };
                         // A fixed clock (or a raw incoming op) can leave col
                         // unchanged, so the journal has no CollectionMark.
                         // Read the actual same-commit metadata, never a made-up
@@ -995,28 +1099,59 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                     rows,
                     added_decks: &added_decks,
                 };
-                let p = row_payload::project(&view, kind, &raw.ok_or(Error::InvalidData)?, |id| layout(&tx, b, id))?;
+                let raw = raw.ok_or(Error::InvalidData)?;
+                let projected = row_payload::project(&view, kind, &raw, |id| {
+                    intent_layouts.get(&id).cloned().map(Ok).unwrap_or_else(|| layout(&tx, b, id))
+                });
+                if applying && let Some(protected) = protected {
+                    let actual = projected.as_ref().map_err(|_| Error::InvalidData)?;
+                    if Some(actual.row_digest().map_err(|_| Error::InvalidData)?) != protected.after_digest {
+                        return Err(Error::InvalidData.into());
+                    }
+                }
+                let failure = match &projected { Err(Error::RowFailure(f)) => Some(*f), _ => None };
+                let classification = super::RowClassification {
+                    kind, key: key.clone(), open, seq: commit.seq.0, generation: commit.generation.0,
+                    file: state.file.ok_or(Error::InvalidData)?,
+                    raw_digest: Some(row_payload::raw_identity(&view, kind, &raw)?),
+                    logical_digest: Some(row_payload::logical_identity(&view, kind, &raw)?), failure,
+                };
+                drop(raw);
+                if classification.failure.is_some() {
+                    super::row_classification::accept(&tx, b, &classification, &mut state, &binding.facts.record_key, DirtySource::Observer)?;
+                    written += 1; hook(written)?;
+                    continue;
+                }
+                let p = projected?;
+                if !super::row_classification::accept(&tx, b, &classification, &mut state, &binding.facts.record_key, DirtySource::Observer)? { continue; }
+                if applying && protected.is_some() { written += 1; hook(written)?; continue; }
+                // No retained current/base/ACK image is read until the
+                // actual row has passed classification and intent ownership.
+                let existing = entity(&tx, b, kind, &key)?;
+                let had_payload = existing.is_some();
                 let mut e = if let Some(e) = existing {
                     e
                 } else {
                     let ordinary_addition = matches!(
                         kind,
                         codec::Kind::Note | codec::Kind::Card | codec::Kind::Deck | codec::Kind::Config
-                    ) && delta.before.is_none();
-                    if !ordinary_addition && kind != codec::Kind::Revlog && protected.is_none() {
+                    ) && presence.is_some_and(|p| !p.before);
+                    if !ordinary_addition && !was_failed && kind != codec::Kind::Revlog && protected.is_none() {
                         return Err(Error::InvalidData.into());
                     }
                     let mut origin = [0; 16];
                     origin[..8].copy_from_slice(&random.next_u64().to_le_bytes());
                     origin[8..].copy_from_slice(&random.next_u64().to_le_bytes());
-                    new_pending_entity(
+                    let mut fresh = new_pending_entity(
                         &binding.facts.record_key,
                         p.clone(),
                         origin,
                         DirtySource::Observer,
                         &mut state.change_counter,
                         (open, commit.seq.0, commit.generation.0),
-                    )?
+                    )?;
+                    fresh.local_rev = fresh.local_rev.max(next(super::row_classification::revision(&tx,b,kind,&key)?)?);
+                    fresh
                 };
                 if !matches!(
                     kind,
@@ -1039,7 +1174,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                     // including an undo that restored the old tracked payload.
                     e.payload = expected.clone();
                 }
-                e.observe(p, DirtySource::Observer, &mut state.change_counter)?;
+                observe_classified(&mut e,p,was_failed && had_payload,DirtySource::Observer,&mut state.change_counter)?;
                 e.observer_open = open;
                 e.observed_seq = commit.seq.0;
                 e.observed_generation = commit.generation.0;
@@ -1065,6 +1200,50 @@ struct CommitView<'a, 'r> {
     rows: &'a meguri_engine::ObserverRows<'r>,
     added_decks: &'a [Vec<u8>],
 }
+// An unsettled apply supplies layout authority only for its own binding
+// and active writer commit. Rekey intents may keep just digests: reconstruct
+// their new layout from the committed rows using the paired counter.
+fn protected_layouts(
+    view: &CommitView<'_, '_>,
+    intents: &[incoming::ApplyIntent],
+    active: &std::collections::BTreeSet<i64>,
+) -> Result<std::collections::BTreeMap<i64, codec::Notetype>, Error> {
+    let mut resolved = std::collections::BTreeMap::new();
+    for intent in intents {
+        if !active.contains(&intent.id) { continue; }
+        if intent.binding != view.b { return Err(Error::InvalidData); }
+        for image in intent.keys.iter().filter(|image| image.kind == codec::Kind::Notetype) {
+            let Some(payload) = image.after_payload.as_ref() else { continue; };
+            let codec::Payload::Notetype(candidate) = payload else { return Err(Error::InvalidData); };
+            if image.key != codec::id_key(candidate.id)
+                || Some(payload.row_digest().map_err(|_| Error::InvalidData)?) != image.after_digest
+            { return Err(Error::InvalidData); }
+            if let Some(previous) = resolved.insert(candidate.id, candidate.clone())
+                && previous != *candidate {
+                return Err(Error::InvalidData);
+            }
+        }
+        if let Some(pair) = super::rekey_store::get(view.c, intent.id)? {
+            super::rekey_store::validate_pair(intent, &pair)?;
+            if let Some(counter) = pair.struct_gen {
+                let RowKey::Id(id) = row_key(codec::Kind::Notetype, &pair.new)? else { return Err(Error::InvalidData); };
+                let target = intent.keys.iter().find(|image|
+                    image.kind == codec::Kind::Notetype && image.key == pair.new
+                ).ok_or(Error::InvalidData)?;
+                let head = view.row(Table::Notetypes, &RowKey::Id(id))?.ok_or(Error::InvalidData)?;
+                let candidate = row_payload::notetype(view, &head, counter)?;
+                let digest = codec::wire::Message::digest(&candidate, true).map_err(|_| Error::InvalidData)?;
+                if target.after_digest != Some(digest) { return Err(Error::InvalidData); }
+                if let Some(previous) = resolved.insert(id, candidate.clone())
+                    && previous != candidate {
+                    return Err(Error::InvalidData);
+                }
+            }
+        }
+    }
+    Ok(resolved)
+}
+
 impl View for CommitView<'_, '_> {
     fn row(&self, t: Table, k: &RowKey) -> Result<Option<RowImage>, Error> {
         Ok(self.rows.row_image(t, k)?)
@@ -1097,17 +1276,15 @@ impl View for CommitView<'_, '_> {
             .collect()
     }
     fn parts(&self, t: Table, id: i64, after: Option<i64>) -> Result<Vec<RowImage>, Error> {
-        let n = layout(self.c, self.b, id)?;
-        let ords: Vec<_> = if t == Table::Fields {
-            n.fields.iter().map(|f| f.ord).collect()
-        } else {
-            n.templates.iter().map(|f| f.ord).collect()
-        };
-        ords.into_iter()
-            .filter(|ord| after.is_none_or(|a| *ord > a))
-            .take(250)
-            .map(|ord| self.row(t, &RowKey::Pair(id, ord))?.ok_or(Error::InvalidData))
-            .collect()
+        let id = meguri_model::ids::NotetypeId(id);
+        Ok(match t {
+            Table::Fields => self.rows.notetype_fields_page(id, after)?,
+            Table::Templates => self.rows.notetype_templates_page(id, after)?,
+            _ => return Err(Error::InvalidData),
+        })
+    }
+    fn raw_parts(&self, t: Table, id: i64, after: Option<&Cell>) -> Result<Vec<RowImage>, Error> {
+        Ok(self.rows.notetype_parts_raw_page(t, meguri_model::ids::NotetypeId(id), after)?)
     }
     fn history(&self, id: i64) -> Result<i64, Error> {
         Ok(self.rows.max_revlog_id(meguri_model::ids::CardId(id))?)
@@ -1324,7 +1501,7 @@ impl TrackingStore {
         e.acked_envelope = OpaqueBytes(saved.envelope.clone());
         e.acked_system_fields = saved.system_fields.clone();
         e.in_flight.retain(|f| f.local_rev > flight.local_rev);
-        if e.tombstone_at.is_some() && e.local_rev == flight.local_rev {
+        if e.tombstone_at.is_some() && e.local_rev == flight.local_rev && !self.row_failed(b, &saved.name)? {
             e.mark = None;
             e.base_payload = None;
         } else if e.tombstone_at.is_none() && e.mark.is_none() {

@@ -137,6 +137,7 @@ impl RuntimeError {
                     Error::Constraint => "Constraint",
                     Error::InvalidIdentifier => "InvalidIdentifier",
                     Error::InvalidData => "InvalidData",
+                    Error::RowFailure(_) => "RowFailure",
                     Error::BindingNotFound => "BindingNotFound",
                     Error::IsolatedBinding => "IsolatedBinding",
                     Error::RecoveryRequired => "RecoveryRequired",
@@ -734,6 +735,7 @@ pub struct ZoneListingRequest {
 pub enum ScanPausePoint {
     BeforeSnapshot,
     BeforeMerge,
+    BeforeRowMerge(codec::Kind),
 }
 #[cfg(feature = "test-hooks")]
 struct ScanPause {

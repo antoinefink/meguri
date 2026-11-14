@@ -177,3 +177,13 @@ threads-required = "num-test-threads"
 [[profile.default.overrides]]
 filter = 'package(meguri-host) and binary(cloud_policy_driver) and (test(/reference_waiting_large_backlog_/) or test(/reference_waiting_paused_scheduled_/))'
 threads-required = "num-test-threads"
+
+# K10 raw canonical-cap cases hold 100 MiB images. Keep their copies isolated.
+[[profile.default.overrides]]
+filter = 'test(=cloud::row_payload::classification_tests::k10_raw_canonical_cap_boundary_and_asset_placement_are_distinct) or test(=row_classification::k10_rows_oversize_raw_observer_scan_reopen_shrink_never_sends_retained_payload)'
+threads-required = "num-test-threads"
+
+# The row index fixture owns its large table and measures SQLite instruction work.
+[[profile.default.overrides]]
+filter = 'test(=cloud::workflow_store::tests::k10_rows_indexed_observer_and_candidate_queries_are_bounded_at_150k)'
+threads-required = "num-test-threads"

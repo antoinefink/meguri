@@ -74,8 +74,13 @@ impl Runtime {
     ) -> Result<(), RuntimeError> {
         self.wait_incoming_idle();
         let status = self.status()?;
-        if status.binding.is_some() && status.stored_usable && status.identity_verified {
-            self.replay_media_intents(collection, &self.media_service(collection)?)?;
+        if let Some(binding) = status.binding.as_ref().filter(|_| status.stored_usable && status.identity_verified) {
+            let has_media = {
+                let s = self.state();
+                with_tracking_access(|| s.store.as_ref().ok_or(Error::Database)?.apply_intents(binding.id))?
+                    .iter().any(|i| i.media.is_some())
+            };
+            if has_media { self.replay_media_intents(collection, &self.media_service(collection)?)?; }
         }
         let has_work = {
             let s = self.state();

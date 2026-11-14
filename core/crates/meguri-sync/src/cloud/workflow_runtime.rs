@@ -193,6 +193,30 @@ impl Runtime {
         }
         Ok(())
     }
+    fn classify_snapshot_row(&self, guard: &ScanGuard, collection: &Collection,
+        classification: &super::super::RowClassification) -> Result<bool, RuntimeError>
+    {
+        self.with_scan(guard, collection, |s| {
+            let result = s.store.as_mut().ok_or(Error::Database)?.classify_row(guard.binding, classification);
+            if result.is_err() {
+                s.tracking_stopped = true;
+                s.scan_required = true;
+                s.whole_complete = false;
+            }
+            Ok(result?)
+        })
+    }
+    /// Durable kind/key details. Completeness belongs only to an accepted full
+    /// real-row scan this open, independently of global K10 attention knowledge.
+    pub fn row_classification_details(&self) -> Result<(bool, Vec<super::super::RowClassification>), RuntimeError> {
+        let s = self.state();
+        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+        with_tracking_access(|| {
+            let store = s.store.as_ref().ok_or(Error::Database)?;
+            Ok((s.whole_complete && !s.scan_required && !s.scan_running && store.row_classification_coverage(b.binding.id)?,
+                store.row_classifications(b.binding.id, true)?))
+        })
+    }
     /// Full-image diagnostic readout. Production selection uses stored headers.
     pub fn entity_facts(&self, name: &str) -> Result<Option<EntityFacts>, RuntimeError> {
         let s = self.state();
@@ -264,8 +288,9 @@ impl Runtime {
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
         let store = s.store.as_ref().ok_or(Error::Database)?;
         let mut pending = store.dirty_names(b.binding.id)?;
+        let failed = store.row_failure_names(b.binding.id)?;
         pending.0.retain(|name, _| {
-            !s.cloud.deferred.contains(name) && !s.cloud.incoming_held.contains(name) && !s.policy.parked.contains(name)
+            !failed.contains(name) && !s.cloud.deferred.contains(name) && !s.cloud.incoming_held.contains(name) && !s.policy.parked.contains(name)
         });
         if !s.media.paused
             && !s.adapter.paused
@@ -648,7 +673,30 @@ impl Runtime {
             let mut recovered = Vec::new();
             let mut counts = Vec::new();
             let mut retained_tombstones = Vec::new();
-            for kind in row_payload::KINDS.into_iter().filter(|k| *k != codec::Kind::MediaName) {
+            let mut after_classification: Option<(codec::Kind, Vec<u8>)> = None;
+            loop {
+                let page = self.with_scan(&guard, collection, |s| {
+                    Ok(s.store.as_ref().ok_or(Error::Database)?.row_classification_page(
+                        guard.binding, after_classification.as_ref().map(|(k,key)| (*k,key.as_slice())))?)
+                })?;
+                if page.is_empty() { break; }
+                after_classification = page.last().map(|f| (f.kind, f.key.clone()));
+                for old in page {
+                    let table = row_payload::table(old.kind).ok_or(Error::InvalidData)?;
+                    if view.row(table, &super::super::workflow_store::row_key(old.kind, &old.key)?)?.is_none() {
+                        let absent = super::super::RowClassification {
+                            kind: old.kind, key: old.key, open: guard.open, seq: snapshot.seq().0,
+                            generation: snapshot.generation().0, file: guard.file,
+                            raw_digest: None, logical_digest: None, failure: None,
+                        };
+                        self.classify_snapshot_row(&guard, collection, &absent)?;
+                    }
+                }
+            }
+            // Classify notetype failures first, including an initial publisher
+            // whose dependent rows cannot yet obtain a usable generation.
+            for kind in [codec::Kind::Notetype].into_iter().chain(row_payload::KINDS.into_iter()
+                .filter(|k| !matches!(k, codec::Kind::Notetype | codec::Kind::MediaName))) {
                 let table = row_payload::table(kind).ok_or(Error::InvalidData)?;
                 // Include tracked absences; a local-only scan cannot prove completeness.
                 let mut after = None;
@@ -700,7 +748,7 @@ impl Runtime {
                                     && e.acked_tombstone()
                                     && e.mark.is_none()
                                     && e.local_rev == e.acked_rev);
-                            if !matches!(kind, codec::Kind::Note | codec::Kind::Card) || !deleted {
+                            if !matches!(kind, codec::Kind::Note | codec::Kind::Card | codec::Kind::Config) || !deleted {
                                 return Err(RuntimeError::Incomplete(Incomplete::WholeBindingReconciliation));
                             }
                             // K11.4/K17.1: absence is already recorded. Preserve
@@ -731,16 +779,7 @@ impl Runtime {
                                 .entity_image(guard.binding, kind, &key)?)
                         })?;
                         let newly_observed = existing.is_none();
-                        if newly_observed
-                            && !publishing
-                            && !matches!(
-                                kind,
-                                codec::Kind::Note | codec::Kind::Card | codec::Kind::Revlog | codec::Kind::Config
-                            )
-                        {
-                            return Err(Error::InvalidData.into());
-                        }
-                        let p = row_payload::project(&view, kind, &row, |id| {
+                        let projected = row_payload::project(&view, kind, &row, |id| {
                             let tracked = {
                                 let s = self.state();
                                 with_tracking_access(|| {
@@ -762,31 +801,36 @@ impl Runtime {
                             } else {
                                 Err(Error::InvalidData)
                             }
-                        })?;
+                        });
+                        let failure = match &projected { Err(Error::RowFailure(f)) => Some(*f), _ => None };
+                        let classification = super::super::RowClassification {
+                            kind, key: key.clone(), open: guard.open, seq: snapshot.seq().0,
+                            generation: snapshot.generation().0, file: guard.file,
+                            raw_digest: Some(row_payload::raw_identity(&view, kind, &row)?),
+                            logical_digest: Some(row_payload::logical_identity(&view, kind, &row)?), failure,
+                        };
+                        #[cfg(feature = "test-hooks")]
+                        Self::pause_scan(&mut scan_pause, ScanPausePoint::BeforeRowMerge(kind))?;
+                        if classification.failure.is_some() {
+                            self.classify_snapshot_row(&guard, collection, &classification)?;
+                            count += 1;
+                            continue;
+                        }
+                        let p = projected?;
+                        if newly_observed && !publishing && !matches!(kind,
+                            codec::Kind::Note | codec::Kind::Card | codec::Kind::Revlog | codec::Kind::Config)
+                        { return Err(Error::InvalidData.into()); }
                         let mut e = if let Some(e) = existing.take() {
                             e
                         } else {
                             let origin = self.publication_random_id()?;
-                            self.with_scan(&guard, collection, |s| {
-                                let store = s.store.as_mut().ok_or(Error::Database)?;
-                                Ok(if publishing {
-                                    store.insert_publication_entity(
-                                        guard.binding,
-                                        p.clone(),
-                                        origin,
-                                        guard.open,
-                                        snapshot.seq().0,
-                                        snapshot.generation().0,
-                                    )?
-                                } else {
-                                    store.insert_workflow_entity(
-                                        guard.binding,
-                                        p.clone(),
-                                        origin,
-                                        (guard.open, snapshot.seq().0, snapshot.generation().0),
-                                    )?
-                                })
-                            })?
+                            let inserted = self.with_scan(&guard, collection, |s| {
+                                Ok(s.store.as_mut().ok_or(Error::Database)?.insert_classified_scan_entity(
+                                    guard.binding, p.clone(), origin, &classification, publishing,
+                                )?)
+                            })?;
+                            let Some(e) = inserted else { count += 1; continue; };
+                            e
                         };
                         if let (codec::Payload::Deck(old), codec::Payload::Deck(new)) = (&e.payload, &p)
                             && (old.kind != new.kind || old.parent_id != new.parent_id)
@@ -817,6 +861,7 @@ impl Runtime {
                                 snapshot.seq().0,
                                 snapshot.generation().0,
                                 e,
+                                &classification,
                             )?)
                         })?;
                         count += 1;
@@ -868,6 +913,7 @@ impl Runtime {
                 )?;
                 let mut coverage_counts = counts.iter().map(|(k, n)| (*k, *n as u64)).collect::<Vec<_>>();
                 coverage_counts.push((codec::Kind::MediaName, media_count));
+                coverage_counts.sort_by_key(|(kind, _)| *kind as u8);
                 s.store.as_mut().ok_or(Error::Database)?.finish_workflow_scan(
                     guard.binding,
                     CoverageLedger {
@@ -954,6 +1000,9 @@ impl Runtime {
                 }
                 Ok(proof)
             });
+            if matches!(&result, Err(RuntimeError::Tracking(Error::Io(_) | Error::Database | Error::Constraint))) {
+                s.tracking_stopped = true;
+            }
             if result.is_err() {
                 s.scan_required = true;
                 s.whole_complete = false;
@@ -1331,6 +1380,9 @@ impl Runtime {
                        e: &EntityFacts,
                        deferred: &mut BTreeSet<String>|
          -> Result<Option<PreparedCandidate>, RuntimeError> {
+            if self.with_scan(&guard, collection, |s| {
+                Ok(s.store.as_ref().ok_or(Error::Database)?.row_failed(guard.binding, name)?)
+            })? { deferred.insert(name.clone()); return Ok(None); }
             let (payload, image_seq, held) = 'image: {
                 if blocked.contains(name)
                     || (e.observer_open == guard.open
@@ -1390,6 +1442,20 @@ impl Runtime {
                 let payload = self.project_send_row(&guard, collection, &view, e, publishing, &row);
                 let payload = match payload {
                     Ok(payload) => payload,
+                    Err(Error::RowFailure(failure)) => {
+                        let (image_seq, held) = view.image();
+                        if !held {
+                            let classification = super::super::RowClassification {
+                                kind: e.kind, key: e.key.clone(), open: guard.open,
+                                seq: image_seq, generation: snapshot.generation().0, file: guard.file,
+                                raw_digest: Some(row_payload::raw_identity(&row_payload::ReadView(&*snapshot), e.kind, &row)?),
+                                logical_digest: Some(row_payload::logical_identity(&row_payload::ReadView(&*snapshot), e.kind, &row)?), failure: Some(failure),
+                            };
+                            self.classify_snapshot_row(&guard, collection, &classification)?;
+                        }
+                        deferred.insert(name.clone());
+                        return Ok(None);
+                    }
                     Err(Error::InvalidData) => {
                         deferred.insert(name.clone());
                         return Ok(None);
@@ -1512,7 +1578,8 @@ impl Runtime {
                         continue;
                     }
                     for reference in references {
-                        if deferred.contains(reference)
+                        if store.row_failed(guard.binding, reference)?
+                            || deferred.contains(reference)
                             || s.cloud.deferred.contains(reference)
                             || s.cloud.incoming_held.contains(reference)
                             || store.incoming_blocks_name(guard.binding, reference)?
@@ -1567,7 +1634,7 @@ impl Runtime {
         // independently of record count, asset count and total asset bytes.
         for name in selected {
             let captured = facts.get(&name).ok_or(Error::InvalidData)?;
-            let Some((flight, envelope, _, _, asset)) = prepare(&name, captured, &mut deferred)? else {
+            let Some((flight, envelope, _, references, asset)) = prepare(&name, captured, &mut deferred)? else {
                 continue;
             };
             let upload = asset
@@ -1602,6 +1669,7 @@ impl Runtime {
                     return Ok(false);
                 }
                 let store = s.store.as_mut().ok_or(Error::Database)?;
+                for reference in &references { if store.row_failed(guard.binding, reference)? { return Ok(false); } }
                 let e = store
                     .entity_header(guard.binding, &name)?
                     .ok_or(Error::InvalidData)?
@@ -1610,6 +1678,7 @@ impl Runtime {
                     || e.acked_payload_digest != captured.acked_payload_digest
                     || e.acked_system_fields != captured.acked_system_fields
                     || store.incoming_blocks_name(guard.binding, &name)?
+                    || store.row_failed(guard.binding, &name)?
                 {
                     return Ok(false);
                 }
@@ -1653,6 +1722,9 @@ impl Runtime {
             // Recheck conditional authority after all incremental commits.
             let store = s.store.as_ref().ok_or(Error::Database)?;
             for input in &saves {
+                if let Some((_, refs)) = descriptors.get(&input.name) {
+                    for reference in refs { if store.row_failed(guard.binding, reference)? { return Ok(empty()); } }
+                }
                 let e = store
                     .entity_header(guard.binding, &input.name)?
                     .ok_or(Error::InvalidData)?
@@ -1662,6 +1734,7 @@ impl Runtime {
                     || e.acked_payload_digest != captured.acked_payload_digest
                     || e.acked_system_fields != captured.acked_system_fields
                     || store.incoming_blocks_name(guard.binding, &input.name)?
+                    || store.row_failed(guard.binding, &input.name)?
                 {
                     return Ok(empty());
                 }
@@ -2310,9 +2383,14 @@ impl Runtime {
             let store = s.store.as_ref().ok_or(Error::Database)?;
             let mut revs = BTreeMap::new();
             for name in &names {
-                let Some(header) = store.entity_header(b, name)? else {
+                if let Some((rev, failed_open, generation, seq)) = store.row_failure_revision(b, name)? {
+                    if failed_open == open && generation == snapshot.generation().0 && seq > boundary {
+                        return Err(RuntimeError::StaleIncarnation);
+                    }
+                    revs.insert(name.clone(), rev);
                     continue;
-                };
+                }
+                let Some(header) = store.entity_header(b, name)? else { continue; };
                 let e = header.facts;
                 if e.observer_open == open
                     && e.observed_generation == snapshot.generation().0

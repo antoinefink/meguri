@@ -117,6 +117,14 @@ impl Runtime {
                     verified: b.verified,
                     publish_step,
                 });
+                for (code, count) in store.row_failure_counts(b.binding.id)? {
+                    let attention = match code {
+                        1 => Attention::Oversize,
+                        2 => Attention::Unreadable,
+                        _ => return Err(Error::InvalidData.into()),
+                    };
+                    *summary.attention.entry(attention).or_default() += count;
+                }
                 if store.root_unreadable(b.binding.id)?.is_some() {
                     summary.attention.insert(Attention::RootUnreadable, 1);
                 }
@@ -129,11 +137,12 @@ impl Runtime {
                 held_pending = work.held_pending_names.clone();
                 summary.held = held_pending.len() as u64;
                 summary.pending_unheld = work.pending_unheld_names.len() as u64;
+                let failed_names = store.row_failure_names(b.binding.id)?;
                 summary.sendable = store
                     .dirty_names(b.binding.id)?
                     .0
                     .keys()
-                    .filter(|n| !held_pending.contains(*n) && !s.policy.parked.contains(*n))
+                    .filter(|n| !failed_names.contains(*n) && !held_pending.contains(*n) && !s.policy.parked.contains(*n))
                     .count() as u64;
                 summary.parked = held_pending
                     .iter()

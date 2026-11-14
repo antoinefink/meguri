@@ -90,6 +90,8 @@ pub(super) const WORK_TABLES: &[&str] = &[
     "inbox",
     "cloud_reference_waiting",
     "cloud_reference_drains",
+    "cloud_row_classifications",
+    "cloud_row_classification_coverage",
     "cloud_runtime_notes",
     "cloud_runtime_entities",
     "cloud_runtime_payloads",
@@ -599,70 +601,13 @@ pub(super) fn advance_sent(tx: &Transaction<'_>, scope: &BuildScope, b: BindingI
         return Ok(());
     }
     let pending: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM cloud_runtime_notes WHERE binding=?1 AND (json_extract(content,'$.mark') IS NOT NULL OR json_extract(content,'$.acked_rev') < json_extract(content,'$.local_rev'))) OR EXISTS(SELECT 1 FROM cloud_runtime_entities WHERE binding=?1 AND (json_extract(content,'$.mark') IS NOT NULL OR json_extract(content,'$.acked_rev') < json_extract(content,'$.local_rev')))", [b.0.as_slice()], |r| r.get(0))?;
-    if !pending {
+    let failed: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM cloud_row_classifications WHERE binding=?1 AND failure!=0)", [b.0.as_slice()], |r| r.get(0))?;
+    if !pending && !failed {
         op.step = PublishStep::Sent;
         put_op(tx, scope, &op)?;
     }
     Ok(())
 }
-impl TrackingStore {
-    pub(super) fn insert_publication_entity(
-        &mut self,
-        b: BindingId,
-        payload: entity_codec::Payload,
-        origin: [u8; 16],
-        open: u64,
-        seq: u64,
-        generation: u64,
-    ) -> Result<workflow::EntityFacts, Error> {
-        let op = self.publication_op()?.ok_or(Error::InvalidData)?;
-        if op.step != PublishStep::Zones || op.binding_after != Some(b) {
-            return Err(Error::InvalidData);
-        }
-        let mut state = self.runtime_binding(b)?;
-        if state.open_counter != open {
-            return Err(Error::InvalidData);
-        }
-        let key = row_payload::payload_key(&payload)?;
-        if let Some(existing) = super::workflow_store::entity(&self.connection, b, payload.kind(), &key)? {
-            return Ok(existing);
-        }
-        state.change_counter = super::runtime_store::next(state.change_counter)?;
-        let entity = workflow::EntityFacts {
-            name: entity_codec::entity_name(&op.record_key.0, payload.kind(), &key).map_err(|_| Error::InvalidData)?,
-            kind: payload.kind(),
-            key,
-            origin,
-            sent: false,
-            local_rev: 1,
-            acked_rev: 0,
-            tombstone_at: None,
-            mark: Some(runtime::DirtyMark {
-                source: runtime::DirtySource::Snapshot,
-                change_seq: state.change_counter,
-                payload_digest: payload.payload_digest().map_err(|_| Error::InvalidData)?,
-            }),
-            payload,
-            base_payload: None,
-            server_erev: 0,
-            acked_system_fields: Vec::new(),
-            acked_row_digest: [0; 32],
-            acked_payload_digest: [0; 32],
-            acked_payload: None,
-            acked_envelope: OpaqueBytes::default(),
-            in_flight: Vec::new(),
-            observer_open: open,
-            observed_seq: seq,
-            observed_generation: generation,
-        };
-        let tx = self.connection.transaction()?;
-        super::workflow_store::put(&tx, b, &entity)?;
-        super::runtime_store::put_binding(&tx, b, &state)?;
-        tx.commit()?;
-        Ok(entity)
-    }
-}
-
 /// K6 references, independent of SDK order and the current batch budget.
 pub(super) fn references(payload: &entity_codec::Payload) -> Result<Vec<(entity_codec::Kind, Vec<u8>)>, Error> {
     use entity_codec::{Kind as K, Payload as P};

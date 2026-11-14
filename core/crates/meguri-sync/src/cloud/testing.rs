@@ -52,6 +52,12 @@ pub fn entity_body_reads() -> usize {
     super::workflow_store::body_reads()
 }
 
+/// Calling-thread row queries, SQLite steps, owner decodes and classification
+/// semantic validations. Reading resets the existing work counters.
+pub fn take_row_read_work() -> (u64, u64, u64, u64) {
+    super::row_classification::take_read_work()
+}
+
 thread_local! {
     static MEDIA_POLICY_BLOB_CANDIDATE_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }

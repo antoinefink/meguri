@@ -40,7 +40,7 @@ pub(super) fn open_current(directory: &Path, scope: BuildScope) -> Result<OpenOu
         Err(error) => return Err(error.into()),
     };
     if exists {
-        match probe(&path)? {
+        match probe(&path, &scope)? {
             Probe::Damaged => return Ok(OpenOutcome::Damaged),
             Probe::Newer(found) => return Ok(OpenOutcome::NewerSchema { found }),
             Probe::Supported => {}
@@ -235,6 +235,7 @@ impl RetainedAdoptionStore {
             }
         }
         super::runtime_store::check_version(&store.connection)?;
+        super::runtime_store::validate_bindings(&store.connection, &store.scope)?;
         store::validate(&store.connection, outer)?;
         if store.adoption_op()?.as_ref() != Some(&self.op)
             || self
@@ -278,7 +279,7 @@ fn private_copy(path: &Path) -> Result<(tempfile::TempDir, PathBuf), Error> {
     Ok((private, copy))
 }
 
-pub(super) fn probe(path: &Path) -> Result<Probe, Error> {
+pub(super) fn probe(path: &Path, scope: &BuildScope) -> Result<Probe, Error> {
     let (_private, copy) = private_copy(path)?;
     let checked = (|| -> Result<Probe, Error> {
         let connection = Connection::open_with_flags(&copy, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
@@ -290,6 +291,7 @@ pub(super) fn probe(path: &Path) -> Result<Probe, Error> {
             return Ok(Probe::Damaged);
         }
         super::runtime_store::check_version(&connection)?;
+        super::runtime_store::validate_bindings(&connection, scope)?;
         let integrity: String = connection.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
         if integrity != "ok" {
             return Ok(Probe::Damaged);

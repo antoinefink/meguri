@@ -198,6 +198,9 @@ impl TrackingStore {
         let mut names = q
             .query_map([binding.0.as_slice()], |r| r.get::<_, String>(0))?
             .collect::<Result<std::collections::BTreeSet<_>, _>>()?;
+        // Failed raw images remain pending even without a canonical payload or
+        // after an ACK of an older handed image cleared its historical mark.
+        names.extend(self.row_failure_names(binding)?);
         for (key, flags) in self.media_ledger(binding)?.names {
             if flags.file_missing || flags.withheld.is_some() || flags.superseded.is_some() {
                 let name =
