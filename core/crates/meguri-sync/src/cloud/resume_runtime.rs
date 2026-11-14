@@ -7,6 +7,8 @@ use crate::cloud::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
+type ResumeUnsentCountsWithExactnessAndDependencyHolds = (BTreeMap<codec::Kind, u64>, bool, BTreeSet<String>);
+
 impl Runtime {
     /// R11: a completed matching process read can reaffirm the original stopped
     /// owner's ready preview. This grants no usability or SDK verification.
@@ -436,7 +438,7 @@ impl Runtime {
         &self,
         snapshot: &(impl ReadRows + ?Sized),
         media: &meguri_engine::media::MediaService,
-    ) -> Result<(BTreeMap<codec::Kind, u64>, bool, BTreeSet<String>), RuntimeError> {
+    ) -> Result<ResumeUnsentCountsWithExactnessAndDependencyHolds, RuntimeError> {
         // Keep only keys/digests and the required notetype authority. Bodies
         // for notes, bases, ACKs and flights are never preview count inputs.
         let (binding, entities, mut layouts, expected) = {
