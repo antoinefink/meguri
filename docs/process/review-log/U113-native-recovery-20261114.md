@@ -24,3 +24,10 @@ The draft also needs precise acceptance, Abort, successor-admission and
 final-stamp handoff rules. Further repair stays held at the recorded limit.
 
 No test, Unit trailer, P24 closure, gate pass or release acceptance is claimed.
+
+## Owner policy direction
+
+See `cloud-recovery-product-decision-20261114.md`: automatic recovery where
+safe, otherwise an explicit local-or-iCloud collection choice. This settles
+the user-facing policy. The detailed native recovery contract, implementation
+and tests remain open; the draft and repair limit are unchanged.
