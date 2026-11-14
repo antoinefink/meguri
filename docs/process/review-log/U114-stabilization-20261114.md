@@ -72,3 +72,38 @@ No Unit trailer, P24 closure, full gate, signed trial or release pass is claimed
 Typing-delta review 100313Z-55515 finds no P0, P1 or P2. It confirms unchanged
 semantics, assertions, calls and gate order. This completes source review
 coverage for the same second round. Both failed test runs remain failed.
+
+## Third stabilization round
+
+Approval: `cloud-recovery-extension-20261114.md`. Start: `270d9af3`.
+Final author export: `cleanroom/20261114T120906Z-43375`.
+
+The account fixture now expects failed after an accepted account transition;
+ordinary cancellation still expects cancelled. Original Swift error, producer,
+cleanup, ownership and ACK checks stay intact.
+
+For malformed, one real policy exchange establishes the epoch before the
+UpdatePending is obtained. Setup calls are counted separately. The attempt
+must add no calls, drains or durable changes; its error and proof assertions
+stay exact. The old baseline helper requires automatic sync off. This case
+keeps automatic sync on and checks its epoch and current SDK directly.
+
+| Check | Run | Result |
+| --- | --- | --- |
+| Native | swift-test/20261114T121436Z-47783 | 3 functions, 14 cases pass |
+| Privacy | private/20261114T121907Z-52081 | 2 files pass |
+| Similarity | 20261114T121910Z-52346 | 2 files, 0 flags, 0 exceptions |
+| Static | static-checks/20261114T121923Z-52703 | pass |
+
+Read-only review `cleanroom/20261114T121637Z-49944` finds the two fixture
+corrections sound, with no P0 or additional P1/P2 in their delta. Its export
+equals the author seed byte for byte. One unit P1 remains: the original
+adopted-phone reopen failure from run095102 is unexplained and unrepaired.
+
+Diagnostic runs 113533 and 113824 pass the focused and broader contexts;
+113824 passes 156/156. They establish no causal repair. All temporary
+diagnostics are removed. Failed runs 113134, 113345, 115227 and 120225 remain.
+The review identifies preparation-to-registration media ordering as an
+unproved interval, not an established cause. Round four remains available
+for that finding. U113, P24, signed delivery and the batch gate remain open.
+No Unit trailer or acceptance claim.

@@ -40,7 +40,8 @@ private func qualifiedRecordExchange(_ command: CoreBridge.CloudPolicyCommand, r
     #expect(observed.completedIDs == before.completedIDs.union(alsoCompleted).union([runtimeID]))
     #expect(observed.activeID == nil)
     let stored = try #require(try await fixture.core.exchangeResult(id: runtimeID))
-    #expect(stored.id == runtimeID && stored.collection == outcome)
+    #expect(stored.id == runtimeID && stored.collection == outcome,
+        "Actual stored collection outcome: \(stored.collection); expected: \(outcome)")
     let records = try result.outputs.flatMap(policyCommands).compactMap { command -> CoreBridge.CloudPolicyExchangeRecord? in
         if case .recordExchange(let record) = command.action { record } else { nil }
     }
@@ -751,8 +752,11 @@ extension EventTests {
                     #expect(engine.acceptedNetworkCalls.value == calls + 1)
                     #expect(try await f.core.fetchDrains() == drains)
                     #expect(base.targets.map(\.name) == ["active"])
+                    // P12.6: the accepted account transition outranks original
+                    // cancellation/failure hints. Swift's original error above
+                    // remains independent of the durable Runtime category.
                     try await qualifiedRecordExchange(command, result: result, fixture: f, before: before,
-                        outcome: mode == "providerFailure" ? .failed : .cancelled)
+                        outcome: mode == "ordinaryCancel" ? .cancelled : .failed)
                 }, whileRunning: {
                     try await provider.waitForArrival()
                     if mode == "providerCancellation" || mode == "providerFailure" {
@@ -2743,6 +2747,7 @@ extension EventTests {
 
     @Test(arguments: ["stale", "invalidSDK", "wrongOwner", "wrongAction", "malformed", "generation"])
     func nativeDependentFetchInitialFailuresCannotAcquireQualification(mode: String) async throws {
+        let preparation = EpochPreparationTransport()
         var foreign: CloudPolicyCommand?
         if mode == "wrongOwner" {
             try await withNativePolicyFixture { f in
@@ -2753,10 +2758,36 @@ extension EventTests {
                 foreign = command
             }
         }
-        try await withNativePolicyFixture { f in
+        try await withNativePolicyFixture(assetReadTransport: mode == "malformed" ? preparation : nil) { f in
             let (policy, executor) = try await nativePolicy(f)
             try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: executor)
             let engine = try await f.engine()
+            if mode == "malformed" {
+                // P6 requires accepted epoch authority; P10.1 then permits the
+                // real local refresh to issue the UpdatePending under test.
+                try #require(try await epochAuthority() == nil)
+                try #require(await f.adapter.retainedInstanceIDs() == [engine.instanceID])
+                try await f.core.validateSDK(engine.instanceID)
+                try #require(engine.acceptedNetworkCalls.value == 0 && preparation.reads.isEmpty)
+                preparation.bind(engine, reply: .found(try await boundEpochBytes()), root: f.root.envelope)
+                await engine.appendFetchScripts([
+                    .manual(fetchedZones: ["meguri-root", f.zone], records: [f.root], group: nil),
+                    .manual(fetchedZones: ["meguri-root", f.zone], records: [], group: nil),
+                ])
+                let setup = try #require(try policyCommands(try await policy.input(.syncNowRequested(.command)))
+                    .first { if case .runExchange = $0.action { true } else { false } })
+                let before = try await observePolicyExchange(setup)
+                let result = await executor.execute(setup)
+                try #require(result.error == nil)
+                _ = try await qualifiedRecordExchange(setup, result: result, fixture: f, before: before, outcome: .succeeded)
+                try #require(try await epochAuthority() != nil)
+                let epoch = CloudControlTarget(zone: f.zone, name: "epoch", recordType: "MGEpoch")
+                #expect(preparation.preparation == [epoch] && preparation.reads == [epoch])
+                let trace = await engine.recordedTrace()
+                #expect(trace.filter { if case .fetchEntered = $0 { true } else { false } }.count == 2)
+                #expect(trace.filter { if case .sendEntered = $0 { true } else { false } }.count == 1)
+                #expect(engine.acceptedNetworkCalls.value == 3)
+            }
             let calls = engine.acceptedNetworkCalls.value
             let commands = try policyCommands(try await policy.input(.foreground))
             let command = try #require(foreign ?? commands.first { if case .requestFetch = $0.action { true } else { false } })
@@ -2772,14 +2803,26 @@ extension EventTests {
                         let exchange = try await policy.input(.syncNowRequested(.command))
                         wrong = try #require(try policyCommands(exchange).first { if case .runExchange = $0.action { true } else { false } })
                     }
+                    let attemptCalls = engine.acceptedNetworkCalls.value
+                    let drains = try await f.core.fetchDrains()
+                    let pending = try await f.core.durableSnapshot()
+                    let reads = preparation.reads
+                    let observed = Mutex<[BridgeCall]>([])
                     do {
-                        try await f.adapter.executePolicyOperation(wrong, policy: policy)
+                        try await MaintenanceCallObservation.$capture.withValue({ call in observed.withLock { $0.append(call) } }) {
+                            try await f.adapter.executePolicyOperation(wrong, policy: policy)
+                        }
                         Issue.record("Wrong action entered a policy fetch")
                     } catch {
                         #expect(error as? BridgeError == .cloudPolicy(mode == "malformed" ? .coreCapabilityUnavailable : .notNativeAction))
                         #expect(!(error is CloudDependentFetchRefusalError))
                         #expect(!(error is CloudFetchProofError))
                     }
+                    #expect(!observed.withLock { $0.contains(.cloudPolicyExecutionStartBeginFetch) })
+                    #expect(engine.acceptedNetworkCalls.value == attemptCalls && attemptCalls == calls)
+                    #expect(try await f.core.fetchDrains() == drains)
+                    #expect(try await f.core.durableSnapshot() == pending)
+                    #expect(preparation.reads == reads)
                 } else {
                     let result = await executor.execute(command)
                     #expect(result.dependentFetchRefusal == nil && result.originalGuardRefusal == nil)

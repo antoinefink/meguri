@@ -135,6 +135,7 @@ final class EpochPreparationTransport: CloudOwnTransport, NativeCloudDatabaseQue
         state.withLock { $0.engine = engine; $0.reply = reply; $0.root = root }
     }
     var preparation: [CloudControlTarget] { state.withLock { $0.preparation } }
+    var reads: [CloudControlTarget] { state.withLock { $0.preparation + $0.later } }
     func prepare(_ command: CloudOwnTransportCommand) throws -> any CloudPreparedOwnOperation {
         guard case .read = command else { throw CloudOwnTransportFailure.unexpectedReply }
         let preparation = state.withLock { $0.engine?.acceptedNetworkCalls.value == 0 }
