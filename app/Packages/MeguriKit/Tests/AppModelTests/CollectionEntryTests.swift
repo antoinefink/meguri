@@ -11,8 +11,9 @@ extension ReviewCollectionStartupTests {
     @Test(arguments: EntrySyncOutcome.allCases)
     func entryDrainsOldSyncBeforeActivationAndRestoresRetainedHost(outcome: EntrySyncOutcome) async throws {
         let files = FileManager.default
-        let root = files.temporaryDirectory.appending(path: UUID().uuidString)
-        defer { try? files.removeItem(at: root) }
+        let scratchContainer = files.temporaryDirectory.appending(path: UUID().uuidString)
+        let root = scratchContainer.appending(path: "Collection", directoryHint: .isDirectory)
+        defer { try? files.removeItem(at: scratchContainer) }
         try files.createDirectory(at: root, withIntermediateDirectories: true)
         try files.copyItem(at: #require(Bundle.module.url(forResource: "schema-18", withExtension: "anki2")),
                            to: root.appending(path: "collection.anki2"))

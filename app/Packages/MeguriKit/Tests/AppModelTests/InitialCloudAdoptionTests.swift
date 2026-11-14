@@ -8,6 +8,25 @@ import Testing
 @testable import AppModel
 
 extension ReviewCollectionStartupTests {
+    @Test func initialCloudHarnessOwnsIsolatedCollectionAndBackups() throws {
+        let fixture = try InitialCloudFixture.load()
+        let first = try InitialCloudHarness(fixture: fixture)
+        defer { first.removeTemporaryStorage() }
+        let second = try InitialCloudHarness(fixture: fixture)
+        defer { second.removeTemporaryStorage() }
+        let firstLocation = first.owner.configuration.collectionLocation
+        let secondLocation = second.owner.configuration.collectionLocation
+        #expect(firstLocation.directory != secondLocation.directory)
+        #expect(firstLocation.backupsDirectory != secondLocation.backupsDirectory)
+        #expect(firstLocation.directory.deletingLastPathComponent() == first.scratchContainer)
+        #expect(firstLocation.backupsDirectory.deletingLastPathComponent() == first.scratchContainer)
+        #expect(secondLocation.directory.deletingLastPathComponent() == second.scratchContainer)
+        #expect(secondLocation.backupsDirectory.deletingLastPathComponent() == second.scratchContainer)
+        #expect(!first.backupsExist && !second.backupsExist)
+        try FileManager.default.createDirectory(at: firstLocation.backupsDirectory, withIntermediateDirectories: true)
+        #expect(first.backupsExist && !second.backupsExist)
+    }
+
     @Test func intentionalCloseRefusesOriginalReadWithoutStickyFailureAndFencesLateProvider() async throws {
         let harness = try InitialCloudHarness(fixture: InitialCloudFixture.load())
         let provider = SyncOwnerGate()
@@ -1340,6 +1359,7 @@ nonisolated struct InitialCloudFixture: Sendable {
 }
 
 @MainActor private final class InitialCloudHarness {
+    let scratchContainer: URL
     let root: URL
     let defaults: UserDefaults
     let suite: String
@@ -1377,7 +1397,9 @@ nonisolated struct InitialCloudFixture: Sendable {
     init(fixture: InitialCloudFixture, enabled: Bool = false, automatic: Bool = false) throws {
         self.fixture = fixture
         factory = InitialCloudSDKFactory(fixture: fixture)
-        root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let scratchContainer = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        self.scratchContainer = scratchContainer
+        root = scratchContainer.appending(path: "Collection", directoryHint: .isDirectory)
         suite = "synthetic-initial-adoption-\(UUID().uuidString)"
         defaults = try #require(UserDefaults(suiteName: suite))
         defaults.set(["enabled": enabled, "paused": false, "automatic": automatic, "media": true], forKey: "meguri.cloud.deviceSettings")
@@ -1463,7 +1485,7 @@ nonisolated struct InitialCloudFixture: Sendable {
         sync.observeAccountPolicyDrain = nil
         configureBackend = nil
         defaults.removePersistentDomain(forName: suite)
-        try? FileManager.default.removeItem(at: root)
+        try? FileManager.default.removeItem(at: scratchContainer)
     }
 }
 
