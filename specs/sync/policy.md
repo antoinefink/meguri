@@ -649,7 +649,7 @@ Attention items:
 |---|---|
 | `isolated` | no binding is active, and the newest binding other than a salvage binding is isolated for a V2.2 reason other than `stopped`, `environment_changed`, `replaced_locally` and `tracking_damaged` (V9, V10, V8.2), and is not the new binding of a waiting `publish` op, whose `recoveryOpWaiting` item offers its Resume (V9.2, V15.3; decided 2026-10-27, review round 3) |
 | `rootUnreadable` | decided 2026-10-27: the summary's `rootUnreadable` (P3): `MGActive` cannot be read, or the epoch it names has no complete `MGEpoch` (`sync/cloudkit-recovery#V10.2` row 3, V11). Nothing is adopted or published automatically; V15 may replace it after confirmation. It clears with the mark: when a later read finds `MGActive` readable and naming an epoch with a complete `MGEpoch`, or when V15 or V16 ends it |
-| `chooseCollection` | iCloud enabled and no binding (P1): the tracking file was missing or damaged (V8.1); a salvage binding does not prevent it (V11). Also an unproven `CloudAdopt` intent after its op's Cancel, until a V13 choice resolves it (P17) |
+| `chooseCollection` | iCloud enabled and no binding (P1): the tracking file was missing or damaged (V8.1); a salvage binding does not prevent it (V11). Also an unproven `CloudAdopt` intent after its op's Cancel, until a V13 choice resolves it (P17); **Approved 2026-11-14 (R2066), review: docs/process/review-log/U113-native-layout-policy-contract-20261114.md:** also K13.4/V13.6's validated unproved-layout decision, recomputed from retained rows/intents even with a binding. Existing Connect to iCloud action opens V13.5; Resume is not offered |
 | `conflicts` | unresolved conflict copies, until each is resolved (V11, V17.2). Opening Review Conflicts does not clear it (decided 2026-10-27) |
 | `conflictsUnreadable` | a damaged tracking file's salvage could not read every conflict copy, while the moved-aside file is kept (V8.1) |
 | `refused` | refused records (K20), and the entities that a `refused` row blocks: an entity whose record name a `refused` row of the binding holds is not sent (K12.1 rule 8, decided 2026-10-27, review round 4), and is counted here, with its kind and key, until a later accepted version or record deletion of that name deletes the row |
@@ -736,6 +736,7 @@ The fence is an input. The policy never clears it: only the explicit choices of 
 
 | Fence, binding or setting | Engine | Sends | Applies | State | Sync Now |
 |---|---|---|---|---|---|
+| **Approved 2026-11-14 (R2066), review: docs/process/review-log/U113-native-layout-policy-contract-20261114.md:** V13.6 unproved-layout decision after K13.4 automatic authority checks | stopped | none | none | `needsAttention{chooseCollection}` (subject to P14.2 account/local-only precedence) | `recoveryRequired` |
 | clear, binding usable | P6 | P7 | yes | P14 | P12.1 |
 | `cloudPublicationPending` (restore, `.colpkg` import, manual Import; the old binding isolated `replaced_locally`, V12.1) | stopped | none | none | `paused{decisionRequired}` | `decisionRequired` |
 | replacement intent unfinished or unproven (`engine/collection-replace#R6.3`), other than the next two rows | stopped | none | none | `paused{decisionRequired}` | `decisionRequired` |

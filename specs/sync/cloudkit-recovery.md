@@ -48,7 +48,7 @@ The collection file and the tracking file are separate SQLite files, and no tran
 
 1. Tracking records only facts about flushed commits (K10.1).
 2. A collection change made from server data has a durable intent written before its commit (K13.2, K14.2, V2.3).
-3. Anything else is rebuilt by the reconcile scan (K11.4).
+3. Anything else is rebuilt by the reconcile scan (K11.4). **Approved 2026-11-14 (R2066), review: docs/process/review-log/U113-native-layout-policy-contract-20261114.md:** native layout maps that a scan cannot infer use K13.4/V13.6; this grants no map inferred from rows or new native replay authority.
 
 ### V2.2 Isolation reasons
 
@@ -544,6 +544,32 @@ Two non-empty collections are never merged. The decision offers:
 | Keep this device's collection without iCloud | local only; nothing is sent |
 | Cancel | nothing changes; not connected; a pending fence stays (V12.2) |
 
+### V13.6 Unproved native layout: existing collection choice
+
+Status: Approved 2026-11-14 (R2066). Review: docs/process/review-log/U113-native-layout-policy-contract-20261114.md. Applies the recorded collection-choice decision without guessed maps.
+
+Apply this decision when K13.4 validation succeeds but cannot establish a required ordinal map. Derive it from the retained binding, collection rows and intents, and reconstruct it on each launch rather than adding a persistent native blocker. Until it is resolved, that binding cannot resume or admit its ordinary cloud engine, sends or applies. The local collection can become ready and study can proceed. Handle temporary I/O, provider and flush failures through their existing retry and error paths instead of this decision. Reconnecting, finding equal rows or changing accounts provides no missing map and removes none of the pending work.
+
+Offer V13.5's existing whole-collection choices, including when this device is empty or MGActive still names this binding's epoch. Read account/root/epoch afresh as V13.2 requires. An unavailable account or unreadable/incomplete source disables the affected remote direction. Do not offer ConfirmResume. Cancel preserves rows/evidence/work. Keep-local-only uses the existing guarded local-only/Stop decision, retains the unresolved old work and acknowledges nothing; a later connection recomputes the refusal unless safe authority has become available.
+
+The preview shows the existing direction, raw local counts, cloud counts with their provenance/date, known pending/held/isolated work, conflict copies, and fetched work whose application cannot be verified. Raw counts do not project through the missing map. Own unsent counts that cannot be proven show unknown with known lower bounds, never zero or a false exact count; distinguish them from other devices' unknown work. The choice selects one collection and does not merge them. V14 keeps the latest local collection in its required safety backup; V15 publishes only current local content and keeps the old iCloud collection for its existing 30 days, including fetched versions absent locally. Retain all existing preview/confirmation account, publication/native-file, generation/incarnation and root-version checks; a changed authority requires a fresh preview.
+
+**Narrow settle-before-replace exception.** A confirmed V14 active-source adoption or V15 publication may supersede ordinary apply work blocked solely by this validated unproved-layout refusal instead of applying it. Reuse the existing op id, binding-before, account/build scope, confirmation and recorded steps; no separate exemption ledger is needed. First stop running applies and settle every re-key/media intent and every unrelated ordinary intent under V17.6. Only the remaining ordinary apply intents whose recovery is blocked by this specific refusal may be skipped. No skipped intent changes collection rows or takes an ACK.
+
+Before V14 records ready or V15 records bound, validate the refusal against the current file and existing evidence, recheck all existing transition identities, and verify under the tracking transition that no apply is running and no unrelated unsettled intent remains. Do not cross that step on a generic error. The existing durable ready/bound-or-later step then certifies completion of these pre-transition checks. At restart before that step, repeat them; at or after it, V2.4 step 8 leaves the old binding's residual ordinary intents untouched while the matching op exists. All re-key/media requirements remain unchanged. Preserve old inbox, ordinary intents and body ownership until success; they cannot become ready while the op waits.
+
+V14 otherwise follows its unchanged staging, safety-backup, replacement-intent and reopen protocol. V15 otherwise follows K18.3, including media carryover, current-open WAL, new-epoch scan and conditional MGActive switch. Its new binding bootstraps each note type independently from the current native aggregate/ordinals, as initial publication does; that defines the new epoch's initial layout, not a map from the old epoch. Never project it through ambiguous old authority, reuse old ACK/base/counters or add optional IDs. Later local edits follow V14/V15's existing rules.
+
+1. This exception takes effect only within the final transaction of the matching successful recovery operation: adoption at V14.2 step 9, or publication at V15.2 step 4. It permits removal without settlement solely for the covered blocked ordinary work.
+
+2. Validate that operation's original success evidence: R6 activation and reopen for adoption, or the accepted MGActive switch for publication. Match the old binding, account and build scope exactly. Require no outstanding re-key or media intent. Enforce these checks in remove_work.
+
+3. A preview, ready or bound step, cancellation, or reconnection alone does not permit removal.
+
+4. Handle failure and cancellation under V14.3 and V15.3, keeping the old evidence. Recompute refusal before allowing a restored old binding to use cloud services.
+
+5. Apply V17.6 cleanup and retain conflict copies. Follow K10.1 for durable tracking commits and K13.4 Durable admission for final-reference release and deletion of unowned bodies after commit.
+
 ## V14. Replace local collection from iCloud (R125, R2056)
 
 ### V14.1 When
@@ -718,7 +744,7 @@ A note's label is the sort field of the saved version as plain text, at most 80 
 
 ### V17.6 Copies of isolated bindings
 
-A binding's **work** (decided 2026-10-27, P24 review) is every tracking row of it except its binding row and its `conflicts` rows: `engine_state`, `entities`, `inbox`, `apply_intents`, `rekey_intents`, `generations`, `generation_maps`, `notetype_layouts`, `blobs`, `zones`, `media_feed`, `refused`, `scan_state` and `absence_passes`. When a recovery op deletes a binding's work (V14.2 step 9; V15.2 step 4), the deletion is in the op's last tracking commit, the one that removes its row. Before that, its intents are settled (decided 2026-10-27, review of the P24 corrections): its re-key, apply and media apply intents (a K15.9 resolution as one unit) are settled as V2.4 step 8 does, before the new binding's reconcile scan, so that scan never reads a half-done apply of the binding before. V2.4 step 8 also settles the intents of the binding before of an `adopt` or `publish` row, and V14.2 step 6 and V15.2 step 2 isolate it only once no apply of it runs. The binding's conflict copies stay, and its binding row stays with them. Staged files that the deleted rows named are deleted after that commit (V6). The commit that deletes the binding's last conflict copy (`sync/policy#P10.3` item 4) also deletes its binding row; a binding with no copy loses its row in the op's commit.
+A binding's **work** (decided 2026-10-27, P24 review) is every tracking row of it except its binding row and its `conflicts` rows: `engine_state`, `entities`, `inbox`, `apply_intents`, `rekey_intents`, `generations`, `generation_maps`, `notetype_layouts`, `blobs`, `zones`, `media_feed`, `refused`, `scan_state` and `absence_passes`. When a recovery op deletes a binding's work (V14.2 step 9; V15.2 step 4), the deletion is in the op's last tracking commit, the one that removes its row. Before that, its intents are settled (decided 2026-10-27, review of the P24 corrections), except for V13.6's ordinary-intent refusal under a confirmed successful whole-collection replacement (**Approved 2026-11-14, R2066; review: docs/process/review-log/U113-native-layout-policy-contract-20261114.md**): its re-key, apply and media apply intents (a K15.9 resolution as one unit) are settled as V2.4 step 8 does, before the new binding's reconcile scan, so that scan never reads a half-done apply of the binding before. V2.4 step 8 also settles the intents of the binding before of an `adopt` or `publish` row, and V14.2 step 6 and V15.2 step 2 isolate it only once no apply of it runs. The binding's conflict copies stay, and its binding row stays with them. Staged files that the deleted rows named are deleted after that commit (V6). The commit that deletes the binding's last conflict copy (`sync/policy#P10.3` item 4) also deletes its binding row; a binding with no copy loses its row in the op's commit.
 
 ## V18. Incomplete structural generations
 
