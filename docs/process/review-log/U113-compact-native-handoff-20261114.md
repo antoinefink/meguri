@@ -35,3 +35,9 @@ The model tests manually deliver dismissal and use placeholder review
 sessions. They do not prove native ordering or return to the same rendered
 card. Keep the unresolved native count-row, paragraph identifier and audio
 link findings. No gate, unit, P24 or visual acceptance is claimed here.
+
+The subsequent filtered run 20261114T215950Z-72319 adds only a stable
+identifier to the existing native Done button. Integrator inspection confirms
+that its action, label and styling are unchanged. Privacy
+20261114T220123Z-73245 and similarity 20261114T220127Z-73508 passed. The
+physical check will use that button to return from Account & Sync to review.

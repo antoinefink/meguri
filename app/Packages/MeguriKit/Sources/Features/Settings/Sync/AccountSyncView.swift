@@ -290,6 +290,7 @@ public struct AccountSyncSheet: View {
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button { collection.navigation.dismissSheet() } label: { Text("Done", bundle: .module) }
+                            .accessibilityIdentifier("settings.accountSync.done")
                     }
                 }
         }
