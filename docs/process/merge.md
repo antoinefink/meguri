@@ -20,6 +20,17 @@ A full, clean main-checkout gate with an explicit base saves its queued checks
 for catch-up when the tip commit carries `Unit:`. Local, partial and dirty gates
 do not save acceptance work. Keep `Unit:` on the completed unit's tip commit.
 
+## Repair rounds for the active goal
+
+Antoine authorized as many repair rounds as necessary on 2026-11-14.
+Earlier numeric limits and count-based extension requests are superseded;
+keep round history, independent review and focused verification. Continue
+repairs without requesting another round-count decision. This changes no
+product contract, safety boundary, assertion, timing limit or acceptance
+requirement. Record actual unresolved decisions separately; authorization
+alone never makes a failed gate pass. See
+`review-log/repair-rounds-authorization-20261114.md`.
+
 ## Earlier workflow: role branches
 
 `tools/mg merge <branch>` checks and fast-forwards the integration branch in the main checkout (`master`). The origin remote uses `master` as its default branch. The orchestrator runs it in the main checkout. A green receipt merges without human review (R1991).
@@ -74,4 +85,4 @@ From a sparse role worktree, an oracle-image run uses the main checkout's `oracl
 | `behavior-gap` | a spec or the oracle cannot settle a behavior |
 | `stop-condition` | a Goal Capsule stop condition |
 
-`tools/mg escalation add --kind <kind> --unit <id> --summary <text> [--detail <JSON>]` records one; `tools/mg escalation resolve <id> --by <name> --resolution <text>` settles it after Antoine decides; `tools/mg escalation list [--open] [--unit <id>]` reads them. Lines are only appended and committed on the checkout's current branch (union merge); `list` reads that checkout's ledger only. The orchestrator records `blocked-red` after the sixth red round. A unit with an open escalation stays unmerged; units that do not depend on it go on. This is not a pause.
+`tools/mg escalation add --kind <kind> --unit <id> --summary <text> [--detail <JSON>]` records one; `tools/mg escalation resolve <id> --by <name> --resolution <text>` settles it after Antoine decides; `tools/mg escalation list [--open] [--unit <id>]` reads them. Lines are only appended and committed on the checkout's current branch (union merge); `list` reads that checkout's ledger only. The historical sixth-round escalation is superseded for the active goal by the authorization above. A unit with an open escalation stays unmerged; units that do not depend on it go on. This is not a pause.
