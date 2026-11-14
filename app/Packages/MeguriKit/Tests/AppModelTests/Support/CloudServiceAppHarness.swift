@@ -54,6 +54,8 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
     }
     // Observation only: callbacks must record/yield without native calls or reentry.
     var onCommands: (@MainActor ([CloudPolicyCommand]) -> Void)? = nil
+    // Passive pairing of an actual input with its issued handles; no reentry.
+    var afterInput: (@MainActor (CloudPolicyEvent, CloudPolicyOutput) -> Void)?
     var beforeExecution: (@MainActor (CloudPolicyCommand) async -> Void)?
     #if DEBUG
     var observeCoreCall: (@Sendable (CloudPolicyCommand, BridgeCall) -> Void)?
@@ -296,6 +298,7 @@ nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().u
     func input(_ event: CloudPolicyEvent) async throws -> CloudPolicyOutput {
         do {
             let output = try await production.input(event)
+            afterInput?(event, output)
             capture(output, stage: .input)
             return output
         } catch {

@@ -233,3 +233,18 @@ failure. Layering and the compiled-name check pass. Clippy stops on
 The full lint job remains failed; complete lint coverage is not proven.
 No lint policy, assertion, timing limit or source behavior was changed.
 This result does not resolve the native failure or accept U113.
+
+### Round 11: native reproduction isolated
+
+Starting commit: `69e3609c`. Author `cleanroom/20261114T195741Z-65058`
+corrects the two fixture preconditions and adds a passive test trace.
+Compile correction `200950Z-74175` protects two captured test scalars;
+production code and test limits are unchanged. Initial native compile
+failure `swift-test/20261114T200720Z-72017` is retained.
+
+`swift-test/20261114T201150Z-74725` executes all five cases with one
+issue, in the lost-reply case. The StopEngine command is issued by cloud
+refresh during post-cancel drain, before close. It fails generation/binding
+validation. Independent review `200711Z-71640` retains two P1 coverage
+findings and one P2 trace finding. They require repair; this fixture and the
+unit are not accepted. No reported failure is suppressed.
