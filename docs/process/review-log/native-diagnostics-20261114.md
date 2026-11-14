@@ -44,3 +44,14 @@ assertions and runtime behavior are unchanged. Earlier failures stay retained.
 
 This remains WIP. Real operation producers and native copy actions are absent.
 The integration pass must resolve the remaining review work before UI exposure.
+
+## Bounded cloud export
+
+Author `cleanroom/20261114T155500Z-9817` adds the read-only projection and
+store authority fixes. `core-test/20261114T160741Z-18384` passes both Rust
+boundary tests; original history stays complete. Source privacy passes at
+`private/20261114T160720Z-18071`.
+
+Independent review `cleanroom/20261114T160706Z-17646` is running. Native
+bindings, the changed store callbacks and UI still need verification. This is
+WIP and changes no sync decisions.

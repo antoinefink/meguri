@@ -3,6 +3,9 @@
 //! Capture uses stored usability independently of live identity. The separate
 //! Note-only reconcile API remains partial; whole completion and conditional
 //! sending use the guarded workflow API. No transport is implicitly started.
+#[path = "diagnostics_export.rs"]
+pub mod diagnostics_export;
+
 use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex, MutexGuard, PoisonError},

@@ -204,7 +204,7 @@ import Testing
         #expect(SafeFieldDiagnosticsExport.Header.safeVersion(String(repeating: "1", count: 100_000)) == nil)
     }
 
-    @Test func hostileMetricDiagnosticAndRootStringsStayInternal() async throws {
+    @Test func hostileMetricAndDiagnosticStringsStayInternal() async throws {
         let directory = location()
         defer { try? FileManager.default.removeItem(at: directory) }
         let secret = "credential-content-private-binary-path-canary"
@@ -212,8 +212,8 @@ import Testing
             .replacingOccurrences(of: "\"applicationVersion\": \"1.0\"", with: "\"applicationVersion\": \"\(secret)\"")
             .replacingOccurrences(of: "\"binaryInfo\": []", with: "\"binaryInfo\": [], \"binaryPath\": \"\(secret)\"")
         let diagnostic = try JSONDecoder().decode(DiagnosticReport.self, from: Data(hostileJSON.utf8))
-        let store = FieldDiagnosticsStore(directory: directory, clock: .fixed(Self.instant), rootReadDiagnostics: {
-            [.init(active: false, lostCollection: false, outcome: secret, a7Failure: true, accepted: false)]
+        let store = FieldDiagnosticsStore(directory: directory, clock: .fixed(Self.instant), cloudDiagnostics: {
+            .init(available: true, rootReads: [.init(active: false, lostCollection: false, outcome: .other, a7Failure: true, accepted: false)])
         })
         try await store.record(diagnostic)
         try await store.record(FieldDiagnosticsStoreTests.metricReport())
@@ -347,11 +347,11 @@ import Testing
     @Test func exportByteCapIncludesNestedDeletionFactsAndKeepsOriginalCloudCaps() async throws {
         let directory = location()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let failures = (0..<100).map { _ in CloudZoneDeletionResult(zone: "private-zone-canary", failure: .init(code: .max, retryAfterMilliseconds: .max, encryptedDataReset: true)) }
-        let store = FieldDiagnosticsStore(directory: directory, clock: .fixed(Self.instant), zoneDeletionDiagnostics: {
-            Array(repeating: .deleted(results: failures, terminal: .init(code: .max)), count: 200)
-        }, rootReadDiagnostics: {
-            Array(repeating: .init(active: false, lostCollection: false, outcome: "found", a7Failure: true, accepted: true), count: 100)
+        let failures = (0..<100).map { _ in CloudDiagnosticResult(failure: .init(code: .max, retryAfterMilliseconds: .max, encryptedDataReset: true)) }
+        let store = FieldDiagnosticsStore(directory: directory, clock: .fixed(Self.instant), cloudDiagnostics: {
+            .init(available: true,
+                  rootReads: Array(repeating: .init(active: false, lostCollection: false, outcome: .found, a7Failure: true, accepted: true), count: 100),
+                  zoneDeletions: Array(repeating: .init(kind: .deleted, terminal: .init(code: .max), results: failures), count: 200))
         })
         store.enqueue(Self.observation)
         let bytes = try await store.debugInfo()
@@ -422,6 +422,95 @@ import Testing
         let sections = try #require(info["sections"] as? [String: [String: Any]])
         for name in ["metrics", "diagnostics", "signposts"] { #expect(sections[name]?["unavailable"] as? Bool == true) }
         #expect(try FieldDiagnosticsStoreTests.files(in: outside) == before)
+    }
+
+    @Test func firstAuthorityFailureCanRecoverOnAnOrdinaryOperationWithoutLosingMemoryEvidence() async throws {
+        let directory = location()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data("temporary blocker".utf8).write(to: directory)
+        let store = FieldDiagnosticsStore(directory: directory, clock: .fixed(Self.instant))
+        store.enqueue(Self.observation)
+        let blocked = await store.timeline()
+        #expect(blocked.storage == .unavailable && blocked.events.count == 1)
+        try FileManager.default.removeItem(at: directory)
+        store.enqueue(.init(component: .startup, operation: .open, stage: .requested, outcome: .observed))
+        let recovered = await store.timeline()
+        #expect(recovered.storage == .available && recovered.events.count == 2)
+        #expect(recovered.events.first?.observation == Self.observation)
+        #expect(recovered.priorHistoryUnavailableReason == .unavailable)
+        try await store.record(FieldDiagnosticsStoreTests.metricReport())
+        #expect(try await store.metrics().count == 1)
+        let reopened = FieldDiagnosticsStore(directory: directory, clock: .fixed(Self.instant))
+        let restored = await reopened.timeline()
+        #expect(restored.events == recovered.events && restored.storage == .available)
+        #expect(restored.priorHistoryUnavailableReason == .unavailable)
+        #expect(try await reopened.metrics().count == 1)
+    }
+
+    @Test(arguments: ["metrics", "diagnostics", "signposts", "signposts/review.answerToNextVisible"])
+    func sameStoreRejectsRealArchiveDirectoryReplacementBetweenOrdinaryCalls(folder: String) async throws {
+        let directory = location()
+        let retained = location()
+        defer { try? FileManager.default.removeItem(at: directory); try? FileManager.default.removeItem(at: retained) }
+        let store = FieldDiagnosticsStore(directory: directory, clock: .fixed(Self.instant))
+        try await store.record(FieldDiagnosticsStoreTests.metricReport())
+        try await store.record(FieldDiagnosticsStoreTests.hangDiagnostic())
+        store.enqueue(Self.observation)
+        _ = await store.timeline()
+        let unrelated = directory.appending(path: "unrelated.bin")
+        let sentinel = Data("untouched".utf8)
+        try sentinel.write(to: unrelated)
+        let replacement = directory.appending(path: folder)
+        try FileManager.default.moveItem(at: replacement, to: retained)
+        // Real compatible archives in a different directory must not establish
+        // a new authority for an already admitted path in this store.
+        try FileManager.default.copyItem(at: retained, to: replacement)
+        let before = try FieldDiagnosticsStoreTests.files(in: replacement)
+        let retainedBefore = try FieldDiagnosticsStoreTests.files(in: retained)
+        do {
+            switch folder {
+            case "metrics": _ = try await store.metrics()
+            case "diagnostics": _ = try await store.diagnostics()
+            default: _ = try await store.signposts(named: IntervalNames.answerToNextVisible.name)
+            }
+            Issue.record("A same-store read imported substituted archives")
+        } catch DiagnosticReadFailure.unavailable { }
+        do {
+            if folder == "diagnostics" { try await store.record(FieldDiagnosticsStoreTests.hangDiagnostic()) }
+            else { try await store.record(FieldDiagnosticsStoreTests.metricReport()) }
+            Issue.record("A same-store write accepted a substituted archive directory")
+        } catch DiagnosticReadFailure.unavailable { }
+        store.enqueue(Self.observation)
+        #expect(await store.timeline().events.count == 2)
+        let info = try json(await store.debugInfo())
+        let section = folder.hasPrefix("signposts") ? "signposts" : folder
+        #expect((info[section] as? [Any])?.isEmpty == true || (info[section] as? [String: Any])?.isEmpty == true)
+        #expect((info["sections"] as? [String: [String: Any]])?[section]?["unavailable"] as? Bool == true)
+        #expect(info["header"] != nil)
+        #expect(((info["timeline"] as? [String: Any])?["events"] as? [Any])?.count == 2)
+        #expect(try FieldDiagnosticsStoreTests.files(in: replacement) == before)
+        #expect(try FieldDiagnosticsStoreTests.files(in: retained) == retainedBefore)
+        #expect(try Data(contentsOf: unrelated) == sentinel)
+    }
+
+    @Test func unavailableCloudProjectionStillCopiesHeaderTimelineAndExplicitAbsence() async throws {
+        let directory = location()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let reads = Mutex(0)
+        let store = FieldDiagnosticsStore(directory: directory, clock: .fixed(Self.instant), cloudDiagnostics: {
+            reads.withLock { $0 += 1 }
+            return .unavailable
+        })
+        store.enqueue(Self.observation)
+        let info = try json(await store.debugInfo())
+        #expect(reads.withLock { $0 } == 1)
+        #expect(info["header"] != nil && info["cloudDiagnosticsAvailable"] as? Bool == false)
+        #expect(info["missingDidFetchEvents"] == nil && info["statusEvidence"] == nil)
+        #expect(info["statusEvidenceUnavailable"] as? Bool == true)
+        #expect(((info["timeline"] as? [String: Any])?["events"] as? [Any])?.count == 1)
+        let sections = try #require(info["sections"] as? [String: [String: Any]])
+        #expect(sections["rootReads"]?["unavailable"] as? Bool == true)
+        #expect(sections["zoneDeletions"]?["unavailable"] as? Bool == true)
     }
 
     @Test(arguments: [false, true])

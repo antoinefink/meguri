@@ -221,16 +221,16 @@ import AppModel
     @Test func debugInfoExportsBoundedReadDeletionAndLocalFailureFacts() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: "FieldCloudDiagnostics-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
-        let diagnostics: [CloudZoneDeletionDiagnostic] = [
-            .read(found: false, allowed: 0, failure: .init(code: 6, retryAfterMilliseconds: 123_000), terminal: .init(code: 2)),
-            .deleted(results: [
-                .init(zone: "private-zone-one", failure: nil),
-                .init(zone: "private-zone-two", failure: .init(code: 26, encryptedDataReset: true)),
-                .init(zone: "private-zone-three", failure: .init(code: 7, retryAfterMilliseconds: 456_000))
-            ], terminal: .init(code: 2, retryAfterMilliseconds: 456_000)),
-            .localFailure(category: .queueRejected, failure: .init(code: nil))
+        let diagnostics: [CloudDiagnosticDeletion] = [
+            .init(kind: .read, found: false, allowed: 0, failure: .init(code: 6, retryAfterMilliseconds: 123_000), terminal: .init(code: 2)),
+            .init(kind: .deleted, terminal: .init(code: 2, retryAfterMilliseconds: 456_000), results: [
+                .init(failure: nil),
+                .init(failure: .init(code: 26, encryptedDataReset: true)),
+                .init(failure: .init(code: 7, retryAfterMilliseconds: 456_000))
+            ]),
+            .init(kind: .localFailure, failure: .init(code: nil), category: .queueRejected)
         ]
-        let store = FieldDiagnosticsStore(directory: directory, zoneDeletionDiagnostics: { diagnostics })
+        let store = FieldDiagnosticsStore(directory: directory, cloudDiagnostics: { .init(available: true, zoneDeletions: diagnostics) })
         let bytes = try await store.debugInfo()
         let json = try JSONSerialization.jsonObject(with: bytes)
         let info = try #require(json as? [String: Any])
@@ -251,8 +251,8 @@ import AppModel
         #expect((exported[2]["failure"] as? [String: Any])?["code"] == nil)
         let text = String(decoding: bytes, as: UTF8.self)
         #expect(!text.contains("private-zone") && !text.contains("account") && !text.contains("settings") && !text.contains("systemFields"))
-        let bounded = FieldDiagnosticsStore(directory: directory, zoneDeletionDiagnostics: {
-            Array(repeating: diagnostics[0], count: 200)
+        let bounded = FieldDiagnosticsStore(directory: directory, cloudDiagnostics: {
+            .init(available: true, zoneDeletions: Array(repeating: diagnostics[0], count: 200))
         })
         let boundedBytes = try await bounded.debugInfo()
         let boundedJSON = try JSONSerialization.jsonObject(with: boundedBytes)
@@ -266,11 +266,11 @@ import AppModel
         let directory = FileManager.default.temporaryDirectory.appending(path: "A7DebugInfo-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
         let reads = [
-            CloudRootReadDiagnostic(active: false, lostCollection: false, outcome: "found", a7Failure: true, accepted: true),
-            CloudRootReadDiagnostic(active: false, lostCollection: false, outcome: "found", a7Failure: false, accepted: true),
-            CloudRootReadDiagnostic(active: true, lostCollection: false, outcome: "found", a7Failure: false, accepted: true)
+            CloudDiagnosticRootRead(active: false, lostCollection: false, outcome: .found, a7Failure: true, accepted: true),
+            CloudDiagnosticRootRead(active: false, lostCollection: false, outcome: .found, a7Failure: false, accepted: true),
+            CloudDiagnosticRootRead(active: true, lostCollection: false, outcome: .found, a7Failure: false, accepted: true)
         ]
-        let store = FieldDiagnosticsStore(directory: directory, rootReadDiagnostics: { reads })
+        let store = FieldDiagnosticsStore(directory: directory, cloudDiagnostics: { .init(available: true, rootReads: reads) })
         let bytes = try await store.debugInfo()
         let object = try #require(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
         let exported = try #require(object["rootReads"] as? [[String: Any]])

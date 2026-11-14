@@ -5,7 +5,8 @@ nonisolated enum DiagnosticReadFailure: Error { case oversized, unavailable, not
 
 /// Authority for this store's directory tree only. Every app-controlled
 /// component is opened without following links; children stay relative to
-/// retained descriptors even if a pathname is replaced during an operation.
+/// retained descriptors. The store retains admitted children between calls;
+/// validation rejects pathname replacement before subsequent reads or writes.
 nonisolated final class FieldDiagnosticDirectory {
     private let descriptor: Int32
     private let parent: FieldDiagnosticDirectory?

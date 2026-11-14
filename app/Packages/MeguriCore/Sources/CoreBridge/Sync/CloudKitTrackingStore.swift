@@ -100,6 +100,15 @@ public actor CoreCloudWorkflowService {
         let raw = try await owner()
         return try await MaintenanceLane.shared.call(.cloudWorkflowFetchDrains) { try raw.fetchDrains().map { .init(zone: $0.zone, fetched: $0.fetched) } }
     }
+    /// Read-only export works without an owner/open collection. Failure and
+    /// absence stay explicit; neither path caches a failed workflow creation.
+    public func diagnosticsExport() async -> CloudDiagnosticsExport {
+        do {
+            return try await MaintenanceLane.shared.call(.cloudDiagnosticsExport) {
+                CloudDiagnosticsExport(try MeguriCoreBindings.cloudDiagnosticsExport(), localFailures: CloudZoneDeletionDiagnostics.localFailures())
+            }
+        } catch { return .unavailable }
+    }
     public func diagnostics() async throws -> CloudWorkflowDiagnostics {
         let raw = try await owner()
         return try await MaintenanceLane.shared.call(.cloudWorkflowDiagnostics) {

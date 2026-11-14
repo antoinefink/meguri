@@ -1,5 +1,8 @@
 //! Typed cloud bridge. Each object retains its original host and tracking owner;
 //! an inspection after close cannot acquire or mutate a successor host.
+#[path = "sync_diagnostics_export.rs"]
+mod diagnostics_export;
+
 use crate::{CoreError, callback, runtime};
 use meguri_sync::cloud::{self as c, adapter as a, runtime as r, workflow as w};
 use std::{

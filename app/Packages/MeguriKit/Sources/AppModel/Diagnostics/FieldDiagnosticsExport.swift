@@ -223,83 +223,36 @@ nonisolated enum SafeFieldDiagnosticsExport {
         }
     }
 
-    struct Failure: Encodable {
-        let code: Int64?
-        let retryAfterMilliseconds: Int64?
-        let encryptedDataReset: Bool
-        init(_ value: CloudZoneDeletionFailure) {
-            code = value.code; retryAfterMilliseconds = value.retryAfterMilliseconds
-            encryptedDataReset = value.encryptedDataReset
-        }
-    }
-    struct RootRead: Encodable {
-        enum Outcome: String, Encodable { case found, unknownItem, zoneNotFound, failed, other }
-        let active: Bool
-        let lostCollection: Bool
-        let outcome: Outcome
-        let a7Failure: Bool
-        let accepted: Bool
-        let failure: Failure?
-        let terminal: Failure?
-        init(_ value: CloudRootReadDiagnostic) {
-            active = value.active; lostCollection = value.lostCollection
-            outcome = Outcome(rawValue: value.outcome) ?? .other
-            a7Failure = value.a7Failure; accepted = value.accepted
-            failure = value.failure.map(Failure.init); terminal = value.terminal.map(Failure.init)
-        }
-    }
-    struct Deletion: Encodable {
-        enum Kind: String, Encodable { case read, deleted, localFailure }
-        struct Result: Encodable { let failure: Failure? }
-        let kind: Kind
-        var found: Bool?
-        var allowed: UInt64?
-        var failure: Failure?
-        var terminal: Failure?
-        var results: [Result]?
-        var resultsOmittedCount: Int?
-        var category: CloudZoneDeletionLocalFailure?
-        init(_ value: CloudZoneDeletionDiagnostic) {
-            switch value {
-            case .read(let found, let allowed, let failure, let terminal):
-                kind = .read; self.found = found; self.allowed = allowed
-                self.failure = failure.map(Failure.init); self.terminal = terminal.map(Failure.init)
-            case .deleted(let results, let terminal):
-                kind = .deleted
-                self.results = results.prefix(64).map { Result(failure: $0.failure.map(Failure.init)) }
-                resultsOmittedCount = max(0, results.count - 64)
-                self.terminal = terminal.map(Failure.init)
-            case .localFailure(let category, let failure):
-                kind = .localFailure; self.category = category; self.failure = Failure(failure)
-            }
-        }
-    }
     struct Export: Encodable {
         let header: Header
         var timeline: FieldDiagnosticTimeline
         var metrics: [Metric]
         var diagnostics: [Diagnostic]
         var signposts: [String: [Signpost]]
-        var zoneDeletions: [Deletion]
-        var rootReads: [RootRead]
+        var zoneDeletions: [CloudDiagnosticDeletion]
+        var rootReads: [CloudDiagnosticRootRead]
         var sections: [String: Section]
         let coreSnapshotIsAtomic = false
-        // Core callbacks do not carry availability or collection-size facts.
+        let cloudDiagnosticsAvailable: Bool
+        let missingDidFetchEvents: UInt64?
+        let statusEvidence: CloudDiagnosticStatusEvidence?
+        let statusEvidenceUnavailable: Bool
+        // This projection does not carry complete collection-size/health facts.
         // An empty array must never imply collection health or convergence.
         let collectionDetailsUnavailable = true
     }
 
-    static func make(directory: FieldDiagnosticDirectory?, now: Date, timeline: FieldDiagnosticTimeline,
-                     deletions: [CloudZoneDeletionDiagnostic], reads: [CloudRootReadDiagnostic]) throws -> Data {
+    static func make(archives: [String: Result<FieldDiagnosticDirectory, DiagnosticReadFailure>], now: Date,
+                     timeline: FieldDiagnosticTimeline, cloud: CloudDiagnosticsExport) throws -> Data {
         var budget = Budget()
         var metricStatus = Section(detailsUnavailable: true)
-        let metrics = reports(Metric.self, root: directory, folder: "metrics", budget: &budget, status: &metricStatus)
+        let metrics = reports(Metric.self, archives: archives, folder: "metrics", budget: &budget, status: &metricStatus)
         var diagnosticStatus = Section(detailsUnavailable: true)
-        let diagnostics = reports(Diagnostic.self, root: directory, folder: "diagnostics", budget: &budget, status: &diagnosticStatus)
+        let diagnostics = reports(Diagnostic.self, archives: archives, folder: "diagnostics", budget: &budget, status: &diagnosticStatus)
         var signpostStatus = Section(detailsUnavailable: true)
         var signposts: [String: [Signpost]] = [:]
         for interval in IntervalNames.all {
-            let stored = reports(SignpostArchive.self, root: directory, folder: "signposts/\(interval.name)", budget: &budget, status: &signpostStatus)
+            let stored = reports(SignpostArchive.self, archives: archives, folder: "signposts/\(interval.name)", budget: &budget, status: &signpostStatus)
             var values: [Signpost] = []
             for report in stored {
                 for value in report.values {
@@ -314,12 +267,13 @@ nonisolated enum SafeFieldDiagnosticsExport {
             if !values.isEmpty { signposts[interval.name] = values }
         }
         var result = Export(header: Header(now: now), timeline: timeline, metrics: metrics, diagnostics: diagnostics,
-                            signposts: signposts, zoneDeletions: deletions.suffix(128).map(Deletion.init),
-                            rootReads: reads.suffix(64).map(RootRead.init), sections: [
+                            signposts: signposts, zoneDeletions: cloud.zoneDeletions,
+                            rootReads: cloud.rootReads, sections: [
                                 "metrics": metricStatus, "diagnostics": diagnosticStatus, "signposts": signpostStatus,
-                                "zoneDeletions": Section(omittedCountLowerBound: max(0, deletions.count - 128), availabilityUnknown: true),
-                                "rootReads": Section(omittedCountLowerBound: max(0, reads.count - 64), availabilityUnknown: true)
-                            ])
+                                "zoneDeletions": Section(omittedCountLowerBound: Int(clamping: cloud.zoneDeletionsOmittedCount), unavailable: !cloud.available),
+                                "rootReads": Section(omittedCountLowerBound: Int(clamping: cloud.rootReadsOmittedCount), unavailable: !cloud.available)
+                            ], cloudDiagnosticsAvailable: cloud.available, missingDidFetchEvents: cloud.missingDidFetchEvents,
+                            statusEvidence: cloud.statusEvidence, statusEvidenceUnavailable: cloud.statusEvidence == nil)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         var bytes = try encoder.encode(result)
@@ -346,14 +300,14 @@ nonisolated enum SafeFieldDiagnosticsExport {
 
     /// A bounded directory sample, newest filenames within that sample. When
     /// enumeration stops early, no claim is made about unvisited reports.
-    static func reports<T: Decodable>(_ type: T.Type, root: FieldDiagnosticDirectory?, folder: String,
+    static func reports<T: Decodable>(_ type: T.Type, archives: [String: Result<FieldDiagnosticDirectory, DiagnosticReadFailure>], folder: String,
                                       budget: inout Budget, status: inout Section) -> [T] {
-        guard let root else { status.unavailable = true; return [] }
         guard budget.scanned < scanLimit else { status.scanTruncated = true; return [] }
         let stored: FieldDiagnosticDirectory
         let names: [String]
         do {
-            stored = try root.folder(folder)
+            guard let authority = archives[folder] else { status.unavailable = true; return [] }
+            stored = try authority.get()
             names = try stored.names(limit: scanLimit - budget.scanned)
         } catch DiagnosticReadFailure.notFound {
             return []

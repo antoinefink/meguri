@@ -42,28 +42,25 @@ public actor FieldDiagnosticsStore {
     private var timelineNeedsRewrite = false
     private var timelineState = FieldDiagnosticTimeline.empty
     private var processDroppedCount: UInt64 = 0
-    private var directoryAuthority: Result<FieldDiagnosticDirectory, any Error>?
+    private var directoryAuthority: FieldDiagnosticDirectory?
+    // Successful admissions only, including every intermediate signpost folder.
+    // A retained authority is never replaced after pathname substitution.
+    private var archiveAuthorities: [String: FieldDiagnosticDirectory] = [:]
+    private let cloudDiagnostics: @Sendable () async -> CloudDiagnosticsExport
 
-    private let zoneDeletionDiagnostics: @Sendable () async -> [CloudZoneDeletionDiagnostic]
-    private let rootReadDiagnostics: @Sendable () async -> [CloudRootReadDiagnostic]
-
-    public init(directory: URL, clock: AppClock = .system, zoneDeletionDiagnostics: @escaping @Sendable () async -> [CloudZoneDeletionDiagnostic] = { [] },
-                rootReadDiagnostics: @escaping @Sendable () async -> [CloudRootReadDiagnostic] = { [] }) {
+    public init(directory: URL, clock: AppClock = .system,
+                cloudDiagnostics: @escaping @Sendable () async -> CloudDiagnosticsExport = { .unavailable }) {
         self.directory = directory
         self.clock = clock
-        self.zoneDeletionDiagnostics = zoneDeletionDiagnostics
-        self.rootReadDiagnostics = rootReadDiagnostics
+        self.cloudDiagnostics = cloudDiagnostics
     }
 
-    /// One process-wide store, shared with the app subscriber and operation
-    /// producers, under `<Application Support>/Diagnostics/`.
+    /// One process-wide store. The export accessor neither creates a workflow
+    /// owner nor needs an open collection; no collection is explicit absence.
     public nonisolated static let standard: FieldDiagnosticsStore = {
         let workflow = CoreCloudWorkflowService()
-        return FieldDiagnosticsStore(directory: URL.applicationSupportDirectory.appending(path: "Diagnostics", directoryHint: .isDirectory), zoneDeletionDiagnostics: {
-            // No open collection is a normal state for Copy Debug Info.
-            let core = try? await workflow.diagnostics()
-            return (core?.zoneDeletions ?? []) + CloudZoneDeletionDiagnostics.localFailures()
-        }, rootReadDiagnostics: { (try? await workflow.diagnostics().rootReads) ?? [] })
+        return FieldDiagnosticsStore(directory: URL.applicationSupportDirectory.appending(path: "Diagnostics", directoryHint: .isDirectory),
+                                     cloudDiagnostics: { await workflow.diagnosticsExport() })
     }()
 
     // MARK: Writing
@@ -132,14 +129,18 @@ public actor FieldDiagnosticsStore {
         return try readAll([FieldSignpost].self, in: Folder.signposts(name)).flatMap { $0 }
     }
 
-    /// Safe, bounded projections only. The two core callbacks are separate
-    /// observations, never an atomic snapshot or timestamped cloud receipts.
+    /// One bounded read-only cloud projection, plus the store's pinned archive
+    /// authorities. Optional section failures leave header/timeline copyable.
     public func debugInfo() async throws -> Data {
-        let deletions = await zoneDeletionDiagnostics()
-        let reads = await rootReadDiagnostics()
+        let cloud = await cloudDiagnostics()
         let snapshot = timeline()
-        return try SafeFieldDiagnosticsExport.make(directory: try? storageDirectory(), now: clock.now(), timeline: snapshot,
-                                                   deletions: deletions, reads: reads)
+        var archives: [String: Result<FieldDiagnosticDirectory, DiagnosticReadFailure>] = [:]
+        for folder in [Folder.metrics, Folder.diagnostics] + IntervalNames.all.map({ Folder.signposts($0.name) }) {
+            do { archives[folder] = .success(try archiveDirectory(folder)) }
+            catch DiagnosticReadFailure.notFound { archives[folder] = .failure(.notFound) }
+            catch { archives[folder] = .failure(.unavailable) }
+        }
+        return try SafeFieldDiagnosticsExport.make(archives: archives, now: clock.now(), timeline: snapshot, cloud: cloud)
     }
 
     /// Nonblocking with respect to storage: no actor hop, file work or await.
@@ -294,12 +295,28 @@ public actor FieldDiagnosticsStore {
     }
 
     private func storageDirectory() throws -> FieldDiagnosticDirectory {
-        if directoryAuthority == nil {
-            directoryAuthority = Result { try FieldDiagnosticDirectory.root(directory) }
+        if let directoryAuthority {
+            try directoryAuthority.validate()
+            return directoryAuthority
         }
-        guard let directoryAuthority else { throw DiagnosticReadFailure.unavailable }
-        let authority = try directoryAuthority.get()
-        try authority.validate()
+        let authority = try FieldDiagnosticDirectory.root(directory)
+        directoryAuthority = authority
+        return authority
+    }
+
+    private func archiveDirectory(_ path: String, create: Bool = false) throws -> FieldDiagnosticDirectory {
+        var authority = try storageDirectory()
+        var prefix = ""
+        for component in path.split(separator: "/", omittingEmptySubsequences: false) {
+            prefix = prefix.isEmpty ? String(component) : "\(prefix)/\(component)"
+            if let retained = archiveAuthorities[prefix] {
+                try retained.validate()
+                authority = retained
+            } else {
+                authority = try authority.child(String(component), create: create)
+                archiveAuthorities[prefix] = authority
+            }
+        }
         return authority
     }
 
@@ -309,14 +326,14 @@ public actor FieldDiagnosticsStore {
     /// exists. Paths stay relative to retained directory descriptors.
     private func write<T: Encodable>(_ value: T, to file: URL) throws {
         let relative = file.deletingLastPathComponent().pathComponents.dropFirst(directory.pathComponents.count).joined(separator: "/")
-        let folder = try storageDirectory().folder(relative, create: true)
+        let folder = try archiveDirectory(relative, create: true)
         try folder.write(Self.encoder.encode(value), name: file.lastPathComponent, replacing: false)
     }
 
     private func readAll<T: Decodable>(_ type: T.Type, in folder: String) throws -> [T] {
         let stored: FieldDiagnosticDirectory
         do {
-            stored = try storageDirectory().folder(folder)
+            stored = try archiveDirectory(folder)
         } catch DiagnosticReadFailure.notFound {
             return []
         }

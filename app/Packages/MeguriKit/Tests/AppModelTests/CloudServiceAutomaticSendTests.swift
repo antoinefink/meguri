@@ -2004,7 +2004,7 @@ extension ReviewCollectionStartupTests {
             let epoch = try #require(initial.first { !$0.active && $0.outcome == "found" && $0.accepted })
             #expect(epoch.a7Failure)
             let producer = FieldDiagnosticsStore(directory: app.root.appending(path: "diagnostics"),
-                rootReadDiagnostics: { (try? await workflow.diagnostics().rootReads) ?? [] })
+                cloudDiagnostics: { await workflow.diagnosticsExport() })
             let bytes = try await producer.debugInfo()
             let info = try #require(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
             let exported = try #require(info["rootReads"] as? [[String: Any]])
@@ -2044,7 +2044,7 @@ extension ReviewCollectionStartupTests {
             try await app.reopen()
             let reopenedWorkflow = try app.backend.workflow
             let reopenedProducer = FieldDiagnosticsStore(directory: app.root.appending(path: "diagnostics"),
-                rootReadDiagnostics: { (try? await reopenedWorkflow.diagnostics().rootReads) ?? [] })
+                cloudDiagnostics: { await reopenedWorkflow.diagnosticsExport() })
             let savedSDK = try #require(await app.factory.engines.last)
             try await savedSDK.signInSameServiceIdentity()
             await app.sync.prepareConnectionAuthority()
