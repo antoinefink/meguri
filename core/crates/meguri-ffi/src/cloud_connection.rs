@@ -1109,7 +1109,7 @@ impl CloudConnection {
                 publication_cancellable: false,
             }));
         }
-        Ok(self
+        self
             .owner
             .core
             .publication_op()
@@ -1134,7 +1134,7 @@ impl CloudConnection {
                     publication_conflict_cancellable: cancellable,
                     publication_cancellable: self.owner.core.publication_cancellable(op.id).map_err(error)?,
                 })
-            }).transpose()?)
+            }).transpose()
     }
 }
 
