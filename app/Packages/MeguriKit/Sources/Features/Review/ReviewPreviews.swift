@@ -3,6 +3,20 @@ import CoreBridge
 import DesignSystem
 import SwiftUI
 
+/// Fixed samples of the production timer label.
+/// These are component fixtures, not placement or live-progression evidence.
+public struct ReviewTimerPreview: View {
+    public nonisolated enum State: String, CaseIterable, Sendable { case running, frozen, capped }
+    public let state: State
+    public init(state: State) { self.state = state }
+    public var body: some View {
+        ReviewTimerLabel(presentation: ReviewTimerPresentation(milliseconds: state == .capped ? 60_000 : 12_000,
+                // Every fixture is a static sample, including the running
+                // question-side appearance; none advances an answer clock.
+                capSeconds: 60, isVisible: true, isCounting: false))
+    }
+}
+
 /// Fixed presentation data. Real WebKit/core evidence belongs to the shell UI
 /// Preview cases exercise the toolbar, answer buttons and available width.
 public enum ReviewQuestionPreview: PreviewStates {

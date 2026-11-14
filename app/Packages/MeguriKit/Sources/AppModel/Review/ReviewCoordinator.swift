@@ -103,11 +103,16 @@ public final class ReviewCoordinator {
         let remaining = Double(counts.new) + Double(counts.learning) + Double(counts.review)
         return answered + remaining == 0 ? 0 : answered / (answered + remaining)
     }
-    public var timerText: String {
+    public var timerPresentation: ReviewTimerPresentation {
         let cap = item?.homePreset.maximumAnswerSeconds ?? 60
-        let seconds = frozenDisplaySeconds ?? timer.milliseconds(at: uptime(), capSeconds: cap) / 1_000
-        return String(format: "%02llu:%02llu", seconds / 60, seconds % 60)
+        let milliseconds = frozenDisplaySeconds.map { $0 * 1_000 }
+            ?? timer.milliseconds(at: uptime(), capSeconds: cap)
+        return ReviewTimerPresentation(milliseconds: milliseconds, capSeconds: cap,
+            isVisible: item?.homePreset.showTimer == true,
+            isCounting: timer.isRunning && !paused && frozenDisplaySeconds == nil,
+            clockIdentity: timer.displayClockIdentity)
     }
+    public var timerText: String { timerPresentation.text }
     public var remainingDescription: String { "\(counts.new) new, \(counts.learning) learning, \(counts.review) to review" }
     #if DEBUG
     private var startObservation: ReviewStartObservation?

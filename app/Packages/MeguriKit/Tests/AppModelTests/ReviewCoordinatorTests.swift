@@ -1197,7 +1197,8 @@ extension ReviewCollectionStartupTests {
             secsUntilNextLearn: waiting ? 600 : 0, reviewRemaining: false, newRemaining: false,
             siblingBuried: 0, userBuried: 0, tomorrow: .init(new: 0, learning: 0, review: 0), empty: !waiting)
     }
-    static func head(_ id: Int64) -> ReviewHead {
+    static func head(_ id: Int64, showTimer: Bool = false, stopTimerOnAnswer: Bool = false,
+                     maximumAnswerSeconds: UInt32 = 60) -> ReviewHead {
         let state = ReviewSchedulingState.new(position: 1)
         let answer = ReviewAnswerState(state: state, delay: .days(amount: 1), left: 0, factor: 0,
             revlog: ReviewRevlogPreview(interval: 1, lastInterval: 0, kind: 0, factor: 0),
@@ -1207,8 +1208,8 @@ extension ReviewCollectionStartupTests {
             renderKey: ReviewRenderKey(bytes: Array(repeating: UInt8(id), count: 32)),
             nextStates: ReviewSchedulingStates(current: state, again: answer, hard: answer, good: answer, easy: answer),
             predictedNext: ReviewPredictions(again: 2, hard: 2, good: 2, easy: 2), flag: 0, marked: false,
-            homePreset: ReviewHomePreset(id: 1, autoplay: false, skipQuestionWhenReplayingAnswer: false, showTimer: false,
-                stopTimerOnAnswer: false, maximumAnswerSeconds: 60, questionSeconds: 0, answerSeconds: 0,
+            homePreset: ReviewHomePreset(id: 1, autoplay: false, skipQuestionWhenReplayingAnswer: false, showTimer: showTimer,
+                stopTimerOnAnswer: stopTimerOnAnswer, maximumAnswerSeconds: maximumAnswerSeconds, questionSeconds: 0, answerSeconds: 0,
                 questionAction: 0, answerAction: 0, waitForAudio: false, leechAction: 0))
         return ReviewHead(items: [item], counts: ReviewCounts(new: 1, learning: 0, review: 0), validUntil: Int64.max, terminalState: .active)
     }

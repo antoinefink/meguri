@@ -19,7 +19,7 @@ public struct ReviewView: View {
             phase: model.phase, states: model.item?.nextStates, enabled: !model.paused,
             close: close, undo: { model.restore() }, redo: { model.restore(redo: true) },
             reveal: model.reveal, rate: model.rate,
-            status: status, timerText: model.item?.homePreset.showTimer == true ? { model.timerText } : nil) {
+            status: status, timerPresentation: { model.timerPresentation }) {
             ZStack {
                 if let pair = model.pair {
                     #if os(macOS)
@@ -160,8 +160,7 @@ struct ReviewLayout<Card: View>: View {
     let reveal: () -> Void
     let rate: (ReviewRating) -> Void
     var status: AnyView? = nil
-    var timerText: (() -> String)? = nil
-    @Environment(\.appClock) var clock
+    var timerPresentation: (() -> ReviewTimerPresentation)? = nil
     @State private var noticeContentHeight: CGFloat?
     @ViewBuilder let card: () -> Card
     var body: some View {
@@ -288,11 +287,8 @@ struct ReviewLayout<Card: View>: View {
         .help(remaining)
     }
     @ViewBuilder private var timer: some View {
-        if let timerText {
-            TimelineView(.periodic(from: clock.now(), by: 1)) { _ in
-                Text(verbatim: timerText()).monospacedDigit().font(.caption)
-                    .accessibilityIdentifier("review.session.timer")
-            }
+        if let timerPresentation {
+            OnScreenTimerView(read: timerPresentation)
         }
     }
 }

@@ -75,6 +75,10 @@ public struct ReviewActiveTime {
     private var began: TimeInterval?
     private var accumulated: TimeInterval = 0
     public init() {}
+    public var isRunning: Bool { began != nil }
+    public var displayClockIdentity: ReviewTimerPresentation.ClockIdentity {
+        .init(began: began, accumulated: accumulated)
+    }
     public mutating func start(at instant: TimeInterval) { accumulated = 0; began = instant }
     public mutating func pause(at instant: TimeInterval) {
         if let began { accumulated += max(0, instant - began) }
