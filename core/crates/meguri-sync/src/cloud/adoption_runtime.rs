@@ -40,12 +40,18 @@ pub(super) struct AdoptionOwner {
     directory: PathBuf,
     stage: Mutex<Option<ReplacementStage>>,
     spool_sizes: Mutex<SpoolSizes>,
-    next: Mutex<Option<AdoptionTask>>,
+    next: Mutex<AdoptionNext>,
     // No page cursor or pending metadata survives this in-memory owner.
     pending_page: Mutex<Option<PendingPage>>,
     #[cfg(feature = "test-hooks")]
     next_contention: Mutex<Option<std::sync::mpsc::Sender<()>>>,
     uncertain_activation: std::sync::atomic::AtomicBool,
+}
+enum AdoptionNext {
+    Pending(AdoptionTask),
+    Claimed,
+    // No reply or local work can claim this state. Only abort cleanup may run.
+    CleanupOnly,
 }
 struct PendingPage {
     records: VecDeque<StagingRecord>,
@@ -66,7 +72,7 @@ pub(super) struct SuspendedAdoptionCleanup {
 }
 impl AdoptionOwner {
     fn set_next(&self, task: AdoptionTask) {
-        *self.next.lock().unwrap_or_else(PoisonError::into_inner) = Some(task);
+        *self.next.lock().unwrap_or_else(PoisonError::into_inner) = AdoptionNext::Pending(task);
     }
     fn claim(&self, task: &AdoptionTask) -> Result<(), RuntimeError> {
         self.claim_with_work(task, &crate::cloud::policy::PolicyWork::default())
@@ -87,12 +93,12 @@ impl AdoptionOwner {
             let _ = sender.send(());
         }
         let mut next = self.next.lock().unwrap_or_else(PoisonError::into_inner);
-        if next.as_ref() != Some(task) {
+        if !matches!(&*next, AdoptionNext::Pending(pending) if pending == task) {
             return Err(RuntimeError::StaleIncarnation);
         }
         // After claim, restore the task or abort even if cancellation arrives.
         work.effect()?;
-        *next = None;
+        *next = AdoptionNext::Claimed;
         Ok(())
     }
 }
@@ -810,7 +816,7 @@ impl Runtime {
             directory: stage.directory().to_owned(),
             stage: Mutex::new(Some(stage)),
             spool_sizes: Mutex::new(spool_sizes),
-            next: Mutex::new(Some(AdoptionTask::ReadActive)),
+            next: Mutex::new(AdoptionNext::Pending(AdoptionTask::ReadActive)),
             pending_page: Mutex::new(None),
             #[cfg(feature = "test-hooks")]
             next_contention: Mutex::new(None),
@@ -901,7 +907,10 @@ impl Runtime {
             return Ok(None);
         }
         let owner = self.adoption_owner()?;
-        let next = owner.next.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        let next = match &*owner.next.lock().unwrap_or_else(PoisonError::into_inner) {
+            AdoptionNext::Pending(task) => Some(task.clone()),
+            AdoptionNext::Claimed | AdoptionNext::CleanupOnly => None,
+        };
         if next == Some(AdoptionTask::Activate)
             && self
                 .review
@@ -935,7 +944,7 @@ impl Runtime {
         }
         if !matches!(
             *owner.next.lock().unwrap_or_else(PoisonError::into_inner),
-            Some(AdoptionTask::Fetch { .. } | AdoptionTask::FetchPayload { .. })
+            AdoptionNext::Pending(AdoptionTask::Fetch { .. } | AdoptionTask::FetchPayload { .. })
         ) {
             return Err(RuntimeError::StaleIncarnation);
         }
@@ -1185,6 +1194,7 @@ impl Runtime {
         }
         // Refusals before the exact owner/task claim have no failure evidence.
         let mut claimed = false;
+        let mut failed_abort_owner = None;
         let result = (|| {
             let mut op = self
                 .adoption_op()?
@@ -1213,7 +1223,10 @@ impl Runtime {
                 diagnostic.enter(AdoptionDiagnosticStage::Transport);
                 diagnostic.transport();
                 self.abort_adoption(&op, collection)
-                    .inspect_err(|error| diagnostic.cleanup(error))?;
+                    .inspect_err(|error| {
+                        diagnostic.cleanup(error);
+                        failed_abort_owner = Some(owner.clone());
+                    })?;
                 return Err(refused());
             }
             let account_unavailable = matches!(
@@ -1234,14 +1247,20 @@ impl Runtime {
             if !account_unavailable && let Err(error) = self.check_adoption_before(&op, collection) {
                 if matches!(&reply, AdoptionReply::TransportFailed { .. }) {
                     self.abort_adoption(&op, collection)
-                        .inspect_err(|error| diagnostic.cleanup(error))?;
+                        .inspect_err(|error| {
+                            diagnostic.cleanup(error);
+                            failed_abort_owner = Some(owner.clone());
+                        })?;
                     return Err(error);
                 }
                 // This pre-existing path discards the authority check error.
                 // Only an abort failure contributes a category here.
                 return self
                     .abort_adoption(&op, collection)
-                    .inspect_err(|error| diagnostic.cleanup(error));
+                    .inspect_err(|error| {
+                        diagnostic.cleanup(error);
+                        failed_abort_owner = Some(owner.clone());
+                    });
             }
             if let AdoptionReply::TransportFailed {
                 code,
@@ -1277,7 +1296,10 @@ impl Runtime {
                 if let Err(error) = outcome {
                     diagnostic.primary(&error);
                     self.abort_adoption(&op, collection)
-                        .inspect_err(|error| diagnostic.cleanup(error))?;
+                        .inspect_err(|error| {
+                            diagnostic.cleanup(error);
+                            failed_abort_owner = Some(owner.clone());
+                        })?;
                     return Err(error);
                 }
                 return Ok(());
@@ -1497,7 +1519,10 @@ impl Runtime {
             if let Err(error) = outcome {
                 diagnostic.primary(&error);
                 self.abort_adoption(&op, collection)
-                    .inspect_err(|error| diagnostic.cleanup(error))?;
+                    .inspect_err(|error| {
+                        diagnostic.cleanup(error);
+                        failed_abort_owner = Some(owner.clone());
+                    })?;
                 return Err(error);
             }
             Ok(())
@@ -1511,6 +1536,23 @@ impl Runtime {
                 "cloud-adoption task={task} stage={stage} record_kind={} payload_source={} envelope_present={} system_fields_present={} epoch_name_valid={} epoch_record_matches={}",
                 page.0, page.1, page.2, page.3, page.4, page.5,
             );
+        }
+        if let Some(owner) = failed_abort_owner {
+            // The reply body, mandatory abort and diagnostic capture have all
+            // settled. Publish cleanup authority only at this final Core boundary;
+            // no reply work follows it. Host close additionally drains its jobs
+            // before using adoption_op_for_host_close. Keep the exact retained
+            // owner: this cannot grant authority to a successor or replay a task.
+            let retained = self.adoption.lock().unwrap_or_else(PoisonError::into_inner)
+                .as_ref().is_some_and(|held| Arc::ptr_eq(held, &owner));
+            if retained {
+                let mut next = owner.next.lock().unwrap_or_else(PoisonError::into_inner);
+                if matches!(*next, AdoptionNext::Claimed)
+                    && !owner.uncertain_activation.load(std::sync::atomic::Ordering::Acquire)
+                {
+                    *next = AdoptionNext::CleanupOnly;
+                }
+            }
         }
         result
     }
@@ -1603,7 +1645,10 @@ impl Runtime {
             .filter(|op| op.id == id)
             .ok_or(PublicationError::NotOffered)?;
         let owner = self.adoption_owner()?;
-        if owner.next.lock().unwrap_or_else(PoisonError::into_inner).is_none() {
+        if matches!(
+            *owner.next.lock().unwrap_or_else(PoisonError::into_inner),
+            AdoptionNext::Claimed
+        ) {
             return Err(PublicationError::Busy.into());
         }
         // Provider failure precedes the cleanup commit and preserves the lease
@@ -1670,7 +1715,8 @@ impl Runtime {
             return Ok(false);
         };
         let next = owner.next.lock().unwrap_or_else(PoisonError::into_inner);
-        Ok(next.is_some() && !owner.uncertain_activation.load(std::sync::atomic::Ordering::Acquire))
+        Ok(!matches!(*next, AdoptionNext::Claimed)
+            && !owner.uncertain_activation.load(std::sync::atomic::Ordering::Acquire))
     }
     pub fn cancel_cloud_adoption(&self, id: [u8; 16], collection: Option<&Collection>) -> Result<(), RuntimeError> {
         self.cancel_cloud_adoption_with_work(id, collection, &crate::cloud::policy::PolicyWork::default())
@@ -1693,10 +1739,19 @@ impl Runtime {
             }
             // Claim the original pending task before releasing the guard; a
             // concurrent worker cannot enter activation during cancellation.
-            next.take().ok_or(PublicationError::Busy)?
+            if matches!(*next, AdoptionNext::Claimed) {
+                return Err(PublicationError::Busy.into());
+            }
+            // CleanupOnly is consumed under the same guard as pending work;
+            // concurrent cancellation stays Busy until this abort has settled.
+            std::mem::replace(&mut *next, AdoptionNext::Claimed)
         };
         let result = self.abort_adoption_with_work(&op, collection, work);
-        if result.is_err() { owner.set_next(pending); }
+        if result.is_err() {
+            // Restore exactly the authority consumed, never a reply task for a
+            // failed original abort. A further cleanup fault retains the slot.
+            *owner.next.lock().unwrap_or_else(PoisonError::into_inner) = pending;
+        }
         result
     }
     pub fn perform_cloud_adoption_local(

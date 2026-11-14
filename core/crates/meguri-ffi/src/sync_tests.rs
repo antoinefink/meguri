@@ -258,7 +258,13 @@ impl Fixture {
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
-        self.workflow.host.close().unwrap();
+        let closed = self.workflow.host.close();
+        if std::thread::panicking() && closed.is_err() {
+            // Preserve the first assertion when teardown independently fails.
+            eprintln!("fixture Host cleanup also failed during unwinding");
+        } else {
+            closed.unwrap();
+        }
     }
 }
 

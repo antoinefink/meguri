@@ -879,6 +879,160 @@ fn diagnostic_fixture() -> (Fixture, Arc<DiagnosticFiles>) {
     (fixture, files)
 }
 
+// Keep the public failure enum visible even when baseline teardown also fails.
+fn diagnostic_cleanup_must_succeed(result: Result<(), CoreError>) {
+    match result {
+        Ok(()) => {},
+        Err(CoreError::CloudConnection { failure }) => panic!("adoption cleanup failed: {failure:?}"),
+        Err(_) => panic!("adoption cleanup failed with another error family"),
+    }
+}
+
+#[test]
+fn connection_adoption_cancel_before_reply_claim_keeps_original_stale_without_diagnostic() {
+    let (fixture, files) = diagnostic_fixture();
+    let (connection, handle, _, directory) = adoption(&fixture);
+    let operation = connection.recovery_status().unwrap().unwrap().operation;
+    let events = fixture.workflow.host.engine().stream().subscribe();
+    let pool = hold_pool(&fixture);
+    let job = connection.clone().start_adoption_result(
+        handle,
+        CloudAdoptionResult::Read { read: CloudControlRead::Missing },
+    ).unwrap();
+    let provider_entries = Arc::new(AtomicUsize::new(0));
+    let claim_entries = Arc::new(AtomicUsize::new(0));
+    let entries = claim_entries.clone();
+    fixture.workflow.core.set_adoption_reply_claim_hook_for_testing(move || {
+        entries.fetch_add(1, Ordering::SeqCst);
+    });
+    let entries = provider_entries.clone();
+    let (entered, reached) = mpsc::channel();
+    let (release, resume) = mpsc::channel();
+    *files.before_read.lock().unwrap() = Some(Box::new(move || {
+        entries.fetch_add(1, Ordering::SeqCst);
+        entered.send(()).unwrap();
+        resume.recv_timeout(Duration::from_secs(20)).unwrap();
+    }));
+    std::thread::scope(|scope| {
+        let cancel_connection = connection.clone();
+        let cancel = scope.spawn(move || cancel_connection.cancel_operation(operation));
+        let release = Release(release);
+        reached.recv_timeout(Duration::from_secs(5)).unwrap();
+        let cancellable = connection.recovery_status().unwrap().unwrap().adoption_cancellable;
+        drop(pool);
+        let outcome = finished(&events, job.handle.id);
+        let result = job.result.result();
+        let diagnostic = job.result.failure_diagnostic().unwrap();
+        let claimed = claim_entries.load(Ordering::SeqCst);
+        let provider_entered = provider_entries.load(Ordering::SeqCst);
+        assert!(directory.exists());
+        assert_eq!(fixture.workflow.host.engine().slot_holder(), Some(meguri_engine::LongOp::CloudAdopt));
+        drop(release);
+        diagnostic_cleanup_must_succeed(cancel.join().unwrap());
+        assert!(fixture.workflow.core.adoption_op().unwrap().is_none());
+        assert!(connection.recovery_status().unwrap().is_none());
+        assert!(!directory.exists());
+        assert_eq!(fixture.workflow.host.engine().slot_holder(), None);
+        fixture.workflow.host.close().unwrap();
+        assert_eq!(provider_entered, 1);
+        assert!(!cancellable);
+        assert_eq!(claimed, 0);
+        assert!(matches!(outcome, JobOutcome::Failed { .. }));
+        failure_is(result, CloudConnectionFailure::AuthorityChanged);
+        assert!(diagnostic.is_none());
+        failure_is(job.result.result(), CloudConnectionFailure::AuthorityChanged);
+        assert!(job.result.failure_diagnostic().unwrap().is_none());
+    });
+}
+
+#[test]
+fn connection_adoption_failed_abort_settles_only_for_public_cancel_or_drained_close() {
+    for close in [false, true] {
+        let (fixture, files) = diagnostic_fixture();
+        let (connection, active, record, directory) = adoption(&fixture);
+        connection.adoption_result(active, CloudAdoptionResult::Read {
+            read: CloudControlRead::Found { record },
+        }).unwrap();
+        let (epoch, _) = adoption_action(&connection);
+        let before = fixture.workflow.core.adoption_op().unwrap().unwrap();
+        let bytes = stage_bytes(&directory);
+        let operation = connection.recovery_status().unwrap().unwrap().operation;
+        let other = fixture.workflow.connection().unwrap();
+        let events = fixture.workflow.host.engine().stream().subscribe();
+        let claims = Arc::new(AtomicUsize::new(0));
+        let entries = claims.clone();
+        let armed = files.clone();
+        let (entered, reached) = mpsc::channel();
+        let (release, resume) = mpsc::channel();
+        fixture.workflow.core.set_adoption_reply_claim_hook_for_testing(move || {
+            entries.fetch_add(1, Ordering::SeqCst);
+            entered.send(()).unwrap();
+            resume.recv_timeout(Duration::from_secs(20)).unwrap();
+            // Authority succeeds; the actual mandatory abort identity read fails.
+            armed.remaining.store(1, Ordering::SeqCst);
+        });
+        let job = connection.clone().start_adoption_result(
+            epoch.clone(),
+            CloudAdoptionResult::Read { read: CloudControlRead::Found {
+                record: CloudControlRecord { encrypted: None, system_fields: vec![] },
+            } },
+        ).unwrap();
+        let release = Release(release);
+        reached.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(claims.load(Ordering::SeqCst), 1);
+        assert!(!connection.recovery_status().unwrap().unwrap().adoption_cancellable);
+        failure_is(connection.cancel_operation(operation.clone()), CloudConnectionFailure::Busy);
+        failure_is(other.cancel_operation(operation.clone()), CloudConnectionFailure::WrongOwner);
+        assert_eq!(fixture.workflow.core.adoption_op().unwrap().as_ref(), Some(&before));
+        assert_eq!(stage_bytes(&directory), bytes);
+        assert_eq!(fixture.workflow.host.engine().slot_holder(), Some(meguri_engine::LongOp::CloudAdopt));
+        drop(release);
+        assert!(matches!(finished(&events, job.handle.id), JobOutcome::Failed { .. }));
+        failure_is(job.result.result(), CloudConnectionFailure::FileIdentityUnavailable);
+        let snapshot = CloudAdoptionFailureDiagnostic {
+            task: CloudAdoptionDiagnosticTask::ReadEpoch,
+            last_entered_stage: CloudAdoptionDiagnosticStage::EpochShape,
+            primary_category: Some(CloudAdoptionFailureCategory::Validation),
+            cleanup_category: Some(CloudAdoptionFailureCategory::FileIdentityUnavailable),
+        };
+        assert_eq!(job.result.failure_diagnostic().unwrap(), Some(snapshot.clone()));
+        assert_eq!(fixture.workflow.core.adoption_op().unwrap().as_ref(), Some(&before));
+        assert_eq!(stage_bytes(&directory), bytes);
+        assert_eq!(fixture.workflow.host.engine().slot_holder(), Some(meguri_engine::LongOp::CloudAdopt));
+        // Settling abort cleanup never reopens the original reply, even before cleanup.
+        let replay = connection.clone().start_adoption_result(epoch, CloudAdoptionResult::Failed).unwrap();
+        assert!(matches!(finished(&events, replay.handle.id), JobOutcome::Failed { .. }));
+        failure_is(replay.result.result(), CloudConnectionFailure::AuthorityChanged);
+        assert!(replay.result.failure_diagnostic().unwrap().is_none());
+        failure_is(other.cancel_operation(operation.clone()), CloudConnectionFailure::WrongOwner);
+        let cancellable = connection.recovery_status().unwrap().unwrap().adoption_cancellable;
+        // Baseline must report Busy here, before any teardown failure.
+        failure_is(connection.cancel_operation(operation.clone()), CloudConnectionFailure::FileIdentityUnavailable);
+        assert_eq!(fixture.workflow.core.adoption_op().unwrap().as_ref(), Some(&before));
+        assert_eq!(stage_bytes(&directory), bytes);
+        assert_eq!(fixture.workflow.host.engine().slot_holder(), Some(meguri_engine::LongOp::CloudAdopt));
+        files.remaining.store(-1, Ordering::SeqCst);
+        if close {
+            fixture.workflow.host.close().unwrap();
+        } else {
+            assert!(matches!(connection.next_publication_work().unwrap(), CloudPublicationWork::Idle));
+            diagnostic_cleanup_must_succeed(connection.cancel_operation(operation.clone()));
+            failure_is(connection.cancel_operation(operation), CloudConnectionFailure::NotOffered);
+            assert!(connection.recovery_status().unwrap().is_none());
+            assert!(fixture.workflow.core.adoption_op().unwrap().is_none());
+            fixture.workflow.host.close().unwrap();
+        }
+        assert!(cancellable);
+        assert!(!directory.exists());
+        assert_eq!(fixture.workflow.host.engine().slot_holder(), None);
+        assert_eq!(claims.load(Ordering::SeqCst), 1);
+        failure_is(job.result.result(), CloudConnectionFailure::FileIdentityUnavailable);
+        assert_eq!(job.result.failure_diagnostic().unwrap(), Some(snapshot));
+        failure_is(replay.result.result(), CloudConnectionFailure::AuthorityChanged);
+        assert!(replay.result.failure_diagnostic().unwrap().is_none());
+    }
+}
+
 #[test]
 fn connection_adoption_diagnostic_primary_cleanup_and_combined_preserve_original_error_precedence() {
     for (reads, primary, cleanup, returned, stage) in [
@@ -933,26 +1087,7 @@ fn connection_adoption_diagnostic_primary_cleanup_and_combined_preserve_original
             .unwrap();
         assert!(job.result.result().unwrap().is_none());
         assert!(job.result.failure_diagnostic().unwrap().is_none());
-        std::thread::scope(|scope| {
-            // A failed abort leaves the reply claim consumed. Admit public
-            // cancellation before that claim, then hold its cleanup read until
-            // the fault is disabled; a fresh post-failure cancel would be Busy.
-            let cancellation = if cleanup.is_some() {
-                let operation = connection.recovery_status().unwrap().unwrap().operation;
-                let (entered, reached) = mpsc::channel();
-                let (release, resume) = mpsc::channel();
-                *files.before_read.lock().unwrap() = Some(Box::new(move || {
-                    entered.send(()).unwrap();
-                    resume.recv_timeout(Duration::from_secs(20)).unwrap();
-                }));
-                let cancel_connection = connection.clone();
-                let cancel = scope.spawn(move || cancel_connection.cancel_operation(operation));
-                let release = Release(release);
-                reached.recv_timeout(Duration::from_secs(5)).unwrap();
-                Some((release, cancel))
-            } else {
-                None
-            };
+        {
             // Reuse the claim seam so all earlier Host/admission reads stay native.
             // The authority check reads first; mandatory abort reads next.
             let armed = files.clone();
@@ -975,14 +1110,15 @@ fn connection_adoption_diagnostic_primary_cleanup_and_combined_preserve_original
             failure_is(job.result.result(), returned);
             assert_eq!(job.result.failure_diagnostic().unwrap(), Some(expected.clone()));
             files.remaining.store(-1, Ordering::SeqCst);
-            if let Some((release, cancel)) = cancellation {
+            if cleanup.is_some() {
                 assert_eq!(
                     fixture.workflow.host.engine().slot_holder(),
                     Some(meguri_engine::LongOp::CloudAdopt)
                 );
-                assert!(connection.recovery_status().unwrap().is_some());
-                drop(release);
-                cancel.join().unwrap().unwrap();
+                assert!(fixture.workflow.core.adoption_op().unwrap().is_some());
+                assert!(directory.exists());
+                let operation = connection.recovery_status().unwrap().unwrap().operation;
+                diagnostic_cleanup_must_succeed(connection.cancel_operation(operation));
             }
             assert_eq!(fixture.workflow.host.engine().slot_holder(), None);
             assert!(connection.recovery_status().unwrap().is_none());
@@ -990,7 +1126,7 @@ fn connection_adoption_diagnostic_primary_cleanup_and_combined_preserve_original
             fixture.workflow.host.close().unwrap();
             failure_is(job.result.result(), returned);
             assert_eq!(job.result.failure_diagnostic().unwrap(), Some(expected));
-        });
+        }
     }
 }
 
@@ -1191,25 +1327,7 @@ fn assert_page_epoch_rejection(stage: CloudAdoptionDiagnosticStage, mutate: impl
             .unwrap();
         assert!(job.result.result().unwrap().is_none());
         assert!(job.result.failure_diagnostic().unwrap().is_none());
-        std::thread::scope(|scope| {
-            // Admit cancellation before the reply claim, as in the control-read
-            // diagnostic cases, so a failed abort can be drained publicly.
-            let cancellation = if cleanup_fails {
-                let operation = connection.recovery_status().unwrap().unwrap().operation;
-                let (entered, reached) = mpsc::channel();
-                let (release, resume) = mpsc::channel();
-                *files.before_read.lock().unwrap() = Some(Box::new(move || {
-                    entered.send(()).unwrap();
-                    resume.recv_timeout(Duration::from_secs(20)).unwrap();
-                }));
-                let cancel_connection = connection.clone();
-                let cancel = scope.spawn(move || cancel_connection.cancel_operation(operation));
-                let release = Release(release);
-                reached.recv_timeout(Duration::from_secs(5)).unwrap();
-                Some((release, cancel))
-            } else {
-                None
-            };
+        {
             let armed = files.clone();
             fixture
                 .workflow
@@ -1236,7 +1354,7 @@ fn assert_page_epoch_rejection(stage: CloudAdoptionDiagnosticStage, mutate: impl
             assert_eq!(job.result.failure_diagnostic().unwrap(), Some(snapshot.clone()));
             failure_is(job.result.result(), returned);
             files.remaining.store(-1, Ordering::SeqCst);
-            if let Some((release, cancel)) = cancellation {
+            if cleanup_fails {
                 assert_eq!(
                     fixture.workflow.host.engine().slot_holder(),
                     Some(meguri_engine::LongOp::CloudAdopt)
@@ -1244,8 +1362,8 @@ fn assert_page_epoch_rejection(stage: CloudAdoptionDiagnosticStage, mutate: impl
                 assert!(fixture.workflow.core.adoption_op().unwrap().is_some());
                 assert!(connection.recovery_status().unwrap().is_some());
                 assert!(directory.exists());
-                drop(release);
-                cancel.join().unwrap().unwrap();
+                let operation = connection.recovery_status().unwrap().unwrap().operation;
+                diagnostic_cleanup_must_succeed(connection.cancel_operation(operation));
             }
             assert_eq!(fixture.workflow.host.engine().slot_holder(), None);
             assert!(fixture.workflow.core.adoption_op().unwrap().is_none());
@@ -1267,7 +1385,7 @@ fn assert_page_epoch_rejection(stage: CloudAdoptionDiagnosticStage, mutate: impl
             failure_is(followup.result.result(), CloudConnectionFailure::AuthorityChanged);
             assert!(followup.result.failure_diagnostic().unwrap().is_none());
             assert_eq!(job.result.failure_diagnostic().unwrap(), Some(snapshot));
-        });
+        }
     }
 }
 
