@@ -261,6 +261,15 @@ impl Entry {
     /// M4.3, M4.4: writes every before-image back, in a `CallerSupplied`
     /// scope. A redo writes the graves its undo removed back pending (A5).
     pub(crate) fn restore(&self, scope: &mut WriteScope<'_>, direction: Direction) -> Result<(), EngineError> {
+        // These maps were checked by the native op. Identity is its own
+        // inverse, so the restored journal can carry the same report to redo.
+        // Capture before restoring: those raw row writes invalidate reports.
+        let reports: Vec<_> = self.journal.identity_layouts().map(|(id, report)| {
+            scope.start_ordinal_report(
+                meguri_model::ids::NotetypeId(id),
+                (report.field_map.len(), report.template_map.len()),
+            )
+        }).collect();
         let rows: Vec<&JournalEntry> = self
             .journal
             .entries()
@@ -294,7 +303,11 @@ impl Entry {
                 scope.remove_grave(*oid, kind)?;
             }
         }
-        self.restore_col(scope)
+        self.restore_col(scope)?;
+        for report in reports {
+            scope.complete_ordinal_report(report);
+        }
+        Ok(())
     }
 
     fn restore_col(&self, scope: &mut WriteScope<'_>) -> Result<(), EngineError> {

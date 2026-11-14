@@ -10,6 +10,77 @@ fn data(width: usize, value: char) -> Cell {
 }
 
 #[test]
+fn checked_ordinal_reports_follow_savepoints_and_raw_write_invalidation() {
+    let (_dir, path) = empty_collection();
+    let collection = open(&path).unwrap();
+    let writer = collection.writer();
+    let clock = clock();
+    let mut scope = writer.begin_write(StampMode::Raw, &clock, None).unwrap();
+    let mut original = common::notetype("Ordinal report fixture", &["Left", "Right"], &["View"]);
+    let id = scope.add_notetype(&original).unwrap();
+    original = scope.notetype(id).unwrap().unwrap();
+    scope.commit().unwrap();
+
+    let mut scope = writer.begin_write(StampMode::Raw, &clock, Some(JournalOptions::in_memory())).unwrap();
+    let stored_notetype = |scope: &meguri_storage::WriteScope<'_>| {
+        let head = scope.row_image(Table::Notetypes, &RowKey::Id(id.0)).unwrap().unwrap();
+        let parts = [Table::Fields, Table::Templates].map(|table| {
+            let mut rows = Vec::new();
+            let mut after = None;
+            loop {
+                let page = scope.notetype_parts_raw_page(table, id, after.as_ref()).unwrap();
+                let Some(last) = page.last() else {
+                    break;
+                };
+                after = Some(last[1].clone());
+                rows.extend(page);
+            }
+            rows
+        });
+        (head, parts)
+    };
+    let original_rows = stored_notetype(&scope);
+    let mark = scope.savepoint().unwrap();
+    let report = scope.start_ordinal_report(id, (original.fields.len(), original.templates.len()));
+    let mut edited = original.clone();
+    edited.name = "Renamed ordinal report fixture".into();
+    scope.put_notetype(&edited).unwrap();
+    scope.complete_ordinal_report(report);
+    let checked = scope.journal().unwrap().identity_layout(id.0).unwrap();
+    assert_eq!(checked.field_map, [0, 1]);
+    assert_eq!(checked.template_map, [0]);
+    scope.rollback_to_savepoint(mark).unwrap();
+    assert!(scope.journal().unwrap().identity_layout(id.0).is_none());
+    assert_eq!(stored_notetype(&scope), original_rows);
+
+    let report = scope.start_ordinal_report(id, (original.fields.len(), original.templates.len()));
+    scope.put_notetype(&edited).unwrap();
+    scope.complete_ordinal_report(report);
+    let edited_rows = stored_notetype(&scope);
+    let mark = scope.savepoint().unwrap();
+    let mut raw = edited.clone();
+    raw.config.css = "raw modification".into();
+    scope.put_notetype(&raw).unwrap();
+    assert!(scope.journal().unwrap().identity_layout(id.0).is_none());
+    // A later checked edit cannot bless the earlier raw write in this scope.
+    let denied = scope.start_ordinal_report(id, (raw.fields.len(), raw.templates.len()));
+    raw.name = "Later checked edit".into();
+    scope.put_notetype(&raw).unwrap();
+    scope.complete_ordinal_report(denied);
+    assert!(scope.journal().unwrap().identity_layout(id.0).is_none());
+    scope.rollback_to_savepoint(mark).unwrap();
+    let checked = scope.journal().unwrap().identity_layout(id.0).unwrap();
+    assert_eq!(checked.field_map, [0, 1]);
+    assert_eq!(checked.template_map, [0]);
+    assert_eq!(stored_notetype(&scope), edited_rows);
+    let mark = scope.savepoint().unwrap();
+    raw.config.css = "released raw modification".into();
+    scope.put_notetype(&raw).unwrap();
+    scope.release_savepoint(mark).unwrap();
+    assert!(scope.commit().unwrap().journal.unwrap().identity_layout(id.0).is_none());
+}
+
+#[test]
 fn nested_replacements_release_rollback_and_composition_preserve_both_sides() {
     let (dir, path) = empty_collection();
     let collection = open(&path).unwrap();

@@ -1247,24 +1247,18 @@ impl Runtime {
     }
 
     fn read_intent_rows(&self, collection: &Collection, i: &ApplyIntent) -> Result<IntentRows, RuntimeError> {
-        let mut layouts = {
+        let (mut layouts, expected) = {
             let s = self.state();
-            with_tracking_access(|| layouts(s.store.as_ref().ok_or(Error::Database)?, i.binding))?
+            with_tracking_access(|| {
+                let store = s.store.as_ref().ok_or(Error::Database)?;
+                let key = store.binding(i.binding)?.ok_or(Error::BindingNotFound)?.facts.record_key.0;
+                Ok::<_, Error>((layouts(store, i.binding)?, super::super::incoming_store::intent_layouts(
+                    &store.connection, i.binding, i.native_file, &key, &store.directory, std::slice::from_ref(i))?))
+            })?
         };
-        // Reopen may have no entity at a newly admitted ID yet. The durable
-        // intent supplies its validated expected image, never an invented ACK.
-        for key in &i.keys {
-            if let Some(codec::Payload::Notetype(nt)) = &key.after_payload {
-                row_payload::validate_notetype(nt)?;
-                if key.kind != codec::Kind::Notetype || key.key != codec::id_key(nt.id)
-                    || digest(key.after_payload.as_ref())? != key.after_digest
-                    || layouts.get(&nt.id).is_some_and(|old| !row_payload::same_layout(old, nt).unwrap_or(false))
-                { return Err(Error::InvalidData.into()); }
-                layouts.insert(nt.id, nt.clone());
-            }
-        }
         let lease = collection.reader(ReaderRole::Cloud)?;
         let snapshot = lease.snapshot()?;
+        select_intent_layouts(&*snapshot, &mut layouts, expected)?;
         let mut current = BTreeMap::new();
         for k in &i.keys {
             current.insert(k.name.clone(), project(&*snapshot, k.kind, &k.key, &layouts)?);
@@ -1321,6 +1315,23 @@ impl Runtime {
                             })
                     }))
             })?;
+            let later_native_edit = if !all_after && i.result_seq.is_some() {
+                self.with_incoming(guard, collection, |s| {
+                    let store = s.store.as_ref().ok_or(Error::Database)?;
+                    for key in &i.keys {
+                        let local = current.get(&key.name).and_then(Option::as_ref);
+                        if digest(local)? == key.after_digest { continue; }
+                        // A deletion/restore has its separate, stricter path below.
+                        if key.after_digest.is_none() || local.is_none() { return Ok(false); }
+                        let Some(e) = store.entity_facts(i.binding, &key.name)? else { return Ok(false); };
+                        if Some(e.observer_open) != i.originating_open || e.observed_generation != i.generation
+                            || e.observed_seq <= i.result_seq.ok_or(Error::InvalidData)?
+                            || e.tombstone_at.is_some() || digest(Some(&e.payload))? != digest(local)?
+                        { return Ok(false); }
+                    }
+                    Ok(true)
+                })?
+            } else { false };
             let restored_deletion = if !all_after && same_open_commit {
                 let tombstones = self.with_incoming(guard, collection, |s| {
                     Ok(s.store
@@ -1384,7 +1395,7 @@ impl Runtime {
             } else {
                 false
             };
-            if all_after || restored_deletion {
+            if all_after || restored_deletion || later_native_edit {
                 // A committed deletion followed by Undo needs fresh WAL coverage
                 // and parked rekey evidence, never a replay of the deletion.
                 self.settle_ordinary(collection, guard, i.id, timeout)?;
@@ -1464,6 +1475,21 @@ fn layouts(store: &TrackingStore, b: BindingId) -> Result<BTreeMap<i64, codec::N
     }
     Ok(layouts)
 }
+// Select exact admitted images, never infer origins from the row's optional IDs.
+fn select_intent_layouts(
+    rows: &(impl ReadRows + ?Sized), layouts: &mut BTreeMap<i64, codec::Notetype>,
+    expected: BTreeMap<i64, codec::Notetype>,
+) -> Result<(), Error> {
+    for (id, intent) in expected {
+        let actual = rows.row_image(Table::Notetypes, &RowKey::Id(id))?
+            .map(|head| row_payload::notetype(&row_payload::ReadView(rows), &head, intent.struct_gen)).transpose()?;
+        if actual.as_ref().is_some_and(|actual| layouts.get(&id) == Some(actual)) { continue; }
+        if actual.as_ref().is_none_or(|actual| *actual == intent) {
+            layouts.insert(id, intent);
+        } else { return Err(Error::InvalidData); }
+    }
+    Ok(())
+}
 fn project(
     rows: &(impl ReadRows + ?Sized),
     kind: codec::Kind,
@@ -1498,6 +1524,11 @@ fn apply(
         .facts
         .record_key
         .0;
+    let intents: Vec<_> = store.apply_intents(binding)?.into_iter()
+        .filter(|intent| intent.result_seq.is_some() || Some(intent.id) == replay_of).collect();
+    let expected = super::super::incoming_store::intent_layouts(&store.connection, binding, guard.file,
+        &record_key, directory, &intents)?;
+    select_intent_layouts(ctx.scope(), &mut layouts, expected)?;
     let mut keys = Vec::new();
     let mut ids = Vec::new();
     for entry in entries {

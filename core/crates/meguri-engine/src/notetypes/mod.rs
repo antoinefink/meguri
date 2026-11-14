@@ -417,7 +417,9 @@ pub fn save_in(scope: &mut WriteScope<'_>, draft: &Draft, options: SaveOptions) 
     if write::requirements_stale(&stored, &notetype) {
         notetype.config.reqs = write::card_requirements(&notetype);
     }
+    let report = scope.start_ordinal_report(notetype.id, (notetype.fields.len(), notetype.templates.len()));
     let written = scope.put_notetype(&notetype)?;
+    scope.complete_ordinal_report(report);
     Ok(Saved {
         id: notetype.id,
         name: notetype.name,

@@ -30,3 +30,6 @@
 - `bootstrap::create` stages the entire new collection and publishes with a same-directory hard link: never replace that with an overwriting rename. The engine freezes the creation clock and supplies the rows; the storage callback runs only on the unpublished file.
 - `collection_package` writes only new files in a caller-owned U32 staging directory. Its standalone snapshot opens immutable after refusing WAL/journal siblings; never use that seam for a live collection. The P7 schema-11 placeholder is authored through the model codecs, independently of collection fixtures.
 - Sidecar consumers mutate through the shared strict locked RMW; never pair a detached load with save for independent device metadata. Partial F3 remains unclean, but unreadable JSON must survive untouched. `verified_replace` owns candidate SQL/finalisation; only operation-owned reserved staging may reach it.
+
+- Native plain saves and field renames bracket writes with the journal identity-layout report. Unreported notetype/part writes invalidate it; savepoints restore it. It carries ordinal maps only, never a counter or durable wire fact.
+- Undo copies only the retained step's checked identity reports, capturing admission before raw restoration and completing after every restore succeeds. The resulting journal owns the witness needed by Redo.

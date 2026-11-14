@@ -799,7 +799,7 @@ impl Runtime {
                                 })
                             }?;
                             if let Some(e) = tracked {
-                                match e.acked_payload.unwrap_or(e.payload) {
+                                match e.payload {
                                     codec::Payload::Notetype(n) => Ok(n),
                                     _ => Err(Error::InvalidData),
                                 }

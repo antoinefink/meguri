@@ -162,6 +162,60 @@ pub(super) fn intents(c: &Connection, b: BindingId) -> Result<Vec<ApplyIntent>, 
     .collect()
 }
 
+/// Resolve only checked ordinary intent images in this binding and native file.
+/// The retained inbox proves the entry/counter; arbitrary intent JSON is insufficient.
+pub(super) fn intent_layouts<'a>(
+    c: &Connection, b: BindingId, file: runtime::NativeFileIdentity,
+    record_key: &[u8; 32], directory: &std::path::Path, intents: impl IntoIterator<Item = &'a ApplyIntent>,
+) -> Result<std::collections::BTreeMap<i64, entity_codec::Notetype>, Error> {
+    let mut layouts = std::collections::BTreeMap::new();
+    for intent in intents {
+        if intent.binding != b || intent.native_file != file { return Err(Error::InvalidData); }
+        if intent.media.is_some() || super::rekey_store::get(c, intent.id)?.is_some() { continue; }
+        if intent.originating_open == Some(0) || intent.result_seq == Some(0) { return Err(Error::InvalidData); }
+        for key in intent.keys.iter().filter(|key| key.kind == entity_codec::Kind::Notetype) {
+            let Some(payload) = &key.after_payload else { continue; };
+            let entity_codec::Payload::Notetype(candidate) = payload else { return Err(Error::InvalidData); };
+            super::row_payload::validate_notetype(candidate)?;
+            if key.key != entity_codec::id_key(candidate.id)
+                || entity_codec::entity_name(record_key, key.kind, &key.key).map_err(|_| Error::InvalidData)? != key.name
+                || digest(Some(payload))? != key.after_digest
+            { return Err(Error::InvalidData); }
+            if key.role == ApplyKeyRole::Entry {
+                let mut server = None;
+                for id in &intent.inbox_ids {
+                    let text: String = c.query_row("SELECT entry FROM inbox WHERE binding=?1 AND id=?2",
+                        params![b.0.as_slice(), id], |r| r.get(0))?;
+                    let entry: InboxEntry = decode(&text)?;
+                    if entry.record_name != key.name { continue; }
+                    let InboxValue::Record { envelope, staged_asset, .. } = entry.value else { return Err(Error::InvalidData); };
+                    let received = super::payload_asset::receive_owned(directory, b, record_key, &key.name,
+                        &envelope.0, staged_asset.as_deref()).map_err(|_| Error::InvalidData)?;
+                    if received.entity.fields.generation.is_some() || received.entity.fields.tombstone
+                        || received.entity.fields.kind != key.kind || received.entity.fields.key != key.key
+                    { return Err(Error::InvalidData); }
+                    let Some(entity_codec::Payload::Notetype(nt)) = received.payload else { return Err(Error::InvalidData); };
+                    super::row_payload::validate_notetype(&nt)?;
+                    if !super::row_payload::same_layout(&nt, candidate)? { return Err(Error::InvalidData); }
+                    server = Some(nt);
+                }
+                if server.is_none() { return Err(Error::InvalidData); }
+            } else {
+                // Ordinary side effects can rename an existing type, never
+                // create layout authority at a previously free key.
+                let prior = facts(c, b, &key.name)?.ok_or(Error::InvalidData)?;
+                let entity_codec::Payload::Notetype(prior) = prior.payload else { return Err(Error::InvalidData); };
+                if key.before_digest.is_none() || !super::row_payload::same_layout(&prior, candidate)? {
+                    return Err(Error::InvalidData);
+                }
+            }
+            if let Some(old) = layouts.insert(candidate.id, candidate.clone())
+                && old != *candidate { return Err(Error::InvalidData); }
+        }
+    }
+    Ok(layouts)
+}
+
 /// Classified native intake shares ordering, pass attribution and intent protection.
 pub(super) fn receive(
     tx: &Transaction<'_>,

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use meguri_model::card::Card;
 use meguri_model::changes::ChangeSet;
 use meguri_model::col::Col;
-use meguri_model::ids::{CardId, RevlogId};
+use meguri_model::ids::{CardId, NotetypeId, RevlogId};
 use meguri_model::revlog::RevlogEntry;
 use meguri_storage::derived::CollectionMark;
 use meguri_storage::journal::{After, Entry, Journal, NoteDigest};
@@ -198,6 +198,11 @@ impl CommitPayload {
             .iter()
             .flat_map(|j| j.entries())
             .filter(move |e| e.table() == table && (e.existed_before() || e.exists_after()))
+    }
+
+    /// Explicit native identity maps; absent for external or unreported writes.
+    pub fn identity_layout(&self, id: NotetypeId) -> Option<&meguri_storage::journal::IdentityLayout> {
+        self.journal.as_ref()?.identity_layout(id.0)
     }
 
     /// Changed keys in journal order, without reading images. External

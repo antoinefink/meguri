@@ -205,9 +205,33 @@ impl PartialEq for UnicaseKey {
 
 impl Eq for UnicaseKey {}
 
+/// Identity maps reported by a native rename/plain save (change-stream S2.5).
+/// Unknown writes invalidate the report; it never supplies a layout counter.
+#[derive(Clone, Debug)]
+pub struct IdentityLayout {
+    pub field_map: Vec<i32>,
+    pub template_map: Vec<i32>,
+}
+
+/// Captured before a checked native edit; earlier unreported writes deny it.
+pub struct OrdinalReportToken {
+    id: i64,
+    permitted: bool,
+    counts: (usize, usize),
+}
+
+fn notetype_key(table: Table, key: &RowKey) -> Option<i64> {
+    match (table, key) {
+        (Table::Notetypes, RowKey::Id(id)) => Some(*id),
+        (Table::Fields | Table::Templates, RowKey::Pair(id, _)) => Some(*id),
+        _ => None,
+    }
+}
+
 /// The journal of one write scope.
 pub struct Journal {
     options: JournalOptions,
+    identity_layouts: BTreeMap<i64, IdentityLayout>,
     chunks: Vec<Vec<Entry>>,
     len: usize,
     /// Entries by key, for keys that compare byte for byte.
@@ -235,6 +259,7 @@ pub struct Journal {
 /// savepoint restores both.
 #[derive(Debug)]
 struct Mark {
+    identity_layouts: BTreeMap<i64, IdentityLayout>,
     len: usize,
     replaced: HashMap<usize, After>,
 }
@@ -258,6 +283,7 @@ impl Journal {
     pub fn new(options: JournalOptions) -> Journal {
         Journal {
             options,
+            identity_layouts: BTreeMap::new(),
             chunks: Vec::new(),
             len: 0,
             index: HashMap::new(),
@@ -273,6 +299,31 @@ impl Journal {
             fail_reads: AtomicBool::new(false),
             #[cfg(feature = "test-hooks")]
             fail_after_reads: AtomicUsize::new(usize::MAX),
+        }
+    }
+
+    pub fn identity_layout(&self, id: i64) -> Option<&IdentityLayout> {
+        self.identity_layouts.get(&id)
+    }
+
+    /// Reports already checked by the step that owns this journal.
+    pub fn identity_layouts(&self) -> impl Iterator<Item = (i64, &IdentityLayout)> {
+        self.identity_layouts.iter().map(|(&id, report)| (id, report))
+    }
+
+    pub(crate) fn start_ordinal_report(&self, id: i64, counts: (usize, usize)) -> OrdinalReportToken {
+        let permitted = self.identity_layouts.contains_key(&id)
+            || self.entries().all(|entry| notetype_key(entry.table(), entry.key()) != Some(id));
+        OrdinalReportToken { id, permitted, counts }
+    }
+
+    pub(crate) fn complete_ordinal_report(&mut self, token: OrdinalReportToken) {
+        if !token.permitted {
+            return;
+        }
+        let ordinals = |count| (0..count).map(i32::try_from).collect::<Result<Vec<_>, _>>();
+        if let (Ok(field_map), Ok(template_map)) = (ordinals(token.counts.0), ordinals(token.counts.1)) {
+            self.identity_layouts.insert(token.id, IdentityLayout { field_map, template_map });
         }
     }
 
@@ -432,6 +483,7 @@ impl Journal {
         before: Option<RowImage>,
         after: Option<RowImage>,
     ) -> Result<(), StorageError> {
+        if let Some(id) = notetype_key(table, &key) { self.identity_layouts.remove(&id); }
         if let Some(at) = self.slot(table, &key) {
             let after = match after {
                 Some(image) if table == Table::Notes => {
@@ -523,6 +575,7 @@ impl Journal {
     /// Remembers the journal's state for a savepoint.
     pub(crate) fn push_mark(&mut self) {
         self.marks.push(Mark {
+            identity_layouts: self.identity_layouts.clone(),
             len: self.len,
             replaced: HashMap::new(),
         });
@@ -557,6 +610,7 @@ impl Journal {
     /// spill file) and older entries get back their after-images.
     pub(crate) fn rollback_mark(&mut self) {
         let Some(mark) = self.marks.pop() else { return };
+        self.identity_layouts = mark.identity_layouts;
         for (at, after) in mark.replaced {
             let current = std::mem::replace(&mut self.at_mut(at).after, after);
             self.held -= after_bytes(&current);

@@ -202,6 +202,19 @@ impl<'c> WriteScope<'c> {
         self.journal.as_ref()
     }
 
+    /// Call only after checking that the edit preserves every ordinal origin.
+    /// Capture before writing so a prior raw write cannot acquire a report.
+    pub fn start_ordinal_report(&self, id: NotetypeId, counts: (usize, usize)) -> Option<crate::journal::OrdinalReportToken> {
+        self.journal.as_ref().map(|journal| journal.start_ordinal_report(id.0, counts))
+    }
+
+    /// Complete only after all writes covered by the checked edit succeed.
+    pub fn complete_ordinal_report(&mut self, token: Option<crate::journal::OrdinalReportToken>) {
+        if let (Some(journal), Some(token)) = (&mut self.journal, token) {
+            journal.complete_ordinal_report(token);
+        }
+    }
+
     /// Whether the scope has made a real change.
     pub fn has_changes(&self) -> bool {
         self.changed

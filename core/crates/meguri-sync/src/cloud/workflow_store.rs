@@ -921,6 +921,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         if state.open_counter != open {
             return Err(Error::InvalidData.into());
         }
+        let directory = self.directory.clone();
         let tx = self.connection.transaction().map_err(Error::from)?;
         let incoming = super::incoming_store::intents(&tx, b)?;
         let applying = matches!(
@@ -969,15 +970,39 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                 added_decks.push(key);
             }
         }
-        let intent_layouts = if applying {
+        let mut intent_layouts = if applying {
+            super::incoming_store::intent_layouts(&tx, b, state.file.ok_or(Error::InvalidData)?,
+                &binding.facts.record_key.0, &directory, incoming.iter().filter(|i| active_intents.contains(&i.id)))?;
             protected_layouts(
                 &CommitView { c: &tx, b, rows, added_decks: &added_decks },
                 &incoming,
                 &active_intents,
             )?
         } else {
-            std::collections::BTreeMap::new()
+            let mut checked = super::incoming_store::intent_layouts(&tx, b, state.file.ok_or(Error::InvalidData)?,
+                &binding.facts.record_key.0, &directory, incoming.iter().filter(|i| i.result_seq.is_some()))?;
+            for intent in incoming.iter().filter(|i| i.result_seq.is_some()) {
+                for key in &intent.keys {
+                    if key.kind != codec::Kind::Notetype { continue; }
+                    if let Some(e) = entity(&tx, b, key.kind, &key.key)?
+                        && Some(e.observer_open) == intent.originating_open
+                        && e.observed_generation == intent.generation
+                        && intent.result_seq.is_some_and(|seq| e.observed_seq > seq)
+                        && let codec::Payload::Notetype(nt) = e.payload
+                    { checked.insert(nt.id, nt); }
+                }
+            }
+            checked
         };
+        if !applying {
+            for change in &commit.changes.notetypes {
+                let id = change.id.0;
+                let view = CommitView { c: &tx, b, rows, added_decks: &added_decks };
+                if let Ok(authority) = observed_layout(&view, commit, &intent_layouts, id) {
+                    intent_layouts.insert(id, authority);
+                }
+            }
+        }
         let mut written = 0;
         let mut dropped = Vec::new();
         for kind in row_payload::KINDS {
@@ -1190,19 +1215,47 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
     }
 }
 fn layout(c: &Connection, b: BindingId, id: i64) -> Result<codec::Notetype, Error> {
-    match entity(c, b, codec::Kind::Notetype, &codec::id_key(id))?.map(|e| e.acked_payload.unwrap_or(e.payload)) {
+    match entity(c, b, codec::Kind::Notetype, &codec::id_key(id))?.map(|e| e.payload) {
         Some(codec::Payload::Notetype(n)) if n.struct_gen > 0 => Ok(n),
         _ => Err(Error::InvalidData),
     }
 }
+// A native report proves the transition, while its journal before-image
+// must match the retained current image. Neither row IDs nor names prove origins.
+fn observed_layout(
+    view: &CommitView<'_, '_>, commit: &meguri_engine::ObservedCommit<'_>,
+    intents: &std::collections::BTreeMap<i64, codec::Notetype>, id: i64,
+) -> Result<codec::Notetype, Error> {
+    let authority = intents.get(&id).cloned().map(Ok).unwrap_or_else(|| layout(view.c, view.b, id))?;
+    let head = view.row(Table::Notetypes, &RowKey::Id(id))?.ok_or(Error::InvalidData)?;
+    let actual = row_payload::notetype(view, &head, authority.struct_gen)?;
+    if actual == authority { return Ok(actual); }
+    let before = BeforeCommitView {
+        inner: CommitView { c: view.c, b: view.b, rows: view.rows, added_decks: view.added_decks }, commit,
+    };
+    let head = before.row(Table::Notetypes, &RowKey::Id(id))?.ok_or(Error::InvalidData)?;
+    if row_payload::notetype(&before, &head, authority.struct_gen)? != authority { return Err(Error::InvalidData); }
+    let report = commit.payload.identity_layout(meguri_model::ids::NotetypeId(id)).ok_or(Error::InvalidData)?;
+    let identity = |map: &[i32], len: usize| map.len() == len
+        && map.iter().enumerate().all(|(i, old)| i32::try_from(i).ok() == Some(*old));
+    if !identity(&report.field_map, actual.fields.len()) || !identity(&report.template_map, actual.templates.len())
+        || authority.fields.len() != actual.fields.len() || authority.templates.len() != actual.templates.len()
+    { return Err(Error::InvalidData); }
+    use meguri_model::proto::{BlobMessage, notetype::NotetypeConfig};
+    let old = NotetypeConfig::decode(&authority.config).map_err(|_| Error::InvalidData)?;
+    let new = NotetypeConfig::decode(&actual.config).map_err(|_| Error::InvalidData)?;
+    if (old.kind, old.sort_field_idx) != (new.kind, new.sort_field_idx) { return Err(Error::InvalidData); }
+    Ok(actual)
+}
+
 struct CommitView<'a, 'r> {
     c: &'a Connection,
     b: BindingId,
     rows: &'a meguri_engine::ObserverRows<'r>,
     added_decks: &'a [Vec<u8>],
 }
-// An unsettled apply supplies layout authority only for its own binding
-// and active writer commit. Rekey intents may keep just digests: reconstruct
+// Protected projection for the apply's own commit. Ordinary intent images
+// also pass scoped inbox validation above. Rekey intents may keep just digests: reconstruct
 // their new layout from the committed rows using the paired counter.
 fn protected_layouts(
     view: &CommitView<'_, '_>,
@@ -1428,7 +1481,42 @@ impl View for BeforeCommitView<'_, '_, '_> {
         self.inner.page(table, after)
     }
     fn parts(&self, table: Table, id: i64, after: Option<i64>) -> Result<Vec<RowImage>, Error> {
-        self.inner.parts(table, id, after)
+        // Only the earliest 250 before-images can belong to this page.
+        // Select keys first so journal tails need no image allocation.
+        let mut restored = std::collections::BTreeSet::new();
+        for key in self.commit.payload.row_keys(table) {
+            let RowKey::Pair(ntid, ord) = key else { return Err(Error::InvalidData); };
+            if *ntid == id && after.is_none_or(|after| *ord > after)
+                && self.commit.payload.row_presence(table, key).is_some_and(|p| p.before)
+            {
+                restored.insert(*ord);
+                if restored.len() > 250 { restored.pop_last(); }
+            }
+        }
+        let mut parts = std::collections::BTreeMap::new();
+        for ord in restored {
+            let delta = self.commit.payload.row(table, &RowKey::Pair(id, ord))?.ok_or(Error::InvalidData)?;
+            parts.insert(ord, delta.before.ok_or(Error::InvalidData)?);
+        }
+        let mut cursor = after;
+        loop {
+            let page = self.inner.parts(table, id, cursor)?;
+            if page.is_empty() { break; }
+            for row in page {
+                let ord = row_payload::int(&row, 1)?;
+                cursor = Some(ord);
+                // Journal entries supply their old side above. In particular,
+                // an added ordinal has no place in the before-image page.
+                if self.commit.payload.row_presence(table, &RowKey::Pair(id, ord)).is_none() {
+                    parts.insert(ord, row);
+                    if parts.len() > 250 { parts.pop_last(); }
+                }
+            }
+            if parts.len() == 250 && parts.last_key_value().is_some_and(|(&ord, _)| cursor >= Some(ord)) {
+                break;
+            }
+        }
+        Ok(parts.into_values().collect())
     }
     fn history(&self, id: i64) -> Result<i64, Error> {
         let mut maximum = self.inner.history(id)?;

@@ -248,7 +248,12 @@ pub fn commit_in(scope: &mut WriteScope<'_>, planned: &FieldRenamePlan) -> Resul
             written: false,
         });
     }
+    let report = scope.start_ordinal_report(
+        planned.renamed.id,
+        (planned.renamed.fields.len(), planned.renamed.templates.len()),
+    );
     let written = scope.put_notetype(&planned.renamed)?;
+    scope.complete_ordinal_report(report);
     if let Some(regeneration) = &planned.regeneration {
         regenerate::commit_in(scope, regeneration)?;
     }

@@ -276,9 +276,9 @@ pub fn layout(view: &impl View, id: i64, acked: &c::Notetype) -> Result<u64, Err
     }
     Ok(acked.struct_gen)
 }
-/// Ordinary runtime authority covers structure, not names, options or stamps.
-/// Counters come only from retained projections or a validated apply intent.
-/// This does not infer a generation for an untracked legacy layout.
+/// Compatibility of two admitted wire images under the server's counter.
+/// This is not proof of local ordinal origins, including when optional IDs match.
+/// Local projection requires a retained image or explicit native identity maps.
 pub(super) fn same_layout(a: &c::Notetype, b: &c::Notetype) -> Result<bool, Error> {
     use meguri_model::proto::{BlobMessage, notetype::*};
     let ac = NotetypeConfig::decode(&a.config).map_err(|_| Error::InvalidData)?;
@@ -376,7 +376,7 @@ fn project_with(
         if !ordinary { return layout(view, id, authority); }
         let head = view.row(Table::Notetypes, &RowKey::Id(id))?.ok_or(Error::InvalidData)?;
         match notetype(view, &head, authority.struct_gen) {
-            Ok(actual) if same_layout(&actual, authority)? => Ok(authority.struct_gen),
+            Ok(actual) if actual == *authority => Ok(authority.struct_gen),
             // Preserve classification of a malformed dependency as its own
             // failure; the reference eligibility fence still holds dependents.
             Err(Error::RowFailure(_)) => Ok(authority.struct_gen),
@@ -487,7 +487,7 @@ fn project_with(
             let id = int(row, 0)?;
             let ack = acknowledged(id)?;
             let actual = notetype(view, row, ack.struct_gen)?;
-            if if ordinary { !same_layout(&actual, &ack)? } else { actual != ack } {
+            if actual != ack {
                 return Err(Error::InvalidData);
             }
             P::Notetype(actual)
