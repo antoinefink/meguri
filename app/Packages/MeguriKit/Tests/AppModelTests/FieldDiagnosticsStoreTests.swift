@@ -280,7 +280,7 @@ import AppModel
         #expect(exported.allSatisfy { $0["outcome"] as? String == "found" })
     }
 
-    @Test func debugInfoHoldsEverythingStored() async throws {
+    @Test func debugInfoProjectsStoredReportsWithoutRawSDKDetails() async throws {
         let store = try temporaryStore()
         let empty = try await store.debugInfo()
         #expect(try JSONSerialization.jsonObject(with: empty) as? [String: Any] != nil)
@@ -293,6 +293,16 @@ import AppModel
         #expect((info["diagnostics"] as? [Any])?.count == 1)
         let signposts = try #require(info["signposts"] as? [String: Any])
         #expect(Array(signposts.keys) == [IntervalNames.answerToNextVisible.name])
+        let diagnostic = try #require((info["diagnostics"] as? [[String: Any]])?.first)
+        #expect(diagnostic["kind"] as? String == "hang")
+        #expect(diagnostic["detailsUnavailable"] as? Bool == true)
+        #expect(Set(diagnostic.keys) == ["receivedAtUnixMilliseconds", "reportTime", "kind", "detailsUnavailable"])
+        let metric = try #require((info["metrics"] as? [[String: Any]])?.first)
+        #expect(metric["detailsUnavailable"] as? Bool == true)
+        #expect(metric["entries"] == nil && metric["applicationVersion"] == nil)
+        let header = try #require(info["header"] as? [String: Any])
+        #expect(header["schemaVersion"] as? Int == 1)
+        #expect((header["generatedAtUTC"] as? String)?.hasSuffix("Z") == true)
     }
 }
 

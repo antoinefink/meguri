@@ -8,12 +8,12 @@ import os
 /// hitches, launch, memory and disk writes, plus the daily statistics of
 /// the registered intervals (R1861, emitted to MetricKit by `Signposts`).
 /// Everything stays in a directory of the app's private container; nothing
-/// here talks to the network. Settings shows it through Copy Debug Info
-/// (U160, `debugInfo()`).
+/// here talks to the network. `debugInfo()` produces a safe export for a
+/// user-initiated Copy Debug Info action.
 ///
 /// The store is an actor on its own utility-QoS serial queue: every read
 /// and write runs there, never on the main actor (KTD9), and callers await
-/// it. Files are only ever added, never rewritten, so a report costs one
+/// it. MetricKit files are only ever added, never rewritten, so a report costs one
 /// write however much history is stored. A report is written under a
 /// staging name and then linked in under its final one, so a reader never
 /// sees it partly written; a report that does not decode (left partly
@@ -33,32 +33,44 @@ public actor FieldDiagnosticsStore {
 
     public nonisolated var unownedExecutor: UnownedSerialExecutor { queue.asUnownedSerialExecutor() }
 
+    public nonisolated static let timelineEventLimit = 512
+    public nonisolated static let timelineAgeSeconds: TimeInterval = 7 * 24 * 60 * 60
+    public nonisolated static let byteLimit = 1_048_576
+    private nonisolated let clock: AppClock
+    private nonisolated let inbox = FieldDiagnosticInbox()
+    private var timelineLoaded = false
+    private var timelineNeedsRewrite = false
+    private var timelineState = FieldDiagnosticTimeline.empty
+    private var processDroppedCount: UInt64 = 0
+
     private let zoneDeletionDiagnostics: @Sendable () async -> [CloudZoneDeletionDiagnostic]
     private let rootReadDiagnostics: @Sendable () async -> [CloudRootReadDiagnostic]
 
-    public init(directory: URL, zoneDeletionDiagnostics: @escaping @Sendable () async -> [CloudZoneDeletionDiagnostic] = { [] },
+    public init(directory: URL, clock: AppClock = .system, zoneDeletionDiagnostics: @escaping @Sendable () async -> [CloudZoneDeletionDiagnostic] = { [] },
                 rootReadDiagnostics: @escaping @Sendable () async -> [CloudRootReadDiagnostic] = { [] }) {
         self.directory = directory
+        self.clock = clock
         self.zoneDeletionDiagnostics = zoneDeletionDiagnostics
         self.rootReadDiagnostics = rootReadDiagnostics
     }
 
-    /// `<Application Support>/Diagnostics/` in the app's container.
-    public nonisolated static var standard: FieldDiagnosticsStore {
+    /// One process-wide store, shared with the app subscriber and operation
+    /// producers, under `<Application Support>/Diagnostics/`.
+    public nonisolated static let standard: FieldDiagnosticsStore = {
         let workflow = CoreCloudWorkflowService()
         return FieldDiagnosticsStore(directory: URL.applicationSupportDirectory.appending(path: "Diagnostics", directoryHint: .isDirectory), zoneDeletionDiagnostics: {
             // No open collection is a normal state for Copy Debug Info.
             let core = try? await workflow.diagnostics()
             return (core?.zoneDeletions ?? []) + CloudZoneDeletionDiagnostics.localFailures()
         }, rootReadDiagnostics: { (try? await workflow.diagnostics().rootReads) ?? [] })
-    }
+    }()
 
     // MARK: Writing
 
     /// Stores a daily metric report: its hang, hitch, launch, memory and
     /// disk-write values, and its registered signposts by name.
     public func record(_ report: MetricReport) throws {
-        let received = Date()
+        let received = clock.now()
         var signposts: [String: [FieldSignpost]] = [:]
         var entries: [FieldMetrics.Entry] = []
         let reported = report.intervalEntries.map { (states: $0.states, duration: Optional($0.duration), values: $0.values) }
@@ -93,7 +105,7 @@ public actor FieldDiagnosticsStore {
     /// Stores a diagnostic report of a kind the store keeps; drops others.
     public func record(_ report: DiagnosticReport) throws {
         guard Self.keeps(report.result) else { return }
-        let received = Date()
+        let received = clock.now()
         let diagnostic = FieldDiagnostic(
             received: received, timeRange: report.timeRange,
             applicationVersion: report.environment.applicationVersion, result: report.result)
@@ -119,17 +131,126 @@ public actor FieldDiagnosticsStore {
         return try readAll([FieldSignpost].self, in: Folder.signposts(name)).flatMap { $0 }
     }
 
-    /// Everything stored, as one JSON object (`metrics`, `diagnostics`,
-    /// `signposts` by name) for Copy Debug Info.
+    /// Safe, bounded projections only. The two core callbacks are separate
+    /// observations, never an atomic snapshot or timestamped cloud receipts.
     public func debugInfo() async throws -> Data {
-        var signposts: [String: [FieldSignpost]] = [:]
-        for interval in IntervalNames.all {
-            let stored = try self.signposts(named: interval.name)
-            if !stored.isEmpty { signposts[interval.name] = stored }
+        let deletions = await zoneDeletionDiagnostics()
+        let reads = await rootReadDiagnostics()
+        return try SafeFieldDiagnosticsExport.make(directory: directory, now: clock.now(), timeline: timeline(),
+                                                   deletions: deletions, reads: reads)
+    }
+
+    /// Nonblocking with respect to storage: no actor hop, file work or await.
+    /// A burst has at most 64 queued values and one consumer task. A full
+    /// inbox drops the new observation and increments a safe loss counter.
+    public nonisolated func enqueue(_ observation: FieldDiagnosticObservation) {
+        let event = diagnosticMilliseconds(clock.now()).map {
+            FieldDiagnosticEvent(observedAtUnixMilliseconds: $0, observation: observation)
         }
-        let zoneDeletions = await zoneDeletionDiagnostics().suffix(128).map(ZoneDeletionDebugInfo.init)
-        let rootReads = Array(await rootReadDiagnostics().suffix(64))
-        return try Self.encoder.encode(DebugInfo(metrics: try metrics(), diagnostics: try diagnostics(), signposts: signposts, zoneDeletions: zoneDeletions, rootReads: rootReads))
+        if inbox.enqueue(event) {
+            Task { await self.drainTimeline() }
+        }
+    }
+
+    /// Also flushes observations already admitted to the inbox. Never throws;
+    /// an unavailable disk leaves the bounded in-memory evidence accessible.
+    public func timeline() -> FieldDiagnosticTimeline {
+        ingest(inbox.take(finishingIfEmpty: false))
+        return timelineState
+    }
+
+    private func drainTimeline() async {
+        while true {
+            let batch = inbox.take(finishingIfEmpty: true)
+            ingest(batch)
+            if batch.finished { return }
+            await Task.yield()
+        }
+    }
+
+    private func ingest(_ batch: FieldDiagnosticInbox.Batch) {
+        loadTimeline()
+        let prior = timelineState
+        let needsRepair = timelineNeedsRewrite
+        let newDrops = batch.dropped >= processDroppedCount ? batch.dropped - processDroppedCount : 0
+        timelineState.droppedCount = saturatedAdd(timelineState.droppedCount, newDrops)
+        processDroppedCount = batch.dropped
+        timelineState.events.append(contentsOf: batch.events)
+        // Stable ordering for equal observed times, including across reopen.
+        timelineState.events = timelineState.events.enumerated().sorted {
+            $0.element.observedAtUnixMilliseconds == $1.element.observedAtUnixMilliseconds
+                ? $0.offset < $1.offset : $0.element.observedAtUnixMilliseconds < $1.element.observedAtUnixMilliseconds
+        }.map(\.element)
+        if let now = diagnosticMilliseconds(clock.now()) {
+            let cutoff = now - Int64(Self.timelineAgeSeconds * 1_000)
+            let expired = timelineState.events.count(where: { $0.observedAtUnixMilliseconds < cutoff })
+            timelineState.events.removeAll { $0.observedAtUnixMilliseconds < cutoff }
+            timelineState.expiredCount = saturatedAdd(timelineState.expiredCount, UInt64(expired))
+        }
+        let excess = max(0, timelineState.events.count - Self.timelineEventLimit)
+        if excess > 0 {
+            timelineState.events.removeFirst(excess)
+            timelineState.truncatedCount = saturatedAdd(timelineState.truncatedCount, UInt64(excess))
+        }
+        guard needsRepair || !batch.events.isEmpty || newDrops > 0 || prior.events != timelineState.events else { return }
+        timelineNeedsRewrite = false
+        persistTimeline()
+    }
+
+    private var timelineFile: URL { directory.appending(path: "timeline.json", directoryHint: .notDirectory) }
+
+    private func loadTimeline() {
+        guard !timelineLoaded else { return }
+        timelineLoaded = true
+        do {
+            let bytes = try boundedDiagnosticRead(timelineFile, limit: Self.byteLimit)
+            var value = try JSONDecoder().decode(FieldDiagnosticTimeline.self, from: bytes)
+            guard value.schemaVersion == 1 else {
+                timelineNeedsRewrite = true
+                timelineState.storage = .unsupportedSchema; timelineState.priorHistoryUnavailable = true
+                timelineState.priorHistoryUnavailableReason = .unsupportedSchema; return
+            }
+            let valid = value.events.filter { (-62_135_596_800_000...253_402_300_799_999).contains($0.observedAtUnixMilliseconds) }
+            timelineNeedsRewrite = valid.count != value.events.count
+            value.invalidCount = saturatedAdd(value.invalidCount, UInt64(value.events.count - valid.count))
+            value.events = valid
+            timelineState = value
+        } catch DiagnosticReadFailure.notFound {
+            return
+        } catch DiagnosticReadFailure.oversized {
+            timelineNeedsRewrite = true
+            timelineState.storage = .oversized; timelineState.priorHistoryUnavailable = true
+            timelineState.priorHistoryUnavailableReason = .oversized
+        } catch is DecodingError {
+            timelineNeedsRewrite = true
+            timelineState.storage = .corrupt; timelineState.priorHistoryUnavailable = true
+            timelineState.priorHistoryUnavailableReason = .corrupt
+        } catch {
+            timelineNeedsRewrite = true
+            timelineState.storage = .unavailable; timelineState.priorHistoryUnavailable = true
+            timelineState.priorHistoryUnavailableReason = .unavailable
+        }
+    }
+
+    private func persistTimeline() {
+        do {
+            var saved = timelineState
+            saved.storage = .available
+            var bytes = try Self.encoder.encode(saved)
+            while bytes.count > Self.byteLimit, !saved.events.isEmpty {
+                saved.events.removeFirst()
+                saved.truncatedCount = saturatedAdd(saved.truncatedCount, 1)
+                bytes = try Self.encoder.encode(saved)
+            }
+            guard bytes.count <= Self.byteLimit else { timelineState.storage = .unavailable; return }
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try bytes.write(to: timelineFile, options: .atomic)
+            timelineState = saved
+            timelineNeedsRewrite = false
+        } catch {
+            // No logging through this store, error description, or retries.
+            timelineState.storage = .unavailable
+        }
     }
 
     // MARK: What is kept
@@ -207,38 +328,7 @@ public actor FieldDiagnosticsStore {
             }
     }
 
-    private struct DebugInfo: Encodable {
-        let metrics: [FieldMetrics]
-        let diagnostics: [FieldDiagnostic]
-        let signposts: [String: [FieldSignpost]]
-        let zoneDeletions: [ZoneDeletionDebugInfo]
-        let rootReads: [CloudRootReadDiagnostic]
-    }
 
-    /// Keep callback ordering and error facts, excluding zone names and payloads.
-    private struct ZoneDeletionDebugInfo: Encodable {
-        let kind: String
-        var found: Bool?
-        var allowed: UInt64?
-        var failure: CloudZoneDeletionFailure?
-        var terminal: CloudZoneDeletionFailure?
-        var results: [Result]?
-        var category: CloudZoneDeletionLocalFailure?
-        struct Result: Encodable {
-            let failure: CloudZoneDeletionFailure?
-        }
-        init(_ diagnostic: CloudZoneDeletionDiagnostic) {
-            switch diagnostic {
-            case .read(let found, let allowed, let failure, let terminal):
-                kind = "read"; self.found = found; self.allowed = allowed
-                self.failure = failure; self.terminal = terminal
-            case .deleted(let results, let terminal):
-                kind = "deleted"; self.results = results.map { Result(failure: $0.failure) }; self.terminal = terminal
-            case .localFailure(let category, let failure):
-                kind = "localFailure"; self.category = category; self.failure = failure
-            }
-        }
-    }
 }
 
 /// A stored metric report.
@@ -304,7 +394,8 @@ public final class FieldDiagnosticsSubscriber {
                 do {
                     try await store.record(report)
                 } catch {
-                    Self.log.error("storing a metric report failed: \(error.localizedDescription, privacy: .public)")
+                    let code = FieldDiagnosticObservation.Failure.storageFailure(for: error)
+                    Self.log.error("fieldDiagnosticsStoreFailure operation=metricWrite code=\(code.rawValue, privacy: .public)")
                 }
             }
         }
@@ -313,7 +404,8 @@ public final class FieldDiagnosticsSubscriber {
                 do {
                     try await store.record(report)
                 } catch {
-                    Self.log.error("storing a diagnostic report failed: \(error.localizedDescription, privacy: .public)")
+                    let code = FieldDiagnosticObservation.Failure.storageFailure(for: error)
+                    Self.log.error("fieldDiagnosticsStoreFailure operation=diagnosticWrite code=\(code.rawValue, privacy: .public)")
                 }
             }
         }
