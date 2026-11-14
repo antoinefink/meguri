@@ -41,14 +41,14 @@ nonisolated enum ServiceAppExchangePhase: String {
 nonisolated func serviceAppUptimeMilliseconds() -> UInt64 { DispatchTime.now().uptimeNanoseconds / 1_000_000 }
 
 // Test-local StopEngine identities only. Retaining each original command also
-// prevents raw object-identity reuse from conflating later input origins.
+// prevents raw object-identity reuse from conflating later observations.
 nonisolated final class ServiceStopEngineTrace: Sendable {
     enum Phase: String, Sendable { case beforeCancel, cancelling, cancelReturned, postCancelDrain, closing }
     enum Boundary: Sendable {
-        case input, begin, end, core(BridgeCall), resultEnqueue, acknowledgementJoined
+        case inputReturned, begin, end, core(BridgeCall), resultEnqueue, acknowledgementJoined
         var label: String {
             switch self {
-            case .input: "input"
+            case .inputReturned: "inputReturned"
             case .begin: "begin"
             case .end: "end"
             case .core(let call): "Core.\(call)"
@@ -57,14 +57,14 @@ nonisolated final class ServiceStopEngineTrace: Sendable {
             }
         }
     }
-    private struct Origin: Sendable {
+    private struct ObservedReturn: Sendable {
         let command: CloudPolicyCommand
         let event: CloudPolicyEvent
         let phase: Phase
     }
     private struct State {
         var phase = Phase.beforeCancel
-        var origins: [Origin] = []
+        var returns: [ObservedReturn] = []
         var lines = 0
     }
     private let state = Mutex(State())
@@ -84,10 +84,10 @@ nonisolated final class ServiceStopEngineTrace: Sendable {
         for command in commands {
             guard case .stopEngine = command.action else { continue }
             state.withLock { value in
-                let origin = Origin(command: command, event: event, phase: value.phase)
-                value.origins.append(origin)
+                let observation = ObservedReturn(command: command, event: event, phase: value.phase)
+                value.returns.append(observation)
             }
-            record(command, at: .input)
+            record(command, at: .inputReturned)
         }
     }
     func record(_ command: CloudPolicyCommand, at boundary: Boundary, error: Bool? = nil) {
@@ -96,13 +96,13 @@ nonisolated final class ServiceStopEngineTrace: Sendable {
             // Bound emitted diagnostics, not retention of actual handles.
             state.lines += 1
             guard state.lines <= 256 else { return nil }
-            let index = state.origins.firstIndex { $0.command.raw === command.raw }
-            let origin = index.map { state.origins[$0] }
-            let handle = index.map { String($0 + 1) } ?? "unobservedInput"
-            let event = origin.map { Self.label($0.event) } ?? "unobservedInput"
-            let issuedPhase = origin?.phase.rawValue ?? "unobservedInput"
+            let index = state.returns.firstIndex { $0.command.raw === command.raw }
+            let observation = index.map { state.returns[$0] }
+            let handle = index.map { String($0 + 1) } ?? "unobservedReturn"
+            let event = observation.map { Self.label($0.event) } ?? "unobservedReturn"
+            let returnPhase = observation?.phase.rawValue ?? "unobservedReturn"
             let failure = error.map { " error=\($0)" } ?? ""
-            return "Service app heldActive.stopEngine handle=\(handle) boundary=\(boundary.label) reason=\(reason) phase=\(state.phase.rawValue) input=\(event) issuedPhase=\(issuedPhase) taskCancelled=\(Task.isCancelled)\(failure)"
+            return "Service app heldActive.stopEngine handle=\(handle) boundary=\(boundary.label) reason=\(reason) phase=\(state.phase.rawValue) observedReturnContext=\(event) observedReturnPhase=\(returnPhase) taskCancelled=\(Task.isCancelled)\(failure)"
         }
         if let line { print(line) }
     }
@@ -147,9 +147,13 @@ nonisolated final class ServiceStopEngineTrace: Sendable {
     }
     // Observation only: callbacks must record/yield without native calls or reentry.
     var onCommands: (@MainActor ([CloudPolicyCommand]) -> Void)? = nil
-    // Passive pairing of an actual input with its issued handles; no reentry.
+    // Return context only: production may merge buffered commands into output.
+    // Retain actual handles without claiming this input issued them; no reentry.
     var afterInput: (@MainActor (CloudPolicyEvent, CloudPolicyOutput) -> Void)?
     var beforeExecution: (@MainActor (CloudPolicyCommand) async -> Void)?
+    // Passive inspection after natural command/own ACK drain, immediately
+    // before the original admitted account completion changes Core authority.
+    var beforeAdmittedAccountCompletion: (@MainActor (UInt64) async -> Void)?
     #if DEBUG
     var observeCoreCall: (@Sendable (CloudPolicyCommand, BridgeCall) -> Void)?
     var afterMediaOriginalLookup: (@Sendable (CloudMediaRegistrationBoundary.Observation) async -> Void)?
@@ -522,6 +526,7 @@ nonisolated final class ServiceStopEngineTrace: Sendable {
     func prepareAccountRead(_ read: UInt64) async -> @MainActor (Bool) async -> SyncCommandResult {
         let complete = await production.prepareAccountRead(read)
         return { [self] admitted in
+            if admitted { await beforeAdmittedAccountCompletion?(read) }
             let result = await complete(admitted)
             if let error = result.error { capture(error, stage: .readAccountError) }
             for output in result.outputs { capture(output, stage: .readAccountOutputs) }

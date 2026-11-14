@@ -254,3 +254,8 @@ unit are not accepted. No reported failure is suppressed.
 See `U113-cancel-drain-r12-20261114.md` for the verified Core correction,
 the native failure and the remaining review work. Further repair is authorized
 by `repair-rounds-authorization-20261114.md`.
+
+## Round 13
+
+`U113-account-projection-r13-20261114.md` records the accepted temporary-account
+projection repair and passing native cases. Unit and peer acceptance remain open.

@@ -81,11 +81,18 @@ extension ReviewCollectionStartupTests {
             let drained = Mutex(false), releasedOriginal = Mutex(false)
             let joinedOwner = Mutex<UUID?>(nil)
             let ownerJoined = Mutex(false)
-            let projectedAccount = Mutex(false), acceptedAccount = Mutex(false)
+            let admittedAccount = Mutex(false), acceptedAccount = Mutex(false)
             let oldOwnerBookkeeping = Mutex(false)
             let changedRead = Mutex<UInt64?>(nil)
             let accountPending = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
             let accountFinished = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            defer {
+                a.sync.observeAccountPolicyDrain = nil; a.sync.observeCausalBoundary = nil
+                accountPending.continuation.finish(); accountFinished.continuation.finish()
+                drainAdmitted.continuation.finish(); drainFinished.continuation.finish()
+                backend.afterInput = nil; backend.beforeExecution = nil; backend.afterExecution = nil
+                backend.beforeAdmittedAccountCompletion = nil; backend.observeCoreCall = nil
+            }
             a.sync.observeCausalBoundary = { boundary, _ in
                 switch boundary {
                 case .ownDrainWaiting(let owner) where joinedOwner.withLock({ $0 == nil }):
@@ -108,11 +115,14 @@ extension ReviewCollectionStartupTests {
                     changedRead.withLock { $0 = read }
                     #expect(releasedOriginal.withLock { $0 })
                     #expect(activeCommitted.withLock { $0 })
-                    #expect(oldOwnerBookkeeping.withLock { $0 })
-                    projectedAccount.withLock { $0 = true }
+                    // Admission is observed before the async completion wrapper
+                    // inspects Core, and before Core accepts the new account.
+                    #expect(!oldOwnerBookkeeping.withLock { $0 })
+                    admittedAccount.withLock { $0 = true }
                 case .accountAccepted(let read, let verified, let succeeded)
                     where changedRead.withLock({ $0 == read }):
-                    #expect(projectedAccount.withLock { $0 })
+                    #expect(admittedAccount.withLock { $0 })
+                    #expect(oldOwnerBookkeeping.withLock { $0 })
                     #expect(!verified)
                     #expect(succeeded == (mode != 2))
                     acceptedAccount.withLock { $0 = true }
@@ -120,32 +130,34 @@ extension ReviewCollectionStartupTests {
                 default: break
                 }
             }
-            // Existing async execution seam: this actual command's ACK fences
-            // account admission while the fixture reads original Core facts.
-            // No async Core call is made from a record-only observation.
-            backend.beforeExecution = { command in
-                guard mode >= 2, case .statusChanged = command.action,
-                      activeCommitted.withLock({ $0 }), !oldOwnerBookkeeping.withLock({ $0 }) else { return }
+            backend.beforeAdmittedAccountCompletion = { read in
+                guard mode >= 2 else { return }
                 do {
-                    #expect(!projectedAccount.withLock { $0 })
+                    try #require(changedRead.withLock { $0 == read })
+                    try #require(admittedAccount.withLock { $0 })
+                    try #require(releasedOriginal.withLock { $0 } && switchReply.replyReturned)
+                    try #require(activeCommitted.withLock { $0 })
+                    try #require(!oldOwnerBookkeeping.withLock { $0 })
                     let saved = try await SelectedCloudControlInspection().current()
                     let complete = try #require(saved.publicationComplete)
                     let done = try #require(saved.publicationDoneActive)
                     try originalReplies.requireOriginalCommit(complete, before: done)
-                    #expect(done.origin == .saved)
-                    #expect(saved.status == .proven && saved.provenance == .runtimeAcceptedPublication)
-                    #expect(saved.bindingMatchesEpoch == .proven && saved.requiredScanComplete)
+                    try #require(done.origin == .saved)
+                    try #require(saved.status == .proven && saved.provenance == .runtimeAcceptedPublication)
+                    try #require(saved.bindingMatchesEpoch == .proven && saved.requiredScanComplete)
                     let currentGuard = try await backend.workflow.currentGuard()
                     let snapshot = try await backend.workflow.durableSnapshot()
                     let policy = try await backend.workflow.policy()
                     let status = try await policy.status()
-                    #expect(currentGuard == originalGuard)
-                    #expect(snapshot.binding == originalSnapshot.binding)
-                    #expect(status.accountStatus == .available && status.accountMatchesBinding)
-                    #expect(a.owner.generation == originalGeneration)
-                    #expect(try a.backend === backend)
-                    #expect(!projectedAccount.withLock { $0 })
+                    try #require(currentGuard == originalGuard)
+                    try #require(snapshot.binding == originalSnapshot.binding)
+                    try #require(status.accountStatus == .available && status.accountMatchesBinding)
+                    try #require(a.owner.generation == originalGeneration)
+                    try #require(try a.backend === backend)
+                    try #require(!acceptedAccount.withLock { $0 })
                     oldOwnerBookkeeping.withLock { $0 = true }
+                } catch is ExpectationFailedError {
+                    // #require already recorded this strict failure.
                 } catch { Issue.record(error) }
             }
             ownDrain = Task {
@@ -159,13 +171,6 @@ extension ReviewCollectionStartupTests {
             a.sync.observeAccountPolicyDrain = { stage in
                 if case .waiting = stage { accountPending.continuation.yield(true) }
             }
-            defer {
-                a.sync.observeAccountPolicyDrain = nil; a.sync.observeCausalBoundary = nil
-                accountPending.continuation.finish(); accountFinished.continuation.finish()
-                drainAdmitted.continuation.finish(); drainFinished.continuation.finish()
-                backend.afterInput = nil; backend.beforeExecution = nil; backend.afterExecution = nil
-                backend.observeCoreCall = nil
-            }
             if mode >= 2 {
                 let status: CloudAccountStatus = mode == 2 ? .temporarilyUnavailable : mode == 3 ? .noAccount : .available
                 let identity = mode == 4 ? Data("synthetic-different-account".utf8) : nil
@@ -174,7 +179,7 @@ extension ReviewCollectionStartupTests {
                 accountChange = Task { await a.sync.accountChanged() }
                 try #require(try await serviceAppSignal(accountPending.stream, stage: "live account BeginRead resolved, completion fenced by original SaveActive"))
                 #expect(await a.factory.accountReadCount == reads + 1)
-                #expect(!projectedAccount.withLock { $0 })
+                #expect(!admittedAccount.withLock { $0 })
                 #expect(!acceptedAccount.withLock { $0 })
             }
             let refused = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
@@ -206,7 +211,7 @@ extension ReviewCollectionStartupTests {
             #expect(retained.switchSent)
             #expect(!retained.publicationCancellable)
             #expect(try await SelectedCloudControlInspection().current().publicationDoneActive == nil)
-            #expect(!projectedAccount.withLock { $0 })
+            #expect(!admittedAccount.withLock { $0 })
             releasedOriginal.withLock { $0 = true }
             switchReply.release() // Only the original matching callback may settle ownership.
             try #require(try await serviceAppSignal(drainFinished.stream, stage: "original SaveActive own drain and ACKs finished"))
@@ -251,9 +256,9 @@ extension ReviewCollectionStartupTests {
                 #expect(SyncStatusPresentation.cancellationMessageKey(fresh.recovery) == "sync.cancelOp.publish.message.switchSent")
                 #expect(SyncText.value(SyncStatusPresentation.cancellationMessageKey(fresh.recovery))
                     != SyncText.value(SyncStatusPresentation.cancellationMessageKey(oldDialog.recovery)))
-                // Every input-issued raw handle stays retained through its
-                // original Core calls, result enqueue and ACK. Issued guards
-                // remain opaque; this trace claims only actual identity/origin.
+                // Every observed raw handle stays retained through its original
+                // Core calls, result enqueue and ACK. The collector labels the
+                // return context, which may include buffered commands.
                 let stopTrace = ServiceStopEngineTrace()
                 backend.afterInput = { stopTrace.input($0, output: $1) }
                 backend.beforeExecution = { stopTrace.record($0, at: .begin) }
@@ -296,7 +301,8 @@ extension ReviewCollectionStartupTests {
                 // BeginRead alone does not change owner (V9.1). The real lane
                 // commits this Saved result first, then admits account proof.
                 #expect(activeCommitted.withLock { $0 })
-                #expect(projectedAccount.withLock { $0 })
+                #expect(admittedAccount.withLock { $0 })
+                #expect(oldOwnerBookkeeping.withLock { $0 })
                 #expect(acceptedAccount.withLock { $0 })
                 #expect(try await connection.recoveryStatus() == nil)
                 let changed = try await SelectedCloudControlInspection().current()
@@ -317,7 +323,7 @@ extension ReviewCollectionStartupTests {
                 await #expect(throws: (any Error).self) { try await backend.workflow.validateSDK(originalSDK.instanceID) }
                 // Restore via the actual provider/read completion. The accepted
                 // same-account proof does not itself reactivate isolation.
-                backend.beforeExecution = nil
+                backend.beforeAdmittedAccountCompletion = nil
                 let restoredRead = Mutex<UInt64?>(nil)
                 let restoredAccount = Mutex(false)
                 a.sync.observeCausalBoundary = { boundary, _ in
@@ -325,10 +331,12 @@ extension ReviewCollectionStartupTests {
                     case .accountCompletion(let read, let followup, _, _, _, _, let admitted, _, _, _, _)
                         where admitted && !followup && restoredRead.withLock({ $0 == nil }):
                         restoredRead.withLock { $0 = read }
-                    case .accountAccepted(let read, let verified, let succeeded)
+                    case .accountAccepted(let read, _, let succeeded)
                         where restoredRead.withLock({ $0 == read }):
-                        #expect(verified && succeeded)
-                        restoredAccount.withLock { $0 = verified && succeeded }
+                        // verified reflects adapter delivery replay, which an
+                        // isolated binding may refuse until explicit Resume.
+                        #expect(succeeded)
+                        restoredAccount.withLock { $0 = succeeded }
                     default: break
                     }
                 }
@@ -353,11 +361,12 @@ extension ReviewCollectionStartupTests {
                 }
                 let restoredGuard = try await backend.workflow.currentGuard()
                 #expect(restoredGuard.generation == originalGuard.generation && restoredGuard.binding == originalGuard.binding)
+                let restoredSnapshot = try await backend.workflow.durableSnapshot()
+                #expect(restoredSnapshot.binding == originalSnapshot.binding)
                 let restoredAuthority = try await policy.status()
                 #expect(restoredAuthority.accountStatus == .available && restoredAuthority.accountMatchesBinding)
                 #expect(restoredAuthority.controls.bindingUsable == true)
                 let restoredSDK = try #require(await a.factory.engines.last)
-                #expect(restoredSDK.instanceID != originalSDK.instanceID)
                 try await backend.workflow.validateSDK(restoredSDK.instanceID)
                 // No Sending-ready assertion: the resumed instance must still
                 // satisfy the production fresh-Root path before later sends.

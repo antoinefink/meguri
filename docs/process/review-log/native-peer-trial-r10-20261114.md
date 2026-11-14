@@ -22,3 +22,14 @@ invoked without a visible error; audible output is not verified. Back to
 Decks leaves four New cards. No grade is recorded in this trial. Phone
 arrival, two-way review convergence, media delivery and cold peer persistence
 remain unverified. The exact Mac preview remains open on the deck page.
+
+## Signed Mac checkpoint at 78ccf827
+
+`build-app/20261114T203746Z-99845` passes on the clean checkpoint. The old
+preview quit normally and the exact new signed Standalone Debug app opened.
+A normal Sync Now records a succeeded exchange with zero selected changes;
+Settings logs show the successful step. The app returns to Unknown afterward.
+Source still marks attention completeness unavailable in `policy_runtime.rs`;
+a successful exchange does not prove all remaining work is known or complete.
+No phone delivery, media convergence or round trip is claimed. The public
+collection remains at four New cards, with no grade or replacement in this pass.

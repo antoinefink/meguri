@@ -217,7 +217,13 @@ public final class CloudAppAccountReader {
             guard let account, account.status != .couldNotDetermine,
                   account.status != .temporarilyUnavailable,
                   account.status != .available || account.identity != nil else {
-                return .init(outputs: [], error: BridgeError.unavailable(reason: "Cloud account proof unavailable"), verified: false)
+                if account?.status == .temporarilyUnavailable {
+                    // Accepted temporary status must stop policy as well as Core.
+                    let output = try await policy.projectIdentityRead(id)
+                    guard admits(id, epoch: expected), permit.isLive else { return cancelled() }
+                    outputs.append(output)
+                }
+                return .init(outputs: outputs, error: BridgeError.unavailable(reason: "Cloud account proof unavailable"), verified: false)
             }
             let output = try await policy.projectIdentityRead(id)
             guard admits(id, epoch: expected), permit.isLive else { return cancelled() }

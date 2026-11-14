@@ -16,6 +16,106 @@ private func projectionPolicy(_ gate: CloudCallbackGate) async throws -> CoreClo
 enum ProjectionInvalidation: Sendable { case refreeze, appClose, close, generation }
 
 extension EventTests {
+    @Test func acceptedTemporaryAccountReadProjectsStopAndAllowsLaterMatchingRead() async throws {
+        try await withNativePolicyFixture { f in
+            let (policy, executor) = try await nativePolicy(f)
+            let reader = await CloudAppAccountReader(workflow: f.core, policy: policy, factory: f.factory, adapter: f.adapter)
+            let original = try await f.engine()
+            let before = try await f.core.durableSnapshot()
+            #expect(try await policy.status().syncNow == .available)
+            await f.factory.appendAccountRead(.success(.init(status: .temporarilyUnavailable, identity: nil)))
+            let id = try await reader.begin(transition: true)
+            let prepared = await reader.prepareAccountRead(id)
+            let temporary = await prepared.complete()
+            #expect(temporary.error as? BridgeError == .unavailable(reason: "Cloud account proof unavailable"))
+            #expect(!temporary.verified)
+            try #require(temporary.outputs.count == 1)
+            let refusal = await prepared.refuse()
+            #expect(refusal.error as? BridgeError == temporary.error as? BridgeError)
+            let commands = temporary.outputs.flatMap { output -> [CoreBridge.CloudPolicyCommand] in
+                if case .commands(let commands) = output { return commands }; return []
+            }
+            #expect(commands.contains { if case .stopEngine = $0.action { true } else { false } })
+            for output in temporary.outputs { try await consumePolicySetup(output, executor: executor) }
+            let stopped = try await policy.status()
+            #expect(stopped.accountStatus == .temporary)
+            if case .unavailable = stopped.syncNow {} else { Issue.record("Temporary account must disable Sync Now") }
+            #expect(stopped.attention[.isolated, default: 0] == 0)
+            #expect(await f.adapter.retainedInstanceIDs().isEmpty)
+            #expect(await original.recordedTrace().contains(.released))
+            await #expect(throws: (any Error).self) { try await f.core.validateSDK(original.instanceID) }
+            #expect(try await f.core.durableSnapshot().binding == before.binding)
+
+            await f.factory.appendAccountRead(.success(.init(status: .available, identity: Data("synthetic-account-A".utf8))))
+            let restoredID = try await reader.begin(transition: true)
+            #expect(restoredID == id + 1)
+            let restored = await reader.read(restoredID)
+            #expect(restored.error == nil)
+            try #require(restored.outputs.count == 1)
+            for output in restored.outputs { try await consumePolicySetup(output, executor: executor) }
+            await reader.didProjectRead(restoredID)
+            let available = try await policy.status()
+            #expect(available.accountStatus == .available && available.accountMatchesBinding)
+            #expect(available.syncNow == .available)
+            let retained = await f.adapter.retainedInstanceIDs()
+            let current = try #require(retained.first)
+            #expect(retained.count == 1)
+            try await f.core.validateSDK(current)
+            #expect(try await f.core.durableSnapshot().binding == before.binding)
+            await reader.close()
+        }
+    }
+
+    @Test func undeterminedAndLaterFailedReadsDoNotProjectTemporaryStatus() async throws {
+        try await withNativePolicyFixture { f in
+            let (policy, _) = try await nativePolicy(f)
+            let reader = await CloudAppAccountReader(workflow: f.core, policy: policy, factory: f.factory, adapter: f.adapter)
+            let original = try await f.engine()
+            // Each read follows an already verified account in this process.
+            for status in [CoreBridge.CloudAccountStatus.couldNotDetermine, .available] {
+                await f.factory.appendAccountRead(.success(.init(status: status, identity: nil)))
+                let id = try await reader.begin(transition: false)
+                let result = await reader.read(id)
+                #expect(result.error as? BridgeError == .unavailable(reason: "Cloud account proof unavailable"))
+                #expect(result.outputs.isEmpty && !result.verified)
+                #expect(try await policy.status().accountStatus == .available)
+                try await f.core.validateSDK(original.instanceID)
+            }
+            let error = BridgeError.internal("synthetic-later-read-failure")
+            await f.factory.appendAccountRead(.failure(error))
+            let failedID = try await reader.begin(transition: false)
+            let failed = await reader.read(failedID)
+            #expect(failed.error as? BridgeError == error)
+            #expect(failed.outputs.isEmpty && !failed.verified)
+            #expect(try await policy.status().accountStatus == .available)
+            try await f.core.validateSDK(original.instanceID)
+            await reader.close()
+        }
+    }
+
+    @Test(arguments: ["stale", "cancelled", "frozen"])
+    func temporaryAccountReadRefusesInvalidPreparation(invalidation: String) async throws {
+        try await withNativePolicyFixture { f in
+            let (policy, _) = try await nativePolicy(f)
+            let reader = await CloudAppAccountReader(workflow: f.core, policy: policy, factory: f.factory, adapter: f.adapter)
+            await f.factory.appendAccountRead(.success(.init(status: .temporarilyUnavailable, identity: nil)))
+            let id = try await reader.begin(transition: false)
+            let prepared = await reader.prepareAccountRead(id)
+            if invalidation == "stale" { _ = try await reader.begin(transition: false) }
+            if invalidation == "frozen" { await reader.freeze() }
+            let completion = Task {
+                if invalidation == "cancelled" { withUnsafeCurrentTask { $0?.cancel() } }
+                return await prepared.complete()
+            }
+            let refused = await completion.value
+            #expect(refused.error is CancellationError)
+            #expect(refused.outputs.isEmpty && !refused.verified)
+            #expect(try await policy.status().accountStatus == .available)
+            await #expect(throws: (any Error).self) { try await policy.projectIdentityRead(id) }
+            await reader.close()
+        }
+    }
+
     @Test func closeDuringSetupFallbackProjectionRetainsResolverFailure() async throws {
         try await withNativePolicyFixture { f in
             let projection = CloudCallbackGate()
