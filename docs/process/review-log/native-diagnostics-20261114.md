@@ -105,3 +105,15 @@ Checkpoint `f4b3160d`: `static-checks/20261114T164611Z-38022` passes.
 Similarity `20261114T164614Z-38371` scans eight files with no flags; the
 review log is outside its source scope. Normal app wiring is a separate
 filtered implementation pass. This checkpoint remains WIP.
+
+The isolated native run `swift-test/20261114T165150Z-40353` compiles and
+runs 54 tests: 53 pass and one fails. The failing equality expects an ungrouped
+UInt64 maximum; the native English formatter preserves every digit and adds
+thousands separators. Follow-up `cleanroom/20261114T165532Z-42538` changes
+only that exact expected string. Production formatting and all assertions
+remain intact. The original failing result is retained.
+
+`swift-test/20261114T165629Z-43001` passes all 54 focused tests after the
+exact locale expectation correction. Native Core products are reused. This
+covers the store, timeline, standalone Settings component, presentation and
+real safe-copy producer controls; it does not cover the pending app wiring.

@@ -74,7 +74,7 @@ import Testing
         #expect(rows[1].count == "Recorded count: 0")
         #expect(rows[6].duration == "Recorded duration: 42 ms")
         #expect(rows[6].failure == "Failure reason: Permission denied")
-        #expect(rows[6].count == "Recorded count: 18446744073709551615")
+        #expect(rows[6].count == "Recorded count: 18,446,744,073,709,551,615")
     }
 
     @Test func rollbackTimesAreDisplayedUnadjustedWithoutReordering() async {
