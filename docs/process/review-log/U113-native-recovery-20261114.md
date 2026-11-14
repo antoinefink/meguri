@@ -106,3 +106,21 @@ Independent review `cleanroom/20261114T153423Z-89103` is running. Swift
 bindings, remaining focused checks and actual rendered controls still need
 verification. Both approved additional rounds are used. No further source
 repair is authorized by this record. U113, P24, gates and release stay open.
+
+### Final round-6 disposition
+
+Review `cleanroom/20261114T153423Z-89103` is terminal: no P0, five P1 and
+two P2 findings. Its full `codex.out` retains the counterexamples and required
+tests. Required areas: replacement completion, outgoing note-type changes,
+Undo/Redo, preview memory and the waiting-operation exit.
+
+`swift-test/20261114T154445Z-97546` passes 12 bridge/instrumentation tests.
+`swift-test/20261114T154753Z-1380` passes 35 diagnostics/presentation tests.
+`static-checks/20261114T154853Z-4036` passes; shared similarity
+`similarity/20261114T154853Z-4156` reports 34 files and no flags.
+
+These results do not close the source findings or the broader FFI failures.
+The unit remains unaccepted. A proposal for at most rounds 7–8 is prepared
+in `build/cloud-resume-diagnosis/U113-integration-rounds-owner-decision-20261114.md`.
+Further U113 source repair needs the owner's decision. Independent app work
+continues while that decision waits.
