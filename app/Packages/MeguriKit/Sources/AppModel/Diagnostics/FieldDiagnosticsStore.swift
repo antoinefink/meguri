@@ -42,6 +42,7 @@ public actor FieldDiagnosticsStore {
     private var timelineNeedsRewrite = false
     private var timelineState = FieldDiagnosticTimeline.empty
     private var processDroppedCount: UInt64 = 0
+    private var directoryAuthority: Result<FieldDiagnosticDirectory, any Error>?
 
     private let zoneDeletionDiagnostics: @Sendable () async -> [CloudZoneDeletionDiagnostic]
     private let rootReadDiagnostics: @Sendable () async -> [CloudRootReadDiagnostic]
@@ -136,7 +137,8 @@ public actor FieldDiagnosticsStore {
     public func debugInfo() async throws -> Data {
         let deletions = await zoneDeletionDiagnostics()
         let reads = await rootReadDiagnostics()
-        return try SafeFieldDiagnosticsExport.make(directory: directory, now: clock.now(), timeline: timeline(),
+        let snapshot = timeline()
+        return try SafeFieldDiagnosticsExport.make(directory: try? storageDirectory(), now: clock.now(), timeline: snapshot,
                                                    deletions: deletions, reads: reads)
     }
 
@@ -170,17 +172,16 @@ public actor FieldDiagnosticsStore {
 
     private func ingest(_ batch: FieldDiagnosticInbox.Batch) {
         loadTimeline()
+        do { _ = try storageDirectory() }
+        catch { timelineState.storage = .unavailable }
         let prior = timelineState
         let needsRepair = timelineNeedsRewrite
         let newDrops = batch.dropped >= processDroppedCount ? batch.dropped - processDroppedCount : 0
         timelineState.droppedCount = saturatedAdd(timelineState.droppedCount, newDrops)
         processDroppedCount = batch.dropped
         timelineState.events.append(contentsOf: batch.events)
-        // Stable ordering for equal observed times, including across reopen.
-        timelineState.events = timelineState.events.enumerated().sorted {
-            $0.element.observedAtUnixMilliseconds == $1.element.observedAtUnixMilliseconds
-                ? $0.offset < $1.offset : $0.element.observedAtUnixMilliseconds < $1.element.observedAtUnixMilliseconds
-        }.map(\.element)
+        // The persisted array and each inbox batch are already in admission
+        // order. Wall-clock rollback changes metadata, never observation order.
         if let now = diagnosticMilliseconds(clock.now()) {
             let cutoff = now - Int64(Self.timelineAgeSeconds * 1_000)
             let expired = timelineState.events.count(where: { $0.observedAtUnixMilliseconds < cutoff })
@@ -197,13 +198,11 @@ public actor FieldDiagnosticsStore {
         persistTimeline()
     }
 
-    private var timelineFile: URL { directory.appending(path: "timeline.json", directoryHint: .notDirectory) }
-
     private func loadTimeline() {
         guard !timelineLoaded else { return }
         timelineLoaded = true
         do {
-            let bytes = try boundedDiagnosticRead(timelineFile, limit: Self.byteLimit)
+            let bytes = try storageDirectory().read("timeline.json", limit: Self.byteLimit)
             var value = try JSONDecoder().decode(FieldDiagnosticTimeline.self, from: bytes)
             guard value.schemaVersion == 1 else {
                 timelineNeedsRewrite = true
@@ -243,8 +242,7 @@ public actor FieldDiagnosticsStore {
                 bytes = try Self.encoder.encode(saved)
             }
             guard bytes.count <= Self.byteLimit else { timelineState.storage = .unavailable; return }
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try bytes.write(to: timelineFile, options: .atomic)
+            try storageDirectory().write(bytes, name: "timeline.json", replacing: true)
             timelineState = saved
             timelineNeedsRewrite = false
         } catch {
@@ -295,37 +293,41 @@ public actor FieldDiagnosticsStore {
         return directory.appending(path: "\(folder)/\(stamp)-\(UUID().uuidString).json", directoryHint: .notDirectory)
     }
 
+    private func storageDirectory() throws -> FieldDiagnosticDirectory {
+        if directoryAuthority == nil {
+            directoryAuthority = Result { try FieldDiagnosticDirectory.root(directory) }
+        }
+        guard let directoryAuthority else { throw DiagnosticReadFailure.unavailable }
+        let authority = try directoryAuthority.get()
+        try authority.validate()
+        return authority
+    }
+
     /// Writes a new file; an existing file is never replaced. The bytes go
     /// to a staging file (`.tmp`, which readers ignore) first; the hard link
     /// to the final name appears at once, complete, and fails when that name
-    /// exists.
+    /// exists. Paths stay relative to retained directory descriptors.
     private func write<T: Encodable>(_ value: T, to file: URL) throws {
-        let folder = file.deletingLastPathComponent()
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let staging = folder.appending(path: "\(UUID().uuidString).tmp", directoryHint: .notDirectory)
-        defer { try? FileManager.default.removeItem(at: staging) }
-        try Self.encoder.encode(value).write(to: staging, options: [.withoutOverwriting])
-        try FileManager.default.linkItem(at: staging, to: file)
-    }
-
-    private func read<T: Decodable>(_ type: T.Type, from file: URL) throws -> T {
-        try JSONDecoder().decode(type, from: Data(contentsOf: file))
+        let relative = file.deletingLastPathComponent().pathComponents.dropFirst(directory.pathComponents.count).joined(separator: "/")
+        let folder = try storageDirectory().folder(relative, create: true)
+        try folder.write(Self.encoder.encode(value), name: file.lastPathComponent, replacing: false)
     }
 
     private func readAll<T: Decodable>(_ type: T.Type, in folder: String) throws -> [T] {
-        let dir = directory.appending(path: folder, directoryHint: .isDirectory)
-        guard FileManager.default.fileExists(atPath: dir.path(percentEncoded: false)) else { return [] }
-        return try FileManager.default.contentsOfDirectory(atPath: dir.path(percentEncoded: false))
-            .filter { $0.hasSuffix(".json") }
-            .sorted()
-            .compactMap { name -> T? in
-                do {
-                    return try read(type, from: dir.appending(path: name, directoryHint: .notDirectory))
-                } catch is DecodingError {
-                    // A partly written report: kept on disk, left out of the export.
-                    return nil
-                }
+        let stored: FieldDiagnosticDirectory
+        do {
+            stored = try storageDirectory().folder(folder)
+        } catch DiagnosticReadFailure.notFound {
+            return []
+        }
+        return try stored.names().filter { $0.hasSuffix(".json") }.sorted().compactMap { name -> T? in
+            do {
+                return try JSONDecoder().decode(type, from: stored.read(name))
+            } catch is DecodingError {
+                // A partly written report: kept on disk, left out of the export.
+                return nil
             }
+        }
     }
 
 

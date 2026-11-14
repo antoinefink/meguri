@@ -1,27 +1,6 @@
 import CoreBridge
-import Darwin
 import Foundation
 import Instrumentation
-import Synchronization
-
-nonisolated enum DiagnosticReadFailure: Error { case oversized, unavailable, notFound }
-
-/// Reject links and special files before any read; never allocate from an
-/// untrusted file size. A racing replacement cannot redirect an open fd.
-nonisolated func boundedDiagnosticRead(_ file: URL, limit: Int) throws -> Data {
-    let descriptor = file.path(percentEncoded: false).withCString { open($0, O_RDONLY | O_NOFOLLOW | O_NONBLOCK) }
-    guard descriptor >= 0 else {
-        throw errno == ENOENT ? DiagnosticReadFailure.notFound : DiagnosticReadFailure.unavailable
-    }
-    let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
-    defer { try? handle.close() }
-    var facts = stat()
-    guard fstat(descriptor, &facts) == 0, (facts.st_mode & S_IFMT) == S_IFREG else { throw DiagnosticReadFailure.unavailable }
-    guard facts.st_size <= limit else { throw DiagnosticReadFailure.oversized }
-    let bytes = try handle.read(upToCount: limit + 1) ?? Data()
-    guard bytes.count <= limit else { throw DiagnosticReadFailure.oversized }
-    return bytes
-}
 
 /// All export types are owned scalar projections. No SDK object is Encodable
 /// through this boundary, including MetricResult and DiagnosticResult.
@@ -29,6 +8,49 @@ nonisolated enum SafeFieldDiagnosticsExport {
     static let reportLimit = 32
     static let reportByteLimit = 65_536
     static let scanLimit = 512
+    static let archiveCountLimit = 512
+    static let archiveDepthLimit = 32
+    static let archiveStructureLimit = 4_096
+
+    /// Check structural cost before JSONDecoder constructs any containers.
+    /// Quoted SDK text is skipped, including escaped quotes and brackets.
+    static func validateArchive(_ bytes: Data) throws {
+        var depth = 0
+        var syntaxUnits = 0
+        var quoted = false
+        var escaped = false
+        for byte in bytes {
+            if quoted {
+                if escaped { escaped = false }
+                else if byte == 92 { escaped = true }
+                else if byte == 34 { quoted = false }
+                continue
+            }
+            if byte == 34 { quoted = true; continue }
+            if byte == 123 || byte == 91 { depth += 1; syntaxUnits += 1 }
+            else if byte == 125 || byte == 93 { depth -= 1 }
+            else if byte == 44 || byte == 58 { syntaxUnits += 1 }
+            guard depth <= archiveDepthLimit, syntaxUnits <= archiveStructureLimit else { throw DiagnosticReadFailure.oversized }
+        }
+    }
+
+    struct ArchiveKey: CodingKey {
+        let stringValue: String
+        let intValue: Int? = nil
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { return nil }
+    }
+
+    /// Read the owned array count without decoding any entry, state,
+    /// measurement or histogram. The input cost was checked before decoding.
+    struct EntryCount: Decodable {
+        let value: Int
+        init(from decoder: any Decoder) throws {
+            let entries = try decoder.unkeyedContainer()
+            guard let count = entries.count, count <= archiveCountLimit else { throw DiagnosticReadFailure.oversized }
+            value = count
+        }
+    }
 
     struct Section: Encodable {
         var omittedCountLowerBound = 0
@@ -79,57 +101,128 @@ nonisolated enum SafeFieldDiagnosticsExport {
         }
     }
 
-    struct ReportTime: Encodable {
+    struct ReportTime: Encodable, Decodable {
         let startUnixMilliseconds: Int64?
         let endUnixMilliseconds: Int64?
-        init(_ value: DateInterval) {
-            startUnixMilliseconds = diagnosticMilliseconds(value.start)
-            endUnixMilliseconds = diagnosticMilliseconds(value.end)
+        private enum CodingKeys: String, CodingKey { case start, duration }
+        init(from decoder: any Decoder) throws {
+            let fields = try decoder.container(keyedBy: CodingKeys.self)
+            let start = try fields.decode(Date.self, forKey: .start)
+            let duration = try fields.decode(TimeInterval.self, forKey: .duration)
+            guard duration.isFinite, duration >= 0 else {
+                throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Invalid report interval"))
+            }
+            startUnixMilliseconds = diagnosticMilliseconds(start)
+            endUnixMilliseconds = diagnosticMilliseconds(start.addingTimeInterval(duration))
+        }
+        private enum ExportKeys: String, CodingKey { case startUnixMilliseconds, endUnixMilliseconds }
+        func encode(to encoder: any Encoder) throws {
+            var fields = encoder.container(keyedBy: ExportKeys.self)
+            try fields.encodeIfPresent(startUnixMilliseconds, forKey: .startUnixMilliseconds)
+            try fields.encodeIfPresent(endUnixMilliseconds, forKey: .endUnixMilliseconds)
         }
     }
-    struct Metric: Encodable {
+
+    struct Metric: Encodable, Decodable {
         let receivedAtUnixMilliseconds: Int64?
         let reportTime: ReportTime
         let entryCount: Int
         // Histograms, states, units and SDK environment are intentionally not
         // projected in schema 1. Their absence is explicit, never zero values.
         let detailsUnavailable = true
-        init(_ value: FieldMetrics) {
-            receivedAtUnixMilliseconds = diagnosticMilliseconds(value.received)
-            reportTime = ReportTime(value.timeRange); entryCount = value.entries.count
+        private enum CodingKeys: String, CodingKey { case received, timeRange, entries }
+        init(from decoder: any Decoder) throws {
+            let fields = try decoder.container(keyedBy: CodingKeys.self)
+            receivedAtUnixMilliseconds = diagnosticMilliseconds(try fields.decode(Date.self, forKey: .received))
+            reportTime = try fields.decode(ReportTime.self, forKey: .timeRange)
+            entryCount = try fields.decode(EntryCount.self, forKey: .entries).value
+        }
+
+        private enum ExportKeys: String, CodingKey { case receivedAtUnixMilliseconds, reportTime, entryCount, detailsUnavailable }
+        func encode(to encoder: any Encoder) throws {
+            var fields = encoder.container(keyedBy: ExportKeys.self)
+            try fields.encodeIfPresent(receivedAtUnixMilliseconds, forKey: .receivedAtUnixMilliseconds)
+            try fields.encode(reportTime, forKey: .reportTime)
+            try fields.encode(entryCount, forKey: .entryCount)
+            try fields.encode(detailsUnavailable, forKey: .detailsUnavailable)
         }
     }
-    struct Diagnostic: Encodable {
+    struct Diagnostic: Encodable, Decodable {
         enum Kind: String, Encodable { case hang, diskWriteException, appLaunch, memoryException, other }
         let receivedAtUnixMilliseconds: Int64?
         let reportTime: ReportTime
         let kind: Kind
         let detailsUnavailable = true
-        init(_ value: FieldDiagnostic) {
-            receivedAtUnixMilliseconds = diagnosticMilliseconds(value.received)
-            reportTime = ReportTime(value.timeRange)
-            switch value.result {
-            case .hang: kind = .hang
-            case .diskWriteException: kind = .diskWriteException
-            case .appLaunch: kind = .appLaunch
-            default:
+        private enum CodingKeys: String, CodingKey { case received, timeRange, result }
+        init(from decoder: any Decoder) throws {
+            let fields = try decoder.container(keyedBy: CodingKeys.self)
+            receivedAtUnixMilliseconds = diagnosticMilliseconds(try fields.decode(Date.self, forKey: .received))
+            reportTime = try fields.decode(ReportTime.self, forKey: .timeRange)
+            let result = try fields.nestedContainer(keyedBy: ArchiveKey.self, forKey: .result)
+            guard result.allKeys.count == 1, let key = result.allKeys.first else {
+                throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Invalid diagnostic discriminator"))
+            }
+            // Only the discriminator is read. Its SDK payload is never decoded.
+            switch key.stringValue {
+            case "hangDiagnostic", "hang": kind = .hang
+            case "diskWriteExceptionDiagnostic", "diskWriteException": kind = .diskWriteException
+            case "appLaunchDiagnostic", "appLaunch": kind = .appLaunch
+            case "memoryExceptionDiagnostic", "memoryException":
                 #if os(iOS)
-                if case .memoryException = value.result { kind = .memoryException } else { kind = .other }
+                kind = .memoryException
                 #else
                 kind = .other
                 #endif
+            default: kind = .other
             }
         }
+        private enum ExportKeys: String, CodingKey { case receivedAtUnixMilliseconds, reportTime, kind, detailsUnavailable }
+        func encode(to encoder: any Encoder) throws {
+            var fields = encoder.container(keyedBy: ExportKeys.self)
+            try fields.encodeIfPresent(receivedAtUnixMilliseconds, forKey: .receivedAtUnixMilliseconds)
+            try fields.encode(reportTime, forKey: .reportTime)
+            try fields.encode(kind, forKey: .kind)
+            try fields.encode(detailsUnavailable, forKey: .detailsUnavailable)
+        }
     }
-    struct Signpost: Encodable {
+    struct Signpost: Encodable, Decodable {
         let reportTime: ReportTime
         let totalCount: UInt64?
         let detailsUnavailable = true
-        init(_ value: FieldSignpost) {
-            reportTime = ReportTime(value.timeRange)
-            totalCount = UInt64(exactly: value.metric.totalCount)
+        // Used only to check membership in the registered interval allowlist.
+        let name: String
+        let category: String
+        private enum CodingKeys: String, CodingKey { case timeRange, metric }
+        private enum MetricKeys: String, CodingKey { case totalCount, signpostName, signpostCategory }
+        init(from decoder: any Decoder) throws {
+            let fields = try decoder.container(keyedBy: CodingKeys.self)
+            reportTime = try fields.decode(ReportTime.self, forKey: .timeRange)
+            let metric = try fields.nestedContainer(keyedBy: MetricKeys.self, forKey: .metric)
+            totalCount = try metric.decode(UInt64.self, forKey: .totalCount)
+            name = try metric.decode(String.self, forKey: .signpostName)
+            category = try metric.decode(String.self, forKey: .signpostCategory)
+        }
+        private enum ExportKeys: String, CodingKey { case reportTime, totalCount, detailsUnavailable }
+        func encode(to encoder: any Encoder) throws {
+            var fields = encoder.container(keyedBy: ExportKeys.self)
+            try fields.encode(reportTime, forKey: .reportTime)
+            try fields.encodeIfPresent(totalCount, forKey: .totalCount)
+            try fields.encode(detailsUnavailable, forKey: .detailsUnavailable)
         }
     }
+    struct SignpostArchive: Decodable {
+        let values: [Signpost]
+        let omitted: Int
+        init(from decoder: any Decoder) throws {
+            var entries = try decoder.unkeyedContainer()
+            guard let count = entries.count, count <= archiveCountLimit else { throw DiagnosticReadFailure.oversized }
+            var summaries: [Signpost] = []
+            for _ in 0..<min(count, reportLimit) { summaries.append(try entries.decode(Signpost.self)) }
+            values = summaries
+            omitted = max(0, count - reportLimit)
+        }
+    }
+
     struct Failure: Encodable {
         let code: Int64?
         let retryAfterMilliseconds: Int64?
@@ -196,33 +289,27 @@ nonisolated enum SafeFieldDiagnosticsExport {
         let collectionDetailsUnavailable = true
     }
 
-    static func make(directory: URL, now: Date, timeline: FieldDiagnosticTimeline,
+    static func make(directory: FieldDiagnosticDirectory?, now: Date, timeline: FieldDiagnosticTimeline,
                      deletions: [CloudZoneDeletionDiagnostic], reads: [CloudRootReadDiagnostic]) throws -> Data {
         var budget = Budget()
         var metricStatus = Section(detailsUnavailable: true)
-        let metrics = reports(FieldMetrics.self, folder: directory.appending(path: "metrics"), budget: &budget, status: &metricStatus).map(Metric.init)
+        let metrics = reports(Metric.self, root: directory, folder: "metrics", budget: &budget, status: &metricStatus)
         var diagnosticStatus = Section(detailsUnavailable: true)
-        let diagnostics = reports(FieldDiagnostic.self, folder: directory.appending(path: "diagnostics"), budget: &budget, status: &diagnosticStatus).map(Diagnostic.init)
+        let diagnostics = reports(Diagnostic.self, root: directory, folder: "diagnostics", budget: &budget, status: &diagnosticStatus)
         var signpostStatus = Section(detailsUnavailable: true)
         var signposts: [String: [Signpost]] = [:]
-        let signpostRoot = directory.appending(path: "signposts")
-        let signpostRootFacts = try? signpostRoot.resourceValues(forKeys: [.isSymbolicLinkKey])
-        let signpostRootIsLink = signpostRootFacts?.isSymbolicLink == true
-        if signpostRootIsLink { signpostStatus.unavailable = true }
-        for interval in IntervalNames.all where !signpostRootIsLink {
-            let stored = reports([FieldSignpost].self, folder: directory.appending(path: "signposts/\(interval.name)"), budget: &budget, status: &signpostStatus)
+        for interval in IntervalNames.all {
+            let stored = reports(SignpostArchive.self, root: directory, folder: "signposts/\(interval.name)", budget: &budget, status: &signpostStatus)
             var values: [Signpost] = []
             for report in stored {
-                // Only registered intervals are exported.
-                for value in report.prefix(reportLimit) {
-                    guard value.metric.signpostName == interval.name,
-                          value.metric.signpostCategory == interval.category.rawValue else {
+                for value in report.values {
+                    guard value.name == interval.name, value.category == interval.category.rawValue else {
                         signpostStatus.unreadableCount += 1; continue
                     }
-                    if values.count < reportLimit { values.append(Signpost(value)) }
+                    if values.count < reportLimit { values.append(value) }
                     else { signpostStatus.omittedCountLowerBound += 1 }
                 }
-                signpostStatus.omittedCountLowerBound += max(0, report.count - reportLimit)
+                signpostStatus.omittedCountLowerBound += report.omitted
             }
             if !values.isEmpty { signposts[interval.name] = values }
         }
@@ -259,42 +346,35 @@ nonisolated enum SafeFieldDiagnosticsExport {
 
     /// A bounded directory sample, newest filenames within that sample. When
     /// enumeration stops early, no claim is made about unvisited reports.
-    static func reports<T: Decodable>(_ type: T.Type, folder: URL, budget: inout Budget, status: inout Section) -> [T] {
-        var folderFacts = stat()
-        let accessible = folder.path(percentEncoded: false).withCString { lstat($0, &folderFacts) }
-        guard accessible == 0 else {
-            if errno != ENOENT { status.unavailable = true }
-            return []
-        }
-        guard (folderFacts.st_mode & S_IFMT) == S_IFDIR else { status.unavailable = true; return [] }
+    static func reports<T: Decodable>(_ type: T.Type, root: FieldDiagnosticDirectory?, folder: String,
+                                      budget: inout Budget, status: inout Section) -> [T] {
+        guard let root else { status.unavailable = true; return [] }
         guard budget.scanned < scanLimit else { status.scanTruncated = true; return [] }
-        let enumerationFailed = Synchronization.Mutex(false)
-        guard let enumerator = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
-                                                             options: [.skipsSubdirectoryDescendants, .skipsHiddenFiles], errorHandler: { _, _ in
-            enumerationFailed.withLock { $0 = true }; return false
-        }) else { status.unavailable = true; return [] }
-        var candidates: [URL] = []
-        while budget.scanned < scanLimit, let file = enumerator.nextObject() as? URL {
-            budget.scanned += 1
-            guard file.pathExtension == "json" else { continue }
-            let facts = try? file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
-            guard facts?.isRegularFile == true, facts?.isSymbolicLink != true else { status.unreadableCount += 1; continue }
-            candidates.append(file)
+        let stored: FieldDiagnosticDirectory
+        let names: [String]
+        do {
+            stored = try root.folder(folder)
+            names = try stored.names(limit: scanLimit - budget.scanned)
+        } catch DiagnosticReadFailure.notFound {
+            return []
+        } catch {
+            status.unavailable = true; return []
         }
+        budget.scanned += names.count
         if budget.scanned == scanLimit { status.scanTruncated = true }
-        status.unavailable = status.unavailable || enumerationFailed.withLock { $0 }
-        candidates.sort { $0.lastPathComponent > $1.lastPathComponent }
+        let candidates = names.filter { !$0.hasPrefix(".") && $0.hasSuffix(".json") }.sorted(by: >)
         status.omittedCountLowerBound += max(0, candidates.count - reportLimit)
         var values: [T] = []
-        for file in candidates.prefix(reportLimit).reversed() {
+        for name in candidates.prefix(reportLimit).reversed() {
             guard budget.bytes > 0 else { status.omittedCountLowerBound += 1; status.scanTruncated = true; continue }
             do {
                 let limit = min(reportByteLimit, budget.bytes)
                 // Charge each attempt for its maximum read size; a complete
                 // read returns unused capacity.
                 budget.bytes -= limit
-                let bytes = try boundedDiagnosticRead(file, limit: limit)
+                let bytes = try stored.read(name, limit: limit)
                 budget.bytes += limit - bytes.count
+                try validateArchive(bytes)
                 values.append(try JSONDecoder().decode(type, from: bytes))
             } catch DiagnosticReadFailure.oversized {
                 status.oversizedCount += 1

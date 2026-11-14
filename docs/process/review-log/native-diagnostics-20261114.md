@@ -27,3 +27,20 @@ Evidence for this component:
 The next pass fixes the review findings before exposing copied output. Native
 UI, real operation observations, remaining integration checks and release
 acceptance remain open. Existing system-report archive retention is unchanged.
+
+## Store repair subpass
+
+Author: `cleanroom/20261114T152953Z-88128`; independent review:
+`cleanroom/20261114T154253Z-95524`. The review finds no P0/P1. Event order
+and archive summary decoding are repaired by inspection. Two P2 issues remain:
+child-directory authority reuse and recovery after initial directory failure.
+The bounded cloud accessor remains pending for the integration pass.
+
+`swift-test/20261114T154753Z-1380` passes 35 diagnostics/presentation tests.
+`static-checks/20261114T154853Z-4036` passes. Shared source similarity
+`similarity/20261114T154853Z-4156` scans 34 files with no flags. The source
+privacy check passes after whole comment and local identifier replacements;
+assertions and runtime behavior are unchanged. Earlier failures stay retained.
+
+This remains WIP. Real operation producers and native copy actions are absent.
+The integration pass must resolve the remaining review work before UI exposure.
