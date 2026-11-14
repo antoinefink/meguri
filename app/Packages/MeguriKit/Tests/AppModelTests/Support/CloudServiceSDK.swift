@@ -317,7 +317,7 @@ actor ServiceSDK: CloudKitEngine {
         }
     }
     private func runScheduledFetch(options: CloudFetchOptions, generation: UInt64,
-                                   began: CloudKitNetworkCompletion, joined: CloudKitNetworkCompletion) async throws {
+                                   began: CloudKitNetworkCompletion? = nil, joined: CloudKitNetworkCompletion? = nil) async throws {
         do {
             try await acquireNetwork()
             defer { releaseNetwork(); scheduleAutomaticSend() }
@@ -325,10 +325,19 @@ actor ServiceSDK: CloudKitEngine {
             try await fetchPass(options: options, reason: .scheduled, firstDatabase: {
                 // Actual scheduled database read returned before the app's
                 // fetchChanges invocation joins this original network task.
-                began.complete(nil)
-                try await joined.drain()
+                began?.complete(nil)
+                try await joined?.drain()
             })
-        } catch { began.complete(error); throw error }
+        } catch { began?.complete(error); throw error }
+    }
+    func scheduledFetchChanges(options: CloudFetchOptions) async throws {
+        try await waitForEventBookkeeping()
+        try requireNetwork()
+        let generation = lifetime.authority()
+        let operation = try lifetime.admit(cancelSDK: { await self.cancelSDKCalls() }) {
+            try await self.runScheduledFetch(options: options, generation: generation)
+        }
+        try await operation.drain()
     }
     private func invokeFetch(options: CloudFetchOptions, generation: UInt64, prepare: @Sendable () async throws -> Void,
                              validate: @Sendable () throws -> Void) async throws {

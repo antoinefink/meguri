@@ -65,7 +65,7 @@ struct CloudDependentFetchRefusalError: Error {
 }
 
 // One original proof wait owns both the first result and its producer. The
-// account receipt is attached only at the validated StopEngine cancellation.
+// account receipt is attached at its validated original stop/cancel boundary.
 fileprivate struct CloudFetchProofCompletion: Sendable {
     struct AccountStop: Sendable {
         let command: CloudPolicyCommand
@@ -136,10 +136,14 @@ public struct CloudPolicyFetchProofOutcome: Sendable {
         preconditionFailure("Fetch proof failure requires its original error")
     }
     public var accountStopCancellation: Bool {
-        guard !callerCancelled, earlierFailure == nil, cleanupFailure == nil,
-              issuer != nil, error is CancellationError,
+        guard earlierFailure == nil, cleanupFailure == nil,
+              let issuer, issuer.original === original, error is CancellationError,
               case .accountStop = completion.producer else { return false }
-        return true
+        switch issuer.command.action {
+        case .requestFetch: return !callerCancelled
+        case .runExchange: return true
+        default: return false
+        }
     }
     var nativeCancellation: CloudPolicyNativeCancellation? {
         guard callerCancelled, earlierFailure == nil, cleanupFailure == nil,
@@ -165,13 +169,15 @@ struct CloudFetchProofError: Error {
 private final class CloudFetchProofWait: Sendable {
     let issuer: CloudFetchProofIssuer?
     let original: CloudSDKStopWitness
+    let cancellationIntent: CloudPolicyCancellationContext?
     private struct State {
         var completion: CloudFetchProofCompletion?
         var waiter: CheckedContinuation<CloudFetchProofCompletion, Never>?
     }
     private let state = Mutex(State())
-    init(issuer: CloudFetchProofIssuer?, original: CloudSDKStopWitness) {
-        self.issuer = issuer; self.original = original
+    init(issuer: CloudFetchProofIssuer?, original: CloudSDKStopWitness,
+         cancellationIntent: CloudPolicyCancellationContext?) {
+        self.issuer = issuer; self.original = original; self.cancellationIntent = cancellationIntent
     }
     func complete(_ result: Result<Void, any Error>, producer: CloudFetchProofCompletion.Producer) {
         let completion = CloudFetchProofCompletion(result: result, producer: producer)
@@ -677,9 +683,13 @@ public actor CloudKitSyncAdapter {
            !instance.authorityRetired, !instance.failed, instance.retirementFailure == nil,
            instance.firstStopReason == nil,
            let wait = instance.rootReadIdentity?.wait, let issuer = wait.issuer,
-           issuer.original === instance.stopWitness, case .requestFetch = issuer.command.action,
+           issuer.original === instance.stopWitness,
            wait.original === instance.stopWitness, wait.original.sdk == origin {
-            proofStop = .init(command: accountStop, execution: execution)
+            switch issuer.command.action {
+            case .requestFetch, .runExchange:
+                proofStop = .init(command: accountStop, execution: execution)
+            default: proofStop = nil
+            }
         } else { proofStop = nil }
         if instance.firstStopReason == nil { instance.firstStopReason = reason }
         #if DEBUG
@@ -1901,7 +1911,7 @@ public actor CloudKitSyncAdapter {
                     throw CloudFetchProofError(outcome: .init(completion: proof.outcome.completion,
                         issuer: proof.outcome.issuer, original: proof.outcome.original,
                         earlierFailure: earlierFailure, cleanupFailure: cleanupFailure,
-                        callerCancelled: Task.isCancelled))
+                        callerCancelled: Task.isCancelled || proof.outcome.callerCancelled))
                 }
                 throw earlierFailure ?? originalError
             }
@@ -2083,6 +2093,9 @@ public actor CloudKitSyncAdapter {
     func waitForBlockedFetchForTesting(_ origin: String) async throws { try await waitForBlockedFetch(origin) }
     #endif
     public func refreshControlIdentity() async throws {
+        try await refreshControlIdentity(proof: CloudOriginalCommandProofYield())
+    }
+    private func refreshControlIdentity(proof: CloudOriginalCommandProofYield) async throws {
         try Task.checkCancellation()
         guard !quiescing, !suspended, !suspending else { throw CancellationError() }
         if appOwnsAccountObservation {
@@ -2103,13 +2116,13 @@ public actor CloudKitSyncAdapter {
                     policyOperationOutputs.insert(contentsOf: outputs, at: 0)
                     throw BridgeError.unavailable(reason: "Cloud outputs require original acknowledgement")
                 }
-                try await admit(CloudOriginalCommandProofYield())
+                try await admit(proof)
                 try Task.checkCancellation()
                 return
             }
             await acknowledge(outputs)
             try Task.checkCancellation()
-            try await admit(CloudOriginalCommandProofYield())
+            try await admit(proof)
             try Task.checkCancellation()
             return
         }
@@ -2125,7 +2138,11 @@ public actor CloudKitSyncAdapter {
     #endif
     private func refreshFetchReadIdentity(instance: Instance, issuer: CloudFetchProofIssuer?) async throws {
         let cancellationIntent = CloudPolicyCancellationContext.current
-        let wait = CloudFetchProofWait(issuer: issuer, original: instance.stopWitness)
+        let wait = CloudFetchProofWait(issuer: issuer, original: instance.stopWitness, cancellationIntent: cancellationIntent)
+        let proof = CloudOriginalCommandProofYield(cancellationIntent: cancellationIntent, originalRevocation: { cause in
+            guard let issuer, issuer.original === wait.original else { return }
+            wait.complete(.failure(CancellationError()), producer: .caller(cause))
+        })
         let task = Task {
             do {
                 guard self.owned.values.contains(where: { $0 === instance }), !instance.stopping else {
@@ -2133,7 +2150,7 @@ public actor CloudKitSyncAdapter {
                 }
                 // This lookup is a proof read, not an engine account event;
                 // do not advance the no-state point of the retained FetchRead.
-                try await self.refreshControlIdentity()
+                try await self.refreshControlIdentity(proof: proof)
                 wait.complete(.success(()), producer: .provider)
             } catch { wait.complete(.failure(error), producer: .provider) }
         }
@@ -2147,7 +2164,10 @@ public actor CloudKitSyncAdapter {
             if case .failure = completion.result {
                 throw CloudFetchProofError(outcome: .init(completion: completion, issuer: issuer,
                     original: instance.stopWitness, earlierFailure: nil, cleanupFailure: nil,
-                    callerCancelled: Task.isCancelled))
+                    callerCancelled: Task.isCancelled || {
+                        if case .caller = completion.producer { return true }
+                        return false
+                    }()))
             }
             try Task.checkCancellation()
         } onCancel: {
@@ -2194,13 +2214,19 @@ public actor CloudKitSyncAdapter {
             try await execution.validateControl()
             requestedRunning = false
             intentGeneration &+= 1
-            exchangeTask?.task.cancel()
             if quiescing {
+                exchangeTask?.task.cancel()
                 heldStops.append((command, execution, policy))
                 return true
             }
-            if let original { try await stopInstance(original, reason: .policyStop, policyStop: false, execution: execution, accountStop: command) }
-            else { try await execution.retireOriginal() }
+            // Record the validated account-stop producer on the original proof
+            // before cancellation can win its first-completion race.
+            let stopping = original.flatMap {
+                beginStop($0, reason: .policyStop, policyStop: false, execution: execution, accountStop: command)
+            }
+            exchangeTask?.task.cancel()
+            if let stopping { try await stopping.value }
+            else if original == nil { try await execution.retireOriginal() }
             if quiescing, let original, let instance = owned[original], !instance.authorityRetired {
                 heldStops.append((command, execution, policy))
                 return true
@@ -2501,6 +2527,25 @@ public actor CloudKitSyncAdapter {
         // switches to the replacement's fresh current SDK.
         let engine = exchangeOrigin.flatMap { owned[$0]?.engine }
         await engine?.cancelOperations()
+    }
+    func recordAccountExchangeCancellation(_ command: CloudPolicyCommand, execution: CoreCloudPolicyExecution,
+                                           intent: CloudPolicyCancellationContext) async throws {
+        guard command.accountRetirement != nil, case .cancelExchange(let exchangeID) = command.action else { return }
+        let origin = try await execution.originalSDK()
+        try await execution.validateControl()
+        guard !Task.isCancelled, let origin, current == origin, exchangeOrigin == origin,
+              let policyWorkerID, exchangeTask?.id == policyWorkerID,
+              let instance = owned[origin], !instance.stopping, !instance.authorityRetired,
+              !instance.failed, instance.retirementFailure == nil, instance.firstStopReason == nil,
+              let wait = instance.rootReadIdentity?.wait, let issuer = wait.issuer,
+              wait.cancellationIntent === intent,
+              issuer.original === instance.stopWitness, wait.original === instance.stopWitness,
+              wait.original.sdk == origin,
+              case .runExchange(let originalID, _) = issuer.command.action, originalID == exchangeID
+        else { return }
+        intent.beforeCancellation {
+            wait.complete(.failure(CancellationError()), producer: .accountStop(.init(command: command, execution: execution)))
+        }
     }
     private func cancelExchange(id: UUID) {
         if exchangeTask?.id == id { exchangeTask?.task.cancel() }

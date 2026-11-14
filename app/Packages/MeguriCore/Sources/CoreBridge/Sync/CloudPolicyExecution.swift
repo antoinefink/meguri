@@ -832,8 +832,13 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
             case .cancelExchange(let id):
                 try await revokeFlushPark(joining: id)
                 let execution = try await policy.prepareExecution(command)
-                if execution != nil, exchange == id {
-                    _ = nativeExchangeCancellation?.capture()
+                if let execution, exchange == id {
+                    let intent = nativeExchangeCancellation
+                    if let intent { try await adapter.recordAccountExchangeCancellation(command, execution: execution, intent: intent) }
+                    guard exchange == id, nativeExchangeCancellation === intent else {
+                        return .init(outputs: outputs, error: nil, deferred: false, acknowledgedOutputCount: delivery.count)
+                    }
+                    _ = intent?.capture()
                     nativeExchangeTask?.cancel(); await adapter.cancelPolicyExchange()
                 }
             }

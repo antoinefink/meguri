@@ -228,6 +228,55 @@ extension ReviewCollectionStartupTests {
             }
             await app.factory.resolveNextAccountRead(with: result)
             await app.factory.holdNextAccountRead { await gate.hold() }
+            let backend = try app.backend
+            var original: CloudPolicyCommand?
+            var inspectedFailures = 0, originalResults = 0
+            #if DEBUG
+            var originalACKs = 0
+            #endif
+            backend.beforeExecution = { command in
+                guard case .runExchange = command.action else { return }
+                #expect(original == nil)
+                original = command
+                if outcome == 3 || outcome == 4 {
+                    backend.expectedCommandFailures[ObjectIdentifier(command.raw)] = { result in
+                        inspectedFailures += 1
+                        #expect(result.fetchProofOutcome?.preservesFailure == true)
+                        #expect(result.fetchProofOutcome?.accountStopCancellation == false)
+                        #expect(result.nativeCancellation == nil && !result.deferred)
+                        if outcome == 3 {
+                            #expect((result.error as? BridgeError) == .unavailable(reason: "Cloud account proof unavailable"))
+                        } else {
+                            guard case .wire? = result.error as? ServiceWorkflowFailure else {
+                                Issue.record("Original proof lost the injected wire failure"); return
+                            }
+                        }
+                    }
+                }
+            }
+            backend.afterExecution = { command, result in
+                guard let original, command.raw === original.raw else { return }
+                originalResults += 1
+                #expect(result.acknowledgedOutputCount == result.outputs.count)
+                if outcome == 1 || outcome == 2 {
+                    #expect(result.error is CancellationError)
+                    #expect(result.fetchProofOutcome?.accountStopCancellation == true)
+                    #expect(result.fetchProofOutcome?.preservesFailure == false)
+                    #expect(!Task.isCancelled && SyncCommandTaskContext.current?.shutdownCancelled == false)
+                }
+            }
+            #if DEBUG
+            app.sync.observeCausalBoundary = { boundary, command in
+                if case .commandAcknowledgementJoined = boundary, let original, let command,
+                   command.raw === original.raw { originalACKs += 1 }
+            }
+            #endif
+            defer {
+                backend.beforeExecution = nil; backend.afterExecution = nil
+                #if DEBUG
+                app.sync.observeCausalBoundary = nil
+                #endif
+            }
             app.sync.syncNow()
             do {
                 try #require(try await serviceAppSignal(gate.entered, stage: "original command fresh proof provider held"))
@@ -239,8 +288,14 @@ extension ReviewCollectionStartupTests {
                 let after = try await workflow.durableSnapshot()
                 #expect(after.entities == before.entities)
                 #expect(try await workflow.trackingSendables() == pending)
+                #expect(original != nil && originalResults == 1)
+                #if DEBUG
+                #expect(originalACKs == 1)
+                #endif
+                #expect(inspectedFailures == (outcome >= 3 ? 1 : 0) && backend.expectedCommandFailures.isEmpty)
                 if outcome == 0 { #expect(!app.sync.operationFailed) }
                 else if outcome == 1 || outcome == 2 {
+                    #expect(!app.sync.operationFailed)
                     let content = try #require(JSONSerialization.jsonObject(with: after.trackingContent) as? [Any])
                     let binding = try #require(content.first as? [Any])
                     let facts = try #require(binding.last as? [String: Any])
@@ -269,6 +324,24 @@ extension ReviewCollectionStartupTests {
                 await provider.hold()
                 providerReturned.continuation.yield(true)
             }
+            let originalBackend = try app.backend
+            var originalCommand: CloudPolicyCommand?
+            var originalResults = 0
+            originalBackend.beforeExecution = { command in
+                guard case .runExchange = command.action else { return }
+                #expect(originalCommand == nil)
+                originalCommand = command
+            }
+            originalBackend.afterExecution = { command, result in
+                guard let originalCommand, command.raw === originalCommand.raw else { return }
+                originalResults += 1
+                #expect(Task.isCancelled && SyncCommandTaskContext.current?.shutdownCancelled == true)
+                #expect(result.error is CancellationError && result.nativeCancellation != nil)
+                #expect(result.fetchProofOutcome?.preservesFailure == false)
+                #expect(result.fetchProofOutcome?.accountStopCancellation == false)
+                #expect(result.acknowledgedOutputCount == result.outputs.count)
+            }
+            defer { originalBackend.beforeExecution = nil; originalBackend.afterExecution = nil }
             app.sync.syncNow()
             var close: Task<Bool, Never>?
             do {
@@ -284,6 +357,7 @@ extension ReviewCollectionStartupTests {
                 // native callback/counter drains and the backend closes.
                 try #require(try await serviceAppSignal(closed.stream, stage: "close before ignoring provider returned"))
                 #expect(oldBackend.closed && oldBackend.closeReturned == 1)
+                #expect(oldBackend === originalBackend && originalCommand != nil && originalResults == 1)
                 try await app.reopen()
                 await app.sync.drainOperations()
                 let successor = try app.backend

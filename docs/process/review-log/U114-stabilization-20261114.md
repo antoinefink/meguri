@@ -36,3 +36,39 @@ Privacy private/20261114T082425Z-73610: pass, two files. Similarity
 20261114T082426Z-73609: pass, two files, zero flags, zero exceptions.
 The current U114 extension has one of two reviews complete. The U113 P1 is
 still open. No Unit, P24, gate or release pass is claimed.
+
+## Second additional round
+
+Start: 693e09e8. Author 093411Z-21082. Final export 094707Z-25695.
+This round retains the failed observations and candidates. Temporary traces
+were removed before final review.
+
+Original cancellation now reaches the proof bridge with its retained cause.
+Account output marks only its own validated cancellation. Earlier errors stay
+errors. The media fixture uses the SDK scheduled path; its old manual call
+had no adapter completion. Resume follows the existing R11 decision.
+
+Native 094719Z-26147 passes six functions and 17 cases. Independent review
+094929Z-29425 finds no P0, P1 or P2. It changes no source. The review covers
+the candidate, not unit acceptance.
+
+Bridge 094940Z-30196 fails compilation and runs no tests. Export 095048Z-33135
+adds explicit types in one new test. Runtime code, assertions and call order
+stay unchanged. Bridge 095753Z-47707 compiles: 11 functions pass, two fail.
+Five modes disagree with the asserted stored outcome. One old fixture has
+no UpdatePending before its intended fault. These failures remain open.
+
+Native 095102Z-33657: 156 functions, 155 pass, one fail. The earlier eleven
+pass. The result file retains the failed case and its evidence.
+
+Privacy 095911Z-49471 passes all 13 changed source/test files. Similarity
+095926Z-49762 passes the same files: zero flags and zero exceptions. Static
+checks 100105Z-52458 pass.
+
+The two approved rounds are used. Further source repair is held for Antoine's
+scope decision. The request names these three checks only. U113 remains open.
+No Unit trailer, P24 closure, full gate, signed trial or release pass is claimed.
+
+Typing-delta review 100313Z-55515 finds no P0, P1 or P2. It confirms unchanged
+semantics, assertions, calls and gate order. This completes source review
+coverage for the same second round. Both failed test runs remain failed.

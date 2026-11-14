@@ -117,6 +117,98 @@ extension ReviewCollectionStartupTests {
         }
     }
 
+    @Test(arguments: [false, true])
+    func shutdownRequestsOriginalCancellationBeforeRevokingProofAndKeepsProviderFailure(earlierProviderFailure: Bool) async throws {
+        try await withShutdownCommands { media, _ in
+            let backend = SyncOwnerFake(), provider = SyncOwnerGate(), delivery = SyncOwnerGate()
+            let entered = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let proof = CloudOriginalCommandProofYield()
+            let providerError = BridgeError.internal("synthetic-original-proof-provider")
+            let cancellation = Mutex<(pending: Bool, shutdown: Bool)?>(nil)
+            var executions = 0, returnedError: (any Error)?
+            #if DEBUG
+            var acknowledgements = 0
+            #endif
+            let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: nil)
+            await sync.preparePlatform(); await sync.completeOpenedHost(generation: 201)
+            await sync.prepareConnectionAuthority()
+            backend.resolveAccount = { _ in
+                entered.continuation.yield(true)
+                await provider.hold()
+                return .init(outputs: [], error: earlierProviderFailure ? providerError : nil,
+                    deferred: false, accountVerified: !earlierProviderFailure)
+            }
+            backend.executeCommand = { command in
+                #expect(command.raw === media.raw)
+                executions += 1
+                guard let admit = CloudOriginalCommandProofYield.admission,
+                      let context = SyncCommandTaskContext.current else {
+                    Issue.record("Missing original command proof admission")
+                    return .init(outputs: [], error: providerError, deferred: false)
+                }
+                let intent = context.cancellationIntent
+                // Model the inner proof bridge without automatically cancelling
+                // its child: the original's handler must run before revocation.
+                let child = Task { try await admit(proof) }
+                let terminal = await withTaskCancellationHandler {
+                    let terminal = await child.result
+                    if earlierProviderFailure { await delivery.hold() }
+                    return terminal
+                } onCancel: {
+                    let shutdown = intent.capture().request?.source == .shutdown
+                    cancellation.withLock { $0 = (proof.isPending, shutdown) }
+                }
+                #expect(Task.isCancelled && context.shutdownCancelled)
+                switch terminal {
+                case .success:
+                    Issue.record("Original proof unexpectedly succeeded")
+                    return .init(outputs: [], error: nil, deferred: false)
+                case .failure(let error):
+                    returnedError = error
+                    return .init(outputs: [], error: error, deferred: false)
+                }
+            }
+            backend.onQuiesce = { provider.release(); delivery.release() }
+            #if DEBUG
+            sync.observeCausalBoundary = { boundary, command in
+                if case .commandAcknowledgementJoined = boundary, let command, command.raw === media.raw {
+                    acknowledgements += 1
+                }
+            }
+            #endif
+            defer {
+                provider.release(); delivery.release(); entered.continuation.finish()
+                #if DEBUG
+                sync.observeCausalBoundary = nil
+                #endif
+            }
+            backend.nextCommands = [media]; sync.receive(.refresh(.cloud))
+            do {
+                try #require(try await serviceAppSignal(entered.stream, stage: "original proof resolver held before shutdown"))
+                try #require(proof.isPending)
+                if earlierProviderFailure {
+                    provider.release()
+                    await delivery.waitUntilHeld()
+                    #expect(!proof.isPending && sync.operationFailed && sync.failureRevision == 1)
+                }
+                #expect(await sync.cancelAndDrain())
+                let observation = try #require(cancellation.withLock { $0 })
+                #expect(observation.shutdown && observation.pending == !earlierProviderFailure)
+                #expect(executions == 1 && backend.closed && backend.closeCount == 1)
+                #if DEBUG
+                #expect(acknowledgements == 1)
+                #endif
+                #expect(sync.operationFailed == earlierProviderFailure)
+                #expect(sync.failureRevision == (earlierProviderFailure ? 2 : 0))
+                if earlierProviderFailure { #expect((returnedError as? BridgeError) == providerError) }
+                else { #expect(returnedError is CancellationError) }
+            } catch {
+                provider.release(); delivery.release(); _ = await sync.cancelAndDrain()
+                throw error
+            }
+        }
+    }
+
     @Test func ownedShutdownCancellationAcknowledgesOriginalMediaAndReopensHealthy() async throws {
         try await withShutdownCommands { media, _ in
             let original = SyncOwnerFake(), successor = SyncOwnerFake()

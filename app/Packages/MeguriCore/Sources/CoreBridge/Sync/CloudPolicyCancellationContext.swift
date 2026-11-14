@@ -45,6 +45,27 @@ public final class CloudPolicyCancellationContext: Sendable {
             value.pending = RequestStamp(sequence: sequence, source: source)
         }
     }
+    // Only the retained bridge may forward an already recorded original request.
+    // A previous capture without a request stays unowned.
+    func captureRequestedCancellation() -> Snapshot? {
+        storage.withLock { value in
+            if let captured = value.captured {
+                guard let request = captured.request, request.source != .other else { return nil }
+                return captured
+            }
+            guard let request = value.pending, request.source != .other else { return nil }
+            let captured = Snapshot(ownerID: id, request: request)
+            value.captured = captured
+            return captured
+        }
+    }
+    // Account output cannot claim a wait already cancelled by its original owner.
+    func beforeCancellation(_ operation: () -> Void) {
+        storage.withLock { value in
+            guard value.pending == nil, value.captured == nil else { return }
+            operation()
+        }
+    }
     /// Capture before any actor hop or revocation wait. A previous observation,
     /// including one without request metadata, is never revised by later work.
     func capture(predecessor: Snapshot? = nil, deadlineReached: Bool = false) -> Snapshot {

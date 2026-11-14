@@ -9,12 +9,29 @@ public final class CloudOriginalCommandProofYield: Sendable {
     public let id = UUID()
     private let completion = CloudKitNetworkCompletion()
     private let pending = Mutex(true)
-    init() {}
+    private let cancellationIntent: CloudPolicyCancellationContext?
+    private let originalRevocation: (@Sendable (CloudPolicyCancellationContext.Snapshot) -> Void)?
+    init(cancellationIntent: CloudPolicyCancellationContext? = nil,
+         originalRevocation: (@Sendable (CloudPolicyCancellationContext.Snapshot) -> Void)? = nil) {
+        self.cancellationIntent = cancellationIntent
+        self.originalRevocation = originalRevocation
+    }
     public var isPending: Bool { pending.withLock { $0 } }
     public func finish(_ error: (any Error)? = nil) {
+        finish(error, beforeCompletion: {})
+    }
+    public func revoke(cancellation context: CloudPolicyCancellationContext) {
+        finish(CancellationError()) {
+            guard cancellationIntent === context,
+                  let cause = context.captureRequestedCancellation() else { return }
+            originalRevocation?(cause)
+        }
+    }
+    private func finish(_ error: (any Error)?, beforeCompletion: () -> Void) {
         guard pending.withLock({ value in
             guard value else { return false }; value = false; return true
         }) else { return }
+        beforeCompletion()
         completion.complete(error)
     }
     public func wait() async throws {

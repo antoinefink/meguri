@@ -1216,7 +1216,12 @@ public final class SyncCoordinator {
         enqueue(.proofAccountRead)
     }
     private func revokeProofWaits() {
-        for wait in proofWaits.values { wait.proof.finish(CancellationError()) }
+        for wait in proofWaits.values {
+            if let id = wait.owner?.commandID, operationTasks[id]?.isCancelled == true,
+               let context = operationContexts[id] {
+                wait.proof.revoke(cancellation: context.cancellationIntent)
+            } else { wait.proof.finish(CancellationError()) }
+        }
         proofWaits.removeAll()
         retryAccountCompletion()
     }
@@ -2069,6 +2074,10 @@ public final class SyncCoordinator {
             return true
         }
         closing = true
+        // Cancellation belongs to the original commands, before revoking an
+        // inner proof can report CancellationError as a provider failure.
+        if entryActivation { cancelCommands(.replacement) } else { cancelCommandsForShutdown() }
+        cancelAccountTask(shutdown: true)
         revokeProofWaits()
         retainedRecoveryStart = nil
         initialOwnAdmission.setOpen(false)

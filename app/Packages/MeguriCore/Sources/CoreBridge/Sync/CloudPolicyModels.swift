@@ -595,7 +595,7 @@ public enum CloudPolicyAction: Sendable {
     }
 }
 // Only a successful original account projection can attach this receipt to
-// its own StopEngine. It is diagnostic provenance, never execution authority.
+// its own stop/cancel commands. It is provenance, never execution authority.
 struct CloudPolicyAccountRetirement: Sendable {
     let status: CloudPolicyStatus
     fileprivate init(_ status: CloudPolicyStatus) { self.status = status }
@@ -632,11 +632,13 @@ public enum CloudPolicyOutput: Sendable {
                   if case .statusChanged(let status) = issued.action { return .init(status) }
                   return nil
               }).last,
-              status.accountStatus == .noAccount || (status.accountStatus == .available && !status.accountMatchesBinding)
+              status.accountStatus == .noAccount || (status.accountStatus == .available && !status.accountMatchesBinding),
+              commands.contains(where: { if case .stopEngine(.gateClosed) = $0.action { true } else { false } })
         else { return .init(value) }
         return .commands(commands.map { issued in
             let receipt: CloudPolicyAccountRetirement?
             if case .stopEngine(.gateClosed) = issued.action { receipt = .init(status) }
+            else if case .cancelExchange = issued.action { receipt = .init(status) }
             else { receipt = nil }
             return CloudPolicyCommand(issued, accountRetirement: receipt)
         })

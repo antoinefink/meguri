@@ -886,6 +886,19 @@ extension ReviewCollectionStartupTests {
             #expect(harness.sync.preview != nil && !harness.sync.operationFailed)
             #expect(try await connection.recoveryStatus() == nil)
             #expect(harness.factory.created.count == starts)
+            // Approved R11: the ready Resume decision on this same backend,
+            // accepted account reads and availability witness reusable proof.
+            // A stopped binding's accountMatchesBinding is not that witness.
+            guard case .ready(_, let resumeSummary) = harness.sync.preview else {
+                throw CloudOwnTransportFailure.unexpectedReply
+            }
+            let matchingResumePreviewBackend = try #require(harness.backends.last)
+            let priorMatchingProcessProof = resumeSummary.decision == .confirmResume
+                && resumeSummary.resumeBindingId != nil
+                && matchingResumePreviewBackend === backend
+                && verifiedReads > 0
+                && harness.sync.status?.accountStatus == .available
+            try #require(priorMatchingProcessProof)
             await harness.sync.confirmResume()
             let resumeDiagnosticParts: [String] = [
                 "connectionFailure=\(String(describing: harness.sync.connectionFailure))",
@@ -910,7 +923,8 @@ extension ReviewCollectionStartupTests {
             #expect(try await connection.recoveryStatus() == nil)
             #expect(harness.factory.created.count == starts + 1 && harness.factory.maximumLive == 1)
             #expect(harness.factory.created.last?.serialization == nil)
-            #expect(harness.factory.accountReadsAtCreation.last == accountReads + 1)
+            let creationReads = try #require(harness.factory.accountReadsAtCreation.last)
+            #expect(creationReads == accountReads + 1 || (creationReads == accountReads && priorMatchingProcessProof))
             #expect(harness.sync.status?.controls.bindingActive == true)
             await harness.sync.confirmResume() // no authority left to reuse
             #expect(harness.factory.created.count == starts + 1)

@@ -88,7 +88,7 @@ extension ReviewCollectionStartupTests {
             // Five fresh SDK fetches, each with one actual collection boundary.
             // No retry/prepareExecution/Core fetch or issued-command port is called.
             for expected in [1, 2, 3, 4, 5] {
-                try await assetRetryRegisteredSDKFetch(a, zone: zone)
+                try await assetRetryScheduledSDKFetch(a, zone: zone)
                 try await firstBackend.waitForAssetRetry()
                 await a.sync.waitForInputs()
                 let observed = try await assetRetryObservation(name: name, noteID: seed.id)
@@ -107,7 +107,7 @@ extension ReviewCollectionStartupTests {
             }
             try #require(await wire.withheldPayloadDeliveries == 1)
             // A sixth real drain in this open grants no sixth accepted read.
-            try await assetRetryRegisteredSDKFetch(a, zone: zone)
+            try await assetRetryScheduledSDKFetch(a, zone: zone)
             await a.sync.waitForInputs()
             try #require(try await assetRetryCollectionDrains(a, zone: zone) == drainBase + 6)
             try #require(firstBackend.assetRetryStarted == 5 && firstBackend.assetRetryCompleted == 5)
@@ -138,7 +138,7 @@ extension ReviewCollectionStartupTests {
             let nextDrainBase = try await assetRetryCollectionDrains(a, zone: zone)
             // The FIRST qualifying collection drain must issue the command via
             // SyncCoordinator and execute it through the retained native backend.
-            try await assetRetryRegisteredSDKFetch(a, zone: zone)
+            try await assetRetryScheduledSDKFetch(a, zone: zone)
             try await nextBackend.waitForAssetRetry()
             await a.sync.waitForInputs()
             try #require(try await assetRetryCollectionDrains(a, zone: zone) == nextDrainBase + 1)
@@ -220,12 +220,16 @@ private func assetRetryEdit(_ harness: ServiceAppHarness, note: NoteRecord, fiel
     await harness.sync.waitForInputs()
 }
 
-private func assetRetryRegisteredSDKFetch(_ harness: ServiceAppHarness, zone: String) async throws {
+private func assetRetryScheduledSDKFetch(_ harness: ServiceAppHarness, zone: String) async throws {
     let engine = try #require(await harness.factory.engines.last)
-    // One SDK fetch yields one collection drain; Sync Now yields two.
-    try await engine.fetchChanges(options: .init(zones: [zone], priorityZones: [zone], groupID: "synthetic-asset-\(UUID().uuidString)"))
+    let drains = try await assetRetryCollectionDrains(harness, zone: zone)
+    let manualGroups = await engine.manualFetchGroups
+    // Enter the SDK's admitted scheduled network path, without a manual call.
+    try await engine.scheduledFetchChanges(options: .init(zones: [zone], priorityZones: [zone], groupID: "synthetic-asset-\(UUID().uuidString)"))
     try await engine.waitForEventBookkeeping()
     await harness.sync.waitForInputs()
+    try #require(await engine.manualFetchGroups == manualGroups)
+    try #require(try await assetRetryCollectionDrains(harness, zone: zone) == drains + 1)
 }
 
 private func assetRetryCollectionDrains(_ harness: ServiceAppHarness, zone: String) async throws -> Int {
