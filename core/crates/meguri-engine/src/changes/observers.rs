@@ -31,9 +31,33 @@ use crate::ports::ChangeObserver;
 /// ```
 pub struct ObserverRows<'a> {
     writer: &'a Writer,
+    native_owner: Option<(&'a crate::executor::ExecShared, i64, (u64, u64))>,
 }
 
 impl ObserverRows<'_> {
+    /// Cover the original writer's commit before granting native layout
+    /// authority. A foreign commit cannot enter the pinned image while its
+    /// observer commits dependent tracking state. This never submits an op.
+    pub fn with_native_layout_authority<T, E>(&self, capture: impl FnOnce() -> Result<T, E>) -> Result<T, E>
+    where E: From<crate::EngineError> + From<StorageError> {
+        let (shared, version, file) = self.native_owner
+            .ok_or_else(|| crate::EngineError::unavailable("native commit ownership unavailable"))?;
+        if self.writer.external_data_version()? != version || self.writer.validate_native_identity()? != file {
+            return Err(crate::EngineError::unavailable("native commit image changed").into());
+        }
+        shared.coverage.sync(shared, self.writer)?;
+        self.writer.with_committed_image(version, file, capture)
+    }
+
+    pub fn validate_native_layout_image(&self) -> Result<(), crate::EngineError> {
+        let (_, version, file) = self.native_owner
+            .ok_or_else(|| crate::EngineError::unavailable("native commit ownership unavailable"))?;
+        if self.writer.external_data_version()? != version || self.writer.validate_native_identity()? != file {
+            return Err(crate::EngineError::unavailable("native commit image changed"));
+        }
+        Ok(())
+    }
+
     /// Exact raw millisecond ID from the borrowed committed writer view.
     /// Returns zero only when this card has no history.
     pub fn max_revlog_id(&self, card: CardId) -> Result<i64, StorageError> {
@@ -394,8 +418,11 @@ fn missing(what: &str) -> StorageError {
 }
 
 /// Runs every observer in order; one that panics does not stop the others.
-pub(crate) fn notify(observers: &[Arc<dyn ChangeObserver>], commit: &ObservedCommit<'_>, writer: &Writer) {
-    let rows = ObserverRows { writer };
+pub(crate) fn notify(
+    observers: &[Arc<dyn ChangeObserver>], commit: &ObservedCommit<'_>, writer: &Writer,
+    native_owner: Option<(&crate::executor::ExecShared, i64, (u64, u64))>,
+) {
+    let rows = ObserverRows { writer, native_owner };
     for observer in observers {
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             observer.observe_with_rows(commit, &rows)

@@ -31,6 +31,7 @@ public struct CloudBuildConfiguration: Sendable {
 protocol SyncCoordinatorBackend: AnyObject, Sendable {
     var connection: CoreCloudConnectionService? { get }
     var own: CloudOwnExecutor? { get }
+    func stopSyncing() async throws
     func input(_ event: CloudPolicyEvent) async throws -> CloudPolicyOutput
     func execute(_ command: CloudPolicyCommand) async -> SyncCommandResult
     // RunCleanup alone reports its qualified local-pass return before waiting
@@ -53,6 +54,7 @@ protocol SyncCoordinatorBackend: AnyObject, Sendable {
     func close() async throws
 }
 extension SyncCoordinatorBackend {
+    func stopSyncing() async throws { throw BridgeError.cloudConnection(.notOffered) }
     func execute(_ command: CloudPolicyCommand, corePrepared: @escaping @MainActor @Sendable () async -> Void) async -> SyncCommandResult {
         await execute(command)
     }
@@ -729,6 +731,38 @@ public final class SyncCoordinator {
                 recordConnectionFailure(error)
             }
         }
+    }
+    public func stopUsingICloud() async { await chooseLocalOnly(stopOnly: true) }
+    public func keepLocalOnly() async { await chooseLocalOnly(stopOnly: false) }
+    private func chooseLocalOnly(stopOnly: Bool) async {
+        guard !closing, !suspended, !replacing, setupState == .attached,
+              initialAdoptionEnabledBefore == nil, ownTask == nil, recovery == nil,
+              let backend, let connection = backend.connection else { return }
+        let expected = generation, revision = hostRevision
+        let ready: CloudConnectionPreview?
+        if case .ready(let handle, _) = preview {
+            guard let owner = readyPreviewOwner, owner.generation == expected, owner.revision == revision else { return }
+            ready = handle
+        } else { ready = nil }
+        connectionFailure = nil
+        startOwnTask(backend: backend, generation: expected, revision: revision) { [self] in
+            defer { finishOwnWork() }
+            do {
+                if stopOnly { try await backend.stopSyncing() }
+                else { try await connection.keepLocalOnly(generation: expected, preview: ready) }
+                guard !closing, expected == generation, revision == hostRevision else { return }
+                preview = nil; readyPreviewOwner = nil
+                saveEnabled(false)
+                receive(.refresh(.cloud))
+            } catch {
+                if expected == generation, revision == hostRevision, !closing {
+                    preview = nil; readyPreviewOwner = nil
+                    recordConnectionFailure(error)
+                    receive(.refresh(.cloud))
+                }
+            }
+        }
+        await ownTask?.value
     }
     public func confirmPublication() async { await confirmConnection(.publication) }
     public func confirmPublication(onConfirmation: @escaping @MainActor (CloudPublicationConfirmation.Result) -> Void,

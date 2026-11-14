@@ -58,6 +58,10 @@ public struct CloudConnectionSummary: Sendable {
     public let unsentCounts: [CloudCountKind: UInt64]
     /// When false, unsentCounts and unsentChangeCount are only lower bounds.
     public let unsentCountsExact: Bool
+    public let fetchedUnverifiedCount: UInt64
+    public let heldCount: UInt64
+    public let isolatedUnsentCount: UInt64
+    public let conflictCopyCount: UInt64
     public var unsentChangeCount: UInt64 {
         unsentCounts.values.reduce(0) { total, count in
             let sum = total.addingReportingOverflow(count)
@@ -73,6 +77,10 @@ public struct CloudConnectionSummary: Sendable {
         resumeBindingId = v.resumeBindingId
         unsentCounts = cloudKindCounts(v.unsentCounts)
         unsentCountsExact = v.unsentCountsExact
+        fetchedUnverifiedCount = v.fetchedUnverifiedCount
+        heldCount = v.heldCount
+        isolatedUnsentCount = v.isolatedUnsentCount
+        conflictCopyCount = v.conflictCopyCount
         decision = switch v.decision { case .noCollection: .noCollection; case .confirmUpload: .confirmUpload; case .confirmAdoption: .confirmAdoption; case .confirmResume: .confirmResume; case .chooseCollection: .chooseCollection; case .cloudUnreadable: .cloudUnreadable }
     }
 }

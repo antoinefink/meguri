@@ -70,6 +70,8 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
             mediaTransport: mediaTransport, persisted: persisted)
     }
 
+    func stopSyncing() async throws { try await workflow.stopSyncing() }
+
     static func make(workflow: CoreCloudWorkflowService, factory: any CloudKitEngineFactory,
                      ownTransport: any CloudOwnTransport, mediaTransport: any CloudMediaTransport,
                      persisted: @escaping @Sendable () async -> Void,

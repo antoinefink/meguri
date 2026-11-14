@@ -403,7 +403,7 @@ impl Runtime {
     }
 
     /// Stored pending entities are a lower bound when native projection is
-    /// unproved. Page bodies rather than retaining another collection image.
+    /// unproved. Read bounded header pages without loading payload bodies.
     pub(super) fn known_unsent_lower_bounds(&self) -> Result<BTreeMap<codec::Kind, u64>, RuntimeError> {
         let s = self.state();
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
@@ -414,11 +414,11 @@ impl Runtime {
                 let mut count = 0u64;
                 let mut after = None;
                 loop {
-                    let page = store.entity_page(b.binding.id, kind, after.as_deref())?;
+                    let page = store.entity_count_page(b.binding.id, kind, after.as_deref())?;
                     if page.is_empty() { break; }
                     for e in page {
                         after = Some(e.key.clone());
-                        if e.mark.is_some() || e.local_rev > e.acked_rev {
+                        if e.pending {
                             count = count.checked_add(1).ok_or(Error::InvalidData)?;
                         }
                     }

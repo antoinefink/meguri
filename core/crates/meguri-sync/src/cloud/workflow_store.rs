@@ -222,6 +222,11 @@ fn keys(c: &Connection, b: BindingId, kind: codec::Kind, after: Option<&[u8]>) -
     Ok(s.query_map(params![b.0.as_slice(), kind as i64, after], |r| r.get(0))?
         .collect::<Result<Vec<_>, _>>()?)
 }
+pub(super) struct EntityCountHeader {
+    pub key: Vec<u8>,
+    pub name: String,
+    pub pending: bool,
+}
 impl TrackingStore {
     pub(super) fn install_workflow(&mut self) -> Result<(), Error> {
         check_version(&self.connection)?;
@@ -351,6 +356,33 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
             [b.0.as_slice()],
             |r| r.get(0),
         )?)
+    }
+    pub(super) fn entity_count_page(
+        &self, b: BindingId, kind: codec::Kind, after: Option<&[u8]>,
+    ) -> Result<Vec<EntityCountHeader>, Error> {
+        self.binding(b)?.ok_or(Error::BindingNotFound)?;
+        keys(&self.connection, b, kind, after)?.into_iter().map(|key| {
+            let sql = if kind == codec::Kind::Note {
+                "SELECT json_extract(content,'$.name'),json_extract(content,'$.local_rev'),
+                 json_extract(content,'$.acked_rev'),json_type(content,'$.mark') NOT IN ('null')
+                 FROM cloud_runtime_notes WHERE binding=?1 AND id=?2"
+            } else {
+                "SELECT json_extract(content,'$.name'),json_extract(content,'$.local_rev'),
+                 json_extract(content,'$.acked_rev'),json_type(content,'$.mark') NOT IN ('null')
+                 FROM cloud_runtime_entities WHERE binding=?1 AND key=?2 AND kind=?3"
+            };
+            let read = |row: &rusqlite::Row<'_>| -> rusqlite::Result<(String, i64, i64, Option<bool>)> {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            };
+            let (name, local, acked, marked) = if kind == codec::Kind::Note {
+                let RowKey::Id(id) = row_key(kind, &key)? else { return Err(Error::InvalidData); };
+                self.connection.query_row(sql, params![b.0.as_slice(), id], read)?
+            } else {
+                self.connection.query_row(sql, params![b.0.as_slice(), &key, kind as i64], read)?
+            };
+            if local < 0 || acked < 0 { return Err(Error::InvalidData); }
+            Ok(EntityCountHeader { key, name, pending: marked.unwrap_or(false) || local > acked })
+        }).collect()
     }
     pub fn entity_page(
         &self,
@@ -908,6 +940,24 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         commit: &meguri_engine::ObservedCommit<'_>,
         rows: &meguri_engine::ObserverRows<'_>,
         random: &dyn meguri_model::rng::RandomSource,
+        hook: impl FnMut(usize) -> Result<(), Error>,
+    ) -> Result<Vec<(String, u64)>, runtime::RuntimeError> {
+        let native_layout = !matches!(commit.changes.source,
+            meguri_model::changes::OpSource::CloudIncoming | meguri_model::changes::OpSource::CloudRekey)
+            && commit.changes.notetypes.iter().any(|change| {
+                commit.payload.identity_layout(change.id).is_some()
+                    || commit.payload.row_presence(Table::Notetypes, &RowKey::Id(change.id.0))
+                        .is_some_and(|presence| !presence.before && presence.after)
+            });
+        if native_layout {
+            return rows.with_native_layout_authority(||
+                self.capture_workflow_image(b, open, commit, rows, random, hook));
+        }
+        self.capture_workflow_image(b, open, commit, rows, random, hook)
+    }
+    fn capture_workflow_image(
+        &mut self, b: BindingId, open: u64, commit: &meguri_engine::ObservedCommit<'_>,
+        rows: &meguri_engine::ObserverRows<'_>, random: &dyn meguri_model::rng::RandomSource,
         mut hook: impl FnMut(usize) -> Result<(), Error>,
     ) -> Result<Vec<(String, u64)>, runtime::RuntimeError> {
         if commit.changes.whole_collection
@@ -998,7 +1048,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
             for change in &commit.changes.notetypes {
                 let id = change.id.0;
                 let view = CommitView { c: &tx, b, rows, added_decks: &added_decks };
-                if let Ok(authority) = observed_layout(&view, commit, &intent_layouts, id) {
+                if let Some(authority) = observed_layout(&view, commit, &intent_layouts, id)? {
                     intent_layouts.insert(id, authority);
                 }
             }
@@ -1159,7 +1209,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                 } else {
                     let ordinary_addition = matches!(
                         kind,
-                        codec::Kind::Note | codec::Kind::Card | codec::Kind::Deck | codec::Kind::Config
+                        codec::Kind::Note | codec::Kind::Card | codec::Kind::Deck | codec::Kind::Config | codec::Kind::Notetype
                     ) && presence.is_some_and(|p| !p.before);
                     if !ordinary_addition && !was_failed && kind != codec::Kind::Revlog && protected.is_none() {
                         return Err(Error::InvalidData.into());
@@ -1210,6 +1260,13 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
             }
         }
         put_binding(&tx, b, &state)?;
+        if !applying && commit.changes.notetypes.iter().any(|change|
+            commit.payload.identity_layout(change.id).is_some()
+                || commit.payload.row_presence(Table::Notetypes, &RowKey::Id(change.id.0))
+                    .is_some_and(|presence| !presence.before && presence.after))
+        {
+            rows.validate_native_layout_image()?;
+        }
         tx.commit().map_err(Error::from)?;
         Ok(dropped)
     }
@@ -1226,11 +1283,25 @@ fn layout(view: &CommitView<'_, '_>, id: i64) -> Result<codec::Notetype, Error> 
 fn observed_layout(
     view: &CommitView<'_, '_>, commit: &meguri_engine::ObservedCommit<'_>,
     intents: &std::collections::BTreeMap<i64, codec::Notetype>, id: i64,
-) -> Result<codec::Notetype, Error> {
+) -> Result<Option<codec::Notetype>, Error> {
+    let created = commit.payload.row_presence(Table::Notetypes, &RowKey::Id(id))
+        .is_some_and(|presence| !presence.before && presence.after);
+    if created {
+        if intents.contains_key(&id) || entity(view.c, view.b, codec::Kind::Notetype, &codec::id_key(id))?.is_some() {
+            return Err(Error::InvalidData);
+        }
+        let head = view.row(Table::Notetypes, &RowKey::Id(id))?.ok_or(Error::InvalidData)?;
+        let actual = row_payload::notetype(view, &head, 1)?;
+        row_payload::validate_notetype(&actual)?;
+        return Ok(Some(actual));
+    }
+    if commit.payload.identity_layout(meguri_model::ids::NotetypeId(id)).is_none() {
+        return Ok(None);
+    }
     let authority = intents.get(&id).cloned().map(Ok).unwrap_or_else(|| layout(view, id))?;
     let head = view.row(Table::Notetypes, &RowKey::Id(id))?.ok_or(Error::InvalidData)?;
     let actual = row_payload::notetype(view, &head, authority.struct_gen)?;
-    if actual == authority { return Ok(actual); }
+    if actual == authority { return Ok(Some(actual)); }
     let before = BeforeCommitView {
         inner: CommitView { c: view.c, b: view.b, rows: view.rows, added_decks: view.added_decks }, commit,
     };
@@ -1246,7 +1317,7 @@ fn observed_layout(
     let old = NotetypeConfig::decode(&authority.config).map_err(|_| Error::InvalidData)?;
     let new = NotetypeConfig::decode(&actual.config).map_err(|_| Error::InvalidData)?;
     if (old.kind, old.sort_field_idx) != (new.kind, new.sort_field_idx) { return Err(Error::InvalidData); }
-    Ok(actual)
+    Ok(Some(actual))
 }
 
 struct CommitView<'a, 'r> {

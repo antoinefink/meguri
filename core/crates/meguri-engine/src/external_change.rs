@@ -34,6 +34,7 @@ pub(crate) fn notify(shared: &ExecShared, writer: &Writer, touched: &mut TouchIn
             payload: CommitPayload::external(seq, shared.generation(), col),
         },
         writer,
+        None,
     );
     reservation.fill(shared.generation(), None, EventKind::Changes(changes));
     Ok(())

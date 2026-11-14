@@ -96,6 +96,11 @@ impl CoreHost {
         self.cloud_connection_generation()?;
         self.collection()
     }
+    pub fn prepare_cloud_runtime(&self, timeout: std::time::Duration) -> Result<(), RuntimeError> {
+        self.cloud_connection_generation()?;
+        self.cloud_runtime().ok_or_else(unavailable)?
+            .prepare_binding(&self.cloud_connection_collection()?, &self.media()?, timeout)
+    }
     pub fn begin_cloud_connection_preview(&self) -> Result<meguri_sync::cloud::publication::PreviewWork, RuntimeError> {
         self.cloud_connection_generation()?;
         let runtime = self.cloud_runtime().ok_or_else(unavailable)?;
@@ -121,6 +126,18 @@ impl CoreHost {
         self.cloud_runtime()
             .ok_or_else(unavailable)?
             .confirm_connection_resume(preview, &collection)
+    }
+    pub fn stop_using_icloud(&self) -> Result<(), RuntimeError> {
+        let collection = self.cloud_connection_collection()?;
+        self.cloud_runtime().ok_or_else(unavailable)?.stop_using_icloud(&collection)
+    }
+    pub fn keep_cloud_local_only(
+        &self, generation: meguri_engine::Generation, preview: Option<&Preview>,
+    ) -> Result<(), RuntimeError> {
+        if self.cloud_connection_generation()? != generation { return Err(RuntimeError::StaleIncarnation); }
+        let collection = self.cloud_connection_collection()?;
+        if collection.generation() != generation { return Err(RuntimeError::StaleIncarnation); }
+        self.cloud_runtime().ok_or_else(unavailable)?.keep_local_only(&collection, preview)
     }
     fn cloud_adoption_collection(&self) -> Result<Option<meguri_engine::Collection>, RuntimeError> {
         self.cloud_connection_generation()?;

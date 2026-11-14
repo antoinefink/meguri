@@ -36,13 +36,13 @@ impl Runtime {
                     let mut count = 0u64;
                     let mut after = None;
                     loop {
-                        let page = store.entity_page(binding.id, kind, after.as_deref())?;
+                        let page = store.entity_count_page(binding.id, kind, after.as_deref())?;
                         if page.is_empty() {
                             break;
                         }
                         for entity in page {
                             after = Some(entity.key.clone());
-                            if entity.mark.is_some() || entity.local_rev > entity.acked_rev {
+                            if entity.pending {
                                 count = count.checked_add(1).ok_or(Error::InvalidData)?;
                             }
                         }
@@ -70,6 +70,36 @@ impl Runtime {
             }))
         })?;
         Ok((s.incarnation, facts))
+    }
+    fn preview_retained_work_locked(s: &State) -> Result<RetainedWork, Error> {
+        let Some(store) = s.store.as_ref() else { return Ok(RetainedWork::default()); };
+        let mut work = RetainedWork { conflict_copies: store.publication_unresolved_conflict_count()?, ..RetainedWork::default() };
+        let held: std::collections::BTreeSet<_> = s.cloud.deferred.iter()
+            .chain(&s.cloud.incoming_held).chain(&s.policy.held_images).collect();
+        for binding in store.publication_bindings()? {
+            let fetched: i64 = store.connection.query_row(
+                "SELECT count(*) FROM inbox WHERE binding=?1", [binding.id.0.as_slice()], |row| row.get(0))?;
+            work.fetched_unverified = work.fetched_unverified.checked_add(u64::try_from(fetched).map_err(|_| Error::InvalidData)?)
+                .ok_or(Error::InvalidData)?;
+            for kind in row_payload::KINDS {
+                let mut after = None;
+                loop {
+                    let page = store.entity_count_page(binding.id, kind, after.as_deref())?;
+                    if page.is_empty() { break; }
+                    for entity in page {
+                        after = Some(entity.key.clone());
+                        if !entity.pending { continue; }
+                        if matches!(binding.facts.state, BindingState::Isolated(_)) {
+                            work.isolated_unsent = work.isolated_unsent.checked_add(1).ok_or(Error::InvalidData)?;
+                        }
+                        if s.bound.as_ref().is_some_and(|b| b.binding.id == binding.id) && held.contains(&entity.name) {
+                            work.held = work.held.checked_add(1).ok_or(Error::InvalidData)?;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(work)
     }
     fn check_absent_preview_file(&self, id: u64) -> Result<(), RuntimeError> {
         let absent = self
@@ -109,6 +139,7 @@ impl Runtime {
         s.publication.next_preview = s.publication.next_preview.checked_add(1).ok_or(Error::InvalidData)?;
         let id = s.publication.next_preview;
         s.publication.resume = None;
+        let retained_work = with_tracking_access(|| Self::preview_retained_work_locked(&s))?;
         s.publication.preview = Some((
             Preview {
                 id,
@@ -128,6 +159,7 @@ impl Runtime {
                 resume_binding: None,
                 unsent_by_kind: BTreeMap::new(),
                 unsent_counts_exact: true,
+                retained_work,
             },
             false,
         ));
@@ -182,6 +214,9 @@ impl Runtime {
         collection: &Collection,
         media: &meguri_engine::media::MediaService,
     ) -> Result<PreviewWork, RuntimeError> {
+        if self.state().tracking_stopped {
+            return Err(Error::Database.into());
+        }
         let account = self.publication_account()?;
         let file = self.inputs.files.identity(collection.path())?;
         let decision = self.publication_decision()?;
@@ -237,13 +272,13 @@ impl Runtime {
                 for kind in row_payload::KINDS {
                     let mut after = None;
                     loop {
-                        let page = store.entity_page(b.id, kind, after.as_deref())?;
+                        let page = store.entity_count_page(b.id, kind, after.as_deref())?;
                         if page.is_empty() {
                             break;
                         }
                         for entity in page {
                             after = Some(entity.key.clone());
-                            if entity.mark.is_some() {
+                            if entity.pending {
                                 *unpublished_by_kind.get_mut(&kind).ok_or(Error::InvalidData)? += 1;
                             }
                         }
@@ -252,6 +287,7 @@ impl Runtime {
             }
             Ok(())
         })?;
+        let retained_work = with_tracking_access(|| Self::preview_retained_work_locked(&s))?;
         s.publication.preview = Some((
             Preview {
                 id,
@@ -268,6 +304,7 @@ impl Runtime {
                 resume_binding: None,
                 unsent_by_kind,
                 unsent_counts_exact,
+                retained_work,
             },
             false,
         ));
@@ -401,6 +438,103 @@ impl Runtime {
             return Err(PublicationError::AuthorityChanged.into());
         }
         Ok(())
+    }
+    /// Stop preserves every retained row, intent, image and acknowledgement.
+    /// The retained Host supplies collection/generation ownership.
+    pub fn stop_using_icloud(&self, collection: &Collection) -> Result<(), RuntimeError> {
+        self.stop_using_icloud_checked(collection, None)
+    }
+    fn stop_using_icloud_checked(&self, collection: &Collection, preview: Option<&Preview>) -> Result<(), RuntimeError> {
+        let file = self.inputs.files.identity(collection.path())?;
+        let decision = self.publication_decision()?;
+        let identity = self.inputs.identity.read_identity(&self.inputs.scope);
+        {
+            let mut s = self.state();
+            let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+            if let Some(p) = preview
+                && (s.publication.preview.as_ref() != Some(&(p.clone(), true))
+                    || p.native_file != Some(file) || p.decision_before.as_ref() != Some(&decision)
+                    || p.account != b.binding.facts.account
+                    || !matches!(&identity, IdentityStatus::Available(account) if account == &p.account))
+            { return Err(PublicationError::AuthorityChanged.into()); }
+            if matches!(&identity, IdentityStatus::Available(account) if account != &b.binding.facts.account) {
+                return Err(PublicationError::AccountMismatch.into());
+            }
+            if !collection.is_current() || b.binding.scope != self.inputs.scope || b.file != file
+                || b.evidence.generation != collection.generation()
+                || b.binding.facts.publication != decision.publication.identity
+            { return Err(PublicationError::AuthorityChanged.into()); }
+            with_tracking_access(|| -> Result<(), RuntimeError> {
+                let store = s.store.as_ref().ok_or(Error::Database)?;
+                if store.publication_op()?.is_some() || store.adoption_op()?.is_some() {
+                    return Err(PublicationError::Busy.into());
+                }
+                Ok(())
+            })?;
+            Self::stop_syncing_locked(&mut s)?;
+        }
+        self.wait_incoming_idle();
+        let mut s = self.state();
+        s.publication.preview = None;
+        s.publication.resume = None;
+        Ok(())
+    }
+    pub fn keep_local_only(&self, collection: &Collection, preview: Option<&Preview>) -> Result<(), RuntimeError> {
+        let decision = self.publication_decision()?;
+        let file = self.inputs.files.identity(collection.path())?;
+        let owner = {
+            let s = self.state();
+            (s.incarnation, s.bound.as_ref().map(|b| b.binding.id))
+        };
+        if let Some(p) = preview {
+            self.check_preview_authority(p, collection)?;
+            if self.state().publication.preview.as_ref() != Some(&(p.clone(), true)) {
+                return Err(PublicationError::AuthorityChanged.into());
+            }
+        } else if decision.publication.decision != meguri_engine::device_state::PublicationDecision::Pending {
+            return Err(PublicationError::NotOffered.into());
+        }
+        {
+            let s = self.state();
+            with_tracking_access(|| -> Result<(), RuntimeError> {
+                if let Some(store) = &s.store
+                    && (store.publication_op()?.is_some() || store.adoption_op()?.is_some())
+                { return Err(PublicationError::Busy.into()); }
+                Ok(())
+            })?;
+        }
+        // Stop first: a sidecar failure remains a stopped connection, with all
+        // original evidence retained, rather than reopening cloud admission.
+        if self.state().bound.is_some() { self.stop_using_icloud_checked(collection, preview)?; }
+        let guard = {
+            let s = self.state();
+            if (s.incarnation, s.bound.as_ref().map(|b| b.binding.id)) != owner {
+                return Err(PublicationError::AuthorityChanged.into());
+            }
+            (s.incarnation, s.adapter.token, s.bound.as_ref().map(|b| b.binding.id))
+        };
+        if self.inputs.files.identity(collection.path())? != file || self.publication_decision()? != decision {
+            return Err(PublicationError::AuthorityChanged.into());
+        }
+        collection.choose_cloud_local_only(&decision, file.pair(), |apply| -> Result<(), RuntimeError> {
+            let mut s = self.state();
+            if (s.incarnation, s.adapter.token, s.bound.as_ref().map(|b| b.binding.id)) != guard
+                || s.bound.as_ref().is_some_and(|b| b.usable || b.verified || b.file != file
+                    || b.binding.scope != self.inputs.scope || b.evidence.generation != collection.generation()
+                    || b.binding.facts.publication != decision.publication.identity)
+            { return Err(PublicationError::AuthorityChanged.into()); }
+            with_tracking_access(|| -> Result<(), RuntimeError> {
+                if let Some(store) = &s.store
+                    && (store.publication_op()?.is_some() || store.adoption_op()?.is_some())
+                { return Err(PublicationError::Busy.into()); }
+                Ok(())
+            })?;
+            if !apply()? { return Err(PublicationError::AuthorityChanged.into()); }
+            s.publication.preview = None;
+            s.publication.resume = None;
+            s.publish_authority();
+            Ok(())
+        })
     }
     /// Explicit user confirmation. Both full-width keys are obtained before the
     /// first publication commit, outside engine, runtime-state and tracking locks.

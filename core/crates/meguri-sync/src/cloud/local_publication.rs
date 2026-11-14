@@ -5,7 +5,7 @@ use meguri_engine::{
     device_state::{AccountBinding, DeviceState, PendingDecisionReason, PublicationDecision},
     media::MediaService,
 };
-use meguri_storage::{ReadRows, ReaderRole, RowKey};
+use meguri_storage::{ReadRows, ReaderRole};
 use std::{collections::BTreeMap, os::unix::fs::MetadataExt};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -87,27 +87,13 @@ impl LocalPublicationInformation {
 /// The caller owns the collection snapshot and captured media-name view.
 pub(crate) fn count_local_rows(rows: &impl ReadRows, media_names: usize) -> Result<Counts, RuntimeError> {
     let mut counts = BTreeMap::new();
-    let mut nondefault_deck = false;
+    let nondefault_deck = rows.nondefault_deck_exists()?;
     for kind in row_payload::KINDS {
-        let mut count = 0u64;
-        if let Some(table) = row_payload::table(kind) {
-            let mut after = None;
-            loop {
-                let page = rows.row_page(table, after.as_ref())?;
-                if page.is_empty() {
-                    break;
-                }
-                for row in page {
-                    after = Some(RowKey::from_stored(table, &row).map_err(meguri_storage::StorageError::from)?);
-                    if kind == Kind::Deck && row_payload::int(&row, 0)? != 1 {
-                        nondefault_deck = true;
-                    }
-                    count = count.checked_add(1).ok_or(super::Error::InvalidData)?;
-                }
-            }
+        let count = if let Some(table) = row_payload::table(kind) {
+            rows.row_count(table)?
         } else {
-            count = u64::try_from(media_names).map_err(|_| super::Error::InvalidData)?;
-        }
+            u64::try_from(media_names).map_err(|_| super::Error::InvalidData)?
+        };
         counts.insert(kind, count);
     }
     let empty = [Kind::Note, Kind::Card, Kind::Revlog, Kind::MediaName]

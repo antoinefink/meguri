@@ -416,6 +416,33 @@ impl Collection {
 }
 
 impl Collection {
+    /// Explicit local choice can only restrict publication. It grants no
+    /// sending token and retains replacement evidence and publication identity.
+    pub fn choose_cloud_local_only<T, E>(
+        &self, expected: &crate::device_state::PublicationDecisionState, native_file: (u64, u64),
+        with_choice: impl FnOnce(&mut dyn FnMut() -> Result<bool, EngineError>) -> Result<T, E>,
+    ) -> Result<T, E>
+    where E: From<EngineError> {
+        let _lease = self.reader(ReaderRole::Cloud)?;
+        if self.open_evidence()?.native_file != native_file {
+            return Err(EngineError::unavailable("local choice file changed").into());
+        }
+        // Acquire the reader before the caller's state guard. Its checked
+        // ownership remains held through this restrictive sidecar comparison.
+        with_choice(&mut || {
+            let mut binding = self.core.publication_binding.lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut replacement = expected.clone();
+            replacement.publication.binding = crate::device_state::AccountBinding::LocalOnly;
+            replacement.publication.decision = crate::device_state::PublicationDecision::Clear;
+            replacement.pending_reason = None;
+            let changed = crate::device_state::DeviceState::for_collection(self.path())
+                .compare_exchange_publication_decision(expected, &replacement)?;
+            if changed { *binding = replacement.publication.binding; }
+            Ok(changed)
+        })
+    }
+
     pub fn resolve_cloud_publication_decision(
         &self,
         operation: [u8; 16],

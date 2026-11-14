@@ -5,6 +5,7 @@ import SwiftUI
 public struct AccountSyncView: View {
     let collection: ReviewCollection
     var host: AppNavigation.SheetHost
+    @State private var confirmingStop = false
     public init(collection: ReviewCollection, host: AppNavigation.SheetHost = .main) {
         self.collection = collection; self.host = host
     }
@@ -15,6 +16,10 @@ public struct AccountSyncView: View {
         Form {
             Section {
                 SyncStatusRows(collection: collection)
+                if let failure = sync.connectionFailure {
+                    Text(SyncText.value(SyncStatusPresentation.connectionErrorKey(failure)))
+                        .accessibilityIdentifier("settings.accountSync.controlError")
+                }
                 Text(SyncText.value(accountKey))
                     .accessibilityIdentifier("settings.accountSync.accountState")
                 if decisionRequired {
@@ -109,11 +114,9 @@ public struct AccountSyncView: View {
             }
             if controls.bindingActive == true {
                 Section {
-                    Button(SyncText.value("sync.settings.stop"), role: .destructive) {}.disabled(true)
+                    Button(SyncText.value("sync.settings.stop"), role: .destructive) { confirmingStop = true }
+                        .disabled(sync.connectionOperationActive)
                         .accessibilityIdentifier("settings.accountSync.stop")
-                } footer: {
-                    Text(SyncText.value("sync.recovery.error.notOffered"))
-                        .accessibilityIdentifier("settings.accountSync.stopUnavailableReason")
                 }
             }
             Section {
@@ -141,6 +144,14 @@ public struct AccountSyncView: View {
         }
         .formStyle(.grouped)
         .navigationTitle(SyncText.value("sync.settings.section"))
+        .alert(SyncText.value("sync.settings.stop.title"), isPresented: $confirmingStop) {
+            Button(SyncText.value("sync.settings.stop.confirm"), role: .destructive) {
+                Task { await sync.stopUsingICloud() }
+            }
+            Button(SyncText.value("sync.now.cancel"), role: .cancel) {}
+        } message: {
+            Text(SyncText.value("sync.settings.stop.message"))
+        }
         .accessibilityIdentifier("settings.accountSync.content")
     }
     private var controlReason: String? {

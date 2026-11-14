@@ -62,6 +62,15 @@ pub enum RecordRead {
     ZoneMissing,
     Failed,
 }
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RetainedWork {
+    /// Received versions still retained here; application is not certified.
+    pub fetched_unverified: u64,
+    /// Known pending changes currently held by local policy.
+    pub held: u64,
+    pub isolated_unsent: u64,
+    pub conflict_copies: u64,
+}
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Preview {
     pub id: u64,
@@ -81,6 +90,7 @@ pub struct Preview {
     pub unsent_by_kind: BTreeMap<Kind, u64>,
     /// False means own work is unknown; the counts are sound lower bounds.
     pub unsent_counts_exact: bool,
+    pub retained_work: RetainedWork,
 }
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PreviewWork {

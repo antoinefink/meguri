@@ -18,6 +18,30 @@ impl Writer {
         Ok(identity)
     }
 
+    /// Pin the writer image while an observer commits dependent device state.
+    /// This transaction never changes collection rows; dropping it releases
+    /// the SQLite writer reservation even when the observer fails.
+    pub fn with_committed_image<T, E>(
+        &self, external_version: i64, native_file: (u64, u64),
+        read: impl FnOnce() -> Result<T, E>,
+    ) -> Result<T, E>
+    where E: From<StorageError> {
+        let transaction = rusqlite::Transaction::new_unchecked(
+            &self.conn, rusqlite::TransactionBehavior::Immediate,
+        ).map_err(StorageError::from)?;
+        if self.external_data_version()? != external_version
+            || self.validate_native_identity()? != native_file
+        {
+            return Err(StorageError::Io { detail: "committed collection image changed".into() }.into());
+        }
+        let result = read()?;
+        if self.validate_native_identity()? != native_file {
+            return Err(StorageError::Io { detail: "collection file changed during observation".into() }.into());
+        }
+        transaction.rollback().map_err(StorageError::from)?;
+        Ok(result)
+    }
+
     /// External commits only, unlike SQLITE_FCNTL_DATA_VERSION.
     pub fn external_data_version(&self) -> Result<i64, StorageError> {
         self.conn

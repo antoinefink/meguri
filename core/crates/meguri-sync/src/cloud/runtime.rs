@@ -545,6 +545,8 @@ struct State {
     last_capture_body_reads: usize,
     #[cfg(feature = "test-hooks")]
     fail_capture_after: Option<usize>,
+    #[cfg(feature = "test-hooks")]
+    fail_capture_journal: bool,
 }
 
 // Exact, bounded authority facts for final native validation only. This owns no
@@ -1606,6 +1608,10 @@ impl Runtime {
         Ok(())
     }
 
+    #[cfg(feature = "test-hooks")]
+    pub fn fail_next_capture_journal_reads_for_testing(&self) {
+        self.state().fail_capture_journal = true;
+    }
     /// Requires current whole coverage, account and root confirmation.
     /// Active reviews use the per-batch eligibility frontier.
     pub fn require_collection_sending(&self) -> Result<(), RuntimeError> {
@@ -1727,6 +1733,10 @@ impl ChangeObserver for Runtime {
         }
         #[cfg(feature = "test-hooks")]
         let fail_after = state.fail_capture_after.take();
+        #[cfg(feature = "test-hooks")]
+        let fail_journal = std::mem::take(&mut state.fail_capture_journal);
+        #[cfg(feature = "test-hooks")]
+        if fail_journal { commit.payload.fail_image_reads(true); }
         let result = with_tracking_access(|| -> Result<(), RuntimeError> {
             if generic {
                 let dropped = state.store.as_mut().ok_or(Error::Database)?.capture_workflow(
@@ -1764,6 +1774,8 @@ impl ChangeObserver for Runtime {
                 },
             )
         });
+        #[cfg(feature = "test-hooks")]
+        if fail_journal { commit.payload.fail_image_reads(false); }
         if result.is_err() {
             state.layout_refusal = None;
             Self::invalidate_locked(&mut state);

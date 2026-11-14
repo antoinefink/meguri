@@ -285,6 +285,10 @@ pub struct CloudConnectionSummary {
     pub unsent_counts: Vec<CloudKindCount>,
     /// False: own total is unknown; unsent_counts are only known lower bounds.
     pub unsent_counts_exact: bool,
+    pub fetched_unverified_count: u64,
+    pub held_count: u64,
+    pub isolated_unsent_count: u64,
+    pub conflict_copy_count: u64,
 }
 impl From<&p::Preview> for CloudConnectionSummary {
     fn from(v: &p::Preview) -> Self {
@@ -309,6 +313,10 @@ impl From<&p::Preview> for CloudConnectionSummary {
             resume_binding_id: v.resume_binding.map(|b| b.0.to_vec()),
             unsent_counts: counts(&v.unsent_by_kind),
             unsent_counts_exact: v.unsent_counts_exact,
+            fetched_unverified_count: v.retained_work.fetched_unverified,
+            held_count: v.retained_work.held,
+            isolated_unsent_count: v.retained_work.isolated_unsent,
+            conflict_copy_count: v.retained_work.conflict_copies,
         }
     }
 }
@@ -671,6 +679,21 @@ impl CloudConnection {
     ) -> Result<CloudLocalPublicationInformation, CoreError> {
         callback::enter("CloudConnection.local_publication_information");
         local_information_for_host(&self.owner.host, generation)
+    }
+    pub fn keep_local_only(
+        &self, generation: u64, preview: Option<Arc<CloudConnectionPreview>>,
+    ) -> Result<(), CoreError> {
+        callback::enter("CloudConnection.keep_local_only");
+        self.owner.check_generation(generation)?;
+        let ready = if let Some(preview) = preview {
+            self.owns(&preview.owner)?;
+            if preview.generation != generation { return Err(failure(CloudConnectionFailure::AuthorityChanged)); }
+            let p::PreviewWork::Ready(p) = preview.take()? else {
+                return Err(failure(CloudConnectionFailure::NotOffered));
+            };
+            Some(p)
+        } else { None };
+        self.owner.host.keep_cloud_local_only(meguri_engine::Generation(generation), ready.as_deref()).map_err(error)
     }
     pub fn resume_binding(&self, preview: Arc<CloudConnectionPreview>) -> Result<(), CoreError> {
         callback::enter("CloudConnection.resume_binding");

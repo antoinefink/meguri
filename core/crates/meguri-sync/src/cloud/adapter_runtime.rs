@@ -430,21 +430,23 @@ impl Runtime {
         Ok(())
     }
     pub fn adapter_stop_syncing(&self) -> Result<(), RuntimeError> {
-        let mut s = self.state();
+        Self::stop_syncing_locked(&mut self.state())
+    }
+    pub(super) fn stop_syncing_locked(s: &mut State) -> Result<(), RuntimeError> {
         let id = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?.binding.id;
         s.adapter.token = s.adapter.token.checked_add(1).ok_or(Error::InvalidData)?;
         s.publish_authority();
-        with_tracking_access(|| {
-            s.store
-                .as_mut()
-                .ok_or(Error::Database)?
-                .isolate_runtime_binding(id, IsolationReason::Stopped)
+        if let Some(b) = s.bound.as_mut() { b.usable = false; b.verified = false; }
+        s.publication.preview = None;
+        s.publication.resume = None;
+        s.publish_authority();
+        let stopped = with_tracking_access(|| -> Result<_, Error> {
+            let store = s.store.as_mut().ok_or(Error::Database)?;
+            store.isolate_runtime_binding(id, IsolationReason::Stopped)?;
+            store.binding(id)?.ok_or(Error::BindingNotFound)
         })?;
-        if let Some(b) = s.bound.as_mut() {
-            b.usable = false;
-            b.verified = false;
-            b.binding.facts.state = BindingState::Isolated(IsolationReason::Stopped);
-        }
+        if let Some(b) = s.bound.as_mut() { b.binding = stopped; }
+        s.publish_authority();
         Ok(())
     }
     pub fn adapter_account(&self, sdk: Option<&str>, identity: IdentityStatus) -> Result<(), RuntimeError> {

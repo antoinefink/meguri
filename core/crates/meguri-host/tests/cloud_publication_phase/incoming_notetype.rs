@@ -747,6 +747,10 @@ fn validated_layout_choice_case(empty: bool) {
     let collection = host.collection().unwrap();
     prove_reopened_binding(&host, &binding);
     assert_eq!(bookkeeping(&host), before);
+    // Exercise the Host entry used by CloudWorkflow.prepare_runtime before any
+    // explicit failed reconciliation. SDK registration stays closed afterward.
+    host.prepare_cloud_runtime(Duration::from_secs(30)).unwrap();
+    assert!(runtime.register_sdk(true).is_err());
     let refusal = runtime.reconcile_binding(&collection, &host.media().unwrap(), Duration::from_secs(30)).unwrap_err();
     assert!(matches!(refusal, cloud::runtime::RuntimeError::Tracking(
         cloud::Error::ValidatedUnprovedLayout { notetype }) if notetype == original.id));
@@ -809,6 +813,19 @@ fn validated_layout_choice_case(empty: bool) {
         &reopened.media().unwrap(), Duration::from_secs(30)).unwrap_err();
     assert!(matches!(error, cloud::runtime::RuntimeError::Tracking(cloud::Error::ValidatedUnprovedLayout { .. })));
     assert!(reopened.cloud_runtime().unwrap().entity_facts(&source.name).unwrap().unwrap() == source);
+    let generation = reopened.cloud_connection_generation().unwrap();
+    reopened.keep_cloud_local_only(generation, Some(&p)).unwrap();
+    let stopped = reopened.cloud_runtime().unwrap().status().unwrap();
+    assert!(!stopped.stored_usable && !stopped.identity_verified);
+    assert_eq!(bookkeeping(&reopened), before);
+    assert_eq!(reopened.cloud_runtime().unwrap().entity_facts(&source.name).unwrap().unwrap(), source);
+    assert_eq!(reopened.cloud_runtime().unwrap().entity_facts_page(codec::Kind::Note, None).unwrap(), notes);
+    assert_eq!(reopened.cloud_runtime().unwrap().entity_facts_page(codec::Kind::Card, None).unwrap(), cards);
+    assert!(matches!(meguri_engine::device_state::DeviceState::for_collection(&dir.join("collection.anki2"))
+        .publication_decision().unwrap().unwrap().publication.binding, meguri_engine::device_state::AccountBinding::LocalOnly));
+    let reconnect = actual_preview(&reopened, &mut service, &scope());
+    assert!(reconnect.decision == ConnectDecision::ChooseCollection && !reconnect.unsent_counts_exact);
+    assert!(reopened.cloud_runtime().unwrap().register_sdk(true).is_err());
     reopened.close().unwrap();
 }
 
@@ -929,7 +946,10 @@ fn cover_restored_type(host: &CoreHost, seq: meguri_engine::Seq) {
         (snapshot.wal_identity(), snapshot.seq())
     };
     assert!(snapshot_seq >= seq);
-    assert_eq!(collection.wait_wal_covered(identity, seq, Duration::ZERO).unwrap(), meguri_engine::WalCoverage::Timeout);
+    let meguri_engine::WalCoverage::Covered(admitted) = collection.wait_wal_covered(identity, seq, Duration::ZERO).unwrap()
+        else { panic!("native layout authority requires prior WAL coverage") };
+    assert_eq!(admitted.identity(), identity);
+    assert!(admitted.through() >= seq);
     collection.flush_wal(Duration::from_secs(30)).unwrap();
     let meguri_engine::WalCoverage::Covered(receipt) = collection.wait_wal_covered(identity, snapshot_seq,
         Duration::from_secs(30)).unwrap() else { panic!("restored commit needs actual WAL coverage") };
@@ -1118,3 +1138,6 @@ fn ordinary_notetype_multipage_css_save_undo_redo_restores_complete_aggregate() 
 fn ordinary_notetype_multipage_name_swaps_undo_redo_restore_complete_aggregate() {
     multipage_restore_case(true);
 }
+
+#[path = "incoming_notetype_round6.rs"]
+mod round6;

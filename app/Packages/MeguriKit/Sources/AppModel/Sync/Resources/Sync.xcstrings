@@ -1669,6 +1669,50 @@
         }
       }
     },
+    "sync.preview.heldBack": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review answers not yet sent: %lld."
+          }
+        }
+      }
+    },
+    "sync.preview.isolatedUnsent": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Known unsent changes from an earlier iCloud connection: %lld."
+          }
+        }
+      }
+    },
+    "sync.preview.conflictsKept": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved conflict copies kept: %lld."
+          }
+        }
+      }
+    },
+    "sync.preview.fetchedUnverified": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Received changes retained on this device: %lld. Their application cannot be verified. Replacing iCloud publishes only the current local collection."
+          }
+        }
+      }
+    },
     "sync.preview.otherDevicesUnknown": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -2219,6 +2263,39 @@
           "stringUnit": {
             "state": "translated",
             "value": "Account & Sync"
+          }
+        }
+      }
+    },
+    "sync.settings.stop.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop Using iCloud on This Device?"
+          }
+        }
+      }
+    },
+    "sync.settings.stop.message": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This collection stays on this device and stops syncing. Nothing in iCloud is deleted."
+          }
+        }
+      }
+    },
+    "sync.settings.stop.confirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop Using iCloud"
           }
         }
       }

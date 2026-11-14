@@ -214,6 +214,24 @@ public struct CloudConnectionView: View {
                 Text(SyncText.value("sync.preview.otherDevicesUnknown"))
             }
         }
+        Section {
+            if summary.heldCount > 0 {
+                Text(SyncText.format("sync.preview.heldBack", Int64(clamping: summary.heldCount)))
+                    .accessibilityIdentifier("sync.preview.heldBack")
+            }
+            if summary.isolatedUnsentCount > 0 {
+                Text(SyncText.format("sync.preview.isolatedUnsent", Int64(clamping: summary.isolatedUnsentCount)))
+                    .accessibilityIdentifier("sync.preview.isolatedUnsent")
+            }
+            if summary.fetchedUnverifiedCount > 0 {
+                Text(SyncText.format("sync.preview.fetchedUnverified", Int64(clamping: summary.fetchedUnverifiedCount)))
+                    .accessibilityIdentifier("sync.preview.fetchedUnverified")
+            }
+            if summary.conflictCopyCount > 0 {
+                Text(SyncText.format("sync.preview.conflictsKept", Int64(clamping: summary.conflictCopyCount)))
+                    .accessibilityIdentifier("sync.preview.conflictsKept")
+            }
+        }
         if page == .connect {
             switch summary.decision {
             case .noCollection: Text(SyncText.value("sync.recovery.error.notOffered"))
@@ -227,9 +245,9 @@ public struct CloudConnectionView: View {
                 Section {
                     choice("sync.connect.two.useICloud", caption: "sync.connect.two.useICloud.caption", destination: .replaceLocal)
                     choice("sync.connect.two.replace", caption: "sync.connect.two.replace.caption", destination: .replaceCloud)
-                    Button(SyncText.value("sync.connect.two.keepLocal")) {}.disabled(true)
+                    Button(SyncText.value("sync.connect.two.keepLocal")) { Task { await keepLocalOnly() } }
+                        .disabled(sync.connectionOperationActive)
                         .accessibilityIdentifier("sync.connect.choice.keepLocal")
-                    Text(SyncText.value("sync.recovery.error.notOffered"))
                 }
             case .cloudUnreadable: Text(SyncText.value("sync.recovery.error.notOffered"))
             }
@@ -263,11 +281,10 @@ public struct CloudConnectionView: View {
                     Text(SyncText.value("sync.decision.replace.caption"))
                     if sync.settings.paused { Text(SyncText.value("sync.status.paused.user")) }
                 }
-                // keep_local_only still needs the Core/coordinator operation surface.
-                Button(SyncText.value("sync.decision.keepLocal")) {}.disabled(true)
+                Button(SyncText.value("sync.decision.keepLocal")) { Task { await keepLocalOnly() } }
+                    .disabled(sync.connectionOperationActive)
                     .accessibilityIdentifier("sync.publicationChoice.keepLocal")
                 Text(SyncText.value("sync.decision.keepLocal.caption"))
-                Text(SyncText.value("sync.recovery.error.notOffered"))
             }
         }
     }
@@ -338,6 +355,15 @@ public struct CloudConnectionView: View {
         case .resume: await sync.confirmResume()
         }
         otherConfirming = false
+    }
+    private func keepLocalOnly() async {
+        guard !confirming, !submitted, !cancelling, !preparing, !sync.connectionOperationActive else { return }
+        otherConfirming = true
+        await sync.keepLocalOnly()
+        otherConfirming = false
+        if !sync.settings.enabled, sync.preview == nil, sync.connectionFailure == nil {
+            collection.navigation.dismissSheet()
+        }
     }
     private func close() async {
         guard !confirming, !preparing, !cancelling else { return }

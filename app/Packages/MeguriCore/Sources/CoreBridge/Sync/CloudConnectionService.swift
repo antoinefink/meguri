@@ -105,6 +105,11 @@ public actor CoreCloudConnectionService {
             LocalPublicationInformation(try raw.localPublicationInformation(generation: generation))
         }
     }
+    public func keepLocalOnly(generation: UInt64, preview: CloudConnectionPreview?) async throws {
+        try await MaintenanceLane.shared.call(.cloudConnectionKeepLocalOnly) { [raw] in
+            try raw.keepLocalOnly(generation: generation, preview: preview?.raw)
+        }
+    }
     public func beginConnectionPreview() async throws -> CloudConnectionPreviewWork {
         let raw = self.raw
         return try await MaintenanceLane.shared.call(.cloudConnectionBeginConnectionPreview) { [raw] in CloudConnectionPreviewWork(try raw.beginConnectionPreview()) }

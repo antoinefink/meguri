@@ -70,6 +70,16 @@ pub struct StoredConfig {
 /// Typed reads (`model/row-records`): a row that cannot be read is
 /// [`StorageError::Row`]; a missing row is `None`.
 pub trait ReadRows: sealed::Connected {
+    /// Count raw rows without reading their variable-sized payload columns.
+    fn row_count(&self, table: Table) -> Result<u64, StorageError> {
+        let count: i64 = self.connection().query_row(
+            &format!("SELECT count(*) FROM {}", table.name()), [], |row| row.get(0))?;
+        u64::try_from(count).map_err(|_| StorageError::Io { detail: "invalid collection row count".into() })
+    }
+    fn nondefault_deck_exists(&self) -> Result<bool, StorageError> {
+        Ok(self.connection().query_row("SELECT EXISTS(SELECT 1 FROM decks WHERE id<>1)", [], |row| row.get(0))?)
+    }
+
     /// Bounded stored-image page for normal sync and its captured overlay.
     fn row_page(&self, table: Table, after: Option<&RowKey>) -> Result<Vec<RowImage>, StorageError> {
         crate::normal_stage::page(self.connection(), "", table, after, false)

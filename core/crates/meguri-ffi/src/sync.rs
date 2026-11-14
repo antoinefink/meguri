@@ -490,7 +490,7 @@ impl CloudWorkflow {
     }
     pub fn stop_syncing(&self) -> Result<(), CoreError> {
         callback::enter("CloudWorkflow.stop_syncing");
-        self.core.adapter_stop_syncing().map_err(cloud_error)
+        self.host.stop_using_icloud().map_err(cloud_error)
     }
     pub fn durable_snapshot(&self) -> Result<CloudDurableSnapshot, CoreError> {
         callback::enter("CloudWorkflow.durable_snapshot");
@@ -593,13 +593,7 @@ impl CloudWorkflow {
     }
     pub fn prepare_runtime(&self) -> Result<(), CoreError> {
         callback::enter("CloudWorkflow.prepare_runtime");
-        self.core
-            .prepare_binding(
-                &self.host.collection()?,
-                &self.host.media()?,
-                std::time::Duration::from_secs(1),
-            )
-            .map_err(cloud_error)
+        self.host.prepare_cloud_runtime(std::time::Duration::from_secs(1)).map_err(cloud_error)
     }
     pub fn register_sdk(&self, automatic: bool) -> Result<CloudEngineRegistration, CoreError> {
         callback::enter("CloudWorkflow.register_sdk");

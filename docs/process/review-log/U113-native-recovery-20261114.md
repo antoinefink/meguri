@@ -88,3 +88,21 @@ Independent review `cleanroom/20261114T150127Z-65745` is still running.
 This is WIP, with no Unit/P24/gate or release acceptance. Round 6 remains for
 required gaps and review findings. The live Mac and phone still show unknown
 sync status; a phone request reports incomplete. No new peer-delivery claim.
+
+## Round 6: partial repair
+
+Source starts at `3817df62`. Author: `cleanroom/20261114T151140Z-78575`.
+The retained handoff reports changes for findings 1–7. Finding 8 remains
+unimplemented; replacement can still fail on the retained ordinary work.
+The operation-conflict case for the local action also remains open.
+
+- `private/20261114T153439Z-89538`: source passes.
+- `core-test/20261114T153503Z-89842`: five new regressions pass.
+- `core-test/20261114T153633Z-90224`: all 109 Host cases pass.
+- `core-test/20261114T153742Z-91176`: all 22 engine controls pass.
+- Earlier native presentation: `swift-test/20261114T151240Z-79030`, eight pass.
+
+Independent review `cleanroom/20261114T153423Z-89103` is running. Swift
+bindings, remaining focused checks and actual rendered controls still need
+verification. Both approved additional rounds are used. No further source
+repair is authorized by this record. U113, P24, gates and release stay open.

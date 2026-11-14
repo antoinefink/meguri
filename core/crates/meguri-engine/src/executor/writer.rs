@@ -457,6 +457,7 @@ fn run_op<T>(
     )?;
     // BEGIN IMMEDIATE excludes a foreign commit between this check and the op.
     let version = collection.writer().external_data_version()?;
+    let native_file = collection.writer().validate_native_identity()?;
     if env.external_version.is_some_and(|old| old != version) {
         *env.external_version = Some(version);
         crate::external_change::notify(shared, collection.writer(), env.touched)?;
@@ -695,6 +696,7 @@ fn run_op<T>(
                     collection: derived.collection,
                 },
                 collection.writer(),
+                Some((shared, version, native_file)),
             );
         }
         reservation.fill(generation, None, EventKind::Changes(Arc::clone(&change_set)));
