@@ -224,3 +224,12 @@ Publication finish `cleanroom/20261114T184343Z-15121` removes one test
 comment only. Privacy `184514Z-17033`, static `184524Z-17655` and
 similarity `184518Z-17315` pass; the latter scans 19 files with no flags.
 The failed native result remains failed. This checkpoint is WIP.
+
+### Remaining compiler and layering check
+
+`core-lint/20261114T185746Z-29619` reports two passed checks and one
+failure. Layering and the compiled-name check pass. Clippy stops on
+`type_complexity` for the return tuple in `cloud/resume_runtime.rs:439`.
+The full lint job remains failed; complete lint coverage is not proven.
+No lint policy, assertion, timing limit or source behavior was changed.
+This result does not resolve the native failure or accept U113.
