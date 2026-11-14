@@ -72,3 +72,31 @@ Export review `cleanroom/20261114T160706Z-17646` found no P0/P1, with
 three P2 defects (failed-write persistence, authority publication on read,
 no-host initialization) and a production mapping coverage gap. All remain
 explicitly pending.
+
+## Read-only export and view repair
+
+R4 source: `cleanroom/20261114T162006Z-28121`; follow-ups:
+`163353Z-30613` and `163853Z-33518`. Review
+`cleanroom/20261114T163029Z-29292`: no P0/P1. One P2 remains: closing
+and reopening the log panel must share the same limit on concurrent reads.
+The production callback owner must enforce that limit for its full lifetime.
+
+The repair preserves pending writes after storage failure, avoids publishing
+runtime authority while reading diagnostics, and avoids initializing Core when
+no host exists. `core-test/20261114T163205Z-30149` passes all four focused
+boundary tests. The catalog now uses named keys and observation dates use the
+platform formatter with the selected locale and time zone.
+
+`swift-test/20261114T163627Z-31528` fails before tests on a captured mutable
+test variable. The final follow-up replaces only that fixture state with an
+actor-isolated reference. Assertions and limits remain unchanged. The next
+native result must establish compilation; this record claims no such pass.
+Production producers, the Settings mount, rendered inspection and integration
+acceptance remain open.
+
+The combined native run `swift-test/20261114T164225Z-35243` fails before
+tests in the separate R7 coordinator change: it throws a presentation enum
+that is not an Error. The R7 export is retained for its final repair; it is
+removed from this WIP checkpoint. No diagnostic test pass is inferred.
+The combined privacy scan `private/20261114T164240Z-36411` flags four R7
+files and no diagnostic file. Earlier failed scans remain retained.

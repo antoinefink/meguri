@@ -83,7 +83,7 @@ impl From<d::Snapshot> for CloudDiagnosticSnapshot {
 #[uniffi::export]
 pub fn cloud_diagnostics_export() -> Result<Option<CloudDiagnosticSnapshot>, CoreError> {
     callback::enter("cloud_diagnostics_export");
-    let Ok(host) = runtime::host() else { return Ok(None) };
+    let Some(host) = runtime::retained_host() else { return Ok(None) };
     let Some(core) = host.cloud_runtime() else { return Ok(None) };
     Ok(Some(project(core)))
 }
@@ -102,6 +102,24 @@ mod tests {
     }
     impl FileIdentityProvider for NoProviders {
         fn identity(&self, _: &Path) -> Result<NativeFileIdentity, RuntimeError> { panic!("diagnostics queried files") }
+    }
+    #[test]
+    fn no_host_export_does_not_initialize_process_core() {
+        const CHILD: &str = "MEGURI_DIAGNOSTICS_FRESH_PROCESS";
+        if std::env::var_os(CHILD).is_some() {
+            assert!(!crate::runtime::process_initialized_for_testing());
+            assert!(cloud_diagnostics_export().unwrap().is_none());
+            // Runtime::new creates ProcessCore (workers) and Dispatcher together.
+            // No runtime means none of those or their callbacks/providers ran.
+            assert!(!crate::runtime::process_initialized_for_testing());
+            return;
+        }
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "sync::diagnostics_export::tests::no_host_export_does_not_initialize_process_core", "--nocapture"])
+            .env(CHILD, "1")
+            .output().unwrap();
+        assert!(output.status.success(), "{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"), "fresh-process test must actually run");
     }
     #[test]
     fn production_projection_bounds_real_original_result_history_before_ffi_lowering() {

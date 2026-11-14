@@ -31,8 +31,9 @@ impl Runtime {
     }
 }
 
+static RUNTIME: OnceLock<Result<Arc<Runtime>, CoreError>> = OnceLock::new();
+
 fn runtime() -> Result<&'static Arc<Runtime>, CoreError> {
-    static RUNTIME: OnceLock<Result<Arc<Runtime>, CoreError>> = OnceLock::new();
     RUNTIME
         .get_or_init(|| Runtime::new(EngineConfig::default()).map(Arc::new))
         .as_ref()
@@ -141,6 +142,19 @@ pub(crate) fn host() -> Result<Arc<meguri_host::CoreHost>, CoreError> {
             reason: "collection host is not ready".into(),
         }),
     }
+}
+/// Evidence lookup only. Never initializes the process engine, workers or event
+/// dispatcher, and preserves the same ready-host selection as `host()`.
+pub(crate) fn retained_host() -> Option<Arc<meguri_host::CoreHost>> {
+    let runtime = RUNTIME.get()?.as_ref().ok()?;
+    match &*runtime.host.lock().unwrap_or_else(PoisonError::into_inner) {
+        HostState::Open(host, _) => Some(host.clone()),
+        _ => None,
+    }
+}
+#[cfg(test)]
+pub(crate) fn process_initialized_for_testing() -> bool {
+    RUNTIME.get().is_some()
 }
 /// Snapshot the retained host's actual configured directory, including FailedCorrupt.
 pub(crate) fn backup_listing_inputs() -> Result<(Arc<meguri_host::CoreHost>, std::path::PathBuf), CoreError> {

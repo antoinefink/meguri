@@ -195,7 +195,9 @@ public actor FieldDiagnosticsStore {
             timelineState.truncatedCount = saturatedAdd(timelineState.truncatedCount, UInt64(excess))
         }
         guard needsRepair || !batch.events.isEmpty || newDrops > 0 || prior.events != timelineState.events else { return }
-        timelineNeedsRewrite = false
+        // Clear only after a successful write. A later ordinary snapshot may
+        // persist this same evidence after initial storage becomes available.
+        timelineNeedsRewrite = true
         persistTimeline()
     }
 

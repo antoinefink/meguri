@@ -49,7 +49,10 @@ impl Runtime {
     /// One lock, no policy or provider calls. Caps precede every vector
     /// allocation/copy. Legacy inspection retains its original complete values.
     pub fn diagnostics_export(&self) -> Snapshot {
-        let state = self.state();
+        // Immutable evidence only: mutation guards must keep publishing native
+        // authority, but this read must neither acquire nor replace authority.
+        let guard = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let state = &*guard;
         let reads = &state.adapter.root_reads;
         let deletions = &state.adapter.zone_deletions;
         Snapshot {
@@ -108,6 +111,31 @@ mod tests {
     }
     impl FileIdentityProvider for NoProviders {
         fn identity(&self, _: &std::path::Path) -> Result<NativeFileIdentity, RuntimeError> { panic!("export must not query files") }
+    }
+    #[test]
+    fn export_never_acquires_or_publishes_native_authority() {
+        let runtime = Runtime::new(std::path::PathBuf::new(), CloudInputs {
+            scope: BuildScope { container: ContainerId::new("synthetic-read-only-export").unwrap(), environment: Environment::Development },
+            identity: Arc::new(NoProviders), files: Arc::new(NoProviders),
+        });
+        let mut authority = runtime.native_authority.lock().unwrap();
+        // Deliberately different from State: even equivalent publication is
+        // forbidden. Holding this mutex also detects authority-lock contention.
+        authority.instance = Some("retained-authority-canary".into());
+        let instance = authority.instance.clone();
+        std::thread::scope(|scope| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let runtime = &runtime;
+            let export = scope.spawn(move || { tx.send(runtime.diagnostics_export()).unwrap(); });
+            let result = rx.recv_timeout(std::time::Duration::from_secs(5));
+            assert_eq!(authority.instance, instance);
+            // Release before joining even on regression, so a failed assertion
+            // reports an error instead of leaving a blocked test worker.
+            drop(authority);
+            export.join().unwrap();
+            assert!(result.is_ok(), "export must complete with authority locked");
+        });
+        assert_eq!(runtime.native_authority.lock().unwrap().instance, instance);
     }
     #[test]
     fn original_result_history_is_bounded_before_bridge_and_legacy_history_is_unchanged() {

@@ -6,6 +6,8 @@ import SwiftUI
 /// Mount directly inside the expanded Connection details disclosure. The parent
 /// must remove this content when collapsed; SwiftUI may retain disclosure bodies.
 /// Callbacks supply observations and the store's safe whole-app export only.
+/// Callback owners are fixed for this view identity. When the owner changes,
+/// the caller must use `.id(ownerID)` to unmount the old model and callbacks.
 public struct SyncDiagnosticsContent: View {
     public typealias Snapshot = @MainActor () async throws -> FieldDiagnosticTimeline
     public typealias SafeExport = @MainActor () async throws -> Data
@@ -13,6 +15,7 @@ public struct SyncDiagnosticsContent: View {
 
     @State private var model: SyncDiagnosticsModel
     @Environment(\.locale) private var locale
+    @Environment(\.timeZone) private var timeZone
 
     public init(snapshot: @escaping Snapshot, safeExport: @escaping SafeExport,
                 writeClipboard: @escaping ClipboardWrite) {
@@ -21,12 +24,11 @@ public struct SyncDiagnosticsContent: View {
     }
 
     public var body: some View {
-        let presentation = model.timeline.map { SyncDiagnosticsPresentation($0, locale: locale) }
+        let presentation = model.timeline.map { SyncDiagnosticsPresentation($0, locale: locale, timeZone: timeZone) }
         VStack(alignment: .leading) {
             Text(SyncDiagnosticsCopy.text("Sync Logs", locale: locale))
                 .accessibilityAddTraits(.isHeader)
-            Text(SyncDiagnosticsCopy.text("Up to 20 recent cloud and media observations, in recorded arrival order. Observation times use the wall clock and may move backward.", locale: locale))
-            Text(SyncDiagnosticsCopy.text("These app observations are not service receipts or proof that collections match.", locale: locale))
+            Text(SyncDiagnosticsCopy.text("Recent cloud and media activity.", locale: locale))
             if model.isLoading {
                 Text(SyncDiagnosticsCopy.text("Loading sync logs…", locale: locale))
             }
@@ -45,8 +47,8 @@ public struct SyncDiagnosticsContent: View {
                         Text(row.summary)
                         Text(row.result)
                         Text(row.observedTime)
-                        Text(row.count)
-                        Text(row.duration)
+                        if let count = row.count { Text(count) }
+                        if let duration = row.duration { Text(duration) }
                         if let failure = row.failure { Text(failure) }
                     }
                     .accessibilityElement(children: .combine)
@@ -54,9 +56,10 @@ public struct SyncDiagnosticsContent: View {
                 }
             }
             Button(SyncDiagnosticsCopy.text("Refresh", locale: locale)) { model.requestRefresh() }
+                .disabled(model.refreshInFlight)
                 .accessibilityIdentifier("settings.diagnostics.refresh")
             Button(SyncDiagnosticsCopy.text("Copy Debug Info", locale: locale)) { model.requestCopy() }
-                .disabled(model.isCopying)
+                .disabled(model.copyInFlight)
                 .accessibilityValue(Text(model.copyFeedback.text(locale: locale) ?? ""))
                 .accessibilityIdentifier("settings.diagnostics.copyDebugInfo")
             if let feedback = model.copyFeedback.text(locale: locale) {
@@ -97,6 +100,10 @@ public struct SyncDiagnosticsContent: View {
     private var lifetime: UUID?
     private var refreshOwner: UUID?
     private var copyOwner: UUID?
+    // Survive invalidation/unmount until the producer actually returns. A
+    // cancelled task may still be inside a noncooperative callback.
+    private(set) var refreshInFlight = false
+    private(set) var copyInFlight = false
     private(set) var refreshRequest = UUID()
     private(set) var copyRequest: UUID?
     private(set) var timeline: FieldDiagnosticTimeline?
@@ -123,14 +130,14 @@ public struct SyncDiagnosticsContent: View {
     }
 
     func requestRefresh() {
-        guard lifetime != nil else { return }
+        guard lifetime != nil, !refreshInFlight else { return }
         refreshOwner = nil
         invalidateCopy()
         refreshRequest = UUID()
     }
 
     func requestCopy() {
-        guard lifetime != nil else { return }
+        guard lifetime != nil, !copyInFlight else { return }
         copyOwner = nil
         copyRequest = UUID()
     }
@@ -141,12 +148,14 @@ public struct SyncDiagnosticsContent: View {
     }
 
     func refresh() async {
-        guard let lifetime, !Task.isCancelled else { return }
+        guard let lifetime, !refreshInFlight, !Task.isCancelled else { return }
         let owner = UUID()
         refreshOwner = owner
         invalidateCopy()
         isLoading = true
+        refreshInFlight = true
         defer {
+            refreshInFlight = false
             if self.lifetime == lifetime, refreshOwner == owner { isLoading = false }
         }
         do {
@@ -161,11 +170,13 @@ public struct SyncDiagnosticsContent: View {
     }
 
     func copy() async {
-        guard let lifetime, copyRequest != nil, !Task.isCancelled else { return }
+        guard let lifetime, copyRequest != nil, !copyInFlight, !Task.isCancelled else { return }
         let owner = UUID()
         copyOwner = owner
         isCopying = true; copyFeedback = .copying
+        copyInFlight = true
         defer {
+            copyInFlight = false
             if self.lifetime == lifetime, copyOwner == owner {
                 isCopying = false
                 if Task.isCancelled { copyFeedback = .idle }
@@ -192,20 +203,22 @@ public struct SyncDiagnosticsContent: View {
 
 /// Presentation only: retains the store's FIFO order and never interprets an
 /// observation as a receipt, current sync status, or a historical last-sync fact.
+/// Display dates use locale/time zone; source timestamps remain unadjusted even
+/// across wall-clock rollback. Missing measurements remain absent in the data.
 struct SyncDiagnosticsPresentation {
     struct Row: Identifiable {
         let id: Int
         let summary: String
         let result: String
         let observedTime: String
-        let count: String
-        let duration: String
+        let count: String?
+        let duration: String?
         let failure: String?
     }
     let rows: [Row]
     let notices: [String]
 
-    init(_ timeline: FieldDiagnosticTimeline, locale: Locale) {
+    init(_ timeline: FieldDiagnosticTimeline, locale: Locale, timeZone: TimeZone = .current) {
         func text(_ key: String.LocalizationValue) -> String { SyncDiagnosticsCopy.text(key, locale: locale) }
         guard timeline.schemaVersion == 1 else {
             rows = []
@@ -215,6 +228,11 @@ struct SyncDiagnosticsPresentation {
         let events = timeline.events.enumerated().filter {
             $0.element.observation.component == .cloud || $0.element.observation.component == .media
         }
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.timeZone = timeZone
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .medium
         rows = events.suffix(20).map { index, event in
             let observation = event.observation
             let component = text(observation.component == .cloud ? "Cloud" : "Media")
@@ -223,18 +241,15 @@ struct SyncDiagnosticsPresentation {
             let outcome = text(SyncDiagnosticsCopy.outcome(observation.outcome))
             let time: String
             if (-62_135_596_800_000...253_402_300_799_999).contains(event.observedAtUnixMilliseconds) {
-                let formatter = ISO8601DateFormatter()
-                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                formatter.timeZone = TimeZone(secondsFromGMT: 0)
                 let instant = formatter.string(from: Date(timeIntervalSince1970: Double(event.observedAtUnixMilliseconds) / 1_000))
                 time = text("Observed at \(instant)")
             } else {
                 time = text("Observation time: Not recorded")
             }
-            return Row(id: index, summary: text("\(component): \(operation)"),
-                       result: text("\(stage) · \(outcome)"), observedTime: time,
-                       count: observation.count.map { text("Recorded count: \($0)") } ?? text("Recorded count: Not recorded"),
-                       duration: observation.durationMilliseconds.map { text("Recorded duration: \($0) ms") } ?? text("Recorded duration: Not recorded"),
+            return Row(id: index, summary: SyncDiagnosticsCopy.format("syncDiagnosticsObservationSummary", component, operation, locale: locale),
+                       result: SyncDiagnosticsCopy.format("syncDiagnosticsObservationResult", stage, outcome, locale: locale), observedTime: time,
+                       count: observation.count.map { text("Recorded count: \($0)") },
+                       duration: observation.durationMilliseconds.map { text("Recorded duration: \($0) ms") },
                        failure: observation.failure.map { text(SyncDiagnosticsCopy.failure($0)) })
         }
         var notes: [String] = []
@@ -260,6 +275,10 @@ private enum SyncDiagnosticsCopy {
         String(localized: key, table: "Diagnostics", bundle: .module, locale: locale)
     }
 
+    static func format(_ key: String.LocalizationValue, _ first: String, _ second: String, locale: Locale) -> String {
+        String(format: text(key, locale: locale), locale: locale, arguments: [first, second])
+    }
+
     static func operation(_ value: FieldDiagnosticObservation.Operation) -> String.LocalizationValue {
         switch value {
         case .open: "Open"
@@ -273,33 +292,33 @@ private enum SyncDiagnosticsCopy {
         case .publish: "Publish"
         case .cleanup: "Clean up"
         case .status: "Status"
-        case .exchange: "Exchange"
-        case .transfer: "Transfer"
+        case .exchange: "Sync data"
+        case .transfer: "Transfer media"
         }
     }
 
     static func stage(_ value: FieldDiagnosticObservation.Stage) -> String.LocalizationValue {
         switch value {
-        case .requested: "Request observed"
-        case .admission: "Admission observed"
-        case .coreAccepted: "Core acceptance observed"
-        case .persistence: "Persistence observed"
-        case .presentation: "Presentation observed"
-        case .inspection: "Inspection observed"
-        case .activation: "Activation observed"
-        case .preparation: "Preparation observed"
-        case .publication: "Publication observed"
-        case .cleanup: "Cleanup observed"
-        case .statusObserved: "Status observed"
-        case .exchangeCompleted: "Exchange completion observed"
-        case .convergenceObserved: "Convergence reported"
+        case .requested: "Requested"
+        case .admission: "Request checked"
+        case .coreAccepted: "Request accepted"
+        case .persistence: "Saving"
+        case .presentation: "Displaying"
+        case .inspection: "Checking"
+        case .activation: "Activating"
+        case .preparation: "Preparing"
+        case .publication: "Publishing"
+        case .cleanup: "Cleaning up"
+        case .statusObserved: "Status checked"
+        case .exchangeCompleted: "Data exchange finished"
+        case .convergenceObserved: "Collections reported matching"
         }
     }
 
     static func outcome(_ value: FieldDiagnosticObservation.Outcome) -> String.LocalizationValue {
         switch value {
-        case .observed: "Observed result"
-        case .succeeded: "Reported success for this stage"
+        case .observed: "Observed"
+        case .succeeded: "Step succeeded"
         case .failed: "Failed"
         case .waiting: "Pending"
         case .cancelled: "Cancelled"

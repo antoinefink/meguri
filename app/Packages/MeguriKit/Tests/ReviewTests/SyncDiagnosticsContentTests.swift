@@ -42,12 +42,12 @@ import Testing
         }
         let presentation = SyncDiagnosticsPresentation(await snapshot(observations), locale: locale)
         #expect(presentation.rows.count == 20)
-        #expect(presentation.rows.map(\.count) == (10..<30).map { "Recorded count: \($0)" })
-        #expect(presentation.rows.first?.summary == "Cloud: Exchange")
-        #expect(presentation.rows.last?.summary == "Media: Exchange")
+        #expect(presentation.rows.compactMap(\.count) == (10..<30).map { "Recorded count: \($0)" })
+        #expect(presentation.rows.first?.summary == "Cloud: Sync data")
+        #expect(presentation.rows.last?.summary == "Media: Sync data")
         #expect(presentation.rows.allSatisfy { $0.failure == nil })
         #expect(presentation.notices.contains("Only the latest 20 cloud and media observations are shown."))
-        #expect(!presentation.rows.map(\.count).joined().contains("9999"))
+        #expect(!presentation.rows.compactMap(\.count).joined().contains("9999"))
     }
 
     @Test func stageOutcomeAndUnknownMeasurementsDoNotInventSuccessOrZero() async {
@@ -64,17 +64,17 @@ import Testing
         ])
         let rows = SyncDiagnosticsPresentation(timeline, locale: locale).rows
         #expect(rows.map(\.result) == [
-            "Request observed · Observed result", "Exchange completion observed · Incomplete",
-            "Status observed · Outcome not recorded", "Publication observed · Pending",
-            "Admission observed · Refused", "Cleanup observed · Cancelled",
-            "Publication observed · Failed", "Persistence observed · Reported success for this stage",
+            "Requested · Observed", "Data exchange finished · Incomplete",
+            "Status checked · Outcome not recorded", "Publishing · Pending",
+            "Request checked · Refused", "Cleaning up · Cancelled",
+            "Publishing · Failed", "Saving · Step succeeded",
         ])
-        #expect(rows[0].count == "Recorded count: Not recorded")
-        #expect(rows[0].duration == "Recorded duration: Not recorded")
+        #expect(rows[0].count == nil)
+        #expect(rows[0].duration == nil)
         #expect(rows[1].count == "Recorded count: 0")
         #expect(rows[6].duration == "Recorded duration: 42 ms")
         #expect(rows[6].failure == "Failure reason: Permission denied")
-        #expect(!rows[6].count.contains("Not recorded"))
+        #expect(rows[6].count == "Recorded count: 18446744073709551615")
     }
 
     @Test func rollbackTimesAreDisplayedUnadjustedWithoutReordering() async {
@@ -86,9 +86,20 @@ import Testing
         _ = await store.timeline()
         clock.withLock { $0 = instant.addingTimeInterval(-1) }
         store.enqueue(observation(stage: .exchangeCompleted, outcome: .incomplete, count: 2))
-        let rows = SyncDiagnosticsPresentation(await store.timeline(), locale: locale).rows
-        #expect(rows.map(\.count) == ["Recorded count: 1", "Recorded count: 2"])
-        #expect(rows.map(\.observedTime) == ["Observed at 2027-01-15T08:00:00.000Z", "Observed at 2027-01-15T07:59:59.000Z"])
+        let timeline = await store.timeline()
+        #expect(timeline.events.map(\.observedAtUnixMilliseconds) == [1_800_000_000_000, 1_799_999_999_000])
+        let utc = TimeZone(secondsFromGMT: 0)!
+        for displayLocale in [locale, Locale(identifier: "de_DE")] {
+            let rows = SyncDiagnosticsPresentation(timeline, locale: displayLocale, timeZone: utc).rows
+            #expect(rows.compactMap(\.count).count == 2)
+            let formatter = DateFormatter()
+            formatter.locale = displayLocale
+            formatter.timeZone = utc
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .medium
+            #expect(rows.map(\.observedTime) == [instant, instant.addingTimeInterval(-1)].map { "Observed at \(formatter.string(from: $0))" })
+        }
+        #expect(SyncDiagnosticsPresentation(timeline, locale: locale).rows.compactMap(\.count) == ["Recorded count: 1", "Recorded count: 2"])
     }
 
     @Test func corruptHistoryHasUnknownLossWhileAvailableRowsRemainVisible() async throws {
@@ -129,66 +140,128 @@ import Testing
 
     @Test func refreshFailurePreservesPriorDataWithoutDescribingTheError() async {
         let value = await snapshot([observation(count: 7)])
-        var fails = false
+        let failure = DiagnosticRefreshFailureFixture()
+        var reads = 0
+        var exports = 0
+        var writes = 0
         let model = SyncDiagnosticsModel(snapshot: {
-            if fails { throw UndescribableDiagnosticError() }
+            reads += 1
+            if failure.fails { throw UndescribableDiagnosticError() }
             return value
-        }, safeExport: { throw UndescribableDiagnosticError() }, writeClipboard: { _ in
+        }, safeExport: { exports += 1; throw UndescribableDiagnosticError() }, writeClipboard: { _ in
+            writes += 1
             Issue.record("Refresh must never write the clipboard")
             return false
         })
         // Unmounted callbacks are never invoked.
         await model.refresh()
-        #expect(model.timeline == nil)
+        model.requestCopy()
+        await model.copy()
+        #expect(model.timeline == nil && reads == 0 && exports == 0 && writes == 0)
         model.mount()
         await model.refresh()
-        fails = true
+        failure.fails = true
         model.requestRefresh()
         await model.refresh()
         #expect(model.snapshotUnavailable)
         #expect(model.timeline?.events == value.events)
         #expect(!model.isLoading)
-        fails = false
+        failure.fails = false
         await model.refresh()
         #expect(!model.snapshotUnavailable)
     }
 
-    @Test func newerRefreshWinsEvenWhenTheOldReadIgnoresCancellation() async {
+    @Test func busyRefreshAdmitsOneNoncooperativeReadAndCanRefreshAgainAfterCompletion() async {
         let old = SuspendedDiagnosticResult<FieldDiagnosticTimeline>()
-        let new = SuspendedDiagnosticResult<FieldDiagnosticTimeline>()
         let oldValue = await snapshot([observation(count: 1)])
         let newValue = await snapshot([observation(count: 2)])
         var reads = 0
         let model = SyncDiagnosticsModel(snapshot: {
             reads += 1
-            return try await (reads == 1 ? old : new).read()
+            if reads == 1 { return try await old.read() }
+            return newValue
         }, safeExport: { Data() }, writeClipboard: { _ in false })
         model.mount()
         let first = Task { await model.refresh() }
         await old.waitUntilRequested()
-        model.requestRefresh()
-        let second = Task { await model.refresh() }
-        await new.waitUntilRequested()
-        new.finish(newValue)
-        await second.value
+        let request = model.refreshRequest
+        for _ in 0..<20 {
+            model.requestRefresh()
+            await model.refresh()
+        }
+        #expect(reads == 1 && model.refreshRequest == request && model.refreshInFlight)
         old.finish(oldValue)
         await first.value
+        #expect(model.timeline?.events == oldValue.events)
+        #expect(!model.refreshInFlight)
+        model.requestRefresh()
+        await model.refresh()
         #expect(model.timeline?.events == newValue.events)
-        #expect(!model.isLoading && !model.snapshotUnavailable)
+        #expect(reads == 2 && !model.isLoading && !model.snapshotUnavailable)
     }
 
     @Test(arguments: [false, true])
     func cancelledOrUnmountedRefreshCannotPublishLateData(unmount: Bool) async {
         let read = SuspendedDiagnosticResult<FieldDiagnosticTimeline>()
         let value = await snapshot([observation()])
-        let model = SyncDiagnosticsModel(snapshot: { try await read.read() }, safeExport: { Data() }, writeClipboard: { _ in false })
+        var reads = 0
+        let model = SyncDiagnosticsModel(snapshot: {
+            reads += 1
+            if reads == 1 { return try await read.read() }
+            return value
+        }, safeExport: { Data() }, writeClipboard: { _ in false })
         model.mount()
         let task = Task { await model.refresh() }
         await read.waitUntilRequested()
         if unmount { model.unmount(); model.mount() } else { task.cancel() }
+        model.requestRefresh()
+        await model.refresh()
+        #expect(reads == 1 && model.refreshInFlight)
         read.finish(value)
         await task.value
-        #expect(model.timeline == nil && !model.isLoading && !model.snapshotUnavailable)
+        #expect(model.timeline == nil && !model.isLoading && !model.snapshotUnavailable && !model.refreshInFlight)
+    }
+
+    @Test func replacingCallbackOwnerAtMountBoundaryRejectsOldWorkAndUsesOnlyNewCallbacks() async {
+        let oldRead = SuspendedDiagnosticResult<FieldDiagnosticTimeline>()
+        let oldExport = SuspendedDiagnosticResult<Data>()
+        let oldValue = await snapshot([observation(count: 1)])
+        let newValue = await snapshot([observation(count: 2)])
+        var readsA = 0, readsB = 0, exportsA = 0, exportsB = 0
+        var writesA: [String] = [], writesB: [String] = []
+        let ownerA = SyncDiagnosticsModel(snapshot: {
+            readsA += 1; return try await oldRead.read()
+        }, safeExport: {
+            exportsA += 1; return try await oldExport.read()
+        }, writeClipboard: { writesA.append($0); return true })
+        ownerA.mount()
+        let readA = Task { await ownerA.refresh() }
+        await oldRead.waitUntilRequested()
+        ownerA.requestCopy()
+        let copyA = Task { await ownerA.copy() }
+        await oldExport.waitUntilRequested()
+        // The model lifecycle at the caller's `.id(ownerID)` boundary: A is
+        // removed and B gets a new model with B's immutable callbacks.
+        ownerA.unmount()
+        let ownerB = SyncDiagnosticsModel(snapshot: {
+            readsB += 1; return newValue
+        }, safeExport: {
+            exportsB += 1; return Data("owner B safe report".utf8)
+        }, writeClipboard: { writesB.append($0); return true })
+        ownerB.mount()
+        await ownerB.refresh()
+        ownerB.requestCopy()
+        await ownerB.copy()
+        oldRead.finish(oldValue)
+        oldExport.finish(Data("owner A stale report".utf8))
+        await readA.value; await copyA.value
+        // Calls made while A is unmounted cannot invoke any of its callbacks.
+        ownerA.requestRefresh(); await ownerA.refresh()
+        ownerA.requestCopy(); await ownerA.copy()
+        #expect(readsA == 1 && exportsA == 1 && writesA.isEmpty)
+        #expect(ownerA.timeline == nil && ownerA.copyFeedback == .idle)
+        #expect(readsB == 1 && exportsB == 1 && writesB == ["owner B safe report"])
+        #expect(ownerB.timeline?.events == newValue.events && ownerB.copyFeedback == .copied)
     }
 
     @Test(arguments: [false, true])
@@ -281,14 +354,25 @@ import Testing
         case "cancel": first.cancel()
         case "unmount": model.unmount(); model.mount()
         case "refresh": model.requestRefresh(); await model.refresh()
-        default: model.requestCopy(); await model.copy()
+        default:
+            // Refresh invalidates the old export. Even a replacement Copy
+            // must wait until its noncooperative producer has returned.
+            model.requestRefresh(); await model.refresh()
+            for _ in 0..<20 { model.requestCopy(); await model.copy() }
+            #expect(exports == 1 && model.copyInFlight)
         }
         pending.finish(Data("stale safe report".utf8))
         await first.value
+        #expect(writes.isEmpty && model.copyFeedback == .idle)
+        if reason == "newCopy" { model.requestCopy(); await model.copy() }
         #expect(writes == (reason == "newCopy" ? ["current safe report"] : []))
         #expect(model.copyFeedback == (reason == "newCopy" ? .copied : .idle))
         #expect(!model.isCopying)
     }
+}
+
+@MainActor private final class DiagnosticRefreshFailureFixture {
+    var fails = false
 }
 
 /// Deliberately ignores cancellation so ownership is tested independently of a

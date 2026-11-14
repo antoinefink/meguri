@@ -1,30 +1,6 @@
 {
   "sourceLanguage": "en",
   "strings": {
-    "%@ · %@": {
-      "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ · %@"
-          }
-        }
-      }
-    },
-    "%@: %@": {
-      "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@: %@"
-          }
-        }
-      }
-    },
     "Activate": {
       "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
       "extractionState": "manual",
@@ -37,26 +13,14 @@
         }
       }
     },
-    "Activation observed": {
+    "Activating": {
       "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Activation observed"
-          }
-        }
-      }
-    },
-    "Admission observed": {
-      "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Admission observed"
+            "value": "Activating"
           }
         }
       }
@@ -85,6 +49,18 @@
         }
       }
     },
+    "Checking": {
+      "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking"
+          }
+        }
+      }
+    },
     "Clean up": {
       "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
       "extractionState": "manual",
@@ -97,14 +73,14 @@
         }
       }
     },
-    "Cleanup observed": {
+    "Cleaning up": {
       "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Cleanup observed"
+            "value": "Cleaning up"
           }
         }
       }
@@ -133,14 +109,14 @@
         }
       }
     },
-    "Convergence reported": {
+    "Collections reported matching": {
       "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Convergence reported"
+            "value": "Collections reported matching"
           }
         }
       }
@@ -157,14 +133,14 @@
         }
       }
     },
-    "Core acceptance observed": {
+    "Data exchange finished": {
       "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Core acceptance observed"
+            "value": "Data exchange finished"
           }
         }
       }
@@ -193,26 +169,14 @@
         }
       }
     },
-    "Exchange": {
+    "Displaying": {
       "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Exchange"
-          }
-        }
-      }
-    },
-    "Exchange completion observed": {
-      "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Exchange completion observed"
+            "value": "Displaying"
           }
         }
       }
@@ -397,18 +361,6 @@
         }
       }
     },
-    "Inspection observed": {
-      "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Inspection observed"
-          }
-        }
-      }
-    },
     "Invalid observations omitted, across the app: %llu": {
       "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
       "extractionState": "manual",
@@ -481,6 +433,18 @@
         }
       }
     },
+    "Observed": {
+      "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Observed"
+          }
+        }
+      }
+    },
     "Observed at %@": {
       "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
       "extractionState": "manual",
@@ -489,18 +453,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Observed at %@"
-          }
-        }
-      }
-    },
-    "Observed result": {
-      "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Observed result"
           }
         }
       }
@@ -565,30 +517,6 @@
         }
       }
     },
-    "Persistence observed": {
-      "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Persistence observed"
-          }
-        }
-      }
-    },
-    "Preparation observed": {
-      "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Preparation observed"
-          }
-        }
-      }
-    },
     "Prepare": {
       "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
       "extractionState": "manual",
@@ -597,6 +525,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Prepare"
+          }
+        }
+      }
+    },
+    "Preparing": {
+      "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparing"
           }
         }
       }
@@ -613,30 +553,6 @@
         }
       }
     },
-    "Presentation observed": {
-      "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Presentation observed"
-          }
-        }
-      }
-    },
-    "Publication observed": {
-      "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Publication observed"
-          }
-        }
-      }
-    },
     "Publish": {
       "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
       "extractionState": "manual",
@@ -645,6 +561,30 @@
           "stringUnit": {
             "state": "translated",
             "value": "Publish"
+          }
+        }
+      }
+    },
+    "Publishing": {
+      "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Publishing"
+          }
+        }
+      }
+    },
+    "Recent cloud and media activity.": {
+      "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recent cloud and media activity."
           }
         }
       }
@@ -661,18 +601,6 @@
         }
       }
     },
-    "Recorded count: Not recorded": {
-      "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Recorded count: Not recorded"
-          }
-        }
-      }
-    },
     "Recorded duration: %llu ms": {
       "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
       "extractionState": "manual",
@@ -681,18 +609,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Recorded duration: %llu ms"
-          }
-        }
-      }
-    },
-    "Recorded duration: Not recorded": {
-      "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Recorded duration: Not recorded"
           }
         }
       }
@@ -745,26 +661,38 @@
         }
       }
     },
-    "Reported success for this stage": {
+    "Request accepted": {
       "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Reported success for this stage"
+            "value": "Request accepted"
           }
         }
       }
     },
-    "Request observed": {
+    "Request checked": {
       "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Request observed"
+            "value": "Request checked"
+          }
+        }
+      }
+    },
+    "Requested": {
+      "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Requested"
           }
         }
       }
@@ -841,6 +769,18 @@
         }
       }
     },
+    "Saving": {
+      "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saving"
+          }
+        }
+      }
+    },
     "Some earlier history is unavailable. The number of missing observations is unknown.": {
       "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
       "extractionState": "manual",
@@ -889,14 +829,26 @@
         }
       }
     },
-    "Status observed": {
+    "Status checked": {
       "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Status observed"
+            "value": "Status checked"
+          }
+        }
+      }
+    },
+    "Step succeeded": {
+      "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Step succeeded"
           }
         }
       }
@@ -913,6 +865,18 @@
         }
       }
     },
+    "Sync data": {
+      "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync data"
+          }
+        }
+      }
+    },
     "Sync logs are unavailable. Try Refresh.": {
       "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
       "extractionState": "manual",
@@ -921,18 +885,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Sync logs are unavailable. Try Refresh."
-          }
-        }
-      }
-    },
-    "These app observations are not service receipts or proof that collections match.": {
-      "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "These app observations are not service receipts or proof that collections match."
           }
         }
       }
@@ -949,26 +901,38 @@
         }
       }
     },
-    "Transfer": {
+    "Transfer media": {
       "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Transfer"
+            "value": "Transfer media"
           }
         }
       }
     },
-    "Up to 20 recent cloud and media observations, in recorded arrival order. Observation times use the wall clock and may move backward.": {
-      "comment": "Connection details sync log presentation. App observations only; never implies service receipts or matching collections.",
+    "syncDiagnosticsObservationResult": {
+      "comment": "Observed stage and outcome, in that order. Named key for symbol generation; preserve both string placeholders.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Up to 20 recent cloud and media observations, in recorded arrival order. Observation times use the wall clock and may move backward."
+            "value": "%@ · %@"
+          }
+        }
+      }
+    },
+    "syncDiagnosticsObservationSummary": {
+      "comment": "Component and operation, in that order. Named key for symbol generation; preserve both string placeholders.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: %@"
           }
         }
       }
