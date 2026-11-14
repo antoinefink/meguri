@@ -1223,7 +1223,17 @@ public final class ReviewCollection: ChangeFanoutSink {
         _ = await cloudPreparationTask?.result
         await cloudActivationCompletion?.value
         await lifecycleTask?.value
+        // Preserve the owner's no-file/unopened cleanup admission, including a
+        // failed open whose absent host still has a historical failed lifecycle.
+        // Other presentation states need a fresh no-collection read after joins.
+        let noCollectionCleanup: Bool
         if state == .noFile || state == .unopened {
+            noCollectionCleanup = true
+        } else {
+            do { noCollectionCleanup = try await collection.lifecycle() == .noCollection }
+            catch { self.error = String(describing: error); return false }
+        }
+        if noCollectionCleanup {
             guard await sync.cancelAndDrain() else { return false }
             do { try await collection.close() }
             catch { self.error = "Couldn’t close the collection. Try again."; return false }

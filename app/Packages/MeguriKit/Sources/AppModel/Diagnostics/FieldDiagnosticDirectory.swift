@@ -27,7 +27,7 @@ nonisolated final class FieldDiagnosticDirectory {
         if let first = components.first, ["var", "tmp", "etc"].contains(first) {
             components.insert("private", at: 0)
         }
-        let descriptor = open("/", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        let descriptor = open("/", O_SEARCH | O_NOFOLLOW | O_CLOEXEC)
         guard descriptor >= 0 else { throw DiagnosticReadFailure.unavailable }
         var directory = FieldDiagnosticDirectory(descriptor: descriptor)
         for component in components {
@@ -58,8 +58,19 @@ nonisolated final class FieldDiagnosticDirectory {
     func child(_ name: String, create: Bool = false) throws -> FieldDiagnosticDirectory {
         try validName(name)
         try validate()
-        if create, mkdirat(descriptor, name, 0o700) != 0, errno != EEXIST { throw DiagnosticReadFailure.unavailable }
-        let child = openat(descriptor, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        let flags = O_SEARCH | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC
+        var child = openat(descriptor, name, flags)
+        if child < 0 {
+            let failure = errno
+            guard failure == ENOENT, create else {
+                throw failure == ENOENT ? DiagnosticReadFailure.notFound : DiagnosticReadFailure.unavailable
+            }
+            // Existing ancestors require search access only, with no creation attempt.
+            guard mkdirat(descriptor, name, 0o700) == 0 || errno == EEXIST else {
+                throw DiagnosticReadFailure.unavailable
+            }
+            child = openat(descriptor, name, flags)
+        }
         guard child >= 0 else {
             throw errno == ENOENT ? DiagnosticReadFailure.notFound : DiagnosticReadFailure.unavailable
         }

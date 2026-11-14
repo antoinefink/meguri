@@ -27,6 +27,7 @@ public struct SyncDiagnosticsContent: View {
         let presentation = model.timeline.map { SyncDiagnosticsPresentation($0, locale: locale, timeZone: timeZone) }
         VStack(alignment: .leading) {
             Text(SyncDiagnosticsCopy.text("Sync Logs", locale: locale))
+                .font(.headline)
                 .accessibilityAddTraits(.isHeader)
             Text(SyncDiagnosticsCopy.text("Recent cloud and media activity.", locale: locale))
             if model.isLoading {
@@ -43,30 +44,38 @@ public struct SyncDiagnosticsContent: View {
                     Text(notice)
                 }
                 ForEach(presentation.rows) { row in
+                    if row.id != presentation.rows.first?.id { Divider() }
                     VStack(alignment: .leading) {
                         Text(row.summary)
                         Text(row.result)
-                        Text(row.observedTime)
-                        if let count = row.count { Text(count) }
-                        if let duration = row.duration { Text(duration) }
+                        VStack(alignment: .leading) {
+                            Text(row.observedTime)
+                            if let count = row.count { Text(count) }
+                            if let duration = row.duration { Text(duration) }
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                         if let failure = row.failure { Text(failure) }
                     }
                     .accessibilityElement(children: .combine)
                     .accessibilityIdentifier("settings.diagnostics.observation.\(row.id)")
                 }
             }
-            Button(SyncDiagnosticsCopy.text("Refresh", locale: locale)) { model.requestRefresh() }
-                .disabled(model.refreshInFlight)
-                .accessibilityIdentifier("settings.diagnostics.refresh")
-            Button(SyncDiagnosticsCopy.text("Copy Debug Info", locale: locale)) { model.requestCopy() }
-                .disabled(model.copyInFlight)
-                .accessibilityValue(Text(model.copyFeedback.text(locale: locale) ?? ""))
-                .accessibilityIdentifier("settings.diagnostics.copyDebugInfo")
+            HStack {
+                Button(SyncDiagnosticsCopy.text("Refresh", locale: locale)) { model.requestRefresh() }
+                    .disabled(model.refreshInFlight)
+                    .accessibilityIdentifier("settings.diagnostics.refresh")
+                Button(SyncDiagnosticsCopy.text("Copy Debug Info", locale: locale)) { model.requestCopy() }
+                    .disabled(model.copyInFlight)
+                    .accessibilityValue(Text(model.copyFeedback.text(locale: locale) ?? ""))
+                    .accessibilityIdentifier("settings.diagnostics.copyDebugInfo")
+            }
             if let feedback = model.copyFeedback.text(locale: locale) {
                 Text(feedback)
                     .accessibilityIdentifier("settings.diagnostics.copyFeedback")
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .onDisappear { model.unmount() }
         .task(id: model.refreshRequest) {
             guard !Task.isCancelled else { return }

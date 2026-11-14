@@ -127,30 +127,37 @@ public struct AccountSyncView: View {
             }
             Section {
                 DisclosureGroup(isExpanded: $detailsExpanded) {
-                    // Available metadata and typed failures live directly here.
-                    // No raw SDK diagnostics, account identity or connection values.
-                    if let status = sync.status {
-                        Text(SyncText.value(accountKey))
-                            .accessibilityIdentifier("settings.accountSync.detailsAccountState")
-                        if let error = status.error {
-                            Text(SyncText.value(SyncStatusPresentation.errorKey(error.error)))
-                                .accessibilityIdentifier("settings.accountSync.detailsError")
+                    VStack(alignment: .leading) {
+                        // Available metadata and typed failures live directly here.
+                        // No raw SDK diagnostics, account identity or connection values.
+                        if let status = sync.status {
+                            Text(SyncText.value(accountKey))
+                                .accessibilityIdentifier("settings.accountSync.detailsAccountState")
+                            if let error = status.error {
+                                Text(SyncText.value(SyncStatusPresentation.errorKey(error.error)))
+                                    .accessibilityIdentifier("settings.accountSync.detailsError")
+                            }
+                            if let last = status.lastAttempt {
+                                Text(SyncStatusCopy.resultTitle(last.outcome))
+                                    .accessibilityIdentifier("settings.accountSync.detailsLastAttempt")
+                            }
+                        } else {
+                            Text(SyncText.value(accountKey))
+                                .accessibilityIdentifier("settings.accountSync.detailsAccountState")
                         }
-                        if let last = status.lastAttempt {
-                            Text(SyncStatusCopy.resultTitle(last.outcome))
-                                .accessibilityIdentifier("settings.accountSync.detailsLastAttempt")
+                        if detailsExpanded, let callbacks = collection.configuration.fieldDiagnostics {
+                            Divider()
+                            SyncDiagnosticsContent(snapshot: { try await callbacks.snapshot() },
+                                safeExport: { try await callbacks.safeExport() }, writeClipboard: callbacks.writeClipboard)
+                                .id(DiagnosticsIdentity(callbacks: ObjectIdentifier(callbacks), collection: ObjectIdentifier(collection), generation: collection.generation))
                         }
-                    } else {
-                        Text(SyncText.value(accountKey))
-                            .accessibilityIdentifier("settings.accountSync.detailsAccountState")
                     }
-                    if detailsExpanded, let callbacks = collection.configuration.fieldDiagnostics {
-                        SyncDiagnosticsContent(snapshot: { try await callbacks.snapshot() },
-                            safeExport: { try await callbacks.safeExport() }, writeClipboard: callbacks.writeClipboard)
-                            .id(DiagnosticsIdentity(callbacks: ObjectIdentifier(callbacks), collection: ObjectIdentifier(collection), generation: collection.generation))
-                    }
-                } label: { Text("Connection details", bundle: .module) }
-                .accessibilityIdentifier("settings.accountSync.details")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } label: {
+                    Text("Connection details", bundle: .module)
+                        // Keep the disclosure's identifier out of its content subtree.
+                        .accessibilityIdentifier("settings.accountSync.details")
+                }
             }
         }
         .formStyle(.grouped)

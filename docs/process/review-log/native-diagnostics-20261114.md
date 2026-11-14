@@ -138,3 +138,33 @@ flush. The assertions remain intact; these causes still need repair.
 compiler/signature results and affected generated bundles are retained.
 Exact rendering, app-hosted exclusion and final integration remain open.
 This is WIP, with no Unit or gate acceptance.
+
+## Verified repair and signed preview
+
+The five-file repair preserves the original no-file close path and admits
+fresh no-collection close without a host flush. Directory authority uses
+Darwin search-only descriptors and opens before creating missing components;
+nofollow, parent identity and substitution checks remain. The native view
+uses leading content, semantic metadata, separators and adjacent actions.
+Moving the disclosure identifier to its label preserves child identifiers.
+
+Source review `cleanroom/20261114T180044Z-75790` and UI review
+`175553Z-74236` found no P0–P2. Native run
+`swift-test/20261114T180053Z-76203` passes all 86 focused tests.
+The final export `cleanroom/20261114T180704Z-81405` contains five files.
+It differs from the tested source only by a deleted test comment.
+
+Final checks pass: privacy `181034Z-83947`, static `181046Z-85736`, and
+similarity `181101Z-86324` (five files, no flags). Signed standalone build
+`build-app/20261114T181042Z-84732` passes. Direct inspection of that exact
+normal sandboxed build confirms available saved history, distinct Refresh
+and Copy Debug Info identifiers, native layout and copy feedback. After
+two normal quits and relaunches, each view retains observations from the
+preceding process. No collection changes or manual sync were performed.
+This is host feedback under the authorized exception, not a VM gate pass.
+
+App-hosted composition check `mac-hosted-test/20261114T173630Z-67823`
+passes with no skips on the earlier wiring checkpoint. Real failed-attempt
+native cursor coverage remains a gap; pure projection coverage is retained.
+U113, P24, full integration and peer round-trip acceptance remain open.
+No Unit trailer or milestone acceptance is claimed here.
