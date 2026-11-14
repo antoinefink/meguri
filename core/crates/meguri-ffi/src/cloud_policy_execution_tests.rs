@@ -69,9 +69,22 @@ fn start() -> (Fixture, Arc<CloudPolicy>, Arc<CloudPolicyExecution>) {
 fn start_with_root() -> (Fixture, Arc<CloudPolicy>, Arc<CloudPolicyExecution>, CloudRecord) {
     start_with_settings(settings(false, false))
 }
+fn start_with_root_and_accepted_epoch() -> (Fixture, Arc<CloudPolicy>, Arc<CloudPolicyExecution>, CloudRecord) {
+    start_with_settings_and_epoch(settings(false, false), true)
+}
 fn start_with_settings(event: CloudPolicyEvent) -> (Fixture, Arc<CloudPolicy>, Arc<CloudPolicyExecution>, CloudRecord) {
+    start_with_settings_and_epoch(event, false)
+}
+fn start_with_settings_and_epoch(
+    event: CloudPolicyEvent,
+    accept_epoch: bool,
+) -> (Fixture, Arc<CloudPolicy>, Arc<CloudPolicyExecution>, CloudRecord) {
     let fixture = fixture();
-    let (sdk, root, _) = fixture.baseline();
+    let (sdk, root, _) = if accept_epoch {
+        fixture.baseline_with_accepted_epoch()
+    } else {
+        fixture.baseline()
+    };
     fixture.workflow.retire_sdk(sdk.instance_id.clone(), false).unwrap();
     fixture.workflow.release_sdk(sdk.instance_id).unwrap();
     let policy = fixture.workflow.policy().unwrap();
@@ -261,7 +274,7 @@ fn settings_pause_with_media_rejects_stale_policy_runtime_guards_and_wrong_owner
 
 #[test]
 fn policy_reads_and_sends_have_no_capability_while_the_original_engine_stops() {
-    let (fixture, policy, start, root) = start_with_root();
+    let (fixture, policy, start, root) = start_with_root_and_accepted_epoch();
     let sdk = start.register_sdk().unwrap();
     let fetch = fixture
         .workflow
@@ -655,7 +668,7 @@ fn native_operation_error_and_activity_use_real_driver_facts() {
 
 #[test]
 fn execution_created_without_sdk_cannot_adopt_registered_sdk() {
-    let (fixture, policy, start) = start();
+    let (fixture, policy, start, _) = start_with_root_and_accepted_epoch();
     let output = policy
         .clone()
         .input(CloudPolicyEvent::SyncNowRequested {
@@ -708,7 +721,7 @@ fn execution_created_without_sdk_cannot_adopt_registered_sdk() {
 
 #[test]
 fn expired_readiness_cannot_accept_a_queued_ready_query() {
-    let (fixture, policy, start) = start();
+    let (fixture, policy, start, _) = start_with_root_and_accepted_epoch();
     start.register_sdk().unwrap();
     policy
         .clone()
@@ -884,8 +897,10 @@ fn actual_replacement_accepts_successor_facades_and_refuses_original_execution_a
 #[test]
 fn cursorless_auto_off_ffi_capture_maps_before_first_root_fetch() {
     let fixture = fixture();
-    let (sdk, root, _) = fixture.baseline_with_root(false);
-    assert!(sdk.needs_root_fetch && sdk.serialization.is_none());
+    let (sdk, root, _) = fixture.baseline_with_root_and_accepted_epoch(false);
+    // This registration was returned before its epoch intake established P6
+    // authority. It carries no initial root-fetch proof or saved cursor.
+    assert!(!sdk.needs_root_fetch && sdk.serialization.is_none());
     let workflow = &fixture.workflow;
     assert!(!workflow.core.wants_send());
     workflow.retire_sdk(sdk.instance_id.clone(), false).unwrap();

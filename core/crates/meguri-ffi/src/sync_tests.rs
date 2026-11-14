@@ -133,7 +133,13 @@ impl Fixture {
         self.baseline_with_root(true)
     }
     fn baseline_with_accepted_epoch(&self) -> (CloudEngineRegistration, CloudRecord, CloudRecord) {
-        let (sdk, root, incoming) = self.baseline();
+        self.baseline_with_root_and_accepted_epoch(true)
+    }
+    fn baseline_with_root_and_accepted_epoch(
+        &self,
+        confirm_root: bool,
+    ) -> (CloudEngineRegistration, CloudRecord, CloudRecord) {
+        let (sdk, root, incoming) = self.baseline_with_root(confirm_root);
         let workflow = &self.workflow;
         let collection = workflow.host.collection().unwrap();
         let projection = || {
@@ -148,6 +154,10 @@ impl Fixture {
         assert!(!before.engine.as_ref().unwrap().stopping);
         let seq = collection.last_seq();
         let cursor = workflow.durable_snapshot().unwrap().serialization;
+        if !confirm_root {
+            assert!(!before.root_confirmed && before.drains.is_empty());
+            assert!(cursor.is_none());
+        }
         // P6 authority comes from accepted SDK intake, independently of Active/root
         // proof. This byte producer alone neither accepts an epoch nor opens apply.
         workflow

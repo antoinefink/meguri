@@ -558,7 +558,7 @@ fn rig_with_provider(identity: Arc<dyn r::IdentityProvider>) -> (Fixture, CloudE
     let (fixture, sdk, incoming, _) = rig_with_provider_and_deck(identity);
     (fixture, sdk, incoming)
 }
-fn rig_with_accepted_epoch() -> (Fixture, CloudEngineRegistration, CloudRecord) {
+pub(super) fn rig_with_accepted_epoch() -> (Fixture, CloudEngineRegistration, CloudRecord) {
     let (fixture, sdk, incoming, _) = rig_with_provider_and_deck_epoch(Arc::new(Account), true);
     (fixture, sdk, incoming)
 }
@@ -703,19 +703,11 @@ fn pending_start_fixture() -> (Fixture, Arc<CloudPolicy>, CloudPolicyIssuedComma
             .input(CloudPolicyEvent::Network { reachable: true })
             .unwrap(),
     );
-    let collection = fixture.workflow.host.collection().unwrap();
-    let media = fixture.workflow.host.media().unwrap();
-    media.store().register_full(|_, _| true).unwrap();
-    fixture
-        .workflow
-        .core
-        .prepare_adapter_baseline_for_testing(&collection, fixture.clock.as_ref(), fixture.random.as_ref(), None)
-        .unwrap();
-    fixture
-        .workflow
-        .core
-        .reconcile_binding(&collection, &media, Duration::from_secs(1))
-        .unwrap();
+    // Establish P6 authority through a prior SDK, then really release it before
+    // selecting the measured pending start. Root and cursor remain unconfirmed.
+    let (sdk, _, _) = fixture.baseline_with_root_and_accepted_epoch(false);
+    fixture.workflow.retire_sdk(sdk.instance_id.clone(), false).unwrap();
+    fixture.workflow.release_sdk(sdk.instance_id).unwrap();
     let start = select(
         &policy,
         policy
@@ -730,6 +722,9 @@ fn pending_start_fixture() -> (Fixture, Arc<CloudPolicy>, CloudPolicyIssuedComma
     assert!(state.gate_open() && state.engine.is_none());
     assert!(fixture.workflow.core.status().unwrap().binding.is_some());
     assert!(fixture.workflow.core.incoming_sdk_instance_for_testing().is_none());
+    assert!(!fixture.workflow.core.sdk_root_confirmed());
+    assert!(fixture.workflow.fetch_drains().unwrap().is_empty());
+    assert!(fixture.workflow.durable_snapshot().unwrap().serialization.is_none());
     (fixture, policy, start)
 }
 fn scheduling_commands(

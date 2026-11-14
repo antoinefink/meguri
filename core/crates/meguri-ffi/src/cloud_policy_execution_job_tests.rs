@@ -168,7 +168,22 @@ fn admit(target: AdmissionTarget, kind: AdmissionKind) -> Result<AdmissionJob, C
     }
 }
 fn admission_fixture(kind: AdmissionKind) -> (Fixture, Arc<CloudPolicy>, AdmissionTarget, Option<String>) {
-    let (fixture, policy, execution, root) = start_with_root();
+    admission_fixture_with_epoch(kind, false)
+}
+fn admission_fixture_with_accepted_epoch(
+    kind: AdmissionKind,
+) -> (Fixture, Arc<CloudPolicy>, AdmissionTarget, Option<String>) {
+    admission_fixture_with_epoch(kind, true)
+}
+fn admission_fixture_with_epoch(
+    kind: AdmissionKind,
+    accept_epoch: bool,
+) -> (Fixture, Arc<CloudPolicy>, AdmissionTarget, Option<String>) {
+    let (fixture, policy, execution, root) = if accept_epoch {
+        start_with_root_and_accepted_epoch()
+    } else {
+        start_with_root()
+    };
     if matches!(kind, AdmissionKind::Register) {
         return (
             fixture,
@@ -296,7 +311,7 @@ fn admission_fixture(kind: AdmissionKind) -> (Fixture, Arc<CloudPolicy>, Admissi
 fn native_admission_jobs_start_without_slot_while_driver_projection_and_review_run() {
     for kind in ADMISSIONS {
         for runtime_hold in [false, true] {
-            let (fixture, policy, execution, _) = admission_fixture(kind);
+            let (fixture, policy, execution, _) = admission_fixture_with_accepted_epoch(kind);
             meguri_engine::sched::fsrs_policy::enable_fsrs(
                 &fixture.workflow.host.collection().unwrap(),
                 &Default::default(),
@@ -425,7 +440,7 @@ fn native_admission_jobs_start_without_slot_while_driver_projection_and_review_r
 fn native_admission_jobs_cancel_after_real_driver_and_runtime_contention_before_effects() {
     for kind in ADMISSIONS {
         for runtime_hold in [false, true] {
-            let (fixture, policy, execution, original) = admission_fixture(kind);
+            let (fixture, policy, execution, original) = admission_fixture_with_accepted_epoch(kind);
             let engine = fixture.workflow.host.engine();
             let events = engine.stream().subscribe();
             let driver = fixture.workflow.host.cloud_policy_driver().unwrap();
@@ -522,7 +537,7 @@ fn native_admission_jobs_cancel_after_real_driver_and_runtime_contention_before_
 #[test]
 fn native_admission_jobs_replacement_after_entry_flush_rejects_waiting_generation() {
     for kind in ADMISSIONS {
-        let (fixture, _, execution, original) = admission_fixture(kind);
+        let (fixture, _, execution, original) = admission_fixture_with_accepted_epoch(kind);
         let engine = fixture.workflow.host.engine();
         let events = engine.stream().subscribe();
         let runtime = fixture.workflow.core.clone();
@@ -652,7 +667,7 @@ fn native_admission_jobs_replacement_after_entry_flush_rejects_waiting_generatio
 fn native_admission_jobs_queued_cancel_and_generation_change_keep_original_typed_results() {
     for kind in ADMISSIONS {
         for replace in [false, true] {
-            let (fixture, _, execution, _) = admission_fixture(kind);
+            let (fixture, _, execution, _) = admission_fixture_with_accepted_epoch(kind);
             let engine = fixture.workflow.host.engine();
             let events = engine.stream().subscribe();
             let pool = hold_pool(&fixture);
@@ -710,7 +725,7 @@ fn native_admission_jobs_queued_cancel_and_generation_change_keep_original_typed
 #[test]
 fn native_admission_jobs_original_close_cancels_and_drains_queued_work() {
     for kind in ADMISSIONS {
-        let (fixture, _, execution, _) = admission_fixture(kind);
+        let (fixture, _, execution, _) = admission_fixture_with_accepted_epoch(kind);
         let engine = fixture.workflow.host.engine();
         let events = engine.stream().subscribe();
         let pool = hold_pool(&fixture);
@@ -990,7 +1005,7 @@ fn native_admission_jobs_post_effect_cancel_keeps_media_fetch_and_send_values_af
         (AdmissionKind::Fetch, Stage::PolicyFetchBegun),
         (AdmissionKind::Send, Stage::PolicySendRetryCleared),
     ] {
-        let (fixture, _, target, original) = admission_fixture(kind);
+        let (fixture, _, target, original) = admission_fixture_with_accepted_epoch(kind);
         let runtime = fixture.workflow.core.clone();
         if stage == Stage::PolicyMediaSelected {
             runtime.prepare_cloud_media_sdk(original.as_deref().unwrap()).unwrap();
@@ -1062,7 +1077,7 @@ fn native_admission_job_media_preparation_retains_actual_guard_error_after_cance
 
 #[test]
 fn native_admission_job_send_limit_clears_retrying_and_retains_completed_no_call() {
-    let (fixture, _, target, original) = admission_fixture(AdmissionKind::NoCall);
+    let (fixture, _, target, original) = admission_fixture_with_accepted_epoch(AdmissionKind::NoCall);
     let runtime = fixture.workflow.core.clone();
     let sdk = original.unwrap();
     let seen = runtime
@@ -1110,7 +1125,7 @@ fn native_admission_job_send_limit_clears_retrying_and_retains_completed_no_call
 
 #[test]
 fn native_admission_job_resume_media_send_retains_pending_effect_through_later_state_acquisition() {
-    let (fixture, policy, _, original) = admission_fixture(AdmissionKind::Send);
+    let (fixture, policy, _, original) = admission_fixture_with_accepted_epoch(AdmissionKind::Send);
     let sdk = original.unwrap();
     let command = commands(
         policy
@@ -1418,7 +1433,7 @@ fn native_admission_jobs_flush_deadline_expires_in_original_pool_queue() {
 }
 
 fn incoming_flush_fixture() -> (Fixture, Arc<CloudPolicyExecution>, String) {
-    let (fixture, sdk, incoming) = super::super::policy::rig();
+    let (fixture, sdk, incoming) = super::super::policy::rig_with_accepted_epoch();
     let policy = fixture.workflow.policy().unwrap();
     policy
         .clone()
