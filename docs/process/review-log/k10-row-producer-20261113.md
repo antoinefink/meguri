@@ -53,10 +53,16 @@ Raw identity paging preserves malformed stored ordinal classes and bytes.
 | 3 | `20261114T003211Z-46246` | Compilation, routine read cost and refusal-boundary findings repaired |
 | 4 | `20261114T005125Z-49063` | No new P0/P1 in its delta; lower findings retained |
 | 5 | `20261114T011556Z-52353` | No new P0/P1 in memory delta; incomplete notetype path remains P1 |
+| 6 | `20261114T022810Z-67438` | Two P1 findings: authority after a later edit, and unknown layout origins |
 
-The ordinary-type continuation starts at `7d43c5e7`. Independent round 6 is
-running on export `cleanroom/20261114T022244Z-65512`; no review pass is claimed.
-The original unit and integration bases above remain unchanged.
+The ordinary-type continuation starts at `7d43c5e7`. Independent round 6 reads
+export `cleanroom/20261114T022244Z-65512`; its own export is byte-identical.
+It finds no P0 and two P1s. A later ordinary edit before a new type's apply
+settles can leave replay without layout authority. An external reorder of a
+type without optional IDs can be mistaken for an ordinary edit and retain the
+old counter. Both require fixes; passing tests do not close them. The original
+unit, integration base and review cap remain unchanged. A blocked-red escalation
+records the findings; two further focused rounds await Antoine's decision.
 
 Initial focused run `20261114T021932Z-64427` passed 7/8; expanded run
 `20261114T022038Z-65061` passed 231/232. The new card fixture copied a source
@@ -101,11 +107,11 @@ V7-reader execution against a valid V8 file remains outstanding. The independent
 native quiet-point failure stays enabled. Normal-device media transfer evidence
 is separate from this producer and does not complete the two-way review trial.
 
-The signed Mac preview builds at `67ff77b9` in
-`build-app/20261114T015345Z-58539`. A normal quit and reopen of that exact
+The signed Mac preview builds at `edd07eed` in
+`build-app/20261114T023144Z-69984`. A normal quit and reopen of that exact
 product retains 4 notes, 4 cards, 4 reviews and 4 media files. The local
 replacement preview shows those counts and is cancelled without replacement.
-The sync status remains Unknown. This is a native reopen check, not a new
+Sync Now returns to Unknown. This is a native reopen check, not a new
 two-way review trial; the phone still has the earlier verified build.
 
 This commit is WIP: no Unit trailer, P24 closure, full gate, milestone, signed
