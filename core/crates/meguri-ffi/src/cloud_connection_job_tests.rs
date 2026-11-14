@@ -824,10 +824,12 @@ fn connection_initial_identity_completion_after_failed_close_and_successful_retr
 // read fails; no Runtime hook or new production fault point is needed.
 struct DiagnosticFiles {
     remaining: std::sync::atomic::AtomicIsize,
+    reads: AtomicUsize,
     before_read: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 impl r::FileIdentityProvider for DiagnosticFiles {
     fn identity(&self, path: &std::path::Path) -> Result<r::NativeFileIdentity, r::RuntimeError> {
+        self.reads.fetch_add(1, Ordering::SeqCst);
         let before_read = self.before_read.lock().unwrap().take();
         if let Some(before_read) = before_read {
             before_read();
@@ -850,6 +852,7 @@ fn diagnostic_fixture() -> (Fixture, Arc<DiagnosticFiles>) {
     fixture.workflow.host.close().unwrap();
     let files = Arc::new(DiagnosticFiles {
         remaining: std::sync::atomic::AtomicIsize::new(-1),
+        reads: AtomicUsize::new(0),
         before_read: Mutex::new(None),
     });
     let mut config = HostConfig::new(
@@ -886,6 +889,172 @@ fn diagnostic_cleanup_must_succeed(result: Result<(), CoreError>) {
         Err(CoreError::CloudConnection { failure }) => panic!("adoption cleanup failed: {failure:?}"),
         Err(_) => panic!("adoption cleanup failed with another error family"),
     }
+}
+
+fn adoption_validate_work(fixture: &Fixture) -> (Arc<CloudConnection>, Arc<CloudAdoptionWork>, std::path::PathBuf) {
+    let connection = fixture.workflow.connection().unwrap();
+    adoption_fetch_ready(&connection);
+    let (page, action) = adoption_action(&connection);
+    assert!(matches!(action, CloudAdoptionAction::Fetch { cursor: None, .. }));
+    connection.adoption_result(page, CloudAdoptionResult::Page {
+        records: vec![], deleted: vec![], next: None,
+    }).unwrap();
+    let (local, action) = adoption_action(&connection);
+    assert!(matches!(action, CloudAdoptionAction::Validate));
+    let op = fixture.workflow.core.adoption_op().unwrap().unwrap();
+    assert_eq!(op.step, c::adoption::AdoptStep::Staged);
+    let directory = fixture.workflow.host.cloud_connection_directory().join(op.staging_name);
+    (connection, local, directory)
+}
+
+fn corrupt_adoption_candidate(directory: &std::path::Path) {
+    use std::io::Write;
+    let path = directory.join("collection.anki2");
+    let identity = r::FileIdentityProvider::identity(&NativeFiles, &path).unwrap();
+    let length = std::fs::metadata(&path).unwrap().len();
+    assert_eq!(&std::fs::read(&path).unwrap()[..16], b"SQLite format 3\0");
+    // Overwrite only the synthetic candidate's header, preserving its inode,
+    // length and live collection. No SQL or fabricated authority is involved.
+    let mut file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+    file.write_all(b"invalid database").unwrap();
+    file.sync_all().unwrap();
+    assert_eq!(std::fs::metadata(&path).unwrap().len(), length);
+    assert_eq!(r::FileIdentityProvider::identity(&NativeFiles, &path).unwrap(), identity);
+}
+
+#[test]
+fn connection_adoption_local_corrupt_candidate_reaches_real_validation_and_aborts() {
+    let (fixture, files) = diagnostic_fixture();
+    let (connection, local, directory) = adoption_validate_work(&fixture);
+    corrupt_adoption_candidate(&directory);
+    // With the same candidate and a working provider, Validate's actual body
+    // refuses it and its mandatory abort succeeds; this is no authority fault.
+    failure_is(connection.perform_adoption_local(local), CloudConnectionFailure::Tracking);
+    assert_eq!(files.remaining.load(Ordering::SeqCst), -1);
+    assert!(fixture.workflow.core.adoption_op().unwrap().is_none());
+    assert!(connection.recovery_status().unwrap().is_none());
+    assert!(!directory.exists());
+    assert_eq!(fixture.workflow.host.engine().slot_holder(), None);
+}
+
+fn local_failed_abort_cleanup(body_failure: bool) {
+    use meguri_storage::{ReadRows, RowKey, Table};
+    for close in [false, true] {
+        let (fixture, files) = diagnostic_fixture();
+        let (connection, local, directory) = adoption_validate_work(&fixture);
+        let collection = fixture.workflow.host.collection().unwrap();
+        let generation = collection.generation();
+        let identity = r::FileIdentityProvider::identity(&NativeFiles, collection.path()).unwrap();
+        let rows = || {
+            let reader = collection.reader(ReaderRole::Query).unwrap();
+            let snapshot = reader.snapshot().unwrap();
+            Table::ALL.into_iter().map(|table| {
+                let mut rows = Vec::new();
+                let mut after = None;
+                loop {
+                    let page = snapshot.row_page(table, after.as_ref()).unwrap();
+                    let Some(last) = page.last() else { break; };
+                    after = Some(RowKey::from_stored(table, last).unwrap());
+                    rows.extend(page);
+                }
+                (table, rows)
+            }).collect::<Vec<_>>()
+        };
+        let before_rows = rows();
+        let before = fixture.workflow.core.adoption_op().unwrap().unwrap();
+        let operation = connection.recovery_status().unwrap().unwrap().operation;
+        let other = fixture.workflow.connection().unwrap();
+        let events = fixture.workflow.host.engine().stream().subscribe();
+        let pool = hold_pool(&fixture);
+        let reads = files.reads.load(Ordering::SeqCst);
+        let worker = connection.clone();
+        let original = local.clone();
+        let (output, result) = mpsc::channel();
+        // Use the actual public Local handle inside a registered Host job.
+        // The pool barrier lets us arm the provider only after Host admission.
+        let job = fixture.workflow.host.start_cloud_connection_job(
+            generation, "CloudConnection.perform_adoption_local", move |_| {
+                let typed = worker.perform_adoption_local(original);
+                let outcome = typed.as_ref().map(|_| ()).map_err(|_| {
+                    meguri_engine::EngineError::CollectionUnavailable { reason: "local adoption failed".into() }
+                });
+                output.send(typed).unwrap();
+                outcome
+            },
+        ).unwrap();
+        assert_eq!(files.reads.load(Ordering::SeqCst), reads);
+        assert!(matches!(result.try_recv(), Err(mpsc::TryRecvError::Empty)));
+        if body_failure {
+            corrupt_adoption_candidate(&directory);
+        }
+        let bytes = stage_bytes(&directory);
+        let (entered, reached) = mpsc::channel();
+        let (release, resume) = mpsc::channel();
+        *files.before_read.lock().unwrap() = Some(Box::new(move || {
+            entered.send(()).unwrap();
+            resume.recv_timeout(Duration::from_secs(20)).unwrap();
+        }));
+        // A: authority and abort fail. B: authority succeeds, real Validate
+        // rejects the corrupted candidate, then the abort identity read fails.
+        files.remaining.store(if body_failure { 1 } else { 0 }, Ordering::SeqCst);
+        let release = Release(release);
+        drop(pool);
+        reached.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(!connection.recovery_status().unwrap().unwrap().adoption_cancellable);
+        failure_is(connection.cancel_operation(operation.clone()), CloudConnectionFailure::Busy);
+        failure_is(other.cancel_operation(operation.clone()), CloudConnectionFailure::WrongOwner);
+        failure_is(connection.perform_adoption_local(local.clone()), CloudConnectionFailure::AuthorityChanged);
+        drop(release);
+        assert!(matches!(finished(&events, job.id.0), JobOutcome::Failed { .. }));
+        let original_result = result.recv_timeout(Duration::from_secs(5)).unwrap();
+        failure_is(original_result.clone(), CloudConnectionFailure::FileIdentityUnavailable);
+        assert_eq!(files.reads.load(Ordering::SeqCst), reads + 2);
+        let retained = || {
+            assert_eq!(fixture.workflow.core.adoption_op().unwrap().as_ref(), Some(&before));
+            assert_eq!(stage_bytes(&directory), bytes);
+            assert_eq!(fixture.workflow.host.engine().slot_holder(), Some(meguri_engine::LongOp::CloudAdopt));
+            assert_eq!(collection.generation(), generation);
+            assert_eq!(r::FileIdentityProvider::identity(&NativeFiles, collection.path()).unwrap(), identity);
+            assert_eq!(rows(), before_rows);
+        };
+        retained();
+        failure_is(connection.perform_adoption_local(local.clone()), CloudConnectionFailure::AuthorityChanged);
+        failure_is(connection.adoption_result(local.clone(), CloudAdoptionResult::Failed), CloudConnectionFailure::AuthorityChanged);
+        failure_is(other.cancel_operation(operation.clone()), CloudConnectionFailure::WrongOwner);
+        let cancellable = connection.recovery_status().unwrap().unwrap().adoption_cancellable;
+        // The test-only patch must fail here with Busy on unchanged R19.
+        failure_is(connection.cancel_operation(operation.clone()), CloudConnectionFailure::FileIdentityUnavailable);
+        retained();
+        assert!(cancellable);
+        assert!(connection.recovery_status().unwrap().unwrap().adoption_cancellable);
+        files.remaining.store(-1, Ordering::SeqCst);
+        assert!(matches!(connection.next_publication_work().unwrap(), CloudPublicationWork::Idle));
+        if close {
+            fixture.workflow.host.close().unwrap();
+        } else {
+            diagnostic_cleanup_must_succeed(connection.cancel_operation(operation.clone()));
+            failure_is(connection.cancel_operation(operation), CloudConnectionFailure::NotOffered);
+            assert!(connection.recovery_status().unwrap().is_none());
+            assert!(fixture.workflow.core.adoption_op().unwrap().is_none());
+            failure_is(connection.perform_adoption_local(local), CloudConnectionFailure::AuthorityChanged);
+            assert_eq!(rows(), before_rows);
+            fixture.workflow.host.close().unwrap();
+        }
+        assert!(!directory.exists());
+        assert_eq!(fixture.workflow.host.engine().slot_holder(), None);
+        assert!(fixture.workflow.host.engine().jobs().running().is_empty());
+        failure_is(original_result, CloudConnectionFailure::FileIdentityUnavailable);
+    }
+}
+
+#[test]
+fn connection_adoption_local_authority_and_abort_failure_settles_for_cancel_or_drained_close() {
+    local_failed_abort_cleanup(false);
+}
+
+#[test]
+fn connection_adoption_local_validation_and_abort_failure_settles_for_cancel_or_drained_close() {
+    local_failed_abort_cleanup(true);
 }
 
 #[test]

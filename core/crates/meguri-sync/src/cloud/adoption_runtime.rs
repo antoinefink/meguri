@@ -1538,23 +1538,24 @@ impl Runtime {
             );
         }
         if let Some(owner) = failed_abort_owner {
-            // The reply body, mandatory abort and diagnostic capture have all
-            // settled. Publish cleanup authority only at this final Core boundary;
-            // no reply work follows it. Host close additionally drains its jobs
-            // before using adoption_op_for_host_close. Keep the exact retained
-            // owner: this cannot grant authority to a successor or replay a task.
-            let retained = self.adoption.lock().unwrap_or_else(PoisonError::into_inner)
-                .as_ref().is_some_and(|held| Arc::ptr_eq(held, &owner));
-            if retained {
-                let mut next = owner.next.lock().unwrap_or_else(PoisonError::into_inner);
-                if matches!(*next, AdoptionNext::Claimed)
-                    && !owner.uncertain_activation.load(std::sync::atomic::Ordering::Acquire)
-                {
-                    *next = AdoptionNext::CleanupOnly;
-                }
-            }
+            self.settle_failed_adoption_abort(&owner);
         }
         result
+    }
+    // Call only after the body, mandatory abort and any diagnostic capture
+    // settle, with no further Core work. Host close also drains its jobs.
+    // Exact retained ownership grants only cleanup, never task replay.
+    fn settle_failed_adoption_abort(&self, owner: &Arc<AdoptionOwner>) {
+        let retained = self.adoption.lock().unwrap_or_else(PoisonError::into_inner)
+            .as_ref().is_some_and(|held| Arc::ptr_eq(held, owner));
+        if retained {
+            let mut next = owner.next.lock().unwrap_or_else(PoisonError::into_inner);
+            if matches!(*next, AdoptionNext::Claimed)
+                && !owner.uncertain_activation.load(std::sync::atomic::Ordering::Acquire)
+            {
+                *next = AdoptionNext::CleanupOnly;
+            }
+        }
     }
     fn abort_adoption(&self, op: &AdoptOp, collection: Option<&Collection>) -> Result<(), RuntimeError> {
         self.abort_adoption_with_work(op, collection, &crate::cloud::policy::PolicyWork::default())
@@ -1793,7 +1794,11 @@ impl Runtime {
             return Err(PublicationError::AccountUnavailable.into());
         }
         if self.check_adoption_before(&op, collection).is_err() {
-            return self.abort_adoption(&op, collection);
+            let result = self.abort_adoption(&op, collection);
+            if result.is_err() {
+                self.settle_failed_adoption_abort(&owner);
+            }
+            return result;
         }
         let result = match work.task {
             AdoptionTask::Validate => self.validate_adoption(&owner, &mut op, collection, media, space),
@@ -1823,7 +1828,10 @@ impl Runtime {
                             .is_ok())
                 };
             if safe_to_abort {
-                self.abort_adoption(&op, collection)?;
+                if let Err(error) = self.abort_adoption(&op, collection) {
+                    self.settle_failed_adoption_abort(&owner);
+                    return Err(error);
+                }
             } else {
                 self.adoption.lock().unwrap_or_else(PoisonError::into_inner).take();
             }
