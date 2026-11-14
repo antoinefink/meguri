@@ -454,7 +454,7 @@ impl Runtime {
                 for row in page {
                     after = Some(RowKey::from_stored(table, &row).map_err(meguri_storage::StorageError::from)?);
                     let key = (kind, crate::cloud::row_payload::key(kind, &row)?);
-                    let payload = crate::cloud::row_payload::project(&view, kind, &row, |id| {
+                    let payload = crate::cloud::row_payload::project_ordinary(&view, kind, &row, |id| {
                         match entities
                             .get(&(codec::Kind::Notetype, codec::id_key(id).to_vec()))
                             .map(|e| e.acked_payload.as_ref().unwrap_or(&e.payload))

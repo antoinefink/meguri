@@ -45,6 +45,10 @@ impl Runtime {
             if received.entity.fields.kind as u8 > 6 || received.entity.fields.generation.is_some() {
                 continue;
             }
+            if let Some(codec::Payload::Notetype(nt)) = &received.payload
+                && (row_payload::validate_notetype(nt).is_err()
+                    || received.entity.fields.key != codec::id_key(nt.id))
+            { continue; }
             let header = self.with_incoming(guard, collection, |s| {
                 Ok(s.store
                     .as_ref()
@@ -312,7 +316,7 @@ pub(super) fn image(
                 let generation = layouts.get(&id).ok_or(Error::InvalidData)?.struct_gen;
                 return row_payload::notetype(view, &row, generation).map(codec::Payload::Notetype);
             }
-            row_payload::project(view, kind, &row, |id| {
+            row_payload::project_ordinary(view, kind, &row, |id| {
                 layouts.get(&id).cloned().ok_or(Error::InvalidData)
             })
         })

@@ -246,6 +246,35 @@ pub(super) fn merge(base: Option<&P>, local: &P, server: &P) -> Result<(P, Optio
             r.config = copied!(b.map(|b| &b.config), &l.config, &s.config);
             P::Preset(r)
         }
+        (P::Notetype(l), P::Notetype(s)) => {
+            let b = match base { Some(P::Notetype(b)) => Some(b), _ => None };
+            if !super::row_payload::same_layout(l, s)?
+                || b.is_some_and(|b| !super::row_payload::same_layout(b, s).unwrap_or(false))
+            { return Err(Error::InvalidData); }
+            let mut r = s.clone();
+            r.name = copied!(b.map(|b| &b.name), &l.name, &s.name);
+            r.config = copied!(b.map(|b| &b.config), &l.config, &s.config);
+            let field_names = |n: &c::Notetype| n.fields.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+            let template_names = |n: &c::Notetype| n.templates.iter().map(|t| t.name.clone()).collect::<Vec<_>>();
+            let bf = b.map(field_names);
+            let bt = b.map(template_names);
+            let names = copied!(bf.as_ref(), &field_names(l), &field_names(s));
+            for (i, name) in names.into_iter().enumerate() {
+                r.fields[i].name = name;
+                r.fields[i].config = copied!(b.map(|b| &b.fields[i].config), &l.fields[i].config, &s.fields[i].config);
+            }
+            let names = copied!(bt.as_ref(), &template_names(l), &template_names(s));
+            for (i, name) in names.into_iter().enumerate() {
+                r.templates[i].name = name;
+                r.templates[i].config = copied!(b.map(|b| &b.templates[i].config), &l.templates[i].config, &s.templates[i].config);
+                // Row timestamps are data. Keep the chosen config's source
+                // timestamp, with actual later-version ordering for equal blobs.
+                if r.templates[i].config == l.templates[i].config
+                    && (r.templates[i].config != s.templates[i].config || later)
+                { r.templates[i].mtime_secs = l.templates[i].mtime_secs; }
+            }
+            P::Notetype(r)
+        }
         (P::Tag(l), P::Tag(s)) => {
             let b = match base {
                 Some(P::Tag(b)) => Some(b),

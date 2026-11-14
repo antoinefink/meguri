@@ -7,27 +7,27 @@ Root `de5d8f67` added normal-device media evidence without changing that code.
 
 ## Current result
 
-`core-test/20261114T013730Z-55429` compiles and runs 225 cases: 224 pass,
-1 fails, 308 are filtered. All nine original failing cases pass under their
-original names. Both malformed-ordinal cases, the real 150k callback case,
-large rekey and all three payload-memory cases pass with unchanged limits.
+`core-test/20261114T022826Z-67905` passes all 232 cases, with 308 filtered.
+All nine original failing cases pass under their original names. The collision
+case now applies and acknowledges the received type after moving the local one.
+Both malformed-ordinal cases, the real 150k callback case, large rekey and all
+three payload-memory cases pass with unchanged limits. The unit is not accepted.
 
-The collision test does not pass. Its rekey commits and its paired intents are
-removed. The original received type stays queued: `reason=structure`,
-`attempts=0`. There is no successful apply or ACK for that received row.
-The type worker and its layout state need further work. The test still checks
-the final inbox and ACK; no expectation was removed. The unit is not accepted.
+Ordinary types use counters from retained payloads and validated incoming
+images in durable intents. Part merges, conflict copies, unique names, dependent
+rows and reopen now have real host coverage. The standalone generation ledger
+is unchanged. Structural changes still wait; no unknown counter is seeded.
 
-Lint `core-lint/20261114T020124Z-61198` passes after replacing one test-only
-clone with a borrow of the same value. Layering and feature-boundary checks
-pass. No lint rule or limit was suppressed. Focused test
-`core-test/20261114T020152Z-61525` retains the same enabled collision failure
-at the final inbox check: `structure`, zero attempts. All assertions remain.
+Lint `core-lint/20261114T023002Z-68357` passes, including layering and
+feature-boundary checks. No lint rule or limit was suppressed.
 
 Privacy `private/20261114T013744Z-55749` passes all 32 paths. Static checks
 `20261114T013745Z-55949` pass. Similarity `20261114T014112Z-56840` passes
 all 29 source files, skips 3 non-source files and uses no allowlist entry.
-This replacement document and the commit message require a fresh scan.
+The ordinary-type follow-up passes privacy on all nine source paths in
+`private/20261114T022628Z-66796` and similarity in
+`20261114T023007Z-68634`, with no allowlist entry. This document and the
+commit message require a fresh scan.
 
 ## Source and review
 
@@ -53,6 +53,23 @@ Raw identity paging preserves malformed stored ordinal classes and bytes.
 | 3 | `20261114T003211Z-46246` | Compilation, routine read cost and refusal-boundary findings repaired |
 | 4 | `20261114T005125Z-49063` | No new P0/P1 in its delta; lower findings retained |
 | 5 | `20261114T011556Z-52353` | No new P0/P1 in memory delta; incomplete notetype path remains P1 |
+
+The ordinary-type continuation starts at `7d43c5e7`. Independent round 6 is
+running on export `cleanroom/20261114T022244Z-65512`; no review pass is claimed.
+The original unit and integration bases above remain unchanged.
+
+Initial focused run `20261114T021932Z-64427` passed 7/8; expanded run
+`20261114T022038Z-65061` passed 231/232. The new card fixture copied a source
+card's history value to a new ID without copying its revlogs. The correction
+proves the new ID has no card or history rows, then derives its history value
+from the canonical query. Every full equality, WAL, ACK and reopen assertion
+remains. Focused run `20261114T022734Z-67115` passes 8/8, followed by the
+current 232-case pass. The original collision fixture is unchanged.
+
+Compile failure `20261114T022620Z-66470` executed no tests: an incremental
+object was missing. Only that package's affected cache directory was retained
+outside the active cache before the passing run. Privacy flagged one redundant
+helper comment; removing the whole comment changed no code or guard.
 
 Cleanup export `cleanroom/20261114T013112Z-54725` changes two complete test
 interfaces, two comments and 12 mechanical lint forms. Root checks that reversing

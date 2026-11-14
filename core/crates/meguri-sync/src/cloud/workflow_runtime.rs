@@ -779,7 +779,7 @@ impl Runtime {
                                 .entity_image(guard.binding, kind, &key)?)
                         })?;
                         let newly_observed = existing.is_none();
-                        let projected = row_payload::project(&view, kind, &row, |id| {
+                        let projected = row_payload::project_ordinary(&view, kind, &row, |id| {
                             let tracked = {
                                 let s = self.state();
                                 with_tracking_access(|| {
@@ -1216,7 +1216,7 @@ impl Runtime {
         publishing: bool,
         row: &[Cell],
     ) -> Result<codec::Payload, Error> {
-        row_payload::project(view, e.kind, row, |id| {
+        row_payload::project_ordinary(view, e.kind, row, |id| {
             let tracked = self
                 .with_scan(guard, collection, |s| {
                     let name = codec::entity_name(

@@ -1057,7 +1057,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                             commit,
                         };
                         let before = before_row.ok_or(Error::InvalidData)?;
-                        let payload = match row_payload::project(&view, kind, before, |id| layout(&tx, b, id)) {
+                        let payload = match row_payload::project_ordinary(&view, kind, before, |id| layout(&tx, b, id)) {
                             Ok(p) => p,
                             // Tombstone has no wire payload. Keep the last real
                             // retained image as bookkeeping when the removed row
@@ -1100,7 +1100,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                     added_decks: &added_decks,
                 };
                 let raw = raw.ok_or(Error::InvalidData)?;
-                let projected = row_payload::project(&view, kind, &raw, |id| {
+                let projected = row_payload::project_ordinary(&view, kind, &raw, |id| {
                     intent_layouts.get(&id).cloned().map(Ok).unwrap_or_else(|| layout(&tx, b, id))
                 });
                 if applying && let Some(protected) = protected {
@@ -1159,6 +1159,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                         | codec::Kind::Card
                         | codec::Kind::Revlog
                         | codec::Kind::Deck
+                        | codec::Kind::Notetype
                         | codec::Kind::Config
                 ) && e.payload != p
                 {

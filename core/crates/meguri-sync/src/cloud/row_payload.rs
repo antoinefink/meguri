@@ -276,12 +276,114 @@ pub fn layout(view: &impl View, id: i64, acked: &c::Notetype) -> Result<u64, Err
     }
     Ok(acked.struct_gen)
 }
+/// Ordinary runtime authority covers structure, not names, options or stamps.
+/// Counters come only from retained projections or a validated apply intent.
+/// This does not infer a generation for an untracked legacy layout.
+pub(super) fn same_layout(a: &c::Notetype, b: &c::Notetype) -> Result<bool, Error> {
+    use meguri_model::proto::{BlobMessage, notetype::*};
+    let ac = NotetypeConfig::decode(&a.config).map_err(|_| Error::InvalidData)?;
+    let bc = NotetypeConfig::decode(&b.config).map_err(|_| Error::InvalidData)?;
+    if a.id != b.id || a.struct_gen == 0 || a.struct_gen != b.struct_gen
+        || (ac.kind, ac.sort_field_idx) != (bc.kind, bc.sort_field_idx)
+        || a.fields.len() != b.fields.len() || a.templates.len() != b.templates.len()
+    { return Ok(false); }
+    let mut field_ids = (Vec::new(), Vec::new());
+    for (a, b) in a.fields.iter().zip(&b.fields) {
+        let ac = FieldConfig::decode(&a.config).map_err(|_| Error::InvalidData)?;
+        let bc = FieldConfig::decode(&b.config).map_err(|_| Error::InvalidData)?;
+        if a.ord != b.ord { return Ok(false); }
+        field_ids.0.push(ac.id);
+        field_ids.1.push(bc.id);
+    }
+    let mut template_ids = (Vec::new(), Vec::new());
+    for (a, b) in a.templates.iter().zip(&b.templates) {
+        let ac = TemplateConfig::decode(&a.config).map_err(|_| Error::InvalidData)?;
+        let bc = TemplateConfig::decode(&b.config).map_err(|_| Error::InvalidData)?;
+        if a.ord != b.ord { return Ok(false); }
+        template_ids.0.push(ac.id);
+        template_ids.1.push(bc.id);
+    }
+    // IDs live inside whole config parts. A changed ID alone is not a
+    // structural edit; a permutation of retained identities is a reorder.
+    for (left, right) in [field_ids, template_ids] {
+        if left != right {
+            let mut sorted_left = left;
+            let mut sorted_right = right;
+            sorted_left.sort_unstable();
+            sorted_right.sort_unstable();
+            if sorted_left == sorted_right { return Ok(false); }
+        }
+    }
+    Ok(true)
+}
+
+/// Admission checks before an ordinary server aggregate supplies any authority.
+/// Keep opaque config bytes intact: decoding here validates, never normalizes.
+pub(super) fn validate_notetype(n: &c::Notetype) -> Result<(), Error> {
+    use meguri_model::proto::{BlobMessage, notetype::*};
+    let config = NotetypeConfig::decode(&n.config).map_err(|_| Error::InvalidData)?;
+    if n.struct_gen == 0 || n.fields.is_empty() || n.templates.is_empty()
+        || !matches!(config.kind, 0 | 1) || config.sort_field_idx as usize >= n.fields.len()
+        || n.name.is_empty() || std::str::from_utf8(&n.name).is_err()
+    { return Err(Error::InvalidData); }
+    for templates in [false, true] {
+        let mut names = std::collections::BTreeSet::new();
+        let parts: Box<dyn Iterator<Item = (i64, &[u8], &[u8])> + '_> = if templates {
+            Box::new(n.templates.iter().map(|p| (p.ord, p.name.as_slice(), p.config.as_slice())))
+        } else {
+            Box::new(n.fields.iter().map(|p| (p.ord, p.name.as_slice(), p.config.as_slice())))
+        };
+        for (position, (ord, name, bytes)) in parts.enumerate() {
+            let name = std::str::from_utf8(name).map_err(|_| Error::InvalidData)?;
+            if ord != i64::try_from(position).map_err(|_| Error::InvalidData)? || name.is_empty()
+                || !names.insert(meguri_text::fold::folded(name))
+            { return Err(Error::InvalidData); }
+            if templates { TemplateConfig::decode(bytes).map_err(|_| Error::InvalidData)?; }
+            else { FieldConfig::decode(bytes).map_err(|_| Error::InvalidData)?; }
+        }
+    }
+    n.encoded_len(false).map_err(codec_error)?;
+    Ok(())
+}
+
+/// Stable-layout runtime projection. The strict `project` API still verifies
+/// exact images for unpublished stages and diagnostics.
+pub fn project_ordinary(
+    view: &impl View,
+    kind: c::Kind,
+    row: &[Cell],
+    authority: impl FnMut(i64) -> Result<c::Notetype, Error>,
+) -> Result<c::Payload, Error> {
+    project_with(view, kind, row, authority, true)
+}
+
 pub fn project(
     view: &impl View,
     kind: c::Kind,
     row: &[Cell],
-    mut acknowledged: impl FnMut(i64) -> Result<c::Notetype, Error>,
+    acknowledged: impl FnMut(i64) -> Result<c::Notetype, Error>,
 ) -> Result<c::Payload, Error> {
+    project_with(view, kind, row, acknowledged, false)
+}
+fn project_with(
+    view: &impl View,
+    kind: c::Kind,
+    row: &[Cell],
+    mut acknowledged: impl FnMut(i64) -> Result<c::Notetype, Error>,
+    ordinary: bool,
+) -> Result<c::Payload, Error> {
+    let generation = |id, authority: &c::Notetype| -> Result<u64, Error> {
+        if !ordinary { return layout(view, id, authority); }
+        let head = view.row(Table::Notetypes, &RowKey::Id(id))?.ok_or(Error::InvalidData)?;
+        match notetype(view, &head, authority.struct_gen) {
+            Ok(actual) if same_layout(&actual, authority)? => Ok(authority.struct_gen),
+            // Preserve classification of a malformed dependency as its own
+            // failure; the reference eligibility fence still holds dependents.
+            Err(Error::RowFailure(_)) => Ok(authority.struct_gen),
+            Err(error) => Err(error),
+            _ => Err(Error::InvalidData),
+        }
+    };
     let t = table(kind).ok_or(Error::InvalidData)?;
     if row.len() != t.columns().len() {
         return Err(Error::InvalidData);
@@ -293,14 +395,14 @@ pub fn project(
             let mid = int(row, 2)?;
             P::Note(super::runtime::note_image(
                 row,
-                layout(view, mid, &acknowledged(mid)?)?,
+                generation(mid, &acknowledged(mid)?)?,
             )?)
         }
         c::Kind::Card => {
             let nid = int(row, 1)?;
             let note = view.row(Table::Notes, &RowKey::Id(nid))?.ok_or(Error::InvalidData)?;
             let mid = int(&note, 2)?;
-            let generation = layout(view, mid, &acknowledged(mid)?)?;
+            let generation = generation(mid, &acknowledged(mid)?)?;
             drop(note);
             P::Card(c::Card {
                 id: int(row, 0)?,
@@ -385,7 +487,9 @@ pub fn project(
             let id = int(row, 0)?;
             let ack = acknowledged(id)?;
             let actual = notetype(view, row, ack.struct_gen)?;
-            if actual != ack { return Err(Error::InvalidData); }
+            if if ordinary { !same_layout(&actual, &ack)? } else { actual != ack } {
+                return Err(Error::InvalidData);
+            }
             P::Notetype(actual)
         }
         c::Kind::Tag => P::Tag(c::Tag {

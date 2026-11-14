@@ -1247,10 +1247,22 @@ impl Runtime {
     }
 
     fn read_intent_rows(&self, collection: &Collection, i: &ApplyIntent) -> Result<IntentRows, RuntimeError> {
-        let layouts = {
+        let mut layouts = {
             let s = self.state();
             with_tracking_access(|| layouts(s.store.as_ref().ok_or(Error::Database)?, i.binding))?
         };
+        // Reopen may have no entity at a newly admitted ID yet. The durable
+        // intent supplies its validated expected image, never an invented ACK.
+        for key in &i.keys {
+            if let Some(codec::Payload::Notetype(nt)) = &key.after_payload {
+                row_payload::validate_notetype(nt)?;
+                if key.kind != codec::Kind::Notetype || key.key != codec::id_key(nt.id)
+                    || digest(key.after_payload.as_ref())? != key.after_digest
+                    || layouts.get(&nt.id).is_some_and(|old| !row_payload::same_layout(old, nt).unwrap_or(false))
+                { return Err(Error::InvalidData.into()); }
+                layouts.insert(nt.id, nt.clone());
+            }
+        }
         let lease = collection.reader(ReaderRole::Cloud)?;
         let snapshot = lease.snapshot()?;
         let mut current = BTreeMap::new();
@@ -1462,7 +1474,7 @@ fn project(
     let key = crate::cloud::workflow_store::row_key(kind, key)?;
     rows.row_image(table, &key)?
         .map(|row| {
-            row_payload::project(&row_payload::ReadView(rows), kind, &row, |id| {
+            row_payload::project_ordinary(&row_payload::ReadView(rows), kind, &row, |id| {
                 layouts.get(&id).cloned().ok_or(Error::InvalidData)
             })
         })
@@ -1479,7 +1491,7 @@ fn apply(
 ) -> Result<Option<i64>, RuntimeError> {
     let binding = guard.binding;
     let store = s.store.as_mut().ok_or(Error::Database)?;
-    let layouts = layouts(store, binding)?;
+    let mut layouts = layouts(store, binding)?;
     let record_key = store
         .binding(binding)?
         .ok_or(Error::BindingNotFound)?
@@ -1524,12 +1536,38 @@ fn apply(
         }
         if remote.fields.tombstone
             || remote.fields.generation.is_some()
-            || matches!(remote.fields.kind, codec::Kind::Notetype | codec::Kind::MediaName)
+            || remote.fields.kind == codec::Kind::MediaName
         {
             store.park_incoming(binding, entry.id, InboxReason::Structure)?;
             continue;
         }
         let server = received.payload.ok_or(Error::InvalidData)?;
+        if row_payload::payload_key(&server)? != remote.fields.key {
+            return Err(Error::InvalidData.into());
+        }
+        if let codec::Payload::Notetype(nt) = &server {
+            // Validate before either writing rows or granting the server counter
+            // any authority. An existing layout may only change through K19.
+            if row_payload::validate_notetype(nt).is_err() {
+                store.park_incoming(binding, entry.id, InboxReason::Structure)?;
+                continue;
+            }
+            let compatible = match layouts.get(&nt.id) {
+                Some(authority) => row_payload::same_layout(authority, nt)?,
+                None => ctx.scope().row_image(Table::Notetypes, &RowKey::Id(nt.id))?.is_none(),
+            };
+            if !compatible {
+                store.park_incoming(binding, entry.id, InboxReason::Structure)?;
+                continue;
+            }
+            if let Some(head) = ctx.scope().row_image(Table::Notetypes, &RowKey::Id(nt.id))? {
+                let actual = row_payload::notetype(&row_payload::ReadView(&*ctx.scope()), &head, nt.struct_gen)?;
+                if !row_payload::same_layout(&actual, nt)? {
+                    store.park_incoming(binding, entry.id, InboxReason::Structure)?;
+                    continue;
+                }
+            }
+        }
         let local = project(ctx.scope(), server.kind(), &remote.fields.key, &layouts)?;
         // An exact fetched own save needs a durable digest/flight intent and
         // actual WAL coverage, but no duplicate copy of the unchanged local
@@ -1688,6 +1726,9 @@ fn apply(
                     deck.name.extend_from_slice(&leaf);
                 }
             }
+            if let codec::Payload::Notetype(nt) = p {
+                unique_notetype_name(ctx, store, binding, &record_key, &mut layouts, &mut keys, nt)?;
+            }
             if *p != server && Some(&*p) != local.as_ref() {
                 incoming_merge::stamp_local(p, ctx.now().0 / 1000);
             }
@@ -1751,9 +1792,21 @@ fn apply(
                     &mut keys,
                 )?;
             }
-            for (table, row_key, row) in row_payload::payload_rows(result.as_ref().ok_or(Error::InvalidData)?)? {
-                ctx.scope().restore(table, &row_key, Some(&row))?;
+            let payload = result.as_ref().ok_or(Error::InvalidData)?;
+            if matches!(payload, codec::Payload::Notetype(_)) {
+                write_payload(ctx, payload)?;
+            } else {
+                // Keep the existing bounded path for potentially large row
+                // images; only notetype aggregates need name-swap planning.
+                for (table, row_key, row) in row_payload::payload_rows(payload)? {
+                    ctx.scope().restore(table, &row_key, Some(&row))?;
+                }
             }
+        }
+        if let Some(codec::Payload::Notetype(nt)) = &result {
+            // Scoped post-write authority for this batch, including dependent
+            // notes/cards. It becomes durable only in the apply intent below.
+            layouts.insert(nt.id, nt.clone());
         }
         keys.push(key);
         ids.push(entry.id);
@@ -1820,6 +1873,80 @@ fn apply(
     Ok(Some(id))
 }
 
+fn write_payload(ctx: &mut meguri_engine::OpContext<'_, '_>, payload: &codec::Payload) -> Result<(), RuntimeError> {
+    let mut changes = Vec::new();
+    for (table, key, row) in row_payload::payload_rows(payload)? {
+        let before = ctx.scope().row_image(table, &key)?;
+        let equal = before.as_ref().is_some_and(|before| {
+            before.iter().zip(&row).enumerate().all(|(i, (a, b))| table.usn_column() == Some(i) || a == b)
+        });
+        if equal { continue; }
+        if matches!(table, Table::Fields | Table::Templates)
+            && before.as_ref().is_some_and(|old| old.get(2) != row.get(2))
+        { ctx.scope().restore(table, &key, None)?; }
+        changes.push((table, key, row));
+    }
+    for (table, key, row) in changes { ctx.scope().restore(table, &key, Some(&row))?; }
+    Ok(())
+}
+
+fn name_collision(rows: &impl ReadRows, id: i64, name: &[u8]) -> Result<Option<i64>, Error> {
+    let name = std::str::from_utf8(name).map_err(|_| Error::InvalidData)?;
+    let mut after = None;
+    loop {
+        let page = rows.row_page(Table::Notetypes, after.as_ref())?;
+        if page.is_empty() { return Ok(None); }
+        for row in page {
+            let other = row_payload::int(&row, 0)?;
+            after = Some(RowKey::Id(other));
+            if other == id { continue; }
+            let Some(Cell::Text(bytes)) = row.get(1) else { return Err(Error::InvalidData); };
+            let other_name = std::str::from_utf8(bytes).map_err(|_| Error::InvalidData)?;
+            if meguri_text::fold::compare_folded(name, other_name).is_eq() { return Ok(Some(other)); }
+        }
+    }
+}
+
+fn unique_notetype_name(
+    ctx: &mut meguri_engine::OpContext<'_, '_>,
+    store: &TrackingStore,
+    binding: BindingId,
+    record_key: &[u8; 32],
+    layouts: &mut BTreeMap<i64, codec::Notetype>,
+    keys: &mut Vec<ApplyKey>,
+    target: &mut codec::Notetype,
+) -> Result<(), RuntimeError> {
+    while let Some(other) = name_collision(ctx.scope(), target.id, &target.name)? {
+        if target.id > other {
+            target.name.push(b'+');
+            continue;
+        }
+        // K15.7 renames the larger ID, including an already existing type.
+        // This is a protected side effect, settled pending with its real base.
+        let key = codec::id_key(other).to_vec();
+        let before = project(ctx.scope(), codec::Kind::Notetype, &key, layouts)?.ok_or(Error::InvalidData)?;
+        let codec::Payload::Notetype(mut changed) = before.clone() else { return Err(Error::InvalidData.into()); };
+        loop {
+            changed.name.push(b'+');
+            if changed.name != target.name && name_collision(ctx.scope(), other, &changed.name)?.is_none() { break; }
+        }
+        changed.mtime_secs = ctx.now().0 / 1000;
+        let after = codec::Payload::Notetype(changed.clone());
+        let name = codec::entity_name(record_key, codec::Kind::Notetype, &key).map_err(|_| Error::InvalidData)?;
+        let clean = store.entity_facts(binding, &name)?.is_some_and(|e|
+            e.server_erev > 0 && digest(Some(&before)).ok().flatten() == Some(e.acked_row_digest)
+        );
+        write_payload(ctx, &after)?;
+        layouts.insert(other, changed);
+        keys.push(ApplyKey {
+            name, kind: codec::Kind::Notetype, key, role: ApplyKeyRole::SideEffect,
+            before_digest: digest(Some(&before))?, after_digest: digest(Some(&after))?,
+            before_payload: clean.then_some(before), after_payload: Some(after), own_flight: None,
+        });
+    }
+    Ok(())
+}
+
 fn same_object(local: Option<&codec::Payload>, server: &codec::Payload) -> bool {
     match (local, server) {
         (Some(codec::Payload::Note(l)), codec::Payload::Note(s)) => l.guid == s.guid,
@@ -1880,7 +2007,7 @@ fn deck_descendants(
             if id == new.parent_id {
                 return Err(Error::InvalidData.into());
             }
-            let before = row_payload::project(&row_payload::ReadView(&*ctx.scope()), codec::Kind::Deck, &row, |id| {
+            let before = row_payload::project_ordinary(&row_payload::ReadView(&*ctx.scope()), codec::Kind::Deck, &row, |id| {
                 layouts.get(&id).cloned().ok_or(Error::InvalidData)
             })?;
             let mut changed = before.clone();
@@ -1939,8 +2066,18 @@ fn references(
             }) && present(Table::Notetypes, n.mid)?
         }
         codec::Payload::Card(c) => {
-            present(Table::Notes, c.nid)?
-                && present(Table::Decks, c.did)?
+            let note = rows.row_image(Table::Notes, &RowKey::Id(c.nid))?;
+            let compatible = if let Some(note) = note {
+                let mid = row_payload::int(&note, 2)?;
+                if let Some(nt) = layouts.get(&mid) {
+                    use meguri_model::proto::{BlobMessage, notetype::NotetypeConfig};
+                    let config = NotetypeConfig::decode(&nt.config).map_err(|_| Error::InvalidData)?;
+                    nt.struct_gen == c.nt_struct_gen && c.ord >= 0
+                        && (config.kind == 1 || usize::try_from(c.ord).is_ok_and(|ord| ord < nt.templates.len()))
+                        && present(Table::Notetypes, mid)?
+                } else { false }
+            } else { false };
+            compatible && present(Table::Decks, c.did)?
                 && (c.odid == 0 || present(Table::Decks, c.odid)?)
         }
         codec::Payload::Revlog(r) => present(Table::Cards, r.cid)?,
@@ -1974,6 +2111,7 @@ fn preserve_conflict(
         codec::Payload::Note(_) => (ConflictKind::Note, ConflictReason::FieldConflict),
         codec::Payload::Deck(_) => (ConflictKind::Deck, ConflictReason::BlobConflict),
         codec::Payload::Preset(_) => (ConflictKind::Preset, ConflictReason::BlobConflict),
+        codec::Payload::Notetype(_) => (ConflictKind::Notetype, ConflictReason::NotetypeConflict),
         _ => return Err(Error::InvalidData.into()),
     };
     // Capture K10.3 names and placement from the writer before replacing rows.
@@ -1990,6 +2128,13 @@ fn preserve_conflict(
             .first()
             .map(|card| card.deck_id.0);
         (field_names, template_names, note_deck)
+    } else if let codec::Payload::Notetype(nt) = losing {
+        let names = |bytes: &[u8]| String::from_utf8(bytes.to_vec()).map_err(|_| Error::InvalidData);
+        (
+            Some(nt.fields.iter().map(|f| names(&f.name)).collect::<Result<_, _>>()?),
+            Some(nt.templates.iter().map(|t| names(&t.name)).collect::<Result<_, _>>()?),
+            None,
+        )
     } else {
         (None, None, None)
     };
