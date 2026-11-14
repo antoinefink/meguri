@@ -94,6 +94,10 @@ PUBLIC_GESTURE_CALL = ".pinch(withScale: 2, velocity: 1)"
 # SHA256 identifies its exact UTF-8 bytes, without quotes or a line ending.
 PUBLIC_SWIFT_IMPORT = "import MachO"
 PUBLIC_SWIFT_IMPORT_SHA256 = "0cd4593e5b7c20a193357a8d46e91ae8d04f5d92d0ecf4aa3167ac4dc0379c5a"
+# Owner approval: docs/process/review-log/recovery-rule-publication-approval-20261114.md.
+# Only this complete case-sensitive public span; SHA256 excludes a line ending.
+PUBLIC_RECOVERY_RULE = "1. This exception takes effect only within the final transaction of the matching successful recovery operation: adoption at V14.2 step 9, or publication at V15.2 step 4. It permits removal without settlement solely for the covered blocked ordinary work."
+PUBLIC_RECOVERY_RULE_SHA256 = "1223e97157bb7d43dc1ce067b92443dd37014a8424b1c7af45c6e3851d5cca06"
 # Docker's security option, approved in E-20261024T181932Z-5d69. Quotes are
 # required; bare words and matches crossing the literal remain private.
 # https://docs.docker.com/reference/cli/docker/container/run/#optional-security-options---security-opt
@@ -159,6 +163,7 @@ PUBLIC_LITERAL = re.compile(
     r'''|(?<![^\s<>()\[\]{},;=|])(?P<swift_quote>["'`]?)'''
     r"(?P<swift_import>" + re.escape(PUBLIC_SWIFT_IMPORT) + r")(?P=swift_quote)"
     r"(?=$|[\s<>()\[\]{},;=|])"
+    r"|" + re.escape(PUBLIC_RECOVERY_RULE)
 )
 
 

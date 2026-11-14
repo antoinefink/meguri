@@ -1245,6 +1245,134 @@ class PublicSwiftImportTests(unittest.TestCase):
                 git(self.repo, "reset", "-q")
 
 
+class PublicRecoveryRuleTests(unittest.TestCase):
+    """The 2026-11-14 approval covers one complete public prose span."""
+
+    check_all = PublicInterfaceTests.check_all
+    check_decoded_and_files = PublicSwiftImportTests.check_decoded_and_files
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.repo = self.temp.name
+        git(self.repo, "init", "-q")
+        self.fact = private_scan.PUBLIC_RECOVERY_RULE
+        self.ws = private_scan.words(self.fact)
+        self.sentinel = "sentinelprivate"
+        self.matcher = private_scan.Matcher({(word,) for word in self.ws})
+
+    def test_exact_approved_bytes_and_digest(self):
+        approved = b"1. This exception takes effect only within the final transaction of the matching successful recovery operation: adoption at V14.2 step 9, or publication at V15.2 step 4. It permits removal without settlement solely for the covered blocked ordinary work."
+        digest = "1223e97157bb7d43dc1ce067b92443dd37014a8424b1c7af45c6e3851d5cca06"
+        self.assertEqual(self.fact.encode("utf-8"), approved)
+        self.assertEqual(private_scan.PUBLIC_RECOVERY_RULE_SHA256, digest)
+        self.assertEqual(hashlib.sha256(approved).hexdigest(), digest)
+        self.assertEqual([m.group() for m in private_scan.PUBLIC_LITERAL.finditer(self.fact)], [self.fact])
+
+    def test_complete_literal_exempts_contained_single_and_multiword_matches(self):
+        for text in (self.fact, '"' + self.fact + '"', "'" + self.fact + "'",
+                     '`' + self.fact + '`', 'rule = r"' + self.fact + '"'):
+            for matcher in (self.matcher, private_scan.Matcher({tuple(self.ws)})):
+                self.check_decoded_and_files(text, False, matcher)
+
+    def test_case_modified_partial_and_bare_text_remains_checked(self):
+        for text in (self.fact.lower(), self.fact.upper(), self.fact.swapcase(),
+                     re.sub(r"(?<=\.)\d+", lambda m: str(int(m.group()) + 1), self.fact),
+                     re.sub(r"[^\W\d_]+", self.sentinel, self.fact, count=1),
+                     self.fact.replace(" ", "  ", 1),
+                     self.fact.replace(" ", "\t", 1),
+                     self.fact.replace(" ", "\n", 1),
+                     self.fact[:-1], self.fact.partition(" ")[2], self.fact.rsplit(". ", 1)[0],
+                     " ".join(self.ws[-3:])):
+            self.check_decoded_and_files(text, True)
+        for word in self.ws:
+            with self.subTest(word=word):
+                self.check_decoded_and_files(word, True)
+
+    def test_python_prefix_outside_and_crossing_matches_remain_checked(self):
+        sentinel = self.sentinel
+        cases = ((sentinel + " " + self.fact, (sentinel,)),
+                 (self.fact + " " + sentinel, (sentinel,)),
+                 (sentinel + " " + self.fact, (sentinel, self.ws[0])),
+                 (self.fact + " " + sentinel, (self.ws[-1], sentinel)),
+                 (self.fact + " " + self.fact, (self.ws[-1], self.ws[0])),
+                 ('rule = r"' + self.fact + '"', ("rule",)),
+                 ('rule = r"' + self.fact + '"', ("r", self.ws[0])))
+        for text, token in cases:
+            self.check_decoded_and_files(text, True, private_scan.Matcher({token}))
+        for prefix in ("", "r", "u", "b", "f"):
+            for text in ('rule = ' + prefix + '"' + sentinel + ' ' + self.fact + '"',
+                         'rule = ' + prefix + '"' + self.fact + ' ' + sentinel + '"'):
+                self.check_decoded_and_files(text, True, private_scan.Matcher({(sentinel,)}))
+        for word in self.ws:
+            self.check_all(self.fact + "\n" + word, True)
+            self.check_all(word + "\n" + self.fact, True)
+
+    def test_hex_escapes_keep_exact_and_crossing_behavior(self):
+        sentinel = self.sentinel
+        cases = [(self.fact, (word,), False) for word in self.ws]
+        cases += [(self.fact.lower(), (word,), True) for word in self.ws]
+        cases += [(sentinel + " " + self.fact, (sentinel,), True),
+                  (sentinel + " " + self.fact, (sentinel, self.ws[0]), True),
+                  (self.fact + " " + sentinel, (self.ws[-1], sentinel), True)]
+        for text, token, expected in cases:
+            encoded = "".join("\\x%02x" % ord(c) for c in text)
+            matcher = private_scan.Matcher({token})
+            self.assertEqual(bool(private_scan.line_hits(matcher, encoded)), expected)
+            self.check_all(encoded, expected, matcher)
+
+    def test_committed_literal_keeps_candidates_and_bare_runtime_hits(self):
+        candidates = os.path.join(self.repo, "candidates.jsonl")
+        tokens = os.path.join(self.repo, "synthetic-tokens.txt")
+        case_data = self.ws + [self.fact, self.sentinel]
+        write(candidates, "".join(json.dumps({"kind": "deck", "text": text}) + "\n"
+                                  for text in case_data))
+        expected = sorted({" ".join(private_scan.words(text)) for text in case_data})
+        public = os.path.join(self.repo, "public.py")
+        for text in (self.fact, '"' + self.fact + '"', "'" + self.fact + "'",
+                     '`' + self.fact + '`', 'rule = r"' + self.fact + '"'):
+            with self.subTest(text=text):
+                write(public, text + "\n")
+                git(self.repo, "add", "public.py")
+                git(self.repo, "commit", "-qm", "fixed fact")
+                result = run("build", "--candidates", candidates, "--repo", self.repo, "--out", tokens)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(Path(tokens).read_text(encoding="utf-8").splitlines(), expected)
+                self.assertEqual(json.loads(result.stdout)["in_repository"], 0)
+                matcher = private_scan.load_tokens([tokens])
+                self.check_decoded_and_files(text, False, matcher)
+                for word in self.ws + [self.sentinel]:
+                    self.check_all(word, True, matcher)
+
+    def test_index_snapshot_is_checked(self):
+        full = os.path.join(self.repo, "rule.py")
+        tokens = os.path.join(self.repo, "synthetic-tokens.txt")
+        sentinel = self.sentinel
+        write(tokens, "".join(word + "\n" for word in self.ws + [sentinel]))
+        # An unchanged adjacent line stays outside the staged addition.
+        write(full, "# " + sentinel + "\n")
+        git(self.repo, "add", "rule.py")
+        git(self.repo, "commit", "-qm", "synthetic context")
+        for binary in (False, True):
+            tail = b"\0" if binary else b"\n"
+            for staged, working, expected in (
+                    (self.fact, sentinel, False),
+                    ('rule = r"' + sentinel + ' ' + self.fact + '"', self.fact, True),
+                    ('rule = r"' + self.fact + ' ' + sentinel + '"', self.fact, True)):
+                # Text scans only added lines; binary scans the entire file.
+                context = "" if binary else "# " + sentinel + "\n"
+                write(full, (context + staged).encode("utf-8") + tail, "wb")
+                git(self.repo, "add", "rule.py")
+                write(full, working.encode("utf-8") + tail, "wb")
+                result = run("scan", "--tokens", tokens, "--staged", "--repo", self.repo)
+                self.assertEqual(result.returncode, int(expected), result.stderr)
+                self.assertEqual(bool(json.loads(result.stdout)["files"]), expected)
+                result = run("scan", "--tokens", tokens, full)
+                self.assertEqual(result.returncode, int(not expected), result.stderr)
+                self.assertEqual(bool(json.loads(result.stdout)["files"]), not expected)
+                git(self.repo, "reset", "-q")
+
+
 class PublicLibraryTests(unittest.TestCase):
     def test_public_asset_mutations(self):
         root = Path(SCRIPT).resolve().parents[3]
