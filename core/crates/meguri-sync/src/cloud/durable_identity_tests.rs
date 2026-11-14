@@ -295,7 +295,7 @@ fn durable_identity_new_publication_binding_records_pair_in_create_commit() {
     };
     store.confirm_publication(&op).unwrap();
     let binding = store
-        .bind_publication(&mut op, BindingId([8; 16]), 88, durable(native()))
+        .bind_publication(&mut op, BindingId([8; 16]), 88, durable(native()), None)
         .unwrap();
     let saved = store.runtime_binding(binding.id).unwrap();
     assert_eq!(saved.file, Some(native()));

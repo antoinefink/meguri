@@ -669,6 +669,8 @@ pub struct CloudRecoveryStatus {
     pub switch_conflict: bool,
     pub retry_after_ms: Option<i64>,
     pub adoption_transport_wait: bool,
+    pub publication_conflict_cancellable: bool,
+    pub publication_cancellable: bool,
 }
 
 #[uniffi::export]
@@ -1101,6 +1103,8 @@ impl CloudConnection {
                 switch_conflict: false,
                 retry_after_ms: op.retry_after_ms,
                 adoption_transport_wait: op.transport_wait,
+                publication_conflict_cancellable: false,
+                publication_cancellable: false,
             }));
         }
         Ok(self
@@ -1108,21 +1112,26 @@ impl CloudConnection {
             .core
             .publication_op()
             .map_err(error)?
-            .map(|op| CloudRecoveryStatus {
-                operation: self.recovery(op.id, false, generation),
-                step: match op.step {
-                    p::PublishStep::Confirmed => CloudRecoveryStep::Confirmed,
-                    p::PublishStep::Bound => CloudRecoveryStep::Bound,
-                    p::PublishStep::Zones => CloudRecoveryStep::Zones,
-                    p::PublishStep::Sent => CloudRecoveryStep::Sent,
-                    p::PublishStep::Complete => CloudRecoveryStep::Complete,
-                    p::PublishStep::Cancelling => CloudRecoveryStep::Cancelling,
-                },
-                switch_sent: op.switch_sent,
-                switch_conflict: op.switch_conflict.is_some(),
-                retry_after_ms: op.retry_after_ms,
-                adoption_transport_wait: false,
-            }))
+            .map(|op| -> Result<CloudRecoveryStatus, CoreError> {
+                let cancellable = self.owner.core.publication_conflict_cancellable(op.id).map_err(error)?;
+                Ok(CloudRecoveryStatus {
+                    operation: self.recovery(op.id, false, generation),
+                    step: match op.step {
+                        p::PublishStep::Confirmed => CloudRecoveryStep::Confirmed,
+                        p::PublishStep::Bound => CloudRecoveryStep::Bound,
+                        p::PublishStep::Zones => CloudRecoveryStep::Zones,
+                        p::PublishStep::Sent => CloudRecoveryStep::Sent,
+                        p::PublishStep::Complete => CloudRecoveryStep::Complete,
+                        p::PublishStep::Cancelling => CloudRecoveryStep::Cancelling,
+                    },
+                    switch_sent: op.switch_sent,
+                    switch_conflict: op.switch_conflict.is_some(),
+                    retry_after_ms: op.retry_after_ms,
+                    adoption_transport_wait: false,
+                    publication_conflict_cancellable: cancellable,
+                    publication_cancellable: self.owner.core.publication_cancellable(op.id).map_err(error)?,
+                })
+            }).transpose()?)
     }
 }
 

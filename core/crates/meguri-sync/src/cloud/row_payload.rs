@@ -252,9 +252,8 @@ pub fn notetype(view: &impl View, row: &[Cell], generation: u64) -> Result<c::No
                     });
                 }
                 after = Some(ord);
+                n.encoded_len(false).map_err(codec_error)?;
             }
-            // Bound each assembled page by its actual canonical payload length.
-            n.encoded_len(false).map_err(codec_error)?;
         }
     }
     n.encoded_len(false).map_err(codec_error)?;
@@ -882,6 +881,33 @@ mod classification_tests {
         assert!(matches!(project(&Parts, c::Kind::Notetype, &raw, ack), Err(Error::RowFailure(RowFailure::Unreadable { table, column })) if table=="fields" && column=="config"));
         let mut changed=ack(2).unwrap(); changed.name=b"other layout".to_vec();
         assert!(matches!(project(&Rows,c::Kind::Notetype,&raw, |_| Ok(changed.clone())),Err(Error::InvalidData)));
+    }
+    #[test]
+    fn notetype_projection_and_raw_identity_continue_after_short_part_pages() {
+        struct Parts { width: i64 }
+        impl View for Parts {
+            fn row(&self, t: Table, k: &RowKey) -> Result<Option<RowImage>, Error> { Rows.row(t, k) }
+            fn page(&self, _: Table, _: Option<&RowKey>) -> Result<Vec<RowImage>, Error> { Err(Error::InvalidData) }
+            fn history(&self, _: i64) -> Result<i64, Error> { Ok(0) }
+            fn parts(&self, t: Table, id: i64, after: Option<i64>) -> Result<Vec<RowImage>, Error> {
+                let start = after.map_or(0, |ord| ord + 1);
+                Ok((start..(start + self.width).min(250)).map(|ord| {
+                    let mut row = vec![Cell::Integer(id), Cell::Integer(ord), Cell::text(format!("Part {ord}"))];
+                    if t == Table::Templates { row.extend([Cell::Integer(0), Cell::Integer(-1)]); }
+                    row.push(Cell::Blob(vec![]));
+                    row
+                }).collect())
+            }
+        }
+        let head = Rows.row(Table::Notetypes, &RowKey::Id(2)).unwrap().unwrap();
+        let full = Parts { width: 250 };
+        let short = Parts { width: 6 };
+        let projected = notetype(&short, &head, 1).unwrap();
+        assert_eq!(projected.fields.len(), 250);
+        assert_eq!(projected.templates.len(), 250);
+        assert_eq!(projected, notetype(&full, &head, 1).unwrap());
+        assert_eq!(raw_identity(&short, c::Kind::Notetype, &head).unwrap(), raw_identity(&full, c::Kind::Notetype, &head).unwrap());
+        assert_eq!(logical_identity(&short, c::Kind::Notetype, &head).unwrap(), logical_identity(&full, c::Kind::Notetype, &head).unwrap());
     }
     #[test]
     fn k10_raw_canonical_cap_boundary_and_asset_placement_are_distinct() {

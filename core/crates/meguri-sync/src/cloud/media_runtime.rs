@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 mod sdk;
 
 #[derive(Clone)]
-struct MediaRecoveryAuthority(Authority);
+struct MediaRecoveryAuthority(Authority, Option<crate::cloud::adoption::RecoveryKind>);
 impl std::ops::Deref for MediaRecoveryAuthority {
     type Target = Authority;
     fn deref(&self) -> &Authority {
@@ -191,17 +191,66 @@ impl Runtime {
         Self::check_media_locked(&s, a)?;
         with_tracking_access(|| work(s.store.as_mut().ok_or(Error::Database)?)).map_err(Into::into)
     }
+    // Drain the replacing operation's prior media intents in this build scope.
+    // This permits neither inbox intake nor starting a stopped engine.
+    fn transition_media_authority(&self, collection: &Collection) -> Result<MediaRecoveryAuthority, RuntimeError> {
+        use crate::cloud::{adoption::{RecoveryKind, AdoptStep}, publication::PublishStep};
+        let account = self.publication_account()?;
+        let decision = self.publication_decision()?;
+        let file = self.inputs.files.identity(collection.path())?;
+        let evidence = collection.open_evidence()?;
+        let s = self.state();
+        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+        let op = with_tracking_access(|| -> Result<_, RuntimeError> {
+            let store = s.store.as_ref().ok_or(Error::Database)?;
+            match (store.publication_op()?, store.adoption_op()?) {
+                (Some(p), None) if p.step == PublishStep::Confirmed => Ok(RecoveryKind::Publish(Box::new(p))),
+                (None, Some(p)) if p.step != AdoptStep::Ready => Ok(RecoveryKind::Adopt(Box::new(p))),
+                _ => Err(Error::RecoveryRefused.into()),
+            }
+        })?;
+        let (before, op_account, op_file, prior) = match &op {
+            RecoveryKind::Publish(p) => (&p.binding_before, &p.account, Some(p.confirmed_file), Some(&p.fence_before)),
+            RecoveryKind::Adopt(p) => (&p.binding_before, &p.account, p.file_before, p.before.as_ref()),
+        };
+        if before.as_ref().map(|b| b.id) != Some(b.binding.id) || *op_account != account
+            || op_file != Some(file) || prior != Some(&decision) || b.binding.scope != self.inputs.scope
+            || b.binding.facts.account != account || b.binding.facts.publication != decision.publication.identity
+            || b.file != file || evidence.generation != b.evidence.generation || evidence.native_file != file.pair()
+            || !collection.is_current()
+        { return Err(RuntimeError::StaleIncarnation); }
+        let a = MediaRecoveryAuthority(Authority {
+            binding: b.binding.id, open: b.open_counter, incarnation: s.incarnation,
+            generation: evidence.generation.0, file, account, adapter_token: Self::adapter_guard_locked(&s).token,
+            media_epoch: s.media.epoch,
+        }, Some(op));
+        Self::check_media_recovery_locked(&s, &a)?;
+        Ok(a)
+    }
+    fn validate_media_recovery_file(&self, collection: &Collection, a: &MediaRecoveryAuthority) -> Result<(), RuntimeError> {
+        let current = if a.1.is_some() { self.transition_media_authority(collection)? }
+            else { MediaRecoveryAuthority(self.media_authority(collection, true)?, None) };
+        if current.0 != a.0 || current.1 != a.1 { return Err(RuntimeError::StaleIncarnation); }
+        Ok(())
+    }
     fn check_media_recovery_locked(s: &State, a: &MediaRecoveryAuthority) -> Result<(), RuntimeError> {
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
-        if b.binding.id != a.binding
+        let transition = if let Some(op) = &a.1 {
+            with_tracking_access(|| -> Result<bool, Error> {
+                let store = s.store.as_ref().ok_or(Error::Database)?;
+                Ok(match op {
+                    crate::cloud::adoption::RecoveryKind::Publish(p) => store.publication_op()?.as_ref() == Some(p.as_ref()),
+                    crate::cloud::adoption::RecoveryKind::Adopt(p) => store.adoption_op()?.as_ref() == Some(p.as_ref()),
+                } && store.runtime_binding(a.binding)?.file == Some(a.file))
+            })?
+        } else { false };
+        if (a.1.is_some() && !transition) || b.binding.id != a.binding
             || b.open_counter != a.open
             || s.incarnation != a.incarnation
             || b.evidence.generation.0 != a.generation
             || b.file != a.file
             || b.binding.facts.account != a.account
-            || !b.usable
-            || !b.verified
-            || b.binding.facts.state != BindingState::Active
+            || (!transition && (!b.usable || !b.verified || b.binding.facts.state != BindingState::Active))
             || s.invalidation_exhausted
             || Self::adapter_guard_locked(s).token != a.adapter_token
             || s.media.epoch != a.media_epoch
@@ -249,9 +298,7 @@ impl Runtime {
         a: &MediaRecoveryAuthority,
         work: impl FnOnce() -> Result<T, RuntimeError>,
     ) -> Result<T, RuntimeError> {
-        if self.media_authority(collection, true)? != a.0 {
-            return Err(RuntimeError::StaleIncarnation);
-        }
+        self.validate_media_recovery_file(collection, a)?;
         let lease = collection.reader(ReaderRole::Cloud)?;
         let snapshot = lease.snapshot()?;
         self.media_recovery_io_with_snapshot(collection, a, &snapshot, work)
@@ -263,9 +310,7 @@ impl Runtime {
         snapshot: &meguri_engine::Snapshot<'_>,
         work: impl FnOnce() -> Result<T, RuntimeError>,
     ) -> Result<T, RuntimeError> {
-        if self.media_authority(collection, true)? != a.0 {
-            return Err(RuntimeError::StaleIncarnation);
-        }
+        self.validate_media_recovery_file(collection, a)?;
         let crt = snapshot.col()?.created.0;
         let s = self.state();
         Self::check_media_recovery_locked(&s, a)?;
@@ -1687,7 +1732,7 @@ impl Runtime {
         pending: PendingMediaApply,
     ) -> Result<(), RuntimeError> {
         self.with_media(a, |_| Ok(()))?;
-        self.begin_local_media_apply(collection, media, &MediaRecoveryAuthority(a.clone()), pending)
+        self.begin_local_media_apply(collection, media, &MediaRecoveryAuthority(a.clone(), None), pending)
     }
     fn begin_local_media_apply(
         &self,
@@ -2548,12 +2593,24 @@ impl Runtime {
         self.state().incoming.receipts.push(receipt);
         Ok(true)
     }
+    pub(super) fn replay_transition_media_intents(&self, collection: &Collection, media: &MediaService) -> Result<(), RuntimeError> {
+        let a = self.transition_media_authority(collection)?;
+        let intents = self.with_media_recovery(&a, |s| s.apply_intents(a.binding))?;
+        for intent in intents.into_iter().filter(|i| i.media.is_some()) {
+            if self.state().bound.as_ref().is_some_and(Bound::crt_equal) {
+                self.execute_media_apply(collection, media, &a, intent)?;
+            } else if !self.settle_committed_media(collection, media, &a, &intent)? {
+                return Err(Error::RecoveryRefused.into());
+            }
+        }
+        Ok(())
+    }
     pub(super) fn replay_media_intents(
         &self,
         collection: &Collection,
         media: &MediaService,
     ) -> Result<usize, RuntimeError> {
-        let a = MediaRecoveryAuthority(self.media_authority(collection, true)?);
+        let a = MediaRecoveryAuthority(self.media_authority(collection, true)?, None);
         let intents = self.with_media_recovery(&a, |s| s.apply_intents(a.binding))?;
         if intents.iter().all(|intent| intent.media.is_none()) {
             return Ok(0);
@@ -2729,7 +2786,7 @@ impl Runtime {
         media: &MediaService,
     ) -> Result<usize, RuntimeError> {
         self.consume_media_feed(collection, media)?;
-        let a = MediaRecoveryAuthority(self.media_authority(collection, true)?);
+        let a = MediaRecoveryAuthority(self.media_authority(collection, true)?, None);
         self.media_recovery_io(collection, &a, || Ok(()))?;
         // Recovery above still settles required local feed/intent work. Only
         // selection of NEW media input is skipped after permanent media loss.
@@ -3352,7 +3409,7 @@ mod recovery_authority_tests {
         state.adapter.paused = true;
         state.media.paused = true;
         state.media.enabled = Some(false);
-        (state, MediaRecoveryAuthority(authority))
+        (state, MediaRecoveryAuthority(authority, None))
     }
 
     #[test]

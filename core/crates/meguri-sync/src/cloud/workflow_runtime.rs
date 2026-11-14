@@ -812,7 +812,7 @@ impl Runtime {
                                     .ok_or(Error::InvalidData)?)
                             })?;
                             e.validate()?;
-                            if matches!(kind, codec::Kind::Revlog | codec::Kind::Deck)
+                            if matches!(kind, codec::Kind::Revlog | codec::Kind::Deck | codec::Kind::Notetype)
                                 && !e.sent && e.server_erev == 0 && e.in_flight.is_empty()
                             {
                                 let removed = self.with_scan(&guard, collection, |s| {
@@ -867,6 +867,10 @@ impl Runtime {
                         })?;
                         let newly_observed = existing.is_none();
                         let projected = row_payload::project_ordinary(&view, kind, &row, |id| {
+                            if publishing {
+                                let raw = view.row(Table::Notetypes, &RowKey::Id(id))?.ok_or(Error::InvalidData)?;
+                                return row_payload::notetype(&view, &raw, 1);
+                            }
                             let tracked = {
                                 let s = self.state();
                                 with_tracking_access(|| {
@@ -1307,6 +1311,10 @@ impl Runtime {
         row: &[Cell],
     ) -> Result<codec::Payload, Error> {
         row_payload::project_ordinary(view, e.kind, row, |id| {
+            if publishing {
+                let head = view.row(Table::Notetypes, &RowKey::Id(id))?.ok_or(Error::InvalidData)?;
+                return row_payload::notetype(view, &head, 1);
+            }
             let tracked = self
                 .with_scan(guard, collection, |s| {
                     let name = codec::entity_name(

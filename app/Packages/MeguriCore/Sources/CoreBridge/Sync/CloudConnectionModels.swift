@@ -209,11 +209,15 @@ public struct CloudRecoveryStatus: Sendable {
     public let step: CloudRecoveryStep
     public let switchSent: Bool
     public let switchConflict: Bool
+    public let publicationConflictCancellable: Bool
+    public let publicationCancellable: Bool
     public let retryAfterMilliseconds: Int64?
     public let adoptionTransportWait: Bool
     init(_ v: MeguriCoreBindings.CloudRecoveryStatus) {
         adoptionTransportWait = v.adoptionTransportWait
-        operation = .init(raw: v.operation); switchSent = v.switchSent; switchConflict = v.switchConflict; retryAfterMilliseconds = v.retryAfterMs
+        operation = .init(raw: v.operation); switchSent = v.switchSent; switchConflict = v.switchConflict;
+        publicationCancellable = v.publicationCancellable
+        publicationConflictCancellable = v.publicationConflictCancellable; retryAfterMilliseconds = v.retryAfterMs
         step = switch v.step { case .confirmed: .confirmed; case .bound: .bound; case .zones: .zones; case .sent: .sent; case .complete: .complete; case .cancelling: .cancelling; case .staging: .staging; case .staged: .staged; case .ready: .ready }
     }
 }

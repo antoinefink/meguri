@@ -136,5 +136,46 @@ fn ordinary_notetype_native_add_and_clone_after_publication_bootstrap_and_reopen
         assert_eq!(current.payload, entity.payload);
         assert_eq!(current.acked_rev, 0);
     }
+    // Deliver through ordinary batches, in real reference dependency order.
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let instance = start(&host);
+    let note_names: BTreeSet<String> = runtime.entity_facts_page(codec::Kind::Note, None).unwrap().into_iter()
+        .filter(|e| e.mark.is_some()).map(|e| e.name).collect();
+    let blocked = runtime.build_collection_batch(&instance, &collection, &note_names).unwrap();
+    assert!(blocked.saves.is_empty(), "unacked types must hold dependent Notes");
+    let held = actual_preview(&host, &mut service, &scope());
+    let pending_cards = runtime.entity_facts_page(codec::Kind::Card, None).unwrap().into_iter().filter(|e| e.mark.is_some()).count();
+    assert_eq!(note_names.len(), 2);
+    assert_eq!(pending_cards, 2);
+    assert_eq!(held.retained_work.held, 4, "both Notes and their Cards await acknowledged dependencies");
+    runtime.cancel_connection_preview_id(held.id).unwrap();
+    for kind in [codec::Kind::Notetype, codec::Kind::Note, codec::Kind::Card] {
+        let pending = runtime.entity_facts_page(kind, None).unwrap().into_iter()
+            .filter(|e| e.mark.is_some()).map(|e| e.name).collect();
+        let batch = runtime.build_collection_batch(&instance, &collection, &pending).unwrap();
+        assert!(!batch.saves.is_empty(), "native additions must reach actual outgoing batches");
+        assert!(send_actual_batch(&host, &mut service, &batch).is_empty());
+        for saved in batch.saves {
+            let e = runtime.entity_facts(&saved.name).unwrap().unwrap();
+            assert!(e.server_erev > 0 && e.acked_rev == e.local_rev);
+            assert!(e.mark.is_none() && e.in_flight.is_empty());
+            assert_eq!(e.acked_payload.as_ref(), Some(&e.payload));
+        }
+    }
+    let original = runtime.entity_facts_page(codec::Kind::Notetype, None).unwrap().into_iter()
+        .find(|e| e.key == codec::id_key(created.0)).unwrap();
+    let mut draft = notetypes::Draft::of(collection.reader(ReaderRole::Query).unwrap().notetype(created).unwrap().unwrap());
+    draft.name = "Ordinary checked rename".into();
+    draft.config.css = "Ordinary checked styling".into();
+    notetypes::save(&collection, draft, Default::default()).unwrap();
+    let batch = runtime.build_collection_batch(&instance, &collection, &BTreeSet::from([original.name.clone()])).unwrap();
+    assert_eq!(batch.saves.len(), 1);
+    assert!(send_actual_batch(&host, &mut service, &batch).is_empty());
+    let changed = runtime.entity_facts(&original.name).unwrap().unwrap();
+    assert_eq!(changed.origin, original.origin);
+    assert_eq!(nt(&changed).struct_gen, nt(&original).struct_gen);
+    assert_eq!(changed.acked_rev, changed.local_rev);
+    assert!(changed.mark.is_none());
     host.close().unwrap();
 }

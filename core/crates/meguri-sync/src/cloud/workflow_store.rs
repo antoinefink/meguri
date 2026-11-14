@@ -762,7 +762,7 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         open: u64,
         cursor: &runtime::NoteScanCursor,
     ) -> Result<bool, Error> {
-        if !matches!(kind, codec::Kind::Revlog | codec::Kind::Deck) {
+        if !matches!(kind, codec::Kind::Revlog | codec::Kind::Deck | codec::Kind::Notetype) {
             return Err(Error::InvalidData);
         }
         let state = self.runtime_binding(b)?;
@@ -1115,13 +1115,14 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                         }
                         return Err(Error::InvalidData.into());
                     };
-                    if matches!(kind, codec::Kind::Note | codec::Kind::Card | codec::Kind::Config) {
+                    if matches!(kind, codec::Kind::Note | codec::Kind::Card | codec::Kind::Config | codec::Kind::Notetype) {
                         if !e.sent && e.server_erev == 0 && e.in_flight.is_empty() {
                             super::incomplete_store::dropped(&tx, b, &e.name, e.local_rev)?;
                             remove_entity(&tx, b, &e)?;
                             dropped.push((e.name, e.local_rev));
                             continue;
                         }
+                        if kind == codec::Kind::Notetype { return Err(Error::InvalidData.into()); }
                         let view = BeforeCommitView {
                             inner: CommitView {
                                 c: &tx,
@@ -1132,7 +1133,8 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
                             commit,
                         };
                         let before = before_row.ok_or(Error::InvalidData)?;
-                        let payload = match row_payload::project_ordinary(&view, kind, before, |id| layout(&view.inner, id)) {
+                        let projected = row_payload::project_ordinary(&view, kind, before, |id| layout(&view.inner, id));
+                        let payload = match projected {
                             Ok(p) => p,
                             // Tombstone has no wire payload. Keep the last real
                             // retained image as bookkeeping when the removed row
@@ -1287,7 +1289,8 @@ fn observed_layout(
     let created = commit.payload.row_presence(Table::Notetypes, &RowKey::Id(id))
         .is_some_and(|presence| !presence.before && presence.after);
     if created {
-        if intents.contains_key(&id) || entity(view.c, view.b, codec::Kind::Notetype, &codec::id_key(id))?.is_some() {
+        if intents.contains_key(&id) { return Err(Error::InvalidData); }
+        if entity(view.c, view.b, codec::Kind::Notetype, &codec::id_key(id))?.is_some() {
             return Err(Error::InvalidData);
         }
         let head = view.row(Table::Notetypes, &RowKey::Id(id))?.ok_or(Error::InvalidData)?;
@@ -1553,8 +1556,6 @@ impl View for BeforeCommitView<'_, '_, '_> {
         self.inner.page(table, after)
     }
     fn parts(&self, table: Table, id: i64, after: Option<i64>) -> Result<Vec<RowImage>, Error> {
-        // Only the earliest 250 before-images can belong to this page.
-        // Select keys first so journal tails need no image allocation.
         let mut restored = std::collections::BTreeSet::new();
         for key in self.commit.payload.row_keys(table) {
             let RowKey::Pair(ntid, ord) = key else { return Err(Error::InvalidData); };
@@ -1565,30 +1566,39 @@ impl View for BeforeCommitView<'_, '_, '_> {
                 if restored.len() > 250 { restored.pop_last(); }
             }
         }
-        let mut parts = std::collections::BTreeMap::new();
-        for ord in restored {
-            let delta = self.commit.payload.row(table, &RowKey::Pair(id, ord))?.ok_or(Error::InvalidData)?;
-            parts.insert(ord, delta.before.ok_or(Error::InvalidData)?);
-        }
         let mut cursor = after;
         loop {
             let page = self.inner.parts(table, id, cursor)?;
-            if page.is_empty() { break; }
+            let upper = page.last().map(|row| row_payload::int(row, 1)).transpose()?;
+            let mut candidates = std::collections::BTreeMap::new();
+            for ord in &restored {
+                if upper.is_none_or(|upper| *ord <= upper) { candidates.insert(*ord, None); }
+            }
             for row in page {
                 let ord = row_payload::int(&row, 1)?;
-                cursor = Some(ord);
-                // Journal entries supply their old side above. In particular,
-                // an added ordinal has no place in the before-image page.
                 if self.commit.payload.row_presence(table, &RowKey::Pair(id, ord)).is_none() {
-                    parts.insert(ord, row);
-                    if parts.len() > 250 { parts.pop_last(); }
+                    candidates.insert(ord, Some(row));
                 }
             }
-            if parts.len() == 250 && parts.last_key_value().is_some_and(|(&ord, _)| cursor >= Some(ord)) {
-                break;
+            let mut out = Vec::new();
+            let mut bytes = 0usize;
+            for (ord, row) in candidates {
+                let row = match row {
+                    Some(row) => row,
+                    None => self.commit.payload.row(table, &RowKey::Pair(id, ord))?
+                        .ok_or(Error::InvalidData)?.before.ok_or(Error::InvalidData)?,
+                };
+                let size = row.iter().fold(row.len() * std::mem::size_of::<Cell>(), |n, cell| {
+                    n.saturating_add(match cell { Cell::Text(v) | Cell::Blob(v) => v.len(), _ => 0 })
+                });
+                if !out.is_empty() && bytes.saturating_add(size) > 8 * 1024 * 1024 { break; }
+                bytes = bytes.saturating_add(size);
+                out.push(row);
+                if out.len() == 250 { break; }
             }
+            if !out.is_empty() || upper.is_none() { return Ok(out); }
+            cursor = upper;
         }
-        Ok(parts.into_values().collect())
     }
     fn history(&self, id: i64) -> Result<i64, Error> {
         let mut maximum = self.inner.history(id)?;

@@ -693,6 +693,10 @@ fn bridge_accepted_active_with_lost_reply_retains_actual_durable_switch_attempt(
     );
     let submitted = fixture.workflow.core.publication_op().unwrap().unwrap();
     assert!(submitted.switch_sent && submitted.active_attempt.is_some());
+    let recovery = connection.recovery_status().unwrap().unwrap();
+    assert!(!recovery.publication_conflict_cancellable);
+    failure_is(connection.cancel_operation(recovery.operation), CloudConnectionFailure::Busy);
+    assert!(fixture.workflow.core.publication_op().unwrap().as_ref() == Some(&submitted));
     assert_eq!(queue.0.load(Ordering::SeqCst), 1);
     fixture.workflow.host.close().unwrap();
     failure_is(
@@ -2161,4 +2165,29 @@ fn adoption_wait_row_decodes_old_shape_and_same_generation_successor_discards_li
     );
     assert!(!successor.cloud_connection_directory().join("collection.anki2").exists());
     successor.close().unwrap();
+}
+
+#[test]
+fn bridge_failed_active_attempt_can_cancel_after_original_delivery() {
+    let fixture = Fixture::new(keys());
+    let (connection, request) = active_request(&fixture);
+    let queue = Arc::new(Queue(AtomicUsize::new(0)));
+    assert!(connection.submit_publication_request(request.clone(), queue.clone()).unwrap());
+    let status = connection.recovery_status().unwrap().unwrap();
+    assert!(!status.publication_cancellable && !status.publication_conflict_cancellable);
+    let submitted = fixture.workflow.core.publication_op().unwrap().unwrap();
+    failure_is(connection.cancel_operation(status.operation.clone()), CloudConnectionFailure::Busy);
+    assert!(fixture.workflow.core.publication_op().unwrap() == Some(submitted.clone()));
+    connection.publication_result(request.clone(), CloudPublicationResult::Failed { retry_after_ms: None }).unwrap();
+    let settled = connection.recovery_status().unwrap().unwrap();
+    assert!(settled.switch_sent && settled.publication_cancellable && !settled.publication_conflict_cancellable);
+    connection.cancel_operation(settled.operation).unwrap();
+    assert!(connection.recovery_status().unwrap().is_none());
+    failure_is(connection.publication_result(request, CloudPublicationResult::Failed { retry_after_ms: None }), CloudConnectionFailure::AuthorityChanged);
+    fixture.workflow.host.close().unwrap();
+    let c::OpenOutcome::Opened(store) = c::TrackingStore::open(&fixture._directory.path().join("collection"), c::BuildScope {
+        container: c::ContainerId::new("synthetic-u114").unwrap(), environment: c::Environment::Development,
+    }).unwrap() else { panic!("durable tracking") };
+    assert!(store.publication_op().unwrap().is_none());
+    assert!(store.binding(submitted.binding_after.unwrap()).unwrap().is_none());
 }

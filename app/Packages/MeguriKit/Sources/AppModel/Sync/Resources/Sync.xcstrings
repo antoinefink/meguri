@@ -1675,7 +1675,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Review answers not yet sent: %lld."
+            "value": "Changes held on this device: %lld."
           }
         }
       }

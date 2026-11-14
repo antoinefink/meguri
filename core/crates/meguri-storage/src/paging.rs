@@ -80,15 +80,16 @@ pub trait ReadRows: sealed::Connected {
         Ok(self.connection().query_row("SELECT EXISTS(SELECT 1 FROM decks WHERE id<>1)", [], |row| row.get(0))?)
     }
 
-    /// Bounded stored-image page for normal sync and its captured overlay.
+    /// At most 250 stored images and 8 MiB of copied cells. One larger
+    /// selected row is returned alone so keyset traversal always progresses.
     fn row_page(&self, table: Table, after: Option<&RowKey>) -> Result<Vec<RowImage>, StorageError> {
-        crate::normal_stage::page(self.connection(), "", table, after, false)
+        crate::normal_stage::raw_page(self.connection(), table, after)
     }
 
     /// Raw fields of one existing parent, in stored `ord` order, at most 250
     /// rows. Continue after the last returned ordinal; gaps are preserved.
-    /// Cells keep their storage classes and bytes. This is a row-count bound,
-    /// not a byte budget. A missing parent returns an empty page.
+    /// Copy at most 8 MiB, except that a larger first row is returned alone.
+    /// Continue until an empty page. A missing parent returns an empty page.
     fn notetype_fields_page(&self, notetype: NotetypeId, after: Option<i64>) -> Result<Vec<RowImage>, StorageError> {
         notetype_parts_page(self.connection(), Table::Fields, notetype, after)
     }
@@ -557,9 +558,18 @@ fn notetype_parts_raw_page(
     if let Some(ord) = after {
         params.push(ord.clone());
     }
-    Ok(statement
-        .query_map(params_from_iter(params), |row| rows::row_image(row, table))?
-        .collect::<rusqlite::Result<_>>()?)
+    let mut cursor = statement.query(params_from_iter(params))?;
+    let mut out = Vec::new();
+    let mut bytes = 0usize;
+    while let Some(row) = cursor.next()? {
+        let size = crate::normal_stage::borrowed_row_size(row, table)?;
+        if !out.is_empty() && bytes.saturating_add(size) > 8 * 1024 * 1024 {
+            break;
+        }
+        out.push(rows::row_image(row, table)?);
+        bytes = bytes.saturating_add(size);
+    }
+    Ok(out)
 }
 
 /// One page of a table keyed by `id`: rows with ids above `after`.

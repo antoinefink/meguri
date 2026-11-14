@@ -365,6 +365,7 @@ public final class SyncCoordinator {
     private var replacing = false
     private var suspended = false
     private var awaitingResumeProof = false
+    private var cancellingConnectionOperation = false
     private var pendingPreviewCancellation = false
     private var pendingExpiry = false
     private var pendingLocalRefresh = false
@@ -736,8 +737,9 @@ public final class SyncCoordinator {
     public func keepLocalOnly() async { await chooseLocalOnly(stopOnly: false) }
     private func chooseLocalOnly(stopOnly: Bool) async {
         guard !closing, !suspended, !replacing, setupState == .attached,
-              initialAdoptionEnabledBefore == nil, ownTask == nil, recovery == nil,
+              initialAdoptionEnabledBefore == nil,
               let backend, let connection = backend.connection else { return }
+        guard ownTask == nil, !cancellingConnectionOperation else { connectionFailure = .busy; return }
         let expected = generation, revision = hostRevision
         let ready: CloudConnectionPreview?
         if case .ready(let handle, _) = preview {
@@ -745,18 +747,33 @@ public final class SyncCoordinator {
             ready = handle
         } else { ready = nil }
         connectionFailure = nil
+        cancellingConnectionOperation = true
         startOwnTask(backend: backend, generation: expected, revision: revision) { [self] in
-            defer { finishOwnWork() }
+            defer { finishOwnWork(); cancellingConnectionOperation = false }
             do {
+                var checkedPreview = ready
+                let pending = try await connection.recoveryStatus()
+                guard !closing, expected == generation, revision == hostRevision, self.backend === backend else { return }
+                if let pending {
+                    guard !stopOnly, pending.publicationConflictCancellable, let own = backend.own else {
+                        throw BridgeError.cloudConnection(.busy)
+                    }
+                    try await own.cancel(pending.operation)
+                    guard !closing, expected == generation, revision == hostRevision, self.backend === backend else { return }
+                    let current = try await connection.recoveryStatus()
+                    guard !closing, expected == generation, revision == hostRevision, self.backend === backend else { return }
+                    recovery = current
+                    guard current == nil else { throw BridgeError.cloudConnection(.busy) }
+                    preview = nil; readyPreviewOwner = nil; checkedPreview = nil
+                }
                 if stopOnly { try await backend.stopSyncing() }
-                else { try await connection.keepLocalOnly(generation: expected, preview: ready) }
+                else { try await connection.keepLocalOnly(generation: expected, preview: checkedPreview) }
                 guard !closing, expected == generation, revision == hostRevision else { return }
                 preview = nil; readyPreviewOwner = nil
                 saveEnabled(false)
                 receive(.refresh(.cloud))
             } catch {
                 if expected == generation, revision == hostRevision, !closing {
-                    preview = nil; readyPreviewOwner = nil
                     recordConnectionFailure(error)
                     receive(.refresh(.cloud))
                 }
@@ -903,7 +920,7 @@ public final class SyncCoordinator {
     /// User action only. Automatic connection/policy wakes cannot release a wait.
     public func resumeWaitingAdoption() {
         guard !closing, !suspended, !replacing, !settings.paused, !awaitingInitialOwnProof,
-              initialOwnDrain == nil, !initialActivationReturned, ownTask == nil,
+              initialOwnDrain == nil, !initialActivationReturned, ownTask == nil, !cancellingConnectionOperation,
               recovery?.adoptionTransportWait == true, let operation = recovery?.operation,
               let backend, let connection = backend.connection, let own = backend.own else { return }
         let expected = generation, revision = hostRevision
@@ -932,7 +949,7 @@ public final class SyncCoordinator {
     }
     public func resumeConnection() {
         guard !closing, !suspended, !replacing, !settings.paused, !awaitingInitialOwnProof,
-              initialOwnDrain == nil, !initialActivationReturned, ownTask == nil, let backend, let connection = backend.connection else { return }
+              initialOwnDrain == nil, !initialActivationReturned, ownTask == nil, !cancellingConnectionOperation, let backend, let connection = backend.connection else { return }
         let expected = generation, revision = hostRevision
         startOwnTask(backend: backend, generation: expected, revision: revision) { [self] in
             defer { finishOwnWork() }
@@ -970,22 +987,35 @@ public final class SyncCoordinator {
         }
         ownResumePreparation = nil; ownOwner = nil; ownTask = nil
         retryAccountCompletion()
-        if ownWorkRequested, !closing, !replacing, !suspended, !settings.paused, !awaitingInitialOwnProof, initialOwnDrain == nil { ownWorkRequested = false; resumeConnection() }
+        if ownWorkRequested, !cancellingConnectionOperation, !closing, !replacing, !suspended, !settings.paused, !awaitingInitialOwnProof, initialOwnDrain == nil { ownWorkRequested = false; resumeConnection() }
     }
     public func cancelConnectionOperation() async {
         guard !closing, !suspended, !replacing, !activatingInitialAdoption,
               let backend, let own = backend.own, let operation = recovery?.operation else { return }
+        guard !cancellingConnectionOperation else { connectionFailure = .busy; return }
+        cancellingConnectionOperation = true
+        defer { cancellingConnectionOperation = false }
+        let expected = generation, revision = hostRevision
+        let originalTask = ownTask
+        connectionFailure = nil
+        let earlierInitialCancellation = initialAdoptionCancelled
         initialAdoptionCancelled = true
         do {
             try await own.cancel(operation)
-            await ownTask?.value
-            recovery = try await backend.connection?.recoveryStatus()
+            await originalTask?.value
+            guard !closing, expected == generation, revision == hostRevision else { return }
+            let current = try await backend.connection?.recoveryStatus()
+            guard !closing, expected == generation, revision == hostRevision, self.backend === backend else { return }
+            recovery = current
             await reconcileInitialAdoption(backend)
             receive(.refresh(.cloud))
         } catch {
+            guard !closing, expected == generation, revision == hostRevision, self.backend === backend else { return }
+            initialAdoptionCancelled = earlierInitialCancellation
             #if DEBUG
             DebugCloudDiagnostics.record(.connectionOperationCancel, error: error)
             #endif
+            if case BridgeError.cloudConnection(let failure) = error { connectionFailure = failure }
             operationFailed = true
         }
     }

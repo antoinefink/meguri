@@ -120,6 +120,72 @@ impl Runtime {
         }
     }
 
+    /// Recheck blocked work before Ready or Bound; retire it only after
+    /// completion is proved for the same replacement operation.
+    pub(super) fn check_replacement_work(
+        &self, collection: &Collection,
+    ) -> Result<crate::cloud::publication_store::ReplacementCheck, RuntimeError> {
+        use crate::cloud::{adoption::RecoveryKind, publication_store::ReplacementCheck};
+        self.settle_before_transition(collection, Duration::from_secs(30))?;
+        let account = self.publication_account()?;
+        let decision = self.publication_decision()?;
+        let file = self.inputs.files.identity(collection.path())?;
+        let seq = collection.last_seq();
+        let (op, owner, intents) = {
+            let s = self.state();
+            if s.incoming.running { return Err(crate::cloud::publication::PublicationError::Busy.into()); }
+            with_tracking_access(|| -> Result<_, RuntimeError> {
+                let store = s.store.as_ref().ok_or(Error::Database)?;
+                let op = match (store.publication_op()?, store.adoption_op()?) {
+                    (Some(p), None) => RecoveryKind::Publish(Box::new(p)),
+                    (None, Some(p)) => RecoveryKind::Adopt(Box::new(p)),
+                    _ => return Err(Error::RecoveryRefused.into()),
+                };
+                let (before, op_account, op_file, prior) = match &op {
+                    RecoveryKind::Publish(p) if p.step == crate::cloud::publication::PublishStep::Confirmed =>
+                        (&p.binding_before, &p.account, Some(p.confirmed_file), Some(&p.fence_before)),
+                    RecoveryKind::Adopt(p) if p.step == crate::cloud::adoption::AdoptStep::Staged =>
+                        (&p.binding_before, &p.account, p.file_before, p.before.as_ref()),
+                    _ => return Err(Error::RecoveryRefused.into()),
+                };
+                if *op_account != account || op_file != Some(file) || prior != Some(&decision) {
+                    return Err(Error::RecoveryRefused.into());
+                }
+                let owner = before.as_ref().map(|before| store.binding(before.id)?.ok_or(Error::BindingNotFound)).transpose()?;
+                let intents = if let Some(owner) = &owner {
+                    let intents = store.apply_intents(owner.id)?;
+                    if owner.scope != self.inputs.scope || owner.facts.account != account
+                        || (!intents.is_empty() && (owner.facts.publication != decision.publication.identity
+                            || store.runtime_binding(owner.id)?.file != Some(file)))
+                    { return Err(Error::RecoveryRefused.into()); }
+                    intents
+                } else { Vec::new() };
+                if !intents.is_empty() && let RecoveryKind::Adopt(p) = &op {
+                    let active = p.active.encrypted.as_deref().and_then(|e| crate::cloud::control_codec::Active::decode(e).ok());
+                    if !matches!(active, Some(a) if a.epoch == p.epoch.0) { return Err(Error::RecoveryRefused.into()); }
+                }
+                for i in &intents {
+                    if i.media.is_some() || crate::cloud::rekey_store::get(&store.connection, i.id)?.is_some() {
+                        return Err(Error::RecoveryRefused.into());
+                    }
+                }
+                Ok((op, owner, intents))
+            })?
+        };
+        for i in &intents {
+            match self.read_intent_rows(collection, i) {
+                Err(RuntimeError::Tracking(Error::ValidatedUnprovedLayout { .. })) => {},
+                Err(e) => return Err(e),
+                Ok(_) => return Err(Error::RecoveryRefused.into()),
+            }
+        }
+        if self.publication_account()? != account || self.publication_decision()? != decision
+            || self.inputs.files.identity(collection.path())? != file || collection.last_seq() != seq
+            || !collection.is_current()
+        { return Err(RuntimeError::StaleIncarnation); }
+        Ok(ReplacementCheck { op, owner, intents, seq, file })
+    }
+
     pub(super) fn wait_incoming_idle(&self) {
         let mut s = self.state();
         while s.incoming.running {
@@ -133,6 +199,18 @@ impl Runtime {
     ) -> Result<(), RuntimeError> {
         self.wait_incoming_idle();
         let status = self.status()?;
+        let transition_media = {
+            let s = self.state();
+            with_tracking_access(|| -> Result<bool, RuntimeError> {
+                let Some(store) = s.store.as_ref() else { return Ok(false); };
+                let adopt = store.adoption_op()?;
+                let owner = store.publication_op()?.filter(|p| p.step == crate::cloud::publication::PublishStep::Confirmed)
+                    .and_then(|p| p.binding_before)
+                    .or_else(|| adopt.filter(|p| p.step != crate::cloud::adoption::AdoptStep::Ready).and_then(|p| p.binding_before));
+                Ok(if let Some(owner) = owner { store.apply_intents(owner.id)?.iter().any(|i| i.media.is_some()) } else { false })
+            })?
+        };
+        if transition_media { self.replay_transition_media_intents(collection, &self.media_service(collection)?)?; }
         if let Some(binding) = status.binding.as_ref().filter(|_| status.stored_usable && status.identity_verified) {
             let has_media = {
                 let s = self.state();
@@ -201,6 +279,12 @@ impl Runtime {
                     .map(|p| RecoveryKind::Publish(Box::new(p)))
                     .or_else(|| adopt.map(|p| RecoveryKind::Adopt(Box::new(p))));
                 let Some(op) = op else { return Ok(None) };
+                // Ready/bound certifies V13.6's checks. Old work remains
+                // owned by that exact op until its original success transaction.
+                if match &op {
+                    RecoveryKind::Publish(p) => p.step != crate::cloud::publication::PublishStep::Confirmed,
+                    RecoveryKind::Adopt(p) => p.step == crate::cloud::adoption::AdoptStep::Ready,
+                } { return Ok(None); }
                 let (before, op_account, op_file, publication) = match &op {
                     RecoveryKind::Publish(p) => {
                         (&p.binding_before, &p.account, p.confirmed_file, p.confirmed_publication)
@@ -287,11 +371,9 @@ impl Runtime {
         };
         let running = Running(self.state.clone(), self.incoming_idle.clone());
         self.with_incoming(&guard, collection, |_| Ok(()))?;
-        self.replay_ordinary(collection, &guard, timeout)?.into_result()?;
+        self.replay_ordinary(collection, &guard, timeout, guard.recovery.is_some())?.into_result()?;
         drop(running);
-        if guard.recovery.is_some() {
-            // The current usable owner's own crash intents still precede its
-            // scan after the recovery row's old owner has finished.
+        if guard.recovery.is_some() && self.apply_intents(guard.binding)?.is_empty() {
             self.settle_before_transition(collection, timeout)?;
         }
         Ok(())
@@ -760,7 +842,7 @@ impl Runtime {
             self.drain_media_metadata(collection, &self.media_service(collection)?)?;
         }
         self.with_incoming(&guard, collection, |_| Ok(()))?;
-        let replayed = match self.replay_ordinary(collection, &guard, timeout)? {
+        let replayed = match self.replay_ordinary(collection, &guard, timeout, false)? {
             IncomingDisposition::Progress(count) => count,
             deferred @ IncomingDisposition::Deferred(_) => return Ok(deferred),
         };
@@ -1333,6 +1415,7 @@ impl Runtime {
         collection: &Collection,
         guard: &IncomingGuard,
         timeout: Duration,
+        replacing: bool,
     ) -> Result<IncomingDisposition, RuntimeError> {
         let intents = self.with_incoming(guard, collection, |s| {
             Ok(s.store.as_ref().ok_or(Error::Database)?.apply_intents(guard.binding)?)
@@ -1359,7 +1442,14 @@ impl Runtime {
                 }
                 continue;
             }
-            let (current, current_seq, _) = self.read_intent_rows(collection, &i)?;
+            let (current, current_seq, _) = match self.read_intent_rows(collection, &i) {
+                Err(RuntimeError::Tracking(Error::ValidatedUnprovedLayout { .. })) if replacing => {
+                    // Only this intent is blocked; continue settling every
+                    // unrelated intent, including every paired re-key above.
+                    continue;
+                }
+                result => result?,
+            };
             let all_after = i
                 .keys
                 .iter()

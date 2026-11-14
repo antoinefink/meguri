@@ -248,12 +248,12 @@ struct CloudRecoveryContent: View {
         }
             .disabled(recovery.switchConflict || recovery.step == .cancelling || collection.sync.settings.paused)
             .accessibilityIdentifier("sync.recovery.resume")
-        // Only the exact accepted staging wait grants this Cancel offer.
+        // Eligibility comes from the native operation's accepted outcome.
         Button(SyncText.value("sync.action.cancelOp")) {
-            if recovery.adoptionTransportWait { Task { await collection.sync.cancelConnectionOperation() } }
-        }.disabled(!recovery.adoptionTransportWait)
+            Task { await collection.sync.cancelConnectionOperation() }
+        }.disabled(!recovery.adoptionTransportWait && !recovery.publicationCancellable)
             .accessibilityIdentifier("sync.recovery.cancel")
-        if !recovery.adoptionTransportWait {
+        if !recovery.adoptionTransportWait && !recovery.publicationCancellable {
             Text(SyncText.value("sync.recovery.error.notOffered")).foregroundStyle(.secondary)
                 .accessibilityIdentifier("sync.recovery.cancelUnavailableReason")
         }

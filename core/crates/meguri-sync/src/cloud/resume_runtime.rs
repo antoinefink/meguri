@@ -436,37 +436,43 @@ impl Runtime {
         &self,
         snapshot: &(impl ReadRows + ?Sized),
         media: &meguri_engine::media::MediaService,
-    ) -> Result<(BTreeMap<codec::Kind, u64>, bool), RuntimeError> {
-        let (entities, expected) = {
+    ) -> Result<(BTreeMap<codec::Kind, u64>, bool, BTreeSet<String>), RuntimeError> {
+        // Keep only keys/digests and the required notetype authority. Bodies
+        // for notes, bases, ACKs and flights are never preview count inputs.
+        let (binding, entities, mut layouts, expected) = {
             let s = self.state();
-            let Some(b) = s.bound.as_ref().filter(|b| Self::resumable(&b.binding) || Self::layout_refused_locked(&s)) else {
-                return Ok((BTreeMap::new(), true));
+            let Some(b) = s.bound.as_ref().filter(|b| b.binding.facts.state == BindingState::Active || Self::resumable(&b.binding) || Self::layout_refused_locked(&s)) else {
+                return Ok((BTreeMap::new(), true, BTreeSet::new()));
             };
             with_tracking_access(|| -> Result<_, RuntimeError> {
                 let store = s.store.as_ref().ok_or(Error::Database)?;
                 let mut entities = BTreeMap::new();
+                let mut layouts = BTreeMap::new();
                 for kind in crate::cloud::row_payload::KINDS {
                     let mut after = None;
                     loop {
-                        let page = store.entity_page(b.binding.id, kind, after.as_deref())?;
-                        if page.is_empty() {
-                            break;
-                        }
+                        let page = store.entity_count_page(b.binding.id, kind, after.as_deref())?;
+                        if page.is_empty() { break; }
                         for e in page {
                             after = Some(e.key.clone());
-                            entities.insert((kind, e.key.clone()), e);
+                            let header = store.entity_header(b.binding.id, &e.name)?.ok_or(Error::InvalidData)?;
+                            if kind == codec::Kind::Notetype {
+                                let codec::Payload::Notetype(n) = header.local_payload(&store.connection, b.binding.id)? else {
+                                    return Err(Error::InvalidData.into());
+                                };
+                                layouts.insert(n.id, n);
+                            }
+                            entities.insert((kind, e.key), (e.name, e.pending, header.facts.acked_row_digest,
+                                header.facts.acked_tombstone(), header.facts.server_erev > 0 && header.facts.acked_payload.is_some()));
                         }
                     }
                 }
                 let expected = super::super::incoming_store::intent_layouts(&store.connection, b.binding.id,
                     b.file, &b.binding.facts.record_key.0, &store.directory, &store.apply_intents(b.binding.id)?)?;
-                Ok((entities, expected))
+                Ok((b.binding.id, entities, layouts, expected))
             })?
         };
         let mut exact = true;
-        let mut layouts = entities.iter().filter_map(|(_, e)| match &e.payload {
-            codec::Payload::Notetype(n) => Some((n.id, n.clone())), _ => None,
-        }).collect();
         match incoming_impl::select_intent_layouts(snapshot, &mut layouts, expected) {
             Ok(()) => {},
             Err(Error::ValidatedUnprovedLayout { .. }) => exact = false,
@@ -474,11 +480,12 @@ impl Runtime {
         }
         let mut pending: BTreeSet<_> = entities
             .iter()
-            .filter(|(_, e)| e.mark.is_some() || e.local_rev > e.acked_rev)
+            .filter(|(_, e)| e.1)
             .map(|(key, _)| key.clone())
             .collect();
         let view = crate::cloud::row_payload::ReadView(snapshot);
         let mut seen = BTreeSet::new();
+        let mut dependency_held = BTreeSet::new();
         for kind in crate::cloud::row_payload::KINDS {
             let Some(table) = crate::cloud::row_payload::table(kind) else {
                 continue;
@@ -505,9 +512,17 @@ impl Runtime {
                         }
                         Err(e) => return Err(e.into()),
                     };
+                    if entities.get(&key).is_some_and(|e| e.1) {
+                        for reference in crate::cloud::publication_store::references(&payload)? {
+                            if entities.get(&reference).is_none_or(|e| !e.4 || e.3) {
+                                dependency_held.insert(entities[&key].0.clone());
+                                break;
+                            }
+                        }
+                    }
                     if entities
                         .get(&key)
-                        .is_none_or(|e| payload.row_digest().ok() != Some(e.acked_row_digest))
+                        .is_none_or(|e| payload.row_digest().ok() != Some(e.2))
                     {
                         pending.insert(key.clone());
                     }
@@ -516,20 +531,27 @@ impl Runtime {
             }
         }
         for (key, e) in &entities {
-            if key.0 != codec::Kind::MediaName && !seen.contains(key) && !e.acked_tombstone() {
+            if key.0 != codec::Kind::MediaName && !seen.contains(key) && !e.3 {
                 pending.insert(key.clone());
             }
         }
         let feed = media.store().media_feed_snapshot().map_err(|_| Error::InvalidData)?;
         for item in feed.items {
             let key = (codec::Kind::MediaName, item.name.to_lowercase().into_bytes());
-            let ack = entities.get(&key).and_then(|e| e.acked_payload.as_ref());
-            let same = match (&item.state, ack) {
+            let ack = if entities.contains_key(&key) {
+                let s = self.state();
+                with_tracking_access(|| -> Result<_, RuntimeError> {
+                    let store = s.store.as_ref().ok_or(Error::Database)?;
+                    Ok(store.entity_image(binding, codec::Kind::MediaName, &key.1)?
+                        .ok_or(Error::InvalidData)?.acked_payload)
+                })?
+            } else { None };
+            let same = match (&item.state, ack.as_ref()) {
                 (meguri_storage::media::MediaFileState::Present(f), Some(codec::Payload::MediaName(m))) => {
                     crate::cloud::media::io::sha1_text(&m.sha1) == f.sha1 && m.size == f.size
                 }
                 (meguri_storage::media::MediaFileState::Absent(_), _) => {
-                    entities.get(&key).is_none_or(|e| e.acked_tombstone())
+                    entities.get(&key).is_none_or(|e| e.3)
                 }
                 _ => false,
             };
@@ -544,6 +566,6 @@ impl Runtime {
         for (kind, _) in pending {
             *counts.get_mut(&kind).ok_or(Error::InvalidData)? += 1;
         }
-        Ok((counts, exact))
+        Ok((counts, exact, dependency_held))
     }
 }

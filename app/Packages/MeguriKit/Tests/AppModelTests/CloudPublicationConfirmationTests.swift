@@ -5,6 +5,35 @@ import Testing
 @testable import CoreBridge
 
 extension ReviewCollectionStartupTests {
+    @Test func waitingPublicationStopReportsBusyAndExplicitCancelRetainsEnabledSetting() async throws {
+        let harness = try PublicationPresentationHarness()
+        defer { harness.removeStorage() }
+        var original: Task<Void, Never>?
+        do {
+            try await harness.prepare()
+            original = Task { await harness.sync.confirmPublication() }
+            try await harness.transport.zones.waitForAdmission()
+            let before = try #require(try await harness.connection().recoveryStatus())
+            #expect(before.step == .bound && before.publicationCancellable)
+            let settings = harness.sync.settings
+            await harness.sync.stopUsingICloud()
+            #expect(harness.sync.connectionFailure == .busy && harness.sync.settings == settings)
+            #expect(!harness.transport.zones.cancelled && harness.transport.zones.enqueues == 1)
+            harness.transport.zones.finish(.publication(.failed(retryAfterMilliseconds: nil)))
+            await original?.value
+            let waiting = try #require(try await harness.connection().recoveryStatus())
+            #expect(waiting.step == .bound && waiting.publicationCancellable && !waiting.publicationConflictCancellable)
+            await harness.sync.stopUsingICloud()
+            #expect(harness.sync.connectionFailure == .busy && harness.sync.settings == settings)
+            #expect(try await harness.connection().recoveryStatus()?.step == .bound)
+            await harness.sync.cancelConnectionOperation()
+            #expect(harness.sync.connectionFailure == nil && harness.sync.recovery == nil)
+            #expect(try await harness.connection().recoveryStatus() == nil)
+            #expect(harness.sync.settings == settings && !harness.sync.connectionOperationActive)
+            #expect(await harness.owner.close())
+        } catch { harness.release(); await original?.value; _ = await harness.owner.close(); throw error }
+    }
+
     @Test(arguments: [false, true])
     func publicationPresentationReleasesAtDurableAcceptanceWhileOriginalTransportStaysOwned(backgroundThrows: Bool) async throws {
         let harness = try PublicationPresentationHarness()

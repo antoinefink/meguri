@@ -1141,3 +1141,6 @@ fn ordinary_notetype_multipage_name_swaps_undo_redo_restore_complete_aggregate()
 
 #[path = "incoming_notetype_round6.rs"]
 mod round6;
+
+#[path = "incoming_notetype_round7.rs"]
+mod round7;

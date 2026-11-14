@@ -1557,6 +1557,13 @@ impl Runtime {
                 activation,
             )?;
             self.refresh_identity()?;
+            if op.binding_before.as_ref().is_some_and(|b| b.state == BindingState::Active) {
+                match self.reconcile_binding(collection, &self.media_service(collection)?, Duration::from_secs(30)) {
+                    Err(RuntimeError::Tracking(Error::ValidatedUnprovedLayout { .. })) => {},
+                    Err(error) => return Err(error),
+                    Ok(_) => {},
+                }
+            }
         }
         Ok(())
     }
@@ -1826,7 +1833,9 @@ impl Runtime {
         }
         let _media = if let (Some(collection), Some(media)) = (collection, media) {
             self.settle_before_transition(collection, Duration::from_secs(30))?;
-            Some(inventory_registered_media(collection, media)?)
+            let (reader, job) = inventory_registered_media(collection, media)?;
+            drop(reader);
+            Some(job)
         } else {
             None
         };
@@ -1925,7 +1934,12 @@ impl Runtime {
             })
         });
         self.check_adoption_before(op, collection)?;
+        let checked = collection.map(|c| self.check_replacement_work(c)).transpose()?;
+        let _lease = collection.map(|c| c.reader(ReaderRole::Cloud)).transpose()?;
         self.with_adoption_state(collection, |s| {
+            if s.incoming.running || collection.zip(checked.as_ref()).is_some_and(|(c, proof)| c.last_seq() != proof.seq) {
+                return Err(PublicationError::AuthorityChanged.into());
+            }
             with_tracking_access(|| {
                 s.store.as_mut().ok_or(Error::Database)?.ready_adoption(
                     op,
@@ -1933,6 +1947,7 @@ impl Runtime {
                     media_key,
                     epoch.crt,
                     entities,
+                    checked.as_ref(),
                 )
             })?;
             if let Some(bound) = &mut s.bound {

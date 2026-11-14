@@ -64,6 +64,18 @@ pub(crate) fn page(
     after: Option<&RowKey>,
     pending: bool,
 ) -> Result<Vec<RowImage>, StorageError> {
+    page_with_byte_limit(conn, prefix, table, after, pending, None)
+}
+
+/// Raw collection reads retain the row ceiling and bound copied cell bytes.
+/// Normal-transfer staging keeps its existing page sizing contract.
+pub(crate) fn raw_page(conn: &Connection, table: Table, after: Option<&RowKey>) -> Result<Vec<RowImage>, StorageError> {
+    page_with_byte_limit(conn, "", table, after, false, Some(8 * 1024 * 1024))
+}
+
+fn page_with_byte_limit(
+    conn: &Connection, prefix: &str, table: Table, after: Option<&RowKey>, pending: bool, byte_limit: Option<usize>,
+) -> Result<Vec<RowImage>, StorageError> {
     let mut predicates = Vec::new();
     let mut params = Vec::new();
     if let Some(key) = after {
@@ -90,10 +102,29 @@ pub(crate) fn page(
         keys(table)
     );
     let mut stmt = conn.prepare_cached(&sql)?;
-    Ok(stmt
-        .query_map(params_from_iter(params), |r| rows::row_image(r, table))?
-        .collect::<rusqlite::Result<_>>()?)
+    let mut cursor = stmt.query(params_from_iter(params))?;
+    let mut out = Vec::new();
+    let mut bytes = 0usize;
+    while let Some(row) = cursor.next()? {
+        let size = if byte_limit.is_some() { borrowed_row_size(row, table)? } else { 0 };
+        // Copy a first row even when oversized; later rows wait for the next keyset page.
+        if !out.is_empty() && byte_limit.is_some_and(|limit| bytes.saturating_add(size) > limit) { break; }
+        out.push(rows::row_image(row, table)?);
+        bytes = bytes.saturating_add(size);
+    }
+    Ok(out)
 }
+pub(crate) fn borrowed_row_size(row: &rusqlite::Row<'_>, table: Table) -> rusqlite::Result<usize> {
+    let mut size = table.columns().len() * std::mem::size_of::<rows::Cell>();
+    for index in 0..table.columns().len() {
+        size = size.saturating_add(match row.get_ref(index)? {
+            rusqlite::types::ValueRef::Text(v) | rusqlite::types::ValueRef::Blob(v) => v.len(),
+            _ => 0,
+        });
+    }
+    Ok(size)
+}
+
 fn get(conn: &Connection, prefix: &str, table: Table, key: &RowKey) -> Result<Option<RowImage>, StorageError> {
     use rusqlite::OptionalExtension;
     Ok(conn

@@ -71,11 +71,11 @@ impl Runtime {
         })?;
         Ok((s.incarnation, facts))
     }
-    fn preview_retained_work_locked(s: &State) -> Result<RetainedWork, Error> {
+    fn preview_retained_work_locked(s: &State, dependency_held: &std::collections::BTreeSet<String>) -> Result<RetainedWork, Error> {
         let Some(store) = s.store.as_ref() else { return Ok(RetainedWork::default()); };
         let mut work = RetainedWork { conflict_copies: store.publication_unresolved_conflict_count()?, ..RetainedWork::default() };
         let held: std::collections::BTreeSet<_> = s.cloud.deferred.iter()
-            .chain(&s.cloud.incoming_held).chain(&s.policy.held_images).collect();
+            .chain(&s.cloud.incoming_held).chain(&s.policy.held_images).chain(dependency_held).collect();
         for binding in store.publication_bindings()? {
             let fetched: i64 = store.connection.query_row(
                 "SELECT count(*) FROM inbox WHERE binding=?1", [binding.id.0.as_slice()], |row| row.get(0))?;
@@ -139,7 +139,7 @@ impl Runtime {
         s.publication.next_preview = s.publication.next_preview.checked_add(1).ok_or(Error::InvalidData)?;
         let id = s.publication.next_preview;
         s.publication.resume = None;
-        let retained_work = with_tracking_access(|| Self::preview_retained_work_locked(&s))?;
+        let retained_work = with_tracking_access(|| Self::preview_retained_work_locked(&s, &Default::default()))?;
         s.publication.preview = Some((
             Preview {
                 id,
@@ -229,8 +229,8 @@ impl Runtime {
             Err(RuntimeError::Tracking(Error::ValidatedUnprovedLayout { .. })) => true,
             Err(error) => return Err(error),
         };
-        let (unsent_by_kind, counted_exact) = if layout_refused {
-            (self.known_unsent_lower_bounds()?, false)
+        let (unsent_by_kind, counted_exact, dependency_held) = if layout_refused {
+            (self.known_unsent_lower_bounds()?, false, Default::default())
         } else { self.resume_unsent_counts(&*snapshot, media)? };
         let unsent_counts_exact = counted_exact && !layout_refused;
         if self.inputs.files.identity(collection.path())? != file
@@ -287,7 +287,7 @@ impl Runtime {
             }
             Ok(())
         })?;
-        let retained_work = with_tracking_access(|| Self::preview_retained_work_locked(&s))?;
+        let retained_work = with_tracking_access(|| Self::preview_retained_work_locked(&s, &dependency_held))?;
         s.publication.preview = Some((
             Preview {
                 id,
@@ -492,7 +492,14 @@ impl Runtime {
                 return Err(PublicationError::AuthorityChanged.into());
             }
         } else if decision.publication.decision != meguri_engine::device_state::PublicationDecision::Pending {
-            return Err(PublicationError::NotOffered.into());
+            let lease = collection.reader(ReaderRole::Cloud)?;
+            let snapshot = lease.snapshot()?;
+            let account = self.publication_account()?;
+            match self.preview_native_layouts(&*snapshot, file, &account, &decision) {
+                Err(RuntimeError::Tracking(Error::ValidatedUnprovedLayout { .. })) => {},
+                Err(error) => return Err(error),
+                Ok(()) => return Err(PublicationError::NotOffered.into()),
+            }
         }
         {
             let s = self.state();
@@ -965,7 +972,7 @@ impl Runtime {
         }
         match work {
             LocalWork::Bind if op.step == PublishStep::Confirmed && decision == op.fence_before => {
-                self.settle_before_transition(collection, Duration::from_secs(30))?;
+                let checked = self.check_replacement_work(collection)?;
                 let id = BindingId(self.publication_random_id()?);
                 let now = self.adapter_now()?;
                 // Providers can suspend, reopen or replace the collection. Read
@@ -982,6 +989,7 @@ impl Runtime {
                     let durable_file = DurableFileIdentity::from_evidence(evidence.cloud_file, file)?;
                     let mut s = self.state();
                     if s.incarnation != incarnation
+                        || s.incoming.running || collection.last_seq() != checked.seq || file != checked.file
                         || !collection.is_current()
                         || evidence.generation != collection.generation()
                     {
@@ -991,7 +999,7 @@ impl Runtime {
                         s.store
                             .as_mut()
                             .ok_or(Error::Database)?
-                            .bind_publication(&mut op, id, now, durable_file)
+                            .bind_publication(&mut op, id, now, durable_file, Some(&checked))
                     })?;
                 }
                 self.bind(collection)?;
@@ -1491,16 +1499,37 @@ impl Runtime {
         }
         Ok(())
     }
+    pub fn publication_cancellable(&self, id: [u8; 16]) -> Result<bool, RuntimeError> {
+        let s = self.state();
+        with_tracking_access(|| -> Result<bool, RuntimeError> {
+            let store = s.store.as_ref().ok_or(Error::Database)?;
+            Ok(store.publication_op()?.is_some_and(|op| op.id == id)
+                && !s.incoming.running
+                && !s.publication.running.as_ref().is_some_and(|r| r.kind == OwnKind::SaveActive))
+        })
+    }
+
+    pub fn publication_conflict_cancellable(&self, id: [u8; 16]) -> Result<bool, RuntimeError> {
+        let s = self.state();
+        with_tracking_access(|| -> Result<bool, RuntimeError> {
+            let store = s.store.as_ref().ok_or(Error::Database)?;
+            let Some(op) = store.publication_op()?.filter(|op| op.id == id) else { return Ok(false); };
+            Ok(op.step == PublishStep::Complete && op.switch_sent
+                && op.switch_conflict.as_ref().is_some_and(|tag| !tag.0.is_empty())
+                && s.publication.running.is_none() && !s.incoming.running)
+        })
+    }
+
     pub fn cancel_publication(&self, id: [u8; 16], collection: &Collection) -> Result<(), RuntimeError> {
         let Some(mut op) = self.publication_op()?.filter(|o| o.id == id) else {
             return Err(PublicationError::NotOffered.into());
         };
         {
             let mut s = self.state();
-            if s.publication
-                .running
-                .as_ref()
-                .is_some_and(|r| r.kind == OwnKind::SaveActive)
+            if with_tracking_access(|| s.store.as_ref().ok_or(Error::Database)?.publication_op())?.as_ref() != Some(&op) {
+                return Err(PublicationError::AuthorityChanged.into());
+            }
+            if s.incoming.running || s.publication.running.as_ref().is_some_and(|r| r.kind == OwnKind::SaveActive)
             {
                 return Err(PublicationError::Busy.into());
             }
@@ -1551,6 +1580,13 @@ impl Runtime {
         }
         self.bind(collection)?;
         self.refresh_identity()?;
+        if restored == BindingState::Active {
+            match self.reconcile_binding(collection, &self.media_service(collection)?, Duration::from_secs(30)) {
+                Err(RuntimeError::Tracking(Error::ValidatedUnprovedLayout { .. })) => {},
+                Err(error) => return Err(error),
+                Ok(_) => {},
+            }
+        }
         Ok(())
     }
 }

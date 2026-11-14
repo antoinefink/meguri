@@ -153,3 +153,24 @@ comments must be rewritten with the guard unchanged.
 Round 8 starts at `f4b3160d` from the complete retained R7 export and the
 review report. This is the final authorized round. No Unit, P24, gate or
 release acceptance is claimed.
+
+## Round 8 verification checkpoint
+
+Author `cleanroom/20261114T165045Z-39765` exports the complete repair.
+Publication follow-up `171329Z-53043` changes one full comment and two test
+names only. The source bodies and assertions are unchanged.
+`private/20261114T171740Z-56825` passes; the earlier rejected scan is kept.
+
+- `core-test/20261114T171106Z-51872`: six pass, five fail. Adoption completes;
+  failed-switch cancellation, competing-root cancellation, large-note memory
+  and large field/template memory controls pass. Outgoing batches, deletion
+  lifecycle and the expanded publication bootstrap still fail.
+- `core-test/20261114T171235Z-52687`: both FFI switch tests pass. An outstanding
+  original attempt stays Busy; a settled failed attempt permits cancellation.
+- `core-test/20261114T171703Z-56456`: short part-page projection and raw
+  identity traversal passes.
+
+Independent review `cleanroom/20261114T171100Z-51496` is running. Native
+integration, the full cleanup-scope matrix, required wider checks and the
+peer round trip remain open. Both authorized rounds are used. This saves
+partial work and failure evidence; it does not accept the unit or any gate.

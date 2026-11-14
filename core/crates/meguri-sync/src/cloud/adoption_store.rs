@@ -1,7 +1,7 @@
 //! Scoped V14 transitions on the production tracking connection.
 use super::{
     adoption::*,
-    publication_store::remove_work,
+    publication_store::{remove_work, WorkRemoval, ReplacementCheck},
     runtime::StoredRuntimeState,
     store::{decode, encode},
     *,
@@ -88,6 +88,7 @@ impl TrackingStore {
         media_key: RecordKey,
         crt: i64,
         entities: impl Iterator<Item = Result<workflow::EntityFacts, Error>>,
+        checked: Option<&ReplacementCheck>,
     ) -> Result<(), Error> {
         if op.step != AdoptStep::Staged || self.adoption_op()?.as_ref() != Some(&*op) {
             return Err(Error::InvalidData);
@@ -102,6 +103,9 @@ impl TrackingStore {
             })
             .transpose()?;
         let tx = self.connection.transaction()?;
+        if let Some(checked) = checked {
+            checked.validate(&tx, &self.scope, &adoption::RecoveryKind::Adopt(Box::new(op.clone())))?;
+        } else if op.binding_before.is_some() { return Err(Error::RecoveryRefused); }
         if let Some(mut before) = before
             && before.facts.state == BindingState::Active
         {
@@ -274,10 +278,11 @@ impl TrackingStore {
             }
             super::runtime_store::put_binding(&tx, op.binding_after, state.as_ref().ok_or(Error::InvalidData)?)?;
             if let Some(before) = before {
-                remove_work(&tx, before.id)?;
+                remove_work(&tx, before.id, WorkRemoval::Adopted(&self.scope, op,
+                    activation.ok_or(Error::RecoveryRefused)?, file.ok_or(Error::RecoveryRefused)?))?;
             }
         } else if op.step == AdoptStep::Ready {
-            remove_work(&tx, op.binding_after)?;
+            remove_work(&tx, op.binding_after, WorkRemoval::Settled)?;
             if let Some(mut before) = before {
                 before.facts.state = op.binding_before.as_ref().ok_or(Error::InvalidData)?.state;
                 tx.execute(

@@ -107,13 +107,142 @@ pub(super) const WORK_TABLES: &[&str] = &[
     "cloud_publication_zones",
 ];
 
-/// Remove work only from an ordinary binding already checked in this scope.
-pub(super) fn remove_work(tx: &Transaction<'_>, b: BindingId) -> Result<(), Error> {
-    // The recovery workflow must settle these first. Never erase their inbox,
-    // merge base or owner as a substitute for actual collection/WAL replay.
-    if !super::incoming_store::intents(tx, b)?.is_empty() {
-        return Err(Error::RecoveryRefused);
+/// A current-file check, consumed only by the matching ready/bound commit.
+/// Existing durable operation steps certify it on restart; it is never stored.
+pub(super) struct ReplacementCheck {
+    pub op: adoption::RecoveryKind,
+    pub owner: Option<Binding>,
+    pub intents: Vec<incoming::ApplyIntent>,
+    pub seq: meguri_engine::Seq,
+    pub file: runtime::NativeFileIdentity,
+}
+impl ReplacementCheck {
+    pub(super) fn validate(&self, tx: &Transaction<'_>, scope: &BuildScope, op: &adoption::RecoveryKind) -> Result<(), Error> {
+        if &self.op != op { return Err(Error::RecoveryRefused); }
+        let (table, account, before, file) = match op {
+            adoption::RecoveryKind::Publish(p) if p.step == PublishStep::Confirmed =>
+                ("cloud_publication_ops", &p.account, &p.binding_before, Some(p.confirmed_file)),
+            adoption::RecoveryKind::Adopt(p) if p.step == adoption::AdoptStep::Staged =>
+                ("cloud_adoption_ops", &p.account, &p.binding_before, p.file_before),
+            _ => return Err(Error::RecoveryRefused),
+        };
+        let text: String = tx.query_row(&format!("SELECT content FROM {table} WHERE container=?1 AND environment=?2"),
+            params![scope.container.as_str(), scope.environment.code()], |r| r.get(0))?;
+        let same = match op {
+            adoption::RecoveryKind::Publish(p) => decode::<PublishOp>(&text)? == **p,
+            adoption::RecoveryKind::Adopt(p) => decode::<adoption::AdoptOp>(&text)? == **p,
+        };
+        if !same || file != Some(self.file) || self.owner.as_ref().map(|b| b.id) != before.as_ref().map(|b| b.id) {
+            return Err(Error::RecoveryRefused);
+        }
+        if let Some(owner) = &self.owner {
+            let facts: String = tx.query_row("SELECT facts FROM bindings WHERE id=?1 AND container=?2 AND environment=?3 AND salvage=0",
+                params![owner.id.0.as_slice(), scope.container.as_str(), scope.environment.code()], |r| r.get(0))?;
+            let state: String = tx.query_row("SELECT content FROM cloud_runtime_bindings WHERE binding=?1", [owner.id.0.as_slice()], |r| r.get(0))?;
+            if owner.scope != *scope || owner.facts.account != *account || decode::<BindingFacts>(&facts)? != owner.facts
+                || (!self.intents.is_empty() && decode::<StoredRuntimeState>(&state)?.file != Some(self.file))
+                || super::incoming_store::intents(tx, owner.id)? != self.intents
+            { return Err(Error::RecoveryRefused); }
+            for i in &self.intents {
+                if i.binding != owner.id || i.native_file != self.file || i.media.is_some() || super::rekey_store::get(tx, i.id)?.is_some() {
+                    return Err(Error::RecoveryRefused);
+                }
+            }
+        } else if !self.intents.is_empty() { return Err(Error::RecoveryRefused); }
+        Ok(())
     }
+}
+
+/// Only original success evidence can release residual work. Cancel and expiry
+/// use Settled and therefore cannot exercise the V13.6 exception.
+pub(super) enum WorkRemoval<'a> {
+    Settled,
+    Published(&'a BuildScope, &'a PublishOp, &'a ControlRecord),
+    Adopted(&'a BuildScope, &'a adoption::AdoptOp, &'a meguri_engine::device_state::CloudAdoptActivation, runtime::NativeFileIdentity),
+}
+
+fn require_replacement_binding(
+    tx: &Transaction<'_>, scope: &BuildScope, id: BindingId, account: &OpaqueBytes,
+    publication: meguri_engine::device_state::PublicationId, epoch: EpochId, file: runtime::NativeFileIdentity,
+) -> Result<(), Error> {
+    let facts: String = tx.query_row("SELECT facts FROM bindings WHERE id=?1 AND container=?2 AND environment=?3 AND salvage=0",
+        params![id.0.as_slice(), scope.container.as_str(), scope.environment.code()], |r| r.get(0))?;
+    let facts: BindingFacts = decode(&facts)?;
+    let state: String = tx.query_row("SELECT content FROM cloud_runtime_bindings WHERE binding=?1", [id.0.as_slice()], |r| r.get(0))?;
+    let state: StoredRuntimeState = decode(&state)?;
+    if facts.account != *account || facts.publication != publication || facts.epoch != epoch
+        || facts.state != BindingState::Active || state.file != Some(file)
+    { return Err(Error::RecoveryRefused); }
+    // Only actual reopened/current-open native evidence can populate the
+    // durable identity paired with the activation file, including at restart.
+    state.durable_file.ok_or(Error::RecoveryRefused)?.paired(file)?;
+    Ok(())
+}
+
+pub(super) fn remove_work(tx: &Transaction<'_>, b: BindingId, proof: WorkRemoval<'_>) -> Result<(), Error> {
+    let intents = super::incoming_store::intents(tx, b)?;
+    let (scope, account, old_file, publication) = match proof {
+        WorkRemoval::Settled => {
+            if !intents.is_empty() { return Err(Error::RecoveryRefused); }
+            (None, None, None, None)
+        }
+        WorkRemoval::Published(scope, op, saved) => {
+            let stored: String = tx.query_row("SELECT content FROM cloud_publication_ops WHERE container=?1 AND environment=?2",
+                params![scope.container.as_str(), scope.environment.code()], |r| r.get(0))?;
+            let active = saved.encrypted.as_deref().and_then(|e| super::control_codec::Active::decode(e).ok());
+            if decode::<PublishOp>(&stored)? != *op || op.step != PublishStep::Complete || !op.switch_sent
+                || op.binding_before.as_ref().map(|p| p.id) != Some(b) || saved.system_fields.0.is_empty()
+                || op.active_attempt.is_none()
+                || !matches!(active, Some(ref a) if a.epoch == op.epoch.0)
+            { return Err(Error::RecoveryRefused); }
+            let id = op.binding_after.ok_or(Error::RecoveryRefused)?;
+            require_replacement_binding(tx, scope, id, &op.account, op.confirmed_publication, op.epoch, op.confirmed_file)?;
+            let durable: String = tx.query_row("SELECT content FROM cloud_adapter_state WHERE binding=?1", [id.0.as_slice()], |r| r.get(0))?;
+            let durable: super::adapter::Durable = decode(&durable)?;
+            if durable.active.as_ref().is_none_or(|a| a.envelope.as_slice() != saved.encrypted.as_deref().unwrap_or_default()
+                || a.system_fields != saved.system_fields.0) { return Err(Error::RecoveryRefused); }
+            (Some(scope), Some(&op.account), Some(op.confirmed_file), Some(op.confirmed_publication))
+        }
+        WorkRemoval::Adopted(scope, op, activation, file) => {
+            let stored: String = tx.query_row("SELECT content FROM cloud_adoption_ops WHERE container=?1 AND environment=?2",
+                params![scope.container.as_str(), scope.environment.code()], |r| r.get(0))?;
+            let before = op.before.as_ref().ok_or(Error::RecoveryRefused)?;
+            if !intents.is_empty() && !matches!(op.active.encrypted.as_deref()
+                .and_then(|e| super::control_codec::Active::decode(e).ok()), Some(a) if a.epoch == op.epoch.0)
+            { return Err(Error::RecoveryRefused); }
+            if decode::<adoption::AdoptOp>(&stored)? != *op || op.step != adoption::AdoptStep::Ready
+                || op.binding_before.as_ref().map(|p| p.id) != Some(b)
+                || !activation.matches(meguri_engine::device_state::PublicationId::from_bytes(op.id), &before.publication, &op.candidate)
+                || activation.native_file() != (file.device, file.inode)
+            { return Err(Error::RecoveryRefused); }
+            require_replacement_binding(tx, scope, op.binding_after, &op.account, op.candidate.identity, op.epoch, file)?;
+            let (controls, activated): (String, Option<String>) = tx.query_row(
+                "SELECT controls,activated_file FROM cloud_adoption_authority WHERE binding=?1", [op.binding_after.0.as_slice()],
+                |r| Ok((r.get(0)?, r.get(1)?)))?;
+            if decode::<adoption::AdoptOp>(&controls)? != *op
+                || activated.map(|s| decode::<runtime::NativeFileIdentity>(&s)).transpose()? != Some(file)
+            { return Err(Error::RecoveryRefused); }
+            (Some(scope), Some(&op.account), op.file_before, Some(before.publication.identity))
+        }
+    };
+    if let (Some(scope), Some(account), Some(file), Some(publication)) = (scope, account, old_file, publication) {
+        let facts: String = tx.query_row("SELECT facts FROM bindings WHERE id=?1 AND container=?2 AND environment=?3 AND salvage=0",
+            params![b.0.as_slice(), scope.container.as_str(), scope.environment.code()], |r| r.get(0))?;
+        let facts: BindingFacts = decode(&facts)?;
+        let state: String = tx.query_row("SELECT content FROM cloud_runtime_bindings WHERE binding=?1", [b.0.as_slice()], |r| r.get(0))?;
+        if facts.account != *account || (!intents.is_empty() &&
+            (facts.publication != publication || decode::<StoredRuntimeState>(&state)?.file != Some(file))) {
+            return Err(Error::RecoveryRefused);
+        }
+        for i in &intents {
+            if i.binding != b || i.native_file != file || i.media.is_some() || super::rekey_store::get(tx, i.id)?.is_some() {
+                return Err(Error::RecoveryRefused);
+            }
+        }
+    } else if !intents.is_empty() { return Err(Error::RecoveryRefused); }
+    // Intents own references until this final commit. Bodies are deleted with
+    // their binding's owners; external staged-file cleanup stays after commit.
+    tx.execute("DELETE FROM cloud_apply_intents WHERE binding=?1", [b.0.as_slice()])?;
     for table in WORK_TABLES {
         let exists: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name=?1)",
@@ -337,6 +466,7 @@ impl TrackingStore {
         id: BindingId,
         now: i64,
         durable_file: runtime::DurableFileIdentity,
+        checked: Option<&ReplacementCheck>,
     ) -> Result<Binding, Error> {
         durable_file.paired(op.confirmed_file)?;
         if op.step != PublishStep::Confirmed
@@ -370,6 +500,9 @@ impl TrackingStore {
             },
         };
         let tx = self.connection.transaction()?;
+        if let Some(checked) = checked {
+            checked.validate(&tx, &self.scope, &adoption::RecoveryKind::Publish(Box::new(op.clone())))?;
+        } else if op.binding_before.is_some() { return Err(Error::RecoveryRefused); }
         if let Some(mut before) = before
             && before.facts.state == BindingState::Active
         {
@@ -525,7 +658,7 @@ impl TrackingStore {
             params![id.0.as_slice(), now],
         )?;
         if let Some(before) = &op.binding_before {
-            remove_work(&tx, before.id)?;
+            remove_work(&tx, before.id, WorkRemoval::Published(&self.scope, op, saved))?;
         }
         remove_op(&tx, &self.scope, op.id)?;
         tx.commit()?;
@@ -542,7 +675,7 @@ impl TrackingStore {
         }
         let tx = self.connection.transaction()?;
         if let Some(id) = op.binding_after {
-            remove_work(&tx, id)?;
+            remove_work(&tx, id, WorkRemoval::Settled)?;
         }
         if let Some(mut before) = before {
             before.facts.state = returned_state;
