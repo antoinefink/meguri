@@ -285,14 +285,35 @@ extension ReviewCollectionStartupTests {
                 #expect(results == 0 && configureResult == nil && acknowledgements == 0 && configureACKs == 0)
                 let before = try await backend.workflow.durableSnapshot()
                 let updates = try await backend.workflow.emittedUpdateIDs()
+                let observations = try await backend.workflow.observations()
                 let pending = await sdk.pendingRecordZoneChanges(), additions = await sdk.pendingAdditionUpdates
                 let batches = await sdk.batchRequests, fetches = await sdk.manualFetchGroups
                 let receipts = await wire.receipts.count
                 let media = try await serviceMediaProof(generation: generation)
+                let failureRevision = app.sync.failureRevision
                 await preparedGate.release()
                 try #require(try await serviceAppSignal(returnedGate.entered, stage: "media failure retained"))
                 let result = try #require(observed)
-                #expect(results == 1 && acknowledgements == 0 && !result.deferred && result.outputs.isEmpty)
+                #expect(results == 1 && acknowledgements == 0 && !result.deferred)
+                // The failure's required cloud refresh emits only pending bookkeeping.
+                #expect(result.outputs.count == 1)
+                var changesCommands = 0, statusCommands = 0
+                for output in result.outputs {
+                    switch output {
+                    case .commands(let commands):
+                        for command in commands {
+                            switch command.action {
+                            case .updatePending(.changes): changesCommands += 1
+                            case .statusChanged: statusCommands += 1
+                            default: Issue.record("Construction cleanup refresh emitted an unexpected action")
+                            }
+                        }
+                    default: Issue.record("Construction cleanup refresh returned a non-commands output")
+                    }
+                }
+                #expect(changesCommands == 1 && statusCommands <= 1)
+                // This acknowledges the refresh prefix, not the held ResumeMedia.
+                #expect(result.acknowledgedOutputCount == result.outputs.count)
                 #expect((result.error as? BridgeError) == .cloudConnection(.authorityChanged))
                 #expect(result.originalGuardRefusal == nil && result.nativeCancellation == nil && !result.mediaCancellation)
                 let originalCalls = calls.withLock { $0 }
@@ -311,7 +332,27 @@ extension ReviewCollectionStartupTests {
                 #expect(await sdk.manualFetchGroups == fetches)
                 #expect(await wire.receipts.count == receipts)
                 #expect(await app.factory.engines.count == engineCount)
-                #expect(try await backend.workflow.emittedUpdateIDs() == updates)
+                let returnedUpdates = try await backend.workflow.emittedUpdateIDs()
+                #expect(Array(returnedUpdates.prefix(updates.count)) == updates)
+                let newUpdates = Array(returnedUpdates.dropFirst(updates.count))
+                #expect(newUpdates.count == 1)
+                let newUpdate = try #require(newUpdates.first)
+                #expect(!updates.contains(newUpdate))
+                let returnedObservations = try await backend.workflow.observations()
+                #expect(Array(returnedObservations.prefix(observations.count)) == observations)
+                let newObservations = Array(returnedObservations.dropFirst(observations.count))
+                let emissions = newObservations.filter {
+                    if case .corePendingEmitted = $0 { return true }
+                    return false
+                }
+                #expect(emissions == [.corePendingEmitted(kind: .changes, actionID: newUpdate)])
+                for observation in newObservations {
+                    switch observation {
+                    case .pendingAdded, .savedPendingRemoved, .batchBuilt, .handlerReturned:
+                        Issue.record("Construction cleanup refresh changed pending delivery or batch state")
+                    default: break
+                    }
+                }
                 let after = try await backend.workflow.durableSnapshot()
                 #expect(after.entities == before.entities && after.inboxNames == before.inboxNames && after.trackingContent == before.trackingContent)
                 let afterMedia = try await serviceMediaProof(generation: generation)
@@ -324,6 +365,10 @@ extension ReviewCollectionStartupTests {
                 }
                 #expect(acknowledgements == 1 && configureACKs == 1 && inspected == 2)
                 #expect(backend.expectedCommandFailures.isEmpty)
+                #expect(app.sync.operationFailed && app.sync.failureRevision > failureRevision)
+                let diagnostic = try #require(backend.firstFailureDiagnostic)
+                #expect(diagnostic.hasPrefix("execute.error.error: connection.authorityChanged action=resumeMedia "))
+                #expect(diagnostic.contains(" task=active ") && diagnostic.contains(" cancellation=none"))
                 #expect(await app.factory.engines.count == engineCount)
                 #expect(app.owner.state == .ready && app.owner.generation == generation && !backend.closed)
                 #expect(try app.backend === backend)

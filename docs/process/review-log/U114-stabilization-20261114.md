@@ -169,3 +169,23 @@ This fixture correction is covered by the extension; runtime code stays fixed.
 
 This is WIP. Required test failures, the historical failure and batch gate remain
 recorded. There is no Unit or release acceptance.
+
+
+### Focused verification outcome
+
+Fixture author `cleanroom/20261114T134959Z-26679` changes only the new cleanup
+case. Independent check `135246Z-28800` finds no P0/P1/P2 in that delta.
+The exact refresh, ID, observation, error and ACK checks pass with data unchanged.
+
+| Receipt | Result |
+| --- | --- |
+| swift-test/20261114T135323Z-29229 | All four focused native cases pass |
+| swift-test/20261114T135455Z-32437 | 159 tests pass, two suites, 340.165 seconds |
+| static-checks/20261114T140323Z-39008 | Pass |
+| similarity/20261114T140321Z-38745 | Pass, one changed file, zero flags |
+| private/20261114T135327Z-30350 | Fixture passes |
+
+The wider native run includes the adopted-phone reopen regression. Its old
+failed receipt remains unexplained; this pass does not reconstruct its cause.
+The FFI failures recorded above, P24 work and required batch gate remain open.
+No Unit trailer or release acceptance is added.
