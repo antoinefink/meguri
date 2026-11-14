@@ -86,10 +86,12 @@ public final class ReviewPages: ReviewCardSurface {
     init(pair: CardPagePair) {
         self.pair = pair
         pair.onCommitted = { [weak self] update, _ in
-            self?.hasPresented = true
-            self?.committedMediaUpdate = update
-            self?.establishInitialFocus()
-            self?.onMediaReady?()
+            guard let self, let pair = self.pair, pair.current.update == update else { return }
+            self.observeHost(pair.current, update: update, purpose: .preload)
+            self.hasPresented = true
+            self.committedMediaUpdate = update
+            self.establishInitialFocus()
+            self.onMediaReady?()
         }
         pair.behaviorPresenter = presenter
         pair.configureLinks(preferExternalBrowser: false, approvals: CardSchemeApprovals())
@@ -102,7 +104,29 @@ public final class ReviewPages: ReviewCardSurface {
             editing = domEditable || composing
         }
     }
-    public func load() async throws { try await pair?.load() }
+    public func load() async throws {
+        guard !closed, let pair else { throw CancellationError() }
+        try await pair.load()
+        try Task.checkCancellation()
+        guard !closed else { throw CancellationError() }
+        do { try await pair.installHostScript(CardRuntime.reviewHostScript) }
+        catch is CardHostReporting.InstallationFailure {
+            // Reporting is optional; the pair has already disabled admission.
+        }
+        try Task.checkCancellation()
+        guard !closed else { throw CancellationError() }
+    }
+    /// Issuance is synchronous and never waits for a result. Native retains
+    /// only matching slot facts and owns cancellation/deadline/revision guards.
+    private func observeHost(_ page: CardPage, update: CardUpdate, purpose: CardHostResourcePurpose) {
+        guard !closed, page.update == update,
+              let context = page.hostReports.context, context.update == update else { return }
+        page.hostReports.probe(.background) { _, _ in }
+        // A cancellation callback or geometry change must not give the second
+        // request a newer context than the observation point captured above.
+        guard page.hostReports.context == context else { return }
+        page.hostReports.probe(.resources, purpose: purpose) { _, _ in }
+    }
     /// Gives the first presented card its initial native focus.
     public func establishInitialFocus() {
         guard let pages = pair else { return }
@@ -149,7 +173,10 @@ public final class ReviewPages: ReviewCardSurface {
         guard let rendered = cards[item.renderKey] else { throw BridgeError.internal("Missing rendered card") }
         let update: CardUpdate
         if let prepared, prepared.0 == item.renderKey { update = prepared.1 }
-        else { update = try await pair.prepare(payload(rendered, item: item)) }
+        else {
+            update = try await pair.prepare(payload(rendered, item: item))
+            observeHost(pair.idle, update: update, purpose: .warmup)
+        }
         try Task.checkCancellation()
         guard !closed else { throw CancellationError() }
         prepared = nil; editing = false; domEditable = false; composing = false
@@ -168,12 +195,16 @@ public final class ReviewPages: ReviewCardSurface {
         let update = try await pair.prepare(payload(rendered, item: item))
         // An arrival can be delivered while the idle page is still settling.
         // Do not publish that older preparation after its invalidation.
-        guard revision == mediaRevision else { return }
+        guard !closed, !Task.isCancelled, revision == mediaRevision else { return }
+        observeHost(pair.idle, update: update, purpose: .preload)
         prepared = (item.renderKey, update)
     }
     public func reveal(inputTime: TimeInterval) async throws {
         _ = try await pair?.showAnswer(inputTime: inputTime)
         committedMediaUpdate = pair?.current.update
+        if let pair, let update = pair.current.update {
+            observeHost(pair.current, update: update, purpose: .preload)
+        }
         if !inputActive { pair?.pauseAudio() }
     }
     /// False keeps arrivals pending until the native presentation is committed.
@@ -190,7 +221,11 @@ public final class ReviewPages: ReviewCardSurface {
         return true
     }
     public func suspend() async { pair?.ownsKeyboardFocus = false; await pair?.suspend() }
-    public func resume() async { await pair?.resume() }
+    public func resume() async {
+        await pair?.resume()
+        guard !Task.isCancelled, let pair, let update = pair.current.update else { return }
+        observeHost(pair.current, update: update, purpose: .warmup)
+    }
     private func updateVisibleMedia() {
         visibleMediaNames = Set(currentMediaRefs + priorityHead.flatMap { cards[$0]?.mediaRefs ?? [] }).sorted()
     }

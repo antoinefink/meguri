@@ -136,6 +136,10 @@ public nonisolated enum CardRuntime {
     /// world.
     public static var interactionScript: String { Resources.text("interaction.js") }
 
+    /// Review-only producer (H10). Execute through the owned pair API;
+    /// never serve it in the page world or install it on the shared controller.
+    public static var reviewHostScript: String { Resources.text("review-host.js") }
+
     private static func attributeEscaped(_ text: String) -> String {
         text.replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "\"", with: "&quot;")

@@ -809,3 +809,426 @@ extension WebKitSuites.CardPagePairTests {
         }
     }
 }
+
+// U176 producer continuation, review R3. These exercise the bundled producer;
+// the earlier synthetic receiver cases continue to test transport separately.
+extension WebKitSuites.CardPagePairTests {
+    private func productionProbe(_ page: CardPage, _ kind: CardHostProbeKind,
+                                 purpose: CardHostResourcePurpose? = nil, timeoutMs: Int? = nil) async throws -> CardHostProbeOutcome {
+        var outcomes: [CardHostProbeOutcome] = []
+        let context = page.hostReports.context
+        page.hostReports.probe(kind, purpose: purpose, timeoutMs: timeoutMs) { received, outcome in
+            #expect(received == context)
+            outcomes.append(outcome)
+        }
+        try await hostWait { outcomes.count == 1 }
+        return try #require(outcomes.first)
+    }
+
+    private func recordProductionReports(_ page: CardPage) async throws {
+        try await page.run("""
+            window.producerReports = [];
+            window.producerHandler = webkit.messageHandlers.meguriReviewHost;
+            const handler = producerHandler, post = handler.postMessage;
+            handler.postMessage = function(message) {
+              producerReports.push(message);
+              return post.call(handler, message);
+            };
+            """, world: CardPage.world)
+    }
+
+    private nonisolated static let bodyColorSamples: [(String, [Double])] = [
+        ("rgb(24 128 240)", [24.0 / 255, 128.0 / 255, 240.0 / 255, 1.0]),
+        ("transparent", [0.0, 0.0, 0.0, 0.0]),
+        ("color(srgb 0.2 0.4 0.6 / 0.5)", [0.2, 0.4, 0.6, 0.5]),
+        ("oklch(62.7955% 0.257683 29.2339)", [1.0, 0.0, 0.0, 1.0]),
+        ("color(display-p3 1 0 0)", [1.0, 0.0, 0.0, 1.0]),
+    ]
+    @Test(arguments: bodyColorSamples)
+    func productionHostObservesComputedBodySRGB(color: String, expected: [Double]) async throws {
+        let (pair, _, _, window) = try await hostPair()
+        defer { pair.close(); window.close() }
+        try await pair.installHostScript(CardRuntime.reviewHostScript)
+        let page = pair.idle
+        try await page.run("document.body.style.backgroundColor = color;", arguments: ["color": color])
+        let outcome = try await productionProbe(page, .background)
+        guard case let .observed(.background(red, green, blue, alpha)) = outcome else {
+            Issue.record("Missing actual computed BODY background: \(outcome)"); return
+        }
+        for (actual, wanted) in zip([red, green, blue, alpha], expected) {
+            // Allow two byte steps for WebKit's pixel quantization and alpha
+            // conversion when comparing the returned sRGB components.
+            #expect(abs(actual - wanted) <= 2.0 / 255)
+        }
+        #expect(page.hostReports.slotBackground != nil)
+        #expect(!CardRuntime.assetPaths.contains("review-host.js"))
+        #expect(CardRuntime.asset(at: "review-host.js") == nil)
+        #expect(try await page.string("return typeof meguriReviewHost;") == "undefined")
+    }
+
+    @Test func productionHostReadyResourcesAndBothPurposesUseRealContent() async throws {
+        let fixture = MediaFixture()
+        fixture.add("/host.png", TestMedia.png(), "image/png")
+        fixture.add("/host.ttf", TestMedia.font(), "font/ttf")
+        fixture.add("/import.css", text: "#qa { font-family: HostFixture; }", "text/css")
+        fixture.add("/host.css", text: "@import url('import.css');", "text/css")
+        let pair = try await make(fixture)
+        let window = SpikeWindow(pair.container)
+        defer { pair.close(); window.close() }
+        try await pair.load()
+        try await pair.installHostScript(CardRuntime.reviewHostScript)
+        let update = try await pair.prepare(CardPayload(cardID: -9_007_199_254_740_991, question: """
+            <style>@font-face { font-family: HostFixture; src: url('host.ttf'); }</style>
+            <link rel=stylesheet href=host.css><img src=host.png><p>Local resources</p>
+            <script>
+              // Page-world replacements must not affect isolated observations.
+              window.getComputedStyle = function(){ throw new Error('page replacement'); };
+              HTMLImageElement.prototype.decode = function(){ return Promise.reject('page replacement'); };
+            </script>
+            """, answer: "answer"))
+        let page = pair.idle
+        for purpose: CardHostResourcePurpose in [.warmup, .preload] {
+            #expect(try await productionProbe(page, .resources, purpose: purpose) ==
+                .observed(.resources(purpose: purpose, state: .ready, imagesPending: 0, fontsPending: 0, stylesPending: 0)))
+        }
+        #expect(page.hostReports.context?.update == update)
+        #expect(page.hostReports.context?.visibility == .preparing)
+        #expect(try await page.string("return String(document.querySelector('img').naturalWidth);") == "4")
+        #expect(try await page.string("return document.fonts.status;") == "loaded")
+    }
+
+    @Test func productionReceiverRejectsMalformedObsoleteAndDuplicateABI() async throws {
+        let (pair, _, _, window) = try await hostPair()
+        defer { pair.close(); window.close() }
+        try await pair.installHostScript(CardRuntime.reviewHostScript)
+        let page = pair.idle
+        let context = try #require(page.hostReports.context)
+        let result = try await page.string("""
+            const receive = meguriReviewHost.receive;
+            const revision = currentRevision;
+            const context = {op:'context',card:7,generation:1,side:'question',viewRevision:revision,
+              visibility:'preparing',bounds:{width:400,height:600},pageZoom:1};
+            const probe = {op:'probe',kind:'resources',request:50,viewRevision:revision,timeoutMs:100,purpose:'warmup'};
+            const invalid = [null, [], true, {op:'unknown'}, context,
+              {op:'clear',viewRevision:revision}, {op:'clear',viewRevision:revision-1},
+              {...probe,extra:true}, {...probe,timeoutMs:true}, {...probe,timeoutMs:0},
+              {...probe,timeoutMs:2001}, {...probe,timeoutMs:1.5}, {...probe,kind:'input'},
+              {...probe,purpose:'answer'}, {...probe,viewRevision:revision-1},
+              {...probe,request:0}, {...probe,request:9007199254740992},
+              {...probe,kind:'background'}, {...probe,purpose:undefined}];
+            if (!invalid.every(message => receive(message) === false)) return 'invalid accepted';
+            if (!receive(probe) || receive(probe)) return 'duplicate accepted';
+            if (!receive({op:'clear',viewRevision:revision+1})) return 'clear rejected';
+            const next = {...context,viewRevision:revision+1};
+            const badContexts = [{...next,card:'7'}, {...next,card:9007199254740992},
+              {...next,generation:-1}, {...next,generation:true}, {...next,side:'front'},
+              {...next,visibility:'idle'}, {...next,bounds:{width:0,height:1}},
+              {...next,bounds:{width:1000001,height:1}}, {...next,bounds:{width:1,height:1,extra:0}},
+              {...next,pageZoom:0}, {...next,pageZoom:1001}, {...next,pageZoom:Infinity},
+              {...next,viewRevision:revision}, {...next,extra:1}];
+            if (!badContexts.every(message => receive(message) === false)) return 'context accepted';
+            if (receive({...probe,request:51,viewRevision:revision+1})) return 'missing context accepted';
+            if (!receive(next) || receive(next)) return 'duplicate context accepted';
+            return Object.keys(meguriReviewHost).join(',');
+            """, arguments: ["currentRevision": context.viewRevision], world: CardPage.world)
+        #expect(result == "receive")
+        try await pair.installHostScript(CardRuntime.reviewHostScript)
+        #expect(page.hostReports.context != nil)
+    }
+
+    @Test(arguments: ["image", "font", "style", "preload"])
+    func productionPendingResourcesTimeoutWithoutSyntheticReadiness(kind: String) async throws {
+        let fixture = MediaFixture()
+        let server = TestMediaServer()
+        server.holdsEverything = true
+        let configuration = CardWebConfiguration(store: .nonPersistent())
+        configuration.configuration.setURLSchemeHandler(server, forURLScheme: WebTestHarness.remoteScheme)
+        let pair = try await make(fixture, configuration: configuration)
+        let window = SpikeWindow(pair.container)
+        defer { pair.close(); window.close() }
+        try await pair.load()
+        for page in [pair.current, pair.idle] { try await recordProductionReports(page) }
+        try await pair.installHostScript(CardRuntime.reviewHostScript)
+        _ = try await pair.prepare(CardPayload(cardID: 7, question: "<p>Pending fixture</p>", answer: "a"))
+        let page = pair.idle
+        try await page.run("""
+            if (kind === 'image') {
+              const image = document.createElement('img'); image.id = 'pending';
+              image.src = 'meguri-remote://media/held.png'; document.body.append(image);
+            } else if (kind === 'style') {
+              const link = document.createElement('link'); link.id = 'pending';
+              link.rel = 'stylesheet'; link.href = 'meguri-remote://media/held.css'; document.head.append(link);
+            } else if (kind === 'preload') {
+              const stylesheetPreload = document.createElement('link');
+              stylesheetPreload.id = 'pending';
+              stylesheetPreload.rel = 'preload';
+              stylesheetPreload.as = 'style';
+              stylesheetPreload.href = 'meguri-remote://media/held-preload.css';
+              document.head.append(stylesheetPreload);
+            } else {
+              window.pendingFace = new FontFace('HostPending','url(meguri-remote://media/held.ttf)');
+              document.fonts.add(pendingFace); pendingFace.load().catch(function(){});
+            }
+            """, arguments: ["kind": kind])
+        var outcomes: [CardHostProbeOutcome] = []
+        page.hostReports.probe(.resources, purpose: .preload, timeoutMs: 300) { _, outcome in outcomes.append(outcome) }
+        try await page.run("""
+            const pending = document.getElementById('pending');
+            if (pending) { pending.dispatchEvent(new Event('load')); pending.dispatchEvent(new Event('error')); }
+            document.fonts.dispatchEvent(new Event('loadingdone'));
+            document.fonts.dispatchEvent(new Event('loadingerror'));
+            """)
+        #expect(outcomes.isEmpty)
+        try await hostWait { outcomes.count == 1 }
+        #expect(outcomes == [.timeout])
+        #expect(page.hostReports.slotResources == nil)
+        // Native time starts before script delivery. Also cross the script's
+        // own bounded deadline before making the DOM ready.
+        try await page.run("await new Promise(resolve => setTimeout(resolve, 300));", world: CardPage.world)
+        // Make the observed DOM ready after expiry: the old observer cannot
+        // send a late success or create native budgetExpired/paint evidence.
+        try await page.run("""
+            document.getElementById('pending')?.remove();
+            if (window.pendingFace) document.fonts.delete(pendingFace);
+            """)
+        #expect(try await page.string("return String(producerReports.length);", world: CardPage.world) == "0")
+        #expect(try await productionProbe(page, .resources, purpose: .warmup) ==
+            .observed(.resources(purpose: .warmup, state: .ready, imagesPending: 0, fontsPending: 0, stylesPending: 0)))
+        #expect(outcomes == [.timeout])
+    }
+
+    @Test func productionFailureReplacementClearAndReinstallReleaseOldWork() async throws {
+        let fixture = MediaFixture()
+        let server = TestMediaServer()
+        server.hold("/held.png")
+        let configuration = CardWebConfiguration(store: .nonPersistent())
+        configuration.configuration.setURLSchemeHandler(server, forURLScheme: WebTestHarness.remoteScheme)
+        let pair = try await make(fixture, configuration: configuration)
+        let window = SpikeWindow(pair.container)
+        defer { pair.close(); window.close() }
+        try await pair.load()
+        let page = pair.idle
+        try await recordProductionReports(page)
+        try await pair.installHostScript(CardRuntime.reviewHostScript)
+        _ = try await pair.prepare(CardPayload(cardID: 7, question: "fixture", answer: "answer"))
+        // Native WebKit properties establish failure even when the error
+        // happened before the resource request was installed.
+        try await page.run("""
+            const image = document.createElement('img'); image.id='broken';
+            image.src='missing-host-fixture.png'; document.body.append(image);
+            await new Promise(resolve => { if(image.complete) resolve(); else image.onerror=resolve; });
+            """)
+        #expect(try await productionProbe(page, .resources, purpose: .warmup) ==
+            .observed(.resources(purpose: .warmup, state: .failed, imagesPending: 0, fontsPending: 0, stylesPending: 0)))
+        try await page.run("""
+            document.getElementById('broken').remove();
+            window.failedFace=new FontFace('HostFailed','url(meguri-remote://media/missing.ttf)');
+            document.fonts.add(failedFace); await failedFace.load().catch(function(){});
+            """)
+        #expect(try await productionProbe(page, .resources, purpose: .warmup) ==
+            .observed(.resources(purpose: .warmup, state: .failed, imagesPending: 0, fontsPending: 0, stylesPending: 0)))
+        try await page.run("""
+            document.fonts.delete(failedFace);
+            const image=document.createElement('img'); image.id='pending';
+            image.src='meguri-remote://media/held.png'; document.body.append(image);
+            """)
+        var first: [CardHostProbeOutcome] = [], second: [CardHostProbeOutcome] = []
+        page.hostReports.probe(.resources, purpose: .warmup) { _, outcome in first.append(outcome) }
+        // Fixed WebKit round trips allow the actual request/observer to start;
+        // the controlled resource cannot finish during them.
+        try await page.run("await new Promise(resolve => setTimeout(resolve, 0));", world: CardPage.world)
+        page.hostReports.probe(.resources, purpose: .preload) { _, outcome in second.append(outcome) }
+        try await page.run("await new Promise(resolve => setTimeout(resolve, 0));", world: CardPage.world)
+        #expect(first == [.cancelled] && second.isEmpty)
+        page.hostReports.invalidate()
+        #expect(second == [.cancelled])
+        await page.hostReports.publish() // includes acknowledgement after clear
+        try await page.run("document.getElementById('pending').remove(); window.previousHost=meguriReviewHost;", world: CardPage.world)
+        #expect(try await page.string("return String(producerReports.length);", world: CardPage.world) == "2")
+        try await page.run("""
+            const image=document.createElement('img'); image.id='pending';
+            image.src='meguri-remote://media/held.png'; document.body.append(image);
+            """)
+        var reinstalled: [CardHostProbeOutcome] = []
+        page.hostReports.probe(.resources, purpose: .preload) { _, outcome in reinstalled.append(outcome) }
+        try await page.run("await new Promise(resolve => setTimeout(resolve, 0));", world: CardPage.world)
+        try await pair.installHostScript(CardRuntime.reviewHostScript)
+        #expect(reinstalled == [.cancelled])
+        #expect(try await page.string("return String(previousHost.receive({op:'clear',viewRevision:9007199254740991}));", world: CardPage.world) == "false")
+        try await page.run("document.getElementById('pending').remove();")
+        #expect(try await productionProbe(page, .resources, purpose: .preload) ==
+            .observed(.resources(purpose: .preload, state: .ready, imagesPending: 0, fontsPending: 0, stylesPending: 0)))
+        #expect(try await page.string("return String(producerReports.length);", world: CardPage.world) == "3")
+        let next = try await pair.prepare(CardPayload(cardID: 8, question: "next", answer: "answer"))
+        #expect(page.hostReports.slotResources == nil && page.hostReports.context?.update == next)
+        #expect(first == [.cancelled] && second == [.cancelled] && reinstalled == [.cancelled])
+    }
+
+    @Test func productionStylesheetReportsOnlyObservedFailure() async throws {
+        let fixture = MediaFixture()
+        let server = TestMediaServer()
+        server.delay("/missing.css", by: .milliseconds(400))
+        let configuration = CardWebConfiguration(store: .nonPersistent())
+        configuration.configuration.setURLSchemeHandler(server, forURLScheme: WebTestHarness.remoteScheme)
+        let pair = try await make(fixture, configuration: configuration)
+        let window = SpikeWindow(pair.container)
+        defer { pair.close(); window.close() }
+        try await pair.load()
+        try await pair.installHostScript(CardRuntime.reviewHostScript)
+        _ = try await pair.prepare(CardPayload(cardID: 7, question: "fixture", answer: "answer"))
+        let page = pair.idle
+        try await page.run("""
+            const link=document.createElement('link'); link.rel='stylesheet';
+            link.href='meguri-remote://media/missing.css'; document.head.append(link);
+            """)
+        #expect(try await productionProbe(page, .resources, purpose: .preload) ==
+            .observed(.resources(purpose: .preload, state: .failed, imagesPending: 0, fontsPending: 0, stylesPending: 1)))
+    }
+
+    @Test func productionLoadedOpaqueStylesheetRemainsUnavailable() async throws {
+        let fixture = MediaFixture()
+        let server = TestMediaServer()
+        server.add("/opaque.css", text: "body { --host-cssom-fixture: loaded; }", "text/css")
+        let configuration = CardWebConfiguration(store: .nonPersistent())
+        configuration.configuration.setURLSchemeHandler(server, forURLScheme: WebTestHarness.remoteScheme)
+        let pair = try await make(fixture, configuration: configuration)
+        let window = SpikeWindow(pair.container)
+        defer { pair.close(); window.close() }
+        try await pair.load()
+        let page = pair.idle
+        try await recordProductionReports(page)
+        try await pair.installHostScript(CardRuntime.reviewHostScript)
+        _ = try await pair.prepare(CardPayload(cardID: 7, question: "fixture", answer: "answer"))
+        try await page.run("""
+            const sheet = document.createElement('link');
+            sheet.id = 'opaque'; sheet.rel = 'stylesheet';
+            sheet.href = 'meguri-remote://media/opaque.css';
+            await new Promise((resolve, reject) => {
+              sheet.onload = resolve; sheet.onerror = reject; document.head.appendChild(sheet);
+            });
+            """)
+        #expect(try await page.string("return getComputedStyle(document.body).getPropertyValue('--host-cssom-fixture').trim();") == "loaded")
+        #expect(try await page.string("""
+            try { document.getElementById('opaque').sheet.cssRules; return 'readable'; }
+            catch (error) { return error.name; }
+            """) == "SecurityError")
+        #expect(try await productionProbe(page, .resources, purpose: .warmup, timeoutMs: 300) == .timeout)
+        #expect(page.hostReports.slotResources == nil)
+        #expect(try await page.string("return String(producerReports.length);", world: CardPage.world) == "0")
+    }
+
+    @Test(arguments: ["srcset", "media", "type", "replace"])
+    func productionPictureSelectionDecodesEveryNativeCurrentSource(change: String) async throws {
+        let fixture = MediaFixture()
+        fixture.add("/first.png", TestMedia.png(), "image/png")
+        fixture.add("/second.png", TestMedia.png(width: 8), "image/png")
+        let server = TestMediaServer()
+        server.hold("/held.css")
+        let configuration = CardWebConfiguration(store: .nonPersistent())
+        configuration.configuration.setURLSchemeHandler(server, forURLScheme: WebTestHarness.remoteScheme)
+        let pair = try await make(fixture, configuration: configuration)
+        let window = SpikeWindow(pair.container)
+        defer { pair.close(); window.close() }
+        try await pair.load()
+        let page = pair.idle
+        // Observe calls while returning WebKit's original decode promise.
+        // This neither resolves nor replaces native decode readiness.
+        try await page.run("""
+            window.nativeDecodeSelections = [];
+            const decode = HTMLImageElement.prototype.decode;
+            const selected = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'currentSrc').get;
+            HTMLImageElement.prototype.decode = function () {
+              nativeDecodeSelections.push(selected.call(this));
+              return decode.call(this);
+            };
+            """, world: CardPage.world)
+        try await recordProductionReports(page)
+        try await pair.installHostScript(CardRuntime.reviewHostScript)
+        _ = try await pair.prepare(CardPayload(cardID: 7, question: """
+            <picture><source id=choice srcset=first.png type=image/png media=all>
+              <source srcset=second.png><img id=responsive src=first.png></picture>
+            """, answer: "answer"))
+        try await page.run("await document.getElementById('responsive').decode();")
+        try await page.run("""
+            const blocker = document.createElement('link'); blocker.id = 'blocker';
+            blocker.rel = 'stylesheet'; blocker.href = 'meguri-remote://media/held.css';
+            document.head.appendChild(blocker);
+            """)
+        var outcomes: [CardHostProbeOutcome] = []
+        page.hostReports.probe(.resources, purpose: .preload, timeoutMs: 2_000) { _, outcome in outcomes.append(outcome) }
+        try await CardBehaviorFixture.until("first native image decode") {
+            try await page.string("return String(nativeDecodeSelections.length);", world: CardPage.world) == "1"
+        }
+        #expect(outcomes.isEmpty)
+        try await page.run("""
+            const image = document.getElementById('responsive');
+            const source = document.getElementById('choice');
+            await new Promise((resolve, reject) => {
+              image.onload = resolve; image.onerror = reject;
+              if (change === 'replace') {
+                const replacement = document.createElement('source');
+                replacement.setAttribute('srcset', 'second.png'); source.replaceWith(replacement);
+              } else {
+                const values = {srcset: 'second.png', media: 'not all', type: 'image/unsupported-host-fixture'};
+                source.setAttribute(change, values[change]);
+              }
+            });
+            await image.decode();
+            """, arguments: ["change": change])
+        #expect(try await page.string("return String(document.getElementById('responsive').naturalWidth);") == "8")
+        try await CardBehaviorFixture.until("new engine-selected resource decoded by the producer") {
+            try await page.string("""
+                const selected = document.getElementById('responsive').currentSrc;
+                return String(nativeDecodeSelections.length >= 2 && nativeDecodeSelections.at(-1) === selected);
+                """, world: CardPage.world) == "true"
+        }
+        #expect(outcomes.isEmpty)
+        #expect(try await page.string("return document.getElementById('responsive').getAttribute('src');") == "first.png")
+        #expect(try await page.string("return String(producerReports.length);", world: CardPage.world) == "0")
+        try await page.run("document.getElementById('blocker').remove();")
+        try await hostWait { outcomes.count == 1 }
+        #expect(outcomes == [.observed(.resources(purpose: .preload, state: .ready,
+            imagesPending: 0, fontsPending: 0, stylesPending: 0))])
+    }
+
+    @Test func productionHostIsPairOnlyAndPreservesExactSafeIdentity() async throws {
+        let (pair, configuration, fixture, window) = try await hostPair()
+        let other = CardPagePair(configuration: configuration, resolver: try await fixture.resolved())
+        let otherWindow = SpikeWindow(other.container)
+        defer { pair.close(); other.close(); window.close(); otherWindow.close() }
+        let page = pair.idle
+        try await recordProductionReports(page)
+        try await pair.installHostScript(CardRuntime.reviewHostScript)
+        try await other.load()
+        for otherPage in [other.current, other.idle] {
+            #expect(try await otherPage.string("return typeof meguriReviewHost;", world: CardPage.world) == "undefined")
+        }
+        for own in [pair.current, pair.idle] {
+            #expect(try await own.string("return typeof meguriReviewHost.receive;", world: CardPage.world) == "function")
+            #expect(try await own.string("return typeof meguriReviewHost;") == "undefined")
+        }
+        let revision = try #require(page.hostReports.context).viewRevision
+        try await page.run("""
+            document.dispatchEvent(new CustomEvent('meguri:signal', {detail:JSON.stringify({
+              signal:'hostProbe',version:1,card:7,generation:1,side:'question',viewRevision:revision,
+              payload:{kind:'background',request:1,rgba:[1,0,0,1]}
+            })}));
+            """, arguments: ["revision": revision])
+        #expect(try await page.string("return String(producerReports.length);", world: CardPage.world) == "0")
+        #expect(try await page.string("""
+            const receive=meguriReviewHost.receive;
+            const viewRevision=revision+1;
+            if(!receive({op:'clear',viewRevision})) return 'clear failed';
+            const context={op:'context',card:-9007199254740991,generation:9007199254740991,
+              side:'answer',viewRevision,visibility:'preparing',bounds:{width:400,height:600},pageZoom:1};
+            if(!receive(context)) return 'context failed';
+            // The receiver must copy context, not retain the mutable argument.
+            context.card=1; context.generation=1; context.side='question';
+            if(!receive({op:'probe',kind:'background',request:1,viewRevision,timeoutMs:250})) return 'probe failed';
+            const message=producerReports[0];
+            return [message.card,message.generation,message.side,message.viewRevision].join('/');
+            """, arguments: ["revision": revision], world: CardPage.world) ==
+            "-9007199254740991/9007199254740991/answer/\(revision + 1)")
+        #expect(page.hostReports.slotBackground == nil, "Native must drop the deliberately unmatched test context")
+    }
+}

@@ -181,7 +181,7 @@ public final class CardPagePair {
             let reconstruct = page === idle && page.needsReconstruction
             if reconstruct { try page.prepareReplacementDocument() }
             try await page.load()
-            if reconstruct, let hostSource { try await page.hostReports.install(hostSource) }
+            if reconstruct { try await reinstallHostScript(on: page) }
         }
     }
 
@@ -208,7 +208,8 @@ public final class CardPagePair {
                 if reconstruct {
                     try await target.load()
                     guard target.update == update, !closed else { throw CardPage.Failure.superseded }
-                    if let hostSource { try await target.hostReports.install(hostSource) }
+                    try await reinstallHostScript(on: target)
+                    guard target.update == update, !closed else { throw CardPage.Failure.superseded }
                 }
                 #if DEBUG
                 startupLogger.notice("pageStart.begin")
@@ -410,6 +411,17 @@ public final class CardPagePair {
             if hostInstallation == installation { for page in pages { page.hostReports.disable() } }
             throw error
         }
+    }
+    private func reinstallHostScript(on page: CardPage) async throws {
+        guard let hostSource else { return }
+        let installation = hostInstallation, document = page.documentID
+        do { try await page.hostReports.install(hostSource) }
+        catch is CardHostReporting.InstallationFailure {
+            // An unavailable observation producer cannot prevent rendering.
+        }
+        try Task.checkCancellation()
+        guard !closed, !page.closed,
+              hostInstallation == installation, page.documentID == document else { throw CardPage.Failure.superseded }
     }
     public func setAppearance(_ value: CardRuntime.Appearance) async throws {
         for page in pages { try await page.setAppearance(value) }
@@ -649,9 +661,9 @@ public final class CardPagePair {
                 surface.renderedHTML = sideHTML
                 try await surface.load()
                 try validateVisit()
-                if let hostCode = self.hostSource {
+                if self.hostSource != nil {
                     guard scriptInstallation == self.hostInstallation else { throw CardPage.Failure.superseded }
-                    try await surface.hostReports.install(hostCode)
+                    try await self.reinstallHostScript(on: surface)
                     try validateVisit()
                 }
                 try await surface.start(html: sideHTML, answer: cardContent.answer, update: replacement, reconstruction: true)

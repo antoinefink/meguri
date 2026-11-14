@@ -67,6 +67,7 @@ let package = Package(
                 .copy("Resources/CardRuntime/runtime.js"),
                 .copy("Resources/CardRuntime/image-occlusion.js"),
                 .copy("Resources/CardRuntime/interaction.js"),
+                .copy("Resources/CardRuntime/review-host.js"),
                 .copy("Resources/CardRuntime/vendor/jquery-3.7.1.min.js"),
             ],
             swiftSettings: settings

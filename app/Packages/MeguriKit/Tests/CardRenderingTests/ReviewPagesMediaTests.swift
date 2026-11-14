@@ -220,6 +220,121 @@ extension WebKitSuites {
             #expect(await model.end())
         }
 
+        @Test func reviewLoadAttachesBundledProducerAndObservesLifecycleSlots() async throws {
+            let fixture = MediaFixture()
+            let pair = CardPagePair(configuration: CardWebConfiguration(store: .nonPersistent()), resolver: try await fixture.resolved())
+            let pages = ReviewPages(pair: pair)
+            let window = SpikeWindow(pair.container)
+            defer { pages.close(); window.close() }
+            let first = Self.item(1), next = Self.item(2)
+            pages.renderHead = { _, keys, _ in
+                keys.map { key in
+                    CardPayload(cardID: key == first.renderKey ? 1 : 2,
+                        question: "<style>body { background-color: rgb(0 128 255); }</style><p>Question</p>",
+                        answer: "<style>body { background-color: transparent; }</style><p>Answer</p>")
+                }
+            }
+            try await pages.load()
+            for page in [pair.current, pair.idle] {
+                #expect(try await page.string("return typeof meguriReviewHost.receive;", world: CardPage.world) == "function")
+                #expect(try await page.string("return typeof meguriReviewHost;") == "undefined")
+            }
+            try await pages.render(sessionID: 5, items: [first, next])
+            try await pages.preload(item: first)
+            try await CardBehaviorFixture.until("production prepared probes") {
+                pair.idle.hostReports.slotResources == .resources(purpose: .preload, state: .ready,
+                    imagesPending: 0, fontsPending: 0, stylesPending: 0) && pair.idle.hostReports.slotBackground != nil
+            }
+            let prepared = try #require(pair.idle.update)
+            try await pages.present(item: first, inputTime: ProcessInfo.processInfo.systemUptime)
+            try await CardBehaviorFixture.until("production presentation probes") {
+                pair.current.update == prepared && pair.current.hostReports.context?.visibility == .presented &&
+                    pair.current.hostReports.slotResources == .resources(purpose: .preload, state: .ready,
+                        imagesPending: 0, fontsPending: 0, stylesPending: 0)
+            }
+            try await pages.preload(item: next)
+            try await CardBehaviorFixture.until("production next-slot probes") {
+                pair.idle.hostReports.slotResources != nil && pair.idle.hostReports.slotBackground != nil
+            }
+            #expect(pair.current.update == prepared && pair.idle.update?.card == 2)
+            try await pages.reveal(inputTime: ProcessInfo.processInfo.systemUptime)
+            try await CardBehaviorFixture.until("production answer probes") {
+                pair.current.hostReports.slotBackground == .background(red: 0, green: 0, blue: 0, alpha: 0) &&
+                    pair.current.hostReports.slotResources == .resources(purpose: .preload, state: .ready,
+                        imagesPending: 0, fontsPending: 0, stylesPending: 0)
+            }
+            #expect(pair.current.update?.side == .answer)
+            await pages.suspend()
+            #expect(pair.current.hostReports.context == nil)
+            await pages.resume()
+            try await CardBehaviorFixture.until("production resume probes") {
+                pair.current.hostReports.slotResources == .resources(purpose: .warmup, state: .ready,
+                    imagesPending: 0, fontsPending: 0, stylesPending: 0)
+            }
+        }
+
+        @Test(arguments: [false, true])
+        func failedProducerInstallationDoesNotStopOwnerOrReconstruction(loadBeforePrepare: Bool) async throws {
+            let fixture = MediaFixture()
+            let configuration = CardWebConfiguration(store: .nonPersistent())
+            // A real isolated-world assignment error in every new document.
+            // No receiver or readiness result is supplied by this fixture.
+            configuration.configuration.userContentController.addUserScript(WKUserScript(source: """
+                Object.defineProperty(window, 'meguriReviewHost', {
+                  value: undefined, writable: false, configurable: false
+                });
+                """, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: CardPage.world))
+            let pair = CardPagePair(configuration: configuration, resolver: try await fixture.resolved())
+            let pages = ReviewPages(pair: pair)
+            let window = SpikeWindow(pair.container)
+            defer { pages.close(); window.close() }
+            var unavailable = 0
+            pair.onHostEvent = { _, event in if event == .unavailable { unavailable += 1 } }
+            try await pages.load()
+            #expect(unavailable > 0)
+            // The explicit installation API still reports the evaluation error.
+            await #expect(throws: CardHostReporting.InstallationFailure.self) {
+                try await pair.installHostScript(CardRuntime.reviewHostScript)
+            }
+            let first = Self.item(1), next = Self.item(2)
+            pages.renderHead = { _, keys, _ in
+                keys.map { key in
+                    CardPayload(cardID: key == first.renderKey ? 1 : 2,
+                        question: "<p id=question>Rendered question</p>", answer: "<p id=answer>Rendered answer</p>")
+                }
+            }
+            try await pages.render(sessionID: 5, items: [first, next])
+            try await pages.preload(item: first)
+            try await pages.present(item: first, inputTime: ProcessInfo.processInfo.systemUptime)
+            try await pair.current.waitForShown(try #require(pair.current.update))
+            #expect(try await pair.current.string("return document.getElementById('question').textContent;") == "Rendered question")
+
+            let idle = pair.idle
+            idle.webViewWebContentProcessDidTerminate(idle.webView)
+            #expect(idle.needsReconstruction)
+            if loadBeforePrepare { try await pair.load() }
+            try await pages.preload(item: next)
+            #expect(!idle.needsReconstruction && idle.settled)
+            try await pages.present(item: next, inputTime: ProcessInfo.processInfo.systemUptime)
+            try await pair.current.waitForShown(try #require(pair.current.update))
+            try await pages.reveal(inputTime: ProcessInfo.processInfo.systemUptime)
+            let beforeRecovery = try #require(pair.current.update)
+            #expect(beforeRecovery.card == 2 && beforeRecovery.side == .answer)
+            var recoveries = 0
+            pages.onRecovery = { recoveries += 1 }
+            pair.current.webViewWebContentProcessDidTerminate(pair.current.webView)
+            try await CardBehaviorFixture.until("rendering recovery despite failed producer installation") { recoveries == 1 }
+            #expect(pair.current.update != beforeRecovery && pair.current.update?.side == .answer)
+            #expect(try await pair.current.string("return document.getElementById('answer').textContent;") == "Rendered answer")
+            for page in pair.pages {
+                #expect(page.hostReports.context == nil && page.hostReports.slotResources == nil && page.hostReports.slotBackground == nil)
+                #expect(try await page.string("return typeof meguriReviewHost;", world: CardPage.world) == "undefined")
+                var outcomes: [CardHostProbeOutcome] = []
+                page.hostReports.probe(.resources, purpose: .warmup) { _, outcome in outcomes.append(outcome) }
+                #expect(outcomes == [.unavailable])
+            }
+        }
+
         private static func expectRetainedInput(_ page: CardPage) async throws {
             #expect(try await page.webView.callAsyncJavaScript(
                 "return window.runs===1 && document.getElementById('typeans')===savedInput && savedInput.value==='retained';",

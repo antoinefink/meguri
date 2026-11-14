@@ -48,8 +48,14 @@ final class CardHostAdmission {
     }
 }
 
-/// Per actual page. No production producer is installed here (H10).
+/// Per actual page. ReviewPages installs the H10 background/resource producer
+/// through its owned pair. Input and hit-map producers remain U180/U181 work.
 public final class CardHostReporting {
+    /// Only evaluation of the optional observation script failed. Renderer
+    /// loading and native lifecycle failures retain their original errors.
+    public struct InstallationFailure: Error {
+        let underlying: any Error
+    }
     public private(set) var viewRevision: UInt64 = 1
     public var context: CardHostContext? {
         checkGeometry()
@@ -126,6 +132,13 @@ public final class CardHostReporting {
         do { try await page.run(source, world: CardPage.world) }
         catch {
             if self.installation == installation { unavailable() }
+            try Task.checkCancellation()
+            guard self.installation == installation, !page.closed else { throw CardPage.Failure.superseded }
+            let failure = error as NSError
+            if failure.domain == WKErrorDomain,
+               failure.code == WKError.Code.javaScriptExceptionOccurred.rawValue {
+                throw InstallationFailure(underlying: error)
+            }
             throw error
         }
         guard self.installation == installation, !page.closed else { throw CardPage.Failure.superseded }
