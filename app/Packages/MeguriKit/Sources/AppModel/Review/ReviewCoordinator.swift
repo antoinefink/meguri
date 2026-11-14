@@ -31,6 +31,7 @@ public final class ReviewCoordinator {
     private let store: ReviewRecordStore
     private let clock: AppClock
     private let nativeInput: NativeReviewInput?
+    private let recordDiagnostic: FieldDiagnosticRecorder
     private let nativeCoordinator = UUID()
     private let nativeGeneration: UInt64
     var nativeInputEligibility: () -> Bool = { true }
@@ -69,7 +70,9 @@ public final class ReviewCoordinator {
     public init(deckID: Int64, surface: any ReviewCardSurface, store: ReviewRecordStore,
                 clock: AppClock = .system, client: any ReviewSessionClient = CoreReviewSessionClient(),
                 uptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
-                nativeInput: NativeReviewInput? = nil, nativeGeneration: UInt64 = 0) {
+                nativeInput: NativeReviewInput? = nil, nativeGeneration: UInt64 = 0,
+                recordDiagnostic: @escaping FieldDiagnosticRecorder = { _ in }) {
+        self.recordDiagnostic = recordDiagnostic
         self.nativeInput = nativeInput; self.nativeGeneration = nativeGeneration
         self.surface = surface; self.store = store; self.clock = clock; self.client = client; self.uptime = uptime
         retryMedia = { names in
@@ -157,6 +160,7 @@ public final class ReviewCoordinator {
 
     public func start() async {
         guard !closingAdmission, sessionID == nil, !busy, phase == .loading else { return }
+        recordDiagnostic(.init(component: .review, operation: .start, stage: .requested, outcome: .observed))
         busy = true
         // Core start owns admission through its terminal result, even if pause
         // arrives before either task executes. Only page preparation is cancelled.
@@ -178,19 +182,26 @@ public final class ReviewCoordinator {
         }
     }
     private func startOwned(_ coreStart: Task<ReviewStartResult, any Error>) async {
+        var failureStage = FieldDiagnosticObservation.Stage.admission
         #if DEBUG
         let logger = Logger(subsystem: "Meguri", category: "ReviewStartup")
         logger.notice("start.begin")
         #endif
         do {
             let result = try await coreStart.value
+            failureStage = .presentation
             #if DEBUG
             logger.notice("core.returned")
             #endif
             switch result {
-            case .refused(.fsrsPolicyPending): onPolicyRefusal?(); phase = .error; notice = "Enable FSRS before studying."
-            case .refused(.presetUnsupported): phase = .error; notice = "This preset needs a newer Meguri"
+            case .refused(.fsrsPolicyPending):
+                recordDiagnostic(.init(component: .review, operation: .start, stage: .admission, outcome: .refused))
+                onPolicyRefusal?(); phase = .error; notice = "Enable FSRS before studying."
+            case .refused(.presetUnsupported):
+                recordDiagnostic(.init(component: .review, operation: .start, stage: .admission, outcome: .refused))
+                phase = .error; notice = "This preset needs a newer Meguri"
             case .started(let id, let generation, let head, _):
+                recordDiagnostic(.init(component: .review, operation: .start, stage: .coreAccepted, outcome: .succeeded))
                 sessionID = id
                 try nativeInput?.bindSession(coordinator: nativeCoordinator, session: id, generation: generation, deck: record.deckID)
                 startupNeedsPreparation = true
@@ -210,12 +221,15 @@ public final class ReviewCoordinator {
                 logger.notice("apply.end")
                 logger.notice("persist.begin")
                 #endif
+                failureStage = .persistence
                 try await persist()
                 #if DEBUG
                 logger.notice("persist.end")
                 #endif
             }
         } catch {
+            recordDiagnostic(.init(component: .review, operation: .start,
+                stage: failureStage, outcome: .failed, failure: .other))
             #if DEBUG
             logger.notice("start.failed")
             #endif
@@ -292,11 +306,14 @@ public final class ReviewCoordinator {
                                          answeredAt: instant, elapsedMilliseconds: elapsed)
         pendingAnswer = answer
         operation = Task {
+            var answerReturned = false
             do {
                 let outcome = try await client.answer(sessionID: sessionID, item: item, rating: rating,
                     at: Int64(instant.timeIntervalSince1970 * 1_000), elapsed: elapsed)
+                answerReturned = true
                 switch outcome {
                 case .accepted(let diff, let leech, let suspended, _):
+                    recordDiagnostic(.init(component: .review, operation: .answer, stage: .coreAccepted, outcome: .succeeded))
                     if let use { nativeInput?.completed(use, outcome: "accepted") }
                     // A failure may arrive while answer() returns. Never resurrect it.
                     if let pendingAnswer, pendingAnswer.id == answer.id {
@@ -305,30 +322,38 @@ public final class ReviewCoordinator {
                     }
                     if leech { notice = suspended ? "Card was a leech. It has been suspended." : "Card was a leech." }
                     if suspended { record.suspended.insert(item.cardId) }
-                    enqueuePersistence()
+                    enqueuePersistence(diagnosticAnswer: true)
                     let needsRefresh = refreshPending
                     let intent = restorationIntent
                     refreshPending = false; forceQuestion = false
-                    let head = needsRefresh ? try await client.head(sessionID: sessionID) : diff.head
                     do {
+                        let head = needsRefresh ? try await client.head(sessionID: sessionID) : diff.head
                         try await apply(head, question: true, inputTime: inputTime, intent: intent)
+                        recordDiagnostic(.init(component: .review, operation: .answer, stage: .presentation,
+                            outcome: paused || closingAdmission ? .waiting : .succeeded))
                     } catch {
+                        recordDiagnostic(.init(component: .review, operation: .answer, stage: .presentation, outcome: .failed, failure: .other))
                         // Presentation failure cannot skip the accepted record.
-                        try await persist()
+                        try await persist(diagnosticAnswer: true)
                         throw error
                     }
-                    try await persist()
+                    try await persist(diagnosticAnswer: true)
                 case .stale(let head, let showNotice):
+                    recordDiagnostic(.init(component: .review, operation: .answer, stage: .coreAccepted, outcome: .stale))
                     if let use { nativeInput?.completed(use, outcome: "stale") }
                     pendingAnswer = nil
                     if showNotice { notice = "Card changed, please answer again" }
                     try await apply(head, question: true)
                 case .notAtHead(let head):
+                    recordDiagnostic(.init(component: .review, operation: .answer, stage: .coreAccepted, outcome: .refused))
                     if let use { nativeInput?.completed(use, outcome: "not-at-head") }
                     pendingAnswer = nil
                     try await apply(head, question: true)
                 }
             } catch {
+                if !answerReturned {
+                    recordDiagnostic(.init(component: .review, operation: .answer, stage: .coreAccepted, outcome: .failed, failure: .other))
+                }
                 if let use { nativeInput?.completed(use, outcome: "failed") }
                 pendingAnswer = nil
                 notice = String(describing: error)
@@ -790,20 +815,31 @@ public final class ReviewCoordinator {
         clearVisibleMedia()
         mediaArrivals = ReviewMediaArrivals()
     }
-    private func persist() async throws {
+    private func persist(diagnosticAnswer: Bool = false) async throws {
         record.activeMilliseconds = activeTime.milliseconds(at: uptime(), capSeconds: UInt32.max)
-        if version == 0 { try await store.begin(record) }
-        version &+= 1
-        let snapshot = record; let revision = version
-        try await store.save(snapshot, version: revision)
-        onRecordChanged?(snapshot)
+        do {
+            if version == 0 { try await store.begin(record) }
+            version &+= 1
+            let snapshot = record; let revision = version
+            try await store.save(snapshot, version: revision)
+            if diagnosticAnswer { recordDiagnostic(.init(component: .review, operation: .save, stage: .persistence, outcome: .succeeded)) }
+            onRecordChanged?(snapshot)
+        } catch {
+            if diagnosticAnswer { recordDiagnostic(.init(component: .review, operation: .save, stage: .persistence, outcome: .failed, failure: .storageUnavailable)) }
+            throw error
+        }
     }
-    private func enqueuePersistence() {
+    private func enqueuePersistence(diagnosticAnswer: Bool = false) {
         version &+= 1
-        let snapshot = record; let revision = version; let store = store
+        let snapshot = record; let revision = version; let store = store; let recordDiagnostic = recordDiagnostic
         Task { [weak self] in
-            do { try await store.save(snapshot, version: revision) }
-            catch { self?.notice = "Couldn’t save the session record. \(error)" }
+            do {
+                try await store.save(snapshot, version: revision)
+                if diagnosticAnswer { recordDiagnostic(.init(component: .review, operation: .save, stage: .persistence, outcome: .succeeded)) }
+            } catch {
+                if diagnosticAnswer { recordDiagnostic(.init(component: .review, operation: .save, stage: .persistence, outcome: .failed, failure: .storageUnavailable)) }
+                self?.notice = "Couldn’t save the session record. \(error)"
+            }
         }
     }
     func settled() async {

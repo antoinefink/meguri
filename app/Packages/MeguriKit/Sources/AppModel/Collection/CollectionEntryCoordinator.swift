@@ -34,12 +34,16 @@ public final class CollectionEntryCoordinator {
     public var canPresent: Bool { !busy && (requiresRecovery || owner?.entryAllowed == true) }
     private weak var owner: ReviewCollection?
     private let service: any CollectionEntryService
+    private let recordDiagnostic: FieldDiagnosticRecorder
     private var operation: CollectionEntryOperation?
     private var task: Task<Void, Never>?
     private var revision: UInt64 = 0
     private var selectedSource: URL?
 
-    init(owner: ReviewCollection, service: any CollectionEntryService) { self.owner = owner; self.service = service }
+    init(owner: ReviewCollection, service: any CollectionEntryService,
+         recordDiagnostic: @escaping FieldDiagnosticRecorder = { _ in }) {
+        self.owner = owner; self.service = service; self.recordDiagnostic = recordDiagnostic
+    }
     public func present() {
         guard canPresent else { return }
         if !requiresRecovery { message = nil; failure = nil }
@@ -69,15 +73,22 @@ public final class CollectionEntryCoordinator {
         let operation = CollectionEntryOperation(); self.operation = operation
         task = Task {
             try? await old?.discard()
+            var inspected = false
             do {
                 let location = try await owner.prepareEntry()
                 let value = try await service.inspect(source: source, location: location, operation: operation,
                     progress: progressReceiver(expected))
+                inspected = true
+                recordDiagnostic(.init(component: .collectionImport, operation: .inspect, stage: .inspection, outcome: .succeeded))
                 guard expected == revision else { try? await value.discard(); return }
                 do { try owner.configuration.nativeReviewInput?.inspected(value) }
                 catch { try? await value.discard(); throw error }
                 preview = value; stage = .awaitingApproval
-            } catch { if expected == revision { report(error) } }
+            } catch {
+                recordDiagnostic(.init(component: .collectionImport, operation: .inspect,
+                    stage: inspected ? .admission : .inspection, outcome: .failed, failure: .other))
+                if expected == revision { report(error) }
+            }
             if expected == revision { self.operation = nil; task = nil; progress = nil }
         }
     }
@@ -87,7 +98,10 @@ public final class CollectionEntryCoordinator {
             try owner.configuration.nativeReviewInput?.willActivate(preview)
             try owner.beginEntryActivation()
         }
-        catch { self.preview = nil; Task { try? await preview.discard() }; report(error); return }
+        catch {
+            recordDiagnostic(.init(component: .collectionImport, operation: .activate, stage: .admission, outcome: .refused, failure: .other))
+            self.preview = nil; Task { try? await preview.discard() }; report(error); return
+        }
         revision &+= 1
         let expected = revision
         stage = .applyingPackage; message = nil; failure = nil; progress = nil; preparedMedia = nil; recoveryFinished = false
@@ -95,14 +109,19 @@ public final class CollectionEntryCoordinator {
         let operation = CollectionEntryOperation(); self.operation = operation
         let actualPrepared = PreparedMediaSnapshot()
         task = Task {
+            var activationObserved = false
+            var completingHost = false
             do {
                 try await owner.drainEntryActivation()
                 let activated = try await service.activate(preview, operation: operation, progress: progressReceiver(expected, prepared: actualPrepared))
+                activationObserved = true
+                recordDiagnostic(.init(component: .collectionImport, operation: .activate, stage: .activation, outcome: .succeeded))
                 if let media = actualPrepared.value.withLock({ $0 }) {
                     preparedMedia = media; owner.configuration.nativeReviewInput?.prepared(media)
                 }
                 owner.configuration.nativeReviewInput?.activated(activated)
                 lastActivation = activated
+                completingHost = true
                 guard await owner.finishEntryActivation(candidateActive: true) else {
                     throw CollectionEntryFailure(after: activated, issue: .core(.unavailable(reason: "Native host setup could not finish")))
                 }
@@ -112,6 +131,13 @@ public final class CollectionEntryCoordinator {
                     preparedMedia = media; owner.configuration.nativeReviewInput?.prepared(media)
                 }
                 let entryFailure = error as? CollectionEntryFailure
+                if !activationObserved, entryFailure?.candidateActive == true {
+                    activationObserved = true
+                    recordDiagnostic(.init(component: .collectionImport, operation: .activate, stage: .activation, outcome: .succeeded))
+                }
+                recordDiagnostic(.init(component: .collectionImport,
+                    operation: .activate, stage: completingHost ? .presentation : .activation,
+                    outcome: entryFailure?.activationOutcomeUncertain == true ? .unknown : .failed, failure: .other))
                 // Keep the existing activation admission closed when recovery
                 // is required. Host setup is not a media-recovery operation.
                 if entryFailure?.requiresRecovery != true {

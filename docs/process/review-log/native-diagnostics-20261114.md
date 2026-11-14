@@ -117,3 +117,24 @@ remain intact. The original failing result is retained.
 exact locale expectation correction. Native Core products are reused. This
 covers the store, timeline, standalone Settings component, presentation and
 real safe-copy producer controls; it does not cover the pending app wiring.
+
+## Production wiring checkpoint
+
+Author `cleanroom/20261114T164556Z-37662` wires the store through production
+composition and the existing disclosure. Review `165752Z-44726` finds no
+P0/P1 and four accuracy issues. Repair `170255Z-50752` addresses them;
+review `171457Z-53607` finds no P0/P1 and a blocked fixture. Follow-up
+`171941Z-57429` tests the actual owned-command order. Review
+`172650Z-62829` finds no P0/P1 in that scope and one P2 cancellation-wait gap.
+
+`swift-test/20261114T172656Z-63225` compiles and runs 83 tests: 78 pass,
+five fail with eight issues. The fixture requests failed-attempt history
+after successful exchanges, which populate completed history instead. Two
+cleanup failures expose the no-host close path attempting a host-required
+flush. The assertions remain intact; these causes still need repair.
+
+`private/20261114T172732Z-64949` passes. Test-only compile follow-ups
+`165852Z-47034` and `171654Z-56059` change no production behavior. Failed
+compiler/signature results and affected generated bundles are retained.
+Exact rendering, app-hosted exclusion and final integration remain open.
+This is WIP, with no Unit or gate acceptance.

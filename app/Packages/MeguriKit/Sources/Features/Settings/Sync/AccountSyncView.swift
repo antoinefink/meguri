@@ -6,6 +6,12 @@ public struct AccountSyncView: View {
     let collection: ReviewCollection
     var host: AppNavigation.SheetHost
     @State private var confirmingStop = false
+    @State private var detailsExpanded = false
+    private struct DiagnosticsIdentity: Hashable {
+        let callbacks: ObjectIdentifier
+        let collection: ObjectIdentifier
+        let generation: UInt64
+    }
     public init(collection: ReviewCollection, host: AppNavigation.SheetHost = .main) {
         self.collection = collection; self.host = host
     }
@@ -120,7 +126,7 @@ public struct AccountSyncView: View {
                 }
             }
             Section {
-                DisclosureGroup {
+                DisclosureGroup(isExpanded: $detailsExpanded) {
                     // Available metadata and typed failures live directly here.
                     // No raw SDK diagnostics, account identity or connection values.
                     if let status = sync.status {
@@ -137,6 +143,11 @@ public struct AccountSyncView: View {
                     } else {
                         Text(SyncText.value(accountKey))
                             .accessibilityIdentifier("settings.accountSync.detailsAccountState")
+                    }
+                    if detailsExpanded, let callbacks = collection.configuration.fieldDiagnostics {
+                        SyncDiagnosticsContent(snapshot: { try await callbacks.snapshot() },
+                            safeExport: { try await callbacks.safeExport() }, writeClipboard: callbacks.writeClipboard)
+                            .id(DiagnosticsIdentity(callbacks: ObjectIdentifier(callbacks), collection: ObjectIdentifier(collection), generation: collection.generation))
                     }
                 } label: { Text("Connection details", bundle: .module) }
                 .accessibilityIdentifier("settings.accountSync.details")

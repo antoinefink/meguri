@@ -170,6 +170,71 @@ extension ReviewCollectionStartupTests {
         _ = await fixture.model.end()
     }
 
+    @Test func defaultNoopRecordingKeepsPackageReviewIndependentOfInjectedRecording() async throws {
+        var observations: [FieldDiagnosticObservation] = []
+        let observed = Fixture(recordDiagnostic: { observations.append($0) })
+        let library = Fixture()
+        for fixture in [observed, library] {
+            await fixture.model.start()
+            fixture.model.reveal(); await fixture.model.settled()
+            fixture.model.rate(.good); await fixture.model.settled()
+        }
+        #expect(observations.contains { $0.stage == .coreAccepted && $0.operation == .answer })
+        let recorded = observations
+        #expect(library.model.record.answers.map(\.cardID) == observed.model.record.answers.map(\.cardID))
+        #expect(library.surface.presented == observed.surface.presented)
+        library.model.reveal(); await library.model.settled()
+        library.model.rate(.good); await library.model.settled()
+        #expect(library.client.answers == 2)
+        #expect(observations == recorded)
+        #expect(await library.model.end())
+        #expect(observations == recorded)
+        #expect(await observed.model.end())
+    }
+
+    @Test func acceptedAnswerDiagnosticsSurviveSessionRecordSaveFailure() async throws {
+        var observations: [FieldDiagnosticObservation] = []
+        let fixture = Fixture(recordDiagnostic: { observations.append($0) })
+        await fixture.model.start()
+        fixture.model.reveal(); await fixture.model.settled()
+        // Fail only the presentation-history store after Core start succeeds.
+        try FileManager.default.removeItem(at: fixture.directory)
+        try Data([0]).write(to: fixture.directory)
+        fixture.model.rate(.good); await fixture.model.settled()
+        #expect(fixture.client.answers == 1)
+        #expect(fixture.model.record.answers.map(\.cardID) == [1])
+        #expect(observations.filter { $0.operation == .answer && $0.stage == .coreAccepted }.map(\.outcome) == [.succeeded])
+        #expect(observations.contains { $0.operation == .save && $0.stage == .persistence && $0.outcome == .failed && $0.failure == .storageUnavailable })
+        #expect(observations.contains { $0.operation == .answer && $0.stage == .presentation && $0.outcome == .succeeded })
+        try FileManager.default.removeItem(at: fixture.directory)
+        #expect(await fixture.model.end())
+    }
+
+    @Test(arguments: ["head", "presentation"])
+    func acceptedAnswerDiagnosticsRetainAcceptanceWhenFollowupFails(boundary: String) async throws {
+        var observations: [FieldDiagnosticObservation] = []
+        let fixture = Fixture(recordDiagnostic: { observations.append($0) })
+        await fixture.model.start()
+        fixture.model.reveal(); await fixture.model.settled()
+        if boundary == "head" {
+            fixture.client.onAnswerResult = { fixture.model.requestRefresh() }
+            fixture.client.onHeadResult = { throw BridgeError.internal("synthetic head refresh failure") }
+        } else {
+            fixture.surface.onPresent = { throw BridgeError.internal("synthetic presentation failure") }
+        }
+        fixture.model.rate(.good); await fixture.model.settled()
+        #expect(fixture.client.answers == 1)
+        #expect(fixture.model.record.answers.map(\.cardID) == [1])
+        #expect(try await fixture.store.load()?.answers == fixture.model.record.answers)
+        #expect(observations.filter { $0.operation == .answer && $0.stage == .coreAccepted }.map(\.outcome) == [.succeeded])
+        #expect(observations.filter { $0.operation == .answer && $0.stage == .presentation }.map(\.outcome) == [.failed])
+        #expect(observations.contains { $0.operation == .save && $0.stage == .persistence && $0.outcome == .succeeded })
+        #expect(fixture.model.phase == .error)
+        if boundary == "head" { #expect(fixture.client.headReads >= 2) }
+        fixture.client.onHeadResult = nil; fixture.client.onAnswerResult = nil; fixture.surface.onPresent = nil
+        #expect(await fixture.model.end())
+    }
+
     @Test func undoRedoUsesRestoreAndPersistsActualRecord() async throws {
         let fixture = Fixture()
         await fixture.model.start()
@@ -1037,12 +1102,14 @@ extension ReviewCollectionStartupTests {
         let store: ReviewRecordStore
         var model: ReviewCoordinator!
         var now: TimeInterval = 0
-        init(nativeInput: NativeReviewInput? = nil, surface: Surface = Surface()) {
+        init(nativeInput: NativeReviewInput? = nil, surface: Surface = Surface(),
+             recordDiagnostic: @escaping FieldDiagnosticRecorder = { _ in }) {
             self.surface = surface
             store = ReviewRecordStore(file: directory.appending(path: "session.json"))
             model = ReviewCoordinator(deckID: 1, surface: surface, store: store,
                 clock: .fixed(Date(timeIntervalSince1970: nativeInput == nil ? 1_800_000_000 : 1_894_698_000)), client: client,
-                uptime: { [weak self] in self?.now ?? 0 }, nativeInput: nativeInput, nativeGeneration: 1)
+                uptime: { [weak self] in self?.now ?? 0 }, nativeInput: nativeInput, nativeGeneration: 1,
+                recordDiagnostic: recordDiagnostic)
             model.retryMedia = { [surface] names in surface.arrivals.append(names); return true }
         }
         isolated deinit { try? FileManager.default.removeItem(at: directory) }

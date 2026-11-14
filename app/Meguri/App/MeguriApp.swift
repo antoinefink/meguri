@@ -1,5 +1,10 @@
 import AppModel
 import SwiftUI
+#if os(macOS)
+import AppKit
+#elseif os(iOS)
+import UIKit
+#endif
 
 /// The app entry (KTD10): one window, holding every feature (R6, R7, R110).
 /// On the Mac a `Window` scene (no New Window, Window > Meguri reopens it)
@@ -24,7 +29,7 @@ struct MeguriApp: App {
     /// Above the layout switch, for the app's whole run (KTD10).
     @State private var navigation: AppNavigation
     /// MetricKit's reports, kept on the device for Copy Debug Info (R1867).
-    private let fieldDiagnostics = FieldDiagnosticsSubscriber.start()
+    private let fieldDiagnostics: FieldDiagnosticsSubscriber?
     #if MEGURI_TEST_HOOKS
     private let hooks: TestHooks.Session
     #endif
@@ -53,6 +58,28 @@ struct MeguriApp: App {
         #if MEGURI_TEST_HOOKS
         startsProduction = startsProduction && !hooks.setupOnly && hooks.shell == nil && hooks.error == nil && hooks.options.route == nil
         #endif
+        if startsProduction {
+            let store = FieldDiagnosticsStore.standard
+            configuration.recordDiagnostic = { store.enqueue($0) }
+            configuration.fieldDiagnostics = FieldDiagnosticsCallbacks(
+                snapshot: { await store.timeline() }, safeExport: { try await store.debugInfo() },
+                writeClipboard: { text in
+                    #if os(macOS)
+                    NSPasteboard.general.clearContents()
+                    return NSPasteboard.general.setString(text, forType: .string)
+                    #elseif os(iOS)
+                    UIPasteboard.general.string = text
+                    return true
+                    #else
+                    return false
+                    #endif
+                })
+            let subscriber = FieldDiagnosticsSubscriber(store: store)
+            subscriber.start()
+            fieldDiagnostics = subscriber
+        } else {
+            fieldDiagnostics = nil
+        }
         let collection = startsProduction ? ReviewCollection(configuration: configuration, navigation: navigation) : nil
         #if MEGURI_TEST_HOOKS
         hooks.start(navigation, collection: collection)
@@ -70,6 +97,12 @@ struct MeguriApp: App {
         self.features = features
         self.uiStateStore = uiStateStore
         _navigation = State(initialValue: navigation)
+    }
+
+    // Read-only composition seam for the app-hosted test. Inspecting this does
+    // not create a store, subscribe, or touch either platform clipboard.
+    var diagnosticComposition: (configuration: LaunchConfiguration, collection: ReviewCollection?, subscriber: FieldDiagnosticsSubscriber?) {
+        (configuration, collection, fieldDiagnostics)
     }
 
     var body: some Scene {

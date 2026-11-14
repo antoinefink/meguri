@@ -431,6 +431,21 @@ import Testing
         }
     }
 
+    @Test func nonReadyStartupHostCompletionRecordsUnavailableWithoutSuccess() async throws {
+        var configuration = LaunchConfiguration()
+        var observations: [FieldDiagnosticObservation] = []
+        configuration.recordDiagnostic = { observations.append($0) }
+        let service = CoreCollectionService()
+        try #require(try await service.lifecycle() == .noCollection)
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
+        // Exercise the actual nonthrowing lifecycle exit, with no fake ready flag.
+        try await owner.completeStartupHost()
+        #expect(owner.state == .unavailable && owner.lifecycle == .noCollection)
+        #expect(observations.map(\.outcome) == [.unknown])
+        #expect(observations.first?.failure == .unavailable)
+        #expect(await owner.close())
+    }
+
     @Test func existingInvalidCollectionFailsWithoutChangingOriginalBytes() async throws {
         let files = FileManager.default
         let source = try #require(Bundle.module.url(forResource: "schema-18", withExtension: "anki2"))
@@ -445,6 +460,8 @@ import Testing
         let original = Data("Synthetic invalid collection for the startup regression.".utf8)
         try original.write(to: database)
         var configuration = LaunchConfiguration()
+        var observations: [FieldDiagnosticObservation] = []
+        configuration.recordDiagnostic = { observations.append($0) }
         configuration.collectionLocation = AppModel.CollectionLocation(directory: directory)
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
         let service = CoreCollectionService()
@@ -454,7 +471,11 @@ import Testing
             try await service.close()
             let archive = root.appending(path: "invalid-original.anki2")
             try files.moveItem(at: database, to: archive)
+            observations.removeAll()
             await owner.start()
+            #expect(owner.state == .noFile)
+            #expect(!observations.contains { $0.component == .startup && $0.outcome == .succeeded })
+            #expect(observations.contains { $0.component == .startup && $0.stage == .admission && $0.outcome == .refused })
             let closed = await owner.close()
             try #require(closed)
             #if DEBUG
@@ -465,6 +486,7 @@ import Testing
             var recoveryFailure: (any Error)?
             do {
                 await owner.start()
+                #expect(observations.filter { $0.component == .startup && $0.stage == .activation }.map(\.outcome) == [.succeeded])
                 try #require(owner.state == .ready, "Recovery open failed: \(owner.error ?? String(describing: owner.state))")
                 #if DEBUG
                 #expect(owner.openFailureDiagnosticValue == nil)
@@ -503,6 +525,8 @@ import Testing
             }
             #expect(try Data(contentsOf: database) == original)
             #expect(owner.decks.isEmpty)
+            #expect(observations.filter { $0.component == .startup }.map(\.outcome) == [.observed, .failed])
+            #expect(observations.last?.failure == .other)
         } catch { failure = error }
         do {
             try await release()

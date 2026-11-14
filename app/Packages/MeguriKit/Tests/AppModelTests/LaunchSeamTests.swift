@@ -63,6 +63,7 @@ import AppModel
         #expect(configuration.migakuPort == nil)
         #expect(configuration.initialPresentation == nil)
         #expect(configuration.nativeReviewInput == nil)
+        #expect(configuration.fieldDiagnostics == nil)
     }
 
     @Test func anInitialPresentationNamesItsStyle() {

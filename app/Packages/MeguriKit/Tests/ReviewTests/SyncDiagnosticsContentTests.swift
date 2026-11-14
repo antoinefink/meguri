@@ -8,6 +8,58 @@ import Testing
     private let locale = Locale(identifier: "en")
     private let instant = Date(timeIntervalSince1970: 1_800_000_000)
 
+    @Test func sharedAdmissionSurvivesCancelledConsumersAndRemountUntilProducersReturn() async throws {
+        // Owned scalar fixture, no diagnostics store or system clipboard.
+        let value = try JSONDecoder().decode(FieldDiagnosticTimeline.self, from: Data("""
+        {"schemaVersion":1,"events":[],"droppedCount":0,"expiredCount":0,"truncatedCount":0,"invalidCount":0,"priorHistoryUnavailable":false,"storage":"available"}
+        """.utf8))
+        let pendingRead = SuspendedDiagnosticResult<FieldDiagnosticTimeline>()
+        let pendingExport = SuspendedDiagnosticResult<Data>()
+        var reads = 0, exports = 0
+        var writes: [String] = []
+        let callbacks = FieldDiagnosticsCallbacks(snapshot: {
+            reads += 1
+            if reads == 1 { return try await pendingRead.read() }
+            return value
+        }, safeExport: {
+            exports += 1
+            if exports == 1 { return try await pendingExport.read() }
+            return Data("current safe report".utf8)
+        }, writeClipboard: { writes.append($0); return true })
+        func consumer() -> SyncDiagnosticsModel {
+            SyncDiagnosticsModel(snapshot: { try await callbacks.snapshot() },
+                safeExport: { try await callbacks.safeExport() }, writeClipboard: callbacks.writeClipboard)
+        }
+        let first = consumer()
+        first.mount()
+        let read = Task { await first.refresh() }
+        await pendingRead.waitUntilRequested()
+        first.requestCopy()
+        let copy = Task { await first.copy() }
+        await pendingExport.waitUntilRequested()
+        first.unmount(); read.cancel(); copy.cancel()
+        let second = consumer()
+        second.mount(); await second.refresh()
+        second.requestCopy(); await second.copy()
+        #expect(second.snapshotUnavailable && second.copyFeedback == .unavailable)
+        second.unmount()
+        let remade = consumer()
+        remade.mount(); await remade.refresh()
+        remade.requestCopy(); await remade.copy()
+        #expect(reads == 1 && exports == 1 && writes.isEmpty)
+        pendingRead.finish(value)
+        await read.value
+        await remade.refresh()
+        remade.requestCopy(); await remade.copy()
+        #expect(reads == 2 && exports == 1 && writes.isEmpty)
+        pendingExport.finish(Data("stale safe report".utf8))
+        await copy.value
+        #expect(first.timeline == nil && writes.isEmpty)
+        remade.requestCopy(); await remade.copy()
+        #expect(exports == 2 && writes == ["current safe report"])
+        #expect(remade.copyFeedback == .copied && remade.timeline != nil)
+    }
+
     /// Each fixture owns an isolated, resolved temporary directory. Never use
     /// the standard store or the user's Application Support directory.
     private func directory() -> URL {

@@ -342,6 +342,8 @@ public final class SyncCoordinator {
     @ObservationIgnored private let makeBackend: @MainActor (@escaping @Sendable () async -> Void) async throws -> any SyncCoordinatorBackend
     @ObservationIgnored private let defaults: UserDefaults?
     @ObservationIgnored private let clock: AppClock
+    @ObservationIgnored private let recordDiagnostic: FieldDiagnosticRecorder
+    @ObservationIgnored private var diagnosticStatus = FieldDiagnosticCloudStatus()
     @ObservationIgnored private let directory: URL?
     @ObservationIgnored private let observeSignals: Bool
     private var platformPrepared = false
@@ -425,7 +427,8 @@ public final class SyncCoordinator {
     private static let settingsKey = "meguri.cloud.deviceSettings"
 
     public convenience init(directory: URL, clock: AppClock = .system,
-                            configuration: CloudBuildConfiguration? = .fromBundle, defaults: UserDefaults? = .standard) {
+                            configuration: CloudBuildConfiguration? = .fromBundle, defaults: UserDefaults? = .standard,
+                            recordDiagnostic: @escaping FieldDiagnosticRecorder = { _ in }) {
         self.init(bootstrap: {
             guard let configuration, configuration.schemaConfigured,
                   !configuration.container.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -443,12 +446,14 @@ public final class SyncCoordinator {
             #else
             throw SyncOwnerFailure.configurationUnavailable
             #endif
-        }, defaults: defaults, clock: clock, directory: directory, observeSignals: true)
+        }, defaults: defaults, clock: clock, directory: directory, observeSignals: true, recordDiagnostic: recordDiagnostic)
     }
 
     init(bootstrap: @escaping @MainActor () async throws -> Void,
          makeBackend: @escaping @MainActor (@escaping @Sendable () async -> Void) async throws -> any SyncCoordinatorBackend,
-         defaults: UserDefaults?, clock: AppClock = .system, directory: URL? = nil, observeSignals: Bool = false) {
+         defaults: UserDefaults?, clock: AppClock = .system, directory: URL? = nil, observeSignals: Bool = false,
+         recordDiagnostic: @escaping FieldDiagnosticRecorder = { _ in }) {
+        self.recordDiagnostic = recordDiagnostic
         self.bootstrap = bootstrap; self.makeBackend = makeBackend; self.defaults = defaults
         self.clock = clock; self.directory = directory
         self.observeSignals = observeSignals
@@ -1913,10 +1918,20 @@ public final class SyncCoordinator {
                         case .statusChanged(let snapshot):
                             if !closing, value.sequence > statusSequence {
                                 statusSequence = value.sequence; status = snapshot
+                                diagnosticStatus.observe(snapshot, generation: value.generation, revision: revision, record: recordDiagnostic)
                                 #if DEBUG
                                 DebugCloudDiagnostics.recordStatus(snapshot.error)
                                 DebugCloudDiagnostics.recordPolicyStatus(snapshot, generation: value.generation, hostRevision: revision)
                                 #endif
+                            }
+                        case .recordExchange(let exchange):
+                            // Core can return a typed failure inside an output.
+                            // Only the original completed/admitted action counts.
+                            let rejected = result.outputs.contains { output in
+                                if case .commands = output { false } else { true }
+                            }
+                            if !closing, value.generation == generation, !result.deferred, !rejected {
+                                FieldDiagnosticCloudStatus.completed(exchange, record: recordDiagnostic)
                             }
                         case .quitNow: quitCompletion?(); quitCompletion = nil
                         case .quitFlush: quitCompletion?(); quitCompletion = nil

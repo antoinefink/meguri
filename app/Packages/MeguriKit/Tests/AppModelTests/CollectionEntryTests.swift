@@ -280,6 +280,8 @@ extension ReviewCollectionStartupTests {
         try files.copyItem(at: #require(Bundle.module.url(forResource: "schema-18", withExtension: "anki2")),
                            to: directory.appending(path: "collection.anki2"))
         var configuration = LaunchConfiguration()
+        var observations: [FieldDiagnosticObservation] = []
+        configuration.recordDiagnostic = { observations.append($0) }
         configuration.collectionLocation = AppModel.CollectionLocation(directory: directory)
         configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600))
         let service = EntryTerminalFailureService(afterActivation: afterActivation)
@@ -296,6 +298,9 @@ extension ReviewCollectionStartupTests {
             #expect(entry.requiresRecovery && !entry.canChoose && !owner.canStudy)
             #expect(failure.media == .init(incoming: 0, decodedBytes: 0, reused: 0, added: 0, trashed: 0))
             #expect(failure.candidateActive == afterActivation)
+            #expect(observations.contains { $0.component == .collectionImport && $0.operation == .inspect && $0.outcome == .succeeded })
+            #expect(observations.filter { $0.component == .collectionImport && $0.operation == .activate && $0.outcome == .succeeded }.count == (afterActivation ? 1 : 0))
+            #expect(observations.contains { $0.component == .collectionImport && $0.operation == .activate && $0.outcome == .failed })
             if afterActivation {
                 #expect(failure.generation != nil && failure.backup != nil)
                 #expect(entry.canContinueRecovery)
@@ -316,6 +321,38 @@ extension ReviewCollectionStartupTests {
             }
             #expect(await owner.close())
         } catch { _ = await owner.close(); try? await CoreCollectionService().close(); throw error }
+    }
+
+    @Test func activatedImportHostFailureDoesNotInventRecoveryAttempt() async throws {
+        let files = FileManager.default
+        let root = files.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? files.removeItem(at: root) }
+        var configuration = LaunchConfiguration()
+        var observations: [FieldDiagnosticObservation] = []
+        configuration.recordDiagnostic = { observations.append($0) }
+        configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
+        let service = EntryGatedActivationService(before: { _ in }, after: {
+            // Close the genuinely activated retained host before native setup.
+            do { try await CoreCollectionService().close() }
+            catch { Issue.record("Could not close the activated fixture host") }
+        })
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), entryService: service)
+        await owner.start()
+        do {
+            try #require(owner.state == .noFile)
+            let entry = owner.entry
+            let source = try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg"))
+            entry.inspect(source); await entry.waitForCompletion()
+            try #require(entry.preview != nil)
+            entry.confirm(); await entry.waitForCompletion()
+            #expect(entry.lastActivation != nil && entry.failure?.candidateActive == true)
+            #expect(entry.requiresRecovery && !owner.canStudy)
+            let imported = observations.filter { $0.component == .collectionImport }
+            #expect(imported.filter { $0.stage == .activation && $0.outcome == .succeeded }.count == 1)
+            #expect(imported.contains { $0.operation == .activate && $0.stage == .presentation && $0.outcome == .failed })
+            #expect(!imported.contains { $0.operation == .recover })
+            #expect(await owner.close())
+        } catch { _ = await owner.close(); throw error }
     }
 
     @Test func zeroCapacityRefusesCopyAndDoesNotCreateBackupParents() async throws {
@@ -351,6 +388,8 @@ extension ReviewCollectionStartupTests {
         try files.copyItem(at: #require(Bundle.module.url(forResource: "schema-18", withExtension: "anki2")),
                            to: directory.appending(path: "collection.anki2"))
         var configuration = LaunchConfiguration()
+        var observations: [FieldDiagnosticObservation] = []
+        configuration.recordDiagnostic = { observations.append($0) }
         configuration.collectionLocation = AppModel.CollectionLocation(directory: directory)
         configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600))
         // Keep the real committed receipt outside the service's delivered
@@ -384,6 +423,9 @@ extension ReviewCollectionStartupTests {
                 ? .outcomePending : .outcomeReadFailed(.internal("synthetic outcome read failure"))))
             #expect(!failure.candidateActive && failure.generation == nil && failure.backup == nil)
             #expect(failure.media == nil && failure.mediaRecoveryReference == nil && failure.completedActivation == nil)
+            let imported = observations.filter { $0.component == .collectionImport }
+            #expect(imported.filter { $0.operation == .activate && $0.stage == .activation }.map(\.outcome) == [.unknown])
+            #expect(!imported.contains { $0.operation == .recover || $0.operation == .activate && $0.outcome == .succeeded })
             #expect(entry.lastActivation == nil && entry.requiresRecovery && failure.requiresReopenRecovery)
             #expect(!entry.canChoose && !entry.canCancel && !entry.canContinueRecovery)
             #expect(!owner.entryAllowed && !owner.manualAllowed && !owner.canStudy)
@@ -457,7 +499,7 @@ nonisolated enum EntrySyncOutcome: CaseIterable, Equatable, Sendable { case repl
 
 private nonisolated struct EntryGatedActivationService: CollectionEntryService {
     let before: @MainActor @Sendable (CollectionEntryOperation) async -> Void
-    let after: @MainActor @Sendable () -> Void
+    let after: @MainActor @Sendable () async -> Void
     private let core = CoreCollectionEntryService()
     func inspect(source: URL, location: CoreBridge.CollectionLocation, operation: CollectionEntryOperation,
                  progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> InspectedCollection {

@@ -6,6 +6,8 @@ import SwiftUI
 /// from the launch arguments before the first scene appears (R1963). Nothing
 /// here knows about the hooks.
 public struct LaunchConfiguration {
+    public var recordDiagnostic: FieldDiagnosticRecorder = { _ in }
+    public var fieldDiagnostics: FieldDiagnosticsCallbacks?
     public var nativeReviewInput: NativeReviewInput?
     public var clock: AppClock = .system
     public var collectionLocation: CollectionLocation = .standard

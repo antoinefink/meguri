@@ -501,6 +501,11 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String, tr
     private(set) var backends: [ServiceAppBackend] = []
     var observeOwn: (@Sendable (CloudOwnObservation) -> Void)?
     var ownTransport: (any CloudOwnTransport)?
+    // Install before preparation and carry observation across real backend
+    // handoffs. This callback never drives policy or owns issued capabilities.
+    var onCommands: (@MainActor ([CloudPolicyCommand]) -> Void)? {
+        didSet { for backend in backends { backend.onCommands = onCommands } }
+    }
     // Test-owned admission before a new native backend can resume work.
     var beforeBackend: (@MainActor () async throws -> Void)?
     lazy var sync = makeSync()
@@ -534,6 +539,7 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String, tr
             try await beforeBackend?()
             let backend = try await ServiceAppBackend.make(wire: wire, factory: factory, persisted: persisted, observeOwn: observeOwn, ownTransport: ownTransport)
             backend.causalTrace = causalTrace
+            backend.onCommands = onCommands
             backends.append(backend)
             return backend
         }, defaults: defaults, clock: .system, directory: nil, observeSignals: false)

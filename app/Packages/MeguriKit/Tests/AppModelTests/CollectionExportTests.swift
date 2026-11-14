@@ -25,6 +25,8 @@ extension ReviewCollectionStartupTests {
         let root = files.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? files.removeItem(at: root) }
         var configuration = LaunchConfiguration()
+        var observations: [FieldDiagnosticObservation] = []
+        configuration.recordDiagnostic = { observations.append($0) }
         configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
         configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600)); configuration.timeZone = TimeZone(secondsFromGMT: 0)
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
@@ -59,6 +61,8 @@ extension ReviewCollectionStartupTests {
             coordinator.chooseDestination(); await coordinator.waitForCompletion()
             coordinator.save(to: saved); await coordinator.waitForCompletion()
             #expect(coordinator.stage == .saved && files.fileExists(atPath: saved.path))
+            #expect(observations.contains { $0.component == .collectionExport && $0.stage == .preparation && $0.outcome == .succeeded })
+            #expect(observations.contains { $0.component == .collectionExport && $0.stage == .publication && $0.outcome == .succeeded })
             let location = CoreBridge.CollectionLocation(collectionDirectory: configuration.collectionLocation.directory,
                 backupsDirectory: configuration.collectionLocation.backupsDirectory,
                 appGroupSnapshot: root.appending(path: "widget"))
@@ -147,6 +151,8 @@ extension ReviewCollectionStartupTests {
         let root = files.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? files.removeItem(at: root) }
         var configuration = LaunchConfiguration()
+        var observations: [FieldDiagnosticObservation] = []
+        configuration.recordDiagnostic = { observations.append($0) }
         configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
         configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600)); configuration.timeZone = TimeZone(secondsFromGMT: 0)
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
@@ -155,7 +161,7 @@ extension ReviewCollectionStartupTests {
         owner.entry.inspect(source); await owner.entry.waitForCompletion()
         owner.entry.confirm(); await owner.entry.waitForCompletion()
         let failNext = Mutex(true)
-        let coordinator = CollectionExportCoordinator(owner: owner, service: CoreCollectionExportService(), finishLease: { lease in
+        let coordinator = CollectionExportCoordinator(owner: owner, service: CoreCollectionExportService(), recordDiagnostic: configuration.recordDiagnostic, finishLease: { lease in
             if failNext.withLock({ fail in let previous = fail; fail = false; return previous }) {
                 throw BridgeError.unavailable(reason: "synthetic completion interruption")
             }
@@ -183,6 +189,9 @@ extension ReviewCollectionStartupTests {
             #expect(coordinator.message?.contains("Retry cleanup") == true)
             #expect(coordinator.stage == (saved ? .saved : .ready))
             #expect(files.fileExists(atPath: destination.path) == saved)
+            let exportObservations = observations.filter { $0.component == .collectionExport }
+            #expect(exportObservations.map(\.stage) == [.preparation, .publication, .cleanup])
+            #expect(exportObservations.map(\.outcome) == [.succeeded, saved ? .succeeded : .cancelled, .cleanupPending])
             coordinator.chooseDestination()
             #expect(!coordinator.destinationPresented && coordinator.providerLease === lease)
             await coordinator.discard()

@@ -16,6 +16,7 @@ public final class CollectionExportCoordinator {
     public private(set) var providerLease: CollectionExportReadLease?
     private weak var owner: ReviewCollection?
     private let service: any CollectionExportService
+    private let recordDiagnostic: FieldDiagnosticRecorder
     private let finishLease: @Sendable (CollectionExportReadLease) async throws -> Void
     private var completionMessage: String?
     public private(set) var completionRetryNeeded = false
@@ -43,8 +44,10 @@ public final class CollectionExportCoordinator {
         return "Preparing collection export…"
     }
     init(owner: ReviewCollection, service: any CollectionExportService,
+         recordDiagnostic: @escaping FieldDiagnosticRecorder = { _ in },
          finishLease: @escaping @Sendable (CollectionExportReadLease) async throws -> Void = { try await $0.finish() }) {
         self.owner = owner; self.service = service; self.finishLease = finishLease
+        self.recordDiagnostic = recordDiagnostic
     }
     public var canPresent: Bool { owner?.exportAllowed == true && !busy }
     public func present() {
@@ -63,7 +66,11 @@ public final class CollectionExportCoordinator {
                     try? await output.discard(); throw BridgeError.staleGeneration(planned: generation, current: owner.generation)
                 }
                 artifact = output; stage = .ready
-            } catch { report(error, destination: false) }
+                recordDiagnostic(.init(component: .collectionExport, operation: .prepare, stage: .preparation, outcome: .succeeded))
+            } catch {
+                recordDiagnostic(.init(component: .collectionExport, operation: .prepare, stage: .preparation, outcome: .failed, failure: .other))
+                report(error, destination: false)
+            }
             self.operation = nil; task = nil; progress = nil
         }
     }
@@ -90,6 +97,7 @@ public final class CollectionExportCoordinator {
                 destinationPresented = true
                 stage = .ready
             } catch {
+                recordDiagnostic(.init(component: .collectionExport, operation: .publish, stage: .admission, outcome: .failed, failure: .other))
                 report(error, destination: true)
                 await finishProvider()
             }
@@ -105,7 +113,12 @@ public final class CollectionExportCoordinator {
             do {
                 try await service.save(artifact, to: url, operation: operation)
                 stage = .saved; message = nil
-            } catch { report(error, destination: true) }
+                recordDiagnostic(.init(component: .collectionExport, operation: .publish, stage: .publication, outcome: .succeeded))
+            } catch {
+                report(error, destination: true)
+                recordDiagnostic(.init(component: .collectionExport, operation: .publish, stage: .publication,
+                    outcome: publicationUncertain ? .unknown : .failed, failure: .other))
+            }
             await finishProvider()
             self.operation = nil; task = nil
         }
@@ -125,6 +138,8 @@ public final class CollectionExportCoordinator {
         // The engine slot prevents generation replacement throughout selection/copy.
         task = Task {
             stage = saved ? .saved : (stale ? .failed : .ready)
+            recordDiagnostic(.init(component: .collectionExport, operation: .publish, stage: .publication,
+                outcome: saved ? .succeeded : .cancelled))
             if saved {
                 message = stale ? "A copy of the earlier collection was saved. Prepare a new export for the current collection." : nil
             }
@@ -137,6 +152,8 @@ public final class CollectionExportCoordinator {
         destinationPresented = false; stage = .saving
         task = Task {
             report(error, destination: true)
+            recordDiagnostic(.init(component: .collectionExport, operation: .publish, stage: .publication,
+                outcome: publicationUncertain ? .unknown : .failed, failure: .other))
             await finishProvider()
             task = nil
         }
@@ -149,9 +166,11 @@ public final class CollectionExportCoordinator {
         do {
             try await finishLease(lease)
             providerLease = nil; completionRetryNeeded = false
+            recordDiagnostic(.init(component: .collectionExport, operation: .cleanup, stage: .cleanup, outcome: .succeeded))
             message = completionMessage; completionMessage = nil
         } catch {
             completionRetryNeeded = true
+            recordDiagnostic(.init(component: .collectionExport, operation: .cleanup, stage: .cleanup, outcome: .cleanupPending, failure: .other))
             message = stage == .saved
                 ? "The file was saved. Export cleanup is pending. Retry cleanup before starting another export."
                 : "Native file access has ended, but export cleanup is pending. Retry cleanup to continue."

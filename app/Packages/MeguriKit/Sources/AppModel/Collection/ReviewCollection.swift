@@ -79,7 +79,7 @@ public final class ReviewCollection: ChangeFanoutSink {
     private var entryOwner: CollectionEntryCoordinator?
     public var entry: CollectionEntryCoordinator {
         if let entryOwner { return entryOwner }
-        let value = CollectionEntryCoordinator(owner: self, service: entryService)
+        let value = CollectionEntryCoordinator(owner: self, service: entryService, recordDiagnostic: configuration.recordDiagnostic)
         entryOwner = value
         return value
     }
@@ -338,7 +338,7 @@ public final class ReviewCollection: ChangeFanoutSink {
     private let exportService: any CollectionExportService
     public var collectionExport: CollectionExportCoordinator {
         if let exportOwner { return exportOwner }
-        let value = CollectionExportCoordinator(owner: self, service: exportService)
+        let value = CollectionExportCoordinator(owner: self, service: exportService, recordDiagnostic: configuration.recordDiagnostic)
         exportOwner = value
         return value
     }
@@ -413,7 +413,8 @@ public final class ReviewCollection: ChangeFanoutSink {
         }
         self.exportService = exportService ?? CoreCollectionExportService()
         self.configuration = configuration; self.navigation = navigation
-        self.sync = sync ?? SyncCoordinator(directory: configuration.collectionLocation.directory, clock: configuration.clock)
+        self.sync = sync ?? SyncCoordinator(directory: configuration.collectionLocation.directory, clock: configuration.clock,
+            recordDiagnostic: configuration.recordDiagnostic)
         self.entryService = entryService ?? CoreCollectionEntryService(clock: LaunchCollectionClock(clock: configuration.clock, zone: configuration.timeZone),
             inspectionSeed: { [input = configuration.nativeReviewInput] in
                 if let input { return try await input.inspectionSeed() }
@@ -439,6 +440,7 @@ public final class ReviewCollection: ChangeFanoutSink {
     private func openCollection() async {
         opening = true; state = .loading; error = nil; closed = false; releasedManualHostState = nil
         defer { opening = false }
+        configuration.recordDiagnostic(.init(component: .startup, operation: .open, stage: .requested, outcome: .observed))
         #if DEBUG
         var openPhase = OpenFailureDiagnostic.Phase.platformPreparation
         #endif
@@ -453,7 +455,11 @@ public final class ReviewCollection: ChangeFanoutSink {
             openPhase = .pathPreparation
             #endif
             let location = try await Self.prepareOpenLocation(configuration.collectionLocation)
-            guard await Self.exists(configuration.collectionLocation.collectionFile) else { state = .noFile; return }
+            guard await Self.exists(configuration.collectionLocation.collectionFile) else {
+                state = .noFile
+                configuration.recordDiagnostic(.init(component: .startup, operation: .open, stage: .admission, outcome: .refused, failure: .unavailable))
+                return
+            }
             #if DEBUG
             openPhase = .seedPreparation
             #endif
@@ -469,11 +475,12 @@ public final class ReviewCollection: ChangeFanoutSink {
             #else
             try await collection.startOpen(location, randomSeed: seed).value()
             #endif
-            try await completeOpenedHost(loadRecord: true)
+            try await completeStartupHost()
             #if DEBUG
             openFailureDiagnosticValue = nil
             #endif
         } catch {
+            configuration.recordDiagnostic(.init(component: .startup, operation: .open, stage: .activation, outcome: .failed, failure: .other))
             let message = Self.openExplanation(error)
             state = .failed(message); self.error = message
             #if DEBUG
@@ -483,6 +490,14 @@ public final class ReviewCollection: ChangeFanoutSink {
             openFailureDiagnosticValue = OpenFailureDiagnostic.value(phase: openPhase, error: error, lifecycle: snapshot)
             #endif
         }
+    }
+    // Also used by focused tests with the real retained lifecycle, including
+    // the nonthrowing unavailable exit of host completion.
+    func completeStartupHost() async throws {
+        try await completeOpenedHost(loadRecord: true)
+        let ready = state == .ready && lifecycle == .ready(generation: generation)
+        configuration.recordDiagnostic(.init(component: .startup, operation: .open, stage: .activation,
+            outcome: ready ? .succeeded : .unknown, failure: ready ? nil : .unavailable))
     }
     private func subscribe() async throws {
         try await ChangeFanout.shared.subscribe(self)
@@ -974,7 +989,8 @@ public final class ReviewCollection: ChangeFanoutSink {
             if goToDeckAdmission == nil { previousRecord = nil }
             let model = ReviewCoordinator(deckID: deckID, surface: makeReviewSurface(resolver),
                 store: records, clock: configuration.clock, client: reviewSessionClient,
-                nativeInput: configuration.nativeReviewInput, nativeGeneration: expected)
+                nativeInput: configuration.nativeReviewInput, nativeGeneration: expected,
+                recordDiagnostic: configuration.recordDiagnostic)
             model.nativeInputEligibility = { [weak self, weak model] in
                 guard let self, let model else { return false }
                 return self.generation == expected && self.reviewIsActive && self.foreground &&
