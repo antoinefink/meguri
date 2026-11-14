@@ -55,3 +55,20 @@ boundary tests; original history stays complete. Source privacy passes at
 Independent review `cleanroom/20261114T160706Z-17646` is running. Native
 bindings, the changed store callbacks and UI still need verification. This is
 WIP and changes no sync decisions.
+
+## Native view draft
+
+Author: `cleanroom/20261114T155858Z-12586`; independent review:
+`cleanroom/20261114T161259Z-23781`. No P0/P1 found by source inspection.
+Three P2 items remain: refresh admission, callback owner identity and lengthy
+introductory copy. The view is not mounted in normal Settings yet.
+
+Native build `swift-test/20261114T161408Z-25019` fails catalog symbol
+generation for a formatting-only key. No native test pass is claimed for
+that run. The next source pass fixes the catalog, view findings and the
+remaining read-only export refinements before normal app wiring.
+
+Export review `cleanroom/20261114T160706Z-17646` found no P0/P1, with
+three P2 defects (failed-write persistence, authority publication on read,
+no-host initialization) and a production mapping coverage gap. All remain
+explicitly pending.
