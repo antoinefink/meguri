@@ -306,6 +306,7 @@ public final class SyncCoordinator {
         case resultReduced(command: UInt64?, read: UInt64?, cancellation: Bool, shutdownOwned: Bool, before: UInt64, after: UInt64)
         case resumeEntered, resumeReturned, resumeRefused(authorityChanged: Bool), resumeCancelled
         case ownCoreStarted
+        case ownDrainWaiting(UUID), ownDrainJoined(UUID)
         case dependencyRevocationJoined(UUID)
         case corePredecessorWaiting(CloudPolicyCommand), corePredecessorReleased(CloudPolicyCommand)
     }
@@ -2120,7 +2121,14 @@ public final class SyncCoordinator {
         repeat {
             let originals = Array(operationTasks.values)
             for task in originals { await task.value }
+            #if DEBUG
+            let drainingOwner = ownOwner
+            if let drainingOwner { observeCausalBoundary?(.ownDrainWaiting(drainingOwner), nil) }
+            #endif
             await ownTask?.value
+            #if DEBUG
+            if let drainingOwner { observeCausalBoundary?(.ownDrainJoined(drainingOwner), nil) }
+            #endif
             await waitForInputs()
         } while !operationTasks.isEmpty || ownTask != nil
     }

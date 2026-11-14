@@ -2193,3 +2193,179 @@ fn bridge_failed_active_attempt_can_cancel_after_original_delivery() {
     assert!(store.publication_op().unwrap().is_none());
     assert!(store.binding(submitted.binding_after.unwrap()).unwrap().is_none());
 }
+
+// P4/V15.3: cancellation deletes the publication binding before the next
+// cloud refresh issues its stop. Keep the actual SDK and retained Host alive.
+fn post_cancel_unbound_stop() -> (
+    Fixture,
+    Arc<crate::cloud_policy::CloudPolicy>,
+    meguri_sync::cloud::policy::Command,
+    String,
+) {
+    use meguri_sync::cloud::policy as policy;
+    let fixture = Fixture::new(Keys::new([
+        Some(vec![31; 32]), Some(vec![47; 32]), Some(vec![53; 32]), Some(vec![59; 32]),
+    ]));
+    let facade = fixture.workflow.policy().unwrap();
+    let (connection, request) = active_request(&fixture);
+    let sdk = fixture.workflow.core.incoming_sdk_instance_for_testing().unwrap();
+    assert!(connection
+        .submit_publication_request(request.clone(), Arc::new(Queue(AtomicUsize::new(0))))
+        .unwrap());
+    connection
+        .publication_result(request, CloudPublicationResult::Failed { retry_after_ms: None })
+        .unwrap();
+    let recovery = connection.recovery_status().unwrap().unwrap();
+    assert!(recovery.switch_sent && recovery.publication_cancellable);
+    connection.cancel_operation(recovery.operation).unwrap();
+    assert!(connection.recovery_status().unwrap().is_none());
+    let backend = fixture.workflow.core.adapter_guard();
+    assert_eq!(backend.generation, 0);
+    assert!(backend.binding.is_empty());
+    let command = fixture.workflow.host
+        .cloud_policy_input(policy::DeviceEvent::Refresh(policy::ChangeCause::Cloud))
+        .unwrap()
+        .into_iter()
+        .find(|c| matches!(c.action.kind, policy::ActionKind::StopEngine { reason: policy::StopReason::GateClosed }))
+        .expect("refresh-issued post-cancel StopEngine");
+    assert_eq!(command.action.guard.generation, fixture.workflow.host.cloud_connection_generation().unwrap().0);
+    assert!(command.action.guard.generation > 0);
+    assert!(command.action.guard.binding.is_none() && command.owner.is_empty());
+    assert_eq!(fixture.workflow.core.incoming_sdk_instance_for_testing(), Some(sdk.clone()));
+    (fixture, facade, command, sdk)
+}
+
+fn stop_handle(
+    policy: &Arc<crate::cloud_policy::CloudPolicy>,
+    command: meguri_sync::cloud::policy::Command,
+) -> Arc<crate::cloud_policy::CloudPolicyCommand> {
+    let crate::cloud_policy::CloudPolicyOutput::Commands { mut commands } = policy.output(Ok(vec![command])).unwrap() else {
+        panic!("issued stop handle")
+    };
+    commands.pop().unwrap().handle
+}
+
+#[test]
+fn post_cancel_unbound_stop_prepares_validates_and_retires_only_original_sdk() {
+    use meguri_sync::cloud::policy as policy;
+    let (fixture, facade, command, sdk) = post_cancel_unbound_stop();
+    let driver = fixture.workflow.host.cloud_policy_driver().unwrap();
+    driver.validate(&command).unwrap();
+    assert!(matches!(driver.retire_native_sdk(&command, "other-sdk"), Err(policy::DriverError::StaleCommand)));
+    assert_eq!(fixture.workflow.core.incoming_sdk_instance_for_testing(), Some(sdk.clone()));
+    let execution = facade.clone().prepare_execution(stop_handle(&facade, command)).unwrap().unwrap();
+    assert_eq!(execution.original_sdk().unwrap(), Some(sdk.clone()));
+    execution.validate_control().unwrap();
+    execution.retire_original().unwrap();
+    // Match native ownership: cancel/drain precedes release and EngineStopped.
+    fixture.workflow.release_sdk(sdk).unwrap();
+    facade.clone().input(crate::cloud_policy::CloudPolicyEvent::Refresh {
+        cause: crate::cloud_policy::CloudPolicyChangeCause::Cloud,
+    }).unwrap();
+    assert!(fixture.workflow.core.incoming_sdk_instance_for_testing().is_none());
+    assert!(driver.state().engine.is_none());
+    fixture.workflow.host.close().unwrap();
+}
+
+#[test]
+fn post_cancel_unbound_stop_preserves_exact_guards_and_command_constraints() {
+    use meguri_sync::cloud::{policy, BindingId};
+    let (fixture, facade, command, sdk) = post_cancel_unbound_stop();
+    let driver = fixture.workflow.host.cloud_policy_driver().unwrap();
+    driver.validate(&command).unwrap();
+    for invalidation in 0..5 {
+        let mut invalid = command.clone();
+        match invalidation {
+            0 => invalid.action.guard.token += 1,
+            1 => invalid.action.guard.generation += 1,
+            2 => invalid.action.guard.binding = Some(BindingId([7; 16])),
+            3 => invalid.owner = "other-opening".into(),
+            4 => invalid.action.kind = policy::ActionKind::RequestFetch { zones: vec![policy::Zone::Root] },
+            _ => unreachable!(),
+        }
+        assert!(matches!(driver.validate(&invalid), Err(policy::DriverError::StaleCommand)), "case {invalidation}");
+    }
+    let mut wrong_action = command.clone();
+    wrong_action.action.kind = policy::ActionKind::PauseMedia;
+    assert!(matches!(driver.retire_native_sdk(&wrong_action, &sdk), Err(policy::DriverError::NotCoreAction)));
+    let execution = facade.clone().prepare_execution(stop_handle(&facade, command.clone())).unwrap().unwrap();
+    let policy_guard = driver.state().guard();
+    let backend = fixture.workflow.core.adapter_guard();
+    fixture.workflow.core.adapter_pause(true).unwrap();
+    let changed = fixture.workflow.core.adapter_guard();
+    assert_eq!(changed.generation, backend.generation);
+    assert_eq!(changed.binding, backend.binding);
+    assert!(changed.token > backend.token);
+    assert_eq!(driver.state().guard(), policy_guard);
+    assert!(matches!(driver.validate(&command), Err(policy::DriverError::StaleCommand)));
+    assert!(matches!(execution.validate_control(), Err(CoreError::CloudPolicy {
+        failure: crate::cloud_policy::CloudPolicyFailure::StaleCommand,
+    })));
+    assert!(matches!(execution.retire_original(), Err(CoreError::CloudPolicy {
+        failure: crate::cloud_policy::CloudPolicyFailure::StaleCommand,
+    })));
+    assert!(matches!(facade.clone().prepare_execution(stop_handle(&facade, command)), Err(CoreError::CloudPolicy {
+        failure: crate::cloud_policy::CloudPolicyFailure::StaleCommand,
+    })));
+    assert_eq!(fixture.workflow.core.incoming_sdk_instance_for_testing(), Some(sdk));
+    fixture.workflow.host.close().unwrap();
+}
+
+#[test]
+fn post_cancel_unbound_stop_rejects_account_binding_generation_close_and_other_host() {
+    use crate::cloud_policy::CloudPolicyFailure as Failure;
+    for invalidation in 0..5 {
+        let (fixture, facade, command, _) = post_cancel_unbound_stop();
+        let handle = stop_handle(&facade, command);
+        let execution = facade.clone().prepare_execution(handle.clone()).unwrap().unwrap();
+        let mut other = None;
+        let expected = match invalidation {
+            0 => {
+                let driver = fixture.workflow.host.cloud_policy_driver().unwrap();
+                let before = driver.state().guard();
+                facade.clone().refresh_account().unwrap();
+                assert_ne!(driver.state().guard(), before);
+                Failure::StaleCommand
+            }
+            1 => {
+                let connection = fixture.workflow.connection().unwrap();
+                connection.confirm_publication(ready(&connection)).unwrap();
+                let _ = own(&connection); // Settle the actual Bind and sidecar work.
+                assert!(!fixture.workflow.core.adapter_guard().binding.is_empty());
+                Failure::StaleCommand
+            }
+            2 => {
+                let engine = fixture.workflow.host.engine();
+                let slot = engine.acquire_slot(meguri_engine::LongOp::Restore).unwrap();
+                let mut exclusive = slot.enter_exclusive(true).unwrap();
+                exclusive.replace(|path| { assert!(path.exists()); Ok(()) }).unwrap();
+                Failure::GenerationChanged
+            }
+            3 => {
+                fixture.workflow.host.close().unwrap();
+                Failure::Closed
+            }
+            4 => {
+                let successor = Fixture::new(keys());
+                assert!(matches!(successor.workflow.policy().unwrap().prepare_execution(handle.clone()),
+                    Err(CoreError::CloudPolicy { failure: Failure::WrongOwner })));
+                other = Some(successor);
+                // The original command still belongs to its live Host.
+                execution.validate_control().unwrap();
+                fixture.workflow.host.close().unwrap();
+                Failure::Closed
+            }
+            _ => unreachable!(),
+        };
+        for result in [
+            facade.clone().prepare_execution(handle).map(|_| ()),
+            execution.validate_control(),
+            execution.retire_original(),
+        ] {
+            let Err(CoreError::CloudPolicy { failure }) = result else { panic!("old stop admitted: case {invalidation}") };
+            assert_eq!(failure, expected);
+        }
+        if invalidation < 3 { fixture.workflow.host.close().unwrap(); }
+        if let Some(other) = other { other.workflow.host.close().unwrap(); }
+    }
+}

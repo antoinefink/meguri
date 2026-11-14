@@ -36,7 +36,9 @@ extension ReviewCollectionStartupTests {
             a.ownTransport = SelectedHeldSwitchTransport(original: ServiceOwnTransport(wire: wire),
                 beforeSwitch: beforeSwitch, switchReply: switchReply, loseReply: mode == 1)
             let activeCommitted = Mutex(false)
+            let originalReplies = SelectedBootstrapReplies()
             a.observeOwn = { observation in
+                originalReplies.record(observation)
                 if case .saveActive = observation.metadata.kind, case .committed = observation.phase {
                     activeCommitted.withLock { $0 = true }
                 }
@@ -69,47 +71,100 @@ extension ReviewCollectionStartupTests {
             #expect(!activeCommitted.withLock { $0 })
             // confirmPublication's first slice may finish at sendEntities. Join
             // the actual current/successor owner and its command/input ACKs.
-            let drainStarted = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let originalGuard = try await backend.workflow.currentGuard()
+            let originalSnapshot = try await backend.workflow.durableSnapshot()
+            let originalSDK = try #require(await a.factory.engines.last)
+            let sdkCancels = Mutex(0)
+            await originalSDK.inspectNextCancellation { sdkCancels.withLock { $0 += 1 } }
+            let drainAdmitted = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
             let drainFinished = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
-            var drained = false
-            ownDrain = Task {
-                drainStarted.continuation.yield(true); drainStarted.continuation.finish()
-                await a.sync.drainOperations()
-                drained = true
-                drainFinished.continuation.yield(true); drainFinished.continuation.finish()
-            }
-            try #require(try await serviceAppSignal(drainStarted.stream, stage: "current SaveActive own drain started"))
-            #expect(!drained)
+            let drained = Mutex(false), releasedOriginal = Mutex(false)
+            let joinedOwner = Mutex<UUID?>(nil)
+            let ownerJoined = Mutex(false)
+            let projectedAccount = Mutex(false), acceptedAccount = Mutex(false)
+            let oldOwnerBookkeeping = Mutex(false)
+            let changedRead = Mutex<UInt64?>(nil)
             let accountPending = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
             let accountFinished = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
-            let releasedOriginal = Mutex(false)
-            var projectedAccount = false, acceptedAccount = false
+            a.sync.observeCausalBoundary = { boundary, _ in
+                switch boundary {
+                case .ownDrainWaiting(let owner) where joinedOwner.withLock({ $0 == nil }):
+                    // This event is inside drainOperations, immediately before
+                    // awaiting the current SaveActive owner, not an outer Task.
+                    joinedOwner.withLock { $0 = owner }
+                    #expect(a.sync.connectionOperationActive)
+                    #expect(!releasedOriginal.withLock { $0 })
+                    #expect(!switchReply.replyReturned)
+                    #expect(!activeCommitted.withLock { $0 })
+                    #expect(switchReply.enqueues == 1)
+                    drainAdmitted.continuation.yield(true); drainAdmitted.continuation.finish()
+                case .ownDrainJoined(let owner) where joinedOwner.withLock({ $0 == owner }):
+                    #expect(releasedOriginal.withLock { $0 })
+                    #expect(switchReply.replyReturned)
+                    #expect(activeCommitted.withLock { $0 } == (mode != 1))
+                    ownerJoined.withLock { $0 = true }
+                case .accountCompletion(let read, let followup, _, _, _, _, let admitted, _, _, _, _)
+                    where mode >= 2 && admitted && !followup && changedRead.withLock({ $0 == nil }):
+                    changedRead.withLock { $0 = read }
+                    #expect(releasedOriginal.withLock { $0 })
+                    #expect(activeCommitted.withLock { $0 })
+                    #expect(oldOwnerBookkeeping.withLock { $0 })
+                    projectedAccount.withLock { $0 = true }
+                case .accountAccepted(let read, let verified, let succeeded)
+                    where changedRead.withLock({ $0 == read }):
+                    #expect(projectedAccount.withLock { $0 })
+                    #expect(!verified)
+                    #expect(succeeded == (mode != 2))
+                    acceptedAccount.withLock { $0 = true }
+                    accountFinished.continuation.yield(true); accountFinished.continuation.finish()
+                default: break
+                }
+            }
+            // Existing async execution seam: this actual command's ACK fences
+            // account admission while the fixture reads original Core facts.
+            // No async Core call is made from a record-only observation.
+            backend.beforeExecution = { command in
+                guard mode >= 2, case .statusChanged = command.action,
+                      activeCommitted.withLock({ $0 }), !oldOwnerBookkeeping.withLock({ $0 }) else { return }
+                do {
+                    #expect(!projectedAccount.withLock { $0 })
+                    let saved = try await SelectedCloudControlInspection().current()
+                    let complete = try #require(saved.publicationComplete)
+                    let done = try #require(saved.publicationDoneActive)
+                    try originalReplies.requireOriginalCommit(complete, before: done)
+                    #expect(done.origin == .saved)
+                    #expect(saved.status == .proven && saved.provenance == .runtimeAcceptedPublication)
+                    #expect(saved.bindingMatchesEpoch == .proven && saved.requiredScanComplete)
+                    let currentGuard = try await backend.workflow.currentGuard()
+                    let snapshot = try await backend.workflow.durableSnapshot()
+                    let policy = try await backend.workflow.policy()
+                    let status = try await policy.status()
+                    #expect(currentGuard == originalGuard)
+                    #expect(snapshot.binding == originalSnapshot.binding)
+                    #expect(status.accountStatus == .available && status.accountMatchesBinding)
+                    #expect(a.owner.generation == originalGeneration)
+                    #expect(try a.backend === backend)
+                    #expect(!projectedAccount.withLock { $0 })
+                    oldOwnerBookkeeping.withLock { $0 = true }
+                } catch { Issue.record(error) }
+            }
+            ownDrain = Task {
+                await a.sync.drainOperations()
+                #expect(ownerJoined.withLock { $0 })
+                drained.withLock { $0 = true }
+                drainFinished.continuation.yield(true); drainFinished.continuation.finish()
+            }
+            try #require(try await serviceAppSignal(drainAdmitted.stream, stage: "drain actually awaiting current SaveActive owner"))
+            #expect(!drained.withLock { $0 })
             a.sync.observeAccountPolicyDrain = { stage in
                 if case .waiting = stage { accountPending.continuation.yield(true) }
-            }
-            if mode >= 2 {
-                var changedRead: UInt64?
-                a.sync.observeCausalBoundary = { boundary, _ in
-                    if case .accountCompletion(let read, let followup, _, _, _, _, let admitted, _, _, _, _) = boundary,
-                       admitted, !followup, changedRead == nil {
-                        changedRead = read
-                        #expect(releasedOriginal.withLock { $0 })
-                        #expect(activeCommitted.withLock { $0 })
-                        projectedAccount = true
-                    }
-                    if case .accountAccepted(let read, let verified, let succeeded) = boundary, read == changedRead {
-                        #expect(projectedAccount)
-                        #expect(!verified)
-                        #expect(succeeded == (mode != 2))
-                        acceptedAccount = true
-                        accountFinished.continuation.yield(true); accountFinished.continuation.finish()
-                    }
-                }
             }
             defer {
                 a.sync.observeAccountPolicyDrain = nil; a.sync.observeCausalBoundary = nil
                 accountPending.continuation.finish(); accountFinished.continuation.finish()
+                drainAdmitted.continuation.finish(); drainFinished.continuation.finish()
                 backend.afterInput = nil; backend.beforeExecution = nil; backend.afterExecution = nil
+                backend.observeCoreCall = nil
             }
             if mode >= 2 {
                 let status: CloudAccountStatus = mode == 2 ? .temporarilyUnavailable : mode == 3 ? .noAccount : .available
@@ -119,8 +174,8 @@ extension ReviewCollectionStartupTests {
                 accountChange = Task { await a.sync.accountChanged() }
                 try #require(try await serviceAppSignal(accountPending.stream, stage: "live account BeginRead resolved, completion fenced by original SaveActive"))
                 #expect(await a.factory.accountReadCount == reads + 1)
-                #expect(!projectedAccount)
-                #expect(!acceptedAccount)
+                #expect(!projectedAccount.withLock { $0 })
+                #expect(!acceptedAccount.withLock { $0 })
             }
             let refused = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
             cancellation = Task {
@@ -137,7 +192,10 @@ extension ReviewCollectionStartupTests {
             await cancellation?.value
             #expect(coreCancels.withLock { $0 } == 0)
             #expect(switchReply.cancels == 0)
-            #expect(!drained)
+            #expect(!drained.withLock { $0 })
+            #expect(!ownerJoined.withLock { $0 })
+            #expect(!switchReply.replyReturned)
+            #expect(sdkCancels.withLock { $0 } == 0)
             #expect(a.sync.connectionOperationActive)
             #expect(switchReply.enqueues == 1)
             #expect(a.owner.generation == originalGeneration)
@@ -148,7 +206,7 @@ extension ReviewCollectionStartupTests {
             #expect(retained.switchSent)
             #expect(!retained.publicationCancellable)
             #expect(try await SelectedCloudControlInspection().current().publicationDoneActive == nil)
-            #expect(!projectedAccount)
+            #expect(!projectedAccount.withLock { $0 })
             releasedOriginal.withLock { $0 = true }
             switchReply.release() // Only the original matching callback may settle ownership.
             try #require(try await serviceAppSignal(drainFinished.stream, stage: "original SaveActive own drain and ACKs finished"))
@@ -160,7 +218,9 @@ extension ReviewCollectionStartupTests {
                 await a.sync.prepareConnectionAuthority()
             }
             await a.sync.waitForInputs(); await a.sync.drainOperations()
-            #expect(drained)
+            #expect(drained.withLock { $0 })
+            #expect(ownerJoined.withLock { $0 })
+            #expect(switchReply.replyReturned)
             #expect(!a.sync.connectionOperationActive)
             #expect(switchReply.cancels == 0)
             #expect(switchReply.enqueues == 1)
@@ -191,41 +251,30 @@ extension ReviewCollectionStartupTests {
                 #expect(SyncStatusPresentation.cancellationMessageKey(fresh.recovery) == "sync.cancelOp.publish.message.switchSent")
                 #expect(SyncText.value(SyncStatusPresentation.cancellationMessageKey(fresh.recovery))
                     != SyncText.value(SyncStatusPresentation.cancellationMessageKey(oldDialog.recovery)))
-                // Retain the actual issued StopEngine handles only. The native
-                // validate.generation-binding line supplies the original guard
-                // booleans between these execution begin/end trace entries.
-                let phase = Mutex(SelectedCancellationPhase.beforeCancel)
-                var refreshStop: (CloudPolicyCommand, SelectedCancellationPhase)?
-                var quitStop: (CloudPolicyCommand, SelectedCancellationPhase)?
-                backend.afterInput = { event, output in
-                    let commands: [CloudPolicyCommand]
-                    switch output {
-                    case .commands(let issued), .coreActionFailed(_, let issued): commands = issued
-                    default: return
-                    }
-                    for command in commands {
-                        guard case .stopEngine = command.action else { continue }
-                        switch event {
-                        case .refresh(.cloud) where refreshStop == nil: refreshStop = (command, phase.withLock { $0 })
-                        case .quitRequested where quitStop == nil: quitStop = (command, phase.withLock { $0 })
-                        default: break
-                        }
+                // Every input-issued raw handle stays retained through its
+                // original Core calls, result enqueue and ACK. Issued guards
+                // remain opaque; this trace claims only actual identity/origin.
+                let stopTrace = ServiceStopEngineTrace()
+                backend.afterInput = { stopTrace.input($0, output: $1) }
+                backend.beforeExecution = { stopTrace.record($0, at: .begin) }
+                backend.afterExecution = { command, result in
+                    stopTrace.record(command, at: .end, error: result.error != nil)
+                }
+                backend.observeCoreCall = { stopTrace.record($0, at: .core($1)) }
+                a.sync.observeCausalBoundary = { boundary, command in
+                    guard let command else { return }
+                    switch boundary {
+                    case .commandResultEnqueue: stopTrace.record(command, at: .resultEnqueue)
+                    case .commandAcknowledgementJoined: stopTrace.record(command, at: .acknowledgementJoined)
+                    default: break
                     }
                 }
-                let traceStop: @MainActor (CloudPolicyCommand, SelectedStopBoundary) -> Void = { command, boundary in
-                    guard case .stopEngine(let reason) = command.action else { return }
-                    let refresh = refreshStop.map { $0.0.raw === command.raw } == true
-                    let quit = quitStop.map { $0.0.raw === command.raw } == true
-                    let issued = refresh ? refreshStop?.1 : quit ? quitStop?.1 : nil
-                    backend.trace("heldActive.stopEngine boundary=\(boundary.rawValue) reason=\(reason) phase=\(phase.withLock { $0.rawValue }) issued=\(issued?.rawValue ?? "other") refreshCloud=\(refresh) quitRequested=\(quit) backendClosing=\(backend.closeEntered > 0) taskCancelled=\(Task.isCancelled)", emit: true)
-                }
-                backend.beforeExecution = { traceStop($0, .begin) }
-                backend.afterExecution = { command, _ in traceStop(command, .end) }
-                phase.withLock { $0 = .cancelling }
+                stopTrace.setPhase(.cancelling)
                 await MaintenanceCallObservation.$capture.withValue(observeCancel) {
                     await a.sync.cancelConnectionOperation(confirmation: fresh)
                 }
-                phase.withLock { $0 = .postCancelDrain }
+                stopTrace.setPhase(.cancelReturned)
+                stopTrace.setPhase(.postCancelDrain)
                 backend.trace("heldActive.phase=postCancelDrain", emit: true)
                 let postCancelFinished = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
                 postCancelDrain = Task {
@@ -240,15 +289,15 @@ extension ReviewCollectionStartupTests {
                 #expect(a.sync.recovery == nil)
                 #expect(try await connection.recoveryStatus() == nil)
                 #expect(try await SelectedCloudControlInspection().current().publicationDoneActive == nil)
-                phase.withLock { $0 = .closing }
+                stopTrace.setPhase(.closing)
                 backend.trace("heldActive.phase=closing", emit: true)
                 try #require(await a.owner.close())
             } else {
                 // BeginRead alone does not change owner (V9.1). The real lane
                 // commits this Saved result first, then admits account proof.
                 #expect(activeCommitted.withLock { $0 })
-                #expect(projectedAccount)
-                #expect(acceptedAccount)
+                #expect(projectedAccount.withLock { $0 })
+                #expect(acceptedAccount.withLock { $0 })
                 #expect(try await connection.recoveryStatus() == nil)
                 let changed = try await SelectedCloudControlInspection().current()
                 #expect(changed.status != .proven)
@@ -258,12 +307,63 @@ extension ReviewCollectionStartupTests {
                 }
                 #expect(a.sync.connectionFailure == .busy)
                 #expect(coreCancels.withLock { $0 } == 0)
-                // Restore through the same actual live reader after own drain.
-                a.sync.observeCausalBoundary = nil
+                let policy = try await backend.workflow.policy()
+                let changedStatus = try await policy.status()
+                #expect(changedStatus.accountStatus == (mode == 2 ? .temporary : mode == 3 ? .noAccount : .available))
+                #expect(changedStatus.syncNow != .available)
+                if mode == 2 { #expect(changedStatus.state == .iCloudUnavailable(.temporary)) }
+                else if mode == 3 { #expect(changedStatus.state == .iCloudUnavailable(.noAccount)) }
+                else { #expect(changedStatus.state == .needsAttention) }
+                await #expect(throws: (any Error).self) { try await backend.workflow.validateSDK(originalSDK.instanceID) }
+                // Restore via the actual provider/read completion. The accepted
+                // same-account proof does not itself reactivate isolation.
+                backend.beforeExecution = nil
+                let restoredRead = Mutex<UInt64?>(nil)
+                let restoredAccount = Mutex(false)
+                a.sync.observeCausalBoundary = { boundary, _ in
+                    switch boundary {
+                    case .accountCompletion(let read, let followup, _, _, _, _, let admitted, _, _, _, _)
+                        where admitted && !followup && restoredRead.withLock({ $0 == nil }):
+                        restoredRead.withLock { $0 = read }
+                    case .accountAccepted(let read, let verified, let succeeded)
+                        where restoredRead.withLock({ $0 == read }):
+                        #expect(verified && succeeded)
+                        restoredAccount.withLock { $0 = verified && succeeded }
+                    default: break
+                    }
+                }
+                let readsBeforeRestore = await a.factory.accountReadCount
                 await a.factory.resolveNextAccountRead(with: .success(.init(status: .available,
                     identity: Data("synthetic-initial-account".utf8))))
                 await a.sync.accountChanged(); await a.sync.prepareConnectionAuthority(); await a.sync.drainOperations()
+                #expect(await a.factory.accountReadCount == readsBeforeRestore + 1)
+                #expect(restoredAccount.withLock { $0 })
+                let restoredStatus = try await policy.status()
+                #expect(restoredStatus.accountStatus == .available)
+                // Isolation needs an explicit, binding-specific Resume. A
+                // temporary unavailable read only closed the account gate.
+                if mode >= 3 {
+                    try await a.owner.prepareCloudConnectionPreview()
+                    await a.sync.waitForConnectionPreview()
+                    guard case .ready(_, let resume) = a.sync.preview else { throw ServiceWorkflowFailure.wire }
+                    try #require(resume.decision == .confirmResume)
+                    #expect(resume.resumeBindingId == originalGuard.binding)
+                    await a.sync.confirmResume()
+                    await a.sync.prepareConnectionAuthority(); await a.sync.drainOperations()
+                }
+                let restoredGuard = try await backend.workflow.currentGuard()
+                #expect(restoredGuard.generation == originalGuard.generation && restoredGuard.binding == originalGuard.binding)
+                let restoredAuthority = try await policy.status()
+                #expect(restoredAuthority.accountStatus == .available && restoredAuthority.accountMatchesBinding)
+                #expect(restoredAuthority.controls.bindingUsable == true)
+                let restoredSDK = try #require(await a.factory.engines.last)
+                #expect(restoredSDK.instanceID != originalSDK.instanceID)
+                try await backend.workflow.validateSDK(restoredSDK.instanceID)
+                // No Sending-ready assertion: the resumed instance must still
+                // satisfy the production fresh-Root path before later sends.
                 #expect(switchReply.enqueues == 1)
+                #expect(switchReply.cancels == 0)
+                #expect(a.owner.generation == originalGeneration)
             }
             if mode != 1 { try #require(await a.owner.close()) }
             let exit = await process.close()
@@ -695,17 +795,14 @@ extension ReviewCollectionStartupTests {
     try replies.requireOriginalCommit(complete, before: done)
 }
 
-private nonisolated enum SelectedCancellationPhase: String {
-    case beforeCancel, cancelling, postCancelDrain, closing
-}
-private nonisolated enum SelectedStopBoundary: String { case begin, end }
-
 private nonisolated final class SelectedSwitchReplyGate: Sendable {
     let reached = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
     private let delivery = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
-    private let state = Mutex((enqueues: 0, cancels: 0))
+    private let state = Mutex((enqueues: 0, cancels: 0, replyReturned: false))
     var enqueues: Int { state.withLock { $0.enqueues } }
     var cancels: Int { state.withLock { $0.cancels } }
+    var replyReturned: Bool { state.withLock { $0.replyReturned } }
+    func returnedOriginalReply() { state.withLock { $0.replyReturned = true } }
     func enqueued() { state.withLock { $0.enqueues += 1 } }
     func cancelled() { state.withLock { $0.cancels += 1 } }
     func hold() async throws {
@@ -753,6 +850,7 @@ private nonisolated final class SelectedHeldSwitchOperation: CloudPreparedOwnOpe
             guard case .publication(.read(.found(_))) = reply else { throw ServiceWorkflowFailure.wire }
         }
         try await gate.hold()
+        defer { gate.returnedOriginalReply() }
         if loseReply { throw SelectedOriginalReplyLost() }
         return reply
     }

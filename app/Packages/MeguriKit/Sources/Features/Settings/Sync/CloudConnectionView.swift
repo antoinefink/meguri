@@ -61,7 +61,10 @@ public struct CloudConnectionView: View {
             if publicationPage, publication.refused {
                 Text(SyncText.value(publication.failure.map(SyncStatusPresentation.connectionErrorKey) ?? "sync.recovery.error.other"))
             } else if publicationPage {
-                if let key = publication.backgroundErrorKey {
+                if publication.accepted, let failure = sync.connectionFailure, case .busy = failure {
+                    Text(SyncText.value(SyncStatusPresentation.connectionErrorKey(failure)))
+                        .accessibilityIdentifier("sync.connect.failure")
+                } else if let key = publication.backgroundErrorKey {
                     Text(SyncText.value(key))
                         .accessibilityIdentifier("sync.publish.error")
                 } else if !submitted, !confirming, let failure = sync.connectionFailure {

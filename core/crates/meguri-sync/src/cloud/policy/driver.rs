@@ -1177,6 +1177,8 @@ impl Driver {
         // Unbound Runtime has no collection generation. Only Host control
         // work may use that issued zero/empty guard; the facade separately
         // validates its retained Host and current collection generation.
+        // StopEngine still retires only its pinned original SDK, even when
+        // publication cancellation has already removed the binding.
         let unbound_host = command.action.kind.host_only()
             && command.action.guard.binding.is_none()
             && command.owner.is_empty()

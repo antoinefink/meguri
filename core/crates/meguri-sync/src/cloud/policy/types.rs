@@ -481,7 +481,8 @@ impl ActionKind {
     pub(crate) fn host_only(&self) -> bool {
         matches!(
             self,
-            Self::ConfigureAutomatic { .. }
+            Self::StopEngine { .. }
+                | Self::ConfigureAutomatic { .. }
                 | Self::ArmFlushTimer { .. }
                 | Self::CancelFlushTimer
                 | Self::CancelExchange { .. }

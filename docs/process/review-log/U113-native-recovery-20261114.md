@@ -248,3 +248,9 @@ refresh during post-cancel drain, before close. It fails generation/binding
 validation. Independent review `200711Z-71640` retains two P1 coverage
 findings and one P2 trace finding. They require repair; this fixture and the
 unit are not accepted. No reported failure is suppressed.
+
+## Round 12
+
+See `U113-cancel-drain-r12-20261114.md` for the verified Core correction,
+the native failure and the remaining review work. Further repair is authorized
+by `repair-rounds-authorization-20261114.md`.
