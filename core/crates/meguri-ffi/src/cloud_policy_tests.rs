@@ -124,7 +124,7 @@ fn new_deck_and_ancestors_capture_once_during_original_sdk_account_read_and_real
             .input(CloudPolicyEvent::Network { reachable: true })
             .unwrap(),
     );
-    let (sdk, _, _) = fixture.baseline();
+    let (sdk, _, _) = fixture.baseline_with_accepted_epoch();
     drain(
         &policy,
         policy
@@ -390,7 +390,7 @@ fn new_deck_real_service_saved_ack_and_next_edit_keep_origin_revision_and_base()
         Caller, Config, Mutation, MutationSuccess, Operation, RecordInput, Reply, Scope, Service, SystemFields,
         coordinator::publication_control_record,
     };
-    let (fixture, sdk, _) = rig();
+    let (fixture, sdk, _) = rig_with_accepted_epoch();
     let collection = fixture.workflow.host.collection().unwrap();
     let added = meguri_engine::decks::add(&collection, "Service captured deck".into()).unwrap();
     fixture
@@ -558,8 +558,18 @@ fn rig_with_provider(identity: Arc<dyn r::IdentityProvider>) -> (Fixture, CloudE
     let (fixture, sdk, incoming, _) = rig_with_provider_and_deck(identity);
     (fixture, sdk, incoming)
 }
+fn rig_with_accepted_epoch() -> (Fixture, CloudEngineRegistration, CloudRecord) {
+    let (fixture, sdk, incoming, _) = rig_with_provider_and_deck_epoch(Arc::new(Account), true);
+    (fixture, sdk, incoming)
+}
 fn rig_with_provider_and_deck(
     identity: Arc<dyn r::IdentityProvider>,
+) -> (Fixture, CloudEngineRegistration, CloudRecord, meguri_model::ids::DeckId) {
+    rig_with_provider_and_deck_epoch(identity, false)
+}
+fn rig_with_provider_and_deck_epoch(
+    identity: Arc<dyn r::IdentityProvider>,
+    accept_epoch: bool,
 ) -> (Fixture, CloudEngineRegistration, CloudRecord, meguri_model::ids::DeckId) {
     let (fixture, deck) = unbound_fixture(identity);
     let policy = fixture.workflow.policy().unwrap();
@@ -573,7 +583,14 @@ fn rig_with_provider_and_deck(
             .input(CloudPolicyEvent::Network { reachable: true })
             .unwrap(),
     );
-    let (sdk, _, incoming) = fixture.baseline();
+    // Only positive callers accept the complete equal-crt control record via
+    // the original SDK. The helper asserts unchanged root/drain/cursor proof
+    // and no collection writes, incoming runs or inbox entries.
+    let (sdk, _, incoming) = if accept_epoch {
+        fixture.baseline_with_accepted_epoch()
+    } else {
+        fixture.baseline()
+    };
     drain(
         &policy,
         policy
@@ -1019,7 +1036,7 @@ fn policy_initial_automatic_bound_unverified_resume_waits_for_account_and_reconc
     for latest in [false, true] {
         let provider = Arc::new(ProjectionCountingAccount(AtomicUsize::new(0)));
         let (fixture, _) = unbound_fixture(provider.clone());
-        let (sdk, _, _) = fixture.baseline();
+        let (sdk, _, _) = fixture.baseline_with_accepted_epoch();
         fixture.workflow.retire_sdk(sdk.instance_id.clone(), false).unwrap();
         fixture.workflow.release_sdk(sdk.instance_id).unwrap();
         let engine = fixture.workflow.host.engine();
@@ -1289,7 +1306,7 @@ fn policy_initial_automatic_scan_configuration_requires_current_non_stopping_sdk
 
 #[test]
 fn policy_initial_automatic_off_admits_current_engine_during_real_unsettled_intent() {
-    let (fixture, sdk, incoming) = rig();
+    let (fixture, sdk, incoming) = rig_with_accepted_epoch();
     let policy = fixture.workflow.policy().unwrap();
     let runtime = &fixture.workflow.core;
     std::thread::scope(|threads| {
@@ -1336,7 +1353,7 @@ fn policy_initial_automatic_off_admits_current_engine_during_real_unsettled_inte
 
 #[test]
 fn policy_initial_automatic_stopping_closed_gate_does_not_recreate_and_reopen_waits_for_release() {
-    let (fixture, sdk, _) = rig();
+    let (fixture, sdk, _) = rig_with_accepted_epoch();
     let policy = fixture.workflow.policy().unwrap();
     let stop = select(&policy, policy.clone().input(settings(true)).unwrap(), |a| {
         matches!(a, CloudPolicyAction::StopEngine { .. })
@@ -2039,7 +2056,7 @@ fn failed_durable_evidence_returns_original_stop_followups_as_typed_output() {
 #[test]
 fn actual_apply_rollback_is_deferred_and_keeps_incoming_without_tracking_stop() {
     for interruption in [ApplyInterruption::Cancel, ApplyInterruption::Error] {
-        let (fixture, sdk, incoming) = rig();
+        let (fixture, sdk, incoming) = rig_with_accepted_epoch();
         let policy = fixture.workflow.policy().unwrap();
         // Stage with Runtime's SDK validation; do not use CloudWorkflow.fetched,
         // which also drains and would consume the action under test.
@@ -2091,7 +2108,7 @@ fn actual_quiet_candidate_superseded_by_local_work_is_observation_only_until_a_n
         coordinator::publication_control_record,
     };
 
-    let (fixture, sdk, _) = rig();
+    let (fixture, sdk, _) = rig_with_accepted_epoch();
     let host = &fixture.workflow.host;
     let runtime = &fixture.workflow.core;
     let driver = host.cloud_policy_driver().unwrap();
@@ -2428,7 +2445,7 @@ fn actual_overlapping_quiet_candidates(
 fn actual_overlapping_quiet_completion_order(newer_first: bool) {
     use meguri_sync::cloud::policy as p;
 
-    let (fixture, sdk, _) = rig();
+    let (fixture, sdk, _) = rig_with_accepted_epoch();
     let (a, b) = actual_overlapping_quiet_candidates(&fixture, &sdk);
     let host = &fixture.workflow.host;
     let collection = host.collection().unwrap();
@@ -2475,7 +2492,7 @@ fn actual_overlapping_quiet_candidates_complete_b_then_a_without_backdating() {
 fn actual_quiet_clock_completion_order(offset_ms: i64, newer_first: bool) {
     use meguri_sync::cloud::policy as p;
 
-    let (fixture, sdk, _) = rig();
+    let (fixture, sdk, _) = rig_with_accepted_epoch();
     let host = &fixture.workflow.host;
     let collection = host.collection().unwrap();
     let a = actual_retained_quiet_candidate(&fixture, &sdk);
@@ -2542,7 +2559,7 @@ fn actual_forward_clock_quiet_successful_replays_preserve_the_latest_record() {
 fn actual_same_ms_quiet_proof_tokens() {
     use meguri_sync::cloud::policy as p;
 
-    let (fixture, sdk, _) = rig();
+    let (fixture, sdk, _) = rig_with_accepted_epoch();
     let host = &fixture.workflow.host;
     let collection = host.collection().unwrap();
     let driver = host.cloud_policy_driver().unwrap();
@@ -2645,7 +2662,7 @@ fn actual_same_ms_quiet_proof_tokens() {
 fn actual_overlapping_quiet_candidates_with_new_local_work_are_observation_only() {
     use meguri_sync::cloud::policy as p;
 
-    let (fixture, sdk, _) = rig();
+    let (fixture, sdk, _) = rig_with_accepted_epoch();
     let (a, b) = actual_overlapping_quiet_candidates(&fixture, &sdk);
     let host = &fixture.workflow.host;
     let collection = host.collection().unwrap();
@@ -2686,7 +2703,7 @@ fn actual_overlapping_quiet_candidates_with_a_new_undrained_fetch_are_observatio
 
     // Each zone gets an independent fixture: either new fetch invalidates quiet.
     for zone in [p::Zone::Root, p::Zone::Collection] {
-        let (fixture, sdk, _) = rig();
+        let (fixture, sdk, _) = rig_with_accepted_epoch();
         let (a, b) = actual_overlapping_quiet_candidates(&fixture, &sdk);
         let host = &fixture.workflow.host;
         let collection = host.collection().unwrap();
