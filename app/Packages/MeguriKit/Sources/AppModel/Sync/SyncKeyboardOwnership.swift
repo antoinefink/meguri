@@ -9,7 +9,7 @@ import UIKit
 /// equivalents; no focus is claimed or moved by the sync shell.
 public enum SyncKeyboardOwnership {
     public static func admits(_ collection: ReviewCollection) -> Bool {
-        guard collection.navigation.sheet == nil, !collection.syncPresentation.statusPresented else { return false }
+        guard collection.navigation.sheet == nil, !collection.syncPresentation.statusOwnsInput else { return false }
         #if os(macOS)
         if let review = collection.review { return ReviewInputOwnership.admitsNativeCommand(review) }
         guard NSApp.isActive, let window = NSApp.keyWindow, window.attachedSheet == nil,

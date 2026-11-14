@@ -33,7 +33,30 @@ public enum CloudConnectionConfirmation: Sendable, Equatable { case publication,
 
 /// Presentation only; the retained coordinator owns all work and authority.
 @Observable public final class SyncPresentation {
-    public var statusPresented = false
+    public var statusPresented = false {
+        didSet {
+            if statusPresented && !oldValue {
+                statusPresentationID = UUID()
+                pendingStatusEntry = nil
+            }
+        }
+    }
+    public private(set) var statusPresentationID = UUID()
+    fileprivate enum StatusDestination {
+        case cloudSync(CloudSyncEntry, AppNavigation.SheetHost)
+        case accountSync
+    }
+    fileprivate struct StatusEntry {
+        let presentationID: UUID
+        let destination: StatusDestination
+        let generation: UInt64
+        let navigationIntent: UInt64
+        let reviewID: ObjectIdentifier?
+    }
+    fileprivate var pendingStatusEntry: StatusEntry?
+    public var statusOwnsInput: Bool { statusPresented || pendingStatusEntry != nil }
+    public var statusHandoffPending: Bool { pendingStatusEntry != nil }
+    public func cancelStatusHandoff() { pendingStatusEntry = nil }
     public var settingsRequest: UUID?
     public var settingsSearch = ""
     public var showStatusForCommands = true
@@ -202,11 +225,41 @@ extension ReviewCollection {
         sync.beginConnectionPreview()
     }
     public func presentCloudSync(_ entry: CloudSyncEntry, host: AppNavigation.SheetHost = .main) {
+        syncPresentation.cancelStatusHandoff()
         guard navigation.sheet == nil || navigation.sheet == .accountSync else { return }
         syncPresentation.statusPresented = false
         syncPresentation.connectionPath = []
         navigation.present(.cloudSync(entry))
         navigation.sheetHost = host
+    }
+    /// Compact status and its destination use separate native presentations. Only the
+    /// status sheet's actual onDismiss may consume this presentation request.
+    public func queueCloudSyncAfterStatusDismissal(_ entry: CloudSyncEntry, host: AppNavigation.SheetHost = .main) {
+        queueSyncStatusDestination(.cloudSync(entry, host))
+    }
+    public func queueAccountSyncAfterStatusDismissal() {
+        queueSyncStatusDestination(.accountSync)
+    }
+    private func queueSyncStatusDestination(_ destination: SyncPresentation.StatusDestination) {
+        let presentation = syncPresentation
+        guard presentation.statusPresented, !presentation.statusHandoffPending,
+              navigation.sheet == nil, canCompleteSyncStatusHandoff else { return }
+        presentation.pendingStatusEntry = .init(presentationID: presentation.statusPresentationID,
+            destination: destination, generation: generation,
+            navigationIntent: navigation.intentRevision, reviewID: navigation.review?.id)
+        presentation.statusPresented = false
+    }
+    public func compactSyncStatusDidDismiss(_ presentationID: UUID) {
+        let presentation = syncPresentation
+        guard let request = presentation.pendingStatusEntry, request.presentationID == presentationID else { return }
+        presentation.cancelStatusHandoff()
+        guard !presentation.statusPresented, canCompleteSyncStatusHandoff,
+              request.generation == generation, request.navigationIntent == navigation.intentRevision,
+              request.reviewID == navigation.review?.id, navigation.sheet == nil else { return }
+        switch request.destination {
+        case .cloudSync(let entry, let host): presentCloudSync(entry, host: host)
+        case .accountSync: navigation.openAccountSync()
+        }
     }
 }
 

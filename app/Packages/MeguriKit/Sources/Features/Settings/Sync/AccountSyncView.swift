@@ -202,11 +202,15 @@ struct CloudPreviewEntryButton: View {
     let collection: ReviewCollection
     let entry: CloudSyncEntry
     var host: AppNavigation.SheetHost = .main
+    var entryAction: ((CloudSyncEntry, AppNavigation.SheetHost) -> Void)? = nil
     private var reason: String? {
         collection.cloudPreviewEntryUnavailableReason(entry)
     }
     var body: some View {
-        Button(SyncText.value(titleKey)) { collection.presentCloudSync(entry, host: host) }
+        Button(SyncText.value(titleKey)) {
+            if let entryAction { entryAction(entry, host) }
+            else { collection.presentCloudSync(entry, host: host) }
+        }
             .disabled(reason != nil || (collection.navigation.sheet != nil && collection.navigation.sheet != .accountSync))
             .help(SyncText.value(reason ?? titleKey))
             .accessibilityIdentifier(entry == .connect && collection.sync.status?.controls.resumeBindingOffered == true ? "settings.accountSync.resume"
@@ -228,6 +232,7 @@ struct CloudPreviewEntryButton: View {
 struct CloudAttentionSection: View {
     let collection: ReviewCollection
     var host: AppNavigation.SheetHost = .main
+    var entryAction: ((CloudSyncEntry, AppNavigation.SheetHost) -> Void)? = nil
     var body: some View {
         if let items = collection.sync.status?.attention, !items.isEmpty {
             Section {
@@ -236,13 +241,13 @@ struct CloudAttentionSection: View {
                         Text(SyncStatusCopy.attention(item, count: items[item] ?? 0))
                             .accessibilityIdentifier("settings.accountSync.attentionMessage.\(offset)")
                         if item == .chooseCollection || item == .isolated {
-                            CloudPreviewEntryButton(collection: collection, entry: .connect, host: host)
+                            CloudPreviewEntryButton(collection: collection, entry: .connect, host: host, entryAction: entryAction)
                         }
                         if item == .rootUnreadable || item == .crtMismatch || item == .mediaZoneMissing {
-                            CloudPreviewEntryButton(collection: collection, entry: .replaceCloud, host: host)
+                            CloudPreviewEntryButton(collection: collection, entry: .replaceCloud, host: host, entryAction: entryAction)
                         }
                         if item == .crtMismatch {
-                            CloudPreviewEntryButton(collection: collection, entry: .replaceLocal, host: host)
+                            CloudPreviewEntryButton(collection: collection, entry: .replaceLocal, host: host, entryAction: entryAction)
                         }
                         if [.quotaFull, .localStorageFull, .trackingError, .cloudError, .exchangeIncomplete].contains(item) {
                             SyncNowButton(collection: collection, reasonIdentifierSuffix: ".\(offset)")

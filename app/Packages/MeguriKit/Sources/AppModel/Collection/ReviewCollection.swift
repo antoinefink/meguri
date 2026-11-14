@@ -64,6 +64,10 @@ public final class ReviewCollection: ChangeFanoutSink {
         let hostAllowsInput = sceneActive && applicationActive && windowVisible && reviewWindowActive
         let sessionAllowsInput = review == nil || reviewVisible
         return foreground && hostAllowsInput && sessionAllowsInput && reviewPresentationAllowsInput
+            && !syncPresentation.statusOwnsInput
+    }
+    var canCompleteSyncStatusHandoff: Bool {
+        foreground && sceneActive && !closed && !closing && !opening && !resuming
     }
     // Notify future U151 integrations after the local flush finishes.
     public var didFlushLocally: (() -> Void)? = nil
@@ -1089,7 +1093,11 @@ public final class ReviewCollection: ChangeFanoutSink {
     public func navigationChanged() {
         if navigation.review == nil, review != nil { Task { await finishReview() } }
     }
-    public func setSceneActive(_ active: Bool) { sceneActive = active; updateReviewActivity() }
+    public func setSceneActive(_ active: Bool) {
+        if !active { syncPresentation.cancelStatusHandoff() }
+        sceneActive = active
+        updateReviewActivity()
+    }
     public func setApplicationActive(_ active: Bool) { applicationActive = active; updateReviewActivity() }
     public func setReviewVisible(_ visible: Bool) {
         visibleReviewHosts = max(0, visibleReviewHosts + (visible ? 1 : -1))
@@ -1117,7 +1125,7 @@ public final class ReviewCollection: ChangeFanoutSink {
     public func setForeground(_ active: Bool) {
         guard active != foreground else { return }
         foreground = active
-        if !active { invalidateGoToDeck() }
+        if !active { invalidateGoToDeck(); syncPresentation.cancelStatusHandoff() }
         resuming = active
         if !active { review?.beginPause(); day?.pause(); countTimer?.invalidate() }
         let previous = lifecycleTask
@@ -1196,6 +1204,7 @@ public final class ReviewCollection: ChangeFanoutSink {
     @discardableResult public func close() async -> Bool { await close(quitting: false) }
     @discardableResult public func closeForQuit() async -> Bool { await close(quitting: true) }
     private func close(quitting: Bool) async -> Bool {
+        syncPresentation.cancelStatusHandoff()
         if let closeTask { return await closeTask.value }
         if closed { return true }
         let task = Task { await performClose(quitting: quitting) }
