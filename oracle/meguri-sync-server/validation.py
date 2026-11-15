@@ -144,12 +144,17 @@ def _identity(case):
 
 def _artifacts(manifest, case, store, invocation, trusted_runtime):
     roles = {}
+    synthetic_inputs = set()
     for artifact in case["artifacts"]:
         store.read(artifact["sha256"], artifact.get("bytes"))
-        require(artifact["role"] not in roles, "duplicate evidence role")
-        roles[artifact["role"]] = artifact["sha256"]
+        if artifact['role'] == 'synthetic_input':
+            require(artifact['sha256'] not in synthetic_inputs, 'duplicate synthetic input descriptor')
+            synthetic_inputs.add(artifact['sha256'])
+        else:
+            require(artifact["role"] not in roles, "duplicate evidence role")
+            roles[artifact["role"]] = artifact["sha256"]
     fixture = store.json(case["fixture_sha256"])
-    require(roles.get("synthetic_input") == case["fixture_sha256"], "fixture manifest identity mismatch")
+    require(case["fixture_sha256"] in synthetic_inputs, "fixture manifest identity mismatch")
     require(fixture.get("format") == "meguri-sync-fixtures-v1", "invalid fixture manifest")
     entries = fixture.get("entries", [])
     digests = set()
@@ -160,6 +165,7 @@ def _artifacts(manifest, case, store, invocation, trusted_runtime):
     require(bool(digests), "empty fixture manifest")
     for action in case["actions"]:
         require("fixture_sha256" in action and action["fixture_sha256"] in digests, "unbound action fixture")
+        require(action['fixture_sha256'] in synthetic_inputs, 'action fixture is not retained')
     wanted = binding(manifest, case)
     for role in ("neutral_observation", "mg_receipt"):
         receipt = store.json(roles[role])

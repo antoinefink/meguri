@@ -87,8 +87,8 @@ mg_sync_server_reference() {
   fi
   lock_sha="$(shasum -a 256 "$reference_dir/requirements.lock" | cut -d ' ' -f1)"
   # Explicit source authors, independent of the operator and checkout path.
-  author_session="s-20261115T211543Z-556b04e9"
-  source_author_sessions='["s-20261115T133013Z-d8cec007","s-20261115T211543Z-556b04e9"]'
+  author_session="s-20261115T224434Z-376ca308"
+  source_author_sessions='["s-20261115T133013Z-d8cec007","s-20261115T211543Z-556b04e9","s-20261115T224434Z-376ca308"]'
   if ! git -C "$MG_ROOT" show "${source_commit}:docs/process/provenance/sessions.jsonl" |
       jq -es --argjson authors "$source_author_sessions" '
         [.[] | select(.session as $id | $authors | index($id))] | unique |

@@ -22,3 +22,10 @@ Reference source authors are explicitly retained as sessions
 The latter is responsible for this finite NORMAL extension. The original ledger
 contains two identical rows for the former session; the wrapper accepts one
 unique complete record and rejects conflicting or missing records.
+
+The action-input retention repair is authored by recorded oracle-maintainer
+session `s-20261115T224434Z-376ca308`. It inspects only this quarantined harness
+and its neutral public synthetic boundary; no Anki implementation source was
+read. The original action recipe bytes and their identities stay unchanged.
+Each case retains descriptors for both its fixture manifest and the exact
+action input. Content-addressed storage retains shared bytes once.

@@ -226,8 +226,10 @@ def record(result, out, invocation, package=None, input_store=None):
         observation_hash = store.put_json({'format': 'meguri-sync-neutral_observation-v1', 'binding': bound, 'details': result})
         receipt_hash = store.put_json({'format': 'meguri-sync-mg_receipt-v1', 'binding': bound, 'run_id': invocation['run_id'],
                                       'selection': invocation['selection'], 'completed_ids': invocation['selection'], 'runtime_receipt_sha256': runtime_hash})
-        case['artifacts'] = [{'role': role, 'sha256': digest, 'bytes': len(store.read(digest))} for role, digest in (
-            ('synthetic_input', fixture_hash), ('neutral_observation', observation_hash), ('mg_receipt', receipt_hash))]
+        case['artifacts'] = [{'role':'synthetic_input', 'sha256':digest, 'bytes':len(store.read(digest))}
+                             for digest in dict.fromkeys((fixture_hash, fixture_input))]
+        case['artifacts'] += [{'role':role, 'sha256':digest, 'bytes':len(store.read(digest))}
+                              for role,digest in (('neutral_observation',observation_hash),('mg_receipt',receipt_hash))]
         if package_hash is not None: case['artifacts'].append({'role':'package','sha256':package_hash,'bytes':len(store.read(package_hash))})
         manifest['cases'].append(case)
     (out / 'selection.json').write_bytes(encoded(contract))

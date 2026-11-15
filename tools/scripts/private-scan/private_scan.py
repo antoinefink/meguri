@@ -882,13 +882,13 @@ PUBLIC_ARTIFACTS = {
     'oracle/meguri-sync-server/catalog.py':
         'da44186c8ee85f1ef77b3ff2584e0adce209cc4cfb9a5ee1eb557ad5d9a0068f',
     'oracle/meguri-sync-server/evidence.py':
-        '161d4764d368468f0cd5985533d48be839c7e57c13dad2cdbb0836d62295cfd5',
+        '98758e82a01aea9640626dc425dbf69ba9657280a98278740a432882e1814cf1',
     'oracle/meguri-sync-server/tests/test_validation.py':
-        '8b65fa75cf0b2c1e68dfc766a49761ed653ac67d5a9dc9adece29c01aca76681',
+        'e7bdbef81fb4b34a1b569b6fa4c186801e1c32904b3813d9e8c011e608a90dfd',
     'oracle/meguri-sync-server/validation.py':
-        '4bdaa9691a68cd1bdd1eb96a36671faf95ccfa2f817c5319687a1bcb0d8af2be',
+        '462a83ed4bb835e8f9b7446b214682531b5f29fcec1cc4476c26d18adda4af76',
     'tools/mg.d/meguri-sync-reference.sh':
-        '756bdbc973641180da7d08933758ffcf1cbc12b1eb17b14f579d8a2588b5fae7',
+        '9afb3032b62cd39079a388bd6cfb69f224c708a0532f6e6ac1ea11c758c0bf84',
 
     'docs/process/review-log/meguri-sync-reference-privacy.md':
         '4ef0a4f96b31e513f73415ac2160a9ce14e335fbd9cc841ddbe4ed2159e643a8',
@@ -961,7 +961,7 @@ PUBLIC_ARTIFACTS = {
         'ff3d726da3af11c5c2fb951c4cf49fada249f073e194584bb05a2a23c9a23f62',
 
     'oracle/meguri-sync-server/tests/test_normal.py':
-        '0bdc9820c24814664bb64d607b1191671b14b8b461c278b8e4f6132a8312656d',
+        '583a5f4ad9c2f5d1d4825a9e1cdbb7e5ca783389e8d17d5bc16d693c0d17de11',
 
     'conformance/fixtures/meguri-sync-server/observations/desktop-26.09.4-normal.json':
         '33e4f576a85f19bf877baefc382e91121e4e0307fe73b4b06fc8e24807e4d4a7',
