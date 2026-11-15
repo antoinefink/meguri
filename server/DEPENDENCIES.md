@@ -1,61 +1,80 @@
-# Standalone server dependency assessment
+# Server dependency assessment
 
-Assessment date: 2026-11-15. Scope: the 14 production and two development direct
-dependency edges in this standalone MIT workspace, for `servers/meguri-sync-web#W1,W2,W3,W7`.
-This is a purpose, release-maintenance, feature and license assessment, not a
-security guarantee or a formal source audit of every dependency. Official catalog
-and release facts below were inspected by the infrastructure integrator on that
-date and supplied to this filtered fixer; this session used no network.
+New first-party server code is MIT. The public model dependency remains
+MPL-2.0. No Anki implementation or reference runtime belongs to this graph.
 
-The standalone resolved graph contains 133 packages, with 14 production and two
-development direct edges. It includes resolved development and platform contexts;
-this count does not mean that every package links into the Linux runtime. The
-integrator completed the MG checks recorded below using Rust 1.99.0 in the Docker development environment.
-This filtered documentation author ran no network, compilation, graph resolution
-or MG jobs.
+The accepted account-service baseline used 133 resolved packages, fourteen
+production edges and two development edges. Those historical results do **not**
+audit the changed collection graph. The manager supplied the measured current
+graph below; this filtered wrapper session did not resolve, compile or audit it.
+These dirty-source graph checks do not establish a final clean artifact,
+Desktop interoperability, independent review or a release notice/source bundle.
 
-The frozen manifest SHA-256 is
-`4cc3d8521c5afed32b3f940428ef5c4f97ce48912aeef668c161f28ad60083a4`;
-the frozen lock SHA-256 is
-`9e4f6785931ddbafb48ca03d35f91a7385ea3aa839fff53ea450c15fde4c28ab`.
+## Collection additions and public API boundary
 
-## Browser body lifetime dependency
+| Dependency | Concrete purpose and selection | Measured graph and remaining assessment |
+| --- | --- | --- |
+| `meguri-model`, path `../core/crates/meguri-model`, defaults disabled, no features | Public records, `schema11` conversions, `proto::ProtoBlob` and blob messages, and `json_text::parse`. SQL, HTTP, account authority and file publication are independently authored. No storage, text, engine, scheduler, sync client, randomness or stock-content convenience import. | Measured model features are `[]`; its only four production dependencies are ryu, serde, serde_json and unicode-normalization. serde_json unifies raw_value; exact versions/features are below. No model test hooks, development peers, engine, scheduler, client, storage or text dependency enters production. |
+| `unicase =2.6.0` | Required Unicode 12.1 SQLite collation, including the specified three-character folding quirk. This compatibility pin intentionally differs from current Unicode. | Measured 2.6.0, features `[]`, MIT/Apache-2.0. Actual scoped deny/about passed on the supplied manifest/lock; this is no future advisory or release-notice guarantee. |
+| `zstd =0.14.4`, defaults disabled | Required streaming raw protocol compression, concatenated frames and a bounded decoder window, without HTTP content coding. Prefer the latest compatible exact patch from the supplied official catalog, released 2026-11-12. The catalog lists BSD-3-Clause for the binding and normal zstd-safe ^8.3.0; these facts are not a security guarantee. | Measured zstd 0.14.4, zstd-safe 8.3.0 and zstd-sys 2.1.3+zstd.1.5.7; exact features/licenses below. Actual deny/about passed; native distribution inputs and final release notices/source remain release work. |
+| `regex =1.11.2`, defaults disabled; `std`, `perf`, `unicode` | Neutral pinned Unicode pattern semantics for note derived values, including malformed markup. No HTML parser or browser rendering. | Measured 1.11.2 and its automata/syntax graph below; MIT OR Apache-2.0. Unicode tables retain their separate notices. Supplied primary catalog records MSRV 1.65. Actual deny/about passed; final distribution notices remain required. |
+| `htmlescape =0.3.1`, defaults disabled | Neutral pinned all-or-nothing HTML 4 entity decoding through the Result API. Independent composition of public rules, without meguri-text dependencies. | Measured 0.3.1, features `[]`; actual metadata license expression is Apache-2.0 / MIT / MPL-2.0. Actual deny/about passed with the approved selection; do not generalize the sole package-scoped model MPL allowance to another package. |
+| `sha1 =0.11.0`, defaults disabled | RustCrypto legacy first-field note checksum only. Never used for security and no locally authored primitive. | Measured 0.11.0, features `[]`, MIT OR Apache-2.0; actual deny/about passed. Supplied primary catalog identifies stable release 2026-03-27 and normal cfg-if/digest 0.11/cpufeatures 0.3. |
+| `rusqlite =0.41.1`, defaults disabled, `bundled`, `backup`, `collation` | Existing pin with SQLite backup for complete committed snapshots and the collection collation. Independently authored WAL/FULL lifecycle, without app storage policy. | Measured rusqlite/libsqlite3-sys features and licenses below; actual deny/about passed. Final native SQLite compile-option evidence, including statistics support, is separate from graph resolution. |
 
-The `httpapi/ingress.rs` implementation directly uses
-`http_body::{Body, Frame, SizeHint}` to poll Axum's incoming body without
-consuming/dropping it on timeout, and implements the standard response body trait
-so the unread receiver, admission permit and service/root owner stay alive through
-the closing HTTP/1 response. This narrow ownership requirement justifies one
-direct dependency; it is not a new parser or server framework. No direct
-http-body-util dependency is needed or present.
+The model's four intended production dependencies are ryu, serde, serde_json
+with raw_value and exact unicode-normalization 0.1.24. Its measured features are
+`[]`; optional randomness, test hooks and development peers are absent. The
+standalone production graph has no model engine/scheduler/client/storage/text
+edge. These are supplied measured graph facts, not a claim of a smaller runtime.
 
-Both the manifest and the updated real lock root dependency list now include this
-production edge:
+## Measured collection graph
 
-```toml
-http-body = { version = "=1.1.0", default-features = false }
-```
+Manager receipt: `build/mg/sync-server-deps/20261115T194209Z-83856/result.json`,
+status `pass`: 149 packages, 20 production direct edges and two development
+direct edges. Actual cargo-deny and cargo-about passed on manifest SHA-256
+`b1ca395a5b6b6fbaae92d5a88b083541639ed94abd5294c42e38d57c438e6403`
+and lock SHA-256
+`e6ff1a10840e84fac2a83621a1c4d4dbe21cf6915215ff59deb4d4532b3b8036`.
+The following selected metadata is attached to that receipt; it is not a new
+dependency or feature choice by this wrapper fixer. Feature lists are the actual
+resolved lists, including transitive unification.
 
-http-body 1.1.0 was already transitive, so the direct edge required no new resolved
-package. Its exact locked metadata features are `[]`. Primary official catalogs
-supplied by the integrator, inspected 2026-11-15:
-[http-body latest](https://docs.rs/crate/http-body/latest) identifies latest stable
-1.1.0, released July 13, MIT, Hyperium's typed HTTP body traits; the matching
-[http-body-util catalog](https://docs.rs/crate/http-body-util/latest) identifies
-0.1.5, August 12, MIT adapters, but it is not directly used or requested here.
+| Package | Version | Metadata license | Resolved features |
+| --- | --- | --- | --- |
+| htmlescape | 0.3.1 | Apache-2.0 / MIT / MPL-2.0 | `[]` |
+| libsqlite3-sys | 0.39.1 | MIT | bundled, bundled_bindings, cc, default, min_sqlite_version_3_45_3, pkg-config, vcpkg |
+| meguri-model | 0.0.0 | MPL-2.0 | `[]` |
+| regex | 1.11.2 | MIT OR Apache-2.0 | perf, perf-backtrack, perf-cache, perf-dfa, perf-inline, perf-literal, perf-onepass, std, unicode, unicode-age, unicode-bool, unicode-case, unicode-gencat, unicode-perl, unicode-script, unicode-segment |
+| regex-automata | 0.4.18 | MIT OR Apache-2.0 | alloc, dfa-onepass, hybrid, meta, nfa-backtrack, nfa-pikevm, nfa-thompson, perf-inline, perf-literal, perf-literal-multisubstring, perf-literal-substring, std, syntax, unicode, unicode-age, unicode-bool, unicode-case, unicode-gencat, unicode-perl, unicode-script, unicode-segment, unicode-word-boundary |
+| regex-syntax | 0.8.11 | MIT OR Apache-2.0 | std, unicode, unicode-age, unicode-bool, unicode-case, unicode-gencat, unicode-perl, unicode-script, unicode-segment |
+| rusqlite | 0.41.1 | MIT | backup, bundled, collation, modern_sqlite |
+| ryu | 1.0.23 | Apache-2.0 OR BSL-1.0 | `[]` |
+| serde | 1.0.228 | MIT OR Apache-2.0 | default, derive, serde_derive, std |
+| serde_json | 1.0.154 | MIT OR Apache-2.0 | default, raw_value, std |
+| sha1 | 0.11.0 | MIT OR Apache-2.0 | `[]` |
+| tinyvec | 1.13.3 | Zlib OR Apache-2.0 OR MIT | alloc, default |
+| unicase | 2.6.0 | MIT/Apache-2.0 | `[]` |
+| unicode-normalization | 0.1.24 | MIT/Apache-2.0 | default, std |
+| zstd | 0.14.4 | BSD-3-Clause | `[]` |
+| zstd-safe | 8.3.0 | BSD-3-Clause | alloc, default |
+| zstd-sys | 2.1.3+zstd.1.5.7 | BSD-3-Clause AND BSD-2-Clause | std |
 
-Features below describe direct manifest requests. “Defaults” means
-`default-features` was not disabled and no extra features were requested unless
-listed. The integrator retained actual metadata and separate normal/build/dev
-feature trees. Exact resolved metadata records argon2 0.6.0
-`[alloc, password-hash]`, password-hash 0.6.1 `[alloc, phc]`, phc 0.6.1 `[alloc]`,
-getrandom 0.4.3 `[]` and sha2 0.11.1 `[]`; unused sha2 alloc/OID defaults have been
-removed. rusqlite resolves bundled libsqlite3-sys 0.39.1 with features
-`[bundled, bundled_bindings, cc, default, min_sqlite_version_3_45_3, pkg-config, vcpkg]`.
-These feature names do not establish the underlying SQLite version or a formal
-dependency source audit. License expressions and scoped deny/about evidence
-support this assessment; metadata alone does not supply notices or select every
-transitive license alternative.
+Passing scoped checks describe these exact dirty-source manifest/lock inputs,
+not a permanent advisory guarantee. Final clean build and candidate receipts
+must independently bind the committed source, actual lock and running binary.
+Release assembly still retains MPL covered source, its availability instructions
+and all selected notices; this assessment does not supply that release bundle.
+
+## Retained account-service assessment (historical)
+
+The exact unchanged-dependency purpose, maintenance and license assessment below
+is restored from the own-source account baseline. Any resolved feature/count or
+passing check language in these tables describes that historical graph only;
+it does not certify the current changed graph. In particular, rusqlite now also
+requests backup/collation, assessed above. The manager's later account baseline
+was 95/95 at source a48fd7472b9761e04e1b57e14e4147dab197784c; it characterizes
+account behavior only, not collection or client compatibility.
 
 ## Production dependencies
 
@@ -83,69 +102,44 @@ transitive license alternative.
 | [reqwest 0.13.5](https://docs.rs/crate/reqwest/0.13.5) | Actual loopback HTTP assertions; defaults off, `json` only. No TLS/cookies or production network client. | MIT OR Apache-2.0 | Latest stable in supplied catalog; retain real HTTP test coverage without expanding service production dependencies. |
 | [tempfile 3.27.0](https://docs.rs/crate/tempfile/3.27.0) | Isolated real SQLite/filesystem/process tests with RAII temporary directories. Defaults; no explicit extras. | MIT OR Apache-2.0 | Current stable in supplied catalog. Retain tested filesystem isolation; production does not rely on this temporary-file helper. |
 
-## Compatibility and ownership
+## Covered files, provenance and distribution
 
-The earlier Argon2 Salt API compile issue is fixed. The actual 0.5.3 fixed-input
-synthetic PHC was characterized before the upgrade. Permanent 0.6 verification,
-fixed-output byte-for-byte compatibility and new random-salt contract tests pass
-in the full suite. No old Argon2 development dependency or capture-only artifact
-writer remains.
+The sole MPL allowance in cargo-deny is package `meguri-model`. Cargo-about may
+emit MPL notices; cargo-deny still rejects an unapproved second MPL package.
+Covered owned paths are `core/crates/meguri-model/Cargo.toml` and all files under
+`core/crates/meguri-model/src/`, together with inherited declarations in
+`core/Cargo.toml` and root `LICENSE`. Do not copy their bodies into MIT files.
+Public module documentation cites neutral model specs and identifies the
+protobuf codec as Meguri's own. The supplied assessment does not establish
+exclusive ownership or complete chain of title.
 
-The full suite includes storage, credential and recovery coverage, the
-revision-only rehash restart fixture, JSON/ingress finite-unit checks and ordinary
-HTTP cases. W2/W6 compare the exact original revision and generation at issuance;
-they impose no relative ordering between these positive counters. The startup
-check accepts a ready account whose same-password rehash advances revision while
-generation stays fixed. Provisioning identity/proof checks and credential
-issuance/revocation are unchanged.
+The coherent batch base supplied by the manager is commit
+`aa8565719af435051de7d5f068c0c817286b568e`. The model reuse source revision is
+`8ead750f295558c1f74362a47bd927ae2c876e51`, scope
+`core/crates/meguri-model`. The spec writer inspected path-limited Git
+attribution/role trailers and the session ledger without source patches or
+quarantined/private content; all recorded session IDs were present. This is
+process evidence, not exclusive ownership or relicensing proof. The candidate receipt must bind the
+actual reused source revision and exact covered bytes. Release assembly must
+retain original covered source and MPL license/notices. Executable distributions
+must explain how recipients obtain covered source under MPL-2.0. The larger
+service may remain MIT without relicensing covered files. This document is not
+a release notice bundle.
 
-There is no core, app, Anki, Python or Node production dependency in this Rust
-workspace. New first-party server code is MIT, authored independently; no Anki
-implementation is used. Future public-model reuse from core is a separate audit
-boundary: reused MPL modules retain their original MPL terms and are not
-relicensed MIT by inclusion here.
+## Manager verification
 
-## Integrator verification evidence
-
-The integrator retained the following actual MG receipts for the exact formatted
-source and frozen manifest/lock:
-
-- Dependency assessment:
-  `/private/tmp/meguri-sync-U4-verify/build/mg/sync-server-deps/20261115T153142Z-38556/result.json`.
-  Scoped cargo-deny advisories (including unmaintained, unsound and yanked policy),
-  bans, licenses and sources all reported zero errors and warnings. Cargo-about
-  notices, metadata, normal/build/dev feature trees and exact lock/config artifacts
-  were retained. These results are not an absence-of-risk guarantee.
-- Full server suite: 83/83 pass, zero skipped,
-  `/private/tmp/meguri-sync-U4-verify/build/mg/sync-server-test/20261115T153913Z-41515/result.json`.
-- Correctness/suspicious clippy checks across all targets and features, plus the
-  default production check: pass,
-  `/private/tmp/meguri-sync-U4-verify/build/mg/sync-server-lint/20261115T153543Z-40360/result.json`.
-  This does not claim that all cosmetic warnings are zero.
-- Focused MG evidence-parser/argument synthetic Bats checks: 13/13 pass,
-  `/private/tmp/meguri-sync-U4-verify/build/mg/selftest/20261115T144920Z-3589/result.json`.
-
-Evidence limits: a broad earlier operational pre-fix reproduction was refused by
-the model cybersecurity guard and is preserved as unavailable red-proof, never a
-passing result. It was not recreated or routed. Authorized actual replacement
-proof consists of finite in-process admission/deadline/cancellation/lifetime
-checks, controlled local authorization/SQLite fixtures and ordinary single-request
-HTTP boundary/matrix tests. Private HTTPS/compiled-browser evidence belongs to U8;
-protocol, current-client and device compatibility belong to later units. Controlled
-phase faults do not imply physical disk-full proof. Independent final source
-review and parent canonical provenance/privacy/similarity/full gate remain pending;
-final server acceptance is not claimed.
-
-Read-only MG reproducibility commands for the integrator (not executed by this
-filtered documentation author):
-
-```sh
-tools/mg sync-server-deps
-tools/mg sync-server-test
-tools/mg sync-server-lint
-```
-
-The normal dependency job is locked/read-only and retains graph/deny/about
-evidence. Dependency mutation with `--update` is optional maintenance, not an
-integration prerequisite. These exact local receipt paths identify the supplied
-evidence; the unit review log is the durable repository acceptance record.
+Use `tools/mg sync-server-deps --resolve-existing` once for the manifest change;
+it retains the prior lock and explicitly resolves against the existing lock.
+Inspect every lock change, then use ordinary locked dependency, test and lint
+jobs. Do not import core/Cargo.lock. Record actual versions, features,
+advisories, maintenance conclusions and notices before accepting the graph.
+The supplied initial resolution at
+`build/mg/sync-server-deps/20261115T192927Z-71678/result.json` used zstd 0.14.3;
+the later measured 149-package receipt above supersedes that graph. This filtered
+wrapper fixer leaves the supplied Rust, manifests and lock frozen. The supplied
+seed's server checks passed 116/116 with zero skips/retries and its scoped MG
+fixtures passed 14/14; these are parent observations, not executions here or
+Desktop interoperability evidence. The manager's initial focused attempt failed
+before tests at schema.rs:17 (unavailable load-extension DbConfig under selected
+features). Preserve that failure as evidence, not a preimplementation red or a
+test pass. No observed preimplementation red exists for the new tests.

@@ -2,7 +2,7 @@
 use super::owned as at;
 use crate::{Error, Result, crypto, limits::TempBudget};
 use rusqlite::params;
-use std::{collections::BTreeMap, sync::Mutex};
+use std::{collections::BTreeMap, sync::{Arc,Mutex}};
 use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Write},
@@ -23,6 +23,7 @@ pub struct DataRoot {
     lock: File,
     state_inode: Option<(u64, u64)>,
     directories: Mutex<BTreeMap<PathBuf, File>>,
+    pub(super) collection_pins: Arc<Mutex<BTreeMap<PathBuf,usize>>>,
 }
 #[derive(Clone, Debug)]
 pub struct AccountStores {
@@ -30,9 +31,7 @@ pub struct AccountStores {
     pub directory: PathBuf,
     pub generations: PathBuf,
     pub media: PathBuf,
-    /// U4 marker only. U5 owns creation/validation of a file-compatible DB and
-    /// the generation switch; this file never claims collection compatibility.
-    pub substrate_manifest: PathBuf,
+    pub current_manifest: PathBuf,
 }
 pub(super) fn unavailable() -> Error {
     Error::new("storage_unavailable")
@@ -91,8 +90,7 @@ fn sync_dir(path: &Path) -> Result<()> {
     Ok(())
 }
 const INITIAL_INTENT: &[u8] = b"meguri-initialization-v1\n";
-const SUBSTRATE: &[u8] =
-    b"meguri-substrate-v1\ncollection-format=pending-u5\ngeneration=substrate-v1\n";
+pub(super) const INITIAL_MANIFEST: &[u8] = b"meguri-collection-v1\ngeneration=initial\n";
 fn lock(file: &File) -> Result<()> {
     // SAFETY: valid borrowed file descriptor, flock does not retain pointers.
     if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
@@ -176,6 +174,7 @@ impl DataRoot {
             lock: lock_file,
             state_inode,
             directories: Mutex::new(BTreeMap::new()),
+            collection_pins: Arc::new(Mutex::new(BTreeMap::new())),
         };
         if root.state().try_exists()? {
             root.bound_dir(Path::new("state"), false)?;
@@ -187,10 +186,13 @@ impl DataRoot {
     }
     /// Open each component relative to the retained root descriptor. Every
     /// observed directory stays pinned for this ownership session.
-    fn bound_dir(&self, relative: &Path, create: bool) -> Result<File> {
+    pub(super) fn bound_dir(&self, relative: &Path, create: bool) -> Result<File> {
+        let mut pinned = self.directories.lock().map_err(|_| unavailable())?;
+        self.bound_dir_locked(relative,create,&mut pinned)
+    }
+    fn bound_dir_locked(&self,relative:&Path,create:bool,pinned:&mut BTreeMap<PathBuf,File>)->Result<File> {
         let mut current = self.dir.try_clone()?;
         let mut prefix = PathBuf::new();
-        let mut pinned = self.directories.lock().map_err(|_| unavailable())?;
         for component in relative.components() {
             let std::path::Component::Normal(name) = component else {
                 return Err(unavailable());
@@ -209,6 +211,16 @@ impl DataRoot {
         }
         Ok(current)
     }
+    pub(super) fn retire_collection_directory(&self,relative:&Path,identity:(u64,u64),remove:impl FnOnce())->Result<()> {
+        // Binding ownership spans the exact authorized removal and forgetting.
+        // Validation holds this same lock across its entire known-path scan.
+        let mut pinned=self.directories.lock().map_err(|_|unavailable())?;
+        let current=self.bound_dir_locked(relative,false,&mut pinned)?;
+        if at::identity(&current)?!=identity { return Err(unavailable()); }
+        remove();
+        if !self.path.join(relative).try_exists()? { pinned.remove(relative); }
+        Ok(())
+    }
     pub fn validate(&self) -> Result<()> {
         no_links(&self.path)?;
         binding(&self.path, &self.dir, true)?;
@@ -220,15 +232,10 @@ impl DataRoot {
                 return Err(unavailable());
             }
         }
-        let expected: Vec<_> = self
-            .directories
-            .lock()
-            .map_err(|_| unavailable())?
-            .keys()
-            .cloned()
-            .collect();
+        let mut pinned=self.directories.lock().map_err(|_|unavailable())?;
+        let expected:Vec<_>=pinned.keys().cloned().collect();
         for path in expected {
-            self.bound_dir(&path, false)?;
+            self.bound_dir_locked(&path,false,&mut pinned)?;
         }
         Ok(())
     }
@@ -526,38 +533,38 @@ impl DataRoot {
             account_id: id.into(),
             generations: directory.join("generations"),
             media: directory.join("media"),
-            substrate_manifest: directory.join("current-substrate"),
+            current_manifest: directory.join("current-collection"),
             directory,
         })
     }
     pub(crate) fn provision(&self, id: &str, budget: &TempBudget) -> Result<()> {
         self.validate()?;
         let s = self.stores(id)?;
-        let ownership = format!("meguri-substrate-staging-v1\naccount={id}\n");
+        let ownership = format!("meguri-collection-staging-v1\naccount={id}\n");
         // Cover all service staging payload, including an existing prefix on
         // resume. Reserve before creating even an empty staging file. The guard
         // survives every write/sync/publication and releases on success or error;
         // errors retain the durable named intent for the next budgeted attempt.
-        let _temporary = budget.reserve((ownership.len() + SUBSTRATE.len()) as u64)?;
+        let _temporary = budget.reserve((ownership.len() + INITIAL_MANIFEST.len()) as u64 + super::collection::INITIAL_TEMP_BYTES)?;
         let relative = PathBuf::from("state/accounts").join(id);
         let account = self.bound_dir(&relative, true)?;
         let generations = self.bound_dir(&relative.join("generations"), true)?;
         let media = self.bound_dir(&relative.join("media"), true)?;
-        let generation = self.bound_dir(&relative.join("generations/substrate-v1"), true)?;
+        let generation = self.bound_dir(&relative.join("generations/initial"), true)?;
         // The reservation owns this private intent. Only its named pending file
         // may be continued; unrelated children are never cleaned up.
-        let staging = self.bound_dir(&relative.join(".substrate-staging"), true)?;
+        let staging = self.bound_dir(&relative.join(".collection-staging"), true)?;
         self.record(
             &staging,
-            &s.directory.join(".substrate-staging"),
+            &s.directory.join(".collection-staging"),
             "owner",
             ownership.as_bytes(),
         )?;
         if at::read(&staging, "owner")? != ownership.as_bytes() {
             return Err(unavailable());
         }
-        if !s.substrate_manifest.try_exists()? {
-            let pending = s.directory.join(".substrate-staging/manifest.pending");
+        if !s.current_manifest.try_exists()? {
+            let pending = s.directory.join(".collection-staging/manifest.pending");
             if !pending.try_exists()? {
                 at::open(&staging, "manifest.pending", false, true)?.sync_all()?;
                 staging.sync_all()?;
@@ -567,16 +574,17 @@ impl DataRoot {
             let existing = at::read(&staging, "manifest.pending")?;
             // Only a prefix of our exact immutable marker can be unfinished work.
             // Never truncate or replace unrelated bytes at the pending name.
-            if !SUBSTRATE.starts_with(&existing) {
+            if !INITIAL_MANIFEST.starts_with(&existing) {
                 return Err(unavailable());
             }
             use std::io::{Seek, SeekFrom};
             f.seek(SeekFrom::End(0))?;
-            let remaining = &SUBSTRATE[existing.len()..];
+            let remaining = &INITIAL_MANIFEST[existing.len()..];
             let split = remaining.len() / 2;
             f.write_all(&remaining[..split])?;
             crate::accounts::phase("stores_during_stage_write")?;
             f.write_all(&remaining[split..])?;
+            super::collection::initial(&s, &generation, &staging)?;
             crate::accounts::phase("stores_before_stage_sync")?;
             f.sync_all()?;
             staging.sync_all()?;
@@ -586,10 +594,10 @@ impl DataRoot {
             media.sync_all()?;
             account.sync_all()?;
             self.validate()?;
-            at::publish_between(&staging, "manifest.pending", &account, "current-substrate")?;
+            at::publish_between(&staging, "manifest.pending", &account, "current-collection")?;
         }
         self.validate_stores(id)?;
-        at::open(&account, "current-substrate", false, false)?.sync_all()?;
+        at::open(&account, "current-collection", false, false)?.sync_all()?;
         generation.sync_all()?;
         generations.sync_all()?;
         media.sync_all()?;
@@ -605,12 +613,14 @@ impl DataRoot {
         self.stores(id)?;
         let relative = PathBuf::from("state/accounts").join(id);
         let account = self.bound_dir(&relative, false)?;
-        for path in ["generations", "media", "generations/substrate-v1"] {
+        for path in ["generations", "media"] {
             self.bound_dir(&relative.join(path), false)?;
         }
-        if at::read(&account, "current-substrate")? != SUBSTRATE {
-            return Err(unavailable());
-        }
+        let generation = super::collection::manifest(&at::read(&account, "current-collection")?)?;
+        self.bound_dir(&relative.join("generations").join(&generation), false)?;
+        let path = self.stores(id)?.generations.join(generation).join("collection.anki2");
+        let c = crate::collection::schema::open(&path, false)?;
+        crate::collection::schema::validate(&c)?;
         self.validate()
     }
     pub(crate) fn remove_setup_file(&self) -> Result<()> {
@@ -621,5 +631,42 @@ impl DataRoot {
             at::unlink(&state, "setup-token")?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod retirement_tests {
+    use super::*;
+    #[test]
+    fn authorized_retirement_owns_binding_until_removal_is_forgotten() {
+        let temp=tempfile::tempdir().unwrap();let mut root=DataRoot::acquire(&temp.path().join("owner"),true).unwrap();root.init().unwrap();
+        let relative=PathBuf::from("state/accounts/owned-retired");
+        let directory=root.bound_dir(&relative,true).unwrap();let identity=at::identity(&directory).unwrap();
+        let root=Arc::new(root);let owner=root.clone();let retired=relative.clone();
+        let (removed,removal)=std::sync::mpsc::channel();let (resume,release)=std::sync::mpsc::channel();
+        let cleanup=std::thread::spawn(move ||owner.retire_collection_directory(&retired,identity,|| {
+            fs::remove_dir(owner.path.join(&retired)).unwrap();
+            assert!(matches!(owner.directories.try_lock(),Err(std::sync::TryLockError::WouldBlock)));
+            removed.send(()).unwrap();release.recv().unwrap();
+        }));
+        removal.recv().unwrap();
+        let validator=root.clone();let (attempted,attempt)=std::sync::mpsc::channel();
+        let validation=std::thread::spawn(move || {attempted.send(()).unwrap();validator.validate()});
+        attempt.recv().unwrap();resume.send(()).unwrap();
+        cleanup.join().unwrap().unwrap();validation.join().unwrap().unwrap();root.validate().unwrap();
+        assert!(!root.directories.lock().unwrap().contains_key(&relative));
+    }
+    #[test]
+    fn unauthorized_missing_or_replaced_directory_cannot_be_forgotten() {
+        for replace in [false,true] {
+            let temp=tempfile::tempdir().unwrap();let mut root=DataRoot::acquire(&temp.path().join("owner"),true).unwrap();root.init().unwrap();
+            let relative=PathBuf::from("state/accounts/owned-retired");let path=root.path.join(&relative);
+            let original=root.bound_dir(&relative,true).unwrap();let identity=at::identity(&original).unwrap();
+            fs::remove_dir(&path).unwrap();if replace {directory(&path,true).unwrap();}
+            let called=std::cell::Cell::new(false);
+            assert!(root.retire_collection_directory(&relative,identity,||called.set(true)).is_err());
+            assert!(!called.get());assert!(root.validate().is_err());
+            assert!(root.directories.lock().unwrap().contains_key(&relative));
+        }
     }
 }

@@ -331,7 +331,7 @@ async fn local_recovery_preserves_data_and_never_reopens_restore_admission() {
     )
     .unwrap();
     std::fs::write(
-        stores.join(&id).join("generations/substrate-v1/sentinel"),
+        stores.join(&id).join("generations/initial/sentinel"),
         b"synthetic collection bytes\0\xfe",
     )
     .unwrap();

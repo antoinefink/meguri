@@ -287,6 +287,7 @@ impl Service {
             .files(move |root| {
                 for id in ids {
                     root.validate_stores(&id)?;
+                    root.recover_collection_stages(&id)?;
                 }
                 Ok(())
             })

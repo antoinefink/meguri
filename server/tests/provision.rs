@@ -517,7 +517,7 @@ async fn process_kill_at_durable_provisioning_phases_recovers_one_first_admin() 
         );
         let mut sentinels = vec![path.join("operator-sentinel")];
         let account = path.join("state/accounts").join(&reserved.0);
-        for directory in [account.join("media"), account.join(".substrate-staging")] {
+        for directory in [account.join("media"), account.join(".collection-staging")] {
             if directory.is_dir() {
                 sentinels.push(directory.join("unrelated-sentinel"));
             }
@@ -1062,7 +1062,7 @@ async fn final_invitation_authority_is_checked_after_durable_stores_before_ready
             )
             .unwrap();
         let stores = h.path().join("state/accounts").join(&exact.0);
-        assert!(stores.join("current-substrate").is_file());
+        assert!(stores.join("current-collection").is_file());
         let before = store_bytes(&stores);
         let reservation: (Vec<u8>, String, Vec<u8>) = db.query_row(
             "SELECT capability,account_id,credential_proof FROM provisioning_reservations WHERE username='reserved'", [],

@@ -204,13 +204,19 @@ pub async fn serve(
     .with_graceful_shutdown(async move {
         shutdown.await;
         stopping.browser_ingress.close();
+        stopping.native_ingress.close();
     })
     .await;
     owner.browser_ingress.close();
+    owner.native_ingress.close();
     owner.browser_ingress.idle().await;
+    owner.native_ingress.idle().await;
     result
 }
 async fn handle(State(service): State<Arc<Service>>, request: Request) -> Response {
+    if request.uri().path().starts_with("/sync/") || request.uri().path().starts_with("/msync/") {
+        return secure(crate::protocol::handle(service, request).await);
+    }
     let browser = request.uri().path().starts_with("/api/");
     let exempt = request.method() == Method::GET && request.uri().path() == "/api/status";
     let (parts, body) = request.into_parts();
@@ -325,7 +331,7 @@ async fn dispatch(
 ) -> Result<Response> {
     let path = parts.uri.path();
     let method = &parts.method;
-    // No SPA, native compatibility endpoint, or GET capability redemption in U4.
+    // Browser and health routes never act as a native or SPA fallback.
     let browser = path.starts_with("/api/");
     if !browser && path != "/health" {
         return Err(Error::new("route_not_found"));

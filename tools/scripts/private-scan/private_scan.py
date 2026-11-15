@@ -897,21 +897,21 @@ PUBLIC_ARTIFACTS = {
     # account-service code, tests and documentation. Includes production paths;
     # each entry admits only its exact path and complete reviewed bytes.
     'server/DEPENDENCIES.md':
-        '9d2f9fb274770106aed9a294e128d4e2779a50dd68726e9fb3809487846c6bdf',
+        '9ff3a746c6efbfaae3886cc4e2a829c6dc2d94fce7899cee7a1bd5dab347eb81',
     'server/src/error.rs':
         '33e51ae13c05fb5124242b189fc02851103684fb3e03e104de63bd1d0a151261',
     'server/src/main.rs':
-        '38e3225e1fcd7e923776ca142edc4512410f1127d9e0a02c7a5fb23902848d11',
+        '6f20a86135d56b9abd8fc3f2a68ad7f56c624c58fa46e885f239b5efb07488e5',
     'server/src/accounts/mod.rs':
-        '35a4ef643eb0b242d0534be5f45ddbbcbba09d156ec8fff3966570a4807b8071',
+        '2b2d090fbc10c3170562c4e4cb95e92d9678f514933e7164e84ecdcfda37dcd3',
     'server/src/accounts/provision.rs':
-        '26d0e9a97a04f0280c103945e36a97ae120883304e50212bb2d457cc1e7072ad',
+        'be0cd6852e5f711fa34064f34d278817cc1cb18cf166d3c2a81d2fd09ed05589',
     'server/src/httpapi/AGENTS.md':
         'ee08f06fbb1c5c420b5dbf55137846012523c0ec5aa37d6f73435f07bb722785',
     'server/src/httpapi/ingress.rs':
         'aaee8e568d0a2c915288942b847f45ec262874d13887ce2911bbe0dac4f39ef6',
     'server/src/httpapi/mod.rs':
-        '2fab79b4a89e95bccc81ed0da6e71f1ec13dc3d30d9b19b2bce782a584817ad3',
+        '3457f4f86b46723c875c2287b7d7828cbe521e15e24405e361fdb2597a7581f1',
     'server/src/httpapi/tests.rs':
         '370858800185720681b7f457ceded7bd414d1ae1d2defd513decb72ece76528d',
     'server/src/storage/schema.sql':
@@ -919,21 +919,37 @@ PUBLIC_ARTIFACTS = {
     'server/src/storage/semantic.rs':
         'a1b812ebdd2ea8ef4c0300025492f172c968f5fd35c6507068a91e307cb48902',
     'server/src/storage/tests.rs':
-        '31e4aa34bf662a34d217d40994d56e40823d43d3e71d142218a9c286dd197bc6',
+        'ad552c0f8ee03fd30aed02177781877457d98f1a343a94d76012204f4c4f7dca',
     'server/tests/accounts.rs':
-        '460c1c0faf439707e74aa3d75add28fd4fb06de29eda6a616c151f64afb56d65',
+        '7e0fa1344776c603a782ff3327e7aa47791357d21e049b9d26cb05cdb4adb2d5',
     'server/tests/http_contract.rs':
-        '405769e1b021ec1c787933330ea9c6a8591b682defd0db075bab45ac1e30959f',
+        'c1e372a9752f2e6f945676ec63bf0285d3e4edd1101fbab638d1d30f968c5fe1',
     'server/tests/provision.rs':
-        'd53465334d7a8000be31947bfb61208dcde0b572910a52265e0395134e1bd9a0',
+        'cd57dc597e06099b7b4c0fa3120b09c98d25f3e049d56a503de7d2e244271033',
     'server/tests/recovery.rs':
-        'bdd02678a72f44a9a9a5d0025b297ea3313c3903a8c7c2f4b09f1c3b8861e2d0',
+        '1d31f70b941ead6f7a986a464fd3de874166308c5c3119e9793dad442f515521',
 
     'docs/process/review-log/meguri-sync-U4.md':
         '3dba5263b27e28389786dc37ee488630527cd3ba62a98ba350b357aac309aee8',
     # Independently reviewed public foundation receipt; delegated maintenance.
     'docs/process/review-log/meguri-sync-foundation.md':
         '1fbf5605fd269f6ee618599e607cec157dbb499b38751964eb22ba0d3fa29fc4',
+
+    # Independently reviewed public transfer code and process evidence.
+    'server/src/collection/schema.rs':
+        'e17519c1a370abb797bba2f0beebeb6813f80d954fc2e7a952a626c74d887fea',
+    'server/src/protocol/framing.rs':
+        'a2e6e3f21c019a17531c6a140e519b65d17eba96fa6fd994e85d3b6230ab6819',
+    'server/src/protocol/full.rs':
+        '1e00dd45e0975e6fcd94c9a05b217b236a202c64573f2585a8a8096f751bd640',
+    'server/src/protocol/mod.rs':
+        'b88f585777498fe735db6be1810128fa6d93e1fb4901036790cf1211000e4981',
+    'server/src/storage/root.rs':
+        'bdeec9b6d4a162d1063cae08f646cf2a48bcaaedbcfb40a70d9321ab0eadcf55',
+    'server/tools/candidate-output.py':
+        '8fc38514eca0a84d6737a83ef5b1ac07d615c562df089a4eacdc85eb9f81b21c',
+    'docs/process/review-log/meguri-sync-U5.md':
+        'a2b89f63e37c1029fa04475b584953c97ab5c0bc54109a808864e1bb0ae5ac98',
 
 }
 

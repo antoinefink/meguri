@@ -51,7 +51,7 @@ impl BrowserAuthority {
     }
 }
 /// Constructed only by native password issuance or hostkey validation. Browser
-/// cookies never construct native authority; U5 owns decoding the native header.
+/// cookies never construct native authority; the protocol owns header decoding.
 #[derive(Clone, Debug)]
 pub struct NativeAuthority {
     pub(crate) id: String,
@@ -71,6 +71,7 @@ pub struct Service {
     pub temp: TempBudget,
     pub collections: CollectionCapacity,
     pub(crate) browser_ingress: Arc<crate::httpapi::ingress::Ingress>,
+    pub(crate) native_ingress: Arc<crate::protocol::framing::Ingress>,
     pub(crate) metadata: Metadata,
     pub(crate) hashes: HashPool,
     pub(crate) attempts: Attempts,
@@ -90,6 +91,7 @@ impl Service {
             config,
             collections: CollectionCapacity::default(),
             browser_ingress: Arc::new(crate::httpapi::ingress::Ingress::default()),
+            native_ingress: Arc::new(crate::protocol::framing::Ingress::default()),
             metadata,
             hashes: HashPool::default(),
             attempts: Attempts::default(),
@@ -123,7 +125,7 @@ impl Service {
             })
             .await
     }
-    /// Restore U9 must close admission durably before installing restored data.
+    /// Restore must close admission durably before installing restored data.
     /// Deliberately no ordinary remote/recovery method opens admission.
     pub async fn close_admission(&self) -> Result<()> {
         self.metadata

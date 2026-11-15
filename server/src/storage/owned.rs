@@ -115,6 +115,18 @@ pub(super) fn publish_between(from: &File, stage: &str, to: &File, final_name: &
 pub(super) fn publish(parent: &File, stage: &str, final_name: &str) -> Result<()> {
     publish_between(parent, stage, parent, final_name)
 }
+/// Caller retains both complete generations before replacing only the pointer.
+pub(super) fn replace(parent: &File, stage: &str, final_name: &str) -> Result<()> {
+    let a = CString::new(stage).map_err(|_| unavailable())?;
+    let b = CString::new(final_name).map_err(|_| unavailable())?;
+    // SAFETY: live descriptor and service-selected single components.
+    if unsafe { libc::renameat(parent.as_raw_fd(), a.as_ptr(), parent.as_raw_fd(), b.as_ptr()) } != 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    crate::accounts::phase("collection_after_manifest_rename")?;
+    parent.sync_all()?;
+    Ok(())
+}
 pub(super) fn write_new(parent: &File, name: &str, bytes: &[u8]) -> Result<()> {
     let mut f = open(parent, name, false, true)?;
     f.write_all(bytes)?;

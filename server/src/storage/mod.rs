@@ -2,11 +2,22 @@
 mod owned;
 mod root;
 mod semantic;
+pub(crate) mod collection;
 use crate::{Error, Result};
 pub use root::{AccountStores, DataRoot};
 use rusqlite::{Connection, OpenFlags};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::Semaphore;
+
+pub(crate) fn private_collection_file(path: &std::path::Path) -> Result<()> {
+    root::regular(path, true)?;
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let mut name = path.as_os_str().to_os_string();
+        name.push(suffix);
+        root::regular(std::path::Path::new(&name), false)?;
+    }
+    Ok(())
+}
 
 pub struct Metadata {
     root: Arc<DataRoot>,
@@ -18,6 +29,10 @@ impl Metadata {
             root,
             capacity: Arc::new(Semaphore::new(8)),
         }
+    }
+    #[cfg(test)]
+    pub(crate) fn test_hold_capacity(&self) -> Vec<tokio::sync::OwnedSemaphorePermit> {
+        (0..8).map(|_| self.capacity.clone().try_acquire_owned().unwrap()).collect()
     }
     pub async fn run<T: Send + 'static>(
         &self,

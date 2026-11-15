@@ -201,7 +201,7 @@ async fn recovery_selects_existing_admin_revokes_related_authority_and_optionall
     )
     .unwrap();
     std::fs::write(
-        stores.join(id).join("generations/substrate-v1/sentinel"),
+        stores.join(id).join("generations/initial/sentinel"),
         b"recovery collection\0\xfe",
     )
     .unwrap();

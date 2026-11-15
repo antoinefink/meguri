@@ -475,7 +475,10 @@ async fn configured_origin_and_urls_ignore_host_forwarding_native_is_independent
             if let Some(origin) = origin {
                 r = r.header("origin", origin);
             }
-            failure(r.send().await.unwrap(), 404, "route_not_found").await;
+            let r = r.send().await.unwrap();
+            assert_eq!(r.status(), 404);
+            headers(&r);
+            assert_eq!(r.text().await.unwrap(), "route_not_found");
         }
     }
     for path in ["/api/unknown", "/api/missing.js"] {
