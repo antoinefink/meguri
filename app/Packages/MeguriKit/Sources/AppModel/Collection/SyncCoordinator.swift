@@ -295,7 +295,6 @@ public final class SyncCoordinator {
         case command(UUID), own(UUID)
         var commandID: UUID? { if case .command(let id) = self { id } else { nil } }
     }
-    #if DEBUG
     enum CausalBoundary {
         case commandResultEnqueue, commandAcknowledgementJoined
         case proofResultReduced, proofAcknowledgementSending
@@ -310,9 +309,10 @@ public final class SyncCoordinator {
         case dependencyRevocationJoined(UUID)
         case corePredecessorWaiting(CloudPolicyCommand), corePredecessorReleased(CloudPolicyCommand)
     }
+    #if DEBUG
     @ObservationIgnored var observeQuiescentDependency: (@MainActor (Bool) -> Void)?
-    @ObservationIgnored var observeCausalBoundary: (@MainActor (CausalBoundary, CloudPolicyCommand?) -> Void)?
     #endif
+    @ObservationIgnored var observeCausalBoundary: (@MainActor (CausalBoundary, CloudPolicyCommand?) -> Void)?
     enum ResumePolicyDrainStage { case waiting, finished }
     // Scheduling observation only; never supplies a result or a capability.
     @ObservationIgnored var observeAccountPolicyDrain: (@MainActor (ResumePolicyDrainStage) -> Void)?
@@ -1987,9 +1987,7 @@ public final class SyncCoordinator {
                                 nativeCancellationOwned: context.ownsNativeCancellation(result, command: command,
                                     backend: backend, generation: value.generation, revision: revision), acknowledged: acknowledged))
                         }
-                        #if DEBUG
                         observeCausalBoundary?(.commandAcknowledgementJoined, command)
-                        #endif
                         guard let followup = result.afterOutputs else { break }
                         result = await followup(true)
                     }
