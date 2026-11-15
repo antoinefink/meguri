@@ -108,7 +108,7 @@ The repaired smoke passed 21 cases in `20261115T154425Z-45682`.
 Fresh review also caught a SQL wildcard that could exclude user tables near SQLite's reserved prefix; literal-prefix matching and a focused regression now retain them.
 The logical digest covers every present user table except separately stamped `col`, preserves duplicate rows and BLOB types, and exports only the digest.
 
-## Final committed-source evidence
+## Independently sealed runtime checkpoint
 
 Runtime source checkpoint: `24af4112b00179065f7780e57261b0cd440e9c94`, clean for every run below.
 Runtime source digest: `0c18545146b5ef1f9c20aa453342dfd9598faa16e16fda1346aa69b146e47cd2`.
@@ -174,10 +174,24 @@ Resolver lock SHA-256: `5df907c15b7fdaf794ff88419e6a204556c63fb0964bf89cd9ee05fd
 
 The actual hash-checked resolver bootstrap and lock generation passed in `20261115T155943Z-57011`.
 Its `resolver-install.json` records uv 0.13.4 and installed aarch64 wheel SHA-256 `7b3cdf868e5415631fe797b648c0d6945d38d388f23367bdd0b6332e80a1fcb0`.
-The focused package audit passed all 20 artifacts in `20261115T155947Z-57690`, retaining separate runtime/resolver counts and lock digests.
+The focused package audit passed all 20 package entries in `20261115T155947Z-57690`, retaining separate runtime/resolver counts and lock digests.
 Regeneration left `requirements.lock` byte-identical at `56e1bef86def9f5f230d12317e3510f2176eb079928f3a75f86afb0dcc408ec8`.
-The executed SDK driver, fixture recipes, selections, schema, candidate adapter, runtime dependency inputs and Docker image inputs are unchanged from 24af.
+The executed SDK driver, fixture recipes, selections, schema, candidate adapter, runtime dependency inputs and Docker definitions are unchanged from 24af.
+The assembled image changes because it also copies the repaired audit, tests and resolver lock; freshly measured SDK/native package bytes remain unchanged.
 
 The parent explicitly directed focused resolver validation and unchanged-runtime proof here.
 The required canonical U1–U4 full gate will run selftest, smoke and edges against the integrated updated source and retain fresh receipts.
 This direction avoids repeating the 29 SDK cases solely for a resolver-only change; it does not waive that integrated gate or reuse historical review batches for new-source seals.
+
+The bounded resolver repair was committed as `5f8a231d6754ecc4f2794b7a86a91404557c2b07`.
+Clean focused receipts from that checkpoint passed:
+
+- `selftest`: 37/37, `20261115T160116Z-60052`.
+- `deps`: 20/20 package entries, `20261115T160112Z-59555` (19 runtime and one resolver).
+- `identity`: `20261115T160114Z-59779`; the entire runtime identity object, including all 19 installed artifact entries, equals the accepted historical runtime object.
+
+The updated source digest is `330b9687f42ebab892486eb94a85f4add6d37f7996ee7d2279da16002672d3f4`.
+The native runtime remains `bf0ccafe0f15bcba59a652db68c4cfdfaa8191756f8c547839c9d134dee12784`; its installed wheel remains `52d319123a06d831fbc47cccfba087d75e00dc2e7eb4176c19a2901c525aad9e`.
+The fresh reviewer accepted the bounded repair and unchanged-runtime proof; its receipts are `/private/tmp/meguri-sync-u3-final-review-artifacts/review-resolver.json` and `review-resolver-final.md`.
+It also verified the final neutral evidence-only commit and documentation corrections.
+No new SDK case seal was issued for the resolver repair. Parent integration and the required updated-source full gate remain outstanding.
