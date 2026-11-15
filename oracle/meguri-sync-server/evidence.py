@@ -6,7 +6,7 @@ import copy
 import pathlib
 
 from validation import Artifacts, binding, decode, encoded, require, same_value, sha, unique_named, validate
-from synthetic import EDGE_FIXTURE
+from synthetic import FIXTURE, EDGE_FIXTURE
 
 
 def selection():
@@ -33,7 +33,7 @@ def selection():
         for same in (True, False):
             definitions.append(('P-F06', direction + ('-same-key-round' if same else '-other-key-round'),
                                 'sync/server-lifecycle#L3', {'start_status': 200, 'pending_grave_status': 200,
-                                'full_transfer': 'ok', 'receiver_graves': 0, 'stale_finish_status': 409}))
+                                'full_transfer': 'ok', 'full_transfer_sessions':[same], 'receiver_graves': 0, 'stale_finish_status': 409}))
     return {'format': 'meguri-sync-selection-v1', 'lane_kind': 'reference',
             'scope': 'Desktop synthetic smoke and explicitly named current-server observations only; broad family obligations remain unobserved.',
             'cases': [{'id': f'{family}:desktop.reference.{variant}', 'family': family, 'classification': 'current_probe',
@@ -106,6 +106,13 @@ def candidate_selection(phase):
     contract['scope'] = 'Actual Desktop against the verified job-owned candidate; intermediate build interoperability only, not production package acceptance.'
     if phase == 'full':
         contract['cases'] = [case for case in contract['cases'] if case['family'] in {'P-T01','P-T02','P-F01','P-F02','P-F03'}]
+        full_actions = [{'actor':'client_a','operation':'prepare_synthetic','description':'Create original synthetic collections from the retained recipe.'},
+                        {'actor':'client_a','operation':'client_sync','method':'hostKey','description':'Log in the actual Desktop clients using the protected synthetic credentials.'},
+                        {'actor':'client_a','operation':'client_sync','method':'meta','description':'Observe the initial metadata and transfer direction with the actual SDK.'},
+                        {'actor':'fresh_client','operation':'client_sync','method':'download','description':'Download the blank account with the actual SDK.'},
+                        {'actor':'client_a','operation':'client_sync','method':'upload','description':'Upload the original synthetic collection with the actual SDK.'},
+                        {'actor':'client_b','operation':'client_sync','method':'download','description':'Download twice with the actual SDK and inspect content, integrity and stamps.'}]
+        for case in contract['cases']: case['actions'] = copy.deepcopy(full_actions)
     for case in contract['cases']: case['id'] = case['id'].replace('.reference.','.candidate.')
     return contract
 
@@ -179,7 +186,8 @@ def observations(result):
             row = admission[direction + ('_same_session' if same else '_other_session')]
             values[('P-F06', direction + ('-same-key-round' if same else '-other-key-round'))] = {
                 'start_status': row['start']['status'], 'pending_grave_status': row['pending_grave']['status'],
-                'full_transfer': row['full_transfer'], 'receiver_graves': row.get('receiver_graves'), 'stale_finish_status': row['stale_finish']['status']}
+                'full_transfer': row['full_transfer'], 'full_transfer_sessions':row['full_transfer_sessions'],
+                'receiver_graves': row.get('receiver_graves'), 'stale_finish_status': row['stale_finish']['status']}
     return values
 
 
@@ -192,7 +200,9 @@ def record(result, out, invocation, package=None, input_store=None):
         for key in ('executable_artifact_sha256','lock_artifact_sha256','mg_build_receipt_sha256','execution_binding_sha256'):
             store.put(input_store.read(package[key]))
         package_hash = store.put_json(package)
-    fixture_bytes = encoded(result['fixture'])
+    expected_fixture = EDGE_FIXTURE if result.get('probe_kind') == 'edges' else FIXTURE
+    require(same_value(result['fixture'],expected_fixture),'returned fixture differs from the supplied original input')
+    fixture_bytes = encoded(expected_fixture)
     fixture_input = store.put(fixture_bytes)
     fixture_manifest = {'format': 'meguri-sync-fixtures-v1', 'entries': [{'sha256': fixture_input, 'bytes': len(fixture_bytes), 'kind': 'original-synthetic-json'}]}
     fixture_hash = store.put_json(fixture_manifest)

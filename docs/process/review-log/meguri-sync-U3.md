@@ -88,3 +88,16 @@ The current focused suite passed 33 tests in `20261115T151016Z-28004`.
 No Meguri Sync server source was read.
 
 Final independent source/evidence review, clean-source receipts, seals and parent-owned provenance, privacy, similarity and batch gates remain pending.
+
+## Fresh final review and repairs
+
+Fresh reviewer session `s-20261115T152024Z-ea02a5e3` reviewed the committed harness and neutral candidate K1–K4 contract in a separate checkout.
+It found two defects: a malformed internal candidate request could select the reference provider, and the full-only candidate selection claimed actions outside that phase.
+Both regressions failed first in `20261115T152645Z-34555` and then passed after repair.
+Missing candidate inputs now fail before provider selection; full-only actions stop after the verified full transfers.
+
+The final repair also binds actual full-transfer session equality without retaining session tokens, checks the returned original fixture, and compares logical hashes of all synthetic user tables across full upload and both downloads.
+The fresh reviewer reported both initial findings resolved and no further source defect; final evidence acceptance remains separate.
+Focused checks after these repairs passed 35 tests (`20261115T154159Z-42670`) and 21 smoke cases (`20261115T154200Z-42752`).
+These development receipts precede the final committed-source runs and are not seals.
+The candidate contract was incorporated from parent commit `7a638e2a8c0b98aae346b5c20abe2a9fafec1dfa`; no candidate execution or release acceptance is claimed.

@@ -26,7 +26,7 @@ from anki.errors import NetworkError, SyncError
 from anki.sync import SyncAuth, SyncOutput
 import zstandard
 
-from validation import encoded, require, sha
+from validation import encoded, require, sha, same_value
 from synthetic import FIXTURE, EDGE_FIXTURE
 
 PHASE = "identity"
@@ -125,6 +125,7 @@ class Recorder(http.server.ThreadingHTTPServer):
         self.errors = []
         self.empty_sk = False
         self.rewrite_session = None
+        self.active_fault_session = None
         self.replay_uploads = False
         self.idle_seconds = 0
         self.expire_after_idle = False
@@ -184,6 +185,8 @@ class RecorderHandler(http.server.BaseHTTPRequestHandler):
                 for key in list(headers):
                     if key.lower() == 'anki-sync': headers[key] = json.dumps(header)
                 detail['session_rewritten_by_fault_driver'] = True
+            if self.server.active_fault_session is not None and self.path in {'/sync/upload','/sync/download'}:
+                detail['session_matches_fault_round'] = header['s'] == self.server.active_fault_session
             connection.request("POST", self.path, body=raw, headers=headers)
             response = connection.getresponse()
             output = response.read()
@@ -411,7 +414,7 @@ def idle_probe(root, fixture, expire):
 
 def edges(fixture):
     global PHASE
-    require(fixture == EDGE_FIXTURE,'unknown edge fixture')
+    require(same_value(fixture,EDGE_FIXTURE),'unknown edge fixture')
     identity = runtime()
     with tempfile.TemporaryDirectory(prefix='current-reference-edges-') as directory:
         root = pathlib.Path(directory)
@@ -444,6 +447,8 @@ def session_probes(port, a, b, auth_a, auth_b, record):
             row = {'start': native_request(port, auth_a, 'start', start, session)}
             row['pending_grave'] = native_request(port, auth_a, 'applyGraves', {'chunk': {'cards': [FIXTURE['pending_grave_id']], 'notes': [], 'decks': []}}, session)
             record.rewrite_session = session if same_session else None
+            record.active_fault_session = session
+            before_transfer = len(record.observations)
             try:
                 receiver = b if direction == 'download' else a
                 full(receiver, auth_b if direction == 'download' else auth_a, direction == 'upload')
@@ -451,7 +456,11 @@ def session_probes(port, a, b, auth_a, auth_b, record):
                 row['receiver_graves'] = receiver.db.scalar('select count(*) from graves')
             except Exception as error:
                 row['full_transfer'] = type(error).__name__
-            finally: record.rewrite_session = None
+            finally:
+                record.rewrite_session = None
+                record.active_fault_session = None
+            row['full_transfer_sessions'] = [entry['session_matches_fault_round'] for entry in record.observations[before_transfer:]
+                                             if entry['route'] == '/sync/'+direction and 'session_matches_fault_round' in entry]
             row['stale_finish'] = native_request(port, auth_a, 'finish', {'_pad': None}, session)
             result[name] = row
     return result
@@ -468,7 +477,7 @@ def probe_server(root, target):
 
 def smoke(fixture, target=None, full_only=False):
     global PHASE
-    require(fixture == FIXTURE, "unknown synthetic fixture")
+    require(same_value(fixture,FIXTURE), "unknown synthetic fixture")
     identity = runtime()
     if target is not None: identity['server'] = target['server']
     with tempfile.TemporaryDirectory(prefix="current-reference-") as scratch:
@@ -503,7 +512,7 @@ def smoke(fixture, target=None, full_only=False):
                 full_equal = full_equal and snapshot(a) == snapshot(b)
                 if full_only:
                     require(not record.errors,'recording is incomplete')
-                    return {'probe_kind':'candidate','phase':'full','full_only':True,'runtime':identity,'fixture':fixture,'traffic':record.observations,
+                    return {'probe_kind':'candidate' if target is not None else 'reference_full','phase':'full','full_only':True,'runtime':identity,'fixture':fixture,'traffic':record.observations,
                             'outcomes':{'full_equal':full_equal,'integrity':integrity,'initial_requirement':initial_requirement,'blank_counts':blank_counts}}
                 note = a.get_note(a.find_notes("")[0])
                 time.sleep(1.05)
@@ -561,8 +570,14 @@ if __name__ == "__main__":
         request = json.loads(sys.stdin.buffer.read())
         if request['mode'] == 'identity': result = runtime()
         elif request['mode'] == 'edges': result = edges(request['fixture'])
-        elif request['mode'] == 'candidate': result = smoke(request['fixture'],request['target'],request['full_only'])
-        elif request['mode'] == 'smoke': result = smoke(request['fixture'])
+        elif request['mode'] == 'candidate':
+            require(isinstance(request.get('target'),dict),'candidate target missing')
+            require(request['target'].get('server',{}).get('kind') == 'meguri_sync','candidate peer kind mismatch')
+            require(type(request.get('full_only')) is bool,'candidate phase is malformed')
+            result = smoke(request['fixture'],request['target'],request['full_only'])
+        elif request['mode'] == 'smoke':
+            require(type(request.get('full_only',False)) is bool,'reference phase is malformed')
+            result = smoke(request['fixture'],full_only=request.get('full_only',False))
         else: raise ValueError('unknown SDK request mode')
         sys.stdout.buffer.write(encoded(result))
     except BaseException as error:
