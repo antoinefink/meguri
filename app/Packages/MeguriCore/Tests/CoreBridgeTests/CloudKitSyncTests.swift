@@ -9,6 +9,50 @@ import Testing
 // These cases share serialization with the process-wide CoreHost suite.
 private final class CloudTaskOriginalFailure: Error {}
 
+/// P6/P10.1: accepted metadata opens the running engine's gate only when
+/// projected through policy; execute that full update before target observations.
+private func withCloudKitPendingFixture(
+    a23: Bool = true, keepAlive: Bool = false,
+    _ body: (CloudKitBridgeFixture) async throws -> Void
+) async throws {
+    try await withNativePolicyFixture(a23: a23, keepAlive: keepAlive) { f in
+        let (policy, executor) = try await nativePolicy(f)
+        defer { withExtendedLifetime((policy, executor)) {} }
+        let engine = try await f.engine()
+        try #require(!engine.automaticallySync)
+        try #require(await engine.pendingRecordZoneChanges().isEmpty,
+                     "Unknown epoch setup must leave SDK pending empty")
+        try await f.qualifyCompleteEpoch()
+        let output = try await policy.input(.refresh(.cloud))
+        guard case .commands(let commands) = output else {
+            throw BridgeError.internal("Expected gate-opening policy commands")
+        }
+        try #require(commands.filter {
+            if case .updatePending(.full) = $0.action { true } else { false }
+        }.count == 1, "Complete epoch refresh must open the gate with a full update")
+        try #require(!commands.contains {
+            switch $0.action {
+            case .startEngine, .configureAutomatic, .requestFetch, .requestSend: true
+            default: false
+            }
+        }, "Auto-off gate opening must keep the running SDK without network work")
+        let starts = try await consumePolicySetup(output, executor: executor)
+        try #require(starts == 0)
+        try #require(await f.factory.engines().count == 1)
+        try #require(await f.adapter.retainedInstanceIDs() == [engine.instanceID])
+        try await f.core.validateSDK(engine.instanceID)
+        try #require(!(await engine.pendingRecordZoneChanges()).isEmpty)
+        try #require(await engine.pendingRecordZoneChanges() == (try await f.core.trackingSendables()))
+        try #require(!(await engine.recordedTrace()).contains {
+            switch $0 {
+            case .fetchEntered, .sendEntered: true
+            default: false
+            }
+        })
+        try await body(f)
+    }
+}
+
 enum CloudIdentityReadTrigger: CaseIterable, Sendable, Equatable {
     case initial, notification, network, foreground
 
@@ -187,8 +231,7 @@ extension EventTests {
     /// V9.1/K10.3: a mere notification lookup cannot discard records then save
     /// the following cursor. A later resolver failure preserves the live owner.
     @Test func cloudKitFailedNotificationLookupKeepsOwnerRecordsCursorAndPending() async throws {
-        try await withCloudKitFixture { f in
-            try await f.qualifyCompleteEpoch()
+        try await withCloudKitPendingFixture { f in
             let engine = try await f.engine()
             let guardBefore = try await f.core.currentGuard()
             let pending = await engine.pendingRecordZoneChanges()
@@ -221,8 +264,7 @@ extension EventTests {
     /// V9.1/A12/P3: an SDK account event loses SDK state even when the identity
     /// resolver fails; it keeps the verified owner and restores usable pending.
     @Test func cloudKitFailedSDKLookupKeepsOwnerAndMarksActualStateLoss() async throws {
-        try await withCloudKitFixture { f in
-            try await f.qualifyCompleteEpoch()
+        try await withCloudKitPendingFixture { f in
             let engine = try await f.engine()
             let guardBefore = try await f.core.currentGuard()
             let pending = await engine.pendingRecordZoneChanges()
@@ -398,8 +440,7 @@ extension EventTests {
     /// and hand 4 back without a foreground/local-change/full-update trigger.
     @Test(arguments: [true, false])
     func cloudKitSavedRevision3CannotEraseRevision4(a23: Bool) async throws {
-        try await withCloudKitFixture(a23: a23, keepAlive: !a23) { f in
-            try await f.qualifyCompleteEpoch()
+        try await withCloudKitPendingFixture(a23: a23, keepAlive: !a23) { f in
             let engine = try await f.engine()
             let name = try #require(f.names.first)
             let deck = try #require(f.decks.first)
@@ -543,8 +584,7 @@ extension EventTests {
     }
 
     private func cloudKitOrderedPending(a23: Bool, replacement: CloudPendingChange?) async throws {
-        try await withCloudKitFixture(a23: a23) { f in
-            try await f.qualifyCompleteEpoch()
+        try await withCloudKitPendingFixture(a23: a23) { f in
             let engine = try await f.engine()
             let inside = CloudCallbackGate()
             await f.probe.pauseSent(inside)

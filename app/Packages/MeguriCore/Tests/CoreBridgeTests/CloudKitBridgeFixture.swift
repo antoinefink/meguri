@@ -272,11 +272,11 @@ func withCloudKitFixture(
 
 /// The native policy owns SDK startup; pure adapter fixtures keep their defaults.
 func withNativePolicyFixture(
-    keepAlive: Bool = false, assetReadTransport: (any CloudOwnTransport)? = nil,
+    a23: Bool = true, keepAlive: Bool = false, assetReadTransport: (any CloudOwnTransport)? = nil,
     appOwnsAccountObservation: Bool = false,
     _ body: (CloudKitBridgeFixture) async throws -> Void
 ) async throws {
-    let fixture = try await CloudKitBridgeFixture.open(keepAlive: keepAlive, startAdapter: false,
+    let fixture = try await CloudKitBridgeFixture.open(a23: a23, keepAlive: keepAlive, startAdapter: false,
         assetReadTransport: assetReadTransport, connectedPolicyOpening: true,
         appOwnsAccountObservation: appOwnsAccountObservation)
     do { try await body(fixture) }
