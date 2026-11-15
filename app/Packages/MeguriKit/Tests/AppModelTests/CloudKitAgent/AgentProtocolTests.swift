@@ -3,7 +3,7 @@ import Testing
 import Darwin
 
 @MainActor @Suite(.serialized) struct CloudKitAgentProtocolTests {
-    static let header = Data("""
+    nonisolated static let header = Data("""
     { "protocol_version":1,"job":"cloudkit-signed","run_id":"20320405T060708Z-1","lane":"cloud-signed","source_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","tree_clean":true,"device":"rig7","device_kind":"mac","os_build":"os-sample-7","app_build":"app-sample-7","executable_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","build_receipt":{"job":"receipt-build-7","run_id":"20320405T060708Z-2"},"build_receipt_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","deployment_receipt":{"job":"receipt-install-7","run_id":"20320405T060708Z-3"},"container":"cloud-sample-7","environment":"development","account_scope":"scope7","account_labels":["acct1"],"selection":"smoke","fixture_delivery":{"base":"small","fixtures_receipt":{"job":"fixtures","run_id":"20320405T060708Z-4"},"source":"/fixture-root/suite7/input","manifest":{"path":"suite7-index.json","sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","bytes":10},"frozen_input":{"path":"fixture-input.json","sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","bytes":20}} }
     """.utf8)
     static func command(_ sequence: Int = 1, action: String = "launch", recovery: Bool = false) -> Data {

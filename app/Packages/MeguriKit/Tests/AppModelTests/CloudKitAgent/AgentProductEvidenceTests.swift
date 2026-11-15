@@ -2,7 +2,7 @@ import Darwin
 import Foundation
 import Testing
 
-@MainActor @Suite(.serialized) struct AgentProductReceiptBindingTests {
+@Suite(.serialized) nonisolated struct AgentProductReceiptBindingTests {
     private typealias Copy = AgentProductReceiptBinding.Copy
     private static let root = "/generated-checkout"
     private static let buildRun = "20320405T060708Z-2", installRun = "20320405T060708Z-3"

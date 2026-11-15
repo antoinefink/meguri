@@ -3,7 +3,8 @@ import Foundation
 
 // J2.1 receipt transport only. No host pathname in these models is opened.
 // The binding holds handles for the four admitted evidence files.
-@MainActor final class AgentProductReceiptBinding {
+// Callers keep this non-Sendable binding and its mutable FD authority thread-confined.
+nonisolated final class AgentProductReceiptBinding {
     enum Copy: String, CaseIterable {
         case buildReceipt = "build-result.json", buildManifest = "agent-build.json"
         case deploymentReceipt = "deployment-result.json", deploymentManifest = "agent-deployment.json"
@@ -389,7 +390,7 @@ extension Dictionary where Key == String, Value == AgentJSON.Value {
 
 // Same stable authority pattern as AgentExpectedAccounts, with public-copy
 // owner/no-other-writer rules rather than that private file's 0700/0600 policy.
-@MainActor private final class AgentReceiptCopyAuthority {
+private nonisolated final class AgentReceiptCopyAuthority {
     private nonisolated final class Descriptor {
         let value: Int32
         init(_ value: Int32) throws { guard value >= 0 else { throw AgentFailure.storage }; self.value = value }
