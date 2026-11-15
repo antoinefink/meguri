@@ -111,9 +111,19 @@ def file_stamp(data):
     with tempfile.NamedTemporaryFile(suffix='.anki2') as stream:
         stream.write(data); stream.flush()
         connection = sqlite3.connect(stream.name)
+        connection.create_collation('unicase', lambda left, right: (left.casefold() > right.casefold()) - (left.casefold() < right.casefold()))
         try:
             names = ['mod', 'scm', 'usn', 'ls', 'crt', 'ver']
-            return dict(zip(names, connection.execute('select mod,scm,usn,ls,crt,ver from col').fetchone()))
+            stamp = dict(zip(names, connection.execute('select mod,scm,usn,ls,crt,ver from col').fetchone()))
+            connection.execute('pragma trusted_schema=off')
+            content = {}
+            tables = connection.execute("select name from sqlite_master where type='table' and name <> 'col' and name not glob 'sqlite_*' order by name").fetchall()
+            for (table,) in tables:
+                rows = connection.execute('select * from "' + table.replace('"', '""') + '"').fetchall()
+                normalized = [[{'blob': value.hex()} if isinstance(value, bytes) else value for value in row] for row in rows]
+                content[table] = sorted(normalized, key=encoded)
+            stamp['user_tables_sha256'] = sha(encoded(content))
+            return stamp
         finally: connection.close()
 
 

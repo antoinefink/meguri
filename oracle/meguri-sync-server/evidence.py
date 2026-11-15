@@ -163,7 +163,7 @@ def observations(result):
         ('P-F01', 'initial-meta'): {'initial_meta': {key: initial_meta[key] for key in ('mod','usn','media_usn','empty','cont','hostNum')}},
         ('P-F01', 'no-card-metadata'): {'blank_receiver_counts': outcomes['blank_counts'], 'blank_download_schema': blank['ver']},
         ('P-F03', 'cards-local'): {'initial_direction': outcomes['initial_requirement']},
-        ('P-F02', 'full-round-trip'): {'full_content_equal': outcomes['full_equal'], 'receiver_integrity': outcomes['integrity']},
+        ('P-F02', 'full-round-trip'): {'full_content_equal': outcomes['full_equal'] and all(row['user_tables_sha256'] == uploaded['upload_stamp']['user_tables_sha256'] for row in downloads), 'receiver_integrity': outcomes['integrity']},
         ('P-F02', 'upload-file-form'): {'upload_schema': uploaded['upload_stamp']['ver'], 'upload_response': uploaded['upload_result']},
         ('P-F02', 'download-file-form'): {'download_schemas': [row['ver'] for row in downloads]},
         ('P-F02', 'download-stamps'): {'download_usn_deltas': [downloads[0]['usn'] - uploaded['upload_stamp']['usn'], downloads[1]['usn'] - downloads[0]['usn']],

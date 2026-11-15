@@ -101,3 +101,9 @@ The fresh reviewer reported both initial findings resolved and no further source
 Focused checks after these repairs passed 35 tests (`20261115T154159Z-42670`) and 21 smoke cases (`20261115T154200Z-42752`).
 These development receipts precede the final committed-source runs and are not seals.
 The candidate contract was incorporated from parent commit `7a638e2a8c0b98aae346b5c20abe2a9fafec1dfa`; no candidate execution or release acceptance is claimed.
+
+The content-hash extension was applied after the preceding repair commit.
+Its first two focused attempts failed (`20261115T154258Z-43937`, `20261115T154258Z-43938`, `20261115T154347Z-44830`, `20261115T154348Z-44901`): independent SQLite reads needed the reference collation and present-table enumeration for blank snapshots.
+The repaired smoke passed 21 cases in `20261115T154425Z-45682`.
+Fresh review also caught a SQL wildcard that could exclude user tables near SQLite's reserved prefix; literal-prefix matching and a focused regression now retain them.
+The logical digest covers every present user table except separately stamped `col`, preserves duplicate rows and BLOB types, and exports only the digest.
