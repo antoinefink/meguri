@@ -14,6 +14,7 @@ pub enum AdoptStep {
 pub enum AdoptionCancellation {
     NotOffered,
     Live,
+    AfterReview,
     RecoveredCancelOnly,
 }
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]

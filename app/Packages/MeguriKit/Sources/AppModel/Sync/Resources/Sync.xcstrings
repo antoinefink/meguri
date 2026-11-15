@@ -221,6 +221,17 @@
         }
       }
     },
+    "sync.attention.adoptAfterReview": {
+      "comment": "Approved sync/status-strings T9.1 copy for a live adoption waiting for review to end.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replacing this collection with the iCloud collection continues when you finish reviewing."
+          }
+        }
+      }
+    },
     "sync.attention.adoptUnproven": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {

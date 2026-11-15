@@ -612,6 +612,7 @@ fn bridge_preview_confirm_consumes_actual_preview_and_exposes_no_manifest_as_loc
     let status = connection.recovery_status().unwrap().unwrap();
     assert!(matches!(status.step, CloudRecoveryStep::Confirmed));
     assert!(!status.adoption_recovered_cancel_only);
+    assert!(!status.adoption_after_review);
     connection.cancel_operation(operation).unwrap();
     assert!(connection.recovery_status().unwrap().is_none());
 }

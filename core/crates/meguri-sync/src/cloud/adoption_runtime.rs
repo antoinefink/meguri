@@ -1713,11 +1713,24 @@ impl Runtime {
     pub fn cloud_adoption_cancellation(&self, id: [u8; 16]) -> Result<AdoptionCancellation, RuntimeError> {
         let owner = self.adoption.lock().unwrap_or_else(PoisonError::into_inner).clone();
         if let Some(owner) = owner {
-            if !self.adoption_op()?.is_some_and(|op| op.id == id) { return Ok(AdoptionCancellation::NotOffered); }
+            let Some(op) = self.adoption_op()?.filter(|op| op.id == id) else {
+                return Ok(AdoptionCancellation::NotOffered);
+            };
+            // Read ReviewService without Runtime/store or owner guards, as in
+            // next_adoption_work. This is status only, never task authority.
+            let review_active = self.active_review().is_some();
             let next = owner.next.lock().unwrap_or_else(PoisonError::into_inner);
-            return Ok(if !matches!(*next, AdoptionNext::Claimed)
-                && !owner.uncertain_activation.load(std::sync::atomic::Ordering::Acquire)
-                { AdoptionCancellation::Live } else { AdoptionCancellation::NotOffered });
+            return Ok(if matches!(*next, AdoptionNext::Claimed)
+                || owner.uncertain_activation.load(std::sync::atomic::Ordering::Acquire)
+            {
+                AdoptionCancellation::NotOffered
+            } else if op.step == AdoptStep::Ready && !op.transport_wait && review_active
+                && matches!(*next, AdoptionNext::Pending(AdoptionTask::Activate))
+            {
+                AdoptionCancellation::AfterReview
+            } else {
+                AdoptionCancellation::Live
+            });
         }
         let observation = meguri_engine::device_state::DeviceState::for_collection(
             &self.directory.join("collection.anki2"),

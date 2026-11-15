@@ -670,6 +670,8 @@ pub struct CloudRecoveryStatus {
     pub retry_after_ms: Option<i64>,
     pub adoption_transport_wait: bool,
     pub adoption_cancellable: bool,
+    /// Live Ready owner with pending activation held by an actual review.
+    pub adoption_after_review: bool,
     /// Exact ownerless recovered adoption; Cancel is its only operation.
     pub adoption_recovered_cancel_only: bool,
     pub publication_conflict_cancellable: bool,
@@ -1108,6 +1110,7 @@ impl CloudConnection {
                 retry_after_ms: op.retry_after_ms,
                 adoption_transport_wait: op.transport_wait,
                 adoption_cancellable: cancellation != a::AdoptionCancellation::NotOffered,
+                adoption_after_review: cancellation == a::AdoptionCancellation::AfterReview,
                 adoption_recovered_cancel_only: cancellation == a::AdoptionCancellation::RecoveredCancelOnly,
                 publication_conflict_cancellable: false,
                 publication_cancellable: false,
@@ -1135,6 +1138,7 @@ impl CloudConnection {
                     retry_after_ms: op.retry_after_ms,
                     adoption_transport_wait: false,
                     adoption_cancellable: false,
+                    adoption_after_review: false,
                     adoption_recovered_cancel_only: false,
                     publication_conflict_cancellable: cancellable,
                     publication_cancellable: self.owner.core.publication_cancellable(op.id).map_err(error)?,

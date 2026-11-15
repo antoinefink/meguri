@@ -1754,6 +1754,12 @@ fn adoption_policy_ready_wait_tracks_review_without_treating_ready_work_as_waiti
     let op = fixture.workflow.core.adoption_op().unwrap().unwrap();
     assert_eq!(op.step, c::adoption::AdoptStep::Ready);
     assert_recovery_policy_wait(&fixture, false, "Ready still has a root recheck to run");
+    let status = connection.recovery_status().unwrap().unwrap();
+    assert!(status.adoption_cancellable);
+    assert!(!status.adoption_after_review && !status.adoption_recovered_cancel_only);
+    let review = fixture.workflow.host.review().begin_unqueued_session().unwrap();
+    // Ready and cancellable during review still need the exact pending Activate task.
+    assert!(!connection.recovery_status().unwrap().unwrap().adoption_after_review);
     let (recheck, action) = adoption_action(&connection);
     assert!(matches!(action, CloudAdoptionAction::ReadActive { .. }));
     connection.adoption_result(recheck, CloudAdoptionResult::Read {
@@ -1762,17 +1768,26 @@ fn adoption_policy_ready_wait_tracks_review_without_treating_ready_work_as_waiti
             system_fields: op.active.system_fields.0,
         } },
     }).unwrap();
-    assert_recovery_policy_wait(&fixture, false, "activation can run without a review");
-    let review = fixture.workflow.host.review().begin_unqueued_session().unwrap();
     assert!(matches!(connection.next_publication_work().unwrap(), CloudPublicationWork::Idle));
     assert_recovery_policy_wait(&fixture, true, "Ready waits for review to end");
     let status = connection.recovery_status().unwrap().unwrap();
     assert!(status.adoption_cancellable && !status.adoption_transport_wait);
+    assert!(status.adoption_after_review);
     assert!(!status.adoption_recovered_cancel_only);
+    assert_eq!(fixture.workflow.host.cloud_adoption_cancellation(op.id).unwrap(),
+        c::adoption::AdoptionCancellation::AfterReview);
     review.end().unwrap();
     assert_recovery_policy_wait(&fixture, false, "review ended; activation is work again");
+    let status = connection.recovery_status().unwrap().unwrap();
+    assert!(status.adoption_cancellable && !status.adoption_transport_wait);
+    assert!(!status.adoption_after_review && !status.adoption_recovered_cancel_only);
+    assert_eq!(fixture.workflow.host.cloud_adoption_cancellation(op.id).unwrap(),
+        c::adoption::AdoptionCancellation::Live);
+    assert!(matches!(connection.next_publication_work().unwrap(),
+        CloudPublicationWork::Adoption { action: CloudAdoptionAction::Activate, .. }));
     let review = fixture.workflow.host.review().begin_unqueued_session().unwrap();
     assert_recovery_policy_wait(&fixture, true, "Ready waits for the new review");
+    assert!(connection.recovery_status().unwrap().unwrap().adoption_after_review);
     connection.cancel_operation(connection.recovery_status().unwrap().unwrap().operation).unwrap();
     assert_recovery_policy_wait(&fixture, false, "Cancel retires Ready review wait");
     assert!(!stage.exists());
@@ -1878,7 +1893,10 @@ fn adoption_transport_wait_retains_exact_page_or_payload_until_explicit_resume_a
             assert_eq!(fixture.workflow.core.adapter_guard(), guard);
             let status = connection.recovery_status().unwrap().unwrap();
             assert!(status.adoption_transport_wait);
+            assert!(status.adoption_cancellable && !status.adoption_after_review);
             assert!(!status.adoption_recovered_cancel_only);
+            assert_eq!(fixture.workflow.host.cloud_adoption_cancellation(waiting.id).unwrap(),
+                c::adoption::AdoptionCancellation::Live);
             assert_eq!(status.retry_after_ms, waiting.retry_after_ms);
             assert_eq!(waiting.retry_after_ms, Some(NOW + 120_000));
             if initial {

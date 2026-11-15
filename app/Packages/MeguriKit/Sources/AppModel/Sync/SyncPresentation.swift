@@ -66,10 +66,15 @@ public enum CloudConnectionConfirmation: Sendable, Equatable { case publication,
 
 public struct SyncStatusPresentation {
     public static func showsRecoveryResume(_ recovery: CloudRecoveryStatus) -> Bool {
-        !recovery.adoptionRecoveredCancelOnly
+        if recovery.adoptionRecoveredCancelOnly || recovery.adoptionAfterReview { return false }
+        switch recovery.step {
+        case .staging, .staged, .ready: return recovery.adoptionTransportWait
+        default: return true
+        }
     }
     public static func recoveryStatusKey(_ recovery: CloudRecoveryStatus) -> String {
         if recovery.adoptionRecoveredCancelOnly { return "sync.attention.adoptUnproven" }
+        if recovery.adoptionAfterReview { return "sync.attention.adoptAfterReview" }
         return switch recovery.step {
         case .confirmed, .bound, .ready: "sync.publish.preparing"
         case .zones: "sync.publish.uploading"
