@@ -9,56 +9,6 @@ import Testing
 // These cases share serialization with the process-wide CoreHost suite.
 private final class CloudTaskOriginalFailure: Error {}
 
-/// P6/P10.1: accepted metadata opens the running engine's gate only when
-/// projected through policy; execute that full update before target observations.
-private func withCloudKitPendingFixture(
-    a23: Bool = true, keepAlive: Bool = false,
-    _ body: (CloudKitBridgeFixture) async throws -> Void
-) async throws {
-    try await withNativePolicyFixture(a23: a23, keepAlive: keepAlive) { f in
-        let (policy, executor) = try await nativePolicy(f)
-        defer { withExtendedLifetime((policy, executor)) {} }
-        try await prepareCloudKitPendingFixture(f, policy: policy, executor: executor)
-        try await body(f)
-    }
-}
-
-private func prepareCloudKitPendingFixture(
-    _ f: CloudKitBridgeFixture, policy: CoreCloudPolicyService, executor: NativeCloudPolicyExecutor
-) async throws {
-    let engine = try await f.engine()
-    try #require(!engine.automaticallySync)
-    try #require(await engine.pendingRecordZoneChanges().isEmpty,
-                 "Unknown epoch setup must leave SDK pending empty")
-    try await f.qualifyCompleteEpoch()
-    let output = try await policy.input(.refresh(.cloud))
-    guard case .commands(let commands) = output else {
-        throw BridgeError.internal("Expected gate-opening policy commands")
-    }
-    try #require(commands.filter {
-        if case .updatePending(.full) = $0.action { true } else { false }
-    }.count == 1, "Complete epoch refresh must open the gate with a full update")
-    try #require(!commands.contains {
-        switch $0.action {
-        case .startEngine, .configureAutomatic, .requestFetch, .requestSend: true
-        default: false
-        }
-    }, "Auto-off gate opening must keep the running SDK without network work")
-    let starts = try await consumePolicySetup(output, executor: executor)
-    try #require(starts == 0)
-    try #require(await f.factory.engines().count == 1)
-    try #require(await f.adapter.retainedInstanceIDs() == [engine.instanceID])
-    try await f.core.validateSDK(engine.instanceID)
-    try #require(!(await engine.pendingRecordZoneChanges()).isEmpty)
-    try #require(await engine.pendingRecordZoneChanges() == (try await f.core.trackingSendables()))
-    try #require(!(await engine.recordedTrace()).contains {
-        switch $0 {
-        case .fetchEntered, .sendEntered: true
-        default: false
-        }
-    })
-}
-
 enum CloudIdentityReadTrigger: CaseIterable, Sendable, Equatable {
     case initial, notification, network, foreground
 

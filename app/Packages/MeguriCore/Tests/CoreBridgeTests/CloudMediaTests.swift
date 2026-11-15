@@ -276,7 +276,7 @@ extension CloudMediaTests {
 
 extension EventTests {
     @Test func originalFakeSDKCannotTurnAnInvalidDeleteAbsenceIntoAcceptedBookkeeping() async throws {
-        try await withCloudKitFixture { f in
+        try await withCloudKitPendingFixture { f in
             let engine = try await f.engine()
             let batch = try #require(await engine.requestRetainedBatch(zone: f.zone))
             let before = try await f.core.durableSnapshot()

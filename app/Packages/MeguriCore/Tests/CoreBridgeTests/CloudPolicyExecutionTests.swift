@@ -189,6 +189,7 @@ extension EventTests {
     func nativeUpdatePendingDeliversCoreAdditionsWithoutNetworkCall(automatic: Bool, cause: CloudPolicyChangeCause) async throws {
         try await withNativePolicyFixture { f in
             let (policy, executor) = try await nativePolicy(f)
+            try await prepareCloudKitPendingFixture(f, policy: policy, executor: executor)
             if automatic {
                 try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: executor)
             }
@@ -244,6 +245,7 @@ extension EventTests {
                 let engine = PolicyPendingEngine(sdk); wrapped.withLock { $0 = engine }; return engine
             }
             let (policy, executor) = try await nativePolicy(f)
+            try await prepareCloudKitPendingFixture(f, policy: policy, executor: executor)
             let engine = try #require(wrapped.withLock { $0 })
             let sdk = try await f.engine()
             let before = await sdk.pendingRecordZoneChanges()
@@ -285,6 +287,7 @@ extension EventTests {
                 let engine = PolicyPendingEngine(sdk); wrapped.withLock { $0 = engine }; return engine
             }
             let (policy, executor) = try await nativePolicy(f)
+            try await prepareCloudKitPendingFixture(f, policy: policy, executor: executor)
             let engine = try #require(wrapped.withLock { $0 })
             let sdk = try await f.engine()
             let before = await sdk.pendingRecordZoneChanges()
@@ -324,6 +327,7 @@ extension EventTests {
                 let engine = PolicyPendingEngine(sdk); wrapped.withLock { $0 = engine }; return engine
             }
             let (policy, executor) = try await nativePolicy(f)
+            try await prepareCloudKitPendingFixture(f, policy: policy, executor: executor)
             let engine = try #require(wrapped.withLock { $0 })
             let sdk = try await f.engine()
             let before = await sdk.pendingRecordZoneChanges()
@@ -354,6 +358,7 @@ extension EventTests {
     @Test func nativeOriginalRefusalKeepsLegacyErrorAndImmutableAttemptEvidence() async throws {
         try await withNativePolicyFixture { f in
             let (policy, executor) = try await nativePolicy(f)
+            try await prepareCloudKitPendingFixture(f, policy: policy, executor: executor)
             let command = try await pendingCommand(policy)
             let current = await executor.execute(command)
             #expect(current.error == nil && current.originalGuardRefusal == nil)
@@ -381,6 +386,7 @@ extension EventTests {
                 let engine = PolicyPendingEngine(sdk); wrapped.withLock { $0 = engine }; return engine
             }
             let (policy, executor) = try await nativePolicy(f)
+            try await prepareCloudKitPendingFixture(f, policy: policy, executor: executor)
             let engine = try #require(wrapped.withLock { $0 })
             try await addPendingDeck(f, name: "Original error before Pause")
             let command = try await pendingCommand(policy)
@@ -412,6 +418,7 @@ extension EventTests {
     @Test func nativeUpdatePendingDefersOrderedListsUntilOriginalCallbackReturns() async throws {
         try await withNativePolicyFixture { f in
             let (policy, executor) = try await nativePolicy(f)
+            try await prepareCloudKitPendingFixture(f, policy: policy, executor: executor)
             let engine = try await f.engine()
             let before = await engine.pendingRecordZoneChanges()
             let emitted = try await f.core.emittedUpdateIDs()
@@ -540,6 +547,7 @@ extension EventTests {
     @Test func nativePolicyPreCaptureCancellationCreatesNoRuntimeExchange() async throws {
         try await withNativePolicyFixture { fixture in
             let (policy, executor) = try await nativePolicy(fixture, gate: CancelledPolicyGate())
+            try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: executor)
             let output = try await policy.input(.syncNowRequested(.command))
             let command = try #require(try policyCommands(output).first { if case .runExchange = $0.action { true } else { false } })
             let before = try await observePolicyExchange(command)
@@ -1626,7 +1634,9 @@ extension EventTests {
     @Test(arguments: [false, true], [CloudFenceTransition.accountSwitch, .token, .generation])
     func nativeFinalEnqueueRejectsHeldWork(send: Bool, transition: CloudFenceTransition) async throws {
         try await withNativePolicyFixture { fixture in
-            _ = try await nativePolicy(fixture)
+            let (policy, executor) = try await nativePolicy(fixture)
+            if send { try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: executor) }
+            defer { withExtendedLifetime((policy, executor)) {} }
             let engine = try await fixture.engine()
             let gate = CloudCallbackGate()
             await engine.pauseNativeReturnedWork(gate)
@@ -1699,6 +1709,7 @@ extension EventTests {
     @Test func nativePolicyReservesBeforeCaptureWhilePublicWorkerDrains() async throws {
         try await withNativePolicyFixture { fixture in
             let (policy, executor) = try await nativePolicy(fixture)
+            try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: executor)
             let engine = try await fixture.engine()
             await engine.appendFetchScripts([
                 .manual(fetchedZones: ["meguri-root", fixture.zone], records: [fixture.root], group: nil),
@@ -1758,6 +1769,7 @@ extension EventTests {
             let changeAccount = mode == "account", sdkFailure = mode == "sdk"
             let failure = NativePolicyOriginalFailure()
             let (policy, executor) = try await nativePolicy(fixture)
+            try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: executor)
             try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: executor)
             let engine = try await fixture.engine()
             await engine.appendFetchScripts([
