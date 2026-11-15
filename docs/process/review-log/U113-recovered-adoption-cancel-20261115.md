@@ -33,6 +33,8 @@ The policy distinguishes this recovery from another build scope, ordinary adopti
 - Final similarity scan: 21 files, zero findings; the filtered implementer view was read.
 - `core-test/20261115T134021Z-24084`: the renamed created-time regression passes. The wording pass changes only comments, test names and a fixture directory label; other reviewed source bytes match.
 
-Native app build, recovered-state render and the full batch gate remain pending. The selected Swift tests prove status mapping, copy and cancellation behavior; they do not prove rendered controls.
+The signed Mac build `build-app/20261115T134338Z-29073` passes from clean `add0078656130a0ef024c5f61e76c4dffa6745be`, with zero errors and warnings. Signature and provisioning checks pass. The older preview quit normally; the exact Personal Preview product opened, with one new process and a matching executable hash. It remains running after startup.
+
+Native computer use failed to start its connection, so no visual inspection is claimed. Recovered-state render and the full batch gate remain pending. The selected Swift tests prove status mapping, copy and cancellation behavior; they do not prove rendered controls.
 
 The physical-phone drive `20261115T124340Z-82037` stops before its script: XCTest cannot enable automation. It proves no interface behavior. No recovered-error snapshot fixture was found. Native render and full batch gate evidence remain required. Global attention completeness, generation integration and signed acceptance remain open.
