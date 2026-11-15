@@ -16,8 +16,8 @@ deepened: 2026-11-15
 - **Objective:** Antoine can keep his Anki collection, review history, and media synchronized between Desktop and AnkiMobile through a server he operates and whose first-party code he can license independently of Anki.
 - **Means:** Meguri Sync using the service, storage, and interface boundaries in KTD1–KTD4.
 - **Product authority:** This contract records the scope confirmed on 2026-11-15. Existing clean-room, privacy, and verification rules remain authoritative. The later Meguri application integration is a separate work area.
-- **Open blockers:** No unresolved product decision blocks planning. Current-release reference verification and Go similarity coverage are technical prerequisites, per R5 and R7.
-- **Execution profile:** Autonomous lfg delivery with no PR. Local branches and worktrees are permitted by Antoine’s 2026-11-15 override; final integration and any push target `master`. Code is produced through the filtered implementation runner, with separate role sessions, per-unit commits and reviews, and coherent-batch gates under `docs/process/tiers.md`.
+- **Open blockers:** No unresolved product decision blocks planning. Current-release reference verification, server/frontend similarity calibration, and the selected dependency audit remain technical prerequisites, per R5, R7, and R33.
+- **Execution profile:** Autonomous lfg delivery with no PR. Local branches and worktrees are permitted by Antoine’s 2026-11-15 override; final integration and any push target `master`. Preserve individual work commits through a normal merge without squashing, as Antoine requested. Code is produced through the filtered implementation runner, with separate role sessions, per-unit commits and reviews, and coherent-batch gates under `docs/process/tiers.md`.
 - **Stop conditions:** Do not weaken compatibility, publish false acceptance, access private collections, or bypass clean-room boundaries to finish. Preserve any unavailable final device evidence as incomplete. Resolve technical failures and review findings within the existing repair authorization.
 - **Delivery owner:** The orchestrator completes planning, implementation, review fixes, verification, and local integration. No public deployment, real account setup, or PR is part of this run.
 
@@ -31,15 +31,16 @@ Build a private, self-hosted sync server and its web administration interface in
 
 ### Problem Frame
 
-Antoine wants control of the server’s first-party code and licensing, and wants to build it in Go. Existing Meguri tooling runs Anki’s server; the retained Meguri sync client is substantial but its historical live acceptance remains incomplete. This is also a project of personal interest, rather than a response to demonstrated performance failure in the official server.
+Antoine wants control of the server’s first-party code and licensing, and has chosen Rust after considering Go. Both languages were acceptable; external dependencies must be well vetted and serve concrete needs. Existing Meguri tooling runs Anki’s server; the retained Meguri sync client is substantial but its historical live acceptance remains incomplete. This is also a project of personal interest, rather than a response to demonstrated performance failure in the official server.
 
-Choosing Go does not establish a speed or security advantage. The official server already offers a Rust implementation. The work must demonstrate correct behavior and reasonable resource use.
+Choosing Rust permits selective reuse of first-party public model APIs; it does not establish a speed, security, licensing, or compatibility result. The work must demonstrate correct behavior and reasonable resource use.
 
 ### Key Decisions
 
-- **Independent Go implementation.** Prefer one server implementation over a Go wrapper around the Rust core. Governs R1, R2, R4. (session-settled: user-approved — chosen over a Rust-backed wrapper: simpler runtime and first-party license boundary.)
+- **Rust server with selective first-party reuse.** Reuse audited public model APIs while implementing server behavior from neutral contracts. Governs R1, R2, R4. (session-settled: user-directed — chosen over the earlier Go implementation: Antoine’s later “Awesome let's go with Rust!” decision supersedes the Go choice.)
+- **Vetted dependencies for concrete needs.** Keep additions and enabled features justified by the shipped service. Governs R33. (session-settled: user-directed — chosen over unrestricted library adoption: both languages were acceptable, but external dependencies need specific reasons and vetting.)
 - **MIT for new server code.** The simpler permissive license fits the ownership goal. Governs R3. (session-settled: user-approved — chosen over the proposed Apache-2.0 default: preserve freedom to modify and license independently with simpler terms.)
-- **Separate collection databases per account.** Keep each collection’s transactions and recovery isolated. Governs R15. (session-settled: user-approved — chosen over a shared collection database: account isolation with one shared Go process.)
+- **Separate collection databases per account.** Keep each collection’s transactions and recovery isolated. Governs R15. (session-settled: user-approved — chosen over a shared collection database: account isolation within one service process.)
 - **Browser-based administration.** A CLI alone does not meet the desired operator experience. Governs R19, R20, R21, R22, R23, R24, R25, R26, R27. (session-settled: user-directed — chosen over CLI-only administration: minimal, friendly setup and account management.)
 - **Invitations and administrator-issued reset links.** Avoid an email service in the initial deployment. Governs R22, R24, R26. (session-settled: user-directed — chosen over open signup and email recovery: private accounts with less operational setup.)
 - **Current Desktop and AnkiMobile releases.** Focus on the clients Antoine uses. Governs R7, R9. (session-settled: user-directed — chosen over broad client and historical-version coverage: keep initial implementation reasonably simple.)
@@ -71,11 +72,12 @@ The initial operator, administrator, and member can all be Antoine.
 **Ownership, implementation, and provenance**
 
 - R1. Deliver the service as Meguri Sync within this repository, with an explicit license boundary for its server and frontend files.
-- R2. Implement the server in Go without requiring Anki, Python, or Meguri’s Rust core in the deployed service.
-- R3. License independently authored server and frontend code under MIT while retaining all applicable third-party notices and terms.
+- R2. Implement the server in Rust in a standalone `server/` Cargo workspace, with only justified public first-party dependencies and no Anki or Python production dependency.
+- R3. License independently authored new server and frontend code under MIT while retaining all applicable dependency notices and terms, including MPL-2.0 for reused existing first-party core crates.
 - R4. Follow `docs/process/provenance.md` and the role contracts; derive behavior from neutral specs without copying or translating Anki code.
-- R5. Extend and validate similarity coverage for Go before crediting a similarity pass for this server, retaining the required independent review and provenance checks.
+- R5. Calibrate existing Rust and applicable JavaScript/JSX/TypeScript/TSX similarity coverage for `server/` before crediting its pass, retaining independent review and provenance checks without claiming the scan proves independence.
 - R6. Use synthetic data for automated interoperability and resource checks without copying or transmitting private `local-data/` content.
+- R33. Admit an external dependency only for a documented concrete purpose after maintenance, security, and license assessment; lock and review its exact transitive graph and enabled features without adding an unnecessary dependency-management framework.
 
 **Compatibility and collection behavior**
 
@@ -90,16 +92,16 @@ The initial operator, administrator, and member can all be Antoine.
 
 **Storage, durability, and resource use**
 
-- R15. Run one Go service process with a shared SQLite database for accounts and web sessions, plus one collection SQLite database and isolated media storage per account.
+- R15. Run one Rust service process with a shared SQLite database for accounts and web sessions, plus one collection SQLite database and isolated media storage per account.
 - R16. Use durable local disk storage in the first release, with one synchronized collection per account.
 - R17. Provide a documented, tested backup-and-restore procedure covering account state, collections, and media without inconsistent references.
 - R18. Bound request, decompression, temporary-storage, and concurrency resource use while safely handling invalid media paths and disk-full failures.
 
 ```mermaid
 flowchart TB
-    Clients["Sync clients and browser"] --> Go["One Go process: sync and compiled web interface"]
-    Go --> Shared["Shared SQLite: accounts and web sessions"]
-    Go --> Collections["Per-account collection SQLite and media storage"]
+    Clients["Sync clients and browser"] --> Server["One Rust process: sync and compiled web interface"]
+    Server --> Shared["Shared SQLite: accounts and web sessions"]
+    Server --> Collections["Per-account collection SQLite and media storage"]
 ```
 
 Storage and runtime boundary, per R15, R20, and R28. An external proxy supplies public HTTPS.
@@ -107,7 +109,7 @@ Storage and runtime boundary, per R15, R20, and R28. An external proxy supplies 
 **Web interface and accounts**
 
 - R19. Provide a minimal responsive React interface using shadcn/ui blocks, with keyboard access, visible focus, labeled controls, and accessible form feedback.
-- R20. Serve compiled frontend assets from Go so deployment requires no separate Node server.
+- R20. Serve compiled frontend assets from the Rust executable so deployment requires no separate Node server.
 - R21. Require an operator-controlled one-time setup token to create the first administrator, and close first-admin setup durably after successful completion.
 - R22. After initial setup, permit account creation only through valid administrator-issued invitations, with expiring single-use tokens and a user-chosen username and password.
 - R23. Let members sign in, sign out, change their password, and find the server URL and client-connection instructions in the web interface.
@@ -207,10 +209,10 @@ Directional interface composition for R19–R24. The implementation uses shadcn 
 
 - The 2026-11-15 published stable versions establish R7. Later releases require their own verification; “latest” is not an unbounded compatibility guarantee.
 - Existing neutral specs were derived from 26.09.3. A spec-side reference check must resolve relevant differences before a clean implementation is credited against 26.09.4.
-- The current scanner excludes Go files by language detection. A generic passing similarity result cannot satisfy R5 until that gap is closed.
+- The existing Rust similarity lane must include the server paths, and browser-source coverage must be calibrated under R5; a generic passing result does not establish that those files were checked.
 - Desktop supports the primary automated interoperability lane. Actual AnkiMobile round-trip evidence requires a supported device and remains explicit acceptance evidence, per R7.
 - The retained Meguri client has unfinished live evidence. A server passing Desktop tests does not establish Meguri interoperability, per R8.
-- New first-party code is independently authored. Existing MPL-covered code cannot simply be relabeled MIT; third-party rights remain governed by R3.
+- New first-party code is independently authored. Existing MPL-covered code cannot simply be relabeled MIT; R3 requires ownership/provenance and dependency-license audit before reuse, with its existing terms retained.
 - MIT permits modification and redistribution subject to its terms. Future releases of owned code may use other terms, but that does not revoke rights already granted in released MIT copies.
 - The operator provides durable disk and the external HTTPS endpoint, per R16 and R28. No end-to-end encryption claim is made.
 - The goal is a reasonable personal-scale service. There is no required load-testing platform, historical-version campaign, or numerical latency target beyond the evidence in R31.
@@ -224,7 +226,10 @@ The original technical questions are resolved in KTD1–KTD16 and the dependency
 Repository claims below were checked independently by source inspection. That inspection establishes code and policy facts, not passing runtime behavior.
 
 - [`docs/process/provenance.md`](https://github.com/antoinefink/meguri/blob/master/docs/process/provenance.md), `docs/process/roles/spec-writer.md`, `docs/process/roles/implementer.md`, and `tools/cleanroom/README.md`: clean-room boundaries and provenance obligations.
-- [`tools/similarity/config.yaml:46`](https://github.com/antoinefink/meguri/blob/master/tools/similarity/config.yaml), `tools/similarity/meguri_similarity/lexer.py:27`, and `tools/similarity/meguri_similarity/scan.py:62`: missing Go coverage.
+- [`tools/similarity/config.yaml`](https://github.com/antoinefink/meguri/blob/master/tools/similarity/config.yaml), `tools/similarity/meguri_similarity/lexer.py`, and `tools/similarity/meguri_similarity/scan.py`: existing Rust coverage and server/browser calibration boundaries.
+- `core/Cargo.toml`, `core/rust-toolchain.toml`, `core/crates/meguri-model/Cargo.toml`, `core/crates/meguri-model/src/lib.rs`, and `core/crates/meguri-model/src/schema11/mod.rs`: MPL-2.0 workspace terms, existing toolchain, and public record/protobuf/schema-11 APIs. `core/crates/meguri-storage/Cargo.toml` and `src/lib.rs` identify the broader storage dependency footprint and public surface; availability alone does not justify reuse.
+- `docker/dev.Dockerfile`, `core/deny.toml`, `tools/mg.d/core.sh`, and `tools/gate/tiers.yaml`: installed Cargo audit/notice tooling and current core-scoped jobs/triggers; standalone server manifest support still needs explicit wiring.
+- [Axum documentation](https://docs.rs/axum/latest/axum/), [RustCrypto Argon2 documentation](https://docs.rs/argon2/latest/argon2/), [Cargo dependency declarations](https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html), and [cargo-deny checks](https://embarkstudios.github.io/cargo-deny/checks/index.html): HTTP/password-hashing candidates and existing graph-audit mechanisms. Exact compatible versions and advisories are checked at execution time under R33.
 - [`core/crates/meguri-servers/src/lib.rs:1`](https://github.com/antoinefink/meguri/blob/master/core/crates/meguri-servers/src/lib.rs), `docker/compose.yml:185`, and `tools/scripts/local_sync.py:173`: integration placeholder and utilities that invoke Anki’s server. The local utility uses a supplied immutable image; its release identity is not established by the utility alone.
 - [`core/crates/meguri-sync/src/lib.rs`](https://github.com/antoinefink/meguri/blob/master/core/crates/meguri-sync/src/lib.rs); `specs/sync/transport.md`, `specs/sync/normal-sync.md`, `specs/sync/one-way.md`, and `specs/sync/media-sync.md`: retained client and neutral protocol contracts.
 - [`docs/process/review-log/U107-normal-sync.md:314–328`](https://github.com/antoinefink/meguri/blob/master/docs/process/review-log/U107-normal-sync.md): parked work, incomplete live verification, and pending batch acceptance.
@@ -243,25 +248,25 @@ Repository claims below were checked independently by source inspection. That in
 
 ## Planning Contract
 
-Product Contract unchanged; its planning-owned questions are resolved below without changing R/A/F/AE meanings or IDs.
+The Rust decision supersedes the earlier Go mechanism in R2/R5 and adds R33; the other product behavior and all existing R/A/F/AE IDs remain authoritative.
 
 ### Key Technical Decisions
 
-- KTD1. **A separate `server/` Go module owns production code.** Keep `cmd/meguri-sync`, HTTP handlers, account storage, collection codecs, sync engines, embedded assets, and the web source in this subtree. Reuse neutral specs and suitable input data, not translated MPL-covered Rust implementations. Test-only reference drivers stay quarantined; no Anki or Rust runtime enters the shipped executable. Implements R1–R4, R20, R32.
-- KTD2. **Use a small, pinned dependency set.** Start from Go 1.27.4, `modernc.org/sqlite` 1.62.0 with its matching `modernc.org/libc` dependency, `klauspost/compress` 1.20.4, and the Go crypto/text/protobuf packages needed by the neutral contracts. Use stdlib HTTP routing and SQL rather than a web framework or ORM. Resolve and lock exact transitive versions through Docker, retaining license evidence. If a researched pin cannot be resolved or has a relevant advisory, choose a supported patched version and record the evidence before implementation. Implements R2–R5, R18, R30. Sources: [Go releases](https://go.dev/doc/devel/release), [modernc tags](https://gitlab.com/cznic/sqlite/-/tags), [compress release](https://github.com/klauspost/compress/releases/tag/v1.20.4).
-- KTD3. **Compile a browser-only React SPA into the Go binary.** Use React/React DOM 19.3.1, Vite 8.3.8, TypeScript 7.0.2, Tailwind 4.3.5, and shadcn CLI 4.23.0 as researched starting pins. Adapt `login-01` and the minimal account/navigation parts of `sidebar-01`; remove sample OAuth, email recovery, public signup, charts, and external assets. Commit imported source, its MIT notices, source URLs/hashes, and the npm lockfile because a pinned CLI does not pin live registry content. Build with Node 26 LTS only in Docker. Implements R3, R19, R20. Sources: [Vite installation](https://ui.shadcn.com/docs/installation/vite), [login blocks](https://ui.shadcn.com/blocks/login), [sidebar blocks](https://ui.shadcn.com/blocks/sidebar).
+- KTD1. **A separate `server/` Cargo workspace owns the production service.** Keep the Rust binary/library, server HTTP/SQL/reconciliation code, compiled assets, and web source in this subtree, with its own `Cargo.lock`. Use a narrow path dependency on audited `meguri-model` public schema-11/protobuf/record APIs under their existing MPL-2.0 terms; KTD6 owns reuse limits. No core/app behavior or license changes are part of this work. Test-only reference drivers stay quarantined and no Anki dependency enters the production graph. Implements R1–R4, R20, R32. (session-settled: user-directed — chosen over the earlier Go implementation under R2: reuse suitable first-party APIs without a duplicate language port.)
+- KTD2. **Select dependencies by required capability and audit the resolved graph.** Use the Rust toolchain pinned by `core/rust-toolchain.toml` and the existing Docker development image. Candidate capabilities are Tokio for bounded asynchronous serving, Axum over Hyper for HTTP routing/framing, rusqlite for SQLite, serde/serde_json for typed/exact JSON, zstd for raw protocol compression, zip for media archives, pinned unicase behavior for collection collation, and RustCrypto Argon2 for Argon2id password hashing. Existing core use of a crate is evidence to inspect, not blanket approval or a requirement to add it. Do not write an HTTP parser or cryptographic primitive. Disable unneeded features; select exact compatible versions after the R33 audit, retaining documented purpose, maintenance/advisory/license findings and resolved feature/transitive evidence. Use normal Cargo metadata/tree/lock tooling, existing cargo-deny and cargo-about scoped to the server graph, plus frontend manifest/lock checks; do not build a generic dependency/license/import framework. No smaller graph is claimed before measurement. Implements R2, R3, R18, R30, R33. Sources: the public crate and Cargo documentation in Sources / Research.
+- KTD3. **Compile a browser-only React SPA into the Rust executable.** Keep React/React DOM, Vite, TypeScript, Tailwind, and shadcn/ui with exact compatible pins checked under R33 at execution time. Adapt `login-01` and the minimal account/navigation parts of `sidebar-01`; remove sample OAuth, email recovery, public signup, charts, and external assets. Commit imported source, its MIT notices, source URLs/hashes, and the npm lockfile because a pinned CLI does not pin live registry content. Build with Node 26 LTS only in Docker. Implements R3, R19, R20, R33. Sources: [Vite installation](https://ui.shadcn.com/docs/installation/vite), [login blocks](https://ui.shadcn.com/blocks/login), [sidebar blocks](https://ui.shadcn.com/blocks/sidebar).
 - KTD4. **Keep server metadata out of transferable collections.** `accounts.sqlite` owns identities, credential generations, browser sessions, hostkeys, capabilities, and account-scoped media indexes/USNs. Each opaque account ID has its own schema-compatible collection SQLite and media blob directory. Account IDs, not usernames or remote filenames, select paths. Every writable connection uses the verified WAL/`synchronous=FULL` durability policy and bounded busy waiting; the accounts database also enforces its foreign-key constraints. A bounded connection manager coordinates these stores without claiming cross-database transactions. Implements R12, R15–R18, R25. Sources: `specs/storage/schema-18.md`, [SQLite server usage](https://www.sqlite.org/whentouse.html), [WAL durability](https://www.sqlite.org/wal.html#performance_considerations).
 - KTD5. **Implement only observed current-client transport forms.** The initial contract is protocol v11, raw zstd, exact integer JSON, `anki-sync` authentication, and `anki-original-size` response framing. U2/U3 establish whether either target needs another form before it is added. Do not invent legacy multipart support or reject HTTP versions merely because the retained client uses HTTP/1.1. Keep browser APIs outside the protocol route families. Implements R7–R9, R14, R18. Sources: `specs/sync/transport.md`, `specs/sync/wire-format.md`.
-- KTD6. **Use file-compatible schema-18 collections and independently authored codecs.** Implement schema-11 JSON to schema-18 SQLite/protobuf conversion from neutral model/storage specs, preserving supported unknown JSON and protobuf fields where their channel permits them. Register the pinned Unicode 12.1 `unicase` behavior on every collection connection; generic current-Unicode folding is insufficient. Do not regenerate unrelated full-transfer contents or introduce stock Anki templates/assets. Add older schema migrations only if a supported client’s verified traffic requires them. Implements R4, R7–R10, R14. Sources: `specs/model/protobuf-records.md`, `specs/model/schema11-json.md`, `specs/text/unicode-primitives.md`, `specs/text/checksum-and-sort-field.md`.
+- KTD6. **Use file-compatible schema-18 collections with audited public model APIs.** Reuse `meguri-model::schema11`, public records, and protobuf codecs only after ownership/provenance and license review under R3. Independently implement the server SQL, HTTP, reconciliation, and durability adapters from neutral specs. Consider storage/text helpers only where existing public APIs fit the server contract and their audited dependency footprint justifies reuse; do not import the engine, scheduler, or sync client for convenience. Where an API is missing, author a small server adapter from neutral specs rather than copying MPL code into MIT files or changing core behavior. Preserve supported unknown JSON/protobuf fields and register pinned Unicode 12.1 `unicase` behavior on every collection connection; generic current-Unicode folding is insufficient. Do not regenerate unrelated full-transfer contents or introduce stock Anki assets. Add older schema migrations only if verified target-client traffic requires them. Implements R3, R4, R7–R10, R14, R33. Sources: `specs/model/protobuf-records.md`, `specs/model/schema11-json.md`, `specs/text/unicode-primitives.md`, `specs/text/checksum-and-sort-field.md`, and the public APIs cited above.
 - KTD7. **A per-account coordinator owns collection sessions.** Hold an uncommitted SQLite transaction on a dedicated connection across the normal round, with bounded idle expiry and no process-wide collection mutex. Bind it to account, collection generation, native session key, and credential generation. A new admitted round replaces an unfinished round according to the server contract; abort, errors, expiry, and restart discard uncommitted work. `finish` rechecks generation ownership and commits before acknowledgement. Full-transfer admission and retirement rules are sealed in U3, so an old connection cannot commit successfully into a displaced file. Lost acknowledgements recover through ordinary client reconciliation rather than a new protocol extension. KTD16 owns lock ordering. Implements R10–R14, R18. Sources: `specs/sync/normal-sync.md`, `specs/sync/server-lifecycle.md` planned in U2.
 - KTD8. **Publish full collection generations atomically.** Stream an upload into a private same-filesystem generation, validate its schema/integrity through a hardened connection, make it durable, then switch a small durable current-generation manifest under the account coordinator. Resolve any unfinished normal round and close old writable handles before activation; preserve the prior generation until durable publication and reader release. Downloads apply required server stamps and stream a pinned, self-contained committed snapshot independent of later replacement. Startup removes only unreferenced, owned staging generations after resolving the manifest. KTD16 owns lock ordering. Implements R9, R12–R14, R18. Sources: `specs/sync/one-way.md`, [SQLite security](https://www.sqlite.org/security.html).
 - KTD9. **Publish media through immutable blobs and transactional metadata.** Stage and validate the complete archive independently of remote paths; publish durable account-private blobs before committing filename, hash, tombstone, and USN metadata in `accounts.sqlite`. Acknowledged metadata never points at nondurable bytes. Normal collection transactions and media use separate coordination under KTD16. Retain tombstones in v1; collect unreferenced owned blobs only with exclusive startup/offline ownership. Restore recovery is governed by KTD13 and cannot be inferred from an ahead cursor, matching USNs, or matching file counts. This avoids a multi-file rename journal and cross-database atomicity claims. Implements R9–R13, R17, R18. Sources: `specs/sync/media-sync.md`, `specs/sync/wire-format.md`.
 - KTD10. **One identity has separate browser and native credentials.** The first administrator also owns a normal collection. Store Argon2id password hashes, hashed opaque session/hostkey secrets, and an account credential generation. Use bounded hash workers and bounded password/capability-attempt rate limiting, with generic authentication failures; ordinary authenticated sync chunks must not consume a password-attempt budget. Browser sign-out revokes that session; password change, reset, recovery, or account disable revokes all relevant credentials. Credential issuance rechecks the exact hash revision and generation verified before slow work, never attaching old-password proof to a new generation. Administrator capability creation and password replacement revalidate their original authority in their committing transaction. Serialize these operations with publication under KTD16. Preserve data and reject disabling the sole administrator. Implements R12, R21–R27, R30. Sources: [OWASP password storage](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html), [OWASP sessions](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html).
 - KTD11. **Initialization and capabilities have explicit durable states.** A local initialization command creates an owner-readable setup token file and a database singleton; normal serve refuses missing expected state instead of silently reinitializing. Browser setup uses that token under R21. Invitations last seven days, resets thirty minutes, and a newer reset replaces older ones. Validation/name conflicts leave a capability unclaimed. A successful provisioning claim durably reserves its capability, username, password hash, and opaque account ID; retries and startup resume only that same identity. Access and first-admin setup closure publish only at the ready transition, so filesystem failure neither exposes a partial account nor permits a second redemption. Put manually shared tokens in URL fragments, clear them promptly, and never consume them on GET. Implements R21, R22, R24, R26, R27, R30. Source: [OWASP reset guidance](https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html).
-- KTD12. **Trust the configured public origin, not request headers.** Production web sessions use Secure, HttpOnly, SameSite cookies even though Go receives HTTP. Require an exact configured Origin on unsafe browser requests, including login/setup/reset; no permissive CORS. Trust forwarded client-IP/proto information only from configured proxy peers. Native sync routes authenticate hostkeys independently and never accept browser cookies as credentials. Test this through a private HTTPS proxy fixture. Implements R18, R25, R28, R30. Go’s generic cross-origin middleware alone does not enforce this fail-closed policy. Sources: [Go HTTP](https://pkg.go.dev/net/http), [OWASP CSRF](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html).
+- KTD12. **Trust the configured public origin, not request headers.** Production web sessions use Secure, HttpOnly, SameSite cookies even though the Rust service receives HTTP. Require an exact configured Origin on unsafe browser requests, including login/setup/reset; no permissive CORS. Trust forwarded client-IP/proto information only from configured proxy peers. Native sync routes authenticate hostkeys independently and never accept browser cookies as credentials. Test this through a private HTTPS proxy fixture. Implements R18, R25, R28, R30. Generic cross-origin middleware alone does not enforce this fail-closed policy. Source: [OWASP CSRF](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html).
 - KTD13. **Use stopped-service backup and explicit client recovery.** Initialization, serve/startup sweeping, backup, restore, and recovery share one stable exclusive data-root lock identity. Never replace that lock during restore. Before backup, recover/checkpoint and close every database under the lock, retaining any required journal state. Restore accepts only an empty target, verifies every file, invalidates bearer capabilities, and durably keeps serving closed until local administrator recovery and explicit review of restored account/password state. Preserve backed-up collection state; the client recovery procedure explicitly requests a full transfer instead of assuming a changed `scm` overrides equal `mod`. Every participating client must complete a verified full collection and media-reset/rescan procedure before it is considered recovered; the runbook cannot infer recovery from successful HTTP, cursor equality, or counts. U3 proves the Desktop procedure and U11 proves the Mobile procedure, including delayed reconnect and renewed credentials. An unverified procedure blocks the affected restore claim rather than introducing an assumed wire signal. Historical password hashes and enabled states are snapshot data: do not claim post-backup revocations survive rollback automatically. No transparent automatic restore guarantee, online backup scheduler, or external auth journal is added. Implements R17, R26–R30. Sources: [SQLite backup](https://www.sqlite.org/backup.html), [SQLite WAL](https://www.sqlite.org/wal.html).
-- KTD14. **Extend existing MG enforcement before adding production paths.** Add `server/` to the filtered source allowlist and provenance/test-host scopes; implement calibrated Go lexical/comment coverage and scoped JSX/TSX coverage without claiming nonexistent structural comparisons. Add dedicated Docker services, context allowlists, caches, source triggers, dependency/notices checks, and headless browser evidence. Preserve mandatory sandbox probes and quarantine. The cleanroom runner’s clean-master source condition remains; local worktrees can hold research/review work while code exports originate from clean master. Implements R4–R6, R29, R32. Sources: `tools/cleanroom/source_view.py`, `tools/similarity/AGENTS.md`, `tools/gate/tiers.yaml`.
-- KTD15. **Use real reference clients, not only Go-to-Go tests.** A separate quarantined 26.09.4 reference runtime exercises supported Desktop backend operations through a neutral test protocol without changing the existing 26.09.3 oracle pin. A test-only Rust peer exercises retained Meguri APIs without editing application behavior. Actual AnkiMobile acceptance remains a distinct exact-build device round trip. Synthetic workload evidence reports behavior and resource use; it is not a hosted-scale program. Implements R6–R11, R31, R32. Sources: `docs/process/roles/oracle-maintainer.md`, `specs/conformance/sync-ops.md`.
+- KTD14. **Extend existing MG enforcement before adding production paths.** Add `server/` to filtered-source and provenance/test-host scopes; retain nested `.agents`/`.config` credential exclusions, static public-host guards, browser retry enforcement, and actual sandbox probes. Calibrate the existing Rust lane and applicable JS/JSX/TS/TSX coverage under R5. Reuse Docker Rust tooling and add Docker-only Node 26 browser tooling/context allowlists as needed. Existing Rust MG jobs and dependency triggers are core-scoped: add explicit server manifest/lock support and real lanes when their owning units supply implementations. Source acquisition for shadcn or release inputs belongs in U8/U10 only as concretely needed. The cleanroom runner’s clean-master source condition remains; local worktrees can hold research/review work while code exports originate from clean master. Historical Go export/review evidence remains in its existing receipts, separate from active scope; no Go lexer, toolchain, lock, or cache work is required here. Implements R4–R6, R29, R32, R33. Sources: `tools/cleanroom/source_view.py`, `tools/similarity/AGENTS.md`, `tools/gate/tiers.yaml`, `tools/mg.d/core.sh`.
+- KTD15. **Use real reference clients, not only Rust self-tests.** A separate quarantined 26.09.4 reference runtime exercises supported Desktop backend operations through a neutral test protocol without changing the existing 26.09.3 oracle pin. A test-only Rust peer exercises retained Meguri APIs without editing application behavior. Actual AnkiMobile acceptance remains a distinct exact-build device round trip. Synthetic workload evidence reports behavior and resource use; it is not a hosted-scale program. Implements R6–R11, R31, R32. Sources: `docs/process/roles/oracle-maintainer.md`, `specs/conformance/sync-ops.md`.
 - KTD16. **Keep publication barriers short and acquire them before shared metadata writes.** Decode/stream/hash outside account barriers and shared write transactions. An account request/publication barrier precedes its short collection/media state lock and any shared metadata write; never wait for an account barrier or client/network round while holding the shared writer. A retained normal-round connection is state owned by the coordinator, not a mutex held across the network. Under the barrier, recheck authority and generation, then finish the relevant commit, manifest switch, or media publication before a revoker may acknowledge. Administrative metadata transactions revalidate the actor and target authority without acquiring another account barrier while holding the writer. Close the relevant unfinished round rather than waiting for an abandoned client. Implements R12, R13, R18, R24–R27; refines KTD7–KTD10. Source: [SQLite isolation](https://www.sqlite.org/isolation.html).
 
 ### High-Level Technical Design
@@ -270,8 +275,8 @@ The production and reference boundaries follow KTD1, KTD4, and KTD15.
 
 ```mermaid
 flowchart TB
-    Browser["Browser SPA"] --> Web["Go web authentication and account API"]
-    Clients["Unmodified Anki clients and test-only Meguri peer"] --> Protocol["Go sync transport"]
+    Browser["Browser SPA"] --> Web["Rust web authentication and account API"]
+    Clients["Unmodified Anki clients and test-only Meguri peer"] --> Protocol["Rust sync transport"]
     Web --> Accounts["Shared account and media metadata SQLite"]
     Protocol --> Coordinator["Per-account collection and media coordinators"]
     Coordinator --> Accounts
@@ -285,7 +290,7 @@ The normal round keeps one account transaction unpublished until finish, per KTD
 ```mermaid
 sequenceDiagram
     participant C as Sync client
-    participant G as Go account coordinator
+    participant G as Rust account coordinator
     participant D as Collection SQLite
     C->>G: start with session key and minUsn
     G->>D: Begin isolated round
@@ -345,9 +350,9 @@ The following paths declare the service boundary; unit file lists own the detail
 ```text
 server/
   AGENTS.md, LICENSE, THIRD_PARTY_NOTICES.md, README.md
-  go.mod, go.sum
-  cmd/meguri-sync/
-  internal/{accounts,collection,httpapi,media,protocol,storage,webassets}/
+  Cargo.toml, Cargo.lock, deny.toml
+  src/{main.rs,lib.rs,operations.rs}
+  src/{accounts,collection,httpapi,media,protocol,storage,webassets}/
   web/{src,public,e2e}/
   tests/{fixtures,meguri-peer,support}/
   licenses/
@@ -370,9 +375,9 @@ tools/scripts/meguri-sync/
 | Retained Meguri peer | Existing neutral APIs and separate test-only adapter | Actual supported paths and explicit client-origin blockers in U11 |
 | Web/account API | Original policy specified in U2 | U4/U8 real API/browser evidence |
 
-- KTD2/KTD3 pins are research inputs, not dependency-resolution receipts. U1/U4/U8 record resolved locks, source notices, and image digests before claiming reproducibility.
+- KTD2/KTD3 selections are planning inputs, not dependency-resolution receipts. U4/U8/U10 record resolved locks, exact features/transitive graphs, notices, image digests, and R33 assessments before claiming reproducibility.
 - U2/U3 must establish Desktop-current upload schema, transport, blank-account behavior, session transitions, stamping, and media envelopes before dependent compatibility handlers are implemented. They do not seal unobserved Mobile behavior; its conditional claims remain open until U11 without blocking independent Desktop-backed implementation.
-- A copied or translated Rust implementation cannot be relabeled MIT. Neutral field declarations and protocol facts are usable; code reuse retains its original license under R3.
+- Audited public first-party path dependencies retain MPL-2.0 and their notices under R3; the new MIT server code has a separate boundary. Resolve ownership/provenance and dependency-license questions before reuse, without relabeling or copying existing covered implementations into MIT files.
 - Initial metadata has a small fixed schema. Media indexing belongs to KTD4’s shared server database, never to the transferable collection.
 - No service method contacts a public sync service. Test endpoints are job-owned local services; production reverse-proxy installation remains operator work.
 - The same account can administer the service and sync its own collection. Administrators gain no browser collection viewer or cross-account content endpoint.
@@ -383,6 +388,8 @@ tools/scripts/meguri-sync/
 
 - The new source tree changes cleanroom, provenance, similarity, dependency, Docker-context, and tier-trigger coverage. U1 makes those changes explicit before server files can escape checks.
 - Current Anki SQLite/protobuf representations and collation are the largest implementation risk. U2/U3 contract evidence and U5 round-trip fixtures precede normal sync.
+- Rust reuse reduces duplicate codec work only where public APIs fit; it neither turns the retained client into a server nor establishes current-client acceptance. Core workspace dependency declarations and parity pins remain untouched.
+- A second Go port is considered and not built: it duplicates representation and tooling work after the Rust decision. A generic dependency/license/import checker is also not built: existing Cargo audit/notice tools plus the specific frontend manifest, lock, and source-notice checks satisfy R33.
 - Long-lived collection transactions, media metadata, and account revocation touch different stores. KTD7–KTD10 define their ownership and publication order; tests must cross those seams.
 - The app’s original milestones and frozen client acceptance remain separate. A new server receipt does not satisfy an old app unit automatically.
 - Restore rolls collection and identity state back to a snapshot. KTD13 makes the operator acknowledge that boundary before serving; preserving a separate permanent revocation journal is considered but not built for this personal-scale service.
@@ -399,12 +406,12 @@ U-IDs are local to this plan. Review logs and commit provenance must also identi
 | U1 | Tooling enforces the new source boundary | `tools/`, `docker/` | None |
 | U2 | Neutral server and web contracts | `specs/sync/server-*.md`, `specs/servers/meguri-sync-web.md` | None |
 | U3 | Current-release reference harness and neutral fixtures | `oracle/meguri-sync-server/`, `conformance/` | U1, U2 |
-| U4 | Account, credential, and service substrate | `server/internal/accounts/`, `server/internal/httpapi/` | U1, U2 |
-| U5 | Collection representation and full transfer | `server/internal/collection/`, `server/internal/protocol/` | U3, U4 |
-| U6 | Transactional incremental sync | `server/internal/collection/`, `server/internal/protocol/` | U5 |
-| U7 | Durable media sync | `server/internal/media/`, `server/internal/protocol/` | U3, U4, U5 |
-| U8 | Minimal shadcn administration interface | `server/web/`, `server/internal/webassets/` | U4 |
-| U9 | Offline recovery and coherent backup/restore | `server/cmd/`, `server/internal/storage/` | U5, U6, U7 |
+| U4 | Account, credential, and service substrate | `server/Cargo.toml`, `server/src/accounts/`, `server/src/httpapi/` | U1, U2 |
+| U5 | Collection representation and full transfer | `server/src/collection/`, `server/src/protocol/` | U3, U4 |
+| U6 | Transactional incremental sync | `server/src/collection/`, `server/src/protocol/` | U5 |
+| U7 | Durable media sync | `server/src/media/`, `server/src/protocol/` | U3, U4, U5, U6 |
+| U8 | Minimal shadcn administration interface | `server/web/`, `server/src/webassets/` | U4 |
+| U9 | Offline recovery and coherent backup/restore | `server/src/operations.rs`, `server/src/storage/` | U5, U6, U7 |
 | U10 | Reproducible release packaging and notices | `docker/`, `server/licenses/`, `server/README.md` | U8, U9 |
 | U11 | Complete interoperability, resilience, and usability evidence | `server/tests/`, `server/web/e2e/`, `conformance/` | U3, U6, U7, U8, U9, U10 |
 
@@ -418,6 +425,7 @@ flowchart TB
     U4 --> U5
     U5 --> U6
     U5 --> U7
+    U6 --> U7
     U4 --> U8
     U6 --> U9
     U7 --> U9
@@ -428,27 +436,28 @@ flowchart TB
 
 ### U1. Extend tooling and provenance to the server boundary
 
-**Goal:** New Go and frontend paths receive the required isolation, dependency, provenance, privacy, and similarity enforcement.
+**Goal:** Rust server and frontend paths receive the required source isolation, provenance, privacy, similarity, host, and retry enforcement.
 
-**Requirements:** R1–R6, R29, R32; KTD1, KTD14.
+**Requirements:** R1–R6, R29, R32, R33; KTD1, KTD14.
 
 **Dependencies:** None.
 
 **Files:** `tools/cleanroom/source_view.py`, `tools/tests/cleanroom.bats`, `tools/hooks/commit-msg`, `tools/gate/static-checks/ankiweb-hosts.sh`, `tools/gate/static-checks/no-retries.sh`, `tools/tests/provenance.bats`, `tools/similarity/meguri_similarity/lexer.py`, `tools/similarity/config.yaml`, `tools/similarity/tests/test_lexer.py`, `tools/similarity/tests/test_scan_synthetic.py`, `tools/mg.d/meguri-sync.sh`, `tools/tests/meguri_sync.bats`, `tools/gate/tiers.yaml`, `docker/compose.yml`, `docker/meguri-sync-dev.Dockerfile` and its context allowlist.
 
-**Approach:** Extend the existing mechanisms in KTD14, preserving their denied trees and reports. Add pinned Go/Node tooling services and source-mutation utilities for dependency locks and licensed block imports. Register jobs and triggers only when their implementation exists; future lanes remain explicitly pending until their owning units land.
+**Approach:** Extend the common mechanisms in KTD14 and preserve their denied trees, credential exclusions, reports, and probes. Reuse existing Rust development tooling; provide Docker-only Node 26 tooling as needed for browser enforcement. Wire server manifest/source scopes only where actual implementations exist, leaving behavior and dependency lanes to their owning units. Preserve historical exports/review evidence separately; remove Go-only expansion from active scope without rewriting old receipts.
 
 **Patterns to follow:** `tools/AGENTS.md`, `docker/AGENTS.md`, existing `mg_job` result helpers and cleanroom boundary tests.
 
 **Test scenarios:**
 
-- Permit ordinary `server/` source while refusing nested forbidden trees, links, submodules, credentials, and history.
+- Permit ordinary `server/` source while refusing nested forbidden trees, `.agents`/`.config` credential files, links, submodules, credentials, and history.
 - Reject a server-code commit missing the appropriate role, session, or spec/requirement provenance.
-- Include Go raw strings, escaped strings, comments, and file/line attribution in scanner coverage; retain existing-language behavior.
-- Detect controlled cross-language lexical/comment positives without claiming a Go-only structural lane proves translation independence.
+- Count Rust and applicable JS/JSX/TS/TSX source with correct file/line attribution, preserving calibrated existing-language behavior.
+- Detect controlled lexical/comment positives in supported lanes without claiming a passing scan proves translation independence.
+- Reject forbidden public sync hosts in production server source and preserve job-owned local test endpoint allowances.
 - Dry-run every new job without mutation, validate its tier/utility registration, and reject browser test retries.
 
-**Verification:** Focused tooling tests, actual cleanroom boundary probes, and similarity calibration pass with Go files demonstrably counted. No production server behavior is introduced by this unit.
+**Verification:** Focused tooling tests, actual cleanroom boundary probes, static-host/retry checks, and similarity calibration pass with server Rust and applicable browser files demonstrably counted. No production server behavior is introduced by this unit.
 
 ### U2. Specify server behavior and current-client probes
 
@@ -499,15 +508,15 @@ flowchart TB
 
 ### U4. Build the account and service substrate
 
-**Goal:** The Go service securely initializes storage and implements the account APIs consumed by native sync and the web UI.
+**Goal:** The Rust service securely initializes storage and implements the account APIs consumed by native sync and the web UI.
 
-**Requirements:** R1–R3, R12, R15, R16, R18, R21–R28, R30; A1–A3; F1, F2, F4, F6; AE1–AE3, AE7; KTD1, KTD2, KTD4, KTD10–KTD12, KTD16.
+**Requirements:** R1–R3, R12, R15, R16, R18, R21–R28, R30, R33; A1–A3; F1, F2, F4, F6; AE1–AE3, AE7; KTD1, KTD2, KTD4, KTD10–KTD12, KTD16.
 
 **Dependencies:** U1 and U2’s completed original web/account contract.
 
-**Files:** `server/AGENTS.md`, `server/LICENSE`, `server/go.mod`, `server/go.sum`, `server/cmd/meguri-sync/main.go`, `server/internal/accounts/`, `server/internal/httpapi/`, `server/internal/storage/`, `server/internal/accounts/accounts_test.go`, `server/internal/httpapi/auth_test.go`, `server/internal/storage/provision_test.go`, `tools/mg.d/meguri-sync.sh`.
+**Files:** `server/AGENTS.md`, `server/LICENSE`, `server/Cargo.toml`, `server/Cargo.lock`, `server/deny.toml`, `server/src/{main,lib}.rs`, `server/src/accounts/`, `server/src/httpapi/`, `server/src/storage/`, `server/tests/{accounts,auth,provision}.rs`, `tools/mg.d/meguri-sync.sh`.
 
-**Approach:** Create the module and process/configuration/storage boundary before exposing handlers. Implement capability and credential transactions, internal native-credential issuance, browser authorization, setup closure, account provisioning, and revocation coordination. Protocol hostkey framing waits for U5. Add only the local initialization/recovery primitives needed by the original flows; U9 completes operational commands.
+**Approach:** Create the standalone Cargo workspace and process/configuration/storage boundary before exposing handlers. Resolve KTD2’s HTTP, SQL, and password-hashing dependencies under R33, locking and auditing the actual server graph with existing tools. Implement capability and credential transactions, internal native-credential issuance, browser authorization, setup closure, account provisioning, and revocation coordination. Keep blocking SQL/hash work off asynchronous request workers with explicit capacity bounds. Protocol hostkey framing waits for U5. Add only the local initialization/recovery primitives needed by the original flows; U9 completes operational commands.
 
 **Execution note:** Prove the account publication and authorization boundaries before adding any collection mutation route.
 
@@ -524,19 +533,19 @@ flowchart TB
 - Provisioning failures between account and filesystem steps recover to the same opaque identity without exposing an incomplete account.
 - Kill between the durable provisioning claim, directory/collection creation, ready transition, and setup closure; concurrent retries resume one reserved identity rather than burn or reuse its capability.
 
-**Verification:** Go unit/integration and race checks pass through MG with real temporary SQLite files. The administrator can also obtain a sync-only hostkey for their own account.
+**Verification:** Rust unit/integration and deterministic concurrency checks pass through MG with real temporary SQLite files; scoped cargo-deny and dependency/notice evidence covers the resolved server graph. The administrator can also obtain a sync-only hostkey for their own account.
 
 ### U5. Implement collection codecs, transport, and full transfer
 
-**Goal:** Supported clients can authenticate, inspect metadata, and exchange a complete valid collection through the Go server.
+**Goal:** Supported clients can authenticate, inspect metadata, and exchange a complete valid collection through the Rust server.
 
-**Requirements:** R7–R10, R12–R16, R18, R25; F3; AE4, AE6; KTD4–KTD8.
+**Requirements:** R3, R7–R10, R12–R16, R18, R25, R33; F3; AE4, AE6; KTD1, KTD2, KTD4–KTD8.
 
 **Dependencies:** U3, U4, and the completed current-release clauses from U2.
 
-**Files:** `server/internal/collection/{schema,objects,protobuf,unicase,notes}.go`, `server/internal/collection/codecs_test.go`, `server/internal/collection/full_test.go`, `server/internal/protocol/{framing,login,meta,full}.go`, `server/internal/protocol/transport_test.go`, `server/tests/fixtures/`, `tools/mg.d/meguri-sync.sh`, server interop tier entries.
+**Files:** `server/Cargo.toml`, `server/Cargo.lock`, `server/src/collection/{schema,objects,model_adapter,unicase,notes}.rs`, `server/src/protocol/{framing,login,meta,full}.rs`, `server/tests/{codecs,full,transport}.rs`, `server/tests/fixtures/`, `tools/mg.d/meguri-sync.sh`, server interop tier entries. Existing core crates are read-only dependencies.
 
-**Approach:** Implement KTD5/KTD6 representations independently, then KTD8 publication and snapshot download. Harden uploaded database connections and preserve unrelated supported content. Keep all private metadata outside the transferable file. Introduce the candidate-server interoperability job with explicit selected lane arguments; the batch gate waits until all registered required lanes exist.
+**Approach:** Audit and add the narrow `meguri-model` path dependency in KTD1/KTD6, then build independent server SQL/HTTP adapters around its public schema-11/protobuf/record APIs. Record the ownership/provenance, retained MPL terms, and actual feature/transitive graph; admit storage/text reuse only when public API fit and footprint justify it. Supply missing seams independently from neutral specs without changing core/app behavior. Implement KTD8 publication and snapshot download, harden uploaded database connections, and preserve unrelated supported content. Keep private metadata outside the transferable file. Introduce the candidate-server interoperability job with explicit lane arguments; the batch gate waits until all registered required lanes exist.
 
 **Execution note:** Start from neutral representation and full-transfer fixtures before normal reconciliation. Do not substitute a server-private database format that cannot round-trip through real clients.
 
@@ -549,9 +558,8 @@ flowchart TB
 - Match pinned `unicase`, note sort-field, and checksum vectors, including the documented folding quirk.
 - Covers AE6. Corrupt/unsupported/truncated uploads, cancellation, disk-full, and kills around publication never replace the committed generation falsely.
 - Serve a valid blank account snapshot and a WAL-backed committed snapshot without leaking incomplete sidecars or server metadata.
-- Interleave a paused normal round, full upload publication, and stamped full download in both orders; acknowledged changes must belong to the manifest-selected generation or its explicit later replacement.
 
-**Verification:** Go fixtures and actual reference-client full-transfer tests pass; inspect the downloaded database through the neutral reference boundary rather than relying on Go decoding itself.
+**Verification:** Rust fixtures and actual reference-client full-transfer tests pass; inspect the downloaded database through the neutral reference boundary rather than relying on the reused model decoder alone. R3/R33 evidence covers every reused crate and new dependency.
 
 ### U6. Implement transactional incremental reconciliation
 
@@ -561,11 +569,11 @@ flowchart TB
 
 **Dependencies:** U5.
 
-**Files:** `server/internal/collection/{session,graves,changes,chunks,sanity}.go`, `server/internal/collection/normal_test.go`, `server/internal/collection/session_test.go`, `server/internal/protocol/normal.go`, current-client neutral scenario inputs.
+**Files:** `server/src/collection/{session,graves,changes,chunks,sanity}.rs`, `server/src/protocol/normal.rs`, `server/tests/{normal,session}.rs`, current-client neutral scenario inputs.
 
 **Approach:** Use the verified lifecycle contract to select pending server changes, exchange objects and rows, enforce conflict/deletion semantics, compare sanity, and commit closing stamps. Retain one unpublished round and coordinate abort, replacement, expiry, and credential-generation changes through KTD7/KTD10.
 
-**Patterns to follow:** `specs/sync/server-collection.md`, `specs/sync/server-lifecycle.md`, and neutral tuple/object rules; existing Rust implementations are peers, not translation templates.
+**Patterns to follow:** `specs/sync/server-collection.md`, `specs/sync/server-lifecycle.md`, and neutral tuple/object rules; the retained Rust client is a test peer, not a server implementation. Reuse follows KTD6.
 
 **Test scenarios:**
 
@@ -575,9 +583,9 @@ flowchart TB
 - Covers AE5. No-change and one-review exchanges stay incremental.
 - Covers AE6. Invalid session order/key, bad sanity, abort, expiry, a new start, or process death rolls back uncommitted changes.
 - A lost finish acknowledgement and subsequent ordinary retry preserve one review history; password reset/disable cannot be followed by an old-generation commit.
-- Overlap finish, media publication, and reset/disable under deterministic barriers; each completes within its bound and a second account progresses without waiting for an idle network round.
+- Interleave a paused normal round, full upload publication, and stamped full download in both orders; acknowledged changes must belong to the manifest-selected generation or its explicit later replacement.
 
-**Verification:** Go/race tests and current-reference two-client normal-sync lanes pass, with database state observed independently after commits and refusals.
+**Verification:** Rust tests, deterministic concurrency checks, and current-reference two-client normal-sync lanes pass, with database state observed independently after commits and refusals.
 
 ### U7. Implement durable media synchronization
 
@@ -585,9 +593,9 @@ flowchart TB
 
 **Requirements:** R9–R13, R15–R18, R25; F3; AE3–AE6; KTD4, KTD9, KTD10.
 
-**Dependencies:** U3, U4, U5.
+**Dependencies:** U3, U4, U5, U6. The cross-operation publication proof uses the completed normal-round implementation.
 
-**Files:** `server/internal/media/{index,archive,blobs,recovery}.go`, `server/internal/media/media_test.go`, `server/internal/media/recovery_test.go`, `server/internal/protocol/media.go`, neutral media fixtures and interop scenarios.
+**Files:** `server/src/media/{index,archive,blobs,recovery}.rs`, `server/src/protocol/media.rs`, `server/tests/{media,media_recovery}.rs`, neutral media fixtures and interop scenarios.
 
 **Approach:** Implement the verified media methods and KTD9 publication order using account-scoped metadata. Enforce archive and filename rules without extracting remote names as paths. Keep media independent of a collection round, and include KTD10 revocation checks at publication.
 
@@ -600,27 +608,27 @@ flowchart TB
 - Identical content and deletion of an absent filename count as processed without inventing USN changes.
 - Covers AE6. Invalid/duplicate mappings, unsafe names, symlinks, bad CRC, expansion limits, interruption, and publication failure preserve committed metadata and bytes.
 - Lost upload acknowledgement and restart do not duplicate media effects; normal collection sync can coexist with independent media work.
-- The KTD13 recovery procedure repairs ahead, equal, and already-overtaken restored cursors, including equal file counts with different hashes and credentials reissued after restore.
+- Overlap finish, media publication, and reset/disable under deterministic barriers; each completes within its bound and a second account progresses without waiting for an idle network round.
 
-**Verification:** Go/race and actual reference-client media lanes pass, including process-kill publication points and independently checked file hashes.
+**Verification:** Rust tests, deterministic concurrency checks, and actual reference-client media lanes pass, including process-kill publication points and independently checked file hashes.
 
 ### U8. Build the minimal shadcn web interface
 
 **Goal:** Operators and members can complete the agreed account flows in a small, usable browser interface.
 
-**Requirements:** R19–R28, R30; A1–A3; F1, F2, F4, F6; AE1–AE3, AE7; KTD3, KTD10–KTD12.
+**Requirements:** R19–R28, R30, R33; A1–A3; F1, F2, F4, F6; AE1–AE3, AE7; KTD3, KTD10–KTD12.
 
 **Dependencies:** U4.
 
-**Files:** `server/web/package.json`, `server/web/package-lock.json`, `server/web/components.json`, `server/web/src/{app,api,components,pages}/`, `server/web/src/api.test.ts`, `server/web/e2e/accounts.spec.ts`, `server/web/e2e/accessibility.spec.ts`, `server/web/playwright.config.ts`, `server/web/upstream-records.json`, `server/internal/webassets/`, `server/internal/httpapi/assets_test.go`, `specs/servers/meguri-sync-web.md`, server web MG jobs and tier triggers.
+**Files:** `server/web/package.json`, `server/web/package-lock.json`, `server/web/components.json`, `server/web/src/{app,api,components,pages}/`, `server/web/src/api.test.ts`, `server/web/e2e/accounts.spec.ts`, `server/web/e2e/accessibility.spec.ts`, `server/web/playwright.config.ts`, `server/web/upstream-records.json`, `server/src/webassets/`, `server/tests/assets.rs`, `specs/servers/meguri-sync-web.md`, server web MG jobs and tier triggers.
 
-**Approach:** Import and simplify the licensed blocks selected in KTD3. Provide setup, login, invite acceptance, reset, member connection/settings, and administrator account pages over U4’s real APIs. Keep role gates server-enforced and preserve nonsecret form input after failures. Embed the built assets with explicit API/asset/known-navigation routing; missing assets never return the SPA shell.
+**Approach:** Acquire, record, and simplify only the licensed blocks selected in KTD3, with exact source hashes/notices and frontend dependency/lock review under R33. Add an acquisition helper only if this concrete import needs one. Provide setup, login, invite acceptance, reset, member connection/settings, and administrator account pages over U4’s real APIs. Keep role gates server-enforced and preserve nonsecret form input after failures. Compile the built assets into the Rust executable with explicit API/asset/known-navigation routing; missing assets never return the SPA shell.
 
 **Patterns to follow:** The requested official shadcn blocks, `docs/design/workflow.md`, and the browser-specific screen contract in `specs/servers/meguri-sync-web.md`. The server web interface is not a SwiftUI screen or an excuse to change the native app.
 
 **Test scenarios:**
 
-- Covers F1/F2/AE1/AE2. Complete setup and invitation flows through the compiled UI and real Go API, including expiry, username conflict, and lost/repeated submission.
+- Covers F1/F2/AE1/AE2. Complete setup and invitation flows through the compiled UI and real Rust API, including expiry, username conflict, and lost/repeated submission.
 - Covers F4/AE7. A reset link permits only password selection; the previous native/browser credentials stop working and collection data remains.
 - Covers AE3. Members cannot reach administrator actions by navigation or direct API calls; a sync hostkey cannot authorize the browser interface.
 - Form errors, session expiry, a signed-in user opening another invitation, browser refresh, and invalid navigation retain clear account identity and useful recovery actions.
@@ -637,7 +645,7 @@ flowchart TB
 
 **Dependencies:** U5, U6, U7.
 
-**Files:** `server/cmd/meguri-sync/operations.go`, `server/internal/storage/{lock,backup,restore}.go`, `server/internal/storage/backup_test.go`, `server/internal/storage/restore_test.go`, `server/internal/accounts/recovery_test.go`, `server/tests/support/`, operator runbook sections in `server/README.md`.
+**Files:** `server/src/operations.rs`, `server/src/storage/{lock,backup,restore}.rs`, `server/tests/{backup,restore,account_recovery}.rs`, `server/tests/support/`, operator runbook sections in `server/README.md`.
 
 **Approach:** Implement KTD13 using exclusive offline ownership and password input outside command arguments. Restore into a fresh root, validate the complete generation, rotate capabilities, and require explicit local review/recovery before serving. Coordinate restored collection stamps and KTD9 media-cursor recovery through the ordinary client protocol.
 
@@ -649,7 +657,7 @@ flowchart TB
 - Covers AE8. A stopped backup restores onto an empty root and supports fresh authentication and independently verified collection/media reads.
 - Refuse concurrent serve/recovery/backup writers, nonempty restore destinations, incomplete archives, tampered manifests, unsafe archive entries, and disk-full publication.
 - A backup predating a password reset or account disable cannot silently reopen service with restored authority; the required local review gate remains closed.
-- An existing client completes explicit full collection reconciliation and verified media reset/rescan, including equal modification stamps, delayed reconnect after server USNs catch up, equal counts with different hashes, and renewed credentials.
+- An existing client completes explicit full collection reconciliation and verified media reset/rescan, including equal modification stamps, ahead/equal/reused/overtaken media cursors, delayed reconnect after server USNs catch up, equal counts with different hashes, and renewed credentials.
 - Cancellation or process death at each restore phase leaves either the untouched destination or a clearly incomplete, non-serving restoration.
 - Initialization, serve, recovery, backup, and restore contend on the same stable lock; restoring cannot replace its identity or open service before durable review clearance.
 - A backup taken immediately after a killed writer recovers committed WAL contents; deterministic write/flush/commit failures distinguish rollback from committed-but-unacknowledged publication.
@@ -660,21 +668,21 @@ flowchart TB
 
 **Goal:** A self-hoster can build and run the production service from reproducible inputs without development runtimes or reference dependencies.
 
-**Requirements:** R1–R5, R19, R20, R28–R30; F1, F5; KTD1–KTD3, KTD13, KTD14.
+**Requirements:** R1–R5, R19, R20, R28–R30, R33; F1, F5; KTD1–KTD3, KTD13, KTD14.
 
 **Dependencies:** U8, U9.
 
-**Files:** `docker/meguri-sync-release.Dockerfile` and allowlist, `server/compose.yaml`, `server/LICENSE`, `server/THIRD_PARTY_NOTICES.md`, `server/licenses/`, `server/README.md`, `tools/scripts/meguri-sync/licenses.*`, `tools/tests/meguri_sync.bats`, packaging/dependency MG jobs and tier triggers.
+**Files:** `docker/meguri-sync-release.Dockerfile` and allowlist, `server/compose.yaml`, `server/LICENSE`, `server/THIRD_PARTY_NOTICES.md`, `server/licenses/`, `server/deny.toml`, server-scoped cargo-about configuration/template as needed, `server/README.md`, `tools/tests/meguri_sync.bats`, packaging/dependency MG jobs and tier triggers.
 
-**Approach:** Build web assets and the Go executable in separate pinned stages, then ship an unprivileged final image and Linux binary with notices. Record the complete shipped Go/npm dependency graph and imported component notices. Keep reference harnesses, Rust peers, private trees, source credentials, Node, and Python out of the final artifacts.
+**Approach:** Build web assets and the Rust executable in separate pinned Docker stages, then ship an unprivileged final image and Linux binary with notices. Use existing cargo-deny/cargo-about and standard Cargo metadata/lock tooling against the server manifest, plus specific frontend manifest/lock/source-notice checks. Record the exact production Rust/npm graphs, enabled features, R33 assessments, imported component provenance, and retained MPL-2.0 terms/source availability for reused crates under R3. Include required source/license material without shipping test-only reference harnesses or peers, private trees, source credentials, Node, or Python. Add only concrete release-source acquisition support that this packaging needs.
 
-**Patterns to follow:** `docker/AGENTS.md` context allowlists, MG manifests, and existing dependency-license policy, adapted explicitly to Go/npm.
+**Patterns to follow:** `docker/AGENTS.md` context allowlists, MG manifests, and existing Cargo dependency/license tooling scoped explicitly to `server/Cargo.toml` and its lockfile; frontend checks follow KTD3.
 
 **Test scenarios:**
 
 - A fresh container with only its documented configuration and persistent volume completes initialization and real browser/native smoke flows.
 - The Linux artifact and container run with Node/Python absent and no writable source checkout or reference runtime.
-- Unknown/unapproved shipped dependency licenses, missing notices, altered lock integrity, or a forbidden Docker context path fail the packaging check.
+- Unknown/unapproved shipped dependency licenses, missing MPL/source or other required notices, altered lock integrity, undocumented dependency purpose, or a forbidden Docker context path fail the packaging check.
 - Restart/upgrade against the supported metadata schema preserves accounts and collections; an unsupported future metadata schema refuses writes.
 - The runbook covers external HTTPS configuration, safe link sharing, Desktop-led transfer from an existing private server, client connection settings, backup, restore, and access recovery.
 
@@ -684,15 +692,15 @@ flowchart TB
 
 **Goal:** The completed service is verified across the agreed client, browser, and recovery flows, with incomplete external evidence kept explicit.
 
-**Requirements:** R4–R32; F1–F6; AE1–AE8; KTD14, KTD15.
+**Requirements:** R4–R33; F1–F6; AE1–AE8; KTD14, KTD15.
 
 **Dependencies:** U3, U6, U7, U8, U9, U10.
 
 **Files:** `server/tests/meguri-peer/Cargo.toml`, `server/tests/meguri-peer/src/`, `server/tests/meguri-peer/tests/`, `server/tests/support/`, `server/web/e2e/`, neutral conformance scenarios/recordings, fault/resource MG jobs and tier triggers, `docs/process/review-log/meguri-sync-acceptance.md`, final runbook corrections.
 
-**Approach:** Exercise the exact packaged Go service through the quarantined current Desktop backend and a test-only retained-Meguri peer. Complete cross-layer failure and browser coverage and collect the personal-scale workload report. Run final current-Mobile validation separately on a supported device without modifying the Meguri app or using private collection fixtures.
+**Approach:** Exercise the exact packaged Rust service through the quarantined current Desktop backend and a test-only retained-Meguri peer. Complete cross-layer failure and browser coverage and collect the personal-scale workload report. Run final current-Mobile validation separately on a supported device without modifying the Meguri app or using private collection fixtures.
 
-**Execution note:** Do not replace an unavailable peer or device result with a Go-only self-test. Preserve failed receipts, diagnose the owning boundary, and fix eligible server defects through clean-room repair/review rounds.
+**Execution note:** Do not replace an unavailable peer or device result with a Rust-only self-test. Preserve failed receipts, diagnose the owning boundary, and fix eligible server defects through clean-room repair/review rounds.
 
 **Patterns to follow:** The neutral protocol from U3, MG queued-evidence rules, and the original retained-client APIs without application changes.
 
@@ -710,24 +718,24 @@ flowchart TB
 
 ## Verification Contract
 
-All build, test, lint, browser, reference, and packaging work runs through `tools/mg`; development and reference workloads run in Docker. Host orchestration may coordinate job-owned containers but never bypasses the MG result contract. New command names below are planned jobs, not claims that they already exist.
+All server/frontend build, test, lint, browser, reference, and packaging work runs through `tools/mg` in Docker, using the existing Rust toolchain/image and Node 26 LTS. Host orchestration may coordinate job-owned containers but never bypasses the MG result contract. New command names below are planned jobs, not claims that they already exist. Existing core Rust jobs are not server receipts until their manifest, lockfile, features, and trigger scope explicitly cover the standalone server workspace.
 
 | Evidence | MG entry point | Proves and limits |
 |---|---|---|
 | Tooling and boundaries | `tools/mg selftest`, focused Bats selection, `tools/mg cleanroom --check` | Registry, filtered source, and sandbox boundaries; no protocol acceptance |
 | Provenance and test policy | `tools/mg static-checks --base <batch-base>` | Required trailers, test-host scope, no retries |
-| Go and browser dependency/notices | `tools/mg sync-server-deps` | Resolved shipped dependency/license graph and notices; not an absence-of-risk certificate |
-| Go implementation | `tools/mg sync-server-test` | Unit, SQL/HTTP integration, and race checks using temporary synthetic data |
-| Actual compiled web interface | `tools/mg sync-server-web` | Type/focused tests plus real Go-served Playwright/a11y flows, zero retries, retained screenshots |
+| Rust and browser dependency/notices | `tools/mg sync-server-deps` | R3/R33 purpose/maintenance/security/license assessment, exact server graph/features, scoped cargo-deny/cargo-about and frontend provenance/lock evidence; not an absence-of-risk certificate |
+| Rust implementation | `tools/mg sync-server-test` | Unit, SQL/HTTP integration, and deterministic concurrency checks using temporary synthetic data |
+| Actual compiled web interface | `tools/mg sync-server-web` | Type/focused tests plus real Rust-served Playwright/a11y flows, zero retries, retained screenshots |
 | Reference harness | `tools/mg sync-server-reference` | Current pinned SDK runtime, neutral harness self-tests, and baseline observations |
 | Interoperability | `tools/mg sync-server-interop` | Selected full/normal/media lanes and retained peer, with nonzero exact-client counts |
 | Failure and recovery | `tools/mg sync-server-faults` | Deterministic interruption, revocation, disk-full, publication, restart, and restore cases |
 | Release artifacts | `tools/mg sync-server-package` | Exact executable/container startup, asset completeness, notices, and runtime exclusions |
 | Personal workload | `tools/mg sync-server-bench` | R31 elapsed-time, transfer, and resource report with hardware/input identity |
-| Similarity | `tools/mg similarity-selftest`, `tools/mg similarity --base <batch-base>` | Calibrated Go and applicable frontend coverage, with corpus/report quarantine retained |
+| Similarity | `tools/mg similarity-selftest`, `tools/mg similarity --base <batch-base>` | Calibrated Rust and applicable JS/JSX/TS/TSX coverage under R5, with corpus/report quarantine retained |
 | Coherent integration batch | `tools/mg gate --base <original-batch-base>` | Required existing and new lanes selected by triggers; no failed receipt is relabeled passed |
 
-Source-changing dependency/block import utilities run before gates; verification must leave the tracked source unchanged. Gate and packaging manifests identify source/lock hashes and exact arguments. A stage with no tests, a stale result, or a skipped required path cannot satisfy another lane.
+Normal dependency lock updates and concrete U8/U10 source acquisition run before gates; verification must leave tracked source unchanged. Gate and packaging manifests identify source/lock hashes and exact arguments. A stage with no tests, a stale result, or a skipped required path cannot satisfy another lane.
 
 Use three coherent integration boundaries: U1–U4, U5–U8, and U9–U11. Record each original batch base and every unit’s start before mutation. Within a batch, keep focused checks, independent source review, provenance/privacy/similarity evidence, separate role-appropriate commits, and logs at `docs/process/review-log/meguri-sync-U<N>.md`. The final boundary is this server’s delivery gate; it does not claim closure of the original application milestones.
 
