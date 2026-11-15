@@ -1645,14 +1645,173 @@ fn resume_waiting_adoption(fixture: &Fixture, connection: &Arc<CloudConnection>)
     job.result.result().unwrap().unwrap().resumed
 }
 
+fn assert_recovery_policy_wait(fixture: &Fixture, waiting: bool, phase: &str) {
+    use c::policy::{Attention, Lifecycle};
+    let lifecycle = if fixture.workflow.host.collection().is_ok() {
+        Lifecycle::Ready
+    } else {
+        Lifecycle::NoCollection
+    };
+    let projection = fixture.workflow.core.policy_projection(
+        lifecycle, fixture.workflow.host.engine().generation().0,
+    ).unwrap();
+    assert_eq!(
+        projection.facts.summary.attention.get(&Attention::RecoveryOpWaiting).copied(),
+        waiting.then_some(1),
+        "{phase}",
+    );
+    assert!(!projection.facts.summary.attention_known, "{phase}");
+}
+
+fn prepare_foreign_builds_before_adoption(fixture: &Fixture) -> Vec<r::Runtime> {
+    let collection = fixture.workflow.host.collection().unwrap();
+    [
+        ("synthetic-u114", c::Environment::Production),
+        ("synthetic-other-build", c::Environment::Development),
+    ].into_iter().map(|(container, environment)| {
+        let runtime = r::Runtime::new(
+            fixture.workflow.host.cloud_connection_directory().to_path_buf(),
+            r::CloudInputs {
+                scope: c::BuildScope {
+                    container: c::ContainerId::new(container).unwrap(), environment,
+                },
+                identity: Arc::new(Account),
+                files: Arc::new(NativeFiles),
+            },
+        );
+        // Bind with actual native evidence before CloudAdopt closes ordinary
+        // collection admission. Retain this scoped store through the real wait.
+        runtime.attach_adapter_clock(fixture.clock.clone());
+        meguri_engine::ports::OpenStep::run(&runtime, &collection).unwrap();
+        assert!(!runtime.policy_projection(c::policy::Lifecycle::Ready, collection.generation().0).unwrap().tracking_stopped);
+        assert!(runtime.adoption_op().unwrap().is_none());
+        runtime
+    }).collect()
+}
+
+fn assert_foreign_builds_ignore_adoption_wait(fixture: &Fixture, runtimes: &[r::Runtime]) {
+    use c::policy::{Attention, Lifecycle};
+    let collection = fixture.workflow.host.collection().unwrap();
+    assert_eq!(runtimes.len(), 2);
+    for runtime in runtimes {
+        let projection = runtime.policy_projection(Lifecycle::Ready, collection.generation().0).unwrap();
+        assert!(!projection.tracking_stopped);
+        assert!(projection.facts.binding.is_none());
+        assert!(runtime.adoption_op().unwrap().is_none());
+        assert!(!projection.facts.summary.attention.contains_key(&Attention::RecoveryOpWaiting));
+        assert!(!projection.facts.summary.attention_known);
+    }
+}
+
+#[test]
+fn adoption_policy_ready_wait_tracks_review_without_treating_ready_work_as_waiting() {
+    use c::entity_codec as codec;
+    let fixture = Fixture::new(Keys::new([]));
+    fixture.baseline_with_accepted_epoch();
+    let connection = fixture.workflow.connection().unwrap();
+    adoption_fetch_ready(&connection);
+    // The candidate needs its own scheduler config through real page intake;
+    // the live collection's accepted Epoch does not supply candidate rows.
+    let key = b"schedVer";
+    let payload = codec::Payload::Config(codec::Config {
+        key: key.to_vec(),
+        mtime_secs: 1,
+        val: b"2".to_vec(),
+    }).encode().unwrap();
+    let entity = codec::Entity::build(codec::EntityFields {
+        kind: codec::Kind::Config,
+        key: key.to_vec(),
+        origin: [1; 16],
+        erev: 1,
+        generation: None,
+        tombstone: false,
+        deleted_at_ms: 0,
+        writer: [2; 16],
+        base_sha256: None,
+    }, &payload).unwrap();
+    assert!(entity.payload.is_some());
+    let record = CloudStagingRecord {
+        name: codec::entity_name(&[19; 32], codec::Kind::Config, key).unwrap(),
+        record_type: "MGEntity".into(),
+        record: CloudControlRecord {
+            encrypted: Some(entity.encode().unwrap()),
+            system_fields: vec![4],
+        },
+        payload_file: None,
+    };
+    let (page, action) = adoption_action(&connection);
+    assert!(matches!(action, CloudAdoptionAction::Fetch { cursor: None, .. }));
+    connection.adoption_result(page, CloudAdoptionResult::Page {
+        records: vec![record], deleted: vec![], next: None,
+    }).unwrap();
+    let (validate, action) = adoption_action(&connection);
+    assert!(matches!(action, CloudAdoptionAction::Validate));
+    let op = fixture.workflow.core.adoption_op().unwrap().unwrap();
+    assert_eq!(op.step, c::adoption::AdoptStep::Staged);
+    let stage = fixture.workflow.host.cloud_connection_directory().join(op.staging_name);
+    assert_recovery_policy_wait(&fixture, false, "staged local validation is work");
+    connection.perform_adoption_local(validate).unwrap();
+    let op = fixture.workflow.core.adoption_op().unwrap().unwrap();
+    assert_eq!(op.step, c::adoption::AdoptStep::Ready);
+    assert_recovery_policy_wait(&fixture, false, "Ready still has a root recheck to run");
+    let (recheck, action) = adoption_action(&connection);
+    assert!(matches!(action, CloudAdoptionAction::ReadActive { .. }));
+    connection.adoption_result(recheck, CloudAdoptionResult::Read {
+        read: CloudControlRead::Found { record: CloudControlRecord {
+            encrypted: op.active.encrypted,
+            system_fields: op.active.system_fields.0,
+        } },
+    }).unwrap();
+    assert_recovery_policy_wait(&fixture, false, "activation can run without a review");
+    let review = fixture.workflow.host.review().begin_unqueued_session().unwrap();
+    assert!(matches!(connection.next_publication_work().unwrap(), CloudPublicationWork::Idle));
+    assert_recovery_policy_wait(&fixture, true, "Ready waits for review to end");
+    assert!(connection.recovery_status().unwrap().unwrap().adoption_cancellable);
+    review.end().unwrap();
+    assert_recovery_policy_wait(&fixture, false, "review ended; activation is work again");
+    let review = fixture.workflow.host.review().begin_unqueued_session().unwrap();
+    assert_recovery_policy_wait(&fixture, true, "Ready waits for the new review");
+    connection.cancel_operation(connection.recovery_status().unwrap().unwrap().operation).unwrap();
+    assert_recovery_policy_wait(&fixture, false, "Cancel retires Ready review wait");
+    assert!(!stage.exists());
+    review.end().unwrap();
+    fixture.workflow.host.close().unwrap();
+}
+
+#[test]
+fn publication_policy_wait_still_uses_accepted_failure_and_existing_trigger_semantics() {
+    let fixture = Fixture::new(keys());
+    let (connection, request) = active_request(&fixture);
+    assert_recovery_policy_wait(&fixture, false, "publication work is running");
+    assert!(connection.submit_publication_request(
+        request.clone(), Arc::new(Queue(AtomicUsize::new(0))),
+    ).unwrap());
+    assert_recovery_policy_wait(&fixture, false, "publication awaits original reply");
+    connection.publication_result(request, CloudPublicationResult::Failed { retry_after_ms: None }).unwrap();
+    assert_recovery_policy_wait(&fixture, true, "publication failure waits");
+    connection.trigger().unwrap();
+    assert_recovery_policy_wait(&fixture, false, "existing publication trigger releases wait");
+    connection.cancel_operation(connection.recovery_status().unwrap().unwrap().operation).unwrap();
+    assert_recovery_policy_wait(&fixture, false, "publication Cancel");
+    fixture.workflow.host.close().unwrap();
+}
+
 #[test]
 fn adoption_transport_wait_retains_exact_page_or_payload_until_explicit_resume_after_deadline() {
-    for initial in [false, true] {
+    for (initial, bound) in [(false, false), (false, true), (true, false)] {
         for payload in [false, true] {
             let fixture = if initial {
                 Fixture::without_collection(Keys::new([]))
             } else {
                 Fixture::new(Keys::new([]))
+            };
+            if bound {
+                fixture.baseline();
+            }
+            let foreign_runtimes = if initial {
+                Vec::new()
+            } else {
+                prepare_foreign_builds_before_adoption(&fixture)
             };
             let connection = fixture.workflow.connection().unwrap();
             adoption_fetch_ready(&connection);
@@ -1674,6 +1833,7 @@ fn adoption_transport_wait_retains_exact_page_or_payload_until_explicit_resume_a
             } else {
                 page
             };
+            assert_recovery_policy_wait(&fixture, false, "issued page/payload before failure");
             let original = fixture.workflow.core.adoption_op().unwrap().unwrap();
             let stage = fixture
                 .workflow
@@ -1698,11 +1858,17 @@ fn adoption_transport_wait_retains_exact_page_or_payload_until_explicit_resume_a
             assert!(job.result.result().unwrap().is_none());
             assert!(!fixture.workflow.core.adoption_op().unwrap().unwrap().transport_wait);
             assert_eq!(stage_bytes(&stage), before);
+            assert_recovery_policy_wait(&fixture, false, "failure result queued, not accepted");
             drop(pool);
             assert_eq!(finished(&events, job.handle.id), JobOutcome::Succeeded);
             assert!(job.result.result().unwrap().unwrap().applied);
             let waiting = fixture.workflow.core.adoption_op().unwrap().unwrap();
             assert!(waiting.transport_wait);
+            assert_recovery_policy_wait(&fixture, true, "accepted transport failure");
+            if !initial {
+                assert_foreign_builds_ignore_adoption_wait(&fixture, &foreign_runtimes);
+                assert_recovery_policy_wait(&fixture, true, "other builds leave original wait intact");
+            }
             assert_eq!(waiting.id, original.id);
             assert_eq!(waiting.candidate, original.candidate);
             assert_eq!(waiting.staging_name, original.staging_name);
@@ -1742,7 +1908,9 @@ fn adoption_transport_wait_retains_exact_page_or_payload_until_explicit_resume_a
                 connection.next_publication_work().unwrap(),
                 CloudPublicationWork::Idle
             ));
+            assert_recovery_policy_wait(&fixture, true, "before retry deadline");
             assert!(!resume_waiting_adoption(&fixture, &connection));
+            assert_recovery_policy_wait(&fixture, true, "early explicit Resume starts nothing");
             assert_eq!(fixture.workflow.core.adoption_op().unwrap().unwrap(), waiting);
             fixture.clock.step_ms(115_001);
             if !initial {
@@ -1752,7 +1920,9 @@ fn adoption_transport_wait_retains_exact_page_or_payload_until_explicit_resume_a
                 connection.next_publication_work().unwrap(),
                 CloudPublicationWork::Idle
             ));
+            assert_recovery_policy_wait(&fixture, true, "deadline expired without Resume");
             assert!(resume_waiting_adoption(&fixture, &connection));
+            assert_recovery_policy_wait(&fixture, false, "accepted explicit Resume");
             let (repeated, action) = adoption_action(&connection);
             assert_eq!(repeated.retained_work_for_test(), &descriptor);
             if payload {
@@ -1788,6 +1958,7 @@ fn adoption_transport_wait_retains_exact_page_or_payload_until_explicit_resume_a
                 .cancel_operation(connection.recovery_status().unwrap().unwrap().operation)
                 .unwrap();
             assert!(!stage.exists());
+            assert_recovery_policy_wait(&fixture, false, "Cancel retires the operation");
             fixture.workflow.host.close().unwrap();
         }
     }
@@ -1801,12 +1972,19 @@ fn adoption_transport_failure_during_account_unavailability_still_requires_expli
         r::IdentityStatus::Restricted,
         r::IdentityStatus::Configuration,
     ] {
-        for payload in [false, true] {
+        for (initial, bound, payload) in [
+            (false, false, false), (false, false, true),
+            (false, true, false), (false, true, true),
+            (true, false, false), (true, false, true),
+        ] {
             let account = c::OpaqueBytes(b"synthetic-account-A".to_vec());
             let identity = Arc::new(CachedIdentity(Mutex::new(Some(r::IdentityStatus::Available(
                 account.clone(),
             )))));
-            let fixture = Fixture::with_identity(Keys::new([]), Some(identity.clone()));
+            let fixture = Fixture::with_collection(Keys::new([]), Some(identity.clone()), !initial);
+            if bound {
+                fixture.baseline();
+            }
             let connection = fixture.workflow.connection().unwrap();
             adoption_fetch_ready(&connection);
             // The original page/payload work is issued while this account is
@@ -1828,6 +2006,7 @@ fn adoption_transport_failure_during_account_unavailability_still_requires_expli
             } else {
                 page
             };
+            assert_recovery_policy_wait(&fixture, false, "issued work with available account");
             let descriptor = handle.retained_work_for_test().clone();
             let original = fixture.workflow.core.adoption_op().unwrap().unwrap();
             let stage = fixture
@@ -1837,6 +2016,7 @@ fn adoption_transport_failure_during_account_unavailability_still_requires_expli
                 .join(&original.staging_name);
             let before = stage_bytes(&stage);
             identity.set(unavailable.clone());
+            assert_recovery_policy_wait(&fixture, false, "account unavailable before accepted failure");
             let events = fixture.workflow.host.engine().stream().subscribe();
             let job = connection
                 .clone()
@@ -1855,6 +2035,7 @@ fn adoption_transport_failure_during_account_unavailability_still_requires_expli
             expected.transport_wait = true;
             expected.retry_after_ms = Some(NOW + 120_000);
             assert_eq!(waiting, expected);
+            assert_recovery_policy_wait(&fixture, true, "accepted failure while account unavailable");
             assert_eq!(stage_bytes(&stage), before);
             assert!(matches!(
                 connection.next_publication_work().unwrap(),
@@ -1864,23 +2045,32 @@ fn adoption_transport_failure_during_account_unavailability_still_requires_expli
             let resume = connection.clone().start_resume_adoption(operation).unwrap();
             assert!(matches!(finished(&events, resume.handle.id), JobOutcome::Failed { .. }));
             failure_is(resume.result.result(), CloudConnectionFailure::AccountUnavailable);
+            assert_recovery_policy_wait(&fixture, true, "Resume without account proof retains wait");
             assert_eq!(fixture.workflow.core.adoption_op().unwrap().unwrap(), waiting);
             identity.set(r::IdentityStatus::Available(account));
             fixture.clock.step_ms(5_000);
-            connection.trigger().unwrap();
+            if !initial {
+                connection.trigger().unwrap();
+            }
             assert!(matches!(
                 connection.next_publication_work().unwrap(),
                 CloudPublicationWork::Idle
             ));
+            assert_recovery_policy_wait(&fixture, true, "before retry deadline after account return");
             assert!(!resume_waiting_adoption(&fixture, &connection));
+            assert_recovery_policy_wait(&fixture, true, "early explicit Resume retains wait");
             assert_eq!(fixture.workflow.core.adoption_op().unwrap().unwrap(), waiting);
             fixture.clock.step_ms(115_001);
-            connection.trigger().unwrap();
+            if !initial {
+                connection.trigger().unwrap();
+            }
             assert!(matches!(
                 connection.next_publication_work().unwrap(),
                 CloudPublicationWork::Idle
             ));
+            assert_recovery_policy_wait(&fixture, true, "deadline expired without Resume");
             assert!(resume_waiting_adoption(&fixture, &connection));
+            assert_recovery_policy_wait(&fixture, false, "accepted explicit Resume after account return");
             let (repeated, _) = adoption_action(&connection);
             assert_eq!(repeated.retained_work_for_test(), &descriptor);
             assert_eq!(stage_bytes(&stage), before);
@@ -1888,6 +2078,7 @@ fn adoption_transport_failure_during_account_unavailability_still_requires_expli
                 .cancel_operation(connection.recovery_status().unwrap().unwrap().operation)
                 .unwrap();
             assert!(!stage.exists());
+            assert_recovery_policy_wait(&fixture, false, "Cancel after resumed work");
             fixture.workflow.host.close().unwrap();
         }
     }
@@ -1949,6 +2140,7 @@ fn adoption_wait_cancel_drains_queued_resume_and_rejects_late_facts() {
         )
         .unwrap();
     let waiting = fixture.workflow.core.adoption_op().unwrap().unwrap();
+    assert_recovery_policy_wait(&fixture, true, "waiting before queued Resume");
     let stage = fixture
         .workflow
         .host
@@ -1964,7 +2156,9 @@ fn adoption_wait_cancel_drains_queued_resume_and_rejects_late_facts() {
     assert_eq!(finished(&events, job.handle.id), JobOutcome::Cancelled);
     assert!(job.result.result().is_err());
     assert_eq!(fixture.workflow.core.adoption_op().unwrap().unwrap(), waiting);
+    assert_recovery_policy_wait(&fixture, true, "cancelled Resume retains transport wait");
     connection.cancel_operation(operation).unwrap();
+    assert_recovery_policy_wait(&fixture, false, "Cancel clears transport wait");
     assert!(!stage.exists());
     assert!(
         connection

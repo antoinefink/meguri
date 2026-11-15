@@ -109,6 +109,21 @@ impl Runtime {
                 if unreadable > 0 {
                     summary.attention.insert(Attention::ConflictsUnreadable, unreadable);
                 }
+                // P3/V14.3 adoption waits belong to this build scope, even
+                // before an initial adoption has a bound collection. Staging
+                // work and retry-after expiry alone never establish a wait.
+                if let Some(op) = store.adoption_op()? {
+                    let ready_wait = op.step == crate::cloud::adoption::AdoptStep::Ready
+                        && (session.is_some()
+                            || store.binding(op.binding_after)?.is_some_and(|b| {
+                                // Recovery retained this candidate without R6
+                                // proof. Keep its existing Cancel-only wait.
+                                b.facts.state == BindingState::Isolated(IsolationReason::FileMismatch)
+                            }));
+                    if op.transport_wait || ready_wait {
+                        summary.attention.insert(Attention::RecoveryOpWaiting, 1);
+                    }
+                }
             }
             if let (Some(b), Some(store)) = (&s.bound, &s.store) {
                 let publish = store.publication_op()?;
@@ -218,7 +233,7 @@ impl Runtime {
                 if refused > 0 {
                     summary.attention.insert(Attention::Refused, refused);
                 }
-                if publish.is_some() && s.publication.waiting || store.adoption_op()?.is_some() {
+                if publish.is_some() && s.publication.waiting {
                     summary.attention.insert(Attention::RecoveryOpWaiting, 1);
                 }
                 summary.media = work.media;

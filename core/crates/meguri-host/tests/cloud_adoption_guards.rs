@@ -1839,6 +1839,14 @@ fn changed_inode_blocks_initial_cloud_recovery_without_retiring_the_durable_row(
     assert!(host.collection().unwrap().cloud_adopt_activation().unwrap().is_none());
     assert_eq!(host.cloud_runtime().unwrap().adoption_op().unwrap().as_ref(), Some(&op));
     assert_eq!(host.engine().slot_holder(), None);
+    // P3/P14.4: this retained Ready row is an R6 recovery wait, even
+    // without a live staging owner or a review session. It grants no Resume.
+    let projection = host.cloud_runtime().unwrap().policy_projection(
+        cloud::policy::Lifecycle::Ready, host.engine().generation().0,
+    ).unwrap();
+    assert!(projection.facts.session.is_none());
+    assert_eq!(projection.facts.summary.attention.get(&cloud::policy::Attention::RecoveryOpWaiting), Some(&1));
+    assert!(!projection.facts.summary.attention_known);
     assert!(matches!(
         host.next_cloud_publication_work().unwrap(),
         cloud::publication::PublicationWork::Idle
