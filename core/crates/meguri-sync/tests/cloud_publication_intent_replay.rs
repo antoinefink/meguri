@@ -35,8 +35,27 @@ fn conflict(point: Point, both_names: bool) -> (Pair, BindingId) {
     pair.receiver.hold(point).unwrap();
     pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
     assert!(pair.receiver.is_held(point));
-    assert_eq!(pair.receiver.driver().apply_intents(binding).unwrap().len(), 1);
+    let intents = pair.receiver.driver().apply_intents(binding).unwrap();
+    assert_eq!(intents.len(), 1);
+    // Real adoption replaced the receiver in this process; the next child
+    // opens the same file in generation 1, without normalizing the fixture.
+    assert_eq!(pair.receiver.driver().incoming_observation(binding).unwrap().generation, 2);
+    assert_eq!(intents[0].generation, 2);
     (pair, binding)
+}
+fn assert_replayed_rewrite_captured(pair: &mut Pair, binding: BindingId) {
+    let observed = pair.receiver.driver().incoming_observation(binding).unwrap();
+    assert_eq!(observed.generation, 1);
+    let intents = pair.receiver.driver().apply_intents(binding).unwrap();
+    assert_eq!(intents.len(), 1);
+    assert_eq!(intents[0].generation, observed.generation);
+    let seq = intents[0].result_seq.unwrap();
+    assert_eq!(seq, observed.seq);
+    let capture = pair.receiver.driver().capture_proof(seq, observed.generation).unwrap();
+    assert_eq!(capture.observed_seq, seq);
+    assert_eq!(capture.generation, observed.generation);
+    assert!(capture.attempted && capture.persisted);
+    assert!(!pair.receiver.driver().scan_state().unwrap().tracking_stopped);
 }
 fn assert_finished(pair: &mut Pair, binding: BindingId) {
     assert!(pair.receiver.driver().apply_intents(binding).unwrap().is_empty());
@@ -114,6 +133,8 @@ fn q11_kill_before_move_replays_the_move_before_the_note_operation() {
     let before = notes(&mut pair.receiver);
     pair.receiver.kill().unwrap();
     pair.reopen_before_identity();
+    assert_eq!(pair.receiver.driver().incoming_observation(binding).unwrap().generation, 1);
+    assert_eq!(pair.receiver.driver().apply_intents(binding).unwrap()[0].generation, 2);
     pair.receiver.hold(Point::ResolutionMoveBeforeRewrite).unwrap();
     pair.verify_and_drive();
     assert!(pair.receiver.is_held(Point::ResolutionMoveBeforeRewrite));
@@ -122,7 +143,12 @@ fn q11_kill_before_move_replays_the_move_before_the_note_operation() {
     assert!(!files.contains_key("photo.jpg"));
     assert_eq!(notes(&mut pair.receiver), before);
     assert_eq!(pair.receiver.driver().apply_intents(binding).unwrap().len(), 1);
+    pair.receiver.hold(Point::ResolutionRewriteCommitted).unwrap();
     pair.receiver.release(Point::ResolutionMoveBeforeRewrite).unwrap();
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    assert!(pair.receiver.is_held(Point::ResolutionRewriteCommitted));
+    assert_replayed_rewrite_captured(&mut pair, binding);
+    pair.receiver.release(Point::ResolutionRewriteCommitted).unwrap();
     pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
     assert_finished(&mut pair, binding);
     pair.close();
@@ -131,6 +157,9 @@ fn q11_kill_before_move_replays_the_move_before_the_note_operation() {
 fn edit_every_key_before_step8(pair: &mut Pair) {
     pair.receiver.kill().unwrap();
     pair.reopen_before_identity();
+    let binding = pair.receiver.facts().unwrap().current.unwrap().id;
+    assert_eq!(pair.receiver.driver().incoming_observation(binding).unwrap().generation, 1);
+    assert_eq!(pair.receiver.driver().apply_intents(binding).unwrap()[0].generation, 2);
     let rows = notes(&mut pair.receiver);
     assert!(rows.len() >= 2);
     for note in rows {
@@ -152,7 +181,12 @@ fn edit_every_key_before_step8(pair: &mut Pair) {
 fn q11_rerun_after_every_key_is_edited_keeps_edits_and_leaves_no_old_name() {
     let (mut pair, binding) = conflict(Point::ResolutionMoveBeforeRewrite, true);
     edit_every_key_before_step8(&mut pair);
+    pair.receiver.hold(Point::ResolutionRewriteCommitted).unwrap();
     pair.verify_and_drive();
+    assert!(pair.receiver.is_held(Point::ResolutionRewriteCommitted));
+    assert_replayed_rewrite_captured(&mut pair, binding);
+    pair.receiver.release(Point::ResolutionRewriteCommitted).unwrap();
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
     assert_finished(&mut pair, binding);
     for note in notes(&mut pair.receiver) {
         assert!(
@@ -172,6 +206,7 @@ fn q11_kill_after_rerun_commit_settles_recorded_digests_without_a_third_run() {
     pair.receiver.hold(Point::ResolutionRewriteCommitted).unwrap();
     pair.verify_and_drive();
     assert!(pair.receiver.is_held(Point::ResolutionRewriteCommitted));
+    assert_replayed_rewrite_captured(&mut pair, binding);
     let rewritten = notes(&mut pair.receiver);
     assert!(
         rewritten
@@ -262,6 +297,8 @@ fn q11_deleted_note_key_is_skipped_while_replay_reruns_surviving_notes() {
     assert_eq!(killed.signal, Some(libc::SIGKILL));
     assert!(!killed.clean_close);
     pair.reopen_before_identity();
+    assert_eq!(planned[0].generation, 2);
+    assert_eq!(pair.receiver.driver().incoming_observation(binding).unwrap().generation, 1);
     let rows = notes(&mut pair.receiver);
     assert!(rows.len() >= 2);
     let deleted_id = rows[0].id;
@@ -286,6 +323,7 @@ fn q11_deleted_note_key_is_skipped_while_replay_reruns_surviving_notes() {
     pair.receiver.hold(Point::ResolutionRewriteCommitted).unwrap();
     pair.verify_and_drive();
     assert!(pair.receiver.is_held(Point::ResolutionRewriteCommitted));
+    assert_replayed_rewrite_captured(&mut pair, binding);
     let rewritten = notes(&mut pair.receiver);
     assert_eq!(
         rewritten.iter().map(|note| note.id).collect::<Vec<_>>(),
@@ -329,6 +367,81 @@ fn q11_deleted_note_key_is_skipped_while_replay_reruns_surviving_notes() {
         }));
     }
     pair.close();
+}
+
+#[test]
+fn paused_media_success_survives_repeated_holds_without_resubmission() {
+    let (mut pair, binding) = conflict(Point::ResolutionMoveBeforeRewrite, false);
+    let requests = pair.service.request_log().unwrap();
+    let before = notes(&mut pair.receiver);
+    // A still-held caller has no terminal result to consume. Repeated drives
+    // must preserve the original callback and its download source.
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    assert!(pair.receiver.is_held(Point::ResolutionMoveBeforeRewrite));
+    assert_eq!(notes(&mut pair.receiver), before);
+    assert!(pair.service.request_log().unwrap() == requests);
+
+    pair.receiver.hold(Point::ResolutionRewriteCommitted).unwrap();
+    pair.receiver.release(Point::ResolutionMoveBeforeRewrite).unwrap();
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    assert!(pair.receiver.is_held(Point::ResolutionRewriteCommitted));
+    let rewritten = notes(&mut pair.receiver);
+    assert!(pair.service.request_log().unwrap() == requests);
+
+    pair.receiver.hold(Point::IntentSettlementComplete).unwrap();
+    pair.receiver.release(Point::ResolutionRewriteCommitted).unwrap();
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    assert!(pair.receiver.is_held(Point::IntentSettlementComplete));
+    assert!(pair.receiver.driver().apply_intents(binding).unwrap().is_empty());
+    assert_eq!(pair.receiver.driver().media_files().unwrap()["photo.jpg"], REMOTE);
+    assert!(pair.service.request_log().unwrap() == requests);
+
+    pair.receiver.release(Point::IntentSettlementComplete).unwrap();
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    assert_eq!(notes(&mut pair.receiver), rewritten);
+    assert_finished(&mut pair, binding);
+    let settled = pair.receiver.driver().incoming_observation(binding).unwrap();
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    assert_eq!(pair.receiver.driver().incoming_observation(binding).unwrap().seq, settled.seq);
+    assert_eq!(notes(&mut pair.receiver), rewritten);
+    pair.close();
+}
+
+#[test]
+fn stopped_tracking_returns_the_original_paused_media_error_once_without_replay() {
+    let (mut pair, binding) = conflict(Point::ResolutionMoveBeforeRewrite, false);
+    let before = pair.receiver.driver().incoming_observation(binding).unwrap();
+    let requests = pair.service.request_log().unwrap();
+    // Fail the real synchronous observer after the first tracking write. The
+    // collection COMMIT survives; invalidated recovery authority then gives the
+    // original MediaReply caller StaleIncarnation, before its boundary hook.
+    pair.receiver.driver().arm_capture_failure_for_testing(1).unwrap();
+    pair.receiver.release(Point::ResolutionMoveBeforeRewrite).unwrap();
+    let error = pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap_err();
+    assert_eq!(error.to_string(), "cloud device operation failed: RuntimeStaleIncarnation");
+    let after = pair.receiver.driver().incoming_observation(binding).unwrap();
+    assert!(after.seq > before.seq);
+    assert_eq!(after.generation, before.generation);
+    let capture = pair.receiver.driver().capture_proof(after.seq, after.generation).unwrap();
+    assert!(capture.attempted && !capture.persisted);
+    assert!(pair.receiver.driver().scan_state().unwrap().tracking_stopped);
+    let rewritten = notes(&mut pair.receiver);
+    assert!(rewritten.iter().all(|note| {
+        let fields = std::str::from_utf8(&note.flds).unwrap();
+        fields.contains(&hash_name()) && !fields.contains("src=\"photo.jpg\"")
+    }));
+    let unsettled = pair.receiver.driver().apply_intents(binding).unwrap();
+    assert_eq!(unsettled.len(), 1);
+    assert_eq!(unsettled[0].result_seq, None);
+    // The terminal error was consumed once. Another stopped drive issues no
+    // SDK operation and neither retries the callback nor rewrites/settles it.
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    assert_eq!(pair.receiver.driver().incoming_observation(binding).unwrap().seq, after.seq);
+    assert_eq!(notes(&mut pair.receiver), rewritten);
+    assert_eq!(pair.receiver.driver().apply_intents(binding).unwrap(), unsettled);
+    assert!(pair.service.request_log().unwrap() == requests);
+    pair.receiver.kill().unwrap();
+    pair.sender.close_clean().unwrap();
 }
 
 #[test]

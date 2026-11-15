@@ -170,6 +170,7 @@ pub struct SDKRig {
     ordinary_media: Option<OrdinaryMedia>,
     ordinary_built: Option<(BuiltBatch, Vec<Mutation>)>,
     ordinary_media_reply: Option<(cloud::media::Reply, Option<tempfile::NamedTempFile>)>,
+    pub(in crate::cloud) cloud_media_reply: Option<(Input, Option<tempfile::NamedTempFile>)>,
 }
 impl SDKRig {
     /// Reopen actual adopted files without supplying a binding or baseline.
@@ -242,6 +243,7 @@ impl SDKRig {
             ordinary_media: None,
             ordinary_built: None,
             ordinary_media_reply: None,
+            cloud_media_reply: None,
         }
     }
     pub(crate) fn install_instance(&mut self, instance: String, zone: String) {

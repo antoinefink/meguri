@@ -830,6 +830,9 @@ impl PublicationRig {
         let result = (|| {
             self.sdk.get_mut().driver.resume_incoming_work()?;
             self.sdk.get_mut().resume_fetch_callback()?;
+            if !self.sdk.get_mut().complete_retained_media_callback()? {
+                return self.refresh();
+            }
             let scan: super::super::child_driver::ScanState = self.sdk.get_mut().driver.call(Input::ScanState)?;
             if scan.tracking_stopped {
                 return self.refresh();
@@ -1029,6 +1032,10 @@ impl PublicationRig {
             self.sdk.get_mut().driver.resume_incoming_work()?;
             self.last_sync_phase = "resume_fetch_callback";
             self.sdk.get_mut().resume_fetch_callback()?;
+            self.last_sync_phase = "complete_retained_media_callback";
+            if !self.sdk.get_mut().complete_retained_media_callback()? {
+                return self.refresh();
+            }
             self.last_sync_phase = "publication_trigger";
             self.sdk.get_mut().driver.call::<()>(Input::PublicationTrigger)?;
             self.last_sync_phase = "media_resume";

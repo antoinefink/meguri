@@ -1166,6 +1166,16 @@ impl ChildDriver {
             || self.suspended_work.iter().any(|(pending, _)| *pending == key)
             || self.completed_work.iter().any(|(completed, _)| *completed == key))
     }
+    /// Read only an already-completed reply for this exact original command.
+    /// Never resume a worker or issue the command when its result is absent.
+    pub(crate) fn take_completed_reply<T: DeserializeOwned>(&mut self, input: &Input) -> Result<Option<T>> {
+        let key = serde_json::to_vec(input)?;
+        let Some(index) = self.completed_work.iter().position(|(completed, _)| *completed == key) else {
+            return Ok(None);
+        };
+        let (_, result) = self.completed_work.remove(index);
+        Ok(Some(serde_json::from_value(result.map_err(ChildFailure::into_error)?)?))
+    }
     pub(crate) fn resume_incoming_work(&mut self) -> Result<()> {
         if self.pending_work.is_none() {
             return Ok(());

@@ -9,6 +9,9 @@ impl SDKRig {
         service: &mut Service<SeededRandom>,
         remaining: &mut usize,
     ) -> Result<bool> {
+        if !self.complete_retained_media_callback()? {
+            return Ok(false);
+        }
         self.updates()?;
         while *remaining > 0 {
             let facts: cloud::testing::PublicationControl = self.driver.call(Input::PublicationControl)?;
@@ -86,8 +89,7 @@ impl SDKRig {
                             result,
                         });
                     }
-                    self.driver
-                        .call::<()>(Input::MediaReply(work.clone(), MediaReply::BlobReads { results }))?;
+                    self.deliver_cloud_media_reply(work, MediaReply::BlobReads { results }, None)?;
                     if self.updates()? {
                         return Ok(true);
                     }
@@ -104,13 +106,43 @@ impl SDKRig {
                 operation,
             )?;
             let (reply, asset_owner) = Self::ordinary_media_reply(response)?;
-            self.driver.call::<()>(Input::MediaReply(work, reply))?;
-            drop(asset_owner);
+            self.deliver_cloud_media_reply(work, reply, asset_owner)?;
             if self.updates()? {
                 return Ok(true);
             }
         }
         Err(failure())
+    }
+    fn deliver_cloud_media_reply(
+        &mut self,
+        work: MediaWork,
+        reply: MediaReply,
+        asset_owner: Option<tempfile::NamedTempFile>,
+    ) -> Result<()> {
+        let input = Input::MediaReply(work, reply);
+        self.cloud_media_reply = Some((input.clone(), asset_owner));
+        let result = self.driver.call::<()>(input);
+        if !matches!(&result, Err(error) if super::child_driver::is_work_paused(error.as_ref())) {
+            self.cloud_media_reply = None;
+        }
+        result
+    }
+    /// Consume only the original transport caller's completed result, without
+    /// admission or resubmission. An absent result keeps its input and files.
+    /// False means the original caller still owns an unsettled continuation.
+    pub(crate) fn complete_retained_media_callback(&mut self) -> Result<bool> {
+        let Some((input, _)) = self.cloud_media_reply.as_ref() else {
+            return Ok(true);
+        };
+        let result = self.driver.take_completed_reply::<()>(input);
+        if matches!(&result, Ok(None)) {
+            // Existing explicit completion seams may have settled this exact
+            // caller already. Keep the retained owner when no result is here;
+            // admit later work only if the original is no longer outstanding.
+            return Ok(!self.driver.has_incoming_reply(input)?);
+        }
+        self.cloud_media_reply = None;
+        result.map(|_| true)
     }
 }
 impl SDKRig {

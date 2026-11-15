@@ -123,6 +123,7 @@ struct Fixture {
     id: NoteId,
     binding: cloud::BindingId,
     incoming: Saved,
+    complete_epoch: Saved,
     original: c::Payload,
     changed: c::Payload,
 }
@@ -166,10 +167,10 @@ impl Fixture {
         // Capture every original canonical row, including raw notetype parts,
         // before producing the later incoming revision. An Active binding must
         // already own these structural images; reconcile cannot publish them.
-        let (original, baselines) = {
+        let (original, baselines, crt) = {
             let reader = collection.reader(ReaderRole::Query).unwrap();
             let snapshot = reader.snapshot().unwrap();
-            (payload(&*snapshot, id), original_baselines(&*snapshot))
+            (payload(&*snapshot, id), original_baselines(&*snapshot), snapshot.col().unwrap().created.0)
         };
         collection.flush_wal(WAIT).unwrap();
         host.close().unwrap();
@@ -249,6 +250,16 @@ impl Fixture {
         runtime
             .reconcile_binding(&collection, &host.media().unwrap(), WAIT)
             .unwrap();
+        assert_eq!(runtime.epoch_crt_for_testing().unwrap(), None);
+        let counts = row_payload::KINDS
+            .iter()
+            .map(|kind| (*kind, baselines.iter().filter(|row| row.kind() == *kind).count() as u64))
+            .collect::<Vec<_>>();
+        let complete_epoch = Saved {
+            name: "epoch".into(),
+            envelope: cloud::control_codec::epoch([7; 16], KEY, crt, 1_735_689_600_000, &counts).unwrap(),
+            system_fields: b"complete-epoch-fields".to_vec(),
+        };
         let incoming = Saved {
             name: c::entity_name(&KEY, c::Kind::Note, &c::id_key(id.0)).unwrap(),
             envelope: envelope(&changed, 2, Some(original.payload_digest().unwrap())),
@@ -264,6 +275,7 @@ impl Fixture {
             id,
             binding,
             incoming,
+            complete_epoch,
             original,
             changed,
         }
@@ -435,6 +447,18 @@ fn original_edit_witness_refuses_a_held_snapshot_frontier_after_a_commit() {
 #[test]
 fn incoming_read_uses_durable_receipt() {
     let fixture = Fixture::new();
+    // Only this apply fixture admits a complete MGEpoch. Entity baselines and
+    // reconcile alone leave P6 authority unknown in the other fixtures.
+    assert_eq!(fixture.runtime.epoch_crt_for_testing().unwrap(), None);
+    fixture.runtime
+        .receive_collection_records(
+            &fixture.runtime.instance().unwrap(),
+            std::slice::from_ref(&fixture.complete_epoch),
+        )
+        .unwrap();
+    let crt = fixture.collection.reader(ReaderRole::Query).unwrap().col().unwrap().created.0;
+    // This getter reads the qualified durable ledger, not cached local CRT.
+    assert_eq!(fixture.runtime.epoch_crt_for_testing().unwrap(), Some(crt));
     fixture.collection.pause_automatic_wal_flush_for_testing(true);
     fixture.receive();
     let (stage_tx, stage_rx) = mpsc::channel();

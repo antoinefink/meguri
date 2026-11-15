@@ -1951,6 +1951,7 @@ impl Runtime {
         let mut planned = intent.clone();
         planned.result_seq = None;
         planned.originating_open = Some(a.open);
+        planned.generation = a.generation;
         let shared = self.state.clone();
         let authority = a.clone();
         let now = self.media_now()?;

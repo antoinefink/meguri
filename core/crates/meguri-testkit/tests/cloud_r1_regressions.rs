@@ -111,7 +111,7 @@ fn confirm_root(runtime: &Runtime, service: &mut Service<SeededRandom>, files: &
     let read = service
         .request(
             &files.scope,
-            caller,
+            caller.clone(),
             Operation::Read {
                 zone: "meguri-root".into(),
                 name: "active".into(),
@@ -136,6 +136,45 @@ fn confirm_root(runtime: &Runtime, service: &mut Service<SeededRandom>, files: &
             )
             .unwrap()
     );
+    // P6 authority is independent of Active/root and the reconciled baseline.
+    assert_eq!(runtime.epoch_crt_for_testing().unwrap(), None);
+    assert!(runtime.require_collection_sending().is_err());
+    let read = service
+        .request(
+            &files.scope,
+            caller,
+            Operation::Read {
+                zone: files.collection_zone.clone(),
+                name: "epoch".into(),
+                fields: RequestedFields::All,
+            },
+        )
+        .unwrap();
+    let Ok(Reply::Record(record)) = read.result else {
+        panic!("actual complete epoch")
+    };
+    assert_eq!(record.name, "epoch");
+    assert_eq!(record.record_type, "MGEpoch");
+    let Field::EncryptedBytes(envelope) = record.fields.get("e").unwrap() else {
+        panic!("epoch envelope")
+    };
+    let core::control_codec::DecodeOutcome::Supported(epoch) = core::control_codec::Epoch::decode(envelope).unwrap()
+    else {
+        panic!("supported epoch")
+    };
+    assert_eq!(epoch.state, core::control_codec::EpochState::Complete);
+    runtime.validate_caller(&instance).unwrap();
+    runtime
+        .receive_collection_records(
+            &instance,
+            &[core::workflow::Saved {
+                name: record.name.clone(),
+                envelope: envelope.clone(),
+                system_fields: record.system_fields.bytes().to_vec(),
+            }],
+        )
+        .unwrap();
+    assert_eq!(runtime.epoch_crt_for_testing().unwrap(), Some(epoch.crt));
     runtime.require_collection_sending().unwrap();
     instance
 }
