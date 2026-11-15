@@ -1,0 +1,724 @@
+{
+  "format": "meguri-sync-neutral-vectors-v1",
+  "source_observation_sha256": "cc2e0d378571128212527f5bef2826f559bc6e5666c25ef3ec8be061625ee2d7",
+  "binding": {
+    "actions": [
+      {
+        "actor": "client_a",
+        "description": "Create original synthetic clients and media from the retained input recipe.",
+        "fixture_sha256": "1570d7c98783cea911ec61cc165c18a7d7c10ac1676f9bd05cf87f110a3c38c7",
+        "operation": "prepare_synthetic"
+      },
+      {
+        "actor": "client_a",
+        "description": "Run the actual pinned Desktop synthetic upload, download, collection and media pipeline; observe the named assertion.",
+        "fixture_sha256": "1570d7c98783cea911ec61cc165c18a7d7c10ac1676f9bd05cf87f110a3c38c7",
+        "operation": "client_sync"
+      }
+    ],
+    "arguments": [
+      "smoke"
+    ],
+    "batch_base": "38235917e6a025daa57625c582e90d253aae62e3",
+    "case_id": "P-T01:desktop.reference.identity",
+    "classification": "current_probe",
+    "expected": [
+      {
+        "name": "version",
+        "value": "26.09.4"
+      },
+      {
+        "name": "build",
+        "value": "c06370ff"
+      },
+      {
+        "name": "protocol",
+        "value": [
+          11
+        ]
+      }
+    ],
+    "family": "P-T01",
+    "fixture_sha256": "938176807ef34c066d0562c68730268b331b732325e766b2443920b49724cd6c",
+    "lane": {
+      "client": {
+        "build": "c06370ff",
+        "kind": "desktop",
+        "runtime_sha256": "bf0ccafe0f15bcba59a652db68c4cfdfaa8191756f8c547839c9d134dee12784",
+        "version": "26.09.4"
+      },
+      "kind": "reference",
+      "server": {
+        "build": "c06370ff",
+        "kind": "reference_runtime",
+        "runtime_sha256": "bf0ccafe0f15bcba59a652db68c4cfdfaa8191756f8c547839c9d134dee12784",
+        "version": "26.09.4"
+      }
+    },
+    "lock_sha256": "56e1bef86def9f5f230d12317e3510f2176eb079928f3a75f86afb0dcc408ec8",
+    "mg_job": "sync-server-reference",
+    "observed": [
+      {
+        "name": "version",
+        "value": "26.09.4"
+      },
+      {
+        "name": "build",
+        "value": "c06370ff"
+      },
+      {
+        "name": "protocol",
+        "value": [
+          11
+        ]
+      }
+    ],
+    "source_commit": "24af4112b00179065f7780e57261b0cd440e9c94",
+    "source_sha256": "0c18545146b5ef1f9c20aa453342dfd9598faa16e16fda1346aa69b146e47cd2",
+    "spec_ids": [
+      "sync/server-transport#T2"
+    ],
+    "status": "matched",
+    "variants": [
+      "identity"
+    ]
+  },
+  "client": {
+    "build": "c06370ff",
+    "kind": "desktop",
+    "runtime_sha256": "bf0ccafe0f15bcba59a652db68c4cfdfaa8191756f8c547839c9d134dee12784",
+    "version": "26.09.4"
+  },
+  "server": {
+    "build": "c06370ff",
+    "kind": "reference_runtime",
+    "runtime_sha256": "bf0ccafe0f15bcba59a652db68c4cfdfaa8191756f8c547839c9d134dee12784",
+    "version": "26.09.4"
+  },
+  "scope": "Actual Desktop 26.09.4 original synthetic smoke only; bounded assertions, no broad-family or Mobile credit. Served stamps are wire snapshot fields; receiver-local ls is not retained here.",
+  "initial_meta": {
+    "cont": true,
+    "empty": true,
+    "hostNum": 0,
+    "media_usn": 0,
+    "mod": 0,
+    "scm": 1794757512853,
+    "ts": 1794757512,
+    "usn": 0
+  },
+  "transfers": [
+    {
+      "route": "/sync/download",
+      "status": 200,
+      "upload_stamp": null,
+      "download_stamp": {
+        "crt": 1794715200,
+        "ls": 0,
+        "mod": 1794757513002,
+        "scm": 1794757512853,
+        "user_tables_sha256": "219938a0cf44977c9bc66426bd255d31b8725c17d0ba822b3f6425facbea8883",
+        "usn": 1,
+        "ver": 18
+      },
+      "upload_result": null
+    },
+    {
+      "route": "/sync/upload",
+      "status": 200,
+      "upload_stamp": {
+        "crt": 1794715200,
+        "ls": 1794757513048,
+        "mod": 1794757513048,
+        "scm": 1794757513048,
+        "user_tables_sha256": "ef0b926a1e5a9a8b101a084946efa2dddb6cf355dc107533f71dcd942616212d",
+        "usn": 1,
+        "ver": 18
+      },
+      "download_stamp": null,
+      "upload_result": "OK"
+    },
+    {
+      "route": "/sync/download",
+      "status": 200,
+      "upload_stamp": null,
+      "download_stamp": {
+        "crt": 1794715200,
+        "ls": 1794757513048,
+        "mod": 1794757513052,
+        "scm": 1794757513048,
+        "user_tables_sha256": "ef0b926a1e5a9a8b101a084946efa2dddb6cf355dc107533f71dcd942616212d",
+        "usn": 2,
+        "ver": 18
+      },
+      "upload_result": null
+    },
+    {
+      "route": "/sync/download",
+      "status": 200,
+      "upload_stamp": null,
+      "download_stamp": {
+        "crt": 1794715200,
+        "ls": 1794757513048,
+        "mod": 1794757513055,
+        "scm": 1794757513048,
+        "user_tables_sha256": "ef0b926a1e5a9a8b101a084946efa2dddb6cf355dc107533f71dcd942616212d",
+        "usn": 3,
+        "ver": 18
+      },
+      "upload_result": null
+    }
+  ],
+  "transport": [
+    {
+      "method": "POST",
+      "route": "/msync/begin",
+      "status": 200,
+      "protocol": 11,
+      "framing": "chunked",
+      "raw_zstd": true,
+      "original_size_matches": true,
+      "no_argument_body": null,
+      "header_members": [
+        "c",
+        "k",
+        "s",
+        "v"
+      ]
+    },
+    {
+      "method": "POST",
+      "route": "/msync/downloadFiles",
+      "status": 200,
+      "protocol": 11,
+      "framing": "chunked",
+      "raw_zstd": true,
+      "original_size_matches": true,
+      "no_argument_body": null,
+      "header_members": [
+        "c",
+        "k",
+        "s",
+        "v"
+      ]
+    },
+    {
+      "method": "POST",
+      "route": "/msync/mediaChanges",
+      "status": 200,
+      "protocol": 11,
+      "framing": "chunked",
+      "raw_zstd": true,
+      "original_size_matches": true,
+      "no_argument_body": null,
+      "header_members": [
+        "c",
+        "k",
+        "s",
+        "v"
+      ]
+    },
+    {
+      "method": "POST",
+      "route": "/msync/mediaSanity",
+      "status": 200,
+      "protocol": 11,
+      "framing": "chunked",
+      "raw_zstd": true,
+      "original_size_matches": true,
+      "no_argument_body": null,
+      "header_members": [
+        "c",
+        "k",
+        "s",
+        "v"
+      ]
+    },
+    {
+      "method": "POST",
+      "route": "/msync/uploadChanges",
+      "status": 200,
+      "protocol": 11,
+      "framing": "chunked",
+      "raw_zstd": true,
+      "original_size_matches": true,
+      "no_argument_body": null,
+      "header_members": [
+        "c",
+        "k",
+        "s",
+        "v"
+      ]
+    },
+    {
+      "method": "POST",
+      "route": "/sync/applyChanges",
+      "status": 200,
+      "protocol": 11,
+      "framing": "chunked",
+      "raw_zstd": true,
+      "original_size_matches": true,
+      "no_argument_body": null,
+      "header_members": [
+        "c",
+        "k",
+        "s",
+        "v"
+      ]
+    },
+    {
+      "method": "POST",
+      "route": "/sync/applyChunk",
+      "status": 200,
+      "protocol": 11,
+      "framing": "chunked",
+      "raw_zstd": true,
+      "original_size_matches": true,
+      "no_argument_body": null,
+      "header_members": [
+        "c",
+        "k",
+        "s",
+        "v"
+      ]
+    },
+    {
+      "method": "POST",
+      "route": "/sync/hostKey",
+      "status": 200,
+      "protocol": 11,
+      "framing": "chunked",
+      "raw_zstd": true,
+      "original_size_matches": true,
+      "no_argument_body": null,
+      "header_members": [
+        "c",
+        "k",
+        "s",
+        "v"
+      ]
+    },
+    {
+      "method": "POST",
+      "route": "/sync/meta",
+      "status": 200,
+      "protocol": 11,
+      "framing": "chunked",
+      "raw_zstd": true,
+      "original_size_matches": true,
+      "no_argument_body": null,
+      "header_members": [
+        "c",
+        "k",
+        "s",
+        "v"
+      ]
+    },
+    {
+      "method": "POST",
+      "route": "/sync/sanityCheck2",
+      "status": 200,
+      "protocol": 11,
+      "framing": "chunked",
+      "raw_zstd": true,
+      "original_size_matches": true,
+      "no_argument_body": null,
+      "header_members": [
+        "c",
+        "k",
+        "s",
+        "v"
+      ]
+    },
+    {
+      "method": "POST",
+      "route": "/sync/start",
+      "status": 200,
+      "protocol": 11,
+      "framing": "chunked",
+      "raw_zstd": true,
+      "original_size_matches": true,
+      "no_argument_body": null,
+      "header_members": [
+        "c",
+        "k",
+        "s",
+        "v"
+      ]
+    },
+    {
+      "method": "POST",
+      "route": "/sync/upload",
+      "status": 200,
+      "protocol": 11,
+      "framing": "chunked",
+      "raw_zstd": true,
+      "original_size_matches": true,
+      "no_argument_body": null,
+      "header_members": [
+        "c",
+        "k",
+        "s",
+        "v"
+      ]
+    },
+    {
+      "method": "POST",
+      "route": "/sync/chunk",
+      "status": 200,
+      "protocol": 11,
+      "framing": "chunked",
+      "raw_zstd": true,
+      "original_size_matches": true,
+      "no_argument_body": {
+        "_pad": null
+      },
+      "header_members": [
+        "c",
+        "k",
+        "s",
+        "v"
+      ]
+    },
+    {
+      "method": "POST",
+      "route": "/sync/download",
+      "status": 200,
+      "protocol": 11,
+      "framing": "chunked",
+      "raw_zstd": true,
+      "original_size_matches": true,
+      "no_argument_body": {
+        "_pad": null
+      },
+      "header_members": [
+        "c",
+        "k",
+        "s",
+        "v"
+      ]
+    },
+    {
+      "method": "POST",
+      "route": "/sync/finish",
+      "status": 200,
+      "protocol": 11,
+      "framing": "chunked",
+      "raw_zstd": true,
+      "original_size_matches": true,
+      "no_argument_body": {
+        "_pad": null
+      },
+      "header_members": [
+        "c",
+        "k",
+        "s",
+        "v"
+      ]
+    }
+  ],
+  "media": [
+    {
+      "route": "/msync/begin",
+      "status": 200,
+      "media_envelope_members": [
+        "data",
+        "err"
+      ],
+      "media_error_empty": true,
+      "media_begin": {
+        "sk_empty": false,
+        "sk_type": "str",
+        "usn": 0
+      },
+      "media_result": null,
+      "response_mutation": null
+    },
+    {
+      "route": "/msync/uploadChanges",
+      "status": 200,
+      "media_envelope_members": [
+        "data",
+        "err"
+      ],
+      "media_error_empty": true,
+      "media_begin": null,
+      "media_result": [
+        1,
+        1
+      ],
+      "response_mutation": null
+    },
+    {
+      "route": "/msync/mediaSanity",
+      "status": 200,
+      "media_envelope_members": [
+        "data",
+        "err"
+      ],
+      "media_error_empty": true,
+      "media_begin": null,
+      "media_result": "OK",
+      "response_mutation": null
+    },
+    {
+      "route": "/msync/begin",
+      "status": 200,
+      "media_envelope_members": [
+        "data",
+        "err"
+      ],
+      "media_error_empty": true,
+      "media_begin": {
+        "sk_empty": false,
+        "sk_type": "str",
+        "usn": 1
+      },
+      "media_result": null,
+      "response_mutation": null
+    },
+    {
+      "route": "/msync/mediaChanges",
+      "status": 200,
+      "media_envelope_members": [
+        "data",
+        "err"
+      ],
+      "media_error_empty": true,
+      "media_begin": null,
+      "media_result": [
+        [
+          "aster.bin",
+          1,
+          "5cb938c26de026da989ebde6f5c6ac9b79d48782"
+        ]
+      ],
+      "response_mutation": null
+    },
+    {
+      "route": "/msync/mediaChanges",
+      "status": 200,
+      "media_envelope_members": [
+        "data",
+        "err"
+      ],
+      "media_error_empty": true,
+      "media_begin": null,
+      "media_result": [],
+      "response_mutation": null
+    },
+    {
+      "route": "/msync/mediaSanity",
+      "status": 200,
+      "media_envelope_members": [
+        "data",
+        "err"
+      ],
+      "media_error_empty": true,
+      "media_begin": null,
+      "media_result": "OK",
+      "response_mutation": null
+    },
+    {
+      "route": "/msync/begin",
+      "status": 200,
+      "media_envelope_members": [
+        "data",
+        "err"
+      ],
+      "media_error_empty": true,
+      "media_begin": {
+        "sk_empty": false,
+        "sk_type": "str",
+        "usn": 1
+      },
+      "media_result": null,
+      "response_mutation": null
+    },
+    {
+      "route": "/msync/uploadChanges",
+      "status": 200,
+      "media_envelope_members": [
+        "data",
+        "err"
+      ],
+      "media_error_empty": true,
+      "media_begin": null,
+      "media_result": [
+        1,
+        2
+      ],
+      "response_mutation": null
+    },
+    {
+      "route": "/msync/mediaSanity",
+      "status": 200,
+      "media_envelope_members": [
+        "data",
+        "err"
+      ],
+      "media_error_empty": true,
+      "media_begin": null,
+      "media_result": "OK",
+      "response_mutation": null
+    },
+    {
+      "route": "/msync/begin",
+      "status": 200,
+      "media_envelope_members": [
+        "data",
+        "err"
+      ],
+      "media_error_empty": true,
+      "media_begin": {
+        "sk_empty": false,
+        "sk_type": "str",
+        "usn": 2
+      },
+      "media_result": null,
+      "response_mutation": null
+    },
+    {
+      "route": "/msync/mediaChanges",
+      "status": 200,
+      "media_envelope_members": [
+        "data",
+        "err"
+      ],
+      "media_error_empty": true,
+      "media_begin": null,
+      "media_result": [
+        [
+          "birch.bin",
+          2,
+          "e7c8bc633d91420f0ee6c0ce54a7ea3109f5b4b2"
+        ]
+      ],
+      "response_mutation": null
+    },
+    {
+      "route": "/msync/mediaChanges",
+      "status": 200,
+      "media_envelope_members": [
+        "data",
+        "err"
+      ],
+      "media_error_empty": true,
+      "media_begin": null,
+      "media_result": [],
+      "response_mutation": null
+    },
+    {
+      "route": "/msync/mediaSanity",
+      "status": 200,
+      "media_envelope_members": [
+        "data",
+        "err"
+      ],
+      "media_error_empty": true,
+      "media_begin": null,
+      "media_result": "OK",
+      "response_mutation": null
+    },
+    {
+      "route": "/msync/begin",
+      "status": 200,
+      "media_envelope_members": [
+        "data",
+        "err"
+      ],
+      "media_error_empty": true,
+      "media_begin": {
+        "sk_empty": false,
+        "sk_type": "str",
+        "usn": 2
+      },
+      "media_result": null,
+      "response_mutation": null
+    },
+    {
+      "route": "/msync/begin",
+      "status": 200,
+      "media_envelope_members": [
+        "data",
+        "err"
+      ],
+      "media_error_empty": true,
+      "media_begin": {
+        "sk_empty": true,
+        "sk_type": "str",
+        "usn": 2
+      },
+      "media_result": null,
+      "response_mutation": "empty-sk"
+    },
+    {
+      "route": "/msync/mediaChanges",
+      "status": 200,
+      "media_envelope_members": [
+        "data",
+        "err"
+      ],
+      "media_error_empty": true,
+      "media_begin": null,
+      "media_result": [
+        [
+          "aster.bin",
+          1,
+          "5cb938c26de026da989ebde6f5c6ac9b79d48782"
+        ],
+        [
+          "birch.bin",
+          2,
+          "e7c8bc633d91420f0ee6c0ce54a7ea3109f5b4b2"
+        ]
+      ],
+      "response_mutation": null
+    },
+    {
+      "route": "/msync/mediaChanges",
+      "status": 200,
+      "media_envelope_members": [
+        "data",
+        "err"
+      ],
+      "media_error_empty": true,
+      "media_begin": null,
+      "media_result": [],
+      "response_mutation": null
+    },
+    {
+      "route": "/msync/mediaSanity",
+      "status": 200,
+      "media_envelope_members": [
+        "data",
+        "err"
+      ],
+      "media_error_empty": true,
+      "media_begin": null,
+      "media_result": "OK",
+      "response_mutation": null
+    }
+  ],
+  "outcomes": {
+    "blank_counts": [
+      0,
+      0
+    ],
+    "initial_requirement": "full_upload",
+    "integrity": "ok",
+    "no_change_routes": [
+      "/sync/meta"
+    ],
+    "no_change_media_routes": [
+      "/msync/begin"
+    ],
+    "media_hashes": {
+      "aster.bin": "e6e8a1dbe6ff2bc36e279f5bc316a50e80d3a0d8a1bb0bef964d1eed7c6dca64",
+      "birch.bin": "91af74ecb52ffabf20156e76c8156b634387aea4830aef95a1b762a2386eddb0"
+    },
+    "fresh_media_hashes": {
+      "aster.bin": "e6e8a1dbe6ff2bc36e279f5bc316a50e80d3a0d8a1bb0bef964d1eed7c6dca64",
+      "birch.bin": "91af74ecb52ffabf20156e76c8156b634387aea4830aef95a1b762a2386eddb0"
+    }
+  }
+}

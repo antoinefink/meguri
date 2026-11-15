@@ -107,3 +107,55 @@ Its first two focused attempts failed (`20261115T154258Z-43937`, `20261115T15425
 The repaired smoke passed 21 cases in `20261115T154425Z-45682`.
 Fresh review also caught a SQL wildcard that could exclude user tables near SQLite's reserved prefix; literal-prefix matching and a focused regression now retain them.
 The logical digest covers every present user table except separately stamped `col`, preserves duplicate rows and BLOB types, and exports only the digest.
+
+## Final committed-source evidence
+
+Runtime source checkpoint: `24af4112b00179065f7780e57261b0cd440e9c94`, clean for every run below.
+Runtime source digest: `0c18545146b5ef1f9c20aa453342dfd9598faa16e16fda1346aa69b146e47cd2`.
+Reference lock digest: `56e1bef86def9f5f230d12317e3510f2176eb079928f3a75f86afb0dcc408ec8`.
+The current-reference release/build remains Desktop/backend 26.09.4, `c06370ff`.
+
+All receipt paths below are relative to `build/mg/sync-server-reference/` in the isolated U3 checkout.
+Each directory retains its actual MG `result.json`; execution and seal directories also retain exact neutral `evidence.json` and content-addressed artifacts.
+
+| MG arguments | Run | Result |
+| --- | --- | --- |
+| `selftest` | `20261115T154507Z-46132` | 36/36 passed |
+| `smoke` | `20261115T154509Z-46635` | 21/21 matched |
+| `edges` | `20261115T154509Z-46640` | 8/8 matched, 266,293 ms |
+| `deps` | `20261115T154508Z-46360` | 19/19 passed |
+| `seal` smoke execution | `20261115T154900Z-50753` | 21/21 sealed |
+| `validate` smoke seal | `20261115T154920Z-51159` | 21/21 passed |
+| `seal` edge execution | `20261115T155211Z-52183` | 8/8 sealed |
+| `validate` edge seal | `20261115T155236Z-52607` | 8/8 passed |
+
+The smoke seal manifest SHA-256 is `d1c6adaae71b0514f8c29f0564ed42bce4b45de002c0d9fecfbcf3851cbc3b5f`.
+The edge seal manifest SHA-256 is `9fc2586b9682fe4edef2572ad38516ca01e9625b02254cb6d92a8e7ee6ef591d`.
+
+Fresh reviewer session `s-20261115T152024Z-ea02a5e3` accepted both exact selections and their retained artifacts.
+The session-only commit is `9fa838954916d39cc371be7e777feb5298fa2dbc`.
+Its actual review batches and human receipts are retained in `/private/tmp/meguri-sync-u3-final-review-artifacts/` as `review-smoke.json`, `review-final-smoke.md`, `review-edges.json` and `review-final-edges.md`.
+The reviewer independently ran retained-evidence MG validation for both selections and found no remaining source defect.
+The sealed MG receipts enforce exact final selected, expected, completed and passed counts with zero failed or skipped cases.
+
+Malformed input (`20261115T154738Z-49767`), an unconfigured candidate (`20261115T154736Z-49391`), and unavailable Mobile (`20261115T154733Z-48722`) each failed closed from the same committed source.
+The Mobile receipt explicitly retains the missing actual AnkiMobile 26.10 device/build condition.
+
+### Neutral vectors for spec review
+
+The reviewer also compared both allowlisted projections to their bound retained observations and approved them for neutral handoff:
+
+- `conformance/fixtures/meguri-sync-server/observations/desktop-26.09.4-foundation.json`, SHA-256 `b302e7c77890d1c55dfdddf5e8630b79e85aa289b40a2fac496f299ae02850b9`.
+- `conformance/fixtures/meguri-sync-server/observations/desktop-26.09.4-edges.json`, SHA-256 `1bac52dfdf20519bfe9abdef8700e3e87a34318da1edde7bccb7a2fef9570c45`.
+
+These projections retain exact original inputs, relevant stamp values, transport forms, envelope shapes, USNs and hashes without driver code, bearer values or raw diagnostics.
+They are auxiliary vectors, not independent C11 seals; use the sealed selections above for the per-case review and execution bindings.
+The full-transfer vector records served snapshot `ls`; it does not retain receiver-local `ls`.
+The zero-file edge records no listing request.
+The 121,000 ms actual reference success establishes only that bounded idle result.
+A separate explicit abort after 121,001 ms produced 409, preserved the local edit and rolled back pending server work; it does not establish automatic reference expiry.
+
+The complete catalog remains 1,294 unobserved obligations across 31 families. No broad-family credit is inferred from these 29 named observations.
+Candidate execution, production package/release acceptance and actual Mobile execution remain unverified.
+The global 26.09.3 oracle and frozen application lanes were not changed.
+Parent-owned registry integration, provenance, privacy, similarity and coherent-batch gates remain required before unit acceptance.
