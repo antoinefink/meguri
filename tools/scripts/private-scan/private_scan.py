@@ -846,7 +846,7 @@ PUBLIC_ARTIFACTS = {
     "specs/sync/server-media.md":
         "32f9eff487e305d1d17bad276c3797de4e7664dae22662e4b72a61bd2c3166cb",
     "specs/servers/meguri-sync-web.md":
-        "f2cf8343c983162fb28b60120250fbaed709434cbd9cc52e91a8b6f3fa89fe26",
+        '416530b250c2dd1868f67fe30df9798dbaac586a1d5747baf603f87e00463d99',
     "specs/conformance/meguri-sync-server.md":
         "48052e8afb0a458947e4a7e72340b448a478bf39db758e44ae6773aca605c7b4",
     "conformance/schema/meguri-sync-server.schema.json":
@@ -950,6 +950,12 @@ PUBLIC_ARTIFACTS = {
         '8fc38514eca0a84d6737a83ef5b1ac07d615c562df089a4eacdc85eb9f81b21c',
     'docs/process/review-log/meguri-sync-U5.md':
         'a2b89f63e37c1029fa04475b584953c97ab5c0bc54109a808864e1bb0ae5ac98',
+
+    'tools/mg.d/meguri-sync.sh':
+        '5e50851d6ff87ad8dee9eaee48dd8d9dcb53ed633bcbabb9d7c8feb2bd30d029',
+
+    'tools/tests/sync_server.bats':
+        'f8b0015ad6e36a4bef23c84edb0bd6b7270e49a0bc0b1b132b7c87123d9dbb2a',
 
 }
 
