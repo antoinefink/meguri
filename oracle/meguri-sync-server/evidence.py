@@ -7,6 +7,7 @@ import pathlib
 
 from validation import Artifacts, binding, decode, encoded, require, same_value, sha, unique_named, validate
 from synthetic import FIXTURE, EDGE_FIXTURE
+from normal import NORMAL_FIXTURE, normal_selection
 
 
 def selection():
@@ -193,21 +194,21 @@ def observations(result):
 
 def record(result, out, invocation, package=None, input_store=None):
     if result.get('probe_kind') == 'candidate': contract = candidate_selection(result['phase'])
-    else: contract = edge_selection() if result.get('probe_kind') == 'edges' else selection()
+    else: contract = normal_selection() if result.get('probe_kind') == 'normal' else edge_selection() if result.get('probe_kind') == 'edges' else selection()
     store = Artifacts(out / 'artifacts')
     package_hash = None
     if package is not None:
         for key in ('executable_artifact_sha256','lock_artifact_sha256','mg_build_receipt_sha256','execution_binding_sha256'):
             store.put(input_store.read(package[key]))
         package_hash = store.put_json(package)
-    expected_fixture = EDGE_FIXTURE if result.get('probe_kind') == 'edges' else FIXTURE
+    expected_fixture = NORMAL_FIXTURE if result.get('probe_kind') == 'normal' else EDGE_FIXTURE if result.get('probe_kind') == 'edges' else FIXTURE
     require(same_value(result['fixture'],expected_fixture),'returned fixture differs from the supplied original input')
     fixture_bytes = encoded(expected_fixture)
     fixture_input = store.put(fixture_bytes)
     fixture_manifest = {'format': 'meguri-sync-fixtures-v1', 'entries': [{'sha256': fixture_input, 'bytes': len(fixture_bytes), 'kind': 'original-synthetic-json'}]}
     fixture_hash = store.put_json(fixture_manifest)
     runtime_hash = store.put_json(result['runtime'])
-    actual = edge_observations(result) if result.get('probe_kind') == 'edges' else observations(result)
+    actual = {(row['family'],row['variants'][0]):result['normal_results'][row['variants'][0]] for row in contract['cases']} if result.get('probe_kind') == 'normal' else edge_observations(result) if result.get('probe_kind') == 'edges' else observations(result)
     invocation['selection'] = [row['id'] for row in contract['cases']]
     manifest = {key: copy.deepcopy(invocation[key]) for key in ('source_commit','batch_base','source_sha256','lock_sha256','mg_job','arguments')}
     if package is not None: manifest['executable_sha256'] = package['server']['executable_sha256']
@@ -249,7 +250,7 @@ def validate_existing(source, out, current, trusted_runtime, seal):
     invocation_path = source / 'execution-invocation.json'
     invocation = decode((invocation_path if invocation_path.exists() else source / 'invocation.json').read_bytes())
     if contract['lane_kind'] == 'candidate': expected_contract = candidate_selection(contract['phase'])
-    else: expected_contract = edge_selection() if invocation['arguments'][0] == 'edges' else selection()
+    else: expected_contract = normal_selection() if invocation['arguments'][0] == 'normal' else edge_selection() if invocation['arguments'][0] == 'edges' else selection()
     require(same_value(contract, expected_contract), 'retained selection differs from the executable contract')
     require(current['source_sha256'] == manifest['source_sha256'] and current['lock_sha256'] == manifest['lock_sha256'], 'retained evidence source bytes are stale')
     schema = decode(pathlib.Path('/opt/reference/schema.json').read_bytes())

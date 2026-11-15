@@ -132,6 +132,7 @@ class Recorder(http.server.ThreadingHTTPServer):
     def __init__(self, upstream):
         self.upstream = upstream
         self.observations = []
+        self.capture_normal = False
         self.errors = []
         self.empty_sk = False
         self.rewrite_session = None
@@ -173,6 +174,8 @@ class RecorderHandler(http.server.BaseHTTPRequestHandler):
                       "header_members": sorted(header), "compressed_request_bytes": len(raw),
                       "request_bytes": len(decoded), "raw_zstd": True,
                       "framing": "chunked" if self.headers.get("Transfer-Encoding") else "content-length"}
+            if self.server.capture_normal and self.path in {'/sync/start','/sync/applyGraves','/sync/applyChanges','/sync/chunk','/sync/applyChunk','/sync/sanityCheck2','/sync/finish'}:
+                detail['normal_request'] = json.loads(decoded)
             if self.path.endswith(("/chunk", "/finish", "/abort", "/download")):
                 detail["no_argument_body"] = json.loads(decoded)
             if self.path.startswith('/msync/') and not self.path.endswith('/uploadChanges'):
@@ -221,6 +224,8 @@ class RecorderHandler(http.server.BaseHTTPRequestHandler):
             if 200 <= response.status < 300:
                 body = unpack(output)
                 detail["response_bytes"] = len(body)
+                if self.server.capture_normal and self.path in {'/sync/start','/sync/applyGraves','/sync/applyChanges','/sync/chunk','/sync/applyChunk','/sync/sanityCheck2','/sync/finish'}:
+                    detail['normal_response'] = json.loads(body)
                 detail["original_size_matches"] = changed_headers.get('anki-original-size', response.getheader("anki-original-size")) == str(len(body))
                 if self.path.endswith('/download'):
                     detail['download_stamp'] = file_stamp(body)
@@ -580,6 +585,9 @@ if __name__ == "__main__":
         request = json.loads(sys.stdin.buffer.read())
         if request['mode'] == 'identity': result = runtime()
         elif request['mode'] == 'edges': result = edges(request['fixture'])
+        elif request['mode'] == 'normal':
+            import normal
+            result = normal.exact_numbers(normal.run(sys.modules[__name__],request['fixture']))
         elif request['mode'] == 'candidate':
             require(isinstance(request.get('target'),dict),'candidate target missing')
             require(request['target'].get('server',{}).get('kind') == 'meguri_sync','candidate peer kind mismatch')

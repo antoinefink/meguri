@@ -12,6 +12,7 @@ tools/mg sync-server-reference deps
 tools/mg sync-server-reference catalog
 tools/mg sync-server-reference smoke
 tools/mg sync-server-reference edges
+tools/mg sync-server-reference normal
 tools/mg sync-server-reference validate build/mg/sync-server-reference/<smoke-run>
 ```
 
@@ -57,3 +58,23 @@ JSON Schema validation uses MIT-licensed jsonschema and its locked dependencies.
 Raw protocol framing uses zstandard under its BSD license option.
 These dependencies never enter a production target or package.
 The dependency report checks the exact graph, published hashes, and reported advisories.
+
+The separate `normal` mode selects twelve finite observations. It measures actual
+Desktop edits, a scheduler review, deletion, authored objects/config/tags, tuple
+and grave boundaries. Explicit auxiliary supported-protocol rounds measure cursor
+selection, one deck's modification conflicts, note conflicts, ordered duplicate
+notes/reviews, and successful sanity/finish stamps. Actual Desktop receivers read
+those committed results. Auxiliary requests are never called SDK-emitted bytes.
+
+These cases leave card/notetype/preset conflict matrices, casefolded object names,
+config replacement/null semantics, failed sanity, same-clock rounds and lifecycle
+fault/recovery families unobserved. They do not enable a candidate normal gate.
+The mode uses the same semantic recorder and validator as smoke and edges.
+The catalog command exports its exact selection and original fixture; the image
+executes their quarantined definitions without changing the existing neutral inputs.
+
+Reference invocations name their source authors explicitly. The wrapper verifies
+those records in the executing commit's ledger and retains `source-authors.json`.
+Checkout paths and the latest ledger row do not select an author. Import the
+source author's session-only commit with this source change before execution.
+The closing `ls` assertion uses the raw served-file stamp retained by the recorder.

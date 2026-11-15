@@ -531,6 +531,15 @@ runs:
     oracle_files: true
     triggers: *sync-server-reference
     budget_s: 900
+  - id: sync-server-reference-normal
+    job: sync-server-reference
+    args: [normal]
+    tier: T1
+    placement: host
+    class: conformance
+    oracle_files: true
+    triggers: *sync-server-reference
+    budget_s: 900
   - id: live-oracle
     job: conformance
     # Antoine stopped Anki server work on 2026-10-26. Keep other T1

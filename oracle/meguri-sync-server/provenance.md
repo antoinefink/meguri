@@ -11,3 +11,14 @@ be measured separately. Only neutral observations may leave this quarantine.
 During the schema-aware content-hash repair, the maintainer also checked the pinned
 26.09.3 storage schema's table and collation declarations. The actual current-wheel
 transfer checks, rather than that older source, determine the recorded outcomes.
+
+The 2026-11-15 finite NORMAL extension uses public SDK operations and the existing
+neutral wire specification, with original synthetic note types, templates and CSS.
+It does not inspect Anki implementation source. Auxiliary supported-protocol
+fixtures are identified separately from actual Desktop-emitted requests.
+
+Reference source authors are explicitly retained as sessions
+`s-20261115T133013Z-d8cec007` and `s-20261115T211543Z-556b04e9`.
+The latter is responsible for this finite NORMAL extension. The original ledger
+contains two identical rows for the former session; the wrapper accepts one
+unique complete record and rejects conflicting or missing records.

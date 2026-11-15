@@ -49,10 +49,10 @@ mg_sync_server_reference() {
       mg_artifact lock "$reference_dir/requirements.lock"
       mg_artifact report "$MG_RUN_DIR/resolver-install.json" "Hash-pinned lock resolver installation"
       mg_status pass; return ;;
-    selftest|identity|smoke|edges|catalog|validate|seal) ;;
-    *) mg_failure usage "expected lock, deps, selftest, identity, smoke, edges, catalog, validate or seal"; mg_status error; return ;;
+    selftest|identity|smoke|edges|normal|catalog|validate|seal) ;;
+    *) mg_failure usage "expected lock, deps, selftest, identity, smoke, edges, normal, catalog, validate or seal"; mg_status error; return ;;
   esac
-  local source_sha lock_sha source_commit author_session argument_json
+  local source_sha lock_sha source_commit author_session source_author_sessions argument_json
   local mount_args=() runtime_args=("$mode") input_path
   argument_json="$(printf '%s\n' "$mode" ${1+"$@"} | jq -Rs 'split("\n")[:-1]')"
   case "$mode" in
@@ -86,13 +86,21 @@ mg_sync_server_reference() {
     mg_failure source-changed "reference source changed during its build"; mg_status fail; return
   fi
   lock_sha="$(shasum -a 256 "$reference_dir/requirements.lock" | cut -d ' ' -f1)"
-  author_session="$(jq -rs '[.[] | select(.role == "oracle-maintainer" and .name == "meguri-sync-reference")] | last | .session // empty' "$MG_ROOT/docs/process/provenance/sessions.jsonl")" || return 1
-  if [ -z "$author_session" ]; then
-    mg_failure session-missing "record the current reference oracle-maintainer session before source work"; mg_status error; return
+  # Explicit source authors, independent of the operator and checkout path.
+  author_session="s-20261115T211543Z-556b04e9"
+  source_author_sessions='["s-20261115T133013Z-d8cec007","s-20261115T211543Z-556b04e9"]'
+  if ! git -C "$MG_ROOT" show "${source_commit}:docs/process/provenance/sessions.jsonl" |
+      jq -es --argjson authors "$source_author_sessions" '
+        [.[] | select(.session as $id | $authors | index($id))] | unique |
+        select(length == ($authors | length)) |
+        select((map(.session) | sort) == ($authors | sort)) |
+        select(all(.role == "oracle-maintainer"))' >"$MG_RUN_DIR/source-authors.json"; then
+    mg_failure session-missing "explicit reference source authors require unambiguous committed oracle-maintainer records"; mg_status error; return
   fi
+  mg_artifact report "$MG_RUN_DIR/source-authors.json" "Committed responsible reference source authors"
   jq -n --arg commit "$source_commit" --arg source "$source_sha" --arg lock "$lock_sha" \
-    --arg run "$MG_RUN_ID" --arg author "$author_session" --argjson args "$argument_json" \
-    '{source_commit:$commit,batch_base:"38235917e6a025daa57625c582e90d253aae62e3",source_sha256:$source,lock_sha256:$lock,mg_job:"sync-server-reference",arguments:$args,run_id:$run,author_session:$author}' \
+    --arg run "$MG_RUN_ID" --arg author "$author_session" --argjson authors "$source_author_sessions" --argjson args "$argument_json" \
+    '{source_commit:$commit,batch_base:"38235917e6a025daa57625c582e90d253aae62e3",source_sha256:$source,lock_sha256:$lock,mg_job:"sync-server-reference",arguments:$args,run_id:$run,author_session:$author,source_author_sessions:$authors}' \
     >"$MG_RUN_DIR/invocation.json" || return 1
   local execution_status=0
   mg_compose -f "$MG_ROOT/docker/meguri-sync-reference.compose.yml" run --rm -T --no-deps \
@@ -115,7 +123,7 @@ mg_sync_server_reference() {
   if [ "$execution_status" -ne 0 ]; then
     mg_failure reference-execution "reference harness failed; no compatibility credit"; mg_status fail; return
   fi
-  if [ "$mode" = smoke ] || [ "$mode" = edges ]; then
+  if [ "$mode" = smoke ] || [ "$mode" = edges ] || [ "$mode" = normal ]; then
     mg_message "Named Desktop reference selection passed; broad catalog and actual Mobile remain unverified"
   fi
   mg_status pass

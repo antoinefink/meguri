@@ -12,6 +12,7 @@ from synthetic import FIXTURE, EDGE_FIXTURE
 from validation import decode, encoded, require, same_value
 from evidence import record, selection, edge_selection, candidate_selection
 from request import check_request
+from normal import NORMAL_FIXTURE, normal_selection
 
 
 def adapter(request):
@@ -24,7 +25,14 @@ def adapter(request):
         if failure.get('recording_errors'):
             print('Recording error kinds: ' + ','.join(failure['recording_errors']), file=sys.stderr)
         raise ValueError('reference SDK worker failed')
-    return decode(process.stdout)
+    try:
+        return decode(process.stdout)
+    except ValueError as error:
+        if str(error) in {"wide integer requires an exact decimal string","duplicate JSON member","nonfinite number"}:
+            print("SDK result boundary: " + str(error),file=sys.stderr)
+        else:
+            print("SDK result boundary: invalid JSON",file=sys.stderr)
+        raise
 
 
 class PrivateResult(unittest.TextTestResult):
@@ -34,7 +42,7 @@ class PrivateResult(unittest.TextTestResult):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=["selftest", "identity", "smoke", "edges", "candidate", "catalog", "validate", "seal"])
+    parser.add_argument("mode", choices=["selftest", "identity", "smoke", "edges", "normal", "candidate", "catalog", "validate", "seal"])
     parser.add_argument('--request')
     parser.add_argument('--input')
     parser.add_argument('--credentials')
@@ -57,6 +65,8 @@ def main():
         (out / 'catalog.json').write_bytes(encoded(value))
         (out / 'selection.json').write_bytes(encoded(selection()))
         (out / 'edge-selection.json').write_bytes(encoded(edge_selection()))
+        (out / 'normal-selection.json').write_bytes(encoded(normal_selection()))
+        (out / 'normal-fixture.json').write_bytes(encoded(NORMAL_FIXTURE))
         (out / 'edge-fixture.json').write_bytes(encoded(EDGE_FIXTURE))
         (out / 'candidate-full-selection.json').write_bytes(encoded(candidate_selection('full')))
         (out / 'candidate-complete-selection.json').write_bytes(encoded(candidate_selection('complete')))
@@ -67,6 +77,12 @@ def main():
         value = adapter({"mode": "identity"})
         (out / 'runtime.json').write_bytes(encoded(value))
         return 0
+    if args.mode == 'normal':
+        value = adapter({'mode':'normal','fixture':NORMAL_FIXTURE})
+        (out / 'normal-observations.json').write_bytes(encoded(value))
+        invocation = decode((out / 'invocation.json').read_bytes())
+        require(value['runtime']['lock_sha256'] == invocation['lock_sha256'], 'runtime lock receipt mismatch')
+        return 0 if record(value,out,invocation) else 1
     if args.mode == 'edges':
         value = adapter({'mode':'edges','fixture':EDGE_FIXTURE})
         (out / 'edge-observations.json').write_bytes(encoded(value))
