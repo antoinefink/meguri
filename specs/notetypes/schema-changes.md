@@ -4,6 +4,7 @@ Spec: notetypes/schema-changes
 Requirements: R949, R950, R951, R1475, R1476, R1477, R1590 (core side), R2053 (core side), R918, R948 (schema side), R1889 (G9)
 Anki: 26.09.3 for G1's meaning of `scm` and `ls`, G2, G3, G5 and G9's Anki column; G1's CloudKit rules and the scope of `ls`, G4, G6, G7's CloudKit part, G8 and G9's Meguri column are Meguri design from the Product Contract
 Scenarios: conformance/scenarios/notetypes/gate/
+Status: Approved 2026-11-15 (R2066) for the new normal-transfer aggregate cross-reference paragraph in G7. Every other section is in force and unchanged.
 
 Which operations mark the collection's schema as modified, what that means for the next manual Anki transfer (KTD26) and for CloudKit (R2053), and the guard that keeps a changed note type structure out of an incremental Anki transfer. Meguri asks no confirmation before a schema change (G4). Destructive-mapping previews belong to their units (U34, U35, U121, U200, U201, U203, U210, U232). The manual-transfer side is U106, U107 and U109 (frozen with the Anki server work); the CloudKit side is U113 and U114 (R2053; generation layout: `sync/cloudkit-records#K19`). Columns are `model/row-records` R2 and `storage/ids-usn-mtime` S6.
 
@@ -82,6 +83,8 @@ A safety net under G2–G5: a note type whose field or template count changed mu
 
 - **Manual Anki transfers** (KTD26; owned by U106, U107 and U109, frozen with the Anki server work). An incremental transfer is possible only while `scm <= ls`. With `scm > ls` the status check reports a one-way transfer, and the transfer preview shows it before anything is sent or replaced (R1476). An incoming note type whose field or template count differs from the local one stops an incremental transfer (R1525). A sanity-check failure sets `scm` (`sync_sanity_failed`).
 - **CloudKit** (U113, U114). A schema change never makes routine sync one-way and never asks. Each committed schema change reaches CloudKit as a validated coherent generation (R2053; `sync/cloudkit-records#K19`). K19.1 lists the ops that publish as one generation and their reason codes; it also includes every package import (`apkg_apply`), schema change or not, and leaves out the reasons with no CloudKit meaning (`collection_replaced`, `full_upload`, `sync_sanity_failed`, `force_one_way`). An op that changes a note type's fields or templates, removes a note type or moves notes to another note type reports its reason codes and its field and template maps when it commits, through the structure report of `engine/change-stream#S2.5`, and a commit that makes such a change without one is refused (`StructureNotReported`, S2.5's guard; K19.2; U34, U35, U121, U128). The apply of an incoming generation sets `scm` as G1 says (`cloudkit_structure_applied`).
+
+The precise normal-transfer aggregate `layouts` exception and its CloudKit authority/recovery safeguards are `engine/change-stream#S2.5` “Normal-transfer aggregates”. It exempts no `removed` entry or `type_changes` pair and changes no schema-stamp or transfer-acceptance rule.
 
 ## G8. Scenarios
 

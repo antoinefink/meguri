@@ -4,6 +4,7 @@ Spec: sync/normal-sync
 Requirements: R1519, R1520 (unbury), R1521, R1522, R1523, R1524, R1525, R1526, R1527, R1528, R1529, R1530, R1531, R1532, R1533, R1535, R1554 (normal sync), R2012 (sync side), R2019 (`scm` on a failed sanity check), R2060, R2062, R2063; AE61, AE64; KTD26
 Anki: 26.09.3
 Scenarios: conformance/scenarios/sync/normal/, conformance/scenarios/sync/conflicts/
+Status: Approved 2026-11-15 (R2066) for the new CloudKit authority cross-reference paragraph in N5.2. Every other section is in force and unchanged.
 
 The incremental sync of one collection with the server, as Anki 26.09.3's client runs it once the status check (`meta-status.md` M3) has called for a normal sync: the order of the requests, which local rows go up, how the server's rows are merged into the collection, the sanity check, the closing stamps, and what a failure leaves. This file states the result Anki produces as if the whole round ran in one transaction on a collection nobody else writes to. Meguri runs it as a snapshot-and-stage job so that answers never wait (KTD6); `hold-back.md` says how that job reproduces this result and what it adds (the held-back answer run, writes made during the round). Message shapes are `wire-format.md`, transport and errors `transport.md` and `errors.md`, the status check `meta-status.md`. One-way sync is U109's, media sync U111's.
 
@@ -101,6 +102,8 @@ Each incoming note type, read per `model/schema11-json` S4 (input):
 
 - Ties go to the server: equal `mtime_secs` and `mod` accept the incoming one.
 - Accepting a note type changes no note and no card: no sort field or checksum is recomputed, no card is generated or removed. (A change of sort field, fields or templates on the other device is a schema change there, so it reaches this client by a one-way sync.)
+
+CloudKit authority for these accepted aggregates follows `engine/change-stream#S2.5` “Normal-transfer aggregates”, including its precise `layouts` exception and existing unproved-layout collection choice. Acceptance here supplies no origin map. These shared-writer rules change none of N5.2 or `sync/hold-back#H10.2`'s transfer acceptance and validation rules.
 
 ### N5.3 Decks (R1524)
 
