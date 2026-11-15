@@ -863,6 +863,36 @@ PUBLIC_ARTIFACTS = {
         "a69bee98c29564e9bdb30eb0f623f20db91795623c6eea1a982cc740d4b1565e",
     "tools/similarity/tests/test_scan_synthetic.py":
         "7a2488452f49b17772f611678883627bbe0c3b96e732de027bfb4f466fd35ca9",
+    # Delegated maintenance: independently reviewed original reference tooling,
+    # synthetic observations and evidence. Exact paths and complete bytes only.
+    'conformance/catalog/meguri-sync-server.json':
+        '4a1b6b865f8dce3c501c9ba14161e4559b0e6dea99c699a00835dbfc091e7898',
+    'conformance/fixtures/meguri-sync-server/observations/desktop-26.09.4-foundation.json':
+        'b302e7c77890d1c55dfdddf5e8630b79e85aa289b40a2fac496f299ae02850b9',
+    'docker/meguri-sync-reference.compose.yml':
+        'bb518192af60c60a54d4f62849d72b51bcea2bdb9b32dacd21726c3ac7966d9c',
+    'docs/process/review-log/meguri-sync-U3.md':
+        '50d4016dcbc654f7692f61a94849b6925de6dc73dac019e70c8923d27ff90923',
+    'oracle/meguri-sync-server/AGENTS.md':
+        'bdc60a465c52a548391469c7febb82de6c6a88c69f0a24329ae5bd31c260071f',
+    'oracle/meguri-sync-server/adapter.py':
+        '0f5659a0a4245fb8c3976f6ca54c9bdc701fcfdce03cb1f738fd3917c32eca17',
+    'oracle/meguri-sync-server/audit_deps.py':
+        '09ba79e0545fb91e5a2c653e93c75e6fa4a55734d52e54a70479ae8e8d55d151',
+    'oracle/meguri-sync-server/catalog.py':
+        'da44186c8ee85f1ef77b3ff2584e0adce209cc4cfb9a5ee1eb557ad5d9a0068f',
+    'oracle/meguri-sync-server/evidence.py':
+        'ae3ddbb0185102d6a657893fe2b1d1e19e17ddba0f5015e4c832eed913174054',
+    'oracle/meguri-sync-server/tests/test_validation.py':
+        '8b65fa75cf0b2c1e68dfc766a49761ed653ac67d5a9dc9adece29c01aca76681',
+    'oracle/meguri-sync-server/validation.py':
+        '4bdaa9691a68cd1bdd1eb96a36671faf95ccfa2f817c5319687a1bcb0d8af2be',
+    'tools/mg.d/meguri-sync-reference.sh':
+        '231787344e5f3525c651d2b541b9794e97ebca6b48f327d256ade22a587217be',
+
+    'docs/process/review-log/meguri-sync-reference-privacy.md':
+        '4ef0a4f96b31e513f73415ac2160a9ce14e335fbd9cc841ddbe4ed2159e643a8',
+
 }
 
 

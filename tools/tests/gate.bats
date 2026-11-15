@@ -1850,7 +1850,7 @@ PY
   # Runs that read the branch's oracle/ files, including route transport.
   jq -e '[.runs[] | select(.id == "conformance-route-transport") | {placement, needs, oracle_files}]
     == [{placement: ["host", "docker:oracle"], needs: ["oracle"], oracle_files: true}]' "$out" >/dev/null
-  [ "$(jq -r '[.runs[] | select(.oracle_files) | .id] | join(" ")' "$out")" = "goldens-check harvest-report conformance-route-transport harvest-coverage" ]
+  [ "$(jq -r '[.runs[] | select(.oracle_files) | .id] | join(" ")' "$out")" = "goldens-check harvest-report sync-server-reference-selftest conformance-route-transport sync-server-reference-smoke sync-server-reference-edges harvest-coverage" ]
   # A pin bump in a sparse worktree whose main checkout has the old oracle/:
   # gate --local runs the rest and leaves those two to the merge.
   printf 'conformance/oracle.json\0conformance/catalog/harvest.csv\0' >"$BATS_TEST_TMPDIR/changed"
@@ -1858,6 +1858,12 @@ PY
     --oracle-tree differs --var base=b --var tip=t --out "$BATS_TEST_TMPDIR/plan.json"
   [ "$(jq -r '[.runs[] | select(.outcome == "deferred-tip") | .id] | join(" ")' "$BATS_TEST_TMPDIR/plan.json")" = "goldens-check harvest-report" ]
   jq -e '.runs[] | select(.id == "conformance" and .action == "run")' "$BATS_TEST_TMPDIR/plan.json" >/dev/null
+
+  # A reference driver change selects its selftest and both reference suites.
+  printf 'oracle/meguri-sync-server/driver.py\0' >"$BATS_TEST_TMPDIR/changed"
+  python3 -B -I "$REPO_ROOT/tools/gate/gate.py" plan --config "$out" --changed "$BATS_TEST_TMPDIR/changed" --mode full \
+    --oracle-tree same --main-capable yes --var base=b --var tip=t --out "$BATS_TEST_TMPDIR/plan.json"
+  [ "$(jq -r '[.runs[] | select(.action == "run" and (.id | test("^sync-server-reference-(selftest|smoke|edges)$"))) | .id] | join(" ")' "$BATS_TEST_TMPDIR/plan.json")" = "sync-server-reference-selftest sync-server-reference-smoke sync-server-reference-edges" ]
 
   # The sched change of the plan's scenario selects sched's live suites and the scan.
   printf 'core/crates/meguri-sched/src/answer.rs\0' >"$BATS_TEST_TMPDIR/changed"
