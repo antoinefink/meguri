@@ -203,7 +203,11 @@ mg_gate__run_one() {
     args[${#args[@]}]="$a"
   done < <(jq -j --arg k "$key" '.[$k][]? | . + "\u0000"' <<<"$item")
   echo "$MG_JOB: [$id] tools/mg $job${args[0]+ ${args[*]}}" >&2
-  out="$("$mg" "$job" ${args[0]+"${args[@]}"} </dev/null)"
+  out="$(
+    # Only the Mac Snapshot host needs the protected credential grant.
+    [ "$job" != xcode-check ] || export MEGURI_APP_SIGNING=team
+    "$mg" "$job" ${args[0]+"${args[@]}"} </dev/null
+  )"
   rc=$?
   result="$(printf '%s\n' "$out" | tail -n 1)"
   [ -f "$result" ] || result=""

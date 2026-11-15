@@ -380,6 +380,57 @@ worktree() {
 
 # --- T0 selection --------------------------------------------------------
 
+# The child records only its signing mode and argv. No Xcode or credentials.
+signing_child() {
+  cat >"$BATS_TEST_TMPDIR/signing-child" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "${MEGURI_APP_SIGNING-unset}" >>"$STUB_LOG"
+printf '%s\n' "$@" >>"$FX/signing-args"
+result="$FX/signing-result.json"
+printf '{"status":"%s"}\n' "${SIGNING_CHILD_STATUS:-pass}" >"$result"
+printf '%s\n' "$result"
+exit "${SIGNING_CHILD_EXIT:-0}"
+EOF
+  chmod +x "$BATS_TEST_TMPDIR/signing-child"
+  mg_job() { :; }
+  source "$SB/tools/mg.d/gate.sh"
+  MG_JOB=gate
+  MG_TOOLS="$SB/tools"
+}
+
+@test "gate signing: only xcode-check receives team signing with no parent or sibling change" {
+  signing_child
+  unset MEGURI_APP_SIGNING
+  local results="$FX/signing-results.jsonl" child="$BATS_TEST_TMPDIR/signing-child"
+  mg_gate__run_one '{"id":"xcode","job":"xcode-check","args":["--mac-unit-only"]}' "$results" args "$child"
+  [ "${MEGURI_APP_SIGNING-unset}" = unset ]
+  mg_gate__run_one '{"id":"review","job":"ui-test","args":["--platform","mac"]}' "$results" args "$child"
+  [ "$(cat "$STUB_LOG")" = $'team\nunset' ]
+  [ "$(cat "$FX/signing-args")" = $'xcode-check\n--mac-unit-only\nui-test\n--platform\nmac' ]
+  [ "$(jq -s 'length' "$results")" = 2 ]
+  [ "$MG_GATE_LAST_STATUS" = pass ]
+}
+
+@test "gate signing: explicit ordinary app signing survives the xcode-check child" {
+  signing_child
+  export MEGURI_APP_SIGNING=adhoc
+  local results="$FX/signing-results.jsonl" child="$BATS_TEST_TMPDIR/signing-child"
+  mg_gate__run_one '{"id":"xcode","job":"xcode-check","args":[]}' "$results" args "$child"
+  [ "$MEGURI_APP_SIGNING" = adhoc ]
+  mg_gate__run_one '{"id":"review","job":"ui-test","args":[]}' "$results" args "$child"
+  [ "$(cat "$STUB_LOG")" = $'team\nadhoc' ]
+}
+
+@test "gate signing: a failing xcode-check retains its failure status and exit code" {
+  signing_child
+  export SIGNING_CHILD_STATUS=fail SIGNING_CHILD_EXIT=1
+  local results="$FX/signing-results.jsonl" child="$BATS_TEST_TMPDIR/signing-child"
+  mg_gate__run_one '{"id":"xcode","job":"xcode-check","args":[]}' "$results" args "$child" || return 1
+  [ "$(cat "$STUB_LOG")" = team ]
+  [ "$MG_GATE_LAST_STATUS" = fail ]
+  jq -e '.id == "xcode" and .exit_code == 1 and .result != null' "$results"
+}
+
 @test "a change touching only docs/ runs the static checks only and passes in seconds" {
   commit_in "$SB" docs/notes.md "# more notes"
   mg gate --base "$BASE0"
