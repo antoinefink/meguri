@@ -20,8 +20,9 @@ extension MaintenanceLane {
     }
 }
 
-// Every test that changes this process's open collection joins the existing
-// serialized listener suite, including the closed-review refusal test.
+// Collection ownership and lane-backed availability tests join the existing
+// serialized listener suite. Availability's deadline includes dispatch onto
+// the shared ControlLane, so other tests' control calls can consume its budget.
 extension EventTests {
     @Test @MainActor func collectionAndDeckServicesOpenReadCloseAndReopenOffMain() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
@@ -122,9 +123,6 @@ extension EventTests {
         #expect(throws: BridgeError.cancelled) { try result.get() }
         #expect(returnedAt - cancelledAt < .milliseconds(100))
     }
-}
-
-@Suite struct CollectionServiceTests {
     @Test func availabilityUsesOneDeadlineAndReturnsTheCoreRefusal() async throws {
         let service = CoreCollectionService()
         let probes = Counter()
@@ -168,7 +166,9 @@ extension EventTests {
         #expect(generation == 37)
         #expect(probes.add(0) == 2)
     }
+}
 
+@Suite struct CollectionServiceTests {
     @Test func scriptedFakeRecordsRequestsAndReturnsErrorsWithoutCore() async throws {
         let location = CoreBridge.CollectionLocation(collectionDirectory: URL(fileURLWithPath: "/preview/collection"), backupsDirectory: URL(fileURLWithPath: "/preview/backups"), appGroupSnapshot: URL(fileURLWithPath: "/preview/widget"))
         let fake = FakeCollectionService(opens: [.success(())], closes: [.success(())], states: [.success(.opening), .success(.ready(generation: 7))], waits: [.failure(.unavailable(reason: "deadline"))])
