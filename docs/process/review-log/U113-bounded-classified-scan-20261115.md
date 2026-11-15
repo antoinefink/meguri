@@ -18,3 +18,5 @@ Verification:
 The focused native receipt does not replace full conformance. Host scan-race checks, the full integration gate and remaining iCloud acceptance evidence are still required.
 
 Follow-up: `core-test/20261115T024942Z-44194` passes all 18 selected host checks. These cover newer observer repair/failure overtaking, partial scan failure, account/file/suspension fences and equal-payload publication. The remaining 212 cases were filtered. Full integration verification remains pending.
+
+Post-batch check `core-test/20261115T030827Z-53899` passes all 21 tests, with no skips, across `cloud_original_observation`, `cloud_publication_intent_replay` and `cloud_r1_regressions`. The batching source is unchanged from `c07e5bd9`. This covers the original reply-retention and publication replay regressions after batching; it does not replace full integration verification.
