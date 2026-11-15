@@ -947,7 +947,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/storage/root.rs':
         'bdeec9b6d4a162d1063cae08f646cf2a48bcaaedbcfb40a70d9321ab0eadcf55',
     'server/tools/candidate-output.py':
-        '8fc38514eca0a84d6737a83ef5b1ac07d615c562df089a4eacdc85eb9f81b21c',
+        'c14a38c1932e22080584917e5309a9f0d89f0c2a3d99b9bd2e06b92cfcee35f5',
     'docs/process/review-log/meguri-sync-U5.md':
         'a2b89f63e37c1029fa04475b584953c97ab5c0bc54109a808864e1bb0ae5ac98',
 
@@ -955,13 +955,16 @@ PUBLIC_ARTIFACTS = {
         '7272897b429bde5c5662bec7deefba2e9d236f625c7af57617b52d53fda8bd42',
 
     'tools/tests/sync_server.bats':
-        'f8b0015ad6e36a4bef23c84edb0bd6b7270e49a0bc0b1b132b7c87123d9dbb2a',
+        '27b836f1262fa6f0825035f6e62a2b184b0c7733b57dc1d65b3c06b5ae53b0f0',
 
     'oracle/meguri-sync-server/normal.py':
         'ff3d726da3af11c5c2fb951c4cf49fada249f073e194584bb05a2a23c9a23f62',
 
     'oracle/meguri-sync-server/tests/test_normal.py':
         '0bdc9820c24814664bb64d607b1191671b14b8b461c278b8e4f6132a8312656d',
+
+    'conformance/fixtures/meguri-sync-server/observations/desktop-26.09.4-normal.json':
+        '33e4f576a85f19bf877baefc382e91121e4e0307fe73b4b06fc8e24807e4d4a7',
 
 }
 
