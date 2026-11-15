@@ -10,6 +10,10 @@ COPY conformance/schema/meguri-sync-server.schema.json /opt/reference/schema.jso
 COPY conformance/catalog/meguri-sync-server.json /opt/reference/neutral/catalog.json
 COPY conformance/fixtures/meguri-sync-server/original.json /opt/reference/neutral/fixture.json
 COPY conformance/recordings/scenarios/meguri-sync-server/desktop-selection.json /opt/reference/neutral/selection.json
+COPY conformance/recordings/scenarios/meguri-sync-server/desktop-edge-selection.json /opt/reference/neutral/edge-selection.json
+COPY conformance/fixtures/meguri-sync-server/edges.json /opt/reference/neutral/edge-fixture.json
+COPY conformance/recordings/scenarios/meguri-sync-server/candidate-full-selection.json /opt/reference/neutral/candidate-full-selection.json
+COPY conformance/recordings/scenarios/meguri-sync-server/candidate-complete-selection.json /opt/reference/neutral/candidate-complete-selection.json
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TMPDIR=/scratch TZ=UTC
 WORKDIR /scratch
 USER 10001:10001

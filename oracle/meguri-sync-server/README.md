@@ -11,6 +11,7 @@ tools/mg sync-server-reference identity
 tools/mg sync-server-reference deps
 tools/mg sync-server-reference catalog
 tools/mg sync-server-reference smoke
+tools/mg sync-server-reference edges
 tools/mg sync-server-reference validate build/mg/sync-server-reference/<smoke-run>
 ```
 
@@ -23,6 +24,9 @@ The catalog lists obligations for all 31 families and applicable targets.
 The smoke selection covers only its named Desktop observations.
 A smoke pass does not complete a broad family or prove Mobile compatibility.
 The catalog keeps all other obligations unobserved.
+The separate edge selection covers exact media page boundaries, replay no-ops and a bounded idle observation.
+Its zero-state case observes no listing request, not an empty server page.
+Its abort injection tests expired-round handling, not automatic reference expiry.
 
 Each run retains the selection, original synthetic JSON, fixture manifest, observations, and hashed artifacts.
 The validator checks exact outcomes, counts, source identities, runtime identities, and retained artifact bytes.
@@ -37,7 +41,9 @@ These requests do not claim to be unmodified Desktop traffic.
 ```
 
 Malformed requests fail. A missing candidate fails. Mobile requires an actual device run and remains unavailable here.
-This unit does not start a candidate server. Candidate execution and package receipts belong to the candidate integration lane.
+This unit does not start a candidate server. The candidate integration wrapper owns that process and its checked build receipts.
+Its fixed file-input conventions are `conformance/recordings/scenarios/meguri-sync-server/candidate-inputs.md`.
+The `candidate` image entrypoint shares the actual SDK pipeline with the reference run and never starts a reference fallback.
 
 To seal a successful smoke, an independent oracle maintainer must review its exact source and retained artifacts.
 The reviewer supplies `review.json` in that run's directory, containing the accepted bindings for every selected case.

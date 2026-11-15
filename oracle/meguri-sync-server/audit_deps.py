@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Review the exact test-only lock against public package metadata."""
 import json
+import hashlib
 import pathlib
 import re
 import sys
@@ -23,7 +24,8 @@ def license_matches(name, reported):
 def main():
     pins = {}
     current = None
-    for line in pathlib.Path('/lock/requirements.lock').read_text().splitlines():
+    lock_bytes = pathlib.Path('/lock/requirements.lock').read_bytes()
+    for line in lock_bytes.decode().splitlines():
         match = re.match(r'^([A-Za-z0-9_.-]+)==([^\s]+)', line)
         if match:
             current = match[1].lower().replace('_','-')
@@ -50,6 +52,7 @@ def main():
                          'reported_advisory_ids':[entry.get('id') for entry in advisories], 'metadata_source':url})
         clean = clean and hashes_match and not advisories and approved_license
     report = {'format':'meguri-sync-reference-deps-v1','test_only':True,'shipped_in_production':False,
+              'lock_sha256':hashlib.sha256(lock_bytes).hexdigest(),
               'packages':packages,'passed':clean,'limit':'Public package metadata and reported advisories are not an exhaustive security audit.'}
     pathlib.Path('/out/dependencies.json').write_text(json.dumps(report,indent=2)+'\n')
     pathlib.Path('/out/summary.json').write_text(json.dumps({'total':len(packages),'passed':sum(p['artifact_hashes_match'] and not p['reported_advisory_ids'] and p['license_matches_review'] for p in packages),

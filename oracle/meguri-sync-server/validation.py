@@ -109,9 +109,8 @@ class Artifacts:
 
 def binding(manifest, case):
     return {**{key: manifest[key] for key in SOURCE_FIELDS},
-            "case_id": case["id"], "lane": case["lane"],
-            "fixture_sha256": case["fixture_sha256"], "variants": case["variants"],
-            "expected": case["expected"], "observed": case.get("observed"),
+            **{key:value for key,value in case.items() if key not in {'artifacts','reason','status','id'}},
+            "case_id": case["id"],
             "status": "matched" if case["status"] == "sealed" else case["status"]}
 
 
@@ -172,9 +171,13 @@ def _artifacts(manifest, case, store, invocation, trusted_runtime):
     require(same_value(receipt.get('completed_ids'), [row['id'] for row in manifest['cases'] if row['status'] in COMPLETED]), 'MG completed selection mismatch')
     runtime = store.json(receipt["runtime_receipt_sha256"])
     require(runtime.get("format") == "meguri-sync-runtime-v1", "invalid runtime receipt")
-    require(same_value(runtime, trusted_runtime), 'retained runtime receipt differs from the pinned runtime')
-    require(runtime.get('lock_sha256') == manifest['lock_sha256'], 'pinned runtime lock mismatch')
     lane = case["lane"]
+    if lane['kind'] == 'candidate':
+        require(same_value({key:value for key,value in runtime.items() if key != 'server'},
+                           {key:value for key,value in trusted_runtime.items() if key != 'server'}), 'candidate Desktop runtime differs from pin')
+    else:
+        require(same_value(runtime, trusted_runtime), 'retained runtime receipt differs from the pinned runtime')
+        require(runtime.get('lock_sha256') == manifest['lock_sha256'], 'pinned runtime lock mismatch')
     if lane["client"]["kind"] == "desktop":
         require(same_value(lane["client"], runtime["client"]), "Desktop runtime identity mismatch")
     if lane["server"]["kind"] == "reference_runtime":
@@ -185,9 +188,8 @@ def _artifacts(manifest, case, store, invocation, trusted_runtime):
         require(peer["executable_sha256"] == manifest.get("executable_sha256"), "candidate executable mismatch")
         package = store.json(roles["package"])
         require(same_value(package.get("server"), peer), "candidate package receipt mismatch")
-        require(package.get("format") == "meguri-sync-package-v1", "invalid package receipt")
-        store.read(package["executable_artifact_sha256"])
-        require(package["executable_artifact_sha256"] == peer["executable_sha256"], "candidate executable artifact mismatch")
+        from candidate import verify_package
+        verify_package(package,store,{**invocation,'executable_sha256':manifest['executable_sha256']})
     if lane["client"]["kind"] == "mobile":
         device = store.json(roles["device_evidence"])
         require(device.get("format") == "meguri-sync-device-v1", "invalid device receipt")
@@ -196,10 +198,16 @@ def _artifacts(manifest, case, store, invocation, trusted_runtime):
     if case["status"] == "sealed":
         result = store.json(receipt['final_result_sha256'])
         require(result.get('job') == manifest['mg_job'] and result.get('run_id') == invocation['run_id'], 'final MG job/run mismatch')
-        require(result.get('status') == 'pass' and result.get('exit_code') == 0 and result.get('dry_run') is False, 'final MG result did not pass')
+        require(result.get('status') == 'pass' and same_value(result.get('exit_code'), 0) and result.get('dry_run') is False, 'final MG result did not pass')
         require(same_value(result.get('args'), manifest['arguments']), 'final MG arguments mismatch')
         require(result.get('commit', {}).get('sha') == manifest['source_commit'] and result['commit'].get('dirty') is False, 'final MG source is stale or dirty')
         require(same_value(result.get('details', {}).get('reference_invocation'), invocation), 'final MG invocation binding mismatch')
+        count = len(manifest['cases'])
+        require(same_value(result.get('summary'), {'total':count,'passed':count,'failed':0,'skipped':0}), 'final MG execution counts mismatch')
+        counters = result.get('details', {}).get('reference_evidence', {})
+        wanted_counts = {'total':count,'passed':count,'failed':0,'expected_case_count':count,'selected_case_count':count,
+                         'completed_case_count':count,'selection_credit':True,'broad_catalog_credit':False}
+        require(all(same_value(counters.get(key), value) for key,value in wanted_counts.items()), 'final MG selection counts or credit mismatch')
         review = store.json(roles["independent_review"])
         require(review.get("format") == "meguri-sync-review-v1", "invalid review receipt")
         require(same_value(review.get("binding"), wanted), "review source/case binding mismatch")
@@ -231,6 +239,8 @@ def validate(manifest, contract, schema, store, invocation, trusted_runtime, req
         selected = expected_by_id[case["id"]]
         for key in ("family", "classification", "variants", "spec_ids", "expected"):
             require(same_value(case[key], selected[key]), "case differs from reviewed contract")
+        actions = [{key:value for key,value in action.items() if key != 'fixture_sha256'} for action in case['actions']]
+        require(same_value(actions, selected['actions']), 'case actions differ from reviewed contract')
         require(case["lane"]["kind"] == contract["lane_kind"], "selection lane mismatch")
         require(case["lane"]["client"]["kind"] == selected["client_kind"], "selection target mismatch")
         expected_values = unique_named(case["expected"])

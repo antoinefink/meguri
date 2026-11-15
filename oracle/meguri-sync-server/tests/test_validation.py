@@ -65,7 +65,8 @@ class EvidenceValidation(unittest.TestCase):
                          "mg_job": "sync-server-reference", "arguments": ["selftest"],
                          "expected_case_count": 1, "selected_case_count": 1, "completed_case_count": 1, "cases": [case]}
         self.contract = {"format": "meguri-sync-selection-v1", "lane_kind": "reference", "cases": [
-            {key: copy.deepcopy(case[key]) for key in ("id", "family", "classification", "spec_ids", "variants", "expected")} | {"client_kind": "desktop"}]}
+            {key: copy.deepcopy(case[key]) for key in ("id", "family", "classification", "spec_ids", "variants", "expected")} |
+            {"client_kind": "desktop", 'actions':[{key:value for key,value in action.items() if key != 'fixture_sha256'} for action in case['actions']]}]}
         self.invocation = {key: copy.deepcopy(self.manifest[key]) for key in ("source_commit", "batch_base", "source_sha256", "lock_sha256", "mg_job", "arguments")}
         self.invocation.update(run_id="validator-only", author_session="validator-author", selection=[case["id"]])
         self.rebind()
@@ -81,7 +82,9 @@ class EvidenceValidation(unittest.TestCase):
         if case['status'] == 'sealed':
             result = {'job':'sync-server-reference', 'run_id':'validator-only', 'status':'pass', 'exit_code':0, 'dry_run':False,
                       'args':self.manifest['arguments'], 'commit':{'sha':self.manifest['source_commit'],'dirty':False},
-                      'details':{'reference_invocation':self.invocation}}
+                      'summary':{'total':1,'passed':1,'failed':0,'skipped':0},
+                      'details':{'reference_invocation':self.invocation,'reference_evidence':{'total':1,'passed':1,'failed':0,
+                      'expected_case_count':1,'selected_case_count':1,'completed_case_count':1,'selection_credit':True,'broad_catalog_credit':False}}}
             receipt_value['final_result_sha256'] = self.store.put_json(result)
         receipt = self.store.put_json(receipt_value)
         case["artifacts"] = [{"role": role, "sha256": digest} for role, digest in (
@@ -167,7 +170,7 @@ class EvidenceValidation(unittest.TestCase):
         self.runtime['client']['runtime_sha256'] = '9' * 64
         with self.assertRaises(ValueError): self.check()
 
-    def test_seal_requires_review_and_clean_actual_mg_result(self):
+    def sealed_case(self):
         case = self.manifest['cases'][0]
         case['status'] = 'sealed'
         self.rebind()
@@ -177,6 +180,10 @@ class EvidenceValidation(unittest.TestCase):
         review = {'format':'meguri-sync-review-v1', 'binding':wanted, 'outcome':'accepted',
                   'reviewer_session':'independent-validator','review_batch_sha256':self.store.put_json(batch)}
         case['artifacts'].append({'role':'independent_review','sha256':self.store.put_json(review)})
+        return case
+
+    def test_seal_requires_review_and_clean_actual_mg_result(self):
+        case = self.sealed_case()
         self.assertTrue(self.check()['credit'])
         receipt = self.store.json(case['artifacts'][2]['sha256'])
         result = self.store.json(receipt['final_result_sha256'])
@@ -184,3 +191,19 @@ class EvidenceValidation(unittest.TestCase):
         receipt['final_result_sha256'] = self.store.put_json(result)
         case['artifacts'][2]['sha256'] = self.store.put_json(receipt)
         with self.assertRaises(ValueError): self.check()
+
+    def test_seal_rejects_zero_or_missing_mg_execution_counts(self):
+        mutations = [lambda result:result['summary'].update(total=0),
+                     lambda result:result['summary'].update(skipped=1),
+                     lambda result:result['details']['reference_evidence'].pop('completed_case_count'),
+                     lambda result:result['details']['reference_evidence'].update(selected_case_count=2),
+                     lambda result:result['details']['reference_evidence'].update(selection_credit=False),
+                     lambda result:result.update(exit_code=False)]
+        for mutate in mutations:
+            case = self.sealed_case()
+            receipt = self.store.json(case['artifacts'][2]['sha256'])
+            result = self.store.json(receipt['final_result_sha256'])
+            mutate(result)
+            receipt['final_result_sha256'] = self.store.put_json(result)
+            case['artifacts'][2]['sha256'] = self.store.put_json(receipt)
+            with self.assertRaises(ValueError): self.check()

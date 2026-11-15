@@ -10,7 +10,10 @@ mg_sync_reference_digest() {
       docker/meguri-sync-reference.Dockerfile.dockerignore docker/meguri-sync-reference.compose.yml \
       tools/mg.d/meguri-sync-reference.sh conformance/schema/meguri-sync-server.schema.json \
       conformance/catalog/meguri-sync-server.json conformance/fixtures/meguri-sync-server/original.json \
-      conformance/recordings/scenarios/meguri-sync-server/desktop-selection.json |
+      conformance/recordings/scenarios/meguri-sync-server/desktop-selection.json \
+      conformance/fixtures/meguri-sync-server/edges.json conformance/recordings/scenarios/meguri-sync-server/desktop-edge-selection.json \
+      conformance/recordings/scenarios/meguri-sync-server/candidate-full-selection.json \
+      conformance/recordings/scenarios/meguri-sync-server/candidate-complete-selection.json |
       LC_ALL=C sort | while IFS= read -r file; do shasum -a 256 "$file" || exit 1; done | shasum -a 256 | cut -d ' ' -f1
   )
 }
@@ -45,8 +48,8 @@ mg_sync_server_reference() {
       fi
       mg_artifact lock "$reference_dir/requirements.lock"
       mg_status pass; return ;;
-    selftest|identity|smoke|catalog|validate|seal) ;;
-    *) mg_failure usage "expected lock, deps, selftest, identity, smoke, catalog, validate or seal"; mg_status error; return ;;
+    selftest|identity|smoke|edges|catalog|validate|seal) ;;
+    *) mg_failure usage "expected lock, deps, selftest, identity, smoke, edges, catalog, validate or seal"; mg_status error; return ;;
   esac
   local source_sha lock_sha source_commit author_session argument_json
   local mount_args=() runtime_args=("$mode") input_path
@@ -111,7 +114,7 @@ mg_sync_server_reference() {
   if [ "$execution_status" -ne 0 ]; then
     mg_failure reference-execution "reference harness failed; no compatibility credit"; mg_status fail; return
   fi
-  if [ "$mode" = smoke ]; then
+  if [ "$mode" = smoke ] || [ "$mode" = edges ]; then
     mg_message "Named Desktop reference selection passed; broad catalog and actual Mobile remain unverified"
   fi
   mg_status pass

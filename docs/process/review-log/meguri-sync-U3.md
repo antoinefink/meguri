@@ -51,4 +51,40 @@ Focused checks:
 - `tools/mg sync-server-reference deps`: all 19 published artifact sets matched and no package advisories were reported, receipt `20261115T140632Z-48284`.
   The subsequent license check also enforces the reviewed expression; its final receipt remains required.
 
-Independent review, final clean-source receipts, seals and parent-owned provenance, privacy, similarity and batch gates remain pending.
+## Independent review and repair
+
+Reviewer session `s-20261115T141353Z-cc120b18` used a separate oracle-maintainer context and checkout.
+Its first review of `087b9e3688cb767e54d0df75c9b922384f222045` required three changes:
+
+- Remove Desktop credit from three raw-driver-only session probes.
+- Bind the empty-sk mutation explicitly in actions and retained observations.
+- Check final MG execution and selection counts before sealing.
+
+All three changes are implemented. The named Desktop smoke selection now contains 21 cases.
+The raw session observations remain auxiliary and their catalog obligations remain open.
+Earlier 24-case smoke receipts are superseded exploratory evidence and must not receive interoperability credit.
+The complete 31-family catalog still contains 1,294 obligations; no obligation was waived.
+
+The sealing-count regression first failed in `20261115T142112Z-64606`.
+The corrected focused suite then passed 25 tests in `20261115T143109Z-80567`.
+The corrected 21-case smoke passed in `20261115T143111Z-80834`.
+
+Eight additional actual-Desktop edge cases passed in `20261115T143914Z-89035`:
+
+- Replayed SDK additions kept `[1,1]`; replayed deletions kept `[1,2]`.
+- Fresh receivers of 0, 1, 999, 1,000 and 1,001 files matched every expected hash and USN.
+- The zero-state client made no listing request; this does not observe an empty server page.
+- A request delayed 121,001 ms succeeded against the reference server.
+- A separate explicit abort after 121,005 ms produced 409 and `SyncError`; local edits survived and pending server work rolled back.
+
+The idle observation establishes only that measured lower bound.
+The abort injection establishes client handling and rollback, not automatic reference expiry.
+
+The parent spec writer approved the narrow candidate seam and its neutral K1–K4 contract.
+The image entrypoint shares the actual SDK pipeline, uses fixed namespace-local loopback, and accepts separate protected credentials and checked peer receipts.
+It exposes 11-case full-transfer and 21-case complete selections. No candidate pass has been claimed.
+The no-reference-fallback regression failed first in `20261115T145038Z-16671`, then passed after the candidate endpoint fix.
+The current focused suite passed 33 tests in `20261115T151016Z-28004`.
+No Meguri Sync server source was read.
+
+Final independent source/evidence review, clean-source receipts, seals and parent-owned provenance, privacy, similarity and batch gates remain pending.

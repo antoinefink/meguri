@@ -22,11 +22,12 @@ import time
 import anki
 import anki.buildinfo
 from anki.collection import Collection
+from anki.errors import NetworkError, SyncError
 from anki.sync import SyncAuth, SyncOutput
 import zstandard
 
 from validation import encoded, require, sha
-from synthetic import FIXTURE
+from synthetic import FIXTURE, EDGE_FIXTURE
 
 PHASE = "identity"
 RECORDER_ERRORS = []
@@ -124,6 +125,11 @@ class Recorder(http.server.ThreadingHTTPServer):
         self.errors = []
         self.empty_sk = False
         self.rewrite_session = None
+        self.replay_uploads = False
+        self.idle_seconds = 0
+        self.expire_after_idle = False
+        self.idle_claimed = False
+        self.idle_completed = threading.Event()
         super().__init__(("127.0.0.1", 0), RecorderHandler)
 
 
@@ -162,6 +168,15 @@ class RecorderHandler(http.server.BaseHTTPRequestHandler):
                 detail['media_request_members'] = sorted(json.loads(decoded))
             if self.path.endswith("/upload"):
                 detail['upload_stamp'] = file_stamp(decoded)
+            if self.path == '/sync/chunk' and self.server.idle_seconds and not self.server.idle_claimed:
+                self.server.idle_claimed = True
+                started = time.monotonic()
+                time.sleep(self.server.idle_seconds)
+                detail['idle_elapsed_ms'] = int((time.monotonic() - started) * 1000)
+                detail['request_mutation'] = 'idle-expire' if self.server.expire_after_idle else 'idle-delay'
+                if self.server.expire_after_idle:
+                    temporary_auth = SyncAuth(hkey=header['k'], endpoint=f'http://127.0.0.1:{self.server.upstream}/')
+                    detail['injected_abort_status'] = native_request(self.server.upstream, temporary_auth, 'abort', {'_pad':None}, header['s'])['status']
             connection = http.client.HTTPConnection("127.0.0.1", self.server.upstream, timeout=30)
             headers = {key: value for key, value in self.headers.items() if key.lower() not in {"host", "connection", "content-length", "transfer-encoding"}}
             if self.server.rewrite_session is not None:
@@ -172,6 +187,15 @@ class RecorderHandler(http.server.BaseHTTPRequestHandler):
             connection.request("POST", self.path, body=raw, headers=headers)
             response = connection.getresponse()
             output = response.read()
+            if self.server.replay_uploads and self.path == '/msync/uploadChanges' and response.status == 200:
+                repeated = http.client.HTTPConnection('127.0.0.1', self.server.upstream, timeout=30)
+                repeated.request('POST', self.path, body=raw, headers=headers)
+                repeated_response = repeated.getresponse()
+                repeated_output = repeated_response.read()
+                detail['request_mutation'] = 'replay-upload'
+                detail['replay_status'] = repeated_response.status
+                detail['replay_media_result'] = json.loads(unpack(repeated_output))['data'] if repeated_response.status == 200 else None
+                repeated.close()
             changed_headers = {}
             if self.server.empty_sk and self.path == '/msync/begin' and response.status == 200:
                 media = json.loads(unpack(output))
@@ -179,6 +203,7 @@ class RecorderHandler(http.server.BaseHTTPRequestHandler):
                 plain = encoded(media)
                 output = zstandard.ZstdCompressor().compress(plain)
                 changed_headers['anki-original-size'] = str(len(plain))
+                detail['response_mutation'] = 'empty-sk'
             detail.update(status=response.status, compressed_response_bytes=len(output))
             if 200 <= response.status < 300:
                 body = unpack(output)
@@ -200,6 +225,8 @@ class RecorderHandler(http.server.BaseHTTPRequestHandler):
                     else:
                         detail['media_result'] = media['data']
             self.server.observations.append(detail)
+            if detail.get('request_mutation') in {'idle-delay','idle-expire'}:
+                self.server.idle_completed.set()
             self.send_response(response.status)
             for key, value in response.getheaders():
                 if key.lower() not in {"connection", "content-length", "transfer-encoding"}:
@@ -261,9 +288,9 @@ def snapshot(col):
             "reviews": col.db.all("select * from revlog order by id")}
 
 
-def media_sync(col, auth):
+def media_sync(col, auth, timeout=30):
     col.sync_media(auth)
-    deadline = time.monotonic() + 30
+    deadline = time.monotonic() + timeout
     while col.media_sync_status().active:
         if time.monotonic() >= deadline:
             col.abort_media_sync()
@@ -284,6 +311,120 @@ def native_request(port, auth, method, body, session):
         result['value'] = json.loads(unpack(output))
     connection.close()
     return result
+
+
+def noop_probe(root, fixture):
+    with reference_server(root / 'server') as (port, username, password), recorder(port) as record:
+        clients = []
+        try:
+            a, model = collection(root, 'a', fixture['base']); clients.append(a)
+            add_note(a, model, fixture['base']['notes'][0])
+            b, _ = collection(root, 'b', fixture['base']); clients.append(b)
+            endpoint = f'http://127.0.0.1:{record.server_port}/'
+            auth_a = a.sync_login(username=username,password=password,endpoint=endpoint)
+            auth_b = b.sync_login(username=username,password=password,endpoint=endpoint)
+            full(a,auth_a,True); full(b,auth_b,False)
+            record.replay_uploads = True
+            a.media.write_data(fixture['repeat_name'],fixture['repeat_contents'].encode())
+            media_sync(a,auth_a); media_sync(b,auth_b)
+            received_hash = sha((pathlib.Path(b.media.dir()) / fixture['repeat_name']).read_bytes())
+            time.sleep(1.05)
+            (pathlib.Path(a.media.dir()) / fixture['repeat_name']).unlink()
+            media_sync(a,auth_a); media_sync(b,auth_b)
+            deleted = not (pathlib.Path(b.media.dir()) / fixture['repeat_name']).exists()
+            require(not record.errors, 'replay recorder incomplete')
+            return {'traffic':record.observations,'received_hash':received_hash,'receiver_deleted':deleted}
+        finally:
+            for col in clients: col.close(downgrade=False)
+
+
+def pagination_probe(root, fixture):
+    with reference_server(root / 'server') as (port, username, password), recorder(port) as record:
+        clients = []
+        try:
+            a, model = collection(root,'a',fixture['base']); clients.append(a)
+            add_note(a,model,fixture['base']['notes'][0])
+            endpoint = f'http://127.0.0.1:{record.server_port}/'
+            auth_a = a.sync_login(username=username,password=password,endpoint=endpoint)
+            full(a,auth_a,True)
+            previous = 0
+            results = []
+            for count in fixture['page_counts']:
+                if count > previous:
+                    time.sleep(1.05)
+                    for index in range(previous,count):
+                        name = f"{fixture['media_prefix']}-{index:04}.bin"
+                        a.media.write_data(name,(fixture['media_payload_prefix']+str(index)).encode())
+                    media_sync(a,auth_a,timeout=120)
+                b, _ = collection(root,'receiver-'+str(count),fixture['base']); clients.append(b)
+                auth_b = b.sync_login(username=username,password=password,endpoint=endpoint)
+                full(b,auth_b,False)
+                before = len(record.observations)
+                media_sync(b,auth_b,timeout=120)
+                traffic = record.observations[before:]
+                pages = [row['media_result'] for row in traffic if row['route'] == '/msync/mediaChanges']
+                hashes = {f"{fixture['media_prefix']}-{index:04}.bin":sha((pathlib.Path(b.media.dir()) / f"{fixture['media_prefix']}-{index:04}.bin").read_bytes()) for index in range(count)}
+                results.append({'count':count,'pages':pages,'file_hashes':hashes,'traffic':traffic})
+                previous = count
+            require(not record.errors, 'pagination recorder incomplete')
+            return results
+        finally:
+            for col in clients: col.close(downgrade=False)
+
+
+def idle_probe(root, fixture, expire):
+    with reference_server(root / 'server') as (port,username,password), recorder(port) as record:
+        clients = []
+        try:
+            a,model = collection(root,'a',fixture['base']); clients.append(a)
+            add_note(a,model,fixture['base']['notes'][0])
+            b,_ = collection(root,'b',fixture['base']); clients.append(b)
+            endpoint = f'http://127.0.0.1:{record.server_port}/'
+            login = a.sync_login(username=username,password=password,endpoint=endpoint)
+            auth_a = SyncAuth(hkey=login.hkey,endpoint=endpoint,io_timeout_secs=fixture['sdk_timeout_seconds'])
+            auth_b = b.sync_login(username=username,password=password,endpoint=endpoint)
+            full(a,auth_a,True); full(b,auth_b,False)
+            original = snapshot(a)
+            time.sleep(1.05)
+            note = a.get_note(a.find_notes('')[0]); note.fields[1] = fixture['idle_edit']; a.update_note(note)
+            before = snapshot(a)
+            record.idle_seconds = fixture['idle_seconds']
+            record.expire_after_idle = expire
+            outcome = {'requested_idle_seconds':fixture['idle_seconds'],'explicit_expiry_injected':expire}
+            try:
+                reply = a.sync_collection(auth_a,sync_media=False)
+                outcome['client_result'] = 'no_changes' if reply.required == SyncOutput.NO_CHANGES else 'full_transfer_required'
+            except (NetworkError, SyncError) as error:
+                outcome['client_result'] = 'error'
+                outcome['client_error_kind'] = type(error).__name__
+            require(record.idle_completed.wait(timeout=fixture['idle_seconds']+10),'delayed SDK request did not complete')
+            outcome['local_content_unchanged'] = snapshot(a) == before
+            full(b,auth_b,False)
+            outcome['server_pending_edit_rolled_back'] = snapshot(b) == original
+            outcome['receiver_matches_sender'] = snapshot(b) == snapshot(a)
+            require(not record.errors,'idle recorder incomplete')
+            outcome['traffic'] = record.observations
+            return outcome
+        finally:
+            for col in clients: col.close(downgrade=False)
+
+
+def edges(fixture):
+    global PHASE
+    require(fixture == EDGE_FIXTURE,'unknown edge fixture')
+    identity = runtime()
+    with tempfile.TemporaryDirectory(prefix='current-reference-edges-') as directory:
+        root = pathlib.Path(directory)
+        for name in ('noops','pages','idle','expiry'): (root / name).mkdir()
+        PHASE = 'media-noop-replays'
+        noops = noop_probe(root / 'noops',fixture)
+        PHASE = 'media-pagination'
+        pages = pagination_probe(root / 'pages',fixture)
+        PHASE = 'reference-idle-boundary'
+        idle = idle_probe(root / 'idle',fixture,False)
+        PHASE = 'injected-expiry-boundary'
+        expiry = idle_probe(root / 'expiry',fixture,True)
+        return {'probe_kind':'edges','runtime':identity,'fixture':fixture,'noops':noops,'pagination':pages,'idle':idle,'expiry':expiry}
 
 
 def session_probes(port, a, b, auth_a, auth_b, record):
@@ -316,14 +457,24 @@ def session_probes(port, a, b, auth_a, auth_b, record):
     return result
 
 
-def smoke(fixture):
+@contextlib.contextmanager
+def probe_server(root, target):
+    if target is None:
+        with reference_server(root) as server: yield server
+    else:
+        require(set(target) == {'username','password','server'}, 'invalid candidate adapter inputs')
+        yield 8080, target['username'], target['password']
+
+
+def smoke(fixture, target=None, full_only=False):
     global PHASE
     require(fixture == FIXTURE, "unknown synthetic fixture")
     identity = runtime()
+    if target is not None: identity['server'] = target['server']
     with tempfile.TemporaryDirectory(prefix="current-reference-") as scratch:
         root = pathlib.Path(scratch)
         PHASE = 'reference-server-start'
-        with reference_server(root / "server") as (port, username, password), recorder(port) as record:
+        with probe_server(root / "server",target) as (port, username, password), recorder(port) as record:
             clients = []
             try:
                 PHASE = 'synthetic-client-setup'
@@ -349,6 +500,11 @@ def smoke(fixture):
                 integrity = b.db.scalar('pragma integrity_check')
                 full_equal = snapshot(a) == snapshot(b)
                 full(b, auth_b, False)
+                full_equal = full_equal and snapshot(a) == snapshot(b)
+                if full_only:
+                    require(not record.errors,'recording is incomplete')
+                    return {'probe_kind':'candidate','phase':'full','full_only':True,'runtime':identity,'fixture':fixture,'traffic':record.observations,
+                            'outcomes':{'full_equal':full_equal,'integrity':integrity,'initial_requirement':initial_requirement,'blank_counts':blank_counts}}
                 note = a.get_note(a.find_notes("")[0])
                 time.sleep(1.05)
                 note.fields = fixture["edit"]
@@ -386,6 +542,8 @@ def smoke(fixture):
                 admission = session_probes(port, a, b, auth_a, auth_b, record)
                 require(not record.errors, "recording is incomplete")
                 return {"runtime": identity, "fixture": fixture, "traffic": record.observations,
+                        'probe_kind':'candidate' if target is not None else 'smoke','phase':'complete',
+                        'auxiliary_scope':'Raw-only session-admission observations carry no Desktop case credit.',
                         'session_admission': admission,
                         "outcomes": {"full_equal": full_equal, "integrity": integrity, "normal_equal": normal_equal,
                                      'initial_requirement': initial_requirement, 'blank_counts': blank_counts,
@@ -401,7 +559,11 @@ def smoke(fixture):
 if __name__ == "__main__":
     try:
         request = json.loads(sys.stdin.buffer.read())
-        result = runtime() if request["mode"] == "identity" else smoke(request["fixture"])
+        if request['mode'] == 'identity': result = runtime()
+        elif request['mode'] == 'edges': result = edges(request['fixture'])
+        elif request['mode'] == 'candidate': result = smoke(request['fixture'],request['target'],request['full_only'])
+        elif request['mode'] == 'smoke': result = smoke(request['fixture'])
+        else: raise ValueError('unknown SDK request mode')
         sys.stdout.buffer.write(encoded(result))
     except BaseException as error:
         # Never export source frames, backend messages or collection content.
