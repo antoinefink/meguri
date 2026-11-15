@@ -400,6 +400,16 @@ public actor CloudKitSyncAdapter {
     func setValidatedEventHook(_ hook: (event: CloudEngineEvent, action: @Sendable () async -> Void)?) {
         validatedEventHook = hook
     }
+    // Scheduling only, after validation and before the pending drain's Core call.
+    private var pendingUpdateValidatedHook: (afterSDKMutation: Bool, action: @Sendable () async -> Void)? = nil
+    func setPendingUpdateValidatedHook(_ hook: (afterSDKMutation: Bool, action: @Sendable () async -> Void)?) {
+        pendingUpdateValidatedHook = hook
+    }
+    // Join only work already scheduled by the original path; never reconcile.
+    func joinOriginalStopTask(instanceID: String) async throws -> Bool {
+        if let task = stopTasks[instanceID] { try await task.value; return true }
+        return owned[instanceID] == nil
+    }
     private var fetchReservationObserver: (@Sendable () async -> Void)?
     func setFetchReservationObserver(_ observer: (@Sendable () async -> Void)?) { fetchReservationObserver = observer }
     private var epochReservationObserver: (@Sendable () async -> Void)?
@@ -759,6 +769,11 @@ public actor CloudKitSyncAdapter {
     private func stopInstance(_ origin: String, reason: StopReason, policyStop: Bool, execution: CoreCloudPolicyExecution? = nil, final: Bool = false, accountStop: CloudPolicyCommand? = nil) async throws {
         if let task = beginStop(origin, reason: reason, policyStop: policyStop, execution: execution, final: final, accountStop: accountStop) { try await task.value }
     }
+    private func retireRejectedOriginal(_ origin: String) {
+        // Core rejected this captured owner. Schedule its existing drain without
+        // joining the SDK from a callback or replacing an earlier real failure.
+        _ = beginStop(origin, reason: .handlerInvalid, policyStop: false)
+    }
     private func drainInstance(_ origin: String, policyStop: Bool, execution: CoreCloudPolicyExecution?, final: Bool, accountStop: CloudPolicyCommand?) async throws {
         guard let instance = owned[origin] else { return }
         instance.rootReadOperation?.cancel()
@@ -922,8 +937,11 @@ public actor CloudKitSyncAdapter {
         // One drain owns all lists. Taking each complete list in emission order
         // prevents a later full removal from overtaking a saved-handler add.
         let updates: [CloudPendingUpdate]
+        #if DEBUG
+        if let hook = pendingUpdateValidatedHook, !hook.afterSDKMutation { await hook.action() }
+        #endif
         do { updates = try await core.takePendingUpdates(sdk: origin) }
-        catch BridgeError.cloudSDKCallbackRejected { return }
+        catch BridgeError.cloudSDKCallbackRejected { retireRejectedOriginal(origin); return }
         for update in updates {
             guard await valid(origin) else { return }
             var applied = update
@@ -937,7 +955,7 @@ public actor CloudKitSyncAdapter {
             let mutation = try await instance.engine.applyPendingUpdate(applied)
             guard await valid(origin) else { return }
             let receipts = await instance.engine.takeSavedPendingRemovals()
-            await savedPendingRemovalsConfirmed(receipts, origin: origin, engine: instance.engine)
+            await savedPendingRemovalsConfirmed(receipts, origin: origin, engine: instance.engine, retireOnRejection: true)
             guard await valid(origin) else { return }
             // A later application mutation ends any still-unconfirmed original
             // ownership. Its absence must never become a delayed Saved proof.
@@ -946,8 +964,11 @@ public actor CloudKitSyncAdapter {
             let after = await instance.engine.pendingRecordZoneChanges()
             guard await valid(origin) else { return }
             let added = mutation.adds.keys.filter { after[$0] == mutation.adds[$0] }
+            #if DEBUG
+            if let hook = pendingUpdateValidatedHook, hook.afterSDKMutation { await hook.action() }
+            #endif
             do { try await core.updateApplied(sdk: origin, id: update.id, added: added) }
-            catch BridgeError.cloudSDKCallbackRejected { return }
+            catch BridgeError.cloudSDKCallbackRejected { retireRejectedOriginal(origin); return }
         }
     }
     // Hold the SDK's original serial delivery, retaining asset lifetime and
@@ -1170,7 +1191,7 @@ public actor CloudKitSyncAdapter {
         }
     }
     fileprivate func savedPendingRemovalsConfirmed(_ receipts: [CloudSavedPendingRemoval], origin: String,
-                                                   engine: any CloudKitEngine) async {
+                                                   engine: any CloudKitEngine, retireOnRejection: Bool = false) async {
         guard let instance = owned[origin], !instance.failed, engine.instanceID == origin,
               (instance.engine as AnyObject) === (engine as AnyObject) else { return }
         for receipt in receipts {
@@ -1184,6 +1205,8 @@ public actor CloudKitSyncAdapter {
                 instance.savedRemovalGuards.removeValue(forKey: receipt.requestID)
             } catch BridgeError.cloudSDKCallbackRejected {
                 // Keep the receipt unconfirmed; the original SDK no longer owns it.
+                // Standalone pending drains have no later event-return cleanup.
+                if retireOnRejection { retireRejectedOriginal(origin) }
             } catch {
                 lastFailure = error; instance.failed = true
                 #if DEBUG
@@ -1426,6 +1449,7 @@ public actor CloudKitSyncAdapter {
             do { try batch?.finalAdmission?() } catch { return nil }
             return batch
         } catch BridgeError.cloudSDKCallbackRejected {
+            retireRejectedOriginal(origin)
             return nil
         } catch {
             lastFailure = error; instance.failed = true

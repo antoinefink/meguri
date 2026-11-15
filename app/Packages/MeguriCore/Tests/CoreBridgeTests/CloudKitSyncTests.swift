@@ -1893,3 +1893,125 @@ extension EventTests {
         }
     }
 }
+
+#if DEBUG
+/// Fresh provider proof, rather than a native validity override, ends the
+/// staged root-loss original. This path deliberately does not reconcile SDKs.
+private func acceptPendingRootLossProof(_ f: CloudKitBridgeFixture, engine: CloudKitEngineFake,
+                                        originalGuard: CloudGuard) async throws {
+    let reads = await f.factory.resolvedAccountReadCount()
+    try #require(try await f.core.currentGuard() == originalGuard)
+    await f.factory.appendAccountRead(.success(.init(status: .available,
+        identity: Data("synthetic-account-A".utf8))))
+    try await f.adapter.refreshPlatformIdentity()
+    try #require(await f.factory.resolvedAccountReadCount() == reads + 1)
+    try #require(try await f.core.currentGuard() != originalGuard,
+                 "Actual fresh provider proof must invalidate the held original")
+    do { try await f.core.validateSDK(engine.instanceID); Issue.record("Fresh root-loss proof retained SDK authority") }
+    catch { }
+    let accepted = try await f.core.durableSnapshot()
+    try #require(accepted.rootEnvelope == nil && accepted.rootSystemFields == nil)
+    try #require(await f.adapter.retainedInstanceIDs() == [engine.instanceID])
+    try #require(!(await engine.recordedTrace()).contains(.cancelEntered),
+                 "Proof acceptance itself must not retire the test's native original")
+}
+
+extension EventTests {
+    @Test(.timeLimit(.minutes(1)), arguments: [false, true])
+    func cloudKitRejectedPendingDrainAutomaticallyRetiresOriginal(afterSDKMutation: Bool) async throws {
+        try await withCloudKitFixture(keepAlive: true, appOwnsAccountObservation: true) { f in
+            let engine = try await f.engine()
+            let before = try await f.core.durableSnapshot()
+            let originalGuard = try await f.core.currentGuard()
+            await engine.emitRetained(.willFetch(groupID: "pending-loss", reason: .scheduled), label: "pendingLossWillFetch")
+            await engine.emitRetained(.willFetchZone(zone: "meguri-root"), label: "pendingLossWillFetchZone")
+            await engine.emitRetained(.fetched(zone: "meguri-root", records: [], deleted: ["active"]), label: "pendingLossDeletedActive")
+            try #require(await f.adapter.lastFailure == nil)
+            let name = try #require(f.names.first)
+            let update = try await f.core.pendingTransition(instance: engine.instanceID, kind: .changes,
+                                                          snapshot: [name: .save])
+            try #require(update.adds[name] == .save)
+            let validated = CloudCallbackGate()
+            await f.adapter.setPendingUpdateValidatedHook((afterSDKMutation: afterSDKMutation, action: { await validated.enter() }))
+            do {
+                try await withCloudTask(gates: [validated], operation: {
+                    try await f.adapter.consumePendingUpdates()
+                }, whileRunning: {
+                    try await validated.waitForArrival()
+                    let applied = await engine.recordedTrace().filter {
+                        if case .pendingApplied(let id, _, _) = $0 { id == update.id } else { false }
+                    }
+                    try #require(applied.count == (afterSDKMutation ? 1 : 0),
+                                 "ACK race must hold after the actual SDK mutation; take race before it")
+                    try await acceptPendingRootLossProof(f, engine: engine, originalGuard: originalGuard)
+                    await validated.open()
+                })
+            } catch {
+                await f.adapter.setPendingUpdateValidatedHook(nil)
+                throw error
+            }
+            await f.adapter.setPendingUpdateValidatedHook(nil)
+            // This observation cannot initiate shutdown. On the unfixed source
+            // it returns false immediately, exposing the missing stop task.
+            #expect(try await f.adapter.joinOriginalStopTask(instanceID: engine.instanceID))
+            #expect(await f.adapter.retainedInstanceIDs().isEmpty)
+            #expect(await f.adapter.lastFailure == nil)
+            #expect(await f.factory.engines().count == 1)
+            let trace = await engine.recordedTrace()
+            let returned = try #require(trace.firstIndex(of: .eventReturned("pendingLossDeletedActive")))
+            let cancelled = try #require(trace.firstIndex(of: .cancelEntered))
+            let cancelReturned = try #require(trace.firstIndex(of: .cancelReturned))
+            let released = try #require(trace.firstIndex(of: .released))
+            #expect(returned < cancelled && cancelled < cancelReturned && cancelReturned < released)
+            #expect(trace.filter { $0 == .released }.count == 1)
+            #expect(trace.filter {
+                if case .pendingApplied(let id, _, _) = $0 { id == update.id } else { false }
+            }.count == (afterSDKMutation ? 1 : 0))
+            #expect(!(try await f.core.observations()).contains(.pendingAdded(name: name, actionID: update.id)))
+            let after = try await f.core.durableSnapshot()
+            #expect(after.serialization == before.serialization && after.entities == before.entities)
+            #expect(after.rootEnvelope == nil && after.rootSystemFields == nil)
+        }
+    }
+
+    /// P2: a real batch delegate held after validation must retire its captured
+    /// original on Core rejection without another callback or waitForIdle().
+    @Test(.timeLimit(.minutes(1)))
+    func cloudKitRejectedNextBatchAutomaticallyRetiresOriginal() async throws {
+        let validated = CloudCallbackGate()
+        try await withCloudKitFixture(keepAlive: true, delegateWorkValidated: { await validated.enter() },
+                                     appOwnsAccountObservation: true) { f in
+            let engine = try await f.engine()
+            let before = try await f.core.durableSnapshot()
+            let originalGuard = try await f.core.currentGuard()
+            try await withCloudTask(gates: [validated], operation: {
+                #expect(await engine.requestRetainedBatch(zone: f.zone) == nil)
+            }, whileRunning: {
+                try await validated.waitForArrival()
+                await engine.emitRetained(.willFetch(groupID: "batch-loss", reason: .scheduled), label: "batchLossWillFetch")
+                await engine.emitRetained(.willFetchZone(zone: "meguri-root"), label: "batchLossWillFetchZone")
+                await engine.emitRetained(.fetched(zone: "meguri-root", records: [], deleted: ["active"]), label: "batchLossDeletedActive")
+                try #require(await f.adapter.lastFailure == nil)
+                try await acceptPendingRootLossProof(f, engine: engine, originalGuard: originalGuard)
+                await validated.open()
+            })
+            #expect(try await f.adapter.joinOriginalStopTask(instanceID: engine.instanceID))
+            #expect(await f.adapter.retainedInstanceIDs().isEmpty)
+            #expect(await f.adapter.lastFailure == nil)
+            #expect(await f.factory.engines().count == 1)
+            let trace = await engine.recordedTrace()
+            let returned = try #require(trace.firstIndex(of: .eventReturned("batchLossDeletedActive")))
+            let cancelled = try #require(trace.firstIndex(of: .cancelEntered))
+            let cancelReturned = try #require(trace.firstIndex(of: .cancelReturned))
+            let released = try #require(trace.firstIndex(of: .released))
+            #expect(returned < cancelled && cancelled < cancelReturned && cancelReturned < released)
+            #expect(trace.filter { $0 == .released }.count == 1)
+            #expect(!trace.contains { if case .handed = $0 { true } else { false } })
+            #expect(!(try await f.core.observations()).contains { if case .batchBuilt = $0 { true } else { false } })
+            let after = try await f.core.durableSnapshot()
+            #expect(after.serialization == before.serialization && after.entities == before.entities)
+            #expect(after.rootEnvelope == nil && after.rootSystemFields == nil)
+        }
+    }
+}
+#endif
