@@ -33,11 +33,15 @@ the containers.
 """
 
 import argparse
+import contextlib
+import io
 import hashlib
 import html
 import json
 import os
 import re
+import secrets
+import stat
 import subprocess
 import sys
 import unicodedata
@@ -603,14 +607,17 @@ def git(repo, *args):
 PRIVATE_RESULTS = "conformance/reports/private/"
 
 
-def committed_texts(repo):
+def committed_texts(repo, commit=None):
     """Yields the text of each regular file committed at HEAD (binary files and
     PRIVATE_RESULTS left out). Nothing when HEAD has no commit."""
-    head = subprocess.run(["git", "-C", repo, "rev-parse", "-q", "--verify", "HEAD^{commit}"],
-                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if head.returncode != 0:
-        return
-    commit = head.stdout.decode("ascii").strip()
+    if commit is None:
+        head = subprocess.run(["git", "-C", repo, "rev-parse", "-q", "--verify", "HEAD^{commit}"],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if head.returncode != 0:
+            return
+        commit = head.stdout.decode("ascii").strip()
+    elif re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", commit) is None:
+        raise ValueError("committed text needs a full commit oid")
     blobs = []
     for record in git(repo, "ls-tree", "-r", "-z", "--full-tree", commit).split(b"\0"):
         if not record:
@@ -648,6 +655,14 @@ def committed_texts(repo):
 # ------------------------------------------------------------------ build
 
 
+def public_tokens(matcher, repo, commit=None):
+    found = set()
+    for text in committed_texts(repo, commit):
+        # Raw-only learning; masked fixed facts do not establish ordinary use.
+        found.update(matcher.scan_tokens(text))
+    return found
+
+
 def build(candidates, repo, out):
     tokens = set()
     by_kind = {}
@@ -662,12 +677,7 @@ def build(candidates, repo, out):
             found = tokens_of(kind, text)
             by_kind[kind] = by_kind.get(kind, 0) + len(found)
             tokens.update(found)
-    matcher = Matcher(tokens)
-    in_repo = set()
-    for text in committed_texts(repo):
-        # Keep committed_texts' raw-only learning: fixed facts are not evidence
-        # that a candidate's ordinary spelling outside their spans is public.
-        in_repo.update(matcher.scan_tokens(text))
+    in_repo = public_tokens(Matcher(tokens), repo)
     final = sorted(" ".join(t) for t in tokens - in_repo)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     tmp = out + ".tmp"
@@ -689,15 +699,125 @@ def build(candidates, repo, out):
     return meta
 
 
+def tokens_from_lines(lines):
+    for line in lines:
+        line = line.rstrip("\n")
+        if line:
+            yield tuple(line.split(" "))
+
+
 def load_tokens(paths):
     tokens = set()
     for path in paths:
         with open(path, encoding="utf-8") as f:
-            for line in f:
-                line = line.rstrip("\n")
-                if line:
-                    tokens.add(tuple(line.split(" ")))
+            tokens.update(tokens_from_lines(f))
     return Matcher(tokens)
+
+
+def refresh_public(repo, expected, shared_main=False):
+    """Explicit idle-writer maintenance; only tokens.txt is authoritative."""
+    def need(ok):
+        if not ok:
+            raise ValueError("unsafe or changed refresh input")
+
+    def pin(info, directory=False):
+        value = (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid)
+        return value if directory else value + (info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+    need(os.path.isabs(repo) and repo == os.path.normpath(repo) == os.path.realpath(repo))
+    need(re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", expected) is not None)
+    with contextlib.ExitStack() as stack:
+        bindings = []
+
+        def directory(path):
+            fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            stack.callback(os.close, fd)
+            for name in path.split("/")[1:]:
+                child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                stack.callback(os.close, child)
+                info = os.fstat(child)
+                need(info.st_uid in (0, os.getuid()) and
+                     (not info.st_mode & 0o022 or (info.st_uid == 0 and info.st_mode & stat.S_ISVTX)))
+                bindings.append((fd, name, child, pin(info, True)))
+                fd = child
+            return fd
+
+        def check_directories():
+            for parent, name, fd, before in bindings:
+                need(pin(os.fstat(fd), True) == before ==
+                     pin(os.stat(name, dir_fd=parent, follow_symlinks=False), True))
+
+        root = directory(repo)
+        marker = os.stat(".git", dir_fd=root, follow_symlinks=False)
+        need(marker.st_uid == os.getuid() and not marker.st_mode & 0o022 and
+             (stat.S_ISDIR(marker.st_mode) or (stat.S_ISREG(marker.st_mode) and marker.st_nlink == 1)))
+        marker_pin = pin(marker, stat.S_ISDIR(marker.st_mode))
+        common = os.fsdecode(git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")).rstrip("\n")
+        need(common == os.path.normpath(common) == os.path.realpath(common) and
+             os.path.isabs(common) and os.path.basename(common) == ".git")
+        need(common == repo + "/.git" or shared_main)
+        target = os.path.dirname(common) if shared_main else repo
+        directory(common)  # The shared target must be this repository's real common root.
+        private = directory(target + "/build/private")
+        need(os.fstat(private).st_uid == os.getuid() and stat.S_IMODE(os.fstat(private).st_mode) == 0o700)
+        parent = directory(target + "/build/private/tokens")
+        need(os.fstat(parent).st_uid == os.getuid())
+
+        def snapshot():
+            check_directories()
+            need(pin(os.stat(".git", dir_fd=root, follow_symlinks=False), stat.S_ISDIR(marker.st_mode)) == marker_pin)
+            need(git(repo, "rev-parse", "--verify", "HEAD^{commit}").decode("ascii").strip() == expected)
+            need(os.fsdecode(git(repo, "rev-parse", "--show-toplevel")).rstrip("\n") == repo)
+            need(os.fsdecode(git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")).rstrip("\n") == common)
+
+        snapshot()
+        fd = os.open("tokens.txt", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        stack.callback(os.close, fd)
+        original = os.fstat(fd)
+        need(stat.S_ISREG(original.st_mode) and original.st_uid == os.getuid() and
+             original.st_nlink == 1 and not original.st_mode & 0o022 and original.st_size <= 64 * 1024 * 1024)
+        with os.fdopen(os.dup(fd), "rb") as stream:
+            before = stream.read(64 * 1024 * 1024 + 1)
+        need(len(before) <= 64 * 1024 * 1024)
+
+        def unchanged(name, opened, info):
+            need(pin(os.fstat(opened)) == pin(info) ==
+                 pin(os.stat(name, dir_fd=parent, follow_symlinks=False)))
+
+        unchanged("tokens.txt", fd, original)
+        tokens = set(tokens_from_lines(io.StringIO(before.decode("utf-8"), newline=None)))
+        public = public_tokens(Matcher(tokens), repo, expected)
+        after = "".join(" ".join(token) + "\n" for token in sorted(tokens - public)).encode("utf-8")
+        result = {"head": expected, "before": len(tokens), "removed": len(public), "after": len(tokens - public),
+                  "before_sha256": hashlib.sha256(before).hexdigest(),
+                  "after_sha256": hashlib.sha256(after if public else before).hexdigest()}
+        snapshot()
+        unchanged("tokens.txt", fd, original)
+        if not public:
+            return result
+
+        def saved(name, data):
+            out = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
+            stack.callback(os.close, out)
+            os.fchmod(out, 0o600)
+            with os.fdopen(os.dup(out), "wb") as stream:
+                stream.write(data)
+                stream.flush()
+                os.fsync(out)
+            return out, os.fstat(out)
+
+        nonce = secrets.token_hex(16)
+        backup, temporary = "tokens.before-" + nonce, "tokens.refresh-" + nonce
+        backup_fd, backup_info = saved(backup, before)
+        temporary_fd, temporary_info = saved(temporary, after)
+        os.fsync(parent)
+        snapshot()
+        unchanged("tokens.txt", fd, original)
+        unchanged(backup, backup_fd, backup_info)
+        unchanged(temporary, temporary_fd, temporary_info)
+        os.replace(temporary, "tokens.txt", src_dir_fd=parent, dst_dir_fd=parent)
+        os.fsync(parent)
+        return result
 
 
 # ------------------------------------------------------------------- scan
@@ -712,11 +832,25 @@ PUBLIC_ARTIFACTS = {
     "specs/licenses/jquery-3.7.1-LICENSE.txt": "d4db9ebe6f29f5168eac45ad713f055623ac5d0dcd5ba92da23d650ae012020d",
     "app/Packages/MeguriKit/Sources/CardRendering/Resources/CardRuntime/vendor/jquery-3.7.1.min.js":
         "fc9a93dd241f6b045cbff0481cf4e1901becd0e12fb45166a8f17f95823f0b1a",
-    # Owner approval 2026-11-15: only these exact documents and complete bytes.
-    "docs/plans/2026-11-15-1028-feat-meguri-sync-server-plan.md":
-        "ee057f23871d457641fcd78d5905dcb33ca23d2aaca543f806ed7f4aaffb5ab8",
+    # Owner approval 2026-11-15: these exact original review-note bytes.
     "docs/process/review-log/meguri-sync-plan-20261115.md":
         "3fefeb90235071d6e3d6ad364443276396cc01d9a9f4ccfa63bd6f80e99316b8",
+    # Delegated maintenance authority 2026-11-15: agent-applied grants for
+    # independently reviewed technical contracts, exact paths and full bytes.
+    "docs/plans/2026-11-15-1028-feat-meguri-sync-server-plan.md":
+        "358fca2e69541e15d464cb5810d9f7ed7bc8597220efec080d9579abb945fbbc",
+    "specs/sync/server-collection.md":
+        "36f7c4adee4eb035c0342e715f0d052a77bd57137d33222e5ee7e84a8f0b9bfa",
+    "specs/sync/server-lifecycle.md":
+        "abacc93c438e5230f8cd8a60a671e8da7efd521465d0d98d189e95444ecd20f1",
+    "specs/sync/server-media.md":
+        "32f9eff487e305d1d17bad276c3797de4e7664dae22662e4b72a61bd2c3166cb",
+    "specs/servers/meguri-sync-web.md":
+        "f2cf8343c983162fb28b60120250fbaed709434cbd9cc52e91a8b6f3fa89fe26",
+    "specs/conformance/meguri-sync-server.md":
+        "48052e8afb0a458947e4a7e72340b448a478bf39db758e44ae6773aca605c7b4",
+    "conformance/schema/meguri-sync-server.schema.json":
+        "cd905c134ed497f166566e18733465fa7e992156944957ee16c2e17ca586814a",
 }
 
 
@@ -964,6 +1098,10 @@ def main(argv):
     b.add_argument("--candidates", required=True)
     b.add_argument("--repo", required=True)
     b.add_argument("--out", required=True)
+    r = sub.add_parser("refresh-public")
+    r.add_argument("--repo", required=True)
+    r.add_argument("--head", required=True)
+    r.add_argument("--shared-main", action="store_true")
     s = sub.add_parser("scan")
     s.add_argument("--tokens", action="append", required=True)
     s.add_argument("--staged", action="store_true")
@@ -971,6 +1109,9 @@ def main(argv):
     s.add_argument("paths", nargs="*")
     args = parser.parse_args(argv)
     try:
+        if args.command == "refresh-public":
+            print(json.dumps(refresh_public(args.repo, args.head, args.shared_main), sort_keys=True))
+            return 0
         if args.command == "build":
             print(json.dumps(build(args.candidates, args.repo, args.out), sort_keys=True))
             return 0
@@ -985,7 +1126,8 @@ def main(argv):
         return 1 if found else 0
     except (OSError, ValueError, RuntimeError, KeyError) as e:
         # The message names a file or a git command, never a token.
-        print("private_scan.py: %s" % e, file=sys.stderr)
+        message = "refresh refused or interrupted; owner must inspect private backup before retrying" if args.command == "refresh-public" else str(e)
+        print("private_scan.py: %s" % message, file=sys.stderr)
         return 2
 
 
