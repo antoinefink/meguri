@@ -171,7 +171,7 @@ import WebKit
         window.makeKeyAndOrderFront(nil)
         activationTrace.record(.windowOrdered, state: .capture(window))
         activationTrace.record(.beforeActivate, state: .capture(window))
-        NSApp.activate()
+        NSApp.activate(ignoringOtherApps: true)
         activationTrace.record(.afterActivate, state: .capture(window))
         defer {
             pages.close(); window.contentViewController = nil; window.close()

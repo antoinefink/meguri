@@ -13,4 +13,17 @@ Independent review `cleanroom/20261115T141943Z-61762`: no P0–P2 findings. The 
 - The app remains inactive and the window is not key. No didBecomeActive notification arrives.
 - Failure unblocking and the cancelled waiter are recorded before the owned window is removed.
 
-This rules out a rejected policy change or hidden window in this run. It does not establish why activation was not granted, or prove a production review defect. The installed Apple SDK's NSApplication header explicitly does not guarantee that `activate()` will activate an app. No repeated unchanged test was started. The native lifecycle check remains failed; no render or acceptance claim, no Unit trailer.
+This rules out a rejected policy change or hidden window in this run. It does not establish why activation was not granted, or prove a production review defect. The installed Apple SDK's NSApplication header explicitly does not guarantee that `activate()` will activate an app. No repeated unchanged test was started. That diagnostic run remains failed. The subsequent repair is recorded below; no acceptance claim or Unit trailer.
+
+
+## Foreground request repair
+
+Author `cleanroom/20261115T144313Z-93065` changes only the test host's request to `NSApp.activate(ignoringOtherApps: true)`. The installed SDK still documents that NSApplication entry point; it differs from the deprecated NSRunningApplication option. The fixture requires actual foreground activation of its own window. `mac-hosted-test` disables host fallback, so execution stays in the dedicated VM. Production behavior is unchanged.
+
+Independent review `cleanroom/20261115T144421Z-94336`: no P0–P2 findings. The integrator read the exact one-line patch. The three-second deadlines, active predicate, assertions, six startup scenarios, observers, cancellation and task joins are unchanged.
+
+- `mac-hosted-test/20261115T144436Z-94815`: PASS, exactly one executed method, no skips or failures; all six startup scenarios complete. Debug Snapshot builds with zero errors and warnings.
+- `mac-hosted-test/20261115T144624Z-98395`: PASS, exactly one executed method, no skips or failures; accepted-answer preparation does not block Pause or Close.
+- `similarity/20261115T144629Z-99606`: PASS, one file, zero flags; filtered implementer view read. The final source privacy scan also passes.
+
+This establishes the native test-host correction and these two methods. It does not prove an Apple CloudKit peer exchange, physical-device behavior, visual approval or full-unit acceptance. The existing tests and this review record retain the lesson; no duplicate learning document is needed.
