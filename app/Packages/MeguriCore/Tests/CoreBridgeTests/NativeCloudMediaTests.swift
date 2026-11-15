@@ -711,7 +711,9 @@ extension EventTests {
 
     @Test func nativeMediaUploadsResumeAfterUnrelatedPersistedSentHandlerReturns() async throws {
         try await withNativePolicyFixture { fixture in
-            let (policy, _) = try await nativePolicy(fixture)
+            let (policy, setup) = try await nativePolicy(fixture)
+            defer { withExtendedLifetime((policy, setup)) {} }
+            try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: setup)
             let engine = try await fixture.engine()
             let guardBefore = try await fixture.core.currentGuard()
             let held = CloudCallbackGate(), afterSent = CloudCallbackGate()
@@ -936,7 +938,9 @@ extension EventTests {
 
     @Test(arguments: [false, true]) func nativeMediaBusyAdmissionCancellationAndLostWake(cancel: Bool) async throws {
         try await withNativePolicyFixture { fixture in
-            let (policy, _) = try await nativePolicy(fixture)
+            let (policy, setup) = try await nativePolicy(fixture)
+            defer { withExtendedLifetime((policy, setup)) {} }
+            try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: setup)
             let engine = try await fixture.engine()
             let guardBefore = try await fixture.core.currentGuard()
             let held = CloudCallbackGate(), declined = CloudCallbackGate()
@@ -1054,7 +1058,9 @@ extension EventTests {
 
     @Test func nativeMediaCancellationAfterSuccessfulAdmissionFinalizesExactCall() async throws {
         try await withNativePolicyFixture { fixture in
-            let (policy, _) = try await nativePolicy(fixture)
+            let (policy, setup) = try await nativePolicy(fixture)
+            defer { withExtendedLifetime((policy, setup)) {} }
+            try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: setup)
             let engine = try await fixture.engine()
             let guardBefore = try await fixture.core.currentGuard()
             guard case .commands(let commands) = try await policy.input(.settings(.init(
@@ -1134,7 +1140,9 @@ extension EventTests {
                 wrapped.withLock { $0 = engine }
                 return engine
             }
-            let (policy, _) = try await nativePolicy(fixture)
+            let (policy, setup) = try await nativePolicy(fixture)
+            defer { withExtendedLifetime((policy, setup)) {} }
+            try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: setup)
             let engine = try await fixture.engine()
             let pendingEngine = try #require(wrapped.withLock { $0 })
             let guardBefore = try await fixture.core.currentGuard()
@@ -1208,7 +1216,9 @@ extension EventTests {
 
     @Test func nativeMediaNonbusySendDeclineFailsWithoutSDKInvocation() async throws {
         try await withNativePolicyFixture { fixture in
-            let (policy, _) = try await nativePolicy(fixture)
+            let (policy, setup) = try await nativePolicy(fixture)
+            defer { withExtendedLifetime((policy, setup)) {} }
+            try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: setup)
             let engine = try await fixture.engine()
             guard case .commands(let commands) = try await policy.input(.settings(.init(
                 enabled: true, paused: false, automatic: true, media: true))) else {
@@ -1253,6 +1263,8 @@ extension EventTests {
             let queue = HeldNativeMediaQueue()
             let staging = try CloudMediaStaging(directory: fixture.directory.appendingPathComponent("media-errors"), available: { UInt64.max })
             let (policy, setup) = try await nativePolicy(fixture)
+            defer { withExtendedLifetime((policy, setup)) {} }
+            try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: setup)
             try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: setup)
             let runner = NativeCloudPolicyExecutor(policy: policy, adapter: fixture.adapter,
                 mediaService: try await fixture.core.media(), mediaTransport: NativeCloudMediaTransport(queue: queue, staging: staging))
@@ -1296,6 +1308,8 @@ extension EventTests {
                 let queue = HeldNativeMediaQueue()
                 let staging = try CloudMediaStaging(directory: fixture.directory.appendingPathComponent("media-errors"), available: { UInt64.max })
                 let (policy, setup) = try await nativePolicy(fixture)
+                defer { withExtendedLifetime((policy, setup)) {} }
+                try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: setup)
                 try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: setup)
                 let runner = NativeCloudPolicyExecutor(policy: policy, adapter: fixture.adapter,
                     mediaService: try await fixture.core.media(), mediaTransport: NativeCloudMediaTransport(queue: queue, staging: staging))
@@ -1360,7 +1374,9 @@ extension EventTests {
         let diagnostics = DebugCloudDiagnostics.Recorder()
         try await DebugCloudDiagnostics.$mediaRecorder.withValue(diagnostics) {
             try await withNativePolicyFixture { fixture in
-                let (policy, _) = try await nativePolicy(fixture)
+                let (policy, setup) = try await nativePolicy(fixture)
+                defer { withExtendedLifetime((policy, setup)) {} }
+                if download { try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: setup) }
                 let engine = try await fixture.engine()
                 let sdk = engine.instanceID
                 let calls = engine.acceptedNetworkCalls.value
@@ -1414,6 +1430,8 @@ extension EventTests {
             defer { queue.finish() }
             let staging = try CloudMediaStaging(directory: fixture.directory.appendingPathComponent("media-sdk-cancel"), available: { UInt64.max })
             let (policy, setup) = try await nativePolicy(fixture)
+            defer { withExtendedLifetime((policy, setup)) {} }
+            try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: setup)
             try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: setup)
             let executor = NativeCloudPolicyExecutor(policy: policy, adapter: fixture.adapter,
                 mediaService: try await fixture.core.media(), mediaTransport: NativeCloudMediaTransport(queue: queue, staging: staging))
@@ -1464,7 +1482,9 @@ extension EventTests {
     #if DEBUG
     @Test func nativeMediaEarlierSourceCancellationRemainsUnqualifiedAfterLaterPause() async throws {
         try await withNativePolicyFixture { fixture in
-            let (policy, _) = try await nativePolicy(fixture)
+            let (policy, setup) = try await nativePolicy(fixture)
+            defer { withExtendedLifetime((policy, setup)) {} }
+            try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: setup)
             let original = try await fixture.engine()
             let guardBefore = try await fixture.core.currentGuard()
             let calls = original.acceptedNetworkCalls.value
@@ -1602,6 +1622,8 @@ extension EventTests {
             let staging = try CloudMediaStaging(directory: fixture.directory.appendingPathComponent("unrequested-media"), available: { UInt64.max })
             let transport = ObservedMediaTransport(native: .init(queue: queue, staging: staging), cancelled: cancelled, failure: failure)
             let (policy, setup) = try await nativePolicy(fixture)
+            defer { withExtendedLifetime((policy, setup)) {} }
+            try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: setup)
             try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: setup)
             let executor = NativeCloudPolicyExecutor(policy: policy, adapter: fixture.adapter,
                 mediaService: try await fixture.core.media(), mediaTransport: transport)
@@ -1706,6 +1728,8 @@ extension EventTests {
             let staging = try CloudMediaStaging(directory: fixture.directory.appendingPathComponent("pause-then-stop-media"), available: { UInt64.max })
             let transport = Transport(original: .init(native: .init(queue: queue, staging: staging), cancelled: cancelled), observations: observations)
             let (policy, setup) = try await nativePolicy(fixture)
+            defer { withExtendedLifetime((policy, setup)) {} }
+            try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: setup)
             try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: setup)
             let executor = NativeCloudPolicyExecutor(policy: policy, adapter: fixture.adapter,
                 mediaService: try await fixture.core.media(), mediaTransport: transport)
@@ -1844,6 +1868,8 @@ extension EventTests {
             let staging = try CloudMediaStaging(directory: fixture.directory.appendingPathComponent("media-runs"), available: { UInt64.max })
             let transport = ObservedMediaTransport(native: .init(queue: queue, staging: staging), cancelled: cancelled)
             let (policy, setup) = try await nativePolicy(fixture)
+            defer { withExtendedLifetime((policy, setup)) {} }
+            try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: setup)
             try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: setup)
             let executor = NativeCloudPolicyExecutor(policy: policy, adapter: fixture.adapter,
                 mediaService: try await fixture.core.media(), mediaTransport: transport)

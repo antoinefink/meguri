@@ -52,6 +52,8 @@ extension EventTests {
     func policyRequiredCompletionActiveSendFreezesBeforeCoreSuspend() async throws {
         try await withNativePolicyFixture { fixture in
             let (policy, executor) = try await nativePolicy(fixture)
+            defer { withExtendedLifetime((policy, executor)) {} }
+            try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: executor)
             try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: executor)
             guard case .commands(let commands) = try await policy.input(.flushTimerFired) else {
                 throw BridgeError.internal("Expected send commands")
@@ -797,7 +799,9 @@ extension EventTests {
 
     @Test func policyFetchAndSendListenerFailureRetainsCallIdentityAndCompletedNoCall() async throws {
         try await withNativePolicyFixture { fixture in
-            let (policy, _) = try await nativePolicy(fixture)
+            let (policy, setup) = try await nativePolicy(fixture)
+            defer { withExtendedLifetime((policy, setup)) {} }
+            try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: setup)
             guard case .commands(let commands) = try await policy.input(.syncNowRequested(.command)) else {
                 throw BridgeError.internal("Expected exchange commands")
             }
@@ -995,7 +999,9 @@ extension EventTests {
 
     @Test func policyMediaContinuationListenerFailureRetainsActualTrueAfterClose() async throws {
         try await withNativePolicyFixture { fixture in
-            let (policy, _) = try await nativePolicy(fixture)
+            let (policy, setup) = try await nativePolicy(fixture)
+            defer { withExtendedLifetime((policy, setup)) {} }
+            try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: setup)
             guard case .commands(let commands) = try await policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: true))) else {
                 throw BridgeError.internal("Expected media commands")
             }
