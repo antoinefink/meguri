@@ -1850,7 +1850,7 @@ PY
   # Runs that read the branch's oracle/ files, including route transport.
   jq -e '[.runs[] | select(.id == "conformance-route-transport") | {placement, needs, oracle_files}]
     == [{placement: ["host", "docker:oracle"], needs: ["oracle"], oracle_files: true}]' "$out" >/dev/null
-  [ "$(jq -r '[.runs[] | select(.oracle_files) | .id] | join(" ")' "$out")" = "goldens-check harvest-report sync-server-reference-selftest conformance-route-transport sync-server-reference-smoke sync-server-reference-edges harvest-coverage" ]
+  [ "$(jq -r '[.runs[] | select(.oracle_files) | .id] | join(" ")' "$out")" = "goldens-check harvest-report sync-server-reference-selftest conformance-route-transport sync-server-interop sync-server-reference-smoke sync-server-reference-edges harvest-coverage" ]
   # A pin bump in a sparse worktree whose main checkout has the old oracle/:
   # gate --local runs the rest and leaves those two to the merge.
   printf 'conformance/oracle.json\0conformance/catalog/harvest.csv\0' >"$BATS_TEST_TMPDIR/changed"
@@ -1864,6 +1864,7 @@ PY
   python3 -B -I "$REPO_ROOT/tools/gate/gate.py" plan --config "$out" --changed "$BATS_TEST_TMPDIR/changed" --mode full \
     --oracle-tree same --main-capable yes --var base=b --var tip=t --out "$BATS_TEST_TMPDIR/plan.json"
   [ "$(jq -r '[.runs[] | select(.action == "run" and (.id | test("^sync-server-(test|lint|deps)$"))) | .id] | join(" ")' "$BATS_TEST_TMPDIR/plan.json")" = "sync-server-test sync-server-lint" ]
+  [ "$(jq -r '[.runs[] | select(.action == "run" and .tier == "T1" and (.id | test("^sync-server-(candidate-build|interop)$"))) | .id] | join(" ")' "$BATS_TEST_TMPDIR/plan.json")" = "sync-server-candidate-build sync-server-interop" ]
   printf 'server/Cargo.lock\0' >"$BATS_TEST_TMPDIR/changed"
   python3 -B -I "$REPO_ROOT/tools/gate/gate.py" plan --config "$out" --changed "$BATS_TEST_TMPDIR/changed" --mode full \
     --oracle-tree same --main-capable yes --var base=b --var tip=t --out "$BATS_TEST_TMPDIR/plan.json"
