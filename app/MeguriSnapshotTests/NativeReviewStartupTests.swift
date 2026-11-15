@@ -128,25 +128,51 @@ import WebKit
             styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         let previousPolicy = NSApp.activationPolicy()
+        let activationTrace = ActivationTrace()
         let active = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingOldest(1))
         let occlusion = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingOldest(1))
         let activeObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification, object: NSApp, queue: .main
-        ) { _ in active.continuation.yield(()) }
+        ) { _ in
+            activationTrace.record(.didBecomeActive)
+            active.continuation.yield(())
+        }
         let occlusionObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main
-        ) { _ in occlusion.continuation.yield(()) }
+        ) { _ in
+            activationTrace.record(.windowOcclusionChanged)
+            occlusion.continuation.yield(())
+        }
+        let activationNotifications: [(Notification.Name, ActivationTrace.Event)] = [
+            (NSApplication.didResignActiveNotification, .didResignActive),
+            (NSApplication.willHideNotification, .willHide),
+            (NSApplication.didHideNotification, .didHide),
+            (NSApplication.willUnhideNotification, .willUnhide),
+            (NSApplication.didUnhideNotification, .didUnhide)
+        ]
+        let activationObservers = activationNotifications.map { name, event in
+            NotificationCenter.default.addObserver(forName: name, object: NSApp, queue: .main) { _ in
+                // No AppKit reads or actor assumptions in notification callbacks.
+                activationTrace.record(event)
+            }
+        }
         defer {
             NotificationCenter.default.removeObserver(activeObserver)
             NotificationCenter.default.removeObserver(occlusionObserver)
+            for observer in activationObservers { NotificationCenter.default.removeObserver(observer) }
             active.continuation.finish(); occlusion.continuation.finish()
         }
         window.contentViewController = hosting
         window.setContentSize(NSSize(width: 640, height: 480))
         let host = hosting.view
-        NSApp.setActivationPolicy(.regular)
+        activationTrace.record(.beforePolicyRequest, state: .capture(window))
+        let policyAccepted = NSApp.setActivationPolicy(.regular)
+        activationTrace.record(.policyRequestReturned, state: .capture(window), policyAccepted: policyAccepted)
         window.makeKeyAndOrderFront(nil)
+        activationTrace.record(.windowOrdered, state: .capture(window))
+        activationTrace.record(.beforeActivate, state: .capture(window))
         NSApp.activate()
+        activationTrace.record(.afterActivate, state: .capture(window))
         defer {
             pages.close(); window.contentViewController = nil; window.close()
             NSApp.setActivationPolicy(previousPolicy)
@@ -154,11 +180,35 @@ import WebKit
         func bounded<T: Sendable>(_ stage: String,
             _ body: @escaping @MainActor @Sendable () async throws -> T) async throws -> T {
             try await Self.deadline(stage, unblocking: {
+                if stage == "native host activation" {
+                    activationTrace.record(.beforeFailureUnblocking, state: .capture(window))
+                }
                 pages.close(); gate.finish()
             }, body)
         }
-        try await bounded("native host activation") {
-            if !NSApp.isActive { for await _ in active.stream { if NSApp.isActive { break } } }
+        do {
+            try await bounded("native host activation") {
+                activationTrace.record(.waiterEntry, state: .capture(window))
+                if !NSApp.isActive {
+                    for await _ in active.stream {
+                        if NSApp.isActive {
+                            activationTrace.record(.predicateTrue, state: .capture(window))
+                            break
+                        }
+                    }
+                } else {
+                    activationTrace.record(.predicateTrue, state: .capture(window))
+                }
+                activationTrace.record(Task.isCancelled ? .waiterCancelled : .waiterCompleted,
+                                       state: .capture(window))
+            }
+            activationTrace.record(.deadlineSucceeded, state: .capture(window))
+        } catch {
+            let outcome: ActivationTrace.Outcome = error is CancellationError ? .cancelled
+                : error is DeadlineFailure ? .expired : .failed
+            // deadline has joined its work; the window and observers are still owned.
+            print(activationTrace.failureRecord(outcome, afterJoin: .capture(window)))
+            throw error
         }
         try await bounded("native host visibility") {
             if !window.occlusionState.contains(.visible) {
@@ -308,6 +358,85 @@ import WebKit
             _ = await closing?.value
             _ = await model.end()
             throw error
+        }
+    }
+
+    // Test-local fixed facts only. The lock covers all mutable storage, including
+    // callback events; AppKit snapshots are captured separately on the main actor.
+    private nonisolated final class ActivationTrace: @unchecked Sendable {
+        enum Event: String, Sendable {
+            case beforePolicyRequest, policyRequestReturned, windowOrdered, beforeActivate, afterActivate
+            case didBecomeActive, didResignActive, willHide, didHide, willUnhide, didUnhide
+            case windowOcclusionChanged, waiterEntry, predicateTrue, waiterCompleted, waiterCancelled
+            case beforeFailureUnblocking, deadlineSucceeded
+        }
+        enum Outcome: String, Sendable { case expired, cancelled, failed }
+        enum Policy: String, Sendable { case regular, accessory, prohibited, unknown }
+        struct State: Sendable {
+            let policy: Policy
+            let active, hidden, visible, occlusionVisible, key, miniaturized, hasScreen: Bool
+
+            @MainActor static func capture(_ window: NSWindow) -> State {
+                let policy: Policy
+                switch NSApp.activationPolicy() {
+                case .regular: policy = .regular
+                case .accessory: policy = .accessory
+                case .prohibited: policy = .prohibited
+                @unknown default: policy = .unknown
+                }
+                return State(policy: policy, active: NSApp.isActive, hidden: NSApp.isHidden,
+                    visible: window.isVisible, occlusionVisible: window.occlusionState.contains(.visible),
+                    key: window.isKeyWindow, miniaturized: window.isMiniaturized, hasScreen: window.screen != nil)
+            }
+
+            var json: String {
+                "{\"policy\":\"\(policy.rawValue)\",\"active\":\(active),\"hidden\":\(hidden),"
+                    + "\"visible\":\(visible),\"occlusionVisible\":\(occlusionVisible),\"key\":\(key),"
+                    + "\"miniaturized\":\(miniaturized),\"hasScreen\":\(hasScreen)}"
+            }
+        }
+
+        private let lock = NSLock()
+        private let start = ContinuousClock.now
+        private var events: [String] = []
+        private var eventBytes = 0
+        private var eventsTruncated = false
+        private var beforeUnblocking: String?
+
+        private var elapsedMs: Double {
+            let elapsed = start.duration(to: .now).components
+            return Double(elapsed.seconds) * 1_000 + Double(elapsed.attoseconds) / 1_000_000_000_000_000
+        }
+
+        func record(_ event: Event, state: State? = nil, policyAccepted: Bool? = nil) {
+            lock.lock(); defer { lock.unlock() }
+            var entry = "{\"event\":\"\(event.rawValue)\",\"elapsedMs\":\(elapsedMs)"
+            if let state { entry += ",\"state\":\(state.json)" }
+            if let policyAccepted { entry += ",\"policyAccepted\":\(policyAccepted)" }
+            entry += "}"
+            // Reserve the pre-cleanup failure fact even if earlier notifications flood the buffer.
+            if event == .beforeFailureUnblocking { beforeUnblocking = entry }
+            guard events.count < 48, eventBytes + entry.utf8.count + 1 <= 8_192 else {
+                eventsTruncated = true
+                return
+            }
+            events.append(entry)
+            eventBytes += entry.utf8.count + 1
+        }
+
+        func failureRecord(_ outcome: Outcome, afterJoin: State) -> String {
+            lock.lock(); defer { lock.unlock() }
+            var prefix = "{\"trace\":\"nativeReviewActivationV1\",\"outcome\":\"\(outcome.rawValue)\","
+                + "\"elapsedMs\":\(elapsedMs),\"beforeUnblockingCaptured\":\(beforeUnblocking != nil),"
+            if let beforeUnblocking { prefix += "\"beforeUnblocking\":\(beforeUnblocking)," }
+            prefix += "\"afterJoin\":\(afterJoin.json),"
+            let record = prefix + "\"eventsTruncated\":\(eventsTruncated),\"outputTruncated\":false,"
+                + "\"events\":[\(events.joined(separator: ","))]}"
+            // Bound output bytes while keeping JSON valid.
+            guard record.utf8.count <= 12_288 else {
+                return prefix + "\"eventsTruncated\":true,\"outputTruncated\":true,\"events\":[]}"
+            }
+            return record
         }
     }
     // Like delayedObserverKeepsEmissionIdentityAndArrivalPreservesDOM,
