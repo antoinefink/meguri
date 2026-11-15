@@ -127,8 +127,14 @@ def validate(output, expected, peer, selection, summary, invocation):
     for case in cases:
         contract = contracts[case["id"]]
         require(case["id"].split(":")[0] == case["family"], "case family differs from ID")
-        for key in ("family", "classification", "spec_ids", "variants", "actions", "expected"):
+        for key in ("family", "classification", "spec_ids", "variants", "expected"):
             require(same(case[key], contract[key]), "case differs from fixed selected contract")
+        # Only the recorder's optional fixture binding is dynamic.
+        actions = case["actions"]
+        require(isinstance(actions, list) and all(isinstance(action, dict) for action in actions)
+                and same([{key: value for key, value in action.items() if key != "fixture_sha256"}
+                          for action in actions], contract["actions"]),
+                "case differs from fixed selected contract")
         # Intermediate output cannot assert an independently reviewed seal.
         require(case["status"] == "matched", "candidate output has no independent seal")
         lane = case["lane"]

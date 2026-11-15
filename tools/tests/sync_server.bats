@@ -531,6 +531,10 @@ for role in ('synthetic_input', 'neutral_observation', 'mg_receipt'):
     digest = hashlib.sha256(data).hexdigest()
     (base / 'out/artifacts' / digest).write_bytes(data)
     artifacts.append(dict(role=role, sha256=digest, bytes=len(data)))
+data = b'finite synthetic output fixture: action'
+digest = hashlib.sha256(data).hexdigest()
+(base / 'out/artifacts' / digest).write_bytes(data)
+artifacts.append(dict(role='synthetic_input', sha256=digest, bytes=len(data)))
 cases = []
 for contract in selection['cases']:
     case = copy.deepcopy(contract)
@@ -538,6 +542,8 @@ for contract in selection['cases']:
     case.update(status='matched', observed=copy.deepcopy(case['expected']),
                 lane=dict(kind='candidate', server=server, client=dict(kind='desktop', version='26.09.4', build='c06370ff', runtime_sha256='2'*64)),
                 fixture_sha256=artifacts[0]['sha256'], artifacts=artifacts)
+    for action in case['actions']:
+        action['fixture_sha256'] = artifacts[-1]['sha256']
     cases.append(case)
 evidence = {key: invocation[key] for key in ('source_commit', 'batch_base', 'source_sha256', 'lock_sha256', 'mg_job', 'arguments')}
 evidence.update(format='meguri-sync-server-v1', document_kind='evidence', baseline_release='26.09.3',
@@ -681,6 +687,10 @@ PY
   candidate_output_check
   [ "$status" -eq 0 ]
   jq -e '.errors==[] and (.invocation.selection|length)==11 and .invocation.executable_sha256==("1"*64) and .summary.total==11 and .summary.selection_credit and (.summary.broad_catalog_credit|not)' <<<"$output"
+  candidate_mutate "[action.pop('fixture_sha256') for case in evidence['cases'] for action in case['actions']]"
+  candidate_output_check
+  [ "$status" -eq 0 ]
+  jq -e '.errors==[]' <<<"$output"
   local field
   for field in source_commit batch_base source_sha256 lock_sha256 executable_sha256 mg_job arguments run_id author_session; do
     candidate_output_fixture
@@ -754,6 +764,16 @@ PY
     "evidence['cases'][0]['lane']['client']['kind']='service'" \
     "evidence['cases'][0]['variants']=['unselected']" \
     "evidence['cases'][0]['family']='P-F01'" \
+    "action=evidence['cases'][0]['actions'][0]; key=next(key for key in action if key!='fixture_sha256'); action[key]={'wrong_static_value':True}" \
+    "action=evidence['cases'][0]['actions'][0]; del action[next(key for key in action if key!='fixture_sha256')]" \
+    "evidence['cases'][0]['actions'].append(evidence['cases'][0]['actions'][0])" \
+    "evidence['cases'][0]['actions'][0]['unknown']=True" \
+    "evidence['cases'][0]['actions'][0]['fixture_sha256']='not-a-digest'" \
+    "evidence['cases'][0]['actions'][0]['fixture_sha256']='0'*64" \
+    "evidence['cases'][0]['actions'][0]['fixture_sha256']=evidence['cases'][0]['artifacts'][1]['sha256']" \
+    "evidence['cases'][0]['artifacts'].pop()" \
+    "(base/'out/artifacts'/evidence['cases'][0]['actions'][0]['fixture_sha256']).unlink()" \
+    "(base/'out/artifacts'/evidence['cases'][0]['actions'][0]['fixture_sha256']).write_bytes(b'changed action fixture')" \
     "evidence['cases'][0]['observed'][0]['value']='mismatch'" \
     "evidence['cases'][0]['observed'].append(evidence['cases'][0]['observed'][0])" \
     "evidence['cases'][0]['artifacts'][0]['bytes']=0" \
