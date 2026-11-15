@@ -136,7 +136,7 @@ runs:
     tier: T0
     placement: docker:dev
     class: unit
-    triggers: [core/, conformance/, tools/mg.d/core.sh, tools/mg.d/conformance.sh, tools/mg.d/oracle.sh]
+    triggers: [core/, conformance/, tools/mg.d/core.sh, tools/mg.d/conformance.sh, tools/mg.d/oracle.sh, "!conformance/schema/meguri-sync-server.schema.json", "!conformance/catalog/meguri-sync-server.json", "!conformance/fixtures/meguri-sync-server/", "!conformance/recordings/scenarios/meguri-sync-server/"]
     budget_s: 2400
   - id: sync-server-test
     job: sync-server-test
@@ -174,7 +174,7 @@ runs:
     tier: T0
     placement: [host, docker:dev]
     class: conformance
-    triggers: [core/, conformance/, tools/mg.d/conformance.sh, tools/mg.d/oracle.sh]
+    triggers: [core/, conformance/, tools/mg.d/conformance.sh, tools/mg.d/oracle.sh, "!conformance/schema/meguri-sync-server.schema.json", "!conformance/catalog/meguri-sync-server.json", "!conformance/fixtures/meguri-sync-server/", "!conformance/recordings/scenarios/meguri-sync-server/"]
     budget_s: 1200
   - id: goldens-check
     job: goldens-check
@@ -182,7 +182,7 @@ runs:
     tier: T0
     placement: [host, docker:dev]
     class: conformance
-    triggers: [conformance/, core/crates/meguri-testkit/, core/tools/meguri-cli/, tools/conformance/, tools/mg.d/conformance.sh]
+    triggers: [conformance/, core/crates/meguri-testkit/, core/tools/meguri-cli/, tools/conformance/, tools/mg.d/conformance.sh, "!conformance/schema/meguri-sync-server.schema.json", "!conformance/catalog/meguri-sync-server.json", "!conformance/fixtures/meguri-sync-server/", "!conformance/recordings/scenarios/meguri-sync-server/"]
     oracle_files: true
     budget_s: 900
   - id: harvest-report
@@ -190,7 +190,7 @@ runs:
     tier: T0
     placement: [host, docker:dev]
     class: conformance
-    triggers: [conformance/catalog/, conformance/scenarios/, core/crates/meguri-testkit/src/catalog.rs, tools/mg.d/conformance.sh]
+    triggers: [conformance/catalog/, conformance/scenarios/, core/crates/meguri-testkit/src/catalog.rs, tools/mg.d/conformance.sh, "!conformance/catalog/meguri-sync-server.json"]
     oracle_files: true
     budget_s: 900
 
@@ -540,7 +540,7 @@ runs:
     oracle: true
     local: false
     budget_s: 1200
-    triggers: [core/, core/crates/meguri-text/, core/crates/meguri-model/, core/crates/meguri-storage/, core/crates/meguri-engine/, core/crates/meguri-sched/, core/crates/meguri-template/, core/crates/meguri-search/, core/crates/meguri-sync/, core/crates/meguri-package/, core/crates/meguri-host/, core/crates/meguri-testkit/, core/tools/meguri-cli/, core/Cargo.lock, core/Cargo.toml, core/pins.toml, conformance/scenarios/, conformance/goldens/, conformance/deviations.yaml, conformance/oracle.json, conformance/fixtures/, tools/mg.d/conformance.sh, tools/mg.d/oracle.sh]
+    triggers: [core/, core/crates/meguri-text/, core/crates/meguri-model/, core/crates/meguri-storage/, core/crates/meguri-engine/, core/crates/meguri-sched/, core/crates/meguri-template/, core/crates/meguri-search/, core/crates/meguri-sync/, core/crates/meguri-package/, core/crates/meguri-host/, core/crates/meguri-testkit/, core/tools/meguri-cli/, core/Cargo.lock, core/Cargo.toml, core/pins.toml, conformance/scenarios/, conformance/goldens/, conformance/deviations.yaml, conformance/oracle.json, conformance/fixtures/, tools/mg.d/conformance.sh, tools/mg.d/oracle.sh, "!conformance/fixtures/meguri-sync-server/"]
   - id: oracle-test
     job: oracle
     args: [test]
