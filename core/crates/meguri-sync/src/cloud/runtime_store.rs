@@ -519,6 +519,7 @@ impl TrackingStore {
     /// Install one coherent synthetic historical file image, after validating
     /// the original fixture. Only its file evidence may differ; ACKs and work
     /// remain byte-identical. Not a recovery or malformed-store repair API.
+    /// Darwin device-only drift requires the unchanged durable proof and birthtime.
     #[cfg(feature = "test-hooks")]
     pub fn prepare_runtime_state_for_testing(
         &mut self,
@@ -531,9 +532,13 @@ impl TrackingStore {
         let new_file = value.file.ok_or(Error::InvalidData)?;
         let old_durable = previous.durable_file.ok_or(Error::InvalidData)?;
         let new_durable = value.durable_file.ok_or(Error::InvalidData)?;
-        if (new_file.device, new_file.inode) != (old_file.device, old_file.inode) || new_durable.identity != old_durable.identity
+        if new_file.inode != old_file.inode || new_durable.identity != old_durable.identity
             || new_durable.version != old_durable.version
             || (new_durable.created_seconds, new_durable.created_nanos) != (new_file.created_seconds, new_file.created_nanos)
+        { return Err(Error::InvalidData); }
+        if new_file.device != old_file.device
+            && (!cfg!(target_vendor = "apple") || new_durable != old_durable
+                || (new_file.created_seconds, new_file.created_nanos) != (old_file.created_seconds, old_file.created_nanos))
         { return Err(Error::InvalidData); }
         let mut normalized = value.clone();
         normalized.file = previous.file;
@@ -548,6 +553,7 @@ impl TrackingStore {
         let rows = self.row_classifications(binding, false)?;
         let covered = self.connection.query_row("SELECT EXISTS(SELECT 1 FROM cloud_row_classification_coverage WHERE binding=?1)", [binding.0.as_slice()], |r| r.get::<_, bool>(0))?;
         let transaction = self.connection.transaction()?;
+        super::row_classification::validate(&transaction, &self.scope)?;
         for mut row in rows.into_iter().filter(|row| row.open == value.open_counter) {
             row.file = value.file.ok_or(Error::InvalidData)?;
             transaction.execute("UPDATE cloud_row_classifications SET content=?1 WHERE binding=?2 AND kind=?3 AND key=?4", params![encode(&row)?, binding.0.as_slice(), row.kind as i64, row.key])?;

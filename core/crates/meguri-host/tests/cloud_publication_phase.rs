@@ -2378,24 +2378,93 @@ fn durable_identity_device_only_reopen_preserves_pending_and_ack_then_reconciles
         container: cloud::ContainerId::new(scope().container).unwrap(),
         environment: cloud::Environment::Development,
     };
-    cloud::runtime::with_tracking_access(|| {
-        let cloud::OpenOutcome::Opened(mut store) = cloud::TrackingStore::open(&dir, scope).unwrap() else {
+    let historical = cloud::runtime::with_tracking_access(|| {
+        let cloud::OpenOutcome::Opened(mut store) = cloud::TrackingStore::open(&dir, scope.clone()).unwrap() else {
             panic!("tracking store")
         };
-        let coverage = complete.coverage.as_ref().unwrap();
-        let mut file = complete.file.unwrap();
+        let previous = store.stored_runtime_state(binding.id).unwrap().unwrap();
+        assert_eq!(previous.file, complete.file);
+        assert_eq!(previous.durable_file, complete.durable_file);
+        let mut historical = previous.clone();
+        let mut file = historical.file.unwrap();
         file.device ^= 1;
-        let mut cursor = coverage.cursor.clone();
-        cursor.native_file = file;
+        historical.file = Some(file);
+        historical.note_scan.as_mut().unwrap().native_file = file;
+        historical.coverage.as_mut().unwrap().cursor.native_file = file;
+
+        // Read every column the fixture transaction can touch, including the
+        // indexed classification facts and the duplicate coverage ledger.
+        let fixture_rows = || {
+            use meguri_storage::rusqlite::{Connection, OpenFlags, types::Value};
+            let read = Connection::open_with_flags(dir.join(cloud::TRACKING_FILE), OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+            ["cloud_runtime_bindings", "cloud_row_classifications", "cloud_row_classification_coverage"]
+                .map(|table| {
+                    let mut query = read.prepare(&format!("SELECT * FROM {table} WHERE binding=?1 ORDER BY rowid")).unwrap();
+                    let width = query.column_count();
+                    query.query_map([binding.id.0.as_slice()], |row| {
+                        (0..width).map(|i| row.get::<_, Value>(i)).collect::<Result<Vec<_>, _>>()
+                    }).unwrap().collect::<Result<Vec<_>, _>>().unwrap()
+                })
+        };
+        let unchanged = fixture_rows();
+        for refusal in ["missing proof", "unknown proof", "UUID", "inode", "creation seconds", "creation nanoseconds", "state", "counts", "coverage file"] {
+            let mut rejected = historical.clone();
+            match refusal {
+                "missing proof" => rejected.durable_file = None,
+                "unknown proof" => rejected.durable_file.as_mut().unwrap().version += 1,
+                "UUID" => {
+                    let meguri_storage::persistent_identity::PersistentIdentity::Darwin { volume_uuid, .. } =
+                        &mut rejected.durable_file.as_mut().unwrap().identity else { panic!("Darwin proof") };
+                    // Remain well-formed so refusal proves the UUID is immutable.
+                    *volume_uuid = if *volume_uuid == [1; 16] { [2; 16] } else { [1; 16] };
+                }
+                "inode" | "creation seconds" | "creation nanoseconds" => {
+                    let mut changed = file;
+                    let durable = rejected.durable_file.as_mut().unwrap();
+                    match refusal {
+                        "inode" => {
+                            changed.inode = changed.inode.checked_add(1).unwrap();
+                            let meguri_storage::persistent_identity::PersistentIdentity::Darwin { inode, .. } =
+                                &mut durable.identity else { panic!("Darwin proof") };
+                            *inode = changed.inode;
+                        }
+                        "creation seconds" => {
+                            changed.created_seconds = changed.created_seconds.checked_sub(1).unwrap();
+                            durable.created_seconds = changed.created_seconds;
+                        }
+                        _ => {
+                            changed.created_nanos = (changed.created_nanos + 1) % 1_000_000_000;
+                            durable.created_nanos = changed.created_nanos;
+                        }
+                    }
+                    rejected.file = Some(changed);
+                    rejected.note_scan.as_mut().unwrap().native_file = changed;
+                    rejected.coverage.as_mut().unwrap().cursor.native_file = changed;
+                }
+                "state" => rejected.change_counter += 1,
+                "counts" => rejected.coverage.as_mut().unwrap().counts[0].1 += 1,
+                // This reaches validation after the classification writes;
+                // rollback must retain the original runtime and both ledgers.
+                "coverage file" => rejected.coverage.as_mut().unwrap().cursor.native_file = previous.file.unwrap(),
+                _ => unreachable!(),
+            }
+            assert!(matches!(store.prepare_runtime_state_for_testing(binding.id, &rejected), Err(cloud::Error::InvalidData)), "{refusal}");
+            assert_eq!(fixture_rows(), unchanged, "{refusal} changed the fixture");
+        }
         store
-            .prepare_drained_baseline_for_testing(
-                binding.id,
-                file,
-                cursor,
-                coverage.media_feed_id,
-                coverage.media_cursor,
-            )
+            .prepare_runtime_state_for_testing(binding.id, &historical)
             .unwrap();
+        assert_eq!(store.stored_runtime_state(binding.id).unwrap().unwrap(), historical);
+        historical
+    });
+    // Exercise the same ordinary WAL-aware probe as host reopen before any
+    // binding selection. A damaged fixture must fail here, not look isolated.
+    cloud::runtime::with_tracking_access(|| {
+        let cloud::OpenOutcome::Opened(store) = cloud::TrackingStore::open(&dir, scope).unwrap() else {
+            panic!("historical device fixture must pass ordinary open")
+        };
+        assert_eq!(store.stored_runtime_state(binding.id).unwrap().unwrap(), historical);
+        assert!(store.entity_facts(binding.id, &pending.name).unwrap().as_ref() == Some(&pending));
     });
     let host = open_host(&dir, keys());
     let runtime = host.cloud_runtime().unwrap();
