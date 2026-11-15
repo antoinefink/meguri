@@ -1835,6 +1835,7 @@ extension EventTests {
     func policySendDuringReplacementCreationUsesNoUnreadyEngine(changeAccount: Bool) async throws {
         try await withNativePolicyFixture { fixture in
             let (policy, executor) = try await nativePolicy(fixture)
+            try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: executor)
             try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: executor)
             let old = try await fixture.engine()
             await old.appendFetchScripts([
@@ -1886,6 +1887,7 @@ extension EventTests {
     @Test func nativePolicyHeldConfigureRunsAfterQualifiedExchangeEnd() async throws {
         try await withNativePolicyFixture { fixture in
             let (policy, executor) = try await nativePolicy(fixture)
+            try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: executor)
             let engine = try await fixture.engine()
             let count = await fixture.factory.engines().count
             await engine.appendFetchScripts([
@@ -1936,6 +1938,7 @@ extension EventTests {
     @Test func nativePolicyReadinessResumesOnCreationEventWithOneCapture() async throws {
         try await withNativePolicyFixture { fixture in
             let (policy, lifecycle) = try await nativePolicy(fixture)
+            try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: lifecycle)
             let factoryGate = CloudCallbackGate(), deadline = CloudCallbackGate()
             await fixture.factory.pauseNextCreation(factoryGate)
             let mode = try await policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false)))
@@ -1980,7 +1983,8 @@ extension EventTests {
     @Test(arguments: [false, true], [CloudFenceTransition.accountSwitch, .token, .generation])
     func nativeQueuedOperationRevalidatesBeforeSDKInvocation(send: Bool, transition: CloudFenceTransition) async throws {
         try await withNativePolicyFixture { fixture in
-            _ = try await nativePolicy(fixture)
+            let (policy, executor) = try await nativePolicy(fixture)
+            if send { try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: executor) }
             let engine = try await fixture.engine()
             let gate = CloudCallbackGate()
             let calls = engine.acceptedNetworkCalls.value
@@ -2010,6 +2014,7 @@ extension EventTests {
     @Test func nativeBackgroundFlushSendsOriginalCollectionWithoutAnExchangeOrFetch() async throws {
         try await withNativePolicyFixture { f in
             let (policy, setup) = try await nativePolicy(f)
+            try await prepareCloudKitPendingFixture(f, policy: policy, executor: setup)
             try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: setup)
             let engine = try await f.engine()
             let before = await engine.recordedTrace()
@@ -2035,6 +2040,7 @@ extension EventTests {
     @Test func nativeExpiryCancelsOriginalHeldFlushWithoutWaitingForTheSend() async throws {
         try await withNativePolicyFixture { f in
             let (policy, setup) = try await nativePolicy(f)
+            try await prepareCloudKitPendingFixture(f, policy: policy, executor: setup)
             try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: setup)
             let engine = try await f.engine()
             let held = CloudCallbackGate(), deadline = CloudCallbackGate()
@@ -2258,6 +2264,7 @@ extension EventTests {
     func policyRefreshReleasesActualHeldAnswerWhenStartProjectionWasNeverObserved(automatic: Bool) async throws {
         try await withNativePolicyFixture { f in
             let (policy, executor) = try await nativePolicy(f)
+            try await prepareCloudKitPendingFixture(f, policy: policy, executor: executor)
             if automatic {
                 try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: executor)
             }
@@ -2315,7 +2322,8 @@ extension EventTests {
     @Test(arguments: ["originalSDK", "stale"])
     func nativeMediaPreNetworkCancellationRequiresSuccessfulOriginalPreparation(mode: String) async throws {
         try await withNativePolicyFixture { f in
-            let (policy, _) = try await nativePolicy(f)
+            let (policy, setup) = try await nativePolicy(f)
+            try await prepareCloudKitPendingFixture(f, policy: policy, executor: setup)
             let issued = try await policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: true)))
             let command = try #require(try policyCommands(issued).first { if case .resumeMedia = $0.action { true } else { false } })
             let queue = NativeOwnCapturingQueue()
@@ -2345,7 +2353,8 @@ extension EventTests {
 
     @Test func nativeMediaOffAndExpiryControlsStartDuringAHeldExchangeFetch() async throws {
         try await withNativePolicyFixture { f in
-            let (policy, _) = try await nativePolicy(f)
+            let (policy, setup) = try await nativePolicy(f)
+            try await prepareCloudKitPendingFixture(f, policy: policy, executor: setup)
             _ = try await policy.input(.settings(.init(enabled: true, paused: false, automatic: false, media: true)))
             let media = try await f.core.media()
             let transport = try NativeCloudMediaTransport(queue: NativeOwnCapturingQueue(),
@@ -2389,7 +2398,10 @@ extension EventTests {
     @Test(arguments: [false, true], ["cancel", "token", "retire", "close", "startedFailure"])
     func nativeStartedPreparationRetainsOutputsAndRevalidatesBeforeSDK(send: Bool, transition: String) async throws {
         try await withNativePolicyFixture { fixture in
-            let (policy, _) = try await nativePolicy(fixture)
+            let (policy, executor) = try await nativePolicy(fixture)
+            if transition == "cancel" || transition == "startedFailure" {
+                try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: executor)
+            }
             let issued = try await policy.input(.syncNowRequested(.command))
             let command = try #require(try policyCommands(issued).first { if case .runExchange = $0.action { true } else { false } })
             let execution = try #require(try await policy.prepareExecution(command))

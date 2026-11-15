@@ -76,12 +76,15 @@ private final class DeletionTransport: CloudOwnTransport, Sendable {
 extension EventTests {
     @Test func deletionWithZeroRealDueRowsDoesNoNetworkWork() async throws {
         try await withNativePolicyFixture { fixture in
-            let (policy, _) = try await nativePolicy(fixture)
+            let (policy, setup) = try await nativePolicy(fixture)
+            try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: setup)
             let engine = try await fixture.engine()
             await engine.appendFetchScripts([
                 .manual(fetchedZones: ["meguri-root", fixture.zone], records: [fixture.root], group: nil),
             ])
             try await fixture.adapter.requestFetch(zones: ["meguri-root", fixture.zone])
+            let rowsBeforeSelection = try await deletionRows()
+            #expect(rowsBeforeSelection.isEmpty)
             guard case .commands(let commands) = try await policy.input(.refresh(.cloud)) else {
                 throw BridgeError.internal("Expected actual first drain")
             }
@@ -319,6 +322,7 @@ extension EventTests {
     /// Exact names are proved by one due row leaving while the other rows stay.
     @Test func fetchedOtherEpochDeletionUsesOriginalSDKAndExactNames() async throws {
         try await withCloudKitFixture(keepAlive: true) { f in
+            try await f.qualifyCompleteEpoch()
             let old = try await f.engine()
             let zones = try await deletionFixture(f)
             let before = try await f.core.durableSnapshot()
@@ -352,11 +356,13 @@ extension EventTests {
     /// Same real intake fault as fetched records; failed metadata closes intake
     /// before a later opaque state can pass it, with original cancel/drain order.
     @Test func fetchedOtherEpochDeletionFailureKeepsRowsAndCursor() async throws {
-        try await withCloudKitFixture(keepAlive: true, failInbox: true) { f in
+        try await withCloudKitFixture(keepAlive: true) { f in
+            try await f.qualifyCompleteEpoch()
             let engine = try await f.engine()
             let zones = try await deletionFixture(f)
             let rows = try await deletionRows()
             let before = try await f.core.durableSnapshot()
+            try await f.armAdapterFaults(failInbox: true, failState: false)
             await engine.emitRetained(.fetchedCollectionZoneDeletions(zones), label: "failedOtherEpoch")
             await engine.emitRetained(.stateUpdate(Data([0xff])), label: "afterFailedOtherEpoch")
             try await f.adapter.waitForIdle()
