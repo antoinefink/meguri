@@ -584,12 +584,14 @@ extension EventTests {
             let engine = try await fixture.engine()
             try await requireUnknownEpochSyncNowBaseline(engine.instanceID)
             transport.bind(engine, reply: .found(try await boundEpochBytes()), root: fixture.root.envelope)
+            #if DEBUG
             let originalAtSend = Mutex<UInt64?>(nil)
             await engine.observeNextSendFinalEntry { _ in
                 if case .some(.runExchange(let exchange, .command)) = CloudMediaCancellationContext.selectedAction {
                     originalAtSend.withLock { $0 = exchange }
                 }
             }
+            #endif
             await engine.appendFetchScripts([
                 .manual(fetchedZones: ["meguri-root", fixture.zone], records: [fixture.root], group: nil),
                 .manual(fetchedZones: ["meguri-root", fixture.zone], records: [], group: nil),
@@ -601,7 +603,9 @@ extension EventTests {
             #expect(transport.preparation == [.init(zone: fixture.zone, name: "epoch", recordType: "MGEpoch")])
             #expect(try await epochAuthority() != nil)
             #expect(result.error == nil)
+            #if DEBUG
             #expect(originalAtSend.withLock { $0 } == before.policyExchange)
+            #endif
             let completed = try await qualifiedRecordExchange(command, result: result, fixture: fixture, before: before, outcome: .succeeded)
             #expect(!completed.selectedNames.isEmpty)
             let policyOutputCommands: [CloudPolicyCommand] = try result.outputs.flatMap(policyCommands)
@@ -1763,7 +1767,12 @@ extension EventTests {
         }
     }
 
+    // Only metadata admission uses the Debug policy-origin observation hook.
+    #if DEBUG
     @Test(arguments: ["scheduling", "account", "sdk", "metadata"])
+    #else
+    @Test(arguments: ["scheduling", "account", "sdk"])
+    #endif
     func policySendRetiredBySchedulingChangeDoesNotFailPublication(mode: String) async throws {
         try await withNativePolicyFixture { fixture in
             let changeAccount = mode == "account", sdkFailure = mode == "sdk"
@@ -1780,12 +1789,20 @@ extension EventTests {
             let send = try #require(pending.first { if case .requestSend = $0.action { true } else { false } })
             let enteredBefore = engine.acceptedNetworkCalls.value
             let gate = CloudCallbackGate()
+            #if DEBUG
             if mode == "metadata" {
                 await fixture.adapter.setPolicyOperationOriginObserver { await gate.enter() }
             } else if sdkFailure {
                 await engine.failNextOperation(failure)
                 await fixture.adapter.setSendErrorObserver { await gate.enter() }
             } else { await engine.pauseNextOperationTask(gate) }
+            #else
+            if sdkFailure {
+                // Hold the actual SDK failure before delivery; the adapter's
+                // post-error observation is intentionally Debug-only.
+                await engine.failNextOperation(failure, beforeThrow: gate)
+            } else { await engine.pauseNextOperationTask(gate) }
+            #endif
             try await withCloudTask(gates: [gate], operation: {
                 let result = await executor.execute(send)
                 #expect((result.error != nil) == (changeAccount || sdkFailure) && !result.deferred)
@@ -1809,8 +1826,10 @@ extension EventTests {
                     throw error
                 }
             })
+            #if DEBUG
             await fixture.adapter.setSendErrorObserver(nil)
             await fixture.adapter.setPolicyOperationOriginObserver(nil)
+            #endif
             #expect(engine.acceptedNetworkCalls.value == enteredBefore + (sdkFailure ? 1 : 0))
             #expect(await engine.recordedTrace().contains(.released))
             #expect(await fixture.factory.engines().count == (changeAccount ? 2 : 3))
@@ -2319,7 +2338,12 @@ extension EventTests {
 
 #if canImport(CloudKit)
 extension EventTests {
+    // Cancelling at the original-SDK lane boundary needs Debug observation.
+    #if DEBUG
     @Test(arguments: ["originalSDK", "stale"])
+    #else
+    @Test(arguments: ["stale"])
+    #endif
     func nativeMediaPreNetworkCancellationRequiresSuccessfulOriginalPreparation(mode: String) async throws {
         try await withNativePolicyFixture { f in
             let (policy, setup) = try await nativePolicy(f)
@@ -2333,11 +2357,15 @@ extension EventTests {
                 mediaService: try await f.core.media(), mediaTransport: transport)
             if mode == "stale" { _ = try await policy.input(.settings(.init(enabled: true, paused: true, automatic: true, media: true))) }
             let task = Task {
+                #if DEBUG
                 await MaintenanceCallObservation.$capture.withValue({ call in
                     if mode == "originalSDK" && call == .cloudPolicyExecutionOriginalSdk {
                         withUnsafeCurrentTask { $0?.cancel() }
                     }
                 }) { await executor.execute(command) }
+                #else
+                await executor.execute(command)
+                #endif
             }
             let result = await task.value
             #expect(result.error != nil)

@@ -158,7 +158,7 @@ actor CloudKitEngineFake: CloudKitEngine {
     private var networkEventWaitObserver: (@Sendable () -> Void)?
     #endif
     private var networkEventWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
-    private var nextOperationError: (any Error)?
+    private var nextOperationError: (error: any Error, beforeThrow: CloudCallbackGate?)?
     private let networkLifetime = CloudKitNetworkLifetime()
     nonisolated let acceptedNetworkCalls = CloudAcceptedNetworkCalls()
 
@@ -257,7 +257,9 @@ actor CloudKitEngineFake: CloudKitEngine {
     func observeNextNetworkEventWait(_ observer: (@Sendable () -> Void)?) { networkEventWaitObserver = observer }
     func networkEventWaiterCount() -> Int { networkEventWaiters.count }
     #endif
-    func failNextOperation(_ error: any Error) { nextOperationError = error }
+    func failNextOperation(_ error: any Error, beforeThrow gate: CloudCallbackGate? = nil) {
+        nextOperationError = (error, gate)
+    }
     func waitForEventBookkeeping() async throws {
         repeat { try await prepareNativeWork() } while eventActive
         try Task.checkCancellation()
@@ -335,7 +337,11 @@ actor CloudKitEngineFake: CloudKitEngine {
     }
     func sendChanges(zones: [String]) async throws {
         acceptedNetworkCalls.record()
-        if let error = nextOperationError { nextOperationError = nil; throw error }
+        if let failure = nextOperationError {
+            nextOperationError = nil
+            if let gate = failure.beforeThrow { await waitInCall(gate) }
+            throw failure.error
+        }
         guard networkEntryAllowed(), let delegate else { return }
         sendCount += 1
         let call = sendCount
@@ -419,7 +425,11 @@ actor CloudKitEngineFake: CloudKitEngine {
 
     func fetchChanges(options: CloudFetchOptions) async throws {
         acceptedNetworkCalls.record()
-        if let error = nextOperationError { nextOperationError = nil; throw error }
+        if let failure = nextOperationError {
+            nextOperationError = nil
+            if let gate = failure.beforeThrow { await waitInCall(gate) }
+            throw failure.error
+        }
         guard networkEntryAllowed(), let delegate else { return }
         trace.append(.fetchEntered(options.groupID))
         let scoped = await delegate.nextFetchChangesOptions(options, engine: self)
