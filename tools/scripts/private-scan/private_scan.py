@@ -852,7 +852,7 @@ PUBLIC_ARTIFACTS = {
     "conformance/schema/meguri-sync-server.schema.json":
         "cd905c134ed497f166566e18733465fa7e992156944957ee16c2e17ca586814a",
     # Same delegated maintenance: independently authored/reviewed tooling,
-    # exact complete bytes only. No production server path is exempted.
+    # exact complete bytes only. These entries cover tooling, not production.
     "docs/process/review-log/meguri-sync-boundary-authoring-20261115.md":
         "c4aa47634166c890025e2ec1fd3a552069677f0d30fc554a98ae7bec82ce2c2a",
     "tools/cleanroom/source_view.py":
@@ -892,6 +892,45 @@ PUBLIC_ARTIFACTS = {
 
     'docs/process/review-log/meguri-sync-reference-privacy.md':
         '4ef0a4f96b31e513f73415ac2160a9ce14e335fbd9cc841ddbe4ed2159e643a8',
+
+    # Delegated maintenance, 2026-11-15: independently authored/reviewed
+    # account-service code, tests and documentation. Includes production paths;
+    # each entry admits only its exact path and complete reviewed bytes.
+    'server/DEPENDENCIES.md':
+        '9d2f9fb274770106aed9a294e128d4e2779a50dd68726e9fb3809487846c6bdf',
+    'server/src/error.rs':
+        '33e51ae13c05fb5124242b189fc02851103684fb3e03e104de63bd1d0a151261',
+    'server/src/main.rs':
+        '38e3225e1fcd7e923776ca142edc4512410f1127d9e0a02c7a5fb23902848d11',
+    'server/src/accounts/mod.rs':
+        '35a4ef643eb0b242d0534be5f45ddbbcbba09d156ec8fff3966570a4807b8071',
+    'server/src/accounts/provision.rs':
+        '26d0e9a97a04f0280c103945e36a97ae120883304e50212bb2d457cc1e7072ad',
+    'server/src/httpapi/AGENTS.md':
+        'ee08f06fbb1c5c420b5dbf55137846012523c0ec5aa37d6f73435f07bb722785',
+    'server/src/httpapi/ingress.rs':
+        'aaee8e568d0a2c915288942b847f45ec262874d13887ce2911bbe0dac4f39ef6',
+    'server/src/httpapi/mod.rs':
+        '2fab79b4a89e95bccc81ed0da6e71f1ec13dc3d30d9b19b2bce782a584817ad3',
+    'server/src/httpapi/tests.rs':
+        '370858800185720681b7f457ceded7bd414d1ae1d2defd513decb72ece76528d',
+    'server/src/storage/schema.sql':
+        '4842a61b5bf0e3b8e909364d5df7667aea59f054c7175313dd28f840f6c7a31b',
+    'server/src/storage/semantic.rs':
+        'a1b812ebdd2ea8ef4c0300025492f172c968f5fd35c6507068a91e307cb48902',
+    'server/src/storage/tests.rs':
+        '31e4aa34bf662a34d217d40994d56e40823d43d3e71d142218a9c286dd197bc6',
+    'server/tests/accounts.rs':
+        '460c1c0faf439707e74aa3d75add28fd4fb06de29eda6a616c151f64afb56d65',
+    'server/tests/http_contract.rs':
+        '405769e1b021ec1c787933330ea9c6a8591b682defd0db075bab45ac1e30959f',
+    'server/tests/provision.rs':
+        'd53465334d7a8000be31947bfb61208dcde0b572910a52265e0395134e1bd9a0',
+    'server/tests/recovery.rs':
+        'bdd02678a72f44a9a9a5d0025b297ea3313c3903a8c7c2f4b09f1c3b8861e2d0',
+
+    'docs/process/review-log/meguri-sync-U4.md':
+        '3dba5263b27e28389786dc37ee488630527cd3ba62a98ba350b357aac309aee8',
 
 }
 
@@ -943,6 +982,9 @@ PUBLIC_VENDOR_ARTIFACTS = {
 # complete raw UTF-8 bytes INCLUDING LF; CR, whitespace and additions differ.
 # Only exact paths qualify. Meguri changes and surrounding lines stay scanned.
 PUBLIC_SOURCE_LINES = {
+    'tools/scripts/private-scan/private_scan.py': {
+        '810bcc7c5a23cc66d257b5b5b5431ae419646e4662391a7216da6552dc2468d8',
+    },
     'core/vendor/askama_derive/Cargo.toml': {'a97a68a2ebcede836802fcf90cf07a563d1d43027f264cdd12ad820dd826d681'},
     'core/vendor/askama_derive/src/config.rs': {'e8aacfc627844473e382f3b486bd3b18803abc3ca21dbbdbf1c1aeb45e7ad8f9'},
     # Public PyPI requirement lines (two web-server dependencies of aqt), resolved by
