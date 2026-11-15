@@ -712,6 +712,11 @@ PUBLIC_ARTIFACTS = {
     "specs/licenses/jquery-3.7.1-LICENSE.txt": "d4db9ebe6f29f5168eac45ad713f055623ac5d0dcd5ba92da23d650ae012020d",
     "app/Packages/MeguriKit/Sources/CardRendering/Resources/CardRuntime/vendor/jquery-3.7.1.min.js":
         "fc9a93dd241f6b045cbff0481cf4e1901becd0e12fb45166a8f17f95823f0b1a",
+    # Owner approval 2026-11-15: only these exact documents and complete bytes.
+    "docs/plans/2026-11-15-1028-feat-meguri-sync-server-plan.md":
+        "ee057f23871d457641fcd78d5905dcb33ca23d2aaca543f806ed7f4aaffb5ab8",
+    "docs/process/review-log/meguri-sync-plan-20261115.md":
+        "3fefeb90235071d6e3d6ad364443276396cc01d9a9f4ccfa63bd6f80e99316b8",
 }
 
 

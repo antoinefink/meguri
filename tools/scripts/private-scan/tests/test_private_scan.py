@@ -1373,6 +1373,49 @@ class PublicRecoveryRuleTests(unittest.TestCase):
                 git(self.repo, "reset", "-q")
 
 
+class PublicSyncPlanTests(unittest.TestCase):
+    def test_exact_approved_documents_and_index_bytes(self):
+        root = Path(SCRIPT).resolve().parents[3]
+        approved = {
+            "docs/plans/2026-11-15-1028-feat-meguri-sync-server-plan.md":
+                "ee057f23871d457641fcd78d5905dcb33ca23d2aaca543f806ed7f4aaffb5ab8",
+            "docs/process/review-log/meguri-sync-plan-20261115.md":
+                "3fefeb90235071d6e3d6ad364443276396cc01d9a9f4ccfa63bd6f80e99316b8",
+        }
+        # Public words stand in for private tokens; no real token set is read.
+        matcher = private_scan.Matcher({("meguri",), ("sync",), ("sentinelprivate",)})
+        for path, digest in approved.items():
+            with self.subTest(path=path), tempfile.TemporaryDirectory() as repo:
+                self.assertEqual(private_scan.PUBLIC_ARTIFACTS.get(path), digest)
+                data = (root / path).read_bytes()
+                self.assertEqual(hashlib.sha256(data).hexdigest(), digest)
+                self.assertTrue(private_scan.line_hits(matcher, data.decode("utf-8")))
+                git(repo, "init", "-q")
+                full = os.path.join(repo, path)
+                for changed, expected in ((data, False), (data + b" ", True),
+                                          (data + b"\nsentinelprivate\n", True)):
+                    write(full, changed, "wb")
+                    git(repo, "add", "--", path)
+                    self.assertEqual(bool(private_scan.scan_paths(matcher, [full], repo)[0]), expected)
+                    self.assertEqual(bool(private_scan.scan_staged(matcher, repo)[0]), expected)
+                # The index controls staged approval even when disk bytes differ.
+                write(full, data, "wb")
+                self.assertFalse(private_scan.scan_paths(matcher, [full], repo)[0])
+                self.assertTrue(private_scan.scan_staged(matcher, repo)[0])
+                git(repo, "add", "--", path)
+                write(full, data + b"\nsentinelprivate\n", "wb")
+                self.assertTrue(private_scan.scan_paths(matcher, [full], repo)[0])
+                self.assertFalse(private_scan.scan_staged(matcher, repo)[0])
+                # Identical approved bytes at a different path stay scanned.
+                copied = "copies/" + path
+                other = os.path.join(repo, copied)
+                write(other, data, "wb")
+                git(repo, "add", "--", copied)
+                self.assertTrue(private_scan.scan_paths(matcher, [other], repo)[0])
+                found, _ = private_scan.scan_staged(matcher, repo)
+                self.assertEqual([item["path"] for item in found], [copied])
+
+
 class PublicLibraryTests(unittest.TestCase):
     def test_public_asset_mutations(self):
         root = Path(SCRIPT).resolve().parents[3]
