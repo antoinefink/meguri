@@ -6,6 +6,8 @@ internal import MeguriCoreBindings
 public enum BridgeError: Error, Sendable, Hashable {
     case cloudPolicy(CloudPolicyFailure)
     case cloudConnection(CloudConnectionFailure)
+    /// Core rejected an old SDK callback without granting it mutation authority.
+    case cloudSDKCallbackRejected
     case maintenance(MaintenanceError)
     case exportSourceChanged
     case exportSourceInvalid
@@ -63,6 +65,7 @@ extension BridgeError {
         switch error {
         case .CloudPolicy(let failure): self = .cloudPolicy(CloudPolicyFailure(failure))
         case .CloudConnection(let failure): self = .cloudConnection(CloudConnectionFailure(failure))
+        case .CloudSdkCallbackRejected: self = .cloudSDKCallbackRejected
         case .Maintenance(let cause): self = .maintenance(MaintenanceError(cause))
         case .DeckOptionsInvalid(let issues): self = .deckOptionsInvalid(issues.map(OptionIssue.init))
         case .Stale(let table, let key): self = .stale(table: CoreTable(table), key: key)

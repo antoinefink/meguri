@@ -15,6 +15,79 @@ use std::{
 };
 
 const NOW: i64 = 1_735_689_600_000;
+
+#[test]
+fn sdk_callback_fence_mapping_preserves_real_error_provenance() {
+    assert_eq!(sdk_callback_error(r::RuntimeError::StaleIncarnation), CoreError::CloudSdkCallbackRejected);
+    // The broader connection authority failure is not a callback guard fence.
+    assert_eq!(
+        sdk_callback_error(r::RuntimeError::Publication(PublicationError::AuthorityChanged)),
+        CoreError::Unavailable { reason: "cloud publication could not proceed".into() }
+    );
+    assert_eq!(
+        sdk_callback_error(r::RuntimeError::Tracking(c::Error::Io(std::io::ErrorKind::PermissionDenied))),
+        CoreError::Unavailable { reason: "cloud runtime tracking failed".into() }
+    );
+    // Even an I/O failure whose detail equals the fence's Display text keeps
+    // its actual type. The mapping never interprets error text as authority.
+    assert_eq!(
+        sdk_callback_error(r::RuntimeError::Engine(meguri_engine::EngineError::Storage(
+            meguri_storage::StorageError::Io { detail: r::RuntimeError::StaleIncarnation.to_string() }
+        ))),
+        CoreError::Unavailable { reason: "cloud runtime collection read failed".into() }
+    );
+    assert_eq!(
+        sdk_callback_error(r::RuntimeError::IdentityUnverified),
+        CoreError::Unavailable { reason: "cloud runtime account is unverified".into() }
+    );
+    // Non-callback APIs keep their original mapping, including stale authority.
+    assert_eq!(
+        cloud_error(r::RuntimeError::StaleIncarnation),
+        CoreError::Unavailable { reason: "cloud runtime incarnation is stale".into() }
+    );
+}
+
+#[test]
+fn retired_sdk_callbacks_and_pending_returns_report_typed_fence_without_mutation() {
+    let fixture = Fixture::new(Keys::new([]));
+    let (sdk, _, incoming) = fixture.baseline();
+    let workflow = &fixture.workflow;
+    workflow.retire_sdk(sdk.instance_id.clone(), false).unwrap();
+    let before = workflow.durable_snapshot().unwrap();
+    let seq = workflow.host.collection().unwrap().last_seq();
+    let id = sdk.instance_id;
+    let results = [
+        workflow.will_fetch(id.clone(), "late".into(), false),
+        workflow.fetch_zone(id.clone(), "meguri-root".into(), true, false),
+        workflow.fetch_zone(id.clone(), "meguri-root".into(), false, false),
+        workflow.did_fetch(id.clone(), "late".into(), false),
+        workflow.state_update(id.clone(), vec![9]),
+        workflow.fetched(id.clone(), sdk.collection_zone.clone(), vec![incoming], vec![]),
+        workflow.sent(id.clone(), 0, vec![], vec![], vec![], vec![], 0).map(|_| ()),
+        workflow.handler_returned(id.clone()),
+        workflow.sdk_saved_removed(id.clone(), 0, vec![]),
+        workflow.take_pending_updates(id.clone()).map(|_| ()),
+        workflow.update_applied(id.clone(), 0, vec![]),
+        workflow.build_batch(id.clone(), sdk.collection_zone, HashMap::new()).map(|_| ()),
+        workflow.tracking_failure(id.clone()),
+        workflow.fetched_collection_zone_deletions(id.clone(), vec![]),
+        workflow.fetched_zone_losses(id.clone(), vec![]).map(|_| ()),
+        workflow.begin_identity_read(true, Some(id.clone())).map(|_| ()),
+        workflow.account_changed(Some(id), CloudAccountStatus::NoAccount, None),
+    ];
+    for (index, result) in results.into_iter().enumerate() {
+        assert_eq!(result, Err(CoreError::CloudSdkCallbackRejected), "callback {index}");
+    }
+    let after = workflow.durable_snapshot().unwrap();
+    assert_eq!(after.tracking_content, before.tracking_content);
+    assert_eq!(after.serialization, before.serialization);
+    assert_eq!(after.root_envelope, before.root_envelope);
+    assert_eq!(after.root_system_fields, before.root_system_fields);
+    assert_eq!(after.tracking_stopped, before.tracking_stopped);
+    assert_eq!(after.absence_pass_completed, before.absence_pass_completed);
+    assert_eq!(workflow.host.collection().unwrap().last_seq(), seq);
+}
+
 struct Account;
 impl r::IdentityProvider for Account {
     fn read_identity(&self, _: &c::BuildScope) -> r::IdentityStatus {
@@ -682,6 +755,7 @@ fn native_fetched_keeps_a_real_commit_completed_error_fatal_and_retains_replay_i
     let result = workflow.fetched(sdk.instance_id, sdk.collection_zone, vec![incoming.clone()], vec![]);
     drop(disarm);
     assert!(result.is_err());
+    assert_eq!(result, Err(CoreError::Unavailable { reason: "cloud runtime collection read failed".into() }));
     assert_eq!(rollback.load(Ordering::SeqCst), 0);
     assert_eq!(fixture.incoming_value(), Some(ConfigValue::Bool(true)));
     let committed = workflow.host.collection().unwrap().last_seq();

@@ -730,6 +730,8 @@ extension EventTests {
             await engine.emitRetained(.stateUpdate(Data([0x6e, 0x65, 0x77])), label: "state")
             try await f.adapter.waitForIdle()
             let after = try await f.core.durableSnapshot()
+            let originalFailure = try #require(await f.adapter.lastFailure as? BridgeError)
+            #expect(originalFailure != .cloudSDKCallbackRejected)
             #expect(after.serialization == before.serialization)
             #expect(after.trackingStopped)
             #expect(!after.inboxNames.contains(f.incoming.name))
@@ -751,6 +753,7 @@ extension EventTests {
             await engine.emitRetained(.stateUpdate(Data([0x7f])), label: "lateState")
             #expect(await engine.requestRetainedBatch(zone: f.zone) == nil)
             #expect(try await f.core.durableSnapshot() == stable)
+            #expect(await f.adapter.lastFailure as? BridgeError == originalFailure)
         }
     }
 
@@ -1460,8 +1463,8 @@ extension EventTests {
     #if DEBUG
     /// K2/K12.5/P21/V23: an already validated drain crosses actual fresh
     /// account-proof acceptance, which retires its original SDK authority.
-    @Test(.timeLimit(.minutes(1)))
-    func cloudKitValidatedRootZoneDrainAfterFreshIdentityProofKeepsDeletionAuthoritative() async throws {
+    @Test(.timeLimit(.minutes(1)), arguments: [false, true])
+    func cloudKitValidatedRootZoneDrainAfterFreshIdentityProofKeepsDeletionAuthoritative(wholeFetch: Bool) async throws {
         try await withCloudKitFixture(keepAlive: true, appOwnsAccountObservation: true) { f in
             let engine = try await f.engine()
             let before = try await f.core.durableSnapshot()
@@ -1474,7 +1477,9 @@ extension EventTests {
             try #require(await f.adapter.lastFailure == nil, "Active deletion must stage without a setup failure")
 
             let validated = CloudCallbackGate()
-            let lateEvent = CloudEngineEvent.didFetchZone(zone: "meguri-root", error: nil)
+            let lateEvent: CloudEngineEvent = wholeFetch
+                ? .didFetch(groupID: "delete-root", reason: .scheduled)
+                : .didFetchZone(zone: "meguri-root", error: nil)
             await f.adapter.setValidatedEventHook((event: lateEvent, action: { await validated.enter() }))
             do {
                 try await withCloudTask(gates: [validated], operation: {

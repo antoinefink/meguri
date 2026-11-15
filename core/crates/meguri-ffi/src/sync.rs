@@ -15,6 +15,14 @@ pub(crate) fn cloud_error(error: impl std::fmt::Display) -> CoreError {
         reason: error.to_string(),
     }
 }
+/// Only guarded SDK callback/return APIs use this mapping. Ordinary runtime,
+/// storage and SDK failures retain their existing error provenance.
+fn sdk_callback_error(error: r::RuntimeError) -> CoreError {
+    match error {
+        r::RuntimeError::StaleIncarnation => CoreError::CloudSdkCallbackRejected,
+        error => cloud_error(error),
+    }
+}
 #[derive(Clone, Debug, Default, uniffi::Record)]
 pub struct CloudRecord {
     pub name: String,
@@ -558,7 +566,7 @@ impl CloudWorkflow {
         callback::enter("CloudWorkflow.begin_identity_read");
         self.core
             .adapter_begin_identity_read(transition, origin_sdk.as_deref())
-            .map_err(cloud_error)
+            .map_err(|error| if origin_sdk.is_some() { sdk_callback_error(error) } else { cloud_error(error) })
     }
     pub fn complete_identity_read(
         &self,
@@ -643,7 +651,7 @@ impl CloudWorkflow {
         let observed = identity(status, value);
         self.core
             .adapter_account(sdk.as_deref(), observed.clone())
-            .map_err(cloud_error)?;
+            .map_err(|error| if sdk.is_some() { sdk_callback_error(error) } else { cloud_error(error) })?;
         if let Some(cache) = &self.identity {
             cache.set(observed);
         }
@@ -651,15 +659,15 @@ impl CloudWorkflow {
     }
     pub fn take_pending_updates(&self, sdk: String) -> Result<Vec<CloudPendingUpdate>, CoreError> {
         callback::enter("CloudWorkflow.take_pending_updates");
-        self.core.validate_sdk(&sdk).map_err(cloud_error)?;
+        self.core.validate_sdk(&sdk).map_err(sdk_callback_error)?;
         self.core
             .take_pending_updates(&sdk)
             .map(|v| v.into_iter().map(Into::into).collect())
-            .map_err(cloud_error)
+            .map_err(sdk_callback_error)
     }
     pub fn update_applied(&self, sdk: String, id: u64, added: Vec<String>) -> Result<(), CoreError> {
         callback::enter("CloudWorkflow.update_applied");
-        self.core.sdk_update_applied(&sdk, id, &added).map_err(cloud_error)
+        self.core.sdk_update_applied(&sdk, id, &added).map_err(sdk_callback_error)
     }
     pub fn build_batch(
         &self,
@@ -668,7 +676,7 @@ impl CloudWorkflow {
         pending: HashMap<String, CloudPendingChange>,
     ) -> Result<Option<CloudEngineBatch>, CoreError> {
         callback::enter("CloudWorkflow.build_batch");
-        self.core.validate_sdk(&sdk).map_err(cloud_error)?;
+        self.core.validate_sdk(&sdk).map_err(sdk_callback_error)?;
         if zone == "meguri-media" {
             let requested = pending
                 .into_iter()
@@ -677,7 +685,7 @@ impl CloudWorkflow {
             let Some((id, work)) = self
                 .core
                 .build_cloud_media_batch(&sdk, &self.host.collection()?, &requested)
-                .map_err(cloud_error)?
+                .map_err(sdk_callback_error)?
             else {
                 return Ok(None);
             };
@@ -701,7 +709,7 @@ impl CloudWorkflow {
         let epoch = self
             .core
             .status()
-            .map_err(cloud_error)?
+            .map_err(sdk_callback_error)?
             .binding
             .ok_or_else(|| cloud_error("binding unavailable"))?
             .facts
@@ -717,7 +725,7 @@ impl CloudWorkflow {
         let b = self
             .core
             .build_collection_batch(&sdk, &self.host.collection()?, &names)
-            .map_err(cloud_error)?;
+            .map_err(sdk_callback_error)?;
         if b.saves.is_empty() {
             return Ok(None);
         }
@@ -750,7 +758,7 @@ impl CloudWorkflow {
         batch_count: u32,
     ) -> Result<u64, CoreError> {
         callback::enter("CloudWorkflow.sent");
-        self.core.validate_sdk(&sdk).map_err(cloud_error)?;
+        self.core.validate_sdk(&sdk).map_err(sdk_callback_error)?;
         // Record metadata cannot turn a collection callback into media work.
         // The retained backend batch decides the path, below.
         let media_metadata = saved
@@ -767,7 +775,7 @@ impl CloudWorkflow {
             let epoch = self
                 .core
                 .status()
-                .map_err(cloud_error)?
+                .map_err(sdk_callback_error)?
                 .binding
                 .ok_or_else(|| cloud_error("binding unavailable"))?
                 .facts
@@ -817,7 +825,7 @@ impl CloudWorkflow {
                     let binding = self
                         .core
                         .status()
-                        .map_err(cloud_error)?
+                        .map_err(sdk_callback_error)?
                         .binding
                         .ok_or_else(|| cloud_error("binding unavailable"))?;
                     let zone = c::adapter::collection_zone(binding.facts.epoch);
@@ -848,12 +856,12 @@ impl CloudWorkflow {
                     batch_id,
                     &conflicts.iter().map(|record| record.name.clone()).collect::<Vec<_>>(),
                 )
-                .map_err(cloud_error)?;
+                .map_err(sdk_callback_error)?;
         }
         let bound_zone = c::adapter::collection_zone(
             self.core
                 .status()
-                .map_err(cloud_error)?
+                .map_err(sdk_callback_error)?
                 .binding
                 .ok_or_else(|| cloud_error("binding unavailable"))?
                 .facts
@@ -875,7 +883,7 @@ impl CloudWorkflow {
                 losses.push(c::adapter::ZoneLoss { zone, cause });
             }
         }
-        self.core.enter_sent_handler(&sdk, batch_id).map_err(cloud_error)?;
+        self.core.enter_sent_handler(&sdk, batch_id).map_err(sdk_callback_error)?;
         let sdk_retrying = failed.iter().chain(&failed_delete).any(|f| {
             matches!(
                 f.code,
@@ -890,7 +898,7 @@ impl CloudWorkflow {
         });
         self.core
             .adapter_sdk_retrying(&sdk, sdk_retrying)
-            .map_err(cloud_error)?;
+            .map_err(sdk_callback_error)?;
         let saved = saved.into_iter().map(CloudRecord::saved).collect::<Vec<_>>();
         let retrying = failed
             .iter()
@@ -955,12 +963,12 @@ impl CloudWorkflow {
                 &failed_delete,
                 &retrying,
             )
-            .map_err(cloud_error)?
+            .map_err(sdk_callback_error)?
         {
             if !losses.is_empty() {
                 self.core
                     .adapter_observe_zone_losses(&sdk, &losses)
-                    .map_err(cloud_error)?;
+                    .map_err(sdk_callback_error)?;
             }
             return Ok(saved.len() as u64);
         }
@@ -978,45 +986,45 @@ impl CloudWorkflow {
                 &failed,
                 batch_count as usize,
             )
-            .map_err(cloud_error)?;
+            .map_err(sdk_callback_error)?;
         if !losses.is_empty() {
             self.core
                 .adapter_observe_zone_losses(&sdk, &losses)
-                .map_err(cloud_error)?;
+                .map_err(sdk_callback_error)?;
         }
         Ok(count)
     }
     pub fn handler_returned(&self, sdk: String) -> Result<(), CoreError> {
         callback::enter("CloudWorkflow.handler_returned");
-        self.core.return_sent_handler(&sdk).map(|_| ()).map_err(cloud_error)
+        self.core.return_sent_handler(&sdk).map(|_| ()).map_err(sdk_callback_error)
     }
     /// Actual SDK bookkeeping only, after the original sent handler returned.
     pub fn sdk_saved_removed(&self, sdk: String, request_id: u64, names: Vec<String>) -> Result<(), CoreError> {
         callback::enter("CloudWorkflow.sdk_saved_removed");
-        self.core.validate_sdk(&sdk).map_err(cloud_error)?;
+        self.core.validate_sdk(&sdk).map_err(sdk_callback_error)?;
         self.core
             .sdk_saved_removed(&sdk, request_id, &names)
-            .map_err(cloud_error)
+            .map_err(sdk_callback_error)
     }
     pub fn tracking_failure(&self, sdk: String) -> Result<(), CoreError> {
         callback::enter("CloudWorkflow.tracking_failure");
-        self.core.adapter_tracking_failure(&sdk).map_err(cloud_error)
+        self.core.adapter_tracking_failure(&sdk).map_err(sdk_callback_error)
     }
     pub fn fetched_collection_zone_deletions(&self, sdk: String, names: Vec<String>) -> Result<(), CoreError> {
         callback::enter("CloudWorkflow.fetched_collection_zone_deletions");
         self.core
             .adapter_fetched_collection_zone_deletions(&sdk, &names)
-            .map_err(cloud_error)
+            .map_err(sdk_callback_error)
     }
     pub fn fetched_zone_losses(&self, sdk: String, losses: Vec<CloudZoneLoss>) -> Result<bool, CoreError> {
         callback::enter("CloudWorkflow.fetched_zone_losses");
         self.core
             .adapter_observe_zone_losses(&sdk, &losses.into_iter().map(Into::into).collect::<Vec<_>>())
-            .map_err(cloud_error)
+            .map_err(sdk_callback_error)
     }
     pub fn state_update(&self, sdk: String, state: Vec<u8>) -> Result<(), CoreError> {
         callback::enter("CloudWorkflow.state_update");
-        self.core.adapter_state_update(&sdk, &state).map_err(cloud_error)
+        self.core.adapter_state_update(&sdk, &state).map_err(sdk_callback_error)
     }
     pub fn fetched(
         &self,
@@ -1026,7 +1034,7 @@ impl CloudWorkflow {
         deleted: Vec<String>,
     ) -> Result<(), CoreError> {
         callback::enter("CloudWorkflow.fetched");
-        self.core.validate_sdk(&sdk).map_err(cloud_error)?;
+        self.core.validate_sdk(&sdk).map_err(sdk_callback_error)?;
         if records.iter().any(|r| {
             let expected = if zone == "meguri-root" {
                 "MGActive"
@@ -1041,7 +1049,7 @@ impl CloudWorkflow {
                 || r.record_type.as_deref().is_some_and(|kind| kind != expected)
                 || (expected != "MGEntity" && r.asset_path.is_some())
         }) {
-            self.core.adapter_tracking_failure(&sdk).map_err(cloud_error)?;
+            self.core.adapter_tracking_failure(&sdk).map_err(sdk_callback_error)?;
             return Err(cloud_error("unsupported fetched record metadata"));
         }
         self.core
@@ -1051,7 +1059,7 @@ impl CloudWorkflow {
                 &records.into_iter().map(CloudRecord::fetched).collect::<Vec<_>>(),
                 &deleted,
             )
-            .map_err(cloud_error)?;
+            .map_err(sdk_callback_error)?;
         // adapter_fetched has validated the SDK and exact zone and committed
         // the inbox. Its guards are gone before the host admits a writer/WAL
         // wait. The serialized native event completes before later cursor events.
@@ -1060,7 +1068,7 @@ impl CloudWorkflow {
                 match self
                     .host
                     .apply_native_cloud_incoming(&sdk, std::time::Duration::from_secs(1))
-                    .map_err(cloud_error)?
+                    .map_err(sdk_callback_error)?
                 {
                     c::incoming::IncomingDisposition::Progress(0) | c::incoming::IncomingDisposition::Deferred(_) => {
                         break;
@@ -1077,17 +1085,17 @@ impl CloudWorkflow {
     }
     pub fn will_fetch(&self, sdk: String, group: String, manual: bool) -> Result<(), CoreError> {
         callback::enter("CloudWorkflow.will_fetch");
-        self.core.adapter_will_fetch(&sdk, group, manual).map_err(cloud_error)
+        self.core.adapter_will_fetch(&sdk, group, manual).map_err(sdk_callback_error)
     }
     pub fn fetch_zone(&self, sdk: String, zone: String, will: bool, failed: bool) -> Result<(), CoreError> {
         callback::enter("CloudWorkflow.fetch_zone");
         self.core
             .adapter_fetch_zone(&sdk, zone, will, failed)
-            .map_err(cloud_error)
+            .map_err(sdk_callback_error)
     }
     pub fn did_fetch(&self, sdk: String, group: String, manual: bool) -> Result<(), CoreError> {
         callback::enter("CloudWorkflow.did_fetch");
-        self.core.adapter_did_fetch(&sdk, &group, manual).map_err(cloud_error)
+        self.core.adapter_did_fetch(&sdk, &group, manual).map_err(sdk_callback_error)
     }
     pub fn finish_fetch(&self, sdk: String, id: u64) -> Result<bool, CoreError> {
         callback::enter("CloudWorkflow.finish_fetch");

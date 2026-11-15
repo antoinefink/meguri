@@ -15,6 +15,8 @@ pub enum CoreError {
     CloudConnection {
         failure: crate::cloud_connection::CloudConnectionFailure,
     },
+    /// A guarded SDK callback belongs to an incarnation that no longer owns it.
+    CloudSdkCallbackRejected,
     Maintenance {
         cause: crate::maintenance::MaintenanceError,
     },
@@ -108,6 +110,7 @@ impl fmt::Display for CoreError {
         match self {
             CoreError::CloudPolicy { .. } => f.write_str("cloud policy refused"),
             CoreError::CloudConnection { .. } => f.write_str("cloud connection refused"),
+            CoreError::CloudSdkCallbackRejected => f.write_str("old cloud SDK callback rejected"),
             CoreError::Maintenance { .. } => write!(f, "{self:?}"),
             CoreError::ExportSourceChanged => f.write_str("export source changed"),
             CoreError::ExportSourceInvalid => f.write_str("export source item refused"),
@@ -220,6 +223,9 @@ impl From<CoreError> for EngineError {
             },
             CoreError::CloudConnection { .. } => EngineError::CollectionUnavailable {
                 reason: "cloud connection refused".into(),
+            },
+            CoreError::CloudSdkCallbackRejected => EngineError::CollectionUnavailable {
+                reason: "old cloud SDK callback rejected".into(),
             },
             CoreError::Maintenance { cause } => EngineError::Internal {
                 message: format!("maintenance: {cause:?}"),

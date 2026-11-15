@@ -548,6 +548,7 @@ public enum DebugCloudDiagnostics {
             switch error {
             case .cloudPolicy(let failure): return policyTag(failure)
             case .cloudConnection(let failure): return connectionTag(failure)
+            case .cloudSDKCallbackRejected: return "bridge.cloudSDKCallbackRejected"
             case .maintenance: return "bridge.maintenance"
             case .exportSourceChanged: return "bridge.exportSourceChanged"
             case .exportSourceInvalid: return "bridge.exportSourceInvalid"

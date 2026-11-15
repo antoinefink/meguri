@@ -921,7 +921,9 @@ public actor CloudKitSyncAdapter {
         guard await valid(origin) else { return }
         // One drain owns all lists. Taking each complete list in emission order
         // prevents a later full removal from overtaking a saved-handler add.
-        let updates = try await core.takePendingUpdates(sdk: origin)
+        let updates: [CloudPendingUpdate]
+        do { updates = try await core.takePendingUpdates(sdk: origin) }
+        catch BridgeError.cloudSDKCallbackRejected { return }
         for update in updates {
             guard await valid(origin) else { return }
             var applied = update
@@ -944,7 +946,8 @@ public actor CloudKitSyncAdapter {
             let after = await instance.engine.pendingRecordZoneChanges()
             guard await valid(origin) else { return }
             let added = mutation.adds.keys.filter { after[$0] == mutation.adds[$0] }
-            try await core.updateApplied(sdk: origin, id: update.id, added: added)
+            do { try await core.updateApplied(sdk: origin, id: update.id, added: added) }
+            catch BridgeError.cloudSDKCallbackRejected { return }
         }
     }
     // Hold the SDK's original serial delivery, retaining asset lifetime and
@@ -1109,6 +1112,9 @@ public actor CloudKitSyncAdapter {
             guard await valid(origin) else { return }
             // No deferred list is applied here. The immutable callback origin
             // survives this suspension and is checked again at commit/return.
+        } catch BridgeError.cloudSDKCallbackRejected {
+            // Authority can end during the async Core call after valid(). Core
+            // refused this old callback; retain any earlier real failure.
         } catch {
             lastFailure = error
             instance.failed = true
@@ -1125,6 +1131,7 @@ public actor CloudKitSyncAdapter {
                 let receipts = await instance.engine.takeSavedPendingRemovals()
                 await savedPendingRemovalsConfirmed(receipts, origin: origin, engine: instance.engine)
             }
+            catch BridgeError.cloudSDKCallbackRejected { }
             catch {
                 lastFailure = error; instance.failed = true
                 #if DEBUG
@@ -1175,6 +1182,8 @@ public actor CloudKitSyncAdapter {
                       await valid(origin), owned[origin] === instance else { continue }
                 try await core.savedPendingRemoved(receipt)
                 instance.savedRemovalGuards.removeValue(forKey: receipt.requestID)
+            } catch BridgeError.cloudSDKCallbackRejected {
+                // Keep the receipt unconfirmed; the original SDK no longer owns it.
             } catch {
                 lastFailure = error; instance.failed = true
                 #if DEBUG
@@ -1416,6 +1425,8 @@ public actor CloudKitSyncAdapter {
             }
             do { try batch?.finalAdmission?() } catch { return nil }
             return batch
+        } catch BridgeError.cloudSDKCallbackRejected {
+            return nil
         } catch {
             lastFailure = error; instance.failed = true
             #if DEBUG
@@ -1611,7 +1622,11 @@ public actor CloudKitSyncAdapter {
                 let losses = try NativeCloudKitSendError.zoneLosses(error, zones: zones.filter { $0 == instance.zone || $0 == "meguri-media" })
                 if !losses.isEmpty, await valid(origin) {
                     instance.mediaLossObserved = losses.contains { $0.zone == "meguri-media" } || instance.mediaLossObserved
-                    if try await core.fetchedZoneLosses(sdk: origin, losses: losses) { instance.stagedZoneLoss() }
+                    do {
+                        if try await core.fetchedZoneLosses(sdk: origin, losses: losses) { instance.stagedZoneLoss() }
+                    } catch BridgeError.cloudSDKCallbackRejected {
+                        // Preserve sendError: this rejects only the old loss report.
+                    }
                     await requestLossAccountRead(origin: origin)
                 }
                 #endif
@@ -1765,7 +1780,11 @@ public actor CloudKitSyncAdapter {
                 let losses = try NativeCloudKitSendError.zoneLosses(error, zones: scope)
                 if !losses.isEmpty, await valid(origin) {
                     instance.mediaLossObserved = losses.contains { $0.zone == "meguri-media" } || instance.mediaLossObserved
-                    if try await core.fetchedZoneLosses(sdk: origin, losses: losses) { instance.stagedZoneLoss() }
+                    do {
+                        if try await core.fetchedZoneLosses(sdk: origin, losses: losses) { instance.stagedZoneLoss() }
+                    } catch BridgeError.cloudSDKCallbackRejected {
+                        // The original failed SDK operation still throws below.
+                    }
                     await requestLossAccountRead(origin: origin)
                 }
                 #endif

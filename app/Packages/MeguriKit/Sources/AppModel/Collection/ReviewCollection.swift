@@ -1404,6 +1404,7 @@ enum OpenFailureDiagnostic {
         switch error {
         case .cloudPolicy: return "cloudPolicy"
         case .cloudConnection: return "cloudConnection"
+        case .cloudSDKCallbackRejected: return "cloudSDKCallbackRejected"
         case .maintenance: return "maintenance"
         case .exportSourceChanged: return "exportSourceChanged"
         case .exportSourceInvalid: return "exportSourceInvalid"
