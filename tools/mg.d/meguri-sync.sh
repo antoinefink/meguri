@@ -106,6 +106,13 @@ print(json.dumps(dict(device=s.st_dev, inode=s.st_ino, uid=s.st_uid, mode=stat.S
 PY
 }
 
+# Compose must merge read_only explicitly; run -v inherits the dev mount's RW.
+mg_sync_server__build_mount_override() {
+  jq -n --arg source "$1" '
+    {services:{dev:{volumes:[{type:"bind",source:$source,target:"/work",read_only:true}]}}}
+  ' >"$2"
+}
+
 mg_sync_server__build_script() {
   cat <<'BUILD'
 set -euo pipefail
@@ -158,11 +165,13 @@ mg_sync_server_candidate_build() {
   build_name="meguri-candidate-build-$MG_RUN_ID"
   mkdir -m 700 "$MG_RUN_DIR/target" || { mg_status fail; return 0; }
   target_owner="$(mg_sync_server__target_identity "$MG_RUN_DIR/target" empty)" || { mg_status fail; return 0; }
+  mg_sync_server__build_mount_override "$MG_RUN_DIR/source" "$MG_RUN_DIR/build-mounts.compose.json" || { mg_status fail; return 0; }
+  mg_artifact candidate-build-mounts "$MG_RUN_DIR/build-mounts.compose.json"
   owner="$(python3 -c 'import secrets; print(secrets.token_hex(16))')" || { mg_status fail; return 0; }
   mg_on_exit "$(printf '%q ' mg_sync_server__remove_container "$build_name" "$owner")"
-  mg_compose run --name "$build_name" -T --no-deps --pull never --label "meguri.mg.run-id=$MG_RUN_ID" \
+  mg_compose -f "$MG_RUN_DIR/build-mounts.compose.json" run --name "$build_name" -T --no-deps --pull never --label "meguri.mg.run-id=$MG_RUN_ID" \
       --label "meguri.sync.owner=$owner" \
-      -v "$MG_RUN_DIR/source:/work:ro" -v "$MG_RUN_DIR/product:/candidate-out" \
+      -v "$MG_RUN_DIR/product:/candidate-out" \
       -v "$MG_RUN_DIR/target:/candidate-target" \
       -e CARGO_TARGET_DIR=/candidate-target dev bash -c "$(mg_sync_server__build_script)" || build_rc=$?
   docker inspect "$build_name" >"$MG_RUN_DIR/build-container.json" || build_rc=1
