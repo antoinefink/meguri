@@ -1,0 +1,246 @@
+{
+  "format": "meguri-sync-normal-neutral-observations-p2-v1",
+  "scope": "Finite original synthetic Desktop NORMAL reference run; matched and validated, not independently sealed.",
+  "source_sha256": "31d39b7f70b26c1865dad39ed4bb1968a4eb659c8dc34ff4fd854eb9bd289a3e",
+  "python_lock_sha256": "56e1bef86def9f5f230d12317e3510f2176eb079928f3a75f86afb0dcc408ec8",
+  "fixture_manifest_sha256": "305682ec3ef661470c7219aabc7d6fb0197f1b6208b82ba04d99a4310522d62f",
+  "runtime": {
+    "build": "c06370ff",
+    "kind": "desktop",
+    "runtime_sha256": "bf0ccafe0f15bcba59a652db68c4cfdfaa8191756f8c547839c9d134dee12784",
+    "version": "26.09.4"
+  },
+  "expected_case_count": 12,
+  "selected_case_count": 12,
+  "completed_case_count": 12,
+  "matched_case_count": 12,
+  "broad_catalog_credit": false,
+  "observations": {
+    "inclusive-usn": {
+      "above_selected": true,
+      "below_selected": false,
+      "equal_selected": true
+    },
+    "object-conflicts": {
+      "equal_incoming": true,
+      "newer_incoming": true,
+      "older_kept": true,
+      "response_before_merge": true
+    },
+    "ordered-duplicates": {
+      "cross_chunk_last_mod": 10,
+      "nonpending_last_mod": 10,
+      "pending_first_accepted_mod": 30,
+      "review_count": 1,
+      "review_first_ease": 2
+    },
+    "row-conflicts": {
+      "nonpending_older_replaces": true,
+      "pending_equal_kept": true,
+      "pending_newer_replaces": true,
+      "pending_older_kept": true
+    },
+    "sanity-finish-stamps": {
+      "row_usn_is_round_usn": true,
+      "sanity_ignored_due_graves": true,
+      "sanity_status": "ok",
+      "schema_creation_preserved": true,
+      "server_ls_is_finish": true,
+      "server_mod_is_finish": true,
+      "server_usn_delta": 1
+    },
+    "sdk-250-boundary": {
+      "received_done": [
+        false,
+        true
+      ],
+      "received_lengths": [
+        250,
+        0
+      ],
+      "receiver_equal": true,
+      "sent_done": [
+        false,
+        true
+      ],
+      "sent_lengths": [
+        250,
+        0
+      ],
+      "unique_card_ids": 125,
+      "unique_note_ids": 125
+    },
+    "sdk-251-graves": {
+      "receiver_card_count": 0,
+      "receiver_note_count": 251,
+      "sent_card_graves": 251,
+      "sent_grave_lengths": [
+        250,
+        1
+      ]
+    },
+    "sdk-bidirectional-edits-deletes": {
+      "deleted_card_absent": true,
+      "deleted_note_absent": true,
+      "forward_equal": true,
+      "reverse_equal": true
+    },
+    "sdk-multichunk": {
+      "received_done": [
+        false,
+        false,
+        true
+      ],
+      "received_lengths": [
+        250,
+        250,
+        2
+      ],
+      "receiver_equal": true,
+      "sent_done": [
+        false,
+        false,
+        true
+      ],
+      "sent_lengths": [
+        250,
+        250,
+        2
+      ],
+      "unique_card_ids": 251,
+      "unique_note_ids": 251
+    },
+    "sdk-no-change": {
+      "full_transfer_count": 0,
+      "request_body_bytes_positive": true,
+      "routes": [
+        "/sync/meta"
+      ]
+    },
+    "sdk-object-config-tag-exchange": {
+      "config_received": true,
+      "deck_received": true,
+      "model_forward": true,
+      "model_reverse": true,
+      "preset_received": true,
+      "tag_received": true
+    },
+    "sdk-one-review": {
+      "card_occurrences": 1,
+      "full_transfer_count": 0,
+      "note_occurrences": 0,
+      "receiver_equal": true,
+      "review_occurrences": 1
+    }
+  },
+  "measured_bytes": {
+    "no_change": [
+      {
+        "route": "/sync/meta",
+        "request_bytes": 45,
+        "response_bytes": 126,
+        "compressed_request_bytes": 54,
+        "compressed_response_bytes": 106
+      }
+    ],
+    "one_review": [
+      {
+        "route": "/sync/meta",
+        "request_bytes": 45,
+        "response_bytes": 126,
+        "compressed_request_bytes": 54,
+        "compressed_response_bytes": 108
+      },
+      {
+        "route": "/sync/start",
+        "request_bytes": 40,
+        "response_bytes": 34,
+        "compressed_request_bytes": 49,
+        "compressed_response_bytes": 43
+      },
+      {
+        "route": "/sync/applyChanges",
+        "request_bytes": 753,
+        "response_bytes": 39,
+        "compressed_request_bytes": 433,
+        "compressed_response_bytes": 48
+      },
+      {
+        "route": "/sync/chunk",
+        "request_bytes": 13,
+        "response_bytes": 13,
+        "compressed_request_bytes": 22,
+        "compressed_response_bytes": 22
+      },
+      {
+        "route": "/sync/applyChunk",
+        "request_bytes": 202,
+        "response_bytes": 4,
+        "compressed_request_bytes": 137,
+        "compressed_response_bytes": 13
+      },
+      {
+        "route": "/sync/sanityCheck2",
+        "request_bytes": 34,
+        "response_bytes": 71,
+        "compressed_request_bytes": 43,
+        "compressed_response_bytes": 63
+      },
+      {
+        "route": "/sync/finish",
+        "request_bytes": 13,
+        "response_bytes": 13,
+        "compressed_request_bytes": 22,
+        "compressed_response_bytes": 22
+      }
+    ]
+  },
+  "traffic_origin": {
+    "sdk": "Edits, one forward scheduler review, note deletion, authored object/config/tag exchanges, and tuple/grave batch emissions.",
+    "auxiliary": "Inclusive USN, existing deck modification conflicts, note conflicts, ordered duplicate notes/reviews, sanity and closing stamps. Supported native round requests followed by actual Desktop full receivers; these requests are not SDK-emitted bytes.",
+    "fixture_graves": "The251 card-only graves are original synthetic database state prepared before the actual SDK normal exchange."
+  },
+  "limits": [
+    "Desktop SDK 26.09.4 only; no Mobile or historical-client coverage.",
+    "Auxiliary tuple/object probes are explicit native protocol traffic, followed by actual SDK full receivers.",
+    "No malformed input, session-policy, restart, expiry, lost acknowledgment or concurrency claims.",
+    "Conflict matrices cover notes and one deck; card, note type and preset conflict matrices remain unobserved.",
+    "No casefolded object collision, config replacement/optional-null, same-clock finish or failed-sanity claim.",
+    "No claim that these finite cases close any complete P-family.",
+    "The review and deletion observations are forward only. Note and note-type CSS edits run in both directions. Deck/preset/config/tag observations are forward only.",
+    "Collection sync explicitly disables media; these cases establish no review-triggered media behavior.",
+    "Duplicate-note observations use one repeated ID within a chunk, one pending-USN repeat, and one across-chunk repeat. Review collision is within one incoming chunk.",
+    "No candidate NORMAL selection, Mobile result or complete-family acceptance is established.",
+    "Local source is uncommitted. Parent owns targeted independent follow-up, final commits, acceptance gates and sealing."
+  ],
+  "closing_stamp_evidence": {
+    "before": {
+      "mod": 1794779178765,
+      "ls": 1794779178764,
+      "usn": 27,
+      "scm": 1794779178051,
+      "crt": 1794715200,
+      "ver": 18
+    },
+    "after": {
+      "mod": 1794779178818,
+      "ls": 1794779178817,
+      "usn": 29,
+      "scm": 1794779178051,
+      "crt": 1794715200,
+      "ver": 18
+    },
+    "finish": 1794779178817,
+    "post_finish_meta": {
+      "mod": 1794779178817,
+      "usn": 28,
+      "scm": 1794779178051
+    },
+    "timing": "The post-finish meta precedes the full download. The raw served file is measured before receiver processing; that download separately advances server mod and USN. Its ls still equals the prior finish T."
+  },
+  "source_author_sessions": [
+    "s-20261115T133013Z-d8cec007",
+    "s-20261115T211543Z-556b04e9"
+  ],
+  "responsible_author_session": "s-20261115T211543Z-556b04e9"
+}

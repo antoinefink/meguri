@@ -24,11 +24,15 @@ The neutral archives are:
   SHA-256 `b302e7c77890d1c55dfdddf5e8630b79e85aa289b40a2fac496f299ae02850b9`.
 - `conformance/fixtures/meguri-sync-server/observations/desktop-26.09.4-edges.json`,
   SHA-256 `1bac52dfdf20519bfe9abdef8700e3e87a34318da1edde7bccb7a2fef9570c45`.
+- `conformance/fixtures/meguri-sync-server/observations/desktop-26.09.4-normal.json`,
+  SHA-256 `33e4f576a85f19bf877baefc382e91121e4e0307fe73b4b06fc8e24807e4d4a7`.
 
 The source-bound review and seal receipts are recorded in
 `docs/process/review-log/meguri-sync-U3.md`. They cover 21 smoke cases and eight
 edge cases. They do not close every pending probe in the baseline contracts.
 Candidate-server interoperability remains a separate verification obligation.
+The additional twelve-case incremental observations in D7 and their committed
+rerun are recorded in `docs/process/review-log/meguri-sync-normal-reference.md`.
 
 Executed selections: `conformance/recordings/scenarios/meguri-sync-server/desktop-selection.json`
 and `conformance/recordings/scenarios/meguri-sync-server/desktop-edge-selection.json`.
@@ -134,3 +138,42 @@ In a separate round, an explicit abort after 121,001 ms returned HTTP 200.
 The forwarded chunk then received HTTP 409 and the Desktop backend failed the
 sync. The local edit survived and the pending server edit rolled back.
 This tests explicit abort handling, not natural reference-server expiry.
+
+## D7. Selected incremental exchanges
+
+These observations use Desktop 26.09.4, build c06370ff. The committed reference
+rerun and retained validation passed all twelve cases. They do not establish
+candidate-server behavior or close the entire pending normal-sync family.
+
+The twelve selected observations distinguish ordinary Desktop exchanges from
+auxiliary protocol fixtures. Actual Desktop receivers inspect the resulting
+collections in both kinds of observation. Auxiliary request bytes are not
+attributed to Desktop.
+
+| Selected observation | Result |
+|---|---|
+| Settled collection | One metadata request; no full collection transfer. |
+| One scheduler review | One card tuple and one review tuple; no note tuple or full transfer. The receiver retained the review. |
+| Notes and note-type CSS | Authored edits arrived in both directions. A forward note deletion also removed its card. |
+| Other collection objects | One authored deck, preset, tag and configuration value arrived at the second client. |
+| Exactly 250 new tuples | Batches contained 250 then zero tuples, with `done` false then true. |
+| 502 new tuples | Batches contained 250, 250 and two tuples, with `done` false, false and true. Receiver IDs were unique. |
+| 251 card graves | Batches contained 250 then one grave. The receiver had no cards and retained its 251 orphan notes. |
+| Inclusive cursor | Rows at and above the cursor were selected; the row below it was excluded. |
+| One existing deck | An older incoming modification lost. Equal and newer modifications replaced it. The reply contained the prior deck version. |
+| Pending note | Equal and older incoming modifications lost; a newer modification replaced it. A nonpending note accepted an older incoming modification. |
+| Repeated note IDs | For nonpending tuples, the later occurrence survived even when modification decreased from 30 to 10. A newly pending first occurrence blocked an older repeat. The same order rule held across chunks. |
+| Repeated review ID | One row remained, retaining the first tuple's ease value of two. |
+
+The selected successful sanity exchange ignored supplied due and grave counts.
+Immediately after finish, metadata showed USN advanced by one and modification
+equal to the returned finish time. A later raw served file retained last-sync
+equal to that time. That full download separately advanced modification and USN;
+its creation and schema stamps stayed unchanged. The received note retained the
+round's USN. Receiver-local stamps do not substitute for this served-file check.
+
+These observations cover note conflicts and one deck conflict matrix only.
+Card, note-type and preset conflicts, case-folded names, configuration replacement
+and null values remain unobserved here. They also leave same-clock finish, failed
+sanity, lifecycle faults, AnkiMobile and candidate incremental sync unobserved.
+Reviews and deletions were exercised forward only. Media was disabled.
