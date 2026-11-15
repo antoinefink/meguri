@@ -45,7 +45,7 @@ The deny profile binds a Claude session started in the worktree. An orchestrator
 
 | Trailer | Required on |
 |---|---|
-| `Role:` one of spec-writer, implementer, fixer, oracle-maintainer, infra, critic, integrator | every commit touching `core/`, `app/` or `conformance/runner/`; checked for a known value wherever present |
+| `Role:` one of spec-writer, implementer, fixer, oracle-maintainer, infra, critic, integrator | every commit touching `core/`, `app/`, `server/` or `conformance/runner/`; checked for a known value wherever present |
 | `Spec:` one or more spec ids (`specs/README-format.md`) or Product Contract requirement ids (`R1987`), comma-separated or repeated | implementer and fixer commits touching those paths |
 | `Session:` the session id | implementer and fixer commits touching those paths |
 
@@ -68,7 +68,7 @@ Which role and `Spec:` a commit uses:
   - `lex`: identifier words and literals, k=12. Flags at ≥ 15% (with ≥ 30 fingerprints).
   - `com`: any shared run of 10 comment words.
   - `text`: any shared run of 8 words between String Catalog English values or Meguri CSS and Anki's Fluent messages, CSS and string literals (R1959).
-  - Swift is scanned through `lex` and `com` only.
+  - Swift is scanned through `lex` and `com` only. Server Rust and JS/JSX/TS/TSX use their existing language channels. Similarity results do not prove translation independence.
 - Two noise filters came out of calibration. Rust attributes (`#[...]`) count as one token. `struct` k-grams that repeat a short period (field lists, column lists, row decoding; periodicity ≥ 0.8) are not fingerprinted. Without them, independent storage code and unrelated fsrs-rs structs flagged on field lists alone.
 - Interop masking: words listed in `specs/<area>/interop-vocab.txt` are dropped from the `lex` channel, in code and in string literals, on both sides. A flag that survives masking is escalated.
 - Reports: the implementer view (`implementer.md` and `.json`: file, lines, channel, score, "rewrite this region from the spec") goes to the implementer. The reviewer view adds the matching Anki source, tag, path and lines, for human review only. Neither view contains corpus text.

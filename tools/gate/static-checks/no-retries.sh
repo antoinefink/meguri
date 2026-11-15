@@ -8,7 +8,8 @@
 # - every Xcode test plan (app/TestPlans/*.xctestplan): no test repetition
 #   mode but `none`, no maximumTestRepetitions, anywhere in the plan;
 # - nextest configuration (any nextest.toml): no `retries` but 0;
-# - tools/ and docker/: no xcodebuild -retry-tests-on-failure or
+# - browser runner configs: literal zero repetition only;
+# - tools/, docker/ and server/: no xcodebuild -retry-tests-on-failure or
 #   -test-iterations, no nextest --retries or NEXTEST_RETRIES but 0.
 # Prints one JSON line per finding ({check, path, line, message}) and exits 1
 # when there is one, 2 when it cannot check. Runs under macOS /bin/bash 3.2.
@@ -17,6 +18,7 @@ set -u
 
 dir="${1:?usage: no-retries.sh <checkout> [<rev>]}"
 rev="${2:-}"
+here="$(cd "$(dirname "$0")" && pwd -P)"
 if [ -n "$rev" ]; then
   rev="$(git -C "$dir" rev-parse --verify -q "$rev^{commit}")" || {
     echo "no-retries: '$2' is not a commit" >&2
@@ -72,6 +74,12 @@ scan() {
       finding "$plan" 0 "repeats failing tests (testRepetitionMode other than none, or maximumTestRepetitions): turn retries off"
     fi
   done
+  # Browser runners may use expressions for CI. Only an explicit zero is
+  # acceptable; unknown/multiline values fail closed instead of becoming a
+  # hidden second attempt. Configs outside tools/ are covered too.
+  # Vitest also automatically loads vite.config files. The browser helper owns
+  # NUL-safe enumeration and checked reads in both working and retained trees.
+  python3 "$here/browser-retries.py" "$dir" "$rev" || return 2
   for cfg in $(files '(^|/)nextest\.toml$'); do
     content "$cfg" | grep -n -E '^[[:space:]]*retries[[:space:]]*=' | while IFS=: read -r n text; do
       case "${text#*=}" in
@@ -82,7 +90,7 @@ scan() {
   # Retry switches in the scripts that run tests. This file names them, so it
   # is left out.
   hits="$(grep_tree '(-retry-tests-on-failure|-test-iterations|--retries[ =]*[1-9]|NEXTEST_RETRIES=[1-9])' \
-    tools/ docker/ ':(exclude)tools/gate/static-checks/no-retries.sh')" || return 2
+    tools/ docker/ server/ ':(exclude)tools/gate/static-checks/no-retries.sh')" || return 2
   [ -n "$hits" ] || return 0
   printf '%s\n' "$hits" | while IFS= read -r hit; do
     path="${hit%%:*}"

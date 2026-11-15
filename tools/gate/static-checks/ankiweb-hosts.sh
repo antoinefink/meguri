@@ -23,8 +23,9 @@ here="$(cd "$(dirname "$0")" && pwd -P)"
 # Where tests, scripts and scenarios live. Product sources (core/crates/*/src,
 # app/Meguri, app/Packages/*/Sources) are not in scope: KTD21 feature-gates
 # AnkiWeb there, and U116 scans the built app.
+# The independent server boundary is entirely in scope, including web sources.
 scope=(
-  tools/ docker/ conformance/ oracle/
+  tools/ docker/ conformance/ oracle/ server/
   core/fuzz/ core/tools/ core/crates/meguri-testkit/
   ':(glob)core/crates/*/tests/**' ':(glob)core/crates/*/benches/**'
   app/MeguriUITests/ app/MeguriSnapshotTests/ ':(glob)app/Packages/*/Tests/**' app/Fixtures/ app/TestPlans/

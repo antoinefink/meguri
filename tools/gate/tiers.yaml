@@ -444,7 +444,7 @@ runs:
     placement: [host, docker:similarity]
     needs: [refs]
     class: similarity
-    triggers: [core/, app/, tools/, docker/, conformance/runner/, .claude/]
+    triggers: [core/, app/, server/, tools/, docker/, conformance/runner/, .claude/]
     budget_s: 600
     local: false
     where: main

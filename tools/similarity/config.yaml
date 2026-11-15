@@ -43,6 +43,8 @@ scan:
     - "conformance/recordings/**"
     - "conformance/corpora/**"
   # Swift has no Anki counterpart, so only the cross-language channels apply.
+  # Server Rust and JS/JSX/TS/TSX use their existing language channels;
+  # similarity results do not establish translation independence.
   channels_by_language:
     rust: [struct, lex, com]
     python: [struct, lex, com]

@@ -11,7 +11,7 @@ import re
 import shutil
 import unittest
 
-from support import file_entry, git, make_corpus, read_json, run_cli, scan, synthetic_config, tmpdir, write_tree
+from support import file_entry, git, make_corpus, read_json, record_calibration, run_cli, scan, synthetic_config, tmpdir, write_tree
 
 CORPUS_RS = '''\
 // Spreads the given number of items over buckets so that no bucket exceeds the
@@ -325,6 +325,64 @@ class SyntheticCorpus(unittest.TestCase):
         comment = "// spreads the given number of items over buckets so\n"
         code, _s, views, err = self.scan({"core/x.rs": comment + MEGURI_OWN_RS})
         self.assertEqual(code, 0, err)
+
+    def test_server_rust_and_browser_comments_have_file_and_line_attribution(self):
+        comment = "\n".join(CORPUS_RS.splitlines()[:2])
+        paths = ["server/src/lib.rs"] + ["server/web/src/comment." + ext for ext in ("js", "jsx", "ts", "tsx")]
+        files = {path: "\n" + comment + "\n" for path in paths}
+        code, summary, views, err = self.scan(files)
+        self.assertEqual(code, 1, err)
+        self.assertEqual(summary["counts"]["scanned"], len(paths))
+        for path in paths:
+            with self.subTest(path=path):
+                entry = file_entry(views["implementer"], path)
+                self.assertEqual(entry["language"], "rust" if path.endswith(".rs") else "js")
+                self.assertEqual(set(entry["channels"]), {"struct", "lex", "com"})
+                flag = next(f for f in entry["flags"] if f["channel"] == "com")
+                self.assertEqual(flag["regions"][0]["lines"], [2, 3])
+                record_calibration("server_comment_" + path.rsplit(".", 1)[1],
+                                   {"scanned": 1, "matched": entry["channels"]["com"]["matched"]})
+
+    def test_server_rust_and_browser_literals_match_cross_language_lexical_words(self):
+        from meguri_similarity.lexer import Lexer
+        words = Lexer().lex(CORPUS_RS, "rust").lex * 3
+        paths = ["server/src/literal.rs"] + ["server/web/src/literal." + ext for ext in ("js", "jsx", "ts", "tsx")]
+        files = {}
+        for path in paths:
+            opening, closing = ('const CONTENT: &str = r#"', '"#;') if path.endswith(".rs") else ('const content = `', '`;')
+            files[path] = opening + "\n" + "\n".join(words) + "\n" + closing + "\n"
+        # Ignore only the synthetic declaration; the multiline literal must
+        # still trigger at the physical source lines containing its words.
+        allow = self.allowlist([{"path": path, "lines": "1-1", "channels": ["lex"],
+                                 "reason": "synthetic declaration only", "approved_by": "antoine"} for path in paths])
+        code, summary, views, err = self.scan(files, config=self.no_stopwords_config(), allowlist=allow)
+        self.assertEqual(code, 1, err)
+        self.assertEqual(summary["counts"]["scanned"], len(paths))
+        for path in paths:
+            with self.subTest(path=path):
+                entry = file_entry(views["implementer"], path)
+                self.assertEqual(entry["language"], "rust" if path.endswith(".rs") else "js")
+                self.assertGreater(entry["channels"]["lex"]["matched"], 0)
+                regions = next(f for f in entry["flags"] if f["channel"] == "lex")["regions"]
+                self.assertGreaterEqual(min(r["lines"][0] for r in regions), 2)
+                self.assertLessEqual(max(r["lines"][1] for r in regions), len(words) + 1)
+                record_calibration("server_lex_" + path.rsplit(".", 1)[1],
+                                   {"scanned": 1, "matched": entry["channels"]["lex"]["matched"]})
+
+    def test_server_rust_and_all_browser_extensions_are_counted(self):
+        files = {"server/src/main.rs": "fn meadow() -> u32 { 17 }\n",
+                 "server/web/src/value.js": "export const meadow = 17;\n",
+                 "server/web/src/value.ts": "export const petal: number = 23;\n",
+                 "server/web/src/Screen.tsx": "export const Screen = () => <main>Meadow</main>;\n",
+                 "server/web/src/Icon.jsx": "export const Icon = () => <span>Petal</span>;\n"}
+        code, summary, views, err = self.scan(files)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(summary["counts"]["scanned"], len(files))
+        for path in files:
+            entry = file_entry(views["implementer"], path)
+            self.assertEqual(entry["language"], "rust" if path.endswith(".rs") else "js")
+            self.assertEqual(set(entry["channels"]), {"struct", "lex", "com"})
+        record_calibration("server_counted", {"scanned": summary["counts"]["scanned"]})
 
     def test_string_catalog_value_with_a_copied_sentence_fails_on_text(self):
         sentence = "This deck has no cards that are ready for study at the moment."
