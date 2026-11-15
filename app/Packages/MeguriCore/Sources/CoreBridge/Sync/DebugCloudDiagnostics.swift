@@ -28,6 +28,8 @@ public enum DebugCloudDiagnostics {
     /// One command-scoped observation, inherited by its existing child tasks.
     /// Enqueue callbacks explicitly capture it because SDK admission is detached.
     @TaskLocal public static var sendFailureCapture: SendFailureCapture?
+    // Retain collection/media context when a deeper send catch wins the latch.
+    @TaskLocal static var mediaSendPhase: SendFailureSite?
 
     enum SendFailureSite: String, Sendable {
         case executeAdmission, executeCore, prepareExecution, requestExecution, policyRefresh
@@ -35,6 +37,9 @@ public enum DebugCloudDiagnostics {
         case sendValidation, sdkAuthorization, sdkPreparation, enqueue, invocationReport
         case enqueueSDKAuthorization, enqueueExecutionValidation, drain, postDrainValidation
         case mediaPreparation, mediaOriginalSDK, mediaQuiescing, mediaPreNetwork, mediaWorker
+        case mediaBegin, mediaValidation, mediaNextWork, mediaDrainWait, mediaReadReply
+        case mediaSendWorkflow, mediaCollectionSend, mediaSend, mediaContinueAfterSend
+        case mediaReportBegin, mediaReportEnd, mediaRequiredRefresh, mediaCancellationCheck
         case completion, deferredUpdates, finish
         case exchangeReadiness, exchangeGate, exchangePreparation, exchangeReservation
         case exchangeCapture, exchangeRun, exchangeCompletion, exchangeEndBeforeCapture, heldConfiguration
@@ -45,14 +50,19 @@ public enum DebugCloudDiagnostics {
         private struct Value: Sendable {
             let site: SendFailureSite
             let category: String
-            var formatted: String { "firstSite=\(site.rawValue) firstCategory=\(category)" }
+            let mediaSendPhase: SendFailureSite?
+            var formatted: String {
+                let phase = mediaSendPhase.map { " mediaSendPhase=\($0.rawValue)" } ?? ""
+                return "firstSite=\(site.rawValue) firstCategory=\(category)\(phase)"
+            }
         }
         private let first = Mutex<Value?>(nil)
         public init() {}
         public var firstValue: String? { first.withLock { $0?.formatted } }
         // Classify immediately; retain neither the error nor any associated payload.
-        func record(_ site: SendFailureSite, error: any Error) {
-            let value = Value(site: site, category: DebugCloudDiagnostics.failureTag(error))
+        func record(_ site: SendFailureSite, error: any Error,
+                    mediaSendPhase: SendFailureSite? = DebugCloudDiagnostics.mediaSendPhase) {
+            let value = Value(site: site, category: DebugCloudDiagnostics.failureTag(error), mediaSendPhase: mediaSendPhase)
             first.withLock { if $0 == nil { $0 = value } }
         }
     }

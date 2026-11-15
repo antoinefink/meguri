@@ -188,7 +188,15 @@ impl RuntimeError {
             ),
             Self::StaleIncarnation => ("StaleIncarnation", "none"),
             Self::IdentityUnverified => ("IdentityUnverified", "none"),
-            Self::Incomplete(_) => ("Incomplete", "none"),
+            Self::Incomplete(incomplete) => (
+                "Incomplete",
+                match incomplete {
+                    Incomplete::WholeBindingReconciliation => "WholeBindingReconciliation",
+                    Incomplete::NewOrRemovedNote => "NewOrRemovedNote",
+                    Incomplete::StructuralLayout => "StructuralLayout",
+                    Incomplete::RootConfirmationAndSending => "RootConfirmationAndSending",
+                },
+            ),
             Self::FileIdentityUnavailable => ("FileIdentityUnavailable", "none"),
             Self::Publication(_) => ("Publication", "none"),
         }
@@ -601,12 +609,16 @@ impl NativeAuthority {
     pub(crate) fn validate_network_sdk(&self, sdk: &str) -> Result<(), RuntimeError> {
         self.validate_sdk(sdk)?;
         if self.service_pending {
+            #[cfg(feature = "test-hooks")]
+            eprintln!("cloudGate.refused site=nativeNetworkSDK predicate=servicePending value=1");
             return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
         }
         Ok(())
     }
     pub(crate) fn require_crt_equal(&self) -> Result<(), RuntimeError> {
         if !self.crt_equal {
+            #[cfg(feature = "test-hooks")]
+            eprintln!("cloudGate.refused site=nativeCRT predicate=crtEqual value=0");
             return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
         }
         Ok(())

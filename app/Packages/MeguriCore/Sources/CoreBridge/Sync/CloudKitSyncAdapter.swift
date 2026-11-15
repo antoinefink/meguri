@@ -1495,6 +1495,7 @@ public actor CloudKitSyncAdapter {
                       requireMediaAdmission: Bool = false) async throws {
         #if DEBUG
         let diagnostic = DebugCloudDiagnostics.sendFailureCapture
+        let mediaSendPhase = DebugCloudDiagnostics.mediaSendPhase
         var site = DebugCloudDiagnostics.SendFailureSite.sendAdmission
         #endif
         guard !quiescing, !suspended, !suspending else {
@@ -1616,16 +1617,16 @@ public actor CloudKitSyncAdapter {
                     #if DEBUG
                     do {
                         if let execution { invocationOutputs.append(try await execution.reportInvocation(zones: reportedZones, kind: .send)) }
-                    } catch { diagnostic?.record(.invocationReport, error: error); throw error }
+                    } catch { diagnostic?.record(.invocationReport, error: error, mediaSendPhase: mediaSendPhase); throw error }
                     #else
                     if let execution { invocationOutputs.append(try await execution.reportInvocation(zones: reportedZones, kind: .send)) }
                     #endif
                 }, validate: {
                     #if DEBUG
                     do { try validateSDK() }
-                    catch { diagnostic?.record(.enqueueSDKAuthorization, error: error); throw error }
+                    catch { diagnostic?.record(.enqueueSDKAuthorization, error: error, mediaSendPhase: mediaSendPhase); throw error }
                     do { try execution?.validateForEnqueue() }
-                    catch { diagnostic?.record(.enqueueExecutionValidation, error: error); throw error }
+                    catch { diagnostic?.record(.enqueueExecutionValidation, error: error, mediaSendPhase: mediaSendPhase); throw error }
                     #else
                     try validateSDK()
                     try execution?.validateForEnqueue()
@@ -2554,9 +2555,43 @@ public actor CloudKitSyncAdapter {
             throw BridgeError.cloudPolicy(.staleCommand)
         }
         // Core qualifies both sends; the same original SDK serves collection first.
-        try await send(zones: [instance.zone], origin: origin, execution: execution, requireMediaAdmission: true)
-        try Task.checkCancellation()
-        try await send(zones: ["meguri-media"], origin: origin, execution: execution, requireMediaAdmission: true)
+        do {
+            #if DEBUG
+            try await DebugCloudDiagnostics.$mediaSendPhase.withValue(.mediaCollectionSend) {
+                try await send(zones: [instance.zone], origin: origin, execution: execution, requireMediaAdmission: true)
+            }
+            #else
+            try await send(zones: [instance.zone], origin: origin, execution: execution, requireMediaAdmission: true)
+            #endif
+        }
+        catch {
+            #if DEBUG
+            DebugCloudDiagnostics.sendFailureCapture?.record(.mediaCollectionSend, error: error)
+            #endif
+            throw error
+        }
+        do { try Task.checkCancellation() }
+        catch {
+            #if DEBUG
+            DebugCloudDiagnostics.sendFailureCapture?.record(.mediaCancellationCheck, error: error)
+            #endif
+            throw error
+        }
+        do {
+            #if DEBUG
+            try await DebugCloudDiagnostics.$mediaSendPhase.withValue(.mediaSend) {
+                try await send(zones: ["meguri-media"], origin: origin, execution: execution, requireMediaAdmission: true)
+            }
+            #else
+            try await send(zones: ["meguri-media"], origin: origin, execution: execution, requireMediaAdmission: true)
+            #endif
+        }
+        catch {
+            #if DEBUG
+            DebugCloudDiagnostics.sendFailureCapture?.record(.mediaSend, error: error)
+            #endif
+            throw error
+        }
     }
     func waitForMediaFetchDrain(core: CoreCloudMediaService, execution: CoreCloudPolicyExecution) async throws {
         guard let origin = try await execution.originalSDK() else { throw BridgeError.cloudPolicy(.staleCommand) }

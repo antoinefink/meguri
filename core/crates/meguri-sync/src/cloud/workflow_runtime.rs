@@ -90,6 +90,8 @@ impl Runtime {
         }
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
         if Self::layout_refused_locked(s) {
+            #[cfg(feature = "test-hooks")]
+            eprintln!("cloudGate.refused site=callerLocked predicate=layoutRefused value=1");
             return Err(RuntimeError::Incomplete(Incomplete::StructuralLayout));
         }
         if !b.usable || !b.verified || b.binding.facts.state != BindingState::Active {
@@ -164,6 +166,8 @@ impl Runtime {
     pub(super) fn gate_locked(s: &State) -> Result<(), RuntimeError> {
         Self::general_gate_locked(s)?;
         if !s.root_confirmed && !Self::publication_allows_send_locked(s) {
+            #[cfg(feature = "test-hooks")]
+            eprintln!("cloudGate.refused site=workflowGate predicate=rootConfirmedOrPublicationAllowsSend value=0");
             return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
         }
         Ok(())
@@ -176,6 +180,8 @@ impl Runtime {
             || s.adapter.durable.collection_loss.is_some()
             || s.adapter.durable.epoch_verification.is_some()
         {
+            #[cfg(feature = "test-hooks")]
+            eprintln!("cloudGate.refused site=generalGate predicate=knownLossOrCollectionLossOrEpochVerification value=1");
             return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
         }
         Ok(())
@@ -185,15 +191,21 @@ impl Runtime {
     fn capture_gate_locked(s: &State) -> Result<(), RuntimeError> {
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
         if Self::layout_refused_locked(s) {
+            #[cfg(feature = "test-hooks")]
+            eprintln!("cloudGate.refused site=captureGate predicate=layoutRefused value=1");
             return Err(RuntimeError::Incomplete(Incomplete::StructuralLayout));
         }
         if !b.usable || !b.verified {
             return Err(RuntimeError::IdentityUnverified);
         }
         if Self::publication_holds_binding_locked(s) {
+            #[cfg(feature = "test-hooks")]
+            eprintln!("cloudGate.refused site=captureGate predicate=publicationHoldsBinding value=1");
             return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
         }
         if !b.crt_equal() {
+            #[cfg(feature = "test-hooks")]
+            eprintln!("cloudGate.refused site=captureGate predicate=crtEqual value=0");
             return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
         }
         if !s.whole_complete
@@ -203,6 +215,11 @@ impl Runtime {
             || s.adapter.paused
             || s.incoming.running
         {
+            #[cfg(feature = "test-hooks")]
+            eprintln!(
+                "cloudGate.refused site=captureGate predicate=workflowReady value=0 wholeComplete={} scanRequired={} scanRunning={} trackingStopped={} paused={} incomingRunning={}",
+                s.whole_complete, s.scan_required, s.scan_running, s.tracking_stopped, s.adapter.paused, s.incoming.running,
+            );
             return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
         }
         Ok(())

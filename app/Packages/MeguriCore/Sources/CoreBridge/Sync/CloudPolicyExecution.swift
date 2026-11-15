@@ -1168,11 +1168,20 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
         var outputs: [CloudPolicyOutput] = []
         var requiredRefreshStarted = false
         var selected = (issued, permit)
+        #if DEBUG
+        var failureSite: DebugCloudDiagnostics.SendFailureSite = .mediaCancellationCheck
+        #endif
         do {
             repeat {
                 let (issued, permit) = selected
                 await delivery.acknowledge(outputs)
+                #if DEBUG
+                failureSite = .mediaCancellationCheck
+                #endif
                 try Task.checkCancellation()
+                #if DEBUG
+                failureSite = .mediaBegin
+                #endif
                 guard try await permit.beginMedia() else {
                     // A prepared original may outlive its configure drain
                     // without ever registering a worker there. Release this
@@ -1185,20 +1194,38 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 let onlyEnvelopes: Bool
                 if case .readBlobs = issued.action { onlyEnvelopes = true } else { onlyEnvelopes = false }
                 await worker.beginRound()
+                #if DEBUG
+                failureSite = .mediaReportBegin
+                #endif
                 try await delivery.appendInput(to: &outputs) { try await permit.report(zones: [.media], kind: .read, started: true) }
                 await delivery.acknowledge(outputs)
                 var readFailure: (any Error)?
                 var sendStopped = false
                 do {
                     round: while true {
+                        #if DEBUG
+                        failureSite = .mediaCancellationCheck
+                        #endif
                         try Task.checkCancellation()
+                        #if DEBUG
+                        failureSite = .mediaValidation
+                        #endif
                         try await permit.validate()
+                        #if DEBUG
+                        failureSite = .mediaNextWork
+                        #endif
                         switch try await worker.runNext(metadataOnly: onlyEnvelopes) {
                         case .idle: break round
                         case .waitingForCollectionDrain:
+                            #if DEBUG
+                            failureSite = .mediaDrainWait
+                            #endif
                             guard !onlyEnvelopes else { throw CloudMediaFailure.metadataScope }
                             try await adapter.waitForMediaFetchDrain(core: coreMedia, execution: permit)
                         case .engineSendRequired:
+                            #if DEBUG
+                            failureSite = .mediaSendWorkflow
+                            #endif
                             guard !onlyEnvelopes else { throw CloudMediaFailure.metadataScope }
                             do {
                                 #if DEBUG
@@ -1211,21 +1238,27 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                             }
                             catch {
                                 #if DEBUG
-                                DebugCloudDiagnostics.sendFailureCapture?.record(.mediaWorker, error: error)
+                                DebugCloudDiagnostics.sendFailureCapture?.record(failureSite, error: error)
                                 #endif
                                 context.observe(error)
                                 outputs.append(contentsOf: await adapter.takePolicyOperationOutputs())
                                 await delivery.acknowledge(outputs)
+                                #if DEBUG
+                                failureSite = .mediaContinueAfterSend
+                                #endif
                                 if try await permit.continueMediaAfterSend(error) == false { sendStopped = true; throw error }
                             }
                             outputs.append(contentsOf: await adapter.takePolicyOperationOutputs())
                         case .read(let reply):
+                            #if DEBUG
+                            failureSite = .mediaReadReply
+                            #endif
                             if let error = reply.failure() { throw error }
                         }
                     }
                 } catch {
                     #if DEBUG
-                    DebugCloudDiagnostics.sendFailureCapture?.record(.mediaWorker, error: error)
+                    DebugCloudDiagnostics.sendFailureCapture?.record(failureSite, error: error)
                     #endif
                     context.observe(error); readFailure = error
                 }
@@ -1235,10 +1268,13 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 #endif
                 await delivery.acknowledge(outputs)
                 let endedFailure = sendStopped ? nil : readFailure
+                #if DEBUG
+                failureSite = .mediaReportEnd
+                #endif
                 do { try await delivery.appendInput(to: &outputs) { try await permit.report(zones: [.media], kind: .read, started: false, error: endedFailure) } }
                 catch {
                     #if DEBUG
-                    DebugCloudDiagnostics.sendFailureCapture?.record(.mediaWorker, error: error)
+                    DebugCloudDiagnostics.sendFailureCapture?.record(failureSite, error: error)
                     #endif
                     if context.observeEndReadReportFailure(error, primary: readFailure) {
                         #if DEBUG
@@ -1250,6 +1286,9 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 if let readFailure { throw readFailure }
                 await delivery.acknowledge(outputs)
                 requiredRefreshStarted = true
+                #if DEBUG
+                failureSite = .mediaRequiredRefresh
+                #endif
                 try await delivery.appendInput(to: &outputs) { [policy] in try await policy.input(.refresh(.cloud)) }
                 requiredRefreshStarted = false
                 guard let queuedResume = heldMediaResume.removeValue(forKey: instance) else { break }
@@ -1259,7 +1298,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
         } catch {
             var mediaCancellation = context.observe(error)
             #if DEBUG
-            DebugCloudDiagnostics.sendFailureCapture?.record(.mediaWorker, error: error)
+            DebugCloudDiagnostics.sendFailureCapture?.record(failureSite, error: error)
             DebugCloudDiagnostics.record(.policyExecute, action: selected.0.action, error: error)
             #endif
             if let queuedResume = heldMediaResume.removeValue(forKey: instance), let mediaTransport {
