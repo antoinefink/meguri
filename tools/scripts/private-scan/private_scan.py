@@ -851,6 +851,18 @@ PUBLIC_ARTIFACTS = {
         "48052e8afb0a458947e4a7e72340b448a478bf39db758e44ae6773aca605c7b4",
     "conformance/schema/meguri-sync-server.schema.json":
         "cd905c134ed497f166566e18733465fa7e992156944957ee16c2e17ca586814a",
+    # Same delegated maintenance: independently authored/reviewed tooling,
+    # exact complete bytes only. No production server path is exempted.
+    "docs/process/review-log/meguri-sync-boundary-authoring-20261115.md":
+        "c4aa47634166c890025e2ec1fd3a552069677f0d30fc554a98ae7bec82ce2c2a",
+    "tools/cleanroom/source_view.py":
+        "be74880b8aaa6768678ec1ad577424a05c8dcc07041a02a8e2f18cb5907530ad",
+    "tools/cleanroom/test_source_view.py":
+        "baed9e4626b60421f37783144317b3823f8d559b71694818c6bdd2f40f4a9508",
+    "tools/gate/static-checks/browser-retries.py":
+        "a69bee98c29564e9bdb30eb0f623f20db91795623c6eea1a982cc740d4b1565e",
+    "tools/similarity/tests/test_scan_synthetic.py":
+        "7a2488452f49b17772f611678883627bbe0c3b96e732de027bfb4f466fd35ca9",
 }
 
 

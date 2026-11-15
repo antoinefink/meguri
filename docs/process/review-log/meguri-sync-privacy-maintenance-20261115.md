@@ -28,6 +28,14 @@ the transport contract has no new entry. No path prefix, directory exclusion,
 editable manifest or automatic approval rule was added. Changed bytes lose the
 exception.
 
+The final tooling scan also reported vocabulary matches in five independently
+authored and reviewed infrastructure/handoff files. Their exact complete hashes
+were registered under the same delegated authority. Credential exclusions and
+synthetic tests remain byte-for-byte unchanged. No production server path was
+added. Targeted and staged failed receipts remain at
+`build/mg/private/20261115T132421Z-3308/result.json` and
+`build/mg/private/20261115T132625Z-5094/result.json`.
+
 Independent read-only reviews found no actionable defect in the maintenance
 operation or the final grant/test changes. Synthetic checks cover committed-only
 learning, unknown-word retention, private-result/fixed-literal exclusions, path
