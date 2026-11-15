@@ -25,3 +25,5 @@ Those peer checks and all required integration and release evidence stay open.
 Later preview: `build-app/20261115T040403Z-72187` passes for clean `66347256`. The prior preview quit normally and the exact new standalone product opened. A process-image check found one matching executable. No grade, import or replacement was performed. This adds build and launch evidence only; no new visual or peer-transfer claim.
 
 Phone update `run/20261115T040938Z-77365` passes for clean `9aee2230`, including verified normal launch. This installs the current production repair without a fixture route, reset or data replacement. UI inspection and further peer evidence remain separate.
+
+Inspection `drive/20261115T041504Z-84135` failed preservation admission before starting a runner. Its fixed reason is `matching-preparation`: source changed after the trusted normal preparation. This supplies no UI evidence. A new normal preparation is required before another preserve-mode inspection; no guard or receipt is changed to admit the old one.
