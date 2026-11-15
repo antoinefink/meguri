@@ -39,6 +39,7 @@ struct AssetExecutorRemote: Sendable {
 
 func assetExecutorPolicy(_ fixture: CloudKitBridgeFixture) async throws -> CoreCloudPolicyService {
     let (policy, _) = try await nativePolicy(fixture)
+    try await fixture.qualifyCompleteEpoch()
     let engine = try await fixture.engine()
     await engine.appendFetchScripts([
         .manual(fetchedZones: ["meguri-root", fixture.zone], records: [fixture.root], group: nil),

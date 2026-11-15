@@ -188,6 +188,7 @@ extension EventTests {
     /// the following cursor. A later resolver failure preserves the live owner.
     @Test func cloudKitFailedNotificationLookupKeepsOwnerRecordsCursorAndPending() async throws {
         try await withCloudKitFixture { f in
+            try await f.qualifyCompleteEpoch()
             let engine = try await f.engine()
             let guardBefore = try await f.core.currentGuard()
             let pending = await engine.pendingRecordZoneChanges()
@@ -221,6 +222,7 @@ extension EventTests {
     /// resolver fails; it keeps the verified owner and restores usable pending.
     @Test func cloudKitFailedSDKLookupKeepsOwnerAndMarksActualStateLoss() async throws {
         try await withCloudKitFixture { f in
+            try await f.qualifyCompleteEpoch()
             let engine = try await f.engine()
             let guardBefore = try await f.core.currentGuard()
             let pending = await engine.pendingRecordZoneChanges()
@@ -397,6 +399,7 @@ extension EventTests {
     @Test(arguments: [true, false])
     func cloudKitSavedRevision3CannotEraseRevision4(a23: Bool) async throws {
         try await withCloudKitFixture(a23: a23, keepAlive: !a23) { f in
+            try await f.qualifyCompleteEpoch()
             let engine = try await f.engine()
             let name = try #require(f.names.first)
             let deck = try #require(f.decks.first)
@@ -471,6 +474,7 @@ extension EventTests {
     /// Q11 K12.4; P21 hold-back/deferrals; actual ReviewService SessionEnded.
     @Test func cloudKitHeldEditWaitsForRealSessionEndedFullUpdate() async throws {
         try await withCloudKitFixture { f in
+            try await f.qualifyCompleteEpoch()
             if try await Core.fsrsPolicyStatus() != .ok {
                 let job = try await Core.enableFsrs()
                 try await job.value()
@@ -540,6 +544,7 @@ extension EventTests {
 
     private func cloudKitOrderedPending(a23: Bool, replacement: CloudPendingChange?) async throws {
         try await withCloudKitFixture(a23: a23) { f in
+            try await f.qualifyCompleteEpoch()
             let engine = try await f.engine()
             let inside = CloudCallbackGate()
             await f.probe.pauseSent(inside)
@@ -594,6 +599,7 @@ extension EventTests {
     /// returns. No helper loop makes sends or manufactures success.
     @Test func cloudKitAutoOff400SelectedLimitExceededFinishesWithinEightCalls() async throws {
         try await withCloudKitFixture(count: 400) { f in
+            try await f.qualifyCompleteEpoch()
             let engine = try await f.engine()
             #expect(!engine.automaticallySync)
             await engine.appendSendReplies([.failed(.limitExceeded)])
@@ -631,6 +637,7 @@ extension EventTests {
     /// the corresponding durable inbox event's handler is still suspended.
     @Test func cloudKitInboxCommitPrecedesOpaqueSDKState() async throws {
         try await withCloudKitFixture { f in
+            try await f.qualifyCompleteEpoch()
             let engine = try await f.engine()
             let gate = CloudCallbackGate()
             await f.probe.pauseFetched(gate)
@@ -668,7 +675,9 @@ extension EventTests {
     /// injected into real Rust persistence, including opaque-state commits.
     @Test(arguments: [true, false])
     func cloudKitPersistenceFailureStopsAndDrainsOldInstance(failInbox: Bool) async throws {
-        try await withCloudKitFixture(keepAlive: true, failInbox: failInbox, failState: !failInbox) { f in
+        try await withCloudKitFixture(keepAlive: true) { f in
+            try await f.qualifyCompleteEpoch()
+            try await f.armAdapterFaults(failInbox: failInbox, failState: !failInbox)
             let engine = try await f.engine()
             let before = try await f.core.durableSnapshot()
             await engine.emitRetained(.fetched(zone: f.zone, records: [f.incoming], deleted: []), label: "fetched")
@@ -726,6 +735,7 @@ extension EventTests {
     /// Sync Now waiting, after persistence, with no fabricated FetchDrained.
     @Test func cloudKitBothFetchesSkippedNeverClaimDrainOrSuccess() async throws {
         try await withCloudKitFixture { f in
+            try await f.qualifyCompleteEpoch()
             let engine = try await f.engine()
             let before = try await f.core.fetchDrains()
             await engine.appendFetchScripts([.shortCircuited, .shortCircuited])
@@ -859,6 +869,7 @@ extension EventTests {
     func cloudKitManualPrePointCollectionFetchCompletesNoAbsencePass(createdWithoutState: Bool) async throws {
         let savedState: Data? = createdWithoutState ? nil : Data([0x73, 0x64, 0x6b])
         try await withCloudKitFixture(savedState: savedState) { f in
+            try await f.qualifyCompleteEpoch()
             let engine = try await f.engine()
             #expect(engine.restoredSerialization == savedState)
             let before = try await f.core.fetchDrains()

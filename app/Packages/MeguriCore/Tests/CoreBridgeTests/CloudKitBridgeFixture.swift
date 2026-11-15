@@ -218,6 +218,30 @@ struct CloudKitBridgeFixture: Sendable {
         try #require(await factory.engines().last)
     }
 
+    /// Opt in only when the case starts after accepted complete-epoch metadata.
+    /// Keep the shared baseline Unknown; this callback must precede fault arming,
+    /// held callbacks and observations of the behavior under test.
+    func qualifyCompleteEpoch() async throws {
+        let engine = try await engine()
+        try await core.validateSDK(engine.instanceID)
+        try #require(try await epochAuthority() == nil, "Positive qualification must start with Unknown authority")
+        let target = CloudControlTarget(zone: zone, name: "epoch", recordType: "MGEpoch")
+        let bytes = try await boundEpochBytes()
+        let native = try NativeCloudOwnRecords.save(target: target, encrypted: bytes, systemFields: nil)
+        let record = try NativeCloudRecordConversion.decode(native)
+        await engine.emitRetained(.fetched(zone: zone, records: [record], deleted: []), label: "positiveCompleteEpoch")
+        try await core.validateSDK(engine.instanceID)
+        try #require(try await epochAuthority() != nil, "Positive fixture requires accepted complete-epoch authority")
+    }
+
+    func armAdapterFaults(failInbox: Bool, failState: Bool) async throws {
+        try await MaintenanceLane.shared.call("test.cloudArmAdapterFaults") {
+            try MeguriCoreBindings.testCloudArmAdapterFaults(
+                failNextInboxCommit: failInbox, failNextStateCommit: failState
+            )
+        }
+    }
+
     func close() async {
         try? await adapter.stop()
         try? await collection.close()

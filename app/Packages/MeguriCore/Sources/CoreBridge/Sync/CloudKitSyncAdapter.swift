@@ -1771,8 +1771,10 @@ public actor CloudKitSyncAdapter {
             guard await valid(origin) else { return false }
             if instance.zoneLossPending { return false }
             policyOperationOutputs.append(contentsOf: invocationOutputs.take())
+            let plan: CloudFetchReadPlan
+            let drained: Bool
             do {
-                let plan = try await core.fetchReadPlan(sdk: origin, id: id)
+                plan = try await core.fetchReadPlan(sdk: origin, id: id)
                 // All original fetch callbacks have returned. Keep fetchBusy held
                 // through inference so another manual fetch cannot pass these reads.
                 if let transport = assetReadTransport {
@@ -1785,11 +1787,8 @@ public actor CloudKitSyncAdapter {
                     }
                 }
                 guard await valid(origin), !quiescing, !suspended, !suspending else { return false }
-                let drained = try await core.finishFetch(sdk: origin, id: id)
+                drained = try await core.finishFetch(sdk: origin, id: id)
                 try await reportOperation(execution, zones: [.root, .collection], kind: .fetch, started: false)
-                // P4's repeat repairs a joined/short-circuited call only. An own
-                // qualified call whose read failed waits for the next event trigger.
-                if plan.qualified { return drained }
             } catch {
                 let proof = error as? CloudFetchProofError
                 do {
@@ -1808,6 +1807,17 @@ public actor CloudKitSyncAdapter {
                 }
                 throw error
             }
+            // Post-API finalization and own reads can emit RootConfirmed's full
+            // list after the last callback drain. Apply and ACK this owner's
+            // lists before returning, without finalizing the fetch a second time.
+            guard await valid(origin), owned[origin] === instance, !quiescing, !suspended, !suspending else { return false }
+            try Task.checkCancellation()
+            try await waitForDeferredUpdates(origin: origin)
+            guard await valid(origin), owned[origin] === instance, !quiescing, !suspended, !suspending else { return false }
+            try Task.checkCancellation()
+            // P4's repeat repairs a joined/short-circuited call only. An own
+            // qualified call whose read failed waits for the next event trigger.
+            if plan.qualified { return drained }
         }
         return false
     }

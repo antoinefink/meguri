@@ -807,6 +807,21 @@ pub fn test_cloud_prepare_adapter_baseline(
     })
 }
 
+/// Arm the existing real adapter transaction faults after positive fixture intake.
+#[uniffi::export]
+pub fn test_cloud_arm_adapter_faults(
+    fail_next_inbox_commit: bool,
+    fail_next_state_commit: bool,
+) -> Result<(), CoreError> {
+    callback::enter("test_cloud_arm_adapter_faults");
+    let host = runtime::host()?;
+    let core = host
+        .cloud_runtime()
+        .ok_or_else(|| crate::sync::cloud_error("cloud capture unavailable"))?;
+    core.arm_adapter_faults_for_testing(fail_next_inbox_commit, fail_next_state_commit);
+    Ok(())
+}
+
 /// Interrupt the next real incoming writer after its durable intent.
 #[uniffi::export]
 pub fn test_cloud_interrupt_next_incoming(cancel: bool) -> Result<(), CoreError> {

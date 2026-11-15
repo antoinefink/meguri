@@ -15,6 +15,7 @@ func expectAppliedCloudIncoming(_ fixture: CloudKitBridgeFixture) async throws {
 extension EventTests {
     @Test func fetchedNativeEventSettlesThroughTheRealCoreAndRedeliveryIsSafe() async throws {
         try await withCloudKitFixture { fixture in
+            try await fixture.qualifyCompleteEpoch()
             let engine = try await fixture.engine()
             #expect(try await fixture.core.entityFacts(name: fixture.incoming.name) == nil)
             await engine.emitRetained(.fetched(zone: fixture.zone, records: [fixture.incoming], deleted: []), label: "applyIncoming")
