@@ -1460,6 +1460,7 @@ extension EventTests {
     /// R3/K10.3: equality includes same-name content and pending root facts.
     @Test func cloudKitSnapshotIncludesInboxContentPendingRootAndStaleDeliveries() async throws {
         try await withCloudKitFixture(keepAlive: true) { f in
+            try await f.qualifyCompleteEpoch()
             let old = try await f.engine()
             await old.emitRetained(.fetched(zone: f.zone, records: [f.incoming], deleted: []), label: "firstInbox")
             let first = try await f.core.durableSnapshot()
@@ -1488,7 +1489,7 @@ extension EventTests {
 
     /// R3/P12.1/.6/.7: real core joins and records a cancellation once.
     @Test func cloudKitCoreExchangeJoinAndCancellationKeepActualSelection() async throws {
-        try await withCloudKitFixture { f in
+        try await withCloudKitPendingFixture { f in
             let sdk = try await f.engine().instanceID
             let id = try await f.core.beginExchange(sdk: sdk)
             #expect(try await f.core.beginExchange(sdk: sdk) == id)
