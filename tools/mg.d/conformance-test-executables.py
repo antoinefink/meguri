@@ -5,8 +5,9 @@ from pathlib import Path
 import sys
 
 
-def executables(stream):
+def executables(stream, selected=None):
     paths = []
+    matches = []
     finished = False
     for line in stream:
         message = json.loads(line)
@@ -36,15 +37,21 @@ def executables(stream):
                     or not os.access(path, os.X_OK) or path in paths):
                 raise ValueError("missing, invalid or duplicate Cargo test executable")
             paths.append(path)
+            if target["name"] == selected:
+                matches.append(path)
     if not finished or not paths:
         raise ValueError("incomplete Cargo build or no test executables")
+    if selected is not None:
+        if len(matches) != 1:
+            raise ValueError("expected exactly one known native testkit target: " + selected)
+        return matches
     return paths
 
 
 if __name__ == "__main__":
     try:
         with open(sys.argv[1], encoding="utf-8") as stream:
-            paths = executables(stream)
+            paths = executables(stream, sys.argv[2] if len(sys.argv) == 3 else None)
         # Emit only after every target and the terminal success are validated.
         sys.stdout.buffer.write(b"".join(os.fsencode(path) + b"\0" for path in paths))
     except (OSError, ValueError) as error:

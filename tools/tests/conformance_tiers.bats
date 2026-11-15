@@ -133,7 +133,10 @@ from pathlib import Path
 root = Path(os.environ["STUB_TESTKIT"])
 messages = [{"reason": "compiler-artifact", "profile": {"test": False},
              "target": {"name": "dependency", "kind": ["lib"]}, "executable": None}]
-for name, kind in (("unit", "lib"), ("integration", "test"), ("conformance", "test")):
+targets = [("unit", "lib"), ("integration", "test"), ("conformance", "test")]
+if os.environ.get("TESTKIT_EXTRA_TARGET"):
+    targets.append((os.environ["TESTKIT_EXTRA_TARGET"], "test"))
+for name, kind in targets:
     messages.append({"reason": "compiler-artifact", "profile": {"test": True},
                      "target": {"name": name, "kind": [kind]}, "executable": str(root / name)})
 mode = os.environ.get("TESTKIT_ARTIFACT_CASE", "valid")
@@ -221,6 +224,118 @@ mg_conf__record_stale() {
 EOF
 }
 
+native_selector_stubs() {
+  native_scratch_stubs
+  export TESTKIT_EXTRA_TARGET=cloud_checks
+  cp "$STUB_TESTKIT/unit" "$STUB_TESTKIT/cloud_checks"
+  cat >>"$STUB_TESTKIT/cloud_checks" <<'EOF'
+rc=$?
+case "${TESTKIT_SUMMARY:-pass}" in
+  pass) echo 'test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s' ;;
+  empty) echo 'test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s' ;;
+  failed) echo 'test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s' ;;
+  multiple)
+    echo 'test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s'
+    echo 'test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s' ;;
+  malformed) echo 'test result: ok. invalid counts' ;;
+  missing) : ;;
+esac
+exit "$rc"
+EOF
+}
+
+@test "native selector runs exactly the known whole binary with scratch counts artifacts and focused arguments" {
+  native_selector_stubs
+  local jobs expected run_dir
+  for jobs in 1 2 7; do
+    expected=2
+    [ "$jobs" != 1 ] || expected=1
+    export EXPECT_NATIVE_JOBS="$expected"
+    mg conformance --lane native --jobs "$jobs" --native-test cloud_checks
+    [ "$status" -eq 0 ]
+    run_dir="$(dirname "$result")"
+    jq -e --arg jobs "$jobs" --argjson n "$expected" '
+      .status=="pass" and .args==["--lane","native","--jobs",$jobs,"--native-test","cloud_checks"]
+      and .details.focused=={scope:"diagnostic-only",native_test:"cloud_checks",full_conformance:false}
+      and .details.native_concurrency==$n and (.details | has("lanes") | not)
+      and .summary=={total:2,passed:2,failed:0,skipped:0}
+      and (.message | contains("diagnostic-only") and contains("not full native/all conformance"))
+      and any(.artifacts[]; .kind=="test-log" and (.label | contains("diagnostic-only")))' "$result"
+    [ -s "$run_dir/native-testkit-build.jsonl" ]
+    [ -s "$run_dir/native-testkit-executables" ]
+    [ ! -e "$run_dir/native-build.jsonl" ]
+    [ ! -e "$run_dir/t0-native.json" ]
+    [ ! -e "$run_dir/native-scratch" ]
+    grep -Fxq -- "conformance: native binary exit $STUB_TESTKIT/cloud_checks rc=0" "$run_dir/log.txt"
+  done
+  [ "$(cat "$CALLS.tests")" = $'cloud_checks\ncloud_checks\ncloud_checks' ]
+  [ "$(cat "$CALLS.test-args")" = $'--test-threads=1\n--test-threads=2\n--test-threads=2' ]
+  [ "$(grep -Fxc -- "$SB/core/crates/meguri-testkit" "$CALLS.test-cwd")" -eq 3 ]
+  [ "$(grep -cx prepare "$CALLS.scratch")" -eq 3 ]
+  [ "$(grep -cx cleanup "$CALLS.scratch")" -eq 3 ]
+  [ ! -e "$CALLS.child-tmp" ]
+  [ "$(cat "$CALLS")" = $'edges-cleanup\nedges-cleanup\nedges-cleanup' ]
+}
+
+@test "native selector rejects missing options paths duplicate selectors and incompatible modes before runners" {
+  mg conformance --lane native --native-test ""
+  [ "$status" -eq 2 ]
+  local args
+  for args in '--native-test' '--native-test --jobs' '--native-test /tmp/cloud_checks' \
+    '--native-test ../cloud_checks' '--native-test ./cloud_checks' '--native-test cloud_checks/name' \
+    '--native-test cloud_checks --native-test cloud_checks' '--native-test cloud_checks' \
+    '--lane all --native-test cloud_checks' '--lane docker --native-test cloud_checks' \
+    '--lane linux --native-test cloud_checks' '--lane all --lane native --native-test cloud_checks' \
+    '--lane native --live --native-test cloud_checks' '--lane native --live-only --native-test cloud_checks' \
+    '--lane native --native-test cloud_checks smoke/fixture' '--lane native smoke/fixture --native-test cloud_checks'; do
+    # Each fixture is intentionally a fixed space-separated argument list.
+    # shellcheck disable=SC2086
+    mg conformance $args
+    [ "$status" -eq 2 ]
+    jq -e '.status=="error" and any(.failures[]; .id=="usage")' "$result"
+    [ ! -e "$CALLS" ]
+    [ ! -e "$CALLS.cargo-args" ]
+    [ ! -e "$CALLS.scratch" ]
+  done
+}
+
+@test "native selector matches Cargo target names exactly and refuses absent or invalid executables" {
+  native_selector_stubs
+  local name mode
+  for name in unknown cloud cloud_check cloud_checks-extra; do
+    mg conformance --lane native --native-test "$name"
+    [ "$status" -eq 2 ]
+    jq -e '.status=="error" and .details.focused.scope=="diagnostic-only" and any(.failures[]; .id=="native/testkit-build")' "$result"
+    [ ! -s "$(dirname "$result")/native-testkit-executables" ]
+    [ ! -e "$CALLS.tests" ]
+  done
+  for mode in zero missing missing-file malformed incomplete duplicate; do
+    export TESTKIT_ARTIFACT_CASE="$mode"
+    mg conformance --lane native --native-test cloud_checks
+    [ "$status" -eq 2 ]
+    [ ! -s "$(dirname "$result")/native-testkit-executables" ]
+    [ ! -e "$CALLS.tests" ]
+  done
+}
+
+@test "native selector fails on nonzero exit empty failing missing or ambiguous result counts" {
+  native_selector_stubs
+  export TESTKIT_FAIL=cloud_checks
+  mg conformance --lane native --native-test cloud_checks
+  [ "$status" -eq 1 ]
+  jq -e '.status=="fail" and .summary.passed==2 and any(.failures[]; .id=="native/testkit" and (.repro | contains("--native-test")))' "$result"
+  unset TESTKIT_FAIL
+  local mode
+  for mode in empty failed missing malformed multiple; do
+    export TESTKIT_SUMMARY="$mode"
+    mg conformance --lane native --native-test cloud_checks
+    [ "$status" -eq 1 ]
+    jq -e '.status=="fail" and (.message | contains("diagnostic-only"))' "$result"
+    [ ! -e "$(dirname "$result")/native-scratch" ]
+  done
+  [ ! -e "$CALLS.child-tmp" ]
+}
+
 @test "native scenario children alone inherit exact run TMPDIR including freshness and offline live replay" {
   native_scratch_stubs
   local inherited="${TMPDIR-unset}"
@@ -250,6 +365,7 @@ EOF
   [ "$(grep -cx -- '--test-threads=2' "$CALLS.test-args")" -eq 3 ]
   [ "$(cat "$CALLS.test-order")" = $'start unit\nexit unit\nstart integration\nexit integration\nstart conformance\nexit conformance' ]
   jq -e '.details.native_concurrency==2' "$result"
+  jq -e '(.details | has("focused") | not) and .summary=={total:1,passed:1,failed:0,skipped:0,pending:0,reference:0}' "$result"
   python3 - "$run_dir/log.txt" "$STUB_TESTKIT" <<'PY'
 import pathlib, sys
 log = pathlib.Path(sys.argv[1]).read_text()

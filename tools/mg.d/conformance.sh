@@ -8,7 +8,7 @@
 # which the container cannot see, so they are host jobs too.
 
 mg_job conformance host mg_conformance \
-  "Conformance: T0 by default, T0+T1 with --live, T1 with --live-only; [--lane native|docker|all] [--jobs N] [filter...]"
+  "Conformance: T0 by default, T0+T1 with --live, T1 with --live-only; [--lane native|docker|all] [--jobs N] [filter...]; --lane native --native-test <testkit-binary> is diagnostic-only, never full conformance/gate evidence"
 mg_job conformance-route-test host mg_conf_routes \
   "Real conformance edge/retained namespace transport lifecycle (neutral socket fixtures, no scenario acceptance)"
 mg_job goldens-check host mg_goldens_check \
@@ -135,14 +135,17 @@ mg_conf__native_ready() {
 # launching anything, then retain --no-fail-fast across the emitted binaries.
 # Match Cargo's package working directory for this package's test executables.
 mg_conf__testkit_native() {
-  local executable binary_rc rc=0 jobs="${MG_CONF_NATIVE_JOBS:-2}"
+  local executable binary_rc rc=0 jobs="${MG_CONF_NATIVE_JOBS:-2}" selected="${1:-}"
+  local selector=() repro="tools/mg conformance --lane native"
+  [ -z "$selected" ] || selector=("$selected")
+  [ -z "$selected" ] || repro="$MG_DEFAULT_REPRO"
   mg_conf__native_owner || return 2
   if ! (cd "$MG_ROOT/core" && cargo test -q -p meguri-testkit --tests --no-run --message-format=json) \
       >"$MG_RUN_DIR/native-testkit-build.jsonl" \
     || ! python3 -I -B "$MG_ROOT/tools/mg.d/conformance-test-executables.py" \
-      "$MG_RUN_DIR/native-testkit-build.jsonl" >"$MG_RUN_DIR/native-testkit-executables"; then
+      "$MG_RUN_DIR/native-testkit-build.jsonl" ${selector[0]+"${selector[@]}"} >"$MG_RUN_DIR/native-testkit-executables"; then
     mg_failure native/testkit-build "Cargo did not report a complete executable testkit suite; see log.txt" \
-      "tools/mg conformance --lane native"
+      "$repro"
     MG_CONF_NATIVE_ERROR=true
     mg_status error
     return 2
@@ -151,7 +154,29 @@ mg_conf__testkit_native() {
     mg_conf__native_ready || return 2
     echo "conformance: native binary start $executable test-threads=$jobs" >&2
     binary_rc=0
-    (cd "$MG_ROOT/core/crates/meguri-testkit" && TMPDIR="$MG_CONF_NATIVE_TMPDIR" "$executable" "--test-threads=$jobs") || binary_rc=$?
+    if [ -n "$selected" ]; then
+      local log="$MG_RUN_DIR/native-testkit-selected.log"
+      (cd "$MG_ROOT/core/crates/meguri-testkit" && TMPDIR="$MG_CONF_NATIVE_TMPDIR" "$executable" "--test-threads=$jobs") >"$log" 2>&1 || binary_rc=$?
+      mg_artifact test-log "$log" "diagnostic-only whole native testkit binary: $selected"
+      cat "$log" >&2
+      local counts passed=0 failed=0 skipped=0
+      counts="$(sed -nE 's/^test result: (ok|FAILED)\. ([0-9]+) passed; ([0-9]+) failed; ([0-9]+) ignored;.*$/\2 \3 \4/p' "$log")"
+      if ! printf '%s\n' "$counts" | grep -Eq '^[0-9]+ [0-9]+ [0-9]+$' || \
+          [ "$(printf '%s\n' "$counts" | wc -l | tr -d ' ')" -ne 1 ]; then
+        mg_failure native/testkit-summary "diagnostic-only $selected has no unique libtest summary (exit $binary_rc)"
+        rc=1
+      else
+        read -r passed failed skipped <<<"$counts"
+        mg_count passed "$passed"; mg_count failed "$failed"; mg_count skipped "$skipped"
+        mg_count total "$((passed + failed + skipped))"
+        if [ "$((passed + failed))" -eq 0 ] || [ "$failed" -ne 0 ]; then
+          mg_failure native/testkit-counts "diagnostic-only $selected executed no tests or reported failing tests"
+          rc=1
+        fi
+      fi
+    else
+      (cd "$MG_ROOT/core/crates/meguri-testkit" && TMPDIR="$MG_CONF_NATIVE_TMPDIR" "$executable" "--test-threads=$jobs") || binary_rc=$?
+    fi
     echo "conformance: native binary exit $executable rc=$binary_rc" >&2
     [ "$binary_rc" -eq 0 ] || rc=1
   done <"$MG_RUN_DIR/native-testkit-executables"
@@ -223,23 +248,34 @@ mg_conf__lane_report() {
   MG_CONF_LANES="$MG_CONF_LANES$(jq -c --arg lane "$lane" '{($lane): {totals, failed, wall_ms}}' "$report")"$'\n'
 }
 
-# tools/mg conformance [--live|--live-only] [--lane native|docker|all] [--jobs N] [filter...]
+# --native-test selects one complete Cargo-reported testkit binary for diagnostics
+# only. It cannot be combined with scenarios, other lanes or live acceptance.
 mg_conformance() {
-  local live=false t0=true lane=all jobs=12
+  local live=false t0=true lane=all jobs=12 native_test="" lane_count=0
   local filters=()
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --live) live=true; shift ;;
       --live-only) live=true; t0=false; shift ;;
-      --lane) lane="${2:-}"; shift 2 || { mg_conf__usage "tools/mg conformance [--live|--live-only] [--lane native|docker|all] [--jobs N] [filter...]" "--lane needs a value"; return 0; } ;;
+      --lane) lane_count=$((lane_count + 1)); lane="${2:-}"; shift 2 || { mg_conf__usage "tools/mg conformance [--live|--live-only] [--lane native|docker|all] [--jobs N] [filter...]" "--lane needs a value"; return 0; } ;;
       --jobs) jobs="${2:-}"; shift 2 || { mg_conf__usage "tools/mg conformance --jobs N" "--jobs needs a number"; return 0; } ;;
-      --help) mg_conf__usage "tools/mg conformance [--live|--live-only] [--lane native|docker|all] [--jobs N] [filter...]" "help"; return 0 ;;
+      --native-test)
+        case "${2:-}" in
+          ''|-*|*[!a-zA-Z0-9_-]*) mg_conf__usage "tools/mg conformance --lane native [--jobs N] --native-test <known-testkit-binary>" "--native-test needs an exact target name, not an option or path"; return 0 ;;
+        esac
+        [ -z "$native_test" ] || { mg_conf__usage "tools/mg conformance --lane native --native-test <known-testkit-binary>" "--native-test may be given only once"; return 0; }
+        native_test="$2"; shift 2 ;;
+      --help) mg_conf__usage "tools/mg conformance [--live|--live-only] [--lane native|docker|all] [--jobs N] [filter...] | --lane native [--jobs N] --native-test <known-testkit-binary>" "--native-test is diagnostic-only: run one whole exact Cargo-reported testkit binary; no live mode or scenario filters; never full native/all conformance, gate or milestone evidence"; return 0 ;;
       --*) mg_conf__usage "tools/mg conformance [--live|--live-only] [--lane native|docker|all] [--jobs N] [filter...]" "unknown option '$1'"; return 0 ;;
       *) filters[${#filters[@]}]="$1"; shift ;;
     esac
   done
   case "$lane" in native | docker | all) ;; *) mg_conf__usage "tools/mg conformance --lane native|docker|all" "unknown lane '$lane'"; return 0 ;; esac
   case "$jobs" in '' | *[!0-9]* | 0) mg_conf__usage "tools/mg conformance --jobs N" "--jobs needs a positive number"; return 0 ;; esac
+  if [ -n "$native_test" ] && { [ "$lane" != native ] || [ "$lane_count" -ne 1 ] || [ "$live" = true ] || [ "${#filters[@]}" -ne 0 ]; }; then
+    mg_conf__usage "tools/mg conformance --lane native [--jobs N] --native-test <known-testkit-binary>" "--native-test requires one --lane native, no live mode and no positional scenario filters"
+    return 0
+  fi
   # Native harnesses (including datatest) need an explicit argument. Keep
   # oracle worker scheduling independent and Docker's defaults unchanged.
   local MG_CONF_NATIVE_JOBS=2
@@ -255,6 +291,22 @@ mg_conformance() {
   if [ "$t0" = true ] && [ "$lane" != docker ]; then
     mg_detail native_concurrency "$MG_CONF_NATIVE_JOBS"
     echo "conformance: native concurrency=$MG_CONF_NATIVE_JOBS" >&2
+  fi
+  if [ -n "$native_test" ]; then
+    mg_detail focused "$(jq -nc --arg target "$native_test" '{scope:"diagnostic-only", native_test:$target, full_conformance:false}')"
+    mg_conf__testkit_native "$native_test" >&2
+    local focused_rc=$? outcome=passed
+    if [ "${MG_CONF_NATIVE_ERROR:-false}" = true ]; then
+      outcome="environment/build/selection error"; mg_status error
+    elif [ "$focused_rc" -ne 0 ]; then
+      outcome=failed
+      mg_failure native/testkit "diagnostic-only native testkit $native_test failed (exit $focused_rc); see log.txt" "$MG_DEFAULT_REPRO"
+      mg_status fail
+    else
+      mg_status pass
+    fi
+    mg_message "conformance: diagnostic-only native testkit $native_test $outcome; not full native/all conformance, gate or milestone evidence"
+    return 0
   fi
   MG_CONF_LANES=""
   local failed=false rc actors
