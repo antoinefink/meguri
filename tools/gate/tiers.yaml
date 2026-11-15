@@ -138,6 +138,27 @@ runs:
     class: unit
     triggers: [core/, conformance/, tools/mg.d/core.sh, tools/mg.d/conformance.sh, tools/mg.d/oracle.sh]
     budget_s: 2400
+  - id: sync-server-test
+    job: sync-server-test
+    tier: T0
+    placement: docker:dev
+    class: unit
+    triggers: &sync-server [server/, tools/mg.d/meguri-sync.sh, core/rust-toolchain.toml, docker/dev.Dockerfile, docker/compose.yml, docker/dev.Dockerfile.dockerignore]
+    budget_s: 2400
+  - id: sync-server-lint
+    job: sync-server-lint
+    tier: T0
+    placement: docker:dev
+    class: static
+    triggers: *sync-server
+    budget_s: 1200
+  - id: sync-server-deps
+    job: sync-server-deps
+    tier: T0
+    placement: docker:dev
+    class: static
+    triggers: [server/Cargo.toml, server/Cargo.lock, server/deny.toml, server/about.toml, server/DEPENDENCIES.md, server/LICENSE, server/rust-toolchain.toml, tools/mg.d/meguri-sync.sh, core/rust-toolchain.toml, docker/dev.Dockerfile, docker/compose.yml, docker/dev.Dockerfile.dockerignore]
+    budget_s: 600
   - id: native-durability
     job: native-durability
     tier: T0
@@ -812,6 +833,7 @@ utilities:
   - {job: cleanroom, why: "restricted Codex implementation runner; boundary probes run before every invocation"}
   - {job: cleanroom-image, why: "builds the restricted Codex runtime; cleanroom verifies it before use"}
   - {job: core-format, why: "optional Rust source formatting on demand"}
+  - {job: sync-server-format, why: "explicit optional server source formatting on demand"}
   - {job: gate, why: "runs the tiers"}
   - {job: merge, why: "runs the gate for a branch and fast-forwards the integration branch"}
   - {job: catch-up, why: "re-runs the runs merges queued because of the machine's state, once tools/mg doctor reports their user step clear (U19b)"}

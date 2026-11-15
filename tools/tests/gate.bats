@@ -1859,6 +1859,16 @@ PY
   [ "$(jq -r '[.runs[] | select(.outcome == "deferred-tip") | .id] | join(" ")' "$BATS_TEST_TMPDIR/plan.json")" = "goldens-check harvest-report" ]
   jq -e '.runs[] | select(.id == "conformance" and .action == "run")' "$BATS_TEST_TMPDIR/plan.json" >/dev/null
 
+  # Server source selects tests and lint; dependency changes also select the audit.
+  printf 'server/src/lib.rs\0' >"$BATS_TEST_TMPDIR/changed"
+  python3 -B -I "$REPO_ROOT/tools/gate/gate.py" plan --config "$out" --changed "$BATS_TEST_TMPDIR/changed" --mode full \
+    --oracle-tree same --main-capable yes --var base=b --var tip=t --out "$BATS_TEST_TMPDIR/plan.json"
+  [ "$(jq -r '[.runs[] | select(.action == "run" and (.id | test("^sync-server-(test|lint|deps)$"))) | .id] | join(" ")' "$BATS_TEST_TMPDIR/plan.json")" = "sync-server-test sync-server-lint" ]
+  printf 'server/Cargo.lock\0' >"$BATS_TEST_TMPDIR/changed"
+  python3 -B -I "$REPO_ROOT/tools/gate/gate.py" plan --config "$out" --changed "$BATS_TEST_TMPDIR/changed" --mode full \
+    --oracle-tree same --main-capable yes --var base=b --var tip=t --out "$BATS_TEST_TMPDIR/plan.json"
+  [ "$(jq -r '[.runs[] | select(.action == "run" and (.id | test("^sync-server-(test|lint|deps)$"))) | .id] | join(" ")' "$BATS_TEST_TMPDIR/plan.json")" = "sync-server-test sync-server-lint sync-server-deps" ]
+
   # A reference driver change selects its selftest and both reference suites.
   printf 'oracle/meguri-sync-server/driver.py\0' >"$BATS_TEST_TMPDIR/changed"
   python3 -B -I "$REPO_ROOT/tools/gate/gate.py" plan --config "$out" --changed "$BATS_TEST_TMPDIR/changed" --mode full \
