@@ -1,0 +1,16 @@
+**
+!oracle/
+!oracle/meguri-sync-server/
+!oracle/meguri-sync-server/**
+!conformance/
+!conformance/schema/
+!conformance/schema/meguri-sync-server.schema.json
+!conformance/catalog/
+!conformance/catalog/meguri-sync-server.json
+!conformance/fixtures/
+!conformance/fixtures/meguri-sync-server/
+!conformance/fixtures/meguri-sync-server/original.json
+!conformance/recordings/
+!conformance/recordings/scenarios/
+!conformance/recordings/scenarios/meguri-sync-server/
+!conformance/recordings/scenarios/meguri-sync-server/desktop-selection.json
