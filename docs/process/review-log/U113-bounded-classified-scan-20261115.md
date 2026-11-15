@@ -16,3 +16,5 @@ Verification:
 - `private/20261115T024811Z-43141`: no findings in the three source files. Safe implementer report `similarity/20261115T024814Z-43403`: three files compared, zero flags.
 
 The focused native receipt does not replace full conformance. Host scan-race checks, the full integration gate and remaining iCloud acceptance evidence are still required.
+
+Follow-up: `core-test/20261115T024942Z-44194` passes all 18 selected host checks. These cover newer observer repair/failure overtaking, partial scan failure, account/file/suspension fences and equal-payload publication. The remaining 212 cases were filtered. Full integration verification remains pending.
