@@ -11,12 +11,24 @@ public final class CloudOriginalCommandProofYield: Sendable {
     private let pending = Mutex(true)
     private let cancellationIntent: CloudPolicyCancellationContext?
     private let originalRevocation: (@Sendable (CloudPolicyCancellationContext.Snapshot) -> Void)?
+    private let originalFailure: (@Sendable (any Error) -> Void)?
     init(cancellationIntent: CloudPolicyCancellationContext? = nil,
-         originalRevocation: (@Sendable (CloudPolicyCancellationContext.Snapshot) -> Void)? = nil) {
+         originalRevocation: (@Sendable (CloudPolicyCancellationContext.Snapshot) -> Void)? = nil,
+         originalFailure: (@Sendable (any Error) -> Void)? = nil) {
         self.cancellationIntent = cancellationIntent
         self.originalRevocation = originalRevocation
+        self.originalFailure = originalFailure
     }
     public var isPending: Bool { pending.withLock { $0 } }
+    /// Select the fenced read's exact failure before executing its policy outputs.
+    /// This reaches the original native latch synchronously, without releasing
+    /// admission or replacing an earlier cancellation/result at that latch.
+    public func sealFailureBeforeOutputs(_ error: any Error) {
+        pending.withLock { value in
+            guard value else { return }
+            originalFailure?(error)
+        }
+    }
     public func finish(_ error: (any Error)? = nil) {
         finish(error, beforeCompletion: {})
     }

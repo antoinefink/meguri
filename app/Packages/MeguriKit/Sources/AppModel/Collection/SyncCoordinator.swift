@@ -1484,6 +1484,18 @@ public final class SyncCoordinator {
             #else
             let result = await complete(true)
             #endif
+            // This read's own CancelExchange/StopEngine must not replace its
+            // exact unsuccessful proof at the original native latch. Keep the
+            // yield pending until outputs return; scheduling finish earlier
+            // alone would still race native cancellation.
+            if let error = result.error, result.afterOutputs == nil,
+               !closing, !suspended, !replacing, !backendRetired, accountTask?.isCancelled == false,
+               expected == generation, revision == hostRevision, backend === original,
+               control === accountTaskControl, pendingAccountRead.map({ $0 != read }) != true {
+                for wait in proofWaits.values where wait.read == read && containsProofOwner(wait.owner) {
+                    wait.proof.sealFailureBeforeOutputs(error)
+                }
+            }
             let supersededAccountCancellation = result.error is CancellationError
                 && pendingAccountRead.map { $0 != read } == true
                 && expected == generation && revision == hostRevision && backend === original

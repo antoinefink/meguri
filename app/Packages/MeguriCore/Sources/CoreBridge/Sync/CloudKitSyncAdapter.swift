@@ -131,9 +131,10 @@ struct CloudFlushCancellationReceipt: Sendable {
 }
 
 #if DEBUG
-// Original-task test boundary, invoked only after the real discard is joined.
+// Original-task test boundaries; nil outside focused tests.
 enum CloudFetchProofCompletionFault {
     @TaskLocal static var afterOriginalDiscard: (@Sendable () throws -> Void)?
+    @TaskLocal static var beforeOriginalPropagation: (@Sendable () async -> Void)?
 }
 #endif
 
@@ -2233,8 +2234,11 @@ public actor CloudKitSyncAdapter {
         let proof = CloudOriginalCommandProofYield(cancellationIntent: cancellationIntent, originalRevocation: { cause in
             guard let issuer, issuer.original === wait.original else { return }
             wait.complete(.failure(CancellationError()), producer: .caller(cause))
+        }, originalFailure: { error in
+            wait.complete(.failure(error), producer: .provider)
         })
         let task = Task {
+            let result: Result<Void, any Error>
             do {
                 guard self.owned.values.contains(where: { $0 === instance }), !instance.stopping else {
                     throw CancellationError()
@@ -2242,8 +2246,12 @@ public actor CloudKitSyncAdapter {
                 // This lookup is a proof read, not an engine account event;
                 // do not advance the no-state point of the retained FetchRead.
                 try await self.refreshControlIdentity(proof: proof)
-                wait.complete(.success(()), producer: .provider)
-            } catch { wait.complete(.failure(error), producer: .provider) }
+                result = .success(())
+            } catch { result = .failure(error) }
+            #if DEBUG
+            await CloudFetchProofCompletionFault.beforeOriginalPropagation?()
+            #endif
+            wait.complete(result, producer: .provider)
         }
         instance.rootReadIdentity = (task, wait)
         defer { instance.rootReadIdentity = nil }
