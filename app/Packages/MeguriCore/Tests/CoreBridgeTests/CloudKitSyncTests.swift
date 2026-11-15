@@ -1342,7 +1342,7 @@ extension EventTests {
     /// durably acked when it suspends. A token change during that suspension
     /// must fence its deferred pending actions, even though the ack was valid.
     @Test func cloudKitGuardCapturedBeforeSuspensionFencesDeferredActions() async throws {
-        try await withCloudKitFixture(keepAlive: true) { f in
+        try await withCloudKitPendingFixture(keepAlive: true) { f in
             let old = try await f.engine()
             let handler = CloudCallbackGate()
             await f.probe.pauseSent(handler)
@@ -1618,7 +1618,7 @@ private actor CloudThrowingFetchFactory: CloudKitEngineFactory {
 }
 extension EventTests {
     @Test func cloudKitThrownFetchTerminatesDurablyAndNextRequestRuns() async throws {
-        try await withCloudKitFixture { f in
+        try await withCloudKitPendingFixture { f in
             try await f.adapter.stop()
             let factory = CloudThrowingFetchFactory()
             let adapter = CloudKitSyncAdapter(core: f.core, engineFactory: factory)
@@ -1649,7 +1649,7 @@ extension EventTests {
 extension EventTests {
     /// K2/K4.1: the fixture, SDK registration and real FFI builder agree.
     @Test func cloudKitRegisteredZoneUsesCanonicalEpochText() async throws {
-        try await withCloudKitFixture { f in
+        try await withCloudKitPendingFixture { f in
             #expect(f.zone == "c-ojzhe4tsojzhe4tsojzhe4tsoi")
             let sdk = try await f.engine()
             #expect(await sdk.requestRetainedBatch(zone: "c-72727272727272727272727272727272") == nil)
@@ -1668,7 +1668,7 @@ private actor CloudExchangeJoinProbe {
 extension EventTests {
     /// P12.1/.6/.7: both callers own the same task until a controlled SDK return.
     @Test func cloudKitConcurrentCallersJoinAndCancelOneOwnedExchange() async throws {
-        try await withCloudKitFixture { f in
+        try await withCloudKitPendingFixture { f in
             try await f.adapter.stop()
             let factory = CloudThrowingFetchFactory(), joins = CloudExchangeJoinProbe()
             let adapter = CloudKitSyncAdapter(core: f.core, engineFactory: factory,
