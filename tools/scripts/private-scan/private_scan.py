@@ -952,7 +952,7 @@ PUBLIC_ARTIFACTS = {
         'a2b89f63e37c1029fa04475b584953c97ab5c0bc54109a808864e1bb0ae5ac98',
 
     'tools/mg.d/meguri-sync.sh':
-        '5e50851d6ff87ad8dee9eaee48dd8d9dcb53ed633bcbabb9d7c8feb2bd30d029',
+        '9936b4bd9b21eba77f3f53f523bdad52757c9564916d547b586ca5447243746b',
 
     'tools/tests/sync_server.bats':
         'f8b0015ad6e36a4bef23c84edb0bd6b7270e49a0bc0b1b132b7c87123d9dbb2a',

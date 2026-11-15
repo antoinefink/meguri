@@ -160,7 +160,7 @@ mg_sync_server_candidate_build() {
   target_owner="$(mg_sync_server__target_identity "$MG_RUN_DIR/target" empty)" || { mg_status fail; return 0; }
   owner="$(python3 -c 'import secrets; print(secrets.token_hex(16))')" || { mg_status fail; return 0; }
   mg_on_exit "$(printf '%q ' mg_sync_server__remove_container "$build_name" "$owner")"
-  mg_compose run --name "$build_name" -T --no-deps --no-build --pull never --label "meguri.mg.run-id=$MG_RUN_ID" \
+  mg_compose run --name "$build_name" -T --no-deps --pull never --label "meguri.mg.run-id=$MG_RUN_ID" \
       --label "meguri.sync.owner=$owner" \
       -v "$MG_RUN_DIR/source:/work:ro" -v "$MG_RUN_DIR/product:/candidate-out" \
       -v "$MG_RUN_DIR/target:/candidate-target" \
