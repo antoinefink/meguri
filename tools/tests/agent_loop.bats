@@ -707,6 +707,12 @@ fi
 echo "ok $((first + 1)) mac-Debug launched hidden stays up: Home"
 echo "1..$((first + 1))"
 EOF
+  # Admit the completed synthetic source and publish owned Unit inputs via
+  # the existing producer doubles; keep MG's actual preparation guard.
+  (
+    source "$REPO_ROOT/tools/tests/xcode_unit_inputs_fixture.sh"
+    unit_fixture_setup "$SB" unit-input-run --with-mg-dispatch
+  )
   export MEGURI_MAC_VM_POLL_SECONDS=1 MEGURI_MAC_VM_LEASE_WAIT_SECONDS=20
   FX_UNTIL="$BATS_TEST_TMPDIR/release-vm" "$SB/tools/mg" fx-vm-lease a >/dev/null 2>&1 3>&- &
   local first=$! check
@@ -735,6 +741,8 @@ EOF
   not_called '^host execution|^xcodebuild |^simctl |^open '
   [ "$(field '.summary | "\(.total) \(.passed) \(.failed)"')" = "3 2 1" ]
   [ "$(field '.failures[0].id')" = "mac-Profile builds" ]
+  [ -s "$(dirname "$result")/xcode-unit-inputs.json" ]
+  [ "$(cat "$SB/build/unit-calls")" = "$(printf 'rust-producer\nnative-cargo')" ]
 
   # A missing VM keeps the builds' results: a failing build is a failure.
   cat >>"$SB/tools/mg.d/zz-fixture.sh" <<'EOF'

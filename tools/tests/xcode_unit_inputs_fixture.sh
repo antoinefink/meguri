@@ -5,6 +5,28 @@ unit_fixture_setup() {
   export MG_RUN_DIR="$MG_ROOT/build/mg/xcode-check/$MG_RUN_ID"
   export UNIT_CALLS="$MG_ROOT/build/unit-calls" UNIT_COMPILER="$MG_ROOT/build/native-target/debug/meguri-cli"
   mkdir -p "$MG_ROOT/tools/scripts" "$MG_ROOT/core" "$MG_RUN_DIR" "$(dirname "$UNIT_COMPILER")" "$MG_ROOT/build/unit-bin"
+  local producer="$MG_ROOT/tools/mg"
+  if [ "${3:-}" = --with-mg-dispatch ]; then
+    # Preserve real MG routing/admission; intercept only the exact producer
+    # command checked by the existing double below, in this generated repo.
+    mv "$MG_ROOT/tools/mg" "$MG_ROOT/tools/mg-fixture-dispatch"
+    producer="$MG_ROOT/build/unit-bin/core-test-double"
+    cat >"$MG_ROOT/tools/mg" <<'DISPATCH'
+#!/bin/bash
+fixture_tools="$(cd "$(dirname "$0")" && pwd -P)"
+if [ "${1:-}" = core-test ]; then
+  exec "$fixture_tools/../build/unit-bin/core-test-double" "$@"
+fi
+exec "$fixture_tools/mg-fixture-dispatch" "$@"
+DISPATCH
+    chmod +x "$MG_ROOT/tools/mg"
+    cat >"$MG_ROOT/tools/mg.d/zz-unit-producer-fakes.sh" <<'ENV'
+# Controlled producer doubles only; the real input guard remains installed.
+export UNIT_CALLS="$MG_ROOT/build/unit-calls"
+export UNIT_COMPILER="$MG_ROOT/build/native-target/debug/meguri-cli"
+export PATH="$MG_ROOT/build/unit-bin:$PATH"
+ENV
+  fi
   cp "$REPO_ROOT/tools/scripts/xcode-unit-inputs.py" \
     "$REPO_ROOT/tools/scripts/swift-cloud-service-helper.py" \
     "$REPO_ROOT/tools/scripts/native-media-review-capture.py" \
@@ -25,7 +47,7 @@ print(json.dumps({'reason': 'compiler-artifact', 'target': {'name': 'meguri-cli'
                   'executable': os.environ['UNIT_COMPILER']}))
 PY
 CARGO
-  cat >"$MG_ROOT/tools/mg" <<'MG'
+  cat >"$producer" <<'MG'
 #!/bin/bash
 [ "$*" = 'core-test -- --test cloud_initial_app_fixture -E package(meguri-ffi) & test(=export_initial_app_adoption_replies_from_real_publication)' ] || exit 97
 echo rust-producer >>"$UNIT_CALLS"
@@ -50,7 +72,7 @@ with open(sys.argv[1], 'w') as f: json.dump(r, f)
 PY
 printf '%s\n' "$result"
 MG
-  chmod +x "$MG_ROOT/build/unit-bin/cargo" "$MG_ROOT/tools/mg"
+  chmod +x "$MG_ROOT/build/unit-bin/cargo" "$producer"
   export PATH="$MG_ROOT/build/unit-bin:$PATH"
   printf '/build/\n' >"$MG_ROOT/.gitignore"
   # Only the generated test repository is committed; never the real checkout.

@@ -1328,6 +1328,12 @@ case " $* " in
     echo "1..2" ;;
 esac
 FAKE
+  # Commit only this completed throwaway source fixture, then retain real
+  # source admission/publication checks with the existing producer doubles.
+  (
+    source "$REPO_ROOT/tools/tests/xcode_unit_inputs_fixture.sh"
+    unit_fixture_setup "$SB" unit-input-run --with-mg-dispatch
+  )
   FAKE_VM_PROCS=2800 MEGURI_MAC_VM_PROCS_POLL_SECONDS=1 MEGURI_MAC_VM_PROCS_WAIT_SECONDS=1 mg xcode-check
   [ "$status" -eq 0 ]
   [ "$(field .status)" = warn ]
@@ -1339,14 +1345,18 @@ FAKE
   called '^fake xcode_project_check --phase devices --continue-from 1 --no-sims$'
   [ "$(field .details.host_lease)" = null ]
   [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
+  [ ! -e "$SB/build/unit-calls" ]
 
   : >"$STUB_LOG"
   FAKE_XCODE_CHECK_QUEUED=iphone-Debug-TestHooksTests mg xcode-check
   [ "$status" -eq 0 ]
   [ "$(field .status)" = warn ]
   [ "$(field .details.queued)" = true ]
+  [ "$(field '.failures | length')" = 0 ]
   [ "$(field '.details.queued_parts[] | "\(.user_step) \(.part): \(.reason)"')" = "mac-vm iphone-Debug-TestHooksTests: meguri-mac refused the run's SSH session" ]
   called '^fake xcode_project_check --phase devices --continue-from 1 --vm-ssh '
+  [ -s "$(dirname "$result")/xcode-unit-inputs.json" ]
+  [ "$(cat "$SB/build/unit-calls")" = "$(printf 'rust-producer\nnative-cargo')" ]
 }
 
 @test "without the VM, simulator jobs are queued with the mac-vm step; MEGURI_SIM_ALLOW_HOST=1 uses this Mac's pool" {
