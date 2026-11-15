@@ -439,6 +439,87 @@ extension ReviewCollectionStartupTests {
         }
     }
 
+    @Test(.timeLimit(.minutes(1)), arguments: [true, false])
+    func resumedStartupLoadPreservesCancellationOwnership(cancelCaller: Bool) async throws {
+        let fixture = Fixture(), initial = CancellableGate(), resumed = CancellableGate()
+        var starting: Task<Void, Never>?
+        var resuming: Task<Void, any Error>?
+        var loadEntries = 0, completedLoads = 0
+        try await Self.lifecycleDeadline(unblocking: {
+            initial.release(); resumed.release()
+        }, cleanup: {
+            await starting?.value
+            _ = await resuming?.result
+            _ = await fixture.model.end()
+            fixture.surface.onLoad = nil
+        }) {
+            let acceptedHead = try #require(fixture.client.currentHead.items.first)
+            fixture.surface.onLoad = {
+                loadEntries += 1
+                try await initial.wait()
+                completedLoads += 1
+            }
+            starting = Task { await fixture.model.start() }
+            await initial.requested()
+            // requested() can also finish during cleanup: prove load actually entered.
+            try #require(loadEntries == 1 && fixture.client.starts == 1 && fixture.model.sessionID == 5)
+            try await fixture.model.pause()
+            await starting?.value
+            let sessionID = try #require(fixture.model.sessionID)
+            #expect(initial.cancelled && completedLoads == 0 && fixture.model.paused)
+            #expect(fixture.model.item?.cardId == acceptedHead.cardId && fixture.surface.presented.isEmpty)
+
+            fixture.surface.onLoad = {
+                loadEntries += 1
+                try await resumed.wait()
+                completedLoads += 1
+            }
+            let caller = Task { try await fixture.model.resume() }
+            resuming = caller
+            await resumed.requested()
+            try #require(loadEntries == 2 && completedLoads == 0 && !resumed.cancelled)
+            try #require(fixture.surface.calls.suffix(2) == ["resume", "load"])
+            #expect(fixture.model.paused && !fixture.model.canReveal && !fixture.model.canRate)
+            #expect(fixture.client.headReads == 0 && fixture.surface.presented.isEmpty)
+            if cancelCaller {
+                // No second Pause: only this caller cancels the Resume owner.
+                caller.cancel()
+            } else {
+                try await fixture.model.pause()
+            }
+            switch await caller.result {
+            case .success:
+                if cancelCaller { Issue.record("Caller cancellation incorrectly completed startup-load Resume") }
+            case .failure(let error):
+                #expect(cancelCaller && error is CancellationError)
+            }
+            #expect(caller.isCancelled == cancelCaller && resumed.cancelled && fixture.model.paused)
+            #expect(!fixture.model.canReveal && !fixture.model.canRate)
+            #expect(!fixture.model.canUndo && !fixture.model.canRedo)
+            fixture.model.reveal(); fixture.model.rate(.good); await fixture.model.settled()
+            #expect(fixture.surface.reveals == 0 && fixture.surface.presented.isEmpty && completedLoads == 0)
+            #expect(fixture.model.sessionID == sessionID && fixture.model.item?.cardId == acceptedHead.cardId)
+            #expect(fixture.model.item?.stateToken == acceptedHead.stateToken && fixture.model.item?.renderKey == acceptedHead.renderKey)
+            #expect(fixture.client.starts == 1 && fixture.client.headReads == 0 && fixture.client.answers == 0)
+            #expect(fixture.client.restores.isEmpty && fixture.client.ends == 0 && fixture.model.record.answers.isEmpty)
+            #expect(fixture.surface.calls.filter { $0 == "suspend" }.count == (cancelCaller ? 1 : 2))
+            let saved = try #require(try await fixture.store.load())
+            #expect(saved.answers.isEmpty && saved.endedAt == nil)
+
+            fixture.surface.onLoad = { loadEntries += 1; completedLoads += 1 }
+            try await fixture.model.resume()
+            #expect(loadEntries == 3 && completedLoads == 1)
+            #expect(!fixture.model.paused && fixture.model.phase == .question && fixture.model.canReveal && !fixture.model.canRate)
+            #expect(fixture.model.sessionID == sessionID && fixture.model.item?.cardId == acceptedHead.cardId)
+            #expect(fixture.model.item?.stateToken == acceptedHead.stateToken && fixture.model.item?.renderKey == acceptedHead.renderKey)
+            #expect(fixture.surface.presented == [acceptedHead.cardId] && fixture.surface.reveals == 0)
+            #expect(fixture.client.starts == 1 && fixture.client.headReads == 1 && fixture.client.answers == 0)
+            #expect(fixture.client.restores.isEmpty && fixture.client.ends == 0 && fixture.model.record.answers.isEmpty)
+            #expect(await fixture.model.end())
+            #expect(fixture.client.ends == 1 && fixture.surface.calls.last == "close")
+        }
+    }
+
     @Test(.timeLimit(.minutes(1))) func resumeAfterCloseJoinedWorkCannotRestartPages() async throws {
         let fixture = Fixture(), stopped = CancellableGate()
         var closing: Task<Bool, Never>?

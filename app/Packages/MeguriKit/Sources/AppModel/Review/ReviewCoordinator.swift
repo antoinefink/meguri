@@ -730,6 +730,8 @@ public final class ReviewCoordinator {
                 try Task.checkCancellation()
                 if self.startupNeedsPreparation { try await self.surface.load() }
             }
+            // A second Pause cancels only preparation; caller cancellation cancels this owner too.
+            try Task.checkCancellation()
             guard ready, !closingAdmission, revision == pauseRevision else { busy = false; return }
             startupNeedsPreparation = false
             // Consume only requests known before this read. Later events own
