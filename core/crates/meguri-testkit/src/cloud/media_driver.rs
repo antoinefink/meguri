@@ -119,9 +119,8 @@ impl SDKRig {
         reply: MediaReply,
         asset_owner: Option<tempfile::NamedTempFile>,
     ) -> Result<()> {
-        let input = Input::MediaReply(work, reply);
-        self.cloud_media_reply = Some((input.clone(), asset_owner));
-        let result = self.driver.call::<()>(input);
+        self.cloud_media_reply = Some((Input::MediaReply(work.clone(), reply.clone()), asset_owner));
+        let result = self.driver.call::<()>(Input::MediaReply(work, reply));
         if !matches!(&result, Err(error) if super::child_driver::is_work_paused(error.as_ref())) {
             self.cloud_media_reply = None;
         }
