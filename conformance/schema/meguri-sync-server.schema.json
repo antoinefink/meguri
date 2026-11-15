@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meguri.local/schema/meguri-sync-server.schema.json",
+  "title": "Neutral Meguri Sync case and evidence manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "baseline_release", "document_kind", "cases"],
+  "properties": {
+    "format": {"const": "meguri-sync-server-v1"},
+    "baseline_release": {"const": "26.09.3"},
+    "document_kind": {"enum": ["probe_contract", "evidence"]},
+    "source_commit": {"$ref": "#/$defs/commit"},
+    "batch_base": {"$ref": "#/$defs/commit"},
+    "source_sha256": {"$ref": "#/$defs/sha256"},
+    "lock_sha256": {"$ref": "#/$defs/sha256"},
+    "executable_sha256": {"$ref": "#/$defs/sha256"},
+    "mg_job": {"type": "string", "pattern": "^sync-server-[a-z-]+$"},
+    "arguments": {"type": "array", "maxItems": 64, "items": {"type": "string", "maxLength": 1024}},
+    "expected_case_count": {"type": "integer", "minimum": 1},
+    "selected_case_count": {"type": "integer", "minimum": 1},
+    "completed_case_count": {"type": "integer", "minimum": 0},
+    "cases": {"type": "array", "minItems": 1, "maxItems": 10000, "items": {"$ref": "#/$defs/case"}}
+  },
+  "allOf": [
+    {"if": {"properties": {"document_kind": {"const": "evidence"}}},
+     "then": {"required": ["source_commit", "batch_base", "source_sha256", "lock_sha256", "mg_job", "arguments", "expected_case_count", "selected_case_count", "completed_case_count"]}},
+    {"if": {"properties": {"document_kind": {"const": "probe_contract"}}},
+     "then": {"properties": {"cases": {"items": {"properties": {"status": {"const": "unobserved"}}, "not": {"required": ["observed"]}}}}}}
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "commit": {"type": "string", "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"},
+    "spec_id": {"type": "string", "pattern": "^(sync/server-(transport|collection|lifecycle|media)|servers/meguri-sync-web|conformance/meguri-sync-server)#[A-Z][0-9]+([.][0-9]+)*$"},
+    "client": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "version", "build"],
+      "properties": {
+        "kind": {"enum": ["desktop", "mobile", "retained_meguri", "service"]},
+        "version": {"type": "string", "minLength": 1, "maxLength": 128},
+        "build": {"type": "string", "minLength": 1, "maxLength": 256},
+        "os_build": {"type": "string", "minLength": 1, "maxLength": 256},
+        "runtime_sha256": {"$ref": "#/$defs/sha256"},
+        "executable_sha256": {"$ref": "#/$defs/sha256"}
+      },
+      "allOf": [
+        {"if": {"properties": {"kind": {"const": "desktop"}}}, "then": {"required": ["runtime_sha256"], "properties": {"version": {"const": "26.09.4"}}}},
+        {"if": {"properties": {"kind": {"const": "mobile"}}}, "then": {"required": ["os_build"], "properties": {"version": {"const": "26.10"}}}},
+        {"if": {"properties": {"kind": {"const": "retained_meguri"}}}, "then": {"required": ["executable_sha256"]}},
+        {"if": {"properties": {"kind": {"const": "service"}}}, "then": {"required": ["runtime_sha256"]}}
+      ]
+    },
+    "server_peer": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "version", "build"],
+      "properties": {
+        "kind": {"enum": ["reference_runtime", "meguri_sync"]},
+        "version": {"type": "string", "minLength": 1, "maxLength": 128},
+        "build": {"type": "string", "minLength": 1, "maxLength": 256},
+        "runtime_sha256": {"$ref": "#/$defs/sha256"},
+        "executable_sha256": {"$ref": "#/$defs/sha256"},
+        "source_commit": {"$ref": "#/$defs/commit"},
+        "source_sha256": {"$ref": "#/$defs/sha256"},
+        "lock_sha256": {"$ref": "#/$defs/sha256"}
+      },
+      "allOf": [
+        {"if": {"properties": {"kind": {"const": "reference_runtime"}}}, "then": {"required": ["runtime_sha256"], "properties": {"version": {"const": "26.09.4"}}}},
+        {"if": {"properties": {"kind": {"const": "meguri_sync"}}}, "then": {"required": ["executable_sha256", "source_commit", "source_sha256", "lock_sha256"]}}
+      ]
+    },
+    "lane": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "client", "server"],
+      "properties": {
+        "kind": {"enum": ["reference", "candidate", "retained_peer", "policy"]},
+        "client": {"$ref": "#/$defs/client"},
+        "server": {"$ref": "#/$defs/server_peer"}
+      },
+      "allOf": [
+        {"if": {"properties": {"kind": {"const": "reference"}}}, "then": {"properties": {
+          "client": {"properties": {"kind": {"enum": ["desktop", "mobile"]}}},
+          "server": {"properties": {"kind": {"const": "reference_runtime"}}}
+        }}},
+        {"if": {"properties": {"kind": {"const": "candidate"}}}, "then": {"properties": {
+          "client": {"properties": {"kind": {"enum": ["desktop", "mobile"]}}},
+          "server": {"properties": {"kind": {"const": "meguri_sync"}}}
+        }}},
+        {"if": {"properties": {"kind": {"const": "retained_peer"}}}, "then": {"properties": {
+          "client": {"properties": {"kind": {"const": "retained_meguri"}}},
+          "server": {"properties": {"kind": {"const": "meguri_sync"}}}
+        }}},
+        {"if": {"properties": {"kind": {"const": "policy"}}}, "then": {"properties": {
+          "client": {"properties": {"kind": {"const": "service"}}},
+          "server": {"properties": {"kind": {"const": "meguri_sync"}}}
+        }}}
+      ]
+    },
+    "artifact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["role", "sha256"],
+      "properties": {
+        "role": {"enum": ["synthetic_input", "neutral_observation", "mg_receipt", "independent_review", "device_evidence", "screenshot", "package", "resource_report"]},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "bytes": {"type": "integer", "minimum": 0},
+        "receipt_id": {"type": "string", "minLength": 1, "maxLength": 256}
+      }
+    },
+    "action": {
+      "type": "object", "additionalProperties": false,
+      "required": ["actor", "operation", "description"],
+      "properties": {
+        "actor": {"enum": ["client_a", "client_b", "fresh_client", "operator", "browser_admin", "browser_member", "service", "fault_driver"]},
+        "operation": {"enum": ["prepare_synthetic", "native_request", "client_sync", "browser_request", "operator_action", "inject_failure", "restart", "observe"]},
+        "description": {"type": "string", "minLength": 1, "maxLength": 2048},
+        "method": {"enum": ["hostKey", "meta", "start", "applyGraves", "applyChanges", "chunk", "applyChunk", "sanityCheck2", "finish", "abort", "upload", "download", "begin", "mediaChanges", "uploadChanges", "downloadFiles", "mediaSanity"]},
+        "fixture_sha256": {"$ref": "#/$defs/sha256"},
+        "phase": {"type": "string", "minLength": 1, "maxLength": 128}
+      }
+    },
+    "observation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "value"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "maxLength": 128},
+        "value": {"description": "Sanitized neutral value. Decimal strings represent exact wide integers; no secrets, source, or private content.", "type": ["object", "array", "string", "number", "boolean", "null"]}
+      }
+    },
+    "case": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "family", "classification", "spec_ids", "variants", "actions", "expected", "status"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[PM]-[A-Z][0-9]{2}:[a-z0-9][a-z0-9._-]{0,127}$"},
+        "family": {"enum": ["P-T01", "P-T02", "P-T03", "P-T04", "P-T05", "P-F01", "P-F02", "P-F03", "P-F04", "P-F05", "P-F06", "P-N01", "P-N02", "P-N03", "P-N04", "P-N05", "P-N06", "P-N07", "P-N08", "P-N09", "P-N10", "M-I01", "P-M01", "P-M02", "P-M03", "P-M04", "P-M05", "P-M06", "P-M07", "M-L01", "M-L02", "M-L03", "M-L04", "M-L05", "M-L06", "M-L07", "M-R01", "M-R02", "M-R03", "P-R01", "P-R02", "P-R03", "M-W01", "M-W02", "M-W03", "M-W04", "M-W05", "M-W06", "M-W07", "M-W08", "M-W09"]},
+        "classification": {"enum": ["baseline", "meguri_policy", "current_probe"]},
+        "spec_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/spec_id"}},
+        "baseline_spec_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 3, "maxLength": 256}},
+        "lane": {"$ref": "#/$defs/lane"},
+        "fixture_sha256": {"$ref": "#/$defs/sha256"},
+        "variants": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 256}},
+        "actions": {"type": "array", "minItems": 1, "maxItems": 1000, "items": {"$ref": "#/$defs/action"}},
+        "expected": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/observation"}},
+        "observed": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/observation"}},
+        "status": {"enum": ["unobserved", "matched", "different", "failed", "unavailable", "sealed"]},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 2048},
+        "artifacts": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/artifact"}},
+        "publication_committed": {"type": "boolean"},
+        "acknowledgement_received": {"type": "boolean"}
+      },
+      "allOf": [
+        {"if": {"properties": {"classification": {"const": "baseline"}}}, "then": {"required": ["baseline_spec_ids"], "properties": {"status": {"const": "unobserved"}}}},
+        {"if": {"properties": {"classification": {"const": "current_probe"}}}, "then": {"properties": {"family": {"pattern": "^P-"}}}},
+        {"if": {"properties": {"classification": {"const": "meguri_policy"}}}, "then": {"properties": {"family": {"pattern": "^M-"}}}},
+        {"if": {"properties": {"family": {"pattern": "^P-"}}}, "then": {"properties": {
+          "classification": {"enum": ["baseline", "current_probe"]},
+          "lane": {"properties": {"kind": {"enum": ["reference", "candidate"]}, "client": {"properties": {"kind": {"enum": ["desktop", "mobile"]}}}}}
+        }}},
+        {"if": {"properties": {"family": {"pattern": "^M-"}}}, "then": {"properties": {
+          "classification": {"const": "meguri_policy"},
+          "lane": {"properties": {"kind": {"enum": ["candidate", "retained_peer", "policy"]}}}
+        }}},
+        {"if": {"properties": {"family": {"const": "M-I01"}}}, "then": {"properties": {"lane": {"properties": {"kind": {"const": "retained_peer"}}}}}},
+        {"if": {"properties": {"family": {"const": "P-R01"}}}, "then": {"properties": {"lane": {"properties": {"kind": {"const": "candidate"}, "client": {"properties": {"kind": {"const": "desktop"}}}}}}}},
+        {"if": {"properties": {"family": {"const": "P-R02"}}}, "then": {"properties": {"lane": {"properties": {"kind": {"const": "candidate"}, "client": {"properties": {"kind": {"const": "mobile"}}}}}}}},
+        {"if": {"properties": {"family": {"const": "P-R03"}}}, "then": {"properties": {"lane": {"properties": {"kind": {"const": "candidate"}, "client": {"properties": {"kind": {"enum": ["desktop", "mobile"]}}}}}}}},
+        {"if": {"properties": {"status": {"enum": ["matched", "different", "sealed"]}}}, "then": {
+          "required": ["lane", "fixture_sha256", "observed", "artifacts"],
+          "properties": {"artifacts": {"allOf": [
+            {"contains": {"properties": {"role": {"const": "synthetic_input"}}, "required": ["role"]}},
+            {"contains": {"properties": {"role": {"const": "neutral_observation"}}, "required": ["role"]}},
+            {"contains": {"properties": {"role": {"const": "mg_receipt"}}, "required": ["role"]}}
+          ]}}
+        }},
+        {"if": {"required": ["lane"], "properties": {
+          "status": {"enum": ["matched", "different", "sealed"]},
+          "lane": {"properties": {"client": {"properties": {"kind": {"const": "mobile"}}}}}
+        }}, "then": {"properties": {"artifacts": {"contains": {"properties": {"role": {"const": "device_evidence"}}, "required": ["role"]}}}}},
+        {"if": {"properties": {"status": {"enum": ["different", "failed", "unavailable"]}}}, "then": {"required": ["reason"]}},
+        {"if": {"properties": {"status": {"const": "sealed"}}}, "then": {"properties": {"artifacts": {"allOf": [
+          {"contains": {"properties": {"role": {"const": "independent_review"}}, "required": ["role"]}},
+          {"contains": {"properties": {"role": {"const": "neutral_observation"}}, "required": ["role"]}},
+          {"contains": {"properties": {"role": {"const": "mg_receipt"}}, "required": ["role"]}}
+        ]}}}}
+      ]
+    }
+  }
+}

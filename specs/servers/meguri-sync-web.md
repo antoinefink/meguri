@@ -1,0 +1,98 @@
+# Meguri Sync browser accounts
+
+Spec: servers/meguri-sync-web
+Requirements: Meguri Sync U2; R15, R19–R30, R33; F1, F2, F4–F6; AE1–AE3, AE7, AE8; KTD3, KTD4, KTD10–KTD13, KTD16
+Anki: 26.09.3
+Scenarios: conformance/scenarios/sync/server/ (planned; contract conformance/meguri-sync-server#C9)
+
+## W1. Independent policy and interface scope
+
+All rules in this file are **M**, original Meguri Sync product/security policy, using the classification in `sync/server-transport#T1`. They reproduce no reference web service. Current-client behavior is required only for the client instructions in W9 and is probed separately. The Anki header above identifies the neutral protocol baseline, not the author or license of this browser contract.
+
+Serve a responsive browser-only React/shadcn interface and its locally compiled assets from the Rust service. Runtime requires no Node server, remote scripts, external fonts or assets. Adapt the login and minimal sidebar/account primitives with their required third-party notices. Ship only setup, invitation, sign-in, account settings, reset and administrator accounts/invitations/reset-link screens. No public registration, email delivery, OAuth/social controls, card browser/editor, telemetry dashboard or automatic transfers. The first administrator is also a member with an ordinary collection and connection page.
+
+R33 applies to backend and frontend dependencies: use vetted external packages for a documented, justified need, lock their resolved graphs, and review licenses, security status and transitive dependencies before shipment. Retain required notices. Any existing core reuse must retain its audited ownership/license boundary; reused MPL modules keep their applicable terms and are not relabeled MIT. No Anki code reuse is permitted.
+
+Forms have persistent visible labels, semantic controls, keyboard operation, visible focus, errors associated with their fields and an announced submission outcome. Busy state prevents duplicate local submission without trapping focus. Copy controls have text labels and announce completion; manual selection remains possible. Small screens preserve complete forms and usable account actions. A successful build alone supplies no browser/accessibility evidence.
+
+## W2. Identity and credential values
+
+An account has an immutable opaque random ID and unique canonical username. Usernames are 3–64 ASCII characters, lowercased after trimming ASCII surrounding whitespace, begin with a letter/digit and contain only letters, digits, `_`, `-`, `.`. No display-name/email field or username-renaming workflow is required. Account paths derive only from the ID. Browser and native login canonicalize username by this same rule. Validation errors name a field without echoing secrets.
+
+New passwords contain 12–1,024 UTF-8 bytes after encoding. Preserve exact input: no trimming, normalization or silent truncation. Reject embedded NUL. Confirmation is a browser form check; the server validates the actual password. Existing login passwords are verified as supplied; do not reject a restored old password merely because current creation policy differs. Store salted Argon2id hashes, never reversible passwords. Initial parameters are 19,456 KiB memory, two iterations and one lane, 16 random-byte salt and 32-byte digest, with version/parameters stored for later upgrades. Hashing has at most two concurrent workers and a bounded queue of eight; exhaustion returns 429 before hashing. Hash rehash/credential issuance must compare the exact original hash revision and credential generation after slow work.
+
+Use 32 cryptographically random bytes per setup/invitation/reset/session/hostkey secret, encoded as unpadded base64url. Only hashes of bearer secrets and their lifecycle metadata are stored; a copyable setup token lives in its protected local file until setup closes. Compare secret digests safely. Hostkeys are independent of browser sessions. Issuing a hostkey after native password verification does not authorize any browser endpoint. Browser sessions expire at a fixed 24 hours without sliding renewal. Native hostkeys remain usable until revoked; repeated logins may issue new keys without retaining plaintext keys. A password change/reset/recovery or disable increments credential generation and revokes all account sessions/hostkeys; signing out revokes only that browser session.
+
+## W3. Browser transport and endpoint table
+
+Production has one exact configured HTTPS public origin, without userinfo/query/fragment or a path prefix; it supplies the displayed native base URL. Serve HTTP behind the operator's external HTTPS proxy. Session cookie name is `__Host-meguri-session`, path `/`, Secure, HttpOnly, SameSite=Strict, no Domain. Use no URL/session local-storage bearer credentials. Return `Cache-Control: no-store` on account/API/capability pages and sensitive results, and `Referrer-Policy: no-referrer`. The capability page loads only local assets. Set a same-origin content security policy without arbitrary inline/eval scripts, disallow framing, and disable content-type sniffing.
+
+All unsafe browser requests, including unauthenticated setup/login/invite/reset, require exactly one `Origin` header equal to the configured origin; missing, `null`, mismatched, malformed or repeated Origin is 403 before slow work or state change. Do not trust Host/Forwarded/X-Forwarded-Host to choose this origin. No permissive CORS or cross-origin credentials are enabled. Only configured proxy peers can influence the effective remote IP/proto; spoofed headers from any other peer are ignored. Native `/sync/` and `/msync/` use their own authentication and are excluded from browser-cookie authority. They must remain usable by native clients without browser Origin.
+
+Browser APIs use UTF-8 JSON with `Content-Type: application/json`; reject unsupported types with 415. Maximum JSON body is 16 KiB and nesting depth 16; duplicate known members and unknown members are 400. Every declared field is required unless marked optional. Successful body is `{ "data": <result> }`. Error is `{ "error": { "code": <stable string>, "field": <optional field name> } }`, without raw exception or submitted value. Empty-result mutations use data null and HTTP 200; creations use 201. API paths never return the SPA document.
+
+| Method/path | Authority and request | Result |
+|---|---|---|
+| GET `/api/status` | Public; no body | `{setup_required:bool}`; no account existence or capability detail |
+| POST `/api/setup` | Setup token; `{token,username,password}` | Ready account identity `{id,username,role:"admin"}`; no automatic session |
+| POST `/api/invitations/claim` | Invitation; `{token,username,password}` | Ready member identity; no automatic session |
+| POST `/api/login` | Public; `{username,password}` | `{id,username,role}` and session cookie |
+| POST `/api/logout` | Current browser session; `{}` | null; clear cookie and revoke this session |
+| GET `/api/me` | Current browser session | `{id,username,role,server_url}` |
+| POST `/api/password` | Current browser session; `{current_password,new_password}` | null; revoke all own credentials and clear cookie |
+| GET `/api/admin/accounts` | Current administrator browser session | `{accounts:[{id,username,role,enabled,provisioning_state}]}` ordered by canonical username/id; never hash/token/session fields |
+| POST `/api/admin/invitations` | Current administrator browser session; `{}` | `{url,expires_at}`; one-time secret-bearing result |
+| POST `/api/admin/accounts/{id}/reset` | Current administrator browser session; `{}` | `{url,expires_at}`; replaces earlier resets for this target |
+| POST `/api/admin/accounts/{id}/disable` | Current administrator browser session; `{}` | null; retain all data; sole administrator protected |
+| POST `/api/resets/claim` | Reset capability; `{token,new_password}` | null; revoke old credentials; no automatic session |
+
+Identity `role` is `admin` or `member`; `enabled` is boolean; provisioning_state is `provisioning` or `ready`; times are RFC3339 UTC strings. IDs and URLs are strings. Only ready enabled accounts can authenticate or authorize operations. An administrator uses the same `/api/me` and member functions as anyone else. An administrator may reset or disable itself if another enabled ready administrator remains. Creating/promoting administrators remotely is outside v1; local recovery can restore an existing administrator. Disable does not delete data or automatically re-enable after reset. A reset can change a disabled account's password but never grants access while disabled. No enabled toggle endpoint is added implicitly.
+
+## W4. Initialization and first-admin delivery
+
+The local initialization command takes exclusive data-root ownership and creates accounts state plus a durable singleton setup capability. It creates the setup-token file with owner-only permissions 0600 in an owner-only directory, using exclusive creation and no following links. It prints the file path and public setup page location, not the token. The operator reads the file locally and enters the token into the setup page; no email, HTTP GET or ordinary log delivers it. Treat the local file as secret. A crash between state and file publication is an incomplete initialization requiring explicit local repair, never silent `serve` reinitialization. The local repair can rotate the unclaimed setup token under the lock while invalidating the older one. The setup token has no time expiry before successful claim, but can be locally rotated.
+
+Setup page accepts the token manually or from fragment `#token=<value>`; promptly remove a received fragment via browser history replacement and retain it only in page memory. GET/navigation loads cannot consume it. `GET /api/status` reports setup_required until the first account reaches ready; valid in-progress reservation still prevents a second setup claim. Successful ready publication closes first-admin setup durably and removes the local token file when possible. If unlink fails, the stored capability is already consumed so the stale file cannot redeem. Later setup visits route to login; posting setup still cannot create another administrator.
+
+## W5. Capability lifecycle and provisioning
+
+Capabilities carry kind, secret hash, expiry where applicable, issuer account ID/credential generation where applicable, optional target ID and lifecycle state. Invitations live seven days; reset links thirty minutes; expiry is checked at committing time against UTC and is exclusive (`now >= expires_at` is expired). A newer reset transaction invalidates every earlier reset for that target, including unclaimed links. Capability creation revalidates the original administrator session/generation/role and enabled state in the committing transaction. Reset claims also require the recorded issuer authority still current; disable/password revocation invalidates outstanding capabilities it issued. A reset's target generation must match its issue-time generation. These checks cannot be bypassed by a slow password hash.
+
+| State/event | Result |
+|---|---|
+| Available, valid authority, invalid username/password or username conflict | 422 field error or 409 username_unavailable; remains available, no account or partial reservation |
+| Available, expired/replaced/revoked/invalid secret | 403 capability_invalid; no state change |
+| Available, valid setup/invitation claim | Atomic durable reservation: capability, canonical username, hashed password and newly generated account ID become one provisioning identity |
+| Provisioning, retry with same capability and same username/password proof | Resume only its reserved identity; never allocate a second ID or change credentials |
+| Provisioning, different credentials or username | 409 claim_in_progress; original reservation stays |
+| Provisioning, filesystem creation fails | 503 provision_unavailable; reservation persists for retry/startup resume; access remains closed |
+| Provisioning, completed stores validated and durable | Atomic ready publication consumes capability and admits the reserved identity; setup also closes the singleton |
+| Consumed, retry/new redemption | 403 capability_invalid; no new account |
+
+Claiming does password hashing before the short reservation transaction and then rechecks capability, authority, expiry and username uniqueness. Reserved password hashes are not replaced on retries. A retry verifies its supplied password against that reserved hash before any resumption. Startup may finish the reserved identity without plaintext password, but it rechecks expiry/revocation/issuer authority before ready publication. A reservation whose authority expires/revokes becomes permanently unavailable for access; preserve its reserved identity without silently releasing the username for another redemption. Local diagnostics identify the opaque blocked reservation for operator repair; no remote cleanup/deletion scope is added.
+
+Invitations produce member identities only. Concurrent same-capability claims select one reservation; concurrent different-capability claims for the same username select one identity and leave the losing available capability unclaimed. Reset has no filesystem provisioning phase: verify the new password, revalidate capability/issuer/target generation under the target publication barrier, replace hash and increment generation, consume the reset and invalidate all other target resets atomically, then acknowledge. Reset never changes data, username, role or enabled state. Every operation uses the publication barriers in `sync/server-lifecycle#L4`.
+
+## W6. Session and authority races
+
+Login proves the exact hash revision and credential generation read before hashing; before session/hostkey creation, recheck both plus ready/enabled. If any changed, return a generic authentication failure and issue nothing. Password change additionally verifies current password and that the submitting session remains current. Its original session, password proof and revision must still be valid at commit. Administrator actions revalidate their original actor authority in the same transaction as capability creation or account revocation. A concurrent reset/disable cannot turn stale authority into a newly issued capability.
+
+Browser sign-out is idempotent for a formerly valid cookie: clear it even if already revoked, without revoking another session. Other unauthenticated account APIs return 401 authentication_failed; member attempts to administer return 403 permission_denied. Native 403 is independent of these browser outcomes. A disabled account, unknown username or bad password returns the same 401 authentication_failed browser result and the same native 403 result. No response distinguishes whether a guessed username exists.
+
+## W7. Attempt budgets and failure outcomes
+
+Bound password/capability attempts with in-memory expiring entries: per effective client IP, twenty attempts in a rolling five minutes; per canonical username or capability digest, ten attempts in five minutes. Count failed and successful attempts in these sensitive routes, never ordinary authenticated sync chunks. Hold at most 10,000 distinct limiter entries; when full, refuse new buckets with 429 rather than growing unbounded. A process restart may clear these budgets, but never revives revoked/consumed credentials. Responses use Retry-After seconds for exhausted budgets. Limiter keys and logs never hold plaintext capability/password values. Setup/invite/reset and native login use the same bounded sensitive-work admission, with no password hash for a clearly invalid/expired capability.
+
+Errors are authentication_failed (401), permission_denied/origin_rejected/capability_invalid (403), username_unavailable/claim_in_progress/sole_administrator/stale_authority (409), validation_failed (422 with field), rate_limited (429), provision_unavailable/storage_unavailable/admission_closed (503), invalid_request (400), unsupported_content_type (415), request_too_large (413), route_not_found (404), or internal_error (500). Secret failure text remains generic. A malformed capability and an expired/consumed one share capability_invalid. Name validation/conflict never consumes an available capability. A storage failure cannot be reported as a completed claim/reset/disable. Internal diagnostics contain opaque IDs and phase/outcome only.
+
+## W8. Link handling and operator recovery
+
+Generated invitation/reset URLs use exactly the configured public origin and `/invite#token=<value>` or `/reset#token=<value>`. Tokens are returned only on successful explicit administrator creation and shown in a copyable control; listing accounts never recovers them. Do not consume them on GET, prefetch, validation or fragment parsing. Clear a token fragment promptly before any navigation; never put the token in a query, referer, external navigation, localStorage or normal log. The claim sends it only in the protected POST body. Users share links themselves outside this service; no message is sent by the application.
+
+Local operator recovery runs while service is stopped under the stable data-root lock. It selects an existing administrator by opaque ID, receives a new password through protected local input, validates and hashes it, increments generation/revokes all credentials and capabilities relevant to the account, and keeps every collection/media byte. It may restore that administrator to enabled, but cannot create an anonymous remote bypass. Restore-admission recovery additionally requires the explicit review/open step in `sync/server-lifecycle#L5`; ordinary password repair cannot silently reopen a restored service. No remote forgotten-password email flow exists.
+
+## W9. Connection instructions and evidence
+
+The member page shows the configured native server URL, username, separate connection guidance for Desktop 26.09.4 and AnkiMobile 26.10, and the fact that the same account is used for browser and native password login. It explains that password replacement revokes existing client sign-ins, client initial/full transfer uses that client's explicit confirmation, and media may complete after collection transfer. Do not instruct copying a live SQLite file between clients. An account with no cards can still contain valuable metadata/media; migration never infers safety to overwrite from card count.
+
+Exact client menu labels, endpoint fields, first transfer/migration and restore actions require C4/C8/C10 evidence. Until verified, display an honest pending-verification statement in development and withhold release acceptance; do not fabricate client steps from memory. The compiled interface verification covers F1/F2/F4/F6, all W3 endpoints, keyboard and accessible error flows, no demo links, the private HTTPS proxy's cookies/Origin behavior, setup races, invitation conflicts and each revocation publication phase. `sync/server-lifecycle#L5,L6` owns F5's additional stopped-service/client recovery evidence.

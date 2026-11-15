@@ -1,3 +1,38 @@
+# Meguri Sync browser/account interface vocabulary (U2).
+__Host-meguri-session
+SameSite
+HttpOnly
+Cache-Control
+Referrer-Policy
+Retry-After
+Content-Security-Policy
+X-Content-Type-Options
+X-Forwarded-Host
+X-Forwarded-For
+setup_required
+server_url
+provisioning_state
+expires_at
+current_password
+new_password
+authentication_failed
+permission_denied
+origin_rejected
+capability_invalid
+username_unavailable
+claim_in_progress
+sole_administrator
+stale_authority
+validation_failed
+rate_limited
+provision_unavailable
+storage_unavailable
+admission_closed
+invalid_request
+unsupported_content_type
+request_too_large
+route_not_found
+internal_error
 # Interface names the servers specs use that are not ordinary words: the
 # AnkiConnect action names, parameters and result keys, the Migaku routes,
 # payload keys, form fields and syntax tags, the HTTP, CORS and WebSocket
