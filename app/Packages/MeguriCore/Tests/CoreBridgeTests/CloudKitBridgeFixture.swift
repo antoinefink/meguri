@@ -225,7 +225,7 @@ struct CloudKitBridgeFixture: Sendable {
         let engine = try await engine()
         try await core.validateSDK(engine.instanceID)
         try #require(try await epochAuthority() == nil, "Positive qualification must start with Unknown authority")
-        let target = CloudControlTarget(zone: zone, name: "epoch", recordType: "MGEpoch")
+        let target = CoreBridge.CloudControlTarget(zone: zone, name: "epoch", recordType: "MGEpoch")
         let bytes = try await boundEpochBytes()
         let native = try NativeCloudOwnRecords.save(target: target, encrypted: bytes, systemFields: nil)
         let record = try NativeCloudRecordConversion.decode(native)
