@@ -205,6 +205,113 @@ fn observe_classified(e: &mut EntityFacts, p: codec::Payload, failed: bool,
     }
     Ok(())
 }
+
+pub(super) const SCAN_BATCH_ROWS: usize = 32;
+pub(super) const SCAN_BATCH_BYTES: usize = 8 * 1024 * 1024;
+
+/// Prepared outside State/SQLite locks. No retained tracking body is authority.
+pub(super) struct ScanRow {
+    pub payload: codec::Payload,
+    pub classification: super::RowClassification,
+    pub origin: Option<[u8; 16]>,
+}
+impl ScanRow {
+    pub(super) fn copied_bytes(&self) -> Result<usize, Error> {
+        fn buffers<const N: usize>(values: [&Vec<u8>; N]) -> usize {
+            values.into_iter().fold(0usize, |n, v| n.saturating_add(v.capacity()))
+        }
+        fn stored(value: &codec::Stored) -> usize {
+            match value {
+                codec::Stored::Text(v) | codec::Stored::Blob(v) => v.capacity(),
+                codec::Stored::Integer(_) | codec::Stored::Real(_) => 0,
+            }
+        }
+        // Projection pushes retain spare capacity, including in notetype part
+        // vectors. Wire length alone cannot bound these owned allocations.
+        let heap = match &self.payload {
+            codec::Payload::Note(n) => buffers([&n.guid, &n.tags, &n.flds, &n.data]).saturating_add(stored(&n.sfld)),
+            codec::Payload::Card(c) => stored(&c.due).saturating_add(stored(&c.odue)).saturating_add(stored(&c.data)),
+            codec::Payload::Revlog(r) => stored(&r.ivl).saturating_add(stored(&r.last_ivl)).saturating_add(stored(&r.time)),
+            codec::Payload::Deck(d) => buffers([&d.name, &d.common, &d.kind]),
+            codec::Payload::Preset(p) => buffers([&p.name, &p.config]),
+            codec::Payload::Notetype(n) => {
+                let parts = buffers([&n.name, &n.config])
+                    .saturating_add(n.fields.capacity().saturating_mul(std::mem::size_of::<codec::Field>()))
+                    .saturating_add(n.templates.capacity().saturating_mul(std::mem::size_of::<codec::Template>()));
+                let fields = n.fields.iter().fold(parts, |bytes, f| bytes.saturating_add(buffers([&f.name, &f.config])));
+                n.templates.iter().fold(fields, |bytes, t| bytes.saturating_add(buffers([&t.name, &t.config])))
+            }
+            codec::Payload::Tag(t) => t.tag.capacity().saturating_add(t.config.as_ref().map_or(0, Vec::capacity)),
+            codec::Payload::Config(c) => buffers([&c.key, &c.val]),
+            codec::Payload::MediaName(m) => m.name.capacity(),
+        };
+        Ok(self.payload.encoded_len().map_err(|_| Error::InvalidData)?
+            .max(heap).saturating_add(std::mem::size_of::<Self>())
+            .saturating_add(self.classification.key.capacity()))
+    }
+}
+
+pub(super) fn scan_batch_copied_bytes(row_bytes: usize, len: usize, capacity: usize) -> usize {
+    // Each row already includes its occupied slot; include the spare slots and
+    // the list itself in both runtime preparation and store admission.
+    row_bytes.saturating_add(capacity.saturating_sub(len).saturating_mul(std::mem::size_of::<ScanRow>()))
+        .saturating_add(std::mem::size_of::<Vec<ScanRow>>())
+}
+
+fn insert_scan_entity(tx: &rusqlite::Transaction<'_>, b: BindingId, record_key: &RecordKey,
+    state: &mut runtime::StoredRuntimeState, payload: codec::Payload, origin: [u8; 16],
+    classification: &super::RowClassification,
+) -> Result<Option<EntityFacts>, Error> {
+    if state.open_counter != classification.open || payload.kind() != classification.kind
+        || row_payload::payload_key(&payload)? != classification.key
+        || classification.failure.is_some() || classification.raw_digest.is_none()
+    { return Err(Error::InvalidData); }
+    // An observer may have installed an entity (or a payloadless failure) since
+    // preparation. Return that entity for the normal merge; never skip it.
+    if let Some(e) = entity(tx, b, classification.kind, &classification.key)? { return Ok(Some(e)); }
+    if !super::row_classification::accept(tx, b, classification, state, record_key, DirtySource::Snapshot)? { return Ok(None); }
+    let mut e = new_pending_entity(record_key, payload, origin, DirtySource::Snapshot,
+        &mut state.change_counter, (classification.open, classification.seq, classification.generation))?;
+    e.local_rev = e.local_rev.max(next(super::row_classification::revision(tx,b,e.kind,&e.key)?)?);
+    put(tx, b, &e)?;
+    Ok(Some(e))
+}
+
+fn merge_scan_entity(tx: &rusqlite::Transaction<'_>, b: BindingId, record_key: &RecordKey,
+    state: &mut runtime::StoredRuntimeState, payload: codec::Payload,
+    classification: &super::RowClassification,
+) -> Result<bool, Error> {
+    if classification.kind != payload.kind() || classification.key != row_payload::payload_key(&payload)?
+        || classification.failure.is_some() || classification.raw_digest.is_none()
+        || state.open_counter != classification.open
+    { return Err(Error::InvalidData); }
+    let mut current = entity(tx, b, classification.kind, &classification.key)?.ok_or(Error::InvalidData)?;
+    if current.observer_open == classification.open && current.observed_generation == classification.generation
+        && current.observed_seq > classification.seq
+    { return Ok(false); }
+    let failed = super::row_classification::get(tx,b,current.kind,&current.key)?.is_some_and(|f| f.failure.is_some());
+    // A rejected stale classification must not leak its tentative counter into
+    // another row in this transaction.
+    let mut updated = state.clone();
+    observe_classified(&mut current,payload,failed,DirtySource::Snapshot,&mut updated.change_counter)?;
+    current.observer_open = classification.open;
+    current.observed_seq = classification.seq;
+    current.observed_generation = classification.generation;
+    if !super::row_classification::accept(tx, b, classification, &mut updated, record_key, DirtySource::Snapshot)? { return Ok(false); }
+    put(tx, b, &current)?;
+    *state = updated;
+    Ok(true)
+}
+
+pub(super) fn check_scan_layout(old: &codec::Payload, new: &codec::Payload) -> Result<(), runtime::RuntimeError> {
+    if let (codec::Payload::Deck(old), codec::Payload::Deck(new)) = (old, new)
+        && (old.kind != new.kind || old.parent_id != new.parent_id)
+    { return Err(runtime::RuntimeError::Incomplete(runtime::Incomplete::StructuralLayout)); }
+    if !matches!(new.kind(), codec::Kind::Note | codec::Kind::Card | codec::Kind::Revlog
+        | codec::Kind::Deck | codec::Kind::Preset | codec::Kind::Notetype | codec::Kind::Config) && old != new
+    { return Err(runtime::RuntimeError::Incomplete(runtime::Incomplete::StructuralLayout)); }
+    Ok(())
+}
 fn keys(c: &Connection, b: BindingId, kind: codec::Kind, after: Option<&[u8]>) -> Result<Vec<Vec<u8>>, Error> {
     if kind == codec::Kind::Note {
         let after = after.map(|k| i64::from_be_bytes(k.try_into().unwrap_or([0; 8])));
@@ -533,65 +640,80 @@ CREATE INDEX IF NOT EXISTS cloud_dirty_entities ON cloud_runtime_entities(bindin
         tx.commit()?;
         Ok(e)
     }
-    /// New scan images install classification and payload atomically. In
-    /// particular a newer failed create has no placeholder payload to overwrite.
+    /// Caller holds the live scan/file/State guards. A failed chunk rolls back
+    /// all of its rows; completed chunks remain durable and coverage stays open.
+    pub(super) fn merge_scan_batch(
+        &mut self, b: BindingId, rows: Vec<ScanRow>, publishing: bool,
+    ) -> Result<Vec<String>, runtime::RuntimeError> {
+        let row_bytes = rows.iter().try_fold(0usize, |n, row| -> Result<_, Error> {
+            Ok(n.saturating_add(row.copied_bytes()?))
+        })?;
+        let bytes = scan_batch_copied_bytes(row_bytes, rows.len(), rows.capacity());
+        if rows.is_empty() || rows.len() > SCAN_BATCH_ROWS || (rows.len() > 1 && bytes > SCAN_BATCH_BYTES) {
+            return Err(Error::InvalidData.into());
+        }
+        let binding = self.binding(b)?.ok_or(Error::BindingNotFound)?;
+        let mut state = self.runtime_binding(b)?;
+        if publishing {
+            let op = self.publication_op()?.ok_or(Error::InvalidData)?;
+            if op.step != super::publication::PublishStep::Zones || op.binding_after != Some(b) {
+                return Err(Error::InvalidData.into());
+            }
+        }
+        let tx = self.connection.transaction().map_err(Error::from)?;
+        let mut recovered = Vec::new();
+        for ScanRow { payload, classification, origin } in rows {
+            let existing = if let Some(origin) = origin {
+                if !publishing && !matches!(payload.kind(), codec::Kind::Note | codec::Kind::Card | codec::Kind::Revlog | codec::Kind::Config) {
+                    return Err(Error::InvalidData.into());
+                }
+                insert_scan_entity(&tx, b, &binding.facts.record_key, &mut state,
+                    payload.clone(), origin, &classification)?
+            } else {
+                Some(entity(&tx, b, classification.kind, &classification.key)?.ok_or(Error::InvalidData)?)
+            };
+            let Some(e) = existing else { continue; };
+            check_scan_layout(&e.payload, &payload)?;
+            let recover = e.payload != payload || (origin.is_some() && !publishing);
+            if merge_scan_entity(&tx, b, &binding.facts.record_key, &mut state, payload, &classification)? && recover {
+                recovered.push(e.name);
+            }
+        }
+        put_binding(&tx, b, &state)?;
+        tx.commit().map_err(Error::from)?;
+        Ok(recovered)
+    }
+    #[cfg(test)]
     pub(super) fn insert_classified_scan_entity(
         &mut self, b: BindingId, payload: codec::Payload, origin: [u8; 16],
         classification: &super::RowClassification, publishing: bool,
     ) -> Result<Option<EntityFacts>, Error> {
         let binding = self.binding(b)?.ok_or(Error::BindingNotFound)?;
         let mut state = self.runtime_binding(b)?;
-        if state.open_counter != classification.open || payload.kind() != classification.kind
-            || row_payload::payload_key(&payload)? != classification.key || classification.failure.is_some() || classification.raw_digest.is_none()
-        { return Err(Error::InvalidData); }
         if publishing {
             let op = self.publication_op()?.ok_or(Error::InvalidData)?;
             if op.step != super::publication::PublishStep::Zones || op.binding_after != Some(b) { return Err(Error::InvalidData); }
         } else if !matches!(payload.kind(), codec::Kind::Note | codec::Kind::Card | codec::Kind::Revlog | codec::Kind::Config) {
             return Err(Error::InvalidData);
         }
-        if let Some(e) = entity(&self.connection, b, classification.kind, &classification.key)? { return Ok(Some(e)); }
         let tx = self.connection.transaction()?;
-        if !super::row_classification::accept(&tx, b, classification, &mut state, &binding.facts.record_key, DirtySource::Snapshot)? { return Ok(None); }
-        let mut e = new_pending_entity(&binding.facts.record_key, payload, origin, DirtySource::Snapshot,
-            &mut state.change_counter, (classification.open, classification.seq, classification.generation))?;
-        e.local_rev = e.local_rev.max(next(super::row_classification::revision(&tx,b,e.kind,&e.key)?)?);
-        put(&tx, b, &e)?;
+        let result = insert_scan_entity(&tx, b, &binding.facts.record_key, &mut state, payload, origin, classification)?;
         put_binding(&tx, b, &state)?;
         tx.commit()?;
-        Ok(Some(e))
+        Ok(result)
     }
+    #[cfg(test)]
     pub(super) fn workflow_merge(
-        &mut self,
-        b: BindingId,
-        open: u64,
-        seq: u64,
-        generation: u64,
-        mut image: EntityFacts,
-        classification: &super::RowClassification,
+        &mut self, b: BindingId, open: u64, seq: u64, generation: u64,
+        image: EntityFacts, classification: &super::RowClassification,
     ) -> Result<(), Error> {
         if classification.kind != image.kind || classification.key != image.key || classification.open != open
             || classification.seq != seq || classification.generation != generation
-            || classification.failure.is_some() || classification.raw_digest.is_none()
         { return Err(Error::InvalidData); }
         let binding = self.binding(b)?.ok_or(Error::BindingNotFound)?;
         let mut state = self.runtime_binding(b)?;
-        if state.open_counter != open {
-            return Err(Error::InvalidData);
-        }
-        let mut current = entity(&self.connection, b, image.kind, &image.key)?.ok_or(Error::InvalidData)?;
-        if current.observer_open == open && current.observed_generation == generation && current.observed_seq > seq {
-            return Ok(());
-        }
-        let failed = super::row_classification::get(&self.connection,b,image.kind,&image.key)?.is_some_and(|f| f.failure.is_some());
-        observe_classified(&mut current,image.payload,failed,DirtySource::Snapshot,&mut state.change_counter)?;
-        current.observer_open = open;
-        current.observed_seq = seq;
-        current.observed_generation = generation;
-        image = current;
         let tx = self.connection.transaction()?;
-        if !super::row_classification::accept(&tx, b, classification, &mut state, &binding.facts.record_key, DirtySource::Snapshot)? { return Ok(()); }
-        put(&tx, b, &image)?;
+        if !merge_scan_entity(&tx, b, &binding.facts.record_key, &mut state, image.payload, classification)? { return Ok(()); }
         put_binding(&tx, b, &state)?;
         tx.commit()?;
         Ok(())

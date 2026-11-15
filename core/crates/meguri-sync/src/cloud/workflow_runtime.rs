@@ -220,6 +220,27 @@ impl Runtime {
             Ok(result?)
         })
     }
+    fn flush_scan_rows(&self, guard: &ScanGuard, collection: &Collection,
+        rows: &mut Vec<super::super::workflow_store::ScanRow>, publishing: bool,
+        recovered: &mut Vec<String>, count: &mut usize,
+    ) -> Result<(), RuntimeError> {
+        if rows.is_empty() { return Ok(()); }
+        let rows = std::mem::take(rows);
+        let row_count = rows.len();
+        let names = self.with_scan(guard, collection, |s| {
+            let result = s.store.as_mut().ok_or(Error::Database)?.merge_scan_batch(guard.binding, rows, publishing);
+            if matches!(&result, Err(RuntimeError::Tracking(Error::Io(_) | Error::Database | Error::Constraint))) {
+                s.tracking_stopped = true;
+                s.scan_required = true;
+                s.whole_complete = false;
+            }
+            result
+        })?;
+        // Only durable facts contribute to the proof's bookkeeping.
+        recovered.extend(names);
+        *count += row_count;
+        Ok(())
+    }
     /// Durable kind/key details. Completeness belongs only to an accepted full
     /// real-row scan this open, independently of global K10 attention knowledge.
     pub fn row_classification_details(&self) -> Result<(bool, Vec<super::super::RowClassification>), RuntimeError> {
@@ -855,108 +876,118 @@ impl Runtime {
                     if page.is_empty() {
                         break;
                     }
-                    for row in page {
-                        let key = row_payload::key(kind, &row)?;
-                        cursor = Some(RowKey::from_stored(table, &row).map_err(meguri_storage::StorageError::from)?);
-                        // Copy only one tracking body per projection, then release guards.
-                        let mut existing = self.with_scan(&guard, collection, |s| {
-                            Ok(s.store
-                                .as_ref()
-                                .ok_or(Error::Database)?
-                                .entity_image(guard.binding, kind, &key)?)
-                        })?;
-                        let newly_observed = existing.is_none();
-                        let projected = row_payload::project_ordinary(&view, kind, &row, |id| {
-                            if publishing {
-                                let raw = view.row(Table::Notetypes, &RowKey::Id(id))?.ok_or(Error::InvalidData)?;
-                                return row_payload::notetype(&view, &raw, 1);
-                            }
-                            let tracked = {
-                                let s = self.state();
-                                with_tracking_access(|| {
-                                    s.store.as_ref().ok_or(Error::Database)?.entity_image(
-                                        guard.binding,
-                                        codec::Kind::Notetype,
-                                        &codec::id_key(id),
-                                    )
-                                })
-                            }?;
-                            if let Some(e) = tracked {
-                                match e.payload {
-                                    codec::Payload::Notetype(n) => Ok(n),
-                                    _ => Err(Error::InvalidData),
-                                }
-                            } else if publishing {
-                                let raw = view.row(Table::Notetypes, &RowKey::Id(id))?.ok_or(Error::InvalidData)?;
-                                row_payload::notetype(&view, &raw, 1)
-                            } else {
-                                row_payload::missing_layout(&view, id)
-                            }
-                        });
-                        let failure = match &projected { Err(Error::RowFailure(f)) => Some(*f), _ => None };
-                        let classification = super::super::RowClassification {
-                            kind, key: key.clone(), open: guard.open, seq: snapshot.seq().0,
-                            generation: snapshot.generation().0, file: guard.file,
-                            raw_digest: Some(row_payload::raw_identity(&view, kind, &row)?),
-                            logical_digest: Some(row_payload::logical_identity(&view, kind, &row)?), failure,
-                        };
-                        #[cfg(feature = "test-hooks")]
-                        Self::pause_scan(&mut scan_pause, ScanPausePoint::BeforeRowMerge(kind))?;
-                        if classification.failure.is_some() {
-                            self.classify_snapshot_row(&guard, collection, &classification)?;
-                            count += 1;
-                            continue;
-                        }
-                        let p = projected?;
-                        if newly_observed && !publishing && !matches!(kind,
-                            codec::Kind::Note | codec::Kind::Card | codec::Kind::Revlog | codec::Kind::Config)
-                        { return Err(Error::InvalidData.into()); }
-                        let mut e = if let Some(e) = existing.take() {
-                            e
-                        } else {
-                            let origin = self.publication_random_id()?;
-                            let inserted = self.with_scan(&guard, collection, |s| {
-                                Ok(s.store.as_mut().ok_or(Error::Database)?.insert_classified_scan_entity(
-                                    guard.binding, p.clone(), origin, &classification, publishing,
-                                )?)
+                    let mut pending = Vec::new();
+                    let mut copied_bytes = 0usize;
+                    let prepared = (|| -> Result<(), RuntimeError> {
+                        for row in page {
+                            let key = row_payload::key(kind, &row)?;
+                            cursor = Some(RowKey::from_stored(table, &row).map_err(meguri_storage::StorageError::from)?);
+                            // Copy only one tracking body per projection, then release guards.
+                            let existing = self.with_scan(&guard, collection, |s| {
+                                Ok(s.store
+                                    .as_ref()
+                                    .ok_or(Error::Database)?
+                                    .entity_image(guard.binding, kind, &key)?)
                             })?;
-                            let Some(e) = inserted else { count += 1; continue; };
-                            e
-                        };
-                        if let (codec::Payload::Deck(old), codec::Payload::Deck(new)) = (&e.payload, &p)
-                            && (old.kind != new.kind || old.parent_id != new.parent_id)
-                        {
-                            return Err(RuntimeError::Incomplete(Incomplete::StructuralLayout));
+                            let newly_observed = existing.is_none();
+                            let projected = row_payload::project_ordinary(&view, kind, &row, |id| {
+                                if publishing {
+                                    let raw = view.row(Table::Notetypes, &RowKey::Id(id))?.ok_or(Error::InvalidData)?;
+                                    return row_payload::notetype(&view, &raw, 1);
+                                }
+                                let tracked = {
+                                    let s = self.state();
+                                    with_tracking_access(|| {
+                                        s.store.as_ref().ok_or(Error::Database)?.entity_image(
+                                            guard.binding,
+                                            codec::Kind::Notetype,
+                                            &codec::id_key(id),
+                                        )
+                                    })
+                                }?;
+                                if let Some(e) = tracked {
+                                    match e.payload {
+                                        codec::Payload::Notetype(n) => Ok(n),
+                                        _ => Err(Error::InvalidData),
+                                    }
+                                } else if publishing {
+                                    let raw = view.row(Table::Notetypes, &RowKey::Id(id))?.ok_or(Error::InvalidData)?;
+                                    row_payload::notetype(&view, &raw, 1)
+                                } else {
+                                    row_payload::missing_layout(&view, id)
+                                }
+                            });
+                            let failure = match &projected { Err(Error::RowFailure(f)) => Some(*f), _ => None };
+                            let classification = super::super::RowClassification {
+                                kind, key: key.clone(), open: guard.open, seq: snapshot.seq().0,
+                                generation: snapshot.generation().0, file: guard.file,
+                                raw_digest: Some(row_payload::raw_identity(&view, kind, &row)?),
+                                logical_digest: Some(row_payload::logical_identity(&view, kind, &row)?), failure,
+                            };
+                            #[cfg(feature = "test-hooks")]
+                            if scan_pause.as_ref().is_some_and(|pause| pause.point == ScanPausePoint::BeforeRowMerge(kind)) {
+                                self.flush_scan_rows(&guard, collection, &mut pending, publishing, &mut recovered, &mut count)?;
+                                copied_bytes = 0;
+                            }
+                            #[cfg(feature = "test-hooks")]
+                            Self::pause_scan(&mut scan_pause, ScanPausePoint::BeforeRowMerge(kind))?;
+                            if classification.failure.is_some() {
+                                self.flush_scan_rows(&guard, collection, &mut pending, publishing, &mut recovered, &mut count)?;
+                                copied_bytes = 0;
+                                self.classify_snapshot_row(&guard, collection, &classification)?;
+                                count += 1;
+                                continue;
+                            }
+                            let p = projected?;
+                            if newly_observed && !publishing && !matches!(kind,
+                                codec::Kind::Note | codec::Kind::Card | codec::Kind::Revlog | codec::Kind::Config)
+                            { return Err(Error::InvalidData.into()); }
+                            if let Some(e) = &existing {
+                                super::super::workflow_store::check_scan_layout(&e.payload, &p)?;
+                            }
+                            // Keep only the projected payload; tracking is read again
+                            // inside the transaction, after all preparation guards end.
+                            drop(existing);
+                            let row = super::super::workflow_store::ScanRow {
+                                payload: p, classification,
+                                origin: if newly_observed { Some(self.publication_random_id()?) } else { None },
+                            };
+                            let bytes = row.copied_bytes()?;
+                            let next_bytes = super::super::workflow_store::scan_batch_copied_bytes(
+                                copied_bytes.saturating_add(bytes), pending.len().saturating_add(1), pending.capacity());
+                            if !pending.is_empty() && (pending.len() == super::super::workflow_store::SCAN_BATCH_ROWS
+                                || next_bytes > super::super::workflow_store::SCAN_BATCH_BYTES)
+                            {
+                                self.flush_scan_rows(&guard, collection, &mut pending, publishing, &mut recovered, &mut count)?;
+                                copied_bytes = 0;
+                            }
+                            // Fix the slot allocation before admitting the first row.
+                            // A nonempty prefix keeps its admitted capacity through flush.
+                            if pending.is_empty() {
+                                pending.reserve_exact(super::super::workflow_store::SCAN_BATCH_ROWS);
+                            }
+                            copied_bytes = copied_bytes.saturating_add(bytes);
+                            pending.push(row);
+                            // Oversized rows run alone, and no chunk spans raw pages.
+                            if pending.len() == super::super::workflow_store::SCAN_BATCH_ROWS
+                                || super::super::workflow_store::scan_batch_copied_bytes(copied_bytes, pending.len(), pending.capacity())
+                                    >= super::super::workflow_store::SCAN_BATCH_BYTES
+                            {
+                                self.flush_scan_rows(&guard, collection, &mut pending, publishing, &mut recovered, &mut count)?;
+                                copied_bytes = 0;
+                            }
                         }
-                        if !matches!(
-                            kind,
-                            codec::Kind::Note
-                                | codec::Kind::Card
-                                | codec::Kind::Revlog
-                                | codec::Kind::Deck
-                                | codec::Kind::Preset
-                                | codec::Kind::Notetype
-                                | codec::Kind::Config
-                        ) && e.payload != p
-                        {
-                            return Err(RuntimeError::Incomplete(Incomplete::StructuralLayout));
-                        }
-                        if e.payload != p || (newly_observed && !publishing) {
-                            recovered.push(e.name.clone());
-                        }
-                        e.payload = p;
-                        self.with_scan(&guard, collection, |s| {
-                            Ok(s.store.as_mut().ok_or(Error::Database)?.workflow_merge(
-                                guard.binding,
-                                guard.open,
-                                snapshot.seq().0,
-                                snapshot.generation().0,
-                                e,
-                                &classification,
-                            )?)
-                        })?;
-                        count += 1;
+                        Ok(())
+                    })();
+                    if let Err(error) = prepared {
+                        // Preserve the successfully prepared prefix on projection
+                        // or hook errors. A failed flush consumed its chunk, so it
+                        // is never retried. Keep the original error if cleanup fails;
+                        // flush_scan_rows still records a tracking failure stop.
+                        let _ = self.flush_scan_rows(&guard, collection, &mut pending, publishing, &mut recovered, &mut count);
+                        return Err(error);
                     }
+                    self.flush_scan_rows(&guard, collection, &mut pending, publishing, &mut recovered, &mut count)?;
                 }
                 counts.push((kind, count));
             }

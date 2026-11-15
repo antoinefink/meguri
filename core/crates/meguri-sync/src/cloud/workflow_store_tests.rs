@@ -82,6 +82,192 @@ fn payloads() -> [codec::Payload; 2] {
     ]
 }
 
+fn prepared_scan_row(store: &TrackingStore, b: BindingId, open: u64,
+    payload: codec::Payload, seq: u64, origin: Option<[u8; 16]>,
+) -> ScanRow {
+    let mut counter = 0;
+    let e = new_pending_entity(&store.binding(b).unwrap().unwrap().facts.record_key,
+        payload.clone(), [9; 16], DirtySource::Snapshot, &mut counter, (open, seq, 7)).unwrap();
+    ScanRow { classification: scan_classification(&e, open, seq, 7), payload, origin }
+}
+
+#[test]
+fn classified_scan_batch_rolls_back_all_rows_and_keeps_the_durable_prefix() {
+    let (dir, mut store, b, open) = fixture();
+    let prefix = store.insert_workflow_entity(b, codec::Payload::Config(codec::Config {
+        key: b"durable-prefix".to_vec(), val: b"1".to_vec(), ..Default::default()
+    }), [1; 16], (open, 1, 7)).unwrap();
+    let state = store.runtime_binding(b).unwrap();
+    let images = payloads();
+    // Fail the second row's header, after both classifications and the first
+    // row's payload/header have been written inside the transaction.
+    store.connection.execute_batch("CREATE TRIGGER fail_batch_second BEFORE INSERT ON cloud_runtime_entities WHEN NEW.kind=8 BEGIN SELECT RAISE(FAIL,'second header fault'); END;").unwrap();
+    let rows = images.iter().map(|p| prepared_scan_row(&store, b, open, p.clone(), 10, Some([2;16]))).collect();
+    assert!(matches!(store.merge_scan_batch(b, rows, false), Err(runtime::RuntimeError::Tracking(Error::Constraint))));
+    assert_eq!(encode(&store.runtime_binding(b).unwrap()).unwrap(), encode(&state).unwrap());
+    assert!(store.entity_facts(b, &prefix.name).unwrap().unwrap() == prefix);
+    assert!(store.row_classifications(b, false).unwrap().is_empty());
+    for table in ["cloud_runtime_notes", "cloud_runtime_payloads"] {
+        let count: i64 = store.connection.query_row(&format!("SELECT count(*) FROM {table} WHERE binding=?1"), [b.0.as_slice()], |r| r.get(0)).unwrap();
+        // The durable prefix has one payload image; no batch image survives.
+        assert_eq!(count, if table == "cloud_runtime_payloads" { 1 } else { 0 });
+    }
+    assert!(!store.row_classification_coverage(b).unwrap());
+    store.connection.execute_batch("DROP TRIGGER fail_batch_second").unwrap();
+    let scope = store.scope.clone();
+    drop(store);
+    let OpenOutcome::Opened(mut store) = TrackingStore::open(dir.path(), scope).unwrap() else { panic!("durable prefix opens"); };
+    store.install_runtime().unwrap();
+    assert!(store.entity_facts(b, &prefix.name).unwrap().unwrap() == prefix);
+    let rows = images.iter().map(|p| prepared_scan_row(&store, b, open, p.clone(), 10, Some([2;16]))).collect();
+    let names = store.merge_scan_batch(b, rows, false).unwrap();
+    assert_eq!(names.len(), 2);
+    assert_eq!(store.runtime_binding(b).unwrap().change_counter, state.change_counter + 2);
+    assert_eq!(store.row_classifications(b, false).unwrap().len(), 2);
+    for (p, name) in images.iter().zip(names) {
+        let e = store.entity_facts(b, &name).unwrap().unwrap();
+        assert_eq!(&e.payload, p);
+        assert_eq!((e.local_rev, e.acked_rev, e.observed_seq), (1, 0, 10));
+        assert!(e.base_payload.is_none() && e.in_flight.is_empty());
+    }
+    assert!(!store.row_classification_coverage(b).unwrap());
+    super::super::row_classification::validate(&store.connection, &store.scope).unwrap();
+}
+
+#[test]
+fn classified_scan_batch_keeps_newer_payloadless_failure_then_repair_and_deletion() {
+    let (_dir, mut store, b, open) = fixture();
+    let images = payloads();
+    let note = prepared_scan_row(&store, b, open, images[0].clone(), 10, Some([2;16]));
+    let mut failed = note.classification.clone();
+    failed.seq = 11;
+    failed.failure = Some(row_payload::RowFailure::Oversize);
+    store.classify_row(b, &failed).unwrap();
+    let before = store.runtime_binding(b).unwrap().change_counter;
+    let names = store.merge_scan_batch(b, vec![note,
+        prepared_scan_row(&store, b, open, images[1].clone(), 10, Some([3;16]))], false).unwrap();
+    assert_eq!(names.len(), 1);
+    assert!(store.entity_image(b, codec::Kind::Note, &failed.key).unwrap().is_none());
+    assert_eq!(store.row_classifications(b, true).unwrap(), vec![failed.clone()]);
+    assert_eq!(store.runtime_binding(b).unwrap().change_counter, before + 1);
+    let repaired = prepared_scan_row(&store, b, open, images[0].clone(), 12, Some([4;16]));
+    let repair = repaired.classification.clone();
+    store.merge_scan_batch(b, vec![repaired], false).unwrap();
+    let e = store.entity_image(b, codec::Kind::Note, &failed.key).unwrap().unwrap();
+    assert!(e.local_rev > 1);
+    assert_eq!(e.payload, images[0]);
+    assert!(!store.classify_row(b, &failed).unwrap());
+    let counter = store.runtime_binding(b).unwrap().change_counter;
+    // The existing-image path must also reject an older failure-era scan.
+    assert!(store.merge_scan_batch(b, vec![prepared_scan_row(&store, b, open, images[0].clone(), 10, None)], false).unwrap().is_empty());
+    assert!(store.entity_image(b, codec::Kind::Note, &failed.key).unwrap().unwrap() == e);
+    assert_eq!(store.runtime_binding(b).unwrap().change_counter, counter);
+    let deletion = super::super::RowClassification { seq: 13, raw_digest: None, logical_digest: None, ..repair };
+    assert!(store.classify_row(b, &deletion).unwrap());
+    store.merge_scan_batch(b, vec![prepared_scan_row(&store, b, open, images[0].clone(), 12, None)], false).unwrap();
+    assert_eq!(store.row_classifications(b, false).unwrap().into_iter().find(|f| f.kind == codec::Kind::Note).unwrap(), deletion);
+    assert!(store.entity_image(b, codec::Kind::Note, &failed.key).unwrap().unwrap() == e);
+    assert_eq!(store.runtime_binding(b).unwrap().change_counter, counter);
+}
+
+#[test]
+fn classified_scan_batch_merges_concurrent_insert_and_preserves_newer_observer_image() {
+    let (_dir, mut store, b, open) = fixture();
+    for newer in [false, true] {
+        let p = payloads()[usize::from(newer)].clone();
+        let prepared = prepared_scan_row(&store, b, open, p.clone(), 10, Some([2;16]));
+        let mut observed = p.clone();
+        match &mut observed {
+            codec::Payload::Note(n) => n.flds = b"observer\x1fbody".to_vec(),
+            codec::Payload::Config(c) => c.val = b"2".to_vec(),
+            _ => unreachable!(),
+        }
+        let before = store.insert_workflow_entity(b, observed.clone(), [3;16], (open, if newer { 11 } else { 9 }, 7)).unwrap();
+        let counter = store.runtime_binding(b).unwrap().change_counter;
+        let names = store.merge_scan_batch(b, vec![prepared], false).unwrap();
+        let e = store.entity_facts(b, &before.name).unwrap().unwrap();
+        if newer {
+            assert!(names.is_empty());
+            assert!(e == before);
+            assert_eq!(store.runtime_binding(b).unwrap().change_counter, counter);
+        } else {
+            assert_eq!(names, vec![before.name]);
+            assert_eq!(e.payload, p);
+            assert_eq!(e.origin, [3;16]);
+            assert_eq!(e.local_rev, before.local_rev + 1);
+            assert_eq!(store.runtime_binding(b).unwrap().change_counter, counter + 1);
+        }
+    }
+}
+
+#[test]
+fn classified_scan_batch_rejects_unbounded_rows_or_copied_bytes() {
+    let (_dir, mut store, b, open) = fixture();
+    let rows = (0..=SCAN_BATCH_ROWS).map(|_| prepared_scan_row(&store, b, open, payloads()[1].clone(), 10, Some([2;16]))).collect();
+    assert!(store.merge_scan_batch(b, rows, false).is_err());
+    let large = codec::Payload::Config(codec::Config {
+        key: b"large-scan-row".to_vec(), val: vec![b'1'; SCAN_BATCH_BYTES], ..Default::default()
+    });
+    let row = prepared_scan_row(&store, b, open, large.clone(), 10, Some([2;16]));
+    assert!(row.copied_bytes().unwrap() > SCAN_BATCH_BYTES);
+    let small = prepared_scan_row(&store, b, open, payloads()[1].clone(), 10, Some([2;16]));
+    assert!(store.merge_scan_batch(b, vec![row, small], false).is_err());
+    assert_eq!(store.runtime_binding(b).unwrap().change_counter, 0);
+    assert!(store.row_classifications(b, false).unwrap().is_empty());
+    let row = prepared_scan_row(&store, b, open, large, 10, Some([2;16]));
+    assert_eq!(store.merge_scan_batch(b, vec![row], false).unwrap().len(), 1);
+}
+
+#[test]
+fn classified_scan_batch_counts_notetype_spare_capacity_and_admits_oversize_alone() {
+    let (_dir, mut store, b, open) = fixture();
+    let historical = codec::Notetype {
+        id: 12, struct_gen: 1, name: b"Scan type".to_vec(),
+        fields: vec![codec::Field { ord: 0, name: b"Front".to_vec(), ..Default::default() }],
+        templates: vec![codec::Template { ord: 0, name: b"T0".to_vec(), ..Default::default() }],
+        ..Default::default()
+    };
+    row_payload::validate_notetype(&historical).unwrap();
+    let key = store.binding(b).unwrap().unwrap().facts.record_key;
+    let mut state = store.runtime_binding(b).unwrap();
+    let before = new_pending_entity(&key, codec::Payload::Notetype(historical.clone()),
+        [1;16], DirtySource::Snapshot, &mut state.change_counter, (open, 1, 7)).unwrap();
+    let tx = store.connection.transaction().unwrap();
+    put(&tx, b, &before).unwrap();
+    put_binding(&tx, b, &state).unwrap();
+    tx.commit().unwrap();
+    let prepare = |store: &TrackingStore| {
+        let mut n = historical.clone();
+        // Match projection's push growth: the live parts still fit below the
+        // cap, but the retained part allocation alone fills the entire budget.
+        while n.templates.capacity().saturating_mul(std::mem::size_of::<codec::Template>()) < SCAN_BATCH_BYTES {
+            n.templates.push(codec::Template {
+                ord: i64::try_from(n.templates.len()).unwrap(),
+                name: format!("T{}", n.templates.len()).into_bytes(), ..Default::default()
+            });
+        }
+        assert!(n.templates.capacity() > n.templates.len());
+        row_payload::validate_notetype(&n).unwrap();
+        let old_parts = n.templates.len().saturating_mul(std::mem::size_of::<codec::Template>());
+        let row = prepared_scan_row(store, b, open, codec::Payload::Notetype(n), 10, None);
+        let old_bytes = row.payload.encoded_len().unwrap().saturating_add(old_parts)
+            .saturating_add(std::mem::size_of::<ScanRow>()).saturating_add(row.classification.key.len());
+        let small = prepared_scan_row(store, b, open, payloads()[1].clone(), 10, Some([2;16]));
+        assert!(scan_batch_copied_bytes(old_bytes.saturating_add(small.copied_bytes().unwrap()), 2, 2) < SCAN_BATCH_BYTES);
+        assert!(row.copied_bytes().unwrap() > SCAN_BATCH_BYTES);
+        (row, small)
+    };
+    let state = encode(&store.runtime_binding(b).unwrap()).unwrap();
+    let (row, small) = prepare(&store);
+    assert!(matches!(store.merge_scan_batch(b, vec![row, small], false),
+        Err(runtime::RuntimeError::Tracking(Error::InvalidData))));
+    assert_eq!(encode(&store.runtime_binding(b).unwrap()).unwrap(), state);
+    assert!(store.entity_facts(b, &before.name).unwrap().unwrap() == before);
+    assert!(store.row_classifications(b, false).unwrap().is_empty());
+    let (row, _) = prepare(&store);
+    assert_eq!(store.merge_scan_batch(b, vec![row], false).unwrap(), vec![before.name]);
+}
+
 #[test]
 fn exchange_blocks_follow_pending_references_and_stop_at_clean_images() {
     let (_directory, mut store, binding, open) = fixture();
