@@ -11,3 +11,7 @@ class DependencyLicenses(unittest.TestCase):
     def test_unknown_license_or_package_fails(self):
         self.assertFalse(license_matches('jsonschema', 'unknown'))
         self.assertFalse(license_matches('unreviewed-package', 'MIT'))
+
+    def test_resolver_license_expression_keeps_an_approved_option(self):
+        self.assertTrue(license_matches('uv', 'MIT OR Apache-2.0'))
+        self.assertFalse(license_matches('uv', 'unknown'))

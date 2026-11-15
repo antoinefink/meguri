@@ -159,3 +159,25 @@ The complete catalog remains 1,294 unobserved obligations across 31 families. No
 Candidate execution, production package/release acceptance and actual Mobile execution remain unverified.
 The global 26.09.3 oracle and frozen application lanes were not changed.
 Parent-owned registry integration, provenance, privacy, similarity and coherent-batch gates remain required before unit acceptance.
+
+## Resolver artifact closure
+
+A final requirement audit found that the optional lock-generation tool was only version-pinned.
+The fresh reviewer confirmed this remaining artifact-pin gap after its earlier source acceptance.
+The original source-bound 24af smoke and edge seals remain valid historical observations; they are not relabeled for this repair.
+
+The resolver now has a separate hash-locked requirement, binary-only installation, no dependency fallback, and an actual retained installation report.
+It uses uv 0.13.4 under its MIT option. Public [PyPI metadata](https://pypi.org/pypi/uv/0.13.4/json) supplied the reviewed Linux wheel hashes and reported no advisory for this fixed version.
+The previous resolver's metadata reported a TLS root-certificate advisory, so hashing that older artifact alone would not close the dependency review.
+The reference runtime still contains 19 packages; the separate resolver adds one audited development tool, for 20 audited packages in total.
+Resolver lock SHA-256: `5df907c15b7fdaf794ff88419e6a204556c63fb0964bf89cd9ee05fd8ba619ca`.
+
+The actual hash-checked resolver bootstrap and lock generation passed in `20261115T155943Z-57011`.
+Its `resolver-install.json` records uv 0.13.4 and installed aarch64 wheel SHA-256 `7b3cdf868e5415631fe797b648c0d6945d38d388f23367bdd0b6332e80a1fcb0`.
+The focused package audit passed all 20 artifacts in `20261115T155947Z-57690`, retaining separate runtime/resolver counts and lock digests.
+Regeneration left `requirements.lock` byte-identical at `56e1bef86def9f5f230d12317e3510f2176eb079928f3a75f86afb0dcc408ec8`.
+The executed SDK driver, fixture recipes, selections, schema, candidate adapter, runtime dependency inputs and Docker image inputs are unchanged from 24af.
+
+The parent explicitly directed focused resolver validation and unchanged-runtime proof here.
+The required canonical U1–U4 full gate will run selftest, smoke and edges against the integrated updated source and retain fresh receipts.
+This direction avoids repeating the 29 SDK cases solely for a resolver-only change; it does not waive that integrated gate or reuse historical review batches for new-source seals.

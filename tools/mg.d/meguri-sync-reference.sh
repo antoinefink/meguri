@@ -42,11 +42,12 @@ mg_sync_server_reference() {
         mg_failure usage "lock takes no arguments"; mg_status error; return
       fi
       if ! mg_compose -f "$MG_ROOT/docker/meguri-sync-reference.compose.yml" run --rm -T --no-deps \
-        --label "meguri.mg.run-id=$MG_RUN_ID" -v "$reference_dir:/lock" -w /lock \
-        sync-reference-resolver sh -c 'pip install --quiet --disable-pip-version-check --root-user-action=ignore uv==0.12.24 && uv pip compile --quiet --generate-hashes --python-version 3.12 --python-platform aarch64-manylinux_2_35 --custom-compile-command "tools/mg sync-server-reference lock" requirements.in -o requirements.lock'; then
+        --label "meguri.mg.run-id=$MG_RUN_ID" -v "$reference_dir:/lock" -v "$MG_RUN_DIR:/out" -w /lock \
+        sync-reference-resolver sh -c 'pip install --quiet --disable-pip-version-check --root-user-action=ignore --require-hashes --no-deps --only-binary=:all: --report /out/resolver-install.json -r resolver-requirements.lock && uv pip compile --quiet --generate-hashes --python-version 3.12 --python-platform aarch64-manylinux_2_35 --custom-compile-command "tools/mg sync-server-reference lock" requirements.in -o requirements.lock'; then
         mg_failure dependency-lock "current reference dependency resolution failed"; mg_status fail; return
       fi
       mg_artifact lock "$reference_dir/requirements.lock"
+      mg_artifact report "$MG_RUN_DIR/resolver-install.json" "Hash-pinned lock resolver installation"
       mg_status pass; return ;;
     selftest|identity|smoke|edges|catalog|validate|seal) ;;
     *) mg_failure usage "expected lock, deps, selftest, identity, smoke, edges, catalog, validate or seal"; mg_status error; return ;;
