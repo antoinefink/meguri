@@ -159,7 +159,7 @@ pub(super) fn apply(
                                     continue;
                                 }
                                 stage::unique(ctx.scope(), table, id, &mut nt.name, &mut nt.mtime, &mut nt.usn, usn)?;
-                                ctx.scope().put_notetype(&nt)?;
+                                ctx.put_accepted_sync_notetype(&nt)?;
                             }
                             Table::Decks => {
                                 let mut row = Deck::from_cells(&image).map_err(meguri_storage::StorageError::from)?;

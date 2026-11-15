@@ -113,6 +113,8 @@ impl std::error::Error for OpenError {}
 pub enum StorageError {
     /// A no-replace file publication found an existing destination.
     DestinationExists,
+    /// S2.5: an operation omitted its executed structure report.
+    StructureNotReported { notetype_id: meguri_model::ids::NotetypeId },
     InsufficientSpace {
         required: u64,
         available: u64,
@@ -202,6 +204,7 @@ impl fmt::Display for StorageError {
             StorageError::InsufficientSpace { required, available } => {
                 write!(f, "insufficient space: need {required} bytes, {available} available")
             }
+            StorageError::StructureNotReported { notetype_id } => write!(f, "structure not reported for note type {}", notetype_id.0),
             StorageError::TransactionOpen => f.write_str("a transaction is open"),
             StorageError::Row(error) => write!(f, "unreadable row: {error}"),
             StorageError::IdsExhausted { table } => {

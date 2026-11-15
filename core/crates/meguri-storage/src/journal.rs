@@ -20,13 +20,20 @@
 //!   the collection's directory, removed when the journal drops.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::Arc;
+use meguri_model::proto::{ProtoBlob, notetype::NotetypeConfig};
+
+#[path = "journal_structure.rs"]
+mod structure;
+pub use structure::{LayoutReport, LayoutShape, StructureReason, StructureReport, TypeChangeReport};
 use std::fmt;
 use std::fs::File;
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 #[cfg(feature = "test-hooks")]
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering as AtomicOrdering};
+use std::sync::atomic::AtomicUsize;
 
 use sha2::{Digest, Sha256};
 
@@ -205,19 +212,32 @@ impl PartialEq for UnicaseKey {
 
 impl Eq for UnicaseKey {}
 
-/// Identity maps reported by a native rename/plain save (change-stream S2.5).
-/// Unknown writes invalidate the report; it never supplies a layout counter.
-#[derive(Clone, Debug)]
-pub struct IdentityLayout {
-    pub field_map: Vec<i32>,
-    pub template_map: Vec<i32>,
+/// A contribution captured before its writes, bound to one journal and its
+/// report revision. It cannot legitimize earlier unreported writes.
+pub struct StructureReportToken {
+    owner: Arc<()>,
+    birthplace: Arc<ReportScope>,
+    revision: u64,
+    pub(crate) contribution: StructureReport,
 }
 
-/// Captured before a checked native edit; earlier unreported writes deny it.
-pub struct OrdinalReportToken {
-    id: i64,
-    permitted: bool,
-    counts: (usize, usize),
+/// Only active savepoint ancestry and outstanding tokens retain these nodes.
+/// Released children need no journal history; an ancestor rollback still
+/// invalidates their tokens through the shared ancestor node.
+#[derive(Debug)]
+struct ReportScope {
+    valid: AtomicBool,
+    parent: Option<Arc<ReportScope>>,
+}
+impl ReportScope {
+    fn live(&self) -> bool {
+        let mut scope = Some(self);
+        while let Some(node) = scope {
+            if !node.valid.load(AtomicOrdering::Relaxed) { return false; }
+            scope = node.parent.as_deref();
+        }
+        true
+    }
 }
 
 fn notetype_key(table: Table, key: &RowKey) -> Option<i64> {
@@ -228,10 +248,55 @@ fn notetype_key(table: Table, key: &RowKey) -> Option<i64> {
     }
 }
 
+fn semantic_layout_change(table: Table, key: &RowKey, before: Option<&[Cell]>, after: Option<&[Cell]>) -> Result<bool, StorageError> {
+    for cells in [before, after].into_iter().flatten() {
+        if RowKey::from_stored(table, cells)? != *key {
+            return Err(structure::invalid("layout row key differs from journal key"));
+        }
+    }
+    match table {
+        Table::Fields | Table::Templates => {
+            let name = |cells: Option<&[Cell]>| -> Result<Option<String>, StorageError> {
+                cells.map(|cells| {
+                    let row = crate::rows::RowCells { table, cells };
+                    row.int::<u32>(1)?;
+                    Ok(row.text(2)?)
+                }).transpose()
+            };
+            Ok(name(before)? != name(after)?)
+        }
+        Table::Notetypes => {
+            let shape = |cells: Option<&[Cell]>| -> Result<Option<(i32, u32)>, StorageError> {
+                cells.map(|cells| {
+                    let row = crate::rows::RowCells { table, cells };
+                    let config: ProtoBlob<NotetypeConfig> = row.wrap(4, ProtoBlob::decode(row.blob(4)?))?;
+                    Ok((config.kind, config.sort_field_idx))
+                }).transpose()
+            };
+            Ok(shape(before)? != shape(after)?)
+        }
+        _ => Err(structure::invalid("not a layout row")),
+    }
+}
+
 /// The journal of one write scope.
 pub struct Journal {
     options: JournalOptions,
-    identity_layouts: BTreeMap<i64, IdentityLayout>,
+    report_owner: Arc<()>,
+    report_scope: Arc<ReportScope>,
+    report_revision: u64,
+    retained_structure_used: bool,
+    structure_report: Arc<StructureReport>,
+    unreported_layouts: BTreeSet<i64>,
+    // Identity capture/admission above stays conservative for every row write.
+    // Retained origins need only actual key/name/shape changes invalidated.
+    unreported_structure_layouts: BTreeSet<i64>,
+    unreported_moves: BTreeSet<(i64, i64)>,
+    // Applied aggregates have unknown origins even when their shapes match.
+    incoming_layouts: BTreeSet<i64>,
+    incoming_used: bool,
+    // Private, synchronous put_notetype bracket; never exposed as a receipt token.
+    active_incoming: Option<i64>,
     chunks: Vec<Vec<Entry>>,
     len: usize,
     /// Entries by key, for keys that compare byte for byte.
@@ -259,7 +324,14 @@ pub struct Journal {
 /// savepoint restores both.
 #[derive(Debug)]
 struct Mark {
-    identity_layouts: BTreeMap<i64, IdentityLayout>,
+    report_scope: Arc<ReportScope>,
+    retained_structure_used: bool,
+    structure_report: Arc<StructureReport>,
+    unreported_layouts: BTreeSet<i64>,
+    unreported_structure_layouts: BTreeSet<i64>,
+    unreported_moves: BTreeSet<(i64, i64)>,
+    incoming_layouts: BTreeSet<i64>,
+    incoming_used: bool,
     len: usize,
     replaced: HashMap<usize, After>,
 }
@@ -283,7 +355,17 @@ impl Journal {
     pub fn new(options: JournalOptions) -> Journal {
         Journal {
             options,
-            identity_layouts: BTreeMap::new(),
+            report_owner: Arc::new(()),
+            report_scope: Arc::new(ReportScope { valid: AtomicBool::new(true), parent: None }),
+            report_revision: 0,
+            retained_structure_used: false,
+            structure_report: Arc::new(StructureReport::default()),
+            unreported_layouts: BTreeSet::new(),
+            unreported_structure_layouts: BTreeSet::new(),
+            unreported_moves: BTreeSet::new(),
+            incoming_layouts: BTreeSet::new(),
+            incoming_used: false,
+            active_incoming: None,
             chunks: Vec::new(),
             len: 0,
             index: HashMap::new(),
@@ -302,29 +384,97 @@ impl Journal {
         }
     }
 
-    pub fn identity_layout(&self, id: i64) -> Option<&IdentityLayout> {
-        self.identity_layouts.get(&id)
+    /// A checked native identity projection for the existing capture seam.
+    pub fn identity_layout(&self, id: i64) -> Option<&LayoutReport> {
+        self.structure_report.layouts.get(&id)
+            .filter(|map| !self.incoming_layout(id) && !self.unreported_layouts.contains(&id) && map.is_identity())
     }
 
-    /// Reports already checked by the step that owns this journal.
-    pub fn identity_layouts(&self) -> impl Iterator<Item = (i64, &IdentityLayout)> {
-        self.identity_layouts.iter().map(|(&id, report)| (id, report))
+    pub fn structure_report(&self) -> Option<&StructureReport> {
+        (!self.structure_report.is_empty()).then_some(self.structure_report.as_ref())
     }
 
-    pub(crate) fn start_ordinal_report(&self, id: i64, counts: (usize, usize)) -> OrdinalReportToken {
-        let permitted = self.identity_layouts.contains_key(&id)
-            || self.entries().all(|entry| notetype_key(entry.table(), entry.key()) != Some(id));
-        OrdinalReportToken { id, permitted, counts }
+    /// Shared compact metadata only; cloning does not retain another row cache.
+    pub fn structure_report_owner(&self) -> Arc<StructureReport> {
+        self.structure_report.clone()
     }
 
-    pub(crate) fn complete_ordinal_report(&mut self, token: OrdinalReportToken) {
-        if !token.permitted {
-            return;
+    pub(crate) fn start_structure_report(&self, contribution: StructureReport) -> Result<StructureReportToken, StorageError> {
+        for id in contribution.layouts.keys() {
+            if self.incoming_layout(*id) || (!self.structure_added_in_transaction(*id) && self.unreported_layouts.contains(id)) {
+                return Err(structure::missing(*id));
+            }
         }
-        let ordinals = |count| (0..count).map(i32::try_from).collect::<Result<Vec<_>, _>>();
-        if let (Ok(field_map), Ok(template_map)) = (ordinals(token.counts.0), ordinals(token.counts.1)) {
-            self.identity_layouts.insert(token.id, IdentityLayout { field_map, template_map });
+        for id in &contribution.removed {
+            if self.incoming_layout(*id) || self.unreported_layouts.contains(id) { return Err(structure::missing(*id)); }
         }
+        for &(old, new) in contribution.type_changes.keys() {
+            if self.incoming_layout(old) || self.incoming_layout(new) {
+                return Err(structure::missing(old));
+            }
+            if self.unreported_moves.contains(&(old, new)) { return Err(structure::missing(old)); }
+        }
+        Ok(StructureReportToken { owner: self.report_owner.clone(), birthplace: self.report_scope.clone(), revision: self.report_revision, contribution })
+    }
+
+    pub(crate) fn complete_structure_report(&mut self, token: StructureReportToken) -> Result<(), StorageError> {
+        let ordinal_authority = !token.contribution.layouts.is_empty()
+            || !token.contribution.type_changes.is_empty() || !token.contribution.removed.is_empty();
+        if !Arc::ptr_eq(&self.report_owner, &token.owner) || !token.birthplace.live()
+            || (ordinal_authority && self.report_revision != token.revision) {
+            return Err(structure::invalid("foreign or superseded contribution token"));
+        }
+        // Scope completion already checked both authored endpoint shapes.
+        // A transaction-start absence has no origins to retain, even after
+        // a checked native save of the newly added aggregate.
+        let mut contribution = token.contribution;
+        contribution.layouts.retain(|id, _| !self.structure_added_in_transaction(*id));
+        let combined = self.structure_report.then(&contribution)?;
+        for id in contribution.layouts.keys().chain(contribution.removed.iter()) {
+            self.unreported_layouts.remove(id);
+            self.unreported_structure_layouts.remove(id);
+        }
+        for pair in contribution.type_changes.keys() { self.unreported_moves.remove(pair); }
+        self.structure_report = Arc::new(combined);
+        self.report_revision += 1;
+        Ok(())
+    }
+
+    fn structure_added_in_transaction(&self, id: i64) -> bool {
+        self.entry(Table::Notetypes, &RowKey::Id(id)).is_some_and(|entry| !entry.existed_before())
+    }
+
+    pub(crate) fn begin_incoming_notetype(&mut self, id: i64) {
+        debug_assert!(self.active_incoming.is_none());
+        self.incoming_used = true;
+        self.active_incoming = Some(id);
+    }
+
+    pub(crate) fn end_incoming_notetype(&mut self) {
+        let Some(id) = self.active_incoming.take() else { return };
+        self.incoming_layouts.insert(id);
+        // An unknown replacement breaks every native map touching this layout.
+        // Preserve original reasons and removals; moves remain subject to the guard.
+        let report = Arc::make_mut(&mut self.structure_report);
+        report.layouts.remove(&id);
+        report.type_changes.retain(|&(old, new), _| old != id && new != id);
+        self.report_revision += 1;
+    }
+
+    pub(crate) fn incoming_layouts(&self) -> impl Iterator<Item = &i64> { self.incoming_layouts.iter() }
+    pub(crate) fn incoming_layout(&self, id: i64) -> bool { self.incoming_layouts.contains(&id) }
+    pub(crate) fn incoming_used(&self) -> bool { self.incoming_used }
+
+    pub(crate) fn use_retained_structure(&mut self) { self.retained_structure_used = true; }
+    /// The executor must bind this admission to its actual completed restore.
+    pub fn retained_structure_used(&self) -> bool { self.retained_structure_used }
+
+    pub(crate) fn layout_unreported(&self, id: i64) -> bool { self.unreported_structure_layouts.contains(&id) }
+    pub(crate) fn unreported_moves(&self) -> impl Iterator<Item = &(i64, i64)> { self.unreported_moves.iter() }
+
+    /// Select final affected pairs by journal facts, never derive their maps.
+    pub(crate) fn retain_structure_pairs(&mut self, pairs: &BTreeSet<(i64, i64)>) {
+        Arc::make_mut(&mut self.structure_report).type_changes.retain(|key, _| pairs.contains(key));
     }
 
     /// The entries in the order their keys were first changed.
@@ -483,7 +633,21 @@ impl Journal {
         before: Option<RowImage>,
         after: Option<RowImage>,
     ) -> Result<(), StorageError> {
-        if let Some(id) = notetype_key(table, &key) { self.identity_layouts.remove(&id); }
+        if matches!(table, Table::Notetypes | Table::Fields | Table::Templates) {
+            let id = notetype_key(table, &key).ok_or_else(|| structure::invalid("invalid layout journal key"))?;
+            self.unreported_layouts.insert(id);
+            // Uninterpretable raw images invalidate origin authority without blocking exact journaling.
+            if self.active_incoming != Some(id)
+                && semantic_layout_change(table, &key, before.as_deref(), after.as_deref()).unwrap_or(true) {
+                self.unreported_structure_layouts.insert(id);
+            }
+        }
+        if table == Table::Notes
+            && let (Some(old), Some(new)) = (before.as_ref().and_then(|r| r.get(2)).and_then(Cell::as_i64),
+                after.as_ref().and_then(|r| r.get(2)).and_then(Cell::as_i64))
+            && old != new {
+            self.unreported_moves.insert((old, new));
+        }
         if let Some(at) = self.slot(table, &key) {
             let after = match after {
                 Some(image) if table == Table::Notes => {
@@ -569,16 +733,34 @@ impl Journal {
                 out.push(entry.table, entry.key.clone(), later.before(entry)?, after)?;
             }
         }
+        out.structure_report = Arc::new(self.structure_report.then(&later.structure_report)?);
+        out.unreported_layouts = self.unreported_layouts.union(&later.unreported_layouts).copied().collect();
+        out.unreported_structure_layouts = self.unreported_structure_layouts.union(&later.unreported_structure_layouts).copied().collect();
+        out.unreported_moves = self.unreported_moves.union(&later.unreported_moves).copied().collect();
+        out.incoming_layouts = self.incoming_layouts.union(&later.incoming_layouts).copied().collect();
+        out.incoming_used = self.incoming_used || later.incoming_used;
+        out.retained_structure_used = self.retained_structure_used || later.retained_structure_used;
+        let report = Arc::make_mut(&mut out.structure_report);
+        report.layouts.retain(|id, _| !out.incoming_layouts.contains(id));
+        report.type_changes.retain(|&(old, new), _| !out.incoming_layouts.contains(&old) && !out.incoming_layouts.contains(&new));
         Ok(out)
     }
 
     /// Remembers the journal's state for a savepoint.
     pub(crate) fn push_mark(&mut self) {
         self.marks.push(Mark {
-            identity_layouts: self.identity_layouts.clone(),
+            report_scope: self.report_scope.clone(),
+            retained_structure_used: self.retained_structure_used,
+            structure_report: self.structure_report.clone(),
+            unreported_layouts: self.unreported_layouts.clone(),
+            unreported_structure_layouts: self.unreported_structure_layouts.clone(),
+            unreported_moves: self.unreported_moves.clone(),
+            incoming_layouts: self.incoming_layouts.clone(),
+            incoming_used: self.incoming_used,
             len: self.len,
             replaced: HashMap::new(),
         });
+        self.report_scope = Arc::new(ReportScope { valid: AtomicBool::new(true), parent: Some(self.report_scope.clone()) });
     }
 
     /// Releases the innermost savepoint: its entries stay. After-images it
@@ -586,6 +768,7 @@ impl Journal {
     /// that one, which may still roll back.
     pub(crate) fn release_mark(&mut self) {
         let Some(mark) = self.marks.pop() else { return };
+        self.report_scope = mark.report_scope;
         for (at, after) in mark.replaced {
             self.remember_replacement(at, after);
         }
@@ -610,7 +793,18 @@ impl Journal {
     /// spill file) and older entries get back their after-images.
     pub(crate) fn rollback_mark(&mut self) {
         let Some(mark) = self.marks.pop() else { return };
-        self.identity_layouts = mark.identity_layouts;
+        self.report_scope.valid.store(false, AtomicOrdering::Relaxed);
+        self.report_scope = mark.report_scope;
+        self.retained_structure_used = mark.retained_structure_used;
+        self.structure_report = mark.structure_report;
+        self.unreported_layouts = mark.unreported_layouts;
+        self.unreported_structure_layouts = mark.unreported_structure_layouts;
+        self.unreported_moves = mark.unreported_moves;
+        self.incoming_layouts = mark.incoming_layouts;
+        self.incoming_used = mark.incoming_used;
+        // Map-bearing tokens retain predecessor fencing. Reason-only parent
+        // tokens survive; tokens born in the aborted subtree do not.
+        self.report_revision += 1;
         for (at, after) in mark.replaced {
             let current = std::mem::replace(&mut self.at_mut(at).after, after);
             self.held -= after_bytes(&current);

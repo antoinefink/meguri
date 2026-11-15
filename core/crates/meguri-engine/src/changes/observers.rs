@@ -224,8 +224,14 @@ impl CommitPayload {
             .filter(move |e| e.table() == table && (e.existed_before() || e.exists_after()))
     }
 
+    /// Operation-authored structure facts, retained with this exact journal.
+    /// No generation counters, event fields or live collection reads.
+    pub fn structure_report(&self) -> Option<&meguri_storage::journal::StructureReport> {
+        self.journal.as_ref()?.structure_report()
+    }
+
     /// Explicit native identity maps; absent for external or unreported writes.
-    pub fn identity_layout(&self, id: NotetypeId) -> Option<&meguri_storage::journal::IdentityLayout> {
+    pub fn identity_layout(&self, id: NotetypeId) -> Option<&meguri_storage::journal::LayoutReport> {
         self.journal.as_ref()?.identity_layout(id.0)
     }
 

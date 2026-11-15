@@ -17,6 +17,7 @@ use meguri_model::notetype::{Notetype, NotetypeTemplate};
 use meguri_model::rng::SeededRandom;
 use meguri_model::time::EpochSecs;
 use meguri_model::usn::Usn;
+use meguri_storage::journal::{StructureReason, StructureReport as AuthoredStructureReport};
 use meguri_storage::{ReadRows, ReaderRole, StampMode};
 use meguri_template::{NodeKind, ParsedTemplate};
 
@@ -155,9 +156,17 @@ fn no_notetypes(h: &Harness) {
         .run(
             OpSpec::named("test_clear_notetypes", OpSource::UserNonUndoable).skip_undo(),
             |ctx| {
-                for id in notetypes::read::ids(ctx.scope())? {
+                let ids = notetypes::read::ids(ctx.scope())?;
+                let mut report = AuthoredStructureReport::default();
+                if !ids.is_empty() {
+                    report.reasons.insert(StructureReason::NotetypeRemoved);
+                }
+                report.removed.extend(ids.iter().map(|id| id.0));
+                let token = ctx.scope().start_structure_report(report)?;
+                for id in ids {
                     ctx.scope().remove_notetype(id)?;
                 }
+                ctx.scope().complete_structure_report(token)?;
                 Ok(())
             },
         )

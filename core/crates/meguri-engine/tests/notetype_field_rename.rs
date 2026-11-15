@@ -90,7 +90,23 @@ fn seed(h: &Harness, nt: Notetype) {
                 .skip_undo()
                 .stamp(StampMode::CallerSupplied),
             move |ctx| {
+                // Fixture author keeps each field/template's positional
+                // identity while seeding explicit legacy ordinal gaps.
+                // Appended rows have no origin; stored keys do not index maps.
+                let old = ctx.scope().notetype(nt.id)?.unwrap();
+                let before = meguri_storage::journal::LayoutShape::of(&old)?;
+                let after = meguri_storage::journal::LayoutShape::of(&nt)?;
+                let mut field_map = vec![-1; after.fields as usize];
+                let mut template_map = if after.cloze { Vec::new() } else { vec![-1; after.templates as usize] };
+                for (position, _) in old.fields.iter().zip(&nt.fields).enumerate() { field_map[position] = position as i32; }
+                if !after.cloze {
+                    for (position, _) in old.templates.iter().zip(&nt.templates).enumerate() { template_map[position] = position as i32; }
+                }
+                let mut report = meguri_storage::journal::StructureReport::default();
+                report.layouts.insert(nt.id.0, meguri_storage::journal::LayoutReport { before, after, field_map, template_map });
+                let token = ctx.scope().start_structure_report(report)?;
                 ctx.scope().put_notetype(&nt)?;
+                ctx.scope().complete_structure_report(token)?;
                 Ok(())
             },
         )

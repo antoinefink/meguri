@@ -12,6 +12,9 @@
 //! scopes without the executor, journal off; layering-check keeps it out of
 //! meguri-engine and meguri-ffi (edges.toml `[storage_builder]`).
 
+#[path = "write_scope_structure.rs"]
+mod structure;
+
 use std::collections::HashSet;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -200,19 +203,6 @@ impl<'c> WriteScope<'c> {
     /// The journal so far.
     pub fn journal(&self) -> Option<&Journal> {
         self.journal.as_ref()
-    }
-
-    /// Call only after checking that the edit preserves every ordinal origin.
-    /// Capture before writing so a prior raw write cannot acquire a report.
-    pub fn start_ordinal_report(&self, id: NotetypeId, counts: (usize, usize)) -> Option<crate::journal::OrdinalReportToken> {
-        self.journal.as_ref().map(|journal| journal.start_ordinal_report(id.0, counts))
-    }
-
-    /// Complete only after all writes covered by the checked edit succeed.
-    pub fn complete_ordinal_report(&mut self, token: Option<crate::journal::OrdinalReportToken>) {
-        if let (Some(journal), Some(token)) = (&mut self.journal, token) {
-            journal.complete_ordinal_report(token);
-        }
     }
 
     /// Whether the scope has made a real change.
@@ -543,13 +533,20 @@ impl<'c> WriteScope<'c> {
             .collect();
         let mut parts = Written::Unchanged;
         for (table, wanted) in [(Table::Fields, fields), (Table::Templates, templates)] {
-            // Rows that change are removed first and written after, so names
+            // Rows whose names change are removed first and written after, so names
             // that move between ordinals never meet in the unique (name,
             // ntid) index halfway.
             let mut changing = Vec::new();
             for cells in wanted.iter() {
-                if !matches!(rows::select_compare(self.conn, table, cells)?, Some((_, true))) {
-                    changing.push(cells.clone());
+                match rows::select_compare(self.conn, table, cells)? {
+                    Some((_, true)) => {}
+                    // Same-name metadata updates need no temporary deletion;
+                    // journal them as a replacement, preserving ordinal origins.
+                    Some((before, false)) if before.get(2) == cells.get(2) => {
+                        self.put_cells(table, cells.clone(), false)?;
+                        parts = Written::Updated;
+                    }
+                    _ => changing.push(cells.clone()),
                 }
             }
             // Stored ordinals may have gaps: list length cannot identify

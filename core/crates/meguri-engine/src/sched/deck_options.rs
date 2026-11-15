@@ -707,8 +707,14 @@ where
         if !draft.removals.is_empty() {
             crate::mark_schema_change(ctx.scope(), &[SchemaReason::PresetRemoved])?;
         }
-        for &key in &draft.removals {
-            ctx.scope().remove_deck_config(DeckConfigId(key))?;
+        if !draft.removals.is_empty() {
+            let mut contribution = meguri_storage::journal::StructureReport::default();
+            contribution.reasons.insert(meguri_storage::journal::StructureReason::PresetRemoved);
+            let report = ctx.scope().start_structure_report(contribution)?;
+            for &key in &draft.removals {
+                ctx.scope().remove_deck_config(DeckConfigId(key))?;
+            }
+            ctx.scope().complete_structure_report(report)?;
         }
         // O7.2.2: name order, target last, including id allocation order.
         prepared.sort_by_key(|(key, _)| *key == draft.selected);

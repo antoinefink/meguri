@@ -240,7 +240,7 @@ fn rewrite(source: &str, map: &HashMap<&str, &str>, first: &str, cloze: bool, fr
 /// write, including normalized no-ops. G9 re-derives live note/card
 /// membership here; it never runs as a second operation or undo step.
 pub fn commit_in(scope: &mut WriteScope<'_>, planned: &FieldRenamePlan) -> Result<Saved, EngineError> {
-    validate(scope, &planned.request)?;
+    let stored = validate(scope, &planned.request)?;
     if !planned.changed {
         return Ok(Saved {
             id: planned.renamed.id,
@@ -248,12 +248,11 @@ pub fn commit_in(scope: &mut WriteScope<'_>, planned: &FieldRenamePlan) -> Resul
             written: false,
         });
     }
-    let report = scope.start_ordinal_report(
-        planned.renamed.id,
-        (planned.renamed.fields.len(), planned.renamed.templates.len()),
-    );
+    let mut contribution = meguri_storage::journal::StructureReport::default();
+    contribution.layouts.insert(stored.id.0, meguri_storage::journal::LayoutReport::identity(&stored)?);
+    let report = scope.start_structure_report(contribution)?;
     let written = scope.put_notetype(&planned.renamed)?;
-    scope.complete_ordinal_report(report);
+    scope.complete_structure_report(report)?;
     if let Some(regeneration) = &planned.regeneration {
         regenerate::commit_in(scope, regeneration)?;
     }

@@ -76,12 +76,15 @@ fn just_synced(h: &Harness) {
     h.clock.step_ms(60_000);
 }
 
+#[derive(Clone, Copy)]
+enum TestEdit { RenameBack, AddField, AddTemplate, SwapTemplates }
+
 /// A test-only structure op declares its effect before safety admission.
 fn structure_op(
     h: &Harness,
     id: NotetypeId,
     reasons: &'static [SchemaReason],
-    change: fn(&mut Notetype, &OpContext<'_, '_>),
+    edit: TestEdit,
 ) -> Result<(), EngineError> {
     h.collection
         .run(
@@ -91,8 +94,30 @@ fn structure_op(
             move |ctx| {
                 let mut notetype = ctx.scope().notetype(id)?.expect("the note type exists");
                 mark_schema_change(ctx.scope(), reasons)?;
-                change(&mut notetype, ctx);
+                let before = meguri_storage::journal::LayoutShape::of(&notetype)?;
+                let mut field_map: Vec<i32> = (0..before.fields).map(|i| i as i32).collect();
+                let mut template_map: Vec<i32> = (0..before.templates).map(|i| i as i32).collect();
+                match edit {
+                    TestEdit::RenameBack => rename_back(&mut notetype, ctx),
+                    TestEdit::AddField => { add_field(&mut notetype, ctx); field_map.push(-1); }
+                    TestEdit::AddTemplate => { add_template(&mut notetype, ctx); template_map.push(-1); }
+                    TestEdit::SwapTemplates => { swap_templates(&mut notetype, ctx); template_map.swap(0, 1); }
+                }
+                let mut report = meguri_storage::journal::StructureReport::default();
+                for reason in reasons {
+                    use meguri_storage::journal::StructureReason as R;
+                    report.reasons.insert(match reason {
+                        SchemaReason::FieldsChanged => R::FieldsChanged,
+                        SchemaReason::TemplatesChanged => R::TemplatesChanged,
+                        _ => unreachable!("this SCM framework only authors these effects"),
+                    });
+                }
+                report.layouts.insert(id.0, meguri_storage::journal::LayoutReport {
+                    before, after: meguri_storage::journal::LayoutShape::of(&notetype)?, field_map, template_map,
+                });
+                let token = ctx.scope().start_structure_report(report)?;
                 ctx.scope().put_notetype(&notetype)?;
+                ctx.scope().complete_structure_report(token)?;
                 Ok(())
             },
         )
@@ -133,16 +158,16 @@ fn a_schema_op_commits_at_once_while_scm_is_at_ls() {
     just_synced(&h);
     let synced = col(&h);
     assert!(!is_modified(&synced));
-    structure_op(&h, id, &[], rename_back).unwrap();
+    structure_op(&h, id, &[], TestEdit::RenameBack).unwrap();
     assert_eq!(notetype(&h, id).fields[1].name, "Answer");
     assert_eq!(col(&h).schema_modified, synced.schema_modified);
     let now = h.clock.now_ms();
-    structure_op(&h, id, FIELDS, add_field).unwrap();
+    structure_op(&h, id, FIELDS, TestEdit::AddField).unwrap();
     assert_eq!(notetype(&h, id).fields.len(), 3);
     assert_eq!(col(&h).schema_modified.0, now);
     assert!(is_modified(&col(&h)));
     h.clock.step_ms(1_000);
-    structure_op(&h, id, TEMPLATES, swap_templates).unwrap();
+    structure_op(&h, id, TEMPLATES, TestEdit::SwapTemplates).unwrap();
     assert_eq!(notetype(&h, id).templates[0].name, "Reverse");
     assert_eq!(col(&h).schema_modified.0, h.clock.now_ms());
 }
@@ -228,10 +253,10 @@ fn a_second_field_add_needs_no_confirmation_and_sets_scm_again() {
     let h = Harness::open();
     let id = pair(&h);
     just_synced(&h);
-    structure_op(&h, id, FIELDS, add_field).unwrap();
+    structure_op(&h, id, FIELDS, TestEdit::AddField).unwrap();
     h.clock.step_ms(5_000);
     let now = h.clock.now_ms();
-    structure_op(&h, id, FIELDS, add_field).unwrap();
+    structure_op(&h, id, FIELDS, TestEdit::AddField).unwrap();
     assert_eq!(notetype(&h, id).fields.len(), 4);
     assert_eq!(col(&h).schema_modified.0, now);
 }
@@ -245,7 +270,7 @@ fn a_change_set_and_the_undo_step_carry_the_schema_stamp() {
     just_synced(&h);
     let synced = col(&h);
     let events = h.engine.stream().subscribe();
-    structure_op(&h, id, FIELDS, add_field).unwrap();
+    structure_op(&h, id, FIELDS, TestEdit::AddField).unwrap();
     let after = col(&h);
     assert_eq!(after.modified.0, h.clock.now_ms());
     let changes: Vec<_> = drain(&events, Duration::from_millis(50))
@@ -269,16 +294,16 @@ fn the_storage_guard_refuses_a_count_change_that_leaves_scm_at_ls() {
     let id = pair(&h);
     just_synced(&h);
     let before = (col(&h), notetype(&h, id).fields.len());
-    let refused = structure_op(&h, id, &[], add_field);
+    let refused = structure_op(&h, id, &[], TestEdit::AddField);
     assert_eq!(refused, Err(EngineError::SchemaNotMarked { notetype_id: id }));
     assert_eq!((col(&h), notetype(&h, id).fields.len()), before);
     // A template count too.
-    let refused = structure_op(&h, id, &[], add_template);
+    let refused = structure_op(&h, id, &[], TestEdit::AddTemplate);
     assert_eq!(refused, Err(EngineError::SchemaNotMarked { notetype_id: id }));
     assert_eq!(notetype(&h, id).templates.len(), 2);
     // A reorder keeps the counts: the guard lets it through (G2 and G3 are
     // the ops' to declare).
-    structure_op(&h, id, &[], swap_templates).unwrap();
+    structure_op(&h, id, &[], TestEdit::SwapTemplates).unwrap();
 }
 
 #[test]
@@ -290,7 +315,7 @@ fn the_guard_lets_count_changes_through_once_the_schema_is_modified() {
     // Never synced: `ls` 0 (G1).
     assert_eq!(col(&h).last_sync.0, 0);
     assert!(is_modified(&col(&h)));
-    structure_op(&h, id, &[], add_field).unwrap();
+    structure_op(&h, id, &[], TestEdit::AddField).unwrap();
     assert_eq!(notetype(&h, id).fields.len(), 3);
 }
 
@@ -306,7 +331,12 @@ fn note_types_added_or_removed_do_not_count() {
         .run(
             OpSpec::named("test_remove_notetype", OpSource::UserNonUndoable),
             move |ctx| {
+                let mut report = meguri_storage::journal::StructureReport::default();
+                report.reasons.insert(meguri_storage::journal::StructureReason::NotetypeRemoved);
+                report.removed.insert(id.0);
+                let token = ctx.scope().start_structure_report(report)?;
                 ctx.scope().remove_notetype(id)?;
+                ctx.scope().complete_structure_report(token)?;
                 Ok(())
             },
         )
@@ -327,7 +357,7 @@ fn undo_and_redo_of_a_template_add_both_commit() {
     let id = pair(&h);
     just_synced(&h);
     let synced = col(&h);
-    structure_op(&h, id, TEMPLATES, add_template).unwrap();
+    structure_op(&h, id, TEMPLATES, TestEdit::AddTemplate).unwrap();
     let added = col(&h);
     assert_eq!(notetype(&h, id).templates.len(), 3);
     assert!(matches!(

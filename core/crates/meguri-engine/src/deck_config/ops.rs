@@ -97,7 +97,11 @@ pub fn remove_in(scope: &mut WriteScope<'_>, id: DeckConfigId, fallback: DeckCon
             decks::save_in(scope, deck)?;
         }
     }
+    let mut contribution = meguri_storage::journal::StructureReport::default();
+    contribution.reasons.insert(meguri_storage::journal::StructureReason::PresetRemoved);
+    let report = scope.start_structure_report(contribution)?;
     scope.remove_deck_config(id)?;
+    scope.complete_structure_report(report)?;
     Ok(())
 }
 fn spec(op: &'static str) -> crate::OpSpec {

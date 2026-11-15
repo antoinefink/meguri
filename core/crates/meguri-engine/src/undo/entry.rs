@@ -92,6 +92,10 @@ pub type RestorerState = Arc<dyn Any + Send + Sync>;
 pub(crate) struct Entry {
     pub info: StepInfo,
     pub journal: Arc<Journal>,
+    /// The original operation's compact report, shared with its journal.
+    /// Redo reuses this rather than inverting the inverse (which loses
+    /// dropped ordinal origins and addition/removal asymmetry, M9.11).
+    pub forward_report: Arc<journal::StructureReport>,
     /// The notes the step changed, and the notes of the cards it changed.
     pub touched_notes: Arc<BTreeSet<i64>>,
     /// `col.mod` to restore when this step is undone or redone (M4.4, A7):
@@ -134,6 +138,7 @@ impl Entry {
         Entry {
             info,
             touched_notes: Arc::new(touched_notes(changes)),
+            forward_report: journal.structure_report_owner(),
             journal,
             col_mod,
             began,
@@ -161,6 +166,7 @@ impl Entry {
             },
             touched_notes: Arc::new(touched_notes(changes)),
             journal,
+            forward_report: self.forward_report.clone(),
             col_mod: self.col_mod.and(col_mod),
             began,
             upload: UploadState::Local,
@@ -190,6 +196,7 @@ impl Entry {
         }
         match self.journal.then(&later.journal) {
             Ok(journal) => {
+                self.forward_report = journal.structure_report_owner();
                 self.journal = Arc::new(journal);
                 true
             }
@@ -261,15 +268,29 @@ impl Entry {
     /// M4.3, M4.4: writes every before-image back, in a `CallerSupplied`
     /// scope. A redo writes the graves its undo removed back pending (A5).
     pub(crate) fn restore(&self, scope: &mut WriteScope<'_>, direction: Direction) -> Result<(), EngineError> {
-        // These maps were checked by the native op. Identity is its own
-        // inverse, so the restored journal can carry the same report to redo.
-        // Capture before restoring: those raw row writes invalidate reports.
-        let reports: Vec<_> = self.journal.identity_layouts().map(|(id, report)| {
-            scope.start_ordinal_report(
-                meguri_model::ids::NotetypeId(id),
-                (report.field_map.len(), report.template_map.len()),
-            )
-        }).collect();
+        let mut contribution = if direction == Direction::Redo {
+            self.forward_report.as_ref().clone()
+        } else {
+            let mut report = self.journal.structure_report().map(journal::StructureReport::inverse).unwrap_or_default();
+            // Adding a type originally needs no report. Its undo removes it,
+            // including on later undo/redo cycles of the same original step.
+            for entry in self.journal.entries() {
+                if entry.table() == Table::Notetypes && !entry.existed_before() && entry.exists_after()
+                    && let RowKey::Id(id) = entry.key() {
+                    report.removed.insert(*id);
+                    report.reasons.insert(journal::StructureReason::NotetypeRemoved);
+                }
+            }
+            report
+        };
+        // A layout of a type that comes back as an addition has no map.
+        for entry in self.journal.entries() {
+            if entry.table() == Table::Notetypes && entry.existed_before() && !entry.exists_after()
+                && let RowKey::Id(id) = entry.key() {
+                contribution.layouts.remove(id);
+            }
+        }
+        let report = scope.start_retained_structure_report(contribution)?;
         let rows: Vec<&JournalEntry> = self
             .journal
             .entries()
@@ -304,9 +325,7 @@ impl Entry {
             }
         }
         self.restore_col(scope)?;
-        for report in reports {
-            scope.complete_ordinal_report(report);
-        }
+        scope.complete_structure_report(report)?;
         Ok(())
     }
 

@@ -24,6 +24,9 @@ use meguri_model::proto::ProtoBlob;
 use meguri_model::schema11::notetype_to_json;
 use meguri_model::time::{EpochMillis, EpochSecs};
 use meguri_model::usn::Usn;
+use meguri_storage::journal::{
+    LayoutReport as AuthoredLayoutReport, LayoutShape, StructureReason, StructureReport as AuthoredStructureReport,
+};
 use meguri_storage::raw::SqlValue;
 use meguri_storage::{ReadRows, ReaderRole, RowImage, RowKey, StampMode, Table};
 
@@ -311,10 +314,15 @@ fn a_field_option_save_or_a_field_rename_leaves_the_whole_note_type_pending_for_
     assert_nothing_pending(&h);
     let schema = scm(&h);
     let mut renamed = read(&h, id);
-    renamed.fields[1].name = "Answer".to_owned();
     h.collection
         .run(OpSpec::named("test_rename_field", OpSource::UserUndoable), move |ctx| {
+            let mut report = AuthoredStructureReport::default();
+            // This fixture renames one field without moving any ordered position.
+            report.layouts.insert(id.0, AuthoredLayoutReport::identity(&renamed)?);
+            let token = ctx.scope().start_structure_report(report)?;
+            renamed.fields[1].name = "Answer".to_owned();
             ctx.scope().put_notetype(&renamed)?;
+            ctx.scope().complete_structure_report(token)?;
             Ok(())
         })
         .unwrap();
@@ -972,9 +980,17 @@ fn no_notetypes(h: &Harness) {
         .run(
             OpSpec::named("test_clear_notetypes", OpSource::UserNonUndoable).skip_undo(),
             |ctx| {
-                for id in notetypes::read::ids(ctx.scope())? {
+                let ids = notetypes::read::ids(ctx.scope())?;
+                let mut report = AuthoredStructureReport::default();
+                if !ids.is_empty() {
+                    report.reasons.insert(StructureReason::NotetypeRemoved);
+                }
+                report.removed.extend(ids.iter().map(|id| id.0));
+                let token = ctx.scope().start_structure_report(report)?;
+                for id in ids {
                     ctx.scope().remove_notetype(id)?;
                 }
+                ctx.scope().complete_structure_report(token)?;
                 Ok(())
             },
         )
@@ -1014,9 +1030,35 @@ fn the_image_occlusion_note_type_is_added_on_demand() {
     assert_eq!((again.value.id, again.value.written), (ensured.id, false));
     assert!(again.changes.is_empty());
     // A kind-6 note type with fewer than 4 fields does not count.
-    let mut short = read(&h, ensured.id);
+    let old = read(&h, ensured.id);
+    let mut short = old.clone();
     short.fields.truncate(3);
-    put_as_given(&h, short);
+    h.collection
+        .run(
+            OpSpec::named("test_put_notetype", OpSource::UserNonUndoable)
+                .skip_undo()
+                .stamp(StampMode::CallerSupplied),
+            move |ctx| {
+                let mut report = AuthoredStructureReport::default();
+                report.reasons.insert(StructureReason::FieldsChanged);
+                // This stock IO fixture keeps its first three field positions
+                // and its single template while dropping the fourth field.
+                report.layouts.insert(
+                    short.id.0,
+                    AuthoredLayoutReport {
+                        before: LayoutShape::of(&old)?,
+                        after: LayoutShape::of(&short)?,
+                        field_map: vec![0, 1, 2],
+                        template_map: vec![0],
+                    },
+                );
+                let token = ctx.scope().start_structure_report(report)?;
+                ctx.scope().put_notetype(&short)?;
+                ctx.scope().complete_structure_report(token)?;
+                Ok(())
+            },
+        )
+        .unwrap();
     let third = notetypes::ensure_image_occlusion(&h.collection).unwrap().value;
     assert!(third.written);
     assert_eq!(third.name, "Image Occlusion++");

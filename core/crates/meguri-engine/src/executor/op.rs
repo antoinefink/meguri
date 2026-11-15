@@ -237,6 +237,16 @@ impl<'c> OpContext<'_, 'c> {
         self.scope
     }
 
+    /// N5.2/H10.2: call after staging/live acceptance and name uniquing.
+    /// Only this aggregate's own writes may omit a layout report; no authority
+    /// is inferred or supplied for CloudKit.
+    pub fn put_accepted_sync_notetype(&mut self, nt: &meguri_model::notetype::Notetype) -> Result<meguri_storage::Written, EngineError> {
+        if self.source != OpSource::SyncIncoming {
+            return Err(EngineError::InvalidArgument { message: "accepted normal-transfer aggregate requires SyncIncoming".into() });
+        }
+        Ok(self.scope.put_accepted_sync_notetype(nt)?)
+    }
+
     /// Sequence proof, independent of second-resolution row timestamps.
     pub fn untouched_since(&self, table: meguri_storage::Table, key: &meguri_storage::RowKey, since: Seq) -> bool {
         self.touched.untouched(table, key, since)

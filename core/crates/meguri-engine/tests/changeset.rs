@@ -9,6 +9,7 @@ use meguri_model::changes::{ChangeKind, OpSource};
 use meguri_model::deck::Deck;
 use meguri_model::ids::{CardId, DeckId, NoteId, NotetypeId};
 use meguri_model::tag::Tag;
+use meguri_storage::journal::{LayoutReport as AuthoredLayoutReport, StructureReport as AuthoredStructureReport};
 use meguri_storage::{ConfigValue, ReadRows};
 
 /// Adds a note whose card has an FSRS memory state.
@@ -210,8 +211,13 @@ fn note_type_changes_flag_schema_changes_but_not_template_text() {
         .collection
         .run(OpSpec::named("rename_field", OpSource::UserNonUndoable), move |ctx| {
             let mut notetype = ctx.scope().notetype(ntid)?.unwrap();
+            let mut report = AuthoredStructureReport::default();
+            // This fixture renames one field without moving any ordered position.
+            report.layouts.insert(ntid.0, AuthoredLayoutReport::identity(&notetype)?);
+            let token = ctx.scope().start_structure_report(report)?;
             notetype.fields[0].name = "Renamed".to_owned();
             ctx.scope().put_notetype(&notetype)?;
+            ctx.scope().complete_structure_report(token)?;
             Ok(())
         })
         .unwrap();

@@ -1144,3 +1144,6 @@ mod round6;
 
 #[path = "incoming_notetype_round7.rs"]
 mod round7;
+
+#[path = "incoming_notetype_normal_transfer.rs"]
+mod normal_transfer;

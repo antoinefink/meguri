@@ -96,3 +96,7 @@ fn every_op_source_declares_its_undo_effect() {
         ]
     );
 }
+
+mod common;
+#[path = "op_catalog/structure_reports.rs"]
+mod structure_reports;

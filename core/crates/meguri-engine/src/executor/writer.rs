@@ -503,7 +503,22 @@ fn run_op<T>(
         let restoring_undo = meta
             .restore
             .is_some_and(|restore| restore.action.direction() == Direction::Undo);
+        // OpSource is caller-selected. Retained admission instead requires
+        // the private queued restore target AND restore_top's completion of
+        // that exact step; neither can be authored by an ordinary op closure.
+        if context.scope().journal().is_some_and(|j| j.retained_structure_used()) {
+            let completed_target = meta.restore.and_then(|restore| restore.target).and_then(Result::ok);
+            if completed_target.is_none() || context.undo_notes.restored != completed_target {
+                return Err(meguri_storage::StorageError::Mode {
+                    detail: "retained structure report requires the completed queued history restore".into(),
+                }.into());
+            }
+        }
+        context.scope().check_accepted_sync_source(spec.source)?;
         crate::schema_gate::guard(context.scope(), restoring_undo)?;
+        if !matches!(spec.source, OpSource::CloudIncoming | OpSource::CloudRekey) {
+            context.scope().check_structure_report()?;
+        }
         let observed_policy = if matches!(spec.source, OpSource::SyncIncoming | OpSource::CloudIncoming) {
             Some(meguri_sched::model::sched_config::SchedConfig::new(context.scope()).fsrs()?)
         } else {

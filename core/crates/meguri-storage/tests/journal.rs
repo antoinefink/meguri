@@ -733,3 +733,55 @@ fn two_journals_compose_into_the_journal_of_both_operations() {
             .unwrap()
     );
 }
+
+#[test]
+fn structure_metadata_uses_journal_marks_and_keeps_spilled_images_owned() {
+    use meguri_storage::journal::{LayoutReport, StructureReport, StructureReason};
+    let (_dir, path) = empty_collection();
+    let collection = open(&path).unwrap();
+    let clock = clock();
+    let mut setup = collection.writer().begin_write(StampMode::Local, &clock, None).unwrap();
+    let id = setup.add_notetype(&common::notetype("Report", &["Front", "Back"], &["Card"])).unwrap();
+    setup.commit().unwrap();
+    let mut scope = collection.writer().begin_write(StampMode::Local, &clock, Some(JournalOptions {
+        spill_threshold: 0, spill_dir: path.parent().map(|p| p.to_owned()),
+    })).unwrap();
+    let outer = scope.savepoint().unwrap();
+    let mut nt = scope.notetype(id).unwrap().unwrap();
+    let mut report = StructureReport::default();
+    report.layouts.insert(id.0, LayoutReport::identity(&nt).unwrap());
+    let token = scope.start_structure_report(report).unwrap();
+    nt.fields[0].name = "Prompt".into();
+    scope.put_notetype(&nt).unwrap();
+    scope.complete_structure_report(token).unwrap();
+    let inner = scope.savepoint().unwrap();
+    let mut reason = StructureReport::default();
+    reason.reasons.insert(StructureReason::ApkgApply);
+    let token = scope.start_structure_report(reason).unwrap();
+    scope.complete_structure_report(token).unwrap();
+    scope.release_savepoint(inner).unwrap();
+    scope.rollback_to_savepoint(outer).unwrap();
+    assert!(scope.journal().unwrap().structure_report().is_none());
+    assert_eq!(scope.notetype(id).unwrap().unwrap().fields[0].name, "Front");
+    let mut nt = scope.notetype(id).unwrap().unwrap();
+    let mut report = StructureReport::default();
+    report.layouts.insert(id.0, LayoutReport::identity(&nt).unwrap());
+    let token = scope.start_structure_report(report).unwrap();
+    nt.fields[0].name = "Final prompt".into();
+    scope.put_notetype(&nt).unwrap();
+    scope.complete_structure_report(token).unwrap();
+    scope.check_structure_report().unwrap();
+    let journal = scope.commit().unwrap().journal.unwrap();
+    assert_eq!(journal.held_bytes(), 0);
+    assert!(journal.spilled_bytes() > 0);
+    let metadata = journal.structure_report_owner();
+    let empty = Journal::new(JournalOptions::spilling_into(path.parent().unwrap()));
+    let composed = journal.then(&empty).unwrap();
+    drop(journal);
+    assert_eq!(composed.structure_report(), Some(metadata.as_ref()));
+    let entry = composed.entry(Table::Fields, &RowKey::Pair(id.0, 0)).unwrap();
+    for _ in 0..2 {
+        assert_eq!(composed.before(entry).unwrap().unwrap()[2], Cell::text("Front"));
+        assert_eq!(composed.after(entry).unwrap().unwrap()[2], Cell::text("Final prompt"));
+    }
+}
