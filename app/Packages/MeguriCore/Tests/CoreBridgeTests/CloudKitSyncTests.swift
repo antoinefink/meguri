@@ -1457,6 +1457,95 @@ extension EventTests {
         }
     }
 
+    #if DEBUG
+    /// K2/K12.5/P21/V23: an already validated drain crosses actual fresh
+    /// account-proof acceptance, which retires its original SDK authority.
+    @Test(.timeLimit(.minutes(1)))
+    func cloudKitValidatedRootZoneDrainAfterFreshIdentityProofKeepsDeletionAuthoritative() async throws {
+        try await withCloudKitFixture(keepAlive: true, appOwnsAccountObservation: true) { f in
+            let engine = try await f.engine()
+            let before = try await f.core.durableSnapshot()
+            try #require(before.rootEnvelope != nil)
+            let originalGuard = try await f.core.currentGuard()
+            let reads = await f.factory.resolvedAccountReadCount()
+            await engine.emitRetained(.willFetch(groupID: "delete-root", reason: .scheduled), label: "willDeleteRoot")
+            await engine.emitRetained(.willFetchZone(zone: "meguri-root"), label: "willDeleteRootZone")
+            await engine.emitRetained(.fetched(zone: "meguri-root", records: [], deleted: ["active"]), label: "deletedActive")
+            try #require(await f.adapter.lastFailure == nil, "Active deletion must stage without a setup failure")
+
+            let validated = CloudCallbackGate()
+            let lateEvent = CloudEngineEvent.didFetchZone(zone: "meguri-root", error: nil)
+            await f.adapter.setValidatedEventHook((event: lateEvent, action: { await validated.enter() }))
+            do {
+                try await withCloudTask(gates: [validated], operation: {
+                    await engine.emitRetained(lateEvent, label: "validatedRootZoneDrained")
+                }, whileRunning: {
+                    try await validated.waitForArrival()
+                    try #require(try await f.core.currentGuard() == originalGuard)
+                    try #require(await f.factory.resolvedAccountReadCount() == reads,
+                                 "App-owned loss handling must not start an automatic SDK account lookup")
+                    try #require(await f.adapter.lastFailure == nil)
+                    let heldTrace = await engine.recordedTrace()
+                    try #require(heldTrace.contains(.eventReturned("deletedActive")))
+                    try #require(!heldTrace.contains(.eventReturned("validatedRootZoneDrained")))
+
+                    // Public adapter path resolves an actual SDK account result
+                    // and completes Core's fresh read while the drain is held.
+                    await f.factory.appendAccountRead(.success(.init(status: .available,
+                        identity: Data("synthetic-account-A".utf8))))
+                    try await f.adapter.refreshPlatformIdentity()
+                    try #require(await f.factory.resolvedAccountReadCount() == reads + 1)
+                    try #require(try await f.core.currentGuard() != originalGuard,
+                                 "Actual fresh proof must retire the original SDK before the drain resumes")
+                    let accepted = try await f.core.durableSnapshot()
+                    try #require(accepted.rootEnvelope == nil && accepted.rootSystemFields == nil)
+                    try #require(accepted.serialization == before.serialization)
+                    await validated.open()
+                })
+            } catch {
+                await f.adapter.setValidatedEventHook(nil)
+                throw error
+            }
+            await f.adapter.setValidatedEventHook(nil)
+            await engine.emitRetained(.didFetch(groupID: "delete-root", reason: .scheduled), label: "deletedRootDrained")
+            await engine.emitRetained(.stateUpdate(Data([0xde, 0x1e])), label: "cursorAfterDeletion")
+            try await f.adapter.waitForIdle()
+            let deletionFailure = await f.adapter.lastFailure
+            #expect(deletionFailure == nil, "Validated drain after fresh identity proof: \(String(describing: deletionFailure))")
+            let deleted = try await f.core.durableSnapshot()
+            #expect(deleted.rootEnvelope == nil && deleted.rootSystemFields == nil)
+            #expect(deleted.serialization == before.serialization)
+            #expect(deleted.trackingContent != before.trackingContent)
+            #expect(await engine.requestRetainedBatch(zone: f.zone) == nil)
+            #expect(await f.adapter.retainedInstanceIDs().isEmpty)
+            #expect(await f.factory.engines().count == 1)
+            let trace = await engine.recordedTrace()
+            let returned = try #require(trace.firstIndex(of: .eventReturned("deletedActive")))
+            let drained = try #require(trace.firstIndex(of: .eventReturned("validatedRootZoneDrained")))
+            let cancelled = try #require(trace.firstIndex(of: .cancelEntered))
+            #expect(returned < drained && drained < cancelled)
+            #expect(trace.contains(.cancelReturned) && trace.contains(.released))
+
+            try await f.collection.close()
+            let closed = try await f.core.durableSnapshot()
+            let location = CoreBridge.CollectionLocation(
+                collectionDirectory: f.directory.appending(path: "collection"),
+                backupsDirectory: f.directory.appending(path: "backups"),
+                appGroupSnapshot: f.directory.appending(path: "widget.snapshot"))
+            try await f.collection.open(location, randomSeed: 115)
+            let reopened = CoreCloudWorkflowService()
+            let persisted = try await reopened.durableSnapshot()
+            #expect(persisted.binding == deleted.binding)
+            #expect(persisted.rootEnvelope == nil)
+            do { _ = try await reopened.registerSDK(automatic: false); Issue.record("Deleted root admitted a new SDK") }
+            catch { }
+            await engine.emitRetained(.fetched(zone: "meguri-root", records: [f.root], deleted: []), label: "oldRootAfterReopen")
+            #expect(try await f.core.durableSnapshot() == closed)
+            #expect(try await reopened.durableSnapshot() == persisted)
+        }
+    }
+    #endif
+
     /// R3/K10.3: equality includes same-name content and pending root facts.
     @Test func cloudKitSnapshotIncludesInboxContentPendingRootAndStaleDeliveries() async throws {
         try await withCloudKitFixture(keepAlive: true) { f in

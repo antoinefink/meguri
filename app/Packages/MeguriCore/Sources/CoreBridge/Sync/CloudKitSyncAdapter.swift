@@ -395,6 +395,11 @@ public actor CloudKitSyncAdapter {
     func setOriginalMediaDrainWithWitness(_ drain: @escaping @Sendable (CloudSDKStopWitness) async -> Void) { originalMediaDrain = drain }
 
     #if DEBUG
+    // Scheduling only, after event validation and before its Core mutation.
+    private var validatedEventHook: (event: CloudEngineEvent, action: @Sendable () async -> Void)? = nil
+    func setValidatedEventHook(_ hook: (event: CloudEngineEvent, action: @Sendable () async -> Void)?) {
+        validatedEventHook = hook
+    }
     private var fetchReservationObserver: (@Sendable () async -> Void)?
     func setFetchReservationObserver(_ observer: (@Sendable () async -> Void)?) { fetchReservationObserver = observer }
     private var epochReservationObserver: (@Sendable () async -> Void)?
@@ -1007,6 +1012,9 @@ public actor CloudKitSyncAdapter {
         let ordinal = instance.observationOrdinal
         await observeEvent?(.init(origin: origin, ordinal: ordinal, event: event, phase: .delivered))
         guard await valid(origin), owned[origin] === instance else { return }
+        #if DEBUG
+        if let hook = validatedEventHook, hook.event == event { await hook.action() }
+        #endif
         do {
             switch event {
             case .deliveryFailed:

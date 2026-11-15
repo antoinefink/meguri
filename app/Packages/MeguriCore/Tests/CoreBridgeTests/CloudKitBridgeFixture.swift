@@ -257,13 +257,15 @@ func withCloudKitFixture(
     startAdapter: Bool = true,
     assetReadTransport: (any CloudOwnTransport)? = nil,
     delegateWorkValidated: @escaping @Sendable () async -> Void = {},
+    appOwnsAccountObservation: Bool = false,
     _ body: (CloudKitBridgeFixture) async throws -> Void
 ) async throws {
     let fixture = try await CloudKitBridgeFixture.open(
         count: count, a23: a23, keepAlive: keepAlive, savedState: savedState,
         failInbox: failInbox, failState: failState, startAdapter: startAdapter,
         assetReadTransport: assetReadTransport,
-        delegateWorkValidated: delegateWorkValidated
+        delegateWorkValidated: delegateWorkValidated,
+        appOwnsAccountObservation: appOwnsAccountObservation
     )
     do { try await body(fixture) }
     catch { await fixture.close(); throw error }
