@@ -931,6 +931,9 @@ PUBLIC_ARTIFACTS = {
 
     'docs/process/review-log/meguri-sync-U4.md':
         '3dba5263b27e28389786dc37ee488630527cd3ba62a98ba350b357aac309aee8',
+    # Independently reviewed public foundation receipt; delegated maintenance.
+    'docs/process/review-log/meguri-sync-foundation.md':
+        '1fbf5605fd269f6ee618599e607cec157dbb499b38751964eb22ba0d3fa29fc4',
 
 }
 
