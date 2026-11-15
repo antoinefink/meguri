@@ -631,6 +631,21 @@ pub struct ReplacementEvidence {
 pub struct CloudAdoptActivation {
     record: CloudAdoptActivationRecord,
 }
+/// Read-only R6 recovery observation. This never grants activation or sending
+/// authority and persists only as the original intent/activation record.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnprovenCloudAdoption {
+    operation: PublicationId,
+    candidate: Publication,
+}
+impl UnprovenCloudAdoption {
+    pub fn matches(&self, operation: PublicationId, candidate: &Publication) -> bool {
+        self.operation == operation && &self.candidate == candidate
+    }
+    pub fn candidate(&self) -> &Publication {
+        &self.candidate
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct CloudAdoptActivationRecord {
     operation: PublicationId,
@@ -696,6 +711,35 @@ impl DeviceState {
             path: sidecar_path(live),
             live: live.to_owned(),
         }
+    }
+    /// Sample after startup reconciliation, under collection ownership. An
+    /// unresolved CloudAdopt intent or retained activation is only an
+    /// observation: Runtime must qualify its scope and full native mismatch,
+    /// or the removal of its candidate work after Cancel. R6's device/inode
+    /// pair cannot rule out a created timestamp mismatch in Runtime's full native identity.
+    /// No live SQLite bytes are hashed and no sidecar state is changed.
+    pub fn unproven_cloud_adoption(&self) -> Result<Option<UnprovenCloudAdoption>, StorageError> {
+        sidecar::read_document(&self.path, |doc| {
+            let Some(state) = decode(doc)? else { return Ok(None) };
+            if let Some(intent) = &state.intent {
+                return Ok((intent.reason == crate::replace::ReplaceReason::CloudAdopt).then(|| UnprovenCloudAdoption {
+                    operation: intent.operation,
+                    candidate: intent.candidate.clone(),
+                }));
+            }
+            let Some(value) = state.extra.get("cloudAdoptActivation") else { return Ok(None) };
+            let proof: CloudAdoptActivationRecord = typed(value)?;
+            let candidate = &proof.replacement.candidate;
+            if proof.replacement.reason != crate::replace::ReplaceReason::CloudAdopt
+                || retained_replacements(&state)?.last() != Some(&proof.replacement)
+                || state.active.identity != candidate.identity
+                || state.active.binding != candidate.binding
+                || pending_reason(&state.extra)?.is_some()
+            {
+                return Ok(None);
+            }
+            Ok(Some(UnprovenCloudAdoption { operation: proof.operation, candidate: candidate.clone() }))
+        })
     }
     fn maintenance_read<T>(
         &self,

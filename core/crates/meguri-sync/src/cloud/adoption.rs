@@ -9,6 +9,13 @@ pub enum AdoptStep {
     Staged,
     Ready,
 }
+/// Current cancellation availability, not authority to execute a cancellation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AdoptionCancellation {
+    NotOffered,
+    Live,
+    RecoveredCancelOnly,
+}
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdoptOp {
     pub id: [u8; 16],

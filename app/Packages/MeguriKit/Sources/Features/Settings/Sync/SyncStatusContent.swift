@@ -237,32 +237,24 @@ struct CloudRecoveryContent: View {
     let recovery: CloudRecoveryStatus
     private var cancellable: Bool { recovery.adoptionCancellable || recovery.publicationCancellable }
     var body: some View {
-        Text(SyncText.value(stepKey))
+        Text(SyncText.value(SyncStatusPresentation.recoveryStatusKey(recovery)))
             .accessibilityIdentifier("sync.recovery.status")
         if recovery.switchConflict {
             Text(SyncText.value("sync.attention.publishConflict"))
                 .accessibilityIdentifier("sync.recovery.switchConflict")
         }
-        Button(SyncText.value("sync.action.resumeOp")) {
-            if recovery.adoptionTransportWait { collection.sync.resumeWaitingAdoption() }
-            else { collection.sync.resumeConnection() }
+        if SyncStatusPresentation.showsRecoveryResume(recovery) {
+            Button(SyncText.value("sync.action.resumeOp")) {
+                if recovery.adoptionTransportWait { collection.sync.resumeWaitingAdoption() }
+                else { collection.sync.resumeConnection() }
+            }
+                .disabled(recovery.switchConflict || recovery.step == .cancelling || collection.sync.settings.paused)
+                .accessibilityIdentifier("sync.recovery.resume")
         }
-            .disabled(recovery.switchConflict || recovery.step == .cancelling || collection.sync.settings.paused)
-            .accessibilityIdentifier("sync.recovery.resume")
         CloudRecoveryCancelButton(collection: collection, recovery: recovery)
         if !cancellable {
             Text(SyncText.value("sync.recovery.error.notOffered")).foregroundStyle(.secondary)
                 .accessibilityIdentifier("sync.recovery.cancelUnavailableReason")
-        }
-    }
-    private var stepKey: String {
-        switch recovery.step {
-        case .confirmed, .bound, .ready: "sync.publish.preparing"
-        case .zones: "sync.publish.uploading"
-        case .sent, .complete: "sync.publish.finishing"
-        case .cancelling: "sync.publish.cancelling"
-        case .staging: "sync.adopt.staging"
-        case .staged: "sync.adopt.validating"
         }
     }
 }

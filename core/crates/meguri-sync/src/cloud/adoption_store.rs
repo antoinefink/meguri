@@ -10,6 +10,97 @@ use meguri_engine::device_state::{AccountBinding, CloudAdoptActivation, Publicat
 use rusqlite::{OptionalExtension, params};
 
 impl TrackingStore {
+    /// Original completed adoption, or an exact later publication choice.
+    /// Cancel removes adoption authority; a subsequent V15 publication also
+    /// removes it, so absence alone cannot classify the retained R6 observation.
+    /// Read-only classification, never activation or removal authority.
+    pub(super) fn adoption_choice_resolved(
+        &self,
+        observation: &meguri_engine::device_state::UnprovenCloudAdoption,
+        decision: Option<&publication::DecisionSnapshot>,
+        current: Option<(&Binding, runtime::NativeFileIdentity)>,
+    ) -> Result<bool, Error> {
+        let mut statement = self.connection.prepare(
+            "SELECT a.controls FROM cloud_adoption_authority AS a
+             JOIN bindings AS b ON b.id=a.binding
+             WHERE b.container=?1 AND b.environment=?2 AND b.salvage=0",
+        )?;
+        let rows = statement.query_map(
+            params![self.scope.container.as_str(), self.scope.environment.code()],
+            |r| r.get::<_, String>(0),
+        )?;
+        for row in rows {
+            let op: AdoptOp = decode(&row?)?;
+            if observation.matches(PublicationId::from_bytes(op.id), &op.candidate) { return Ok(true); }
+        }
+        let Some(decision) = decision else { return Ok(false) };
+        let publication = &decision.publication;
+        let Some((current, file)) = current else { return Ok(false) };
+        if publication.decision != meguri_engine::device_state::PublicationDecision::Clear
+            || publication.identity != observation.candidate().identity
+            || publication.binding != observation.candidate().binding
+            || current.scope != self.scope || current.facts.state != BindingState::Active
+            || current.facts.publication != publication.identity
+            || !matches!(&publication.binding, AccountBinding::Connected { account, configuration, environment }
+                if account.as_bytes() == current.facts.account.0.as_slice()
+                    && configuration == self.scope.container.as_str()
+                    && environment == match self.scope.environment {
+                        Environment::Development => "development", Environment::Production => "production",
+                    })
+            || self.binding(current.id)?.as_ref() != Some(current)
+        { return Ok(false); }
+        if let Some(op) = self.publication_op()? {
+            // P6 admits the publisher only after its own controls reached
+            // Zones. Active ACKs belong to completion, so cannot prove this
+            // in-progress choice. Use the existing scoped op and its exact
+            // selected binding, original file and written sidecar instead.
+            op.validate()?;
+            return Ok(matches!(op.step, publication::PublishStep::Zones
+                    | publication::PublishStep::Sent | publication::PublishStep::Complete)
+                && op.binding_after == Some(current.id)
+                && op.account == current.facts.account
+                && op.confirmed_publication == publication.identity
+                && op.fence_before.publication.identity == op.confirmed_publication
+                && op.fence_before.publication.binding == publication.binding
+                && op.epoch == current.facts.epoch
+                && op.record_key == current.facts.record_key
+                && op.confirmed_file == file
+                && self.runtime_binding(current.id)?.file == Some(file)
+                && op.decision_written(&self.scope)? == *decision
+                && self.publication_media(current.id)? == Some((op.media_key, true, op.crt)));
+        }
+        if !self.publication_media(current.id)?.is_some_and(|(_, acked, _)| acked) { return Ok(false); }
+        // V15 completion (or actual subsequent root confirmation) writes the
+        // acknowledged Active with the current binding, atomically. Neither
+        // an isolated conflict owner nor a default runtime row supplies it.
+        let runtime = self.runtime_binding(current.id)?;
+        let durable = self.adapter_durable(current.id)?;
+        Ok(runtime.root_ack.as_ref().zip(durable.active.as_ref()).is_some_and(|(ack, active)|
+            ack.epoch == current.facts.epoch && active.name == "active"
+                && active.envelope == ack.envelope.0 && active.system_fields == ack.system_fields.0))
+    }
+
+    /// The same scoped predicate is used by availability and by the atomic
+    /// ownerless Cancel. Caller serializes Runtime state and tracking access.
+    pub(super) fn recovered_adoption_cancellable(&self, op: &AdoptOp) -> Result<bool, Error> {
+        recovered_cancel_qualified(&self.connection, &self.scope, op)
+    }
+
+    /// V14.3 last row: retire only candidate tracking, never restore the prior
+    /// binding or touch R6, the collection or staging. Settled removal retains
+    /// conflict owners and refuses every unsettled apply intent.
+    pub(super) fn cancel_recovered_adoption(&mut self, op: &AdoptOp) -> Result<(), Error> {
+        let tx = self.connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if !recovered_cancel_qualified(&tx, &self.scope, op)? { return Err(Error::RecoveryRefused); }
+        remove_work(&tx, op.binding_after, WorkRemoval::Settled)?;
+        if tx.execute(
+            "DELETE FROM cloud_adoption_ops WHERE container=?1 AND environment=?2 AND content=?3",
+            params![self.scope.container.as_str(), self.scope.environment.code(), encode(op)?],
+        )? != 1 { return Err(Error::RecoveryRefused); }
+        tx.commit()?;
+        Ok(())
+    }
+
     pub(super) fn install_adoption(&mut self) -> Result<(), Error> {
         let tx = self.connection.transaction()?;
         tx.execute_batch(
@@ -347,4 +438,52 @@ impl TrackingStore {
         }
         Ok(())
     }
+}
+
+fn recovered_cancel_qualified(c: &rusqlite::Connection, scope: &BuildScope, op: &AdoptOp) -> Result<bool, Error> {
+    if op.step != AdoptStep::Ready || op.binding_before.as_ref().is_some_and(|b| b.id == op.binding_after) {
+        return Ok(false);
+    }
+    let current: Option<String> = c.query_row(
+        "SELECT content FROM cloud_adoption_ops WHERE container=?1 AND environment=?2",
+        params![scope.container.as_str(), scope.environment.code()], |r| r.get(0),
+    ).optional()?;
+    if current.map(|s| decode::<AdoptOp>(&s)).transpose()?.as_ref() != Some(op) { return Ok(false); }
+    let publishing: bool = c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM cloud_publication_ops WHERE container=?1 AND environment=?2)",
+        params![scope.container.as_str(), scope.environment.code()], |r| r.get(0),
+    )?;
+    if publishing { return Ok(false); }
+    let binding = |id: BindingId| -> Result<Option<BindingFacts>, Error> {
+        let text: Option<String> = c.query_row(
+            "SELECT facts FROM bindings WHERE id=?1 AND container=?2 AND environment=?3 AND salvage=0",
+            params![id.0.as_slice(), scope.container.as_str(), scope.environment.code()], |r| r.get(0),
+        ).optional()?;
+        text.map(|s| decode(&s)).transpose()
+    };
+    let Some(candidate) = binding(op.binding_after)? else { return Ok(false) };
+    let account_matches = matches!(&op.candidate.binding, AccountBinding::Connected { account, configuration, environment }
+        if account.as_bytes() == op.account.0.as_slice() && configuration == scope.container.as_str()
+            && environment == match scope.environment { Environment::Development => "development", Environment::Production => "production" });
+    if !account_matches || op.candidate.decision != meguri_engine::device_state::PublicationDecision::Clear
+        || candidate.account != op.account || candidate.publication != op.candidate.identity
+        || candidate.epoch != op.epoch || candidate.state != BindingState::Isolated(IsolationReason::FileMismatch)
+    { return Ok(false); }
+    let authority: Option<String> = c.query_row(
+        "SELECT controls FROM cloud_adoption_authority WHERE binding=?1", [op.binding_after.0.as_slice()], |r| r.get(0),
+    ).optional()?;
+    if authority.map(|s| decode::<AdoptOp>(&s)).transpose()?.as_ref() != Some(op) { return Ok(false); }
+    if let Some(before) = &op.binding_before {
+        let Some(old) = binding(before.id)? else { return Ok(false) };
+        let expected = match before.state {
+            BindingState::Active => BindingState::Isolated(IsolationReason::ReplacedLocally),
+            isolated @ BindingState::Isolated(_) => isolated,
+        };
+        if old.account != op.account || old.state != expected
+            || !op.before.as_ref().is_some_and(|p| p.publication.identity == old.publication)
+        { return Ok(false); }
+    }
+    // Match the removal authority even for the availability read.
+    if !super::incoming_store::intents(c, op.binding_after)?.is_empty() { return Ok(false); }
+    Ok(true)
 }

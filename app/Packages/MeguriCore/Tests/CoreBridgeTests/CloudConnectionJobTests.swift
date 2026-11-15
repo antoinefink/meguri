@@ -40,6 +40,8 @@ private func connectionAdoption(_ connection: CoreCloudConnectionService) async 
         throw CloudOwnTransportFailure.unexpectedReply
     }
     _ = try await connection.confirmAdoption(preview)
+    let status = try #require(try await connection.recoveryStatus())
+    #expect(!status.adoptionRecoveredCancelOnly)
     guard case .adoption(let handle, _, _) = try await connection.nextPublicationWork() else { throw CloudOwnTransportFailure.unexpectedReply }
     return handle
 }
@@ -224,6 +226,7 @@ extension EventTests {
                 handle = next
             }
             let status = try #require(try await connection.recoveryStatus())
+            #expect(!status.adoptionRecoveredCancelOnly)
             let gate = try await MaintenanceLane.shared.call("test.holdAdoptionReply") { try testCloudHoldAdoptionReply() }
             let pendingHandle = handle
             let original = Task { try await connection.adoptionResult(pendingHandle, result: .transportFailed(code: 4, retryAfterDurationMilliseconds: nil)) }
@@ -245,6 +248,7 @@ extension EventTests {
                     _ = try await group.next()
                 }
                 #expect(try await connection.recoveryStatus()?.adoptionTransportWait == false)
+                #expect(try await connection.recoveryStatus()?.adoptionRecoveredCancelOnly == false)
                 try await MaintenanceLane.shared.call("test.releaseAdoptionReply") { try gate.release() }
                 try await original.value
                 #expect(try await resumed.value)

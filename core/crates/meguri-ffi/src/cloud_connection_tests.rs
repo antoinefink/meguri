@@ -609,10 +609,9 @@ fn bridge_preview_confirm_consumes_actual_preview_and_exposes_no_manifest_as_loc
         connection.confirm_publication(preview),
         CloudConnectionFailure::Consumed,
     );
-    assert!(matches!(
-        connection.recovery_status().unwrap().unwrap().step,
-        CloudRecoveryStep::Confirmed
-    ));
+    let status = connection.recovery_status().unwrap().unwrap();
+    assert!(matches!(status.step, CloudRecoveryStep::Confirmed));
+    assert!(!status.adoption_recovered_cancel_only);
     connection.cancel_operation(operation).unwrap();
     assert!(connection.recovery_status().unwrap().is_none());
 }
@@ -810,6 +809,7 @@ fn assert_adoption_recovery_operation(fixture: Fixture) {
     let status = connection.recovery_status().unwrap().unwrap();
     assert!(matches!(status.step, CloudRecoveryStep::Staging));
     assert!(status.adoption_cancellable && !status.publication_cancellable);
+    assert!(!status.adoption_recovered_cancel_only);
     assert!(!status.adoption_transport_wait);
     assert!(!status.switch_sent && !status.switch_conflict && status.retry_after_ms.is_none());
     assert_eq!(fixture.workflow.core.adoption_op().unwrap().as_ref(), Some(&before));

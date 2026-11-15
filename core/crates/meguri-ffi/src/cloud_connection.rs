@@ -670,6 +670,8 @@ pub struct CloudRecoveryStatus {
     pub retry_after_ms: Option<i64>,
     pub adoption_transport_wait: bool,
     pub adoption_cancellable: bool,
+    /// Exact ownerless recovered adoption; Cancel is its only operation.
+    pub adoption_recovered_cancel_only: bool,
     pub publication_conflict_cancellable: bool,
     pub publication_cancellable: bool,
 }
@@ -1093,6 +1095,7 @@ impl CloudConnection {
         callback::enter("CloudConnection.recovery_status");
         let generation = self.owner.current_generation()?;
         if let Some(op) = self.owner.core.adoption_op().map_err(error)? {
+            let cancellation = self.owner.host.cloud_adoption_cancellation(op.id).map_err(error)?;
             return Ok(Some(CloudRecoveryStatus {
                 operation: self.recovery(op.id, true, generation),
                 step: match op.step {
@@ -1104,7 +1107,8 @@ impl CloudConnection {
                 switch_conflict: false,
                 retry_after_ms: op.retry_after_ms,
                 adoption_transport_wait: op.transport_wait,
-                adoption_cancellable: self.owner.host.cloud_adoption_cancellable(op.id).map_err(error)?,
+                adoption_cancellable: cancellation != a::AdoptionCancellation::NotOffered,
+                adoption_recovered_cancel_only: cancellation == a::AdoptionCancellation::RecoveredCancelOnly,
                 publication_conflict_cancellable: false,
                 publication_cancellable: false,
             }));
@@ -1131,6 +1135,7 @@ impl CloudConnection {
                     retry_after_ms: op.retry_after_ms,
                     adoption_transport_wait: false,
                     adoption_cancellable: false,
+                    adoption_recovered_cancel_only: false,
                     publication_conflict_cancellable: cancellable,
                     publication_cancellable: self.owner.core.publication_cancellable(op.id).map_err(error)?,
                 })

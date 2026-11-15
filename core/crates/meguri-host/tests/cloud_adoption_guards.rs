@@ -77,15 +77,12 @@ struct Pair {
     _root: tempfile::TempDir,
 }
 impl Pair {
-    fn published() -> Self {
+    fn unbound() -> Self {
         let root = tempfile::tempdir().unwrap();
         let sender_dir = generated(root.path(), "sender", 801);
         let directory = generated(root.path(), "receiver", 802);
-        let mut service = Service::open(root.path(), Config::default(), SeededRandom::new(811)).unwrap();
-        let mut sender = online(&sender_dir);
-        let preview = sender.preview(&mut service, STEPS).unwrap();
-        sender.confirm_publication(&preview).unwrap();
-        sender.drive_ready(&mut service, STEPS).unwrap();
+        let service = Service::open(root.path(), Config::default(), SeededRandom::new(811)).unwrap();
+        let sender = online(&sender_dir);
         let receiver = online(&directory);
         Self {
             service,
@@ -94,6 +91,13 @@ impl Pair {
             directory,
             _root: root,
         }
+    }
+    fn published() -> Self {
+        let mut pair = Self::unbound();
+        let preview = pair.sender.preview(&mut pair.service, STEPS).unwrap();
+        pair.sender.confirm_publication(&preview).unwrap();
+        pair.sender.drive_ready(&mut pair.service, STEPS).unwrap();
+        pair
     }
     fn close(&mut self) {
         self.receiver.close_clean().unwrap();
@@ -938,6 +942,15 @@ fn initial_read(service: &mut Service<SeededRandom>, zone: &str, name: &str) -> 
     )
 }
 fn initial_preview(host: &meguri_host::CoreHost, service: &mut Service<SeededRandom>) -> cloud::publication::Preview {
+    let preview = real_preview(host, service, None);
+    assert!(preview.native_file.is_none());
+    preview
+}
+fn real_preview(
+    host: &meguri_host::CoreHost,
+    service: &mut Service<SeededRandom>,
+    expected_native: Option<cloud::runtime::NativeFileIdentity>,
+) -> cloud::publication::Preview {
     use cloud::publication::PreviewWork;
     let core = host.cloud_runtime().unwrap();
     let PreviewWork::ReadActive { id } = host.begin_cloud_connection_preview().unwrap() else {
@@ -958,7 +971,7 @@ fn initial_preview(host: &meguri_host::CoreHost, service: &mut Service<SeededRan
     else {
         panic!("ready")
     };
-    assert!(p.native_file.is_none());
+    assert_eq!(p.native_file, expected_native);
     assert_eq!(
         p.decision_before,
         DeviceState::for_collection(&host.cloud_connection_directory().join("collection.anki2"))
@@ -1835,7 +1848,7 @@ fn changed_inode_blocks_initial_cloud_recovery_without_retiring_the_durable_row(
     assert_ne!(NativeFiles.identity(&live).unwrap(), native);
     let (config, _, backup) = initial_config(&directory);
     let process = meguri_host::ProcessCore::new(config.engine.clone()).unwrap();
-    let host = process.open(config).unwrap();
+    let host = process.open(config.clone()).unwrap();
     assert!(host.collection().unwrap().cloud_adopt_activation().unwrap().is_none());
     assert_eq!(host.cloud_runtime().unwrap().adoption_op().unwrap().as_ref(), Some(&op));
     assert_eq!(host.engine().slot_holder(), None);
@@ -1863,7 +1876,530 @@ fn changed_inode_blocks_initial_cloud_recovery_without_retiring_the_durable_row(
         Some(native)
     );
     assert_eq!(backup.0.load(Ordering::SeqCst), 0);
+    drop(saved);
+    let host = process.open(config.clone()).unwrap();
+    assert_recovered_cancel(&host, &directory, &op);
+    host.close().unwrap();
+    assert!(host.cancel_cloud_adoption(op.id).is_err());
+    let reopened = process.open(config).unwrap();
+    assert_choose_after_recovered_cancel(&reopened);
+    let preview = real_preview(&reopened, &mut pair.service,
+        Some(NativeFiles.identity(&reopened.cloud_connection_directory().join("collection.anki2")).unwrap()));
+    reopened.keep_cloud_local_only(reopened.engine().generation(), Some(&preview)).unwrap();
+    let chosen = reopened.cloud_runtime().unwrap().policy_projection(
+        cloud::policy::Lifecycle::Ready, reopened.engine().generation().0,
+    ).unwrap();
+    assert_eq!(chosen.facts.fence, cloud::policy::Fence::LocalOnly);
+    reopened.close().unwrap();
     pair.close();
+}
+
+#[test]
+fn completed_adoption_retained_activation_keeps_policy_clear_after_reopen() {
+    let mut pair = Pair::published();
+    let preview = pair.receiver.preview(&mut pair.service, STEPS).unwrap();
+    pair.receiver.adopt_cloud(&preview).unwrap();
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    pair.receiver.close_clean().unwrap();
+    let (config, _, _) = initial_config(&pair.directory);
+    let host = meguri_host::CoreHost::open(config).unwrap();
+    assert!(host.collection().unwrap().cloud_adopt_activation().unwrap().is_some());
+    assert!(host.cloud_runtime().unwrap().adoption_op().unwrap().is_none());
+    let projection = host.cloud_runtime().unwrap().policy_projection(
+        cloud::policy::Lifecycle::Ready, host.engine().generation().0,
+    ).unwrap();
+    assert_eq!(projection.facts.fence, cloud::policy::Fence::Clear);
+    assert!(!projection.facts.summary.attention_known);
+    assert!(!projection.facts.summary.attention.contains_key(&cloud::policy::Attention::RecoveryOpWaiting));
+    host.close().unwrap();
+    pair.sender.close_clean().unwrap();
+}
+
+#[test]
+fn recovered_cancel_accepts_equal_native_pair_with_different_created_time_and_keeps_choice_after_reopen() {
+    let mut pair = Pair::published();
+    let directory = pair._root.path().join("initial-created_time");
+    let op = crash_initial_adoption(&mut pair, &directory, "cloud.adopt.after_activation");
+    let local = meguri_host::CoreHost::open(cloud_disabled_config(&directory, &op)).unwrap();
+    local.close().unwrap();
+    let live = directory.join("collection.anki2");
+    let original = NativeFiles.identity(&live).unwrap();
+    // Existing storage-fixture API changes only coherent prior-runtime file
+    // evidence. Current native provider and engine evidence remain identical.
+    let mut historical = store(&directory).stored_runtime_state(op.binding_after).unwrap().unwrap();
+    assert_eq!(historical.file, Some(original));
+    let mut prior = original;
+    prior.created_seconds = prior.created_seconds.checked_sub(1).unwrap();
+    historical.file = Some(prior);
+    historical.durable_file.as_mut().unwrap().created_seconds = prior.created_seconds;
+    if let Some(scan) = &mut historical.note_scan { scan.native_file = prior; }
+    if let Some(coverage) = &mut historical.coverage { coverage.cursor.native_file = prior; }
+    store(&directory).prepare_runtime_state_for_testing(op.binding_after, &historical).unwrap();
+    assert_eq!((prior.device, prior.inode), (original.device, original.inode));
+    assert_ne!(prior, original);
+    let (config, _, _) = initial_config(&directory);
+    let process = meguri_host::ProcessCore::new(config.engine.clone()).unwrap();
+    let host = process.open(config.clone()).unwrap();
+    // Binding passed the production provider/OpenEvidence boundary. R6's pair
+    // proof survives, but end_adoption's prior full identity refuses completion.
+    assert!(host.collection().unwrap().cloud_adopt_activation().unwrap().is_some());
+    let runtime = host.cloud_runtime().unwrap();
+    assert!(!runtime.status().unwrap().tracking_stopped);
+    assert_eq!(runtime.status().unwrap().binding.unwrap().id, op.binding_after);
+    let tracking = store(&directory);
+    assert_eq!(tracking.binding(op.binding_after).unwrap().unwrap().facts.state,
+        cloud::BindingState::Isolated(cloud::IsolationReason::FileMismatch));
+    assert_eq!(tracking.adoption_op().unwrap().as_ref(), Some(&op));
+    let retained = tracking.stored_runtime_state(op.binding_after).unwrap().unwrap();
+    assert_eq!(retained.file, Some(prior));
+    assert_eq!(retained.durable_file, historical.durable_file);
+    let evidence = host.collection().unwrap().open_evidence().unwrap().cloud_file.unwrap();
+    assert_eq!(evidence.native, (original.device, original.inode, original.created_seconds, original.created_nanos));
+    assert_eq!(NativeFiles.identity(&live).unwrap(), original);
+    drop(tracking);
+    assert_recovered_cancel(&host, &directory, &op);
+    host.close().unwrap();
+    let reopened = process.open(config).unwrap();
+    assert_choose_after_recovered_cancel(&reopened);
+    let preview = real_preview(&reopened, &mut pair.service,
+        Some(NativeFiles.identity(&reopened.cloud_connection_directory().join("collection.anki2")).unwrap()));
+    reopened.keep_cloud_local_only(reopened.engine().generation(), Some(&preview)).unwrap();
+    assert_eq!(reopened.cloud_runtime().unwrap().policy_projection(
+        cloud::policy::Lifecycle::Ready, reopened.engine().generation().0,
+    ).unwrap().facts.fence, cloud::policy::Fence::LocalOnly);
+    reopened.close().unwrap();
+    pair.close();
+}
+
+// Actual completed publication facts must resolve the retained R6 observation,
+// without inventing complete attention evidence or restoring an old authority.
+fn assert_publication_choice_clear(host: &meguri_host::CoreHost, expected: cloud::BindingId) {
+    use cloud::policy;
+    let runtime = host.cloud_runtime().unwrap();
+    runtime.refresh_identity().unwrap();
+    assert!(runtime.adoption_op().unwrap().is_none());
+    assert!(runtime.publication_op().unwrap().is_none());
+    let status = runtime.status().unwrap();
+    assert!(status.stored_usable && status.identity_verified && !status.tracking_stopped);
+    assert_eq!(status.binding.unwrap().id, expected);
+    let projection = runtime.policy_projection(policy::Lifecycle::Ready, host.engine().generation().0).unwrap();
+    assert_eq!(projection.facts.fence, policy::Fence::Clear);
+    assert!(!projection.facts.summary.attention_known);
+    assert!(!projection.facts.summary.attention.contains_key(&policy::Attention::RecoveryOpWaiting));
+    host.cloud_policy_input(policy::DeviceEvent::Settings(policy::DeviceSettings::default_connected())).unwrap();
+    let (request, identity) = runtime.policy_account_identity().unwrap();
+    host.cloud_policy_input(policy::DeviceEvent::IdentityRead { request, identity }).unwrap();
+    host.cloud_policy_input(policy::DeviceEvent::Refresh(policy::ChangeCause::Cloud)).unwrap();
+    assert!(host.cloud_policy_driver().unwrap().state().engine_allowed());
+}
+// Real policy state and emitted work, before any fixture SDK registration.
+fn assert_publication_engine_admission(
+    host: &meguri_host::CoreHost,
+    expected: cloud::publication::PublishStep,
+    allowed: bool,
+) {
+    use cloud::policy::{self, ActionKind, ChangeCause, DeviceEvent};
+    let runtime = host.cloud_runtime().unwrap();
+    let op = runtime.publication_op().unwrap().unwrap();
+    assert_eq!(op.step, expected);
+    let commands = host.cloud_policy_input(DeviceEvent::Refresh(ChangeCause::Cloud)).unwrap();
+    let state = host.cloud_policy_driver().unwrap().state();
+    assert_eq!(state.facts.binding.as_ref().unwrap().id, op.binding_after.unwrap());
+    assert!(!state.facts.summary.attention_known);
+    assert_eq!(state.engine_allowed(), allowed, "publication step {expected:?}");
+    assert!(state.engine.is_none(), "fixture must not register an SDK before policy admission");
+    if allowed {
+        assert_eq!(state.facts.fence, policy::Fence::Clear);
+        assert!(commands.iter().any(|c| matches!(c.action.kind,
+            ActionKind::StartEngine { binding, .. } if Some(binding) == op.binding_after)));
+        assert!(commands.iter().any(|c| matches!(&c.action.kind,
+            ActionKind::RequestSend { zones } if zones.contains(&policy::Zone::Collection))));
+    } else {
+        assert!(!commands.iter().any(|c| matches!(c.action.kind,
+            ActionKind::StartEngine { .. } | ActionKind::RequestSend { .. })));
+    }
+}
+fn assert_adoption_authority_removed(directory: &Path, binding: cloud::BindingId) {
+    cloud::runtime::with_tracking_access(|| {
+        use meguri_storage::rusqlite::{Connection, OpenFlags};
+        let read = Connection::open_with_flags(directory.join(cloud::TRACKING_FILE), OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        let exists: bool = read.query_row(
+            "SELECT EXISTS(SELECT 1 FROM cloud_adoption_authority WHERE binding=?1)",
+            [binding.0.as_slice()], |row| row.get(0),
+        ).unwrap();
+        assert!(!exists);
+    });
+}
+
+#[test]
+fn completed_adoption_then_same_account_publication_keeps_policy_clear_after_cold_reopen() {
+    let mut pair = Pair::published();
+    let preview = pair.receiver.preview(&mut pair.service, STEPS).unwrap();
+    pair.receiver.adopt_cloud(&preview).unwrap();
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    let adopted = pair.receiver.facts().unwrap();
+    let old = adopted.current.unwrap().id;
+    let preview = pair.receiver.preview(&mut pair.service, STEPS).unwrap();
+    pair.receiver.confirm_publication(&preview).unwrap();
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    let completed = pair.receiver.facts().unwrap();
+    let current = completed.current.unwrap().id;
+    assert_ne!(current, old);
+    assert_eq!(completed.decision, adopted.decision);
+    assert!(completed.recovery_ops.is_empty());
+    assert!(completed.root_acked);
+    pair.receiver.close_clean().unwrap();
+    assert_adoption_authority_removed(&pair.directory, old);
+    let device = DeviceState::for_collection(&pair.directory.join("collection.anki2"));
+    assert!(device.unproven_cloud_adoption().unwrap().is_some());
+    let retained = device.publication_decision().unwrap();
+    let (config, _, _) = initial_config(&pair.directory);
+    let process = meguri_host::ProcessCore::new(config.engine.clone()).unwrap();
+    for _ in 0..2 {
+        let host = process.open(config.clone()).unwrap();
+        assert_publication_choice_clear(&host, current);
+        assert_eq!(device.publication_decision().unwrap(), retained);
+        host.close().unwrap();
+    }
+    pair.sender.close_clean().unwrap();
+}
+
+#[test]
+fn recovered_cancel_then_replace_cloud_resolves_choice_after_publication_and_cold_reopen() {
+    run_republication_policy_flow(false);
+}
+
+#[test]
+fn recovered_cancel_then_replace_cloud_restricts_policy_while_cancelling() {
+    run_republication_policy_flow(true);
+}
+
+fn run_republication_policy_flow(cancel: bool) {
+    use cloud::publication::{LocalWork, PublicationWork, PublishStep};
+    // A real provider error after the Cancelling commit retains that step for
+    // inspection; no operation, summary, binding or authority is injected.
+    struct Files(std::sync::atomic::AtomicBool);
+    impl FileIdentityProvider for Files {
+        fn identity(&self, path: &Path) -> Result<cloud::runtime::NativeFileIdentity, cloud::runtime::RuntimeError> {
+            if self.0.load(Ordering::SeqCst) {
+                Err(cloud::runtime::RuntimeError::FileIdentityUnavailable)
+            } else {
+                NativeFiles.identity(path)
+            }
+        }
+    }
+    let mut pair = Pair::published();
+    let (op, runtime) = crash_and_drain(&mut pair);
+    replace_native_candidate(&pair.directory, &op, &runtime);
+    let (mut config, _, _) = initial_config(&pair.directory);
+    let files = Arc::new(Files(std::sync::atomic::AtomicBool::new(false)));
+    config.cloud.as_mut().unwrap().files = files.clone();
+    let process = meguri_host::ProcessCore::new(config.engine.clone()).unwrap();
+    let host = process.open(config.clone()).unwrap();
+    assert_recovered_cancel(&host, &pair.directory, &op);
+    host.close().unwrap();
+    let host = process.open(config.clone()).unwrap();
+    assert_choose_after_recovered_cancel(&host);
+    let preview = real_preview(&host, &mut pair.service,
+        Some(NativeFiles.identity(&pair.directory.join("collection.anki2")).unwrap()));
+    assert!(preview.active.is_some());
+    // Discovery itself cannot resolve the canceled candidate's choice.
+    assert_choose_after_recovered_cancel(&host);
+    let runtime = host.cloud_runtime().unwrap();
+    runtime.attach_key_bytes(Arc::new(Keys(AtomicUsize::new(0))));
+    let collection = host.collection().unwrap();
+    let publication = runtime.confirm_connection_publication(&preview, &collection).unwrap();
+    assert_eq!(runtime.publication_op().unwrap().unwrap().reason,
+        cloud::control_codec::EpochReason::ReplaceCloud as u8);
+    host.cloud_policy_input(cloud::policy::DeviceEvent::Settings(
+        cloud::policy::DeviceSettings::default_connected(),
+    )).unwrap();
+    let (request, identity) = runtime.policy_account_identity().unwrap();
+    host.cloud_policy_input(cloud::policy::DeviceEvent::IdentityRead { request, identity }).unwrap();
+    let PublicationWork::Local { op: id, work: LocalWork::Bind } = host.next_cloud_publication_work().unwrap() else {
+        panic!("confirmed publication must bind")
+    };
+    assert_eq!(id, publication);
+    runtime.perform_publication_local(id, LocalWork::Bind, &collection).unwrap();
+    assert_publication_engine_admission(&host, PublishStep::Bound, false);
+    // Execute only actual Core-selected local and own work through Zones.
+    // No SDK exists yet, so this cannot send the entities around policy.
+    for _ in 0..32 {
+        if runtime.publication_op().unwrap().unwrap().step == PublishStep::Zones { break; }
+        match host.next_cloud_publication_work().unwrap() {
+            PublicationWork::Local { op, work } => runtime.perform_publication_local(op, work, &collection).unwrap(),
+            PublicationWork::Own(request) => {
+                let (result, _) = meguri_testkit::cloud::coordinator::execute_publication_request(
+                    &mut pair.service, &scope(), &request, runtime, &collection,
+                ).unwrap();
+                runtime.publication_result(&request, result, &collection).unwrap();
+            }
+            _ => panic!("publication controls must reach Zones without SDK work"),
+        }
+        if runtime.publication_op().unwrap().unwrap().step == PublishStep::Bound {
+            assert_publication_engine_admission(&host, PublishStep::Bound, false);
+        }
+    }
+    assert_eq!(runtime.publication_op().unwrap().unwrap().step, PublishStep::Zones);
+    host.prepare_cloud_runtime(std::time::Duration::from_secs(30)).unwrap();
+    assert!(matches!(host.next_cloud_publication_work().unwrap(), PublicationWork::SendEntities));
+    // Regression: seed125735-92151 projects ChooseCollection here and refuses
+    // engine admission. Checking only after drive_ready hid that deadlock.
+    assert_publication_engine_admission(&host, PublishStep::Zones, true);
+    if cancel {
+        files.0.store(true, Ordering::SeqCst);
+        let result = runtime.cancel_publication(publication, &collection);
+        files.0.store(false, Ordering::SeqCst);
+        assert!(matches!(result, Err(cloud::runtime::RuntimeError::FileIdentityUnavailable)));
+        assert_publication_engine_admission(&host, PublishStep::Cancelling, false);
+        runtime.cancel_publication(publication, &collection).unwrap();
+        assert_choose_after_recovered_cancel(&host);
+        host.close().unwrap();
+        pair.sender.close_clean().unwrap();
+        return;
+    }
+    let current = runtime.status().unwrap().binding.unwrap().id;
+    drop(collection);
+    host.close().unwrap();
+    pair.receiver = PublicationRig::open(
+        &pair.directory, &scope(), IdentityReads::Available(scope().account),
+        false, NOW, 2881, Arc::new(Keys(AtomicUsize::new(0))),
+    ).unwrap();
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    let completed = pair.receiver.facts().unwrap();
+    assert!(completed.recovery_ops.is_empty());
+    assert!(completed.root_acked);
+    assert_eq!(completed.decision.publication.identity, op.candidate.identity);
+    assert_eq!(completed.decision.publication.binding, op.candidate.binding);
+    assert_eq!(completed.current.unwrap().id, current);
+    assert_ne!(current, op.binding_after);
+    pair.receiver.close_clean().unwrap();
+    assert_adoption_authority_removed(&pair.directory, op.binding_after);
+    assert!(DeviceState::for_collection(&pair.directory.join("collection.anki2"))
+        .unproven_cloud_adoption().unwrap().is_some());
+    for _ in 0..2 {
+        let host = process.open(config.clone()).unwrap();
+        assert_publication_choice_clear(&host, current);
+        host.close().unwrap();
+    }
+    pair.sender.close_clean().unwrap();
+}
+
+#[test]
+fn foreign_recovered_adoption_preserves_decision_with_current_scope_historical_binding() {
+    for foreign_environment in [false, true] {
+        let mut pair = Pair::unbound();
+        let current_scope = if foreign_environment {
+            Scope { environment: "production".into(), ..scope() }
+        } else {
+            Scope { container: "test.meguri.adoption-history".into(), ..scope() }
+        };
+        // Install current-scope history by an actual publication before the
+        // other scope adopts on this same collection place and tracking file.
+        pair.receiver.close_clean().unwrap();
+        let mut historical = PublicationRig::open(
+            &pair.directory, &current_scope, IdentityReads::Available(current_scope.account.clone()),
+            false, NOW, 1881, Arc::new(Keys(AtomicUsize::new(0))),
+        ).unwrap();
+        let preview = historical.preview(&mut pair.service, STEPS).unwrap();
+        historical.confirm_publication(&preview).unwrap();
+        historical.drive_ready(&mut pair.service, STEPS).unwrap();
+        let historical_id = historical.facts().unwrap().current.unwrap().id;
+        historical.close_clean().unwrap();
+        pair.receiver = online(&pair.directory);
+        let preview = pair.sender.preview(&mut pair.service, STEPS).unwrap();
+        pair.sender.confirm_publication(&preview).unwrap();
+        pair.sender.drive_ready(&mut pair.service, STEPS).unwrap();
+        let (op, runtime) = crash_and_drain(&mut pair);
+        replace_native_candidate(&pair.directory, &op, &runtime);
+        // A real same-scope account mismatch makes the retained adoption's
+        // decision Pending. The foreign build must preserve that decision.
+        let (config, identity, _) = initial_config(&pair.directory);
+        *identity.0.lock().unwrap() = cloud::runtime::IdentityStatus::Available(
+            cloud::OpaqueBytes(b"synthetic-other-account".to_vec()),
+        );
+        let host = meguri_host::CoreHost::open(config).unwrap();
+        host.close().unwrap();
+        assert_eq!(DeviceState::for_collection(&pair.directory.join("collection.anki2"))
+            .publication().unwrap().unwrap().decision, meguri_engine::device_state::PublicationDecision::Pending);
+        assert_eq!(store(&pair.directory).adoption_op().unwrap().as_ref(), Some(&op));
+
+        let (mut config, _, _) = initial_config(&pair.directory);
+        config.cloud.as_mut().unwrap().scope = cloud::BuildScope {
+            container: cloud::ContainerId::new(current_scope.container.clone()).unwrap(),
+            environment: if foreign_environment { cloud::Environment::Production } else { cloud::Environment::Development },
+        };
+        config.publication_binding = AccountBinding::Connected {
+            account: current_scope.account.clone(), configuration: current_scope.container.clone(),
+            environment: current_scope.environment.clone(),
+        };
+        let host = meguri_host::CoreHost::open(config).unwrap();
+        let runtime = host.cloud_runtime().unwrap();
+        assert!(runtime.adoption_op().unwrap().is_none());
+        let projection = runtime.policy_projection(cloud::policy::Lifecycle::Ready, host.engine().generation().0).unwrap();
+        assert_eq!(projection.facts.binding.as_ref().unwrap().id, historical_id);
+        assert_eq!(projection.facts.fence, cloud::policy::Fence::DecisionRequired, "environment={foreign_environment}");
+        assert!(!projection.facts.summary.attention_known);
+        assert!(!projection.facts.summary.attention.contains_key(&cloud::policy::Attention::RecoveryOpWaiting));
+        assert!(!host.cloud_adoption_cancellable(op.id).unwrap());
+        assert!(host.cancel_cloud_adoption(op.id).is_err());
+        host.close().unwrap();
+        assert_eq!(store(&pair.directory).adoption_op().unwrap().as_ref(), Some(&op));
+        pair.sender.close_clean().unwrap();
+    }
+}
+
+fn assert_choose_after_recovered_cancel(host: &meguri_host::CoreHost) {
+    let projection = host.cloud_runtime().unwrap().policy_projection(
+        cloud::policy::Lifecycle::Ready, host.engine().generation().0,
+    ).unwrap();
+    assert_eq!(projection.facts.fence, cloud::policy::Fence::ChooseCollection);
+    assert!(!projection.facts.summary.attention_known);
+    assert!(!projection.facts.summary.attention.contains_key(&cloud::policy::Attention::RecoveryOpWaiting));
+    assert!(matches!(host.next_cloud_publication_work().unwrap(), cloud::publication::PublicationWork::Idle));
+}
+
+// Only real cold recovery feeds this helper: no status, summary or authority injection.
+fn assert_recovered_cancel(host: &meguri_host::CoreHost, directory: &Path, op: &cloud::adoption::AdoptOp) {
+    let projection = host.cloud_runtime().unwrap().policy_projection(
+        cloud::policy::Lifecycle::Ready, host.engine().generation().0,
+    ).unwrap();
+    assert_eq!(projection.facts.fence, cloud::policy::Fence::UnprovenAdoption);
+    assert_eq!(projection.facts.summary.attention.get(&cloud::policy::Attention::RecoveryOpWaiting), Some(&1));
+    assert!(host.cloud_adoption_cancellable(op.id).unwrap());
+    let mut foreign = op.id;
+    foreign[0] ^= 1;
+    assert!(!host.cloud_adoption_cancellable(foreign).unwrap());
+    assert!(host.cancel_cloud_adoption(foreign).is_err());
+    assert!(host.resume_cloud_adoption_with_work(op.id, &mut cloud::policy::PolicyWork::default()).is_err());
+    let sidecar = std::fs::read(directory.join("meguri-sidecar.json")).unwrap();
+    let live = std::fs::read(directory.join("collection.anki2")).unwrap();
+    let stage = retained_stage_files(&directory.join(&op.staging_name));
+    let (candidate, old, old_work, copies) = {
+        let tracking = store(directory);
+        let old = op.binding_before.as_ref().map(|b| tracking.binding(b.id).unwrap().unwrap());
+        let work = old.as_ref().map(|b| (
+            tracking.stored_runtime_state(b.id).unwrap(),
+            tracking.entity_page(b.id, codec::Kind::Note, None).unwrap(),
+            tracking.inbox(b.id).unwrap(),
+        ));
+        (tracking.binding(op.binding_after).unwrap().unwrap(), old, work, tracking.conflict_copies().unwrap())
+    };
+    let busy = host.engine().acquire_slot(LongOp::Restore).unwrap();
+    assert!(host.cancel_cloud_adoption(op.id).is_err());
+    assert_eq!(host.cloud_runtime().unwrap().adoption_op().unwrap().as_ref(), Some(op));
+    drop(busy);
+    let barrier = std::sync::Barrier::new(2);
+    let results = std::thread::scope(|scope| {
+        let first = scope.spawn(|| { barrier.wait(); host.cancel_cloud_adoption(op.id) });
+        let second = scope.spawn(|| { barrier.wait(); host.cancel_cloud_adoption(op.id) });
+        [first.join().unwrap(), second.join().unwrap()]
+    });
+    assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
+    assert!(host.cloud_runtime().unwrap().adoption_op().unwrap().is_none());
+    assert!(!host.cloud_adoption_cancellable(op.id).unwrap());
+    assert!(host.cancel_cloud_adoption(op.id).is_err());
+    assert_eq!(host.engine().slot_holder(), None);
+    assert_eq!(std::fs::read(directory.join("meguri-sidecar.json")).unwrap(), sidecar);
+    assert_eq!(std::fs::read(directory.join("collection.anki2")).unwrap(), live);
+    assert_eq!(retained_stage_files(&directory.join(&op.staging_name)), stage);
+    let tracking = store(directory);
+    if copies.iter().any(|copy| copy.binding == op.binding_after) {
+        // V17 copies retain their isolated owner, but none of its runtime work.
+        assert_eq!(tracking.binding(op.binding_after).unwrap(), Some(candidate));
+        assert!(tracking.stored_runtime_state(op.binding_after).unwrap().is_none());
+    } else {
+        assert!(tracking.binding(op.binding_after).unwrap().is_none());
+        assert!(matches!(tracking.stored_runtime_state(op.binding_after), Err(cloud::Error::BindingNotFound)));
+    }
+    assert_eq!(tracking.conflict_copies().unwrap(), copies);
+    if let Some(old) = old {
+        assert!(matches!(old.facts.state, cloud::BindingState::Isolated(_)));
+        assert_eq!(tracking.binding(old.id).unwrap(), Some(old.clone()));
+        let work = (
+            tracking.stored_runtime_state(old.id).unwrap(),
+            tracking.entity_page(old.id, codec::Kind::Note, None).unwrap(),
+            tracking.inbox(old.id).unwrap(),
+        );
+        assert!(Some(work) == old_work);
+    }
+    assert_choose_after_recovered_cancel(host);
+}
+
+fn retained_stage_files(path: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    if !path.exists() { return vec![]; }
+    let mut files = vec![];
+    for entry in std::fs::read_dir(path).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() { files.extend(retained_stage_files(&path)); }
+        else { files.push((path.clone(), std::fs::read(path).unwrap())); }
+    }
+    files.sort();
+    files
+}
+
+#[test]
+fn recovered_cancel_keeps_old_binding_isolated_and_its_work_after_reopen() {
+    let mut pair = Pair::unbound();
+    // Use a distinct device RNG for the fresh successor; both publications
+    // still get exactly one two-key budget, with no earlier sender publication.
+    pair.sender.close_clean().unwrap();
+    pair.sender = PublicationRig::open(
+        &pair._root.path().join("sender"), &scope(), IdentityReads::Available(scope().account),
+        false, NOW, 1809, Arc::new(Keys(AtomicUsize::new(0))),
+    ).unwrap();
+    // Give the receiver its own real binding, then publish a successor from
+    // the sender. The receiver's next adoption now has binding_before.
+    let preview = pair.receiver.preview(&mut pair.service, STEPS).unwrap();
+    pair.receiver.confirm_publication(&preview).unwrap();
+    pair.receiver.drive_ready(&mut pair.service, STEPS).unwrap();
+    let preview = pair.sender.preview(&mut pair.service, STEPS).unwrap();
+    pair.sender.confirm_publication(&preview).unwrap();
+    pair.sender.drive_ready(&mut pair.service, STEPS).unwrap();
+    assert_ne!(pair.sender.facts().unwrap().current.unwrap().facts.epoch,
+        pair.receiver.facts().unwrap().current.unwrap().facts.epoch);
+    let rows = pair.receiver.driver().collection_rows().unwrap();
+    let id = rows.iter().find_map(|payload| match payload { codec::Payload::Note(n) => Some(n.id), _ => None }).unwrap();
+    pair.receiver.driver().edit_note_fields(id, &["retained isolated work", "back"]).unwrap();
+    let (op, runtime) = crash_and_drain(&mut pair);
+    assert!(op.binding_before.is_some());
+    assert!(store(&pair.directory).entity_page(op.binding_before.as_ref().unwrap().id, codec::Kind::Note, None)
+        .unwrap().iter().any(|e| e.local_rev > e.acked_rev || e.mark.is_some()));
+    replace_native_candidate(&pair.directory, &op, &runtime);
+    let copies = {
+        let mut tracking = store(&pair.directory);
+        // Populate preservation through its public opaque-copy API. These
+        // storage inputs grant no decision, activation or sending authority.
+        for (id, owner) in [(241, op.binding_before.as_ref().unwrap().id), (242, op.binding_after)] {
+            tracking.store_conflict(owner, &cloud::ConflictCopy {
+                id: cloud::CopyId([id; 16]), kind: cloud::ConflictKind::Note,
+                key: cloud::OpaqueBytes(vec![id]), reason: cloud::ConflictReason::FieldConflict,
+                losing_envelope: cloud::OpaqueBytes(b"synthetic-retained-adoption-copy".to_vec()),
+                losing_payload_digest: cloud::PayloadDigest([id; 32]),
+                winning_payload_digest: cloud::PayloadDigest([99; 32]),
+                field_names: Some(vec!["Front".into()]), template_names: None,
+                note_deck: None, staged_path: None, created_at_ms: NOW, resolved_at_ms: None,
+            }).unwrap();
+        }
+        let copies = tracking.conflict_copies().unwrap();
+        assert_eq!(copies.len(), 2);
+        copies
+    };
+    let (config, _, _) = initial_config(&pair.directory);
+    let process = meguri_host::ProcessCore::new(config.engine.clone()).unwrap();
+    let host = process.open(config.clone()).unwrap();
+    let bound = host.cloud_runtime().unwrap().status().unwrap().binding.unwrap();
+    assert_eq!(bound.id, op.binding_after);
+    assert_eq!(bound.facts.state, cloud::BindingState::Isolated(cloud::IsolationReason::FileMismatch));
+    assert_recovered_cancel(&host, &pair.directory, &op);
+    host.close().unwrap();
+    let reopened = process.open(config).unwrap();
+    assert_choose_after_recovered_cancel(&reopened);
+    let old = store(&pair.directory).binding(op.binding_before.as_ref().unwrap().id).unwrap().unwrap();
+    assert!(matches!(old.facts.state, cloud::BindingState::Isolated(_)));
+    assert_eq!(store(&pair.directory).conflict_copies().unwrap(), copies);
+    reopened.close().unwrap();
+    pair.sender.close_clean().unwrap();
 }
 #[test]
 fn initial_adoption_malformed_sidecar_is_an_error_and_is_preserved() {

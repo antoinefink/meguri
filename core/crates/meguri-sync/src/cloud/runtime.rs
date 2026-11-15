@@ -936,6 +936,10 @@ impl Runtime {
         }
         let durable_file = DurableFileIdentity::from_evidence(evidence.cloud_file, file)?;
         let live_adoption = self.adoption.lock().unwrap_or_else(PoisonError::into_inner).is_some();
+        let recovered_observation = if live_adoption { None } else {
+            meguri_engine::device_state::DeviceState::for_collection(&self.directory.join("collection.anki2"))
+                .unproven_cloud_adoption()?
+        };
         if let Some(owner) = self.adoption.lock().unwrap_or_else(PoisonError::into_inner).as_ref() {
             *owner.cleanup_evidence.lock().unwrap_or_else(PoisonError::into_inner) =
                 Some((evidence, activation.clone()));
@@ -1041,7 +1045,17 @@ impl Runtime {
                 }
                 Some(binding)
             } else {
-                store.selected_binding()?
+                let fallback = store.selected_binding()?;
+                // Both rows may have the same clock time. The generic id tie
+                // break must not select its isolated predecessor over this exact
+                // Cancel-only candidate. This grants no usable binding.
+                let recovered = match store.adoption_op()? {
+                    Some(op) if recovered_observation.as_ref().is_some_and(|o|
+                        o.matches(meguri_engine::device_state::PublicationId::from_bytes(op.id), &op.candidate))
+                        && store.recovered_adoption_cancellable(&op)? => store.binding(op.binding_after)?,
+                    _ => None,
+                };
+                recovered.or(fallback)
             };
             let Some(mut binding) = selected else {
                 state.publication.restarted_confirmed = restarted_confirmed;

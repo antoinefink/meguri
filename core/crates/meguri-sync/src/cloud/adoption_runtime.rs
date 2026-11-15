@@ -1705,19 +1705,104 @@ impl Runtime {
         }
         Ok(())
     }
-    /// The same live owner/task authority consumed by Cancel, including a
-    /// Ready operation waiting for SessionEnded. A step or transport wait alone
-    /// cannot establish that activation has not started.
+    /// Live task authority, or the exact ownerless recovered Ready row below.
+    /// A step or transport wait alone never establishes cancellation authority.
     pub fn cloud_adoption_cancellable(&self, id: [u8; 16]) -> Result<bool, RuntimeError> {
-        if !self.adoption_op()?.is_some_and(|op| op.id == id) {
-            return Ok(false);
+        Ok(self.cloud_adoption_cancellation(id)? != AdoptionCancellation::NotOffered)
+    }
+    pub fn cloud_adoption_cancellation(&self, id: [u8; 16]) -> Result<AdoptionCancellation, RuntimeError> {
+        let owner = self.adoption.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        if let Some(owner) = owner {
+            if !self.adoption_op()?.is_some_and(|op| op.id == id) { return Ok(AdoptionCancellation::NotOffered); }
+            let next = owner.next.lock().unwrap_or_else(PoisonError::into_inner);
+            return Ok(if !matches!(*next, AdoptionNext::Claimed)
+                && !owner.uncertain_activation.load(std::sync::atomic::Ordering::Acquire)
+                { AdoptionCancellation::Live } else { AdoptionCancellation::NotOffered });
         }
-        let Some(owner) = self.adoption.lock().unwrap_or_else(PoisonError::into_inner).clone() else {
-            return Ok(false);
+        let observation = meguri_engine::device_state::DeviceState::for_collection(
+            &self.directory.join("collection.anki2"),
+        ).unproven_cloud_adoption()?;
+        let held = self.adoption.lock().unwrap_or_else(PoisonError::into_inner);
+        if held.is_some() { return Ok(AdoptionCancellation::NotOffered); }
+        let s = self.state();
+        with_tracking_access(|| {
+            Ok(if Self::recovered_cancel_op(&s, id, observation.as_ref())?.is_some()
+                { AdoptionCancellation::RecoveredCancelOnly } else { AdoptionCancellation::NotOffered })
+        })
+    }
+    fn recovered_cancel_op(
+        s: &State,
+        id: [u8; 16],
+        observation: Option<&meguri_engine::device_state::UnprovenCloudAdoption>,
+    ) -> Result<Option<AdoptOp>, RuntimeError> {
+        let Some(store) = &s.store else { return Ok(None) };
+        let Some(op) = store.adoption_op()?.filter(|op| op.id == id) else { return Ok(None) };
+        if !observation.is_some_and(|o| o.matches(publication_id(op.id), &op.candidate))
+            || !store.recovered_adoption_cancellable(&op)?
+            || !s.bound.as_ref().is_some_and(|b| b.binding.id == op.binding_after && !b.usable
+                && b.binding.facts.state == BindingState::Isolated(IsolationReason::FileMismatch))
+        { return Ok(None); }
+        Ok(Some(op))
+    }
+    /// Host entry for a local Cancel after cold recovery. Live owners retain
+    /// their original task/uncertain-activation restrictions and abort path.
+    pub fn cancel_cloud_adoption_for_host(
+        &self,
+        id: [u8; 16],
+        collection: Option<&Collection>,
+        engine: &Engine,
+        generation: meguri_engine::Generation,
+    ) -> Result<(), RuntimeError> {
+        if self.adoption.lock().unwrap_or_else(PoisonError::into_inner).is_some() {
+            return self.cancel_cloud_adoption(id, collection);
+        }
+        let (op, incarnation) = {
+            let s = self.state();
+            let op = with_tracking_access(|| s.store.as_ref().ok_or(Error::Database)?.adoption_op())?
+                .filter(|op| op.id == id).ok_or(PublicationError::NotOffered)?;
+            (op, s.incarnation)
         };
-        let next = owner.next.lock().unwrap_or_else(PoisonError::into_inner);
-        Ok(!matches!(*next, AdoptionNext::Claimed)
-            && !owner.uncertain_activation.load(std::sync::atomic::Ordering::Acquire))
+        let collection = collection.ok_or(RuntimeError::StaleIncarnation)?;
+        if !collection.is_current() || collection.generation() != generation
+            || collection.path() != self.directory.join("collection.anki2")
+        { return Err(RuntimeError::StaleIncarnation); }
+        let file = self.inputs.files.identity(collection.path())?;
+        let slot = engine.acquire_slot(LongOp::CloudAdopt)?;
+        slot.with_cloud_adoption_tracking_cleanup(generation, collection, || {
+            // Actual file/sidecar evidence, with lifecycle serialized and no
+            // Runtime/store locks or platform/account provider call.
+            let observation = meguri_engine::device_state::DeviceState::for_collection(collection.path())
+                .unproven_cloud_adoption()?;
+            let native = fs::symlink_metadata(collection.path()).map_err(storage_io)?;
+            if !native.file_type().is_file() || (native.dev(), native.ino()) != file.pair() {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+            let held = self.adoption.lock().unwrap_or_else(PoisonError::into_inner);
+            if held.is_some() { return Err(PublicationError::Busy.into()); }
+            let mut s = self.state();
+            if s.incarnation != incarnation || !collection.is_current()
+                || !s.bound.as_ref().is_some_and(|b| b.evidence.generation == generation && b.file == file)
+            { return Err(RuntimeError::StaleIncarnation); }
+            let next_incarnation = s.incarnation.checked_add(1).ok_or(Error::InvalidData)?;
+            with_tracking_access(|| -> Result<(), RuntimeError> {
+                if Self::recovered_cancel_op(&s, id, observation.as_ref())?.as_ref() != Some(&op) {
+                    return Err(PublicationError::NotOffered.into());
+                }
+                s.store.as_mut().ok_or(Error::Database)?.cancel_recovered_adoption(&op)?;
+                Ok(())
+            })?;
+            Self::adapter_close_exchange_locked(&mut s);
+            s.incarnation = next_incarnation;
+            s.bound = None;
+            s.publication.preview = None;
+            s.publication.resume = None;
+            s.scan_required = true;
+            s.whole_complete = false;
+            s.note_scan = None;
+            s.last_capture = None;
+            s.publish_authority();
+            Ok(())
+        })
     }
     pub fn cancel_cloud_adoption(&self, id: [u8; 16], collection: Option<&Collection>) -> Result<(), RuntimeError> {
         self.cancel_cloud_adoption_with_work(id, collection, &crate::cloud::policy::PolicyWork::default())

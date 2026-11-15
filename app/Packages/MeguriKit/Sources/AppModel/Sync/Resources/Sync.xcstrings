@@ -221,6 +221,17 @@
         }
       }
     },
+    "sync.attention.adoptUnproven": {
+      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meguri couldn’t confirm which collection file is current, so syncing stopped."
+          }
+        }
+      }
+    },
     "sync.attention.applyFailed": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {

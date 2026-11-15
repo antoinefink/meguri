@@ -63,9 +63,11 @@ impl Runtime {
         let session = self.active_review();
         let resume_binding = self.resume_binding_offer_with_work(work)?;
         // Read the existing sidecar fact, outside Runtime/tracking locks. This grants no authority.
-        let publication =
-            meguri_engine::device_state::DeviceState::for_collection(&self.directory.join("collection.anki2"))
-                .publication()?;
+        let device = meguri_engine::device_state::DeviceState::for_collection(&self.directory.join("collection.anki2"));
+        let decision = device.publication_decision()?;
+        let publication = decision.as_ref().map(|d| &d.publication);
+        let ownerless = self.adoption.lock().unwrap_or_else(PoisonError::into_inner).is_none();
+        let unproven_adoption = if ownerless { device.unproven_cloud_adoption()? } else { None };
         let mut fence = match publication.as_ref() {
             Some(p) if p.decision == meguri_engine::device_state::PublicationDecision::Pending => {
                 Fence::DecisionRequired
@@ -94,6 +96,30 @@ impl Runtime {
             // V8.1 kept sources span all original build scopes and outlive bindings.
             // Only finalized main files count; enumeration failures are not zero.
             if let Some(store) = &s.store {
+                // P17 uses R6's actual typed intent/retained activation evidence,
+                // never in an arbitrary Pending decision or layout refusal.
+                if let Some(observation) = &unproven_adoption
+                    && matches!(&observation.candidate().binding,
+                        meguri_engine::device_state::AccountBinding::Connected { configuration, environment, .. }
+                        if configuration.as_str() == s_scope_container(self)
+                            && environment.as_str() == s_scope_environment(self))
+                {
+                    match store.adoption_op()? {
+                        Some(op) if observation.matches(
+                            meguri_engine::device_state::PublicationId::from_bytes(op.id), &op.candidate,
+                        ) && store.binding(op.binding_after)?.is_some_and(|b|
+                            b.facts.state == BindingState::Isolated(IsolationReason::FileMismatch)
+                        ) => fence = Fence::UnprovenAdoption,
+                        // R6 also survives a later publication choice. Its
+                        // scoped in-progress authority or actual completion
+                        // must qualify the current choice before absence is
+                        // classified as a remaining collection choice.
+                        None if !store.adoption_choice_resolved(observation, decision.as_ref(),
+                            s.bound.as_ref().filter(|b| b.usable).map(|b| (&b.binding, b.file)))?
+                            => fence = Fence::ChooseCollection,
+                        _ => {},
+                    }
+                }
                 // V17.2 attention follows local preservation across all builds,
                 // including isolated/salvage owners and no selected binding.
                 // Listing grants no publication or ordinary write authority.
@@ -280,6 +306,7 @@ impl Runtime {
                 fence,
                 summary,
                 resume_binding_offered: resume_binding
+                    .filter(|_| !matches!(fence, Fence::UnprovenAdoption | Fence::ChooseCollection))
                     .filter(|id| {
                         s.publication
                             .resume

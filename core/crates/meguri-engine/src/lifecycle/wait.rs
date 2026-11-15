@@ -38,6 +38,31 @@ pub(crate) struct SlotHolder {
 }
 
 impl SlotGuard {
+    /// Local tracking-only recovery cleanup. Serialize with close/suspend and
+    /// replacement, without entering a swap or creating replacement authority.
+    /// The closure must not call lifecycle controls, providers or callbacks.
+    pub fn with_cloud_adoption_tracking_cleanup<T, E: From<EngineError>>(
+        &self,
+        generation: Generation,
+        collection: &Collection,
+        cleanup: impl FnOnce() -> Result<T, E>,
+    ) -> Result<T, E> {
+        let _control = self.engine.inner.control_lane.lock().unwrap();
+        {
+            let state = self.engine.lock_state();
+            self.check_held(&state)?;
+            if self.op != LongOp::CloudAdopt || self.engine.generation() != generation
+                || !matches!(state.state, LifecycleState::Ready { .. }) || state.suspended
+                || collection.generation() != generation
+                || !state.current.as_ref().is_some_and(|current|
+                    std::sync::Arc::ptr_eq(&current.core, &collection.core))
+            {
+                return Err(EngineError::unavailable("cloud adoption cleanup is stale").into());
+            }
+        }
+        cleanup()
+    }
+
     /// Confirms an opaque consumer belongs to this process engine.
     pub fn belongs_to(&self, engine: &Engine) -> bool {
         std::sync::Arc::ptr_eq(&self.engine.inner, &engine.inner)

@@ -1766,7 +1766,9 @@ fn adoption_policy_ready_wait_tracks_review_without_treating_ready_work_as_waiti
     let review = fixture.workflow.host.review().begin_unqueued_session().unwrap();
     assert!(matches!(connection.next_publication_work().unwrap(), CloudPublicationWork::Idle));
     assert_recovery_policy_wait(&fixture, true, "Ready waits for review to end");
-    assert!(connection.recovery_status().unwrap().unwrap().adoption_cancellable);
+    let status = connection.recovery_status().unwrap().unwrap();
+    assert!(status.adoption_cancellable && !status.adoption_transport_wait);
+    assert!(!status.adoption_recovered_cancel_only);
     review.end().unwrap();
     assert_recovery_policy_wait(&fixture, false, "review ended; activation is work again");
     let review = fixture.workflow.host.review().begin_unqueued_session().unwrap();
@@ -1876,6 +1878,7 @@ fn adoption_transport_wait_retains_exact_page_or_payload_until_explicit_resume_a
             assert_eq!(fixture.workflow.core.adapter_guard(), guard);
             let status = connection.recovery_status().unwrap().unwrap();
             assert!(status.adoption_transport_wait);
+            assert!(!status.adoption_recovered_cancel_only);
             assert_eq!(status.retry_after_ms, waiting.retry_after_ms);
             assert_eq!(waiting.retry_after_ms, Some(NOW + 120_000));
             if initial {

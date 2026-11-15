@@ -65,8 +65,23 @@ public enum CloudConnectionConfirmation: Sendable, Equatable { case publication,
 }
 
 public struct SyncStatusPresentation {
+    public static func showsRecoveryResume(_ recovery: CloudRecoveryStatus) -> Bool {
+        !recovery.adoptionRecoveredCancelOnly
+    }
+    public static func recoveryStatusKey(_ recovery: CloudRecoveryStatus) -> String {
+        if recovery.adoptionRecoveredCancelOnly { return "sync.attention.adoptUnproven" }
+        return switch recovery.step {
+        case .confirmed, .bound, .ready: "sync.publish.preparing"
+        case .zones: "sync.publish.uploading"
+        case .sent, .complete: "sync.publish.finishing"
+        case .cancelling: "sync.publish.cancelling"
+        case .staging: "sync.adopt.staging"
+        case .staged: "sync.adopt.validating"
+        }
+    }
     public static func cancellationMessageKey(_ recovery: CloudRecoveryStatus) -> String {
-        switch recovery.step {
+        if recovery.adoptionRecoveredCancelOnly { return "sync.cancelOp.adoptUnproven.message" }
+        return switch recovery.step {
         case .staging, .staged, .ready: "sync.cancelOp.adopt.message"
         default: recovery.switchSent ? "sync.cancelOp.publish.message.switchSent" : "sync.cancelOp.publish.message"
         }

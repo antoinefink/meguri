@@ -69,7 +69,10 @@ impl State {
         if self.facts.session.is_some() {
             return Err(Unavailable::ReviewActive);
         }
-        if self.local_only() || self.facts.binding.is_none() {
+        // P17's two recovery states survive a missing binding. This exception
+        // applies only to that part of P12.1 row 3, preserving first-match order.
+        let recovery_choice = matches!(self.facts.fence, Fence::UnprovenAdoption | Fence::ChooseCollection);
+        if self.local_only() || (self.facts.binding.is_none() && !recovery_choice) {
             return Err(Unavailable::NotConnected);
         }
         if self.settings.paused {
@@ -163,6 +166,7 @@ impl State {
             Attention::ChooseCollection,
             self.settings.enabled
                 && (self.facts.binding.is_none() || self.facts.fence == Fence::ChooseCollection)
+                && self.facts.fence != Fence::UnprovenAdoption
                 && self.facts.fence != Fence::EnvironmentChanged,
         );
         add(Attention::CrtMismatch, s.crt_mismatch);

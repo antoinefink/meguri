@@ -14,6 +14,28 @@ extension ReviewCollectionStartupTests {
             original = Task { await harness.sync.confirmPublication() }
             try await harness.transport.zones.waitForAdmission()
             let before = try #require(try await harness.connection().recoveryStatus())
+            #expect(!before.adoptionRecoveredCancelOnly && SyncStatusPresentation.showsRecoveryResume(before))
+            #expect(SyncStatusPresentation.cancellationMessageKey(before) == "sync.cancelOp.publish.message")
+            // Projection coverage only: reuse the real issued handle without
+            // executing it. The Rust crash regression proves the recovered fact.
+            for (recovered, transportWait) in [(false, false), (false, true), (true, false)] {
+                let projected = CoreBridge.CloudRecoveryStatus(.init(
+                    operation: before.operation.raw, step: .ready,
+                    switchSent: false, switchConflict: false, retryAfterMs: nil,
+                    adoptionTransportWait: transportWait, adoptionCancellable: true,
+                    adoptionRecoveredCancelOnly: recovered,
+                    publicationConflictCancellable: false, publicationCancellable: false))
+                #expect(projected.adoptionRecoveredCancelOnly == recovered)
+                #expect(SyncStatusPresentation.showsRecoveryResume(projected) == !recovered)
+                #expect(SyncStatusPresentation.recoveryStatusKey(projected)
+                    == (recovered ? "sync.attention.adoptUnproven" : "sync.publish.preparing"))
+                if recovered {
+                    #expect(SyncText.value(SyncStatusPresentation.recoveryStatusKey(projected))
+                        == "Meguri couldn’t confirm which collection file is current, so syncing stopped.")
+                }
+                #expect(SyncStatusPresentation.cancellationMessageKey(projected)
+                    == (recovered ? "sync.cancelOp.adoptUnproven.message" : "sync.cancelOp.adopt.message"))
+            }
             #expect(before.step == .bound && before.publicationCancellable)
             let settings = harness.sync.settings
             await harness.sync.stopUsingICloud()
@@ -23,6 +45,7 @@ extension ReviewCollectionStartupTests {
             await original?.value
             let waiting = try #require(try await harness.connection().recoveryStatus())
             #expect(waiting.step == .bound && waiting.publicationCancellable && !waiting.publicationConflictCancellable)
+            #expect(!waiting.adoptionRecoveredCancelOnly && SyncStatusPresentation.showsRecoveryResume(waiting))
             await harness.sync.stopUsingICloud()
             #expect(harness.sync.connectionFailure == .busy && harness.sync.settings == settings)
             #expect(try await harness.connection().recoveryStatus()?.step == .bound)

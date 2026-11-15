@@ -1,7 +1,7 @@
 //! Composition only: Runtime owns V14; existing providers own capacity/backup.
 use super::*;
 use meguri_sync::cloud::{
-    adoption::{AdoptionReply, AdoptionWork},
+    adoption::{AdoptionCancellation, AdoptionReply, AdoptionWork},
     publication::Preview,
     runtime::RuntimeError,
 };
@@ -173,13 +173,18 @@ impl CoreHost {
         )
     }
     pub fn cloud_adoption_cancellable(&self, id: [u8; 16]) -> Result<bool, RuntimeError> {
+        Ok(self.cloud_adoption_cancellation(id)? != AdoptionCancellation::NotOffered)
+    }
+    pub fn cloud_adoption_cancellation(&self, id: [u8; 16]) -> Result<AdoptionCancellation, RuntimeError> {
         self.cloud_adoption_collection()?;
-        self.cloud_runtime().ok_or_else(unavailable)?.cloud_adoption_cancellable(id)
+        self.cloud_runtime().ok_or_else(unavailable)?.cloud_adoption_cancellation(id)
     }
     pub fn cancel_cloud_adoption(&self, id: [u8; 16]) -> Result<(), RuntimeError> {
+        let generation = self.cloud_connection_generation()?;
+        let collection = self.cloud_adoption_collection()?;
         self.cloud_runtime()
             .ok_or_else(unavailable)?
-            .cancel_cloud_adoption(id, self.cloud_adoption_collection()?.as_ref())
+            .cancel_cloud_adoption_for_host(id, collection.as_ref(), self.engine(), generation)
     }
     pub fn resume_cloud_adoption_with_work(
         &self,

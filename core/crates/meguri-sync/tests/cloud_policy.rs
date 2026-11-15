@@ -247,6 +247,57 @@ fn availability_uses_ordered_rows_and_review_registry_fact() {
 }
 
 #[test]
+fn recovery_fences_preserve_sync_now_first_match_order() {
+    use meguri_sync::cloud::IsolationReason;
+
+    for fence in [Fence::UnprovenAdoption, Fence::ChooseCollection] {
+        for bound in [false, true] {
+            let mut base = ready();
+            base.facts.fence = fence;
+            base.facts.summary.attention_known = false;
+            if !bound { base.facts.binding = None; }
+            assert_eq!(base.sync_now_availability(), Err(Unavailable::RecoveryRequired), "{fence:?}, bound={bound}");
+            let mut cases = Vec::new();
+            let mut disabled = base.clone();
+            disabled.settings.enabled = false;
+            disabled.settings.paused = true;
+            disabled.account.status = AccountStatus::NoAccount;
+            cases.push(("disabled before pause/account", disabled, Unavailable::NotConnected));
+            if bound {
+                let mut stopped = base.clone();
+                stopped.facts.binding.as_mut().unwrap().state = BindingState::Isolated(IsolationReason::Stopped);
+                stopped.settings.paused = true;
+                stopped.account.status = AccountStatus::NoAccount;
+                cases.push(("stopped before pause/account", stopped, Unavailable::NotConnected));
+            }
+            let mut paused = base.clone();
+            paused.settings.paused = true;
+            paused.account.status = AccountStatus::NoAccount;
+            cases.push(("pause before account", paused, Unavailable::Paused));
+            for status in [AccountStatus::NoAccount, AccountStatus::Restricted, AccountStatus::Temporary,
+                AccountStatus::Configuration, AccountStatus::Undetermined]
+            {
+                let mut unavailable = base.clone();
+                unavailable.account.status = status;
+                cases.push(("unavailable account", unavailable, Unavailable::ICloudUnavailable));
+            }
+            for (case, state, reason) in cases {
+                assert_eq!(state.sync_now_availability(), Err(reason), "{fence:?}, bound={bound}, {case}");
+            }
+        }
+    }
+    // The no-binding exception belongs only to the two P17 recovery fences.
+    for fence in [Fence::Clear, Fence::LocalOnly, Fence::EnvironmentChanged, Fence::DecisionRequired] {
+        let mut state = ready();
+        state.facts.binding = None;
+        state.facts.fence = fence;
+        state.settings.paused = true;
+        state.account.status = AccountStatus::NoAccount;
+        assert_eq!(state.sync_now_availability(), Err(Unavailable::NotConnected), "{fence:?}");
+    }
+}
+
+#[test]
 fn no_quiet_point_from_idle_or_one_drain_or_unsettled_apply() {
     let state = ready();
     assert_eq!(state.status().state, StatusState::AwaitingEvidence);
