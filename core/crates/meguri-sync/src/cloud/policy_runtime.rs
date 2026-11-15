@@ -94,6 +94,17 @@ impl Runtime {
             // V8.1 kept sources span all original build scopes and outlive bindings.
             // Only finalized main files count; enumeration failures are not zero.
             if let Some(store) = &s.store {
+                // V17.2 attention follows local preservation across all builds,
+                // including isolated/salvage owners and no selected binding.
+                // Listing grants no publication or ordinary write authority.
+                let conflicts = store
+                    .conflict_copies()?
+                    .iter()
+                    .filter(|c| c.copy.resolved_at_ms.is_none())
+                    .count() as u64;
+                if conflicts > 0 {
+                    summary.attention.insert(Attention::Conflicts, conflicts);
+                }
                 let unreadable = store.retained_damaged_sources()?.len() as u64;
                 if unreadable > 0 {
                     summary.attention.insert(Attention::ConflictsUnreadable, unreadable);
@@ -206,14 +217,6 @@ impl Runtime {
                 let refused = store.refused_entries(b.binding.id)?.len() as u64;
                 if refused > 0 {
                     summary.attention.insert(Attention::Refused, refused);
-                }
-                let conflicts = store
-                    .conflict_copies()?
-                    .iter()
-                    .filter(|c| c.binding == b.binding.id && c.copy.resolved_at_ms.is_none())
-                    .count() as u64;
-                if conflicts > 0 {
-                    summary.attention.insert(Attention::Conflicts, conflicts);
                 }
                 if publish.is_some() && s.publication.waiting || store.adoption_op()?.is_some() {
                     summary.attention.insert(Attention::RecoveryOpWaiting, 1);

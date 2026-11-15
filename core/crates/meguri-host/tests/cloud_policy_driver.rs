@@ -1258,10 +1258,12 @@ fn k10_projection_retained_unreadable_conflicts_survive_binding_and_reopen() {
             let projection = runtime.policy_projection(Lifecycle::Ready, collection.generation().0).unwrap();
             assert_eq!(projection.facts.binding.is_some(), ordinary);
             assert_eq!(projection.facts.summary.attention.get(&Attention::ConflictsUnreadable), Some(&1));
+            assert_eq!(projection.facts.summary.attention.get(&Attention::Conflicts), Some(&1));
             assert!(!projection.facts.summary.attention_known);
             let status = host.cloud_policy_driver().unwrap().status();
             assert_eq!(status.state, StatusState::NeedsAttention);
             assert_eq!(status.attention.get(&Attention::ConflictsUnreadable), Some(&1));
+            assert_eq!(status.attention.get(&Attention::Conflicts), Some(&1));
             assert_eq!(status.attention.contains_key(&Attention::ChooseCollection), !ordinary);
             assert!(!status.attention.contains_key(&Attention::Isolated));
             assert!(!format!("{:?} {status:?}", projection.facts).contains(&kept[0]));
@@ -1290,16 +1292,184 @@ fn k10_projection_complete_salvage_has_no_unreadable_item_or_readiness_claim() {
         let projection = host.cloud_runtime().unwrap()
             .policy_projection(Lifecycle::Ready, host.engine().generation().0).unwrap();
         assert!(projection.facts.binding.is_none());
-        assert!(projection.facts.summary.attention.is_empty());
+        assert_eq!(projection.facts.summary.attention,
+            [(Attention::Conflicts, 3)].into_iter().collect());
         assert!(!projection.facts.summary.attention_known);
         host.cloud_policy_input(DeviceEvent::Settings(DeviceSettings {
             enabled: true, paused: false, automatic: true, media: false,
         })).unwrap();
         let status = host.cloud_policy_driver().unwrap().status();
         assert!(!status.attention.contains_key(&Attention::ConflictsUnreadable));
+        assert_eq!(status.attention.get(&Attention::Conflicts), Some(&3));
         assert!(!matches!(status.state, StatusState::UpToDate { .. }));
         host.close().unwrap();
     }
+}
+
+fn preserved_policy_copy(id: u8, now_ms: i64, resolved: bool) -> meguri_sync::cloud::ConflictCopy {
+    use meguri_sync::cloud::*;
+    ConflictCopy {
+        id: CopyId([id; 16]),
+        kind: ConflictKind::Note,
+        // Multiple versions of one object must still count once per copy.
+        key: OpaqueBytes(b"synthetic-preserved-note".to_vec()),
+        reason: ConflictReason::FieldConflict,
+        losing_envelope: OpaqueBytes(b"synthetic-preserved-version".to_vec()),
+        losing_payload_digest: PayloadDigest([id; 32]),
+        winning_payload_digest: PayloadDigest([99; 32]),
+        field_names: None,
+        template_names: None,
+        note_deck: None,
+        staged_path: None,
+        created_at_ms: now_ms,
+        resolved_at_ms: resolved.then_some(now_ms),
+    }
+}
+
+fn policy_conflict_store(rig: &Rig, scope: BuildScope) -> meguri_sync::cloud::TrackingStore {
+    use meguri_sync::cloud::{OpenOutcome, TrackingStore};
+    let (OpenOutcome::Missing(store) | OpenOutcome::Opened(store)) =
+        TrackingStore::open(&rig.config.collection_directory, scope).unwrap()
+    else {
+        panic!("expected healthy synthetic tracking store");
+    };
+    store
+}
+
+fn assert_preserved_policy_count(host: &CoreHost, count: Option<u64>) {
+    use meguri_sync::cloud::policy::{Attention, Lifecycle};
+    let projection = host.cloud_runtime().unwrap()
+        .policy_projection(Lifecycle::Ready, host.engine().generation().0).unwrap();
+    assert_eq!(projection.facts.summary.attention.get(&Attention::Conflicts).copied(), count);
+    assert!(!projection.facts.summary.attention_known);
+}
+
+#[test]
+fn k10_projection_preserved_conflicts_counts_current_isolated_and_other_build_copies() {
+    use meguri_sync::cloud::{BindingState, IsolationReason, runtime::with_tracking_access};
+    let rig = rig_with_epoch(true, 1933, false);
+    let binding = rig.host.cloud_runtime().unwrap().status().unwrap().binding.unwrap();
+    rig.host.close().unwrap();
+    let scope = rig.config.cloud.as_ref().unwrap().scope.clone();
+    with_tracking_access(|| {
+        let mut store = policy_conflict_store(&rig, scope);
+        store.store_conflict(binding.id, &preserved_policy_copy(1, rig.clock.now_ms(), false)).unwrap();
+        store.store_conflict(binding.id, &preserved_policy_copy(4, rig.clock.now_ms(), true)).unwrap();
+        let mut facts = binding.facts.clone();
+        facts.state = BindingState::Isolated(IsolationReason::ReplacedLocally);
+        let earlier = StepClock::new(rig.clock.now_ms() - 1, UtcOffset::UTC, "UTC");
+        let older = store.create_binding(facts, &earlier, rig.config.random.as_ref()).unwrap();
+        for id in [2, 3] {
+            store.store_conflict(older.id, &preserved_policy_copy(id, earlier.now_ms(), false)).unwrap();
+        }
+        drop(store);
+        let foreign_scope = BuildScope {
+            container: ContainerId::new("synthetic-preserved-other-build").unwrap(),
+            environment: Environment::Production,
+        };
+        let mut foreign = policy_conflict_store(&rig, foreign_scope);
+        let owner = foreign.create_binding(binding.facts.clone(), rig.clock.as_ref(), rig.config.random.as_ref()).unwrap();
+        foreign.store_conflict(owner.id, &preserved_policy_copy(5, rig.clock.now_ms(), false)).unwrap();
+        foreign.store_conflict(owner.id, &preserved_policy_copy(6, rig.clock.now_ms(), true)).unwrap();
+    });
+    // Only stored copies are inputs. Each reopen projects through the real Runtime.
+    for (stage, expected) in [(0, Some(4)), (1, Some(3)), (2, Some(2)), (3, None)] {
+        if stage > 0 {
+            // U161 resolve/unresolve is not exposed by TrackingStore yet. Change
+            // storage fixtures directly; this tests projection, not UI operations.
+            with_tracking_access(|| {
+                let db = meguri_storage::rusqlite::Connection::open(
+                    rig.config.collection_directory.join(meguri_sync::cloud::TRACKING_FILE)).unwrap();
+                match stage {
+                    1 => assert_eq!(db.execute(
+                        "UPDATE conflicts SET content=json_set(content,'$.resolved_at_ms',?1) WHERE id=?2",
+                        meguri_storage::rusqlite::params![rig.clock.now_ms(), [1_u8; 16].as_slice()],
+                    ).unwrap(), 1),
+                    2 => assert_eq!(db.execute("DELETE FROM conflicts WHERE id=?1", [[2_u8; 16].as_slice()]).unwrap(), 1),
+                    _ => assert_eq!(db.execute(
+                        "UPDATE conflicts SET content=json_set(content,'$.resolved_at_ms',?1) WHERE id IN (?2,?3)",
+                        meguri_storage::rusqlite::params![rig.clock.now_ms(), [3_u8; 16].as_slice(), [5_u8; 16].as_slice()],
+                    ).unwrap(), 2),
+                }
+            });
+        }
+        let host = CoreHost::open(rig.config.clone()).unwrap();
+        assert_eq!(host.cloud_runtime().unwrap().status().unwrap().binding.unwrap().id, binding.id);
+        assert_preserved_policy_count(&host, expected);
+        host.close().unwrap();
+    }
+}
+
+#[test]
+fn k10_projection_preserved_conflicts_without_binding_includes_salvage_and_other_build() {
+    use meguri_sync::cloud::{self, runtime::with_tracking_access};
+    let rig = rig_with_epoch(true, 1934, false);
+    let facts = rig.host.cloud_runtime().unwrap().status().unwrap().binding.unwrap().facts;
+    assert!(recover_policy_conflicts(&rig, false).is_empty());
+    let scope = rig.config.cloud.as_ref().unwrap().scope.clone();
+    with_tracking_access(|| {
+        let foreign_scope = BuildScope {
+            container: ContainerId::new("synthetic-preserved-other-build").unwrap(),
+            environment: Environment::Production,
+        };
+        let mut foreign = policy_conflict_store(&rig, foreign_scope);
+        let owner = foreign.create_binding(facts, rig.clock.as_ref(), rig.config.random.as_ref()).unwrap();
+        foreign.store_conflict(owner.id, &preserved_policy_copy(4, rig.clock.now_ms(), false)).unwrap();
+        foreign.store_conflict(owner.id, &preserved_policy_copy(5, rig.clock.now_ms(), true)).unwrap();
+        drop(foreign);
+        let mut store = policy_conflict_store(&rig, scope);
+        assert!(store.selected_binding().unwrap().is_none());
+        assert!(store.binding(owner.id).unwrap().is_none());
+        let salvage = store.conflict_copies().unwrap().into_iter()
+            .find(|c| c.copy.id == cloud::CopyId([1; 16])).unwrap().binding;
+        assert!(store.binding(salvage).unwrap().is_none());
+        for id in [owner.id, salvage] {
+            assert_eq!(store.store_conflict(id, &preserved_policy_copy(9, rig.clock.now_ms(), false)),
+                Err(cloud::Error::BindingNotFound));
+        }
+    });
+    let host = CoreHost::open(rig.config.clone()).unwrap();
+    assert!(host.cloud_runtime().unwrap().policy_projection(
+        cloud::policy::Lifecycle::Ready, host.engine().generation().0).unwrap().facts.binding.is_none());
+    assert_preserved_policy_count(&host, Some(4));
+    host.close().unwrap();
+}
+
+#[test]
+fn k10_projection_preserved_conflicts_tracking_errors_are_not_zero_without_binding() {
+    use meguri_sync::cloud::{self, policy::Lifecycle, runtime::with_tracking_access};
+    let rig = rig_with_epoch(true, 1935, false);
+    assert!(recover_policy_conflicts(&rig, false).is_empty());
+    let host = CoreHost::open(rig.config.clone()).unwrap();
+    let runtime = host.cloud_runtime().unwrap();
+    let generation = host.engine().generation().0;
+    assert!(runtime.policy_projection(Lifecycle::Ready, generation).unwrap().facts.binding.is_none());
+    assert_preserved_policy_count(&host, Some(3));
+    let content: String = with_tracking_access(|| {
+        let db = meguri_storage::rusqlite::Connection::open(
+            rig.config.collection_directory.join(cloud::TRACKING_FILE)).unwrap();
+        let content = db.query_row("SELECT content FROM conflicts WHERE id=?1", [[1_u8; 16].as_slice()],
+            |row| row.get(0)).unwrap();
+        assert_eq!(db.execute("UPDATE conflicts SET content='{}' WHERE id=?1", [[1_u8; 16].as_slice()]).unwrap(), 1);
+        content
+    });
+    assert!(matches!(runtime.policy_projection(Lifecycle::Ready, generation),
+        Err(RuntimeError::Tracking(cloud::Error::InvalidData))));
+    with_tracking_access(|| {
+        let db = meguri_storage::rusqlite::Connection::open(
+            rig.config.collection_directory.join(cloud::TRACKING_FILE)).unwrap();
+        db.execute("UPDATE conflicts SET content=?1 WHERE id=?2",
+            meguri_storage::rusqlite::params![content, [1_u8; 16].as_slice()]).unwrap();
+        db.execute_batch("ALTER TABLE conflicts RENAME TO synthetic_unreadable_conflicts;").unwrap();
+    });
+    assert!(matches!(runtime.policy_projection(Lifecycle::Ready, generation),
+        Err(RuntimeError::Tracking(_))));
+    with_tracking_access(|| {
+        let db = meguri_storage::rusqlite::Connection::open(
+            rig.config.collection_directory.join(cloud::TRACKING_FILE)).unwrap();
+        db.execute_batch("ALTER TABLE synthetic_unreadable_conflicts RENAME TO conflicts;").unwrap();
+    });
+    host.close().unwrap();
 }
 
 #[test]
