@@ -5,9 +5,243 @@ import Foundation
 @testable import Instrumentation
 import func MeguriCoreBindings.testPhysicalReviewRows
 import struct MeguriCoreBindings.PhysicalReviewRows
+import Observation
 import Testing
 
+@MainActor private final class RetainedReviewCountsPublication {
+    private let owner: ReviewCollection
+    private let changes = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+
+    init(owner: ReviewCollection) {
+        self.owner = owner
+        observe()
+    }
+
+    // Register synchronously before the operation. The will-change callback
+    // only buffers a notification; the MainActor waiter reads after assignment.
+    private func observe() {
+        withObservationTracking { _ = owner.decks } onChange: { [continuation = changes.continuation] in
+            continuation.yield(())
+        }
+    }
+
+    func finish() { changes.continuation.finish() }
+
+    func wait(stage: String, until matches: @escaping @MainActor () -> Bool) async throws {
+        let ready = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let waiter = Task { @MainActor in
+            defer { ready.continuation.finish() }
+            // The natural publication may have completed during the operation.
+            if matches() { ready.continuation.yield(true); return }
+            for await _ in changes.stream {
+                guard !Task.isCancelled else { return }
+                observe()
+                if matches() { ready.continuation.yield(true); return }
+            }
+        }
+        do {
+            try #require(try await serviceAppSignal(ready.stream, stage: stage))
+        } catch {
+            finish(); waiter.cancel()
+            await waiter.value
+            throw error
+        }
+        finish(); waiter.cancel()
+        await waiter.value
+    }
+}
+
 extension ReviewCollectionStartupTests {
+    @Test func realServiceSyntheticSurfaceReviewsRoundTripThroughRetainedBindings() async throws {
+        let fixture = try InitialCloudFixture.load()
+        let root = FileManager.default.temporaryDirectory.appending(path: "synthetic-retained-reviews-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let serviceDirectory = root.appending(path: "service")
+        try FileManager.default.createDirectory(at: serviceDirectory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        // One real Service process outlives every sequential Host/backend.
+        // Surface is synthetic and the SDK uses controlled Service transport:
+        // these are Host/backend reopens, not OS process restart or Apple acceptance.
+        let process = try await CloudServiceProcess.open(stateDirectory: serviceDirectory)
+        var active: ServiceAppHarness?
+        do {
+            let wire = try ServiceWorkflowWire(process: process, directory: root.appending(path: "transport"))
+            let a = try ServiceAppHarness(root: root.appending(path: "A"), wire: wire)
+            let b = try ServiceAppHarness(root: root.appending(path: "B"), wire: wire)
+            let probe = InitialCloudEvents()
+            defer {
+                ChangeFanout.shared.unsubscribe(probe); probe.finish()
+                a.defaults.removePersistentDomain(forName: a.suite)
+                b.defaults.removePersistentDomain(forName: b.suite)
+            }
+            func flatten(_ nodes: [CountedDeckNode]) -> [CountedDeckNode] { nodes.flatMap { [$0] + flatten($0.children) } }
+            func counts(_ nodes: [CountedDeckNode]) -> [Int64: ReviewCounts] {
+                Dictionary(uniqueKeysWithValues: flatten(nodes).map { ($0.id, $0.counts) })
+            }
+            func grade(_ app: ServiceAppHarness, deckID: Int64, expectedCounts: ReviewCounts,
+                       excluding: Int64? = nil) async throws -> (cardID: Int64, revlogID: Int64, rows: PhysicalReviewRows) {
+                try #require(app.owner.canStudy)
+                await app.owner.startStudy(deckID: deckID)
+                let review = try #require(app.owner.review)
+                try #require(review.phase == .question && review.counts == expectedCounts)
+                let presentedID = try #require(review.item?.cardId)
+                try #require(presentedID != excluding, "Reverse review must use a different remaining eligible card")
+                review.reveal(); await review.settled()
+                try #require(review.phase == .answer)
+                let beforeAnswer = probe.events.last?.seq ?? 0
+                let generation = app.owner.generation
+                review.rate(.easy); await review.settled()
+                try #require(review.record.answers.count == 1)
+                let answer = try #require(review.record.answers.first)
+                try #require(answer.cardID == presentedID && answer.rating == "easy")
+                // C16: only normal finish drains the accepted answer. In
+                // particular, no injected flush before or after rate(.easy).
+                await app.owner.finishReview()
+                try #require(app.owner.review == nil && review.phase == .ended)
+                let committed = try await probe.next(after: beforeAnswer, stage: "retained review normal finish durable Changes") {
+                    guard $0.generation == generation, case .changes(let changes) = $0.kind else { return false }
+                    return changes.cards.contains { $0.id == presentedID } && changes.revlogAdded.count == 1
+                }
+                guard case .changes(let changes) = committed.kind else { throw ServiceWorkflowFailure.wire }
+                let cardID = try #require(changes.cards.first { $0.id == presentedID }?.id)
+                let revlogID = try #require(changes.revlogAdded.first)
+                try #require(review.record.answers.first?.durable == true)
+                let record = try #require(app.owner.previousRecord)
+                try #require(record.answers.count == 1 && record.answers.first?.cardID == cardID)
+                try #require(record.answers.allSatisfy(\.durable))
+                let rows = try await servicePhysicalRows(cardID: cardID, revlogID: revlogID)
+                try requirePhysicalContext(rows, generation: generation, since: committed.seq)
+                try #require(rows.card?.id == cardID && rows.revlog?.id == revlogID)
+                return (cardID, revlogID, rows)
+            }
+
+            try await wire.seed(fixture)
+            try await ChangeFanout.shared.subscribe(probe)
+            active = a
+            let baselinePublicationA = RetainedReviewCountsPublication(owner: a.owner)
+            defer { baselinePublicationA.finish() }
+            try await a.adopt()
+            if a.owner.policy != .ok { await a.owner.enableFsrs() }
+            try await a.exchange()
+            let baseline = try await CoreDeckService().treeWithCounts()
+            try await baselinePublicationA.wait(stage: "A adopted deck counts") { counts(a.owner.decks) == counts(baseline.nodes) }
+            try #require(baseline.generation == a.owner.generation && counts(a.owner.decks) == counts(baseline.nodes))
+            let deck = try #require(flatten(baseline.nodes).first { !$0.filtered && $0.counts.new >= 2 })
+            try #require(await a.owner.close())
+            active = b
+            let baselinePublicationB = RetainedReviewCountsPublication(owner: b.owner)
+            defer { baselinePublicationB.finish() }
+            try await b.adopt()
+            try await b.exchange()
+            let baselineB = try await CoreDeckService().treeWithCounts()
+            try await baselinePublicationB.wait(stage: "B adopted deck counts") { counts(b.owner.decks) == counts(baselineB.nodes) }
+            try #require(baselineB.generation == b.owner.generation && counts(baselineB.nodes) == counts(baseline.nodes))
+            try #require(counts(b.owner.decks) == counts(baselineB.nodes) && b.owner.review == nil)
+            try #require(await b.owner.close())
+
+            // Both original bindings have adopted/exchanged before either
+            // answer. From here on retain their roots, defaults and tracking.
+            active = a
+            try await a.reopen()
+            let receiptStartA = await wire.receipts.count
+            let firstPublicationA = RetainedReviewCountsPublication(owner: a.owner)
+            defer { firstPublicationA.finish() }
+            let first = try await grade(a, deckID: deck.id, expectedCounts: deck.counts)
+            await a.sync.waitForInputs()
+            try await a.exchange()
+            let receiptsA = Array(await wire.receipts.dropFirst(receiptStartA))
+            try #require(receiptsA.contains { $0.matchesEntity(kind: 2, key: serviceIDKey(first.cardID)) }, "No actual original Service Card Saved receipt for A")
+            try #require(receiptsA.contains { $0.matchesEntity(kind: 3, key: serviceIDKey(first.revlogID)) }, "No actual original Service Revlog Saved receipt for A")
+            let afterFirst = try await CoreDeckService().treeWithCounts()
+            try await firstPublicationA.wait(stage: "A first review deck counts") { counts(a.owner.decks) == counts(afterFirst.nodes) }
+            try #require(afterFirst.generation == a.owner.generation && counts(a.owner.decks) == counts(afterFirst.nodes))
+            let remaining = try #require(a.owner.deck(deck.id))
+            try #require(remaining.counts.new < deck.counts.new && remaining.counts.new > 0)
+            try #require(await a.owner.close())
+
+            active = b
+            try await b.reopen()
+            let firstPublicationB = RetainedReviewCountsPublication(owner: b.owner)
+            defer { firstPublicationB.finish() }
+            try await b.exchange()
+            let receivedFirst = try await servicePhysicalRows(cardID: first.cardID, revlogID: first.revlogID)
+            try requirePhysicalContext(receivedFirst, generation: b.owner.generation, since: first.rows.seq)
+            try #require(receivedFirst.generation > first.rows.generation)
+            try comparePhysicalRows(expected: first.rows, actual: receivedFirst, crossDevice: true)
+            let receivedCounts = try await CoreDeckService().treeWithCounts()
+            try #require(receivedCounts.generation == b.owner.generation && counts(receivedCounts.nodes) == counts(afterFirst.nodes))
+            try await firstPublicationB.wait(stage: "B received first review deck counts") { counts(b.owner.decks) == counts(receivedCounts.nodes) }
+            // Assert the existing owner's normal refreshed deck state before
+            // any further reopen, then inspect its real review head in grade.
+            try #require(counts(b.owner.decks) == counts(afterFirst.nodes) && b.owner.review == nil)
+            let receiptStartB = await wire.receipts.count
+            let secondPublicationB = RetainedReviewCountsPublication(owner: b.owner)
+            defer { secondPublicationB.finish() }
+            let second = try await grade(b, deckID: deck.id, expectedCounts: remaining.counts, excluding: first.cardID)
+            try #require(second.cardID != first.cardID && second.revlogID != first.revlogID)
+            await b.sync.waitForInputs()
+            try await b.exchange()
+            let receiptsB = Array(await wire.receipts.dropFirst(receiptStartB))
+            try #require(receiptsB.contains { $0.matchesEntity(kind: 2, key: serviceIDKey(second.cardID)) }, "No actual original Service Card Saved receipt for B")
+            try #require(receiptsB.contains { $0.matchesEntity(kind: 3, key: serviceIDKey(second.revlogID)) }, "No actual original Service Revlog Saved receipt for B")
+            let afterBoth = try await CoreDeckService().treeWithCounts()
+            try await secondPublicationB.wait(stage: "B second review deck counts") { counts(b.owner.decks) == counts(afterBoth.nodes) }
+            try #require(afterBoth.generation == b.owner.generation && counts(b.owner.decks) == counts(afterBoth.nodes))
+            let finishedDeck = try #require(b.owner.deck(deck.id))
+            try #require(finishedDeck.counts.new < remaining.counts.new)
+            let retainedFirstB = try await servicePhysicalRows(cardID: first.cardID, revlogID: first.revlogID)
+            try requirePhysicalContext(retainedFirstB, generation: b.owner.generation, since: receivedFirst.seq)
+            try comparePhysicalRows(expected: receivedFirst, actual: retainedFirstB, crossDevice: false)
+            try #require(await b.owner.close())
+
+            active = a
+            try await a.reopen()
+            let secondPublicationA = RetainedReviewCountsPublication(owner: a.owner)
+            defer { secondPublicationA.finish() }
+            try await a.exchange()
+            let retainedFirstA = try await servicePhysicalRows(cardID: first.cardID, revlogID: first.revlogID)
+            let receivedSecond = try await servicePhysicalRows(cardID: second.cardID, revlogID: second.revlogID)
+            try requirePhysicalContext(retainedFirstA, generation: a.owner.generation, since: retainedFirstB.seq)
+            try requirePhysicalContext(receivedSecond, generation: a.owner.generation, since: second.rows.seq)
+            try #require(receivedSecond.generation > second.rows.generation)
+            try comparePhysicalRows(expected: first.rows, actual: retainedFirstA, crossDevice: false)
+            try comparePhysicalRows(expected: second.rows, actual: receivedSecond, crossDevice: true)
+            let returnedCounts = try await CoreDeckService().treeWithCounts()
+            try #require(returnedCounts.generation == a.owner.generation && counts(returnedCounts.nodes) == counts(afterBoth.nodes))
+            try await secondPublicationA.wait(stage: "A received second review deck counts") { counts(a.owner.decks) == counts(returnedCounts.nodes) }
+            try #require(counts(a.owner.decks) == counts(afterBoth.nodes) && a.owner.review == nil)
+            try #require(await a.owner.close())
+
+            // Reopen both local stores and compare disk state.
+            // No explicit exchange runs in this phase.
+            var lastSeq = receivedSecond.seq
+            var lastGeneration = receivedSecond.generation
+            for (app, expectedFirst, expectedSecond) in [(a, retainedFirstA, receivedSecond), (b, retainedFirstB, second.rows)] {
+                active = app
+                try await app.reopen()
+                let coldFirst = try await servicePhysicalRows(cardID: first.cardID, revlogID: first.revlogID)
+                let coldSecond = try await servicePhysicalRows(cardID: second.cardID, revlogID: second.revlogID)
+                try requirePhysicalContext(coldFirst, generation: app.owner.generation, since: lastSeq)
+                try requirePhysicalContext(coldSecond, generation: app.owner.generation, since: coldFirst.seq)
+                try #require(coldFirst.generation > lastGeneration)
+                try comparePhysicalRows(expected: expectedFirst, actual: coldFirst, crossDevice: false)
+                try comparePhysicalRows(expected: expectedSecond, actual: coldSecond, crossDevice: false)
+                let coldCounts = try await CoreDeckService().treeWithCounts()
+                try #require(coldCounts.generation == app.owner.generation && counts(coldCounts.nodes) == counts(afterBoth.nodes))
+                try #require(counts(app.owner.decks) == counts(afterBoth.nodes) && app.owner.review == nil)
+                lastSeq = coldSecond.seq; lastGeneration = coldSecond.generation
+                try #require(await app.owner.close())
+            }
+            let exit = await process.close()
+            try #require(exit.status == 0 && exit.joined && !exit.unexpectedOutput && !exit.ioFailed)
+            try #require(exit.diagnostics.isEmpty && !exit.diagnosticLimitExceeded)
+        } catch {
+            await active?.cleanup()
+            _ = await process.cancel()
+            throw error
+        }
+    }
+
     @Test func realServiceExternalMediaReachesRetainedBindingIncrementally() async throws {
         let fixture = try InitialCloudFixture.load()
         let root = FileManager.default.temporaryDirectory.appending(path: "synthetic-external-media-\(UUID().uuidString)")
