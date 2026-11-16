@@ -131,7 +131,7 @@ struct NativeReplayAccessibilityTests {
                 }
                 _ = try await harness.signal("shown", count: shown + 1, from: page,
                     timeout: max(.zero, ContinuousClock.now.duration(to: deadline)))
-                func observe(until observationDeadline: ContinuousClock.Instant) async throws -> PublicAXObservation {
+                @MainActor func observe(until observationDeadline: ContinuousClock.Instant) async throws -> PublicAXObservation {
                     try Self.publicAXFacts(windowIdentifier: windowID, deadline: observationDeadline)
                 }
                 var tree = try await observe(until: deadline)
