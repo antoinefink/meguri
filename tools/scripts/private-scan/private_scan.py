@@ -831,13 +831,13 @@ PUBLIC_ARTIFACTS = {
     'server/Dockerfile':
         '324a94c05aafbbf38065174f70578eb044337ea6d0ded209977196b685a1ccd8',
     'server/README.md':
-        'f66656dd11a23cca25a8ed744d4325392392f355990ca26071cd11da87f7e6be',
+        '66e29ca5c1fb282f4cb5af33791e1129c8ca9c09a266eef24bbc9dd26220238c',
     'server/compose.yaml':
         '03737d36cd35810513c04e39a193b707e14228ca997e116ca93557c09e7a0d9b',
     'server/tools/package-context.py':
         '84db291e6ba4b27dbc5bfef38dc01434342cd4d06016e901ae544c212fd55724',
     'tools/mg.d/sync-package.sh':
-        '2c837c48fcb99ce67cdafce572fa19a52010befa379624630111478ae31132f6',
+        '0385c96b9fff90961214012cf2077653704a61752377e6aa746ddadc8011ca63',
     'tools/tests/sync_package.bats':
         'a8a9f046c1f5f7aa9fc9b55c04a43d60eff2d631136ab3f4133b1c8dbee22514',
     'tools/tests/sync_package_context_test.py':
@@ -907,7 +907,7 @@ PUBLIC_ARTIFACTS = {
         '2cfc1f7c8eb2399bf6bc2e8d77274682dd00563b2c467d15d17eb29956feee03',
     # Independently classified original public session metadata, exact bytes.
     'docs/process/provenance/sessions.jsonl':
-        '30493453761c194daec2d66e0c642304fca1de2f3a10be655f5cb84303bccb0f',
+        '5baabed59b8dad56eb20c5ba6df9a15d4b111639c603e13ee2fd68313e97233c',
     'conformance/fixtures/meguri-sync-server/observations/desktop-26.09.4-normal-matrix.json':
         '8a4e17346939516eda8b5b650203444693fb32e2173f4d6741242b4089da04eb',
     'specs/sync/server-desktop-current.md':
