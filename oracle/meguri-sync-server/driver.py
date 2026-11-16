@@ -15,6 +15,7 @@ from request import check_request
 from normal import NORMAL_FIXTURE, normal_selection
 from normal_matrix import MATRIX_FIXTURE, matrix_selection
 from media import MEDIA_FIXTURE, media_selection
+from recovery import RECOVERY_FIXTURE, recovery_selection
 
 
 def adapter(request):
@@ -45,7 +46,7 @@ class PrivateResult(unittest.TextTestResult):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=["selftest", "identity", "smoke", "edges", "normal", "normal-sdk", "normal-matrix", "media", "candidate", "catalog", "validate", "seal"])
+    parser.add_argument("mode", choices=["selftest", "identity", "recovery-discover", "recovery", "smoke", "edges", "normal", "normal-sdk", "normal-matrix", "media", "candidate", "catalog", "validate", "seal"])
     parser.add_argument('--request')
     parser.add_argument('--input')
     parser.add_argument('--credentials')
@@ -56,6 +57,7 @@ def main():
         neutral = pathlib.Path('/opt/reference/neutral')
         for name, expected in [('catalog.json',catalog()),('selection.json',selection()),('fixture.json',FIXTURE),
                                ('edge-selection.json',edge_selection()),('edge-fixture.json',EDGE_FIXTURE),
+                               ('recovery-selection.json',recovery_selection()),('recovery-fixture.json',RECOVERY_FIXTURE),
                                ('candidate-media-selection.json',candidate_selection('media')),('media-selection.json',media_selection()),('media-fixture.json',MEDIA_FIXTURE),
                                ('candidate-full-selection.json',candidate_selection('full')),('candidate-normal-selection.json',candidate_selection('normal')),('candidate-complete-selection.json',candidate_selection('complete'))]:
             require(same_value(decode((neutral / name).read_bytes()), expected), 'generated neutral input is stale')
@@ -67,6 +69,8 @@ def main():
     if args.mode == 'catalog':
         value = catalog()
         (out / 'catalog.json').write_bytes(encoded(value))
+        (out / 'recovery-selection.json').write_bytes(encoded(recovery_selection()))
+        (out / 'recovery-fixture.json').write_bytes(encoded(RECOVERY_FIXTURE))
         (out / 'selection.json').write_bytes(encoded(selection()))
         (out / 'edge-selection.json').write_bytes(encoded(edge_selection()))
         (out / 'matrix-selection.json').write_bytes(encoded(matrix_selection()))
@@ -82,6 +86,17 @@ def main():
         (out / 'media-fixture.json').write_bytes(encoded(MEDIA_FIXTURE))
         (out / 'fixture.json').write_bytes(encoded(FIXTURE))
         (out / 'summary.json').write_bytes(encoded({"total": 0, "passed": 0, "failed": 0, 'catalog_cases': value['required_case_count']}))
+        return 0
+    if args.mode == 'recovery':
+        value = adapter({'mode':'recovery','fixture':RECOVERY_FIXTURE})
+        (out / 'recovery-observations.json').write_bytes(encoded(value))
+        invocation = decode((out / 'invocation.json').read_bytes())
+        require(value['runtime']['lock_sha256'] == invocation['lock_sha256'], 'runtime lock receipt mismatch')
+        return 0 if record(value,out,invocation) else 1
+    if args.mode == 'recovery-discover':
+        value = adapter({'mode':'recovery-discover'})
+        (out / 'recovery-api.json').write_bytes(encoded(value))
+        (out / 'summary.json').write_bytes(encoded({'total':1,'passed':1,'failed':0,'scope':'Public interface discovery only; no recovery acceptance.'}))
         return 0
     if args.mode == 'identity':
         value = adapter({"mode": "identity"})
