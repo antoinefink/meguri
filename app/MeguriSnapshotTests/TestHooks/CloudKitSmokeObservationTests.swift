@@ -189,6 +189,8 @@ import Testing
     @Test func collectionSaveRecordsTheHandedSequenceAndHeldFlag() throws {
         let origin = "generated-engine"
         let record = CloudRecord(name: entity("n1").recordName, envelope: Data([1]), systemFields: Data([2]))
+        let expectedEnvelopeDigest = SHA256.hash(data: record.envelope)
+            .map { String(format: "%02x", $0) }.joined()
         for held in [true, false] {
             let evidence = try ledger()
             try evidence.admitSmokeSDK(origin: origin)
@@ -204,7 +206,8 @@ import Testing
             #expect(!evidence.drain().contains { $0.operation == label })
             evidence.sdk(.init(origin: origin, ordinal: 1, event: sent, phase: .committed), current: current())
             let facts = evidence.drain()
-            #expect(facts.last == .init(name: .engineCallback, count: 13, engine: "engine1", operation: label))
+            #expect(facts.last == .init(name: .engineCallback, count: 13, digest: expectedEnvelopeDigest,
+                                       engine: "engine1", operation: label))
             #expect(facts.dropLast().last?.operation == "send1-batch1-entity1-saved")
         }
     }
