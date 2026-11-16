@@ -1,5 +1,7 @@
 # tools/
 
+- Dev containers expose a separate 16 MiB tmpfs at `MEGURI_TEST_ENOSPC_ROOT`. Disk-full tests verify its mount identity before bounded writes; serialize tests sharing this fixture. Ordinary scratch stays under `TMPDIR`.
+
 - `cloud-fetch-probe-host` takes no arguments and requires explicit team signing; host Debug Snapshot SDK observation only (warn), never a fallback or acceptance. Keep all native evidence private; do not add it to gates/catch-up.
 - `cloud-record-read-host` takes no arguments; set explicit `MEGURI_CLOUD_RECORD_READ_INPUT` to its private build JSON and `MEGURI_APP_SIGNING=team`. It reuses that controller's fixed record-read selector. Its job-owned development Application Support input survives uncertain joins with the lease fence. Never adopt existing diagnostics files or expose native logs/input in MG output.
 
