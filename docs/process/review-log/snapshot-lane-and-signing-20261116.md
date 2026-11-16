@@ -184,5 +184,35 @@ Scanner regressions `selftest/20261116T214235Z-61985` pass their selected
 case with zero skips. Privacy `20261116T214239Z-62333` passes both files;
 static checks `20261116T214239Z-62332` pass all three checks. Similarity
 `20261116T214256Z-63448` passes both eligible files with zero flags or
-exceptions, and its filtered implementer report was read. Native execution
-of this diagnostic remains pending.
+exceptions, and its filtered implementer report was read.
+
+Native run `mac-hosted-test/20261116T214628Z-67510` on clean `aa17e03e`
+compiles and executes one failed test with zero skips. The original CF error
+remains. The extra walk reads one returned native object; its public legacy
+getter is available but returns nil role, identifiers and children. The walk
+stops as incomplete before reaching links. This result supplies no complete
+native tree or causal repair. This bounded diagnostic branch is stopped;
+required identity, names and all native activations remain unverified.
+
+## Affected iPhone simulator follow-up
+
+Selected Snapshot run `20261116T220046Z-78844` passes on clean `cf61cbc9`.
+It verifies four `home.deckList/typical/*` images across the two phone sizes.
+The retained native bundles report:
+
+| Device group and phase | Passed | Expected failure | Failed | Skipped |
+|---|---:|---:|---:|---:|
+| iPhone plan | 3 | 0 | 0 | 0 |
+| iPhone render workload | 113 | 3 | 0 | 2 |
+| Small iPhone plan | 2 | 0 | 0 | 1 |
+| Small iPhone render workload | 104 | 0 | 0 | 14 |
+
+The three expected-failure method groups belong to `HostedSnapshotTests`:
+token-color difference reporting, missing-baseline reporting, and startup
+I/O error reporting. The integrator checked their actual results and existing
+`withKnownIssue` blocks. These are intentional negative harness checks,
+not a product-failure waiver. All skipped results remain retained.
+
+This selected render workload does not replace the complete Snapshot or
+Xcode matrix, prove live CloudKit exchange, or close the original gate.
+No baseline was replaced.
