@@ -96,14 +96,29 @@ extension WebKitSuites.CardRuntimeSuites {
                 let ids = commands.indices.map { "review.card.replay.\(side)\($0)" }
                 let html = zip(ids, commands).map { Self.control($0.0, command: $0.1, platform: platform) }.joined()
                 let shown = harness.signals("shown", from: page).count
+                let deadline = ContinuousClock.now + .seconds(10)
                 if side == "q" {
                     try await page.run("_showQuestion(html, '', 'card card1', ids);", ["html": html, "ids": ids])
                 } else {
                     try await page.run("_showAnswer(html, 'card card1', ids);", ["html": html, "ids": ids])
                 }
-                try await harness.signal("shown", count: shown + 1, from: page)
-                let snapshot = Self.hierarchy(page.webView)
-                let links = snapshot.filter { $0.accessibilityTraits.contains(.link) }
+                try await harness.signal("shown", count: shown + 1, from: page,
+                    timeout: max(.zero, ContinuousClock.now.duration(to: deadline)))
+                var snapshot = Self.hierarchy(page.webView)
+                var links = snapshot.filter { $0.accessibilityTraits.contains(.link) }
+                var capturedInTime = ContinuousClock.now < deadline
+                // DOM shown can precede native AX publication. Wait on counts only;
+                // identity/name/assertion failures never retry.
+                while links.count != ids.count && capturedInTime {
+                    try await Task.sleep(for: .milliseconds(5))
+                    guard ContinuousClock.now < deadline else {
+                        capturedInTime = false
+                        break
+                    }
+                    snapshot = Self.hierarchy(page.webView)
+                    links = snapshot.filter { $0.accessibilityTraits.contains(.link) }
+                    capturedInTime = ContinuousClock.now < deadline
+                }
                 func identifier(_ element: NSObject) -> String? { (element as? any UIAccessibilityIdentification)?.accessibilityIdentifier }
                 let observed = links.map { "id=\(identifier($0) ?? "nil"), label=\($0.accessibilityLabel ?? "nil")" }
                 if links.isEmpty {
@@ -122,6 +137,7 @@ extension WebKitSuites.CardRuntimeSuites {
                     let sceneState = scene.map { String($0.activationState.rawValue) } ?? "nil"
                     print("Replay native AX fixture: webViewHasSuperview=\(page.webView.superview != nil) windowPresent=\(fixtureWindow != nil) rootViewControllerPresent=\(fixtureWindow?.rootViewController != nil) windowHidden=\(windowHidden) windowKey=\(windowKey) scenePresent=\(scene != nil) sceneActivationState=\(sceneState) voiceOverRunning=\(UIAccessibility.isVoiceOverRunning) switchControlRunning=\(UIAccessibility.isSwitchControlRunning)")
                 }
+                try #require(capturedInTime, "Native WebKit AX hierarchy and trait query must finish within the existing 10 s deadline")
                 #expect(links.count == ids.count, "Real WebKit AX links: \(observed)")
                 #expect(Set(links.compactMap(identifier)) == Set(ids), "HTML IDs must reach native accessibilityIdentifier: \(observed)")
                 for (id, command) in zip(ids, commands) {
