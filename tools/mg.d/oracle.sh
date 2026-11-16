@@ -238,6 +238,7 @@ mg_oracle__actor_scenarios() {
 # parser cannot run, it records an error and returns 1.
 mg_oracle__scenarios_where() {
   local what="$1" test="$2" dir="$MG_ROOT/conformance/scenarios" file rel id f out rc
+  local parsed="$MG_RUN_DIR/scenario-values.jsonl"
   local files=()
   shift 2
   [ -d "$dir" ] || return 0
@@ -246,7 +247,7 @@ mg_oracle__scenarios_where() {
     rel="${file#"$dir"/}"
     id="${rel%.*}"
     if [ "$#" -eq 0 ]; then
-      files[${#files[@]}]="$file"
+      files[${#files[@]}]="/work/$(mg_conf__rel "$file")"
       continue
     fi
     for f in "$@"; do
@@ -258,7 +259,7 @@ mg_oracle__scenarios_where() {
       # shellcheck disable=SC2254 # the filter is a pattern
       case "$id" in
         "$f" | "$f"/* | $f)
-          files[${#files[@]}]="$file"
+          files[${#files[@]}]="/work/$(mg_conf__rel "$file")"
           break
           ;;
       esac
@@ -267,19 +268,30 @@ mg_oracle__scenarios_where() {
 $(find "$dir" -type f \( -name '*.yaml' -o -name '*.yml' -o -name '*.json' \) ! -name 'area.yaml' ! -name 'area.yml' | LC_ALL=C sort)
 EOF
   [ "${#files[@]}" -gt 0 ] || return 0
-  out="$(mg_conf__cli_native conformance to-json "${files[@]}")"
-  rc=$?
+  # Oracle metadata uses this checkout's dev service, including its target
+  # cache; explicit native conformance commands keep their host CLI.
+  # Keep Compose progress out of the parser's JSON stream. The output path
+  # is relative to core/ in both the host checkout and the /work mount.
+  # Reset on the host too: Compose can exit 1 before its shell redirects.
+  if : >"$parsed"; then
+    mg_conf__dev -- "cd core && cargo run -q -p meguri-cli -- conformance to-json$(mg_conf__quote "${files[@]}") >$(mg_conf__quote "../$(mg_conf__rel "$parsed")")" >&2
+    rc=$?
+  else
+    rc=2
+  fi
+  out=""
+  [ ! -f "$parsed" ] || out="$(cat "$parsed")"
   # to-json exits 1 when a file does not parse, and still answers for it: that
   # file is no actor scenario here, and the harness reports it invalid.
   if [ "$rc" -ge 2 ] || [ "$(printf '%s\n' "$out" | grep -c '^{')" -ne "${#files[@]}" ]; then
     mg_failure scenario-parse "meguri-cli could not read the selected scenarios (exit $rc), so which of them are $what is unknown; see log.txt" \
-      "cd core && cargo run -p meguri-cli -- conformance to-json <scenario file>"
+      "$MG_DEFAULT_REPRO"
     mg_status error
     return 1
   fi
   printf '%s\n' "$out" | jq -r "select(.value | type == \"object\" and ($test)) | .path" |
     while IFS= read -r file; do
-      rel="${file#"$dir"/}"
+      rel="${file#/work/conformance/scenarios/}"
       printf '%s\n' "${rel%.*}"
     done
 }
@@ -675,7 +687,8 @@ mg_oracle_recordings() {
   for arg in "$@"; do
     case "$arg" in -*) mg_oracle__usage "recordings: unknown option '$arg'"; return 0 ;; esac
   done
-  local ids plan="$MG_RUN_DIR/plan.json"
+  local ids id rc plan="$MG_RUN_DIR/plan.json"
+  local plan_ids=()
   ids="$(mg_oracle__actor_scenarios "$@")" || return 0
   if [ -z "$ids" ]; then
     mg_failure no-scenarios "no actor scenario matches $*; only actor scenarios have oracle-client exchanges"
@@ -686,16 +699,22 @@ mg_oracle_recordings() {
   mg_oracle__docker_ok || return 0
   # A recording names the scenario text and the golden it reproduces: fresh
   # goldens only (T0 lists an actor scenario with one as live or pending).
-  # shellcheck disable=SC2086 # one id per word
-  mg_conf__cli_native conformance run --conformance "$MG_ROOT/conformance" --lane plan --report "$plan" $ids >/dev/null 2>&1
-  if [ ! -s "$plan" ]; then
+  while IFS= read -r id; do
+    plan_ids[${#plan_ids[@]}]="$id"
+  done <<EOF
+$ids
+EOF
+  mg_conf__dev -- "cd core && cargo run -q -p meguri-cli -- conformance run --conformance /work/conformance --lane plan --report$(mg_conf__quote "/work/$(mg_conf__rel "$plan")" "${plan_ids[@]}")" >/dev/null
+  rc=$?
+  # Exit 1 can still carry the stale/invalid outcomes checked below.
+  if [ "$rc" -ge 2 ] || [ ! -s "$plan" ]; then
     mg_failure plan "could not check the goldens of $(printf '%s' "$ids" | tr '\n' ' '); see log.txt"
     mg_status error
     return 0
   fi
   mg_oracle__tree && mg_oracle__build "$MG_ORACLE_DIR" || return 0
   mg_oracle__sync_faults || return 0
-  local id n=0 recorded=0 status sha
+  local n=0 recorded=0 status sha
   while IFS= read -r id; do
     n=$((n + 1))
     status="$(jq -r --arg id "$id" '.scenarios[] | select(.scenario == $id) | .status' "$plan")"
