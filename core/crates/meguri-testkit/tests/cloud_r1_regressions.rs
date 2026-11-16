@@ -605,6 +605,21 @@ fn unsupported_notetype_sort_field_and_deck_parent_changes_remain_gated_through_
                         let mut nt = ctx.scope().notetype(id)?.unwrap();
                         assert_eq!(nt.config.sort_field_idx, 0);
                         assert_eq!(nt.fields.len(), 2);
+                        assert_eq!(nt.fields.iter().map(|field| field.ord).collect::<Vec<_>>(), vec![0, 1]);
+                        assert_eq!(nt.templates.iter().map(|template| template.ord).collect::<Vec<_>>(), vec![0]);
+                        // This operation keeps every field/template at its
+                        // original ordinal and changes only the sort index.
+                        use meguri_storage::journal::{LayoutReport, LayoutShape, StructureReason, StructureReport};
+                        let before = LayoutShape::of(&nt)?;
+                        let mut contribution = StructureReport::default();
+                        contribution.reasons.insert(StructureReason::SortFieldChanged);
+                        contribution.layouts.insert(id.0, LayoutReport {
+                            before,
+                            after: LayoutShape { sort_field: 1, ..before },
+                            field_map: vec![0, 1],
+                            template_map: vec![0],
+                        });
+                        let report = ctx.scope().start_structure_report(contribution)?;
                         mark_schema_change(ctx.scope(), &[SchemaReason::SortFieldChanged])?;
                         nt.config.sort_field_idx = 1;
                         ctx.scope().put_notetype(&nt)?;
@@ -620,6 +635,7 @@ fn unsupported_notetype_sort_field_and_deck_parent_changes_remain_gated_through_
                             note.sort_field = meguri_text::checksum::sort_text_of(&fields, 1).into_owned();
                             ctx.scope().put(&note)?;
                         }
+                        ctx.scope().complete_structure_report(report)?;
                         Ok(())
                     },
                 )

@@ -90,6 +90,111 @@ fn raw_field_delete_with_journal_accepts_negative_ordinal() {
     raw_layout_image_round_trip(Table::Fields, Some(JournalOptions::in_memory()), true);
 }
 
+fn head_metadata_with_unreadable_child(table: Table, ordinal: meguri_storage::raw::SqlValue, stored_ordinal: Cell) {
+    use meguri_storage::raw::SqlValue;
+    let (_dir, path) = empty_collection();
+    let collection = open(&path).unwrap();
+    let writer = collection.writer();
+    let clock = clock();
+    let mut setup = writer.begin_write(StampMode::Raw, &clock, None).unwrap();
+    let id = setup.add_notetype(&common::notetype("Unreadable child", &["Front", "Back"], &["Card"])).unwrap();
+    setup.commit().unwrap();
+    // Synthetic corruption only; the head writes below use the real scope
+    // and explicitly pass the same storage guard the executor calls.
+    writer.execute_raw(&format!("UPDATE {} SET ord=?1 WHERE ntid=?2 AND ord=0", table.name()),
+        &[ordinal, SqlValue::Integer(id.0)]).unwrap();
+    let parts = || [Table::Fields, Table::Templates].map(|part| writer.notetype_parts_raw_page(part, id, None).unwrap());
+    let before_parts = parts();
+    let damaged = &before_parts[if table == Table::Fields { 0 } else { 1 }];
+    assert!(damaged.iter().any(|row| row[1] == stored_ordinal));
+    assert!(matches!(writer.notetype(id), Err(StorageError::Row(error)) if error.table == table.name() && error.column == "ord"));
+    let key = RowKey::Id(id.0);
+    let original = writer.row_image(Table::Notetypes, &key).unwrap().unwrap();
+    let mut head = original.clone();
+    head[3] = Cell::Integer(head[3].as_i64().unwrap() + 1);
+    // First the exact USN-only regression, then different config bytes with
+    // unchanged kind/sort facts: neither may decode unchanged child rows.
+    for config_changed in [false, true] {
+        let before_head = writer.row_image(Table::Notetypes, &key).unwrap().unwrap();
+        if config_changed {
+            let Cell::Blob(bytes) = &head[4] else { panic!("head config must be a blob") };
+            let mut config = meguri_model::proto::ProtoBlob::<meguri_model::proto::notetype::NotetypeConfig>::decode(bytes).unwrap();
+            config.css = "metadata-only CSS".into();
+            head[4] = Cell::Blob(config.to_bytes().into_owned());
+        }
+        let mut scope = writer.begin_write(StampMode::Raw, &clock, Some(JournalOptions::in_memory())).unwrap();
+        scope.restore(Table::Notetypes, &key, Some(&head)).unwrap();
+        scope.check_structure_report().unwrap();
+        let committed = scope.commit().unwrap();
+        assert!(committed.changed);
+        let journal = committed.journal.unwrap();
+        assert_eq!(journal.len(), 1);
+        let entry = journal.entry(Table::Notetypes, &key).unwrap();
+        assert_eq!(journal.before(entry).unwrap(), Some(before_head));
+        assert_eq!(journal.after(entry).unwrap(), Some(head.clone()));
+        assert!(journal.structure_report().is_none());
+        assert!(journal.identity_layout(id.0).is_none());
+        assert_eq!(writer.row_image(Table::Notetypes, &key).unwrap(), Some(head.clone()));
+        assert_eq!(parts(), before_parts);
+    }
+}
+
+#[test]
+fn head_usn_and_nonstructural_config_writes_preserve_unreadable_field_ordinal() {
+    head_metadata_with_unreadable_child(Table::Fields, meguri_storage::raw::SqlValue::Text("invalid ordinal".into()), Cell::text("invalid ordinal"));
+}
+
+#[test]
+fn head_usn_and_nonstructural_config_writes_preserve_unreadable_template_ordinal() {
+    head_metadata_with_unreadable_child(Table::Templates, meguri_storage::raw::SqlValue::Blob(vec![0, 1]), Cell::Blob(vec![0, 1]));
+}
+
+#[test]
+fn head_config_sort_and_kind_changes_still_require_structure_admission() {
+    for kind_changed in [false, true] {
+        let (_dir, path) = empty_collection();
+        let collection = open(&path).unwrap();
+        let writer = collection.writer();
+        let clock = clock();
+        let mut setup = writer.begin_write(StampMode::Raw, &clock, None).unwrap();
+        let id = setup.add_notetype(&common::notetype("Head structure", &["Front", "Back"], &["Card"])).unwrap();
+        setup.commit().unwrap();
+        let key = RowKey::Id(id.0);
+        let original = writer.row_image(Table::Notetypes, &key).unwrap().unwrap();
+        let before_parts = [Table::Fields, Table::Templates].map(|table| writer.notetype_parts_raw_page(table, id, None).unwrap());
+        let mut config = writer.notetype(id).unwrap().unwrap().config;
+        if kind_changed { config.kind = 1; } else { config.sort_field_idx = 1; }
+        let mut head = original.clone();
+        head[4] = Cell::Blob(config.to_bytes().into_owned());
+        let mut scope = writer.begin_write(StampMode::Raw, &clock, Some(JournalOptions::in_memory())).unwrap();
+        scope.restore(Table::Notetypes, &key, Some(&head)).unwrap();
+        assert!(matches!(scope.check_structure_report(), Err(StorageError::StructureNotReported { notetype_id }) if notetype_id == id));
+        scope.rollback().unwrap();
+        assert_eq!(writer.row_image(Table::Notetypes, &key).unwrap(), Some(original));
+        assert_eq!([Table::Fields, Table::Templates].map(|table| writer.notetype_parts_raw_page(table, id, None).unwrap()), before_parts);
+    }
+}
+
+#[test]
+fn changed_unreadable_head_config_is_not_treated_as_metadata() {
+    let (_dir, path) = empty_collection();
+    let collection = open(&path).unwrap();
+    let writer = collection.writer();
+    let clock = clock();
+    let mut setup = writer.begin_write(StampMode::Raw, &clock, None).unwrap();
+    let id = setup.add_notetype(&common::notetype("Malformed changed head", &["Front"], &["Card"])).unwrap();
+    setup.commit().unwrap();
+    let key = RowKey::Id(id.0);
+    let original = writer.row_image(Table::Notetypes, &key).unwrap().unwrap();
+    let mut head = original.clone();
+    head[4] = Cell::Blob(vec![0x80]);
+    let mut scope = writer.begin_write(StampMode::Raw, &clock, Some(JournalOptions::in_memory())).unwrap();
+    scope.restore(Table::Notetypes, &key, Some(&head)).unwrap();
+    assert!(matches!(scope.check_structure_report(), Err(StorageError::Row(error)) if error.table == "notetypes" && error.column == "config"));
+    scope.rollback().unwrap();
+    assert_eq!(writer.row_image(Table::Notetypes, &key).unwrap(), Some(original));
+}
+
 #[test]
 fn checked_ordinal_reports_follow_savepoints_and_raw_write_invalidation() {
     let (_dir, path) = empty_collection();

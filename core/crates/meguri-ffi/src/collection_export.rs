@@ -1265,6 +1265,7 @@ mod tests {
         config.disk_space_provider = space;
         let reopened = CoreHost::open(config.clone()).unwrap();
         assert!(reopened.derived().wait_idle(Duration::from_secs(5)));
+        reopened.engine().maintenance().wait_idle_for_testing();
         (reopened, config)
     }
     #[test]

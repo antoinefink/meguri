@@ -161,9 +161,18 @@ impl WriteScope<'_> {
                 }
                 (Table::Notetypes, RowKey::Id(id)) if e.existed_before() && !e.exists_after() => { removed.insert(*id); }
                 (Table::Notetypes, RowKey::Id(id)) if e.existed_before() && e.exists_after() => {
-                    let before = self.structure_shape_before(*id)?.ok_or_else(|| invalid("missing note type before shape"))?;
-                    let after = self.structure_shape(*id)?.ok_or_else(|| invalid("missing note type after shape"))?;
-                    if before.sort_field != after.sort_field || before.cloze != after.cloze { affected.insert(*id); }
+                    let before = journal.before(e)?.ok_or_else(|| invalid("missing note type before image"))?;
+                    let after = journal.after(e)?.ok_or_else(|| invalid("missing note type after image"))?;
+                    // Metadata writes need no aggregate read. Unchanged child
+                    // rows may be unreadable and belong to row classification.
+                    if before.get(4) != after.get(4) {
+                        let head_shape = |cells: &crate::RowImage| -> Result<(i32, u32), StorageError> {
+                            let row = crate::rows::RowCells { table: Table::Notetypes, cells };
+                            let config: ProtoBlob<NotetypeConfig> = row.wrap(4, ProtoBlob::decode(row.blob(4)?))?;
+                            Ok((config.kind, config.sort_field_idx))
+                        };
+                        if head_shape(&before)? != head_shape(&after)? { affected.insert(*id); }
+                    }
                 }
                 (Table::Notes, key) if e.existed_before() && e.exists_after()
                     && matches!(e.after(), After::Note(digest) if digest.changed.contains(2)) => {
