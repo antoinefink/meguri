@@ -44,8 +44,14 @@ mg_tap_report() {
     mg_failure runner-exit "the test runner exited with code $rc without a failing test; see log.txt"
   fi
   if [ "$failed" -eq 0 ] && [ "$rc" -eq 0 ] && { [ -z "$plan" ] || [ "$seen" -ge "$plan" ]; }; then
-    mg_message "$MG_JOB: $passed passed, $skipped skipped"
-    mg_status pass
+    if [ "$MG_JOB" = selftest ] && [ "$seen" -eq 0 ]; then
+      mg_failure no-tests "Bats selected no tests; verification did not run"
+      mg_message "$MG_JOB: no tests selected"
+      mg_status fail
+    else
+      mg_message "$MG_JOB: $passed passed, $skipped skipped"
+      mg_status pass
+    fi
   else
     mg_message "$MG_JOB: $failed failed, $passed passed, $skipped skipped"
     mg_status fail

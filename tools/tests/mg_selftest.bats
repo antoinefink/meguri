@@ -2908,6 +2908,102 @@ STUB
   validate "$result"
 }
 
+# Exercise the MG boundary with controlled Bats output, without nesting suites.
+selftest_tap_fixture() {
+  local bin="$BATS_TEST_TMPDIR/selftest-bin"
+  mkdir -p "$bin"
+  cat >"$bin/bats" <<'EOF'
+#!/bin/bash
+printf '%s\n' "$@" >"$SELFTEST_BATS_ARGS"
+printf '%s' "$SELFTEST_TAP"
+exit "${SELFTEST_RC:-0}"
+EOF
+  chmod +x "$bin/bats"
+  export PATH="$bin:$PATH" MG_CONTAINER=dev
+  export SELFTEST_BATS_ARGS="$BATS_TEST_TMPDIR/bats-args" SELFTEST_RC=0
+}
+
+@test "selftest refuses no-match and unsupported-filter zero results with unchanged counts" {
+  selftest_tap_fixture
+  export SELFTEST_TAP=$'1..0\n'
+  local selector
+  for selector in 'no-such-test' 'selected(?= case)'; do
+    mg selftest --filter "$selector"
+    [ "$status" -eq 1 ]
+    [ "$(field .status)" = fail ]
+    [ "$(field -c .summary)" = '{"total":0,"passed":0,"failed":0,"skipped":0}' ]
+    [ "$(field -c '[.failures[].id]')" = '["no-tests"]' ]
+    [ "$(field .message)" = 'selftest: no tests selected' ]
+    [ "$(sed -n '6,7p' "$SELFTEST_BATS_ARGS")" = "$(printf '%s\n' --filter "$selector")" ]
+    validate "$result"
+  done
+}
+
+@test "selftest counts positive selection from completed TAP cases" {
+  selftest_tap_fixture
+  export SELFTEST_TAP=$'1..2\nok 1 selected first\nok 2 selected second\n'
+  mg selftest --filter selected
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(field -c .summary)" = '{"total":2,"passed":2,"failed":0,"skipped":0}' ]
+  [ "$(field -c .failures)" = '[]' ]
+  [ "$(field .message)" = 'selftest: 2 passed, 0 skipped' ]
+  validate "$result"
+}
+
+@test "selftest preserves skipped-only and failed TAP reports" {
+  selftest_tap_fixture
+  export SELFTEST_TAP=$'1..1\nok 1 selected skip # skip unavailable\n'
+  mg selftest --filter selected
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(field -c .summary)" = '{"total":1,"passed":0,"failed":0,"skipped":1}' ]
+  [ "$(field -c .failures)" = '[]' ]
+  [ "$(field .message)" = 'selftest: 0 passed, 1 skipped' ]
+  validate "$result"
+
+  export SELFTEST_TAP=$'1..3\nok 1 selected pass\nnot ok 2 selected failure\n# assertion failed\nok 3 selected skip # SKIP unavailable\n' SELFTEST_RC=1
+  mg selftest --filter selected
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field -c .summary)" = '{"total":3,"passed":1,"failed":1,"skipped":1}' ]
+  [ "$(field -c '[.failures[].id]')" = '["selected failure"]' ]
+  [ "$(field '.failures[0].message')" = 'assertion failed' ]
+  [ "$(field '.failures[0].repro')" = "tools/mg selftest --filter 'selected failure'" ]
+  [ "$(field .message)" = 'selftest: 1 failed, 1 passed, 1 skipped' ]
+  validate "$result"
+}
+
+@test "selftest preserves runner-exit and incomplete TAP failures including zero completed cases" {
+  selftest_tap_fixture
+  export SELFTEST_TAP=$'1..0\n' SELFTEST_RC=2
+  mg selftest --filter selected
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field -c .summary)" = '{"total":0,"passed":0,"failed":0,"skipped":0}' ]
+  [ "$(field -c '[.failures[].id]')" = '["runner-exit"]' ]
+  [ "$(field '.failures[0].message')" = 'the test runner exited with code 2 without a failing test; see log.txt' ]
+  validate "$result"
+
+  export SELFTEST_TAP=$'1..2\nok 1 selected first\n' SELFTEST_RC=0
+  mg selftest --filter selected
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field -c .summary)" = '{"total":2,"passed":1,"failed":0,"skipped":0}' ]
+  [ "$(field -c '[.failures[].id]')" = '["tap-incomplete"]' ]
+  [ "$(field '.failures[0].message')" = 'the test run stopped after 1 of 2 tests (runner exit 0); see log.txt' ]
+  validate "$result"
+
+  export SELFTEST_TAP=$'1..2\n' SELFTEST_RC=2
+  mg selftest --filter selected
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field -c .summary)" = '{"total":2,"passed":0,"failed":0,"skipped":0}' ]
+  [ "$(field -c '[.failures[].id]')" = '["tap-incomplete"]' ]
+  [ "$(field '.failures[0].message')" = 'the test run stopped after 0 of 2 tests (runner exit 2); see log.txt' ]
+  validate "$result"
+}
+
 # These exercise the real nested runner with isolated fixture files.
 @test "selftest overlaps files but keeps each file sequential by default" {
   rm "$SB/tools/tests/"*.bats
