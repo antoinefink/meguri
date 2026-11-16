@@ -28,6 +28,7 @@ final class NativeReplayFixture {
         }
         windowIdentifier = nativeAccessibilityWindowIdentifier
         configuration = WKWebViewConfiguration()
+        // Scheme registration lasts until the owned configuration/web views are released.
         configuration.setURLSchemeHandler(media, forURLScheme: "meguri-media")
         configuration.websiteDataStore = .nonPersistent()
         configuration.mediaTypesRequiringUserActionForPlayback = []
@@ -58,7 +59,6 @@ final class NativeReplayFixture {
         controller.removeScriptMessageHandler(forName: CardRuntime.signalHandlerName, contentWorld: world)
         controller.removeScriptMessageHandler(forName: CardRuntime.confirmationHandlerName, contentWorld: world)
         controller.removeAllUserScripts()
-        configuration.setURLSchemeHandler(nil, forURLScheme: "meguri-media")
     }
 
     struct Signal: @unchecked Sendable {
@@ -177,7 +177,6 @@ final class NativeReplayFixture {
             controller.removeScriptMessageHandler(forName: CardRuntime.signalHandlerName, contentWorld: harness.world)
             controller.removeScriptMessageHandler(forName: CardRuntime.confirmationHandlerName, contentWorld: harness.world)
             controller.removeAllUserScripts()
-            webView.configuration.setURLSchemeHandler(nil, forURLScheme: "meguri-media")
         }
 
         @discardableResult
