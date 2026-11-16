@@ -20,6 +20,26 @@ A full, clean main-checkout gate with an explicit base saves its queued checks
 for catch-up when the tip commit carries `Unit:`. Local, partial and dirty gates
 do not save acceptance work. Keep `Unit:` on the completed unit's tip commit.
 
+## Failure register
+
+Antoine requested this rule on 2026-11-16 after required failures accumulated.
+Read `verification-status.md` on resume and before a batch. Update it after each
+required gate. Record each failure group's tested commit, receipt, status and
+next focused check. Preserve individual failures in their original receipts.
+
+Repair required active failures before unrelated features or a new batch.
+Existing frozen, queued, human-evidence and optional VoiceOver exceptions retain
+their exact scopes. An inherited failure is not a passing baseline.
+
+After a repair, run the exact failed cases and affected tests. Mark the repair
+as focused-verified until its required integration gate passes. Keep the original
+integration base. Focused counts never establish whole-app health.
+
+Close known technical failures and review findings before another full gate.
+Keep the existing batch cadence. Update the register from the complete result
+before further feature work. Failed, queued, pending and unrun checks remain
+distinct from passing checks.
+
 ## Repair rounds for the active goal
 
 Antoine authorized as many repair rounds as necessary on 2026-11-14.
