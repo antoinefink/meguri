@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Finite output binding for the owned Desktop/full candidate invocation.
+"""Finite output binding for the owned Desktop candidate invocation.
 
 This checks finite counts, identities and retained bytes. The pinned test tool's
 separate validate invocation owns artifact JSON semantics. This helper never
@@ -74,23 +74,26 @@ def validate(output, expected, peer, selection, summary, invocation):
                 for item in (expected, invocation)
                 for key in ("source_commit", "source_sha256", "lock_sha256")),
             "invocation source or lock differs from owned candidate")
+    phase = expected['arguments'][3]
+    require(phase in {'full', 'normal'}, 'unsupported owned candidate phase')
+    required = 11 if phase == 'full' else 10
     require(selection["format"] == "meguri-sync-selection-v1"
-            and selection["lane_kind"] == "candidate" and selection["phase"] == "full",
+            and selection["lane_kind"] == "candidate" and selection["phase"] == phase,
             "invalid fixed selection")
     contracts = selection["cases"]
     ids = [case["id"] for case in contracts]
-    require(len(ids) == 11 and len(set(ids)) == 11, "invalid full selection expansion")
+    require(len(ids) == required and len(set(ids)) == required, "invalid selected phase expansion")
     selected = invocation["selection"]
-    require(isinstance(selected, list) and len(selected) == 11
-            and len(set(selected)) == 11 and set(selected) == set(ids),
-            "final invocation selection differs from full contract")
+    require(isinstance(selected, list) and len(selected) == required
+            and len(set(selected)) == required and set(selected) == set(ids),
+            "final invocation selection differs from selected phase contract")
     require(all(count(summary[key]) for key in COUNT_KEYS), "invalid actual summary counts")
     require(type(summary["selection_credit"]) is bool
             and type(summary["broad_catalog_credit"]) is bool, "invalid actual credit flags")
     require(summary.get("skipped", 0) == 0 and type(summary.get("skipped", 0)) is int,
             "hidden skipped output")
-    require(summary["expected_case_count"] == summary["selected_case_count"] == 11,
-            "missing or zero full selection")
+    require(summary["expected_case_count"] == summary["selected_case_count"] == required,
+            "missing or zero phase selection")
     evidence = load(output / "evidence.json")
     evidence_keys = {"format", "document_kind", "baseline_release", "source_commit",
                      "source_sha256", "lock_sha256", "batch_base", "mg_job", "arguments",
@@ -106,20 +109,20 @@ def validate(output, expected, peer, selection, summary, invocation):
     for key in ("source_commit", "source_sha256", "lock_sha256", "batch_base", "mg_job", "arguments"):
         require(same(evidence[key], expected[key]), "stale or mismatched evidence identity")
     cases = evidence["cases"]
-    require(isinstance(cases, list) and len(cases) == 11
-            and len({case["id"] for case in cases}) == 11
+    require(isinstance(cases, list) and len(cases) == required
+            and len({case["id"] for case in cases}) == required
             and {case["id"] for case in cases} == set(ids), "missing or duplicate output cases")
     completed = sum(case["status"] in ("matched", "different", "failed", "sealed") for case in cases)
     passed = sum(case["status"] in ("matched", "sealed") for case in cases)
-    for key, actual in (("expected_case_count", 11), ("selected_case_count", len(cases)),
+    for key, actual in (("expected_case_count", required), ("selected_case_count", len(cases)),
                         ("completed_case_count", completed)):
         require(count(evidence[key]) and evidence[key] == actual == summary[key],
                 "mismatched actual execution counts")
     require(summary["total"] == len(cases) and summary["passed"] == passed
             and summary["failed"] == completed - passed, "mismatched actual outcome totals")
-    require(completed == passed == 11 and summary["failed"] == 0, "incomplete or failed actual execution")
+    require(completed == passed == required and summary["failed"] == 0, "incomplete or failed actual execution")
     require(summary["selection_credit"] and not summary["broad_catalog_credit"],
-            "invalid full-only coverage claim")
+            "invalid finite coverage claim")
     require(not (output / "artifacts").is_symlink()
             and (output / "artifacts").is_dir(), "missing retained artifacts directory")
     contracts = {case["id"]: case for case in contracts}

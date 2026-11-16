@@ -89,3 +89,13 @@ synthetic descriptors. Raw served schema-18 rows precede SDK normalization; nati
 server rows are read only after its job-owned process exits. `matrix-progress.json`
 retains completed traffic and observations if the observer fails. Structural changes,
 other Unicode spellings, complete P-families, Mobile and final acceptance are excluded.
+
+The candidate `normal` phase selects ten real Desktop SDK exchanges from the
+finite normal probe: no-change, reviews and deletions in both directions, note edits,
+authored object/config/tag exchange in both directions, 250/502-row boundaries
+and 251 card graves. It performs independent initial full setup per collection,
+but the credited normal exchanges are inspected separately. It includes no
+auxiliary-crafted normal matrix traffic, media, restart or Mobile claim.
+`tools/mg sync-server-reference normal-sdk` exercises the same ten SDK paths
+against a job-owned reference server. Actual candidate execution still requires
+a committed clean build and the existing strict runtime/artifact validations.

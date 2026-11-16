@@ -522,6 +522,15 @@ runs:
     oracle_files: true
     triggers: *sync-server-candidate
     budget_s: 900
+  - id: sync-server-interop-normal
+    job: sync-server-interop
+    args: [--lane, desktop, --phase, normal, --build-receipt, "{artifact:sync-server-candidate-build:result.json}", --author-session, s-20261115T203832Z-6ecc17e8]
+    tier: T1
+    placement: host
+    class: sync
+    oracle_files: true
+    triggers: *sync-server-candidate
+    budget_s: 900
   # Smoke covers only the wrapper's named Desktop selection.
   - id: sync-server-reference-smoke
     job: sync-server-reference

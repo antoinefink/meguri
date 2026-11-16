@@ -44,18 +44,18 @@ class PrivateResult(unittest.TextTestResult):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=["selftest", "identity", "smoke", "edges", "normal", "normal-matrix", "candidate", "catalog", "validate", "seal"])
+    parser.add_argument("mode", choices=["selftest", "identity", "smoke", "edges", "normal", "normal-sdk", "normal-matrix", "candidate", "catalog", "validate", "seal"])
     parser.add_argument('--request')
     parser.add_argument('--input')
     parser.add_argument('--credentials')
-    parser.add_argument('--phase',choices=['full','complete'],default='full')
+    parser.add_argument('--phase',choices=['full','normal','complete'],default='full')
     args = parser.parse_args()
     out = pathlib.Path('/out')
     if args.mode != 'catalog':
         neutral = pathlib.Path('/opt/reference/neutral')
         for name, expected in [('catalog.json',catalog()),('selection.json',selection()),('fixture.json',FIXTURE),
                                ('edge-selection.json',edge_selection()),('edge-fixture.json',EDGE_FIXTURE),
-                               ('candidate-full-selection.json',candidate_selection('full')),('candidate-complete-selection.json',candidate_selection('complete'))]:
+                               ('candidate-full-selection.json',candidate_selection('full')),('candidate-normal-selection.json',candidate_selection('normal')),('candidate-complete-selection.json',candidate_selection('complete'))]:
             require(same_value(decode((neutral / name).read_bytes()), expected), 'generated neutral input is stale')
     if args.mode == "selftest":
         suite = unittest.defaultTestLoader.discover(str(pathlib.Path(__file__).parent / "tests"))
@@ -73,6 +73,7 @@ def main():
         (out / 'normal-fixture.json').write_bytes(encoded(NORMAL_FIXTURE))
         (out / 'edge-fixture.json').write_bytes(encoded(EDGE_FIXTURE))
         (out / 'candidate-full-selection.json').write_bytes(encoded(candidate_selection('full')))
+        (out / 'candidate-normal-selection.json').write_bytes(encoded(candidate_selection('normal')))
         (out / 'candidate-complete-selection.json').write_bytes(encoded(candidate_selection('complete')))
         (out / 'fixture.json').write_bytes(encoded(FIXTURE))
         (out / 'summary.json').write_bytes(encoded({"total": 0, "passed": 0, "failed": 0, 'catalog_cases': value['required_case_count']}))
@@ -87,8 +88,8 @@ def main():
         invocation = decode((out / 'invocation.json').read_bytes())
         require(value['runtime']['lock_sha256'] == invocation['lock_sha256'], 'runtime lock receipt mismatch')
         return 0 if record(value,out,invocation) else 1
-    if args.mode == 'normal':
-        value = adapter({'mode':'normal','fixture':NORMAL_FIXTURE})
+    if args.mode in {'normal','normal-sdk'}:
+        value = adapter({'mode':args.mode,'fixture':NORMAL_FIXTURE})
         (out / 'normal-observations.json').write_bytes(encoded(value))
         invocation = decode((out / 'invocation.json').read_bytes())
         require(value['runtime']['lock_sha256'] == invocation['lock_sha256'], 'runtime lock receipt mismatch')
@@ -105,7 +106,7 @@ def main():
         invocation = decode((out / 'invocation.json').read_bytes())
         package,inputs,credentials = load_inputs('/in',args.credentials,invocation)
         target = {**credentials,'server':package['server']}
-        value = adapter({'mode':'candidate','fixture':FIXTURE,'target':target,'full_only':args.phase == 'full'})
+        value = adapter({'mode':'candidate','fixture':NORMAL_FIXTURE if args.phase == 'normal' else FIXTURE,'target':target,'phase':args.phase,'full_only':args.phase == 'full'})
         (out / 'candidate-observations.json').write_bytes(encoded(value))
         return 0 if record(value,out,invocation,package,inputs) else 1
     if args.mode == 'smoke':

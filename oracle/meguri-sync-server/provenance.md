@@ -50,3 +50,21 @@ action input. Content-addressed storage retains shared bytes once.
   the lower-modification round starts. The mode asserts modification 2000000000,
   USN 0 and due 17 before sending the older tuple. No download interrupts a round.
   The original handoff and 13 receipts remain frozen; corrected evidence is v2.
+
+## Dedicated candidate normal lane
+
+Session s-20261116T001757Z-8fe546bc extended the existing quarantine and MG
+boundary from committed base7c537aa3b6c325735ff0a49358a3594a89087926.
+The finite ten SDK paths reuse this project's original normal probe and
+synthetic input. No Anki implementation, private collection or production server
+source was read. The SDK remains pinned26.09.4/c06370ff; no dependency changed.
+The reference run establishes harness behavior only. Parent integration must
+perform the actual candidate execution after its normal handlers are committed.
+
+A targeted independent review found that normal credit ignored the SDK's
+public `SyncOutput.required` decision. A real metadata-only reference exchange
+followed by an injected FULL_SYNC result demonstrated the false success.
+Every normal sender and receiver call now requires public NO_CHANGES completion.
+The observation retains each actor's raw public SDK decision. Existing wire,
+tuple-count and database comparisons remain enabled. No SDK implementation
+source or guessed numeric enum mapping was used.

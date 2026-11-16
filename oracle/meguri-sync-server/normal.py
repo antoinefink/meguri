@@ -11,6 +11,8 @@ import secrets
 import tempfile
 import time
 
+from anki.sync import SyncOutput
+
 from synthetic import FIXTURE
 from validation import require, same_value
 
@@ -28,7 +30,7 @@ NORMAL_FIXTURE = {'format':'meguri-sync-normal-v1','base':FIXTURE,
 
 def definitions():
     return [
-      ('P-N10','sdk-no-change',{'routes':['/sync/meta'],'full_transfer_count':0,'request_body_bytes_positive':True}),
+      ('P-N10','sdk-no-change',{'required':SyncOutput.NO_CHANGES,'routes':['/sync/meta'],'full_transfer_count':0,'request_body_bytes_positive':True}),
       ('P-N10','sdk-one-review',{'review_occurrences':1,'card_occurrences':1,'note_occurrences':0,'full_transfer_count':0,'receiver_equal':True}),
       ('P-N03','sdk-bidirectional-edits-deletes',{'forward_equal':True,'reverse_equal':True,'deleted_note_absent':True,'deleted_card_absent':True}),
       ('P-N05','sdk-object-config-tag-exchange',{'model_forward':True,'model_reverse':True,'deck_received':True,'preset_received':True,'tag_received':True,'config_received':True}),
@@ -43,17 +45,27 @@ def definitions():
     ]
 
 
-def normal_selection():
+def reverse_definitions():
+    return [
+      ('P-N10','sdk-reverse-review',{'review_occurrences':1,'card_occurrences':1,'note_occurrences':0,'full_transfer_count':0,'receiver_equal':True}),
+      ('P-N03','sdk-reverse-delete',{'deleted_note_absent':True,'deleted_card_absent':True,'full_transfer_count':0,'receiver_equal':True}),
+      ('P-N05','sdk-reverse-object-config-tag',{'deck_received':True,'preset_received':True,'tag_received':True,'config_received':True,'full_transfer_count':0,'receiver_equal':True}),
+    ]
+
+
+def normal_selection(sdk_only=False):
     cases=[]
-    for family,variant,values in definitions():
+    for family,variant,values in definitions() + (reverse_definitions() if sdk_only else []):
+        if sdk_only and not variant.startswith('sdk-'): continue
         sdk = variant.startswith('sdk-')
+        reverse = variant.startswith('sdk-reverse-')
         cases.append({'id':f'{family}:desktop.reference.normal-{variant}','family':family,'classification':'current_probe',
           'spec_ids':['sync/server-collection#'+('C5' if family=='P-N08' else 'C4' if family in {'P-N06','P-N07'} else 'C3' if family in {'P-N03','P-N04','P-N05'} else 'C2')],
           'variants':[variant],'client_kind':'desktop','expected':[{'name':key,'value':value} for key,value in values.items()],
           'actions':[{'actor':'client_a','operation':'prepare_synthetic','description':'Create original job-owned collection with authored note type, templates and CSS.'},
-            {'actor':'client_a' if sdk else 'fault_driver','operation':'client_sync' if sdk else 'native_request',
+            {'actor':('client_b' if reverse else 'client_a') if sdk else 'fault_driver','operation':'client_sync' if sdk else 'native_request',
              'description':'Run actual Desktop SDK normal exchanges and retain exact method and tuple counts.' if sdk else 'Send explicitly marked auxiliary supported normal-round protocol traffic over loopback; these bytes are not claimed as Desktop SDK output.'},
-            {'actor':'client_b','operation':'client_sync','description':'Use the actual Desktop SDK receiver to inspect committed state.'}]})
+            {'actor':'client_a' if reverse else 'client_b','operation':'client_sync','description':'Use the actual Desktop SDK receiver to inspect committed state.'}]})
     return {'format':'meguri-sync-selection-v1','lane_kind':'reference','scope':'Finite Desktop NORMAL selection; auxiliary supported protocol fixtures are explicitly marked. No whole-family or Mobile credit.','cases':cases}
 
 
@@ -72,29 +84,32 @@ def length(chunk):
     return sum(len(chunk.get(key,[])) for key in ('notes','cards','revlog'))
 
 
-def run(api, fixture):
+def run(api, fixture, target=None, sdk_only=False):
     require(same_value(fixture,NORMAL_FIXTURE),'unknown normal fixture')
     identity=api.runtime()
     require(identity['client']['build']=='c06370ff' and identity['client']['runtime_sha256']=='bf0ccafe0f15bcba59a652db68c4cfdfaa8191756f8c547839c9d134dee12784','normal runtime pin mismatch')
     require(identity['lock_sha256']=='56e1bef86def9f5f230d12317e3510f2176eb079928f3a75f86afb0dcc408ec8','normal runtime lock mismatch')
+    if target is not None: identity['server'] = target['server']
     results={}; details={}
     with tempfile.TemporaryDirectory(prefix='normal-reference-') as scratch:
         root=pathlib.Path(scratch)
         api.PHASE='normal-sdk'
-        sdk(api,root/'sdk',fixture,results,details)
-        api.PHASE='normal-protocol'
-        protocol(api,root/'protocol',fixture,results,details)
-    return {'probe_kind':'normal','runtime':identity,'fixture':fixture,'normal_results':results,'normal_details':details}
+        sdk(api,root/'sdk',fixture,results,details,target,bidirectional=sdk_only)
+        if not sdk_only:
+            api.PHASE='normal-protocol'
+            protocol(api,root/'protocol',fixture,results,details)
+    return {'probe_kind':'candidate' if target is not None else 'normal-sdk' if sdk_only else 'normal','phase':'normal','runtime':identity,'fixture':fixture,'normal_results':results,'normal_details':details}
 
 
-def environment(api, root, count=1):
+def environment(api, root, count=1, target=None):
     """A context manager with no shared profiles or ambient credentials."""
     import contextlib
     @contextlib.contextmanager
     def entered():
         root.mkdir()
-        with api.reference_server(root/'server') as (port,user,password),api.recorder(port) as record:
+        with api.probe_server(root/'server',target) as (port,user,password),api.recorder(port) as record:
             record.capture_normal=True
+            record.sdk_completions=[]
             clients=[]
             try:
                 a,model=api.collection(root,'a',FIXTURE);clients.append(a)
@@ -105,7 +120,7 @@ def environment(api, root, count=1):
                 ab=b.sync_login(username=user,password=password,endpoint=endpoint)
                 api.full(a,aa,True);api.full(b,ab,False)
                 # Bring A's cursor/stamps up to the post-download server state.
-                a.sync_collection(aa,sync_media=False)
+                sync(a,aa,record,'client_a')
                 yield a,b,model,aa,ab,record,port,clients
                 require(not record.errors,'normal recording incomplete')
             finally:
@@ -113,19 +128,22 @@ def environment(api, root, count=1):
     return entered()
 
 
-def sync(col,auth):
+def sync(col,auth,recorder=None,actor=None):
     result=col.sync_collection(auth,sync_media=False)
+    if recorder is not None:
+        recorder.sdk_completions.append({'actor':actor,'required':result.required})
+    require(result.required == SyncOutput.NO_CHANGES,'normal SDK outcome requires full transfer')
     col.models=type(col.models)(col)
     return result
 
 
-def sdk(api,root,f,results,details):
+def sdk(api,root,f,results,details,target=None,bidirectional=False):
     root.mkdir()
-    with environment(api,root/'exchange',3) as (a,b,model,aa,ab,rec,port,clients):
+    with environment(api,root/'exchange',3,target) as (a,b,model,aa,ab,rec,port,clients):
         # A settled no-change exchange measures actual wire payloads.
-        sync(a,aa);before=len(rec.observations);sync(a,aa)
+        sync(a,aa,rec,'client_a');before=len(rec.observations);settled=sync(a,aa,rec,'client_a')
         rows=rec.observations[before:]
-        results['sdk-no-change']={'routes':[r['route'] for r in rows],'full_transfer_count':sum(r['route'] in {'/sync/upload','/sync/download'} for r in rows),'request_body_bytes_positive':all(r['request_bytes']>0 for r in rows)}
+        results['sdk-no-change']={'required':settled.required,'routes':[r['route'] for r in rows],'full_transfer_count':sum(r['route'] in {'/sync/upload','/sync/download'} for r in rows),'request_body_bytes_positive':all(r['request_bytes']>0 for r in rows)}
         details['no_change']=rows
         # A review through the public scheduler, then a real receiving client.
         api.PHASE='normal-sdk-review-get'
@@ -133,20 +151,30 @@ def sdk(api,root,f,results,details):
         card=a.sched.getCard(); require(card is not None,'synthetic review card unavailable')
         api.PHASE='normal-sdk-review-answer'
         a.sched.answerCard(card,3)
-        before=len(rec.observations);sync(a,aa);review_rows=rec.observations[before:]
-        sync(b,ab)
+        before=len(rec.observations);sync(a,aa,rec,'client_a');review_rows=rec.observations[before:]
+        sync(b,ab,rec,'client_b')
         chunks=[r['normal_request']['chunk'] for r in review_rows if r['route']=='/sync/applyChunk']
         results['sdk-one-review']={'review_occurrences':sum(len(c.get('revlog',[])) for c in chunks),'card_occurrences':sum(len(c.get('cards',[])) for c in chunks),'note_occurrences':sum(len(c.get('notes',[])) for c in chunks),'full_transfer_count':sum(r['route'] in {'/sync/upload','/sync/download'} for r in review_rows),'receiver_equal':api.snapshot(a)==api.snapshot(b)}
         details['one_review']=review_rows
+        if bidirectional:
+            api.PHASE='normal-sdk-reverse-review'
+            time.sleep(1.05)
+            card=b.sched.getCard();require(card is not None,'reverse synthetic review card unavailable')
+            b.sched.answerCard(card,3)
+            before=len(rec.observations);sync(b,ab,rec,'client_b');reverse_rows=rec.observations[before:]
+            sync(a,aa,rec,'client_a')
+            chunks=[r['normal_request']['chunk'] for r in reverse_rows if r['route']=='/sync/applyChunk']
+            results['sdk-reverse-review']={'review_occurrences':sum(len(c.get('revlog',[])) for c in chunks),'card_occurrences':sum(len(c.get('cards',[])) for c in chunks),'note_occurrences':sum(len(c.get('notes',[])) for c in chunks),'full_transfer_count':sum(r['route'] in {'/sync/upload','/sync/download'} for r in reverse_rows),'receiver_equal':api.snapshot(a)==api.snapshot(b)}
+            details['reverse_review']=reverse_rows
         # Both directions, plus ordinary note deletion (with its card grave).
         api.PHASE='normal-sdk-edit-delete'
         note_id=a.find_notes('')[0]
-        time.sleep(1.05);n=a.get_note(note_id);n.fields[1]='Aster forward';a.update_note(n);sync(a,aa);sync(b,ab)
+        time.sleep(1.05);n=a.get_note(note_id);n.fields[1]='Aster forward';a.update_note(n);sync(a,aa,rec,'client_a');sync(b,ab,rec,'client_b')
         forward=api.snapshot(a)==api.snapshot(b)
-        time.sleep(1.05);n=b.get_note(note_id);n.fields[1]='Aster reverse';b.update_note(n);sync(b,ab);sync(a,aa)
+        time.sleep(1.05);n=b.get_note(note_id);n.fields[1]='Aster reverse';b.update_note(n);sync(b,ab,rec,'client_b');sync(a,aa,rec,'client_a')
         reverse=api.snapshot(a)==api.snapshot(b)
         delete_id=a.find_notes('')[-1];delete_card=a.db.scalar('select id from cards where nid=?',delete_id)
-        time.sleep(1.05);a.remove_notes([delete_id]);sync(a,aa);sync(b,ab)
+        time.sleep(1.05);a.remove_notes([delete_id]);sync(a,aa,rec,'client_a');sync(b,ab,rec,'client_b')
         results['sdk-bidirectional-edits-deletes']={'forward_equal':forward,'reverse_equal':reverse,'deleted_note_absent':b.db.scalar('select count(*) from notes where id=?',delete_id)==0,'deleted_card_absent':b.db.scalar('select count(*) from cards where id=?',delete_card)==0}
         # Author every changed object; schema shape and templates remain our own.
         time.sleep(1.05)
@@ -157,37 +185,58 @@ def sdk(api,root,f,results,details):
         api.PHASE='normal-sdk-config-tag'
         a.set_config(f['conf_key'],f['conf_value'])
         n=a.get_note(note_id);n.tags=[f['tag']];a.update_note(n)
-        sync(a,aa);sync(b,ab)
+        sync(a,aa,rec,'client_a');sync(b,ab,rec,'client_b')
         api.PHASE='normal-sdk-object-receive'
         model_forward=b.models.get(model['id'])['css']=='.card { color: #234567; }'
-        time.sleep(1.05);m=b.models.get(model['id']);m['css']='.card { color: #345678; }';b.models.save(m);sync(b,ab);sync(a,aa)
+        time.sleep(1.05);m=b.models.get(model['id']);m['css']='.card { color: #345678; }';b.models.save(m);sync(b,ab,rec,'client_b');sync(a,aa,rec,'client_a')
         results['sdk-object-config-tag-exchange']={'model_forward':model_forward,'model_reverse':a.models.get(model['id'])['css']=='.card { color: #345678; }','deck_received':b.decks.get(did)['name']==f['deck'],'preset_received':b.decks.get_config(cid)['name']==f['preset'],'tag_received':f['tag'] in b.tags.all(),'config_received':b.get_config(f['conf_key'])==f['conf_value']}
+        if bidirectional:
+            api.PHASE='normal-sdk-reverse-objects'
+            time.sleep(1.05)
+            reverse_deck=b.decks.id(f['deck']+' reverse')
+            reverse_preset=b.decks.add_config(f['preset']+' reverse')
+            reverse_config={'source':'Aster reverse','count':4}
+            b.set_config(f['conf_key'],reverse_config)
+            reverse_tag=f['tag']+'Reverse'
+            n=b.get_note(note_id);n.tags=[reverse_tag];b.update_note(n)
+            before=len(rec.observations);sync(b,ab,rec,'client_b');sync(a,aa,rec,'client_a');reverse_rows=rec.observations[before:]
+            results['sdk-reverse-object-config-tag']={'deck_received':a.decks.get(reverse_deck)['name']==f['deck']+' reverse','preset_received':a.decks.get_config(reverse_preset['id'])['name']==f['preset']+' reverse','tag_received':reverse_tag in a.tags.all(),'config_received':a.get_config(f['conf_key'])==reverse_config,'full_transfer_count':sum(r['route'] in {'/sync/upload','/sync/download'} for r in reverse_rows),'receiver_equal':api.snapshot(a)==api.snapshot(b)}
+            details['reverse_objects']=reverse_rows
+            api.PHASE='normal-sdk-reverse-delete'
+            delete_id=next(ident for ident in b.find_notes('') if ident!=note_id)
+            delete_card=b.db.scalar('select id from cards where nid=?',delete_id)
+            time.sleep(1.05);b.remove_notes([delete_id])
+            before=len(rec.observations);sync(b,ab,rec,'client_b');sync(a,aa,rec,'client_a');reverse_rows=rec.observations[before:]
+            results['sdk-reverse-delete']={'deleted_note_absent':a.db.scalar('select count(*) from notes where id=?',delete_id)==0,'deleted_card_absent':a.db.scalar('select count(*) from cards where id=?',delete_card)==0,'full_transfer_count':sum(r['route'] in {'/sync/upload','/sync/download'} for r in reverse_rows),'receiver_equal':api.snapshot(a)==api.snapshot(b)}
+            details['reverse_delete']=reverse_rows
         details['exchange_traffic']=rec.observations
+        details['exchange_sdk_completions']=rec.sdk_completions
     api.PHASE='normal-sdk-boundaries'
     for count in f['note_counts']:
-        with environment(api,root/('boundary-'+str(count)),1) as (a,b,model,aa,ab,rec,port,clients):
+        with environment(api,root/('boundary-'+str(count)),1,target) as (a,b,model,aa,ab,rec,port,clients):
             time.sleep(1.05)
             # New rows: exactly two tuples per note; initial fixture row is unchanged.
             for index in range(count): api.add_note(a,a.models.get(model['id']),[f'Boundary cue {index}',f'Boundary response {index}'])
-            before=len(rec.observations);sync(a,aa);sent=rec.observations[before:]
-            before=len(rec.observations);sync(b,ab);received=rec.observations[before:]
+            before=len(rec.observations);sync(a,aa,rec,'client_a');sent=rec.observations[before:]
+            before=len(rec.observations);sync(b,ab,rec,'client_b');received=rec.observations[before:]
             sc=[r['normal_request']['chunk'] for r in sent if r['route']=='/sync/applyChunk']
             rc=[r['normal_response'] for r in received if r['route']=='/sync/chunk']
             variant='sdk-250-boundary' if count==125 else 'sdk-multichunk'
             results[variant]={'sent_lengths':[length(c) for c in sc],'sent_done':[c['done'] for c in sc],'received_lengths':[length(c) for c in rc],'received_done':[c['done'] for c in rc],'unique_note_ids':len({n[0] for c in rc for n in c.get('notes',[])}),'unique_card_ids':len({n[0] for c in rc for n in c.get('cards',[])}),'receiver_equal':api.snapshot(a)==api.snapshot(b)}
-            details[variant]={'sender':sent,'receiver':received}
+            details[variant]={'sender':sent,'receiver':received,'sdk_completions':rec.sdk_completions}
     api.PHASE='normal-sdk-graves'
-    with environment(api,root/'graves',251) as (a,b,model,aa,ab,rec,port,clients):
+    with environment(api,root/'graves',251,target) as (a,b,model,aa,ab,rec,port,clients):
         time.sleep(1.05)
         # Author an otherwise valid fixture with card-only graves and orphan notes.
         card_ids=a.find_cards('')
         a.db.executemany('insert into graves(usn,oid,type) values(-1,?,0)',[(ident,) for ident in card_ids])
         a.db.execute('delete from cards')
         a.db.execute('update col set mod=?',int(time.time()*1000)+1000)
-        before=len(rec.observations);sync(a,aa);sent=rec.observations[before:];sync(b,ab)
+        before=len(rec.observations);sync(a,aa,rec,'client_a');sent=rec.observations[before:];sync(b,ab,rec,'client_b')
         graves=[r['normal_request']['chunk'] for r in sent if r['route']=='/sync/applyGraves']
         results['sdk-251-graves']={'sent_grave_lengths':[sum(len(v) for v in c.values()) for c in graves],'sent_card_graves':sum(len(c['cards']) for c in graves),'receiver_card_count':b.db.scalar('select count(*) from cards'),'receiver_note_count':b.db.scalar('select count(*) from notes')}
         details['sdk-251-graves']=sent
+        details['sdk-251-graves-completions']=rec.sdk_completions
 
 
 def protocol(api,root,f,results,details):

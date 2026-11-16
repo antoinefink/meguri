@@ -3,13 +3,46 @@ import copy
 import pathlib
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from normal import NORMAL_FIXTURE, definitions, exact_numbers, normal_selection
-from evidence import record
+import adapter as api
+from anki.sync import SyncOutput
+
+from normal import NORMAL_FIXTURE, definitions, environment, exact_numbers, normal_selection, sync
+from evidence import candidate_selection, record
 from validation import Artifacts, decode, encoded, sha
 
 
 class NormalBoundary(unittest.TestCase):
+    def test_normal_sync_rejects_full_transfer_result_after_real_meta_only_exchange(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with environment(api,pathlib.Path(directory)/'round') as (a,b,model,aa,ab,rec,port,clients):
+                sync(a,aa)
+                before=len(rec.observations)
+                reply=a.sync_collection(aa,sync_media=False)
+                self.assertEqual(reply.required,SyncOutput.NO_CHANGES)
+                self.assertEqual([row['route'] for row in rec.observations[before:]],['/sync/meta'])
+                # Inject a public SDK transfer decision after the real exchange.
+                reply.required=SyncOutput.FULL_SYNC
+                with patch.object(a,'sync_collection',return_value=reply):
+                    with self.assertRaisesRegex(ValueError,'full transfer'):
+                        accepted=sync(a,aa)
+                        pathlib.Path('/out/normal-transfer-regression.json').write_bytes(encoded({
+                            'actual_metadata_only_exchange':True,'original_required':SyncOutput.NO_CHANGES,
+                            'injected_required':SyncOutput.FULL_SYNC,'silently_returned_required':accepted.required}))
+
+    def test_candidate_normal_contract_keeps_only_actual_sdk_exchanges(self):
+        selected = candidate_selection('normal')
+        self.assertEqual(selected['phase'], 'normal')
+        self.assertEqual(selected['lane_kind'], 'candidate')
+        self.assertEqual(len(selected['cases']), 10)
+        self.assertEqual({c['variants'][0] for c in selected['cases']},
+                         {variant for _, variant, _ in definitions() if variant.startswith('sdk-')} |
+                         {'sdk-reverse-review','sdk-reverse-delete','sdk-reverse-object-config-tag'})
+        self.assertTrue(all('.candidate.' in c['id'] for c in selected['cases']))
+        self.assertTrue(all(action['operation'] != 'native_request'
+                            for c in selected['cases'] for action in c['actions']))
+
     def test_record_retains_action_inputs_with_exact_synthetic_descriptors(self):
         # Metadata-only producer regression; no SDK execution or compatibility claim.
         zero = '0' * 64

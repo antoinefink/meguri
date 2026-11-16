@@ -593,14 +593,19 @@ if __name__ == "__main__":
         elif request['mode'] == 'normal-matrix':
             import normal_matrix
             result = normal_matrix.run(sys.modules[__name__],request['fixture'])
-        elif request['mode'] == 'normal':
+        elif request['mode'] in {'normal','normal-sdk'}:
             import normal
-            result = normal.exact_numbers(normal.run(sys.modules[__name__],request['fixture']))
+            result = normal.exact_numbers(normal.run(sys.modules[__name__],request['fixture'],sdk_only=request['mode'] == 'normal-sdk'))
         elif request['mode'] == 'candidate':
             require(isinstance(request.get('target'),dict),'candidate target missing')
             require(request['target'].get('server',{}).get('kind') == 'meguri_sync','candidate peer kind mismatch')
             require(type(request.get('full_only')) is bool,'candidate phase is malformed')
-            result = smoke(request['fixture'],request['target'],request['full_only'])
+            require(request.get('phase') in {'full','normal','complete'},'candidate phase is unknown')
+            if request['phase'] == 'normal':
+                import normal
+                result = normal.exact_numbers(normal.run(sys.modules[__name__],request['fixture'],request['target'],sdk_only=True))
+            else:
+                result = smoke(request['fixture'],request['target'],request['full_only'])
         elif request['mode'] == 'smoke':
             require(type(request.get('full_only',False)) is bool,'reference phase is malformed')
             result = smoke(request['fixture'],full_only=request.get('full_only',False))

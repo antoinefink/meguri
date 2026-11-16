@@ -17,4 +17,5 @@
 !conformance/recordings/scenarios/meguri-sync-server/desktop-selection.json
 !conformance/recordings/scenarios/meguri-sync-server/desktop-edge-selection.json
 !conformance/recordings/scenarios/meguri-sync-server/candidate-full-selection.json
+!conformance/recordings/scenarios/meguri-sync-server/candidate-normal-selection.json
 !conformance/recordings/scenarios/meguri-sync-server/candidate-complete-selection.json

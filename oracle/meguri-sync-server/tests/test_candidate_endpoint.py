@@ -7,6 +7,7 @@ import tempfile
 import unittest
 
 from synthetic import FIXTURE
+from normal import NORMAL_FIXTURE
 from validation import decode, encoded
 from adapter import file_stamp
 
@@ -29,14 +30,16 @@ class CandidateEndpoint(unittest.TestCase):
         return subprocess.run([sys.executable,str(adapter)],input=encoded(request),stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=30)
 
     def test_missing_candidate_never_starts_a_reference_fallback(self):
-        adapter = pathlib.Path(__file__).parents[1] / 'adapter.py'
-        request = {'mode':'candidate','fixture':FIXTURE,'full_only':True,
-                   'target':{'username':'synthetic','password':'unreachable-only','server':{'kind':'meguri_sync','version':'test','build':'test'}}}
-        process = subprocess.run([sys.executable,str(adapter)],input=encoded(request),stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=30)
-        self.assertNotEqual(process.returncode,0)
-        result = decode(process.stdout)
-        self.assertEqual(result['failure']['phase'],'native-login')
-        self.assertNotIn(b'unreachable-only',process.stdout)
+        for phase,fixture,failure_phase in [('full',FIXTURE,'native-login'),
+                                             ('normal',NORMAL_FIXTURE,'normal-sdk')]:
+            with self.subTest(phase=phase):
+                request = {'mode':'candidate','fixture':fixture,'full_only':phase == 'full','phase':phase,
+                           'target':{'username':'synthetic','password':'unreachable-only','server':{'kind':'meguri_sync','version':'test','build':'test'}}}
+                process = self.run_request(request)
+                self.assertNotEqual(process.returncode,0)
+                result = decode(process.stdout)
+                self.assertEqual(result['failure']['phase'],failure_phase)
+                self.assertNotIn(b'unreachable-only',process.stdout)
 
     def test_missing_candidate_target_never_selects_reference(self):
         process = self.run_request({'mode':'candidate','fixture':FIXTURE,'full_only':True,'target':None})

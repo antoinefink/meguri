@@ -13,6 +13,7 @@ COPY conformance/recordings/scenarios/meguri-sync-server/desktop-selection.json 
 COPY conformance/recordings/scenarios/meguri-sync-server/desktop-edge-selection.json /opt/reference/neutral/edge-selection.json
 COPY conformance/fixtures/meguri-sync-server/edges.json /opt/reference/neutral/edge-fixture.json
 COPY conformance/recordings/scenarios/meguri-sync-server/candidate-full-selection.json /opt/reference/neutral/candidate-full-selection.json
+COPY conformance/recordings/scenarios/meguri-sync-server/candidate-normal-selection.json /opt/reference/neutral/candidate-normal-selection.json
 COPY conformance/recordings/scenarios/meguri-sync-server/candidate-complete-selection.json /opt/reference/neutral/candidate-complete-selection.json
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TMPDIR=/scratch TZ=UTC
 WORKDIR /scratch

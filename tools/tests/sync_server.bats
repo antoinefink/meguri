@@ -513,13 +513,14 @@ candidate_build_check() {
 candidate_output_fixture() {
   export CANDIDATE_FIXTURE="$BATS_TEST_TMPDIR/candidate"
   mkdir -p "$CANDIDATE_FIXTURE/out/artifacts"
-  python3 - "$REPO_ROOT" "$CANDIDATE_FIXTURE" <<'PY'
+  python3 - "$REPO_ROOT" "$CANDIDATE_FIXTURE" "${1:-full}" <<'PY'
 import copy, hashlib, json, pathlib, sys
-root, base = map(pathlib.Path, sys.argv[1:])
-selection = json.loads((root / 'conformance/recordings/scenarios/meguri-sync-server/candidate-full-selection.json').read_text())
+root, base = map(pathlib.Path, sys.argv[1:3])
+phase = sys.argv[3]
+selection = json.loads((root / f'conformance/recordings/scenarios/meguri-sync-server/candidate-{phase}-selection.json').read_text())
 def write(path, value):
     (base / path).write_text(json.dumps(value))
-args = ['--lane', 'desktop', '--phase', 'full', '--build-receipt', 'owned/result.json', '--author-session', 'producer-fixture']
+args = ['--lane', 'desktop', '--phase', phase, '--build-receipt', 'owned/result.json', '--author-session', 'producer-fixture']
 invocation = dict(source_commit='a'*40, batch_base='b'*40, source_sha256='c'*64,
                   lock_sha256='d'*64, executable_sha256='1'*64, mg_job='sync-server-interop', arguments=args,
                   run_id='20261115T000000Z-1', author_session='producer-fixture')
@@ -552,10 +553,10 @@ for contract in selection['cases']:
     cases.append(case)
 evidence = {key: invocation[key] for key in ('source_commit', 'batch_base', 'source_sha256', 'lock_sha256', 'mg_job', 'arguments')}
 evidence.update(format='meguri-sync-server-v1', document_kind='evidence', baseline_release='26.09.3',
-                expected_case_count=11, selected_case_count=11, completed_case_count=11, cases=cases)
+                expected_case_count=len(cases), selected_case_count=len(cases), completed_case_count=len(cases), cases=cases)
 write('out/evidence.json', evidence)
-write('out/summary.json', dict(total=11, passed=11, failed=0, expected_case_count=11,
-                            selected_case_count=11, completed_case_count=11,
+write('out/summary.json', dict(total=len(cases), passed=len(cases), failed=0, expected_case_count=len(cases),
+                            selected_case_count=len(cases), completed_case_count=len(cases),
                             selection_credit=True, broad_catalog_credit=False))
 PY
 }
@@ -703,6 +704,21 @@ PY
     candidate_output_check
     [ "$status" -ne 0 ]
   done
+}
+
+@test "sync-server: normal candidate counts and phase stay bound to its selected contract" {
+  candidate_output_fixture normal
+  candidate_output_check
+  [ "$status" -eq 0 ]
+  jq -e '.errors==[] and .summary.total==10 and (.invocation.selection|length)==10' <<<"$output"
+  candidate_mutate "summary['completed_case_count']=9"
+  candidate_output_check
+  [ "$status" -ne 0 ]
+  candidate_output_fixture normal
+  candidate_mutate "expected=json.loads((base/'expected.json').read_text()); expected['arguments'][3]='full'; (base/'expected.json').write_text(json.dumps(expected)); invocation['arguments'][3]='full'; evidence['arguments'][3]='full'"
+  candidate_output_check
+  [ "$status" -ne 0 ]
+  jq -e '.errors==["invalid fixed selection"]' <<<"$output"
 }
 
 @test "sync-server: candidate executable binds expected final and optional evidence identities" {
