@@ -31,7 +31,7 @@ final class SnapshotAppLifecycle {
         }
         let id = UUID()
         try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
                 // The cancellation callback may have reached this actor before
                 // registration. Check again in the same turn as the enqueue.
                 if Task.isCancelled {
