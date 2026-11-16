@@ -7,6 +7,7 @@ artifact_contract: ce-unified-plan/v1
 product_contract_source: ce-brainstorm
 execution: code
 deepened: 2026-11-15
+scope_revised: 2026-11-16
 ---
 
 # Meguri Sync Server - Plan
@@ -15,7 +16,7 @@ deepened: 2026-11-15
 
 - **Objective:** Antoine can keep his Anki collection, review history, and media synchronized between Desktop and AnkiMobile through a server he operates and whose first-party code he can license independently of Anki.
 - **Means:** Meguri Sync using the service, storage, and interface boundaries in KTD1–KTD4.
-- **Product authority:** This contract records the scope confirmed on 2026-11-15. Existing clean-room, privacy, and verification rules remain authoritative. The later Meguri application integration is a separate work area.
+- **Product authority:** This contract records the original scope confirmed on 2026-11-15 and the explicit delivery-scope correction on 2026-11-16. Existing clean-room, privacy, and verification rules remain authoritative. The later Meguri application integration is a separate work area.
 - **Open blockers:** No unresolved product decision blocks planning. Current-release reference verification, server/frontend similarity calibration, and the selected dependency audit remain technical prerequisites, per R5, R7, and R33.
 - **Execution profile:** Autonomous lfg delivery with no PR. Local branches and worktrees are permitted by Antoine’s 2026-11-15 override; final integration and any push target `master`. Preserve individual work commits through a normal merge without squashing, as Antoine requested. Code is produced through the filtered implementation runner, with separate role sessions, per-unit commits and reviews, and coherent-batch gates under `docs/process/tiers.md`.
 - **Stop conditions:** Do not weaken compatibility, publish false acceptance, access private collections, or bypass clean-room boundaries to finish. Preserve any unavailable final device evidence as incomplete. Resolve technical failures and review findings within the existing repair authorization.
@@ -28,6 +29,12 @@ deepened: 2026-11-15
 ### Summary
 
 Build a private, self-hosted sync server and its web administration interface in this repository. The first release serves Antoine’s current clients, supports isolated private accounts, and favors simple operation over hosted-service scale.
+
+### Delivery scope confirmed on 2026-11-16
+
+Antoine confirmed delivery of the sync server, account interface, and reusable local Docker build/run/test workflow for `master`. Backup/restore and production operations belong to later deployment work. Local administrator recovery, safe persistence, useful integrity/security tests, client compatibility, license evidence, and clean-room controls remain required.
+
+R17, F5, AE8, KTD13 and U9 are deferred, not implemented or accepted. U10 supplies a locally tested Dockerfile/image and short usage instructions; it does not publish or deploy a service. U11 verifies the supported clients and useful server boundaries. Existing failed evidence and mandatory gates remain binding.
 
 ### Problem Frame
 
@@ -46,6 +53,7 @@ Choosing Rust permits selective reuse of first-party public model APIs; it does 
 - **Current Desktop and AnkiMobile releases.** Focus on the clients Antoine uses. Governs R7, R9. (session-settled: user-directed — chosen over broad client and historical-version coverage: keep initial implementation reasonably simple.)
 - **Meguri application changes are later work.** The server remains useful independently of the app integration. Governs R8, R32. (session-settled: user-directed — chosen over changing routine Meguri sync now: this work delivers the server and web interface.)
 - **HTTP behind an external HTTPS proxy.** Avoid certificate operations inside this service. Governs R28. (session-settled: user-directed — chosen over built-in TLS: deployment supplies HTTPS through a reverse proxy or tunnel.)
+- **Local server delivery; deployment operations later.** Deliver the Dockerfile, locally tested image and reusable synchronization test workflow. Defer backup/restore and production operations until deployment is planned. Useful integrity/security tests, existing local administrator recovery and license/clean-room evidence remain required. Governs R17, R29, R31. (session-settled: user-directed — 2026-11-16: Antoine explicitly confirmed this reduced operational scope and Docker use from `master`.)
 
 <!-- ce-section: work-relationships -->
 
@@ -94,7 +102,7 @@ The initial operator, administrator, and member can all be Antoine.
 
 - R15. Run one Rust service process with a shared SQLite database for accounts and web sessions, plus one collection SQLite database and isolated media storage per account.
 - R16. Use durable local disk storage in the first release, with one synchronized collection per account.
-- R17. Provide a documented, tested backup-and-restore procedure covering account state, collections, and media without inconsistent references.
+- R17. **Deferred deployment follow-up:** coherent backup and restore of accounts, collections and media. This feature is outside current delivery and acceptance.
 - R18. Bound request, decompression, temporary-storage, and concurrency resource use while safely handling invalid media paths and disk-full failures.
 
 ```mermaid
@@ -132,9 +140,9 @@ Directional interface composition for R19–R24. The implementation uses shadcn 
 **Deployment and delivery scope**
 
 - R28. Serve HTTP behind an external HTTPS proxy or tunnel, with a configured public origin and explicit trusted-proxy handling for web authentication.
-- R29. Provide a container image and Linux executable with documented startup, persistent storage, upgrade, and recovery instructions.
+- R29. Provide a reproducible Dockerfile and locally tested image with persistent storage, compiled assets, license notices, and short setup/client/test instructions. The Docker workflow must be reusable from `master`. Separate Linux-binary distribution, publishing, deployment automation, upgrade operations and backup/restore tooling are deferred.
 - R30. Store passwords as suitable password hashes and keep authentication secrets and collection contents out of ordinary service logs.
-- R31. Record elapsed time and resource use for representative synthetic no-change, single-review, initial-transfer, and media-recovery workloads on a personal-scale deployment.
+- R31. Use existing local interoperability and server tests for a simple synthetic performance sanity check of no-change, single-review, initial-transfer and media-transfer behavior. Record available elapsed/resource evidence without adding a dedicated benchmark or production-capacity program.
 - R32. Deliver this work without changing the Meguri application or claiming its previously unfinished client work accepted.
 
 ### Key Flows
@@ -149,15 +157,13 @@ Directional interface composition for R19–R24. The implementation uses shadcn 
 
 - F3. Synchronize between clients
   - **Trigger:** a member points supported clients at the server and requests sync.
-  - **Steps:** The client authenticates and performs the required initial or incremental exchange. The other client receives collection and media changes on its next sync; full replacement uses the client’s existing confirmation flow. Covers R7–R18.
+  - **Steps:** The client authenticates and performs the required initial or incremental exchange. The other client receives collection and media changes on its next sync; full replacement uses the client’s existing confirmation flow. Covers R7–R16, R18.
 
 - F4. Recover account access
   - **Trigger:** a member forgets their password.
   - **Steps:** The administrator generates a reset link and gives it to the member. The member chooses a new password and signs clients in again. Lost administrator access follows local operator recovery. Covers R24–R27.
 
-- F5. Restore a deployment
-  - **Trigger:** the operator restores a backup onto an empty deployment.
-  - **Steps:** The operator follows the documented restore procedure and verifies authentication, collection state, and media availability before normal use. Covers R17, R29.
+- F5. **Deferred:** restore a deployment. The future backup/restore feature covers R17; this flow is not current acceptance.
 
 - F6. Manage a member’s own connection
   - **Trigger:** a signed-in member opens account settings.
@@ -186,12 +192,13 @@ Directional interface composition for R19–R24. The implementation uses shadcn 
 - AE7. Reset recovers access without retaining old credentials
   - **Covers R26, R27.** A completed reset allows the new password, invalidates old sessions and sync credentials, and preserves collection and media data. Used or expired reset links fail. Local administrator recovery provides the same data preservation.
 
-- AE8. A backup is usable on an empty deployment
-  - **Covers R15–R17, R29.** Following the restore instructions recovers accounts, collection content, and media references together. A supported client can authenticate and synchronize against the restored service.
+- AE8. **Deferred with R17/F5:** demonstrate a complete usable backup on an empty deployment. Do not report this acceptance example as implemented.
 
 ### Scope Boundaries
 
 **Deferred for later**
+
+- Backup/restore commands and their client-recovery matrix, deployment automation, production operations/hardening exercises, separate Linux-binary distribution and a dedicated capacity/benchmark program.
 
 - Meguri’s user-facing backend selector, backend migration, and routine app integration, per R32.
 - AnkiDroid, historical Anki release matrices, and beta-client support beyond R7.
@@ -255,16 +262,16 @@ The Rust decision supersedes the earlier Go mechanism in R2/R5 and adds R33; the
 - KTD1. **A separate `server/` Cargo workspace owns the production service.** Keep the Rust binary/library, server HTTP/SQL/reconciliation code, compiled assets, and web source in this subtree, with its own `Cargo.lock`. Use a narrow path dependency on audited `meguri-model` public schema-11/protobuf/record APIs under their existing MPL-2.0 terms; KTD6 owns reuse limits. No core/app behavior or license changes are part of this work. Test-only reference drivers stay quarantined and no Anki dependency enters the production graph. Implements R1–R4, R20, R32. (session-settled: user-directed — chosen over the earlier Go implementation under R2: reuse suitable first-party APIs without a duplicate language port.)
 - KTD2. **Select dependencies by required capability and audit the resolved graph.** Use the Rust toolchain pinned by `core/rust-toolchain.toml` and the existing Docker development image. Candidate capabilities are Tokio for bounded asynchronous serving, Axum over Hyper for HTTP routing/framing, rusqlite for SQLite, serde/serde_json for typed/exact JSON, zstd for raw protocol compression, zip for media archives, pinned unicase behavior for collection collation, and RustCrypto Argon2 for Argon2id password hashing. Existing core use of a crate is evidence to inspect, not blanket approval or a requirement to add it. Do not write an HTTP parser or cryptographic primitive. Disable unneeded features; select exact compatible versions after the R33 audit, retaining documented purpose, maintenance/advisory/license findings and resolved feature/transitive evidence. Use normal Cargo metadata/tree/lock tooling, existing cargo-deny and cargo-about scoped to the server graph, plus frontend manifest/lock checks; do not build a generic dependency/license/import framework. No smaller graph is claimed before measurement. Implements R2, R3, R18, R30, R33. Sources: the public crate and Cargo documentation in Sources / Research.
 - KTD3. **Compile a browser-only React SPA into the Rust executable.** Keep React/React DOM, Vite, TypeScript, Tailwind, and shadcn/ui with exact compatible pins checked under R33 at execution time. Adapt `login-01` and the minimal account/navigation parts of `sidebar-01`; remove sample OAuth, email recovery, public signup, charts, and external assets. Commit imported source, its MIT notices, source URLs/hashes, and the npm lockfile because a pinned CLI does not pin live registry content. Build with Node 26 LTS only in Docker. Implements R3, R19, R20, R33. Sources: [Vite installation](https://ui.shadcn.com/docs/installation/vite), [login blocks](https://ui.shadcn.com/blocks/login), [sidebar blocks](https://ui.shadcn.com/blocks/sidebar).
-- KTD4. **Keep server metadata out of transferable collections.** `accounts.sqlite` owns identities, credential generations, browser sessions, hostkeys, capabilities, and account-scoped media indexes/USNs. Each opaque account ID has its own schema-compatible collection SQLite and media blob directory. Account IDs, not usernames or remote filenames, select paths. Every writable connection uses the verified WAL/`synchronous=FULL` durability policy and bounded busy waiting; the accounts database also enforces its foreign-key constraints. A bounded connection manager coordinates these stores without claiming cross-database transactions. Implements R12, R15–R18, R25. Sources: `specs/storage/schema-18.md`, [SQLite server usage](https://www.sqlite.org/whentouse.html), [WAL durability](https://www.sqlite.org/wal.html#performance_considerations).
+- KTD4. **Keep server metadata out of transferable collections.** `accounts.sqlite` owns identities, credential generations, browser sessions, hostkeys, capabilities, and account-scoped media indexes/USNs. Each opaque account ID has its own schema-compatible collection SQLite and media blob directory. Account IDs, not usernames or remote filenames, select paths. Every writable connection uses the verified WAL/`synchronous=FULL` durability policy and bounded busy waiting; the accounts database also enforces its foreign-key constraints. A bounded connection manager coordinates these stores without claiming cross-database transactions. Implements R12, R15, R16, R18, R25. Sources: `specs/storage/schema-18.md`, [SQLite server usage](https://www.sqlite.org/whentouse.html), [WAL durability](https://www.sqlite.org/wal.html#performance_considerations).
 - KTD5. **Implement only observed current-client transport forms.** The initial contract is protocol v11, raw zstd, exact integer JSON, `anki-sync` authentication, and `anki-original-size` response framing. U2/U3 establish whether either target needs another form before it is added. Do not invent legacy multipart support or reject HTTP versions merely because the retained client uses HTTP/1.1. Keep browser APIs outside the protocol route families. Implements R7–R9, R14, R18. Sources: `specs/sync/transport.md`, `specs/sync/wire-format.md`.
 - KTD6. **Use file-compatible schema-18 collections with audited public model APIs.** Reuse `meguri-model::schema11`, public records, and protobuf codecs only after ownership/provenance and license review under R3. Independently implement the server SQL, HTTP, reconciliation, and durability adapters from neutral specs. Consider storage/text helpers only where existing public APIs fit the server contract and their audited dependency footprint justifies reuse; do not import the engine, scheduler, or sync client for convenience. Where an API is missing, author a small server adapter from neutral specs rather than copying MPL code into MIT files or changing core behavior. Preserve supported unknown JSON/protobuf fields and register pinned Unicode 12.1 `unicase` behavior on every collection connection; generic current-Unicode folding is insufficient. Do not regenerate unrelated full-transfer contents or introduce stock Anki assets. Add older schema migrations only if verified target-client traffic requires them. Implements R3, R4, R7–R10, R14, R33. Sources: `specs/model/protobuf-records.md`, `specs/model/schema11-json.md`, `specs/text/unicode-primitives.md`, `specs/text/checksum-and-sort-field.md`, and the public APIs cited above.
 - KTD7. **A per-account coordinator owns collection sessions.** Hold an uncommitted SQLite transaction on a dedicated connection across the normal round, with bounded idle expiry and no process-wide collection mutex. Bind it to account, collection generation, native session key, and credential generation. A new admitted round replaces an unfinished round according to the server contract; abort, errors, expiry, and restart discard uncommitted work. `finish` rechecks generation ownership and commits before acknowledgement. Full-transfer admission and retirement rules are sealed in U3, so an old connection cannot commit successfully into a displaced file. Lost acknowledgements recover through ordinary client reconciliation rather than a new protocol extension. KTD16 owns lock ordering. Implements R10–R14, R18. Sources: `specs/sync/normal-sync.md`, `specs/sync/server-lifecycle.md` planned in U2.
 - KTD8. **Publish full collection generations atomically.** Stream an upload into a private same-filesystem generation, validate its schema/integrity through a hardened connection, make it durable, then switch a small durable current-generation manifest under the account coordinator. Resolve any unfinished normal round and close old writable handles before activation; preserve the prior generation until durable publication and reader release. Downloads apply required server stamps and stream a pinned, self-contained committed snapshot independent of later replacement. Startup removes only unreferenced, owned staging generations after resolving the manifest. KTD16 owns lock ordering. Implements R9, R12–R14, R18. Sources: `specs/sync/one-way.md`, [SQLite security](https://www.sqlite.org/security.html).
-- KTD9. **Publish media through immutable blobs and transactional metadata.** Stage and validate the complete archive independently of remote paths; publish durable account-private blobs before committing filename, hash, tombstone, and USN metadata in `accounts.sqlite`. Acknowledged metadata never points at nondurable bytes. Normal collection transactions and media use separate coordination under KTD16. Retain tombstones in v1; collect unreferenced owned blobs only with exclusive startup/offline ownership. Restore recovery is governed by KTD13 and cannot be inferred from an ahead cursor, matching USNs, or matching file counts. This avoids a multi-file rename journal and cross-database atomicity claims. Implements R9–R13, R17, R18. Sources: `specs/sync/media-sync.md`, `specs/sync/wire-format.md`.
+- KTD9. **Publish media through immutable blobs and transactional metadata.** Stage and validate the complete archive independently of remote paths; publish durable account-private blobs before committing filename, hash, tombstone, and USN metadata in `accounts.sqlite`. Acknowledged metadata never points at nondurable bytes. Normal collection transactions and media use separate coordination under KTD16. Retain tombstones in v1; collect unreferenced owned blobs only with exclusive startup/offline ownership. Future restore recovery is deferred under KTD13; ordinary synchronization still cannot infer content equality from matching cursors or file counts. This avoids a multi-file rename journal and cross-database atomicity claims. Implements R9–R13, R18. Sources: `specs/sync/media-sync.md`, `specs/sync/wire-format.md`.
 - KTD10. **One identity has separate browser and native credentials.** The first administrator also owns a normal collection. Store Argon2id password hashes, hashed opaque session/hostkey secrets, and an account credential generation. Use bounded hash workers and bounded password/capability-attempt rate limiting, with generic authentication failures; ordinary authenticated sync chunks must not consume a password-attempt budget. Browser sign-out revokes that session; password change, reset, recovery, or account disable revokes all relevant credentials. Credential issuance rechecks the exact hash revision and generation verified before slow work, never attaching old-password proof to a new generation. Administrator capability creation and password replacement revalidate their original authority in their committing transaction. Serialize these operations with publication under KTD16. Preserve data and reject disabling the sole administrator. Implements R12, R21–R27, R30. Sources: [OWASP password storage](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html), [OWASP sessions](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html).
 - KTD11. **Initialization and capabilities have explicit durable states.** A local initialization command creates an owner-readable setup token file and a database singleton; normal serve refuses missing expected state instead of silently reinitializing. Browser setup uses that token under R21. Invitations last seven days, resets thirty minutes, and a newer reset replaces older ones. Validation/name conflicts leave a capability unclaimed. A successful provisioning claim durably reserves its capability, username, password hash, and opaque account ID; retries and startup resume only that same identity. Access and first-admin setup closure publish only at the ready transition, so filesystem failure neither exposes a partial account nor permits a second redemption. Put manually shared tokens in URL fragments, clear them promptly, and never consume them on GET. Implements R21, R22, R24, R26, R27, R30. Source: [OWASP reset guidance](https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html).
 - KTD12. **Trust the configured public origin, not request headers.** Production web sessions use Secure, HttpOnly, SameSite cookies even though the Rust service receives HTTP. Require an exact configured Origin on unsafe browser requests, including login/setup/reset; no permissive CORS. Trust forwarded client-IP/proto information only from configured proxy peers. Native sync routes authenticate hostkeys independently and never accept browser cookies as credentials. Test this through a private HTTPS proxy fixture. Implements R18, R25, R28, R30. Generic cross-origin middleware alone does not enforce this fail-closed policy. Source: [OWASP CSRF](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html).
-- KTD13. **Use stopped-service backup and explicit client recovery.** Initialization, serve/startup sweeping, backup, restore, and recovery share one stable exclusive data-root lock identity. Never replace that lock during restore. Before backup, recover/checkpoint and close every database under the lock, retaining any required journal state. Restore accepts only an empty target, verifies every file, invalidates bearer capabilities, and durably keeps serving closed until local administrator recovery and explicit review of restored account/password state. Preserve backed-up collection state; the client recovery procedure explicitly requests a full transfer instead of assuming a changed `scm` overrides equal `mod`. Every participating client must complete a verified full collection and media-reset/rescan procedure before it is considered recovered; the runbook cannot infer recovery from successful HTTP, cursor equality, or counts. U3 proves the Desktop procedure and U11 proves the Mobile procedure, including delayed reconnect and renewed credentials. An unverified procedure blocks the affected restore claim rather than introducing an assumed wire signal. Historical password hashes and enabled states are snapshot data: do not claim post-backup revocations survive rollback automatically. No transparent automatic restore guarantee, online backup scheduler, or external auth journal is added. Implements R17, R26–R30. Sources: [SQLite backup](https://www.sqlite.org/backup.html), [SQLite WAL](https://www.sqlite.org/wal.html).
+- KTD13. **Defer backup/restore and deployment operations.** This decision records the 2026-11-16 scope correction. No new backup format, restore CLI, historical-account review gate, post-restore cursor matrix or deployment automation is built in this delivery. Existing stable ownership locks, interruption safety, reset/revocation behavior and local administrator recovery remain required by their server contracts. Preserve the completed reference observations as research, without treating them as a delivered restore feature. Implements the deferral of R17/F5/AE8/U9. (session-settled: user-directed — backup/restore and production operations wait until deployment is planned.)
 - KTD14. **Extend existing MG enforcement before adding production paths.** Add `server/` to filtered-source and provenance/test-host scopes; retain nested `.agents`/`.config` credential exclusions, static public-host guards, browser retry enforcement, and actual sandbox probes. Calibrate the existing Rust lane and applicable JS/JSX/TS/TSX coverage under R5. Reuse Docker Rust tooling and add Docker-only Node 26 browser tooling/context allowlists as needed. Existing Rust MG jobs and dependency triggers are core-scoped: add explicit server manifest/lock support and real lanes when their owning units supply implementations. Source acquisition for shadcn or release inputs belongs in U8/U10 only as concretely needed. The cleanroom runner’s clean-master source condition remains; local worktrees can hold research/review work while code exports originate from clean master. Historical Go export/review evidence remains in its existing receipts, separate from active scope; no Go lexer, toolchain, lock, or cache work is required here. Implements R4–R6, R29, R32, R33. Sources: `tools/cleanroom/source_view.py`, `tools/similarity/AGENTS.md`, `tools/gate/tiers.yaml`, `tools/mg.d/core.sh`.
 - KTD15. **Use real reference clients, not only Rust self-tests.** A separate quarantined 26.09.4 reference runtime exercises supported Desktop backend operations through a neutral test protocol without changing the existing 26.09.3 oracle pin. A test-only Rust peer exercises retained Meguri APIs without editing application behavior. Actual AnkiMobile acceptance remains a distinct exact-build device round trip. Synthetic workload evidence reports behavior and resource use; it is not a hosted-scale program. Implements R6–R11, R31, R32. Sources: `docs/process/roles/oracle-maintainer.md`, `specs/conformance/sync-ops.md`.
 - KTD16. **Keep publication barriers short and acquire them before shared metadata writes.** Decode/stream/hash outside account barriers and shared write transactions. An account request/publication barrier precedes its short collection/media state lock and any shared metadata write; never wait for an account barrier or client/network round while holding the shared writer. A retained normal-round connection is state owned by the coordinator, not a mutex held across the network. Under the barrier, recheck authority and generation, then finish the relevant commit, manifest switch, or media publication before a revoker may acknowledge. Administrative metadata transactions revalidate the actor and target authority without acquiring another account barrier while holding the writer. Close the relevant unfinished round rather than waiting for an abandoned client. Implements R12, R13, R18, R24–R27; refines KTD7–KTD10. Source: [SQLite isolation](https://www.sqlite.org/isolation.html).
@@ -351,7 +358,7 @@ The following paths declare the service boundary; unit file lists own the detail
 server/
   AGENTS.md, LICENSE, THIRD_PARTY_NOTICES.md, README.md
   Cargo.toml, Cargo.lock, deny.toml
-  src/{main.rs,lib.rs,operations.rs}
+  src/{main.rs,lib.rs}
   src/{accounts,collection,httpapi,media,protocol,storage,webassets}/
   web/{src,public,e2e}/
   tests/{fixtures,meguri-peer,support}/
@@ -371,7 +378,7 @@ tools/scripts/meguri-sync/
 |---|---|---|
 | Existing neutral v11 contract | 26.09.3 facts and client semantics in U2 | Current-client verification, not inherited acceptance |
 | Current Desktop backend | U3 records 26.09.4 forms, stamps, lifecycle, and recovery procedure | Candidate-server round trips in U5–U11 |
-| Current AnkiMobile | Shared-protocol compatibility is an explicit working assumption | Exact-build real-device forms, round trips, and recovery in U11 |
+| Current AnkiMobile | Shared-protocol compatibility is an explicit working assumption | Exact-build real-device forms and ordinary sync round trips in U11 |
 | Retained Meguri peer | Existing neutral APIs and separate test-only adapter | Actual supported paths and explicit client-origin blockers in U11 |
 | Web/account API | Original policy specified in U2 | U4/U8 real API/browser evidence |
 
@@ -392,7 +399,7 @@ tools/scripts/meguri-sync/
 - A second Go port is considered and not built: it duplicates representation and tooling work after the Rust decision. A generic dependency/license/import checker is also not built: existing Cargo audit/notice tools plus the specific frontend manifest, lock, and source-notice checks satisfy R33.
 - Long-lived collection transactions, media metadata, and account revocation touch different stores. KTD7–KTD10 define their ownership and publication order; tests must cross those seams.
 - The app’s original milestones and frozen client acceptance remain separate. A new server receipt does not satisfy an old app unit automatically.
-- Restore rolls collection and identity state back to a snapshot. KTD13 makes the operator acknowledge that boundary before serving; preserving a separate permanent revocation journal is considered but not built for this personal-scale service.
+- Future backup/restore would roll back collection and identity state. Its full design and acceptance are deferred under KTD13; no current restore guarantee is made.
 - Online backup, a distributed lock service, per-user billing quotas, generalized role management, and automatic reference-version tracking are considered and not built. None is required for the chosen one-process private deployment; measured need or a changed product scope can reopen them later.
 
 ---
@@ -411,9 +418,9 @@ U-IDs are local to this plan. Review logs and commit provenance must also identi
 | U6 | Transactional incremental sync | `server/src/collection/`, `server/src/protocol/` | U5 |
 | U7 | Durable media sync | `server/src/media/`, `server/src/protocol/` | U3, U4, U5, U6 |
 | U8 | Minimal shadcn administration interface | `server/web/`, `server/src/webassets/` | U4 |
-| U9 | Offline recovery and coherent backup/restore | `server/src/operations.rs`, `server/src/storage/` | U5, U6, U7 |
-| U10 | Reproducible release packaging and notices | `docker/`, `server/licenses/`, `server/README.md` | U8, U9 |
-| U11 | Complete interoperability, resilience, and usability evidence | `server/tests/`, `server/web/e2e/`, `conformance/` | U3, U6, U7, U8, U9, U10 |
+| U9 | Deferred backup/restore follow-up | Not part of current delivery | Deferred |
+| U10 | Local Docker build/run/test workflow and notices | `docker/`, `server/compose.yaml`, `server/README.md` | U5, U6, U7, U8 |
+| U11 | Current-scope client, integrity, security and usability evidence | `server/tests/`, `server/web/`, `conformance/` | U3, U6, U7, U8, U10 |
 
 ```mermaid
 flowchart TB
@@ -427,10 +434,8 @@ flowchart TB
     U5 --> U7
     U6 --> U7
     U4 --> U8
-    U6 --> U9
-    U7 --> U9
     U8 --> U10
-    U9 --> U10
+    U7 --> U10
     U10 --> U11
 ```
 
@@ -463,13 +468,13 @@ flowchart TB
 
 **Goal:** Implementers receive neutral baseline server/web contracts and a complete current-release probe contract.
 
-**Requirements:** R4, R7–R18, R21–R30; F1–F6; AE1–AE8; KTD5–KTD13.
+**Requirements:** R4, R7–R16, R18, R21–R30; F1–F4, F6; AE1–AE7; KTD5–KTD12.
 
 **Dependencies:** None. U3 validates and seals current-release reference clauses before compatibility code depends on them.
 
 **Files:** `specs/sync/server-transport.md`, `specs/sync/server-collection.md`, `specs/sync/server-lifecycle.md`, `specs/sync/server-media.md`, `specs/servers/meguri-sync-web.md`, `specs/conformance/meguri-sync-server.md`, relevant `specs/*/interop-vocab.txt`, `conformance/schema/meguri-sync-server.schema.json`, and spec-side provenance under `oracle/provenance/`.
 
-**Approach:** Separate verified Anki behavior from original Meguri Sync policy. Specify initial account state, method admission/order, USN/stamp transitions, conflict/deletion semantics, schema/protobuf conversion boundaries, media envelopes/limits, abort/expiry, and acknowledgement outcomes. Define the narrow browser endpoints, identity rules, capability states, error outcomes, and KTD10–KTD13 publication boundaries without copying code or reference control flow.
+**Approach:** Separate verified Anki behavior from original Meguri Sync policy. Specify initial account state, method admission/order, USN/stamp transitions, conflict/deletion semantics, schema/protobuf conversion boundaries, media envelopes/limits, abort/expiry, and acknowledgement outcomes. Define the narrow browser endpoints, identity rules, capability states, error outcomes, and KTD10–KTD12 publication boundaries without copying code or reference control flow.
 
 **Execution note:** Use existing neutral facts first. Mark unknown reference behavior for U3 probes; no dependent compatibility implementation proceeds with those facts unresolved.
 
@@ -478,7 +483,7 @@ flowchart TB
 **Test scenarios:**
 
 - Classify every endpoint and state transition as a verified reference fact or original server policy, with a neutral observation for each reference-dependent rule.
-- Cover first-admin token delivery, administrator-as-member identity, invitation conflicts, reset/disable during each publication phase, and stopped restore admission.
+- Cover first-admin token delivery, administrator-as-member identity, invitation conflicts, reset/disable during each publication phase, and local administrator recovery.
 - Establish exact current-client transport and schema forms rather than assuming the old pin or requiring speculative legacy transport.
 
 **Verification:** An independent spec review finds no unclassified server behavior or missing current-client probe. Original account/web policy is complete; compatibility clauses carry their reference baseline until U3 verification. Spec and oracle work keep separate role commits.
@@ -516,7 +521,7 @@ flowchart TB
 
 **Files:** `server/AGENTS.md`, `server/LICENSE`, `server/Cargo.toml`, `server/Cargo.lock`, `server/deny.toml`, `server/src/{main,lib}.rs`, `server/src/accounts/`, `server/src/httpapi/`, `server/src/storage/`, `server/tests/{accounts,auth,provision}.rs`, `tools/mg.d/meguri-sync.sh`.
 
-**Approach:** Create the standalone Cargo workspace and process/configuration/storage boundary before exposing handlers. Resolve KTD2’s HTTP, SQL, and password-hashing dependencies under R33, locking and auditing the actual server graph with existing tools. Implement capability and credential transactions, internal native-credential issuance, browser authorization, setup closure, account provisioning, and revocation coordination. Keep blocking SQL/hash work off asynchronous request workers with explicit capacity bounds. Protocol hostkey framing waits for U5. Add only the local initialization/recovery primitives needed by the original flows; U9 completes operational commands.
+**Approach:** Create the standalone Cargo workspace and process/configuration/storage boundary before exposing handlers. Resolve KTD2’s HTTP, SQL, and password-hashing dependencies under R33, locking and auditing the actual server graph with existing tools. Implement capability and credential transactions, internal native-credential issuance, browser authorization, setup closure, account provisioning, and revocation coordination. Keep blocking SQL/hash work off asynchronous request workers with explicit capacity bounds. Protocol hostkey framing waits for U5. Add the local initialization and administrator-recovery commands needed by the current flows; U10 documents their use.
 
 **Execution note:** Prove the account publication and authorization boundaries before adding any collection mutation route.
 
@@ -591,7 +596,7 @@ flowchart TB
 
 **Goal:** Media additions, replacements, and deletions converge through compatible batches without losing acknowledged bytes or cursor progress.
 
-**Requirements:** R9–R13, R15–R18, R25; F3; AE3–AE6; KTD4, KTD9, KTD10.
+**Requirements:** R9–R13, R15, R16, R18, R25; F3; AE3–AE6; KTD4, KTD9, KTD10.
 
 **Dependencies:** U3, U4, U5, U6. The cross-operation publication proof uses the completed normal-round implementation.
 
@@ -637,82 +642,57 @@ flowchart TB
 
 **Verification:** Type checks, focused frontend/API tests, and zero-retry headless browser/accessibility tests pass through MG. Retain screenshots of the exact compiled interface for independent review.
 
-### U9. Add local recovery and coherent backup/restore
+### U9. Deferred: backup and restore
 
-**Goal:** The operator can recover access and restore a complete deployment without accidental overwrite, stale authority, or undetected cursor divergence.
+Antoine explicitly deferred this feature on 2026-11-16. Do not implement it as part of this delivery. Preserve existing neutral reference observations and failed evidence as research, without crediting a restore acceptance result. Existing local administrator recovery remains in scope under R27/F4/AE7 and its implemented account-service checks.
 
-**Requirements:** R12–R18, R26–R30; F4, F5; AE6–AE8; KTD8–KTD10, KTD13.
+### U10. Supply the local Docker workflow and complete license evidence
 
-**Dependencies:** U5, U6, U7.
+**Goal:** `master` can build, run and use the actual service for local synchronization tests with persistent data.
 
-**Files:** `server/src/operations.rs`, `server/src/storage/{lock,backup,restore}.rs`, `server/tests/{backup,restore,account_recovery}.rs`, `server/tests/support/`, operator runbook sections in `server/README.md`.
+**Requirements:** R1–R5, R19, R20, R28–R30, R33; F1; KTD1–KTD3, KTD14 and the local-delivery scope decision.
 
-**Approach:** Implement KTD13 using exclusive offline ownership and password input outside command arguments. Restore into a fresh root, validate the complete generation, rotate capabilities, and require explicit local review/recovery before serving. Coordinate restored collection stamps and KTD9 media-cursor recovery through the ordinary client protocol.
+**Dependencies:** U5, U6, U7, U8. U9 is deferred and is not a prerequisite.
 
-**Patterns to follow:** Existing MG ownership/retained-artifact conventions and the original operational contract from U2; no private collection helpers or production server state are used.
+**Files:** a pinned service Dockerfile and context allowlist, `server/compose.yaml`, `server/LICENSE`, notices/covered-source material, `server/README.md`, and only the concrete MG packaging/local-service jobs and focused tests needed to build and verify them.
 
-**Test scenarios:**
+**Approach:** Build assets and the Rust executable in pinned Docker stages. Run the actual compiled service in a small unprivileged image with persistent storage. Provide a repeatable local build/run/test workflow for `master`; keep test credentials and fixtures synthetic. Reuse the existing Cargo/frontend license and dependency checks. Preserve exact shipped graphs/features, imported-component provenance and applicable MPL source availability. Retain the existing local access-recovery command rather than building another administration framework.
 
-- Covers AE7. Local administrator recovery preserves collection/media, closes setup, and invalidates previous credentials.
-- Covers AE8. A stopped backup restores onto an empty root and supports fresh authentication and independently verified collection/media reads.
-- Refuse concurrent serve/recovery/backup writers, nonempty restore destinations, incomplete archives, tampered manifests, unsafe archive entries, and disk-full publication.
-- A backup predating a password reset or account disable cannot silently reopen service with restored authority; the required local review gate remains closed.
-- An existing client completes explicit full collection reconciliation and verified media reset/rescan, including equal modification stamps, ahead/equal/reused/overtaken media cursors, delayed reconnect after server USNs catch up, equal counts with different hashes, and renewed credentials.
-- Cancellation or process death at each restore phase leaves either the untouched destination or a clearly incomplete, non-serving restoration.
-- Initialization, serve, recovery, backup, and restore contend on the same stable lock; restoring cannot replace its identity or open service before durable review clearance.
-- A backup taken immediately after a killed writer recovers committed WAL contents; deterministic write/flush/commit failures distinguish rollback from committed-but-unacknowledged publication.
-
-**Verification:** CLI integration, race/fault, and current-client post-restore tests pass with synthetic data; the documented procedure is rehearsed from a clean directory.
-
-### U10. Package the release with complete license evidence
-
-**Goal:** A self-hoster can build and run the production service from reproducible inputs without development runtimes or reference dependencies.
-
-**Requirements:** R1–R5, R19, R20, R28–R30, R33; F1, F5; KTD1–KTD3, KTD13, KTD14.
-
-**Dependencies:** U8, U9.
-
-**Files:** `docker/meguri-sync-release.Dockerfile` and allowlist, `server/compose.yaml`, `server/LICENSE`, `server/THIRD_PARTY_NOTICES.md`, `server/licenses/`, `server/deny.toml`, server-scoped cargo-about configuration/template as needed, `server/README.md`, `tools/tests/meguri_sync.bats`, packaging/dependency MG jobs and tier triggers.
-
-**Approach:** Build web assets and the Rust executable in separate pinned Docker stages, then ship an unprivileged final image and Linux binary with notices. Use existing cargo-deny/cargo-about and standard Cargo metadata/lock tooling against the server manifest, plus specific frontend manifest/lock/source-notice checks. Record the exact production Rust/npm graphs, enabled features, R33 assessments, imported component provenance, and retained MPL-2.0 terms/source availability for reused crates under R3. Include required source/license material without shipping test-only reference harnesses or peers, private trees, source credentials, Node, or Python. Add only concrete release-source acquisition support that this packaging needs.
-
-**Patterns to follow:** `docker/AGENTS.md` context allowlists, MG manifests, and existing Cargo dependency/license tooling scoped explicitly to `server/Cargo.toml` and its lockfile; frontend checks follow KTD3.
+**Patterns to follow:** Docker context allowlists, existing MG result/ownership contracts and server-scoped dependency/notice tooling.
 
 **Test scenarios:**
 
-- A fresh container with only its documented configuration and persistent volume completes initialization and real browser/native smoke flows.
-- The Linux artifact and container run with Node/Python absent and no writable source checkout or reference runtime.
-- Unknown/unapproved shipped dependency licenses, missing MPL/source or other required notices, altered lock integrity, undocumented dependency purpose, or a forbidden Docker context path fail the packaging check.
-- Restart/upgrade against the supported metadata schema preserves accounts and collections; an unsupported future metadata schema refuses writes.
-- The runbook covers external HTTPS configuration, safe link sharing, Desktop-led transfer from an existing private server, client connection settings, backup, restore, and access recovery.
+- Build the documented Dockerfile and start its exact image using only documented configuration and a fresh persistent volume.
+- Complete first setup, browser/account and actual native-sync smoke flows; restart with the same volume and verify account/collection/media persistence.
+- Verify the final runtime contains compiled assets and required notices, with no Node, Python, test hooks, reference peer/runtime, private trees or source credentials.
+- Keep existing schema-version refusal, ownership, authentication and corruption protections. Fail missing notices, unapproved licenses, changed lock integrity and forbidden build-context inputs.
+- Rehearse the short local instructions for build, initialize/start/stop, public-origin/proxy configuration, client connection, synthetic sync testing and existing administrator recovery.
 
-**Verification:** Production package smoke and dependency/notices checks pass against the exact release artifacts. No deployment or real account creation is claimed.
+**Verification:** The documented local Docker workflow and exact-image smoke, integrity and dependency/notice checks pass. No service publication, external deployment, separate binary distribution, backup/restore subsystem or production operations exercise is required.
 
-### U11. Close interoperability, resilience, and usability evidence
+### U11. Close current-scope interoperability, integrity and usability evidence
 
-**Goal:** The completed service is verified across the agreed client, browser, and recovery flows, with incomplete external evidence kept explicit.
+**Goal:** Verify the locally runnable server with the agreed clients and useful failure/security tests, keeping missing external evidence explicit.
 
-**Requirements:** R4–R33; F1–F6; AE1–AE8; KTD14, KTD15.
+**Requirements:** R4–R16, R18–R33; F1–F4, F6; AE1–AE7; KTD14, KTD15 and the local-delivery scope decision.
 
-**Dependencies:** U3, U6, U7, U8, U9, U10.
+**Dependencies:** U3, U6, U7, U8, U10. U9 is deferred.
 
-**Files:** `server/tests/meguri-peer/Cargo.toml`, `server/tests/meguri-peer/src/`, `server/tests/meguri-peer/tests/`, `server/tests/support/`, `server/web/e2e/`, neutral conformance scenarios/recordings, fault/resource MG jobs and tier triggers, `docs/process/review-log/meguri-sync-acceptance.md`, final runbook corrections.
+**Files:** test-only retained-Meguri peer, existing server/browser test seams, neutral conformance inputs where needed, local MG interoperability/test integration, acceptance review log and short README corrections.
 
-**Approach:** Exercise the exact packaged Rust service through the quarantined current Desktop backend and a test-only retained-Meguri peer. Complete cross-layer failure and browser coverage and collect the personal-scale workload report. Run final current-Mobile validation separately on a supported device without modifying the Meguri app or using private collection fixtures.
+**Approach:** Exercise the exact image through the current Desktop backend, actual retained-Meguri HTTP client and real current AnkiMobile. Reuse the existing interruption, account-boundary, resource-limit and browser tests; add only tests that close a real integrity/security or interoperability gap. Use ordinary result logs for the small R31 sanity check. Do not create deployment, disaster-recovery, soak/capacity or benchmarking infrastructure.
 
-**Execution note:** Do not replace an unavailable peer or device result with a Rust-only self-test. Preserve failed receipts, diagnose the owning boundary, and fix eligible server defects through clean-room repair/review rounds.
-
-**Patterns to follow:** The neutral protocol from U3, MG queued-evidence rules, and the original retained-client APIs without application changes.
+**Execution note:** Never replace a missing real peer/device result with a Rust-only self-test. Preserve failed evidence and fix eligible server defects through clean-room review. Existing mandatory gate assertions remain intact.
 
 **Test scenarios:**
 
-- Covers AE4. Current Desktop A → server → Desktop B and current AnkiMobile preserve supported collection/media/review state across initial, incremental, and replacement flows.
-- The retained Meguri peer tests real auth/full/normal/media paths that its existing API supports; a client-origin defect stays an explicit affected-claim blocker.
-- Covers AE5/AE6. Capture no-change, one-review, initial-transfer, and media-recovery resource evidence while verifying content and bounded failure behavior.
-- Covers AE1–AE3/AE7/AE8. Run browser invitation/reset/disable operations during native sync publication and repeat a complete backup/restore rehearsal.
-- Complete independent code and built-interface review, remove abandoned attempts, and verify all eligible fixes against the same production artifact.
+- Current Desktop A → server → Desktop B and current AnkiMobile preserve supported collection/media/review state through initial, incremental and replacement sync.
+- The test-only retained-Meguri peer exercises its actual supported auth/full/normal/media APIs. Client-origin defects remain explicit affected-claim blockers; no app behavior change is included.
+- No-change and one-review sync remain incremental. Capture available elapsed/resource evidence for the local synthetic transfer cases.
+- Account isolation, reset/disable during publication, rejected/interrupted transfers, invalid paths, bounded decoding and disk-full handling preserve committed state. Reuse existing proofs where coverage already exists.
+- Review the exact built interface and image, resolve eligible findings, and prove that `master` has a repeatable local sync-test workflow.
 
-**Verification:** Required automated lanes and coherent-batch gates pass, all actionable eligible findings are corrected, and final device/reference evidence is either actually present or explicitly still awaiting its required step. An incomplete acceptance item cannot be reported as a fully accepted server.
+**Verification:** Required current-scope automated lanes and coherent-batch gates pass. Exact-build Mobile and retained-client claims have actual evidence. A missing external acceptance item remains incomplete. Deferred restore families stay explicitly deferred in selection/evidence; they never become synthetic passes, and unrelated assertions are not waived.
 
 ---
 
@@ -729,15 +709,15 @@ All server/frontend build, test, lint, browser, reference, and packaging work ru
 | Actual compiled web interface | `tools/mg sync-server-web` | Type/focused tests plus real Rust-served Playwright/a11y flows, zero retries, retained screenshots |
 | Reference harness | `tools/mg sync-server-reference` | Current pinned SDK runtime, neutral harness self-tests, and baseline observations |
 | Interoperability | `tools/mg sync-server-interop` | Selected full/normal/media lanes and retained peer, with nonzero exact-client counts |
-| Failure and recovery | `tools/mg sync-server-faults` | Deterministic interruption, revocation, disk-full, publication, restart, and restore cases |
-| Release artifacts | `tools/mg sync-server-package` | Exact executable/container startup, asset completeness, notices, and runtime exclusions |
-| Personal workload | `tools/mg sync-server-bench` | R31 elapsed-time, transfer, and resource report with hardware/input identity |
+| Integrity and security | Existing `tools/mg sync-server-test` and interoperability/browser lanes | Useful interruption, revocation, disk-full, publication, isolation and restart checks; backup/restore is deferred |
+| Local Docker artifact | Concrete MG package/local-service job from U10 | Exact-image startup, persistent storage, local sync testing, compiled assets, notices and runtime exclusions |
+| Local performance sanity | Existing interoperability/test result logs | Small synthetic R31 checks with available elapsed/resource and input identity; no dedicated benchmark subsystem |
 | Similarity | `tools/mg similarity-selftest`, `tools/mg similarity --base <batch-base>` | Calibrated Rust and applicable JS/JSX/TS/TSX coverage under R5, with corpus/report quarantine retained |
 | Coherent integration batch | `tools/mg gate --base <original-batch-base>` | Required existing and new lanes selected by triggers; no failed receipt is relabeled passed |
 
 Normal dependency lock updates and concrete U8/U10 source acquisition run before gates; verification must leave tracked source unchanged. Gate and packaging manifests identify source/lock hashes and exact arguments. A stage with no tests, a stale result, or a skipped required path cannot satisfy another lane.
 
-Use three coherent integration boundaries: U1–U4, U5–U8, and U9–U11. Record each original batch base and every unit’s start before mutation. Within a batch, keep focused checks, independent source review, provenance/privacy/similarity evidence, separate role-appropriate commits, and logs at `docs/process/review-log/meguri-sync-U<N>.md`. The final boundary is this server’s delivery gate; it does not claim closure of the original application milestones.
+Use three coherent integration boundaries: U1–U4, U5–U8, and U10–U11. U9 is explicitly deferred, not silently marked complete. Record each original batch base and every unit’s start before mutation. Within a batch, keep focused checks, independent source review, provenance/privacy/similarity evidence, separate role-appropriate commits, and logs at `docs/process/review-log/meguri-sync-U<N>.md`. The final boundary is this server’s delivery gate; it does not claim closure of the original application milestones.
 
 The reference lane never contacts a public sync service and never reads private collections. Its 26.09.4 runtime is separate from the original 26.09.3 oracle. Neutral current-client vectors may be consumed in isolated implementation sessions; quarantined source, driver code, and raw reference reports may not.
 
@@ -747,7 +727,7 @@ AnkiMobile acceptance uses the exact target build and synthetic data. If device 
 
 - Interrupted normal/full/media work preserves committed content, and lost acknowledgements recover without duplicate reviews or media loss.
 - Reset/disable during each staging/publication phase prevents old-generation publication after revocation acknowledges.
-- A stopped backup restores auth, collection, and media together; KTD13’s explicit operator/client recovery covers delayed reconnect, equal modification stamps, and reused or overtaken media cursor values.
+- Restart of the same local persistent volume preserves accounts, collection and media; an image usable for `master` integration tests is verified. Backup/restore and its rollback/client-recovery matrix remain deferred.
 - A private HTTPS proxy preserves configured-origin checks and Secure cookies over backend HTTP, including spoofed forwarded headers and missing/null Origin.
 - New accounts, a Desktop-led migration from an existing server, and a fresh receiving client use explicit existing-client transfer decisions; empty-card metadata is not proof of absent data.
 
@@ -755,11 +735,11 @@ AnkiMobile acceptance uses the exact target build and synthetic data. If device 
 
 ## Definition of Done
 
-- The Product Contract’s implemented behavior is traced to unit and cross-layer evidence, including F1–F6 and AE1–AE8.
-- U1–U11 have role-appropriate implementation, focused verification, independent review/fix evidence, provenance/privacy/similarity checks, and their required coherent-batch gates.
-- The exact production binary/container has the requested usable shadcn interface, complete dependency notices, and no reference/runtime contamination.
+- The Product Contract’s implemented behavior is traced to unit and cross-layer evidence, including F1–F4, F6 and AE1–AE7.
+- U1–U8 and U10–U11 have role-appropriate implementation, focused verification, independent review/fix evidence, provenance/privacy/similarity checks and required coherent-batch gates. U9/R17/F5/AE8 are explicitly deferred.
+- The exact locally built Docker image has the usable shadcn interface, persistent data, complete dependency notices and no reference/runtime contamination. Its workflow supports synchronization tests from `master`.
 - Supported Desktop and retained-Meguri compatibility claims are backed by actual results, and current AnkiMobile acceptance has real exact-build evidence before full acceptance is claimed.
-- Operator/client instructions are rehearsed with synthetic data, including first setup, migration, offline recovery, complete backup/restore, and stale client cursors.
+- Short local build/run/test and client instructions are rehearsed with synthetic data, including first setup, initial transfer, ordinary synchronization, restart persistence and existing administrator recovery.
 - All eligible correctness, safety, privacy, accessibility, and interoperability review findings are fixed; any residual decision or external limitation is recorded durably with its practical consequence.
 - Abandoned implementation attempts, temporary production fallbacks, demo/social-login links, and unused dependencies are removed. Retained failed evidence is preserved.
 - Changes are committed and integrated locally according to the authorized workflow. No PR is created, no force push occurs, and no real deployment or private collection transfer is implied by completion.

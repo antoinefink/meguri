@@ -893,7 +893,7 @@ PUBLIC_ARTIFACTS = {
         '2cfc1f7c8eb2399bf6bc2e8d77274682dd00563b2c467d15d17eb29956feee03',
     # Independently classified original public session metadata, exact bytes.
     'docs/process/provenance/sessions.jsonl':
-        '7b85da246f8ee1138d5470cf69a0e168894a52a67b84c7fb6feb30aaa35f7f65',
+        '958ce88c9aa2bb9b8716529ecd0f2d29b5972b849fe81eb0dee923ad055210a4',
     'conformance/fixtures/meguri-sync-server/observations/desktop-26.09.4-normal-matrix.json':
         '8a4e17346939516eda8b5b650203444693fb32e2173f4d6741242b4089da04eb',
     'specs/sync/server-desktop-current.md':
@@ -928,7 +928,7 @@ PUBLIC_ARTIFACTS = {
     # Delegated maintenance authority 2026-11-15: agent-applied grants for
     # independently reviewed technical contracts, exact paths and full bytes.
     "docs/plans/2026-11-15-1028-feat-meguri-sync-server-plan.md":
-        "358fca2e69541e15d464cb5810d9f7ed7bc8597220efec080d9579abb945fbbc",
+        "80af6e19d1dad2fc8d100d502f53bece53be1ab52d5e49fe4a9f16131f51d067",
     "specs/sync/server-collection.md":
         "36f7c4adee4eb035c0342e715f0d052a77bd57137d33222e5ee7e84a8f0b9bfa",
     "specs/sync/server-lifecycle.md":
