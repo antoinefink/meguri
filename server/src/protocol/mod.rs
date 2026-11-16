@@ -3,6 +3,7 @@ pub mod framing;
 pub mod login;
 pub mod meta;
 pub(crate) mod full;
+pub(crate) mod normal;
 use crate::{Error, Result, Service, collection::schema};
 use axum::{body::Body, extract::{ConnectInfo, Request}, http::{Method, StatusCode}, response::{IntoResponse,Response}};
 use serde::Deserialize;
@@ -12,6 +13,8 @@ fn error(e:Error)->Response {
     let status=match e.code {
         "authentication_failed" | "stale_authority" => StatusCode::FORBIDDEN,
         "invalid_collection" | "invalid_request" | "validation_failed" => StatusCode::BAD_REQUEST,
+        "unsupported_normal_case" => StatusCode::BAD_REQUEST,
+        "invalid_session" => StatusCode::CONFLICT,
         _ => e.status(),
     };
     let mut response=(status,e.code).into_response();
@@ -26,11 +29,10 @@ fn header(parts:&axum::http::request::Parts)->Result<login::Header> {
     if header.v!=11 { return Err(Error::new("invalid_request")); }
     Ok(header)
 }
-const METHODS:&[&str]=&["hostKey","meta","upload","download"];
+const METHODS:&[&str]=&["hostKey","meta","upload","download","start","applyGraves","applyChanges","chunk","applyChunk","sanityCheck2","finish","abort"];
 pub(crate) async fn handle(service:Arc<Service>,request:Request)->Response {
     let (parts,body)=request.into_parts();
-    // These names have no alternate route or SPA behavior. Reconciliation and
-    // media remain unimplemented; do not pretend a successful empty sync.
+    // Native names have no alternate route or SPA behavior.
     let Some(method)=parts.uri.path().strip_prefix("/sync/").filter(|s|METHODS.contains(s)) else {
         return framing::retain(error(Error::new("route_not_found")),body,None,service);
     };
@@ -66,6 +68,9 @@ async fn dispatch(service:Arc<Service>,parts:&axum::http::request::Parts,method:
         return framing::response(&serde_json::to_vec(&serde_json::json!({"key":key})).map_err(|_|Error::new("internal_error"))?);
     }
     let authority=service.validate_hostkey(&header.k).await?;
+    if !matches!(method,"upload"|"download"|"meta") {
+        return normal::handle(service,authority,header.s,method.to_owned(),body).await;
+    }
     let capacity=service.collections.acquire()?;
     match method {
         "upload" => {

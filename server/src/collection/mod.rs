@@ -4,3 +4,8 @@ pub mod notes;
 pub mod objects;
 pub mod schema;
 pub mod unicase;
+pub(crate) mod session;
+pub(crate) mod graves;
+pub(crate) mod changes;
+pub(crate) mod chunks;
+pub(crate) mod sanity;

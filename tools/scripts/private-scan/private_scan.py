@@ -828,6 +828,12 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'server/tests/session.rs':
+        '9bcc7edb13789a4abfd059bb19e03ec04544abbe441b0e2129f5f45e111d5e5d',
+    'server/src/collection/graves.rs':
+        '891dda6db91028e90badfc7ee5591ff1f04c060e06de3585981b16e4d6dd57ba',
+    'server/src/collection/changes.rs':
+        '83f506e218e17d7c878c5381110c76277d3c64e767eb8a3da299d50c81a92b33',
     'tools/gate/tiers.yaml':
         '8f0b90aa3b74210d8d724612e92b32e13144cb9b001c451a05ed86f8cc10471b',
     'tools/mg.d/sync-web.sh':
@@ -936,7 +942,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/main.rs':
         '46699d99127a80945a264e9a461c17cdfcaf1f28cacf56ebf80ed9cd8d9882bf',
     'server/src/accounts/mod.rs':
-        '2b2d090fbc10c3170562c4e4cb95e92d9678f514933e7164e84ecdcfda37dcd3',
+        'b3d43c40a3349d34e37a74ff6b9b3ee765e1739f2f6c00ced4d4f43d2d033428',
     'server/src/accounts/provision.rs':
         'be0cd6852e5f711fa34064f34d278817cc1cb18cf166d3c2a81d2fd09ed05589',
     'server/src/httpapi/AGENTS.md':
@@ -976,7 +982,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/protocol/full.rs':
         '1e00dd45e0975e6fcd94c9a05b217b236a202c64573f2585a8a8096f751bd640',
     'server/src/protocol/mod.rs':
-        'b88f585777498fe735db6be1810128fa6d93e1fb4901036790cf1211000e4981',
+        '2cda93705c74963a1a305b45d0fc2cdcb7581e484051e80c6b21b461c4e57d71',
     'server/src/storage/root.rs':
         'dd59a110b203632166f301573d6435be1c40fd0c68a40abdbfa6448e6ae65037',
     'server/tools/candidate-output.py':

@@ -72,12 +72,16 @@ pub struct Service {
     pub collections: CollectionCapacity,
     pub(crate) browser_ingress: Arc<crate::httpapi::ingress::Ingress>,
     pub(crate) native_ingress: Arc<crate::protocol::framing::Ingress>,
+    pub(crate) normal_sessions: Arc<crate::collection::session::Sessions>,
     pub(crate) metadata: Metadata,
     pub(crate) hashes: HashPool,
     pub(crate) attempts: Attempts,
     pub(crate) barriers: barrier::Barriers,
     #[cfg(feature = "test-hooks")]
     pub hooks: crate::test_hooks::Hooks,
+}
+impl Drop for Service {
+    fn drop(&mut self) { self.normal_sessions.close(); }
 }
 impl Service {
     /// Ownership remains held by metadata and every outstanding blocking job.
@@ -92,6 +96,7 @@ impl Service {
             collections: CollectionCapacity::default(),
             browser_ingress: Arc::new(crate::httpapi::ingress::Ingress::default()),
             native_ingress: Arc::new(crate::protocol::framing::Ingress::default()),
+            normal_sessions: crate::collection::session::Sessions::new(),
             metadata,
             hashes: HashPool::default(),
             attempts: Attempts::default(),

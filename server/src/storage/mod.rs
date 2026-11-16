@@ -24,6 +24,7 @@ pub struct Metadata {
     capacity: Arc<Semaphore>,
 }
 impl Metadata {
+    pub(crate) fn owner(&self) -> Arc<DataRoot> { self.root.clone() }
     pub fn new(root: Arc<DataRoot>) -> Self {
         Self {
             root,

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 //! SQL-to-public-model seam. No scheduler defaults or stock content enter it.
+pub(crate) mod preservation;
+
 use crate::{Result, collection::{model_adapter::blob, schema::invalid}};
 use meguri_model::{
     deck::Deck, deck_config::DeckConfig,
