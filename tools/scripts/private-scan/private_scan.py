@@ -829,7 +829,7 @@ PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
     'server/Dockerfile':
-        'c5d46b5339c6a793d9e6c97360ffcc9dfe3398d0a013d80451076238e599f5e6',
+        '324a94c05aafbbf38065174f70578eb044337ea6d0ded209977196b685a1ccd8',
     'server/README.md':
         'f66656dd11a23cca25a8ed744d4325392392f355990ca26071cd11da87f7e6be',
     'server/compose.yaml':
@@ -907,7 +907,7 @@ PUBLIC_ARTIFACTS = {
         '2cfc1f7c8eb2399bf6bc2e8d77274682dd00563b2c467d15d17eb29956feee03',
     # Independently classified original public session metadata, exact bytes.
     'docs/process/provenance/sessions.jsonl':
-        '969bd1bf8012dbdbf48b94661804845f61ee0dbcd7ae20cec86fc32f9310a4f6',
+        'c4457f168016f948a00f3d35a044e7af4793dca6b3185ca6dafe43f796c393f8',
     'conformance/fixtures/meguri-sync-server/observations/desktop-26.09.4-normal-matrix.json':
         '8a4e17346939516eda8b5b650203444693fb32e2173f4d6741242b4089da04eb',
     'specs/sync/server-desktop-current.md':
