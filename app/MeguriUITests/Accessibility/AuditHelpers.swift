@@ -288,6 +288,10 @@ enum AccessibilityAudit {
     enum Appearance {
         @MainActor
         static func shown(by app: XCUIApplication) throws -> (dark: Bool, luminance: Double) {
+            #if os(macOS)
+            // Initialize the runner's AppKit application before native window capture.
+            _ = NSApplication.shared
+            #endif
             let luminance = try medianLuminance(app.windows.firstMatch.screenshot().image)
             return (luminance < 0.5, luminance)
         }
