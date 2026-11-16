@@ -1,0 +1,87 @@
+{
+  "repository": "https://github.com/shadcn-ui/ui",
+  "commit": "e62c9435fff729a175f38983dee73b2cb4f6a069",
+  "license": "MIT",
+  "inputs": [
+    {
+      "url": "https://raw.githubusercontent.com/shadcn-ui/ui/e62c9435fff729a175f38983dee73b2cb4f6a069/LICENSE.md",
+      "sha256": "1564074e13439397221ffd522e2e504d56561994a23d371aa5e3ad43e4f5423f",
+      "path": "LICENSE.md",
+      "adapted_into": "THIRD_PARTY_NOTICES.txt",
+      "adaptation": "Notice retained verbatim.",
+      "adapted_sha256": "2b51afdda8f3ad8177e5ebc39f8c789e8711836ea31fade22dcd81458104fb33"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/shadcn-ui/ui/e62c9435fff729a175f38983dee73b2cb4f6a069/apps/v4/registry/new-york-v4/blocks/login-01/page.tsx",
+      "sha256": "9abc004ff5446fc599b684eff842a6c8eb13d65030779d90162567f6903e3c6e",
+      "path": "apps/v4/registry/new-york-v4/blocks/login-01/page.tsx",
+      "adapted_into": "src/forms.tsx",
+      "adaptation": "Centered card, header/content and FieldGroup composition retained; username/password and capability forms replace email, social login and signup.",
+      "adapted_sha256": "b5b7f29af3d0d92e4778de9342cad20686bfdd1e9ee0a5d0b8965a7938557af0"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/shadcn-ui/ui/e62c9435fff729a175f38983dee73b2cb4f6a069/apps/v4/registry/new-york-v4/blocks/login-01/components/login-form.tsx",
+      "sha256": "a62a24aef1e3be9cb204c7b3bd563cc2f8cdd5d7c4ff07693af2128a4773a91a",
+      "path": "apps/v4/registry/new-york-v4/blocks/login-01/components/login-form.tsx",
+      "adapted_into": "src/forms.tsx",
+      "adaptation": "Centered card, header/content and FieldGroup composition retained; username/password and capability forms replace email, social login and signup.",
+      "adapted_sha256": "b5b7f29af3d0d92e4778de9342cad20686bfdd1e9ee0a5d0b8965a7938557af0"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/shadcn-ui/ui/e62c9435fff729a175f38983dee73b2cb4f6a069/apps/v4/registry/new-york-v4/blocks/sidebar-01/page.tsx",
+      "sha256": "3587d625ceb2fadf4ca2cddf262b426b40d4dc142a880ce79c747eb2f04400fa",
+      "path": "apps/v4/registry/new-york-v4/blocks/sidebar-01/page.tsx",
+      "adapted_into": "src/app.tsx",
+      "adaptation": "Sidebar header/content/group/menu and inset composition retained; actual account links replace sample navigation and panels.",
+      "adapted_sha256": "4e3224e691b9887c4e5aa8dee485118fb5308e20b15d15ccb0d885cb0915e8fd"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/shadcn-ui/ui/e62c9435fff729a175f38983dee73b2cb4f6a069/apps/v4/registry/new-york-v4/blocks/sidebar-01/components/app-sidebar.tsx",
+      "sha256": "0a12fbafd0752d3ee24d5dead49255e41243c5412cbaae9cda3bc4ca7fbe430a",
+      "path": "apps/v4/registry/new-york-v4/blocks/sidebar-01/components/app-sidebar.tsx",
+      "adapted_into": "src/app.tsx",
+      "adaptation": "Sidebar header/content/group/menu and inset composition retained; actual account links replace sample navigation and panels.",
+      "adapted_sha256": "4e3224e691b9887c4e5aa8dee485118fb5308e20b15d15ccb0d885cb0915e8fd"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/shadcn-ui/ui/e62c9435fff729a175f38983dee73b2cb4f6a069/apps/v4/registry/new-york-v4/ui/sidebar.tsx",
+      "sha256": "2ba1a9b9422f4172373f4cd0587b675d2331a41f4fa68f65dab2b23ca98fd9d2",
+      "path": "apps/v4/registry/new-york-v4/ui/sidebar.tsx",
+      "adapted_into": "src/ui.tsx",
+      "adaptation": "Used slot structure and styles adapted to semantic HTML and local CSS; only used primitives retained; no cn, CVA, Radix, icons, cookies, mobile sheet or collapse machinery.",
+      "adapted_sha256": "c10c24f7dd3bf08a13e1bbd55bf6f912c453f29e8f68c134e70c774c5e4e117a"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/shadcn-ui/ui/e62c9435fff729a175f38983dee73b2cb4f6a069/apps/v4/registry/new-york-v4/ui/card.tsx",
+      "sha256": "ef8305b12c3112dab42a4708b41b1ebcc042fa5ab4c20f039da8d45b09ed5059",
+      "path": "apps/v4/registry/new-york-v4/ui/card.tsx",
+      "adapted_into": "src/ui.tsx",
+      "adaptation": "Used slot structure and styles adapted to semantic HTML and local CSS; only used primitives retained; no cn, CVA, Radix, icons, cookies, mobile sheet or collapse machinery.",
+      "adapted_sha256": "c10c24f7dd3bf08a13e1bbd55bf6f912c453f29e8f68c134e70c774c5e4e117a"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/shadcn-ui/ui/e62c9435fff729a175f38983dee73b2cb4f6a069/apps/v4/registry/new-york-v4/ui/input.tsx",
+      "sha256": "0c9457181f6ddc80969bcf854e92c362903a55b6e889fbef3fd85343ecc4af5b",
+      "path": "apps/v4/registry/new-york-v4/ui/input.tsx",
+      "adapted_into": "src/ui.tsx",
+      "adaptation": "Used slot structure and styles adapted to semantic HTML and local CSS; only used primitives retained; no cn, CVA, Radix, icons, cookies, mobile sheet or collapse machinery.",
+      "adapted_sha256": "c10c24f7dd3bf08a13e1bbd55bf6f912c453f29e8f68c134e70c774c5e4e117a"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/shadcn-ui/ui/e62c9435fff729a175f38983dee73b2cb4f6a069/apps/v4/registry/new-york-v4/ui/button.tsx",
+      "sha256": "79dd6f75f8136394442202d6b8b922fb269eaad0a5dba579397c9d5b41f893bb",
+      "path": "apps/v4/registry/new-york-v4/ui/button.tsx",
+      "adapted_into": "src/ui.tsx",
+      "adaptation": "Used slot structure and styles adapted to semantic HTML and local CSS; only used primitives retained; no cn, CVA, Radix, icons, cookies, mobile sheet or collapse machinery.",
+      "adapted_sha256": "c10c24f7dd3bf08a13e1bbd55bf6f912c453f29e8f68c134e70c774c5e4e117a"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/shadcn-ui/ui/e62c9435fff729a175f38983dee73b2cb4f6a069/apps/v4/registry/new-york-v4/ui/field.tsx",
+      "sha256": "4a4d17fcb933513f637f9f7e2daf5d8348f7de086b29738337dec7e6dd1819a0",
+      "path": "apps/v4/registry/new-york-v4/ui/field.tsx",
+      "adapted_into": "src/ui.tsx",
+      "adaptation": "Used slot structure and styles adapted to semantic HTML and local CSS; only used primitives retained; no cn, CVA, Radix, icons, cookies, mobile sheet or collapse machinery.",
+      "adapted_sha256": "c10c24f7dd3bf08a13e1bbd55bf6f912c453f29e8f68c134e70c774c5e4e117a"
+    }
+  ]
+}

@@ -18,6 +18,8 @@ services:
       - ..:/work
       - cargo-home:/cargo-home
       - "${MEGURI_DOCKER_CARGO_TARGET:-cargo-target}:/cargo-target"
+      # Explicit locked browser install, shared with sync-web MG jobs; read-only.
+      - sync-web-deps:/sync-web-deps:ro
     # SQLite files and other test scratch stay on tmpfs, never on the bind mount.
     tmpfs:
       - /tmp:exec,mode=1777
@@ -374,3 +376,4 @@ volumes:
   cargo-home:
     name: meguri-cargo-home
   cargo-target: {}
+  sync-web-deps: {}

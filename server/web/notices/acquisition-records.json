@@ -1,0 +1,289 @@
+{
+  "npm_archives": [
+    {
+      "name": "vite",
+      "version": "8.3.8",
+      "url": "https://registry.npmjs.org/vite/8.3.8",
+      "dist": {
+        "tarball": "https://registry.npmjs.org/vite/-/vite-8.3.8.tgz",
+        "integrity": "sha512-LzOn3h9rG/0vhLdXrV4yJ4QFA9eEoqCl+Yx+kGJd7aB9w6nfNgVHKSYwLPZUHrz4ZGa+t+kXjV9itvcHDLQouA=="
+      },
+      "licenses": [
+        {
+          "entry": "package/LICENSE.md",
+          "bytes": 98196,
+          "sha256": "a22152baa1aef74402443008e767e7c689a524c0909d19b0431d97f5ab066a13",
+          "runtime_extract": {
+            "start": "# Vite core license",
+            "end_before": "# Licenses of bundled dependencies",
+            "bytes": 1163,
+            "sha256": "444c5ec3bf7f798af5c5179d734673cbcb115b22b1ef48e6d85bc941ac8777a2"
+          }
+        }
+      ],
+      "qualification": "Manager inspected the exact npm archive and verified SHA-512. The emitted preload helper is Vite core DOM-only code, not the bundled Node build dependencies named after the explicit boundary. Runtime notices retain the exact complete core MIT copyright, permission and disclaimer; the entire packaged LICENSE.md remains in full audit evidence."
+    },
+    {
+      "name": "@rolldown/binding-linux-arm64-gnu",
+      "version": "1.2.19",
+      "url": "https://registry.npmjs.org/@rolldown/binding-linux-arm64-gnu/1.2.19",
+      "dist": {
+        "shasum": "bf65d9ea72c10a48f322a2c08f2b68f0f7a7f8e0",
+        "tarball": "https://registry.npmjs.org/@rolldown/binding-linux-arm64-gnu/-/binding-linux-arm64-gnu-1.2.19.tgz",
+        "fileCount": 3,
+        "integrity": "sha512-pm/apFMBnSbFb3O6nG5pHO1iqHhZrjGDFEjSm+ot9J17XXPvH9L90y5h+jgfHCE+Qdlsvy8qKEcU4VKxgjD+vA==",
+        "signatures": [
+          {
+            "sig": "MEQCIBBSh/AdWFvp6KwgcbZQwSkASaeBa5Bysfhnrr/xdOzbAiABhhyPGMXZg9aBmzSWfCjfWkL8EDw8lqGPmQGu7aj63A==",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          },
+          {
+            "sig": "MEQCIDS6Tnpc83dwbEa3LeCsfOfzjIUW2ryzW0pG+vRRxsEyAiArqmetxfLThCw3Z0Wolg9oFGH0RlKmQTvBM0Pageb16Q==",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          }
+        ],
+        "attestations": {
+          "url": "https://registry.npmjs.org/-/npm/v1/attestations/@rolldown%2fbinding-linux-arm64-gnu@1.2.19",
+          "provenance": {
+            "predicateType": "https://slsa.dev/provenance/v1"
+          }
+        },
+        "unpackedSize": 18951020
+      },
+      "gitHead": null,
+      "repository": {
+        "url": "git+https://github.com/rolldown/rolldown.git",
+        "type": "git",
+        "directory": "packages/rolldown"
+      },
+      "licenses": []
+    },
+    {
+      "name": "rolldown",
+      "version": "1.2.19",
+      "url": "https://registry.npmjs.org/rolldown/1.2.19",
+      "dist": {
+        "shasum": "259be7978a73d9f223480f8cd10d39e45075e159",
+        "tarball": "https://registry.npmjs.org/rolldown/-/rolldown-1.2.19.tgz",
+        "fileCount": 54,
+        "integrity": "sha512-QIiV1J9d0pzN4jeeTH4sjPy0AZ6cAy2cG0ExeoE1+U8Rvj+hR3gYkokx0YbeUNGlZqiQJJ2utcETe0oKXwzsuA==",
+        "signatures": [
+          {
+            "sig": "MEQCIFAXqhd4NjWpT+rYs9yvw4vmU/GYyJ2IHtRqSZMnQ4obAiA0uck4HQg3AyzX0OmwL+XcyaOsN2FBVnUd/OzPR3S38A==",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          },
+          {
+            "sig": "MEYCIQCpdrYames1rGBgBGhbJcbhMS76IRz252VaHlQwHWiHvAIhAIF0xdz+Avcfnk9z2+sq47CA4QghwsoogHwITP4b+sjy",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          }
+        ],
+        "attestations": {
+          "url": "https://registry.npmjs.org/-/npm/v1/attestations/rolldown@1.2.19",
+          "provenance": {
+            "predicateType": "https://slsa.dev/provenance/v1"
+          }
+        },
+        "unpackedSize": 884684
+      },
+      "gitHead": null,
+      "repository": {
+        "url": "git+https://github.com/rolldown/rolldown.git",
+        "type": "git",
+        "directory": "packages/rolldown"
+      },
+      "licenses": [
+        {
+          "entry": "package/LICENSE",
+          "sha256": "23ecfff35a5a2e80d92142f75228912c3b1abc4b5a8337a821ff4397e2f9f734"
+        },
+        {
+          "entry": "package/THIRD-PARTY-LICENSE",
+          "sha256": "a877291d800ed43692f3f9ae09d8e01cc6f7293ad39d43896059c188ffbb8b7c"
+        }
+      ]
+    },
+    {
+      "name": "@tailwindcss/oxide-wasm32-wasi",
+      "version": "4.3.5",
+      "url": "https://registry.npmjs.org/@tailwindcss/oxide-wasm32-wasi/4.3.5",
+      "dist": {
+        "shasum": "9acbe452e76bdb798419c18ccffd65d5daef1272",
+        "tarball": "https://registry.npmjs.org/@tailwindcss/oxide-wasm32-wasi/-/oxide-wasm32-wasi-4.3.5.tgz",
+        "fileCount": 115,
+        "integrity": "sha512-OJhFmlEfdzMr+avACdi40RPtnkW0B6hXyxL/8r+tnEHBWZji36CYRjEXrrvgBmaYsD3oEOBqwYFRKsYvzFe7Bw==",
+        "signatures": [
+          {
+            "sig": "MEUCIQDtjmAZdhKWRKps34HnYYgck0x8zTrVmST1xa6N7yr6FgIgVhI/BzAVZ4ZmzPbh8A5HQkUQDGgov4zNhv9bbXR4Yo4=",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          },
+          {
+            "sig": "MEUCIGzqcRI3vuBZOm2QCPK4HvarYHGXbk9ocvBFuCmVCMSDAiEA8ccybuwQ9mG+VznLXkcnUdy37tB7hUlSwKC/+E8GtrQ=",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          }
+        ],
+        "attestations": {
+          "url": "https://registry.npmjs.org/-/npm/v1/attestations/@tailwindcss%2foxide-wasm32-wasi@4.3.5",
+          "provenance": {
+            "predicateType": "https://slsa.dev/provenance/v1"
+          }
+        },
+        "unpackedSize": 6561250
+      },
+      "gitHead": null,
+      "repository": {
+        "url": "git+https://github.com/tailwindlabs/tailwindcss.git",
+        "type": "git",
+        "directory": "crates/node"
+      },
+      "licenses": [
+        {
+          "entry": "package/node_modules/@emnapi/core/LICENSE",
+          "sha256": "2088f55c6731498410b20c95ebd345ed4a4a800bf74c0fba4d282fd2a021daaa"
+        },
+        {
+          "entry": "package/node_modules/@emnapi/runtime/LICENSE",
+          "sha256": "2088f55c6731498410b20c95ebd345ed4a4a800bf74c0fba4d282fd2a021daaa"
+        },
+        {
+          "entry": "package/node_modules/@emnapi/wasi-threads/LICENSE",
+          "sha256": "2088f55c6731498410b20c95ebd345ed4a4a800bf74c0fba4d282fd2a021daaa"
+        },
+        {
+          "entry": "package/node_modules/tslib/CopyrightNotice.txt",
+          "sha256": "da16ddb65f8ca390998fb99223d0112498b56b45784d00afd77ff8ce1ac4de8b"
+        },
+        {
+          "entry": "package/node_modules/tslib/LICENSE.txt",
+          "sha256": "210b19e543130388c68654b7497e967119ce17145f66ab7d85688fbd70f08751"
+        }
+      ]
+    },
+    {
+      "name": "@tailwindcss/oxide",
+      "version": "4.3.5",
+      "url": "https://registry.npmjs.org/@tailwindcss/oxide/4.3.5",
+      "dist": {
+        "shasum": "e0600d6a38eab9fe9365d67c933b560fbf744883",
+        "tarball": "https://registry.npmjs.org/@tailwindcss/oxide/-/oxide-4.3.5.tgz",
+        "fileCount": 4,
+        "integrity": "sha512-PynqGLZsZvwM9tqD/CUxkOIfyd6K5elZ2MooauzJryP/UqXYgi3yYbtt3N0Xe+MHV/eFKPFQCEfIKAqlAS1CBg==",
+        "signatures": [
+          {
+            "sig": "MEQCIH7iwbkNLyFeGSgxJOX9NbYUKkbZXXtlyybTJIVqV2z7AiBgRpTGwhI96fqm1l9gcPdZMswd4zYWD89kTmEgStwu6Q==",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          },
+          {
+            "sig": "MEUCIEFh3aLA2P6I+eKUR8/PdXBujA+c/aiCrUWb/sH3HNRzAiEArNYJFsOCwww4NJp9b5Lrz0TTNqgs1l9640N0x2SBRHQ=",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          }
+        ],
+        "attestations": {
+          "url": "https://registry.npmjs.org/-/npm/v1/attestations/@tailwindcss%2foxide@4.3.5",
+          "provenance": {
+            "predicateType": "https://slsa.dev/provenance/v1"
+          }
+        },
+        "unpackedSize": 29783
+      },
+      "gitHead": null,
+      "repository": {
+        "url": "git+https://github.com/tailwindlabs/tailwindcss.git",
+        "type": "git",
+        "directory": "crates/node"
+      },
+      "licenses": [
+        {
+          "entry": "package/LICENSE",
+          "sha256": "60e0b68c0f35c078eef3a5d29419d0b03ff84ec1df9c3f9d6e39a519a5ae7985"
+        }
+      ]
+    },
+    {
+      "name": "@napi-rs/wasm-runtime",
+      "version": "1.2.2",
+      "url": "https://registry.npmjs.org/@napi-rs/wasm-runtime/1.2.2",
+      "dist": {
+        "shasum": "c70706532e5827c0932ca6bf43ee2c512f29c639",
+        "tarball": "https://registry.npmjs.org/@napi-rs/wasm-runtime/-/wasm-runtime-1.2.2.tgz",
+        "fileCount": 8,
+        "integrity": "sha512-JfB4kuJQjaoHuCTseIINHtHWeJnvgEcxjwA5t/Y00ZgaOO1Crz3fjT/p8kT28zA/Caz7oiUMn3d6H2yOVCVwuw==",
+        "signatures": [
+          {
+            "sig": "MEUCIQD1hW3J/arsP1DcvtncwFOW5yFIeV4ti1MyJkPDs5vQxAIgaMV7sL2OnEefWQMqvGdE/shL4LOnJr3343QyEGYpDEI=",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          },
+          {
+            "sig": "MEUCIQDn7i/9vWjcjivxdvxizGRKWdFopQMpSrmKsgWnnPdEDwIgG4bzOk8lAlXSgrnIIJaXNw1KBLzOLAPWQ7DXKpqImT4=",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          }
+        ],
+        "attestations": {
+          "url": "https://registry.npmjs.org/-/npm/v1/attestations/@napi-rs%2fwasm-runtime@1.2.2",
+          "provenance": {
+            "predicateType": "https://slsa.dev/provenance/v1"
+          }
+        },
+        "unpackedSize": 1030633
+      },
+      "gitHead": "5b344c367eeed81d1917f7c4d8e65b1adc16de12",
+      "repository": {
+        "url": "git+https://github.com/napi-rs/napi-rs.git",
+        "type": "git",
+        "directory": "wasm-runtime"
+      },
+      "licenses": []
+    },
+    {
+      "name": "@tybys/wasm-util",
+      "version": "0.10.3",
+      "url": "https://registry.npmjs.org/@tybys/wasm-util/0.10.3",
+      "dist": {
+        "shasum": "015cba9e9dd47ce14d03d2a8c5d547bfb169665d",
+        "tarball": "https://registry.npmjs.org/@tybys/wasm-util/-/wasm-util-0.10.3.tgz",
+        "fileCount": 39,
+        "integrity": "sha512-F3fo1MYrRJYL3zER0OUOmkutjr1Vp23m7OsSgp7nq4SP6OqX6C/56XFIPAl5bt3zaBRjmW7SGz3u/6LwFpYcOg==",
+        "signatures": [
+          {
+            "sig": "MEYCIQCRsJ0IVBNOK4iBAB3eVFtIHHLSNWpBEqYU9oSxbOCW6wIhAOMCVzRAyORufiD3MdaQ9qAKIRWWpyV4qZcEwfwhvjjO",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          }
+        ],
+        "unpackedSize": 825080
+      },
+      "gitHead": "efb17cc128a30fb16b58127738f09c8871a3f7d1",
+      "repository": {
+        "url": "git+https://github.com/toyobayashi/wasm-util.git",
+        "type": "git"
+      },
+      "licenses": []
+    }
+  ],
+  "source_licenses": [
+    {
+      "name": "napi-rs",
+      "url": "https://raw.githubusercontent.com/napi-rs/napi-rs/5b344c367eeed81d1917f7c4d8e65b1adc16de12/LICENSE",
+      "sha256": "3f1ce66533302df3a32edbfdfc0b78f0dd34659e4c1f5817162e5ea3c2297215"
+    },
+    {
+      "name": "wasm-util",
+      "url": "https://raw.githubusercontent.com/toyobayashi/wasm-util/51836d7bf26fb7f43b05dd6477b3ca4260c945cf/LICENSE",
+      "sha256": "09e436100bf926e78df875ec80cf3d0c643dfec779b52cfe2aa96afa0de714cb",
+      "qualification": "The published 0.10.3 archive and its gitHead commit omit LICENSE; official repository current immutable commit supplies MIT notice. Package metadata declares MIT."
+    }
+  ],
+  "node_notice": {
+    "url": "https://raw.githubusercontent.com/nodejs/node/e9c277643b0249c50f6e6de5413be8a88ea11b6a/LICENSE",
+    "sha256": "8e603aa87c70d36e497004f0dec63111511cb61b7d65ace12e10ea791599286c",
+    "commit": "e9c277643b0249c50f6e6de5413be8a88ea11b6a",
+    "extract": "Initial Node and Joyent MIT notices, ending before externally maintained library list",
+    "extract_sha256": "86d2d599e5aca4ce609f66171863a5eb405c3a520b27ef869c5740ea12cc9887"
+  },
+  "retained_files": {
+    "rolldown-LICENSE.txt": "23ecfff35a5a2e80d92142f75228912c3b1abc4b5a8337a821ff4397e2f9f734",
+    "rolldown-THIRD-PARTY-LICENSE.txt": "a877291d800ed43692f3f9ae09d8e01cc6f7293ad39d43896059c188ffbb8b7c",
+    "tailwindcss-LICENSE.txt": "60e0b68c0f35c078eef3a5d29419d0b03ff84ec1df9c3f9d6e39a519a5ae7985",
+    "napi-rs-LICENSE.txt": "3f1ce66533302df3a32edbfdfc0b78f0dd34659e4c1f5817162e5ea3c2297215",
+    "wasm-util-LICENSE.txt": "09e436100bf926e78df875ec80cf3d0c643dfec779b52cfe2aa96afa0de714cb",
+    "node-MIT-NOTICES.txt": "86d2d599e5aca4ce609f66171863a5eb405c3a520b27ef869c5740ea12cc9887"
+  }
+}

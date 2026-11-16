@@ -73,16 +73,17 @@ async fn run() -> Result<()> {
         .map_err(|_| Error::new("storage_unavailable"))??;
     match command.as_str() {
         "init" => {
-            let location = tokio::task::spawn_blocking(move || {
+            let (root, code) = tokio::task::spawn_blocking(move || {
                 let mut root = root;
                 root.init()?;
-                Ok::<_, Error>(root.setup_file())
+                let code = root.setup_code()?;
+                Ok::<_, Error>((root, code))
             })
             .await
             .map_err(|_| Error::new("storage_unavailable"))??;
             println!(
-                "setup file: {}\nsetup page: {}/setup",
-                location.display(),
+                "one-time setup code: {code}\nsetup file: {}\nsetup page: {}/setup",
+                root.setup_file().display(),
                 config.origin()
             );
             Ok(())

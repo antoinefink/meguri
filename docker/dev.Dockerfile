@@ -3,14 +3,18 @@
 # Build context is the repo root, filtered by dev.Dockerfile.dockerignore.
 # Never pushed to a registry.
 
+FROM node:26.13.1-bookworm-slim@sha256:5df79989ed685e09f0a98019db4cebfb22fb9df1a53c0161664a011f7ff6b0f1 AS sync-web-node
 FROM rust:1.99-slim@sha256:2752b332db73fdbb7dc576f06c82ed1f312005784ef913d7e04a28f5f55dc581 AS dev
+
+# Build-time only: server Cargo jobs prepare the real locked browser bundle.
+COPY --from=sync-web-node /usr/local/ /usr/local/
 
 # C toolchain for bundled SQLite, zstd and aws-lc-sys; valgrind for
 # instruction-count benches; bats, jq, git and python3-jsonschema for the
 # tools/mg self-tests.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      bats ca-certificates clang cmake git jq pkg-config python3-jsonschema valgrind \
+      bats ca-certificates clang cmake git jq libatomic1 pkg-config python3-jsonschema valgrind \
  && rm -rf /var/lib/apt/lists/*
 
 ARG CARGO_NEXTEST_VERSION=0.9.148

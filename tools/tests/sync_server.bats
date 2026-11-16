@@ -11,6 +11,11 @@ setup_file() {
   cp "$REPO_ROOT/.gitignore" "$t/"
   # Synthetic workspace markers; no server sources or compiler are used.
   touch "$t/server/Cargo.toml" "$t/server/Cargo.lock" "$t/server/rust-toolchain.toml"
+  # Isolate synthetic runner/report tests from real browser asset preparation.
+  # Loaded after meguri-sync.sh; no prepared assets or build evidence are faked.
+  cat >"$t/tools/mg.d/zz-sync-server-web-fixture.sh" <<'SH'
+mg_sync_server__web() { :; }
+SH
   git -C "$t" init -q
   git -C "$t" add -A
   git -C "$t" -c user.name=selftest -c user.email=selftest@localhost commit -qm template

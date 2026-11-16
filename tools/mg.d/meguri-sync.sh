@@ -14,7 +14,7 @@ mg_job sync-server-interop host mg_sync_server_interop \
 
 # One source-input definition for production freeze and execution revalidation.
 mg_sync_server__archive() {
-  git -C "$MG_ROOT" archive --format=tar "$1" -- server core/crates/meguri-model core/Cargo.toml core/rust-toolchain.toml LICENSE docker/dev.Dockerfile docker/compose.yml tools/mg tools/mg.d/meguri-sync.sh
+  git -C "$MG_ROOT" archive --format=tar "$1" -- server core/crates/meguri-model core/Cargo.toml core/rust-toolchain.toml LICENSE docker/dev.Dockerfile docker/dev.Dockerfile.dockerignore docker/compose.yml tools/mg tools/mg.d/meguri-sync.sh
 }
 
 mg_sync_server__clean() {
@@ -121,6 +121,13 @@ export RUSTFLAGS= CARGO_ENCODED_RUSTFLAGS=
 [ "$CARGO_TARGET_DIR" = /candidate-target ]
 [ -d /candidate-target ] && [ -z "$(ls -A /candidate-target)" ]
 rustc -Vv > /candidate-out/rustc.txt
+# Prepare from this frozen archive, using only the explicitly installed locked
+# web dependencies. Generated inputs stay out of the archive and Cargo source.
+web_work="$(mktemp -d /tmp/meguri-candidate-web.XXXXXX)"
+MEGURI_WEB_SOURCE=/work/server/web MEGURI_WEB_WORK="$web_work" \
+  MEGURI_WEB_OUTPUT=/candidate-out/web MEGURI_WEB_DEPS=/sync-web-deps \
+  bash /work/server/web/scripts/run.sh build
+export MEGURI_WEB_PREPARED_DIR=/candidate-out/web/prepared
 cargo build --locked --no-default-features --bin meguri-sync-server --message-format json-render-diagnostics --target-dir /candidate-target --profile dev > /candidate-out/build.jsonl
 cp /candidate-target/debug/meguri-sync-server /candidate-out/meguri-sync-server
 cmp /candidate-target/debug/meguri-sync-server /candidate-out/meguri-sync-server
@@ -507,6 +514,19 @@ mg_sync_server__locked() {
     return 1
   fi
 }
+mg_sync_server__web() {
+  local web_work
+  web_work="$(mktemp -d /tmp/meguri-server-web.XXXXXX)" || return 1
+  if ! MEGURI_WEB_SOURCE="$MG_ROOT/server/web" MEGURI_WEB_WORK="$web_work" \
+      MEGURI_WEB_OUTPUT="$MG_RUN_DIR/web" MEGURI_WEB_DEPS=/sync-web-deps \
+      bash "$MG_ROOT/server/web/scripts/run.sh" build; then
+    mg_failure web-preparation "Real locked browser asset preparation failed; inspect log.txt and web evidence"
+    mg_status fail
+    return 1
+  fi
+  export MEGURI_WEB_PREPARED_DIR="$MG_RUN_DIR/web/prepared"
+  mg_artifact browser-build "$MG_RUN_DIR/web" "Source-bound compiled browser assets and distributed-code notices"
+}
 mg_sync_server_test() {
   [ "${1:-}" != -- ] || shift
   # Only separate filter operands are forwarded. No Cargo/config/output/policy
@@ -525,6 +545,7 @@ mg_sync_server_test() {
     esac
   done
   mg_sync_server__env && mg_sync_server__locked || return 0
+  mg_sync_server__web || return 0
   local binary="$MG_RUN_DIR/binary.jsonl" out="$MG_RUN_DIR/nextest.jsonl" rc
   # Integration tests spawn this exact feature-gated executable for lock/kill
   # evidence. Default production build is checked separately by clippy.
@@ -639,6 +660,7 @@ mg_sync_server_test() {
 mg_sync_server_lint() {
   [ "$#" -eq 0 ] || { mg_failure usage "sync-server-lint takes no arguments"; mg_status error; return 0; }
   mg_sync_server__env && mg_sync_server__locked || return 0
+  mg_sync_server__web || return 0
   local rc=0
   (cd server && cargo clippy --locked --workspace --all-targets --all-features -- -D clippy::correctness -D clippy::suspicious) >"$MG_RUN_DIR/clippy.log" 2>&1 || rc=$?
   # Also prove that the default production graph builds without testing seams.
@@ -693,6 +715,7 @@ mg_sync_server_deps() {
     fi
     mg_message "sync-server-deps: updated $update_package to $update_version; checking resolved graph"
   fi
+  mg_sync_server__web || return 0
   local rc=0 edge
   cp server/Cargo.lock "$MG_RUN_DIR/Cargo.lock" || rc=1
   cp server/deny.toml "$MG_RUN_DIR/deny.toml" || rc=1

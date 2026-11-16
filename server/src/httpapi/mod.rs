@@ -257,10 +257,14 @@ async fn handle(State(service): State<Arc<Service>>, request: Request) -> Respon
             },
         }
     } else {
-        // Native families have their own routing/authentication contract.
-        dispatch(&service, &parts, None)
-            .await
-            .unwrap_or_else(IntoResponse::into_response)
+        // Exact local navigation/assets only. API and native dispatch retain
+        // their own envelopes, admission and authentication above.
+        match web_asset(&parts) {
+            Some(response) => response,
+            None => dispatch(&service, &parts, None)
+                .await
+                .unwrap_or_else(IntoResponse::into_response),
+        }
     };
     let mut response = response;
     if browser {
@@ -269,6 +273,20 @@ async fn handle(State(service): State<Arc<Service>>, request: Request) -> Respon
             .insert("connection", "close".parse().expect("static header"));
     }
     secure(response)
+}
+fn web_asset(parts: &axum::http::request::Parts) -> Option<Response> {
+    if !matches!(parts.method, Method::GET | Method::HEAD) || parts.uri.query().is_some() {
+        return None;
+    }
+    let asset = crate::webassets::lookup(parts.uri.path())?;
+    let mut response = Response::new(if parts.method == Method::HEAD {
+        Body::empty()
+    } else {
+        Body::from(asset.bytes)
+    });
+    response.headers_mut().insert("content-type", asset.content_type.parse().unwrap());
+    response.headers_mut().insert("content-length", asset.bytes.len().into());
+    Some(response)
 }
 fn secure(mut response: Response) -> Response {
     for (name, value) in [

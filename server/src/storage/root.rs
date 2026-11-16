@@ -248,6 +248,23 @@ impl DataRoot {
     pub fn setup_file(&self) -> PathBuf {
         self.state().join("setup-token")
     }
+    /// Protected local access for successful first-init console delivery only.
+    /// HTTP and routine startup must never call this accessor.
+    pub fn setup_code(&self) -> Result<String> {
+        self.check_initialized()?;
+        let db = super::inspect(self.database())?;
+        let (phase, hash): (String, Vec<u8>) = db.query_row(
+            "SELECT phase,capability FROM setup WHERE singleton=1", [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        if phase != "open" { return Err(unavailable()); }
+        let state = self.bound_dir(Path::new("state"), false)?;
+        let code = String::from_utf8(at::read(&state, "setup-token")?).map_err(|_| unavailable())?;
+        let code = code.trim_end_matches('\n');
+        let digest = crypto::bearer(code).map_err(|_| unavailable())?;
+        if !crypto::same_digest(&hash, &digest) { return Err(unavailable()); }
+        Ok(code.to_owned())
+    }
     pub fn init(&mut self) -> Result<()> {
         self.validate()?;
         if self.state().try_exists()? || self.path.join(".initialization").try_exists()? {

@@ -10,6 +10,7 @@ pub mod httpapi;
 pub mod limits;
 pub mod protocol;
 pub mod storage;
+pub mod webassets;
 #[cfg(feature = "test-hooks")]
 pub mod test_hooks;
 pub use accounts::{Identity, NativeAuthority, Service};

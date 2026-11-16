@@ -1,0 +1,9 @@
+**
+!docker/
+!docker/sync-web.Dockerfile
+!docker/sync-web.Dockerfile.dockerignore
+!server/
+!server/web/
+!server/web/scripts/
+!server/web/scripts/*.sh
+!server/web/scripts/*.mjs

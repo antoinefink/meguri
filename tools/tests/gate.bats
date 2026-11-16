@@ -1827,7 +1827,7 @@ PY
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$(jq '.quarantine.invalid | length' "$out")" = 0 ]
   # The canaries run first; T0 covers Rust, Swift, goldens, lint, deny, UI and the similarity scan.
-  [ "$(jq -r '[.runs[] | select(.stage == "canary") | .id] | join(" ")' "$out")" = "pin-canary canary-scenarios" ]
+  [ "$(jq -r '[.runs[] | select(.stage == "canary") | .id] | join(" ")' "$out")" = "pin-canary canary-scenarios sync-web-verify" ]
   for id in core-test conformance goldens-check lint-ui core-lint core-deny swift-test-core swift-test-core-profile snapshots a11y-iphone similarity perf-smoke notices; do
     jq -e --arg id "$id" '.runs[] | select(.id == $id and .tier == "T0")' "$out" >/dev/null || { echo "no T0 run $id"; return 1; }
   done
@@ -1865,6 +1865,10 @@ PY
     --oracle-tree same --main-capable yes --var base=b --var tip=t --out "$BATS_TEST_TMPDIR/plan.json"
   [ "$(jq -r '[.runs[] | select(.action == "run" and (.id | test("^sync-server-(test|lint|deps)$"))) | .id] | join(" ")' "$BATS_TEST_TMPDIR/plan.json")" = "sync-server-test sync-server-lint" ]
   [ "$(jq -r '[.runs[] | select(.action == "run" and .tier == "T1" and (.id | test("^sync-server-(candidate-build|interop)$"))) | .id] | join(" ")' "$BATS_TEST_TMPDIR/plan.json")" = "sync-server-candidate-build sync-server-interop" ]
+  # A fresh project prepares embedded assets before any Rust consumer.
+  jq -e 'any(.runs[]; .id == "sync-web-verify" and .action == "run" and .stage == "canary")
+    and ([.runs[] | select(.action == "run") | .id] |
+      index("sync-web-verify") < index("sync-server-test"))' "$BATS_TEST_TMPDIR/plan.json" >/dev/null
   printf 'server/Cargo.lock\0' >"$BATS_TEST_TMPDIR/changed"
   python3 -B -I "$REPO_ROOT/tools/gate/gate.py" plan --config "$out" --changed "$BATS_TEST_TMPDIR/changed" --mode full \
     --oracle-tree same --main-capable yes --var base=b --var tip=t --out "$BATS_TEST_TMPDIR/plan.json"
@@ -1875,6 +1879,10 @@ PY
   python3 -B -I "$REPO_ROOT/tools/gate/gate.py" plan --config "$out" --changed "$BATS_TEST_TMPDIR/changed" --mode full \
     --oracle-tree same --main-capable yes --var base=b --var tip=t --out "$BATS_TEST_TMPDIR/plan.json"
   [ "$(jq -r '[.runs[] | select(.action == "run" and (.id | test("^sync-server-reference-(selftest|smoke|edges)$"))) | .id] | join(" ")' "$BATS_TEST_TMPDIR/plan.json")" = "sync-server-reference-selftest sync-server-reference-smoke sync-server-reference-edges" ]
+  # Reference-only changes also select a fresh candidate build.
+  jq -e 'any(.runs[]; .id == "sync-web-verify" and .action == "run" and .stage == "canary")
+    and ([.runs[] | select(.action == "run") | .id] |
+      index("sync-web-verify") < index("sync-server-candidate-build"))' "$BATS_TEST_TMPDIR/plan.json" >/dev/null
   jq -e '.runs[] | select(.id == "oracle-test" and .action == "run")' "$BATS_TEST_TMPDIR/plan.json" >/dev/null
 
   # Dedicated neutral inputs have their own reference coverage. Check actual

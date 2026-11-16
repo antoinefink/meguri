@@ -3,11 +3,91 @@ mod support;
 use meguri_sync_server::{Config, DataRoot, Service};
 use serde_json::{Value, json};
 use std::{
-    io::BufRead,
+    io::{BufRead, Read},
     os::unix::fs::{MetadataExt, PermissionsExt},
     process::{Command, Stdio},
 };
 use support::*;
+
+#[tokio::test]
+async fn first_init_console_matches_protected_code_and_serve_never_reveals_it() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("owner");
+    let init = Command::new(binary())
+        .args(["init", path.to_str().unwrap(), ORIGIN])
+        .output().unwrap();
+    assert!(init.status.success());
+    assert!(init.stderr.is_empty());
+    let location = path.join("state/setup-token");
+    let protected = std::fs::read_to_string(&location).unwrap();
+    let code = protected.strip_suffix('\n').unwrap();
+    assert_eq!(code.len(), 43);
+    assert_eq!(String::from_utf8(init.stdout).unwrap(), format!(
+        "one-time setup code: {code}\nsetup file: {}\nsetup page: {ORIGIN}/setup\n", location.display()
+    ));
+    let inode = std::fs::metadata(path.join("owner.lock")).unwrap().ino();
+    let repeat = Command::new(binary())
+        .args(["init", path.to_str().unwrap(), ORIGIN])
+        .output().unwrap();
+    assert!(!repeat.status.success());
+    assert!(repeat.stdout.is_empty());
+    assert!(!String::from_utf8(repeat.stderr).unwrap().contains(code));
+    assert_eq!(std::fs::read_to_string(&location).unwrap(), protected);
+
+    let mut child = Child(Command::new(binary())
+        .args(["serve", path.to_str().unwrap(), ORIGIN, "127.0.0.1:0"])
+        .stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap());
+    let stdout = child.0.stdout.take().unwrap();
+    let (line, mut stdout) = within(tokio::task::spawn_blocking(move || {
+        let mut reader = std::io::BufReader::new(stdout);
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        (line, reader)
+    })).await.unwrap();
+    let address = line.trim().strip_prefix("listening ").unwrap();
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    for page in ["/setup", "/api/status"] {
+        let response = client.get(format!("http://{address}{page}")).send().await.unwrap();
+        assert_eq!(response.status(), 200);
+        assert!(!response.text().await.unwrap().contains(code));
+    }
+    assert_eq!(std::fs::read_to_string(&location).unwrap(), protected);
+    // A clean, signalled serve exit proves the complete output, not just its
+    // first readiness line. No workstation input or timing-based sleep.
+    // SAFETY: this is the retained live child PID; kill borrows no pointers.
+    assert_eq!(unsafe { libc::kill(child.0.id() as i32, libc::SIGTERM) }, 0);
+    within(async {
+        loop {
+            if let Some(status) = child.0.try_wait().unwrap() {
+                assert!(status.success());
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    }).await;
+    let mut remaining = String::new();
+    stdout.read_to_string(&mut remaining).unwrap();
+    assert!(remaining.is_empty());
+    let mut stderr = String::new();
+    child.0.stderr.take().unwrap().read_to_string(&mut stderr).unwrap();
+    assert!(stderr.is_empty());
+    assert!(!line.contains(code));
+    assert_eq!(std::fs::metadata(path.join("owner.lock")).unwrap().ino(), inode);
+
+    #[cfg(feature = "test-hooks")]
+    {
+        // Failure after token publication still must not disclose it.
+        let failed_path = temp.path().join("failed-owner");
+        let failed = Command::new(binary())
+            .args(["init", failed_path.to_str().unwrap(), ORIGIN])
+            .env("MEGURI_TEST_FAIL_PHASE", "init_after_token")
+            .output().unwrap();
+        assert!(!failed.status.success());
+        assert!(failed.stdout.is_empty());
+        let generated = std::fs::read_to_string(failed_path.join("state/setup-token")).unwrap();
+        assert!(!String::from_utf8(failed.stderr).unwrap().contains(generated.trim()));
+    }
+}
 
 #[tokio::test]
 async fn invalid_and_conflicting_invites_remain_available() {
@@ -629,7 +709,7 @@ async fn incomplete_init_requires_explicit_repair_after_process_kill() {
                 .args(["init", path.to_str().unwrap(), ORIGIN])
                 .env("MEGURI_TEST_KILL_PHASE", phase)
                 .env("MEGURI_TEST_SIGNAL_FILE", &signal)
-                .stdout(Stdio::null())
+                .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .spawn()
                 .unwrap(),
@@ -638,6 +718,9 @@ async fn incomplete_init_requires_explicit_repair_after_process_kill() {
         let child_lock_inode = std::fs::metadata(path.join("owner.lock")).unwrap().ino();
         child.0.kill().unwrap();
         child.0.wait().unwrap();
+        let mut output = String::new();
+        child.0.stdout.take().unwrap().read_to_string(&mut output).unwrap();
+        assert!(output.is_empty(), "interrupted init must not disclose a code");
         drop(child);
         let root = DataRoot::acquire(&path, false).unwrap();
         assert!(root.check_initialized().is_err());
