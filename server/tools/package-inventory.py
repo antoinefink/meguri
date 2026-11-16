@@ -11,15 +11,40 @@ root = pathlib.Path(context)
 out = pathlib.Path(output)
 out.mkdir()
 files = {}
+# These exact entries were observed in the actual Docker container export.
+# They describe empty mount stubs and filesystem layout, not shipped content.
+export_entries = {name: (tarfile.REGTYPE, 0o755, 0, 0, 0, '', 0, 0)
+                  for name in ['.dockerenv', 'dev/console', 'etc/hostname', 'etc/hosts', 'etc/resolv.conf']}
+export_entries['etc/mtab'] = (tarfile.SYMTYPE, 0o777, 0, 0, 0, '/proc/mounts', 0, 0)
+export_entries.update({name: (tarfile.DIRTYPE, 0o700, 10001, 10001, 0, '', 0, 0)
+                       for name in ['data', 'data/owner']})
+export_entries.update({name: (tarfile.DIRTYPE, 0o755, 0, 0, 0, '', 0, 0)
+                       for name in ['dev', 'dev/pts', 'dev/shm', 'etc', 'proc', 'sys', 'usr',
+                                    'usr/local', 'usr/local/bin', 'usr/share', 'usr/share/meguri-sync',
+                                    'usr/share/meguri-sync/licenses', 'usr/share/meguri-sync/licenses/rust',
+                                    'usr/share/meguri-sync/web']})
+accepted_export_entries = {}
 with tarfile.open(archive) as image:
     for item in image:
         name = item.name[2:] if item.name.startswith('./') else item.name
+        if name in export_entries:
+            metadata = (item.type, item.mode, item.uid, item.gid, item.size,
+                        item.linkname, item.devmajor, item.devminor)
+            if metadata != export_entries[name]:
+                raise ValueError('Unexpected runtime export metadata: ' + name)
+            accepted_export_entries[name] = dict(type=item.type.decode('ascii'), mode=item.mode,
+                                                uid=item.uid, gid=item.gid, size=item.size,
+                                                linkname=item.linkname, devmajor=item.devmajor,
+                                                devminor=item.devminor)
+            # Validate the link as metadata only; never follow /proc/mounts.
+            if item.isdir() or item.issym():
+                continue
         if item.isdir():
-            continue
+            raise ValueError('Unexpected runtime directory: ' + name)
         if not item.isfile():
             raise ValueError('Nonregular runtime input: ' + name)
         if not (name == 'usr/local/bin/meguri-sync-server' or name.startswith('usr/share/meguri-sync/')
-                or name in {'.dockerenv', 'etc/hosts', 'etc/hostname', 'etc/resolv.conf'}):
+                or name in accepted_export_entries):
             raise ValueError('Unexpected runtime file: ' + name)
         data = image.extractfile(item).read()
         files[name] = dict(bytes=len(data), sha256=hashlib.sha256(data).hexdigest())
@@ -95,4 +120,6 @@ for name in files:
         relative = name[len(base):]
         if relative not in allowed_top and relative not in allowed_extra:
             raise ValueError('Unexpected runtime material: ' + name)
+for name, metadata in accepted_export_entries.items():
+    files.setdefault(name, {}).update(metadata)
 (out / 'runtime-inventory.json').write_text(json.dumps(files, indent=2) + '\n')
