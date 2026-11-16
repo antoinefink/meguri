@@ -957,7 +957,7 @@ PUBLIC_ARTIFACTS = {
     'server/tools/candidate-output.py':
         'c14a38c1932e22080584917e5309a9f0d89f0c2a3d99b9bd2e06b92cfcee35f5',
     'docs/process/review-log/meguri-sync-U5.md':
-        'a2b89f63e37c1029fa04475b584953c97ab5c0bc54109a808864e1bb0ae5ac98',
+        'ab6cf8f924d526320f0fcc9479944ce81a70264fc699472051b1a451f3c68f96',
 
     'tools/mg.d/meguri-sync.sh':
         '7272897b429bde5c5662bec7deefba2e9d236f625c7af57617b52d53fda8bd42',

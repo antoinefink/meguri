@@ -1,9 +1,9 @@
 # Full collection transfer
 
 This records the reviewed collection body and its integration checkpoint.
-Unit acceptance remains open: the candidate wrapper, actual Desktop round trip
-and coherent batch gate still need their final evidence. Normal reconciliation,
-media, package acceptance and AnkiMobile are separate remaining work.
+The full-transfer candidate lane passes all eleven selected current Desktop
+backend cases. Acceptance awaits the coherent batch gate. Incremental sync,
+media, release packaging, GUI and AnkiMobile remain separate.
 
 Original batch/source base: `aa8565719af435051de7d5f068c0c817286b568e`.
 Canonical integration starts from the accepted foundation and subsequent
@@ -91,12 +91,38 @@ Independent source reviews classify the full original body and repaired delta
 as public code/process/synthetic material. Any maintenance entry is limited to
 its exact path and final full-file SHA; matching logic is unchanged.
 
+## Actual Desktop full-transfer result
+
+Committed candidate source a38664a4983c49fb2fabdb2f8e6004809b3c45e8 passed
+all eleven selected cases, with zero failures or skips. The actual pinned
+semantic validator and local retained-artifact validator passed. Compatibility
+credit is true, client and pinned-validator exits are zero, and cleanup completed.
+This is a debug executable with no enabled Cargo features, not a release build.
+
+- Build: `build/mg/sync-server-candidate-build/20261115T230839Z-84330/result.json`.
+- Interoperability: `build/mg/sync-server-interop/20261115T230850Z-84973/result.json`.
+- Source archive SHA256: `2942e97ef5f8c9b2bbb3773759546c09f78ce67df2dd2cd15d1305dab419ebcb`.
+- Cargo lock SHA256: `e6ff1a10840e84fac2a83621a1c4d4dbe21cf6915215ff59deb4d4532b3b8036`.
+- Executable SHA256: `428fac17b44f96cee409dce0a0600236260d6c034611cea92fdb8497deee6ea6`.
+
+Earlier failures stay unchanged and earn no retroactive compatibility credit.
+The 214028Z-3179 invocation rejected an unsupported Compose flag before cases.
+The 215904Z-22957 build compiled but failed its read-only source-mount check.
+The 221633Z-38698 exchange matched eleven cases but failed static-action
+validation on an optional recorder fixture hash. The 223611Z-52762 exchange
+matched eleven cases but lacked per-case action-fixture artifact links. Those
+bytes existed globally; missing links caused the failure. Reviewed repairs
+preserve strict source/lock/executable binding, ordered actions, per-case
+manifest links and content-addressed artifact checks. A proposed test duplicating
+the command array was not landed; existing behavioral fixtures and actual Docker
+executions cover these repairs. Scoped similarity excludes quarantined oracle
+source. This result does not grant incremental, media, GUI or Mobile acceptance.
+
 ## Remaining integration
 
-The candidate wrapper is separately reviewed and repaired. Its invocation must
-identify the candidate source/Cargo lock/executable; reference runtime identities
-are retained separately. Its isolated validator is reused rather than duplicated.
-Synthetic wrapper tests alone establish no actual Desktop compatibility.
+The candidate wrapper and artifact-retention repairs are independently reviewed.
+The actual result above records their executed full-transfer scope. The coherent
+batch gate remains pending; isolated full-transfer success does not replace it.
 
 The user subsequently requested the setup code and setup URL in first-time
 initialization output, accessible through Docker logs. That narrow intentional
