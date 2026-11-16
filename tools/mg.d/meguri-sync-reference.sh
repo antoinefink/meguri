@@ -17,6 +17,8 @@ mg_sync_reference_digest() {
       conformance/recordings/scenarios/meguri-sync-server/desktop-media-selection.json \
       conformance/fixtures/meguri-sync-server/media.json \
       conformance/fixtures/meguri-sync-server/recovery.json \
+      conformance/fixtures/meguri-sync-server/recovery-dirty.json \
+      conformance/recordings/scenarios/meguri-sync-server/desktop-recovery-dirty-selection.json \
       conformance/recordings/scenarios/meguri-sync-server/desktop-recovery-selection.json \
       conformance/recordings/scenarios/meguri-sync-server/candidate-full-selection.json \
       conformance/recordings/scenarios/meguri-sync-server/candidate-complete-selection.json |
@@ -55,8 +57,8 @@ mg_sync_server_reference() {
       mg_artifact lock "$reference_dir/requirements.lock"
       mg_artifact report "$MG_RUN_DIR/resolver-install.json" "Hash-pinned lock resolver installation"
       mg_status pass; return ;;
-    selftest|identity|recovery-discover|recovery|smoke|edges|normal|normal-sdk|normal-matrix|media|catalog|validate|seal) ;;
-    *) mg_failure usage "expected lock, deps, selftest, identity, recovery-discover, recovery, smoke, edges, normal, normal-sdk, normal-matrix, media, catalog, validate or seal"; mg_status error; return ;;
+    selftest|identity|recovery-discover|recovery|recovery-dirty|smoke|edges|normal|normal-sdk|normal-matrix|media|catalog|validate|seal) ;;
+    *) mg_failure usage "expected lock, deps, selftest, identity, recovery-discover, recovery, recovery-dirty, smoke, edges, normal, normal-sdk, normal-matrix, media, catalog, validate or seal"; mg_status error; return ;;
   esac
   local source_sha lock_sha source_commit author_session source_author_sessions argument_json
   local mount_args=() runtime_args=("$mode") input_path
@@ -93,8 +95,8 @@ mg_sync_server_reference() {
   fi
   lock_sha="$(shasum -a 256 "$reference_dir/requirements.lock" | cut -d ' ' -f1)"
   # Explicit source authors, independent of the operator and checkout path.
-  author_session="s-20261116T092626Z-4487d759"
-  source_author_sessions='["s-20261115T133013Z-d8cec007","s-20261115T211543Z-556b04e9","s-20261115T224434Z-376ca308","s-20261115T231059Z-ff95725a","s-20261116T001757Z-8fe546bc","s-20261116T020051Z-5e05fa3f","s-20261116T092626Z-4487d759"]'
+  author_session="s-20261116T124044Z-c9976196"
+  source_author_sessions='["s-20261115T133013Z-d8cec007","s-20261115T211543Z-556b04e9","s-20261115T224434Z-376ca308","s-20261115T231059Z-ff95725a","s-20261116T001757Z-8fe546bc","s-20261116T020051Z-5e05fa3f","s-20261116T092626Z-4487d759","s-20261116T124044Z-c9976196"]'
   if ! git -C "$MG_ROOT" show "${source_commit}:docs/process/provenance/sessions.jsonl" |
       jq -es --argjson authors "$source_author_sessions" '
         [.[] | select(.session as $id | $authors | index($id))] | unique |
@@ -105,7 +107,7 @@ mg_sync_server_reference() {
   fi
   mg_artifact report "$MG_RUN_DIR/source-authors.json" "Committed responsible reference source authors"
   local batch_base="38235917e6a025daa57625c582e90d253aae62e3"
-  case "$mode" in recovery|recovery-discover) batch_base="8506d4879dd3b76b4aa5e1ab0825409671b84549" ;; esac
+  case "$mode" in recovery-dirty) batch_base="146cb76fd38c2a8ff724b837df979d25eabc71f9" ;; recovery|recovery-discover) batch_base="8506d4879dd3b76b4aa5e1ab0825409671b84549" ;; esac
   jq -n --arg batch "$batch_base" --arg commit "$source_commit" --arg source "$source_sha" --arg lock "$lock_sha" \
     --arg run "$MG_RUN_ID" --arg author "$author_session" --argjson authors "$source_author_sessions" --argjson args "$argument_json" \
     '{source_commit:$commit,batch_base:$batch,source_sha256:$source,lock_sha256:$lock,mg_job:"sync-server-reference",arguments:$args,run_id:$run,author_session:$author,source_author_sessions:$authors}' \
