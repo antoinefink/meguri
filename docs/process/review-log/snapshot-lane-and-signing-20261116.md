@@ -216,3 +216,15 @@ not a product-failure waiver. All skipped results remain retained.
 This selected render workload does not replace the complete Snapshot or
 Xcode matrix, prove live CloudKit exchange, or close the original gate.
 No baseline was replaced.
+
+## Affected iPad simulator follow-up
+
+Selected Snapshot run `20261116T220938Z-87949` passes on clean `92026772`.
+Its four selected `home.deckList/typical/*` images pass across both iPad
+sizes, with no baseline replacement. The MG count describes images; it
+must not be read as a native-test count. The full matrix remains pending.
+
+The required iPad accessibility run `a11y/20261116T221528Z-93150` also
+passes on clean `92026772`: all 12 screen checks pass, with zero failures
+or skips. This verifies that platform's current required audit workload;
+it does not clear the other failed jobs or the integration gate.
