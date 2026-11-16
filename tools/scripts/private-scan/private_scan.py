@@ -868,7 +868,7 @@ PUBLIC_ARTIFACTS = {
         'b77e146b870049a542f1abb6bef8aaf0ea2cb7a6dc3590f370d2171fb31b5b5f',
     # Independently classified original public session metadata, exact bytes.
     'docs/process/provenance/sessions.jsonl':
-        '7ca57c0ce49eb60f43871f3030f837c3a10bbfd23fc8d086b4e0f6adefebd08b',
+        '2b3bae617e84af93350da357ca79e592f5bdbcc5ebcb39436c3117ea9341c238',
     'conformance/fixtures/meguri-sync-server/observations/desktop-26.09.4-normal-matrix.json':
         '8a4e17346939516eda8b5b650203444693fb32e2173f4d6741242b4089da04eb',
     'specs/sync/server-desktop-current.md':
