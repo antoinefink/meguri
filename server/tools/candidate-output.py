@@ -75,8 +75,8 @@ def validate(output, expected, peer, selection, summary, invocation):
                 for key in ("source_commit", "source_sha256", "lock_sha256")),
             "invocation source or lock differs from owned candidate")
     phase = expected['arguments'][3]
-    require(phase in {'full', 'normal'}, 'unsupported owned candidate phase')
-    required = 11 if phase == 'full' else 10
+    require(phase in {'full', 'normal', 'media'}, 'unsupported owned candidate phase')
+    required = {'full':11, 'normal':10, 'media':4}[phase]
     require(selection["format"] == "meguri-sync-selection-v1"
             and selection["lane_kind"] == "candidate" and selection["phase"] == phase,
             "invalid fixed selection")

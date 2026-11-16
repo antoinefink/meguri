@@ -10,7 +10,7 @@ mg_job sync-server-format docker:dev mg_sync_server_format \
 mg_job sync-server-candidate-build host mg_sync_server_candidate_build \
   "Clean committed candidate build in Docker: --lane desktop --phase full --author-session <recorded-id>"
 mg_job sync-server-interop host mg_sync_server_interop \
-  "Owned isolated loopback candidate: --lane desktop --phase <full|normal> --build-receipt <result.json> --author-session <recorded-id>; no fallback"
+  "Owned isolated loopback candidate: --lane desktop --phase <full|normal|media> --build-receipt <result.json> --author-session <recorded-id>; no fallback"
 
 # One source-input definition for production freeze and execution revalidation.
 mg_sync_server__archive() {
@@ -221,11 +221,11 @@ mg_sync_server_candidate_build() {
 
 mg_sync_server_interop() {
   if [ "$#" -ne 8 ] || [ "$1" != --lane ] || [ "$2" != desktop ] || [ "$3" != --phase ] || [ "$5" != --build-receipt ] || [ ! -f "$6" ] || [ "$7" != --author-session ] || [ -z "$8" ]; then
-    mg_failure usage "sync-server-interop --lane desktop --phase <full|normal> --build-receipt <result.json> --author-session <recorded-id>"; mg_status error; return 0
+    mg_failure usage "sync-server-interop --lane desktop --phase <full|normal|media> --build-receipt <result.json> --author-session <recorded-id>"; mg_status error; return 0
   fi
   mg_sync_server__author_session "$8" || { mg_status fail; return 0; }
-  if [ "$4" != full ] && [ "$4" != normal ]; then
-    mg_failure candidate-phase "Only Desktop full and normal are supported; complete coverage is unavailable"; mg_status error; return 0
+  if [ "$4" != full ] && [ "$4" != normal ] && [ "$4" != media ]; then
+    mg_failure candidate-phase "Only Desktop full, normal and media are supported; complete coverage is unavailable"; mg_status error; return 0
   fi
   case "$(mg_session_role)" in
     implementer|fixer) mg_failure role-refused "Candidate reference execution requires an integration session"; mg_status fail; return 0 ;;
@@ -360,8 +360,13 @@ mg_sync_server__interop_exchange() {
   printf '%s\n' "$server" | jq -e --arg hash "$hash" '.executable_sha256==$hash' >/dev/null || return 1
   mg_sync_server__clean || return 1
   [ "$(git -C "$MG_ROOT" rev-parse HEAD)" = "$commit" ] || return 1
-  local expected=11
-  [ "$(jq -r '.[3]' <<<"$arguments")" != normal ] || expected=10
+  local expected
+  case "$(jq -r '.[3]' <<<"$arguments")" in
+    full) expected=11 ;;
+    normal) expected=10 ;;
+    media) expected=4 ;;
+    *) mg_failure candidate-phase "Unknown owned candidate execution phase"; return 1 ;;
+  esac
   jq -se --argjson expected "$expected" 'add | .total==$expected and .passed==$expected and .failed==0' "$MG_STATE/counts.jsonl" >/dev/null || return 1
   jq -se 'add | (.reference_invocation|type)=="object" and (.reference_evidence|type)=="object"' "$MG_STATE/details.jsonl" >/dev/null || return 1
 }
@@ -384,7 +389,7 @@ mg_sync_server__reference_identity() {
 mg_sync_server_candidate_client() {
   local cid="$1" input="$2" credentials="$3" output="$4" server="$5" arguments="$6" author_session="$7"
   local identity identity_after image uid gid client_rc=0 validation_rc=0 output_rc=0 report counts phase
-  phase="$(jq -er '.[3] | select(.=="full" or .=="normal")' <<<"$arguments")" || return 1
+  phase="$(jq -er '.[3] | select(.=="full" or .=="normal" or .=="media")' <<<"$arguments")" || return 1
   local validation="$MG_RUN_DIR/validation" client_name="meguri-candidate-client-$MG_RUN_ID" validation_name="meguri-candidate-validation-$MG_RUN_ID" owner
   mg_sync_server__author_session "$author_session" || return 1
   mg_detail candidate_compatibility_credit false

@@ -615,6 +615,13 @@ PY
     args+=(--author-session producer-fixture)
     candidate_shell "$job" "${args[@]}"
     [[ "$output" == *fixture-before-runtime* ]] && [[ "$output" != *usage* ]]
+    args[3]=media
+    candidate_shell "$job" "${args[@]}"
+    if [ "$job" = mg_sync_server_interop ]; then
+      [[ "$output" == *fixture-before-runtime* ]] && [[ "$output" != *candidate-phase* ]]
+    else
+      [[ "$output" == *candidate-phase* ]] && [[ "$output" == *status:error* ]]
+    fi
     # Change only the phase; preserve the valid producer and every receipt operand.
     args[3]=complete
     candidate_shell "$job" "${args[@]}"
@@ -706,19 +713,24 @@ PY
   done
 }
 
-@test "sync-server: normal candidate counts and phase stay bound to its selected contract" {
-  candidate_output_fixture normal
-  candidate_output_check
-  [ "$status" -eq 0 ]
-  jq -e '.errors==[] and .summary.total==10 and (.invocation.selection|length)==10' <<<"$output"
-  candidate_mutate "summary['completed_case_count']=9"
-  candidate_output_check
-  [ "$status" -ne 0 ]
-  candidate_output_fixture normal
-  candidate_mutate "expected=json.loads((base/'expected.json').read_text()); expected['arguments'][3]='full'; (base/'expected.json').write_text(json.dumps(expected)); invocation['arguments'][3]='full'; evidence['arguments'][3]='full'"
-  candidate_output_check
-  [ "$status" -ne 0 ]
-  jq -e '.errors==["invalid fixed selection"]' <<<"$output"
+@test "sync-server: normal and media candidate counts and phases stay bound to their selected contracts" {
+  local phase count
+  for phase in normal media; do
+    count=10
+    [ "$phase" != media ] || count=4
+    candidate_output_fixture "$phase"
+    candidate_output_check
+    [ "$status" -eq 0 ]
+    jq -e --argjson n "$count" '.errors==[] and .summary.total==$n and (.invocation.selection|length)==$n' <<<"$output"
+    candidate_mutate "summary['completed_case_count']=$((count - 1))"
+    candidate_output_check
+    [ "$status" -ne 0 ]
+    candidate_output_fixture "$phase"
+    candidate_mutate "expected=json.loads((base/'expected.json').read_text()); expected['arguments'][3]='full'; (base/'expected.json').write_text(json.dumps(expected)); invocation['arguments'][3]='full'; evidence['arguments'][3]='full'"
+    candidate_output_check
+    [ "$status" -ne 0 ]
+    jq -e '.errors==["invalid fixed selection"]' <<<"$output"
+  done
 }
 
 @test "sync-server: candidate executable binds expected final and optional evidence identities" {
@@ -964,7 +976,16 @@ sync_owned_fixture() {
   # Real EXIT hooks run after this function returns; keep their fixture state
   # in the owning job shell rather than in this function's dynamic scope.
   fixture_shell="$BASH_SUBSHELL" fixture_mode="$1" fixture_receipt="$2"
-  if ! mg_sync_server__interop_owned "$fixture_receipt" '[]' producer-fixture; then mg_status fail; fi
+  fixture_phase=full fixture_count=11
+  case "$fixture_mode" in
+    normal) fixture_phase=normal; fixture_count=10 ;;
+    media) fixture_phase=media; fixture_count=4 ;;
+    unknown) fixture_phase=unknown ;;
+    wrong-count) fixture_phase=media ;;
+  esac
+  local arguments
+  arguments="$(mg_json_array --lane desktop --phase "$fixture_phase" --build-receipt "$fixture_receipt" --author-session producer-fixture)"
+  if ! mg_sync_server__interop_owned "$fixture_receipt" "$arguments" producer-fixture; then mg_status fail; fi
   mg_detail fixture_hooks "${#MG_EXIT_CMDS[@]}"
   printf 'returned\n' >>"$MG_RUN_DIR/events"
 }
@@ -979,7 +1000,7 @@ mg_sync_server_candidate_client() {
     mg_on_exit "$(printf '%q ' mg_sync_server__remove_container "$name" "$owner")"
     docker create --name "$name" --label "meguri.sync.owner=$owner" >/dev/null || return 1
   done
-  mg_count total 11; mg_count passed 11; mg_count failed 0
+  mg_count total "$fixture_count"; mg_count passed "$fixture_count"; mg_count failed 0
   mg_detail reference_invocation '{}'; mg_detail reference_evidence '{}'
 }
 docker() {
@@ -1045,12 +1066,15 @@ SH
   git -C "$SB" -c user.name=selftest -c user.email=selftest@localhost commit -qm 'synthetic owned job'
   candidate_build_fixture
   local mode run_dir cleanup_shell remaining
-  for mode in pass candidate client validation; do
+  for mode in pass normal media unknown wrong-count candidate client validation; do
     run --separate-stderr "$SB/tools/mg" sync-owned-fixture "$mode" "$CANDIDATE_BUILD/result.json"
     result="${lines[${#lines[@]} - 1]:-}"
-    if [ "$mode" = pass ]; then
+    if [ "$mode" = pass ] || [ "$mode" = normal ] || [ "$mode" = media ]; then
       [ "$status" -eq 0 ]; [ "$(field .status)" = pass ]
       [ "$(field '.failures | length')" -eq 0 ]
+    elif [ "$mode" = unknown ] || [ "$mode" = wrong-count ]; then
+      [ "$status" -eq 1 ]; [ "$(field .status)" = fail ]
+      jq -e 'any(.failures[]; .id=="candidate-interop")' "$result"
     else
       [ "$status" -eq 1 ]; [ "$(field .status)" = fail ]
       jq -e 'any(.failures[]; .id=="candidate-cleanup")' "$result"

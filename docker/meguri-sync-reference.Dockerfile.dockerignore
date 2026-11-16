@@ -11,6 +11,7 @@
 !conformance/fixtures/meguri-sync-server/
 !conformance/fixtures/meguri-sync-server/original.json
 !conformance/fixtures/meguri-sync-server/edges.json
+!conformance/fixtures/meguri-sync-server/media.json
 !conformance/recordings/
 !conformance/recordings/scenarios/
 !conformance/recordings/scenarios/meguri-sync-server/
@@ -18,4 +19,6 @@
 !conformance/recordings/scenarios/meguri-sync-server/desktop-edge-selection.json
 !conformance/recordings/scenarios/meguri-sync-server/candidate-full-selection.json
 !conformance/recordings/scenarios/meguri-sync-server/candidate-normal-selection.json
+!conformance/recordings/scenarios/meguri-sync-server/candidate-media-selection.json
+!conformance/recordings/scenarios/meguri-sync-server/desktop-media-selection.json
 !conformance/recordings/scenarios/meguri-sync-server/candidate-complete-selection.json

@@ -136,6 +136,7 @@ class Recorder(http.server.ThreadingHTTPServer):
         self.upstream = upstream
         self.observations = []
         self.capture_normal = False
+        self.capture_media = False
         self.errors = []
         self.empty_sk = False
         self.rewrite_session = None
@@ -183,6 +184,8 @@ class RecorderHandler(http.server.BaseHTTPRequestHandler):
                 detail["no_argument_body"] = json.loads(decoded)
             if self.path.startswith('/msync/') and not self.path.endswith('/uploadChanges'):
                 detail['media_request_members'] = sorted(json.loads(decoded))
+                if self.server.capture_media:
+                    detail['media_request'] = json.loads(decoded)
             if self.path.endswith("/upload"):
                 detail['upload_stamp'] = file_stamp(decoded)
             if self.path == '/sync/chunk' and self.server.idle_seconds and not self.server.idle_claimed:
@@ -593,6 +596,9 @@ if __name__ == "__main__":
         elif request['mode'] == 'normal-matrix':
             import normal_matrix
             result = normal_matrix.run(sys.modules[__name__],request['fixture'])
+        elif request['mode'] == 'media':
+            import media
+            result = media.run(sys.modules[__name__],request['fixture'])
         elif request['mode'] in {'normal','normal-sdk'}:
             import normal
             result = normal.exact_numbers(normal.run(sys.modules[__name__],request['fixture'],sdk_only=request['mode'] == 'normal-sdk'))
@@ -600,8 +606,11 @@ if __name__ == "__main__":
             require(isinstance(request.get('target'),dict),'candidate target missing')
             require(request['target'].get('server',{}).get('kind') == 'meguri_sync','candidate peer kind mismatch')
             require(type(request.get('full_only')) is bool,'candidate phase is malformed')
-            require(request.get('phase') in {'full','normal','complete'},'candidate phase is unknown')
-            if request['phase'] == 'normal':
+            require(request.get('phase') in {'full','normal','media','complete'},'candidate phase is unknown')
+            if request['phase'] == 'media':
+                import media
+                result = media.run(sys.modules[__name__],request['fixture'],request['target'])
+            elif request['phase'] == 'normal':
                 import normal
                 result = normal.exact_numbers(normal.run(sys.modules[__name__],request['fixture'],request['target'],sdk_only=True))
             else:

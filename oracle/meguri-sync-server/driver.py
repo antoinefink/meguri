@@ -14,12 +14,13 @@ from evidence import record, selection, edge_selection, candidate_selection
 from request import check_request
 from normal import NORMAL_FIXTURE, normal_selection
 from normal_matrix import MATRIX_FIXTURE, matrix_selection
+from media import MEDIA_FIXTURE, media_selection
 
 
 def adapter(request):
     process = subprocess.run([sys.executable, str(pathlib.Path(__file__).with_name("adapter.py"))],
                              input=encoded(request), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                             timeout=600 if request['mode'] == 'edges' else 120)
+                             timeout=600 if request['mode'] == 'edges' or request.get('phase') == 'media' or request['mode'] == 'media' else 120)
     if process.returncode != 0:
         failure = decode(process.stdout).get('failure', {}) if process.stdout else {}
         print('SDK phase failure: ' + str(failure.get('phase', 'unknown')) + ' (' + str(failure.get('kind', 'worker-exit')) + ')', file=sys.stderr)
@@ -44,17 +45,18 @@ class PrivateResult(unittest.TextTestResult):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=["selftest", "identity", "smoke", "edges", "normal", "normal-sdk", "normal-matrix", "candidate", "catalog", "validate", "seal"])
+    parser.add_argument("mode", choices=["selftest", "identity", "smoke", "edges", "normal", "normal-sdk", "normal-matrix", "media", "candidate", "catalog", "validate", "seal"])
     parser.add_argument('--request')
     parser.add_argument('--input')
     parser.add_argument('--credentials')
-    parser.add_argument('--phase',choices=['full','normal','complete'],default='full')
+    parser.add_argument('--phase',choices=['full','normal','media','complete'],default='full')
     args = parser.parse_args()
     out = pathlib.Path('/out')
     if args.mode != 'catalog':
         neutral = pathlib.Path('/opt/reference/neutral')
         for name, expected in [('catalog.json',catalog()),('selection.json',selection()),('fixture.json',FIXTURE),
                                ('edge-selection.json',edge_selection()),('edge-fixture.json',EDGE_FIXTURE),
+                               ('candidate-media-selection.json',candidate_selection('media')),('media-selection.json',media_selection()),('media-fixture.json',MEDIA_FIXTURE),
                                ('candidate-full-selection.json',candidate_selection('full')),('candidate-normal-selection.json',candidate_selection('normal')),('candidate-complete-selection.json',candidate_selection('complete'))]:
             require(same_value(decode((neutral / name).read_bytes()), expected), 'generated neutral input is stale')
     if args.mode == "selftest":
@@ -75,6 +77,9 @@ def main():
         (out / 'candidate-full-selection.json').write_bytes(encoded(candidate_selection('full')))
         (out / 'candidate-normal-selection.json').write_bytes(encoded(candidate_selection('normal')))
         (out / 'candidate-complete-selection.json').write_bytes(encoded(candidate_selection('complete')))
+        (out / 'candidate-media-selection.json').write_bytes(encoded(candidate_selection('media')))
+        (out / 'media-selection.json').write_bytes(encoded(media_selection()))
+        (out / 'media-fixture.json').write_bytes(encoded(MEDIA_FIXTURE))
         (out / 'fixture.json').write_bytes(encoded(FIXTURE))
         (out / 'summary.json').write_bytes(encoded({"total": 0, "passed": 0, "failed": 0, 'catalog_cases': value['required_case_count']}))
         return 0
@@ -85,6 +90,12 @@ def main():
     if args.mode == 'normal-matrix':
         value = adapter({'mode':'normal-matrix','fixture':MATRIX_FIXTURE})
         (out / 'matrix-observations.json').write_bytes(encoded(value))
+        invocation = decode((out / 'invocation.json').read_bytes())
+        require(value['runtime']['lock_sha256'] == invocation['lock_sha256'], 'runtime lock receipt mismatch')
+        return 0 if record(value,out,invocation) else 1
+    if args.mode == 'media':
+        value = adapter({'mode':'media','fixture':MEDIA_FIXTURE})
+        (out / 'media-observations.json').write_bytes(encoded(value))
         invocation = decode((out / 'invocation.json').read_bytes())
         require(value['runtime']['lock_sha256'] == invocation['lock_sha256'], 'runtime lock receipt mismatch')
         return 0 if record(value,out,invocation) else 1
@@ -106,7 +117,7 @@ def main():
         invocation = decode((out / 'invocation.json').read_bytes())
         package,inputs,credentials = load_inputs('/in',args.credentials,invocation)
         target = {**credentials,'server':package['server']}
-        value = adapter({'mode':'candidate','fixture':NORMAL_FIXTURE if args.phase == 'normal' else FIXTURE,'target':target,'phase':args.phase,'full_only':args.phase == 'full'})
+        value = adapter({'mode':'candidate','fixture':MEDIA_FIXTURE if args.phase == 'media' else NORMAL_FIXTURE if args.phase == 'normal' else FIXTURE,'target':target,'phase':args.phase,'full_only':args.phase == 'full'})
         (out / 'candidate-observations.json').write_bytes(encoded(value))
         return 0 if record(value,out,invocation,package,inputs) else 1
     if args.mode == 'smoke':

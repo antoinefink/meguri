@@ -845,7 +845,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/collection/changes.rs':
         '83f506e218e17d7c878c5381110c76277d3c64e767eb8a3da299d50c81a92b33',
     'tools/gate/tiers.yaml':
-        'fcfa6d998a75c1c62cb4a33766dbd0c60cd1d80793d25d42db337efbfd0c0539',
+        '7d25001cc4ca9ee9ef630a1f63bcc29fb653a2ec5913c973605427d397410f6e',
     'tools/mg.d/sync-web.sh':
         '278ad9f6f50691f5e8447189d248404a016bf626fe4c51974ebd3b1e27f8a22b',
     'server/web/upstream-records.json':
@@ -877,6 +877,14 @@ PUBLIC_ARTIFACTS = {
         'ec667ccfd6cd9e7782a3c555e78cf8e31b4db721e0e7b4d5a9f230e3a3da3763',
     'oracle/meguri-sync-server/normal_matrix.py':
         '5f98f7d6db36d70d9a9f78fd224540fe58230e13eeea2f38b22f52bfba0e8644',
+    'conformance/fixtures/meguri-sync-server/media.json':
+        '1f87dc5efcf2521dec86a843bbe041f791f4de283234ac6933c4a4911ce8e97d',
+    'conformance/recordings/scenarios/meguri-sync-server/desktop-media-selection.json':
+        '42620ebc2d79e113d89b1e85d98ce598803618191ae8585ed1f0f6b4b8b6c0d9',
+    'oracle/meguri-sync-server/media.py':
+        'a75f35b5d4adda3f222ba61a56fa33ae6ef6000572a7c0b2e85413e85a3f4b62',
+    'oracle/meguri-sync-server/tests/test_media.py':
+        'c819a65c159e28a1fe70ae3436e94d909e9a008320210f476114bf8a9c83697d',
     PUBLIC_NOTICE_PATH: PUBLIC_NOTICE_SHA256,
     "specs/licenses/jquery-3.7.1-LICENSE.txt": "d4db9ebe6f29f5168eac45ad713f055623ac5d0dcd5ba92da23d650ae012020d",
     "app/Packages/MeguriKit/Sources/CardRendering/Resources/CardRuntime/vendor/jquery-3.7.1.min.js":
@@ -897,7 +905,7 @@ PUBLIC_ARTIFACTS = {
     "specs/servers/meguri-sync-web.md":
         '416530b250c2dd1868f67fe30df9798dbaac586a1d5747baf603f87e00463d99',
     "specs/conformance/meguri-sync-server.md":
-        "48052e8afb0a458947e4a7e72340b448a478bf39db758e44ae6773aca605c7b4",
+        "3918ed16b36b74ccec6d2f609b4baf939f96fb8881d67a405d30f703b3ed5c09",
     "conformance/schema/meguri-sync-server.schema.json":
         "cd905c134ed497f166566e18733465fa7e992156944957ee16c2e17ca586814a",
     # Same delegated maintenance: independently authored/reviewed tooling,
@@ -925,19 +933,19 @@ PUBLIC_ARTIFACTS = {
     'oracle/meguri-sync-server/AGENTS.md':
         'bdc60a465c52a548391469c7febb82de6c6a88c69f0a24329ae5bd31c260071f',
     'oracle/meguri-sync-server/adapter.py':
-        'd720f7d3a6f93ad06dca1a09fd2c67097826194ba7d593fbc1b3d1035e6f35fa',
+        '208344b64c3ee717e1e9b03b61ec38460a38fbc8e2991d0cbd2187aa87e3b9e1',
     'oracle/meguri-sync-server/audit_deps.py':
         '09ba79e0545fb91e5a2c653e93c75e6fa4a55734d52e54a70479ae8e8d55d151',
     'oracle/meguri-sync-server/catalog.py':
         'da44186c8ee85f1ef77b3ff2584e0adce209cc4cfb9a5ee1eb557ad5d9a0068f',
     'oracle/meguri-sync-server/evidence.py':
-        '59d44406b25d85416ead15a71281568ad42c9afcfd3ce5115af224c9473737cf',
+        '02ef7a399310c04badd52066b03e7d74469fe6a94d65d333866e6d1b3d3577e9',
     'oracle/meguri-sync-server/tests/test_validation.py':
         'e7bdbef81fb4b34a1b569b6fa4c186801e1c32904b3813d9e8c011e608a90dfd',
     'oracle/meguri-sync-server/validation.py':
         '462a83ed4bb835e8f9b7446b214682531b5f29fcec1cc4476c26d18adda4af76',
     'tools/mg.d/meguri-sync-reference.sh':
-        '6525b80738fb1cbceccba7d07a0db4424b709ca33251c694ed07c31bbb4fb28e',
+        '03500c853def084399187d6c9da618b2662e3a22ec77215be0f05df67cfd246f',
 
     'docs/process/review-log/meguri-sync-reference-privacy.md':
         '4ef0a4f96b31e513f73415ac2160a9ce14e335fbd9cc841ddbe4ed2159e643a8',
@@ -996,15 +1004,15 @@ PUBLIC_ARTIFACTS = {
     'server/src/storage/root.rs':
         'dd59a110b203632166f301573d6435be1c40fd0c68a40abdbfa6448e6ae65037',
     'server/tools/candidate-output.py':
-        '6edb3832518cb59d50f2ad44084338d473614455acae7cc80500c8c630fd4a84',
+        '4f0e092bdb45811046defae71b0c822d97b1994311e9cda2f3489a7c1b355763',
     'docs/process/review-log/meguri-sync-U5.md':
         'ab6cf8f924d526320f0fcc9479944ce81a70264fc699472051b1a451f3c68f96',
 
     'tools/mg.d/meguri-sync.sh':
-        '02b0c98af604a27b8aad7b5171607d31079a5bcc271c5c5a62fe779ef7acd86d',
+        '56e47f8fcebc5f8eaebb561f21a529ab04d63b83743272f22b5eb1593e1d2526',
 
     'tools/tests/sync_server.bats':
-        'c16383d969e8ce377015ead96d5423d27e16e4f5fe54c4f5936d3bdc7320441d',
+        '6c0ad95ca4dafd841dc7dd5bc239dd810b11758a413f0b5219de28e89abda470',
 
     'oracle/meguri-sync-server/normal.py':
         'cb9e7dd7bd2d4ee03f98cc38ea31b7d8881f77e80074b57dc8a87caba1018196',

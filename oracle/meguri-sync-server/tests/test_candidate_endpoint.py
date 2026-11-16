@@ -8,6 +8,7 @@ import unittest
 
 from synthetic import FIXTURE
 from normal import NORMAL_FIXTURE
+from media import MEDIA_FIXTURE
 from validation import decode, encoded
 from adapter import file_stamp
 
@@ -31,7 +32,8 @@ class CandidateEndpoint(unittest.TestCase):
 
     def test_missing_candidate_never_starts_a_reference_fallback(self):
         for phase,fixture,failure_phase in [('full',FIXTURE,'native-login'),
-                                             ('normal',NORMAL_FIXTURE,'normal-sdk')]:
+                                             ('normal',NORMAL_FIXTURE,'normal-sdk'),
+                                             ('media',MEDIA_FIXTURE,'media-sdk-setup')]:
             with self.subTest(phase=phase):
                 request = {'mode':'candidate','fixture':fixture,'full_only':phase == 'full','phase':phase,
                            'target':{'username':'synthetic','password':'unreachable-only','server':{'kind':'meguri_sync','version':'test','build':'test'}}}

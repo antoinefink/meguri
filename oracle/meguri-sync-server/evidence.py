@@ -9,6 +9,7 @@ from validation import Artifacts, binding, decode, encoded, require, same_value,
 from synthetic import FIXTURE, EDGE_FIXTURE
 from normal import NORMAL_FIXTURE, normal_selection
 from normal_matrix import MATRIX_FIXTURE, matrix_selection
+from media import MEDIA_FIXTURE, media_selection
 
 
 def selection():
@@ -101,8 +102,8 @@ def edge_selection():
 
 
 def candidate_selection(phase):
-    require(phase in {'full','normal','complete'},'unknown candidate phase')
-    contract = copy.deepcopy(normal_selection(sdk_only=True) if phase == 'normal' else selection())
+    require(phase in {'full','normal','media','complete'},'unknown candidate phase')
+    contract = copy.deepcopy(media_selection() if phase == 'media' else normal_selection(sdk_only=True) if phase == 'normal' else selection())
     contract['lane_kind'] = 'candidate'
     contract['phase'] = phase
     contract['scope'] = 'Actual Desktop against the verified job-owned candidate; intermediate build interoperability only, not production package acceptance.'
@@ -195,6 +196,7 @@ def observations(result):
 
 def record(result, out, invocation, package=None, input_store=None):
     if result.get('probe_kind') == 'candidate': contract = candidate_selection(result['phase'])
+    elif result.get('probe_kind') == 'media': contract = media_selection()
     else: contract = matrix_selection() if result.get('probe_kind') == 'normal-matrix' else normal_selection(sdk_only=result.get('probe_kind') == 'normal-sdk') if result.get('probe_kind') in {'normal','normal-sdk'} else edge_selection() if result.get('probe_kind') == 'edges' else selection()
     store = Artifacts(out / 'artifacts')
     package_hash = None
@@ -202,14 +204,17 @@ def record(result, out, invocation, package=None, input_store=None):
         for key in ('executable_artifact_sha256','lock_artifact_sha256','mg_build_receipt_sha256','execution_binding_sha256'):
             store.put(input_store.read(package[key]))
         package_hash = store.put_json(package)
-    expected_fixture = MATRIX_FIXTURE if result.get('probe_kind') == 'normal-matrix' else NORMAL_FIXTURE if 'normal_results' in result and result.get('probe_kind') != 'normal-matrix' else EDGE_FIXTURE if result.get('probe_kind') == 'edges' else FIXTURE
+    expected_fixture = MEDIA_FIXTURE if 'media_results' in result else MATRIX_FIXTURE if result.get('probe_kind') == 'normal-matrix' else NORMAL_FIXTURE if 'normal_results' in result and result.get('probe_kind') != 'normal-matrix' else EDGE_FIXTURE if result.get('probe_kind') == 'edges' else FIXTURE
     require(same_value(result['fixture'],expected_fixture),'returned fixture differs from the supplied original input')
     fixture_bytes = encoded(expected_fixture)
     fixture_input = store.put(fixture_bytes)
     fixture_manifest = {'format': 'meguri-sync-fixtures-v1', 'entries': [{'sha256': fixture_input, 'bytes': len(fixture_bytes), 'kind': 'original-synthetic-json'}]}
     fixture_hash = store.put_json(fixture_manifest)
     runtime_hash = store.put_json(result['runtime'])
-    actual = {(row['family'],row['variants'][0]):result['normal_results'][row['variants'][0]] for row in contract['cases']} if 'normal_results' in result else edge_observations(result) if result.get('probe_kind') == 'edges' else observations(result)
+    if 'media_results' in result:
+        actual = {(row['family'],row['variants'][0]):result['media_results'][row['variants'][0]] for row in contract['cases']}
+    else:
+        actual = {(row['family'],row['variants'][0]):result['normal_results'][row['variants'][0]] for row in contract['cases']} if 'normal_results' in result else edge_observations(result) if result.get('probe_kind') == 'edges' else observations(result)
     invocation['selection'] = [row['id'] for row in contract['cases']]
     manifest = {key: copy.deepcopy(invocation[key]) for key in ('source_commit','batch_base','source_sha256','lock_sha256','mg_job','arguments')}
     if package is not None: manifest['executable_sha256'] = package['server']['executable_sha256']
@@ -260,6 +265,7 @@ def validate_existing(source, out, current, trusted_runtime, seal):
     invocation_path = source / 'execution-invocation.json'
     invocation = decode((invocation_path if invocation_path.exists() else source / 'invocation.json').read_bytes())
     if contract['lane_kind'] == 'candidate': expected_contract = candidate_selection(contract['phase'])
+    elif invocation['arguments'][0] == 'media': expected_contract = media_selection()
     else: expected_contract = matrix_selection() if invocation['arguments'][0] == 'normal-matrix' else normal_selection(sdk_only=invocation['arguments'][0] == 'normal-sdk') if invocation['arguments'][0] in {'normal','normal-sdk'} else edge_selection() if invocation['arguments'][0] == 'edges' else selection()
     require(same_value(contract, expected_contract), 'retained selection differs from the executable contract')
     require(current['source_sha256'] == manifest['source_sha256'] and current['lock_sha256'] == manifest['lock_sha256'], 'retained evidence source bytes are stale')
