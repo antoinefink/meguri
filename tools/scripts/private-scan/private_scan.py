@@ -828,6 +828,20 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'server/Dockerfile':
+        'c5d46b5339c6a793d9e6c97360ffcc9dfe3398d0a013d80451076238e599f5e6',
+    'server/README.md':
+        'f66656dd11a23cca25a8ed744d4325392392f355990ca26071cd11da87f7e6be',
+    'server/compose.yaml':
+        '03737d36cd35810513c04e39a193b707e14228ca997e116ca93557c09e7a0d9b',
+    'server/tools/package-context.py':
+        '84db291e6ba4b27dbc5bfef38dc01434342cd4d06016e901ae544c212fd55724',
+    'tools/mg.d/sync-package.sh':
+        '2c837c48fcb99ce67cdafce572fa19a52010befa379624630111478ae31132f6',
+    'tools/tests/sync_package.bats':
+        'a8a9f046c1f5f7aa9fc9b55c04a43d60eff2d631136ab3f4133b1c8dbee22514',
+    'tools/tests/sync_package_context_test.py':
+        '8d8d511920aaecc53c7ac0801ebb013955fea587fef03c64dc4d0fad1ebda3f3',
     # Independently reviewed public Docker lifecycle tooling, exact bytes.
     'tools/mg.d/conformance-admission.py':
         '7fe260aa7857773c6f472037929f9f6f3a5fe7f2d1eb2eda722238942f1bf7ae',
@@ -850,7 +864,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/collection/changes.rs':
         '83f506e218e17d7c878c5381110c76277d3c64e767eb8a3da299d50c81a92b33',
     'tools/gate/tiers.yaml':
-        '7d25001cc4ca9ee9ef630a1f63bcc29fb653a2ec5913c973605427d397410f6e',
+        'd63c27f6b8673ba9581c433695f3f35154d25a4f19e482a1aa846b7b22be9028',
     'tools/mg.d/sync-web.sh':
         '278ad9f6f50691f5e8447189d248404a016bf626fe4c51974ebd3b1e27f8a22b',
     'server/web/upstream-records.json':
@@ -860,7 +874,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/src/app.tsx':
         '4e3224e691b9887c4e5aa8dee485118fb5308e20b15d15ccb0d885cb0915e8fd',
     'server/web/scripts/run.sh':
-        '02636655a6eaace0500e9804a520fa6ff269b1f361ad55cbc0eff30bca34e6ce',
+        'ffb7660f0da45f44125a20d1ce2888094e80810cade350714c537eb9f52d67d3',
     'server/web/package-lock.json':
         'f2f38f36f9f092dec3723f3425047d2f10f4fb32b7c411242c2b1b32c6a1a2f4',
     'server/web/notices/rolldown-THIRD-PARTY-LICENSE.txt':
@@ -893,7 +907,7 @@ PUBLIC_ARTIFACTS = {
         '2cfc1f7c8eb2399bf6bc2e8d77274682dd00563b2c467d15d17eb29956feee03',
     # Independently classified original public session metadata, exact bytes.
     'docs/process/provenance/sessions.jsonl':
-        '1134a229cd83506fbc3405017f11401493b74e2475556438546030adca86fb46',
+        'bc16fb2b8eeee72fbff8c1641f21a379c61bcc0f52a8e6d24cbcceef8bd8e062',
     'conformance/fixtures/meguri-sync-server/observations/desktop-26.09.4-normal-matrix.json':
         '8a4e17346939516eda8b5b650203444693fb32e2173f4d6741242b4089da04eb',
     'specs/sync/server-desktop-current.md':
