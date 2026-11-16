@@ -3,12 +3,28 @@
 REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
 
 @test "recovery neutral inputs affect the reference digest" {
-  local sandbox="$BATS_TEST_TMPDIR/recovery-inputs" path before after_fixture after_selection
+  local sandbox="$BATS_TEST_TMPDIR/recovery-inputs" path before after_fixture after_selection after_dirty_fixture after_dirty_selection
   mkdir -p "$sandbox"
-  while IFS= read -r path; do
+  # Copy the digest inputs from the working tree without requiring Git metadata.
+  for path in oracle/meguri-sync-server docker/meguri-sync-reference.Dockerfile \
+    docker/meguri-sync-reference.Dockerfile.dockerignore docker/meguri-sync-reference.compose.yml \
+    tools/mg.d/meguri-sync-reference.sh conformance/schema/meguri-sync-server.schema.json \
+    conformance/catalog/meguri-sync-server.json conformance/fixtures/meguri-sync-server/original.json \
+    conformance/recordings/scenarios/meguri-sync-server/desktop-selection.json \
+    conformance/fixtures/meguri-sync-server/edges.json conformance/recordings/scenarios/meguri-sync-server/desktop-edge-selection.json \
+    conformance/recordings/scenarios/meguri-sync-server/candidate-normal-selection.json \
+    conformance/recordings/scenarios/meguri-sync-server/candidate-media-selection.json \
+    conformance/recordings/scenarios/meguri-sync-server/desktop-media-selection.json \
+    conformance/fixtures/meguri-sync-server/media.json \
+    conformance/fixtures/meguri-sync-server/recovery.json \
+    conformance/fixtures/meguri-sync-server/recovery-dirty.json \
+    conformance/recordings/scenarios/meguri-sync-server/desktop-recovery-dirty-selection.json \
+    conformance/recordings/scenarios/meguri-sync-server/desktop-recovery-selection.json \
+    conformance/recordings/scenarios/meguri-sync-server/candidate-full-selection.json \
+    conformance/recordings/scenarios/meguri-sync-server/candidate-complete-selection.json; do
     mkdir -p "$sandbox/$(dirname "$path")"
-    cp "$REPO_ROOT/$path" "$sandbox/$path"
-  done < <(git -C "$REPO_ROOT" ls-files -- oracle/meguri-sync-server docker/meguri-sync-reference.Dockerfile docker/meguri-sync-reference.Dockerfile.dockerignore docker/meguri-sync-reference.compose.yml tools/mg.d/meguri-sync-reference.sh conformance/schema/meguri-sync-server.schema.json conformance/catalog/meguri-sync-server.json conformance/fixtures/meguri-sync-server conformance/recordings/scenarios/meguri-sync-server)
+    cp -R "$REPO_ROOT/$path" "$sandbox/$path"
+  done
   # The host helper uses macOS tools; the dev image supplies equivalent primitives.
   rg() { [ "$1" = --files ]; shift; find "$@" -type f; }
   shasum() { [ "$1" = -a ] && [ "$2" = 256 ]; shift 2; sha256sum "$@"; }
@@ -22,4 +38,10 @@ REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   printf '\n' >>"$sandbox/conformance/recordings/scenarios/meguri-sync-server/desktop-recovery-selection.json"
   after_selection="$(mg_sync_reference_digest)"
   [ "$after_fixture" != "$after_selection" ]
+  printf '\n' >>"$sandbox/conformance/fixtures/meguri-sync-server/recovery-dirty.json"
+  after_dirty_fixture="$(mg_sync_reference_digest)"
+  [ "$after_selection" != "$after_dirty_fixture" ]
+  printf '\n' >>"$sandbox/conformance/recordings/scenarios/meguri-sync-server/desktop-recovery-dirty-selection.json"
+  after_dirty_selection="$(mg_sync_reference_digest)"
+  [ "$after_dirty_fixture" != "$after_dirty_selection" ]
 }

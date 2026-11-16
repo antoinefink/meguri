@@ -20,6 +20,8 @@ COPY conformance/fixtures/meguri-sync-server/media.json /opt/reference/neutral/m
 COPY conformance/recordings/scenarios/meguri-sync-server/candidate-complete-selection.json /opt/reference/neutral/candidate-complete-selection.json
 COPY conformance/fixtures/meguri-sync-server/recovery.json /opt/reference/neutral/recovery-fixture.json
 COPY conformance/recordings/scenarios/meguri-sync-server/desktop-recovery-selection.json /opt/reference/neutral/recovery-selection.json
+COPY conformance/fixtures/meguri-sync-server/recovery-dirty.json /opt/reference/neutral/recovery-dirty-fixture.json
+COPY conformance/recordings/scenarios/meguri-sync-server/desktop-recovery-dirty-selection.json /opt/reference/neutral/recovery-dirty-selection.json
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TMPDIR=/scratch TZ=UTC
 WORKDIR /scratch
 USER 10001:10001

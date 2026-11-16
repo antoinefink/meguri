@@ -592,6 +592,9 @@ if __name__ == "__main__":
     try:
         request = json.loads(sys.stdin.buffer.read())
         if request['mode'] == 'identity': result = runtime()
+        elif request['mode'] == 'recovery-dirty':
+            import recovery_dirty
+            result = recovery_dirty.run(sys.modules[__name__],request['fixture'])
         elif request['mode'] == 'recovery':
             import recovery
             result = recovery.run(sys.modules[__name__],request['fixture'])

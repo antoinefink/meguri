@@ -159,3 +159,13 @@ It measures ahead, equal/reused and delayed/overtaken media histories after cont
 Each case exercises renewed authentication, an explicit authoritative collection download and a public media reset followed by SDK sync.
 The exact collection semantics, offline-review exclusion and media hashes must match; counts and successful HTTP are insufficient.
 These selected reference facts do not satisfy C8's candidate-only P-R01/P-R03, Desktop GUI controls or Mobile obligations.
+
+
+### Selected dirty offline-media facts
+
+`sync-server-reference recovery-dirty` uses one equal-cursor fixture with one offline media addition, replacement and deletion.
+Its two named P-M07 reference cases distinguish observed failure of in-place exact media restoration from a separate clean-receiver mechanism.
+The preserved closed dirty profile stays offline; the clean procedure starts from the reestablished chosen server snapshot and separate fresh collection/media state.
+Exact whole-name/hash equality, non-col table hashes and card/review rows remain compared.
+The original failed goal receipt is retained without restore credit. `server-desktop-current#D10` records the observed scope.
+These facts do not satisfy candidate P-R01/P-R03, GUI or Mobile acceptance.

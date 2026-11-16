@@ -264,3 +264,25 @@ The retained observations preserve both raw and narrowly scoped semantic hashes.
 
 This selection establishes SDK mechanisms for those inputs. It supplies no Desktop menu or dialog labels,
 candidate restore result or AnkiMobile evidence. L6 remains pending for its exact supported-client procedures.
+
+
+## D10. Dirty offline media and a separate clean receiver
+
+Here “profile” means the complete generated SDK collection/media test directory and its tracking files. It does not include Desktop GUI-global preferences, Keychain or credentials outside that directory. No actual Desktop GUI profile copy or export was exercised.
+
+D9 used previously synchronized stale media; it did not modify media files on the offline recovering client.
+
+One Desktop SDK 26.09.4 reference fixture tested three simultaneous offline media changes at an equal client/server cursor of two: a local-only addition, replacement of one server filename and deletion of the other. The same offline profile also contained a collection edit and an extra review. Its local file count remained two, but its names and bytes differed from the chosen server snapshot.
+
+An explicit authoritative full collection download restored exact non-col collection rows, including cards and reviews. Public media reset followed by SDK media synchronization restored the modified and deleted server files, but retained and uploaded the local-only addition. The resulting client and independent server witness held three files; media sanity returned OK. This is an observed failure of exact in-place authoritative media restoration for that fixture, not a server protocol defect or accepted restore.
+
+The original exact-equality failure remains in receipt `20261116T124551Z-36888`. Final observation case `dirty-inplace-observed` records the negative result under a distinct identity. The whole-name/hash comparison stays false; no subset comparison replaces it.
+
+A separate procedure first preserved the closed original dirty profile, including collection, media and media-tracking files, with an exact byte-hash manifest. After the diagnostic attempt, the protected stopped server snapshot was reestablished before the clean procedure. A new collection and empty media state in a separate directory authenticated with renewed credentials, explicitly downloaded the chosen collection and synchronized media. Exact non-col table hashes, card/review rows and the complete filename/byte-hash map matched the chosen snapshot. Reopen and a second independent SDK receiver agreed. The clean procedure uploaded no media. The preserved dirty profile remained byte-identical and was never imported or synchronized during that procedure.
+
+A fresh profile alone does not undo the diagnostic upload to the server. The clean-procedure result presumes that the chosen authoritative snapshot is reestablished or remains uncontaminated. No artificial deletion protocol or automatic merge of offline changes is implied. The old dirty data remains preserved separately.
+
+This is one finite reference SDK fixture and mechanism. Actual Desktop profile/menu/dialog controls, candidate restore acceptance and actual Mobile evidence remain separate obligations. It does not block independent U9 storage work once its batch dependencies pass.
+
+The source/evidence review and exact receipts are recorded in `docs/process/review-log/meguri-sync-recovery-dirty-reference.md`.
+The auxiliary neutral projection is `conformance/fixtures/meguri-sync-server/observations/desktop-26.09.4-recovery-dirty.json`.
