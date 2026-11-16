@@ -81,6 +81,8 @@ mg() {
 
 field() { jq -r "$@" "$RESULT"; }
 
+. "$REPO/tools/tests/doctor_result.sh"
+
 expect() { # expect <description> <actual> <expected>
   if [ "$2" != "$3" ]; then
     echo "$1: got '$2', want '$3'"
@@ -114,11 +116,7 @@ EOF
 t_doctor_on_this_mac() {
   mg doctor
   jq -c '{status, message, missing: [.user_steps[] | select(.state == "missing") | .id]}' "$RESULT"
-  expect "exit code" "$RC" 0 &&
-    case "$(field .status)" in pass | warn) true ;; *) echo "status $(field .status)"; false ;; esac &&
-    expect "failed checks" "$(field '[.details.checks[] | select(.status == "fail")] | length')" 0 &&
-    expect "xcode build recorded" "$(field '.details.environment.xcode_build | type')" string &&
-    expect "user_steps listed" "$(field '.user_steps | length > 0')" true
+  assert_doctor_result "$RESULT" "$RC"
 }
 
 t_core_test_runs_in_dev_container() {

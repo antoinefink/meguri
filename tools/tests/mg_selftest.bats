@@ -38,6 +38,11 @@ field() { jq -r "$@" "$result"; }
 
 validate() { python3 "$SB/tools/tests/validate_result.py" "$@"; }
 
+. "$REPO_ROOT/tools/tests/doctor_result.sh"
+
+# The host suite checks these two contracts separately (doctor + all results).
+validate_host_doctor() { validate "$1" && assert_doctor_result "$1" "$2"; }
+
 add_fixture_jobs() {
   cat >"$SB/tools/mg.d/zz-fixture.sh" <<'EOF'
 mg_job fx-pass host fx_pass "fixture: pass with counts, artifact, detail"
@@ -493,6 +498,7 @@ failure_ids() { jq -r '[.failures[].id] | sort | join("\n")' "$result"; }
   [[ "$stderr" != *"device builds are blocked"* ]]
   assert_read_only_calls
   validate "$result"
+  assert_doctor_result "$result" "$status"
 }
 
 @test "doctor on a fully set-up Mac passes and still lists the steps it cannot verify" {
@@ -506,6 +512,7 @@ failure_ids() { jq -r '[.failures[].id] | sort | join("\n")' "$result"; }
   [ "$(field .summary.total)" = "$(field '.details.checks | length')" ]
   assert_read_only_calls
   validate "$result"
+  assert_doctor_result "$result" "$status"
 }
 
 @test "doctor reports the Mac UI test VM: configured, drive connected, present, running, SSH and the host's Xcode" {
@@ -665,6 +672,7 @@ failure_ids() { jq -r '[.failures[].id] | sort | join("\n")' "$result"; }
   jq -e '.failures[] | select(.id == "xcode-license" and .message == "the Xcode license is not accepted" and .repro == "tools/mg doctor")' "$result"
   assert_read_only_calls
   validate "$result"
+  assert_doctor_result "$result" "$status"
 }
 
 @test "doctor fails and lists the step without an iOS 27 simulator runtime" {
@@ -677,6 +685,7 @@ failure_ids() { jq -r '[.failures[].id] | sort | join("\n")' "$result"; }
   jq -e '.failures[] | select(.id == "ios-runtime" and .message == "no available iOS 27 simulator runtime" and .repro == "tools/mg doctor")' "$result"
   assert_read_only_calls
   validate "$result"
+  assert_doctor_result "$result" "$status"
 }
 
 @test "doctor fails when Docker is unreachable" {
@@ -691,6 +700,7 @@ failure_ids() { jq -r '[.failures[].id] | sort | join("\n")' "$result"; }
   [ "$(field '[.user_steps[] | select(.id == "docker-resources")] | length')" = 0 ]
   assert_read_only_calls
   validate "$result"
+  assert_doctor_result "$result" "$status"
 }
 
 # MemTotal is the Linux VM's total after the kernel's reservation: a VM given
@@ -729,6 +739,109 @@ failure_ids() { jq -r '[.failures[].id] | sort | join("\n")' "$result"; }
   jq -e '.details.checks[] | select(.id == "rust" and .status == "warn" and (.message | contains("aarch64-apple-ios-sim")))' "$result"
   [ "$(field '[.user_steps[] | select(.state == "missing" and .required)] | length')" = 0 ]
   assert_read_only_calls
+  validate_host_doctor "$result" "$status"
+}
+
+@test "host doctor validation accepts a reported missing host tool while the VM remains a separate warning" {
+  make_stubs
+  rm "$STUBS/rustup" "$MEGURI_MAC_VM_CONFIG"
+  # The dev container's rustup is outside the system command directories.
+  # Leave every other host probe stubbed, and exercise the real absence path.
+  PATH="$STUBS:/usr/bin:/bin" STUB_ACCOUNT=0 mg doctor
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  jq -e '.failures[] | select(.id == "rust" and (.message | startswith("rustup not found")) and .repro == "tools/mg doctor")' "$result"
+  [ "$(field -c '[.details.checks[] | select(.status == "fail")] | map(.id)')" = '["rust"]' ]
+  jq -e '.details.checks[] | select(.id == "mac-vm" and .status == "warn")' "$result"
+  jq -e '.user_steps[] | select(.id == "mac-vm" and .state == "missing" and .required == true)' "$result"
+  [ "$(field '[.user_steps[] | select(.id == "rust")] | length')" = 0 ]
+  assert_read_only_calls
+  validate_host_doctor "$result" "$status"
+}
+
+@test "host doctor validation rejects malformed and inconsistent diagnostics" {
+  make_stubs
+  mg doctor
+  [ "$status" -eq 0 ]
+  validate_host_doctor "$result" 0
+  local mutation broken="$BATS_TEST_TMPDIR/broken.json"
+  while IFS= read -r mutation; do
+    jq "$mutation" "$result" >"$broken"
+    run validate_host_doctor "$broken" 0
+    if [ "$status" -eq 0 ]; then
+      echo "accepted malformed doctor result: $mutation"
+      return 1
+    fi
+  done <<'MUTATIONS'
+.status = "error" | .exit_code = 2
+.status = "unsupported"
+.status = "warn"
+.exit_code = 1
+.summary.total += 1
+.summary.passed -= 1
+.summary.failed = 1
+.summary.warned = 1
+.summary.skipped = 1
+del(.summary.warned)
+.details.checks[0].status = "error"
+.details.checks[0].status = "unsupported"
+.details.checks[0].status = "warn"
+.details.checks = []
+.details.checks = {}
+.details.checks += [.details.checks[0]]
+del(.details.checks[0].id)
+del(.details.checks[0].message)
+.failures = [{id:"rust",message:"unaccounted failure",repro:"tools/mg doctor"}]
+del(.details.environment)
+del(.details.environment.xcode_build)
+.details.environment.xcode_build = ""
+del(.details.environment.rust_channel)
+.user_steps = []
+.user_steps = [{}]
+.user_steps[0].state = "done"
+del(.user_steps[0].how)
+del(.schema_version)
+.schema_version = 2
+MUTATIONS
+  run validate_host_doctor "$result" 1
+  [ "$status" -ne 0 ]
+  printf 'not JSON\n' >"$broken"
+  run validate_host_doctor "$broken" 0
+  [ "$status" -ne 0 ]
+}
+
+@test "host doctor validation requires failed and warned checks to match status counts failures and RC" {
+  make_stubs
+  STUB_LICENSE_RC=1 STUB_LOCKED=1 mg doctor
+  [ "$status" -eq 1 ]
+  validate_host_doctor "$result" 1
+  local mutation broken="$BATS_TEST_TMPDIR/broken.json"
+  while IFS= read -r mutation; do
+    jq "$mutation" "$result" >"$broken"
+    run validate_host_doctor "$broken" 1
+    if [ "$status" -eq 0 ]; then
+      echo "accepted inconsistent failed doctor result: $mutation"
+      return 1
+    fi
+  done <<'MUTATIONS'
+.status = "pass"
+.status = "warn"
+.status = "error" | .exit_code = 2
+.exit_code = 0
+.summary.failed = 0
+.summary.warned = 0
+.failures = []
+.failures[0].id = "other"
+.failures[0].message = "different failure"
+.failures[0].repro = "tools/mg other"
+.failures += [.failures[0]]
+.user_steps |= map(select(.id != "host-session"))
+.user_steps |= map(select(.id != "xcode-license"))
+MUTATIONS
+  run validate_host_doctor "$result" 0
+  [ "$status" -ne 0 ]
+  run validate_host_doctor "$result" 2
+  [ "$status" -ne 0 ]
 }
 
 # --- core-update (fake Cargo, isolated workspace) --------------------------
