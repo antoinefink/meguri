@@ -9,7 +9,14 @@ import Testing
 /// Launch routes (U7, R1963), in the app process.
 @MainActor
 @Suite struct RouteRegistryTests {
-    static let standardRoutes = "card/behaviors, card/behaviors/fallback, card/behaviors/graphic, card/behaviors/separator, collection/import/empty, collection/import/error, collection/import/loading, collection/import/overflow, collection/import/typical, designsystem/gallery, home/deck-list/empty, home/deck-list/typical, perf/probe, review/congratulations/finished, review/congratulations/finished-with-new-work, review/congratulations/ready-to-continue, review/congratulations/waiting-unavailable, sample/alert, sample/deck-overview/empty, sample/deck-overview/error, sample/deck-overview/loading, sample/deck-overview/overflow, sample/deck-overview/typical, sample/defects, sample/screen, sample/sheet, sample/touch-targets, settings/account-sync/setup-needed, settings/anki-transfer/empty, settings/anki-transfer/error, settings/anki-transfer/loading, settings/anki-transfer/media-complete, settings/anki-transfer/media-consent, settings/anki-transfer/media-partial, settings/anki-transfer/media-progress, settings/anki-transfer/media-unknown, settings/anki-transfer/overflow, settings/anki-transfer/typical, settings/import-export/error, settings/import-export/loading, settings/import-export/typical, shell/root/browse-pushed, shell/root/deck-page, shell/root/error, shell/root/loading, shell/root/review-answer, shell/root/typical, spike/card-swap, spike/card-swap/capture, spike/card-swap/typein, spike/media-seek, spike/media-seek/audio, spike/storage/read, spike/storage/write"
+    static let standardRoutes: String = {
+        #if DEBUG && os(macOS)
+        let replayAccessibilityRoute = "card/replay-accessibility, "
+        #else
+        let replayAccessibilityRoute = ""
+        #endif
+        return "card/behaviors, card/behaviors/fallback, card/behaviors/graphic, card/behaviors/replay-identifier, card/behaviors/separator, \(replayAccessibilityRoute)collection/import/empty, collection/import/error, collection/import/loading, collection/import/overflow, collection/import/typical, designsystem/gallery, home/deck-list/empty, home/deck-list/typical, perf/probe, review/congratulations/finished, review/congratulations/finished-with-new-work, review/congratulations/ready-to-continue, review/congratulations/waiting-unavailable, sample/alert, sample/deck-overview/empty, sample/deck-overview/error, sample/deck-overview/loading, sample/deck-overview/overflow, sample/deck-overview/typical, sample/defects, sample/screen, sample/sheet, sample/touch-targets, settings/account-sync/setup-needed, settings/anki-transfer/empty, settings/anki-transfer/error, settings/anki-transfer/loading, settings/anki-transfer/media-complete, settings/anki-transfer/media-consent, settings/anki-transfer/media-partial, settings/anki-transfer/media-progress, settings/anki-transfer/media-unknown, settings/anki-transfer/overflow, settings/anki-transfer/typical, settings/import-export/error, settings/import-export/loading, settings/import-export/typical, shell/root/browse-pushed, shell/root/deck-page, shell/root/error, shell/root/loading, shell/root/review-answer, shell/root/typical, spike/card-swap, spike/card-swap/capture, spike/card-swap/typein, spike/media-seek, spike/media-seek/audio, spike/storage/read, spike/storage/write"
+    }()
 
     @Test func theStandardRegistryHasTheSampleGalleryPerfShellAndSpikeRoutes() {
         #expect(TestHooks.RouteRegistry.standard.routes.map(\.path).joined(separator: ", ") == Self.standardRoutes)
@@ -23,6 +30,7 @@ import Testing
         ("designsystem/gallery", .screen),
         ("sample/deck-overview/typical", .screen),
         ("sample/touch-targets", .screen),
+        ("card/behaviors/replay-identifier", .screen),
         ("collection/import/empty", .sheet),
         ("collection/import/typical", .sheet),
         ("collection/import/overflow", .sheet),
