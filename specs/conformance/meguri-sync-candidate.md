@@ -1,7 +1,7 @@
 # Meguri Sync candidate test boundary
 
 Spec: conformance/meguri-sync-candidate
-Requirements: Meguri Sync U3, U5, U11; R4, R6, R29, R32
+Requirements: Meguri Sync U3, U5, U6, U11; R4, R6, R29, R32
 Anki: 26.09.3
 Scenarios: conformance/recordings/scenarios/meguri-sync-server/
 
@@ -56,3 +56,19 @@ Case selection, synthetic inputs, actions, outcomes, execution counts and
 independent review remain bound under the existing conformance contract. A
 correct invocation format, empty run or schema-valid receipt cannot establish
 Desktop, Mobile or retained-Meguri compatibility.
+
+## K5. Separate build and normal-completion evidence
+
+The same committed executable build may serve the full-transfer and incremental
+selections. The existing full-only build receipt describes how that executable
+was produced; each client invocation separately binds its actual selected phase,
+cases and completion counts. Both invocations use the build receipt's recorded
+producer identity. Reuse does not turn one phase's result into another's credit.
+
+The selected Desktop incremental cases cover reviews, deletions and collection
+objects in both directions, no-change sync and the declared chunk boundaries.
+Every credited client normal call must report completion without a pending full
+transfer. Reject a pending full-transfer decision even when observed traffic
+contains only metadata and no collection bytes. Retain actual client decisions
+with their actor identities alongside the wire and final-state observations.
+A request list or successful HTTP status cannot substitute for that completion.
