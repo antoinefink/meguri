@@ -41,6 +41,42 @@ A worktree made with plain `git worktree add` has no record, no marker and no de
 
 The deny profile binds a Claude session started in the worktree. An orchestrator's subagents start in the main checkout and never load it, so `.claude/hooks/cleanroom_guard.py` (a project PreToolUse hook in `.claude/settings.json`) applies the same rules to every subagent labelled as an implementer or fixer (workflow labels `U<n>:implement…`, `U<n>:fix-…`, `U<n>:codexfix-…`; Agent descriptions starting `implementer` or `fixer`). It also refuses git commands that would print `oracle/` content: unit branches carry the spec side's `oracle/` commits, which the sparse checkout keeps off disk but `git diff` and `git show` still print. Test: `.claude/hooks/test_cleanroom_guard.sh`.
 
+## Routine privacy admissions
+
+Antoine delegates the following routine updates across Meguri work until revoked
+(2026-11-16). Qualifying updates need no manual reconfirmation.
+
+For `docs/process/provenance/sessions.jsonl`:
+
+- An independent non-author reviews every appended record, including descriptions
+  and paths, and confirms that it contains only public operational metadata.
+- The orchestrator preserves the previously admitted bytes and original
+  ledger-only append commits, then verifies the exact candidate digest.
+
+For public-file snapshots, including first admissions and later hash refreshes:
+
+- An independent non-author reviews the complete candidate contents, including
+  comments, literals, embedded data and paths. Reviewing only flagged lines or
+  changed lines is insufficient. Changed bytes require a new complete review.
+- The review uses permitted public material, without opening private inputs or
+  inspecting matched private tokens. Existing role boundaries still apply.
+- Existing authorship, dependency-license and clean-room evidence must support
+  the file. Privacy classification alone provides none of those clearances.
+- The orchestrator verifies the reviewed bytes and exact repository-relative path.
+  Add or refresh only that path's whole-file SHA-256 in the existing public-artifact map.
+  Never add path patterns, partial-content exemptions or caller-controlled manifests.
+
+For either update, record the reviewer, reviewed digest and decision in existing
+review evidence. Preserve original history and run the required privacy,
+provenance, similarity and focused checks. Future changed bytes remain checked.
+
+Resolve ordinary review findings autonomously. Escalate actual or uncertain
+private content, unresolved authorship or licensing concerns, historical ledger
+edits, unfamiliar formats, and changes to matcher behavior, thresholds,
+private-data access, similarity exceptions or clean-room rules.
+This delegation covers only the exact hash entries above. Use normal tool
+approval; it cannot override a denial or an owner-only action.
+
 ## Commit trailers
 
 | Trailer | Required on |

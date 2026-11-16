@@ -13,6 +13,8 @@ pub struct Config {
     pub listen: SocketAddr,
     pub trusted_peers: HashSet<IpAddr>,
     pub temp_bytes: NonZeroU64,
+    pub native_compressed_bytes: NonZeroU64,
+    pub native_decompressed_bytes: NonZeroU64,
 }
 impl Config {
     pub fn new(origin: &str, listen: SocketAddr) -> Result<Self> {
@@ -36,6 +38,8 @@ impl Config {
             listen,
             trusted_peers: HashSet::new(),
             temp_bytes: NonZeroU64::new(2 * 1024 * 1024 * 1024).unwrap(),
+            native_compressed_bytes: NonZeroU64::new(104_857_600).unwrap(),
+            native_decompressed_bytes: NonZeroU64::new(314_572_800).unwrap(),
         })
     }
     pub fn origin(&self) -> &str {

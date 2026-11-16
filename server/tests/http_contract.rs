@@ -103,6 +103,63 @@ fn mutations(id: &str) -> Vec<(String, Value)> {
 }
 
 #[tokio::test]
+async fn compiled_navigation_and_assets_use_exact_get_head_routes_without_claiming_setup() {
+    let h = Harness::new().await;
+    let mut shell = None;
+    for path in meguri_sync_server::webassets::NAVIGATION {
+        let response = h.get(path, None).await;
+        headers(&response);
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.headers()["content-type"], "text/html; charset=utf-8");
+        assert!(!response.headers().contains_key("set-cookie"));
+        let length = response.headers()["content-length"].clone();
+        let html = response.text().await.unwrap();
+        assert!(!html.contains(&h.setup_token));
+        assert_eq!(length.to_str().unwrap().parse::<usize>().unwrap(), html.len());
+        if let Some(expected) = &shell { assert_eq!(&html, expected); }
+        else { shell = Some(html); }
+        let head = h.client.head(format!("{}{path}", h.base)).send().await.unwrap();
+        headers(&head);
+        assert_eq!(head.status(), 200);
+        assert_eq!(head.headers()["content-length"], length);
+        assert_eq!(head.headers()["content-type"], "text/html; charset=utf-8");
+        assert!(head.bytes().await.unwrap().is_empty());
+    }
+    let shell = shell.unwrap();
+    let paths: Vec<_> = shell.split('"').filter(|value| value.starts_with("/assets/")).collect();
+    assert!(paths.iter().any(|path| path.ends_with(".js")));
+    assert!(paths.iter().any(|path| path.ends_with(".css")));
+    for path in paths {
+        let response = h.get(path, None).await;
+        headers(&response);
+        assert_eq!(response.status(), 200);
+        let mime = if path.ends_with(".js") { "text/javascript; charset=utf-8" } else { "text/css; charset=utf-8" };
+        assert_eq!(response.headers()["content-type"], mime);
+        let length = response.headers()["content-length"].clone();
+        let bytes = response.bytes().await.unwrap();
+        assert!(!bytes.is_empty());
+        assert_ne!(bytes.as_ref(), shell.as_bytes());
+        assert_eq!(length.to_str().unwrap().parse::<usize>().unwrap(), bytes.len());
+        let head = h.client.head(format!("{}{path}", h.base)).send().await.unwrap();
+        headers(&head);
+        assert_eq!(head.status(), 200);
+        assert_eq!(head.headers()["content-type"], mime);
+        assert_eq!(head.headers()["content-length"], length);
+        assert!(head.bytes().await.unwrap().is_empty());
+        failure(h.get(&format!("{path}?x=1"), None).await, 404, "route_not_found").await;
+    }
+    for path in ["/unknown", "/index.html", "/accounts/", "/assets/main.js", "/assets/missing-abcdefgh.js", "/setup?token=invalid", "/api/unknown"] {
+        failure(h.get(path, None).await, 404, "route_not_found").await;
+    }
+    for method in [reqwest::Method::POST, reqwest::Method::OPTIONS] {
+        failure(h.client.request(method, format!("{}/setup", h.base)).send().await.unwrap(), 404, "route_not_found").await;
+    }
+    assert_eq!(h.get("/api/status", None).await.json::<Value>().await.unwrap()["data"]["setup_required"], true);
+    h.setup().await;
+    h.stop().await;
+}
+
+#[tokio::test]
 async fn every_mutation_requires_an_object_without_mutation() {
     let h = Harness::new().await;
     for (path, object) in mutations("valid-member-shaped-target") {
@@ -475,7 +532,11 @@ async fn configured_origin_and_urls_ignore_host_forwarding_native_is_independent
             if let Some(origin) = origin {
                 r = r.header("origin", origin);
             }
-            failure(r.send().await.unwrap(), 404, "route_not_found").await;
+            let r = r.send().await.unwrap();
+            let registered=path=="/msync/begin";
+            assert_eq!(r.status(), if registered {400} else {404});
+            headers(&r);
+            assert_eq!(r.text().await.unwrap(), if registered {"invalid_request"} else {"route_not_found"});
         }
     }
     for path in ["/api/unknown", "/api/missing.js"] {

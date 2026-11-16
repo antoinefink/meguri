@@ -89,12 +89,27 @@ class EvidenceValidation(unittest.TestCase):
         receipt = self.store.put_json(receipt_value)
         case["artifacts"] = [{"role": role, "sha256": digest} for role, digest in (
             ("synthetic_input", case["fixture_sha256"]), ("neutral_observation", observed), ("mg_receipt", receipt))]
+        for digest in dict.fromkeys(action['fixture_sha256'] for action in case['actions']):
+            if digest != case['fixture_sha256']:
+                case['artifacts'].append({'role':'synthetic_input','sha256':digest,'bytes':len(self.store.read(digest))})
 
     def check(self, credit=True):
         return validate(self.manifest, self.contract, self.schema, self.store, self.invocation, self.runtime, credit)
 
     def test_current_matching_evidence_is_accepted(self):
         self.assertTrue(self.check()["credit"])
+
+    def test_action_input_requires_its_own_synthetic_descriptor(self):
+        # The bytes and manifest entry alone did not satisfy the candidate boundary.
+        self.manifest['cases'][0]['artifacts'].pop()
+        with self.assertRaisesRegex(ValueError, 'action fixture is not retained'):
+            self.check()
+
+    def test_distinct_synthetic_inputs_are_accepted_but_duplicates_fail(self):
+        case = self.manifest['cases'][0]
+        self.assertTrue(self.check()['credit'])
+        case['artifacts'].append(copy.deepcopy(case['artifacts'][-1]))
+        with self.assertRaises(ValueError): self.check()
 
     def test_duplicate_ids_fail_even_with_adjusted_declared_counts(self):
         self.manifest["cases"] *= 2

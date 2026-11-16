@@ -16,3 +16,9 @@ entries:
     reason: schema-18 DDL in the normalized form of specs/storage/schema-18.md S2/S3 (the exact text SQLite stores; compared by schema_objects goldens). Escalation U22-E1.
     approved_by: antoine
     approved_on: 2026-10-15
+  - path: server/src/collection/schema.sql
+    channels: [struct]
+    lines: "1-28"
+    reason: Exact schema-18 table/index declarations from specs/storage/schema-18.md S2/S3; reviewed SHA256 b0e4f8380947dc09b0b72eb209dad1f3759e22376d8b75fa94432720b0616e58. Owner approval E-20261115T200432Z-c0f9. No implementation, other file or other channel is exempted.
+    approved_by: antoine
+    approved_on: 2026-11-15

@@ -11,7 +11,7 @@ async fn main() {
 }
 async fn run() -> Result<()> {
     // Secrets are never accepted on the command line. Positional configuration
-    // is intentionally small; deployment/config-file policy belongs to U9.
+    // is intentionally small; deployment/config-file policy is separate.
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.len() < 3 {
         return Err(Error::new("invalid_request"));
@@ -57,6 +57,13 @@ async fn run() -> Result<()> {
                     .map_err(|_| Error::field("temp_bytes"))?;
                 rest += 2;
             }
+            "--native-compressed-bytes" | "--native-decompressed-bytes" if command == "serve" => {
+                let limit = args.get(rest + 1).ok_or(Error::new("invalid_request"))?
+                    .parse().map_err(|_|Error::field("native_bytes"))?;
+                if args[rest] == "--native-compressed-bytes" { config.native_compressed_bytes = limit; }
+                else { config.native_decompressed_bytes = limit; }
+                rest += 2;
+            }
             _ => return Err(Error::new("invalid_request")),
         }
     }
@@ -66,16 +73,17 @@ async fn run() -> Result<()> {
         .map_err(|_| Error::new("storage_unavailable"))??;
     match command.as_str() {
         "init" => {
-            let location = tokio::task::spawn_blocking(move || {
+            let (root, code) = tokio::task::spawn_blocking(move || {
                 let mut root = root;
                 root.init()?;
-                Ok::<_, Error>(root.setup_file())
+                let code = root.setup_code()?;
+                Ok::<_, Error>((root, code))
             })
             .await
             .map_err(|_| Error::new("storage_unavailable"))??;
             println!(
-                "setup file: {}\nsetup page: {}/setup",
-                location.display(),
+                "one-time setup code: {code}\nsetup file: {}\nsetup page: {}/setup",
+                root.setup_file().display(),
                 config.origin()
             );
             Ok(())

@@ -1,0 +1,375 @@
+# SPDX-License-Identifier: MIT
+# Host functions orchestrate only; all compilers and fixture processes run in Docker.
+mg_job sync-web-image host mg_sync_web_image "Build and probe the pinned browser/Rust image"
+mg_job sync-web-deps host mg_sync_web_deps "Resolve (--resolve), locked install (--install), or audit dependencies"
+mg_job sync-web-browser-install host mg_sync_web_browser_install "Explicitly install locked Chromium after dependency audit"
+mg_job sync-web-typecheck host mg_sync_web_typecheck "Strict browser TypeScript check"
+mg_job sync-web-unit host mg_sync_web_unit "Browser API/policy unit tests"
+mg_job sync-web-build host mg_sync_web_build "Production browser build and prepared embedded assets"
+mg_job sync-web-check host mg_sync_web_check "Typecheck, unit tests and production prepared assets"
+mg_job sync-web-actualserver-build host mg_sync_web_actualserver_build "Compile the actual Rust server using a prepared browser build"
+mg_job sync-web-preview-up host mg_sync_web_preview_up "Start synthetic actual-server HTTPS fixtures on loopback"
+mg_job sync-web-preview-down host mg_sync_web_preview_down "Stop this checkout's owned HTTPS fixtures"
+mg_job sync-web-browser host mg_sync_web_browser "Zero-retry browser/axe tests against the isolated actual-server fixture"
+mg_job sync-web-verify host mg_sync_web_verify "Locked Docker web verification with a run-private actual-server HTTPS fixture; no host ports"
+
+mg_sync_web__compose() {
+  MEGURI_SYNC_WEB_IMAGE="$(mg_compose_project)-sync-web:local" mg_compose -f "$MG_ROOT/docker/sync-web-compose.yml" "$@"
+}
+mg_sync_web__failure() {
+  mg_artifact directory "$MG_RUN_DIR" "Partial sync-web evidence"
+  mg_failure sync-web-execution "$1"
+  mg_status fail
+}
+mg_sync_web__directory() {
+  case "$1" in "$MG_ROOT"/build/*) ;; *) return 1 ;; esac
+  local directory
+  directory="$(cd "$1" && pwd -P)" || return 1
+  case "$directory" in "$MG_ROOT"/build/*) printf '%s\n' "$directory" ;; *) return 1 ;; esac
+}
+mg_sync_web__counts() {
+  local mode="$1" report="$2" key value count_status=0
+  python3 "$MG_ROOT/server/web/scripts/report-counts.py" "$mode" "$report" "$MG_RUN_DIR/test-counts.json" || count_status=1
+  if [ -f "$MG_RUN_DIR/test-counts.json" ]; then
+    while IFS=$'\t' read -r key value; do
+      mg_count "$key" "$value"
+    done < <(jq -r '(.counts // {}) | to_entries[] | [.key, .value] | @tsv' "$MG_RUN_DIR/test-counts.json")
+    mg_artifact json "$MG_RUN_DIR/test-counts.json" "Counts bound to retained runner results"
+  fi
+  if [ "$count_status" -ne 0 ]; then
+    mg_failure sync-web-test-report "Missing, inconsistent or nonpassing runner evidence; inspect test-counts.json"
+  fi
+  return "$count_status"
+}
+mg_sync_web__run() {
+  local service="$1" mode="$2"; shift 2
+  if [ "$#" -ne 0 ]; then mg_failure usage "Unexpected arguments"; mg_status error; return; fi
+  if [ "$mode" != resolve ] && [ "$mode" != probe ] && [ ! -f "$MG_ROOT/server/web/package-lock.json" ]; then
+    mg_failure web-lock-missing "Run explicit resolution and review/adopt the emitted lock first"; mg_status error; return
+  fi
+  local execution_status=0 count_status=0
+  # Node unit tests compile/invoke the actual std-only preparation consumer.
+  local consumer_mount=()
+  case "$mode" in
+    unit|check) consumer_mount=(-v "$MG_ROOT/server/build.rs:/server/build.rs:ro") ;;
+  esac
+  mg_sync_web__compose run --rm -T --no-deps --label "meguri.mg.run-id=$MG_RUN_ID" \
+      ${consumer_mount[0]+"${consumer_mount[@]}"} \
+      -v "$MG_ROOT/server/web:/source:ro" -v "$MG_RUN_DIR:/out" "$service" "$mode" || execution_status=$?
+  case "$mode" in
+    unit|check) mg_sync_web__counts unit "$MG_RUN_DIR/unit-results.tap" || count_status=1 ;;
+  esac
+  if [ "$execution_status" -ne 0 ] || [ "$count_status" -ne 0 ]; then
+    mg_sync_web__failure "Browser tool operation failed; inspect retained outputs"; return
+  fi
+  mg_artifact directory "$MG_RUN_DIR" "Browser tool evidence"
+  mg_status pass
+}
+mg_sync_web_image() {
+  if [ "$#" -ne 0 ]; then mg_failure usage "Use sync-web-image"; mg_status error; return; fi
+  if ! mg_sync_web__compose --progress plain build sync-web-resolver; then
+    mg_sync_web__failure "Pinned tool image build failed"; return
+  fi
+  mg_sync_web__run sync-web-resolver probe
+}
+mg_sync_web_deps() {
+  case "${1:-}" in
+    --resolve) shift; mg_sync_web__run sync-web-resolver resolve "$@" ;;
+    --install) shift; mg_sync_web__run sync-web-resolver install "$@" ;;
+    "") mg_sync_web__run sync-web-resolver audit ;;
+    *) mg_failure usage "Use sync-web-deps [--resolve|--install]"; mg_status error ;;
+  esac
+}
+mg_sync_web_browser_install() { mg_sync_web__run sync-web-resolver browser-install "$@"; }
+mg_sync_web_typecheck() { mg_sync_web__run sync-web-check typecheck "$@"; }
+mg_sync_web_unit() { mg_sync_web__run sync-web-check unit "$@"; }
+mg_sync_web_build() { mg_sync_web__run sync-web-check build "$@"; }
+mg_sync_web_check() { mg_sync_web__run sync-web-check check "$@"; }
+mg_sync_web_actualserver_build() {
+  local prepared
+  if [ "$#" -ne 1 ] || ! prepared="$(mg_sync_web__directory "$1")" || \
+      [ ! -f "$prepared/meguri_web_assets.rs" ] || [ ! -f "$prepared/assets.json" ] || [ ! -d "$prepared/embedded" ]; then
+    mg_failure usage "Use sync-web-actualserver-build <checkout/build/.../prepared>"; mg_status error; return
+  fi
+  if ! mg_sync_web__compose run --rm -T --no-deps --label "meguri.mg.run-id=$MG_RUN_ID" \
+      -v "$MG_ROOT/server/src:/server/src:ro" \
+      -v "$MG_ROOT/server/Cargo.toml:/server/Cargo.toml:ro" \
+      -v "$MG_ROOT/server/Cargo.lock:/server/Cargo.lock:ro" \
+      -v "$MG_ROOT/server/build.rs:/server/build.rs:ro" \
+      -v "$MG_ROOT/server/rust-toolchain.toml:/server/rust-toolchain.toml:ro" \
+      -v "$MG_ROOT/server/web:/server/web:ro" \
+      -v "$MG_ROOT/core/crates/meguri-model:/core/crates/meguri-model:ro" \
+      -v "$MG_ROOT/core/Cargo.toml:/core/Cargo.toml:ro" \
+      -v "$MG_ROOT/core/rust-toolchain.toml:/core/rust-toolchain.toml:ro" \
+      -v "$prepared:/prepared:ro" -v "$MG_RUN_DIR:/out" sync-web-actualserver actualserver; then
+    mg_sync_web__failure "Actual Rust server compilation failed"; return
+  fi
+  mg_artifact directory "$MG_RUN_DIR" "Exact actual-server binary, source/build/asset hashes"
+  mg_status pass
+}
+mg_sync_web_preview_up() {
+  local binary_dir
+  if [ "$#" -ne 1 ] || ! binary_dir="$(mg_sync_web__directory "$1")" || \
+      [ ! -f "$binary_dir/meguri-sync-server" ] || [ ! -f "$binary_dir/assets.json" ]; then
+    mg_failure usage "Use sync-web-preview-up <checkout/build/.../actualserver-output>"; mg_status error; return
+  fi
+  # Persist only the owned synthetic preview service; down never touches shared services.
+  # Compose run supports explicit read-only mounts without writing shared configuration.
+  local name="$(mg_compose_project)-sync-web-preview"
+  if ! mg_sync_web__compose run -d --no-deps --service-ports --name "$name" \
+      -v "$binary_dir:/binary:ro" -v "$MG_RUN_DIR:/out" sync-web-preview preview; then
+    mg_sync_web__failure "Could not start owned HTTPS fixture"; return
+  fi
+  if ! docker exec "$name" node /opt/sync-web/ready.mjs; then
+    docker stop --time 10 "$name" >/dev/null
+    docker rm "$name" >/dev/null
+    mg_sync_web__failure "Fixture initialization did not publish readiness"; return
+  fi
+  mg_artifact directory "$MG_RUN_DIR" "Synthetic preview identities, capability descriptors and exact build identity"
+  mg_detail preview_url '"https://localhost:18443"'
+  mg_detail setup_url '"https://localhost:18445/setup"'
+  mg_detail test_url '"https://localhost:18447"'
+  mg_status pass
+}
+mg_sync_web_preview_down() {
+  if [ "$#" -ne 0 ]; then mg_failure usage "Use sync-web-preview-down"; mg_status error; return; fi
+  local name="$(mg_compose_project)-sync-web-preview"
+  if ! docker stop --time 10 "$name" || ! docker rm "$name"; then
+    mg_sync_web__failure "Could not stop/remove the owned preview container"; return
+  fi
+  mg_status pass
+}
+mg_sync_web_browser() {
+  local fixture_dir
+  if [ "$#" -ne 1 ] || ! fixture_dir="$(mg_sync_web__directory "$1")" || [ ! -f "$fixture_dir/test/fixture.json" ]; then
+    mg_failure usage "Use sync-web-browser <checkout/build/.../preview-up-output>"; mg_status error; return
+  fi
+  local image
+  image="$(docker image inspect --format '{{.Id}}' "$(mg_compose_project)-sync-web:local")" || {
+    mg_sync_web__failure "Cannot resolve browser image"; return
+  }
+  mg_sync_web__browser "$fixture_dir" "$(mg_compose_project)-sync-web-preview" "$image" || return
+  mg_status pass
+}
+
+# Internal identity parameter only; both callers use the same browser invocation.
+# Register hooks in the owning job shell, never inside a command substitution.
+mg_sync_web__browser() {
+  local fixture_dir="$1" container="$2" image="$3" identity owner name
+  identity="$(docker inspect --format '{{.Id}} {{.Image}} {{.State.Running}}' "$container")" || {
+    mg_sync_web__failure "Cannot inspect browser fixture"; return 1
+  }
+  local cid="${identity%% *}"
+  if ! [[ "$cid" =~ ^[0-9a-f]{64}$ ]] || [ "$identity" != "$cid $image true" ]; then
+    mg_sync_web__failure "Browser fixture identity or running image differs"; return 1
+  fi
+  owner="$(python3 -c 'import secrets; print(secrets.token_hex(16))')" || return 1
+  name="meguri-web-browser-$MG_RUN_ID-$owner"
+  mg_on_exit "$(printf '%q ' mg_sync_server__remove_container "$name" "$owner")"
+  local execution_status=0 count_status=0
+  docker run --rm --init --read-only --cap-drop ALL --security-opt no-new-privileges \
+      --name "$name" --label "meguri.sync.owner=$owner" \
+      --label "meguri.mg.run-id=$MG_RUN_ID" --shm-size=512m --tmpfs /tmp --tmpfs /work:exec \
+      --network "container:$cid" \
+      -v "$(mg_compose_project)_sync-web-deps:/deps:ro" \
+      -v "$(mg_compose_project)_sync-web-browsers:/browsers:ro" \
+      -v "$MG_ROOT/server/web:/source:ro" -v "$MG_RUN_DIR:/out" \
+      -v "$fixture_dir/test:/fixture:ro" -e MEGURI_WEB_BASE_URL=https://localhost:18447 \
+      "$image" browser || execution_status=$?
+  mg_sync_server__remove_container "$name" "$owner" || execution_status=1
+  if [ "$execution_status" -eq 0 ]; then
+    mg_detail browser_cleanup "$(jq -nc --arg name "$name" --arg owner "$owner" \
+      '{name:$name,owner:$owner,absence_confirmed:true}')"
+  fi
+  mg_sync_web__counts browser "$MG_RUN_DIR/browser-results.json" || count_status=1
+  if [ "$execution_status" -ne 0 ] || [ "$count_status" -ne 0 ]; then
+    mg_sync_web__failure "Actual fixture browser/axe suite or checked cleanup failed"; return 1
+  fi
+  mg_artifact directory "$MG_RUN_DIR" "Browser results and narrow/wide screenshots"
+}
+
+# Retain even failed child receipts. These are fresh invocations, never latest.
+# Set the result in this shell so callers can use the exact owned output.
+mg_sync_web__child() {
+  local job="$1" result rc=0 arguments
+  shift
+  arguments="$(mg_json_array ${1+"$@"})" || return 1
+  result="$("$MG_TOOLS/mg" "$job" ${1+"$@"})" || rc=$?
+  case "$result" in "$MG_ROOT"/build/mg/"$job"/*/result.json) ;; *)
+    mg_sync_web__failure "Missing $job child receipt"; return 1 ;;
+  esac
+  mg_artifact child-receipt "$result" "$job (fresh required child)"
+  mg_artifact directory "${result%/result.json}" "$job underlying reports and identities"
+  MG_SYNC_WEB_CHILD="$result"
+  if [ "$rc" -ne 0 ] || ! jq -e --arg root "$MG_ROOT" --arg job "$job" --argjson args "$arguments" '
+      .root == $root and .job == $job and .args == $args and .dry_run == false and
+      .status == "pass" and .exit_code == 0 and .failures == [] and
+      (.started_at | type == "string") and (.finished_at | type == "string")
+    ' "$result" >/dev/null; then
+    mg_sync_web__failure "Required $job child failed or has incomplete evidence"; return 1
+  fi
+}
+
+# A null running state checks ownership only, including failed initialization.
+mg_sync_web__fixture_inspect() {
+  local name="$1" cid="$2" owner="$3" image="$4" binary_dir="$5" running="$6"
+  local inspection="$MG_RUN_DIR/fixture-container-$running.json"
+  docker inspect "$cid" >"$inspection" || return 1
+  mg_artifact json "$inspection" "Private fixture immutable identity, isolation and mounts"
+  jq -e --arg name "/$name" --arg cid "$cid" --arg run "$MG_RUN_ID" --arg owner "$owner" \
+      --arg image "$image" --arg binary "$binary_dir" --arg out "$MG_RUN_DIR/fixture" --argjson running "$running" '
+    length == 1 and (.[0] |
+      .Id == $cid and .Name == $name and
+      .Config.Labels["meguri.mg.run-id"] == $run and .Config.Labels["meguri.sync.owner"] == $owner and
+      (if $running == null then true else
+      .Image == $image and .Config.Image == $image and
+      .State.Running == $running and .Config.Cmd == ["preview"] and .Config.User == "0:0" and
+      .Config.Entrypoint == ["bash", "/opt/sync-web/run.sh"] and
+      .HostConfig.NetworkMode == "none" and (.HostConfig.PortBindings // {} | length) == 0 and
+      (.NetworkSettings.Ports // {} | length) == 0 and .HostConfig.PublishAllPorts == false and
+      ((.NetworkSettings.Networks | keys) == ["none"] or
+        ($running == false and (.NetworkSettings.Networks | length) == 0)) and
+      .HostConfig.ReadonlyRootfs == true and .HostConfig.Privileged == false and .HostConfig.Init == true and
+      .HostConfig.CapDrop == ["ALL"] and (.HostConfig.CapAdd // [] | length) == 0 and
+      .HostConfig.SecurityOpt == ["no-new-privileges"] and
+      .HostConfig.Tmpfs == {"/tmp":"noexec", "/work":"exec", "/fixtures":"rw,noexec,nosuid,nodev,mode=0700,uid=0,gid=0"} and
+      ([.Mounts[] | select(.Type == "bind") | {Source,Destination,RW}] | sort_by(.Destination)) ==
+        ([{Source:($binary + "/meguri-sync-server"),Destination:"/binary/meguri-sync-server",RW:false},
+          {Source:($binary + "/assets.json"),Destination:"/binary/assets.json",RW:false},
+          {Source:$out,Destination:"/out",RW:true}] | sort_by(.Destination)) and
+      all(.Mounts[]; .Type == "bind" or
+        (.Type == "tmpfs" and (.Destination == "/tmp" or .Destination == "/work" or .Destination == "/fixtures")))
+      end))
+  ' "$inspection" >/dev/null
+}
+
+# Capture by validated immutable ID before the shared helper checks removal.
+# Append only when present: an idempotent exit hook must retain earlier logs.
+mg_sync_web__fixture_cleanup() {
+  local name="$1" owner="$2" ids rc=0
+  if ids="$(docker container ls -aq --no-trunc --filter "name=^/$name$")"; then
+    if [ -n "$ids" ]; then
+      if [[ "$ids" =~ ^[0-9a-f]{64}$ ]] &&
+          mg_sync_web__fixture_inspect "$name" "$ids" "$owner" "" "" null; then
+        docker logs "$ids" >>"$MG_RUN_DIR/fixture.log" 2>&1 || rc=1
+        mg_artifact log "$MG_RUN_DIR/fixture.log" "Owned detached fixture stdout/stderr before removal"
+      else
+        rc=1
+      fi
+    fi
+  else
+    rc=1
+  fi
+  if [ "$rc" -ne 0 ]; then
+    mg_failure sync-web-fixture-logs "Could not preserve owned fixture logs before cleanup"
+    mg_status fail
+  fi
+  mg_sync_server__remove_container "$name" "$owner" || rc=1
+  return "$rc"
+}
+
+# Same-shell body: return to the owner for checked cleanup on every outcome.
+mg_sync_web__verify_body() {
+  local name="$1" owner="$2" image="$3" binary_dir="$4" frontend="$5" cid binary_hash counts key value
+  docker create --init --read-only --cap-drop ALL --security-opt no-new-privileges --user 0:0 \
+      --name "$name" --label "meguri.mg.run-id=$MG_RUN_ID" --label "meguri.sync.owner=$owner" \
+      --network none --tmpfs /tmp:noexec --tmpfs /work:exec \
+      --tmpfs /fixtures:rw,noexec,nosuid,nodev,mode=0700,uid=0,gid=0 \
+      -v "$binary_dir/meguri-sync-server:/binary/meguri-sync-server:ro" \
+      -v "$binary_dir/assets.json:/binary/assets.json:ro" -v "$MG_RUN_DIR/fixture:/out" \
+      "$image" preview >"$MG_RUN_DIR/fixture.cid" || return 1
+  cid="$(cat "$MG_RUN_DIR/fixture.cid")" || return 1
+  [[ "$cid" =~ ^[0-9a-f]{64}$ ]] || return 1
+  mg_sync_web__fixture_inspect "$name" "$cid" "$owner" "$image" "$binary_dir" false || return 1
+  docker start "$cid" >/dev/null || return 1
+  docker exec "$cid" node /opt/sync-web/ready.mjs || return 1
+  mg_sync_web__fixture_inspect "$name" "$cid" "$owner" "$image" "$binary_dir" true || return 1
+  # Verify runtime storage ownership/permissions, not just requested mount flags.
+  docker exec "$cid" /bin/sh -c 'test "$(stat -c "%u:%g:%a" /fixtures)" = 0:0:700' || return 1
+  [ -f "$MG_RUN_DIR/fixture/ready" ] && [ -s "$MG_RUN_DIR/fixture/test/fixture.json" ] || return 1
+  binary_hash="$(shasum -a 256 "$binary_dir/meguri-sync-server" | awk '{print $1}')" || return 1
+  jq -e --arg hash "$binary_hash" --slurpfile assets "$binary_dir/assets.json" '
+    .binary_sha256 == $hash and .assets == $assets[0] and (.assets | length) > 0 and
+    .test.origin == "https://localhost:18447"
+  ' "$MG_RUN_DIR/fixture/preview.json" >/dev/null || return 1
+  cmp "$binary_dir/assets.json" "$frontend/prepared/assets.json" || return 1
+  # Identity probe only: require bytes from the running binary, not just the
+  # copied inventory. This contributes artifacts, never test credits.
+  docker exec "$cid" node --input-type=module -e '
+    import { readFile, writeFile } from "node:fs/promises";
+    import { createHash } from "node:crypto";
+    import { get } from "node:https";
+    const assets = JSON.parse(await readFile("/binary/assets.json", "utf8"));
+    if (!Array.isArray(assets) || !assets.length) throw new Error("Missing asset inventory");
+    const observed = [];
+    for (const asset of assets) {
+      if (!/^\/(index\.html|assets\/[A-Za-z0-9_.-]+)$/.test(asset.path)) throw new Error("Invalid asset path");
+      const bytes = await new Promise((resolve, reject) => {
+        const request = get("https://localhost:18447" + (asset.path === "/index.html" ? "/" : asset.path),
+          { rejectUnauthorized: false, headers: { Origin: "https://localhost:18447" } }, response => {
+            if (response.statusCode !== 200) { response.resume(); reject(new Error("Asset unavailable")); return; }
+            const chunks = [];
+            response.on("data", chunk => chunks.push(chunk));
+            response.on("error", reject);
+            response.on("end", () => resolve(Buffer.concat(chunks)));
+          });
+        request.on("error", reject);
+        request.setTimeout(15000, () => request.destroy(new Error("Asset identity timeout")));
+      });
+      const sha256 = createHash("sha256").update(bytes).digest("hex");
+      if (bytes.length !== asset.bytes || sha256 !== asset.sha256) throw new Error("Served asset identity differs");
+      observed.push({ path: asset.path, bytes: bytes.length, sha256 });
+    }
+    await writeFile("/out/asset-identity.json", JSON.stringify(observed, null, 2) + "\n");
+  ' || return 1
+  mg_artifact directory "$MG_RUN_DIR/fixture" "Fresh synthetic HTTPS readiness and actual binary/assets identity"
+  mg_sync_web__browser "$MG_RUN_DIR/fixture" "$cid" "$image" || return 1
+  # Revalidate the child's TAP-validated report; build/install steps earn no tests.
+  counts="$(jq -n --slurpfile frontend "$frontend/test-counts.json" \
+      --slurpfile browser "$MG_RUN_DIR/test-counts.json" '
+    {frontend:$frontend[0], browser:$browser[0]} |
+    select(all(.[]; .errors == [] and .counts.total > 0 and
+      .counts.total == .counts.completed and .counts.total == .counts.passed))
+  ')" || return 1
+  [ -n "$counts" ] || return 1
+  mg_detail test_groups "$counts"
+  mg_artifact json "$frontend/test-counts.json" "Frontend child counts bound to retained TAP"
+  counts="$(jq -c '[.[].counts | to_entries[]] | group_by(.key) |
+      map({key:.[0].key,value:(map(.value)|add)}) | from_entries' <<<"$counts")" || return 1
+  while IFS=$'\t' read -r key value; do mg_count "$key" "$value"; done \
+    < <(jq -r 'to_entries[] | [.key,.value] | @tsv' <<<"$counts")
+}
+
+mg_sync_web_verify() {
+  if [ "$#" -ne 0 ]; then mg_failure usage "Use sync-web-verify (no arguments)"; mg_status error; return; fi
+  mg_status fail
+  mg_artifact directory "$MG_RUN_DIR" "Composite child receipts, reports, identities and checked cleanup"
+  local frontend binary_dir image owner name rc=0
+  mg_sync_web__child sync-web-image || return
+  image="$(docker image inspect --format '{{.Id}}' "$(mg_compose_project)-sync-web:local")" || return
+  [[ "$image" =~ ^sha256:[0-9a-f]{64}$ ]] || return
+  mg_detail image_id "$(jq -nc --arg image "$image" '$image')"
+  mg_sync_web__child sync-web-deps --install || return
+  mg_sync_web__child sync-web-deps || return
+  mg_sync_web__child sync-web-browser-install || return
+  mg_sync_web__child sync-web-check || return
+  frontend="${MG_SYNC_WEB_CHILD%/result.json}"
+  mg_sync_web__child sync-web-actualserver-build "$frontend/prepared" || return
+  binary_dir="${MG_SYNC_WEB_CHILD%/result.json}"
+  [ -x "$binary_dir/meguri-sync-server" ] && [ -s "$binary_dir/assets.json" ] &&
+    [ -s "$binary_dir/build-sha256.txt" ] && [ -s "$binary_dir/server-source-sha256.txt" ] &&
+    [ -s "$frontend/source-sha256.txt" ] || { mg_sync_web__failure "Missing real build identities"; return; }
+  owner="$(python3 -c 'import secrets; print(secrets.token_hex(16))')" || return
+  name="meguri-web-verify-$MG_RUN_ID-$owner"
+  # Register before creation in this owner shell, including cancellation cleanup.
+  mg_on_exit "$(printf '%q ' mg_sync_web__fixture_cleanup "$name" "$owner")"
+  mkdir -m 700 "$MG_RUN_DIR/fixture" || return
+  mg_sync_web__verify_body "$name" "$owner" "$image" "$binary_dir" "$frontend" || rc=1
+  mg_sync_web__fixture_cleanup "$name" "$owner" || rc=1
+  if [ "$rc" -ne 0 ]; then
+    mg_sync_web__failure "Private verification or ownership-checked cleanup failed"; return
+  fi
+  mg_detail fixture_cleanup "$(jq -nc --arg name "$name" --arg owner "$owner" \
+    '{name:$name,owner:$owner,absence_confirmed:true}')"
+  mg_status pass
+}

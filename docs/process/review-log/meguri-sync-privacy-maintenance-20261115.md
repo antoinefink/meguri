@@ -54,3 +54,35 @@ Passing Docker checks:
 Earlier failed receipts are retained: a synthetic word accidentally present in
 the fixture's committed text, and two live-document test assumptions exposed by
 the Rust plan edit. Their corrections changed test setup, not privacy matching.
+
+## Standing ledger delegation, 2026-11-16
+
+Starting commit: `8ee4f155e8407d0e6bdd4ca2dd9c6e5037d2ce7a`.
+Antoine approved the exact instruction proposal and its standing, revocable
+single-ledger authority in chat. The rule is in `docs/process/provenance.md`.
+The sync implementation remained paused during this maintenance.
+
+Fresh non-author reviewer `/root/ledger_content_review` read every field in
+all 15 pending records and found public operational metadata only. Mechanical
+checks preserved the admitted prefix and matched all appends to original
+ledger-only commits. The approved prefix was
+`7ca57c0ce49eb60f43871f3030f837c3a10bbfd23fc8d086b4e0f6adefebd08b`.
+The first 13-record snapshot was
+`2b3bae617e84af93350da357ca79e592f5bdbcc5ebcb39436c3117ea9341c238`;
+the final 15-record snapshot was
+`ef4316d2bc2074182b4a80b128e77cebdf67ba5ab6cd143dbf0db9d25a051c04`.
+Normal merges `83e7cba9` and `414c671b` retain every original commit.
+Their staged privacy checks passed at
+`build/mg/private/20261116T090543Z-52658/result.json` and
+`build/mg/private/20261116T090657Z-56475/result.json`.
+The scanner unit suite passed at
+`build/mg/selftest/20261116T090417Z-48567/result.json`.
+
+The same independent reviewer separately inspected both complete instruction
+documents, verified their exact match to the owner-approved proposal, and
+found public operational content only. That one-time content review does not
+extend the standing delegation beyond the session ledger. The initial document
+scan failure is retained at
+`build/mg/private/20261116T090419Z-48950/result.json`.
+No matcher, threshold, private input, clean-room boundary or original record
+was changed. The ordinary tool approval path remains required.

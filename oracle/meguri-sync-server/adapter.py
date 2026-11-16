@@ -71,9 +71,9 @@ def free_port():
 
 
 @contextlib.contextmanager
-def reference_server(root):
+def reference_server(root, credentials=None):
     port = free_port()
-    username, password = "synthetic-" + secrets.token_hex(8), secrets.token_hex(24)
+    username, password = credentials if credentials is not None else ("synthetic-" + secrets.token_hex(8), secrets.token_hex(24))
     env = {key: value for key, value in os.environ.items() if not key.startswith("SYNC_") and "proxy" not in key.lower()}
     env.update(SYNC_BASE=str(root), SYNC_HOST="127.0.0.1", SYNC_PORT=str(port), SYNC_USER1=f"{username}:{password}")
     process = subprocess.Popen([sys.executable, "-m", "anki.syncserver"], env=env,
@@ -106,7 +106,7 @@ def unpack(data):
     return result
 
 
-def file_stamp(data):
+def file_stamp(data, matrix=False):
     import sqlite3
     with tempfile.NamedTemporaryFile(suffix='.anki2') as stream:
         stream.write(data); stream.flush()
@@ -123,6 +123,9 @@ def file_stamp(data):
                 normalized = [[{'blob': value.hex()} if isinstance(value, bytes) else value for value in row] for row in rows]
                 content[table] = sorted(normalized, key=encoded)
             stamp['user_tables_sha256'] = sha(encoded(content))
+            if matrix:
+                from normal_matrix import database_state
+                stamp['matrix_state'] = database_state(connection)
             return stamp
         finally: connection.close()
 
@@ -132,6 +135,8 @@ class Recorder(http.server.ThreadingHTTPServer):
     def __init__(self, upstream):
         self.upstream = upstream
         self.observations = []
+        self.capture_normal = False
+        self.capture_media = False
         self.errors = []
         self.empty_sk = False
         self.rewrite_session = None
@@ -173,10 +178,14 @@ class RecorderHandler(http.server.BaseHTTPRequestHandler):
                       "header_members": sorted(header), "compressed_request_bytes": len(raw),
                       "request_bytes": len(decoded), "raw_zstd": True,
                       "framing": "chunked" if self.headers.get("Transfer-Encoding") else "content-length"}
+            if self.server.capture_normal and self.path in {'/sync/start','/sync/applyGraves','/sync/applyChanges','/sync/chunk','/sync/applyChunk','/sync/sanityCheck2','/sync/finish'}:
+                detail['normal_request'] = json.loads(decoded)
             if self.path.endswith(("/chunk", "/finish", "/abort", "/download")):
                 detail["no_argument_body"] = json.loads(decoded)
             if self.path.startswith('/msync/') and not self.path.endswith('/uploadChanges'):
                 detail['media_request_members'] = sorted(json.loads(decoded))
+                if self.server.capture_media:
+                    detail['media_request'] = json.loads(decoded)
             if self.path.endswith("/upload"):
                 detail['upload_stamp'] = file_stamp(decoded)
             if self.path == '/sync/chunk' and self.server.idle_seconds and not self.server.idle_claimed:
@@ -221,9 +230,11 @@ class RecorderHandler(http.server.BaseHTTPRequestHandler):
             if 200 <= response.status < 300:
                 body = unpack(output)
                 detail["response_bytes"] = len(body)
+                if self.server.capture_normal and self.path in {'/sync/start','/sync/applyGraves','/sync/applyChanges','/sync/chunk','/sync/applyChunk','/sync/sanityCheck2','/sync/finish'}:
+                    detail['normal_response'] = json.loads(body)
                 detail["original_size_matches"] = changed_headers.get('anki-original-size', response.getheader("anki-original-size")) == str(len(body))
                 if self.path.endswith('/download'):
-                    detail['download_stamp'] = file_stamp(body)
+                    detail['download_stamp'] = file_stamp(body,getattr(self.server,'capture_matrix',False))
                 elif self.path.endswith('/meta'):
                     meta = json.loads(body)
                     detail['meta'] = {key: meta[key] for key in ('mod','scm','usn','ts','cont','empty','media_usn','hostNum')}
@@ -311,7 +322,7 @@ def media_sync(col, auth, timeout=30):
         time.sleep(0.01)
 
 
-def native_request(port, auth, method, body, session):
+def native_request(port, auth, method, body, session, retain_input=False):
     """Job-owned fault driver; never claims its bytes were emitted by Desktop."""
     payload = zstandard.ZstdCompressor().compress(encoded(body))
     header = json.dumps({'v': 11, 'k': auth.hkey, 'c': 'meguri-reference-fault-driver', 's': session})
@@ -320,6 +331,8 @@ def native_request(port, auth, method, body, session):
     response = connection.getresponse()
     output = response.read()
     result = {'status': response.status, 'response_bytes': len(output)}
+    if retain_input:
+        result.update(input_json_hex=encoded(body).hex(),input_zstd_hex=payload.hex(),response_zstd_hex=output.hex())
     if 200 <= response.status < 300:
         result['value'] = json.loads(unpack(output))
     connection.close()
@@ -579,12 +592,38 @@ if __name__ == "__main__":
     try:
         request = json.loads(sys.stdin.buffer.read())
         if request['mode'] == 'identity': result = runtime()
+        elif request['mode'] == 'recovery-dirty':
+            import recovery_dirty
+            result = recovery_dirty.run(sys.modules[__name__],request['fixture'])
+        elif request['mode'] == 'recovery':
+            import recovery
+            result = recovery.run(sys.modules[__name__],request['fixture'])
+        elif request['mode'] == 'recovery-discover':
+            import recovery
+            result = recovery.discover(sys.modules[__name__])
         elif request['mode'] == 'edges': result = edges(request['fixture'])
+        elif request['mode'] == 'normal-matrix':
+            import normal_matrix
+            result = normal_matrix.run(sys.modules[__name__],request['fixture'])
+        elif request['mode'] == 'media':
+            import media
+            result = media.run(sys.modules[__name__],request['fixture'])
+        elif request['mode'] in {'normal','normal-sdk'}:
+            import normal
+            result = normal.exact_numbers(normal.run(sys.modules[__name__],request['fixture'],sdk_only=request['mode'] == 'normal-sdk'))
         elif request['mode'] == 'candidate':
             require(isinstance(request.get('target'),dict),'candidate target missing')
             require(request['target'].get('server',{}).get('kind') == 'meguri_sync','candidate peer kind mismatch')
             require(type(request.get('full_only')) is bool,'candidate phase is malformed')
-            result = smoke(request['fixture'],request['target'],request['full_only'])
+            require(request.get('phase') in {'full','normal','media','complete'},'candidate phase is unknown')
+            if request['phase'] == 'media':
+                import media
+                result = media.run(sys.modules[__name__],request['fixture'],request['target'])
+            elif request['phase'] == 'normal':
+                import normal
+                result = normal.exact_numbers(normal.run(sys.modules[__name__],request['fixture'],request['target'],sdk_only=True))
+            else:
+                result = smoke(request['fixture'],request['target'],request['full_only'])
         elif request['mode'] == 'smoke':
             require(type(request.get('full_only',False)) is bool,'reference phase is malformed')
             result = smoke(request['fixture'],full_only=request.get('full_only',False))
@@ -592,6 +631,6 @@ if __name__ == "__main__":
         sys.stdout.buffer.write(encoded(result))
     except BaseException as error:
         # Never export source frames, backend messages or collection content.
-        sys.stdout.buffer.write(encoded({"failure": {"kind": type(error).__name__, "phase": PHASE, "recording_errors": RECORDER_ERRORS}}))
+        sys.stdout.buffer.write(encoded({"failure": {"kind": type(error).__name__, "phase": PHASE, "recording_errors": RECORDER_ERRORS, "driver_frames": [str(pathlib.Path(frame.filename).name)+":"+str(frame.lineno) for frame in __import__("traceback").extract_tb(error.__traceback__) if frame.filename.startswith("/opt/reference/")]}}))
         sys.stdout.buffer.flush()
         os._exit(1)

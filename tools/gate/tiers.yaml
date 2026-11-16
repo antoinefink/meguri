@@ -2,7 +2,7 @@
 #
 # Each run is one `tools/mg <job> <args>` call with its tier, the paths that
 # trigger it, where its work happens (R1952) and a time budget. `tools/mg gate`
-# runs T0 and, when core/ changed, T1; `tools/mg nightly` runs T2; `tools/mg
+# runs T0 and T1 for their changed paths; `tools/mg nightly` runs T2; `tools/mg
 # milestone <M>` runs in full the T0, T1 and T3 runs M's gate reads
 # (docs/process/milestones.yaml) and lists its T4 runs; `tools/mg milestone
 # release` runs every T0, T1, T3 and T4 run. Every registered tools/mg job is a
@@ -66,7 +66,7 @@ version: 1
 
 tiers:
   T0: {when: every change, what: "static checks, canaries, committed goldens on macOS and Linux, unit tests, lint, dependency gate, similarity scan, snapshot and accessibility tests for touched UI, simulator perf smoke for touched hot paths", budget: "conformance part under 60 s"}
-  T1: {when: every change under core/ (and to scenarios or goldens), what: "live oracle suites for the touched areas, sync smoke, oracle-checked fixtures", budget: "2-5 min"}
+  T1: {when: changes matching each run's triggers, what: "live oracle suites for the touched areas, server interoperability, sync smoke, oracle-checked fixtures", budget: "2-5 min"}
   T2: {when: nightly (weekly for the weekly runs), what: "fuzzing with a logged seed, JPlag, Meguri-versus-Anki timing, long simulations, the full sync, media and fault matrix", budget: "60-90 min"}
   T3: {when: milestone and release, what: "private collection suite, macOS-native oracle confirmation, Mac benchmarks, harvest coverage (R1880), release audit", budget: "10-30 min plus the benchmarks"}
   T4: {when: milestone and release, what: "on-device performance, performed by Antoine (U256)", budget: "per R1863"}
@@ -143,7 +143,7 @@ runs:
     tier: T0
     placement: docker:dev
     class: unit
-    triggers: &sync-server [server/, tools/mg.d/meguri-sync.sh, core/rust-toolchain.toml, docker/dev.Dockerfile, docker/compose.yml, docker/dev.Dockerfile.dockerignore]
+    triggers: &sync-server [server/, tools/mg.d/meguri-sync.sh, core/crates/meguri-model/, core/Cargo.toml, core/rust-toolchain.toml, docker/dev.Dockerfile, docker/compose.yml, docker/dev.Dockerfile.dockerignore]
     budget_s: 2400
   - id: sync-server-lint
     job: sync-server-lint
@@ -157,7 +157,7 @@ runs:
     tier: T0
     placement: docker:dev
     class: static
-    triggers: [server/Cargo.toml, server/Cargo.lock, server/deny.toml, server/about.toml, server/DEPENDENCIES.md, server/LICENSE, server/rust-toolchain.toml, tools/mg.d/meguri-sync.sh, core/rust-toolchain.toml, docker/dev.Dockerfile, docker/compose.yml, docker/dev.Dockerfile.dockerignore]
+    triggers: [server/Cargo.toml, server/Cargo.lock, server/deny.toml, server/about.toml, server/DEPENDENCIES.md, server/LICENSE, server/rust-toolchain.toml, tools/mg.d/meguri-sync.sh, core/crates/meguri-model/, core/Cargo.toml, core/rust-toolchain.toml, docker/dev.Dockerfile, docker/compose.yml, docker/dev.Dockerfile.dockerignore]
     budget_s: 600
   - id: native-durability
     job: native-durability
@@ -204,6 +204,16 @@ runs:
     oracle_files: true
     triggers: &sync-server-reference [oracle/meguri-sync-server/, docker/meguri-sync-reference.Dockerfile, docker/meguri-sync-reference.Dockerfile.dockerignore, docker/meguri-sync-reference.compose.yml, tools/mg.d/meguri-sync-reference.sh, conformance/schema/meguri-sync-server.schema.json, conformance/catalog/meguri-sync-server.json, conformance/fixtures/meguri-sync-server/, conformance/recordings/scenarios/meguri-sync-server/, specs/conformance/meguri-sync-server.md, specs/conformance/meguri-sync-candidate.md, "specs/sync/server-*.md"]
     budget_s: 900
+
+  # Prepare and verify the embedded web application before Rust consumers.
+  - id: sync-web-verify
+    job: sync-web-verify
+    tier: T0
+    stage: canary
+    placement: host
+    class: ui
+    triggers: [server/, core/crates/meguri-model/, core/Cargo.toml, core/rust-toolchain.toml, tools/mg.d/meguri-sync.sh, tools/mg.d/sync-web.sh, tools/mg.d/meguri-sync-reference.sh, oracle/meguri-sync-server/, docker/dev.Dockerfile, docker/dev.Dockerfile.dockerignore, docker/compose.yml, docker/sync-web-compose.yml, docker/sync-web.Dockerfile, docker/sync-web.Dockerfile.dockerignore, docker/meguri-sync-reference.Dockerfile, docker/meguri-sync-reference.Dockerfile.dockerignore, docker/meguri-sync-reference.compose.yml, conformance/schema/meguri-sync-server.schema.json, conformance/catalog/meguri-sync-server.json, conformance/fixtures/meguri-sync-server/, conformance/recordings/scenarios/meguri-sync-server/, specs/conformance/meguri-sync-server.md, specs/conformance/meguri-sync-candidate.md, "specs/sync/server-*.md"]
+    budget_s: 1800
 
   # --- T0: tooling self-tests -------------------------------------------------
   - id: selftest
@@ -493,6 +503,43 @@ runs:
     where: tip
 
   # --- T1: live oracle ----------------------------------------------------------
+  # The explicit producer session is the reviewed wrapper author, not an inferred
+  # last ledger row. Each receipt independently binds the current candidate tip.
+  - id: sync-server-candidate-build
+    job: sync-server-candidate-build
+    args: [--lane, desktop, --phase, full, --author-session, s-20261115T203832Z-6ecc17e8]
+    tier: T1
+    placement: host
+    class: sync
+    triggers: &sync-server-candidate [server/, core/crates/meguri-model/, core/Cargo.toml, core/rust-toolchain.toml, tools/mg.d/meguri-sync.sh, tools/mg.d/meguri-sync-reference.sh, oracle/meguri-sync-server/, docker/dev.Dockerfile, docker/dev.Dockerfile.dockerignore, docker/compose.yml, docker/meguri-sync-reference.Dockerfile, docker/meguri-sync-reference.Dockerfile.dockerignore, docker/meguri-sync-reference.compose.yml, conformance/schema/meguri-sync-server.schema.json, conformance/catalog/meguri-sync-server.json, conformance/fixtures/meguri-sync-server/, conformance/recordings/scenarios/meguri-sync-server/, specs/conformance/meguri-sync-candidate.md, "specs/sync/server-*.md"]
+    budget_s: 1200
+  - id: sync-server-interop
+    job: sync-server-interop
+    args: [--lane, desktop, --phase, full, --build-receipt, "{artifact:sync-server-candidate-build:result.json}", --author-session, s-20261115T203832Z-6ecc17e8]
+    tier: T1
+    placement: host
+    class: sync
+    oracle_files: true
+    triggers: *sync-server-candidate
+    budget_s: 900
+  - id: sync-server-interop-normal
+    job: sync-server-interop
+    args: [--lane, desktop, --phase, normal, --build-receipt, "{artifact:sync-server-candidate-build:result.json}", --author-session, s-20261115T203832Z-6ecc17e8]
+    tier: T1
+    placement: host
+    class: sync
+    oracle_files: true
+    triggers: *sync-server-candidate
+    budget_s: 900
+  - id: sync-server-interop-media
+    job: sync-server-interop
+    args: [--lane, desktop, --phase, media, --build-receipt, "{artifact:sync-server-candidate-build:result.json}", --author-session, s-20261115T203832Z-6ecc17e8]
+    tier: T1
+    placement: host
+    class: sync
+    oracle_files: true
+    triggers: *sync-server-candidate
+    budget_s: 900
   # Smoke covers only the wrapper's named Desktop selection.
   - id: sync-server-reference-smoke
     job: sync-server-reference
@@ -506,6 +553,24 @@ runs:
   - id: sync-server-reference-edges
     job: sync-server-reference
     args: [edges]
+    tier: T1
+    placement: host
+    class: conformance
+    oracle_files: true
+    triggers: *sync-server-reference
+    budget_s: 900
+  - id: sync-server-reference-normal
+    job: sync-server-reference
+    args: [normal]
+    tier: T1
+    placement: host
+    class: conformance
+    oracle_files: true
+    triggers: *sync-server-reference
+    budget_s: 900
+  - id: sync-server-reference-normal-matrix
+    job: sync-server-reference
+    args: [normal-matrix]
     tier: T1
     placement: host
     class: conformance
@@ -817,6 +882,17 @@ runs:
     user_step: device-run
 
 utilities:
+  - {job: sync-web-browser, why: "Focused real browser journey against an owned preview; sync-web-verify uses a private gate fixture"}
+  - {job: sync-web-preview-down, why: "Explicit cleanup of the owned persistent preview; never stop it for gates"}
+  - {job: sync-web-preview-up, why: "Explicit user preview with published loopback ports; never a gate service"}
+  - {job: sync-web-actualserver-build, why: "On-demand real server and asset build; sync-web-verify covers gates"}
+  - {job: sync-web-check, why: "Focused frontend type, unit and build checks; sync-web-verify covers gates"}
+  - {job: sync-web-build, why: "Focused embedded asset build; sync-web-verify covers gates"}
+  - {job: sync-web-unit, why: "Focused real frontend unit proofs; sync-web-verify covers gates"}
+  - {job: sync-web-typecheck, why: "Focused frontend type check; sync-web-verify covers gates"}
+  - {job: sync-web-browser-install, why: "On-demand pinned browser acquisition; sync-web-verify prepares its browser runtime"}
+  - {job: sync-web-deps, why: "On-demand locked frontend dependency audit and preparation; sync-web-verify covers gates"}
+  - {job: sync-web-image, why: "On-demand pinned frontend/browser image; sync-web-verify prepares the required gate runtime"}
   - {job: cloud-fetch-probe-host, why: "On-demand SDK observation; no gate evidence"}
   - {job: cloud-record-read-host, why: "On-demand read-only acknowledged-record observation; no gate or acceptance evidence"}
   - {job: cloud-media-probe, why: "Explicit normal-app generated media diagnostic only; prepare-ui is private prepared-only PREPARATION with separate authorized Finder copy/sync evidence; staged-only or peer-byte-match never grants Q7/signed-lane acceptance"}

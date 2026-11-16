@@ -8,7 +8,7 @@ use std::{fs, os::unix::fs::PermissionsExt, path::Path};
 // Same public synthetic PHC as the permanent crypto compatibility test.
 const PHC: &str = "$argon2id$v=19$m=19456,t=2,p=1$AAECAwQFBgcICQoLDA0ODw$krbozlfmG/YbBoj1y9KHSlgK7HHNhVNfzFmZ8bEcWH4";
 fn budget() -> crate::limits::TempBudget {
-    crate::limits::TempBudget::new(std::num::NonZeroU64::new(1024).unwrap())
+    crate::limits::TempBudget::new(std::num::NonZeroU64::new(collection::INITIAL_TEMP_BYTES + 4096).unwrap())
 }
 fn initialized() -> (tempfile::TempDir, DataRoot) {
     let temp = tempfile::tempdir().unwrap();
@@ -153,11 +153,11 @@ fn private_marker_phase_errors_resume_same_reservation_on_restart() {
             crate::test_hooks::storage_failure(phase, || root.provision(&id, &budget())).is_err()
         );
         let stores = root.stores(&id).unwrap();
-        assert!(!stores.substrate_manifest.exists());
+        assert!(!stores.current_manifest.exists());
         let sentinel = stores.media.join("operator-sentinel");
         private_sentinel(&sentinel);
         let bytes = fs::read(&sentinel).unwrap();
-        let staging_sentinel = stores.directory.join(".substrate-staging/unrelated");
+        let staging_sentinel = stores.directory.join(".collection-staging/unrelated");
         private_sentinel(&staging_sentinel);
         drop(root);
         let root = DataRoot::acquire(&temp.path().join("owner"), false).unwrap();
@@ -182,7 +182,7 @@ fn complete_store_bindings_reject_changed_intermediate_directory_identities() {
         "state/accounts",
         "generations",
         "media",
-        "generations/substrate-v1",
+        "generations/initial",
     ] {
         let (_temp, root) = initialized();
         let id = reserve(&root, "setup", None);
@@ -461,7 +461,7 @@ async fn ordinary_restart_and_local_admin_recovery_preserve_synthetic_stores() {
     let stores = root.stores(&admin).unwrap();
     let sentinels = [
         stores.media.join("blob"),
-        stores.generations.join("substrate-v1/data"),
+        stores.generations.join("initial/data"),
         stores.directory.join("unrelated"),
     ];
     for path in &sentinels {
@@ -514,11 +514,11 @@ fn unexpected_pending_marker_bytes_remain_untouched() {
     let id = reserve(&root, "setup", None);
     root.provision(&id, &budget()).unwrap();
     let stores = root.stores(&id).unwrap();
-    fs::remove_file(&stores.substrate_manifest).unwrap();
-    let pending = stores.directory.join(".substrate-staging/manifest.pending");
+    fs::remove_file(&stores.current_manifest).unwrap();
+    let pending = stores.directory.join(".collection-staging/manifest.pending");
     private_sentinel(&pending);
     assert!(root.provision(&id, &budget()).is_err());
-    assert!(!stores.substrate_manifest.exists());
+    assert!(!stores.current_manifest.exists());
     assert_eq!(
         fs::read(pending).unwrap(),
         b"synthetic data: preserve exactly\0\xff"
@@ -699,10 +699,10 @@ fn staging_budget_covers_payload_and_releases_on_each_error_and_adoption() {
         assert_eq!(budget.used(), 0);
         let stores = root.stores(&id).unwrap();
         let files = staging_bytes(&stores.directory);
-        let held = budget.reserve(1024).unwrap();
+        let held = budget.reserve(collection::INITIAL_TEMP_BYTES + 4096).unwrap();
         assert!(root.provision(&id, &budget).is_err());
         assert_eq!(staging_bytes(&stores.directory), files);
-        assert!(!stores.substrate_manifest.exists());
+        assert!(!stores.current_manifest.exists());
         assert_eq!(metadata_snapshot(&root), before);
         drop(held);
         root.provision(&id, &budget).unwrap();
@@ -713,7 +713,7 @@ fn staging_budget_covers_payload_and_releases_on_each_error_and_adoption() {
 }
 fn staging_bytes(path: &Path) -> std::collections::BTreeMap<std::path::PathBuf, Vec<u8>> {
     let mut files = std::collections::BTreeMap::new();
-    let staging = path.join(".substrate-staging");
+    let staging = path.join(".collection-staging");
     if staging.exists() {
         for entry in fs::read_dir(staging).unwrap() {
             let entry = entry.unwrap();
@@ -746,7 +746,7 @@ async fn startup_resume_reserves_staging_budget_before_extending_existing_bytes(
         before
     );
     assert_eq!(staging_bytes(&stores.directory), staged);
-    assert!(!stores.substrate_manifest.exists());
+    assert!(!stores.current_manifest.exists());
     assert_eq!(
         fs::read(&sentinel).unwrap(),
         b"synthetic data: preserve exactly\0\xff"
@@ -755,7 +755,7 @@ async fn startup_resume_reserves_staging_budget_before_extending_existing_bytes(
     let service = crate::Service::open(root, config()).await.unwrap();
     assert_eq!(service.temp.used(), 0);
     assert!(!service.status().await.unwrap());
-    assert!(stores.substrate_manifest.is_file());
+    assert!(stores.current_manifest.is_file());
     assert_eq!(
         fs::read(&sentinel).unwrap(),
         b"synthetic data: preserve exactly\0\xff"
@@ -784,10 +784,11 @@ fn staging_payload_requires_its_full_byte_reservation_before_any_write() {
     let stores = root.stores(&id).unwrap();
     // Derive the finite payload from actual service-created files, rather than
     // assume a physical disk capacity or generate a disk-full condition.
-    let payload = fs::metadata(stores.directory.join(".substrate-staging/owner"))
+    let payload = fs::metadata(stores.directory.join(".collection-staging/owner"))
         .unwrap()
         .len()
-        + fs::metadata(&stores.substrate_manifest).unwrap().len();
+        + fs::metadata(&stores.current_manifest).unwrap().len()
+        + collection::INITIAL_TEMP_BYTES;
     let (_other_temp, other) = initialized();
     let other_id = reserve(&other, "setup", None);
     let before = metadata_snapshot(&other);
@@ -801,4 +802,40 @@ fn staging_payload_requires_its_full_byte_reservation_before_any_write() {
     assert_eq!(exact.used(), 0);
     other.validate_stores(&other_id).unwrap();
     assert_eq!(metadata_snapshot(&other), before);
+}
+
+#[cfg(feature="test-hooks")]
+#[test]
+fn collection_pointer_faults_reopen_only_complete_generations_without_touching_media() {
+    for (phase,changed) in [("collection_before_manifest",false),("collection_after_manifest_rename",true),("collection_after_manifest_sync",true)] {
+        let (temp,root)=initialized();let id=reserve(&root,"setup",None);ready(&root,&id,true);
+        let stores=root.stores(&id).unwrap();let before=fs::read(&stores.current_manifest).unwrap();
+        let sentinel=stores.media.join("sentinel");private_sentinel(&sentinel);
+        let stage=root.stage_collection(&id).unwrap();
+        crate::collection::schema::create_blank(&stage.path,123,456).unwrap();
+        assert!(crate::test_hooks::storage_failure(phase,||stage.activate()).is_err());
+        assert_eq!(fs::read(&stores.current_manifest).unwrap()!=before,changed);
+        drop(root);
+        let root=DataRoot::acquire(&temp.path().join("owner"),false).unwrap();root.check_initialized().unwrap();
+        root.recover_collection_stages(&id).unwrap();
+        let path=root.collection_path(&id).unwrap();let c=crate::collection::schema::open(&path,false).unwrap();
+        crate::collection::schema::validate(&c).unwrap();
+        if changed {assert_eq!(c.query_row("SELECT scm FROM col",[],|r|r.get::<_,i64>(0)).unwrap(),456);}
+        assert_eq!(fs::read(sentinel).unwrap(),b"synthetic data: preserve exactly\0\xff");
+    }
+}
+
+#[cfg(feature="test-hooks")]
+#[test]
+fn activation_reports_uncertainty_only_at_pointer_replacement() {
+    for (phase,notified) in [("collection_before_manifest",false),("collection_after_manifest_rename",true),("collection_after_manifest_sync",true)] {
+        let (_temp,root)=initialized();let id=reserve(&root,"setup",None);ready(&root,&id,true);
+        let old=root.collection_path(&id).unwrap();let stage=root.stage_collection(&id).unwrap();let candidate=stage.path.clone();
+        crate::collection::schema::create_blank(&candidate,123,456).unwrap();
+        let boundary=std::cell::Cell::new(false);
+        let result=crate::test_hooks::storage_failure(phase,||stage.activate_notifying(||boundary.set(true)));
+        assert!(result.is_err());assert_eq!(boundary.get(),notified);
+        assert!(old.exists());assert_eq!(candidate.exists(),notified);
+        // A fault after rename is never returned as an acknowledged success.
+    }
 }

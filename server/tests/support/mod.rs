@@ -33,18 +33,25 @@ impl Harness {
         Self::start(temp, root).await
     }
     pub async fn reopen(temp: TempDir) -> Self {
+        let config = Config::new(ORIGIN, "127.0.0.1:0".parse().unwrap()).unwrap();
+        Self::reopen_with_config(temp, config).await
+    }
+    pub async fn reopen_with_config(temp: TempDir, config: Config) -> Self {
         let path = temp.path().join("owner");
         let root = tokio::task::spawn_blocking(move || DataRoot::acquire(&path, false).unwrap())
             .await
             .unwrap();
-        Self::start(temp, root).await
+        Self::start_with_config(temp, root, config).await
     }
     async fn start(temp: TempDir, root: DataRoot) -> Self {
+        let config = Config::new(ORIGIN, "127.0.0.1:0".parse().unwrap()).unwrap();
+        Self::start_with_config(temp, root, config).await
+    }
+    async fn start_with_config(temp: TempDir, root: DataRoot, config: Config) -> Self {
         let setup_token = std::fs::read_to_string(root.setup_file())
             .unwrap_or_default()
             .trim()
             .into();
-        let config = Config::new(ORIGIN, "127.0.0.1:0".parse().unwrap()).unwrap();
         let service = Service::open(root, config).await.unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());

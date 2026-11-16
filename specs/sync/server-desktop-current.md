@@ -24,11 +24,15 @@ The neutral archives are:
   SHA-256 `b302e7c77890d1c55dfdddf5e8630b79e85aa289b40a2fac496f299ae02850b9`.
 - `conformance/fixtures/meguri-sync-server/observations/desktop-26.09.4-edges.json`,
   SHA-256 `1bac52dfdf20519bfe9abdef8700e3e87a34318da1edde7bccb7a2fef9570c45`.
+- `conformance/fixtures/meguri-sync-server/observations/desktop-26.09.4-normal.json`,
+  SHA-256 `33e4f576a85f19bf877baefc382e91121e4e0307fe73b4b06fc8e24807e4d4a7`.
 
 The source-bound review and seal receipts are recorded in
 `docs/process/review-log/meguri-sync-U3.md`. They cover 21 smoke cases and eight
 edge cases. They do not close every pending probe in the baseline contracts.
 Candidate-server interoperability remains a separate verification obligation.
+The additional twelve-case incremental observations in D7 and their committed
+rerun are recorded in `docs/process/review-log/meguri-sync-normal-reference.md`.
 
 Executed selections: `conformance/recordings/scenarios/meguri-sync-server/desktop-selection.json`
 and `conformance/recordings/scenarios/meguri-sync-server/desktop-edge-selection.json`.
@@ -134,3 +138,151 @@ In a separate round, an explicit abort after 121,001 ms returned HTTP 200.
 The forwarded chunk then received HTTP 409 and the Desktop backend failed the
 sync. The local edit survived and the pending server edit rolled back.
 This tests explicit abort handling, not natural reference-server expiry.
+
+## D7. Selected incremental exchanges
+
+These observations use Desktop 26.09.4, build c06370ff. The committed reference
+rerun and retained validation passed all twelve cases. They do not establish
+candidate-server behavior or close the entire pending normal-sync family.
+
+The twelve selected observations distinguish ordinary Desktop exchanges from
+auxiliary protocol fixtures. Actual Desktop receivers inspect the resulting
+collections in both kinds of observation. Auxiliary request bytes are not
+attributed to Desktop.
+
+| Selected observation | Result |
+|---|---|
+| Settled collection | One metadata request; no full collection transfer. |
+| One scheduler review | One card tuple and one review tuple; no note tuple or full transfer. The receiver retained the review. |
+| Notes and note-type CSS | Authored edits arrived in both directions. A forward note deletion also removed its card. |
+| Other collection objects | One authored deck, preset, tag and configuration value arrived at the second client. |
+| Exactly 250 new tuples | Batches contained 250 then zero tuples, with `done` false then true. |
+| 502 new tuples | Batches contained 250, 250 and two tuples, with `done` false, false and true. Receiver IDs were unique. |
+| 251 card graves | Batches contained 250 then one grave. The receiver had no cards and retained its 251 orphan notes. |
+| Inclusive cursor | Rows at and above the cursor were selected; the row below it was excluded. |
+| One existing deck | An older incoming modification lost. Equal and newer modifications replaced it. The reply contained the prior deck version. |
+| Pending note | Equal and older incoming modifications lost; a newer modification replaced it. A nonpending note accepted an older incoming modification. |
+| Repeated note IDs | For nonpending tuples, the later occurrence survived even when modification decreased from 30 to 10. A newly pending first occurrence blocked an older repeat. The same order rule held across chunks. |
+| Repeated review ID | One row remained, retaining the first tuple's ease value of two. |
+
+The selected successful sanity exchange ignored supplied due and grave counts.
+Immediately after finish, metadata showed USN advanced by one and modification
+equal to the returned finish time. A later raw served file retained last-sync
+equal to that time. That full download separately advanced modification and USN;
+its creation and schema stamps stayed unchanged. The received note retained the
+round's USN. Receiver-local stamps do not substitute for this served-file check.
+
+These observations cover note conflicts and one deck conflict matrix only.
+Card, note-type and preset conflicts, case-folded names, configuration replacement
+and null values remain unobserved here. They also leave same-clock finish, failed
+sanity, lifecycle faults, AnkiMobile and candidate incremental sync unobserved.
+Reviews and deletions were exercised forward only. Media was disabled.
+
+## D8. Selected object and configuration conflict matrix
+
+Seven finite groups completed independent source and observation review.
+A separate committed-source reproduction passed all seven groups at
+`build/mg/sync-server-reference/20261116T001625Z-38361/result.json`.
+The retained author observations below keep their original execution identity.
+
+The exact execution is `20261115T234234Z-25456`, on Desktop SDK 26.09.4, build `c06370ff`.
+The adjacent JSON records native runtime and lock hashes, exact rows, stamps, inputs and limits.
+Normal-round requests here are auxiliary valid protocol fixtures. Actual SDK receivers inspected the committed results separately.
+Raw served schema-18 observations precede SDK normalization. Native server rows were read after its own process exited.
+
+| Selected case | Observed result |
+|---|---|
+| Existing authored note type, unchanged structure | Stored modification S=2000000000. S−1 was ignored. S and S+1 were accepted, with incoming names, CSS and stamps. |
+| Existing authored preset, unchanged structure | The same S−1/S/S+1 rule held. Accepted `new.perDay` values were 31 and 32. |
+| Response before object merge | The three replies contained the stored name, stored name and equal-update name respectively. |
+| Selected ASCII deck and note-type names | With `Alpha` and `alpha+` present, incoming `alpha` became `alpha++`. Both renamed objects received merge-time modification 1794786161 and round USN 5. |
+| Existing tag | Incoming `cedartag` retained `CedarTag`, USN 0, collapsed 0 and NULL config exactly. |
+| `lnewer=true`, paired omitted `conf` and `crt` | Accepted; config values, row USNs, row modification times and creation time stayed unchanged. |
+| `lnewer=true`, paired explicit NULL `conf` and `crt` | Accepted; the same values and stamps stayed unchanged. |
+| Whole config replacement | The omitted `cedar_old` key disappeared. Replacement rows had merge-time modification 1794786164 and round USN 4. |
+| `lnewer=false` | The reply contained the complete replacement config and creation time 1794715201. Sent config row USNs became literal 0; modification times stayed unchanged. The surrounding collection USNs were 6 and 8. |
+
+For distinct cards at cursor 1, the stored seed modification was 2000000000 and due was 17.
+
+| Stored USN | Incoming modification | Raw resulting modification, USN, due |
+|---|---:|---|
+| 1 | 1999999999 | 2000000000, 1, 17 |
+| 1 | 2000000000 | 2000000000, 1, 17 |
+| 1 | 2000000001 | 2000000001, 10, 23 |
+| 0 | 1999999999 | 1999999999, 14, 23 |
+
+The USN-0 seed was measured directly before the incoming round: modification 2000000000, USN 0 and due 17.
+The snapshot followed the completed preparation round. No download interrupted an admitted round.
+
+Card data `{"pos":5,"zz":7}` was accepted. Raw stored data became exactly `{"pos":5}`; due became 5.
+A later known due edit produced due 29 and retained exactly `{"pos":5}`.
+The first request already removed `zz`; this does not characterize an existing stored unknown key.
+
+A non-default deck grave removed that deck and moved its card to deck 1 without changing the card's modification or USN.
+A later admitted round sent card, note and deck graves, then valid same-ID occurrences.
+All three rows existed afterward. Their graves remained.
+Card and note graves had USN 7. The previously existing deck grave retained USN 4.
+The JSON records note derived columns and the exact final card, note and deck rows.
+
+The repaired source passed 45 selftests and matrix 7/7.
+Both runs share source digest `6c811474e6b4aab41b947eccf260fba61adde427c85c757a6097c6d7ad51db70`.
+The unchanged normal 12/12, smoke 21/21 and static checks remain historical v1 receipts at their original source identity.
+Earlier failed observer runs and the invalid provisional reused-card assertion remain in the receipt archive and earn no credit.
+
+Structural count changes and SDK selection of full transfer remain unobserved.
+Mixed optional config/creation-time forms remain unobserved.
+These selected ASCII names do not establish Unicode closure.
+No complete P-family, Mobile, candidate NORMAL or final acceptance is claimed.
+
+## D9. Selected recovery mechanisms
+
+Three finite Desktop SDK 26.09.4 reference observations completed independent source and evidence review.
+Execution `20261116T094758Z-93201` passed 3/3 from clean source `9e2d0263a7ed7cf0c6f59c77971a53697dc23099`.
+Seal `20261116T095223Z-4330` and its retained validation passed 3/3.
+The exact bindings and original failures are recorded in `docs/process/review-log/meguri-sync-recovery-reference.md`.
+The neutral projection is `conformance/fixtures/meguri-sync-server/observations/desktop-26.09.4-recovery.json`.
+These are P-M07 reference mechanisms, not candidate-only P-R01/P-R03 acceptance.
+
+The original synthetic fixture has two notes, two cards, one retained review and two media files.
+A stopped test server was rolled back as a whole. Password replacement was controlled setup;
+its old native credential received HTTP 403 and renewed authentication succeeded.
+This does not establish Meguri's restore or credential-invalidation policy.
+
+| Existing client media cursor | Restored/current server head | Ordinary media result before explicit reset |
+| --- | --- | --- |
+| 4 | 2 | Empty listing and sanity OK; both files retained incorrect bytes. |
+| 4 | 4 | Begin-only completion; both files retained incorrect bytes. |
+| 4 | 6 | One later change arrived; the changed file below cursor remained incorrect. Sanity returned OK. |
+
+Each collection had controlled equal modification times and different schema times, plus an offline edit and review.
+Ordinary collection sync returned no changes. An explicitly selected full download restored the chosen authoritative collection.
+The subsequent public media reset and SDK sync began listing at cursor zero and recovered both exact byte hashes.
+A fresh independent SDK receiver agreed. Reopen preserved every present user table except the separately stamped `col` row exactly.
+A later normal sync changed only configuration USNs and modification-time columns.
+All configuration keys and value bytes, including the authored configuration, and every other included column stayed equal.
+The retained observations preserve both raw and narrowly scoped semantic hashes.
+
+This selection establishes SDK mechanisms for those inputs. It supplies no Desktop menu or dialog labels,
+candidate restore result or AnkiMobile evidence. L6 remains pending for its exact supported-client procedures.
+
+
+## D10. Dirty offline media and a separate clean receiver
+
+Here “profile” means the complete generated SDK collection/media test directory and its tracking files. It does not include Desktop GUI-global preferences, Keychain or credentials outside that directory. No actual Desktop GUI profile copy or export was exercised.
+
+D9 used previously synchronized stale media; it did not modify media files on the offline recovering client.
+
+One Desktop SDK 26.09.4 reference fixture tested three simultaneous offline media changes at an equal client/server cursor of two: a local-only addition, replacement of one server filename and deletion of the other. The same offline profile also contained a collection edit and an extra review. Its local file count remained two, but its names and bytes differed from the chosen server snapshot.
+
+An explicit authoritative full collection download restored exact non-col collection rows, including cards and reviews. Public media reset followed by SDK media synchronization restored the modified and deleted server files, but retained and uploaded the local-only addition. The resulting client and independent server witness held three files; media sanity returned OK. This is an observed failure of exact in-place authoritative media restoration for that fixture, not a server protocol defect or accepted restore.
+
+The original exact-equality failure remains in receipt `20261116T124551Z-36888`. Final observation case `dirty-inplace-observed` records the negative result under a distinct identity. The whole-name/hash comparison stays false; no subset comparison replaces it.
+
+A separate procedure first preserved the closed original dirty profile, including collection, media and media-tracking files, with an exact byte-hash manifest. After the diagnostic attempt, the protected stopped server snapshot was reestablished before the clean procedure. A new collection and empty media state in a separate directory authenticated with renewed credentials, explicitly downloaded the chosen collection and synchronized media. Exact non-col table hashes, card/review rows and the complete filename/byte-hash map matched the chosen snapshot. Reopen and a second independent SDK receiver agreed. The clean procedure uploaded no media. The preserved dirty profile remained byte-identical and was never imported or synchronized during that procedure.
+
+A fresh profile alone does not undo the diagnostic upload to the server. The clean-procedure result presumes that the chosen authoritative snapshot is reestablished or remains uncontaminated. No artificial deletion protocol or automatic merge of offline changes is implied. The old dirty data remains preserved separately.
+
+This is one finite reference SDK fixture and mechanism. Actual Desktop profile/menu/dialog controls, candidate restore acceptance and actual Mobile evidence remain separate obligations. It does not block independent U9 storage work once its batch dependencies pass.
+
+The source/evidence review and exact receipts are recorded in `docs/process/review-log/meguri-sync-recovery-dirty-reference.md`.
+The auxiliary neutral projection is `conformance/fixtures/meguri-sync-server/observations/desktop-26.09.4-recovery-dirty.json`.

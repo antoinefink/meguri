@@ -51,7 +51,7 @@ impl BrowserAuthority {
     }
 }
 /// Constructed only by native password issuance or hostkey validation. Browser
-/// cookies never construct native authority; U5 owns decoding the native header.
+/// cookies never construct native authority; the protocol owns header decoding.
 #[derive(Clone, Debug)]
 pub struct NativeAuthority {
     pub(crate) id: String,
@@ -71,12 +71,17 @@ pub struct Service {
     pub temp: TempBudget,
     pub collections: CollectionCapacity,
     pub(crate) browser_ingress: Arc<crate::httpapi::ingress::Ingress>,
+    pub(crate) native_ingress: Arc<crate::protocol::framing::Ingress>,
+    pub(crate) normal_sessions: Arc<crate::collection::session::Sessions>,
     pub(crate) metadata: Metadata,
     pub(crate) hashes: HashPool,
     pub(crate) attempts: Attempts,
     pub(crate) barriers: barrier::Barriers,
     #[cfg(feature = "test-hooks")]
     pub hooks: crate::test_hooks::Hooks,
+}
+impl Drop for Service {
+    fn drop(&mut self) { self.normal_sessions.close(); }
 }
 impl Service {
     /// Ownership remains held by metadata and every outstanding blocking job.
@@ -90,6 +95,8 @@ impl Service {
             config,
             collections: CollectionCapacity::default(),
             browser_ingress: Arc::new(crate::httpapi::ingress::Ingress::default()),
+            native_ingress: Arc::new(crate::protocol::framing::Ingress::default()),
+            normal_sessions: crate::collection::session::Sessions::new(),
             metadata,
             hashes: HashPool::default(),
             attempts: Attempts::default(),
@@ -98,6 +105,10 @@ impl Service {
             hooks: crate::test_hooks::Hooks::default(),
         });
         service.resume_startup().await?;
+        // Provisioning must obtain its staging budget before any schema write.
+        // The exclusive root owner still prevents serving until both complete;
+        // upgrade_media validates semantics before and after migration.
+        service.metadata.files(|r| { r.upgrade_media()?; crate::media::recovery::startup(r) }).await?;
         Ok(service)
     }
     pub async fn status(&self) -> Result<bool> {
@@ -123,7 +134,7 @@ impl Service {
             })
             .await
     }
-    /// Restore U9 must close admission durably before installing restored data.
+    /// Restore must close admission durably before installing restored data.
     /// Deliberately no ordinary remote/recovery method opens admission.
     pub async fn close_admission(&self) -> Result<()> {
         self.metadata

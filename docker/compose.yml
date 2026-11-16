@@ -18,9 +18,13 @@ services:
       - ..:/work
       - cargo-home:/cargo-home
       - "${MEGURI_DOCKER_CARGO_TARGET:-cargo-target}:/cargo-target"
+      # Explicit locked browser install, shared with sync-web MG jobs; read-only.
+      - sync-web-deps:/sync-web-deps:ro
     # SQLite files and other test scratch stay on tmpfs, never on the bind mount.
     tmpfs:
       - /tmp:exec,mode=1777
+      # Bounded, container-owned filesystem for actual disk-full proofs.
+      - /mg-enospc:noexec,nosuid,nodev,mode=1777,size=16m
     environment:
       # The whole CARGO_HOME is shared, not just registry/ and git/: cargo's
       # package-cache lock files live in its root. The image's tools stay in
@@ -28,6 +32,7 @@ services:
       CARGO_HOME: /cargo-home
       CARGO_TARGET_DIR: /cargo-target
       TMPDIR: /tmp
+      MEGURI_TEST_ENOSPC_ROOT: /mg-enospc
 
   # Generated RF4 proof only. Host job adds its owned fixture directory,
   # decoder script (read-only), and fresh output directory; no checkout mount.
@@ -374,3 +379,4 @@ volumes:
   cargo-home:
     name: meguri-cargo-home
   cargo-target: {}
+  sync-web-deps: {}

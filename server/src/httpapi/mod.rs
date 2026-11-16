@@ -204,13 +204,19 @@ pub async fn serve(
     .with_graceful_shutdown(async move {
         shutdown.await;
         stopping.browser_ingress.close();
+        stopping.native_ingress.close();
     })
     .await;
     owner.browser_ingress.close();
+    owner.native_ingress.close();
     owner.browser_ingress.idle().await;
+    owner.native_ingress.idle().await;
     result
 }
 async fn handle(State(service): State<Arc<Service>>, request: Request) -> Response {
+    if request.uri().path().starts_with("/sync/") || request.uri().path().starts_with("/msync/") {
+        return secure(crate::protocol::handle(service, request).await);
+    }
     let browser = request.uri().path().starts_with("/api/");
     let exempt = request.method() == Method::GET && request.uri().path() == "/api/status";
     let (parts, body) = request.into_parts();
@@ -251,10 +257,14 @@ async fn handle(State(service): State<Arc<Service>>, request: Request) -> Respon
             },
         }
     } else {
-        // Native families have their own routing/authentication contract.
-        dispatch(&service, &parts, None)
-            .await
-            .unwrap_or_else(IntoResponse::into_response)
+        // Exact local navigation/assets only. API and native dispatch retain
+        // their own envelopes, admission and authentication above.
+        match web_asset(&parts) {
+            Some(response) => response,
+            None => dispatch(&service, &parts, None)
+                .await
+                .unwrap_or_else(IntoResponse::into_response),
+        }
     };
     let mut response = response;
     if browser {
@@ -263,6 +273,20 @@ async fn handle(State(service): State<Arc<Service>>, request: Request) -> Respon
             .insert("connection", "close".parse().expect("static header"));
     }
     secure(response)
+}
+fn web_asset(parts: &axum::http::request::Parts) -> Option<Response> {
+    if !matches!(parts.method, Method::GET | Method::HEAD) || parts.uri.query().is_some() {
+        return None;
+    }
+    let asset = crate::webassets::lookup(parts.uri.path())?;
+    let mut response = Response::new(if parts.method == Method::HEAD {
+        Body::empty()
+    } else {
+        Body::from(asset.bytes)
+    });
+    response.headers_mut().insert("content-type", asset.content_type.parse().unwrap());
+    response.headers_mut().insert("content-length", asset.bytes.len().into());
+    Some(response)
 }
 fn secure(mut response: Response) -> Response {
     for (name, value) in [
@@ -325,7 +349,7 @@ async fn dispatch(
 ) -> Result<Response> {
     let path = parts.uri.path();
     let method = &parts.method;
-    // No SPA, native compatibility endpoint, or GET capability redemption in U4.
+    // Browser and health routes never act as a native or SPA fallback.
     let browser = path.starts_with("/api/");
     if !browser && path != "/health" {
         return Err(Error::new("route_not_found"));

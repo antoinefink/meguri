@@ -38,6 +38,11 @@ field() { jq -r "$@" "$result"; }
 
 validate() { python3 "$SB/tools/tests/validate_result.py" "$@"; }
 
+. "$REPO_ROOT/tools/tests/doctor_result.sh"
+
+# The host suite checks these two contracts separately (doctor + all results).
+validate_host_doctor() { validate "$1" && assert_doctor_result "$1" "$2"; }
+
 add_fixture_jobs() {
   cat >"$SB/tools/mg.d/zz-fixture.sh" <<'EOF'
 mg_job fx-pass host fx_pass "fixture: pass with counts, artifact, detail"
@@ -493,6 +498,7 @@ failure_ids() { jq -r '[.failures[].id] | sort | join("\n")' "$result"; }
   [[ "$stderr" != *"device builds are blocked"* ]]
   assert_read_only_calls
   validate "$result"
+  assert_doctor_result "$result" "$status"
 }
 
 @test "doctor on a fully set-up Mac passes and still lists the steps it cannot verify" {
@@ -506,6 +512,7 @@ failure_ids() { jq -r '[.failures[].id] | sort | join("\n")' "$result"; }
   [ "$(field .summary.total)" = "$(field '.details.checks | length')" ]
   assert_read_only_calls
   validate "$result"
+  assert_doctor_result "$result" "$status"
 }
 
 @test "doctor reports the Mac UI test VM: configured, drive connected, present, running, SSH and the host's Xcode" {
@@ -665,6 +672,7 @@ failure_ids() { jq -r '[.failures[].id] | sort | join("\n")' "$result"; }
   jq -e '.failures[] | select(.id == "xcode-license" and .message == "the Xcode license is not accepted" and .repro == "tools/mg doctor")' "$result"
   assert_read_only_calls
   validate "$result"
+  assert_doctor_result "$result" "$status"
 }
 
 @test "doctor fails and lists the step without an iOS 27 simulator runtime" {
@@ -677,6 +685,7 @@ failure_ids() { jq -r '[.failures[].id] | sort | join("\n")' "$result"; }
   jq -e '.failures[] | select(.id == "ios-runtime" and .message == "no available iOS 27 simulator runtime" and .repro == "tools/mg doctor")' "$result"
   assert_read_only_calls
   validate "$result"
+  assert_doctor_result "$result" "$status"
 }
 
 @test "doctor fails when Docker is unreachable" {
@@ -691,6 +700,7 @@ failure_ids() { jq -r '[.failures[].id] | sort | join("\n")' "$result"; }
   [ "$(field '[.user_steps[] | select(.id == "docker-resources")] | length')" = 0 ]
   assert_read_only_calls
   validate "$result"
+  assert_doctor_result "$result" "$status"
 }
 
 # MemTotal is the Linux VM's total after the kernel's reservation: a VM given
@@ -729,6 +739,109 @@ failure_ids() { jq -r '[.failures[].id] | sort | join("\n")' "$result"; }
   jq -e '.details.checks[] | select(.id == "rust" and .status == "warn" and (.message | contains("aarch64-apple-ios-sim")))' "$result"
   [ "$(field '[.user_steps[] | select(.state == "missing" and .required)] | length')" = 0 ]
   assert_read_only_calls
+  validate_host_doctor "$result" "$status"
+}
+
+@test "host doctor validation accepts a reported missing host tool while the VM remains a separate warning" {
+  make_stubs
+  rm "$STUBS/rustup" "$MEGURI_MAC_VM_CONFIG"
+  # The dev container's rustup is outside the system command directories.
+  # Leave every other host probe stubbed, and exercise the real absence path.
+  PATH="$STUBS:/usr/bin:/bin" STUB_ACCOUNT=0 mg doctor
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  jq -e '.failures[] | select(.id == "rust" and (.message | startswith("rustup not found")) and .repro == "tools/mg doctor")' "$result"
+  [ "$(field -c '[.details.checks[] | select(.status == "fail")] | map(.id)')" = '["rust"]' ]
+  jq -e '.details.checks[] | select(.id == "mac-vm" and .status == "warn")' "$result"
+  jq -e '.user_steps[] | select(.id == "mac-vm" and .state == "missing" and .required == true)' "$result"
+  [ "$(field '[.user_steps[] | select(.id == "rust")] | length')" = 0 ]
+  assert_read_only_calls
+  validate_host_doctor "$result" "$status"
+}
+
+@test "host doctor validation rejects malformed and inconsistent diagnostics" {
+  make_stubs
+  mg doctor
+  [ "$status" -eq 0 ]
+  validate_host_doctor "$result" 0
+  local mutation broken="$BATS_TEST_TMPDIR/broken.json"
+  while IFS= read -r mutation; do
+    jq "$mutation" "$result" >"$broken"
+    run validate_host_doctor "$broken" 0
+    if [ "$status" -eq 0 ]; then
+      echo "accepted malformed doctor result: $mutation"
+      return 1
+    fi
+  done <<'MUTATIONS'
+.status = "error" | .exit_code = 2
+.status = "unsupported"
+.status = "warn"
+.exit_code = 1
+.summary.total += 1
+.summary.passed -= 1
+.summary.failed = 1
+.summary.warned = 1
+.summary.skipped = 1
+del(.summary.warned)
+.details.checks[0].status = "error"
+.details.checks[0].status = "unsupported"
+.details.checks[0].status = "warn"
+.details.checks = []
+.details.checks = {}
+.details.checks += [.details.checks[0]]
+del(.details.checks[0].id)
+del(.details.checks[0].message)
+.failures = [{id:"rust",message:"unaccounted failure",repro:"tools/mg doctor"}]
+del(.details.environment)
+del(.details.environment.xcode_build)
+.details.environment.xcode_build = ""
+del(.details.environment.rust_channel)
+.user_steps = []
+.user_steps = [{}]
+.user_steps[0].state = "done"
+del(.user_steps[0].how)
+del(.schema_version)
+.schema_version = 2
+MUTATIONS
+  run validate_host_doctor "$result" 1
+  [ "$status" -ne 0 ]
+  printf 'not JSON\n' >"$broken"
+  run validate_host_doctor "$broken" 0
+  [ "$status" -ne 0 ]
+}
+
+@test "host doctor validation requires failed and warned checks to match status counts failures and RC" {
+  make_stubs
+  STUB_LICENSE_RC=1 STUB_LOCKED=1 mg doctor
+  [ "$status" -eq 1 ]
+  validate_host_doctor "$result" 1
+  local mutation broken="$BATS_TEST_TMPDIR/broken.json"
+  while IFS= read -r mutation; do
+    jq "$mutation" "$result" >"$broken"
+    run validate_host_doctor "$broken" 1
+    if [ "$status" -eq 0 ]; then
+      echo "accepted inconsistent failed doctor result: $mutation"
+      return 1
+    fi
+  done <<'MUTATIONS'
+.status = "pass"
+.status = "warn"
+.status = "error" | .exit_code = 2
+.exit_code = 0
+.summary.failed = 0
+.summary.warned = 0
+.failures = []
+.failures[0].id = "other"
+.failures[0].message = "different failure"
+.failures[0].repro = "tools/mg other"
+.failures += [.failures[0]]
+.user_steps |= map(select(.id != "host-session"))
+.user_steps |= map(select(.id != "xcode-license"))
+MUTATIONS
+  run validate_host_doctor "$result" 0
+  [ "$status" -ne 0 ]
+  run validate_host_doctor "$result" 2
+  [ "$status" -ne 0 ]
 }
 
 # --- core-update (fake Cargo, isolated workspace) --------------------------
@@ -2103,12 +2216,14 @@ diff_report() {
 # logs every call to $STUB_LOG, reports every container running and healthy,
 # lets a sync-recorder container write $STUB_EXCHANGES to its recording
 # directory and answer $STUB_HEALTH, and makes the harness write $STUB_REPORT
-# as its report and exit $STUB_RC. A cargo stub stands in for meguri-cli: it
-# writes $STUB_PLAN as the T0 plan report, and `conformance to-json` answers
-# each scenario file with the value $STUB_PARSED gives its id, as the scenario
-# parser would read it; with $STUB_CARGO_RC set it prints nothing and exits
-# with that code. The tree has one actor scenario (smoke/sync/pair) and one
-# other (smoke/plain).
+# as its report and exit $STUB_RC. Host Cargo is forbidden. The dev service
+# executes its bash script with a cargo stub standing in for meguri-cli: it
+# requires container paths, writes $STUB_PLAN as the T0 plan report, and answers
+# to-json with the value $STUB_PARSED gives each file's id, as the scenario
+# parser would read it; with $STUB_PARSE_RC set it prints nothing and exits
+# with that code. STUB_DEV_FAIL_RUN fails that numbered dev run with exit 1
+# before Bash starts, retaining the first run's output separately as evidence.
+# The tree has one actor scenario (smoke/sync/pair) and one other (smoke/plain).
 actor_fixture() {
   local stubs="$BATS_TEST_TMPDIR/actor-stubs"
   mkdir -p "$stubs" "$SB/oracle/driver" "$SB/conformance/scenarios/smoke/sync" "$SB/conformance/goldens/smoke/sync"
@@ -2122,21 +2237,6 @@ actor_fixture() {
   printf 'id: smoke/sync/pair\nclock: {tz: UTC, start: "2030-01-15T10:00:00"}\nactors: [client_a, client_c]\n' \
     >"$SB/conformance/scenarios/smoke/sync/pair.yaml"
   printf 'id: smoke/plain\nclock: {tz: UTC, start: "2030-01-15T10:00:00"}\n' >"$SB/conformance/scenarios/smoke/plain.yaml"
-  # Only this fixture's selected plan uses the direct cargo CLI stub.
-  cat >"$SB/tools/mg.d/zz-actor-scratch.sh" <<'STUB'
-mg_conf__scratch() {
-  if [ "$#" -eq 10 ] && [ "$1" = selected ] &&
-    [ "$2" = conformance ] && [ "$3" = run ] &&
-    [ "$4" = --conformance ] && [ "$5" = "$MG_ROOT/conformance" ] &&
-    [ "$6" = --lane ] && [ "$7" = plan ] &&
-    [ "$8" = --report ] && [ "$9" = "$MG_RUN_DIR/plan.json" ] &&
-    [ "${10}" = smoke/sync/pair ]; then
-    printf '%s\n' false
-    return 0
-  fi
-  return 97
-}
-STUB
   cat >"$stubs/docker" <<'STUB'
 #!/bin/bash
 printf '%s\n' "$*" >>"$STUB_LOG"
@@ -2153,6 +2253,38 @@ case "$1" in
   inspect) echo "true healthy"; exit 0 ;;
   exec) printf '%s\n' "$STUB_HEALTH"; exit 0 ;;
   compose)
+    [ "$2" = -p ] && [ -n "$3" ] && [ "$4" = -f ] &&
+      [ "$5" = "$STUB_ROOT/docker/compose.yml" ] || exit 97
+    if [ "${6:-}" = --progress ] && [ "${7:-}" = plain ] &&
+      [ "${8:-}" = build ] && [ "${9:-}" = dev ] && [ "$#" -eq 9 ]; then
+      echo 'fixture dev build' >&2
+      exit "${STUB_DEV_BUILD_RC:-0}"
+    fi
+    if [ "${12:-}" = dev ]; then
+      [ "$#" -eq 15 ] && [ "$6" = run ] && [ "$7" = --rm ] &&
+        [ "$8" = -T ] && [ "$9" = --no-deps ] && [ "${10}" = --label ] &&
+        [[ "${11}" = meguri.mg.run-id=* ]] && [ "${13}" = bash ] &&
+        [ "${14}" = -c ] && [ "$MEGURI_DOCKER_CARGO_TARGET" = "$STUB_DOCKER_TARGET" ] || exit 97
+      if [ -n "${STUB_DEV_FAIL_RUN:-}" ]; then
+        dev_run=0
+        [ ! -f "$STUB_LOG.dev-count" ] || dev_run="$(cat "$STUB_LOG.dev-count")"
+        dev_run=$((dev_run + 1))
+        printf '%s\n' "$dev_run" >"$STUB_LOG.dev-count"
+        if [ "$dev_run" -eq "$STUB_DEV_FAIL_RUN" ]; then
+          echo "fixture dev run $dev_run failed before bash (exit 1)" | tee -a "$STUB_LOG.dev-events" >&2
+          exit 1
+        fi
+      fi
+      cd "$STUB_ROOT" || exit 97
+      echo 'fixture compose progress'
+      STUB_IN_DEV=1 /bin/bash -c "${15}"
+      rc=$?
+      if [ -n "${STUB_DEV_FAIL_RUN:-}" ] && [ "$dev_run" -eq 1 ]; then
+        cp "$MG_RUN_DIR/scenario-values.jsonl" "$STUB_LOG.first-parse.jsonl" || exit 97
+        echo "fixture first dev bash exited $rc" >>"$STUB_LOG.dev-events"
+      fi
+      exit "$rc"
+    fi
     if [ "$#" -eq 10 ] && [ "$2" = -p ] && [ -n "$3" ] &&
       [ "$4" = -f ] && [ -n "$5" ] && [ "$6" = --profile ] &&
       [ "$7" = oracle-sync ] && [ "$8" = ps ] && [ "$9" = -q ] &&
@@ -2176,24 +2308,50 @@ exit 97
 STUB
   cat >"$stubs/cargo" <<'STUB'
 #!/bin/bash
-[ -z "${STUB_CARGO_RC:-}" ] || exit "$STUB_CARGO_RC"
-prev="" files=false rc=0 rel=""
-for a in "$@"; do
-  if [ "$files" = true ]; then
-    rel="${a#*/conformance/scenarios/}"
-    jq -nc --arg p "$a" --arg id "${rel%.*}" --argjson parsed "$STUB_PARSED" \
-      'if $parsed | has($id) then {path: $p, value: $parsed[$id]} else {path: $p, error: "not parsed"} end'
-    jq -e --arg id "${rel%.*}" 'has($id)' <<<"$STUB_PARSED" >/dev/null || rc=1
-    continue
-  fi
-  [ "$a" = to-json ] && files=true
-  [ "$prev" = --report ] && printf '%s\n' "$STUB_PLAN" >"$a"
-  prev="$a"
-done
-exit "$rc"
+[ "${STUB_IN_DEV:-}" = 1 ] || {
+  echo host-cargo >>"$STUB_LOG"
+  echo 'host Cargo must not run for Docker oracle metadata' >&2
+  exit 97
+}
+[ "$PWD" = "$STUB_ROOT/core" ] && [ "$#" -ge 7 ] &&
+  [ "$1" = run ] && [ "$2" = -q ] && [ "$3" = -p ] &&
+  [ "$4" = meguri-cli ] && [ "$5" = -- ] && [ "$6" = conformance ] || exit 97
+shift 6
+python3 - "$@" <<'PY' >>"$STUB_LOG.cli"
+import json, os, sys
+print(json.dumps({"args": sys.argv[1:], "target": os.environ["MEGURI_DOCKER_CARGO_TARGET"]}))
+PY
+case "$1" in
+  to-json)
+    [ -z "${STUB_PARSE_RC:-}" ] || { echo 'fixture parser failed' >&2; exit "$STUB_PARSE_RC"; }
+    [ "${STUB_PARSE_EMPTY:-0}" != 1 ] || exit 0
+    shift
+    rc=0
+    for a in "$@"; do
+      case "$a" in /work/conformance/scenarios/*) ;; *) exit 97 ;; esac
+      [ -f "$STUB_ROOT/${a#/work/}" ] || exit 97
+      rel="${a#*/conformance/scenarios/}"
+      jq -nc --arg p "$a" --arg id "${rel%.*}" --argjson parsed "$STUB_PARSED" \
+        'if $parsed | has($id) then {path: $p, value: $parsed[$id]} else {path: $p, error: "not parsed"} end'
+      jq -e --arg id "${rel%.*}" 'has($id)' <<<"$STUB_PARSED" >/dev/null || rc=1
+    done
+    exit "$rc"
+    ;;
+  run)
+    [ "$#" -ge 8 ] && [ "$2" = --conformance ] && [ "$3" = /work/conformance ] &&
+      [ "$4" = --lane ] && [ "$5" = plan ] && [ "$6" = --report ] || exit 97
+    case "$7" in /work/build/mg/oracle/*/plan.json) ;; *) exit 97 ;; esac
+    [ "${STUB_PLAN_WRITE:-yes}" != yes ] || printf '%s\n' "$STUB_PLAN" >"$STUB_ROOT/${7#/work/}"
+    echo "fixture plan exit ${STUB_PLAN_RC:-0}" >&2
+    exit "${STUB_PLAN_RC:-0}"
+    ;;
+esac
+exit 97
 STUB
   chmod +x "$stubs/docker" "$stubs/cargo"
   export PATH="$stubs:$PATH" STUB_LOG="$BATS_TEST_TMPDIR/docker.log"
+  export STUB_ROOT="$SB" STUB_DOCKER_TARGET="$BATS_TEST_TMPDIR/docker target's"
+  export MEGURI_DOCKER_CARGO_TARGET="$STUB_DOCKER_TARGET"
   export STUB_PARSED='{"smoke/sync/pair": {"id": "smoke/sync/pair", "actors": ["client_a", "client_c"]},
     "smoke/plain": {"id": "smoke/plain"}}'
   : >"$STUB_LOG"
@@ -2215,6 +2373,8 @@ harness_report() {
   STUB_REPORT="$(harness_report record smoke/plain=recorded)"
   mg oracle record smoke/plain
   [ "$status" -eq 0 ]
+  [ "$(field .summary.total)" -eq 1 ]
+  [ "$(jq -sc 'all(.args == ["to-json", "/work/conformance/scenarios/smoke/plain.yaml"])' "$STUB_LOG.cli")" = true ]
   ! grep -q 'sync-faults' "$STUB_LOG"
   ! grep -q 'ORACLE_SYNC_FAULTS' "$STUB_LOG"
   validate "$result"
@@ -2256,13 +2416,129 @@ harness_report() {
   # A parser that cannot run leaves the actor scenarios unknown: an error
   # before the image build, not a run without the fault proxy.
   : >"$STUB_LOG"
-  export STUB_CARGO_RC=101
+  export STUB_PARSE_RC=101
   mg oracle compare smoke/sync
-  unset STUB_CARGO_RC
+  unset STUB_PARSE_RC
   [ "$status" -eq 2 ]
   [ "$(field '.failures[0].id')" = scenario-parse ]
   ! grep -q -- ' build oracle' "$STUB_LOG"
   ! grep -q -- ' harness ' "$STUB_LOG"
+  grep -q 'fixture parser failed' "$(dirname "$result")/log.txt"
+  validate "$result"
+}
+
+@test "oracle metadata preserves selected checkout paths and quoted scenario filters in Docker" {
+  # Both the checkout path and a scenario argument must survive shell quoting.
+  local moved="$SB ' \$(literal)" id="smoke/plain ' \$(literal)" sel expected
+  mv "$SB" "$moved"
+  SB="$moved"
+  actor_fixture
+  printf 'id: fixture\n' >"$SB/conformance/scenarios/$id.yaml"
+  STUB_PARSED="$(jq -c --arg id "$id" '. + {($id): {id: $id}}' <<<"$STUB_PARSED")"
+  export STUB_PARSED STUB_REPORT
+  for sel in "$id" /smoke/sync/pair.yaml/ smoke/sync 'smoke/sync/*' smoke; do
+    : >"$STUB_LOG"
+    : >"$STUB_LOG.cli"
+    expected='["/work/conformance/scenarios/smoke/sync/pair.yaml"]'
+    case "$sel" in
+      "$id") expected="$(jq -nc --arg p "/work/conformance/scenarios/$id.yaml" '[$p]')" ;;
+      smoke) expected="$(jq -nc --arg p "/work/conformance/scenarios/$id.yaml" \
+        '[$p, "/work/conformance/scenarios/smoke/plain.yaml", "/work/conformance/scenarios/smoke/sync/pair.yaml"]')" ;;
+    esac
+    STUB_REPORT="$(harness_report compare smoke/plain=pass)"
+    mg oracle compare "$sel"
+    [ "$status" -eq 0 ]
+    [ "$(jq -sc --argjson expected "$expected" 'length == 2 and all(.args == (["to-json"] + $expected))' "$STUB_LOG.cli")" = true ]
+    [ "$(jq -sc --arg target "$STUB_DOCKER_TARGET" 'all(.target == $target)' "$STUB_LOG.cli")" = true ]
+    ! grep -q host-cargo "$STUB_LOG"
+    validate "$result"
+  done
+  # No filters means every scenario, using the same ordering and parser.
+  : >"$STUB_LOG.cli"
+  mg oracle compare
+  [ "$status" -eq 0 ]
+  [ "$(jq -sc --argjson expected "$expected" 'length == 2 and all(.args == (["to-json"] + $expected))' "$STUB_LOG.cli")" = true ]
+
+  # An unmatched selection still reaches the real job's nonempty guard.
+  : >"$STUB_LOG.cli"
+  STUB_REPORT="$(harness_report compare)"
+  mg oracle compare missing
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = no-scenarios ]
+  [ ! -s "$STUB_LOG.cli" ]
+  validate "$result"
+
+  # The same quoting applies to the recordings plan's output path and ids.
+  STUB_PARSED="$(jq -c --arg id "$id" '.[$id].actors = ["client_a"]' <<<"$STUB_PARSED")"
+  export STUB_PLAN STUB_PLAN_RC=1
+  STUB_PLAN="$(jq -nc --arg id "$id" '{tier: "t0", scenarios: [{scenario: $id, status: "stale"}]}')"
+  mg oracle recordings "$id"
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = "$id" ]
+  [ "$(jq -sc --arg id "$id" '[.[] | select(.args[0] == "run") | .args] |
+    length == 1 and .[0][7:] == [$id]' "$STUB_LOG.cli")" = true ]
+  validate "$result"
+}
+
+@test "oracle metadata distinguishes invalid scenarios from missing parser output and dev failures" {
+  actor_fixture
+  export STUB_REPORT STUB_RC=1
+  # An invalid row (to-json exit 1) remains the harness's invalid scenario.
+  STUB_PARSED='{}'
+  STUB_REPORT="$(harness_report compare smoke/sync/pair=invalid)"
+  mg oracle compare smoke/sync/pair
+  [ "$status" -eq 1 ]
+  [ "$(field .summary.total)" -eq 1 ]
+  [ "$(field '.failures[0].id')" = smoke/sync/pair ]
+  ! grep -q sync-faults "$STUB_LOG"
+  validate "$result"
+
+  local mode
+  for mode in empty build; do
+    : >"$STUB_LOG"
+    if [ "$mode" = empty ]; then export STUB_PARSE_EMPTY=1; else export STUB_DEV_BUILD_RC=17; fi
+    mg oracle compare smoke/sync/pair
+    unset STUB_PARSE_EMPTY STUB_DEV_BUILD_RC
+    [ "$status" -eq 2 ]
+    [ "$(field '.failures[0].id')" = scenario-parse ]
+    ! grep -q ' harness ' "$STUB_LOG"
+    ! grep -q ' build oracle' "$STUB_LOG"
+    validate "$result"
+  done
+}
+
+@test "oracle metadata rejects stale actor output when the heatmap dev run exits 1 before bash" {
+  actor_fixture
+  export STUB_DEV_FAIL_RUN=2 STUB_REPORT
+  STUB_REPORT="$(harness_report compare smoke/sync/pair=pass)"
+  mg oracle compare smoke/sync/pair
+
+  # Print the causal evidence before assertions so a red run retains the
+  # successful first output, absent second CLI execution and harness outcome.
+  echo "MG exit: $status; dev runs: $(cat "$STUB_LOG.dev-count")"
+  cat "$STUB_LOG.dev-events"
+  echo 'first completed parser output:'
+  cat "$STUB_LOG.first-parse.jsonl"
+  echo 'executed CLI calls:'
+  cat "$STUB_LOG.cli"
+  jq '{status, summary, failures}' "$result"
+  echo 'oracle harness calls:'
+  grep ' harness ' "$STUB_LOG" || true
+
+  [ "$(cat "$STUB_LOG.dev-count")" -eq 2 ]
+  grep -qx 'fixture first dev bash exited 0' "$STUB_LOG.dev-events"
+  grep -qx 'fixture dev run 2 failed before bash (exit 1)' "$STUB_LOG.dev-events"
+  [ "$(jq -sc --argjson parsed "$STUB_PARSED" 'length == 1 and
+    .[0] == {path: "/work/conformance/scenarios/smoke/sync/pair.yaml", value: $parsed["smoke/sync/pair"]}' \
+    "$STUB_LOG.first-parse.jsonl")" = true ]
+  [ "$(jq -sc 'length == 1 and .[0].args == ["to-json", "/work/conformance/scenarios/smoke/sync/pair.yaml"]' "$STUB_LOG.cli")" = true ]
+  grep -q ' build oracle' "$STUB_LOG"
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  [ "$(field '.failures[0].id')" = scenario-parse ]
+  [[ "$(field '.failures[0].message')" = *'exit 1'*'heatmap scenarios'* ]]
+  grep -q 'fixture dev run 2 failed before bash (exit 1)' "$(dirname "$result")/log.txt"
+  ! grep -q ' harness ' "$STUB_LOG"
   validate "$result"
 }
 
@@ -2331,7 +2607,7 @@ harness_report() {
   validate "$result"
 }
 
-@test "oracle recordings rejects bad usage and non-actor scenarios before touching Docker" {
+@test "oracle recordings rejects bad usage before Docker and non-actor scenarios after metadata only" {
   actor_fixture
   local args
   for args in "recordings" "recordings --jobs 2 smoke/sync/pair"; do
@@ -2341,11 +2617,32 @@ harness_report() {
     [ "$(field '.failures[0].id')" = usage ]
     validate "$result"
   done
+  [ ! -s "$STUB_LOG" ]
   mg oracle recordings smoke/plain
   [ "$status" -eq 1 ]
   [ "$(field '.failures[0].id')" = no-scenarios ]
-  [ ! -s "$STUB_LOG" ]
+  [ -s "$STUB_LOG.cli" ]
+  ! grep -q ' build oracle\|sync-faults\| harness \|host-cargo' "$STUB_LOG"
   validate "$result"
+}
+
+@test "oracle recordings reports plan setup errors with logs before starting the oracle" {
+  actor_fixture
+  export STUB_PLAN='{"tier":"t0","scenarios":[{"scenario":"smoke/sync/pair","status":"live","scenario_sha256":"a"}]}'
+  export STUB_PLAN_RC=2
+  local write
+  # Even a populated report cannot make a setup failure look successful.
+  for write in no yes; do
+    : >"$STUB_LOG"
+    export STUB_PLAN_WRITE="$write"
+    mg oracle recordings smoke/sync/pair
+    [ "$status" -eq 2 ]
+    [ "$(field '.failures[0].id')" = plan ]
+    grep -q 'fixture plan exit 2' "$(dirname "$result")/log.txt"
+    ! grep -q ' build oracle\|sync-faults\| harness \|host-cargo' "$STUB_LOG"
+    [ ! -e "$SB/conformance/recordings" ]
+    validate "$result"
+  done
 }
 
 @test "oracle recordings keeps a recording only when the run reproduced its golden and every exchange was recorded" {
@@ -2361,6 +2658,9 @@ harness_report() {
   [ "$status" -eq 0 ]
   [ "$(field .status)" = pass ]
   [ "$(field .summary.passed)" -eq 1 ]
+  [ "$(jq -sc '[.[] | select(.args[0] == "run") | .args] | length == 1 and
+    .[0][0:6] == ["run", "--conformance", "/work/conformance", "--lane", "plan", "--report"] and
+    (.[0][6] | startswith("/work/build/mg/oracle/")) and .[0][7:] == ["smoke/sync/pair"]' "$STUB_LOG.cli")" = true ]
   validate "$result"
   [ "$(cat "$dest/exchanges.jsonl")" = "$(printf '%s' "$STUB_EXCHANGES")" ]
   # recording.json: sorted keys, two-space indents, a final newline (S9).
@@ -2398,6 +2698,7 @@ harness_report() {
   # A stale golden: nothing runs.
   : >"$STUB_LOG"
   STUB_PLAN="$(jq -nc '{tier: "t0", scenarios: [{scenario: "smoke/sync/pair", status: "stale"}]}')"
+  export STUB_PLAN_RC=1
   mg oracle recordings smoke/sync/pair
   [ "$status" -eq 1 ]
   [ "$(field '.failures[0].repro')" = "tools/mg oracle record smoke/sync/pair" ]

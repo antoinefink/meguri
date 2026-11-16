@@ -764,6 +764,12 @@ mg_conf_routes() {
     --project "$(mg_compose_project)" --run "$MG_RUN_ID" --run-dir "$MG_RUN_DIR" --image "$image" --owner "$owner" --peer-owner "$peer" --handoff "$handoff" \
     --scenario "$MG_RUN_DIR/route-scenario.json"
   rc=$?
+  if [ -f "$MG_RUN_DIR/worker-retirement.json" ]; then
+    mg_artifact json "$MG_RUN_DIR/worker-retirement.json" "bounded successful worker retirement"
+  fi
+  if [ -f "$MG_RUN_DIR/api-control-endpoints.json" ]; then
+    mg_artifact json "$MG_RUN_DIR/api-control-endpoints.json" "API control endpoint count while response is held"
+  fi
   mg_conf__edges_cleanup || rc=1
   if [ "$rc" -eq 0 ]; then
     mg_count total 1; mg_count passed 1

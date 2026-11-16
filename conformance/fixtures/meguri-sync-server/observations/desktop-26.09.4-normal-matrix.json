@@ -1,0 +1,2454 @@
+{
+  "format": "meguri-sync-normal-matrix-observations-v1",
+  "status": "matched-unreviewed",
+  "run_id": "20261115T234234Z-25456",
+  "source_commit": "e4868dfef79c209c95ad2c2314c6a8aca86268ad",
+  "source_sha256": "6c811474e6b4aab41b947eccf260fba61adde427c85c757a6097c6d7ad51db70",
+  "source_author_sessions": [
+    "s-20261115T133013Z-d8cec007",
+    "s-20261115T211543Z-556b04e9",
+    "s-20261115T224434Z-376ca308",
+    "s-20261115T231059Z-ff95725a"
+  ],
+  "runtime": {
+    "client": {
+      "build": "c06370ff",
+      "kind": "desktop",
+      "runtime_sha256": "bf0ccafe0f15bcba59a652db68c4cfdfaa8191756f8c547839c9d134dee12784",
+      "version": "26.09.4"
+    },
+    "format": "meguri-sync-runtime-v1",
+    "lock_sha256": "56e1bef86def9f5f230d12317e3510f2176eb079928f3a75f86afb0dcc408ec8",
+    "packages": [
+      {
+        "name": "anki",
+        "sha256": "52d319123a06d831fbc47cccfba087d75e00dc2e7eb4176c19a2901c525aad9e",
+        "version": "26.09.4"
+      },
+      {
+        "name": "attrs",
+        "sha256": "c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309",
+        "version": "26.1.0"
+      },
+      {
+        "name": "certifi",
+        "sha256": "e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1",
+        "version": "2026.10.23"
+      },
+      {
+        "name": "charset-normalizer",
+        "sha256": "b91363207bd9dc966a691e959bb47f64b30f7ac4b072be9968b366982f7db77c",
+        "version": "3.5.2"
+      },
+      {
+        "name": "decorator",
+        "sha256": "f47fe6fdbd2edd623ecfe36875d37aba411624e2670dd395dddae1358689bb3c",
+        "version": "5.3.1"
+      },
+      {
+        "name": "distro",
+        "sha256": "7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2",
+        "version": "1.9.0"
+      },
+      {
+        "name": "idna",
+        "sha256": "ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c",
+        "version": "3.20"
+      },
+      {
+        "name": "jsonschema",
+        "sha256": "3fba0169e345c7175110351d456342c364814cfcf3b964ba4587f22915230a63",
+        "version": "4.25.1"
+      },
+      {
+        "name": "jsonschema-specifications",
+        "sha256": "98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe",
+        "version": "2025.9.1"
+      },
+      {
+        "name": "Markdown",
+        "sha256": "e1a31a112232504d753e5c01bb8c2de90d3f0ba986b063e10770cf7695b09e73",
+        "version": "3.11.3"
+      },
+      {
+        "name": "orjson",
+        "sha256": "ae1d895cf7bbfd50ef34bb63bb727b14514f259f3e3f8dd010783bd38e864c6e",
+        "version": "3.13.0"
+      },
+      {
+        "name": "protobuf",
+        "sha256": "e11e1f0180583a2af89db6a2ecd9e8dc40aa6d2988ca175bfd0e6d12ea72d74e",
+        "version": "7.36.2"
+      },
+      {
+        "name": "PySocks",
+        "sha256": "2725bd0a9925919b9b51739eea5f9e2bae91e83288108a9ad338b2e3a4435ee5",
+        "version": "1.7.1"
+      },
+      {
+        "name": "referencing",
+        "sha256": "381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231",
+        "version": "0.37.0"
+      },
+      {
+        "name": "requests",
+        "sha256": "2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0",
+        "version": "2.34.2"
+      },
+      {
+        "name": "rpds-py",
+        "sha256": "2693b2728bbcc48d09a981a356954b0c47c53ff25b545856f28a889ea619f69a",
+        "version": "2026.9.1"
+      },
+      {
+        "name": "typing_extensions",
+        "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+        "version": "4.16.0"
+      },
+      {
+        "name": "urllib3",
+        "sha256": "0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3",
+        "version": "2.8.0"
+      },
+      {
+        "name": "zstandard",
+        "sha256": "6dffecc361d079bb48d7caef5d673c88c8988d3d33fb74ab95b7ee6da42652ea",
+        "version": "0.25.0"
+      }
+    ],
+    "server": {
+      "build": "c06370ff",
+      "kind": "reference_runtime",
+      "runtime_sha256": "bf0ccafe0f15bcba59a652db68c4cfdfaa8191756f8c547839c9d134dee12784",
+      "version": "26.09.4"
+    },
+    "wheel_sha256": "52d319123a06d831fbc47cccfba087d75e00dc2e7eb4176c19a2901c525aad9e"
+  },
+  "summary": {
+    "broad_catalog_credit": false,
+    "completed_case_count": 7,
+    "expected_case_count": 7,
+    "failed": 0,
+    "passed": 7,
+    "selected_case_count": 7,
+    "selection_credit": true,
+    "total": 7
+  },
+  "outcomes": {
+    "ascii-name-collisions": {
+      "deck_repeated_plus": true,
+      "model_repeated_plus": true,
+      "tag_spelling_state_preserved": true
+    },
+    "card-pending-matrix": {
+      "equal_kept": true,
+      "known_edit_retains_known_data": true,
+      "newer_incoming": true,
+      "nonpending_older_incoming": true,
+      "older_kept": true,
+      "unknown_top_level_dropped": true
+    },
+    "config-optional": {
+      "null_preserved": true,
+      "omitted_preserved": true
+    },
+    "config-replacement-outgoing": {
+      "old_key_removed": true,
+      "outgoing_config": true,
+      "outgoing_crt": true,
+      "replacement_received": true
+    },
+    "grave-then-occurrence": {
+      "card_present": true,
+      "deck_present": true,
+      "graves_retained": true,
+      "note_present": true
+    },
+    "model-mod-matrix": {
+      "equal_incoming": true,
+      "newer_incoming": true,
+      "older_kept": true,
+      "response_before_merge": true
+    },
+    "preset-mod-matrix": {
+      "equal_incoming": true,
+      "newer_incoming": true,
+      "older_kept": true,
+      "response_before_merge": true
+    }
+  },
+  "card_samples": [
+    {
+      "cursor": 1,
+      "incoming_tuple": [
+        1794786156916,
+        1794786156915,
+        1,
+        0,
+        1999999999,
+        4,
+        0,
+        0,
+        23,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        "{}"
+      ],
+      "label": "older",
+      "raw_served_before_sdk_normalization": {
+        "data": "{}",
+        "did": 1,
+        "due": 17,
+        "factor": 0,
+        "flags": 0,
+        "id": 1794786156916,
+        "ivl": 0,
+        "lapses": 0,
+        "left": 0,
+        "mod": 2000000000,
+        "nid": 1794786156915,
+        "odid": 0,
+        "odue": 0,
+        "ord": 0,
+        "queue": 0,
+        "reps": 0,
+        "type": 0,
+        "usn": 1
+      },
+      "seed_tuple": [
+        1794786156916,
+        1794786156915,
+        1,
+        0,
+        2000000000,
+        1,
+        0,
+        0,
+        17,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        "{}"
+      ]
+    },
+    {
+      "cursor": 1,
+      "incoming_tuple": [
+        1794786156917,
+        1794786156916,
+        1,
+        0,
+        2000000000,
+        7,
+        0,
+        0,
+        23,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        "{}"
+      ],
+      "label": "equal",
+      "raw_served_before_sdk_normalization": {
+        "data": "{}",
+        "did": 1,
+        "due": 17,
+        "factor": 0,
+        "flags": 0,
+        "id": 1794786156917,
+        "ivl": 0,
+        "lapses": 0,
+        "left": 0,
+        "mod": 2000000000,
+        "nid": 1794786156916,
+        "odid": 0,
+        "odue": 0,
+        "ord": 0,
+        "queue": 0,
+        "reps": 0,
+        "type": 0,
+        "usn": 1
+      },
+      "seed_tuple": [
+        1794786156917,
+        1794786156916,
+        1,
+        0,
+        2000000000,
+        1,
+        0,
+        0,
+        17,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        "{}"
+      ]
+    },
+    {
+      "cursor": 1,
+      "incoming_tuple": [
+        1794786156918,
+        1794786156917,
+        1,
+        0,
+        2000000001,
+        10,
+        0,
+        0,
+        23,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        "{}"
+      ],
+      "label": "newer",
+      "raw_served_before_sdk_normalization": {
+        "data": "{}",
+        "did": 1,
+        "due": 23,
+        "factor": 0,
+        "flags": 0,
+        "id": 1794786156918,
+        "ivl": 0,
+        "lapses": 0,
+        "left": 0,
+        "mod": 2000000001,
+        "nid": 1794786156917,
+        "odid": 0,
+        "odue": 0,
+        "ord": 0,
+        "queue": 0,
+        "reps": 0,
+        "type": 0,
+        "usn": 10
+      },
+      "seed_tuple": [
+        1794786156918,
+        1794786156917,
+        1,
+        0,
+        2000000000,
+        1,
+        0,
+        0,
+        17,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        "{}"
+      ]
+    },
+    {
+      "cursor": 1,
+      "incoming_tuple": [
+        1794786156919,
+        1794786156918,
+        1,
+        0,
+        1999999999,
+        14,
+        0,
+        0,
+        23,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        "{}"
+      ],
+      "label": "nonpending_older",
+      "raw_seed_before_incoming_round": {
+        "data": "{}",
+        "did": 1,
+        "due": 17,
+        "factor": 0,
+        "flags": 0,
+        "id": 1794786156919,
+        "ivl": 0,
+        "lapses": 0,
+        "left": 0,
+        "mod": 2000000000,
+        "nid": 1794786156918,
+        "odid": 0,
+        "odue": 0,
+        "ord": 0,
+        "queue": 0,
+        "reps": 0,
+        "type": 0,
+        "usn": 0
+      },
+      "raw_served_before_sdk_normalization": {
+        "data": "{}",
+        "did": 1,
+        "due": 23,
+        "factor": 0,
+        "flags": 0,
+        "id": 1794786156919,
+        "ivl": 0,
+        "lapses": 0,
+        "left": 0,
+        "mod": 1999999999,
+        "nid": 1794786156918,
+        "odid": 0,
+        "odue": 0,
+        "ord": 0,
+        "queue": 0,
+        "reps": 0,
+        "type": 0,
+        "usn": 14
+      },
+      "seed_tuple": [
+        1794786156919,
+        1794786156918,
+        1,
+        0,
+        2000000000,
+        0,
+        0,
+        0,
+        17,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        "{}"
+      ]
+    },
+    {
+      "incoming_unknown_tuple": [
+        1794786156920,
+        1794786156919,
+        1,
+        0,
+        2000000000,
+        16,
+        0,
+        0,
+        5,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        "{\"pos\":5,\"zz\":7}"
+      ],
+      "label": "unknown-top-level-data-then-known-edit",
+      "raw_after_known_edit": {
+        "data": "{\"pos\":5}",
+        "did": 1,
+        "due": 29,
+        "factor": 0,
+        "flags": 0,
+        "id": 1794786156920,
+        "ivl": 0,
+        "lapses": 0,
+        "left": 0,
+        "mod": 2000000001,
+        "nid": 1794786156919,
+        "odid": 0,
+        "odue": 0,
+        "ord": 0,
+        "queue": 0,
+        "reps": 0,
+        "type": 0,
+        "usn": 18
+      },
+      "raw_after_unknown": {
+        "data": "{\"pos\":5}",
+        "did": 1,
+        "due": 5,
+        "factor": 0,
+        "flags": 0,
+        "id": 1794786156920,
+        "ivl": 0,
+        "lapses": 0,
+        "left": 0,
+        "mod": 2000000000,
+        "nid": 1794786156919,
+        "odid": 0,
+        "odue": 0,
+        "ord": 0,
+        "queue": 0,
+        "reps": 0,
+        "type": 0,
+        "usn": 16
+      }
+    }
+  ],
+  "object_samples": {
+    "model": [
+      {
+        "label": "older",
+        "stored_seed_mod": 2000000000,
+        "incoming": {
+          "id": 1794786158274,
+          "name": "Cedar older model",
+          "mod": 1999999999,
+          "usn": 4
+        },
+        "prior_response": {
+          "id": 1794786158274,
+          "name": "Cedar stored model",
+          "mod": 2000000000,
+          "usn": 0
+        },
+        "raw_served": {
+          "id": 1794786158274,
+          "mtime_secs": 2000000000,
+          "name": "Cedar stored model",
+          "usn": 0
+        },
+        "sdk_receiver": {
+          "id": 1794786158274,
+          "name": "Cedar stored model",
+          "mod": 2000000000,
+          "usn": 0,
+          "css": "",
+          "fields": [
+            {
+              "collapsed": false,
+              "description": "",
+              "excludeFromSearch": false,
+              "font": "Arial",
+              "id": "2462710786119013517",
+              "name": "Prompt",
+              "ord": 0,
+              "plainText": false,
+              "preventDeletion": false,
+              "rtl": false,
+              "size": 20,
+              "sticky": false,
+              "tag": null
+            },
+            {
+              "collapsed": false,
+              "description": "",
+              "excludeFromSearch": false,
+              "font": "Arial",
+              "id": "-6070869725495491060",
+              "name": "Reply",
+              "ord": 1,
+              "plainText": false,
+              "preventDeletion": false,
+              "rtl": false,
+              "size": 20,
+              "sticky": false,
+              "tag": null
+            }
+          ],
+          "templates": [
+            {
+              "afmt": "{{Reply}}",
+              "bafmt": "",
+              "bfont": "",
+              "bqfmt": "",
+              "bsize": 0,
+              "did": null,
+              "id": "3549297089941791816",
+              "name": "Cedar face",
+              "ord": 0,
+              "qfmt": "{{Prompt}}"
+            }
+          ]
+        }
+      },
+      {
+        "label": "equal",
+        "stored_seed_mod": 2000000000,
+        "incoming": {
+          "id": 1794786158274,
+          "name": "Cedar equal model",
+          "mod": 2000000000,
+          "usn": 7
+        },
+        "prior_response": {
+          "id": 1794786158274,
+          "name": "Cedar stored model",
+          "mod": 2000000000,
+          "usn": 0
+        },
+        "raw_served": {
+          "id": 1794786158274,
+          "mtime_secs": 2000000000,
+          "name": "Cedar equal model",
+          "usn": 7
+        },
+        "sdk_receiver": {
+          "id": 1794786158274,
+          "name": "Cedar equal model",
+          "mod": 2000000000,
+          "usn": 7,
+          "css": ".card { color: #456789; }",
+          "fields": [
+            {
+              "collapsed": false,
+              "description": "",
+              "excludeFromSearch": false,
+              "font": "Arial",
+              "id": "2462710786119013517",
+              "name": "Prompt",
+              "ord": 0,
+              "plainText": false,
+              "preventDeletion": false,
+              "rtl": false,
+              "size": 20,
+              "sticky": false,
+              "tag": null
+            },
+            {
+              "collapsed": false,
+              "description": "",
+              "excludeFromSearch": false,
+              "font": "Arial",
+              "id": "-6070869725495491060",
+              "name": "Reply",
+              "ord": 1,
+              "plainText": false,
+              "preventDeletion": false,
+              "rtl": false,
+              "size": 20,
+              "sticky": false,
+              "tag": null
+            }
+          ],
+          "templates": [
+            {
+              "afmt": "{{Reply}}",
+              "bafmt": "",
+              "bfont": "",
+              "bqfmt": "",
+              "bsize": 0,
+              "did": null,
+              "id": "3549297089941791816",
+              "name": "Cedar face",
+              "ord": 0,
+              "qfmt": "{{Prompt}}"
+            }
+          ]
+        }
+      },
+      {
+        "label": "newer",
+        "stored_seed_mod": 2000000000,
+        "incoming": {
+          "id": 1794786158274,
+          "name": "Cedar newer model",
+          "mod": 2000000001,
+          "usn": 10
+        },
+        "prior_response": {
+          "id": 1794786158274,
+          "name": "Cedar equal model",
+          "mod": 2000000000,
+          "usn": 7
+        },
+        "raw_served": {
+          "id": 1794786158274,
+          "mtime_secs": 2000000001,
+          "name": "Cedar newer model",
+          "usn": 10
+        },
+        "sdk_receiver": {
+          "id": 1794786158274,
+          "name": "Cedar newer model",
+          "mod": 2000000001,
+          "usn": 10,
+          "css": ".card { color: #456789; }",
+          "fields": [
+            {
+              "collapsed": false,
+              "description": "",
+              "excludeFromSearch": false,
+              "font": "Arial",
+              "id": "2462710786119013517",
+              "name": "Prompt",
+              "ord": 0,
+              "plainText": false,
+              "preventDeletion": false,
+              "rtl": false,
+              "size": 20,
+              "sticky": false,
+              "tag": null
+            },
+            {
+              "collapsed": false,
+              "description": "",
+              "excludeFromSearch": false,
+              "font": "Arial",
+              "id": "-6070869725495491060",
+              "name": "Reply",
+              "ord": 1,
+              "plainText": false,
+              "preventDeletion": false,
+              "rtl": false,
+              "size": 20,
+              "sticky": false,
+              "tag": null
+            }
+          ],
+          "templates": [
+            {
+              "afmt": "{{Reply}}",
+              "bafmt": "",
+              "bfont": "",
+              "bqfmt": "",
+              "bsize": 0,
+              "did": null,
+              "id": "3549297089941791816",
+              "name": "Cedar face",
+              "ord": 0,
+              "qfmt": "{{Prompt}}"
+            }
+          ]
+        }
+      }
+    ],
+    "preset": [
+      {
+        "label": "older",
+        "stored_seed_mod": 2000000000,
+        "incoming": {
+          "id": 1794786159830,
+          "name": "Cedar older preset",
+          "mod": 1999999999,
+          "usn": 4
+        },
+        "prior_response": {
+          "id": 1794786159830,
+          "name": "Cedar stored preset",
+          "mod": 2000000000,
+          "usn": 0
+        },
+        "raw_served": {
+          "id": 1794786159830,
+          "mtime_secs": 2000000000,
+          "name": "Cedar stored preset",
+          "usn": 0
+        },
+        "sdk_receiver": {
+          "id": 1794786159830,
+          "name": "Cedar stored preset",
+          "mod": 2000000000,
+          "usn": 0,
+          "new_per_day": 20
+        }
+      },
+      {
+        "label": "equal",
+        "stored_seed_mod": 2000000000,
+        "incoming": {
+          "id": 1794786159830,
+          "name": "Cedar equal preset",
+          "mod": 2000000000,
+          "usn": 7
+        },
+        "prior_response": {
+          "id": 1794786159830,
+          "name": "Cedar stored preset",
+          "mod": 2000000000,
+          "usn": 0
+        },
+        "raw_served": {
+          "id": 1794786159830,
+          "mtime_secs": 2000000000,
+          "name": "Cedar equal preset",
+          "usn": 7
+        },
+        "sdk_receiver": {
+          "id": 1794786159830,
+          "name": "Cedar equal preset",
+          "mod": 2000000000,
+          "usn": 7,
+          "new_per_day": 31
+        }
+      },
+      {
+        "label": "newer",
+        "stored_seed_mod": 2000000000,
+        "incoming": {
+          "id": 1794786159830,
+          "name": "Cedar newer preset",
+          "mod": 2000000001,
+          "usn": 10
+        },
+        "prior_response": {
+          "id": 1794786159830,
+          "name": "Cedar equal preset",
+          "mod": 2000000000,
+          "usn": 7
+        },
+        "raw_served": {
+          "id": 1794786159830,
+          "mtime_secs": 2000000001,
+          "name": "Cedar newer preset",
+          "usn": 10
+        },
+        "sdk_receiver": {
+          "id": 1794786159830,
+          "name": "Cedar newer preset",
+          "mod": 2000000001,
+          "usn": 10,
+          "new_per_day": 32
+        }
+      }
+    ]
+  },
+  "ascii_names": {
+    "decks": [
+      {
+        "id": 810001,
+        "mtime_secs": 2000000000,
+        "name": "Alpha",
+        "usn": 3
+      },
+      {
+        "id": 810002,
+        "mtime_secs": 2000000000,
+        "name": "alpha+",
+        "usn": 4
+      },
+      {
+        "id": 810003,
+        "mtime_secs": 1794786161,
+        "name": "alpha++",
+        "usn": 5
+      }
+    ],
+    "notetypes": [
+      {
+        "id": 820001,
+        "mtime_secs": 2000000000,
+        "name": "Alpha",
+        "usn": 3
+      },
+      {
+        "id": 820002,
+        "mtime_secs": 2000000000,
+        "name": "alpha+",
+        "usn": 4
+      },
+      {
+        "id": 820003,
+        "mtime_secs": 1794786161,
+        "name": "alpha++",
+        "usn": 5
+      }
+    ],
+    "tag_before": {
+      "collapsed": 0,
+      "config": null,
+      "tag": "CedarTag",
+      "usn": 0
+    },
+    "tag_after": {
+      "collapsed": 0,
+      "config": null,
+      "tag": "CedarTag",
+      "usn": 0
+    }
+  },
+  "configuration": {
+    "config-optional": {
+      "samples": [
+        {
+          "form": "omitted",
+          "response": {
+            "decks": [
+              [
+                {
+                  "browserCollapsed": true,
+                  "collapsed": true,
+                  "conf": 1,
+                  "desc": "",
+                  "desiredRetention": null,
+                  "dyn": 0,
+                  "extendNew": 0,
+                  "extendRev": 0,
+                  "id": 1,
+                  "lrnToday": [
+                    0,
+                    0
+                  ],
+                  "mod": 0,
+                  "name": "Default",
+                  "newLimit": null,
+                  "newLimitToday": null,
+                  "newToday": [
+                    0,
+                    0
+                  ],
+                  "revToday": [
+                    0,
+                    0
+                  ],
+                  "reviewLimit": null,
+                  "reviewLimitToday": null,
+                  "timeToday": [
+                    0,
+                    0
+                  ],
+                  "usn": 0
+                }
+              ],
+              [
+                {
+                  "answerAction": 0,
+                  "autoplay": true,
+                  "buryInterdayLearning": false,
+                  "desiredRetention": 0.9,
+                  "dyn": false,
+                  "easyDaysPercentages": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ],
+                  "fsrsParams5": [],
+                  "fsrsParams6": [],
+                  "fsrsWeights": [],
+                  "id": 1,
+                  "ignoreRevlogsBeforeDate": "",
+                  "interdayLearningMix": 0,
+                  "lapse": {
+                    "delays": [
+                      10.0
+                    ],
+                    "leechAction": 1,
+                    "leechFails": 8,
+                    "minInt": 1,
+                    "mult": 0.0
+                  },
+                  "maxTaken": 60,
+                  "mod": 0,
+                  "name": "Default",
+                  "new": {
+                    "bury": false,
+                    "delays": [
+                      1.0,
+                      10.0
+                    ],
+                    "initialFactor": 2500,
+                    "ints": [
+                      1,
+                      4,
+                      0
+                    ],
+                    "order": 1,
+                    "perDay": 20
+                  },
+                  "newGatherPriority": 0,
+                  "newMix": 0,
+                  "newPerDayMinimum": 0,
+                  "newSortOrder": 0,
+                  "questionAction": 0,
+                  "replayq": true,
+                  "rev": {
+                    "bury": false,
+                    "ease4": 1.3,
+                    "hardFactor": 1.2,
+                    "ivlFct": 1.0,
+                    "maxIvl": 36500,
+                    "perDay": 200
+                  },
+                  "reviewOrder": 0,
+                  "secondsToShowAnswer": 0.0,
+                  "secondsToShowQuestion": 0.0,
+                  "sm2Retention": 0.9,
+                  "stopTimerOnAnswer": false,
+                  "timer": 0,
+                  "usn": 0,
+                  "waitForAudio": true,
+                  "weightSearch": ""
+                },
+                {
+                  "answerAction": 0,
+                  "autoplay": true,
+                  "buryInterdayLearning": false,
+                  "desiredRetention": 0.9,
+                  "dyn": false,
+                  "easyDaysPercentages": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ],
+                  "fsrsParams5": [],
+                  "fsrsParams6": [],
+                  "fsrsWeights": [],
+                  "id": 1794786162281,
+                  "ignoreRevlogsBeforeDate": "",
+                  "interdayLearningMix": 0,
+                  "lapse": {
+                    "delays": [
+                      10.0
+                    ],
+                    "leechAction": 1,
+                    "leechFails": 8,
+                    "minInt": 1,
+                    "mult": 0.0
+                  },
+                  "maxTaken": 60,
+                  "mod": 1794786162,
+                  "name": "Cedar matrix preset",
+                  "new": {
+                    "bury": false,
+                    "delays": [
+                      1.0,
+                      10.0
+                    ],
+                    "initialFactor": 2500,
+                    "ints": [
+                      1,
+                      4,
+                      0
+                    ],
+                    "order": 1,
+                    "perDay": 20
+                  },
+                  "newGatherPriority": 0,
+                  "newMix": 0,
+                  "newPerDayMinimum": 0,
+                  "newSortOrder": 0,
+                  "questionAction": 0,
+                  "replayq": true,
+                  "rev": {
+                    "bury": false,
+                    "ease4": 1.3,
+                    "hardFactor": 1.2,
+                    "ivlFct": 1.0,
+                    "maxIvl": 36500,
+                    "perDay": 200
+                  },
+                  "reviewOrder": 0,
+                  "secondsToShowAnswer": 0.0,
+                  "secondsToShowQuestion": 0.0,
+                  "sm2Retention": 0.9,
+                  "stopTimerOnAnswer": false,
+                  "timer": 0,
+                  "usn": 0,
+                  "waitForAudio": true,
+                  "weightSearch": ""
+                }
+              ]
+            ],
+            "models": [
+              {
+                "css": "",
+                "did": null,
+                "flds": [
+                  {
+                    "collapsed": false,
+                    "description": "",
+                    "excludeFromSearch": false,
+                    "font": "Arial",
+                    "id": "-6807983056059247925",
+                    "name": "Prompt",
+                    "ord": 0,
+                    "plainText": false,
+                    "preventDeletion": false,
+                    "rtl": false,
+                    "size": 20,
+                    "sticky": false,
+                    "tag": null
+                  },
+                  {
+                    "collapsed": false,
+                    "description": "",
+                    "excludeFromSearch": false,
+                    "font": "Arial",
+                    "id": "258178378391666905",
+                    "name": "Reply",
+                    "ord": 1,
+                    "plainText": false,
+                    "preventDeletion": false,
+                    "rtl": false,
+                    "size": 20,
+                    "sticky": false,
+                    "tag": null
+                  }
+                ],
+                "id": 1794786162286,
+                "latexPost": "",
+                "latexPre": "",
+                "latexsvg": false,
+                "mod": 1794786162,
+                "name": "Cedar matrix recall",
+                "originalStockKind": 1,
+                "req": [
+                  [
+                    0,
+                    "any",
+                    [
+                      0
+                    ]
+                  ]
+                ],
+                "sortf": 0,
+                "tmpls": [
+                  {
+                    "afmt": "{{Reply}}",
+                    "bafmt": "",
+                    "bfont": "",
+                    "bqfmt": "",
+                    "bsize": 0,
+                    "did": null,
+                    "id": "8131720559013665523",
+                    "name": "Cedar face",
+                    "ord": 0,
+                    "qfmt": "{{Prompt}}"
+                  }
+                ],
+                "type": 0,
+                "usn": 0
+              }
+            ],
+            "tags": []
+          },
+          "before": {
+            "crt": 1794715200,
+            "col_usn": 5,
+            "rows": [
+              {
+                "KEY": "cedar_keep",
+                "mtime_secs": 1794786162,
+                "usn": 3,
+                "val": {
+                  "hex": "37",
+                  "json": 7
+                }
+              },
+              {
+                "KEY": "cedar_old",
+                "mtime_secs": 1794786162,
+                "usn": 3,
+                "val": {
+                  "hex": "7b227061796c6f6164223a226f6c64227d",
+                  "json": {
+                    "payload": "old"
+                  }
+                }
+              }
+            ]
+          },
+          "after": {
+            "crt": 1794715200,
+            "col_usn": 7,
+            "rows": [
+              {
+                "KEY": "cedar_keep",
+                "mtime_secs": 1794786162,
+                "usn": 3,
+                "val": {
+                  "hex": "37",
+                  "json": 7
+                }
+              },
+              {
+                "KEY": "cedar_old",
+                "mtime_secs": 1794786162,
+                "usn": 3,
+                "val": {
+                  "hex": "7b227061796c6f6164223a226f6c64227d",
+                  "json": {
+                    "payload": "old"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "form": "null",
+          "response": {
+            "decks": [
+              [
+                {
+                  "browserCollapsed": true,
+                  "collapsed": true,
+                  "conf": 1,
+                  "desc": "",
+                  "desiredRetention": null,
+                  "dyn": 0,
+                  "extendNew": 0,
+                  "extendRev": 0,
+                  "id": 1,
+                  "lrnToday": [
+                    0,
+                    0
+                  ],
+                  "mod": 0,
+                  "name": "Default",
+                  "newLimit": null,
+                  "newLimitToday": null,
+                  "newToday": [
+                    0,
+                    0
+                  ],
+                  "revToday": [
+                    0,
+                    0
+                  ],
+                  "reviewLimit": null,
+                  "reviewLimitToday": null,
+                  "timeToday": [
+                    0,
+                    0
+                  ],
+                  "usn": 0
+                }
+              ],
+              [
+                {
+                  "answerAction": 0,
+                  "autoplay": true,
+                  "buryInterdayLearning": false,
+                  "desiredRetention": 0.9,
+                  "dyn": false,
+                  "easyDaysPercentages": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ],
+                  "fsrsParams5": [],
+                  "fsrsParams6": [],
+                  "fsrsWeights": [],
+                  "id": 1,
+                  "ignoreRevlogsBeforeDate": "",
+                  "interdayLearningMix": 0,
+                  "lapse": {
+                    "delays": [
+                      10.0
+                    ],
+                    "leechAction": 1,
+                    "leechFails": 8,
+                    "minInt": 1,
+                    "mult": 0.0
+                  },
+                  "maxTaken": 60,
+                  "mod": 0,
+                  "name": "Default",
+                  "new": {
+                    "bury": false,
+                    "delays": [
+                      1.0,
+                      10.0
+                    ],
+                    "initialFactor": 2500,
+                    "ints": [
+                      1,
+                      4,
+                      0
+                    ],
+                    "order": 1,
+                    "perDay": 20
+                  },
+                  "newGatherPriority": 0,
+                  "newMix": 0,
+                  "newPerDayMinimum": 0,
+                  "newSortOrder": 0,
+                  "questionAction": 0,
+                  "replayq": true,
+                  "rev": {
+                    "bury": false,
+                    "ease4": 1.3,
+                    "hardFactor": 1.2,
+                    "ivlFct": 1.0,
+                    "maxIvl": 36500,
+                    "perDay": 200
+                  },
+                  "reviewOrder": 0,
+                  "secondsToShowAnswer": 0.0,
+                  "secondsToShowQuestion": 0.0,
+                  "sm2Retention": 0.9,
+                  "stopTimerOnAnswer": false,
+                  "timer": 0,
+                  "usn": 0,
+                  "waitForAudio": true,
+                  "weightSearch": ""
+                },
+                {
+                  "answerAction": 0,
+                  "autoplay": true,
+                  "buryInterdayLearning": false,
+                  "desiredRetention": 0.9,
+                  "dyn": false,
+                  "easyDaysPercentages": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ],
+                  "fsrsParams5": [],
+                  "fsrsParams6": [],
+                  "fsrsWeights": [],
+                  "id": 1794786162281,
+                  "ignoreRevlogsBeforeDate": "",
+                  "interdayLearningMix": 0,
+                  "lapse": {
+                    "delays": [
+                      10.0
+                    ],
+                    "leechAction": 1,
+                    "leechFails": 8,
+                    "minInt": 1,
+                    "mult": 0.0
+                  },
+                  "maxTaken": 60,
+                  "mod": 1794786162,
+                  "name": "Cedar matrix preset",
+                  "new": {
+                    "bury": false,
+                    "delays": [
+                      1.0,
+                      10.0
+                    ],
+                    "initialFactor": 2500,
+                    "ints": [
+                      1,
+                      4,
+                      0
+                    ],
+                    "order": 1,
+                    "perDay": 20
+                  },
+                  "newGatherPriority": 0,
+                  "newMix": 0,
+                  "newPerDayMinimum": 0,
+                  "newSortOrder": 0,
+                  "questionAction": 0,
+                  "replayq": true,
+                  "rev": {
+                    "bury": false,
+                    "ease4": 1.3,
+                    "hardFactor": 1.2,
+                    "ivlFct": 1.0,
+                    "maxIvl": 36500,
+                    "perDay": 200
+                  },
+                  "reviewOrder": 0,
+                  "secondsToShowAnswer": 0.0,
+                  "secondsToShowQuestion": 0.0,
+                  "sm2Retention": 0.9,
+                  "stopTimerOnAnswer": false,
+                  "timer": 0,
+                  "usn": 0,
+                  "waitForAudio": true,
+                  "weightSearch": ""
+                }
+              ]
+            ],
+            "models": [
+              {
+                "css": "",
+                "did": null,
+                "flds": [
+                  {
+                    "collapsed": false,
+                    "description": "",
+                    "excludeFromSearch": false,
+                    "font": "Arial",
+                    "id": "-6807983056059247925",
+                    "name": "Prompt",
+                    "ord": 0,
+                    "plainText": false,
+                    "preventDeletion": false,
+                    "rtl": false,
+                    "size": 20,
+                    "sticky": false,
+                    "tag": null
+                  },
+                  {
+                    "collapsed": false,
+                    "description": "",
+                    "excludeFromSearch": false,
+                    "font": "Arial",
+                    "id": "258178378391666905",
+                    "name": "Reply",
+                    "ord": 1,
+                    "plainText": false,
+                    "preventDeletion": false,
+                    "rtl": false,
+                    "size": 20,
+                    "sticky": false,
+                    "tag": null
+                  }
+                ],
+                "id": 1794786162286,
+                "latexPost": "",
+                "latexPre": "",
+                "latexsvg": false,
+                "mod": 1794786162,
+                "name": "Cedar matrix recall",
+                "originalStockKind": 1,
+                "req": [
+                  [
+                    0,
+                    "any",
+                    [
+                      0
+                    ]
+                  ]
+                ],
+                "sortf": 0,
+                "tmpls": [
+                  {
+                    "afmt": "{{Reply}}",
+                    "bafmt": "",
+                    "bfont": "",
+                    "bqfmt": "",
+                    "bsize": 0,
+                    "did": null,
+                    "id": "8131720559013665523",
+                    "name": "Cedar face",
+                    "ord": 0,
+                    "qfmt": "{{Prompt}}"
+                  }
+                ],
+                "type": 0,
+                "usn": 0
+              }
+            ],
+            "tags": []
+          },
+          "before": {
+            "crt": 1794715200,
+            "col_usn": 8,
+            "rows": [
+              {
+                "KEY": "cedar_keep",
+                "mtime_secs": 1794786162,
+                "usn": 3,
+                "val": {
+                  "hex": "37",
+                  "json": 7
+                }
+              },
+              {
+                "KEY": "cedar_old",
+                "mtime_secs": 1794786162,
+                "usn": 3,
+                "val": {
+                  "hex": "7b227061796c6f6164223a226f6c64227d",
+                  "json": {
+                    "payload": "old"
+                  }
+                }
+              }
+            ]
+          },
+          "after": {
+            "crt": 1794715200,
+            "col_usn": 10,
+            "rows": [
+              {
+                "KEY": "cedar_keep",
+                "mtime_secs": 1794786162,
+                "usn": 3,
+                "val": {
+                  "hex": "37",
+                  "json": 7
+                }
+              },
+              {
+                "KEY": "cedar_old",
+                "mtime_secs": 1794786162,
+                "usn": 3,
+                "val": {
+                  "hex": "7b227061796c6f6164223a226f6c64227d",
+                  "json": {
+                    "payload": "old"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "native_server_final_rows": [
+        {
+          "KEY": "cedar_keep",
+          "mtime_secs": 1794786162,
+          "usn": 3,
+          "val": {
+            "hex": "37",
+            "json": 7
+          }
+        },
+        {
+          "KEY": "cedar_old",
+          "mtime_secs": 1794786162,
+          "usn": 3,
+          "val": {
+            "hex": "7b227061796c6f6164223a226f6c64227d",
+            "json": {
+              "payload": "old"
+            }
+          }
+        }
+      ],
+      "sdk_receiver_rows": [
+        [
+          "cedar_keep",
+          3,
+          1794786162
+        ],
+        [
+          "cedar_old",
+          3,
+          1794786162
+        ]
+      ]
+    },
+    "config-replacement-outgoing": {
+      "samples": [
+        {
+          "outgoing": {
+            "conf": {
+              "cedar_keep": 9,
+              "cedar_new": [
+                "cedar",
+                4
+              ]
+            },
+            "crt": 1794715201,
+            "decks": [
+              [
+                {
+                  "browserCollapsed": true,
+                  "collapsed": true,
+                  "conf": 1,
+                  "desc": "",
+                  "desiredRetention": null,
+                  "dyn": 0,
+                  "extendNew": 0,
+                  "extendRev": 0,
+                  "id": 1,
+                  "lrnToday": [
+                    0,
+                    0
+                  ],
+                  "mod": 0,
+                  "name": "Default",
+                  "newLimit": null,
+                  "newLimitToday": null,
+                  "newToday": [
+                    0,
+                    0
+                  ],
+                  "revToday": [
+                    0,
+                    0
+                  ],
+                  "reviewLimit": null,
+                  "reviewLimitToday": null,
+                  "timeToday": [
+                    0,
+                    0
+                  ],
+                  "usn": 0
+                }
+              ],
+              [
+                {
+                  "answerAction": 0,
+                  "autoplay": true,
+                  "buryInterdayLearning": false,
+                  "desiredRetention": 0.9,
+                  "dyn": false,
+                  "easyDaysPercentages": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ],
+                  "fsrsParams5": [],
+                  "fsrsParams6": [],
+                  "fsrsWeights": [],
+                  "id": 1,
+                  "ignoreRevlogsBeforeDate": "",
+                  "interdayLearningMix": 0,
+                  "lapse": {
+                    "delays": [
+                      10.0
+                    ],
+                    "leechAction": 1,
+                    "leechFails": 8,
+                    "minInt": 1,
+                    "mult": 0.0
+                  },
+                  "maxTaken": 60,
+                  "mod": 0,
+                  "name": "Default",
+                  "new": {
+                    "bury": false,
+                    "delays": [
+                      1.0,
+                      10.0
+                    ],
+                    "initialFactor": 2500,
+                    "ints": [
+                      1,
+                      4,
+                      0
+                    ],
+                    "order": 1,
+                    "perDay": 20
+                  },
+                  "newGatherPriority": 0,
+                  "newMix": 0,
+                  "newPerDayMinimum": 0,
+                  "newSortOrder": 0,
+                  "questionAction": 0,
+                  "replayq": true,
+                  "rev": {
+                    "bury": false,
+                    "ease4": 1.3,
+                    "hardFactor": 1.2,
+                    "ivlFct": 1.0,
+                    "maxIvl": 36500,
+                    "perDay": 200
+                  },
+                  "reviewOrder": 0,
+                  "secondsToShowAnswer": 0.0,
+                  "secondsToShowQuestion": 0.0,
+                  "sm2Retention": 0.9,
+                  "stopTimerOnAnswer": false,
+                  "timer": 0,
+                  "usn": 0,
+                  "waitForAudio": true,
+                  "weightSearch": ""
+                },
+                {
+                  "answerAction": 0,
+                  "autoplay": true,
+                  "buryInterdayLearning": false,
+                  "desiredRetention": 0.9,
+                  "dyn": false,
+                  "easyDaysPercentages": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ],
+                  "fsrsParams5": [],
+                  "fsrsParams6": [],
+                  "fsrsWeights": [],
+                  "id": 1794786163474,
+                  "ignoreRevlogsBeforeDate": "",
+                  "interdayLearningMix": 0,
+                  "lapse": {
+                    "delays": [
+                      10.0
+                    ],
+                    "leechAction": 1,
+                    "leechFails": 8,
+                    "minInt": 1,
+                    "mult": 0.0
+                  },
+                  "maxTaken": 60,
+                  "mod": 1794786163,
+                  "name": "Cedar matrix preset",
+                  "new": {
+                    "bury": false,
+                    "delays": [
+                      1.0,
+                      10.0
+                    ],
+                    "initialFactor": 2500,
+                    "ints": [
+                      1,
+                      4,
+                      0
+                    ],
+                    "order": 1,
+                    "perDay": 20
+                  },
+                  "newGatherPriority": 0,
+                  "newMix": 0,
+                  "newPerDayMinimum": 0,
+                  "newSortOrder": 0,
+                  "questionAction": 0,
+                  "replayq": true,
+                  "rev": {
+                    "bury": false,
+                    "ease4": 1.3,
+                    "hardFactor": 1.2,
+                    "ivlFct": 1.0,
+                    "maxIvl": 36500,
+                    "perDay": 200
+                  },
+                  "reviewOrder": 0,
+                  "secondsToShowAnswer": 0.0,
+                  "secondsToShowQuestion": 0.0,
+                  "sm2Retention": 0.9,
+                  "stopTimerOnAnswer": false,
+                  "timer": 0,
+                  "usn": 0,
+                  "waitForAudio": true,
+                  "weightSearch": ""
+                }
+              ]
+            ],
+            "models": [
+              {
+                "css": "",
+                "did": null,
+                "flds": [
+                  {
+                    "collapsed": false,
+                    "description": "",
+                    "excludeFromSearch": false,
+                    "font": "Arial",
+                    "id": "-793270086229110267",
+                    "name": "Prompt",
+                    "ord": 0,
+                    "plainText": false,
+                    "preventDeletion": false,
+                    "rtl": false,
+                    "size": 20,
+                    "sticky": false,
+                    "tag": null
+                  },
+                  {
+                    "collapsed": false,
+                    "description": "",
+                    "excludeFromSearch": false,
+                    "font": "Arial",
+                    "id": "8807409994770787904",
+                    "name": "Reply",
+                    "ord": 1,
+                    "plainText": false,
+                    "preventDeletion": false,
+                    "rtl": false,
+                    "size": 20,
+                    "sticky": false,
+                    "tag": null
+                  }
+                ],
+                "id": 1794786163479,
+                "latexPost": "",
+                "latexPre": "",
+                "latexsvg": false,
+                "mod": 1794786163,
+                "name": "Cedar matrix recall",
+                "originalStockKind": 1,
+                "req": [
+                  [
+                    0,
+                    "any",
+                    [
+                      0
+                    ]
+                  ]
+                ],
+                "sortf": 0,
+                "tmpls": [
+                  {
+                    "afmt": "{{Reply}}",
+                    "bafmt": "",
+                    "bfont": "",
+                    "bqfmt": "",
+                    "bsize": 0,
+                    "did": null,
+                    "id": "-8378301147745605937",
+                    "name": "Cedar face",
+                    "ord": 0,
+                    "qfmt": "{{Prompt}}"
+                  }
+                ],
+                "type": 0,
+                "usn": 0
+              }
+            ],
+            "tags": []
+          },
+          "raw_served": {
+            "crt": 1794715201,
+            "col_usn": 6,
+            "rows": [
+              {
+                "KEY": "cedar_keep",
+                "mtime_secs": 1794786164,
+                "usn": 4,
+                "val": {
+                  "hex": "39",
+                  "json": 9
+                }
+              },
+              {
+                "KEY": "cedar_new",
+                "mtime_secs": 1794786164,
+                "usn": 4,
+                "val": {
+                  "hex": "5b226365646172222c345d",
+                  "json": [
+                    "cedar",
+                    4
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "native_server_final_rows": [
+        {
+          "KEY": "cedar_keep",
+          "mtime_secs": 1794786164,
+          "usn": 0,
+          "val": {
+            "hex": "39",
+            "json": 9
+          }
+        },
+        {
+          "KEY": "cedar_new",
+          "mtime_secs": 1794786164,
+          "usn": 0,
+          "val": {
+            "hex": "5b226365646172222c345d",
+            "json": [
+              "cedar",
+              4
+            ]
+          }
+        }
+      ],
+      "sdk_receiver_rows": [
+        [
+          "cedar_keep",
+          0,
+          1794786164
+        ],
+        [
+          "cedar_new",
+          0,
+          1794786164
+        ]
+      ]
+    }
+  },
+  "graves": {
+    "raw_deck_grave_only": {
+      "cards": [
+        {
+          "data": "{}",
+          "did": 1,
+          "due": 1,
+          "factor": 0,
+          "flags": 0,
+          "id": 1794786164707,
+          "ivl": 0,
+          "lapses": 0,
+          "left": 0,
+          "mod": 1794786164,
+          "nid": 1794786164707,
+          "odid": 0,
+          "odue": 0,
+          "ord": 0,
+          "queue": 0,
+          "reps": 0,
+          "type": 0,
+          "usn": 0
+        },
+        {
+          "data": "{}",
+          "did": 1,
+          "due": 2,
+          "factor": 0,
+          "flags": 0,
+          "id": 1794786164708,
+          "ivl": 0,
+          "lapses": 0,
+          "left": 0,
+          "mod": 1794786164,
+          "nid": 1794786164708,
+          "odid": 0,
+          "odue": 0,
+          "ord": 0,
+          "queue": 0,
+          "reps": 0,
+          "type": 0,
+          "usn": 0
+        },
+        {
+          "data": "{}",
+          "did": 1,
+          "due": 3,
+          "factor": 0,
+          "flags": 0,
+          "id": 1794786164709,
+          "ivl": 0,
+          "lapses": 0,
+          "left": 0,
+          "mod": 1794786164,
+          "nid": 1794786164709,
+          "odid": 0,
+          "odue": 0,
+          "ord": 0,
+          "queue": 0,
+          "reps": 0,
+          "type": 0,
+          "usn": 0
+        },
+        {
+          "data": "{}",
+          "did": 1,
+          "due": 4,
+          "factor": 0,
+          "flags": 0,
+          "id": 1794786164710,
+          "ivl": 0,
+          "lapses": 0,
+          "left": 0,
+          "mod": 1794786164,
+          "nid": 1794786164710,
+          "odid": 0,
+          "odue": 0,
+          "ord": 0,
+          "queue": 0,
+          "reps": 0,
+          "type": 0,
+          "usn": 0
+        },
+        {
+          "data": "{}",
+          "did": 1,
+          "due": 5,
+          "factor": 0,
+          "flags": 0,
+          "id": 1794786164711,
+          "ivl": 0,
+          "lapses": 0,
+          "left": 0,
+          "mod": 1794786164,
+          "nid": 1794786164711,
+          "odid": 0,
+          "odue": 0,
+          "ord": 0,
+          "queue": 0,
+          "reps": 0,
+          "type": 0,
+          "usn": 0
+        }
+      ],
+      "decks": [
+        {
+          "id": 1,
+          "mtime_secs": 0,
+          "name": "Default",
+          "usn": 0
+        }
+      ],
+      "graves": [
+        {
+          "oid": 830001,
+          "type": 2,
+          "usn": 4
+        }
+      ]
+    },
+    "raw_same_round_occurrences": {
+      "cards": [
+        {
+          "data": "{}",
+          "did": 830001,
+          "due": 1,
+          "factor": 0,
+          "flags": 0,
+          "id": 1794786164707,
+          "ivl": 0,
+          "lapses": 0,
+          "left": 0,
+          "mod": 2000000001,
+          "nid": 1794786164707,
+          "odid": 0,
+          "odue": 0,
+          "ord": 0,
+          "queue": 0,
+          "reps": 0,
+          "type": 0,
+          "usn": 7
+        },
+        {
+          "data": "{}",
+          "did": 1,
+          "due": 2,
+          "factor": 0,
+          "flags": 0,
+          "id": 1794786164708,
+          "ivl": 0,
+          "lapses": 0,
+          "left": 0,
+          "mod": 1794786164,
+          "nid": 1794786164708,
+          "odid": 0,
+          "odue": 0,
+          "ord": 0,
+          "queue": 0,
+          "reps": 0,
+          "type": 0,
+          "usn": 0
+        },
+        {
+          "data": "{}",
+          "did": 1,
+          "due": 3,
+          "factor": 0,
+          "flags": 0,
+          "id": 1794786164709,
+          "ivl": 0,
+          "lapses": 0,
+          "left": 0,
+          "mod": 1794786164,
+          "nid": 1794786164709,
+          "odid": 0,
+          "odue": 0,
+          "ord": 0,
+          "queue": 0,
+          "reps": 0,
+          "type": 0,
+          "usn": 0
+        },
+        {
+          "data": "{}",
+          "did": 1,
+          "due": 4,
+          "factor": 0,
+          "flags": 0,
+          "id": 1794786164710,
+          "ivl": 0,
+          "lapses": 0,
+          "left": 0,
+          "mod": 1794786164,
+          "nid": 1794786164710,
+          "odid": 0,
+          "odue": 0,
+          "ord": 0,
+          "queue": 0,
+          "reps": 0,
+          "type": 0,
+          "usn": 0
+        },
+        {
+          "data": "{}",
+          "did": 1,
+          "due": 5,
+          "factor": 0,
+          "flags": 0,
+          "id": 1794786164711,
+          "ivl": 0,
+          "lapses": 0,
+          "left": 0,
+          "mod": 1794786164,
+          "nid": 1794786164711,
+          "odid": 0,
+          "odue": 0,
+          "ord": 0,
+          "queue": 0,
+          "reps": 0,
+          "type": 0,
+          "usn": 0
+        }
+      ],
+      "notes": [
+        {
+          "csum": 3197265419,
+          "data": "",
+          "flags": 0,
+          "flds": "Cedar prompt 0\u001fCedar reply 0",
+          "guid": "sN5v|gQH+2",
+          "id": 1794786164707,
+          "mid": 1794786164712,
+          "mod": 1794786164,
+          "sfld": "Cedar prompt 0",
+          "tags": "",
+          "usn": 0
+        },
+        {
+          "csum": 390943721,
+          "data": "",
+          "flags": 0,
+          "flds": "Cedar prompt 1\u001fCedar reply 1",
+          "guid": "p$pEXmVs<Z",
+          "id": 1794786164708,
+          "mid": 1794786164712,
+          "mod": 2000000001,
+          "sfld": "Cedar prompt 1",
+          "tags": "",
+          "usn": 7
+        },
+        {
+          "csum": 3420851798,
+          "data": "",
+          "flags": 0,
+          "flds": "Cedar prompt 2\u001fCedar reply 2",
+          "guid": "hgbb!|L7#:",
+          "id": 1794786164709,
+          "mid": 1794786164712,
+          "mod": 1794786164,
+          "sfld": "Cedar prompt 2",
+          "tags": "",
+          "usn": 0
+        },
+        {
+          "csum": 3516805576,
+          "data": "",
+          "flags": 0,
+          "flds": "Cedar prompt 3\u001fCedar reply 3",
+          "guid": "HS45cl<(o^",
+          "id": 1794786164710,
+          "mid": 1794786164712,
+          "mod": 1794786164,
+          "sfld": "Cedar prompt 3",
+          "tags": "",
+          "usn": 0
+        },
+        {
+          "csum": 461430966,
+          "data": "",
+          "flags": 0,
+          "flds": "Cedar prompt 4\u001fCedar reply 4",
+          "guid": "oeOZKd#9iJ",
+          "id": 1794786164711,
+          "mid": 1794786164712,
+          "mod": 1794786164,
+          "sfld": "Cedar prompt 4",
+          "tags": "",
+          "usn": 0
+        }
+      ],
+      "decks": [
+        {
+          "id": 1,
+          "mtime_secs": 0,
+          "name": "Default",
+          "usn": 0
+        },
+        {
+          "id": 830001,
+          "mtime_secs": 2000000002,
+          "name": "Cedar grave deck",
+          "usn": 7
+        }
+      ],
+      "graves": [
+        {
+          "oid": 830001,
+          "type": 2,
+          "usn": 4
+        },
+        {
+          "oid": 1794786164707,
+          "type": 0,
+          "usn": 7
+        },
+        {
+          "oid": 1794786164708,
+          "type": 1,
+          "usn": 7
+        }
+      ]
+    },
+    "sdk_receiver": {
+      "cards": [
+        [
+          1794786164707,
+          1794786164707,
+          830001,
+          0,
+          2000000001,
+          7,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          "{}"
+        ],
+        [
+          1794786164708,
+          1794786164708,
+          1,
+          0,
+          1794786164,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          "{}"
+        ],
+        [
+          1794786164709,
+          1794786164709,
+          1,
+          0,
+          1794786164,
+          0,
+          0,
+          0,
+          3,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          "{}"
+        ],
+        [
+          1794786164710,
+          1794786164710,
+          1,
+          0,
+          1794786164,
+          0,
+          0,
+          0,
+          4,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          "{}"
+        ],
+        [
+          1794786164711,
+          1794786164711,
+          1,
+          0,
+          1794786164,
+          0,
+          0,
+          0,
+          5,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          "{}"
+        ]
+      ],
+      "notes": [
+        [
+          1794786164707,
+          1794786164,
+          0,
+          "Cedar prompt 0\u001fCedar reply 0"
+        ],
+        [
+          1794786164708,
+          2000000001,
+          7,
+          "Cedar prompt 1\u001fCedar reply 1"
+        ],
+        [
+          1794786164709,
+          1794786164,
+          0,
+          "Cedar prompt 2\u001fCedar reply 2"
+        ],
+        [
+          1794786164710,
+          1794786164,
+          0,
+          "Cedar prompt 3\u001fCedar reply 3"
+        ],
+        [
+          1794786164711,
+          1794786164,
+          0,
+          "Cedar prompt 4\u001fCedar reply 4"
+        ]
+      ],
+      "decks": [
+        {
+          "browserCollapsed": true,
+          "collapsed": true,
+          "conf": 1,
+          "desc": "",
+          "desiredRetention": null,
+          "dyn": 0,
+          "extendNew": 0,
+          "extendRev": 0,
+          "id": 830001,
+          "lrnToday": [
+            0,
+            0
+          ],
+          "mod": 2000000002,
+          "name": "Cedar grave deck",
+          "newLimit": null,
+          "newLimitToday": null,
+          "newToday": [
+            0,
+            0
+          ],
+          "revToday": [
+            0,
+            0
+          ],
+          "reviewLimit": null,
+          "reviewLimitToday": null,
+          "timeToday": [
+            0,
+            0
+          ],
+          "usn": 7
+        },
+        {
+          "browserCollapsed": true,
+          "collapsed": true,
+          "conf": 1,
+          "desc": "",
+          "desiredRetention": null,
+          "dyn": 0,
+          "extendNew": 0,
+          "extendRev": 0,
+          "id": 1,
+          "lrnToday": [
+            0,
+            0
+          ],
+          "mod": 0,
+          "name": "Default",
+          "newLimit": null,
+          "newLimitToday": null,
+          "newToday": [
+            0,
+            0
+          ],
+          "revToday": [
+            0,
+            0
+          ],
+          "reviewLimit": null,
+          "reviewLimitToday": null,
+          "timeToday": [
+            0,
+            0
+          ],
+          "usn": 0
+        }
+      ],
+      "graves": [
+        [
+          830001,
+          2,
+          4
+        ],
+        [
+          1794786164707,
+          0,
+          7
+        ],
+        [
+          1794786164708,
+          1,
+          7
+        ]
+      ]
+    }
+  },
+  "limits": [
+    "Desktop 26.09.4 only. No whole-family, candidate NORMAL, Mobile or final acceptance.",
+    "Auxiliary valid normal protocol fixtures, not SDK-emitted traffic. Actual SDK receivers reported separately.",
+    "Structural full-sync selection unobserved. Only selected ASCII name collision facts.",
+    "The paired omitted conf/crt and paired null conf/crt forms are observed; independent mixed optional forms are unobserved.",
+    "The first card-data request removed zz. A preexisting stored zz key followed by a known edit is therefore unobserved.",
+    "No independent review or sealing yet. Earlier observer failures and invalid provisional assertions earn no credit."
+  ],
+  "repair": {
+    "review_finding": "P2 nonpending seed must be directly measured",
+    "seed_observation_location": "card_samples[3].raw_seed_before_incoming_round",
+    "seed_measurement_boundary": "Raw served snapshot after preparation round finishes and before incoming round starts. No download interrupts an admitted round.",
+    "prior_export": "../original-v1/neutral/desktop-26.09.4-normal-matrix.json",
+    "targeted_review": "pending"
+  }
+}

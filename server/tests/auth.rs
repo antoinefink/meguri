@@ -76,7 +76,9 @@ async fn actual_http_origin_precedes_body_work_security_headers_on_errors_no_spa
     )
     .await;
     error(h.get("/api/setup", None).await, 404, "route_not_found").await;
-    error(h.get("/sync/", None).await, 404, "route_not_found").await;
+    let native = h.get("/sync/", None).await;
+    assert_eq!(native.status(), 404);
+    assert_eq!(native.text().await.unwrap(), "route_not_found");
     h.setup().await;
 }
 #[tokio::test]

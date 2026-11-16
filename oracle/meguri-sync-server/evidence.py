@@ -7,6 +7,11 @@ import pathlib
 
 from validation import Artifacts, binding, decode, encoded, require, same_value, sha, unique_named, validate
 from synthetic import FIXTURE, EDGE_FIXTURE
+from normal import NORMAL_FIXTURE, normal_selection
+from normal_matrix import MATRIX_FIXTURE, matrix_selection
+from media import MEDIA_FIXTURE, media_selection
+from recovery import RECOVERY_FIXTURE, recovery_selection
+from recovery_dirty import DIRTY_FIXTURE, dirty_selection
 
 
 def selection():
@@ -99,8 +104,8 @@ def edge_selection():
 
 
 def candidate_selection(phase):
-    require(phase in {'full','complete'},'unknown candidate phase')
-    contract = copy.deepcopy(selection())
+    require(phase in {'full','normal','media','complete'},'unknown candidate phase')
+    contract = copy.deepcopy(media_selection() if phase == 'media' else normal_selection(sdk_only=True) if phase == 'normal' else selection())
     contract['lane_kind'] = 'candidate'
     contract['phase'] = phase
     contract['scope'] = 'Actual Desktop against the verified job-owned candidate; intermediate build interoperability only, not production package acceptance.'
@@ -193,21 +198,31 @@ def observations(result):
 
 def record(result, out, invocation, package=None, input_store=None):
     if result.get('probe_kind') == 'candidate': contract = candidate_selection(result['phase'])
-    else: contract = edge_selection() if result.get('probe_kind') == 'edges' else selection()
+    elif result.get('probe_kind') == 'recovery-dirty': contract = dirty_selection()
+    elif result.get('probe_kind') == 'recovery': contract = recovery_selection()
+    elif result.get('probe_kind') == 'media': contract = media_selection()
+    else: contract = matrix_selection() if result.get('probe_kind') == 'normal-matrix' else normal_selection(sdk_only=result.get('probe_kind') == 'normal-sdk') if result.get('probe_kind') in {'normal','normal-sdk'} else edge_selection() if result.get('probe_kind') == 'edges' else selection()
     store = Artifacts(out / 'artifacts')
     package_hash = None
     if package is not None:
         for key in ('executable_artifact_sha256','lock_artifact_sha256','mg_build_receipt_sha256','execution_binding_sha256'):
             store.put(input_store.read(package[key]))
         package_hash = store.put_json(package)
-    expected_fixture = EDGE_FIXTURE if result.get('probe_kind') == 'edges' else FIXTURE
+    expected_fixture = DIRTY_FIXTURE if result.get('probe_kind') == 'recovery-dirty' else RECOVERY_FIXTURE if result.get('probe_kind') == 'recovery' else MEDIA_FIXTURE if 'media_results' in result else MATRIX_FIXTURE if result.get('probe_kind') == 'normal-matrix' else NORMAL_FIXTURE if 'normal_results' in result and result.get('probe_kind') != 'normal-matrix' else EDGE_FIXTURE if result.get('probe_kind') == 'edges' else FIXTURE
     require(same_value(result['fixture'],expected_fixture),'returned fixture differs from the supplied original input')
     fixture_bytes = encoded(expected_fixture)
     fixture_input = store.put(fixture_bytes)
     fixture_manifest = {'format': 'meguri-sync-fixtures-v1', 'entries': [{'sha256': fixture_input, 'bytes': len(fixture_bytes), 'kind': 'original-synthetic-json'}]}
     fixture_hash = store.put_json(fixture_manifest)
     runtime_hash = store.put_json(result['runtime'])
-    actual = edge_observations(result) if result.get('probe_kind') == 'edges' else observations(result)
+    if 'dirty_results' in result:
+        actual = {(row['family'],row['variants'][0]):result['dirty_results'][row['variants'][0]] for row in contract['cases']}
+    elif 'recovery_results' in result:
+        actual = {(row['family'],row['variants'][0]):result['recovery_results'][row['variants'][0]] for row in contract['cases']}
+    elif 'media_results' in result:
+        actual = {(row['family'],row['variants'][0]):result['media_results'][row['variants'][0]] for row in contract['cases']}
+    else:
+        actual = {(row['family'],row['variants'][0]):result['normal_results'][row['variants'][0]] for row in contract['cases']} if 'normal_results' in result else edge_observations(result) if result.get('probe_kind') == 'edges' else observations(result)
     invocation['selection'] = [row['id'] for row in contract['cases']]
     manifest = {key: copy.deepcopy(invocation[key]) for key in ('source_commit','batch_base','source_sha256','lock_sha256','mg_job','arguments')}
     if package is not None: manifest['executable_sha256'] = package['server']['executable_sha256']
@@ -221,12 +236,21 @@ def record(result, out, invocation, package=None, input_store=None):
         case['observed'] = [{'name': name, 'value': value} for name, value in actual[(case['family'], case['variants'][0])].items()]
         case['status'] = 'matched' if same_value(unique_named(case['expected']), unique_named(case['observed'])) else 'different'
         if case['status'] == 'different': case['reason'] = 'Named current-reference observations differ from the selected contract.'
+        exact_input = None
+        if result.get('probe_kind') == 'normal-matrix':
+            exact_input = store.put_json({'format':'meguri-sync-matrix-action-input-v1','fixture':expected_fixture,'traffic':result['case_inputs'][case['variants'][0]]})
+            case_manifest = {'format':'meguri-sync-fixtures-v1','entries':[{'sha256':fixture_input,'bytes':len(fixture_bytes),'kind':'original-synthetic-json'},{'sha256':exact_input,'bytes':len(store.read(exact_input)),'kind':'original-synthetic-json'}]}
+            case['fixture_sha256'] = store.put_json(case_manifest)
+            for action in case['actions']: action['fixture_sha256'] = exact_input
         bound = binding(manifest, case)
         observation_hash = store.put_json({'format': 'meguri-sync-neutral_observation-v1', 'binding': bound, 'details': result})
         receipt_hash = store.put_json({'format': 'meguri-sync-mg_receipt-v1', 'binding': bound, 'run_id': invocation['run_id'],
                                       'selection': invocation['selection'], 'completed_ids': invocation['selection'], 'runtime_receipt_sha256': runtime_hash})
-        case['artifacts'] = [{'role': role, 'sha256': digest, 'bytes': len(store.read(digest))} for role, digest in (
-            ('synthetic_input', fixture_hash), ('neutral_observation', observation_hash), ('mg_receipt', receipt_hash))]
+        case['artifacts'] = [{'role':'synthetic_input', 'sha256':digest, 'bytes':len(store.read(digest))}
+                             for digest in dict.fromkeys((case['fixture_sha256'], fixture_input))]
+        if exact_input is not None: case['artifacts'].append({'role':'synthetic_input','sha256':exact_input,'bytes':len(store.read(exact_input))})
+        case['artifacts'] += [{'role':role, 'sha256':digest, 'bytes':len(store.read(digest))}
+                              for role,digest in (('neutral_observation',observation_hash),('mg_receipt',receipt_hash))]
         if package_hash is not None: case['artifacts'].append({'role':'package','sha256':package_hash,'bytes':len(store.read(package_hash))})
         manifest['cases'].append(case)
     (out / 'selection.json').write_bytes(encoded(contract))
@@ -249,7 +273,10 @@ def validate_existing(source, out, current, trusted_runtime, seal):
     invocation_path = source / 'execution-invocation.json'
     invocation = decode((invocation_path if invocation_path.exists() else source / 'invocation.json').read_bytes())
     if contract['lane_kind'] == 'candidate': expected_contract = candidate_selection(contract['phase'])
-    else: expected_contract = edge_selection() if invocation['arguments'][0] == 'edges' else selection()
+    elif invocation['arguments'][0] == 'recovery-dirty': expected_contract = dirty_selection()
+    elif invocation['arguments'][0] == 'recovery': expected_contract = recovery_selection()
+    elif invocation['arguments'][0] == 'media': expected_contract = media_selection()
+    else: expected_contract = matrix_selection() if invocation['arguments'][0] == 'normal-matrix' else normal_selection(sdk_only=invocation['arguments'][0] == 'normal-sdk') if invocation['arguments'][0] in {'normal','normal-sdk'} else edge_selection() if invocation['arguments'][0] == 'edges' else selection()
     require(same_value(contract, expected_contract), 'retained selection differs from the executable contract')
     require(current['source_sha256'] == manifest['source_sha256'] and current['lock_sha256'] == manifest['lock_sha256'], 'retained evidence source bytes are stale')
     schema = decode(pathlib.Path('/opt/reference/schema.json').read_bytes())

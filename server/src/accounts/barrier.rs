@@ -92,6 +92,28 @@ impl Barriers {
     }
 }
 impl Service {
+    /// Full-file publication owns the account barrier before resolving current
+    /// collection state. The authority read takes no shared metadata writer.
+    /// The dedicated blocking job retains the barrier across cancellation.
+    pub(crate) async fn collection_operation<T: Send + 'static>(
+        &self,
+        authority: NativeAuthority,
+        retire: bool,
+        operation: impl FnOnce(&crate::storage::DataRoot) -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        let gate = self.publication_barrier(&authority).await?;
+        let guard = gate.enter().await;
+        self.pause("collection_with_barrier").await;
+        self.metadata.run(move |c| {
+            admission(c)?;
+            check_native_generation(c, &authority)
+        }).await?;
+        self.metadata.files(move |root| {
+            let _guard = guard;
+            if retire { gate.retire()?; }
+            operation(root)
+        }).await
+    }
     pub async fn publication_barrier(
         &self,
         authority: &NativeAuthority,
@@ -127,7 +149,7 @@ impl Service {
             })
             .await
     }
-    /// U5–U7 finish/switch/media seam: bytes/hash/validation prepared outside;
+    /// Metadata publication seam: bytes/hash/validation prepared outside;
     /// callback is synchronous, bounded and runs off the async executor under
     /// the barrier and one short IMMEDIATE transaction. No network/hash waits.
     /// Commit durable collection state inside callback before returning success.
@@ -136,9 +158,17 @@ impl Service {
         a: NativeAuthority,
         f: impl FnOnce(&Connection) -> Result<T> + Send + 'static,
     ) -> Result<T> {
+        self.publish_at(a,"publish_with_barrier",f).await
+    }
+    /// Same coordinator and transaction; a named test boundary distinguishes a
+    /// media commit from its earlier metadata-only snapshot.
+    pub(crate) async fn publish_at<T: Send + 'static>(
+        &self, a:NativeAuthority, phase:&'static str,
+        f:impl FnOnce(&Connection)->Result<T>+Send+'static,
+    )->Result<T> {
         let gate = self.publication_barrier(&a).await?;
         let guard = gate.enter().await;
-        self.pause("publish_with_barrier").await;
+        self.pause(phase).await;
         self.metadata
             .run(move |c| {
                 let _publication = (gate, guard);

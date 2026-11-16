@@ -12,19 +12,32 @@ from synthetic import FIXTURE, EDGE_FIXTURE
 from validation import decode, encoded, require, same_value
 from evidence import record, selection, edge_selection, candidate_selection
 from request import check_request
+from normal import NORMAL_FIXTURE, normal_selection
+from normal_matrix import MATRIX_FIXTURE, matrix_selection
+from media import MEDIA_FIXTURE, media_selection
+from recovery import RECOVERY_FIXTURE, recovery_selection
+from recovery_dirty import DIRTY_FIXTURE, dirty_selection
 
 
 def adapter(request):
     process = subprocess.run([sys.executable, str(pathlib.Path(__file__).with_name("adapter.py"))],
                              input=encoded(request), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                             timeout=600 if request['mode'] == 'edges' else 120)
+                             timeout=600 if request['mode'] == 'edges' or request.get('phase') == 'media' or request['mode'] == 'media' else 120)
     if process.returncode != 0:
         failure = decode(process.stdout).get('failure', {}) if process.stdout else {}
         print('SDK phase failure: ' + str(failure.get('phase', 'unknown')) + ' (' + str(failure.get('kind', 'worker-exit')) + ')', file=sys.stderr)
+        if failure.get('driver_frames'): print('Driver frames: '+','.join(failure['driver_frames']),file=sys.stderr)
         if failure.get('recording_errors'):
             print('Recording error kinds: ' + ','.join(failure['recording_errors']), file=sys.stderr)
         raise ValueError('reference SDK worker failed')
-    return decode(process.stdout)
+    try:
+        return decode(process.stdout)
+    except ValueError as error:
+        if str(error) in {"wide integer requires an exact decimal string","duplicate JSON member","nonfinite number"}:
+            print("SDK result boundary: " + str(error),file=sys.stderr)
+        else:
+            print("SDK result boundary: invalid JSON",file=sys.stderr)
+        raise
 
 
 class PrivateResult(unittest.TextTestResult):
@@ -34,18 +47,21 @@ class PrivateResult(unittest.TextTestResult):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=["selftest", "identity", "smoke", "edges", "candidate", "catalog", "validate", "seal"])
+    parser.add_argument("mode", choices=["selftest", "identity", "recovery-discover", "recovery", "recovery-dirty", "smoke", "edges", "normal", "normal-sdk", "normal-matrix", "media", "candidate", "catalog", "validate", "seal"])
     parser.add_argument('--request')
     parser.add_argument('--input')
     parser.add_argument('--credentials')
-    parser.add_argument('--phase',choices=['full','complete'],default='full')
+    parser.add_argument('--phase',choices=['full','normal','media','complete'],default='full')
     args = parser.parse_args()
     out = pathlib.Path('/out')
     if args.mode != 'catalog':
         neutral = pathlib.Path('/opt/reference/neutral')
         for name, expected in [('catalog.json',catalog()),('selection.json',selection()),('fixture.json',FIXTURE),
                                ('edge-selection.json',edge_selection()),('edge-fixture.json',EDGE_FIXTURE),
-                               ('candidate-full-selection.json',candidate_selection('full')),('candidate-complete-selection.json',candidate_selection('complete'))]:
+                               ('recovery-selection.json',recovery_selection()),('recovery-fixture.json',RECOVERY_FIXTURE),
+                               ('recovery-dirty-selection.json',dirty_selection()),('recovery-dirty-fixture.json',DIRTY_FIXTURE),
+                               ('candidate-media-selection.json',candidate_selection('media')),('media-selection.json',media_selection()),('media-fixture.json',MEDIA_FIXTURE),
+                               ('candidate-full-selection.json',candidate_selection('full')),('candidate-normal-selection.json',candidate_selection('normal')),('candidate-complete-selection.json',candidate_selection('complete'))]:
             require(same_value(decode((neutral / name).read_bytes()), expected), 'generated neutral input is stale')
     if args.mode == "selftest":
         suite = unittest.defaultTestLoader.discover(str(pathlib.Path(__file__).parent / "tests"))
@@ -55,18 +71,65 @@ def main():
     if args.mode == 'catalog':
         value = catalog()
         (out / 'catalog.json').write_bytes(encoded(value))
+        (out / 'recovery-selection.json').write_bytes(encoded(recovery_selection()))
+        (out / 'recovery-fixture.json').write_bytes(encoded(RECOVERY_FIXTURE))
+        (out / 'recovery-dirty-fixture.json').write_bytes(encoded(DIRTY_FIXTURE))
+        (out / 'recovery-dirty-selection.json').write_bytes(encoded(dirty_selection()))
         (out / 'selection.json').write_bytes(encoded(selection()))
         (out / 'edge-selection.json').write_bytes(encoded(edge_selection()))
+        (out / 'matrix-selection.json').write_bytes(encoded(matrix_selection()))
+        (out / 'matrix-fixture.json').write_bytes(encoded(MATRIX_FIXTURE))
+        (out / 'normal-selection.json').write_bytes(encoded(normal_selection()))
+        (out / 'normal-fixture.json').write_bytes(encoded(NORMAL_FIXTURE))
         (out / 'edge-fixture.json').write_bytes(encoded(EDGE_FIXTURE))
         (out / 'candidate-full-selection.json').write_bytes(encoded(candidate_selection('full')))
+        (out / 'candidate-normal-selection.json').write_bytes(encoded(candidate_selection('normal')))
         (out / 'candidate-complete-selection.json').write_bytes(encoded(candidate_selection('complete')))
+        (out / 'candidate-media-selection.json').write_bytes(encoded(candidate_selection('media')))
+        (out / 'media-selection.json').write_bytes(encoded(media_selection()))
+        (out / 'media-fixture.json').write_bytes(encoded(MEDIA_FIXTURE))
         (out / 'fixture.json').write_bytes(encoded(FIXTURE))
         (out / 'summary.json').write_bytes(encoded({"total": 0, "passed": 0, "failed": 0, 'catalog_cases': value['required_case_count']}))
+        return 0
+    if args.mode == 'recovery-dirty':
+        value = adapter({'mode':'recovery-dirty','fixture':DIRTY_FIXTURE})
+        (out / 'recovery-dirty-observations.json').write_bytes(encoded(value))
+        invocation = decode((out / 'invocation.json').read_bytes())
+        require(value['runtime']['lock_sha256'] == invocation['lock_sha256'], 'runtime lock receipt mismatch')
+        return 0 if record(value,out,invocation) else 1
+    if args.mode == 'recovery':
+        value = adapter({'mode':'recovery','fixture':RECOVERY_FIXTURE})
+        (out / 'recovery-observations.json').write_bytes(encoded(value))
+        invocation = decode((out / 'invocation.json').read_bytes())
+        require(value['runtime']['lock_sha256'] == invocation['lock_sha256'], 'runtime lock receipt mismatch')
+        return 0 if record(value,out,invocation) else 1
+    if args.mode == 'recovery-discover':
+        value = adapter({'mode':'recovery-discover'})
+        (out / 'recovery-api.json').write_bytes(encoded(value))
+        (out / 'summary.json').write_bytes(encoded({'total':1,'passed':1,'failed':0,'scope':'Public interface discovery only; no recovery acceptance.'}))
         return 0
     if args.mode == 'identity':
         value = adapter({"mode": "identity"})
         (out / 'runtime.json').write_bytes(encoded(value))
         return 0
+    if args.mode == 'normal-matrix':
+        value = adapter({'mode':'normal-matrix','fixture':MATRIX_FIXTURE})
+        (out / 'matrix-observations.json').write_bytes(encoded(value))
+        invocation = decode((out / 'invocation.json').read_bytes())
+        require(value['runtime']['lock_sha256'] == invocation['lock_sha256'], 'runtime lock receipt mismatch')
+        return 0 if record(value,out,invocation) else 1
+    if args.mode == 'media':
+        value = adapter({'mode':'media','fixture':MEDIA_FIXTURE})
+        (out / 'media-observations.json').write_bytes(encoded(value))
+        invocation = decode((out / 'invocation.json').read_bytes())
+        require(value['runtime']['lock_sha256'] == invocation['lock_sha256'], 'runtime lock receipt mismatch')
+        return 0 if record(value,out,invocation) else 1
+    if args.mode in {'normal','normal-sdk'}:
+        value = adapter({'mode':args.mode,'fixture':NORMAL_FIXTURE})
+        (out / 'normal-observations.json').write_bytes(encoded(value))
+        invocation = decode((out / 'invocation.json').read_bytes())
+        require(value['runtime']['lock_sha256'] == invocation['lock_sha256'], 'runtime lock receipt mismatch')
+        return 0 if record(value,out,invocation) else 1
     if args.mode == 'edges':
         value = adapter({'mode':'edges','fixture':EDGE_FIXTURE})
         (out / 'edge-observations.json').write_bytes(encoded(value))
@@ -79,7 +142,7 @@ def main():
         invocation = decode((out / 'invocation.json').read_bytes())
         package,inputs,credentials = load_inputs('/in',args.credentials,invocation)
         target = {**credentials,'server':package['server']}
-        value = adapter({'mode':'candidate','fixture':FIXTURE,'target':target,'full_only':args.phase == 'full'})
+        value = adapter({'mode':'candidate','fixture':MEDIA_FIXTURE if args.phase == 'media' else NORMAL_FIXTURE if args.phase == 'normal' else FIXTURE,'target':target,'phase':args.phase,'full_only':args.phase == 'full'})
         (out / 'candidate-observations.json').write_bytes(encoded(value))
         return 0 if record(value,out,invocation,package,inputs) else 1
     if args.mode == 'smoke':

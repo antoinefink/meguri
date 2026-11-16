@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: MIT
+x-tool: &tool
+  image: "${MEGURI_SYNC_WEB_IMAGE:?MG supplies the checkout image name}"
+  build:
+    context: ..
+    dockerfile: docker/sync-web.Dockerfile
+  init: true
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges"]
+  working_dir: /work
+  tmpfs: [/tmp, /work:exec]
+services:
+  sync-web-resolver:
+    <<: *tool
+    volumes: [sync-web-deps:/deps, sync-web-browsers:/browsers]
+    networks: [sync-web-resolve]
+  sync-web-check:
+    <<: *tool
+    volumes: [sync-web-deps:/deps:ro, sync-web-browsers:/browsers:ro]
+    network_mode: none
+  sync-web-actualserver:
+    <<: *tool
+    volumes: [cargo-home:/cargo-home, sync-web-cargo-target:/cargo-target]
+    environment:
+      CARGO_HOME: /cargo-home
+      CARGO_TARGET_DIR: /cargo-target
+    networks: [sync-web-resolve]
+  sync-web-preview:
+    <<: *tool
+    command: [preview]
+    volumes: [sync-web-fixtures:/fixtures]
+    ports: ["127.0.0.1:18443:18443", "127.0.0.1:18445:18445", "127.0.0.1:18447:18447"]
+    networks: [sync-web-private]
+networks:
+  sync-web-resolve: {}
+  sync-web-private:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+volumes:
+  sync-web-deps: {}
+  sync-web-browsers: {}
+  sync-web-cargo-target: {}
+  sync-web-fixtures: {}

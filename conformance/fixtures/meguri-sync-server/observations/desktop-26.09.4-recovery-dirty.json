@@ -1,0 +1,2001 @@
+{
+  "format": "meguri-sync-neutral-vectors-v1",
+  "scope": "One dirty-media fixture: observed failure of in-place exact media restoration and separate successful clean-receiver mechanism; not candidate/GUI/Mobile acceptance.",
+  "source": {
+    "source_commit": "a99ab5f607fb3a3588f372dc3e70abfc06392265",
+    "source_sha256": "bd71b60d1b757b3f6ba160c3fe845293fb6a0a182f59edb2ce6dc8175785a5a1",
+    "batch_base": "146cb76fd38c2a8ff724b837df979d25eabc71f9",
+    "lock_sha256": "56e1bef86def9f5f230d12317e3510f2176eb079928f3a75f86afb0dcc408ec8"
+  },
+  "source_observation_sha256": "d9bbd92b664a6c5518c741bedd3cb34a6aa1a1260aa35b5b72ed5a840cd85666",
+  "sealed_evidence_sha256": "454cddc84e4abaa56ba4a10bd07e13953a0486b7c2f6bdd06b8f6992ab94c6d3",
+  "independent_review_sha256": "ba4ed43b386df7a94f22db7098fbaf932bebbac9d6940bedf5803fc7bcfb32cc",
+  "original_red_result_sha256": "c55d9716364c510196c2e11be72129775d326fb59d5203a2847c8be01aee569b",
+  "original_red_source_commit": "9c6aeb517d15de4b6d53dc4c65b6e94c037d8475",
+  "cases": [
+    {
+      "id": "P-M07:desktop.reference.recovery-dirty-inplace-observed",
+      "lane": {
+        "client": {
+          "build": "c06370ff",
+          "kind": "desktop",
+          "runtime_sha256": "bf0ccafe0f15bcba59a652db68c4cfdfaa8191756f8c547839c9d134dee12784",
+          "version": "26.09.4"
+        },
+        "kind": "reference",
+        "server": {
+          "build": "c06370ff",
+          "kind": "reference_runtime",
+          "runtime_sha256": "bf0ccafe0f15bcba59a652db68c4cfdfaa8191756f8c547839c9d134dee12784",
+          "version": "26.09.4"
+        }
+      },
+      "fixture_sha256": "8bfbcbeae46a6731807c7a35d576c210be5b6cc09da493cd29f084682eb8dedf",
+      "expected": [
+        {
+          "name": "equal_cursor",
+          "value": true
+        },
+        {
+          "name": "dirty_action_count",
+          "value": 3
+        },
+        {
+          "name": "old_key_rejected",
+          "value": true
+        },
+        {
+          "name": "renewed_credentials",
+          "value": true
+        },
+        {
+          "name": "collection_snapshot_equal",
+          "value": true
+        },
+        {
+          "name": "card_review_rows_equal",
+          "value": true
+        },
+        {
+          "name": "full_download_count",
+          "value": 1
+        },
+        {
+          "name": "reset_starts_zero",
+          "value": true
+        },
+        {
+          "name": "media_snapshot_equal",
+          "value": false
+        },
+        {
+          "name": "server_witness_media_equal",
+          "value": false
+        },
+        {
+          "name": "inplace_exact_snapshot_plus_added_file",
+          "value": true
+        },
+        {
+          "name": "witness_exact_snapshot_plus_added_file",
+          "value": true
+        },
+        {
+          "name": "preserved_profile_bytes_unchanged",
+          "value": true
+        }
+      ],
+      "observed": [
+        {
+          "name": "card_review_rows_equal",
+          "value": true
+        },
+        {
+          "name": "collection_snapshot_equal",
+          "value": true
+        },
+        {
+          "name": "dirty_action_count",
+          "value": 3
+        },
+        {
+          "name": "equal_cursor",
+          "value": true
+        },
+        {
+          "name": "full_download_count",
+          "value": 1
+        },
+        {
+          "name": "inplace_exact_snapshot_plus_added_file",
+          "value": true
+        },
+        {
+          "name": "media_snapshot_equal",
+          "value": false
+        },
+        {
+          "name": "old_key_rejected",
+          "value": true
+        },
+        {
+          "name": "preserved_profile_bytes_unchanged",
+          "value": true
+        },
+        {
+          "name": "renewed_credentials",
+          "value": true
+        },
+        {
+          "name": "reset_starts_zero",
+          "value": true
+        },
+        {
+          "name": "server_witness_media_equal",
+          "value": false
+        },
+        {
+          "name": "witness_exact_snapshot_plus_added_file",
+          "value": true
+        }
+      ],
+      "status": "sealed"
+    },
+    {
+      "id": "P-M07:desktop.reference.recovery-dirty-clean-receiver",
+      "lane": {
+        "client": {
+          "build": "c06370ff",
+          "kind": "desktop",
+          "runtime_sha256": "bf0ccafe0f15bcba59a652db68c4cfdfaa8191756f8c547839c9d134dee12784",
+          "version": "26.09.4"
+        },
+        "kind": "reference",
+        "server": {
+          "build": "c06370ff",
+          "kind": "reference_runtime",
+          "runtime_sha256": "bf0ccafe0f15bcba59a652db68c4cfdfaa8191756f8c547839c9d134dee12784",
+          "version": "26.09.4"
+        }
+      },
+      "fixture_sha256": "8bfbcbeae46a6731807c7a35d576c210be5b6cc09da493cd29f084682eb8dedf",
+      "expected": [
+        {
+          "name": "collection_snapshot_equal",
+          "value": true
+        },
+        {
+          "name": "card_review_rows_equal",
+          "value": true
+        },
+        {
+          "name": "media_snapshot_equal",
+          "value": true
+        },
+        {
+          "name": "independent_receiver_snapshot_equal",
+          "value": true
+        },
+        {
+          "name": "reopened_snapshot_equal",
+          "value": true
+        },
+        {
+          "name": "media_upload_count",
+          "value": 0
+        },
+        {
+          "name": "preserved_profile_bytes_unchanged",
+          "value": true
+        },
+        {
+          "name": "server_restored_from_protected_snapshot",
+          "value": true
+        }
+      ],
+      "observed": [
+        {
+          "name": "card_review_rows_equal",
+          "value": true
+        },
+        {
+          "name": "collection_snapshot_equal",
+          "value": true
+        },
+        {
+          "name": "independent_receiver_snapshot_equal",
+          "value": true
+        },
+        {
+          "name": "media_snapshot_equal",
+          "value": true
+        },
+        {
+          "name": "media_upload_count",
+          "value": 0
+        },
+        {
+          "name": "preserved_profile_bytes_unchanged",
+          "value": true
+        },
+        {
+          "name": "reopened_snapshot_equal",
+          "value": true
+        },
+        {
+          "name": "server_restored_from_protected_snapshot",
+          "value": true
+        }
+      ],
+      "status": "sealed"
+    }
+  ],
+  "input_conditions": {
+    "client_media_cursor": 2,
+    "restored_server_media_usn": 2,
+    "offline_review_count": 2,
+    "snapshot_review_count": 1,
+    "dirty_media_hashes": {
+      "recovery-offline-only.bin": "c19dd50b6ccd665262672460e986cf9a30f3e2fb9d94667ec2154bb10b2eb067",
+      "recovery-one.bin": "0f48f3f65703de790c5773e64b7ff87d59d2ca665dc04de76154ea4912a6f721"
+    }
+  },
+  "media": {
+    "expected_media_hashes": {
+      "recovery-one.bin": "93938df331d8f6cad58e8cf7433414f8e5e0d62f3b2418e8f503b4950e1611d0",
+      "recovery-two.bin": "ac1d5043248136b7a830902b0ddb88c365a28b2e3e7b448bdd2e3b7459b8599b"
+    },
+    "inplace_media_hashes": {
+      "recovery-offline-only.bin": "c19dd50b6ccd665262672460e986cf9a30f3e2fb9d94667ec2154bb10b2eb067",
+      "recovery-one.bin": "93938df331d8f6cad58e8cf7433414f8e5e0d62f3b2418e8f503b4950e1611d0",
+      "recovery-two.bin": "ac1d5043248136b7a830902b0ddb88c365a28b2e3e7b448bdd2e3b7459b8599b"
+    },
+    "witness_media_hashes": {
+      "recovery-offline-only.bin": "c19dd50b6ccd665262672460e986cf9a30f3e2fb9d94667ec2154bb10b2eb067",
+      "recovery-one.bin": "93938df331d8f6cad58e8cf7433414f8e5e0d62f3b2418e8f503b4950e1611d0",
+      "recovery-two.bin": "ac1d5043248136b7a830902b0ddb88c365a28b2e3e7b448bdd2e3b7459b8599b"
+    },
+    "clean_media_hashes": {
+      "recovery-one.bin": "93938df331d8f6cad58e8cf7433414f8e5e0d62f3b2418e8f503b4950e1611d0",
+      "recovery-two.bin": "ac1d5043248136b7a830902b0ddb88c365a28b2e3e7b448bdd2e3b7459b8599b"
+    },
+    "clean_reopened_media_hashes": {
+      "recovery-one.bin": "93938df331d8f6cad58e8cf7433414f8e5e0d62f3b2418e8f503b4950e1611d0",
+      "recovery-two.bin": "ac1d5043248136b7a830902b0ddb88c365a28b2e3e7b448bdd2e3b7459b8599b"
+    },
+    "independent_media_hashes": {
+      "recovery-one.bin": "93938df331d8f6cad58e8cf7433414f8e5e0d62f3b2418e8f503b4950e1611d0",
+      "recovery-two.bin": "ac1d5043248136b7a830902b0ddb88c365a28b2e3e7b448bdd2e3b7459b8599b"
+    }
+  },
+  "collection": {
+    "chosen_snapshot": {
+      "cards": [
+        [
+          1794833451046,
+          1794833451046,
+          1,
+          0,
+          1794833451,
+          0,
+          1,
+          1,
+          1794834184,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          0,
+          0,
+          "{\"pos\":1,\"lrt\":1794833451}"
+        ],
+        [
+          1794833451047,
+          1794833451047,
+          1,
+          0,
+          1794833451,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          "{}"
+        ]
+      ],
+      "config_columns": [
+        "KEY",
+        "usn",
+        "mtime_secs",
+        "val"
+      ],
+      "config_rows": [
+        [
+          "_deck_1_lastNotetype",
+          -1,
+          1794833451,
+          [
+            49,
+            55,
+            57,
+            52,
+            56,
+            51,
+            51,
+            52,
+            53,
+            49,
+            48,
+            53,
+            48
+          ]
+        ],
+        [
+          "_nt_1794833451050_lastDeck",
+          -1,
+          1794833451,
+          [
+            49
+          ]
+        ],
+        [
+          "activeDecks",
+          0,
+          0,
+          [
+            91,
+            49,
+            93
+          ]
+        ],
+        [
+          "addToCur",
+          0,
+          0,
+          [
+            116,
+            114,
+            117,
+            101
+          ]
+        ],
+        [
+          "collapseTime",
+          0,
+          0,
+          [
+            49,
+            50,
+            48,
+            48
+          ]
+        ],
+        [
+          "creationOffset",
+          0,
+          0,
+          [
+            48
+          ]
+        ],
+        [
+          "curDeck",
+          0,
+          0,
+          [
+            49
+          ]
+        ],
+        [
+          "curModel",
+          -1,
+          1794833451,
+          [
+            49,
+            55,
+            57,
+            52,
+            56,
+            51,
+            51,
+            52,
+            53,
+            49,
+            48,
+            53,
+            48
+          ]
+        ],
+        [
+          "dayLearnFirst",
+          0,
+          0,
+          [
+            102,
+            97,
+            108,
+            115,
+            101
+          ]
+        ],
+        [
+          "dueCounts",
+          0,
+          0,
+          [
+            116,
+            114,
+            117,
+            101
+          ]
+        ],
+        [
+          "estTimes",
+          0,
+          0,
+          [
+            116,
+            114,
+            117,
+            101
+          ]
+        ],
+        [
+          "newSpread",
+          0,
+          0,
+          [
+            48
+          ]
+        ],
+        [
+          "nextPos",
+          -1,
+          1794833451,
+          [
+            51
+          ]
+        ],
+        [
+          "recovery_authored",
+          -1,
+          1794833451,
+          [
+            123,
+            34,
+            110,
+            117,
+            109,
+            98,
+            101,
+            114,
+            34,
+            58,
+            51,
+            55,
+            44,
+            34,
+            115,
+            111,
+            117,
+            114,
+            99,
+            101,
+            34,
+            58,
+            34,
+            82,
+            101,
+            99,
+            111,
+            118,
+            101,
+            114,
+            121,
+            34,
+            125
+          ]
+        ],
+        [
+          "rollover",
+          -1,
+          1794833451,
+          [
+            52
+          ]
+        ],
+        [
+          "sched2021",
+          0,
+          0,
+          [
+            116,
+            114,
+            117,
+            101
+          ]
+        ],
+        [
+          "schedVer",
+          0,
+          0,
+          [
+            50
+          ]
+        ],
+        [
+          "sortBackwards",
+          0,
+          0,
+          [
+            102,
+            97,
+            108,
+            115,
+            101
+          ]
+        ],
+        [
+          "sortType",
+          0,
+          0,
+          [
+            34,
+            110,
+            111,
+            116,
+            101,
+            70,
+            108,
+            100,
+            34
+          ]
+        ],
+        [
+          "timeLim",
+          0,
+          0,
+          [
+            48
+          ]
+        ]
+      ],
+      "reviews": [
+        [
+          1794833451046,
+          1794833451046,
+          0,
+          3,
+          -600,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "semantic_sha256": "a0c80b0f97e81184a1808909e4703af4c07228e917ac76d2c31a397197e49326",
+      "sha256": "6d59a2a38d2035e20dbf8acf7072e4bbb7a589c5915d833d50ca2f02dbf529ae",
+      "table_counts": {
+        "cards": 2,
+        "config": 20,
+        "deck_config": 1,
+        "decks": 1,
+        "fields": 2,
+        "graves": 0,
+        "notes": 2,
+        "notetypes": 1,
+        "revlog": 1,
+        "tags": 0,
+        "templates": 1
+      },
+      "table_hashes": {
+        "cards": "24fb4df3fa1597c1c9e6c1f6f5af7bfb373fa8c4e5e2799bb36042ab0202554b",
+        "config": "6a93d7fcc53887b606c7427426312b66a7fab1aa4db2af9065fcc562ee2b3f70",
+        "deck_config": "310a7c84356e8f9483fdc1843d02be2d1acc5260dc5322eb1064d020687be765",
+        "decks": "ad61143dcad1cd367373c7df53a417fa72ebf1ebb6daabb7e82175d77864a4b6",
+        "fields": "5fad0f53c1eafd0f18352e846129f61ec66e7d16de6324ff195e3b3f8ea81313",
+        "graves": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "notes": "bfee6e4db0c3add73376f5949ab7a51e4c8539bf61546883dede18bbc8dc20ab",
+        "notetypes": "cade8df066492541fe616b208244fe9dc9cd6166033df8d690ecfe4189706c3a",
+        "revlog": "f1212d3b1e78451aefee2e6fe347326497ba0dce51373fc988a25a8045f6dd20",
+        "tags": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "templates": "9220ec59bc6321df0039f58fca338a9af0e2f012346429359a529b8b9e7ae6d0"
+      }
+    },
+    "after_inplace_full_download": {
+      "cards": [
+        [
+          1794833451046,
+          1794833451046,
+          1,
+          0,
+          1794833451,
+          0,
+          1,
+          1,
+          1794834184,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          0,
+          0,
+          "{\"pos\":1,\"lrt\":1794833451}"
+        ],
+        [
+          1794833451047,
+          1794833451047,
+          1,
+          0,
+          1794833451,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          "{}"
+        ]
+      ],
+      "config_columns": [
+        "KEY",
+        "usn",
+        "mtime_secs",
+        "val"
+      ],
+      "config_rows": [
+        [
+          "_deck_1_lastNotetype",
+          -1,
+          1794833451,
+          [
+            49,
+            55,
+            57,
+            52,
+            56,
+            51,
+            51,
+            52,
+            53,
+            49,
+            48,
+            53,
+            48
+          ]
+        ],
+        [
+          "_nt_1794833451050_lastDeck",
+          -1,
+          1794833451,
+          [
+            49
+          ]
+        ],
+        [
+          "activeDecks",
+          0,
+          0,
+          [
+            91,
+            49,
+            93
+          ]
+        ],
+        [
+          "addToCur",
+          0,
+          0,
+          [
+            116,
+            114,
+            117,
+            101
+          ]
+        ],
+        [
+          "collapseTime",
+          0,
+          0,
+          [
+            49,
+            50,
+            48,
+            48
+          ]
+        ],
+        [
+          "creationOffset",
+          0,
+          0,
+          [
+            48
+          ]
+        ],
+        [
+          "curDeck",
+          0,
+          0,
+          [
+            49
+          ]
+        ],
+        [
+          "curModel",
+          -1,
+          1794833451,
+          [
+            49,
+            55,
+            57,
+            52,
+            56,
+            51,
+            51,
+            52,
+            53,
+            49,
+            48,
+            53,
+            48
+          ]
+        ],
+        [
+          "dayLearnFirst",
+          0,
+          0,
+          [
+            102,
+            97,
+            108,
+            115,
+            101
+          ]
+        ],
+        [
+          "dueCounts",
+          0,
+          0,
+          [
+            116,
+            114,
+            117,
+            101
+          ]
+        ],
+        [
+          "estTimes",
+          0,
+          0,
+          [
+            116,
+            114,
+            117,
+            101
+          ]
+        ],
+        [
+          "newSpread",
+          0,
+          0,
+          [
+            48
+          ]
+        ],
+        [
+          "nextPos",
+          -1,
+          1794833451,
+          [
+            51
+          ]
+        ],
+        [
+          "recovery_authored",
+          -1,
+          1794833451,
+          [
+            123,
+            34,
+            110,
+            117,
+            109,
+            98,
+            101,
+            114,
+            34,
+            58,
+            51,
+            55,
+            44,
+            34,
+            115,
+            111,
+            117,
+            114,
+            99,
+            101,
+            34,
+            58,
+            34,
+            82,
+            101,
+            99,
+            111,
+            118,
+            101,
+            114,
+            121,
+            34,
+            125
+          ]
+        ],
+        [
+          "rollover",
+          -1,
+          1794833451,
+          [
+            52
+          ]
+        ],
+        [
+          "sched2021",
+          0,
+          0,
+          [
+            116,
+            114,
+            117,
+            101
+          ]
+        ],
+        [
+          "schedVer",
+          0,
+          0,
+          [
+            50
+          ]
+        ],
+        [
+          "sortBackwards",
+          0,
+          0,
+          [
+            102,
+            97,
+            108,
+            115,
+            101
+          ]
+        ],
+        [
+          "sortType",
+          0,
+          0,
+          [
+            34,
+            110,
+            111,
+            116,
+            101,
+            70,
+            108,
+            100,
+            34
+          ]
+        ],
+        [
+          "timeLim",
+          0,
+          0,
+          [
+            48
+          ]
+        ]
+      ],
+      "reviews": [
+        [
+          1794833451046,
+          1794833451046,
+          0,
+          3,
+          -600,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "semantic_sha256": "a0c80b0f97e81184a1808909e4703af4c07228e917ac76d2c31a397197e49326",
+      "sha256": "6d59a2a38d2035e20dbf8acf7072e4bbb7a589c5915d833d50ca2f02dbf529ae",
+      "table_counts": {
+        "cards": 2,
+        "config": 20,
+        "deck_config": 1,
+        "decks": 1,
+        "fields": 2,
+        "graves": 0,
+        "notes": 2,
+        "notetypes": 1,
+        "revlog": 1,
+        "tags": 0,
+        "templates": 1
+      },
+      "table_hashes": {
+        "cards": "24fb4df3fa1597c1c9e6c1f6f5af7bfb373fa8c4e5e2799bb36042ab0202554b",
+        "config": "6a93d7fcc53887b606c7427426312b66a7fab1aa4db2af9065fcc562ee2b3f70",
+        "deck_config": "310a7c84356e8f9483fdc1843d02be2d1acc5260dc5322eb1064d020687be765",
+        "decks": "ad61143dcad1cd367373c7df53a417fa72ebf1ebb6daabb7e82175d77864a4b6",
+        "fields": "5fad0f53c1eafd0f18352e846129f61ec66e7d16de6324ff195e3b3f8ea81313",
+        "graves": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "notes": "bfee6e4db0c3add73376f5949ab7a51e4c8539bf61546883dede18bbc8dc20ab",
+        "notetypes": "cade8df066492541fe616b208244fe9dc9cd6166033df8d690ecfe4189706c3a",
+        "revlog": "f1212d3b1e78451aefee2e6fe347326497ba0dce51373fc988a25a8045f6dd20",
+        "tags": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "templates": "9220ec59bc6321df0039f58fca338a9af0e2f012346429359a529b8b9e7ae6d0"
+      }
+    },
+    "clean_receiver": {
+      "cards": [
+        [
+          1794833451046,
+          1794833451046,
+          1,
+          0,
+          1794833451,
+          0,
+          1,
+          1,
+          1794834184,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          0,
+          0,
+          "{\"pos\":1,\"lrt\":1794833451}"
+        ],
+        [
+          1794833451047,
+          1794833451047,
+          1,
+          0,
+          1794833451,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          "{}"
+        ]
+      ],
+      "config_columns": [
+        "KEY",
+        "usn",
+        "mtime_secs",
+        "val"
+      ],
+      "config_rows": [
+        [
+          "_deck_1_lastNotetype",
+          -1,
+          1794833451,
+          [
+            49,
+            55,
+            57,
+            52,
+            56,
+            51,
+            51,
+            52,
+            53,
+            49,
+            48,
+            53,
+            48
+          ]
+        ],
+        [
+          "_nt_1794833451050_lastDeck",
+          -1,
+          1794833451,
+          [
+            49
+          ]
+        ],
+        [
+          "activeDecks",
+          0,
+          0,
+          [
+            91,
+            49,
+            93
+          ]
+        ],
+        [
+          "addToCur",
+          0,
+          0,
+          [
+            116,
+            114,
+            117,
+            101
+          ]
+        ],
+        [
+          "collapseTime",
+          0,
+          0,
+          [
+            49,
+            50,
+            48,
+            48
+          ]
+        ],
+        [
+          "creationOffset",
+          0,
+          0,
+          [
+            48
+          ]
+        ],
+        [
+          "curDeck",
+          0,
+          0,
+          [
+            49
+          ]
+        ],
+        [
+          "curModel",
+          -1,
+          1794833451,
+          [
+            49,
+            55,
+            57,
+            52,
+            56,
+            51,
+            51,
+            52,
+            53,
+            49,
+            48,
+            53,
+            48
+          ]
+        ],
+        [
+          "dayLearnFirst",
+          0,
+          0,
+          [
+            102,
+            97,
+            108,
+            115,
+            101
+          ]
+        ],
+        [
+          "dueCounts",
+          0,
+          0,
+          [
+            116,
+            114,
+            117,
+            101
+          ]
+        ],
+        [
+          "estTimes",
+          0,
+          0,
+          [
+            116,
+            114,
+            117,
+            101
+          ]
+        ],
+        [
+          "newSpread",
+          0,
+          0,
+          [
+            48
+          ]
+        ],
+        [
+          "nextPos",
+          -1,
+          1794833451,
+          [
+            51
+          ]
+        ],
+        [
+          "recovery_authored",
+          -1,
+          1794833451,
+          [
+            123,
+            34,
+            110,
+            117,
+            109,
+            98,
+            101,
+            114,
+            34,
+            58,
+            51,
+            55,
+            44,
+            34,
+            115,
+            111,
+            117,
+            114,
+            99,
+            101,
+            34,
+            58,
+            34,
+            82,
+            101,
+            99,
+            111,
+            118,
+            101,
+            114,
+            121,
+            34,
+            125
+          ]
+        ],
+        [
+          "rollover",
+          -1,
+          1794833451,
+          [
+            52
+          ]
+        ],
+        [
+          "sched2021",
+          0,
+          0,
+          [
+            116,
+            114,
+            117,
+            101
+          ]
+        ],
+        [
+          "schedVer",
+          0,
+          0,
+          [
+            50
+          ]
+        ],
+        [
+          "sortBackwards",
+          0,
+          0,
+          [
+            102,
+            97,
+            108,
+            115,
+            101
+          ]
+        ],
+        [
+          "sortType",
+          0,
+          0,
+          [
+            34,
+            110,
+            111,
+            116,
+            101,
+            70,
+            108,
+            100,
+            34
+          ]
+        ],
+        [
+          "timeLim",
+          0,
+          0,
+          [
+            48
+          ]
+        ]
+      ],
+      "reviews": [
+        [
+          1794833451046,
+          1794833451046,
+          0,
+          3,
+          -600,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "semantic_sha256": "a0c80b0f97e81184a1808909e4703af4c07228e917ac76d2c31a397197e49326",
+      "sha256": "6d59a2a38d2035e20dbf8acf7072e4bbb7a589c5915d833d50ca2f02dbf529ae",
+      "table_counts": {
+        "cards": 2,
+        "config": 20,
+        "deck_config": 1,
+        "decks": 1,
+        "fields": 2,
+        "graves": 0,
+        "notes": 2,
+        "notetypes": 1,
+        "revlog": 1,
+        "tags": 0,
+        "templates": 1
+      },
+      "table_hashes": {
+        "cards": "24fb4df3fa1597c1c9e6c1f6f5af7bfb373fa8c4e5e2799bb36042ab0202554b",
+        "config": "6a93d7fcc53887b606c7427426312b66a7fab1aa4db2af9065fcc562ee2b3f70",
+        "deck_config": "310a7c84356e8f9483fdc1843d02be2d1acc5260dc5322eb1064d020687be765",
+        "decks": "ad61143dcad1cd367373c7df53a417fa72ebf1ebb6daabb7e82175d77864a4b6",
+        "fields": "5fad0f53c1eafd0f18352e846129f61ec66e7d16de6324ff195e3b3f8ea81313",
+        "graves": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "notes": "bfee6e4db0c3add73376f5949ab7a51e4c8539bf61546883dede18bbc8dc20ab",
+        "notetypes": "cade8df066492541fe616b208244fe9dc9cd6166033df8d690ecfe4189706c3a",
+        "revlog": "f1212d3b1e78451aefee2e6fe347326497ba0dce51373fc988a25a8045f6dd20",
+        "tags": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "templates": "9220ec59bc6321df0039f58fca338a9af0e2f012346429359a529b8b9e7ae6d0"
+      }
+    },
+    "reopened_clean_receiver": {
+      "cards": [
+        [
+          1794833451046,
+          1794833451046,
+          1,
+          0,
+          1794833451,
+          0,
+          1,
+          1,
+          1794834184,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          0,
+          0,
+          "{\"pos\":1,\"lrt\":1794833451}"
+        ],
+        [
+          1794833451047,
+          1794833451047,
+          1,
+          0,
+          1794833451,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          "{}"
+        ]
+      ],
+      "config_columns": [
+        "KEY",
+        "usn",
+        "mtime_secs",
+        "val"
+      ],
+      "config_rows": [
+        [
+          "_deck_1_lastNotetype",
+          -1,
+          1794833451,
+          [
+            49,
+            55,
+            57,
+            52,
+            56,
+            51,
+            51,
+            52,
+            53,
+            49,
+            48,
+            53,
+            48
+          ]
+        ],
+        [
+          "_nt_1794833451050_lastDeck",
+          -1,
+          1794833451,
+          [
+            49
+          ]
+        ],
+        [
+          "activeDecks",
+          0,
+          0,
+          [
+            91,
+            49,
+            93
+          ]
+        ],
+        [
+          "addToCur",
+          0,
+          0,
+          [
+            116,
+            114,
+            117,
+            101
+          ]
+        ],
+        [
+          "collapseTime",
+          0,
+          0,
+          [
+            49,
+            50,
+            48,
+            48
+          ]
+        ],
+        [
+          "creationOffset",
+          0,
+          0,
+          [
+            48
+          ]
+        ],
+        [
+          "curDeck",
+          0,
+          0,
+          [
+            49
+          ]
+        ],
+        [
+          "curModel",
+          -1,
+          1794833451,
+          [
+            49,
+            55,
+            57,
+            52,
+            56,
+            51,
+            51,
+            52,
+            53,
+            49,
+            48,
+            53,
+            48
+          ]
+        ],
+        [
+          "dayLearnFirst",
+          0,
+          0,
+          [
+            102,
+            97,
+            108,
+            115,
+            101
+          ]
+        ],
+        [
+          "dueCounts",
+          0,
+          0,
+          [
+            116,
+            114,
+            117,
+            101
+          ]
+        ],
+        [
+          "estTimes",
+          0,
+          0,
+          [
+            116,
+            114,
+            117,
+            101
+          ]
+        ],
+        [
+          "newSpread",
+          0,
+          0,
+          [
+            48
+          ]
+        ],
+        [
+          "nextPos",
+          -1,
+          1794833451,
+          [
+            51
+          ]
+        ],
+        [
+          "recovery_authored",
+          -1,
+          1794833451,
+          [
+            123,
+            34,
+            110,
+            117,
+            109,
+            98,
+            101,
+            114,
+            34,
+            58,
+            51,
+            55,
+            44,
+            34,
+            115,
+            111,
+            117,
+            114,
+            99,
+            101,
+            34,
+            58,
+            34,
+            82,
+            101,
+            99,
+            111,
+            118,
+            101,
+            114,
+            121,
+            34,
+            125
+          ]
+        ],
+        [
+          "rollover",
+          -1,
+          1794833451,
+          [
+            52
+          ]
+        ],
+        [
+          "sched2021",
+          0,
+          0,
+          [
+            116,
+            114,
+            117,
+            101
+          ]
+        ],
+        [
+          "schedVer",
+          0,
+          0,
+          [
+            50
+          ]
+        ],
+        [
+          "sortBackwards",
+          0,
+          0,
+          [
+            102,
+            97,
+            108,
+            115,
+            101
+          ]
+        ],
+        [
+          "sortType",
+          0,
+          0,
+          [
+            34,
+            110,
+            111,
+            116,
+            101,
+            70,
+            108,
+            100,
+            34
+          ]
+        ],
+        [
+          "timeLim",
+          0,
+          0,
+          [
+            48
+          ]
+        ]
+      ],
+      "reviews": [
+        [
+          1794833451046,
+          1794833451046,
+          0,
+          3,
+          -600,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "semantic_sha256": "a0c80b0f97e81184a1808909e4703af4c07228e917ac76d2c31a397197e49326",
+      "sha256": "6d59a2a38d2035e20dbf8acf7072e4bbb7a589c5915d833d50ca2f02dbf529ae",
+      "table_counts": {
+        "cards": 2,
+        "config": 20,
+        "deck_config": 1,
+        "decks": 1,
+        "fields": 2,
+        "graves": 0,
+        "notes": 2,
+        "notetypes": 1,
+        "revlog": 1,
+        "tags": 0,
+        "templates": 1
+      },
+      "table_hashes": {
+        "cards": "24fb4df3fa1597c1c9e6c1f6f5af7bfb373fa8c4e5e2799bb36042ab0202554b",
+        "config": "6a93d7fcc53887b606c7427426312b66a7fab1aa4db2af9065fcc562ee2b3f70",
+        "deck_config": "310a7c84356e8f9483fdc1843d02be2d1acc5260dc5322eb1064d020687be765",
+        "decks": "ad61143dcad1cd367373c7df53a417fa72ebf1ebb6daabb7e82175d77864a4b6",
+        "fields": "5fad0f53c1eafd0f18352e846129f61ec66e7d16de6324ff195e3b3f8ea81313",
+        "graves": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "notes": "bfee6e4db0c3add73376f5949ab7a51e4c8539bf61546883dede18bbc8dc20ab",
+        "notetypes": "cade8df066492541fe616b208244fe9dc9cd6166033df8d690ecfe4189706c3a",
+        "revlog": "f1212d3b1e78451aefee2e6fe347326497ba0dce51373fc988a25a8045f6dd20",
+        "tags": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "templates": "9220ec59bc6321df0039f58fca338a9af0e2f012346429359a529b8b9e7ae6d0"
+      }
+    },
+    "independent_clean_receiver": {
+      "cards": [
+        [
+          1794833451046,
+          1794833451046,
+          1,
+          0,
+          1794833451,
+          0,
+          1,
+          1,
+          1794834184,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          0,
+          0,
+          "{\"pos\":1,\"lrt\":1794833451}"
+        ],
+        [
+          1794833451047,
+          1794833451047,
+          1,
+          0,
+          1794833451,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          "{}"
+        ]
+      ],
+      "config_columns": [
+        "KEY",
+        "usn",
+        "mtime_secs",
+        "val"
+      ],
+      "config_rows": [
+        [
+          "_deck_1_lastNotetype",
+          -1,
+          1794833451,
+          [
+            49,
+            55,
+            57,
+            52,
+            56,
+            51,
+            51,
+            52,
+            53,
+            49,
+            48,
+            53,
+            48
+          ]
+        ],
+        [
+          "_nt_1794833451050_lastDeck",
+          -1,
+          1794833451,
+          [
+            49
+          ]
+        ],
+        [
+          "activeDecks",
+          0,
+          0,
+          [
+            91,
+            49,
+            93
+          ]
+        ],
+        [
+          "addToCur",
+          0,
+          0,
+          [
+            116,
+            114,
+            117,
+            101
+          ]
+        ],
+        [
+          "collapseTime",
+          0,
+          0,
+          [
+            49,
+            50,
+            48,
+            48
+          ]
+        ],
+        [
+          "creationOffset",
+          0,
+          0,
+          [
+            48
+          ]
+        ],
+        [
+          "curDeck",
+          0,
+          0,
+          [
+            49
+          ]
+        ],
+        [
+          "curModel",
+          -1,
+          1794833451,
+          [
+            49,
+            55,
+            57,
+            52,
+            56,
+            51,
+            51,
+            52,
+            53,
+            49,
+            48,
+            53,
+            48
+          ]
+        ],
+        [
+          "dayLearnFirst",
+          0,
+          0,
+          [
+            102,
+            97,
+            108,
+            115,
+            101
+          ]
+        ],
+        [
+          "dueCounts",
+          0,
+          0,
+          [
+            116,
+            114,
+            117,
+            101
+          ]
+        ],
+        [
+          "estTimes",
+          0,
+          0,
+          [
+            116,
+            114,
+            117,
+            101
+          ]
+        ],
+        [
+          "newSpread",
+          0,
+          0,
+          [
+            48
+          ]
+        ],
+        [
+          "nextPos",
+          -1,
+          1794833451,
+          [
+            51
+          ]
+        ],
+        [
+          "recovery_authored",
+          -1,
+          1794833451,
+          [
+            123,
+            34,
+            110,
+            117,
+            109,
+            98,
+            101,
+            114,
+            34,
+            58,
+            51,
+            55,
+            44,
+            34,
+            115,
+            111,
+            117,
+            114,
+            99,
+            101,
+            34,
+            58,
+            34,
+            82,
+            101,
+            99,
+            111,
+            118,
+            101,
+            114,
+            121,
+            34,
+            125
+          ]
+        ],
+        [
+          "rollover",
+          -1,
+          1794833451,
+          [
+            52
+          ]
+        ],
+        [
+          "sched2021",
+          0,
+          0,
+          [
+            116,
+            114,
+            117,
+            101
+          ]
+        ],
+        [
+          "schedVer",
+          0,
+          0,
+          [
+            50
+          ]
+        ],
+        [
+          "sortBackwards",
+          0,
+          0,
+          [
+            102,
+            97,
+            108,
+            115,
+            101
+          ]
+        ],
+        [
+          "sortType",
+          0,
+          0,
+          [
+            34,
+            110,
+            111,
+            116,
+            101,
+            70,
+            108,
+            100,
+            34
+          ]
+        ],
+        [
+          "timeLim",
+          0,
+          0,
+          [
+            48
+          ]
+        ]
+      ],
+      "reviews": [
+        [
+          1794833451046,
+          1794833451046,
+          0,
+          3,
+          -600,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "semantic_sha256": "a0c80b0f97e81184a1808909e4703af4c07228e917ac76d2c31a397197e49326",
+      "sha256": "6d59a2a38d2035e20dbf8acf7072e4bbb7a589c5915d833d50ca2f02dbf529ae",
+      "table_counts": {
+        "cards": 2,
+        "config": 20,
+        "deck_config": 1,
+        "decks": 1,
+        "fields": 2,
+        "graves": 0,
+        "notes": 2,
+        "notetypes": 1,
+        "revlog": 1,
+        "tags": 0,
+        "templates": 1
+      },
+      "table_hashes": {
+        "cards": "24fb4df3fa1597c1c9e6c1f6f5af7bfb373fa8c4e5e2799bb36042ab0202554b",
+        "config": "6a93d7fcc53887b606c7427426312b66a7fab1aa4db2af9065fcc562ee2b3f70",
+        "deck_config": "310a7c84356e8f9483fdc1843d02be2d1acc5260dc5322eb1064d020687be765",
+        "decks": "ad61143dcad1cd367373c7df53a417fa72ebf1ebb6daabb7e82175d77864a4b6",
+        "fields": "5fad0f53c1eafd0f18352e846129f61ec66e7d16de6324ff195e3b3f8ea81313",
+        "graves": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "notes": "bfee6e4db0c3add73376f5949ab7a51e4c8539bf61546883dede18bbc8dc20ab",
+        "notetypes": "cade8df066492541fe616b208244fe9dc9cd6166033df8d690ecfe4189706c3a",
+        "revlog": "f1212d3b1e78451aefee2e6fe347326497ba0dce51373fc988a25a8045f6dd20",
+        "tags": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "templates": "9220ec59bc6321df0039f58fca338a9af0e2f012346429359a529b8b9e7ae6d0"
+      }
+    }
+  },
+  "profile_separation": {
+    "preserved_dirty_profile_manifest_sha256": "63a26bf04eeab83d1e4b98a592a29399679802d954cfa4356c0ad70b279f621e",
+    "protected_snapshot_matches_clean_server_before_serve": true
+  },
+  "inplace_upload_results": [
+    [
+      1,
+      3
+    ]
+  ],
+  "inplace_media_sanity_results": [
+    "OK"
+  ],
+  "limits": [
+    "Original red equality result remains a failed restore attempt; matching the later negative fact does not accept that restore.",
+    "The clean receiver starts only after the chosen server snapshot is reestablished; a fresh profile alone does not undo the diagnostic upload.",
+    "Preserved profile bytes remain unchanged during the fixture procedure; actual GUI/profile controls and Mobile remain unobserved."
+  ]
+}
