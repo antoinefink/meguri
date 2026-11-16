@@ -727,6 +727,7 @@ final class AgentDriver {
         }
         self.tree = tree
         #if os(macOS)
+        _ = NSApplication.shared
         let screenshot = app.windows.firstMatch.screenshot()
         let origin = tree.window.origin
         #else
