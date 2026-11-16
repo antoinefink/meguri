@@ -214,9 +214,10 @@ import Testing
                     + " rolePresent=\(role != nil)"
                     + " identifierClass=\(identifierClass)"
                     + " labelMatchesExpected=\(accessibilityString(in: object, selector: labelGetter) == expectedLabel)")
-                let legacyNamesGetter = #selector(NSObject.accessibilityAttributeNames)
-                let legacyValueGetter = #selector(NSObject.accessibilityAttributeValue(_:))
-                let legacyIgnoredGetter = #selector(NSObject.accessibilityIsIgnored)
+                // Public NSAccessibility.h legacy entrypoints for dynamic capability observation.
+                let legacyNamesGetter = NSSelectorFromString("accessibilityAttributeNames")
+                let legacyValueGetter = NSSelectorFromString("accessibilityAttributeValue:")
+                let legacyIgnoredGetter = NSSelectorFromString("accessibilityIsIgnored")
                 let supportsLegacyNames = object.responds(to: legacyNamesGetter)
                 let supportsLegacyValue = object.responds(to: legacyValueGetter)
                 print("settingsSearchAX root=\(root) node=\(node)"
