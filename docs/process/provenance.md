@@ -41,6 +41,28 @@ A worktree made with plain `git worktree add` has no record, no marker and no de
 
 The deny profile binds a Claude session started in the worktree. An orchestrator's subagents start in the main checkout and never load it, so `.claude/hooks/cleanroom_guard.py` (a project PreToolUse hook in `.claude/settings.json`) applies the same rules to every subagent labelled as an implementer or fixer (workflow labels `U<n>:implement…`, `U<n>:fix-…`, `U<n>:codexfix-…`; Agent descriptions starting `implementer` or `fixer`). It also refuses git commands that would print `oracle/` content: unit branches carry the spec side's `oracle/` commits, which the sparse checkout keeps off disk but `git diff` and `git show` still print. Test: `.claude/hooks/test_cleanroom_guard.sh`.
 
+## Routine ledger privacy maintenance
+
+Antoine delegates routine exact-hash refreshes solely for
+`docs/process/provenance/sessions.jsonl` across Meguri work until revoked.
+Qualifying updates, including pending original session records, need no manual
+reconfirmation after these checks:
+
+- An independent agent who did not author the records inspects every appended
+  record, including descriptions and paths, and confirms only public operational
+  metadata is present. Valid JSON or an author's classification alone is insufficient.
+- The orchestrator verifies the previously admitted bytes are unchanged, appends
+  match original ledger-only commits, and the digest matches the exact candidate.
+- Update only that ledger's existing exact-path, whole-file SHA-256 entry.
+  Preserve original records, commit history and required checks. Record the
+  reviewer identity, reviewed digest and decision in existing review evidence.
+
+Resolve ordinary review findings autonomously. Escalate unresolved privacy
+ambiguity, historical edits, unfamiliar formats, new exceptions or changes to
+scanner behavior, thresholds, private-data access or clean-room rules.
+Use the normal tool-approval path; this delegation cannot override a denial or
+an owner-only action.
+
 ## Commit trailers
 
 | Trailer | Required on |

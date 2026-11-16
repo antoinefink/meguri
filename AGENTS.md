@@ -11,6 +11,8 @@ Meguri: native SwiftUI app (macOS, iOS, iPadOS 27) on a Rust core, fully compati
 
 - Every agent session has one role; read `docs/process/roles/<role>.md` first. Implementers and fixers never read `oracle/`, `refs/`, `local-data/` or any Anki source (R1955). Trailers and the similarity gate: `docs/process/provenance.md`.
 
+- Routine ledger privacy maintenance follows the standing delegation in `docs/process/provenance.md#routine-ledger-privacy-maintenance`; independent review and exact-content checks remain required.
+
 ## Tooling
 
 - On a migrated Mac, source `.local/activate` when present before running jobs. Machine-local VM storage and tool setup: `docs/process/new-machine.md`.
