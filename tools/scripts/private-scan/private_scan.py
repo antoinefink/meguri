@@ -888,9 +888,9 @@ PUBLIC_ARTIFACTS = {
         'c3f782e9d61556d6e032f3b2093ef8573dc3e5ce4d0b12e632c209f607c430d7',
     # Owner-approved instruction proposal; independent full-content review.
     'AGENTS.md':
-        'fee9f8855bffde9b4980d05238bcde572bbc5c30520bf94ae31c507b2d9520d3',
+        '36089c33aa814ef45e2666bf3f9c41e96e8dc6fc1ea3c587f06fd16f81a6b18b',
     'docs/process/provenance.md':
-        'b64e434da32547a924fa0c0a8f1f311a793666eecf82bc0cc0c604db3a020dfd',
+        '2cfc1f7c8eb2399bf6bc2e8d77274682dd00563b2c467d15d17eb29956feee03',
     # Independently classified original public session metadata, exact bytes.
     'docs/process/provenance/sessions.jsonl':
         '7b85da246f8ee1138d5470cf69a0e168894a52a67b84c7fb6feb30aaa35f7f65',
