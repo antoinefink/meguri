@@ -828,6 +828,8 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'docs/process/review-log/meguri-sync-U10.md':
+        '565221177f72b2182784c8c442b1c07eda55c6d33186dfe1add3f36e0474cdf0',
     'server/Dockerfile':
         '324a94c05aafbbf38065174f70578eb044337ea6d0ded209977196b685a1ccd8',
     'server/README.md':
@@ -848,7 +850,7 @@ PUBLIC_ARTIFACTS = {
     'tools/mg.d/conformance-edge.py':
         'db717ee3b016fb7f351552cdf9bbff12eff88936d16aefb9b6aabbdd04fa6f8e',
     'specs/conformance/meguri-sync-candidate.md':
-        '305e2b5c509129d49d71dbb35298c5350a847412672649bb2de91df669c55d35',
+        '17992fe697babc4d609586223cb2ecf3d6b371a8864123dcdf453aa76e406d5f',
     'docs/process/review-log/meguri-sync-normal-candidate.md':
         'a071d74e332b444e750964a80c7651915d23700b7221f55b183a998001c16996',
     'docs/process/review-log/meguri-sync-U8.md':
@@ -952,7 +954,7 @@ PUBLIC_ARTIFACTS = {
     "specs/servers/meguri-sync-web.md":
         '416530b250c2dd1868f67fe30df9798dbaac586a1d5747baf603f87e00463d99',
     "specs/conformance/meguri-sync-server.md":
-        "80984e2e5df4d7a0e84cef6ac186ad2d67a041d61b5029d853169fa01ff0814c",
+        "4c0e7651ab72236ad31320925e8c1c163c6dc7f1904e9c0c3e52df50e8f9e479",
     "conformance/schema/meguri-sync-server.schema.json":
         "cd905c134ed497f166566e18733465fa7e992156944957ee16c2e17ca586814a",
     # Same delegated maintenance: independently authored/reviewed tooling,
