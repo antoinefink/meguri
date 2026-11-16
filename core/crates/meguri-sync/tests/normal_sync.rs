@@ -576,9 +576,15 @@ fn schema_change_during_delayed_meta(structural: bool, count: usize, server_empt
     f.clock.step_ms(1000);
     let notetype = f.notetype;
     let note = f.cards.first().map(|id| card(&f, *id).note_id);
+    let spec = OpSpec::named("schema while meta waits", OpSource::UserUndoable);
+    let spec = if structural {
+        spec.schema_changes([meguri_engine::schema_gate::SchemaReason::FieldsChanged])
+    } else {
+        spec
+    };
     f.collection
         .run(
-            OpSpec::named("schema while meta waits", OpSource::UserUndoable),
+            spec,
             move |ctx| {
                 meguri_engine::schema_gate::mark_schema_change(
                     ctx.scope(),
@@ -589,15 +595,25 @@ fn schema_change_during_delayed_meta(structural: bool, count: usize, server_empt
                     }],
                 )?;
                 if structural {
+                    use meguri_storage::journal::{LayoutReport, LayoutShape, StructureReason, StructureReport};
                     let (scope, random) = ctx.scope_and_random();
                     let mut nt = scope.notetype(notetype)?.unwrap();
+                    let mut layout = LayoutReport::identity(&nt)?;
                     let mut field = meguri_engine::notetypes::new_field("Extra", random);
-                    field.ord = nt.fields.len() as u32;
+                    field.ord = layout.before.fields;
                     nt.fields.push(field);
+                    // This append keeps every existing origin; only the new field has none.
+                    layout.field_map.push(-1);
+                    layout.after = LayoutShape::of(&nt)?;
+                    let mut report = StructureReport::default();
+                    report.reasons.insert(StructureReason::FieldsChanged);
+                    report.layouts.insert(notetype.0, layout);
+                    let token = scope.start_structure_report(report)?;
                     scope.put_notetype(&nt)?;
                     let mut row = scope.note(note.unwrap())?.unwrap();
                     row.fields.push(meguri_model::note::FIELD_SEPARATOR);
                     scope.put(&row)?;
+                    scope.complete_structure_report(token)?;
                 }
                 Ok(())
             },
