@@ -907,7 +907,7 @@ PUBLIC_ARTIFACTS = {
         '2cfc1f7c8eb2399bf6bc2e8d77274682dd00563b2c467d15d17eb29956feee03',
     # Independently classified original public session metadata, exact bytes.
     'docs/process/provenance/sessions.jsonl':
-        'bc16fb2b8eeee72fbff8c1641f21a379c61bcc0f52a8e6d24cbcceef8bd8e062',
+        '969bd1bf8012dbdbf48b94661804845f61ee0dbcd7ae20cec86fc32f9310a4f6',
     'conformance/fixtures/meguri-sync-server/observations/desktop-26.09.4-normal-matrix.json':
         '8a4e17346939516eda8b5b650203444693fb32e2173f4d6741242b4089da04eb',
     'specs/sync/server-desktop-current.md':
@@ -1023,7 +1023,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/storage/semantic.rs':
         '3da133a09e7d4e3f225a696fad20652c465309522f97825f78a8f022e2f18945',
     'server/src/storage/tests.rs':
-        'ad552c0f8ee03fd30aed02177781877457d98f1a343a94d76012204f4c4f7dca',
+        '2fca66030368d01fbdf61c1bf5596834c2a0fb570c9df1b18855055c7ae54084',
     'server/tests/accounts.rs':
         '7e0fa1344776c603a782ff3327e7aa47791357d21e049b9d26cb05cdb4adb2d5',
     'server/tests/http_contract.rs':
