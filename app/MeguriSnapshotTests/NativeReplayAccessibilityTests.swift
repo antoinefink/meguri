@@ -33,9 +33,10 @@ struct NativeReplayAccessibilityTests {
         var nodes: [String] = []
     }
 
-    /// AX calls run off the main actor so this process can answer them.
+    /// Same-process AX reads synchronously enter AppKit/WebKit accessibility
+    /// callbacks; keep them on the main actor that owns the hosted GUI.
     /// Read only the fixture's own process and exact window identifier.
-    nonisolated static func publicAXFacts(windowIdentifier: String,
+    static func publicAXFacts(windowIdentifier: String,
                                           deadline: ContinuousClock.Instant) throws -> PublicAXObservation {
         var observation = PublicAXObservation()
         let application = AXUIElementCreateApplication(ProcessInfo.processInfo.processIdentifier)
@@ -131,7 +132,7 @@ struct NativeReplayAccessibilityTests {
                 _ = try await harness.signal("shown", count: shown + 1, from: page,
                     timeout: max(.zero, ContinuousClock.now.duration(to: deadline)))
                 func observe(until observationDeadline: ContinuousClock.Instant) async throws -> PublicAXObservation {
-                    try await Task.detached { try Self.publicAXFacts(windowIdentifier: windowID, deadline: observationDeadline) }.value
+                    try Self.publicAXFacts(windowIdentifier: windowID, deadline: observationDeadline)
                 }
                 var tree = try await observe(until: deadline)
                 // Publication waits on counts only; identity/name failures never retry.
@@ -160,7 +161,7 @@ struct NativeReplayAccessibilityTests {
                     let binding = try #require(harness.signals("shown", from: page).last)
                     try #require(binding.card == card && binding.generation == generation && binding.side == (side == "q" ? "question" : "answer"))
                     let count = harness.signals("command", from: page).count
-                    let error = await Task.detached { AXUIElementPerformAction(link.element, kAXPressAction as CFString) }.value
+                    let error = AXUIElementPerformAction(link.element, kAXPressAction as CFString)
                     try #require(error == .success, "Same original native AX link press failed")
                     let message = try await harness.signal("command", count: count + 1, from: page)
                     commands.append(command)
