@@ -34,7 +34,7 @@ def locked(stream, exclusive, deadline):
 
 
 class OwnerAdmission:
-    """Persistent terminal fence plus shared publication/exclusive sweep."""
+    """Shared publishers; exclusive inspection or persistently fenced sweep."""
     def __init__(self, state):
         self.state = pathlib.Path(state)
 
@@ -50,6 +50,11 @@ class OwnerAdmission:
         if (self.state / "closing").exists():
             raise AdmissionError("route owner is closing")
 
+    def require_worker_open(self, worker):
+        self.require_open()
+        if (self.state / ("retired-" + worker)).exists():
+            raise AdmissionError("worker is retired")
+
     def begin_mutation(self):
         name = "pending-" + uuid.uuid4().hex
         self.mark(name)
@@ -61,9 +66,9 @@ class OwnerAdmission:
             raise AdmissionError("route mutation remains uncertain")
 
     @contextlib.contextmanager
-    def hold(self, deadline, exclusive=False, publishing=False):
+    def hold(self, deadline, exclusive=False, publishing=False, terminal=True):
         self.state.mkdir(mode=0o700, parents=True, exist_ok=True)
-        if exclusive:
+        if exclusive and terminal:
             self.mark("closing")
         with (self.state / "admission.lock").open("a") as stream:
             with locked(stream, exclusive, deadline):

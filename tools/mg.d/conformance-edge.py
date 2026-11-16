@@ -67,6 +67,7 @@ class Edges:
         self.labels = {"meguri.mg.run-id": run, "meguri.mg.checkout": self.root,
                        "meguri.mg.project": project, "meguri.mg.purpose": PURPOSE, OWNER: owner}
         self.deadline = time.monotonic() + 20
+        self.control_binding = None
         # Keep route ownership in temporary local state, outside reports.
         # Record it ahead of creation and preserve it when replies are lost.
         self.state = pathlib.Path(self.root) / "build/mg/conformance-routes" / owner
@@ -138,14 +139,76 @@ class Edges:
             result[token] = state
         return result
 
+    def verify_control_service(self):
+        """Pin the checkout's sole isolated service namespace for this helper."""
+        if self.faults != "sync-faults:8474":
+            raise EdgeError("invalid trusted fault configuration")
+        labels = {"com.docker.compose.project": self.project,
+                  "com.docker.compose.service": "sync-faults",
+                  "com.docker.compose.oneoff": "False",
+                  "com.docker.compose.project.config_files": self.root + "/docker/compose.yml",
+                  "com.docker.compose.project.working_dir": self.root + "/docker"}
+        ids = self.docker("ps", "-aq", "--no-trunc", "--filter",
+                          "label=com.docker.compose.project=" + self.project,
+                          "--filter", "label=com.docker.compose.service=sync-faults").split()
+        if len(ids) != 1 or not re.fullmatch(r"[0-9a-f]{64}", ids[0]):
+            raise EdgeError("control service identity refused")
+        cid = ids[0]
+        if self.control_binding is not None and cid != self.control_binding[0]:
+            raise EdgeError("control service changed")
+        # Select metadata only: never retrieve environment, command or mounts.
+        selected_labels = "{" + ",".join(json.dumps(k) + ':{{json (index .Config.Labels ' +
+                                              json.dumps(k) + ')}}' for k in labels) + "}"
+        service_format = ('{"Id":{{json .Id}},"Labels":' + selected_labels +
+                          ',"Running":{{json .State.Running}},"NetworkMode":{{json .HostConfig.NetworkMode}},'
+                          '"PortBindings":{{json .HostConfig.PortBindings}},"Ports":{{json .NetworkSettings.Ports}},'
+                          '"Networks":{{json .NetworkSettings.Networks}}}')
+        network_name = self.project + "_oracle-internal"
+        try:
+            service = json.loads(self.docker("inspect", "--type", "container", "--format", service_format, cid),
+                                 object_pairs_hook=strict_object)
+            networks = service["Networks"]
+            if (service["Id"] != cid or service["Labels"] != labels or service["Running"] is not True
+                    or service["PortBindings"] not in ({}, None)
+                    or not isinstance(service["Ports"], (dict, type(None)))
+                    or any(v not in (None, []) for v in (service["Ports"] or {}).values())
+                    or set(networks) != {network_name}):
+                raise EdgeError("control service isolation refused")
+            endpoint = networks[network_name]
+            nid, eid, address = endpoint["NetworkID"], endpoint["EndpointID"], endpoint["IPAddress"]
+            if (not re.fullmatch(r"[0-9a-f]{64}", nid) or not re.fullmatch(r"[0-9a-f]{64}", eid)
+                    or service["NetworkMode"] not in (network_name, nid)
+                    or ipaddress.ip_address(address).version != 4):
+                raise EdgeError("control service network refused")
+            network_format = ('{"Id":{{json .Id}},"Name":{{json .Name}},"Internal":{{json .Internal}},'
+                              '"Labels":{"com.docker.compose.project":{{json (index .Labels "com.docker.compose.project")}},'
+                              '"com.docker.compose.network":{{json (index .Labels "com.docker.compose.network")}}},'
+                              '"Binding":{{json (index .Containers "' + cid + '")}}}')
+            network = json.loads(self.docker("network", "inspect", "--format", network_format, nid),
+                                 object_pairs_hook=strict_object)
+            binding = network["Binding"]
+            if (network["Id"] != nid or network["Name"] != network_name or network["Internal"] is not True
+                    or network["Labels"] != {"com.docker.compose.project": self.project,
+                                             "com.docker.compose.network": "oracle-internal"}
+                    or binding["EndpointID"] != eid
+                    or ipaddress.ip_interface(binding["IPv4Address"]).ip != ipaddress.ip_address(address)):
+                raise EdgeError("control network isolation refused")
+        except (KeyError, TypeError, ValueError, AttributeError):
+            raise EdgeError("control service metadata refused") from None
+        current = (cid, nid, eid, address)
+        if self.control_binding is not None and self.control_binding != current:
+            raise EdgeError("control service binding changed")
+        self.control_binding = current
+        return cid
+
     def api(self, method, proxy=None):
         # A short-lived host-owned control invocation, never exec in a retained
         # worker. No listening control service and no published API. Arguments
         # are direct argv, and neither accounts nor scenario data enter here.
-        target_address("http://" + self.faults.split(":")[0] + ":1/", self.faults)
         path = "/proxies" + ("/" + proxy if proxy else "")
         if proxy is not None and not self.proxy_name(proxy):
             raise EdgeError("proxy ownership refused")
+        cid = self.verify_control_service()
         script = ("import json,sys,urllib.request,urllib.error; "
                   "u='http://'+sys.argv[1]+sys.argv[3]; "
                   "r=urllib.request.Request(u,method=sys.argv[2]); "
@@ -157,10 +220,11 @@ class Edges:
         out = self.docker("run", "--rm", "--name", name,
                           "--label", "meguri.mg.run-id=" + self.run,
                           "--label", "meguri.mg.purpose=conformance-route-control",
-                          "--network", self.project + "_oracle-internal",
+                          "--network", "container:" + cid,
                           "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
                           "--env", "LD_PRELOAD=", "--entrypoint", "python3", self.image,
-                          "-I", "-B", "-c", script, self.faults, method, path)
+                          "-I", "-B", "-c", script, "127.0.0.1:8474", method, path)
+        self.verify_control_service()
         response = json.loads(out)
         if method == "DELETE" and response["status"] == 404:
             return None
@@ -172,7 +236,15 @@ class Edges:
         return isinstance(proxy, str) and re.fullmatch(
             "meguri-edge-" + self.owner + r"-[0-9a-f]{32}", proxy) is not None
 
-    def validate_route(self, target, route, expected_worker, proxies=None, allow_missing=False):
+    def worker_addresses(self, worker):
+        network = worker["NetworkSettings"]["Networks"].get(self.project + "_oracle-internal")
+        if not network or not network.get("IPAddress"):
+            raise EdgeError("retained worker network missing")
+        ipaddress.ip_address(network["IPAddress"])
+        return {network["IPAddress"], worker["Id"], worker["Id"][:12],
+                worker["Name"].lstrip("/"), worker["Config"]["Hostname"]}
+
+    def validate_route(self, target, route, expected_worker, proxies=None, allow_missing=False, *, workers=None):
         host, port = target_address(target, self.faults)
         if (not isinstance(route, dict) or set(route) != {"proxy", "worker"}
                 or not isinstance(expected_worker, str)
@@ -182,7 +254,9 @@ class Edges:
             raise EdgeError("route identity refused")
         # The trusted checkout identity is tested BEFORE querying or mutating
         # any proxy, so B's complete consistent tuple cannot substitute for A.
-        workers = self.workers()
+        # Only the terminal sweep may supply its verified snapshot while
+        # holding exclusive owner admission. Acquire/release inspect afresh.
+        workers = self.workers() if workers is None else workers
         if expected_worker not in workers:
             raise EdgeError("retained worker missing")
         worker = workers[expected_worker]
@@ -194,7 +268,7 @@ class Edges:
             return host, port
         if not isinstance(proxy, dict) or proxy.get("name") != route["proxy"]:
             raise EdgeError("named proxy missing")
-        listen = re.fullmatch(r"(0\.0\.0\.0|" + re.escape(host) + r"):([0-9]+)", proxy.get("listen", ""))
+        listen = re.fullmatch(r"(0\.0\.0\.0|\[::\]|" + re.escape(host) + r"):([0-9]+)", proxy.get("listen", ""))
         if not listen or int(listen[2]) != port:
             raise EdgeError("proxy listen mismatch")
         upstream = re.fullmatch(r"([a-zA-Z0-9_.-]+):([0-9]+)", proxy.get("upstream", ""))
@@ -202,15 +276,78 @@ class Edges:
             raise EdgeError("invalid backend")
         # Only the retained worker's unique name, id, hostname or private
         # address. Compose's shared service alias 'oracle' is never trusted.
-        network = worker["NetworkSettings"]["Networks"].get(self.project + "_oracle-internal")
-        if not network or not network.get("IPAddress"):
-            raise EdgeError("retained worker network missing")
-        ipaddress.ip_address(network["IPAddress"])
-        names = {network["IPAddress"], worker["Id"], worker["Id"][:12],
-                 worker["Name"].lstrip("/"), worker["Config"]["Hostname"]}
-        if upstream[1] not in names:
+        if upstream[1] not in self.worker_addresses(worker):
             raise EdgeError("backend namespace mismatch")
         return host, port
+
+    def retire_worker(self, token, expected_id):
+        """Only the launcher's observed normal exec completion permits this.
+
+        Drain shared launch/acquire/release operations without terminally
+        closing this owner. Never remove a route to make retirement possible.
+        """
+        if (not re.fullmatch(r"[0-9a-f]{32}", token) or token == self.owner
+                or not re.fullmatch(r"[0-9a-f]{64}", expected_id)):
+            raise EdgeError("invalid retiring worker")
+        with self.admission().hold(self.deadline, exclusive=True, publishing=True, terminal=False):
+            workers = self.workers()
+            worker = workers.get(token)
+            name = "meguri-conf-worker-" + self.owner + "-" + token
+            if (worker is None or worker["Id"] != expected_id or worker["Name"] != "/" + name
+                    or not worker["State"]["Running"]):
+                raise EdgeError("retiring worker ownership refused")
+            for path in self.state.glob("*.json"):
+                self.owned_token(path.stem)
+                record = json.loads(path.read_text(), object_pairs_hook=strict_object)
+                route = record["route"]
+                if (set(record) != {"route", "target", "expected_worker", "released"}
+                        or not isinstance(route, dict) or set(route) != {"worker", "proxy"}
+                        or type(record["released"]) is not bool
+                        or not re.fullmatch(r"[0-9a-f]{32}", record["expected_worker"])
+                        or record["expected_worker"] == self.owner
+                        or route["worker"] != record["expected_worker"]
+                        or not self.proxy_name(route["proxy"])):
+                    raise EdgeError("route reservation ownership unproved")
+                target_address(record["target"], self.faults)
+                if not record["released"] and route["worker"] == token:
+                    raise EdgeError("worker still reserved")
+            # Include pre-token and stopped publications, and edge networks.
+            self.edge_resources(workers=workers)
+            for args in (("ps", "-aq"), ("network", "ls", "-q")):
+                if self.docker(*args, *self.filters(), "--filter", "label=" + WORKER + "=" + token).split():
+                    raise EdgeError("worker still published")
+            addresses = self.worker_addresses(worker)
+            # DNS aliases may be shared: any candidate alias is a reservation.
+            for network in worker["NetworkSettings"]["Networks"].values():
+                addresses.update(network.get("Aliases") or [])
+                addresses.update(network.get("DNSNames") or [])
+                for key in ("IPAddress", "GlobalIPv6Address"):
+                    if network.get(key):
+                        addresses.add(network[key])
+            other_addresses = set().union(*(self.worker_addresses(w) for t, w in workers.items() if t != token))
+            for proxy in self.api("GET").values():
+                upstream = re.fullmatch(r"([a-zA-Z0-9_.-]+):([0-9]+)", proxy.get("upstream", ""))
+                if not upstream or not 0 < int(upstream[2]) <= 65535 or upstream[1] in addresses:
+                    raise EdgeError("worker proxy absence unproved")
+                try:
+                    ipaddress.ip_address(upstream[1])
+                except ValueError:
+                    if upstream[1] not in other_addresses:
+                        raise EdgeError("proxy backend is ambiguous")
+            # Pin the exact inspected object once more before deletion, then
+            # leave a durable worker fence for delayed factory launches.
+            current = self.inspect(expected_id)
+            if (current["Id"] != expected_id or current["Name"] != "/" + name
+                    or not current["State"]["Running"]
+                    or current["HostConfig"].get("AutoRemove")
+                    or current["NetworkSettings"]["Networks"] != worker["NetworkSettings"]["Networks"]
+                    or any(current["Config"]["Labels"].get(k) != v for k, v in
+                           dict(self.labels, **{"meguri.mg.purpose": WORKER_PURPOSE, WORKER: token}).items())):
+                raise EdgeError("retiring worker identity changed")
+            self.admission().mark("retired-" + token)
+            self.docker("rm", "-f", expected_id)
+            if self.docker("ps", "-aq", "--filter", "id=" + expected_id).split():
+                raise EdgeError("worker retirement unproved")
 
     def save(self, token, record):
         self.state.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -222,10 +359,10 @@ class Edges:
             os.fsync(stream.fileno())
         temporary.replace(self.state / (token + ".json"))
 
-    def remove_edges(self, token=None):
+    def edge_resources(self, token=None, workers=None):
         if token is not None:
             self.owned_token(token)
-        workers = self.workers()
+        workers = self.workers() if workers is None else workers
         ids = self.docker("ps", "-aq", *self.filters(token)).split()
         networks = self.docker("network", "ls", "-q", *self.filters(token)).split()
         # Match all ownership fields and the exact generated name before any
@@ -242,6 +379,10 @@ class Edges:
                         or labels.get(WORKER) not in workers or not self.proxy_name(labels.get(PROXY))
                         or state["Name"].lstrip("/") != "meguri-conf-edge-" + lease.replace(".", "-")):
                     raise EdgeError("edge resource ownership refused")
+        return ids, networks
+
+    def remove_edges(self, token=None):
+        ids, networks = self.edge_resources(token)
         if ids:
             self.docker("rm", "-f", *ids)
         # Absence after rm proves all publications and pumps/connections gone.
@@ -310,7 +451,7 @@ class Edges:
             for token in workers:
                 route = {"proxy": name, "worker": token}
                 try:
-                    self.validate_route(target, route, token, proxies)
+                    self.validate_route(target, route, token, proxies, workers=workers)
                     owners.append(token)
                 except EdgeError:
                     pass
@@ -336,6 +477,8 @@ class Edges:
             return self._acquire(target, route, expected_worker)
 
     def _acquire(self, target, route, expected_worker):
+        if isinstance(expected_worker, str) and re.fullmatch(r"[0-9a-f]{32}", expected_worker):
+            self.admission().require_worker_open(expected_worker)
         host, port = self.validate_route(target, route, expected_worker)
         # Reject a second publication for a route, including a lost response.
         if self.docker("ps", "-aq", *self.filters(),

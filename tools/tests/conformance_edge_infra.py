@@ -87,6 +87,33 @@ def read_line(child):
     return line.decode().strip()
 
 
+def exchange(endpoint, token):
+    deadline = time.monotonic() + 5
+
+    def remaining():
+        seconds = deadline - time.monotonic()
+        if seconds <= 0:
+            raise TimeoutError("fixture exchange timed out")
+        return seconds
+
+    port = int(endpoint.removeprefix("http://127.0.0.1:").rstrip("/"))
+    with socket.create_connection(("127.0.0.1", port), remaining()) as client:
+        client.settimeout(remaining())
+        client.sendall(b"neutral byte transport")
+        # This neutral fixture responds before request EOF. Keep writing open
+        # until its identity arrives; TCP may split that identity arbitrarily.
+        expected, received = token.encode(), b""
+        while len(received) < len(expected):
+            client.settimeout(remaining())
+            chunk = client.recv(len(expected) - len(received))
+            assert chunk, "truncated fixture identity"
+            received += chunk
+            assert expected.startswith(received), "unexpected fixture identity"
+        client.shutdown(socket.SHUT_WR)
+        client.settimeout(remaining())
+        assert client.recv(1) == b"", "extra fixture response bytes"
+
+
 def run(args):
     root = pathlib.Path(args.root).resolve()
     edge_module = load("infra_edges", root / "tools/mg.d/conformance-edge.py")
@@ -161,18 +188,133 @@ def run(args):
         assert int(port) > 0
         return token, name, process, "http://sync-faults:" + port + "/", {"proxy": proxy, "worker": token}
 
-    def exchange(endpoint, token):
-        port = int(endpoint.removeprefix("http://127.0.0.1:").rstrip("/"))
-        with socket.create_connection(("127.0.0.1", port), 5) as client:
-            client.sendall(b"neutral byte transport")
-            client.shutdown(socket.SHUT_WR)
-            assert client.recv(4096) == token.encode()
-            assert client.recv(4096) == b""
-
     def new_owner():
         owner = edge_module.Edges(root, args.project, args.run, args.image,
                                   "sync-faults:8474", uuid.uuid4().hex)
         return remember(owner)
+
+    def worker_command(owner, worker, tz="UTC"):
+        return ["python3", "-I", "-B", str(root / "tools/mg.d/conformance-worker.py"),
+                "--root", str(root), "--project", args.project, "--run", args.run,
+                "--owner", owner.owner, "--worker", worker, "--handoff", args.handoff,
+                "--faults", "sync-faults:8474", "--tz", tz]
+
+    def control_endpoint_count():
+        # Pause inside a real successful API response while its control
+        # container is running. Only this fixture enables stdin and inserts a
+        # pipe barrier; no production pause, mount or timeout change is needed.
+        client = new_owner()
+        receipt = {}
+        receipt_path = pathlib.Path(args.run_dir) / "api-control-endpoints.json"
+        ready, resume = threading.Event(), threading.Event()
+        original = client.docker
+        control_names = []
+
+        def endpoints():
+            return len(json.loads(docker("network", "inspect", args.project + "_oracle-internal"))[0]["Containers"])
+
+        def paused(*argv, **kwargs):
+            if argv[0] != "run":
+                return original(*argv, **kwargs)
+            argv = list(argv)
+            control_names.append(argv[argv.index("--name") + 1])
+            index = argv.index("-c") + 1
+            marker = "with urllib.request.urlopen(r,timeout=3) as f: "
+            assert argv[index].count(marker) == 1
+            barrier = "print('control-ready',flush=True); sys.stdin.buffer.read(1); "
+            argv[index] = argv[index].replace(marker, marker + barrier)
+            argv.insert(1, "--interactive")
+            # Match the production Docker-call budget, including the barrier.
+            deadline = min(client.deadline, time.monotonic() + 5)
+            child = subprocess.Popen(["docker", *argv], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                     stderr=subprocess.DEVNULL, start_new_session=True)
+            try:
+                assert select.select([child.stdout], [], [], max(0, deadline - time.monotonic()))[0], "control readiness timed out"
+                assert child.stdout.readline() == b"control-ready\n"
+                ready.set()
+                assert resume.wait(max(0, deadline - time.monotonic())), "control barrier timed out"
+                out, _ = child.communicate(b"R", timeout=max(0, deadline - time.monotonic()))
+                assert child.returncode == 0, "control invocation failed"
+                return out.decode().strip()
+            finally:
+                if child.poll() is None:
+                    os.killpg(child.pid, signal.SIGKILL)
+                    child.wait()
+                child.stdin.close(); child.stdout.close()
+
+        client.docker = paused
+        receipt["before"] = endpoints()
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                pending = pool.submit(fresh(client).api, "GET")
+                try:
+                    assert ready.wait(5), "control response barrier timed out"
+                    assert len(control_names) == 1
+                    mode = json.loads(docker("inspect", "--format", "{{json .HostConfig.NetworkMode}}", control_names[0]))
+                    running = json.loads(docker("inspect", "--format", "{{json .State.Running}}", control_names[0]))
+                    receipt.update(during=endpoints(), control_running=running,
+                                   immutable_service_netns=mode == "container:" + client.control_binding[0])
+                    receipt_path.write_text(json.dumps(receipt) + "\n")
+                    assert not pending.done() and running
+                    assert receipt["immutable_service_netns"]
+                    assert receipt["during"] == receipt["before"], "API control allocated an endpoint"
+                finally:
+                    resume.set()
+                assert isinstance(pending.result(timeout=10), dict)
+            receipt["after"] = endpoints()
+            assert receipt["after"] == receipt["before"]
+            receipt["passed"] = True
+            receipt_path.write_text(json.dumps(receipt) + "\n")
+        finally:
+            client.docker = original
+
+    def sequential_retirement():
+        # Exercise the production factory command, real hello and normal EOF.
+        # One live peer plus one changing timezone lifetime: never >2 holders.
+        owner = new_owner()
+        receipt = {"lifetimes": 6, "holder_bound": 2, "observations": []}
+        receipt_path = pathlib.Path(args.run_dir) / "worker-retirement.json"
+
+        def endpoints():
+            return len(json.loads(docker("network", "inspect", args.project + "_oracle-internal"))[0]["Containers"])
+
+        def launch(index):
+            worker = uuid.uuid4().hex
+            process = subprocess.Popen(worker_command(owner, worker, "UTC" if index % 2 else "Europe/Paris"),
+                                       stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            processes.append(process)
+            process.stdin.write(b'{"cmd":"hello"}\n'); process.stdin.flush()
+            assert json.loads(read_line(process))["ok"] is True
+            state = fresh(owner).workers()[worker]
+            return process, state["Id"]
+
+        base = endpoints()
+        anchor, anchor_id = launch(0)
+        retired_ids = []
+        for index in range(1, 7):
+            process, cid = launch(index)
+            peak = endpoints()
+            assert len(fresh(owner).workers()) == 2
+            process.stdin.close()
+            rc = process.wait(timeout=25)
+            retired_ids.append(cid)
+            gone = all(not docker("ps", "-aq", "--filter", "id=" + old) for old in retired_ids)
+            count = endpoints()
+            receipt["observations"].append({"completion": rc, "peak_endpoints": peak,
+                                            "remaining_endpoints": count, "retired_ids_gone": gone})
+            receipt_path.write_text(json.dumps(receipt) + "\n")
+            assert rc == 0 and gone, "successful factory lifetime retained its holder"
+            assert peak == base + 2 and count == base + 1, "factory endpoint count grew"
+            assert fresh(owner).inspect(anchor_id)["State"]["Running"]
+            anchor.stdin.write(b'{"cmd":"hello"}\n'); anchor.stdin.flush()
+            assert json.loads(read_line(anchor))["ok"] is True
+            assert not (owner.state / "closing").exists()
+        anchor.stdin.close()
+        assert anchor.wait(timeout=25) == 0
+        assert not docker("ps", "-aq", "--filter", "id=" + anchor_id)
+        assert endpoints() == base
+        receipt["passed"] = True
+        receipt_path.write_text(json.dumps(receipt) + "\n")
 
     def allocation_sweep_race(phase, index):
         owner = new_owner()
@@ -347,6 +489,8 @@ def run(args):
     try:
         if args.cancel_fixture:
             cancellation_fixture()
+        control_endpoint_count()
+        sequential_retirement()
         # Four independent namespaces are simultaneously alive; no session lock.
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
             started = list(pool.map(lambda i: start(edges, i), range(4)))
@@ -374,14 +518,14 @@ def run(args):
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
             leases.extend(pool.map(allocate, range(4)))
         for index in range(4):
-            processes[index].stdin.write(b"count\n"); processes[index].stdin.flush()
-            assert read_line(processes[index]) == "0", "startup probe contacted the backend"
+            started[index][2].stdin.write(b"count\n"); started[index][2].stdin.flush()
+            assert read_line(started[index][2]) == "0", "startup probe contacted the backend"
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
             list(pool.map(lambda pair: exchange(pair[0]["endpoint"], pair[1]), zip(leases, tokens)))
         # Independent exit/EOF leaves the container/address held. Inject only
         # removal failure; production helper and Docker route remain real.
-        processes[0].stdin.write(b"selfexit\n"); processes[0].stdin.flush(); processes[0].wait(timeout=10)
-        processes[1].stdin.close(); processes[1].wait(timeout=10)
+        started[0][2].stdin.write(b"selfexit\n"); started[0][2].stdin.flush(); started[0][2].wait(timeout=10)
+        started[1][2].stdin.close(); started[1][2].wait(timeout=10)
         original = edges.docker
         def blocked(*argv, **kwargs):
             if argv[:2] == ("rm", "-f"):
@@ -396,6 +540,22 @@ def run(args):
         assert fresh().inspect(names[0])["State"]["Running"]
         assert routes[0]["proxy"] in fresh().api("GET")
         assert not admission.admitted(str(root), args.project, docker)
+        # Normal retirement must refuse a live publication. It may never
+        # remove the edge/proxy to turn this control into a successful retire.
+        before_proxy = fresh().api("GET")[routes[1]["proxy"]]
+        before_edges = fresh().docker("ps", "-aq", *edges.filters()).split()
+        for index in (0, 1):
+            cid = fresh().inspect(names[index])["Id"]
+            try:
+                fresh().retire_worker(tokens[index], cid)
+                raise AssertionError("published worker retirement succeeded")
+            except edge_module.EdgeError:
+                pass
+            assert fresh().inspect(cid)["State"]["Running"]
+        assert set(fresh().docker("ps", "-aq", *edges.filters()).split()) == set(before_edges)
+        assert fresh().api("GET")[routes[1]["proxy"]] == before_proxy
+        assert fresh(peer).inspect(peer_name)["State"]["Running"]
+        assert peer_route["proxy"] in fresh(peer).api("GET")
         # While the original edge survives, its proxy keeps its listening port.
         # Pointing a replacement at the other backend's equal port must fail.
         upstream_b = fresh().api("GET")[routes[1]["proxy"]]["upstream"]
@@ -438,10 +598,7 @@ def run(args):
         # Real launch contract: holder first, exactly one entrypoint driver,
         # no --rm, no replacement launch in a retained namespace after EOF.
         worker = uuid.uuid4().hex
-        launcher = ["python3", "-I", "-B", str(root / "tools/mg.d/conformance-worker.py"),
-                    "--root", str(root), "--project", args.project, "--run", args.run,
-                    "--owner", edges.owner, "--worker", worker, "--handoff", args.handoff,
-                    "--faults", "sync-faults:8474", "--tz", "UTC"]
+        launcher = worker_command(edges, worker)
         scenario = json.loads(pathlib.Path(args.scenario).read_text())["value"]
         begin = {"cmd": "begin", "id": scenario["id"], "scenario": scenario, "caller_actors": ["meguri"]}
         # Normal edge-first end permits a second session on this same driver.
@@ -464,7 +621,7 @@ def run(args):
         process.stdin.write(json.dumps(begin).encode() + b"\n"); process.stdin.flush()
         sync = json.loads(read_line(process))["sync"]
         lease = fresh().acquire(sync["endpoints"]["actors"], sync["route"], worker)
-        process.stdin.close(); process.wait(timeout=15)
+        process.stdin.close(); process.wait(timeout=25)
         name = "meguri-conf-worker-" + edges.owner + "-" + worker
         assert fresh().inspect(name)["State"]["Running"]
         assert sync["route"]["proxy"] in fresh().api("GET")
@@ -481,8 +638,13 @@ def run(args):
         process = subprocess.Popen(launcher2, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         processes.append(process)
         process.stdin.write(json.dumps(begin).encode() + b"\n"); process.stdin.flush()
-        process.stdin.close(); process.wait(timeout=15)
+        process.stdin.close(); process.wait(timeout=25)
         assert fresh().inspect("meguri-conf-worker-" + edges.owner + "-" + worker2)["State"]["Running"]
+        # The actual factory's exit-0 retirement path cannot consume a
+        # before-token proxy just because no lease reached the caller.
+        reserved = [name for name in fresh().api("GET") if edges.proxy_name(name)]
+        assert len(reserved) == 1
+        assert not fresh().docker("ps", "-aq", *edges.filters()).split()
         fresh().sweep()
     finally:
         if args.cancel_fixture:

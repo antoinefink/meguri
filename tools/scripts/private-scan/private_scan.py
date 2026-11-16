@@ -828,6 +828,11 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    # Independently reviewed public Docker lifecycle tooling, exact bytes.
+    'tools/mg.d/conformance-admission.py':
+        '7fe260aa7857773c6f472037929f9f6f3a5fe7f2d1eb2eda722238942f1bf7ae',
+    'tools/mg.d/conformance-edge.py':
+        'db717ee3b016fb7f351552cdf9bbff12eff88936d16aefb9b6aabbdd04fa6f8e',
     'specs/conformance/meguri-sync-candidate.md':
         '305e2b5c509129d49d71dbb35298c5350a847412672649bb2de91df669c55d35',
     'docs/process/review-log/meguri-sync-normal-candidate.md':
@@ -888,7 +893,7 @@ PUBLIC_ARTIFACTS = {
         'b64e434da32547a924fa0c0a8f1f311a793666eecf82bc0cc0c604db3a020dfd',
     # Independently classified original public session metadata, exact bytes.
     'docs/process/provenance/sessions.jsonl':
-        '706ef0e38c7134fe4e8067962b9ef44d7efefd519fbedd722afff235bb72fdb8',
+        '7b85da246f8ee1138d5470cf69a0e168894a52a67b84c7fb6feb30aaa35f7f65',
     'conformance/fixtures/meguri-sync-server/observations/desktop-26.09.4-normal-matrix.json':
         '8a4e17346939516eda8b5b650203444693fb32e2173f4d6741242b4089da04eb',
     'specs/sync/server-desktop-current.md':

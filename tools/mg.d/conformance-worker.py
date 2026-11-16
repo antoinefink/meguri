@@ -39,8 +39,8 @@ def main():
                 "-e", "ORACLE_FIXTURES=/fixtures", "-v", root + "/conformance/fixtures:/fixtures:ro",
                 "-e", "LD_PRELOAD=", "--entrypoint", "python3", "oracle",
                 "-u", "/opt/oracle/worker_holder.py"]
-    # No --rm: holder exit, driver EOF, CLI death and launch failure all leave
-    # the namespace owned for MG's edge-first sweep. Compose retains init/tmpfs.
+    # No --rm: uncertain completion and live routes retain the namespace for
+    # MG's edge-first sweep. Compose retains init/tmpfs.
     spec = importlib.util.spec_from_file_location("route_admission", root + "/tools/mg.d/conformance-admission.py")
     admission = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(admission)
@@ -49,7 +49,7 @@ def main():
     with owner_admission.hold(time.monotonic() + 25, publishing=True), admission.launch_admission(root):
         # Keep publication within owner admission, including inspect. A launch
         # paused behind infrastructure admission must recheck terminal closure.
-        owner_admission.require_open()
+        owner_admission.require_worker_open(args.worker)
         pending = owner_admission.begin_mutation()
         try:
             subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
@@ -62,14 +62,29 @@ def main():
             owner_admission.mark("uncertain")
             raise
         pending.unlink()
-        state = json.loads(subprocess.check_output(["docker", "inspect", name], timeout=5))[0]
+        state = json.loads(subprocess.check_output(["docker", "inspect", name], timeout=5,
+                                                  stderr=subprocess.DEVNULL))[0]
         if (not state["State"]["Running"] or state["HostConfig"].get("AutoRemove")
+                or state["Name"] != "/" + name or not re.fullmatch(r"[0-9a-f]{64}", state["Id"])
                 or any(state["Config"]["Labels"].get(k) != v for k, v in labels.items())):
             raise ValueError("worker holder is unavailable")
-        owner_admission.require_open()
+        owner_admission.require_worker_open(args.worker)
     # Exactly one attached driver. It MUST enter through the clock-setting
     # entrypoint; do not invoke Python directly or inherit holder LD_PRELOAD.
-    os.execvp("docker", ["docker", "exec", "-i", name, "/opt/oracle/entrypoint.sh", "worker"])
+    # Inherit all three pipes unchanged. Never hold admission while the driver
+    # runs; independent pool workers must stream and complete concurrently.
+    result = subprocess.run(["docker", "exec", "-i", state["Id"], "/opt/oracle/entrypoint.sh", "worker"])
+    if result.returncode != 0:
+        return result.returncode if result.returncode > 0 else 1
+    # Exit 0 is the daemon completion boundary. Failure/cancellation above is
+    # never evidence that the attached exec stopped. Retirement failures leave
+    # ownership and route evidence for terminal sweep, with a generic error.
+    spec = importlib.util.spec_from_file_location("worker_edges", root + "/tools/mg.d/conformance-edge.py")
+    edges = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(edges)
+    edges.Edges(root, args.project, args.run, state["Image"], args.faults, args.owner).retire_worker(
+        args.worker, state["Id"])
+    return 0
 
 
 if __name__ == "__main__":
@@ -78,7 +93,7 @@ if __name__ == "__main__":
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(sig, interrupted)
     try:
-        main()
+        sys.exit(main())
     except Exception:
         print("conformance worker unavailable", file=sys.stderr)
         sys.exit(1)

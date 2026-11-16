@@ -26,6 +26,7 @@ def load(name, path):
 helper = load("edge_helper", ROOT / "tools/mg.d/conformance-edge.py")
 forward = load("edge_forward", ROOT / "tools/mg.d/conformance-forward.py")
 admission = load("edge_admission", ROOT / "tools/mg.d/conformance-admission.py")
+infra = load("edge_infra", ROOT / "tools/tests/conformance_edge_infra.py")
 OWNER, A, B = "a" * 32, "c" * 32, "d" * 32
 
 
@@ -95,10 +96,19 @@ class FakeEdges(helper.Edges):
                 "State": {"Running": True}, "NetworkSettings": {"Ports": mapping}}
         elif words[0] == "ps" or words[:2] == ["network", "ls"]:
             kind = "container" if words[0] == "ps" else "network"
-            filters = dict(words[i+1][6:].split("=", 1) for i, word in enumerate(words) if word == "--filter")
+            filters = [words[i+1] for i, word in enumerate(words) if word == "--filter"]
+            def matches(name, state):
+                for value in filters:
+                    if value.startswith("id="):
+                        if name != value[3:]:
+                            return False
+                    else:
+                        key, expected = value[6:].split("=", 1)
+                        if state["Config"]["Labels"].get(key) != expected:
+                            return False
+                return True
             return "\n".join(name for (k, name), state in self.resources.items()
-                             if k == kind and all(state["Config"]["Labels"].get(key) == value
-                                                  for key, value in filters.items()))
+                             if k == kind and matches(name, state))
         elif words[0] == "rm" or words[:2] == ["network", "rm"]:
             if self.fail_remove:
                 raise helper.EdgeError("synthetic edge removal failure")
@@ -166,6 +176,27 @@ class Ownership(unittest.TestCase):
                 edge.allocate()
             self.assertEqual(edge.edge_names(), [])
             self.assertFalse(any(c[:2] == ("api", "DELETE") for c in edge.calls))
+
+    def test_ipv6_unspecified_listener_preserves_port_and_worker_checks(self):
+        for listen, upstream, error in [
+                ("[::]:30001", "172.20.0.10:27701", None),
+                ("[::]:30002", "172.20.0.10:27701", "proxy listen mismatch"),
+                ("[::]:30001", "172.20.0.11:27701", "backend namespace mismatch")]:
+            with self.subTest(listen=listen, upstream=upstream):
+                edge = FakeEdges()
+                self.addCleanup(edge.temporary.cleanup)
+                edge.proxies[edge.route()["proxy"]].update(listen=listen, upstream=upstream)
+                if error is None:
+                    self.assertIn("endpoint", edge.allocate())
+                    continue
+                resources, proxies = dict(edge.resources), dict(edge.proxies)
+                with self.assertRaisesRegex(helper.EdgeError, error):
+                    edge.allocate()
+                self.assertEqual(edge.resources, resources)
+                self.assertEqual(edge.proxies, proxies)
+                self.assertFalse(list(edge.state.glob("*.json")))
+                self.assertTrue(all(c[0] in ("ps", "inspect") or c[:2] == ("api", "GET")
+                                    for c in edge.calls))
 
     def test_owned_idempotence_and_foreign_refusal(self):
         edge = FakeEdges()
@@ -236,6 +267,75 @@ class Ownership(unittest.TestCase):
             edge.sweep()
         self.assertEqual(edge.proxies, saved)
         self.assertIn(("container", A), edge.resources)
+
+    def test_sixty_worker_one_proxy_sweep_bounds_worker_inspections(self):
+        edge = FakeEdges(resources={}, proxies={})
+        self.addCleanup(edge.temporary.cleanup)
+        tokens = [f"{index:032x}" for index in range(1, 61)]
+        for index, token in enumerate(tokens):
+            labels = dict(edge.labels, **{"meguri.mg.purpose": helper.WORKER_PURPOSE,
+                                         helper.WORKER: token})
+            edge.resources[("container", token)] = edge.worker_state(token, index, labels)
+        name = edge.route(tokens[-1])["proxy"]
+        edge.proxies[name] = {"name": name, "listen": "[::]:30001",
+                              "upstream": "172.20.0.69:27701"}
+        edge.sweep()
+        self.assertEqual(edge.resources, {})
+        self.assertEqual(edge.proxies, {})
+        inspections = sum(c[0] == "inspect" and c[1] in tokens for c in edge.calls)
+        self.assertLessEqual(inspections, 3 * len(tokens),
+                             f"60-worker sweep performed {inspections} worker inspections")
+
+    def test_sweep_refuses_ambiguous_proxy_ownership(self):
+        edge = FakeEdges()
+        self.addCleanup(edge.temporary.cleanup)
+        # A shared alias can match both verified workers; neither is a proof.
+        for token in (A, B):
+            edge.resources[("container", token)]["Config"]["Hostname"] = "shared"
+        edge.proxies[edge.route()["proxy"]]["upstream"] = "shared:27701"
+        resources, proxies = dict(edge.resources), dict(edge.proxies)
+        with self.assertRaisesRegex(helper.EdgeError, "pre-token proxy ownership unproved"):
+            edge.sweep()
+        self.assertEqual(edge.resources, resources)
+        self.assertEqual(edge.proxies, proxies)
+        self.assertFalse(any(c[0] == "rm" or c[:2] == ("api", "DELETE") for c in edge.calls))
+
+    def test_acquire_and_release_reinspect_worker_after_route_validation(self):
+        edge = FakeEdges()
+        self.addCleanup(edge.temporary.cleanup)
+        edge.validate_route("http://sync-faults:30001/", edge.route(), A)
+        worker = edge.resources[("container", A)]
+        worker["State"]["Running"] = False
+        with self.assertRaisesRegex(helper.EdgeError, "retained namespace stopped"):
+            edge.allocate()
+        worker["State"]["Running"] = True
+        lease = edge.allocate()["lease"]
+        worker["State"]["Running"] = False
+        edge.calls.clear()
+        with self.assertRaisesRegex(helper.EdgeError, "retained namespace stopped"):
+            edge.remove(lease)
+        self.assertTrue(edge.edge_names())
+        self.assertIn(edge.route()["proxy"], edge.proxies)
+        self.assertFalse(json.loads((edge.state / (lease + ".json")).read_text())["released"])
+        self.assertFalse(any(c[0] == "rm" or c[:2] == ("api", "DELETE") for c in edge.calls))
+
+    def test_sweep_refuses_stopped_foreign_or_unmatched_proxy_worker(self):
+        for failure in ("stopped", "foreign", "unmatched"):
+            with self.subTest(failure=failure):
+                edge = FakeEdges()
+                self.addCleanup(edge.temporary.cleanup)
+                if failure == "stopped":
+                    edge.resources[("container", A)]["State"]["Running"] = False
+                elif failure == "foreign":
+                    edge.resources[("container", A)]["Config"]["Labels"][helper.OWNER] = "e" * 32
+                else:
+                    edge.proxies[edge.route()["proxy"]]["upstream"] = "172.20.0.99:27701"
+                resources, proxies = dict(edge.resources), dict(edge.proxies)
+                with self.assertRaisesRegex(helper.EdgeError, "pre-token proxy ownership unproved"):
+                    edge.sweep()
+                self.assertEqual(edge.resources, resources)
+                self.assertEqual(edge.proxies, proxies)
+                self.assertFalse(any(c[0] == "rm" or c[:2] == ("api", "DELETE") for c in edge.calls))
 
     def test_interrupted_acquire_cleans_before_token_or_reserves_on_failure(self):
         for blocked in (False, True):
@@ -419,6 +519,61 @@ class OwnerFence(unittest.TestCase):
             command.assert_not_called()
 
 
+class FixtureExchange(unittest.TestCase):
+    endpoint = "http://127.0.0.1:42001/"
+    token = "c" * 32
+
+    def exchange(self, receive):
+        client = mock.MagicMock()
+        client.recv.side_effect = receive
+        with mock.patch.object(infra.socket, "create_connection") as connect:
+            connect.return_value.__enter__.return_value = client
+            infra.exchange(self.endpoint, self.token)
+        return client, connect
+
+    def test_exchange_keeps_write_open_until_identity(self):
+        client = mock.MagicMock()
+        def receive(_size):
+            # Model the measured fresh-fixture race: pre-response FIN loses
+            # the identity; open-write-first returns the complete response.
+            if client.shutdown.called:
+                return b""
+            return self.token.encode()
+        client.recv.side_effect = receive
+        with mock.patch.object(infra.socket, "create_connection") as connect:
+            connect.return_value.__enter__.return_value = client
+            infra.exchange(self.endpoint, self.token)
+        client.sendall.assert_called_once_with(b"neutral byte transport")
+        client.shutdown.assert_called_once_with(socket.SHUT_WR)
+        self.assertEqual(client.recv.call_count, 2)
+
+    def test_exchange_consumes_fragmented_identity_and_eof(self):
+        client, _ = self.exchange([b"c", b"c" * 7, b"c" * 24, b""])
+        self.assertEqual(client.recv.call_count, 4)
+
+    def test_exchange_rejects_wrong_truncated_and_extra_bytes(self):
+        for chunks in ([b"d" * 32], [b"c" * 31, b""], [b""],
+                       [b"c" * 32 + b"extra"], [b"c" * 32, b"extra"]):
+            with self.subTest(chunks=chunks), self.assertRaises(AssertionError):
+                self.exchange(chunks)
+
+    def test_exchange_requires_eof(self):
+        with self.assertRaises(TimeoutError):
+            self.exchange([self.token.encode(), TimeoutError("no EOF")])
+
+    def test_exchange_shares_five_second_deadline_across_all_io(self):
+        with mock.patch.object(infra.time, "monotonic", side_effect=[0, 0, 1, 2, 3, 4]):
+            client, connect = self.exchange([b"c" * 8, b"c" * 24, b""])
+        connect.assert_called_once_with(("127.0.0.1", 42001), 5)
+        self.assertEqual(client.settimeout.call_args_list,
+                         [mock.call(4), mock.call(3), mock.call(2), mock.call(1)])
+
+    def test_exchange_fragment_progress_does_not_extend_deadline(self):
+        with mock.patch.object(infra.time, "monotonic", side_effect=[0, 0, 1, 3, 5]):
+            with self.assertRaises(TimeoutError):
+                self.exchange([b"c" * 8, b"c" * 8, b"c" * 16, b""])
+
+
 class Sockets(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.loop = asyncio.get_running_loop()
@@ -498,18 +653,19 @@ class Launcher(unittest.TestCase):
                 "--owner", OWNER, "--worker", A, "--handoff", "/tmp/handoff with space",
                 "--faults", "sync-faults:8474", "--tz", "UTC"]
         def inspected(*args, **kwargs):
-            command = started.call_args.args[0]
+            command = started.call_args_list[0].args[0]
             labels = dict(command[i+1].split("=", 1) for i, word in enumerate(command) if word == "--label")
-            return json.dumps([{"State": {"Running": True}, "HostConfig": {"AutoRemove": False},
+            return json.dumps([{"Id": A * 2, "Name": "/meguri-conf-worker-" + OWNER + "-" + A,
+                                "State": {"Running": True}, "HostConfig": {"AutoRemove": False},
                                 "Config": {"Labels": labels}}]).encode()
         with mock.patch.object(worker.sys, "argv", argv), \
              mock.patch.object(worker.importlib.util, "spec_from_file_location", return_value=fake_spec), \
              mock.patch.object(worker.importlib.util, "module_from_spec", return_value=admission_module), \
-             mock.patch.object(worker.subprocess, "run") as started, \
+             mock.patch.object(worker.subprocess, "run", return_value=types.SimpleNamespace(returncode=7)) as started, \
              mock.patch.object(worker.subprocess, "check_output", side_effect=inspected), \
              mock.patch.object(worker.os, "execvp") as attached:
             worker.main()
-        command = started.call_args.args[0]
+        command = started.call_args_list[0].args[0]
         self.assertNotIn("--rm", command)
         self.assertIn("-d", command)
         self.assertEqual(command[-5:], ["--entrypoint", "python3", "oracle", "-u", "/opt/oracle/worker_holder.py"])
@@ -518,9 +674,38 @@ class Launcher(unittest.TestCase):
         self.assertIn("meguri.mg.worker=" + A, command)
         self.assertIn("LD_PRELOAD=", command)
         self.assertIn("/tmp/handoff with space:/handoff", command)
-        name = "meguri-conf-worker-" + OWNER + "-" + A
-        attached.assert_called_once_with("docker", ["docker", "exec", "-i", name,
-                                                   "/opt/oracle/entrypoint.sh", "worker"])
+        attached.assert_not_called()
+        self.assertEqual(started.call_args_list[1], mock.call(
+            ["docker", "exec", "-i", A * 2, "/opt/oracle/entrypoint.sh", "worker"]))
+
+    def test_delayed_launch_rechecks_worker_and_terminal_fence_after_infrastructure_admission(self):
+        import contextlib
+        import types
+        worker = load("delayed_worker_launcher", ROOT / "tools/mg.d/conformance-worker.py")
+        fake_spec = types.SimpleNamespace(loader=mock.Mock())
+        for marker in ("closing", "retired-" + A):
+            with self.subTest(marker=marker), tempfile.TemporaryDirectory() as root:
+                owner = admission.OwnerAdmission(pathlib.Path(root) / "build/mg/conformance-routes" / OWNER)
+                @contextlib.contextmanager
+                def infrastructure(_root):
+                    # The shared owner admission was already granted; model a
+                    # launcher delayed behind the infrastructure lock.
+                    owner.mark(marker)
+                    yield
+                module = types.SimpleNamespace(OwnerAdmission=admission.OwnerAdmission,
+                                               launch_admission=infrastructure)
+                argv = ["launcher", "--root", root, "--project", "test-project", "--run", "test-run",
+                        "--owner", OWNER, "--worker", A, "--handoff", "/tmp/handoff",
+                        "--faults", "sync-faults:8474", "--tz", "UTC"]
+                with mock.patch.object(worker.sys, "argv", argv), \
+                     mock.patch.object(worker.importlib.util, "spec_from_file_location", return_value=fake_spec), \
+                     mock.patch.object(worker.importlib.util, "module_from_spec", return_value=module), \
+                     mock.patch.object(worker.subprocess, "run") as started, \
+                     mock.patch.object(worker.subprocess, "check_output") as inspected:
+                    with self.assertRaises(admission.AdmissionError):
+                        worker.main()
+                started.assert_not_called()
+                inspected.assert_not_called()
 
     def test_closed_owner_refuses_holder_launch_before_docker(self):
         import types
