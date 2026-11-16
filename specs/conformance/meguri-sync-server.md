@@ -169,3 +169,66 @@ The preserved closed dirty profile stays offline; the clean procedure starts fro
 Exact whole-name/hash equality, non-col table hashes and card/review rows remain compared.
 The original failed goal receipt is retained without restore credit. `server-desktop-current#D10` records the observed scope.
 These facts do not satisfy candidate P-R01/P-R03, GUI or Mobile acceptance.
+
+## C12. Current local-delivery acceptance
+
+This is original Meguri acceptance policy for the delivery scope confirmed on
+2026-11-16. It distinguishes Product Contract delivery from completion of the
+provisional reference-research index. It does not change supported protocol
+behavior or establish a reference observation.
+
+The 1,294 catalog entries remain open research obligations unless separately
+resolved under C11. They are not 1,294 required manual device workflows. Final
+delivery needs the requirement-derived coverage below and the plan's ordinary
+checks. It cannot be inferred from the catalog's size, schema validity, an
+intermediate selection, or a successful policy-driver request. A delivery pass
+does not seal an unexecuted catalog case or complete a broad P family.
+
+For this local delivery, the matrix below governs the interpretation of C10's
+blanket F3 P-family evidence row. C11's exact-expansion and counting requirements
+apply to each frozen final lane/job selection. The catalog's original
+`required_case_count` of 1,294 remains unchanged for its broader research scope;
+it is not replaced with the final selection's count. No other C11 rule is
+relaxed. Final Product Contract acceptance requires the complete mapping below,
+not a declaration that the research catalog is complete.
+
+Before final execution, freeze named selections with synthetic fixture
+identities, ordered actions, expected assertions, required peers and nonzero
+expected case counts. Map every current requirement, acceptance example and
+cross-layer assertion to its owning proof. Reuse existing meaningful selections
+and deterministic tests where they supply that proof; add uncovered assertions
+before execution. Do not define the required set from whichever cases passed.
+Keep C11's exact identity, artifact, independent-review, outcome and count rules
+for each selected lane. Missing, failed, skipped or unavailable required results
+leave the affected delivery claim incomplete.
+
+| Proof | Required coverage |
+| --- | --- |
+| Local Docker artifact | The documented image and configuration, unprivileged startup, fresh persistent storage, first administrator and member flows, compiled assets, dependency notices and required covered-source availability, runtime exclusions, and account/collection/media persistence after restarting the same volume. Bind the actual image and running executable to source, locks, features and assets. |
+| Current Desktop against the image | Authenticate; initial upload and download; explicit full replacement; Desktop A through the server to Desktop B; Desktop-led migration from another synthetic server; fresh receiver and new/no-card metadata distinctions. Preserve supported notes, cards, reviews, scheduling, decks, note types, fields, templates, presets, configuration, deletions and media. Exercise collection and media changes in both directions, ordinary no-change and one-review incremental completion without a pending full transfer. |
+| Actual current AnkiMobile against the image | Record the installed app and OS builds. Receive synthetic Desktop state on Mobile; send Mobile changes and reviews back to Desktop; exercise edits, deletions and media changes in both directions, initial and required full replacement with explicit authority, ordinary incremental and no-change sync. Compare final supported content, history, scheduling and media bytes through the independent Desktop/fresh-receiver observations. Bind actual device execution under C11; Desktop or synthetic-driver results cannot replace it. |
+| Retained Meguri peer | Exercise its actual supported authentication, full, normal and media HTTP APIs against the image. Bind the real peer executable and results. Record unsupported paths and client-origin failures as blockers to the affected claim; keep these results distinct from Desktop/Mobile and unfinished application acceptance. |
+| Integrity, authentication and resources | Trace normal/full/media interruption, lost acknowledgements and ordinary retry; valid committed state; reset/disable publication ordering; account isolation; bounded decoding, invalid media paths and disk-full handling; exclusive root ownership and startup/restart protections. Trace setup, invitations, passwords, resets, local administrator recovery and browser/native credential separation. Reuse existing deterministic proofs without treating test-hook binaries as the delivered executable. |
+| Interface, proxy and local sanity | Review the image's actual Rust-served interface and useful setup/member/admin flows, keyboard behavior, labels, focus, errors and accessibility. Verify configured HTTPS origin, trusted proxy, Secure cookies and forwarding/Origin rejection over backend HTTP. Rehearse short local build/run/test/client/recovery instructions. Record available elapsed/resource evidence and workload/settings/hardware identities for initial transfer, no-change, one review and media transfer in ordinary logs. |
+
+Actual-client cases retain their P-family and target/lane classification.
+Service-driver safety tests may prove an original Product Contract policy
+assertion without sealing a P observation. Never relabel a P case as policy or
+claim that crafted malformed traffic was emitted by Mobile. A compatibility
+implementation or final claim that needs an unresolved reference fact still
+requires the reviewed observation process.
+
+The plan's explicit deferral of backup/restore applies to C8 and its M-R/P-R
+families, C10's F5/AE8 row, and restore-specific portions of M-L07. Ordinary
+exclusive ownership, interrupted-transfer recovery, restart persistence,
+resource bounds and account recovery remain required. The historical C10
+media-recovery timing wording and planned dedicated faults/bench job names do
+not require restore or benchmarking infrastructure for this delivery. Existing
+useful tests and mandatory gates remain enabled. The catalog and old evidence
+retain their historical contents; deferred work receives no synthetic pass.
+
+Final acceptance covers only the supported exact builds and declared local
+delivery. It does not claim exhaustive research coverage, older client versions,
+application milestone closure, backup/restore, public deployment or hosted
+capacity. Missing actual Mobile evidence remains incomplete after every
+independent automated task has finished.
