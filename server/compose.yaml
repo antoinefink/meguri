@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: MIT
+# Invoke through tools/mg sync-server-local. TLS is an external prerequisite.
+services:
+  local-sync:
+    image: ${MEGURI_SYNC_IMAGE:?Build the image through MG first}
+    pull_policy: never
+    init: true
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    network_mode: ${MEGURI_SYNC_NETWORK:-bridge}
+    ports:
+      - "127.0.0.1:${MEGURI_SYNC_PORT:-8080}:8080"
+    tmpfs:
+      - /tmp:mode=1777,size=64m
+    volumes:
+      - sync-data:/data
+    labels:
+      meguri.sync.owner: ${MEGURI_SYNC_OWNER:?MG owns the container lifecycle}
+    command: [serve, /data/owner, "${MEGURI_SYNC_ORIGIN:?Set the exact public HTTPS origin}", "0.0.0.0:8080", --trusted-peer, "${MEGURI_SYNC_TRUSTED_PEER:?Set the exact backend proxy peer IP}"]
+volumes:
+  sync-data:
+    external: true
+    name: ${MEGURI_SYNC_VOLUME:?MG initializes the persistent volume}

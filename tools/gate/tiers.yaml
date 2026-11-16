@@ -159,6 +159,13 @@ runs:
     class: static
     triggers: [server/Cargo.toml, server/Cargo.lock, server/deny.toml, server/about.toml, server/DEPENDENCIES.md, server/LICENSE, server/rust-toolchain.toml, tools/mg.d/meguri-sync.sh, core/crates/meguri-model/, core/Cargo.toml, core/rust-toolchain.toml, docker/dev.Dockerfile, docker/compose.yml, docker/dev.Dockerfile.dockerignore]
     budget_s: 600
+  - id: sync-server-package-test
+    job: sync-server-package-test
+    tier: T0
+    placement: host
+    class: data-safety
+    triggers: [tools/tests/sync_package.bats, tools/tests/sync_package_context_test.py, server/, core/crates/meguri-model/, core/Cargo.toml, core/rust-toolchain.toml, tools/mg, tools/mg.d/sync-package.sh, tools/mg.d/meguri-sync.sh, tools/mg.d/sync-web.sh, tools/mg.d/host.sh, docker/dev.Dockerfile, docker/dev.Dockerfile.dockerignore, docker/compose.yml, docker/sync-web-compose.yml, docker/sync-web.Dockerfile, docker/sync-web.Dockerfile.dockerignore]
+    budget_s: 3600
   - id: native-durability
     job: native-durability
     tier: T0
@@ -909,6 +916,8 @@ utilities:
   - {job: cleanroom, why: "restricted Codex implementation runner; boundary probes run before every invocation"}
   - {job: cleanroom-image, why: "builds the restricted Codex runtime; cleanroom verifies it before use"}
   - {job: core-format, why: "optional Rust source formatting on demand"}
+  - {job: sync-server-package, why: "Explicit clean image build; exact-image runtime smoke builds and verifies it in gates"}
+  - {job: sync-server-local, why: "Explicit persistent operator service and existing recovery commands; automated packaging uses an isolated synthetic volume"}
   - {job: sync-server-format, why: "explicit optional server source formatting on demand"}
   - {job: gate, why: "runs the tiers"}
   - {job: merge, why: "runs the gate for a branch and fast-forwards the integration branch"}

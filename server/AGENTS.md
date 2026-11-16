@@ -5,3 +5,4 @@
 - Lock order: target publication barrier, then collection state, then a metadata writer if needed. Full collection operations use only an authority read and need no metadata writer. Never hash, stream, await a second barrier, or wait on a client inside these scopes. Retirement is synchronous.
 - `test-hooks` is empty by default and must be absent from release artifacts. Tests use actual loopback HTTP and private temporary SQLite files; integrator runs them through MG.
 - Owner-root parent is operator-controlled and cannot be renamed by another same-UID process. Keep the root and its stable lock inode outside restore replacement (`state/` only); never unlink either lock.
+- Packaging uses the MG-generated context and `Dockerfile` runtime target. The `smoke` target is client tooling only. Keep production features empty, the static runtime inventory narrow, and the image-owned named-volume layout private; never add a privileged entrypoint to repair permissions.
