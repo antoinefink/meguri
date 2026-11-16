@@ -31,6 +31,10 @@ RECOVERY_FIXTURE = {
     'histories':['ahead','equal-reused','delayed-overtaken'],
     'media_names':['recovery-one.bin','recovery-two.bin'],
     'config_key':'recovery_authored', 'config_value':{'source':'Recovery','number':37},
+    'snapshot_payloads':['Recovery snapshot 0','Recovery snapshot 1'],
+    'abandoned_payloads':['Recovery abandoned 0','Recovery abandoned 1'],
+    'current_payloads':['Recovery current 0','Recovery current 1','Recovery current 2','Recovery current 3'],
+    'offline_edit':'Recovery offline edit','seed_review_ease':3,'offline_review_ease':2,'schema_delta_ms':1000,
     'limits':['Reference SDK mechanism only; no candidate restore, GUI or Mobile acceptance.',
               'Stopped whole-root rollback and credential replacement are controlled fixtures.',
               'Explicit server-authoritative download intentionally discards offline edits/review.']}
@@ -95,10 +99,10 @@ def run(api,fixture):
                 for note in fixture['base']['notes']+[fixture['base']['second_note']]: api.add_note(a,model,note)
                 require(a.note_count()==2,'recovery fixture needs two notes')
                 a.set_config(fixture['config_key'],fixture['config_value'])
-                card=a.sched.getCard();require(card is not None,'seed review unavailable');a.sched.answerCard(card,3)
+                card=a.sched.getCard();require(card is not None,'seed review unavailable');a.sched.answerCard(card,fixture['seed_review_ease'])
                 b,_=api.collection(root,'existing',fixture['base']);clients.append(b)
                 names=fixture['media_names']
-                for index,name in enumerate(names): a.media.write_data(name,('Recovery snapshot '+str(index)).encode())
+                for index,name in enumerate(names): a.media.write_data(name,fixture['snapshot_payloads'][index].encode())
                 with api.reference_server(root/'server') as (port,user,password),api.recorder(port) as rec:
                     rec.capture_media=True
                     endpoint=f'http://127.0.0.1:{rec.server_port}/'
@@ -116,7 +120,7 @@ def run(api,fixture):
                     old_auth=b.sync_login(username=user,password=password,endpoint=endpoint)
                     for index,name in enumerate(names):
                         time.sleep(1.05);path=pathlib.Path(a.media.dir())/name
-                        path.write_bytes(('Recovery abandoned '+str(index)).encode());path.parent.touch()
+                        path.write_bytes(fixture['abandoned_payloads'][index].encode());path.parent.touch()
                         api.media_sync(a,aa);api.media_sync(b,old_auth)
                     changes=[change for row in rec.observations if row['route']=='/msync/mediaChanges' for change in row['media_result']]
                     client_cursor=max(change[1] for change in changes)
@@ -132,7 +136,7 @@ def run(api,fixture):
                     # New legitimate changes reuse then overtake the abandoned cursor.
                     for index in range(0 if history=='ahead' else 2 if history=='equal-reused' else 4):
                         time.sleep(1.05);path=pathlib.Path(a.media.dir())/names[0 if index==0 else 1]
-                        path.write_bytes(('Recovery current '+str(index)).encode());path.parent.touch()
+                        path.write_bytes(fixture['current_payloads'][index].encode());path.parent.touch()
                         api.media_sync(a,aa)
                     server_usn=next(row['media_begin']['usn'] for row in reversed(rec.observations) if 'media_begin' in row)
                     # The latest upload can advance past its begin; a settled begin measures the final head.
@@ -143,13 +147,13 @@ def run(api,fixture):
                                   expected_collection=expected,expected_media_hashes=expected_media)
                     api.PHASE='recovery-'+history+'-offline-edit'
                     note=b.get_note(b.db.scalar('select id from notes order by id limit 1'))
-                    note.fields[0]='Recovery offline edit';b.update_note(note)
-                    card=b.sched.getCard();require(card is not None,'offline review unavailable');b.sched.answerCard(card,2)
+                    note.fields[0]=fixture['offline_edit'];b.update_note(note)
+                    card=b.sched.getCard();require(card is not None,'offline review unavailable');b.sched.answerCard(card,fixture['offline_review_ease'])
                     detail['offline_collection']=logical(b)
                     # Controlled equal-mod/different-scm fixture; not an SDK-emitted mutation.
                     a.sync_collection(aa,sync_media=False)
                     server_meta=next(row['meta'] for row in reversed(rec.observations) if 'meta' in row)
-                    b.db.execute('update col set mod=?, scm=?',server_meta['mod'],server_meta['scm']+1000)
+                    b.db.execute('update col set mod=?, scm=?',server_meta['mod'],server_meta['scm']+fixture['schema_delta_ms'])
                     b.close(downgrade=False);clients.remove(b)
                     b=api.Collection(str(root/'existing'/'collection.anki2'));clients.append(b)
                     detail['pre_recovery_stamps']=dict(zip(('mod','scm'),b.db.first('select mod,scm from col')))
