@@ -108,6 +108,7 @@ source result supplies no final credit.
 For final selections apply conformance/meguri-sync-local-delivery#L1–L7.
 The disjoint final_package input extends this boundary without changing
 intermediate_build semantics or historical full/normal/media/complete scope.
-Generated input manifests and concrete assertions require independent review
-before execution; generator authoring may precede those hashes. Receipt, actual
+Static prepared inputs and concrete assertions require independent review before
+final execution; dynamic offline event snapshots follow L1 capture/order rules and
+independent artifact review before credit. Generator authoring may precede hashes. Receipt, actual
 running-peer measurement and semantic validation bind identical final inputs.

@@ -75,8 +75,9 @@ image, running process, locks/features, assets and manifests; never relabel debu
 Desktop31 is the fixed concatenation of unchanged full11, normal10, media4 and
 candidate-final-additions.json six cases. Mobile10 and retained8 use
 candidate-mobile-final-selection.json and candidate-retained-final-selection.json.
-final-fixture-recipes.json gives original independent values. Preparation freezes
-actual input manifests, IDs and expected content before final execution and its
-independent review. Source templates do not fabricate runtime/device identities.
+final-fixture-recipes.json gives original independent values. Preparation freezes static
+initial input manifests, IDs and expected rules before final execution and review.
+Dynamic offline event snapshots follow L1 capture-before-submission rules, with
+actual artifacts independently reviewed before credit. Source templates do not fabricate runtime/device identities.
 Missing actual device/private routing remains incomplete. Historical selections
 and research catalog retain their scope/counts.

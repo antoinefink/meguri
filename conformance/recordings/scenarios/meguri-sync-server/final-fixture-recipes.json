@@ -190,7 +190,7 @@
       "reverse-added.txt": "Synthetic added from receiving client."
     }
   },
-  "generated_identity_policy": "Preparation freezes actual client-generated IDs, review/scheduling rows, supported values and every input file before candidate execution. Expected original values above are independent of candidate output; stamp normalization is explicit.",
+  "generated_identity_policy": "Static recipes/baselines/initial inputs and expectation rules frozen and independently reviewed before final execution. Later actual offline event snapshots captured/retained/hashed/frozen by pre-reviewed preparation code/rules BEFORE first candidate submission; bind case/action/actor/preparation identity/baseline and ordering. Compare later to unchanged snapshots/independent recipe values; review actual artifacts before credit. No per-event external approval pause or candidate-derived expectations.",
   "mobile_witness": "A supported authoritative full upload or synthetic export witnesses rich state actually resident on Mobile before independent Desktop comparison. Re-reading an unchanged server is insufficient.",
   "review_actions": {
     "forward": {
