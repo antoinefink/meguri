@@ -89,7 +89,8 @@ def resolve(root,path):
     overrides=['MEGURI_MAC_AGENT_PROFILE_STYLE=Manual','MEGURI_MAC_AGENT_PROFILE_SPECIFIER='+uuid]
     settings=[];baseline=[]
     roles=(('Meguri','com.antoinefink.meguri.dev'),('MeguriWidget','com.antoinefink.meguri.dev.widget'),
-           ('MeguriSnapshotTests','com.antoinefink.meguri.dev.snapshottests'))
+           ('MeguriSnapshotTests','com.antoinefink.meguri.dev.snapshottests'),
+           ('MeguriUITests','com.antoinefink.meguri.dev.uitests'))
     for role,identifier in roles:
         for output,extra in ((settings,overrides),(baseline,[])):
             values=json.loads(v.command(command+['-target',role]+extra,'profile-settings').stdout)
@@ -106,7 +107,7 @@ def resolve(root,path):
          and app.get('MEGURI_SIGNING')=='team' and app.get('CODE_SIGN_STYLE')=='Manual'
          and app.get('PROVISIONING_PROFILE_SPECIFIER')==uuid
          and app.get('PRODUCT_BUNDLE_IDENTIFIER')=='com.antoinefink.meguri.dev','profile-settings')
-    for target in ('MeguriWidget','MeguriSnapshotTests'):
+    for target,_ in roles[1:]:
         previous=[x['buildSettings'] for x in baseline if x.get('target')==target]
         current=[x['buildSettings'] for x in settings if x.get('target')==target]
         need(len(previous)==len(current)==1,'profile-target-scope')

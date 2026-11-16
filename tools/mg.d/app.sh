@@ -87,6 +87,7 @@ mg_app_mac_agent_profile_scope() {
   case "$5" in
     CloudAgent) return 0 ;;
     Snapshot) [ "${MG_JOB:-}" = mac-hosted-test ] ;;
+    UI) [ "${MG_JOB:-}" = drive ] ;;
     *) return 1 ;;
   esac
 }
@@ -290,6 +291,14 @@ mg_app_build_action() {
       mg_status fail
       return 1
     fi
+  fi
+  # The drive caller delivers products next and has no CloudAgent freeze.
+  if mg_app_mac_agent_profile_scope "$signing" "$action" "$platform" "$config" "$plan" "$scheme" &&
+      [ "${MG_JOB:-}/$plan" = drive/UI ] && [ -n "${MG_CLOUD_AGENT_MAC_PROFILE_BINDING:-}" ] &&
+      ! mg_app_mac_agent_profile_check; then
+    mg_failure agent-profile "App-only Mac profile changed before drive VM delivery"
+    mg_status fail
+    return 1
   fi
   return 0
 }

@@ -7,6 +7,8 @@ import cloud_agent_test as fixtures
 spec=importlib.util.spec_from_file_location('mac_profile_subject',Path(__file__).resolve().parents[1]/'scripts/cloud-agent-mac-profile.py')
 m=importlib.util.module_from_spec(spec);sys.modules[spec.name]=m;spec.loader.exec_module(m)
 UUID='00000000-0000-0000-0000-000000000001'
+ROLES=('Meguri','MeguriWidget','MeguriSnapshotTests','MeguriUITests')
+OTHER_ROLES=ROLES[1:]
 
 class ProfileTests(unittest.TestCase):
  def setUp(self):
@@ -19,6 +21,8 @@ class ProfileTests(unittest.TestCase):
   ent=self.root/'app/request.entitlements';ent.parent.mkdir(parents=True,exist_ok=True);ent.write_bytes(plistlib.dumps(self.f.ent))
   self.certificate_team=fixtures.TEAM;self.expired_certificate=False;self.other_certificate_cn=False;self.two_identities=False
   self.ent=ent;self.changed_other=False;self.target_shape=None;self.unexpected_role=None
+  self.queries=[];self.other_target_mutation=None
+  self.other_target_settings={role:{'CODE_SIGN_STYLE':'Automatic'} for role in OTHER_ROLES}
   self.settings=fixtures.settings();self.settings.update(CONFIGURATION='Debug',PLATFORM_NAME='macosx',MEGURI_SIGNING='team',
    DEVELOPMENT_TEAM=fixtures.TEAM,CODE_SIGN_ENTITLEMENTS='request.entitlements')
   for item in (patch.object(m.Path,'home',return_value=self.home),patch.object(m.v,'source',return_value=fixtures.SHA),
@@ -48,14 +52,25 @@ class ProfileTests(unittest.TestCase):
    self.assertIn('OBJROOT='+str(self.root/'build/app/CloudAgentMacDerivedData/Build/Intermediates.noindex'),args)
    for excluded in ('-scheme','-testPlan','-derivedDataPath','build-for-testing'):self.assertNotIn(excluded,args)
    role=args[args.index('-target')+1]
-   self.assertIn(role,('Meguri','MeguriWidget','MeguriSnapshotTests'))
+   self.assertIn(role,ROLES)
    custom=any(x.startswith('MEGURI_MAC_AGENT_PROFILE_SPECIFIER=') for x in args)
+   self.queries.append((role,custom))
    app=dict(self.settings,TARGET_NAME='Meguri',CODE_SIGN_STYLE='Manual' if custom else 'Automatic',PROVISIONING_PROFILE_SPECIFIER=UUID if custom else '')
    other={'CODE_SIGN_STYLE':'Manual' if custom and self.changed_other else 'Automatic','CONFIGURATION':'Debug',
     'PLATFORM_NAME':'macosx','MEGURI_SIGNING':'team','TARGET_NAME':role,
-    'PRODUCT_BUNDLE_IDENTIFIER':'com.antoinefink.meguri.dev.'+('widget' if role=='MeguriWidget' else 'snapshottests')}
+    'PRODUCT_BUNDLE_IDENTIFIER':'com.antoinefink.meguri.dev.'+{
+     'MeguriWidget':'widget','MeguriSnapshotTests':'snapshottests','MeguriUITests':'uitests'}.get(role,'')}
+   if role in OTHER_ROLES:
+    other.update(self.other_target_settings[role])
+    if custom and self.changed_other:other['CODE_SIGN_STYLE']='Manual'
+    if custom and self.other_target_mutation is not None:
+     target,key,value=self.other_target_mutation
+     if role==target:
+      if value is None:other.pop(key,None)
+      else:other[key]=value
    targets=[{'target':role,'buildSettings':app if role=='Meguri' else other}]
    if self.unexpected_role==role:targets.append({'target':'MeguriUITests','buildSettings':{}})
+   if self.unexpected_role==(role,custom):targets=[{'target':'GeneratedUnexpectedRole','buildSettings':other}]
    if self.target_shape is not None:
     target,phase,duplicate=self.target_shape
     if custom==phase:
@@ -72,6 +87,27 @@ class ProfileTests(unittest.TestCase):
  def test_exact_installed_profile_and_current_requested_grants_resolve_private_binding(self):
   value=m.resolve(str(self.root),str(self.input))
   self.assertEqual(value,{'file':str(self.input),'uuid':UUID,'sha256':m.v.digest(self.input.read_bytes()),'bytes':len(self.input.read_bytes()),'source_commit':fixtures.SHA})
+  self.assertEqual(self.queries,[(role,custom) for role in ROLES for custom in (True,False)])
+ def test_other_targets_keep_each_original_style_and_specifier_including_absence(self):
+  for style in ('Automatic','Manual'):
+   for specifier in (None,'','generated-other-profile'):
+    for role in OTHER_ROLES:
+     self.other_target_settings[role]={'CODE_SIGN_STYLE':style}
+     if specifier is not None:self.other_target_settings[role]['PROVISIONING_PROFILE_SPECIFIER']=specifier
+    with self.subTest(style=style,specifier=specifier):
+     self.assertEqual(m.resolve(str(self.root),str(self.input))['uuid'],UUID)
+ def test_each_other_target_style_and_specifier_mutation_refuses(self):
+  for role in OTHER_ROLES:
+   for key in ('CODE_SIGN_STYLE','PROVISIONING_PROFILE_SPECIFIER'):
+    changed=('Automatic','Manual') if key=='CODE_SIGN_STYLE' else ('generated-original','generated-changed')
+    for baseline,current in ((None,''),('',None),changed):
+     for other_role in OTHER_ROLES:self.other_target_settings[other_role]={'CODE_SIGN_STYLE':'Automatic'}
+     if baseline is None:self.other_target_settings[role].pop(key,None)
+     else:self.other_target_settings[role][key]=baseline
+     self.other_target_mutation=(role,key,current)
+     with self.subTest(role=role,key=key,baseline=baseline,current=current):
+      with self.assertRaisesRegex(m.v.Refused,'profile-target-scope'):
+       m.resolve(str(self.root),str(self.input))
  def test_changed_cache_wrong_host_grants_and_other_target_style_refuse(self):
   self.cache.write_bytes(b'other')
   with self.assertRaises(m.v.Refused):m.resolve(str(self.root),str(self.input))
@@ -84,7 +120,7 @@ class ProfileTests(unittest.TestCase):
   self.profile=copy.deepcopy(self.f.profile);self.profile['UUID']=UUID;self.changed_other=True
   with self.assertRaises(m.v.Refused):m.resolve(str(self.root),str(self.input))
  def test_named_queries_reject_missing_or_duplicate_each_named_role_in_either_phase(self):
-  for target in ('Meguri','MeguriWidget','MeguriSnapshotTests'):
+  for target in ROLES:
    for custom in (False,True):
     for duplicate in (False,True):
      self.target_shape=(target,custom,duplicate)
@@ -92,10 +128,17 @@ class ProfileTests(unittest.TestCase):
       with self.assertRaisesRegex(m.v.Refused,'profile-target-scope'):
        m.resolve(str(self.root),str(self.input))
  def test_named_queries_reject_unexpected_role_in_each_query(self):
-  for role in ('Meguri','MeguriWidget','MeguriSnapshotTests'):
+  for role in ROLES:
    self.unexpected_role=role
    with self.assertRaisesRegex(m.v.Refused,'profile-target-scope'):
     m.resolve(str(self.root),str(self.input))
+ def test_named_queries_reject_substituted_role_in_either_phase(self):
+  for role in ROLES:
+   for custom in (False,True):
+    self.unexpected_role=(role,custom)
+    with self.subTest(role=role,custom=custom):
+     with self.assertRaisesRegex(m.v.Refused,'profile-target-scope'):
+      m.resolve(str(self.root),str(self.input))
  def test_named_target_metadata_mismatch_refuses_even_with_one_row(self):
   original=self.command
   for key,bad in [('TARGET_NAME','GeneratedOther'),('PRODUCT_BUNDLE_IDENTIFIER','generated.other'),
@@ -108,6 +151,21 @@ class ProfileTests(unittest.TestCase):
     return result
    with patch.object(m.v,'command',side_effect=changed):
     with self.assertRaisesRegex(m.v.Refused,'profile-target-scope'):m.resolve(str(self.root),str(self.input))
+ def test_metadata_mismatch_refuses_for_each_role_and_phase(self):
+  original=self.command
+  for role in ROLES:
+   for custom in (False,True):
+    for key,bad in [('TARGET_NAME','GeneratedOther'),('PRODUCT_BUNDLE_IDENTIFIER','generated.other'),
+                    ('PLATFORM_NAME','iphonesimulator'),('CONFIGURATION','Release'),('MEGURI_SIGNING','adhoc')]:
+     def changed(args,category):
+      result=original(args,category)
+      if (args[0]=='/usr/bin/xcodebuild' and args[args.index('-target')+1]==role and
+          any(x.startswith('MEGURI_MAC_AGENT_PROFILE_SPECIFIER=') for x in args)==custom):
+       rows=json.loads(result.stdout);rows[0]['buildSettings'][key]=bad
+       return subprocess.CompletedProcess(args,0,json.dumps(rows).encode(),b'')
+      return result
+     with self.subTest(role=role,custom=custom,key=key),patch.object(m.v,'command',side_effect=changed):
+      with self.assertRaisesRegex(m.v.Refused,'profile-target-scope'):m.resolve(str(self.root),str(self.input))
  def test_transient_original_path_substitution_cannot_change_decoded_authority(self):
   admitted=self.input.read_bytes()
   def substitute(args,*,input,capture_output,timeout):
