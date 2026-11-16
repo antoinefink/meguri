@@ -2,7 +2,7 @@
 # Host orchestration only. All compilation and HTTP clients execute in Docker.
 mg_job sync-server-package host mg_sync_package_build "Build the pinned production image and separate synthetic client image from clean committed inputs"
 mg_job sync-server-package-test host mg_sync_package_test "Build and smoke the exact non-root image with private HTTPS, native content/media and restart persistence"
-mg_job sync-server-local host mg_sync_package_local "Local image/volume: init, start, stop, rotate-setup, recover-admin <username> [--reenable]"
+mg_job sync-server-local host mg_sync_package_local "Local image/volume: init, start, stop, rotate-setup, recover-admin <account-id> [--reenable]"
 
 mg_sync_package__failure() {
   mg_artifact packaging-evidence "$MG_RUN_DIR"
@@ -240,7 +240,7 @@ mg_sync_package__admin() {
 }
 mg_sync_package_local() {
   local MG_SYNC_INSTANCE="$MG_ROOT/build/sync-server-local" action="${1:-}" rc=0 receipt
-  [ "$#" -gt 0 ] || { mg_failure usage "sync-server-local init|start|stop|rotate-setup|recover-admin <username> [--reenable]"; mg_status error; return; }
+  [ "$#" -gt 0 ] || { mg_failure usage "sync-server-local init|start|stop|rotate-setup|recover-admin <account-id> [--reenable]"; mg_status error; return; }
   shift
   case "$action" in
     init|start|stop|rotate-setup) [ "$#" -eq 0 ] || rc=1 ;;

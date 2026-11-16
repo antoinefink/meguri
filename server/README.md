@@ -106,10 +106,17 @@ recovery command. It stops the recorded lock owner before opening the same
 volume. Add `--reenable` only when deliberately recovering a disabled admin.
 No password is put on the command line or in the normal service log.
 
+Select an existing, ready administrator by its opaque account ID, which differs
+from its username. Obtain the ID from the existing authenticated accounts API
+when available (`/api/admin/accounts`, or `/api/me` for your own identity), or
+inspect the stopped service's local accounts SQLite database using
+operator-chosen read-only tooling. The runtime has no SQLite CLI. Do not modify
+account data for this lookup. Set `ADMIN_ACCOUNT_ID` to that ID before running:
+
 ```sh
 tools/mg sync-server-local stop
 MEGURI_SYNC_RECOVERY_FILE=/absolute/private/password.txt \
-  tools/mg sync-server-local recover-admin your.admin
+  tools/mg sync-server-local recover-admin "$ADMIN_ACCOUNT_ID"
 tools/mg sync-server-local start
 ```
 
