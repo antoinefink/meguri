@@ -56,7 +56,8 @@ struct NativeReplayAccessibilityTests {
             guard error == .success, let value, CFGetTypeID(value) == CFStringGetTypeID() else { return nil }
             return value as? String
         }
-        func children(_ node: AXUIElement, _ attribute: String = kAXChildrenAttribute) throws -> [AXUIElement] {
+        func children(_ node: AXUIElement, _ attribute: String = kAXChildrenAttribute,
+                      path: String, depth: Int, role: String?, identifier: String?) throws -> [AXUIElement] {
             let (value, error) = try read(node, attribute)
             if error == .attributeUnsupported || error == .noValue { return [] }
             guard error == .success, let value, CFGetTypeID(value) == CFArrayGetTypeID(),
@@ -67,16 +68,17 @@ struct NativeReplayAccessibilityTests {
                 let arrayCount = array.map { String($0.count) } ?? "not-array"
                 let arrayCastSucceeded = (value as? [AXUIElement]) != nil
                 let readKind = attribute == kAXWindowsAttribute ? "windows" : "children"
-                throw NativeReplayFailure("Own-window native AX children unavailable/wrong-type/truncated: read=\(readKind) attribute=\(attribute) AXError.rawValue=\(error.rawValue) valueIsNil=\(value == nil) CFTypeID=\(typeID) arrayCount=\(arrayCount) AXUIElementArrayCastSucceeded=\(arrayCastSucceeded) AXIsProcessTrusted=\(AXIsProcessTrusted())")
+                throw NativeReplayFailure("Own-window native AX children unavailable/wrong-type/truncated: path=\(path) depth=\(depth) role=\(role ?? "nil") AXIdentifier=\(identifier.debugDescription) read=\(readKind) attribute=\(attribute) AXError.rawValue=\(error.rawValue) valueIsNil=\(value == nil) CFTypeID=\(typeID) arrayCount=\(arrayCount) AXUIElementArrayCastSucceeded=\(arrayCastSucceeded) AXIsProcessTrusted=\(AXIsProcessTrusted())")
             }
             return result
         }
-        let windows = try children(application, kAXWindowsAttribute)
+        let windows = try children(application, kAXWindowsAttribute,
+                                   path: "app-windows", depth: 0, role: nil, identifier: nil)
         var owned: [AXUIElement] = []
         for window in windows where try string(window, kAXIdentifierAttribute) == windowIdentifier { owned.append(window) }
         guard owned.count == 1, let window = owned.first else { throw NativeReplayFailure("Exact fixture AX window missing/duplicate") }
         var seen: [AXUIElement] = []
-        func visit(_ node: AXUIElement, depth: Int) throws {
+        func visit(_ node: AXUIElement, path: String, depth: Int) throws {
             guard depth <= 32, seen.count < 256, !seen.contains(where: { CFEqual($0, node) }) else {
                 throw NativeReplayFailure("Own-window native AX tree truncated/cyclic")
             }
@@ -96,9 +98,12 @@ struct NativeReplayAccessibilityTests {
                     rawDOMIdentifier: domID, domError: error, domWrongType: error == .success && !isString,
                     label: try string(node, kAXDescriptionAttribute), title: try string(node, kAXTitleAttribute)))
             }
-            for child in try children(node) { try visit(child, depth: depth + 1) }
+            for (index, child) in try children(node, path: path, depth: depth,
+                                               role: role, identifier: identifier).enumerated() {
+                try visit(child, path: "\(path)/\(index)", depth: depth + 1)
+            }
         }
-        try visit(window, depth: 0)
+        try visit(window, path: "root", depth: 0)
         return observation
     }
 
