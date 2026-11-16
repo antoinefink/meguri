@@ -53,7 +53,7 @@ extension ReviewCollectionStartupTests {
 }
 
 @MainActor
-@Suite struct ReviewCoordinatorTests {
+@Suite(.serialized) struct ReviewCoordinatorTests {
     #if DEBUG
     @Test(arguments: [false, true])
     func startDiagnostic(cardLoad: Bool) async {
