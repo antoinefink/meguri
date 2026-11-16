@@ -344,7 +344,9 @@ extension ReviewCollectionStartupTests {
         var starting: Task<Void, Never>?
         var resuming: Task<Void, any Error>?
         var pausing: Task<Bool, any Error>?
-        try await Self.lifecycleDeadline(unblocking: {
+        let trace = LifecycleTrace("secondPauseCancelsAndJoinsResumedStartup(close: \(close))", fixture: fixture,
+                                   gates: [("first", first), ("resumed", resumed), ("stopped", stopped)])
+        try await Self.lifecycleDeadline(trace, unblocking: {
             first.release(); resumed.release(); stopped.release()
         }, cleanup: {
             await starting?.value
@@ -352,34 +354,45 @@ extension ReviewCollectionStartupTests {
             _ = await pausing?.result
             _ = await fixture.model.end()
         }) {
-            fixture.surface.onRender = { try await first.wait() }
-            starting = Task { await fixture.model.start() }
+            fixture.surface.onRender = { trace.checkpoint = "first.wait"; try await first.wait() }
+            starting = Task { trace.checkpoint = "starting.start"; await fixture.model.start() }
+            trace.checkpoint = "first.requested"
             await first.requested()
+            trace.checkpoint = "model.pause"
             try await fixture.model.pause()
+            trace.checkpoint = "starting?.value"
             await starting?.value
-            fixture.surface.onRender = { try await resumed.wait() }
-            resuming = Task { try await fixture.model.resume() }
+            fixture.surface.onRender = { trace.checkpoint = "resumed.wait"; try await resumed.wait() }
+            resuming = Task { trace.checkpoint = "resuming.resume"; try await fixture.model.resume() }
+            trace.checkpoint = "resumed.requested"
             await resumed.requested()
-            fixture.surface.onSuspend = { _ = try? await stopped.wait() }
+            fixture.surface.onSuspend = { trace.checkpoint = "stopped.wait"; _ = try? await stopped.wait() }
             if !close { fixture.model.beginPause() }
             pausing = Task {
-                if close { return await fixture.model.end() }
+                if close { trace.checkpoint = "pausing.end"; return await fixture.model.end() }
+                trace.checkpoint = "model.pause"
                 try await fixture.model.pause()
                 return true
             }
+            trace.checkpoint = "stopped.requested"
             await stopped.requested()
+            trace.checkpoint = "resuming?.value"
             try await resuming?.value
             #expect(first.cancelled && resumed.cancelled && fixture.model.paused)
             #expect(fixture.surface.presented.isEmpty && fixture.client.ends == 0)
             stopped.release()
+            trace.checkpoint = "pausing?.value"
             #expect(try await pausing?.value == true)
+            trace.checkpoint = "endedAt.store.load"
             #expect((try await fixture.store.load()?.endedAt != nil) == close)
             fixture.surface.onSuspend = nil; fixture.surface.onRender = nil
             if !close {
                 fixture.client.currentHead = Self.head(2)
+                trace.checkpoint = "model.resume"
                 try await fixture.model.resume()
                 #expect(fixture.model.canReveal && fixture.surface.presented == [2])
             }
+            trace.checkpoint = "model.end"
             #expect(await fixture.model.end())
             #expect(fixture.client.ends == 1 && fixture.model.record.answers.isEmpty)
         }
@@ -390,29 +403,35 @@ extension ReviewCollectionStartupTests {
         let fixture = Fixture(), held = CancellableGate()
         var resuming: Task<Void, any Error>?
         var completedPresentations: [Int64] = []
-        try await Self.lifecycleDeadline(unblocking: { held.release() }, cleanup: {
+        let trace = LifecycleTrace("callerCancellationKeepsResumePausedUntilNewHeadIsPresented(stage: \(stage))", fixture: fixture,
+                                   gates: [("held", held)])
+        try await Self.lifecycleDeadline(trace, unblocking: { held.release() }, cleanup: {
             _ = await resuming?.result
             _ = await fixture.model.end()
             fixture.surface.onRender = nil; fixture.surface.onPresent = nil
         }) {
+            trace.checkpoint = "model.start"
             await fixture.model.start()
-            fixture.model.reveal(); await fixture.model.settled()
+            fixture.model.reveal(); trace.checkpoint = "reveal.settled"; await fixture.model.settled()
             try #require(fixture.model.canRate && fixture.surface.presented == [1])
+            trace.checkpoint = "model.pause"
             try await fixture.model.pause()
             fixture.client.currentHead = Self.head(2)
             let reads = fixture.client.headReads
-            if stage == "render" { fixture.surface.onRender = { try await held.wait() } }
+            if stage == "render" { fixture.surface.onRender = { trace.checkpoint = "held.wait"; try await held.wait() } }
             fixture.surface.onPresent = {
-                if stage == "present" { try await held.wait() }
+                if stage == "present" { trace.checkpoint = "held.wait"; try await held.wait() }
                 completedPresentations.append(2)
             }
-            let caller = Task { try await fixture.model.resume() }
+            let caller = Task { trace.checkpoint = "resuming.resume"; try await fixture.model.resume() }
             resuming = caller
+            trace.checkpoint = "held.requested"
             await held.requested()
             #expect(fixture.model.paused && !fixture.model.canReveal && !fixture.model.canRate)
             #expect(completedPresentations.isEmpty)
             // Cancel only this caller; no second lifecycle pause changes the revision.
             caller.cancel()
+            trace.checkpoint = "caller.result"
             let result = await caller.result
             switch result {
             case .success: Issue.record("Caller cancellation incorrectly completed Resume")
@@ -423,17 +442,20 @@ extension ReviewCollectionStartupTests {
             #expect(!fixture.model.canUndo && !fixture.model.canRedo)
             #expect(completedPresentations.isEmpty)
             if stage == "render" { #expect(fixture.surface.presented == [1]) }
-            fixture.model.rate(.good); await fixture.model.settled()
+            fixture.model.rate(.good); trace.checkpoint = "rate.settled"; await fixture.model.settled()
             #expect(fixture.client.answers == 0 && fixture.model.record.answers.isEmpty)
             #expect(fixture.client.ends == 0 && fixture.surface.calls.filter { $0 == "suspend" }.count == 1)
             fixture.surface.onRender = nil
             fixture.surface.onPresent = { completedPresentations.append(2) }
+            trace.checkpoint = "model.resume"
             try await fixture.model.resume()
             #expect(!fixture.model.paused && fixture.model.phase == .question)
             #expect(fixture.model.canReveal && !fixture.model.canRate && fixture.model.item?.cardId == 2)
             #expect(completedPresentations == [2] && fixture.surface.presented.last == 2)
             #expect(fixture.client.starts == 1 && fixture.client.headReads == reads + 2 && fixture.client.answers == 0)
+            trace.checkpoint = "store.load"
             #expect(try await fixture.store.load()?.answers.isEmpty == true)
+            trace.checkpoint = "model.end"
             #expect(await fixture.model.end())
             #expect(fixture.client.ends == 1 && fixture.surface.calls.last == "close")
         }
@@ -445,7 +467,9 @@ extension ReviewCollectionStartupTests {
         var starting: Task<Void, Never>?
         var resuming: Task<Void, any Error>?
         var loadEntries = 0, completedLoads = 0
-        try await Self.lifecycleDeadline(unblocking: {
+        let trace = LifecycleTrace("resumedStartupLoadPreservesCancellationOwnership(cancelCaller: \(cancelCaller))", fixture: fixture,
+                                   gates: [("initial", initial), ("resumed", resumed)])
+        try await Self.lifecycleDeadline(trace, unblocking: {
             initial.release(); resumed.release()
         }, cleanup: {
             await starting?.value
@@ -456,14 +480,17 @@ extension ReviewCollectionStartupTests {
             let acceptedHead = try #require(fixture.client.currentHead.items.first)
             fixture.surface.onLoad = {
                 loadEntries += 1
-                try await initial.wait()
+                trace.checkpoint = "initial.wait"; try await initial.wait()
                 completedLoads += 1
             }
-            starting = Task { await fixture.model.start() }
+            starting = Task { trace.checkpoint = "starting.start"; await fixture.model.start() }
+            trace.checkpoint = "initial.requested"
             await initial.requested()
             // requested() can also finish during cleanup: prove load actually entered.
             try #require(loadEntries == 1 && fixture.client.starts == 1 && fixture.model.sessionID == 5)
+            trace.checkpoint = "model.pause"
             try await fixture.model.pause()
+            trace.checkpoint = "starting?.value"
             await starting?.value
             let sessionID = try #require(fixture.model.sessionID)
             #expect(initial.cancelled && completedLoads == 0 && fixture.model.paused)
@@ -471,11 +498,12 @@ extension ReviewCollectionStartupTests {
 
             fixture.surface.onLoad = {
                 loadEntries += 1
-                try await resumed.wait()
+                trace.checkpoint = "resumed.wait"; try await resumed.wait()
                 completedLoads += 1
             }
-            let caller = Task { try await fixture.model.resume() }
+            let caller = Task { trace.checkpoint = "resuming.resume"; try await fixture.model.resume() }
             resuming = caller
+            trace.checkpoint = "resumed.requested"
             await resumed.requested()
             try #require(loadEntries == 2 && completedLoads == 0 && !resumed.cancelled)
             try #require(fixture.surface.calls.suffix(2) == ["resume", "load"])
@@ -485,8 +513,10 @@ extension ReviewCollectionStartupTests {
                 // No second Pause: only this caller cancels the Resume owner.
                 caller.cancel()
             } else {
+                trace.checkpoint = "model.pause"
                 try await fixture.model.pause()
             }
+            trace.checkpoint = "caller.result"
             switch await caller.result {
             case .success:
                 if cancelCaller { Issue.record("Caller cancellation incorrectly completed startup-load Resume") }
@@ -496,17 +526,19 @@ extension ReviewCollectionStartupTests {
             #expect(caller.isCancelled == cancelCaller && resumed.cancelled && fixture.model.paused)
             #expect(!fixture.model.canReveal && !fixture.model.canRate)
             #expect(!fixture.model.canUndo && !fixture.model.canRedo)
-            fixture.model.reveal(); fixture.model.rate(.good); await fixture.model.settled()
+            fixture.model.reveal(); fixture.model.rate(.good); trace.checkpoint = "rate.settled"; await fixture.model.settled()
             #expect(fixture.surface.reveals == 0 && fixture.surface.presented.isEmpty && completedLoads == 0)
             #expect(fixture.model.sessionID == sessionID && fixture.model.item?.cardId == acceptedHead.cardId)
             #expect(fixture.model.item?.stateToken == acceptedHead.stateToken && fixture.model.item?.renderKey == acceptedHead.renderKey)
             #expect(fixture.client.starts == 1 && fixture.client.headReads == 0 && fixture.client.answers == 0)
             #expect(fixture.client.restores.isEmpty && fixture.client.ends == 0 && fixture.model.record.answers.isEmpty)
             #expect(fixture.surface.calls.filter { $0 == "suspend" }.count == (cancelCaller ? 1 : 2))
+            trace.checkpoint = "store.load"
             let saved = try #require(try await fixture.store.load())
             #expect(saved.answers.isEmpty && saved.endedAt == nil)
 
             fixture.surface.onLoad = { loadEntries += 1; completedLoads += 1 }
+            trace.checkpoint = "model.resume"
             try await fixture.model.resume()
             #expect(loadEntries == 3 && completedLoads == 1)
             #expect(!fixture.model.paused && fixture.model.phase == .question && fixture.model.canReveal && !fixture.model.canRate)
@@ -515,6 +547,7 @@ extension ReviewCollectionStartupTests {
             #expect(fixture.surface.presented == [acceptedHead.cardId] && fixture.surface.reveals == 0)
             #expect(fixture.client.starts == 1 && fixture.client.headReads == 1 && fixture.client.answers == 0)
             #expect(fixture.client.restores.isEmpty && fixture.client.ends == 0 && fixture.model.record.answers.isEmpty)
+            trace.checkpoint = "model.end"
             #expect(await fixture.model.end())
             #expect(fixture.client.ends == 1 && fixture.surface.calls.last == "close")
         }
@@ -523,23 +556,32 @@ extension ReviewCollectionStartupTests {
     @Test(.timeLimit(.minutes(1))) func resumeAfterCloseJoinedWorkCannotRestartPages() async throws {
         let fixture = Fixture(), stopped = CancellableGate()
         var closing: Task<Bool, Never>?
-        try await Self.lifecycleDeadline(unblocking: { stopped.release() }, cleanup: {
+        let trace = LifecycleTrace("resumeAfterCloseJoinedWorkCannotRestartPages()", fixture: fixture,
+                                   gates: [("stopped", stopped)])
+        try await Self.lifecycleDeadline(trace, unblocking: { stopped.release() }, cleanup: {
             _ = await closing?.value
             _ = await fixture.model.end()
         }) {
+            trace.checkpoint = "model.start"
             await fixture.model.start()
-            fixture.surface.onSuspend = { _ = try? await stopped.wait() }
-            closing = Task { await fixture.model.end() }
+            fixture.surface.onSuspend = { trace.checkpoint = "stopped.wait"; _ = try? await stopped.wait() }
+            closing = Task { trace.checkpoint = "closing.end"; return await fixture.model.end() }
+            trace.checkpoint = "stopped.requested"
             await stopped.requested() // End has joined all original preparation.
             let calls = fixture.surface.calls, reads = fixture.client.headReads
+            trace.checkpoint = "model.resume"
             try await fixture.model.resume()
+            trace.checkpoint = "model.start"
             await fixture.model.start()
             #expect(fixture.surface.calls == calls && fixture.client.headReads == reads)
             #expect(fixture.model.paused && fixture.client.ends == 0)
+            trace.checkpoint = "endedAt.store.load"
             #expect(try await fixture.store.load()?.endedAt == nil)
             stopped.release()
+            trace.checkpoint = "closing?.value"
             #expect(await closing?.value == true)
             #expect(fixture.client.ends == 1 && fixture.surface.calls.last == "close")
+            trace.checkpoint = "endedAt.store.load"
             #expect(try await fixture.store.load()?.endedAt != nil)
         }
     }
@@ -551,7 +593,9 @@ extension ReviewCollectionStartupTests {
         var pausing: Task<Bool, any Error>?
         var order: [String] = []
         var physicallyStopped = false
-        try await Self.lifecycleDeadline(unblocking: {
+        let trace = LifecycleTrace("acceptedAnswerPreparationIsCancelledWithoutCancellingCommit(stage: \(stage), close: \(close))", fixture: fixture,
+                                   gates: [("accepted", accepted), ("preparation", preparation), ("stopped", stopped)])
+        try await Self.lifecycleDeadline(trace, unblocking: {
             accepted.release(); preparation.release(); stopped.release()
         }, cleanup: {
             _ = await pausing?.result
@@ -561,17 +605,18 @@ extension ReviewCollectionStartupTests {
             fixture.surface.onSuspend = nil; fixture.surface.onRender = nil; fixture.surface.onPresent = nil
             fixture.model.onRecordChanged = nil
         }) {
+            trace.checkpoint = "model.start"
             await fixture.model.start()
-            fixture.model.reveal(); await fixture.model.settled()
+            fixture.model.reveal(); trace.checkpoint = "reveal.settled"; await fixture.model.settled()
             fixture.client.onAnswerResult = {
-                try await accepted.wait()
+                trace.checkpoint = "accepted.wait"; try await accepted.wait()
                 // Real ordered fan-out path, including commit-before-result.
                 if stage == "core" { fixture.model.receive(Self.answerCommitted()) }
             }
-            if stage == "present" { fixture.surface.onPresent = { try await preparation.wait() } }
+            if stage == "present" { fixture.surface.onPresent = { trace.checkpoint = "preparation.wait"; try await preparation.wait() } }
             else {
                 fixture.surface.onRender = {
-                    do { try await preparation.wait() }
+                    do { trace.checkpoint = "preparation.wait"; try await preparation.wait() }
                     catch {
                         if stage == "failure" { throw BridgeError.internal("post-answer preparation failed") }
                         throw error
@@ -580,7 +625,7 @@ extension ReviewCollectionStartupTests {
             }
             fixture.surface.onSuspend = {
                 order.append("physical-stop")
-                _ = try? await stopped.wait()
+                trace.checkpoint = "stopped.wait"; _ = try? await stopped.wait()
                 physicallyStopped = true
                 order.append("stopped")
             }
@@ -591,6 +636,7 @@ extension ReviewCollectionStartupTests {
             fixture.client.onEnd = {
                 #expect(order.last == "pause-persist")
                 do {
+                    trace.checkpoint = "onEnd.store.load"
                     #expect(try await fixture.store.load()?.answers.first?.durable == true)
                 } catch {
                     Issue.record(error)
@@ -598,24 +644,29 @@ extension ReviewCollectionStartupTests {
                 order.append("CoreEnd")
             }
             fixture.model.rate(.good)
+            trace.checkpoint = "accepted.requested"
             await accepted.requested()
             if stage != "core" {
                 accepted.release()
+                trace.checkpoint = "preparation.requested"
                 await preparation.requested()
                 fixture.model.receive(Self.answerCommitted())
             }
             fixture.model.beginPause()
             pausing = Task {
-                if close { return await fixture.model.end() }
+                if close { trace.checkpoint = "pausing.end"; return await fixture.model.end() }
+                trace.checkpoint = "model.pause"
                 try await fixture.model.pause()
                 return true
             }
             // A pause requested before the answer returns must still retain it.
             accepted.release()
+            trace.checkpoint = "stopped.requested"
             await stopped.requested()
             #expect(!accepted.cancelled && fixture.client.answers == 1 && fixture.client.ends == 0)
             #expect(stage == "core" || preparation.cancelled)
             #expect(fixture.model.record.answers.count == 1 && fixture.model.record.answers[0].durable)
+            trace.checkpoint = "store.load"
             let saved = try #require(try await fixture.store.load())
             #expect(saved.answers == fixture.model.record.answers && saved.endedAt == nil)
             #expect(order.last == "physical-stop" && order.contains("accepted-persist"))
@@ -623,15 +674,19 @@ extension ReviewCollectionStartupTests {
             if stage == "failure" { #expect(fixture.model.notice?.contains("post-answer preparation failed") == true) }
             else { #expect(fixture.model.notice == nil) }
             stopped.release()
+            trace.checkpoint = "pausing?.value"
             #expect(try await pausing?.value == true)
             fixture.surface.onSuspend = nil; fixture.surface.onRender = nil; fixture.surface.onPresent = nil
             if !close {
+                trace.checkpoint = "model.resume"
                 try await fixture.model.resume()
                 #expect(fixture.model.phase == .question && fixture.model.item?.cardId == 2 && fixture.model.canReveal)
                 #expect(fixture.surface.presented.last == 2 && fixture.client.headReads > 0)
             }
+            trace.checkpoint = "model.end"
             #expect(await fixture.model.end())
             #expect(fixture.client.answers == 1 && fixture.client.ends == 1)
+            trace.checkpoint = "ended.store.load"
             let ended = try #require(try await fixture.store.load())
             #expect(ended.answers == saved.answers && ended.endedAt != nil)
             #expect(order.suffix(2) == ["CoreEnd", "ended-persist"] && fixture.surface.calls.last == "close")
@@ -646,7 +701,9 @@ extension ReviewCollectionStartupTests {
         let genuineFailure = path.hasSuffix("-failure")
         var visualJoined = false, physicallyStopped = false
         var pausing: Task<Bool, any Error>?
-        try await Self.lifecycleDeadline(unblocking: {
+        let trace = LifecycleTrace("visualPreparationIsCancelledAndJoinedBeforeLifecycleStop(path: \(path), close: \(close))", fixture: fixture,
+                                   gates: [("visual", visual), ("restored", restored), ("stopped", stopped)])
+        try await Self.lifecycleDeadline(trace, unblocking: {
             visual.release(); restored.release(); stopped.release()
         }, cleanup: {
             _ = await pausing?.result
@@ -655,16 +712,18 @@ extension ReviewCollectionStartupTests {
             fixture.client.onAnswerResult = nil; fixture.client.onEnd = nil; fixture.client.onRestoreResult = nil
             fixture.surface.onSuspend = nil; fixture.surface.onReveal = nil; fixture.surface.onRender = nil
         }) {
+            trace.checkpoint = "model.start"
             await fixture.model.start()
-            fixture.model.reveal(); await fixture.model.settled()
+            fixture.model.reveal(); trace.checkpoint = "reveal.settled"; await fixture.model.settled()
             // Synthetic ordered commit fan-out before the original result.
             fixture.client.onAnswerResult = { fixture.model.receive(Self.answerCommitted()) }
-            fixture.model.rate(.good); await fixture.model.settled()
+            fixture.model.rate(.good); trace.checkpoint = "rate.settled"; await fixture.model.settled()
+            trace.checkpoint = "store.load"
             try #require(try await fixture.store.load()?.answers.first?.durable == true)
-            if action == "redo" { fixture.model.restore(); await fixture.model.settled() }
+            if action == "redo" { fixture.model.restore(); trace.checkpoint = "restore.settled"; await fixture.model.settled() }
             let heldVisual: () async throws -> Void = {
                 defer { visualJoined = true }
-                do { try await visual.wait() }
+                do { trace.checkpoint = "visual.wait"; try await visual.wait() }
                 catch {
                     if genuineFailure { throw BridgeError.internal("concrete \(action) visual failure") }
                     throw error
@@ -672,18 +731,20 @@ extension ReviewCollectionStartupTests {
             }
             if action == "reveal" { fixture.surface.onReveal = heldVisual }
             else { fixture.surface.onRender = heldVisual }
-            if action == "undo-core" { fixture.client.onRestoreResult = { try await restored.wait() } }
+            if action == "undo-core" { fixture.client.onRestoreResult = { trace.checkpoint = "restored.wait"; try await restored.wait() } }
             fixture.surface.onSuspend = {
                 #expect(action == "undo-core" || (visualJoined && visual.cancelled))
                 #expect(fixture.client.starts == 1 && fixture.client.answers == 1 && fixture.client.ends == 0)
+                trace.checkpoint = "store.load"
                 let saved = try? await fixture.store.load()
                 #expect(saved?.answers == fixture.model.record.answers && saved?.undone == fixture.model.record.undone)
                 #expect(saved?.endedAt == nil)
-                _ = try? await stopped.wait()
+                trace.checkpoint = "stopped.wait"; _ = try? await stopped.wait()
                 physicallyStopped = true
             }
             fixture.client.onEnd = {
                 #expect(physicallyStopped)
+                trace.checkpoint = "onEnd.store.load"
                 let saved = try #require(try await fixture.store.load())
                 #expect(saved.answers == fixture.model.record.answers && saved.undone == fixture.model.record.undone)
                 #expect(saved.endedAt == nil)
@@ -693,13 +754,14 @@ extension ReviewCollectionStartupTests {
             case "refresh": fixture.model.requestRefresh(question: true)
             default: fixture.model.restore(redo: action == "redo")
             }
-            if action == "undo-core" { await restored.requested() }
-            else { await visual.requested() }
+            if action == "undo-core" { trace.checkpoint = "restored.requested"; await restored.requested() }
+            else { trace.checkpoint = "visual.requested"; await visual.requested() }
             // Redo's restored record becomes durable through ordinary fan-out.
             fixture.model.receive(Self.answerCommitted())
             fixture.model.beginPause()
             pausing = Task {
-                if close { return await fixture.model.end() }
+                if close { trace.checkpoint = "pausing.end"; return await fixture.model.end() }
+                trace.checkpoint = "model.pause"
                 try await fixture.model.pause()
                 return true
             }
@@ -707,11 +769,13 @@ extension ReviewCollectionStartupTests {
                 #expect(!fixture.surface.calls.contains("suspend") && fixture.client.ends == 0)
                 restored.release()
             }
+            trace.checkpoint = "stopped.requested"
             await stopped.requested()
             #expect(!restored.cancelled)
             #expect(action == "undo-core" || (visualJoined && visual.cancelled))
             let expectedRestores: [Bool] = action == "redo" ? [false, true] : action.hasPrefix("undo") ? [false] : []
             #expect(fixture.client.restores == expectedRestores)
+            trace.checkpoint = "store.load"
             let saved = try #require(try await fixture.store.load())
             if action.hasPrefix("undo") {
                 #expect(saved.answers.isEmpty && saved.undone.map(\.cardID) == [1] && saved.undone.first?.durable == true)
@@ -721,19 +785,23 @@ extension ReviewCollectionStartupTests {
             if genuineFailure { #expect(fixture.model.notice?.contains("concrete \(action) visual failure") == true) }
             else { #expect(fixture.model.notice == nil) }
             stopped.release()
+            trace.checkpoint = "pausing?.value"
             #expect(try await pausing?.value == true)
             fixture.surface.onSuspend = nil; fixture.surface.onReveal = nil; fixture.surface.onRender = nil
             fixture.client.onRestoreResult = nil
             if !close {
                 let reads = fixture.client.headReads
                 fixture.client.currentHead = Self.head(3)
+                trace.checkpoint = "model.resume"
                 try await fixture.model.resume()
                 #expect(fixture.client.headReads == reads + 1 && fixture.model.item?.cardId == 3)
                 #expect(fixture.model.canReveal && !fixture.model.canRate && fixture.surface.presented.last == 3)
             }
+            trace.checkpoint = "model.end"
             #expect(await fixture.model.end())
             #expect(fixture.client.starts == 1 && fixture.client.answers == 1 && fixture.client.restores == expectedRestores)
             #expect(fixture.client.ends == 1 && fixture.surface.calls.last == "close")
+            trace.checkpoint = "ended.store.load"
             let ended = try #require(try await fixture.store.load())
             #expect(ended.answers == saved.answers && ended.undone == saved.undone && ended.endedAt != nil)
         }
@@ -768,8 +836,37 @@ extension ReviewCollectionStartupTests {
             skippedIncomingCards: [], skippedIncomingNotes: [], skippedIncomingDecks: [], collectionRow: false))))
     }
 
-    private struct LifecycleDeadline: Error {}
+    @MainActor
+    private final class LifecycleTrace {
+        let label: String
+        var checkpoint = "scenario-not-started"
+        unowned let fixture: Fixture
+        let gates: [(String, CancellableGate)]
+
+        init(_ label: String, fixture: Fixture, gates: [(String, CancellableGate)]) {
+            self.label = label; self.fixture = fixture; self.gates = gates
+        }
+
+        // Last reached checkpoint across scenario and callbacks, not proof of a stalled await.
+        func snapshot() -> String {
+            let client = fixture.client, surface = fixture.surface
+            let gateFacts = gates.map { name, gate in
+                "\(name)(entries=\(gate.waitEntries),active=\(gate.activeWaits),cancelled=\(gate.cancelled))"
+            }.joined(separator: ",")
+            return "\(label) checkpoint=\(checkpoint) " +
+                "client(starts=\(client.starts),headReads=\(client.headReads),answers=\(client.answers),restores=\(client.restores.count),ends=\(client.ends)) " +
+                "surface(presented=\(surface.presented.count),reveals=\(surface.reveals),calls=\(surface.calls)) " +
+                "model(paused=\(fixture.model.paused),answers=\(fixture.model.record.answers.count),undone=\(fixture.model.record.undone.count),ended=\(fixture.model.record.endedAt != nil)) " +
+                "gates=[\(gateFacts)]"
+        }
+    }
+
+    private struct LifecycleDeadline: Error, CustomStringConvertible {
+        let snapshot: String
+        var description: String { "LifecycleDeadline(\(snapshot))" }
+    }
     private static func lifecycleDeadline(
+        _ trace: LifecycleTrace,
         unblocking: @escaping @MainActor () -> Void,
         cleanup: @escaping @MainActor () async -> Void,
         _ body: @escaping @MainActor @Sendable () async throws -> Void
@@ -782,7 +879,9 @@ extension ReviewCollectionStartupTests {
         let timeout = Task {
             do { try await Task.sleep(for: .seconds(3)) }
             catch { return }
-            results.continuation.yield(.failure(LifecycleDeadline()))
+            // Freeze primary evidence before cancellation, gate release, or cleanup.
+            let snapshot = trace.snapshot()
+            results.continuation.yield(.failure(LifecycleDeadline(snapshot: snapshot)))
         }
         let result: Result<Void, any Error> = await withTaskCancellationHandler {
             for await result in results.stream { return result }
@@ -1253,7 +1352,11 @@ extension ReviewCollectionStartupTests {
         private let entered = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingOldest(1))
         private let held = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingOldest(1))
         private(set) var cancelled = false
+        private(set) var waitEntries = 0
+        private(set) var activeWaits = 0
         func wait() async throws {
+            waitEntries += 1; activeWaits += 1
+            defer { activeWaits -= 1 }
             entered.continuation.yield(())
             for await _ in held.stream { break }
             cancelled = Task.isCancelled
