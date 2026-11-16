@@ -59,7 +59,7 @@ struct SnapshotAppLifecycleTests {
                 #expect(state == "original")
                 order.append("next")
                 state = "next"
-                defer { state = "original"; order.append("next restored") }
+                do { state = "original"; order.append("next restored") }
             }
         }
         await survivorRequested.wait()
