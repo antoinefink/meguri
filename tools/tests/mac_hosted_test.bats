@@ -101,6 +101,78 @@ field() { jq -r "$@" "$result"; }
 called() { grep -Eq -- "$1" "$STUB_LOG"; }
 not_called() { ! grep -Eq -- "$1" "$STUB_LOG"; }
 
+# Exercise the real helper under nounset, stubbing only result/VM boundaries.
+snapshot_dispatch() {
+  run --separate-stderr /bin/bash -uc '
+MG_TOOLS="$1/tools" MG_RUN_DIR="$2"
+MG_MAC_VM_LOST="" MG_MAC_VM_LOST_UNREACHABLE=""
+MG_MAC_VM_RUN_ERROR="" MG_MAC_VM_RUN_QUEUED="" MG_SNAP_BROKEN=0
+shift 2
+mg_job() { :; }
+mg_artifact() { :; }
+mg_failure() { echo "unexpected failure: $*" >&2; exit 1; }
+mg_vm_xcodebuild_test() {
+  jq -nc --args '\''$ARGS.positional'\'' -- "$@" >"$MG_RUN_DIR/dispatch.argv"
+  printf "%s|%s\n" "$TEST_RUNNER_MEGURI_SNAPSHOT_OUT" "$TEST_RUNNER_MEGURI_SNAPSHOT_MODE" >"$MG_RUN_DIR/dispatch.env"
+  mkdir -p "$1.xcresult"
+  : >"$1.log"
+}
+mg_sim_fetch() { printf "%s\n" "$1" >"$MG_RUN_DIR/dispatch.fetch"; }
+. "$MG_TOOLS/mg.d/snapshots.sh"
+mg_snapshots__xcodebuild "$MG_RUN_DIR/dispatch" "$@" \
+  "TEST_RUNNER_MEGURI_SNAPSHOT_OUT=$MG_RUN_DIR/guest output" TEST_RUNNER_MEGURI_SNAPSHOT_MODE=plan || exit 1
+[ -z "${TEST_RUNNER_MEGURI_SNAPSHOT_OUT+x}" ] && [ -z "${TEST_RUNNER_MEGURI_SNAPSHOT_MODE+x}" ]
+' -- "$SB" "$BATS_TEST_TMPDIR" "$@"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/dispatch.env")" = "$BATS_TEST_TMPDIR/guest output|plan" ]
+}
+snapshot_expect_argv() {
+  [ "$(cat "$BATS_TEST_TMPDIR/dispatch.argv")" = "$(jq -nc --args '$ARGS.positional' -- "$BATS_TEST_TMPDIR/dispatch" Snapshot "$@")" ]
+}
+
+@test "ordinary Mac all snapshots exclude exactly the three SDK observation methods" {
+  snapshot_dispatch platform=macOS,arch=arm64 all
+  snapshot_expect_argv macosx platform=macOS,arch=arm64 Debug \
+    '-skip-testing:MeguriSnapshotTests/CloudKitSoakTests/signedGeneratedMutationAndSyncNow()' \
+    '-skip-testing:MeguriSnapshotTests/NativeCloudFetchScopeProbeTests/observeAcknowledgedRecords()' \
+    '-skip-testing:MeguriSnapshotTests/NativeCloudFetchScopeProbeTests/observeSavedStateFetchScopes()'
+  [ ! -e "$BATS_TEST_TMPDIR/dispatch.fetch" ]
+}
+
+@test "ordinary selected Mac snapshots preserve only-testing and the input guard" {
+  snapshot_dispatch platform=macOS,arch=arm64 'ScreenSnapshots NativeCloudFetchScopeProbeTests/acknowledgedRecordInputGuards()'
+  snapshot_expect_argv macosx platform=macOS,arch=arm64 Debug \
+    '-only-testing:MeguriSnapshotTests/ScreenSnapshots' \
+    '-only-testing:MeguriSnapshotTests/NativeCloudFetchScopeProbeTests/acknowledgedRecordInputGuards()' \
+    '-skip-testing:MeguriSnapshotTests/CloudKitSoakTests/signedGeneratedMutationAndSyncNow()' \
+    '-skip-testing:MeguriSnapshotTests/NativeCloudFetchScopeProbeTests/observeAcknowledgedRecords()' \
+    '-skip-testing:MeguriSnapshotTests/NativeCloudFetchScopeProbeTests/observeSavedStateFetchScopes()'
+}
+
+@test "ordinary simulator snapshots preserve selected suites and exclude only the signed soak method" {
+  snapshot_dispatch id=FAKE-IPAD 'GalleryComponentSnapshots ScreenSnapshots'
+  snapshot_expect_argv iphonesimulator id=FAKE-IPAD Debug \
+    '-only-testing:MeguriSnapshotTests/GalleryComponentSnapshots' \
+    '-only-testing:MeguriSnapshotTests/ScreenSnapshots' \
+    '-skip-testing:MeguriSnapshotTests/CloudKitSoakTests/signedGeneratedMutationAndSyncNow()'
+  [ "$(cat "$BATS_TEST_TMPDIR/dispatch.fetch")" = "$BATS_TEST_TMPDIR/dispatch" ]
+}
+
+@test "result-only Snapshot calls preserve exact dedicated selectors without exclusions or output fetch" {
+  local selector
+  for selector in 'CloudKitSoakTests/signedGeneratedMutationAndSyncNow()' \
+      'NativeCloudFetchScopeProbeTests/observeAcknowledgedRecords()' \
+      'NativeCloudFetchScopeProbeTests/observeSavedStateFetchScopes()' \
+      'NativeCloudFetchScopeProbeTests/acknowledgedRecordInputGuards()'; do
+    snapshot_dispatch platform=macOS,arch=arm64 "$selector" --result-only
+    snapshot_expect_argv macosx platform=macOS,arch=arm64 Debug "-only-testing:MeguriSnapshotTests/$selector"
+  done
+  snapshot_dispatch id=FAKE-IPAD 'CloudKitSoakTests/signedGeneratedMutationAndSyncNow()' --result-only
+  snapshot_expect_argv iphonesimulator id=FAKE-IPAD Debug \
+    '-only-testing:MeguriSnapshotTests/CloudKitSoakTests/signedGeneratedMutationAndSyncNow()'
+  [ ! -e "$BATS_TEST_TMPDIR/dispatch.fetch" ]
+}
+
 @test "mac-hosted-test requires one safe exact selector before any work" {
   local bad
   mg
@@ -148,6 +220,22 @@ not_called() { ! grep -Eq -- "$1" "$STUB_LOG"; }
   set_cases "MeguriSnapshotTests/$SUITE" Passed
   mg --suite "$SUITE"
   [ "$status" -eq 0 ]
+}
+
+@test "mac-hosted-test keeps dedicated SDK observation methods and the guard selectable without exclusions" {
+  local selector
+  for selector in CloudKitSoakTests/signedGeneratedMutationAndSyncNow \
+      NativeCloudFetchScopeProbeTests/observeAcknowledgedRecords \
+      NativeCloudFetchScopeProbeTests/observeSavedStateFetchScopes \
+      NativeCloudFetchScopeProbeTests/acknowledgedRecordInputGuards; do
+    : >"$STUB_LOG"
+    set_cases "$selector()" Passed
+    mg --suite "$selector"
+    [ "$status" -eq 0 ]
+    [ "$(field .status)" = pass ]
+    called "^vm-test .* Snapshot macosx platform=macOS,arch=arm64 Debug -only-testing:MeguriSnapshotTests/$selector\\(\\)$"
+    not_called 'skip-testing|FORBIDDEN|RAW XCODE'
+  done
 }
 
 @test "mac-hosted-test refuses zero executions and a skipped selected method" {

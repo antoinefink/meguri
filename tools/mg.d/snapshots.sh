@@ -302,7 +302,7 @@ mg_snapshots__session() {
 # MG_SNAP_TEST_EXIT without snapshot failure/output handling. Default callers
 # retain their existing behavior; only mac-hosted-test consumes this seam.
 mg_snapshots__xcodebuild() {
-  local out="$1" dest="$2" suites="$3" only=() s rc summary e sdk=iphonesimulator
+  local out="$1" dest="$2" suites="$3" only=() skip=() s rc summary e sdk=iphonesimulator
   local output="" failures probe err="$1.output.log" result_only=false
   MG_SNAP_NO_OUTPUT=""
   shift 3
@@ -318,13 +318,22 @@ mg_snapshots__xcodebuild() {
   rm -rf "$out.xcresult"
   mkdir -p "$(dirname "$out")"
   [ "$dest" != "platform=macOS,arch=arm64" ] || sdk=macosx
+  # SDK observations require dedicated inputs. Keep the input guard enabled
+  # and leave exact --result-only selections untouched.
+  if [ "$result_only" = false ]; then
+    skip=("-skip-testing:MeguriSnapshotTests/CloudKitSoakTests/signedGeneratedMutationAndSyncNow()")
+    if [ "$sdk" = macosx ]; then
+      skip+=("-skip-testing:MeguriSnapshotTests/NativeCloudFetchScopeProbeTests/observeAcknowledgedRecords()"
+        "-skip-testing:MeguriSnapshotTests/NativeCloudFetchScopeProbeTests/observeSavedStateFetchScopes()")
+    fi
+  fi
   # mg_vm_xcodebuild_test passes the exported TEST_RUNNER_ variables.
   for e in "$@"; do
     export "${e?}"
     case "$e" in TEST_RUNNER_MEGURI_SNAPSHOT_OUT=*) output="${e#*=}" ;; esac
   done
   rm -rf "$out"
-  mg_vm_xcodebuild_test "$out" Snapshot "$sdk" "$dest" Debug ${only[0]+"${only[@]}"}
+  mg_vm_xcodebuild_test "$out" Snapshot "$sdk" "$dest" Debug ${only[0]+"${only[@]}"} ${skip[0]+"${skip[@]}"}
   rc=$?
   for e in "$@"; do unset "${e%%=*}"; done
   [ -z "$MG_MAC_VM_RUN_QUEUED" ] || return 2
