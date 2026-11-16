@@ -158,22 +158,31 @@ impl HttpBody for Stream {
     }
 }
 pub(crate) fn download(service:Arc<Service>, snapshot:super::full::Snapshot) -> Result<Response> {
-    let size=snapshot.file.metadata()?.len();
+    file_download(service,snapshot.file.try_clone()?,snapshot)
+}
+/// A file-backed payload retains its private stage/pin through encoding and
+/// response cancellation. Media ZIP preparation uses the same bounded stream.
+pub(crate) fn file_download<T:Send+'static>(service:Arc<Service>,mut file:std::fs::File,hold:T)->Result<Response> {
+    let size=file.metadata()?.len();
     let (tx,rx)=mpsc::channel(2);
     let runtime=tokio::runtime::Handle::current();
     // Independent slot survives response cancellation until the encoder stops.
     let permit=service.native_ingress.encoders.clone().try_acquire_owned().map_err(|_|Error::limited(1))?;
     tokio::task::spawn_blocking(move || {
         let _ownership=(service,permit);
-        let mut snapshot=snapshot;
         let error_tx=tx.clone();
         let result=(|| -> io::Result<()> {
             let mut encoder=zstd::stream::write::Encoder::new(Writer {tx,runtime},0)?;
-            io::copy(&mut snapshot.file,&mut encoder)?;
+            io::copy(&mut file,&mut encoder)?;
             encoder.finish()?;
             Ok(())
         })();
+        // Keep the last sender until private staging/pins have been released.
+        // Otherwise the receiver can observe EOF before their temp leases drop.
+        drop(file);
+        drop(hold);
         if result.is_err() { let _=error_tx.try_send(Err(io::Error::other("native snapshot stream failed"))); }
+        drop(error_tx);
     });
     let mut response=Response::new(Body::new(Stream(rx)));
     response.headers_mut().insert("anki-original-size",size.to_string().parse().expect("integer header"));

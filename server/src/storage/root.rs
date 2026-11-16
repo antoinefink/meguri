@@ -186,7 +186,7 @@ impl DataRoot {
     }
     /// Open each component relative to the retained root descriptor. Every
     /// observed directory stays pinned for this ownership session.
-    pub(super) fn bound_dir(&self, relative: &Path, create: bool) -> Result<File> {
+    pub(crate) fn bound_dir(&self, relative: &Path, create: bool) -> Result<File> {
         let mut pinned = self.directories.lock().map_err(|_| unavailable())?;
         self.bound_dir_locked(relative,create,&mut pinned)
     }
@@ -456,7 +456,7 @@ impl DataRoot {
             drop(db);
             return self.initialize_schema();
         }
-        if version != 1 {
+        if !matches!(version,1|2) {
             return Err(unavailable());
         }
         super::semantic::validate(self, &db, true)?;
@@ -516,7 +516,7 @@ impl DataRoot {
         let version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
         let integrity: String = db.query_row("PRAGMA quick_check", [], |r| r.get(0))?;
         let foreign: bool = db.prepare("PRAGMA foreign_key_check")?.exists([])?;
-        if version != 1 || integrity != "ok" || foreign {
+        if !matches!(version,1|2) || integrity != "ok" || foreign {
             return Err(unavailable());
         }
         let (phase, hash): (String, Vec<u8>) = db.query_row(

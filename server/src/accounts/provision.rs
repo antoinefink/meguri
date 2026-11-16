@@ -140,7 +140,7 @@ impl Service {
             } else {
                 if tx.query_row("SELECT EXISTS(SELECT 1 FROM accounts WHERE username=?1)",[&name],|r|r.get::<_,bool>(0))? { return Err(Error::new("username_unavailable")); }
                 let role=if kind=="setup" {"admin"} else {"member"};
-                tx.execute("INSERT INTO accounts VALUES(?1,?2,?3,'provisioning',1,?4,1,1)",params![id,name,role,phc])?;
+                tx.execute("INSERT INTO accounts(id,username,role,provisioning_state,enabled,password_phc,password_revision,generation) VALUES(?1,?2,?3,'provisioning',1,?4,1,1)",params![id,name,role,phc])?;
                 tx.execute("UPDATE capabilities SET state='provisioning',reserved_id=?2 WHERE hash=?1",params![hash.as_slice(),id])?;
                 tx.execute("INSERT INTO provisioning_reservations VALUES(?1,?2,?3,?4,?5)",params![hash.as_slice(),id,name,role,crypto::digest(phc.as_bytes()).as_slice()])?;
                 read_account(&tx,&id)?.ok_or(Error::new("storage_unavailable"))?

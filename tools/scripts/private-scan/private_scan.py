@@ -893,6 +893,14 @@ PUBLIC_ARTIFACTS = {
         'a75f35b5d4adda3f222ba61a56fa33ae6ef6000572a7c0b2e85413e85a3f4b62',
     'oracle/meguri-sync-server/tests/test_media.py':
         'c819a65c159e28a1fe70ae3436e94d909e9a008320210f476114bf8a9c83697d',
+    'server/src/media/archive.rs':
+        '33e053ff1dc4f8965f61212ae5d56d3e8c3337db173473be46ff8bad0da3bded',
+    'server/src/media/recovery.rs':
+        'c5388c9f59ef653beb7d7472f3195dc106bb732ecb797475cfc4671c0735eba5',
+    'server/tests/media.rs':
+        '1f397837922affc5e36fee7e450248c648ab3f2426cc81622829a52b884b4fe5',
+    'server/tests/media_disk_full.rs':
+        '98c3a131c1bb05110a2338ae9aee42fd37d8608e8f2ea854475a33ad1518ac57',
     PUBLIC_NOTICE_PATH: PUBLIC_NOTICE_SHA256,
     "specs/licenses/jquery-3.7.1-LICENSE.txt": "d4db9ebe6f29f5168eac45ad713f055623ac5d0dcd5ba92da23d650ae012020d",
     "app/Packages/MeguriKit/Sources/CardRendering/Resources/CardRuntime/vendor/jquery-3.7.1.min.js":
@@ -962,15 +970,15 @@ PUBLIC_ARTIFACTS = {
     # account-service code, tests and documentation. Includes production paths;
     # each entry admits only its exact path and complete reviewed bytes.
     'server/DEPENDENCIES.md':
-        '9ff3a746c6efbfaae3886cc4e2a829c6dc2d94fce7899cee7a1bd5dab347eb81',
+        '1fdefcfdee0a81e3c190550cedfc8667b1bd6ba0f21b1727664e0afa91e52148',
     'server/src/error.rs':
         '33e51ae13c05fb5124242b189fc02851103684fb3e03e104de63bd1d0a151261',
     'server/src/main.rs':
         '46699d99127a80945a264e9a461c17cdfcaf1f28cacf56ebf80ed9cd8d9882bf',
     'server/src/accounts/mod.rs':
-        'b3d43c40a3349d34e37a74ff6b9b3ee765e1739f2f6c00ced4d4f43d2d033428',
+        '21134b14725958e298960a4d10423348a9db1ec5d6b52cfec270dba763c9d606',
     'server/src/accounts/provision.rs':
-        'be0cd6852e5f711fa34064f34d278817cc1cb18cf166d3c2a81d2fd09ed05589',
+        'f75596225c443a3f33a58c5e1322ceba52326c4a7b507723c30b4f2aa6fc0416',
     'server/src/httpapi/AGENTS.md':
         'ee08f06fbb1c5c420b5dbf55137846012523c0ec5aa37d6f73435f07bb722785',
     'server/src/httpapi/ingress.rs':
@@ -982,13 +990,13 @@ PUBLIC_ARTIFACTS = {
     'server/src/storage/schema.sql':
         '4842a61b5bf0e3b8e909364d5df7667aea59f054c7175313dd28f840f6c7a31b',
     'server/src/storage/semantic.rs':
-        'a1b812ebdd2ea8ef4c0300025492f172c968f5fd35c6507068a91e307cb48902',
+        '3da133a09e7d4e3f225a696fad20652c465309522f97825f78a8f022e2f18945',
     'server/src/storage/tests.rs':
         'ad552c0f8ee03fd30aed02177781877457d98f1a343a94d76012204f4c4f7dca',
     'server/tests/accounts.rs':
         '7e0fa1344776c603a782ff3327e7aa47791357d21e049b9d26cb05cdb4adb2d5',
     'server/tests/http_contract.rs':
-        'a0083f29d1749b47b7df75bf3d398c462d2a077f31b2a34f50de09e75151a234',
+        'b3af9669195af18792f1c9b44e8de582f7fb12ac658430f7bdf3ba469d8fcb7a',
     'server/tests/provision.rs':
         '73e9e3159679125a5aea2d5fd845326fb7d36cd7b328f84a04b4eef30c02aa9f',
     'server/tests/recovery.rs':
@@ -1004,13 +1012,13 @@ PUBLIC_ARTIFACTS = {
     'server/src/collection/schema.rs':
         'e17519c1a370abb797bba2f0beebeb6813f80d954fc2e7a952a626c74d887fea',
     'server/src/protocol/framing.rs':
-        'a2e6e3f21c019a17531c6a140e519b65d17eba96fa6fd994e85d3b6230ab6819',
+        'a1349d00d0b25dd659e0e8fff5d3adc6b7ce63d20f861e17604e60071d79b777',
     'server/src/protocol/full.rs':
         '1e00dd45e0975e6fcd94c9a05b217b236a202c64573f2585a8a8096f751bd640',
     'server/src/protocol/mod.rs':
-        '2cda93705c74963a1a305b45d0fc2cdcb7581e484051e80c6b21b461c4e57d71',
+        '32c7e634ac02543ee958fa7df92aad82c2d7600c29271ed0d97a91423ac35d84',
     'server/src/storage/root.rs':
-        'dd59a110b203632166f301573d6435be1c40fd0c68a40abdbfa6448e6ae65037',
+        'bae80427f23487936d206ea04d9f9ae81db6b920939b752d7a29f2517ac0b9cc',
     'server/tools/candidate-output.py':
         '4f0e092bdb45811046defae71b0c822d97b1994311e9cda2f3489a7c1b355763',
     'docs/process/review-log/meguri-sync-U5.md':

@@ -105,6 +105,10 @@ impl Service {
             hooks: crate::test_hooks::Hooks::default(),
         });
         service.resume_startup().await?;
+        // Provisioning must obtain its staging budget before any schema write.
+        // The exclusive root owner still prevents serving until both complete;
+        // upgrade_media validates semantics before and after migration.
+        service.metadata.files(|r| { r.upgrade_media()?; crate::media::recovery::startup(r) }).await?;
         Ok(service)
     }
     pub async fn status(&self) -> Result<bool> {

@@ -533,9 +533,10 @@ async fn configured_origin_and_urls_ignore_host_forwarding_native_is_independent
                 r = r.header("origin", origin);
             }
             let r = r.send().await.unwrap();
-            assert_eq!(r.status(), 404);
+            let registered=path=="/msync/begin";
+            assert_eq!(r.status(), if registered {400} else {404});
             headers(&r);
-            assert_eq!(r.text().await.unwrap(), "route_not_found");
+            assert_eq!(r.text().await.unwrap(), if registered {"invalid_request"} else {"route_not_found"});
         }
     }
     for path in ["/api/unknown", "/api/missing.js"] {

@@ -158,9 +158,17 @@ impl Service {
         a: NativeAuthority,
         f: impl FnOnce(&Connection) -> Result<T> + Send + 'static,
     ) -> Result<T> {
+        self.publish_at(a,"publish_with_barrier",f).await
+    }
+    /// Same coordinator and transaction; a named test boundary distinguishes a
+    /// media commit from its earlier metadata-only snapshot.
+    pub(crate) async fn publish_at<T: Send + 'static>(
+        &self, a:NativeAuthority, phase:&'static str,
+        f:impl FnOnce(&Connection)->Result<T>+Send+'static,
+    )->Result<T> {
         let gate = self.publication_barrier(&a).await?;
         let guard = gate.enter().await;
-        self.pause("publish_with_barrier").await;
+        self.pause(phase).await;
         self.metadata
             .run(move |c| {
                 let _publication = (gate, guard);

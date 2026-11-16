@@ -4,6 +4,7 @@ pub mod login;
 pub mod meta;
 pub(crate) mod full;
 pub(crate) mod normal;
+pub(crate) mod media;
 use crate::{Error, Result, Service, collection::schema};
 use axum::{body::Body, extract::{ConnectInfo, Request}, http::{Method, StatusCode}, response::{IntoResponse,Response}};
 use serde::Deserialize;
@@ -14,7 +15,7 @@ fn error(e:Error)->Response {
         "authentication_failed" | "stale_authority" => StatusCode::FORBIDDEN,
         "invalid_collection" | "invalid_request" | "validation_failed" => StatusCode::BAD_REQUEST,
         "unsupported_normal_case" => StatusCode::BAD_REQUEST,
-        "invalid_session" => StatusCode::CONFLICT,
+        "invalid_session" | "missing_media" => StatusCode::CONFLICT,
         _ => e.status(),
     };
     let mut response=(status,e.code).into_response();
@@ -33,7 +34,10 @@ const METHODS:&[&str]=&["hostKey","meta","upload","download","start","applyGrave
 pub(crate) async fn handle(service:Arc<Service>,request:Request)->Response {
     let (parts,body)=request.into_parts();
     // Native names have no alternate route or SPA behavior.
-    let Some(method)=parts.uri.path().strip_prefix("/sync/").filter(|s|METHODS.contains(s)) else {
+    let media_route=parts.uri.path().starts_with("/msync/");
+    let route=if media_route {parts.uri.path().strip_prefix("/msync/").filter(|s|media::METHODS.contains(s))}
+        else {parts.uri.path().strip_prefix("/sync/").filter(|s|METHODS.contains(s))};
+    let Some(method)=route else {
         return framing::retain(error(Error::new("route_not_found")),body,None,service);
     };
     let method=method.to_owned();
@@ -57,7 +61,8 @@ struct Empty {}
 async fn dispatch(service:Arc<Service>,parts:&axum::http::request::Parts,method:&str,body:&mut Body)->Result<Response> {
     if parts.uri.query().is_some() || parts.headers.contains_key("content-encoding") { return Err(Error::new("invalid_request")); }
     let header=header(parts)?;
-    if method=="hostKey" {
+    let media_route=parts.uri.path().starts_with("/msync/");
+    if !media_route && method=="hostKey" {
         let bytes=framing::receive(service.clone(),body,move |reader,limit| {
             let mut bytes=Vec::new(); framing::decode(reader,&mut bytes,limit)?; Ok(bytes)
         }).await?;
@@ -68,6 +73,7 @@ async fn dispatch(service:Arc<Service>,parts:&axum::http::request::Parts,method:
         return framing::response(&serde_json::to_vec(&serde_json::json!({"key":key})).map_err(|_|Error::new("internal_error"))?);
     }
     let authority=service.validate_hostkey(&header.k).await?;
+    if media_route {return media::handle(service,authority,method,body).await;}
     if !matches!(method,"upload"|"download"|"meta") {
         return normal::handle(service,authority,header.s,method.to_owned(),body).await;
     }
@@ -94,10 +100,14 @@ async fn dispatch(service:Arc<Service>,parts:&axum::http::request::Parts,method:
                 let request:meta::Request=framing::json(&bytes)?;
                 if request.v!=11 { return Err(Error::new("invalid_request")); }
                 let id=authority.account_id().to_owned();
+                let authority_for_media=authority.clone();
                 let result=service.collection_operation(authority,false,move |root| {
                     let _capacity=capacity;
                     meta::read(&schema::open(&root.collection_path(&id)?,false)?)
                 }).await?;
+                let mut result=result;
+                let id=authority_for_media.account_id().to_owned();
+                result.media_usn=service.publish(authority_for_media,move |c|crate::media::index::cursor(c,&id)).await?;
                 framing::response(&serde_json::to_vec(&result).map_err(|_|Error::new("internal_error"))?)
             } else {
                 let _:Empty=framing::json(&bytes)?;

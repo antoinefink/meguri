@@ -8,6 +8,7 @@ pub mod crypto;
 pub mod error;
 pub mod httpapi;
 pub mod limits;
+pub(crate) mod media;
 pub mod protocol;
 pub mod storage;
 pub mod webassets;

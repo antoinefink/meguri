@@ -199,7 +199,7 @@ impl Service {
     ) -> Result<()> {
         crypto::new_password(&password)?;
         let metadata = Metadata::new(Arc::new(root));
-        metadata.files(|r| r.check_initialized()).await?;
+        metadata.files(|r| r.upgrade_media()).await?;
         let phc = HashPool::default()
             .run(move || crypto::hash(&password))
             .await?;

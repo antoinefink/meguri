@@ -19,7 +19,7 @@ Desktop interoperability, independent review or a release notice/source bundle.
 | `zstd =0.14.4`, defaults disabled | Required streaming raw protocol compression, concatenated frames and a bounded decoder window, without HTTP content coding. Prefer the latest compatible exact patch from the supplied official catalog, released 2026-11-12. The catalog lists BSD-3-Clause for the binding and normal zstd-safe ^8.3.0; these facts are not a security guarantee. | Measured zstd 0.14.4, zstd-safe 8.3.0 and zstd-sys 2.1.3+zstd.1.5.7; exact features/licenses below. Actual deny/about passed; native distribution inputs and final release notices/source remain release work. |
 | `regex =1.11.2`, defaults disabled; `std`, `perf`, `unicode` | Neutral pinned Unicode pattern semantics for note derived values, including malformed markup. No HTML parser or browser rendering. | Measured 1.11.2 and its automata/syntax graph below; MIT OR Apache-2.0. Unicode tables retain their separate notices. Supplied primary catalog records MSRV 1.65. Actual deny/about passed; final distribution notices remain required. |
 | `htmlescape =0.3.1`, defaults disabled | Neutral pinned all-or-nothing HTML 4 entity decoding through the Result API. Independent composition of public rules, without meguri-text dependencies. | Measured 0.3.1, features `[]`; actual metadata license expression is Apache-2.0 / MIT / MPL-2.0. Actual deny/about passed with the approved selection; do not generalize the sole package-scoped model MPL allowance to another package. |
-| `sha1 =0.11.0`, defaults disabled | RustCrypto legacy first-field note checksum only. Never used for security and no locally authored primitive. | Measured 0.11.0, features `[]`, MIT OR Apache-2.0; actual deny/about passed. Supplied primary catalog identifies stable release 2026-03-27 and normal cfg-if/digest 0.11/cpufeatures 0.3. |
+| `sha1 =0.11.0`, defaults disabled | RustCrypto legacy first-field note checksum and media protocol digest. Never an authorization proof; no locally authored primitive. | Measured 0.11.0, features `[]`, MIT OR Apache-2.0; actual deny/about passed. Supplied primary catalog identifies stable release 2026-03-27 and normal cfg-if/digest 0.11/cpufeatures 0.3. |
 | `rusqlite =0.41.1`, defaults disabled, `bundled`, `backup`, `collation` | Existing pin with SQLite backup for complete committed snapshots and the collection collation. Independently authored WAL/FULL lifecycle, without app storage policy. | Measured rusqlite/libsqlite3-sys features and licenses below; actual deny/about passed. Final native SQLite compile-option evidence, including statistics support, is separate from graph resolution. |
 
 The model's four intended production dependencies are ryu, serde, serde_json
@@ -135,11 +135,142 @@ jobs. Do not import core/Cargo.lock. Record actual versions, features,
 advisories, maintenance conclusions and notices before accepting the graph.
 The supplied initial resolution at
 `build/mg/sync-server-deps/20261115T192927Z-71678/result.json` used zstd 0.14.3;
-the later measured 149-package receipt above supersedes that graph. This filtered
-wrapper fixer leaves the supplied Rust, manifests and lock frozen. The supplied
+the later measured 149-package receipt above supersedes that graph. That earlier filtered
+collection wrapper left its supplied Rust, manifests and lock frozen. The supplied
 seed's server checks passed 116/116 with zero skips/retries and its scoped MG
 fixtures passed 14/14; these are parent observations, not executions here or
 Desktop interoperability evidence. The manager's initial focused attempt failed
 before tests at schema.rs:17 (unavailable load-extension DbConfig under selected
 features). Preserve that failure as evidence, not a preimplementation red or a
 test pass. No observed preimplementation red exists for the new tests.
+
+## Media additions: measured graph
+
+The media manifest adds exact `zip =9.0.5`, defaults disabled, with only
+`deflate-flate2-zlib-rs`, and a direct `unicode-normalization =0.1.24` edge
+(the latter already appeared in the measured model graph). Existing
+`sha1 =0.11.0` also supplies the required legacy media protocol digest. Existing
+`sha2 =0.11.1` supplies an internal content check; generated account-private
+object IDs and actual-byte comparison determine storage reuse, never SHA-1.
+
+`zip` initially supplied upload reads and stored download generation. The
+targeted replacement below removes its untrusted upload reader; the exact writer
+and test-fixture pin remains. No remote archive name is extracted or used as a
+path, and no remote permissions are applied. NFC validation compares the
+original spelling with its normalized character sequence; it never silently
+renames a supplied name.
+
+Primary facts supplied by the parent for this selection:
+
+- [zip 9.0.5 documentation](https://docs.rs/crate/zip/9.0.5) states MIT,
+  MSRV 1.88, active 9.x maintenance and stored/deflate read/write capability.
+  General `deflate` adds zopfli; `deflate-flate2-zlib-rs` selects the required
+  backend alone. The catalog includes 9.6.0 on November 15; that is no reason
+  to float this specifically vetted pin.
+- [RUSTSEC-2026-0367](https://rustsec.org/advisories/RUSTSEC-2026-0367) and
+  [RUSTSEC-2026-0429](https://rustsec.org/advisories/RUSTSEC-2026-0429.html)
+  describe extraction-permission and symlink-allocation flaws fixed in versions
+  >=9.0.0. Avoiding extraction/mode application narrows our use; these facts do
+  not establish an advisory-free resolved graph or prove our bounds.
+- The prior measured unicode-normalization version was 0.1.24, MIT/Apache-2.0,
+  with default/std and its tinyvec graph. The current supplied audit also
+  records unicode-normalization 0.1.24 as MIT/Apache-2.0.
+
+Manager-supplied `MG sync-server-deps --resolve-existing` receipt
+`20261116T030209Z-41348` is PASS; both scoped cargo-deny and cargo-about ran
+successfully on server lock SHA-256
+`a6566ec28fe707892909590223ac8753effe0fef1abd1b1fdd64836a69c8fe8f`.
+Existing dependencies were retained. Ten packages were added: cfg_aliases
+0.2.2, crc32fast 1.5.5, equivalent 1.0.3, flate2 1.1.11, hashbrown 0.17.1,
+indexmap 2.14.2, nix 0.31.3, typed-path 0.12.4, zip 9.0.5 and zlib-rs 0.6.8.
+Relevant supplied licenses are zip MIT, zlib-rs Zlib, and flate2/crc32fast
+MIT OR Apache-2.0. The exact resolved zip feature
+`deflate-flate2-zlib-rs` includes `deflate-flate2`, `_deflate-any` and flate2's
+zlib-rs backend; no zopfli, default ZIP crypto or other compression is enabled.
+The core lock remained SHA-256
+`4cd1fbf8107a078ecc344cb83a54346dd5260c38a1a49a00a633d3b870678bb5`.
+
+The receipt above is retained as **superseded graph evidence**. It predates the
+rawzip and direct flate2 edges below; the manager-supplied
+`MG sync-server-deps --resolve-existing` receipt `20261116T040827Z-95770`
+is PASS for the actual resolved graph, including scoped cargo-deny/cargo-about
+and normal/build/dev feature trees. Only one package was added: rawzip 0.5.2,
+MIT, with resolved node features exactly `alloc`, `std` and an empty dependency
+list. Its own declared development dependencies are not production graph edges.
+Existing flate2 remains 1.1.11 with zlib-rs; the direct edge adds no new packages.
+Existing zip 9.0.5 and its writer features remain unchanged. The server lock
+SHA-256 is `867679c49c310e081f89e4c09750d57fc03e17165ddbd06b9c362816f5a923dd`;
+the core lock remains
+`4cd1fbf8107a078ecc344cb83a54346dd5260c38a1a49a00a633d3b870678bb5`.
+This is graph/advisory/license evidence, not proof of adapter correctness.
+No resolver, build or audit ran in this filtered fixer session; the supplied
+resolved locks and exact manifests remain unchanged.
+
+### Targeted archive reader replacement: measured graph, proofs pending
+
+| Exact edge | Purpose, features and resource boundary | Maintenance, license and outstanding assessment |
+| --- | --- | --- |
+| `rawzip =0.5.2`, defaults disabled, `std` only | File-backed untrusted ZIP locator, lending directory iterator, local headers, compressed ranges, descriptors and EOF CRC/size verification. Caller-owned fixed buffers and its documented streaming, zero-index architecture avoid allocations sized by declared counts or ZIP64 metadata. Application count, extent, name, duplicate, size, overlap and mapping limits remain independent checks. | [Primary crate documentation](https://docs.rs/crate/rawzip/latest) identifies 0.5.2 released 2026-10-04, following 0.5.1 in July and 0.4.4 in March; it reports no normal dependencies. The primary repository identifies MIT and has tests/fuzzing. This is a small project, **not widely vetted**; these supplied facts do not establish a security audit. Receipt `20261116T040827Z-95770` measures MIT, exactly `alloc`, `std` and no dependency edges, with passing scoped graph/advisory/license checks. Adapter proofs remain pending. |
+| `flate2 =1.1.11`, defaults disabled, `zlib-rs` only | Direct edge to the already selected raw-DEFLATE implementation, wrapped in rawzip's EOF verifier. A fixed-buffer adapter requires StreamEnd and exact consumed compressed extent; fixed-block staging and actual expanded-byte limits apply independently of size hints. | Existing superseded receipt measured flate2 1.1.11 (MIT OR Apache-2.0) and zlib-rs 0.6.8 (Zlib). Receipt `20261116T040827Z-95770` confirms the retained version and zlib-rs backend; the direct edge adds no packages. No other version/backend change is authorized. |
+| `zip =9.0.5`, existing features unchanged | Stored download writer and existing test fixture reader/writer only. Untrusted production uploads no longer construct its `ZipArchive` or use its sequential reader. | Receipt `20261116T040827Z-95770` covers the combined graph; the exact writer pin and features are unchanged. |
+
+The selected reader uses a bounded, single locator attempt and does not retry
+false-footer candidates. The small extent adapter reads only bounded metadata
+at rawzip's selected footer and record offsets; it does not select another
+footer, index the upload in memory or decode ZIP structure independently.
+Declared directory extent/count and actual record extents must agree exactly.
+At most 26 members (including `_meta`) are admitted; directory metadata and
+aggregate local-header metadata are each at most 128 KiB, `_meta` at most
+50 KiB and each addition 1..100 MiB. Directory/local-header caller buffers are
+64 KiB each, the staging block is 64 KiB, and DEFLATE adds one fixed 64 KiB
+input block plus backend state. Metadata byte storage reserves a fixed 50 KiB,
+not a hint-derived capacity. JSON allocations are bounded by that metadata
+input cap; identifier/member/extent collections are bounded by 26 records.
+Existing temporary-budget reservation bookkeeping scales with actual fixed-block
+writes under the configured byte cap; this is not a constant total-memory claim. Actual expanded
+bytes include metadata and must fit the configured request limit. ZIP input and
+staging remain file-backed with temporary reservations before every write.
+Hashes use actual decoded blocks, outside the publication barrier. All member
+bytes, local/central agreement, CRCs, descriptors, extents, logical names and
+mapping must validate before any staged content is durably published.
+
+Supported input is deliberately bounded to classic single-disk stored/deflate
+archives with contiguous local-member extents, version-needed at most 2.0,
+and no local/central extra fields, self-extracting prefix, inter-record padding
+or trailing data. ZIP64 forms and oversized header records (over the 64 KiB
+caller buffers) are unsupported. Flags are limited to
+UTF-8, descriptors and DEFLATE options; encryption and other unsupported flag
+forms are rejected. The qualified descriptor limitation in the
+[rawzip descriptor documentation](https://docs.rs/rawzip/latest/rawzip/struct.ZipDataDescriptor.html)
+remains: an omitted signature with CRC `0x08074b50` can be falsely rejected.
+This is an unsupported structural form, **not a media-payload byte ban**. No
+exhaustive ZIP variant compatibility or optional/mobile acceptance is claimed.
+The parent measured Desktop 26.09.4 finalized stored headers only, without
+extras, descriptors or ZIP64; that evidence applies to the measured runtime.
+
+The source change targets three existing HTTP reds without modifying proofs:
+`stored_data_descriptor_upload_preserves_exact_bytes_and_listing_after_restart`
+and `deflated_data_descriptor_upload_preserves_exact_bytes_and_listing_after_restart`
+were HTTP 400 versus expected 200 in `20261116T032009Z-49447`;
+`malformed_small_central_directory_and_zip64_metadata_reject_without_committed_effects`
+was HTTP 200 versus expected 400 for declared directory size 97 in
+`20261116T033105Z-54262`. The latter red predates the prior archive actor's edit;
+the parent retains the SHA evidence. All three reds remain unverified after
+the compile correction, not waived. No pass for these tests is asserted here.
+The superseded speculative zip-index envelope/reader-wrapper proposal is removed;
+the new production reader owns structural parsing and the adapter checks the
+same library-selected metadata. Compilation, focused proofs, full server/lint,
+independent review and provenance/privacy/similarity checks remain orchestrator
+work, as does SDK reference acceptance. The measured graph receipt above does
+not replace any of these checks. The manager's compile attempt
+`20261116T040857Z-96092` failed with E0369 at archive.rs:168,171,188 because
+rawzip's `EntryFlags` cannot be masked directly with integers. This fixer uses
+the documented `bits(self) -> u16` accessor for the existing numeric masks and
+local/central comparison, and replaces deprecated rawzip compression constants
+with the identical `STORE`/`DEFLATE` constants. No compilation ran here.
+
+The parent reports physical OS ENOSPC proof PASS 1/1 in
+`20261116T035504Z-85991`, after correcting the test directory's 0700 setup.
+The earlier `035005` attempt observed zero ENOSPC events and is not passing
+ENOSPC evidence. The private 16 MiB mount and 32 MiB maximum fill fixture,
+existing assertions, locks and all other source are unchanged by this fixer.
