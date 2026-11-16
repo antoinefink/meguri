@@ -146,3 +146,43 @@ Native verification `mac-hosted-test/20261116T212345Z-44063` on clean
 both remounts and every original identity/text assertion. This is a focused
 repair pass. Native replay, the complete Snapshot matrix and the original
 integration gate remain incomplete.
+
+## Bounded replay observation
+
+This remains diagnostic work, not a native replay repair. Herdr delegate
+`t1dr` supplied the public-API audit and bounded author prompt. Filtered
+export `cleanroom/20261116T212400Z-45925` adds one first-question native
+subtree observation after the original CF attempt, including failure unwind.
+A source review caught direct deprecated calls before compilation; seed
+correction `20261116T213145Z-52067` changes only those six calls to guarded
+public selector reads. Independent complete-candidate review
+`20261116T213531Z-55716` found no P0–P2 findings; its exported patch matches.
+
+The original CF error and every assertion, identity check, deadline and
+native activation remain. Actual returned native values stay in memory;
+logs use fixed classifications. Nil children stop the extra traversal as
+incomplete. An early leaf can end the walk before the other links. This
+observation cannot establish playback, a repair or full convergence.
+
+Normal privacy run `20261116T213854Z-58910` flagged the candidate and is
+retained. Under `provenance.md#routine-privacy-admissions`, independent
+reviewer `incoming_contract_review` read all 393 lines and 23,768 bytes,
+including comments, literals, graphics, paths and output. It classified the
+complete file as public operational test code and synthetic fixtures, with
+no actual private values or new licensing concern. Its provenance basis
+includes the filtered authors/review and the original Meguri graphic in
+`render/display-transform#D4`.
+
+The reviewed path is
+`app/MeguriSnapshotTests/NativeReplayAccessibilityTests.swift`; its SHA-256
+is `48452d45977876bb07b2a55deb8197ef2c0693ff35661bec2e301ca0bee607ac`.
+The integrator checked those exact bytes and added only that path/digest to
+the existing public-file table. Matcher logic, thresholds, tokens and
+private-data access are unchanged; future bytes require a fresh check.
+
+Scanner regressions `selftest/20261116T214235Z-61985` pass their selected
+case with zero skips. Privacy `20261116T214239Z-62333` passes both files;
+static checks `20261116T214239Z-62332` pass all three checks. Similarity
+`20261116T214256Z-63448` passes both eligible files with zero flags or
+exceptions, and its filtered implementer report was read. Native execution
+of this diagnostic remains pending.

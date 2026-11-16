@@ -828,6 +828,8 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    "app/MeguriSnapshotTests/NativeReplayAccessibilityTests.swift":
+        "48452d45977876bb07b2a55deb8197ef2c0693ff35661bec2e301ca0bee607ac",
     # Independently reviewed public Docker lifecycle tooling, exact bytes.
     'tools/mg.d/conformance-admission.py':
         '7fe260aa7857773c6f472037929f9f6f3a5fe7f2d1eb2eda722238942f1bf7ae',

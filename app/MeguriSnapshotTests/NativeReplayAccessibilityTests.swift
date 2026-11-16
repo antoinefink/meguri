@@ -33,6 +33,206 @@ struct NativeReplayAccessibilityTests {
         var nodes: [String] = []
     }
 
+    static func diagnosticRole(_ value: Any?) -> String {
+        guard let value else { return "nil" }
+        guard let role = value as? String else { return "wrong-type" }
+        switch role {
+        case "AXLink": return "AXLink"
+        case "AXWebArea": return "AXWebArea"
+        case "AXScrollArea": return "AXScrollArea"
+        case "AXGroup": return "AXGroup"
+        default: return "other"
+        }
+    }
+
+    static func diagnosticValueType(_ value: Any?) -> String {
+        guard let value else { return "nil" }
+        if value is String { return "string" }
+        if value is NSArray { return "array" }
+        return "other"
+    }
+
+    // Retain exact receivers and unmodified getter results locally. These never
+    // enter PublicAXObservation or provide an identity/press target to the proof.
+    struct NativeDiagnosticNode {
+        let object: NSObject
+        let path: String
+        let depth: Int
+        var hasGetter = false
+        var roleRead = false
+        var identifierRead = false
+        var domIdentifierRead = false
+        var descriptionRead = false
+        var titleRead = false
+        var childrenRead = false
+        var role: Any?
+        var identifier: Any?
+        var domIdentifier: Any?
+        var description: Any?
+        var title: Any?
+        var children: Any?
+    }
+
+    static func nativeSnapshot(webView: WKWebView, window: NSWindow,
+                               windowIdentifier: String, expectedIDs: [String],
+                               deadline: ContinuousClock.Instant) {
+        // Legacy getters have no documented cancellable timeout. Deadline
+        // checks bound admission to each read/step, not a getter already running.
+        guard ContinuousClock.now < deadline else {
+            print("Replay native snapshot: complete=false reason=deadline inconclusive=true")
+            return
+        }
+        var reason = "complete"
+        func admitted() -> Bool {
+            guard ContinuousClock.now < deadline else {
+                reason = "deadline"
+                return false
+            }
+            return true
+        }
+        guard admitted() else {
+            print("Replay native snapshot: complete=false reason=deadline inconclusive=true")
+            return
+        }
+        let attachedWindow = webView.window
+        guard attachedWindow === window else {
+            print("Replay native snapshot: complete=false reason=window-ownership inconclusive=true")
+            return
+        }
+        guard admitted() else {
+            print("Replay native snapshot: complete=false reason=deadline inconclusive=true")
+            return
+        }
+        let nativeWindowIdentifier = window.accessibilityIdentifier()
+        guard nativeWindowIdentifier == windowIdentifier else {
+            print("Replay native snapshot: complete=false reason=window-identifier inconclusive=true")
+            return
+        }
+        guard admitted() else {
+            print("Replay native snapshot: complete=false reason=deadline inconclusive=true")
+            return
+        }
+        let mediaRoot = webView.url
+        guard mediaRoot == NativeReplayFixture.mediaRoot else {
+            print("Replay native snapshot: complete=false reason=media-root inconclusive=true")
+            return
+        }
+        var nodes: [NativeDiagnosticNode] = []
+        var seen = Set<ObjectIdentifier>()
+        let getter = NSSelectorFromString("accessibilityAttributeValue:")
+        func nativeAttributeValue(_ receiver: NSObject, _ attribute: NSAccessibility.Attribute) -> Any? {
+            guard receiver.responds(to: getter),
+                  let result = receiver.perform(getter, with: attribute.rawValue as NSString) else { return nil }
+            return result.takeUnretainedValue()
+        }
+        func visitCollection(_ entries: NSArray, path: String, depth: Int) -> Bool {
+            guard admitted() else { return false }
+            let count = entries.count
+            guard count <= 256 else { reason = "collection-limit"; return false }
+            for index in 0..<count {
+                guard admitted() else { return false }
+                let entry = entries[index]
+                // Do not manufacture an NSObject by bridging a Swift value.
+                guard type(of: entry) is AnyClass, let node = entry as? NSObject else {
+                    reason = "nonnative-entry"
+                    return false
+                }
+                guard visit(node, path: "\(path)/\(index)", depth: depth) else { return false }
+            }
+            return true
+        }
+        func visit(_ node: NSObject, path: String, depth: Int) -> Bool {
+            guard admitted() else { return false }
+            guard depth <= 32 else { reason = "depth-limit"; return false }
+            guard nodes.count < 256 else { reason = "node-limit"; return false }
+            guard seen.insert(ObjectIdentifier(node)).inserted else { reason = "cycle"; return false }
+            let index = nodes.count
+            nodes.append(NativeDiagnosticNode(object: node, path: path, depth: depth))
+            guard admitted() else { return false }
+            nodes[index].hasGetter = node.responds(to: getter)
+            guard nodes[index].hasGetter else { reason = "missing-getter"; return false }
+            guard admitted() else { return false }
+            nodes[index].role = nativeAttributeValue(node, .role)
+            nodes[index].roleRead = true
+            guard admitted() else { return false }
+            nodes[index].identifier = nativeAttributeValue(node, .identifier)
+            nodes[index].identifierRead = true
+            guard admitted() else { return false }
+            nodes[index].domIdentifier = nativeAttributeValue(node, NSAccessibility.Attribute(rawValue: "AXDOMIdentifier"))
+            nodes[index].domIdentifierRead = true
+            if nodes[index].role as? String == "AXLink" {
+                guard admitted() else { return false }
+                nodes[index].description = nativeAttributeValue(node, .description)
+                nodes[index].descriptionRead = true
+                guard admitted() else { return false }
+                nodes[index].title = nativeAttributeValue(node, .title)
+                nodes[index].titleRead = true
+            }
+            guard admitted() else { return false }
+            nodes[index].children = nativeAttributeValue(node, .children)
+            nodes[index].childrenRead = true
+            guard admitted() else { return false }
+            // A nil legacy value has no AXError and establishes no unsupported
+            // attribute result. It cannot establish a complete children list.
+            guard let children = nodes[index].children as? NSArray else {
+                reason = nodes[index].children == nil ? "children-nil" : "children-wrong-type"
+                return false
+            }
+            return visitCollection(children, path: path, depth: depth + 1)
+        }
+        guard admitted() else {
+            print("Replay native snapshot: complete=false reason=deadline inconclusive=true")
+            return
+        }
+        let roots = webView.accessibilityChildren()
+        let complete: Bool
+        if !admitted() {
+            complete = false
+        } else if let roots {
+            complete = visitCollection(roots as NSArray, path: "root", depth: 0)
+        } else {
+            reason = "children-nil"
+            complete = false
+        }
+        func objectType(_ node: NSObject) -> String {
+            if node is WKWebView { return "WKWebView" }
+            if node is NSWindow { return "NSWindow" }
+            if node is NSView { return "NSView" }
+            if node is NSAccessibilityElement { return "NSAccessibilityElement" }
+            return "NSObject"
+        }
+        func identifierClass(_ value: Any?) -> String {
+            guard let value else { return "nil" }
+            guard let string = value as? String else { return "wrong-type" }
+            if let index = expectedIDs.firstIndex(of: string) { return "known index=\(index)" }
+            return "other"
+        }
+        var identifierMatches = Array(repeating: 0, count: expectedIDs.count)
+        var domMatches = Array(repeating: 0, count: expectedIDs.count)
+        var links = 0
+        for node in nodes {
+            // All output is fixed classifications or bounded tree coordinates;
+            // raw values and original object references remain in nodes.
+            print("Replay native snapshot node: path=\(node.path) depth=\(node.depth) objectType=\(objectType(node.object)) getter=\(node.hasGetter) roleRead=\(node.roleRead) roleType=\(diagnosticValueType(node.role)) role=\(diagnosticRole(node.role)) AXIdentifierRead=\(node.identifierRead) AXIdentifierType=\(diagnosticValueType(node.identifier)) AXIdentifier=\(identifierClass(node.identifier)) AXDOMIdentifierRead=\(node.domIdentifierRead) AXDOMIdentifierType=\(diagnosticValueType(node.domIdentifier)) AXDOMIdentifier=\(identifierClass(node.domIdentifier)) childrenRead=\(node.childrenRead) childrenType=\(diagnosticValueType(node.children))")
+            if node.role as? String == "AXLink" {
+                links += 1
+                if let id = node.identifier as? String, let index = expectedIDs.firstIndex(of: id) {
+                    identifierMatches[index] += 1
+                }
+                if let id = node.domIdentifier as? String, let index = expectedIDs.firstIndex(of: id) {
+                    domMatches[index] += 1
+                }
+                let description = node.description as? String
+                let title = node.title as? String
+                print("Replay native snapshot link: path=\(node.path) descriptionRead=\(node.descriptionRead) descriptionType=\(diagnosticValueType(node.description)) titleRead=\(node.titleRead) titleType=\(diagnosticValueType(node.title)) descriptionReplay=\(description == CardRuntime.replayLabel) titleReplay=\(title == CardRuntime.replayLabel) descriptionAuthored=\(description == "Author & 猫") titleAuthored=\(title == "Author & 猫")")
+            }
+        }
+        for index in expectedIDs.indices {
+            print("Replay native snapshot matches: index=\(index) AXIdentifierCount=\(identifierMatches[index]) AXDOMIdentifierCount=\(domMatches[index])")
+        }
+        print("Replay native snapshot: complete=\(complete) reason=\(reason) inconclusive=\(!complete) nodes=\(nodes.count) links=\(links) rootsType=\(diagnosticValueType(roots)) synchronousGetterPreemptible=false")
+    }
+
     /// Same-process AX reads synchronously enter AppKit/WebKit accessibility
     /// callbacks; keep them on the main actor that owns the hosted GUI.
     /// Read only the fixture's own process and exact window identifier.
@@ -63,12 +263,13 @@ struct NativeReplayAccessibilityTests {
             guard error == .success, let value, CFGetTypeID(value) == CFArrayGetTypeID(),
                   let result = value as? [AXUIElement], result.count <= 256 else {
                 // Diagnose only the failed read; never request a second AX value.
-                let typeID = value.map { String(CFGetTypeID($0)) } ?? "nil"
+                let valueType = value.map { CFGetTypeID($0) == CFArrayGetTypeID() ? "array" : (CFGetTypeID($0) == CFStringGetTypeID() ? "string" : "other") } ?? "nil"
                 let array = value.flatMap { CFGetTypeID($0) == CFArrayGetTypeID() ? $0 as? NSArray : nil }
-                let arrayCount = array.map { String($0.count) } ?? "not-array"
+                let arrayCount = array.map { String(min($0.count, 256)) } ?? "not-array"
+                let arrayOverLimit = array.map { $0.count > 256 } ?? false
                 let arrayCastSucceeded = (value as? [AXUIElement]) != nil
                 let readKind = attribute == kAXWindowsAttribute ? "windows" : "children"
-                throw NativeReplayFailure("Own-window native AX children unavailable/wrong-type/truncated: path=\(path) depth=\(depth) role=\(role ?? "nil") AXIdentifier=\(identifier.debugDescription) read=\(readKind) attribute=\(attribute) AXError.rawValue=\(error.rawValue) valueIsNil=\(value == nil) CFTypeID=\(typeID) arrayCount=\(arrayCount) AXUIElementArrayCastSucceeded=\(arrayCastSucceeded) AXIsProcessTrusted=\(AXIsProcessTrusted())")
+                throw NativeReplayFailure("Own-window native AX children unavailable/wrong-type/truncated: path=\(path) depth=\(depth) role=\(diagnosticRole(role)) AXIdentifier=\(identifier == nil ? "nil" : "other") read=\(readKind) AXError.rawValue=\(error.rawValue) valueIsNil=\(value == nil) CFType=\(valueType) arrayCount=\(arrayCount) arrayOverLimit=\(arrayOverLimit) AXUIElementArrayCastSucceeded=\(arrayCastSucceeded) AXIsProcessTrusted=\(AXIsProcessTrusted())")
             }
             return result
         }
@@ -90,7 +291,7 @@ struct NativeReplayAccessibilityTests {
             let (dom, error) = try read(node, "AXDOMIdentifier")
             let isString = dom.map { CFGetTypeID($0) == CFStringGetTypeID() } ?? false
             let domID = error == .success && isString ? dom as? String : nil
-            observation.nodes.append("role=\(role ?? "nil") AXIdentifier=\(identifier.debugDescription) AXDOMIdentifier=\(domID.debugDescription) DOMError=\(error.rawValue) DOMWrongType=\(error == .success && !isString)")
+            observation.nodes.append("role=\(diagnosticRole(role)) AXIdentifier=\(identifier == nil ? "nil" : "other") AXDOMIdentifier=\(domID == nil ? "nil" : "other") DOMError=\(error.rawValue) DOMWrongType=\(error == .success && !isString)")
             // Public AXWebConstants.h: kAXLinkRole is CFSTR("AXLink");
             // that C macro is not imported by ApplicationServices in Swift.
             if role == "AXLink" {
@@ -139,7 +340,16 @@ struct NativeReplayAccessibilityTests {
                 @MainActor func observe(until observationDeadline: ContinuousClock.Instant) async throws -> PublicAXObservation {
                     try Self.publicAXFacts(windowIdentifier: windowID, deadline: observationDeadline)
                 }
-                var tree = try await observe(until: deadline)
+                var tree: PublicAXObservation
+                do {
+                    defer {
+                        if stage == 0 {
+                            Self.nativeSnapshot(webView: page.webView, window: window,
+                                windowIdentifier: windowID, expectedIDs: expectedIDs, deadline: deadline)
+                        }
+                    }
+                    tree = try await observe(until: deadline)
+                }
                 // Publication waits on counts only; identity/name failures never retry.
                 while tree.links.count != expectedIDs.count && ContinuousClock.now < deadline {
                     try await Task.sleep(for: .milliseconds(5))
