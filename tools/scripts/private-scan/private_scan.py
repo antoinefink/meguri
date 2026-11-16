@@ -828,6 +828,10 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'conformance/fixtures/meguri-sync-server/observations/desktop-26.09.4-normal-matrix.json':
+        '8a4e17346939516eda8b5b650203444693fb32e2173f4d6741242b4089da04eb',
+    'specs/sync/server-desktop-current.md':
+        '310f162df4d28dde5f2f3500fce75b3d73d0c6c5f414ae860d7f44d89e217f96',
     'oracle/meguri-sync-server/tests/test_normal_matrix.py':
         'ec667ccfd6cd9e7782a3c555e78cf8e31b4db721e0e7b4d5a9f230e3a3da3763',
     'oracle/meguri-sync-server/normal_matrix.py':

@@ -177,3 +177,59 @@ Card, note-type and preset conflicts, case-folded names, configuration replaceme
 and null values remain unobserved here. They also leave same-clock finish, failed
 sanity, lifecycle faults, AnkiMobile and candidate incremental sync unobserved.
 Reviews and deletions were exercised forward only. Media was disabled.
+
+## D8. Selected object and configuration conflict matrix
+
+Seven finite groups completed independent source and observation review.
+A separate committed-source reproduction passed all seven groups at
+`build/mg/sync-server-reference/20261116T001625Z-38361/result.json`.
+The retained author observations below keep their original execution identity.
+
+The exact execution is `20261115T234234Z-25456`, on Desktop SDK 26.09.4, build `c06370ff`.
+The adjacent JSON records native runtime and lock hashes, exact rows, stamps, inputs and limits.
+Normal-round requests here are auxiliary valid protocol fixtures. Actual SDK receivers inspected the committed results separately.
+Raw served schema-18 observations precede SDK normalization. Native server rows were read after its own process exited.
+
+| Selected case | Observed result |
+|---|---|
+| Existing authored note type, unchanged structure | Stored modification S=2000000000. S−1 was ignored. S and S+1 were accepted, with incoming names, CSS and stamps. |
+| Existing authored preset, unchanged structure | The same S−1/S/S+1 rule held. Accepted `new.perDay` values were 31 and 32. |
+| Response before object merge | The three replies contained the stored name, stored name and equal-update name respectively. |
+| Selected ASCII deck and note-type names | With `Alpha` and `alpha+` present, incoming `alpha` became `alpha++`. Both renamed objects received merge-time modification 1794786161 and round USN 5. |
+| Existing tag | Incoming `cedartag` retained `CedarTag`, USN 0, collapsed 0 and NULL config exactly. |
+| `lnewer=true`, paired omitted `conf` and `crt` | Accepted; config values, row USNs, row modification times and creation time stayed unchanged. |
+| `lnewer=true`, paired explicit NULL `conf` and `crt` | Accepted; the same values and stamps stayed unchanged. |
+| Whole config replacement | The omitted `cedar_old` key disappeared. Replacement rows had merge-time modification 1794786164 and round USN 4. |
+| `lnewer=false` | The reply contained the complete replacement config and creation time 1794715201. Sent config row USNs became literal 0; modification times stayed unchanged. The surrounding collection USNs were 6 and 8. |
+
+For distinct cards at cursor 1, the stored seed modification was 2000000000 and due was 17.
+
+| Stored USN | Incoming modification | Raw resulting modification, USN, due |
+|---|---:|---|
+| 1 | 1999999999 | 2000000000, 1, 17 |
+| 1 | 2000000000 | 2000000000, 1, 17 |
+| 1 | 2000000001 | 2000000001, 10, 23 |
+| 0 | 1999999999 | 1999999999, 14, 23 |
+
+The USN-0 seed was measured directly before the incoming round: modification 2000000000, USN 0 and due 17.
+The snapshot followed the completed preparation round. No download interrupted an admitted round.
+
+Card data `{"pos":5,"zz":7}` was accepted. Raw stored data became exactly `{"pos":5}`; due became 5.
+A later known due edit produced due 29 and retained exactly `{"pos":5}`.
+The first request already removed `zz`; this does not characterize an existing stored unknown key.
+
+A non-default deck grave removed that deck and moved its card to deck 1 without changing the card's modification or USN.
+A later admitted round sent card, note and deck graves, then valid same-ID occurrences.
+All three rows existed afterward. Their graves remained.
+Card and note graves had USN 7. The previously existing deck grave retained USN 4.
+The JSON records note derived columns and the exact final card, note and deck rows.
+
+The repaired source passed 45 selftests and matrix 7/7.
+Both runs share source digest `6c811474e6b4aab41b947eccf260fba61adde427c85c757a6097c6d7ad51db70`.
+The unchanged normal 12/12, smoke 21/21 and static checks remain historical v1 receipts at their original source identity.
+Earlier failed observer runs and the invalid provisional reused-card assertion remain in the receipt archive and earn no credit.
+
+Structural count changes and SDK selection of full transfer remain unobserved.
+Mixed optional config/creation-time forms remain unobserved.
+These selected ASCII names do not establish Unicode closure.
+No complete P-family, Mobile, candidate NORMAL or final acceptance is claimed.
