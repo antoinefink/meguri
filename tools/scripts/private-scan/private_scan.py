@@ -828,6 +828,14 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'conformance/recordings/scenarios/meguri-sync-server/candidate-inputs.md':
+        '87139844033f14711d35deaab3d7ade6585db36aac5a8078b009028a2359343f',
+    'conformance/recordings/scenarios/meguri-sync-server/candidate-retained-final-selection.json':
+        '6b1b00213ad01336e95fcdb5e557ce8a40ef77c5e8190ed0f24051a53d076bf1',
+    'conformance/recordings/scenarios/meguri-sync-server/final-fixture-recipes.json':
+        '2f8ccffb383bd0516af2cee891e9844b6c450adb678d6de3fe01a418ca3246b3',
+    'specs/conformance/meguri-sync-local-delivery.md':
+        '096bc2f12594bcbf20883e3c80853ac223013b97109b4d921afb83e2b66632de',
     'docs/process/review-log/meguri-sync-U10.md':
         '565221177f72b2182784c8c442b1c07eda55c6d33186dfe1add3f36e0474cdf0',
     'server/Dockerfile':
@@ -850,7 +858,7 @@ PUBLIC_ARTIFACTS = {
     'tools/mg.d/conformance-edge.py':
         'db717ee3b016fb7f351552cdf9bbff12eff88936d16aefb9b6aabbdd04fa6f8e',
     'specs/conformance/meguri-sync-candidate.md':
-        '17992fe697babc4d609586223cb2ecf3d6b371a8864123dcdf453aa76e406d5f',
+        '748208f6643b35bace1b405b52dac4ea1b2da528d88595ed67c99e84a615f3d7',
     'docs/process/review-log/meguri-sync-normal-candidate.md':
         'a071d74e332b444e750964a80c7651915d23700b7221f55b183a998001c16996',
     'docs/process/review-log/meguri-sync-U8.md':
@@ -909,7 +917,7 @@ PUBLIC_ARTIFACTS = {
         '2cfc1f7c8eb2399bf6bc2e8d77274682dd00563b2c467d15d17eb29956feee03',
     # Independently classified original public session metadata, exact bytes.
     'docs/process/provenance/sessions.jsonl':
-        '683a2cf7b4c02aafd6772cc514c74627510439873a123a677a9e9a0760c6c0a1',
+        '7b1b42b06e4fac9fe49f79da1419f32abe334364bac940a6b1299ae01d21e735',
     'conformance/fixtures/meguri-sync-server/observations/desktop-26.09.4-normal-matrix.json':
         '8a4e17346939516eda8b5b650203444693fb32e2173f4d6741242b4089da04eb',
     'specs/sync/server-desktop-current.md':
