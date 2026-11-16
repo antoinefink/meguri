@@ -62,7 +62,12 @@ extension WebKitSuites.CardRuntimeSuites {
             var result: [NSObject] = []
             while let element = pending.popLast() {
                 guard seen.insert(ObjectIdentifier(element)).inserted else { continue }
+                let view = element as? UIView
+                guard view?.isHidden != true else { continue }
                 result.append(element)
+                // accessibilityElementsHidden hides descendants, not the view itself.
+                guard view?.accessibilityElementsHidden != true else { continue }
+                if let view { pending += view.subviews }
                 if let children = element.accessibilityElements {
                     pending += children.compactMap { $0 as? NSObject }
                 } else {
