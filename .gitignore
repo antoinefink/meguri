@@ -15,6 +15,7 @@
 
 # Rust build output (host builds; Docker builds use a named volume)
 /core/target/
+/server/target/
 
 # cargo-fuzz's default output directories (tools/mg core-fuzz keeps corpora on
 # tmpfs and findings under build/)
