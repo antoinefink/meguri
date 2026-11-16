@@ -1,0 +1,39 @@
+[workspace]
+resolver = "3"
+members = ["."]
+
+[package]
+name = "meguri-sync-server"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT"
+publish = false
+
+[features]
+default = []
+# Deterministic pause/failure/kill controls. Never enable in a shipped binary.
+test-hooks = []
+
+[dependencies]
+# Deliberately selected exact pins; see DEPENDENCIES.md for per-crate rationale.
+# The resolved graph requires maintenance/advisory/license review through MG.
+tokio = { version = "=1.53.3", default-features = false, features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
+axum = { version = "=0.8.8", default-features = false, features = ["http1", "tokio", "json"] }
+http-body = { version = "=1.1.0", default-features = false }
+rusqlite = { version = "=0.41.1", default-features = false, features = ["bundled"] }
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.154"
+argon2 = { version = "=0.6.0", default-features = false, features = ["alloc", "password-hash"] }
+getrandom = "=0.4.3"
+sha2 = { version = "=0.11.1", default-features = false }
+subtle = { version = "=2.6.1", default-features = false }
+base64 = "=0.23.1"
+url = "=2.5.8"
+time = { version = "=0.3.55", default-features = false, features = ["std", "formatting"] }
+libc = "=0.2.190"
+
+[dev-dependencies]
+tempfile = "=3.27.0"
+# Real loopback HTTP client only; no external endpoints or TLS graph needed.
+reqwest = { version = "=0.13.5", default-features = false, features = ["json"] }

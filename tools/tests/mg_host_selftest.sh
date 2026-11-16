@@ -14,6 +14,9 @@
 
 set -u
 
+# Similarity checks must use the sandbox's synthetic corpus.
+unset MG_SIMILARITY_REFS
+
 REPO="$(cd "$(dirname "$0")/../.." && pwd -P)"
 mkdir -p "$1"
 SB="$(cd "$1" && pwd -P)"

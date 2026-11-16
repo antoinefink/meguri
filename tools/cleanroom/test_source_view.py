@@ -8,6 +8,21 @@ from unittest.mock import patch
 from source_view import permitted, prepare, seed, validate
 
 
+CONFIG_STORE_PATHS = tuple(
+    prefix + ".config/" + suffix
+    for prefix in ("core/", "server/", "server/web/nested/")
+    for suffix in ("gcloud/application_default_credentials.json", "gh/hosts.yml",
+                   "glab-cli/config.yml", "rclone/rclone.conf", "future-tool/auth.json",
+                   "future-tool/nextest.toml", "credentials", "nextest.toml.bak")
+)
+UNAUDITED_CONFIG_PATHS = (
+    "server/.config/nextest.toml",
+    "server/web/nested/.config/nextest.toml",
+    "core/nested/.config/nextest.toml",
+    "core/.config/nested/nextest.toml",
+)
+
+
 class SourceViewTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -66,9 +81,90 @@ class SourceViewTests(unittest.TestCase):
             prepare(self.root, self.target)
 
     def test_forbidden_components_and_traversal_are_rejected(self):
-        for name in ("/core/a", "core/../oracle/a", "core/build/a", "app/.git/a", "core/refs/a"):
+        for name in ("/core/a", "core/../oracle/a", "core/build/a", "app/.git/a", "core/refs/a",
+                     "server/.config/nextest.toml/credentials",
+                     "server/.config/.config/nextest.toml"):
             self.assertFalse(permitted(name), name)
         self.assertTrue(permitted("core/crates/example/src/lib.rs"))
+
+    def test_server_source_keeps_nested_quarantine_and_credentials_out(self):
+        allowed = ("server/src/main.rs", "server/web/src/Login.tsx", "server/web/src/Icon.jsx",
+                   "core/.config/nextest.toml", "server/web/config/settings.json",
+                   "server/web/vite.config.ts")
+        for name in allowed:
+            self.assertTrue(permitted(name))
+            self.file(name)
+        denied = ["server/" + part + "/sentinel" for part in (
+            "oracle", "refs", "local-data", "build", ".git", ".codex", ".claude",
+            ".aws", ".ssh", ".azure", ".docker", ".kube", ".agents", "web/node_modules",
+        )] + ["server/web/" + part for part in (
+            ".env", ".env.production", ".npmrc", ".netrc", ".gitmodules", ".git-credentials",
+        )] + ["server/.config/gcloud/application_default_credentials.json",
+              "server/.agents/skills/example/SKILL.md",
+              "server/web/nested/.config/gcloud/credentials.db",
+              "server/web/nested/.agents/settings.json"] + list(CONFIG_STORE_PATHS + UNAUDITED_CONFIG_PATHS)
+        for name in denied:
+            self.assertFalse(permitted(name))
+            self.file(name)
+        self.git("add", "-A")
+        report = prepare(self.root, self.target)
+        self.assertEqual(report["files"], len(allowed))
+        self.assertFalse(report["real_history"])
+        self.assertIn(".config", report["credential_trees"])
+        self.assertEqual(report["source_config_files"], ["core/.config/nextest.toml"])
+        self.assertEqual(sorted(p.relative_to(self.target).as_posix()
+                                for p in self.target.rglob("*") if p.is_file()), sorted(allowed))
+        validate(self.target)
+
+    def test_export_refuses_nested_credentials_and_agent_configuration(self):
+        self.target.mkdir()
+        for name in CONFIG_STORE_PATHS + UNAUDITED_CONFIG_PATHS + ("server/.agents/skills/example/SKILL.md",
+                     "server/web/nested/.config/gcloud/credentials.db",
+                     "server/web/nested/.agents/settings.json"):
+            with self.subTest(name=name):
+                path = self.target / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("synthetic excluded input")
+                with self.assertRaises(ValueError):
+                    validate(self.target)
+                path.unlink()
+        # Empty guard directories remain exportable; source files still work.
+        (self.target / "server/main.rs").write_text("fn main() {}")
+        for name in ("core/.config/nextest.toml", "server/web/config/settings.json"):
+            config = self.target / name
+            config.parent.mkdir(parents=True, exist_ok=True)
+            config.write_text("synthetic source configuration\n")
+        validate(self.target)
+
+    def test_server_links_hardlinks_and_submodules_fail_before_copy(self):
+        path = self.file("server/src/main.rs")
+        self.git("add", "-A")
+        os.link(path, self.root / "alias")
+        with self.assertRaises(ValueError):
+            prepare(self.root, self.target)
+        (self.root / "alias").unlink()
+        path.unlink()
+        path.symlink_to(self.root / "outside")
+        with self.assertRaises(ValueError):
+            prepare(self.root, self.target)
+        path.unlink()
+        path.write_text("own code")
+        tree = self.git("write-tree").decode().strip()
+        commit = self.git("-c", "user.name=test", "-c", "user.email=test@localhost",
+                          "commit-tree", tree, "-m", "synthetic submodule").decode().strip()
+        self.git("update-index", "--add", "--cacheinfo", "160000," + commit + ",server/module")
+        with self.assertRaises(ValueError):
+            prepare(self.root, self.target)
+        self.assertFalse(self.target.exists())
+
+    def test_server_seed_and_output_use_the_same_boundary(self):
+        self.apply_seed("server/web/src/Screen.tsx")
+        self.assertTrue((self.target / "server/web/src/Screen.tsx").is_file())
+        self.file("server/refs/blocked.rs")
+        blocked = self.target / "server/.env"
+        blocked.write_text("synthetic")
+        with self.assertRaises(ValueError):
+            validate(self.target)
 
     def test_forbidden_or_linked_worker_output_is_rejected(self):
         self.target.mkdir()
@@ -120,6 +216,25 @@ class SourceViewTests(unittest.TestCase):
     def test_seed_refuses_forbidden_output_before_model_access(self):
         with self.assertRaises(ValueError):
             self.apply_seed("app/refs/example.txt")
+
+    def test_seed_refuses_unknown_config_store_before_model_access(self):
+        with self.assertRaises(ValueError):
+            self.apply_seed("server/web/.config/future-tool/auth.json")
+
+    def test_seed_accepts_audited_config(self):
+        self.apply_seed("core/.config/nextest.toml")
+        self.assertEqual((self.target / "core/.config/nextest.toml").read_text(), "own code\n")
+
+    def test_seed_accepts_ordinary_config_outside_config_store(self):
+        self.apply_seed("server/web/config/settings.json")
+        self.assertEqual((self.target / "server/web/config/settings.json").read_text(), "own code\n")
+
+    def test_seed_refuses_unaudited_config_before_model_access(self):
+        for name in UNAUDITED_CONFIG_PATHS:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temp:
+                self.target = Path(temp) / "view"
+                with self.assertRaises(ValueError):
+                    self.apply_seed(name)
 
     def test_seed_refuses_links_before_model_access(self):
         with self.assertRaises(ValueError):

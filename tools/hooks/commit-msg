@@ -4,7 +4,7 @@
 # checkout being committed in.
 #
 # - A Role: trailer, when present, names one known role.
-# - Commits touching core/, app/ or conformance/runner/ need a Role: trailer.
+# - Commits touching core/, app/, server/ or conformance/runner/ need a Role: trailer.
 # - Implementer and fixer commits touching those paths also need Spec: (one
 #   or more spec ids, specs/README-format.md, or Product Contract requirement
 #   ids such as R1987 for UI work no spec covers) and Session: (the session id
@@ -72,11 +72,11 @@ changed_paths() {
     git diff --cached --no-renames --name-only -z
   fi
 }
-code_paths="$(changed_paths | tr '\0' '\n' | grep -E '^(core/|app/|conformance/runner/)' | head -n 3)"
+code_paths="$(changed_paths | tr '\0' '\n' | grep -E '^(core/|app/|server/|conformance/runner/)' | head -n 3)"
 [ -n "$code_paths" ] || exit 0
 first_path="$(printf '%s\n' "$code_paths" | head -n 1)"
 
-[ -n "$role" ] || reject "commits touching core/, app/ or conformance/runner/ (here $first_path) need a Role: trailer"
+[ -n "$role" ] || reject "commits touching core/, app/, server/ or conformance/runner/ (here $first_path) need a Role: trailer"
 
 case "$role" in
   implementer | fixer) ;;

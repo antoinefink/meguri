@@ -1840,7 +1840,7 @@ dockerfiles() {
     ignore="$f.dockerignore"
     [ -f "$ignore" ] || { echo "$f has no $(basename "$ignore"); the repo root holds local-data/"; return 1; }
     first="$(grep -Ev '^[[:space:]]*(#|$)' "$ignore" | head -n 1)"
-    [ "$first" = "*" ] || { echo "$ignore must start with '*', found '$first'"; return 1; }
+    [ "$first" = "*" ] || [ "$first" = "**" ] || { echo "$ignore must start with '*' or '**', found '$first'"; return 1; }
     if grep -Eq '^!.*(local-data|refs)' "$ignore"; then
       echo "$ignore re-includes a private path"
       return 1

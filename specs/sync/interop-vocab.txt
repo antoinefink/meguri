@@ -1,3 +1,7 @@
+# Meguri Sync storage/connection interface names (U2).
+accounts.sqlite
+synchronous
+foreign_keys
 # Interface names the sync specs use that are not ordinary words: the
 # protocol's HTTP header names and content type, the URL path prefixes and
 # method names of sync protocol v11, the client-version member of the status

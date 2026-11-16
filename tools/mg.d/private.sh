@@ -45,7 +45,7 @@ mg_job anonymize host mg_anonymize \
   "Anonymized clone (specs/fixtures/anonymizer.md): [--source <dir>] [--out <dir>] [--salt-file <file>] [--now <instant>] [--tz <zone>]; default source a fresh vault copy, clone in build/private/<run>/clone, salt build/private/anonymize.salt; V1, V2, V4, V5 by meguri-cli, V3 by tools/mg oracle check --schedule on the source and the clone"
 
 mg_job private host mg_private \
-  "Private collection vault (local-data/anki/, read-only, never off this Mac): status | copy | suite [--record <name>] [--keep] | scan-outputs [paths...] (default: the staged lines); copies and the token set stay in build/private/"
+  "Private collection vault (local-data/anki/, read-only, never off this Mac): status | copy | suite [--record <name>] [--keep] | refresh-public --head <full-oid> [--shared-main] | scan-outputs [paths...] (default: the staged lines); copies and the token set stay in build/private/"
 
 mg_job private-selftest host mg_private_selftest \
   "The vault's copy through the real read-only mount, on a made-up profile folder (no private data; any checkout): meguri-cli private copy in the private service gives the collection, its log and media unchanged, the source keeps every hash, size and mtime, writes through /vault are refused, a read-write source is refused"
@@ -71,7 +71,7 @@ MG_PRIVATE_CLI=/cargo-target/fixtures/meguri-cli
 MG_PRIVATE_COPY_SCRIPT='"$1" private copy --source "$2" --out "$3/copy" --access-log "$3/vault-access.log" >"$3/copy.json"'
 
 mg__private_usage() {
-  mg_failure usage "$1; usage: tools/mg private status | copy | suite [--record <name>] [--keep] | scan-outputs [paths...]"
+  mg_failure usage "$1; usage: tools/mg private status | copy | suite [--record <name>] [--keep] | refresh-public --head <full-oid> [--shared-main] | scan-outputs [paths...]"
   mg_message "private: usage error"
   mg_status error
 }
@@ -427,10 +427,37 @@ mg__private_suite() {
   fi
 }
 
+# Owner-controlled idle token/Git writer window required; legacy writers do
+# not coordinate. This is never invoked by a hook, gate or catch-up.
+mg__private_refresh_public() {
+  local out="$MG_RUN_DIR/refresh-public.json" rc
+  if [ "$#" -lt 2 ] || [ "$#" -gt 3 ] || [ "$1" != --head ] ||
+     { [ "$#" -eq 3 ] && [ "$3" != --shared-main ]; }; then
+    mg__private_usage "refresh-public requires --head <full-oid> [--shared-main]"
+    return 0
+  fi
+  mg__private_guard || return 0
+  python3 -I -B "$MG_ROOT/$MG_PRIVATE_SCAN" refresh-public --repo "$MG_ROOT" "$@" >"$out"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    mg_failure refresh-public "refresh refused or interrupted; owner must inspect private backup before retrying"
+    mg_status error
+    return 0
+  fi
+  mg_artifact report "$out" "public-baseline refresh (counts and hashes only)"
+  mg_detail refresh_public "$(jq -c . "$out")"
+  mg_message "private: removed $(jq .removed "$out") public entries; $(jq .after "$out") tokens remain"
+  mg_status pass
+}
+
 mg_private() {
   local command="${1:-}"
   [ "$#" -eq 0 ] || shift
   case "$command" in
+    refresh-public)
+      mg__private_refresh_public "$@"
+      return 0
+      ;;
     scan-outputs)
       mg__private_scan_outputs "$@"
       return 0

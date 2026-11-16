@@ -1901,7 +1901,7 @@ PY
   # Runs that read the branch's oracle/ files, including route transport.
   jq -e '[.runs[] | select(.id == "conformance-route-transport") | {placement, needs, oracle_files}]
     == [{placement: ["host", "docker:oracle"], needs: ["oracle"], oracle_files: true}]' "$out" >/dev/null
-  [ "$(jq -r '[.runs[] | select(.oracle_files) | .id] | join(" ")' "$out")" = "goldens-check harvest-report conformance-route-transport harvest-coverage" ]
+  [ "$(jq -r '[.runs[] | select(.oracle_files) | .id] | join(" ")' "$out")" = "goldens-check harvest-report sync-server-reference-selftest conformance-route-transport sync-server-reference-smoke sync-server-reference-edges harvest-coverage" ]
   # A pin bump in a sparse worktree whose main checkout has the old oracle/:
   # gate --local runs the rest and leaves those two to the merge.
   printf 'conformance/oracle.json\0conformance/catalog/harvest.csv\0' >"$BATS_TEST_TMPDIR/changed"
@@ -1909,6 +1909,105 @@ PY
     --oracle-tree differs --var base=b --var tip=t --out "$BATS_TEST_TMPDIR/plan.json"
   [ "$(jq -r '[.runs[] | select(.outcome == "deferred-tip") | .id] | join(" ")' "$BATS_TEST_TMPDIR/plan.json")" = "goldens-check harvest-report" ]
   jq -e '.runs[] | select(.id == "conformance" and .action == "run")' "$BATS_TEST_TMPDIR/plan.json" >/dev/null
+
+  # Server source selects tests and lint; dependency changes also select the audit.
+  printf 'server/src/lib.rs\0' >"$BATS_TEST_TMPDIR/changed"
+  python3 -B -I "$REPO_ROOT/tools/gate/gate.py" plan --config "$out" --changed "$BATS_TEST_TMPDIR/changed" --mode full \
+    --oracle-tree same --main-capable yes --var base=b --var tip=t --out "$BATS_TEST_TMPDIR/plan.json"
+  [ "$(jq -r '[.runs[] | select(.action == "run" and (.id | test("^sync-server-(test|lint|deps)$"))) | .id] | join(" ")' "$BATS_TEST_TMPDIR/plan.json")" = "sync-server-test sync-server-lint" ]
+  printf 'server/Cargo.lock\0' >"$BATS_TEST_TMPDIR/changed"
+  python3 -B -I "$REPO_ROOT/tools/gate/gate.py" plan --config "$out" --changed "$BATS_TEST_TMPDIR/changed" --mode full \
+    --oracle-tree same --main-capable yes --var base=b --var tip=t --out "$BATS_TEST_TMPDIR/plan.json"
+  [ "$(jq -r '[.runs[] | select(.action == "run" and (.id | test("^sync-server-(test|lint|deps)$"))) | .id] | join(" ")' "$BATS_TEST_TMPDIR/plan.json")" = "sync-server-test sync-server-lint sync-server-deps" ]
+
+  # A reference driver change selects its selftest and both reference suites.
+  printf 'oracle/meguri-sync-server/driver.py\0' >"$BATS_TEST_TMPDIR/changed"
+  python3 -B -I "$REPO_ROOT/tools/gate/gate.py" plan --config "$out" --changed "$BATS_TEST_TMPDIR/changed" --mode full \
+    --oracle-tree same --main-capable yes --var base=b --var tip=t --out "$BATS_TEST_TMPDIR/plan.json"
+  [ "$(jq -r '[.runs[] | select(.action == "run" and (.id | test("^sync-server-reference-(selftest|smoke|edges)$"))) | .id] | join(" ")' "$BATS_TEST_TMPDIR/plan.json")" = "sync-server-reference-selftest sync-server-reference-smoke sync-server-reference-edges" ]
+  jq -e '.runs[] | select(.id == "oracle-test" and .action == "run")' "$BATS_TEST_TMPDIR/plan.json" >/dev/null
+
+  # Dedicated neutral inputs have their own reference coverage. Check actual
+  # plans so exclusions cannot suppress an old input in the same change.
+  python3 -B -I - "$REPO_ROOT" "$out" "$BATS_TEST_TMPDIR" <<'PY'
+import json
+from pathlib import Path
+import subprocess
+import sys
+
+root, config, tmp = map(Path, sys.argv[1:])
+old = {"core-test", "conformance", "goldens-check", "harvest-report", "live-oracle"}
+reference = {"sync-server-reference-selftest", "sync-server-reference-smoke",
+             "sync-server-reference-edges"}
+dedicated = [
+    "conformance/schema/meguri-sync-server.schema.json",
+    "conformance/catalog/meguri-sync-server.json",
+    "conformance/fixtures/meguri-sync-server/AGENTS.md",
+    "conformance/fixtures/meguri-sync-server/original.json",
+    "conformance/fixtures/meguri-sync-server/edges.json",
+    "conformance/fixtures/meguri-sync-server/observations/desktop-26.09.4-foundation.json",
+    "conformance/fixtures/meguri-sync-server/observations/desktop-26.09.4-edges.json",
+    "conformance/recordings/scenarios/meguri-sync-server/AGENTS.md",
+    "conformance/recordings/scenarios/meguri-sync-server/desktop-selection.json",
+    "conformance/recordings/scenarios/meguri-sync-server/desktop-edge-selection.json",
+    "conformance/recordings/scenarios/meguri-sync-server/candidate-complete-selection.json",
+    "conformance/recordings/scenarios/meguri-sync-server/candidate-full-selection.json",
+    "conformance/recordings/scenarios/meguri-sync-server/candidate-inputs.md",
+]
+
+def selected(paths, mode="full"):
+    changed, plan = tmp / "routing-changed", tmp / "routing-plan.json"
+    changed.write_bytes(b"".join(p.encode() + b"\0" for p in paths))
+    subprocess.run([
+        sys.executable, "-B", "-I", str(root / "tools/gate/gate.py"), "plan",
+        "--config", str(config), "--changed", str(changed), "--mode", mode,
+        "--oracle-tree", "same", "--main-capable", "yes",
+        "--var", "base=b", "--var", "tip=t", "--out", str(plan),
+    ], check=True)
+    return {r["id"] for r in json.loads(plan.read_text())["runs"] if r["action"] == "run"}
+
+def retains(paths, expected, mode="full"):
+    actual = selected(paths, mode)
+    assert expected <= actual, (mode, paths, "missing", sorted(expected - actual))
+    return actual
+
+for path in dedicated:
+    actual = retains([path], reference)
+    assert not actual & old, (path, "selected old jobs", sorted(actual & old))
+
+for path in ("docker/meguri-sync-reference.Dockerfile", "tools/mg.d/meguri-sync-reference.sh"):
+    retains([path], reference)
+
+fixture = "conformance/fixtures/storage/schema-18.anki2"
+scenario = "conformance/scenarios/smoke/runner-empty.yaml"
+fixture_jobs = {"core-test", "conformance", "goldens-check", "live-oracle"}
+scenario_jobs = old | {"canary-scenarios"}
+for path, expected in (
+    (fixture, fixture_jobs),
+    ("conformance/catalog/harvest.csv", {"core-test", "conformance", "goldens-check", "harvest-report"}),
+    (scenario, scenario_jobs),
+    ("conformance/schema/scenario.schema.json", {"core-test", "conformance", "goldens-check"}),
+    ("conformance/recordings/scenarios/sync/wire/records-down/exchanges.jsonl",
+     {"core-test", "conformance", "goldens-check"}),
+):
+    retains([path], expected)
+
+for shared, expected in (
+    (fixture, fixture_jobs),
+    (scenario, scenario_jobs),
+    ("core/crates/meguri-sched/src/answer.rs", {"core-test", "conformance", "live-oracle"}),
+    ("tools/mg.d/conformance.sh", old | {"canary-scenarios"}),
+    ("tools/mg.d/oracle.sh", {"core-test", "conformance", "live-oracle", "oracle-test"}),
+):
+    baseline = retains([shared], expected) & old
+    for path in dedicated:
+        actual = selected([shared, path]) & old
+        assert actual == baseline, (shared, path, "old jobs", sorted(actual), "expected", sorted(baseline))
+
+# These modes deliberately execute all paths, even for dedicated-only input.
+for mode in ("milestone", "release"):
+    retains([dedicated[3]], old | reference | {"oracle-test"}, mode)
+PY
 
   # The sched change of the plan's scenario selects sched's live suites and the scan.
   printf 'core/crates/meguri-sched/src/answer.rs\0' >"$BATS_TEST_TMPDIR/changed"

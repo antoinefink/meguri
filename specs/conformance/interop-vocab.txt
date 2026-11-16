@@ -1,3 +1,45 @@
+# Neutral Meguri Sync probe/evidence manifest keys (U2).
+selected_case_count
+reference_runtime
+meguri_sync
+retained_peer
+device_evidence
+meguri-sync-server-v1
+baseline_release
+document_kind
+probe_contract
+source_sha256
+batch_base
+mg_job
+expected_case_count
+completed_case_count
+spec_ids
+baseline_spec_ids
+retained_meguri
+runtime_sha256
+synthetic_input
+neutral_observation
+mg_receipt
+independent_review
+resource_report
+receipt_id
+client_a
+client_b
+fresh_client
+browser_admin
+browser_member
+fault_driver
+prepare_synthetic
+native_request
+client_sync
+browser_request
+operator_action
+inject_failure
+fixture_sha256
+meguri_policy
+current_probe
+publication_committed
+acknowledgement_received
 # Interface names the conformance specs use (specs/README-format.md once U2
 # lands): card and review-log columns, scheduling-state protobuf fields and
 # collection config keys that observations and scenarios carry.

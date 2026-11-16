@@ -597,6 +597,36 @@ STUB
   [ "$status" -eq 0 ]
 }
 
+@test "commit-msg: Rust and frontend server changes require role, spec and session provenance" {
+  mg hooks install
+  [ "$status" -eq 0 ]
+  WT="$SB"
+  local path
+  for path in server/src/main.rs server/web/src/Login.tsx; do
+    commit_with 'Server source' "$path"
+    [ "$status" -ne 0 ]
+    [[ "$stderr" == *"need a Role: trailer"* ]]
+    commit_with $'Server source\n\nRole: implementer' "$path"
+    [ "$status" -ne 0 ]
+    [[ "$stderr" == *"need a Spec: trailer"* ]]
+    commit_with $'Server source\n\nRole: fixer\nSpec: R4' "$path"
+    [ "$status" -ne 0 ]
+    [[ "$stderr" == *"need a Session: trailer"* ]]
+    commit_with $'Server source\n\nRole: implementer\nSpec: R4, R32\nSession: s-server-tooling' "$path"
+    [ "$status" -eq 0 ]
+    run bash -c 'cd "$1" && tools/hooks/commit-msg --commit HEAD' _ "$SB"
+    [ "$status" -eq 0 ]
+  done
+  git -C "$WT" mv server/src/main.rs tools/moved.rs
+  commit_with $'Move server source\n\nRole: implementer'
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"need a Spec: trailer"* ]]
+  git -C "$WT" -c core.hooksPath=/dev/null commit -qm 'Synthetic bypassed server commit'
+  run bash -c 'cd "$1" && tools/hooks/commit-msg --commit HEAD' _ "$SB"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"need a Role: trailer"* ]]
+}
+
 @test "commit-msg: spec paths, several ids, other roles and paths outside the code tree" {
   mg hooks install
   WT="$SB"

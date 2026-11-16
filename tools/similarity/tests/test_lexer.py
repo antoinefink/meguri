@@ -75,6 +75,31 @@ class RustLexing(unittest.TestCase):
         self.assertEqual(out.lex[-3:], ["id", "cards", "x"])
 
 
+class ServerLanguages(unittest.TestCase):
+    def test_rust_server_uses_existing_rust_tokens_and_lines(self):
+        path = "server/src/main.rs"
+        self.assertEqual(language_of(path), "rust")
+        source = 'fn main() {\n    let label = "Amber birch"; // cedar dogwood\n}\n'
+        out = Lexer().lex(source, language_of(path))
+        self.assertEqual(out, Lexer().lex(source, "rust"))
+        self.assertEqual(list(zip(out.lex, out.lex_lines)),
+                         [("main", 1), ("label", 2), ("amber", 2), ("birch", 2)])
+        self.assertEqual(out.comments, [(["cedar", "dogwood"], [2, 2])])
+        self.assertTrue(out.struct)
+
+    def test_browser_extensions_keep_javascript_tokens_and_source_lines(self):
+        source = 'export const Screen = () => (\n  <main title="Amber birch" />\n);\n// cedar dogwood\n'
+        for extension in ("js", "jsx", "ts", "tsx"):
+            with self.subTest(extension=extension):
+                path = "server/web/src/Screen." + extension
+                self.assertEqual(language_of(path), "js")
+                out = Lexer().lex(source, language_of(path))
+                self.assertEqual(out, Lexer().lex(source, "js"))
+                self.assertEqual(out.lex_lines[out.lex.index("amber")], 2)
+                self.assertEqual(out.comments, [(["cedar", "dogwood"], [4, 4])])
+                self.assertTrue(out.struct)
+
+
 class OtherLanguages(unittest.TestCase):
     def setUp(self):
         self.lx = Lexer()

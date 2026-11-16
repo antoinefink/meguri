@@ -136,8 +136,29 @@ runs:
     tier: T0
     placement: docker:dev
     class: unit
-    triggers: [core/, conformance/, tools/mg.d/core.sh, tools/mg.d/conformance.sh, tools/mg.d/oracle.sh]
+    triggers: [core/, conformance/, tools/mg.d/core.sh, tools/mg.d/conformance.sh, tools/mg.d/oracle.sh, "!conformance/schema/meguri-sync-server.schema.json", "!conformance/catalog/meguri-sync-server.json", "!conformance/fixtures/meguri-sync-server/", "!conformance/recordings/scenarios/meguri-sync-server/"]
     budget_s: 2400
+  - id: sync-server-test
+    job: sync-server-test
+    tier: T0
+    placement: docker:dev
+    class: unit
+    triggers: &sync-server [server/, tools/mg.d/meguri-sync.sh, core/rust-toolchain.toml, docker/dev.Dockerfile, docker/compose.yml, docker/dev.Dockerfile.dockerignore]
+    budget_s: 2400
+  - id: sync-server-lint
+    job: sync-server-lint
+    tier: T0
+    placement: docker:dev
+    class: static
+    triggers: *sync-server
+    budget_s: 1200
+  - id: sync-server-deps
+    job: sync-server-deps
+    tier: T0
+    placement: docker:dev
+    class: static
+    triggers: [server/Cargo.toml, server/Cargo.lock, server/deny.toml, server/about.toml, server/DEPENDENCIES.md, server/LICENSE, server/rust-toolchain.toml, tools/mg.d/meguri-sync.sh, core/rust-toolchain.toml, docker/dev.Dockerfile, docker/compose.yml, docker/dev.Dockerfile.dockerignore]
+    budget_s: 600
   - id: native-durability
     job: native-durability
     tier: T0
@@ -153,7 +174,7 @@ runs:
     tier: T0
     placement: [host, docker:dev]
     class: conformance
-    triggers: [core/, conformance/, tools/mg.d/conformance.sh, tools/mg.d/oracle.sh]
+    triggers: [core/, conformance/, tools/mg.d/conformance.sh, tools/mg.d/oracle.sh, "!conformance/schema/meguri-sync-server.schema.json", "!conformance/catalog/meguri-sync-server.json", "!conformance/fixtures/meguri-sync-server/", "!conformance/recordings/scenarios/meguri-sync-server/"]
     budget_s: 1200
   - id: goldens-check
     job: goldens-check
@@ -161,7 +182,7 @@ runs:
     tier: T0
     placement: [host, docker:dev]
     class: conformance
-    triggers: [conformance/, core/crates/meguri-testkit/, core/tools/meguri-cli/, tools/conformance/, tools/mg.d/conformance.sh]
+    triggers: [conformance/, core/crates/meguri-testkit/, core/tools/meguri-cli/, tools/conformance/, tools/mg.d/conformance.sh, "!conformance/schema/meguri-sync-server.schema.json", "!conformance/catalog/meguri-sync-server.json", "!conformance/fixtures/meguri-sync-server/", "!conformance/recordings/scenarios/meguri-sync-server/"]
     oracle_files: true
     budget_s: 900
   - id: harvest-report
@@ -169,8 +190,19 @@ runs:
     tier: T0
     placement: [host, docker:dev]
     class: conformance
-    triggers: [conformance/catalog/, conformance/scenarios/, core/crates/meguri-testkit/src/catalog.rs, tools/mg.d/conformance.sh]
+    triggers: [conformance/catalog/, conformance/scenarios/, core/crates/meguri-testkit/src/catalog.rs, tools/mg.d/conformance.sh, "!conformance/catalog/meguri-sync-server.json"]
     oracle_files: true
+    budget_s: 900
+
+  # The wrapper orchestrates its own Docker reference image.
+  - id: sync-server-reference-selftest
+    job: sync-server-reference
+    args: [selftest]
+    tier: T0
+    placement: host
+    class: conformance
+    oracle_files: true
+    triggers: &sync-server-reference [oracle/meguri-sync-server/, docker/meguri-sync-reference.Dockerfile, docker/meguri-sync-reference.Dockerfile.dockerignore, docker/meguri-sync-reference.compose.yml, tools/mg.d/meguri-sync-reference.sh, conformance/schema/meguri-sync-server.schema.json, conformance/catalog/meguri-sync-server.json, conformance/fixtures/meguri-sync-server/, conformance/recordings/scenarios/meguri-sync-server/, specs/conformance/meguri-sync-server.md, specs/conformance/meguri-sync-candidate.md, "specs/sync/server-*.md"]
     budget_s: 900
 
   # --- T0: tooling self-tests -------------------------------------------------
@@ -444,7 +476,7 @@ runs:
     placement: [host, docker:similarity]
     needs: [refs]
     class: similarity
-    triggers: [core/, app/, tools/, docker/, conformance/runner/, .claude/]
+    triggers: [core/, app/, server/, tools/, docker/, conformance/runner/, .claude/]
     budget_s: 600
     local: false
     where: main
@@ -461,6 +493,25 @@ runs:
     where: tip
 
   # --- T1: live oracle ----------------------------------------------------------
+  # Smoke covers only the wrapper's named Desktop selection.
+  - id: sync-server-reference-smoke
+    job: sync-server-reference
+    args: [smoke]
+    tier: T1
+    placement: host
+    class: conformance
+    oracle_files: true
+    triggers: *sync-server-reference
+    budget_s: 900
+  - id: sync-server-reference-edges
+    job: sync-server-reference
+    args: [edges]
+    tier: T1
+    placement: host
+    class: conformance
+    oracle_files: true
+    triggers: *sync-server-reference
+    budget_s: 900
   - id: live-oracle
     job: conformance
     # Antoine stopped Anki server work on 2026-10-26. Keep other T1
@@ -489,7 +540,7 @@ runs:
     oracle: true
     local: false
     budget_s: 1200
-    triggers: [core/, core/crates/meguri-text/, core/crates/meguri-model/, core/crates/meguri-storage/, core/crates/meguri-engine/, core/crates/meguri-sched/, core/crates/meguri-template/, core/crates/meguri-search/, core/crates/meguri-sync/, core/crates/meguri-package/, core/crates/meguri-host/, core/crates/meguri-testkit/, core/tools/meguri-cli/, core/Cargo.lock, core/Cargo.toml, core/pins.toml, conformance/scenarios/, conformance/goldens/, conformance/deviations.yaml, conformance/oracle.json, conformance/fixtures/, tools/mg.d/conformance.sh, tools/mg.d/oracle.sh]
+    triggers: [core/, core/crates/meguri-text/, core/crates/meguri-model/, core/crates/meguri-storage/, core/crates/meguri-engine/, core/crates/meguri-sched/, core/crates/meguri-template/, core/crates/meguri-search/, core/crates/meguri-sync/, core/crates/meguri-package/, core/crates/meguri-host/, core/crates/meguri-testkit/, core/tools/meguri-cli/, core/Cargo.lock, core/Cargo.toml, core/pins.toml, conformance/scenarios/, conformance/goldens/, conformance/deviations.yaml, conformance/oracle.json, conformance/fixtures/, tools/mg.d/conformance.sh, tools/mg.d/oracle.sh, "!conformance/fixtures/meguri-sync-server/"]
   - id: oracle-test
     job: oracle
     args: [test]
@@ -782,6 +833,7 @@ utilities:
   - {job: cleanroom, why: "restricted Codex implementation runner; boundary probes run before every invocation"}
   - {job: cleanroom-image, why: "builds the restricted Codex runtime; cleanroom verifies it before use"}
   - {job: core-format, why: "optional Rust source formatting on demand"}
+  - {job: sync-server-format, why: "explicit optional server source formatting on demand"}
   - {job: gate, why: "runs the tiers"}
   - {job: merge, why: "runs the gate for a branch and fast-forwards the integration branch"}
   - {job: catch-up, why: "re-runs the runs merges queued because of the machine's state, once tools/mg doctor reports their user step clear (U19b)"}

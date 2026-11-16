@@ -1373,10 +1373,60 @@ class PublicRecoveryRuleTests(unittest.TestCase):
                 git(self.repo, "reset", "-q")
 
 
+class PublicSyncPlanTests(unittest.TestCase):
+    def test_exact_approved_documents_and_index_bytes(self):
+        data = b"meguri sync approved technical fixture\n"
+        digest = hashlib.sha256(data).hexdigest()
+        paths = ("docs/plans/2026-11-15-1028-feat-meguri-sync-server-plan.md",
+                 "docs/process/review-log/meguri-sync-plan-20261115.md")
+        # Public words stand in for private tokens; no real token set is read.
+        matcher = private_scan.Matcher({("meguri",), ("sync",), ("sentinelprivate",)})
+        for path in paths:
+            # Real plans may change. Only fixed synthetic bytes are approved in
+            # this test; revised content must pass through the normal scanner.
+            with self.subTest(path=path), tempfile.TemporaryDirectory() as repo, \
+                    mock.patch.object(private_scan, "PUBLIC_ARTIFACTS", {path: digest}):
+                self.assertTrue(private_scan.line_hits(matcher, data.decode("utf-8")))
+                git(repo, "init", "-q")
+                full = os.path.join(repo, path)
+                for changed, expected in ((data, False), (data + b" ", True),
+                                          (b"meguri sync revised technical fixture\n", True),
+                                          (data + b"\nsentinelprivate\n", True)):
+                    write(full, changed, "wb")
+                    git(repo, "add", "--", path)
+                    self.assertEqual(bool(private_scan.scan_paths(matcher, [full], repo)[0]), expected)
+                    self.assertEqual(bool(private_scan.scan_staged(matcher, repo)[0]), expected)
+                # The index controls staged approval even when disk bytes differ.
+                write(full, data, "wb")
+                self.assertFalse(private_scan.scan_paths(matcher, [full], repo)[0])
+                self.assertTrue(private_scan.scan_staged(matcher, repo)[0])
+                git(repo, "add", "--", path)
+                write(full, data + b"\nsentinelprivate\n", "wb")
+                self.assertTrue(private_scan.scan_paths(matcher, [full], repo)[0])
+                self.assertFalse(private_scan.scan_staged(matcher, repo)[0])
+                # Identical approved bytes at a different path stay scanned.
+                copied = "copies/" + path
+                other = os.path.join(repo, copied)
+                write(other, data, "wb")
+                git(repo, "add", "--", copied)
+                self.assertTrue(private_scan.scan_paths(matcher, [other], repo)[0])
+                found, _ = private_scan.scan_staged(matcher, repo)
+                self.assertEqual([item["path"] for item in found], [copied])
+
+    def test_original_review_note_grant_is_unchanged(self):
+        self.assertEqual(
+            private_scan.PUBLIC_ARTIFACTS["docs/process/review-log/meguri-sync-plan-20261115.md"],
+            "3fefeb90235071d6e3d6ad364443276396cc01d9a9f4ccfa63bd6f80e99316b8")
+
+
 class PublicLibraryTests(unittest.TestCase):
     def test_public_asset_mutations(self):
         root = Path(SCRIPT).resolve().parents[3]
-        facts = dict(private_scan.PUBLIC_ARTIFACTS)
+        facts = {path: private_scan.PUBLIC_ARTIFACTS[path] for path in (
+            private_scan.PUBLIC_NOTICE_PATH,
+            "specs/licenses/jquery-3.7.1-LICENSE.txt",
+            "app/Packages/MeguriKit/Sources/CardRendering/Resources/CardRuntime/vendor/jquery-3.7.1.min.js",
+        )}
         matched = 0
         for source in (root / "core/vendor/askama_derive").rglob("*"):
             if source.is_file():

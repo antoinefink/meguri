@@ -5,11 +5,16 @@ from pathlib import Path
 import socket
 import subprocess
 import sys
+import tempfile
 
 
 def child(port: int) -> None:
     for path in (
         "/work/oracle", "/work/refs", "/work/local-data", "/work/build",
+        "/work/server/oracle", "/work/server/refs", "/work/server/local-data",
+        "/work/server/.git", "/work/server/.aws", "/work/server/web/node_modules",
+        "/work/server/.agents", "/work/server/.config/gcloud",
+        "/work/server/web/.agents", "/work/server/web/.config/gcloud",
         "/Users/antoine/code/meguri", "/Applications/Anki.app", "/var/run/docker.sock",
     ):
         assert not Path(path).exists(), "forbidden source/host path is exposed: " + path
@@ -26,6 +31,15 @@ def child(port: int) -> None:
     marker = Path("/work/cleanroom-probe")
     marker.write_text("allowed write")
     marker.unlink()
+    server = Path("/work/server")
+    created_server = not server.exists()
+    server.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".boundary-probe-", dir=server) as directory:
+        source = Path(directory) / "probe.rs"
+        source.write_text("pub fn boundary_probe() {}\n")
+        assert source.read_text() == "pub fn boundary_probe() {}\n", "server source is not writable"
+    if created_server:
+        server.rmdir()
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=2):
             pass
@@ -33,7 +47,7 @@ def child(port: int) -> None:
         pass
     else:
         raise AssertionError("sandbox allowed command networking")
-    print("cleanroom: allowed write PASS; forbidden paths absent; credentials and network denied")
+    print("cleanroom: allowed writes including server PASS; forbidden paths absent; credentials and network denied")
 
 
 if __name__ == "__main__":

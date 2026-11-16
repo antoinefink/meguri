@@ -10,9 +10,17 @@ import stat
 import subprocess
 
 
-ROOTS = {"core", "app", "specs", "conformance", "docs", "tools", "docker"}
+ROOTS = {"core", "app", "server", "specs", "conformance", "docs", "tools", "docker"}
 ROOT_FILES = {"AGENTS.md", ".gitignore", ".gitattributes"}
 FORBIDDEN = {"oracle", "refs", "local-data", "build", ".git", ".codex", ".claude"}
+# Credentials and dependency caches must not enter a source-only runner, even
+# when somebody accidentally tracks them below an otherwise permitted root.
+FORBIDDEN |= {".aws", ".ssh", ".azure", ".docker", ".kube", ".agents", "node_modules"}
+# .config is also a credential-store root (including tools not yet known to
+# this runner). Permit only the exact source configuration currently needed.
+CREDENTIAL_TREES = {(".config",)}
+SOURCE_CONFIG_FILES = {"core/.config/nextest.toml"}
+CREDENTIAL_FILES = {".netrc", ".npmrc", ".pypirc", ".gitconfig", ".git-credentials", ".gitmodules"}
 
 
 def permitted(name: str) -> bool:
@@ -22,6 +30,9 @@ def permitted(name: str) -> bool:
         and not path.is_absolute()
         and ".." not in path.parts
         and not FORBIDDEN.intersection(path.parts)
+        and not CREDENTIAL_FILES.intersection(path.parts)
+        and (".config" not in path.parts or name in SOURCE_CONFIG_FILES)
+        and not any(part == ".env" or part.startswith(".env.") for part in path.parts)
         and (path.parts[0] in ROOTS or name in ROOT_FILES)
     )
 
@@ -61,7 +72,11 @@ def prepare(root: Path, target: Path) -> dict:
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, dest)
         dest.chmod(source.stat().st_mode & 0o777)
-    return {"files": len(entries), "excluded": sorted(FORBIDDEN), "real_history": False}
+    return {"files": len(entries), "excluded": sorted(FORBIDDEN),
+            "credential_trees": ["/".join(parts) for parts in sorted(CREDENTIAL_TREES)],
+            "source_config_files": sorted(SOURCE_CONFIG_FILES),
+            "credential_files": sorted(CREDENTIAL_FILES), "credential_patterns": [".env", ".env.*"],
+            "real_history": False}
 
 
 def validate(root: Path) -> None:

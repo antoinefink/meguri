@@ -1,0 +1,18 @@
+services:
+  sync-reference-resolver:
+    image: python:3.12-slim-trixie@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
+    init: true
+  sync-reference:
+    build:
+      context: ..
+      dockerfile: docker/meguri-sync-reference.Dockerfile
+    init: true
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges]
+    mem_limit: 2g
+    pids_limit: 128
+    tmpfs:
+      - /scratch:exec,mode=1777,size=1g
+      - /tmp:mode=1777,size=64m

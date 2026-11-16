@@ -33,11 +33,15 @@ the containers.
 """
 
 import argparse
+import contextlib
+import io
 import hashlib
 import html
 import json
 import os
 import re
+import secrets
+import stat
 import subprocess
 import sys
 import unicodedata
@@ -603,14 +607,17 @@ def git(repo, *args):
 PRIVATE_RESULTS = "conformance/reports/private/"
 
 
-def committed_texts(repo):
+def committed_texts(repo, commit=None):
     """Yields the text of each regular file committed at HEAD (binary files and
     PRIVATE_RESULTS left out). Nothing when HEAD has no commit."""
-    head = subprocess.run(["git", "-C", repo, "rev-parse", "-q", "--verify", "HEAD^{commit}"],
-                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if head.returncode != 0:
-        return
-    commit = head.stdout.decode("ascii").strip()
+    if commit is None:
+        head = subprocess.run(["git", "-C", repo, "rev-parse", "-q", "--verify", "HEAD^{commit}"],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if head.returncode != 0:
+            return
+        commit = head.stdout.decode("ascii").strip()
+    elif re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", commit) is None:
+        raise ValueError("committed text needs a full commit oid")
     blobs = []
     for record in git(repo, "ls-tree", "-r", "-z", "--full-tree", commit).split(b"\0"):
         if not record:
@@ -648,6 +655,14 @@ def committed_texts(repo):
 # ------------------------------------------------------------------ build
 
 
+def public_tokens(matcher, repo, commit=None):
+    found = set()
+    for text in committed_texts(repo, commit):
+        # Raw-only learning; masked fixed facts do not establish ordinary use.
+        found.update(matcher.scan_tokens(text))
+    return found
+
+
 def build(candidates, repo, out):
     tokens = set()
     by_kind = {}
@@ -662,12 +677,7 @@ def build(candidates, repo, out):
             found = tokens_of(kind, text)
             by_kind[kind] = by_kind.get(kind, 0) + len(found)
             tokens.update(found)
-    matcher = Matcher(tokens)
-    in_repo = set()
-    for text in committed_texts(repo):
-        # Keep committed_texts' raw-only learning: fixed facts are not evidence
-        # that a candidate's ordinary spelling outside their spans is public.
-        in_repo.update(matcher.scan_tokens(text))
+    in_repo = public_tokens(Matcher(tokens), repo)
     final = sorted(" ".join(t) for t in tokens - in_repo)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     tmp = out + ".tmp"
@@ -689,15 +699,125 @@ def build(candidates, repo, out):
     return meta
 
 
+def tokens_from_lines(lines):
+    for line in lines:
+        line = line.rstrip("\n")
+        if line:
+            yield tuple(line.split(" "))
+
+
 def load_tokens(paths):
     tokens = set()
     for path in paths:
         with open(path, encoding="utf-8") as f:
-            for line in f:
-                line = line.rstrip("\n")
-                if line:
-                    tokens.add(tuple(line.split(" ")))
+            tokens.update(tokens_from_lines(f))
     return Matcher(tokens)
+
+
+def refresh_public(repo, expected, shared_main=False):
+    """Explicit idle-writer maintenance; only tokens.txt is authoritative."""
+    def need(ok):
+        if not ok:
+            raise ValueError("unsafe or changed refresh input")
+
+    def pin(info, directory=False):
+        value = (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid)
+        return value if directory else value + (info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+    need(os.path.isabs(repo) and repo == os.path.normpath(repo) == os.path.realpath(repo))
+    need(re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", expected) is not None)
+    with contextlib.ExitStack() as stack:
+        bindings = []
+
+        def directory(path):
+            fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            stack.callback(os.close, fd)
+            for name in path.split("/")[1:]:
+                child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                stack.callback(os.close, child)
+                info = os.fstat(child)
+                need(info.st_uid in (0, os.getuid()) and
+                     (not info.st_mode & 0o022 or (info.st_uid == 0 and info.st_mode & stat.S_ISVTX)))
+                bindings.append((fd, name, child, pin(info, True)))
+                fd = child
+            return fd
+
+        def check_directories():
+            for parent, name, fd, before in bindings:
+                need(pin(os.fstat(fd), True) == before ==
+                     pin(os.stat(name, dir_fd=parent, follow_symlinks=False), True))
+
+        root = directory(repo)
+        marker = os.stat(".git", dir_fd=root, follow_symlinks=False)
+        need(marker.st_uid == os.getuid() and not marker.st_mode & 0o022 and
+             (stat.S_ISDIR(marker.st_mode) or (stat.S_ISREG(marker.st_mode) and marker.st_nlink == 1)))
+        marker_pin = pin(marker, stat.S_ISDIR(marker.st_mode))
+        common = os.fsdecode(git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")).rstrip("\n")
+        need(common == os.path.normpath(common) == os.path.realpath(common) and
+             os.path.isabs(common) and os.path.basename(common) == ".git")
+        need(common == repo + "/.git" or shared_main)
+        target = os.path.dirname(common) if shared_main else repo
+        directory(common)  # The shared target must be this repository's real common root.
+        private = directory(target + "/build/private")
+        need(os.fstat(private).st_uid == os.getuid() and stat.S_IMODE(os.fstat(private).st_mode) == 0o700)
+        parent = directory(target + "/build/private/tokens")
+        need(os.fstat(parent).st_uid == os.getuid())
+
+        def snapshot():
+            check_directories()
+            need(pin(os.stat(".git", dir_fd=root, follow_symlinks=False), stat.S_ISDIR(marker.st_mode)) == marker_pin)
+            need(git(repo, "rev-parse", "--verify", "HEAD^{commit}").decode("ascii").strip() == expected)
+            need(os.fsdecode(git(repo, "rev-parse", "--show-toplevel")).rstrip("\n") == repo)
+            need(os.fsdecode(git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")).rstrip("\n") == common)
+
+        snapshot()
+        fd = os.open("tokens.txt", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        stack.callback(os.close, fd)
+        original = os.fstat(fd)
+        need(stat.S_ISREG(original.st_mode) and original.st_uid == os.getuid() and
+             original.st_nlink == 1 and not original.st_mode & 0o022 and original.st_size <= 64 * 1024 * 1024)
+        with os.fdopen(os.dup(fd), "rb") as stream:
+            before = stream.read(64 * 1024 * 1024 + 1)
+        need(len(before) <= 64 * 1024 * 1024)
+
+        def unchanged(name, opened, info):
+            need(pin(os.fstat(opened)) == pin(info) ==
+                 pin(os.stat(name, dir_fd=parent, follow_symlinks=False)))
+
+        unchanged("tokens.txt", fd, original)
+        tokens = set(tokens_from_lines(io.StringIO(before.decode("utf-8"), newline=None)))
+        public = public_tokens(Matcher(tokens), repo, expected)
+        after = "".join(" ".join(token) + "\n" for token in sorted(tokens - public)).encode("utf-8")
+        result = {"head": expected, "before": len(tokens), "removed": len(public), "after": len(tokens - public),
+                  "before_sha256": hashlib.sha256(before).hexdigest(),
+                  "after_sha256": hashlib.sha256(after if public else before).hexdigest()}
+        snapshot()
+        unchanged("tokens.txt", fd, original)
+        if not public:
+            return result
+
+        def saved(name, data):
+            out = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
+            stack.callback(os.close, out)
+            os.fchmod(out, 0o600)
+            with os.fdopen(os.dup(out), "wb") as stream:
+                stream.write(data)
+                stream.flush()
+                os.fsync(out)
+            return out, os.fstat(out)
+
+        nonce = secrets.token_hex(16)
+        backup, temporary = "tokens.before-" + nonce, "tokens.refresh-" + nonce
+        backup_fd, backup_info = saved(backup, before)
+        temporary_fd, temporary_info = saved(temporary, after)
+        os.fsync(parent)
+        snapshot()
+        unchanged("tokens.txt", fd, original)
+        unchanged(backup, backup_fd, backup_info)
+        unchanged(temporary, temporary_fd, temporary_info)
+        os.replace(temporary, "tokens.txt", src_dir_fd=parent, dst_dir_fd=parent)
+        os.fsync(parent)
+        return result
 
 
 # ------------------------------------------------------------------- scan
@@ -708,10 +828,113 @@ def load_tokens(paths):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    # Independently classified original public session metadata, exact bytes.
+    'docs/process/provenance/sessions.jsonl':
+        '89b3be0f19ddc57b1b00692b34a073b163db61ff88f62b7129871223bc03de79',
     PUBLIC_NOTICE_PATH: PUBLIC_NOTICE_SHA256,
     "specs/licenses/jquery-3.7.1-LICENSE.txt": "d4db9ebe6f29f5168eac45ad713f055623ac5d0dcd5ba92da23d650ae012020d",
     "app/Packages/MeguriKit/Sources/CardRendering/Resources/CardRuntime/vendor/jquery-3.7.1.min.js":
         "fc9a93dd241f6b045cbff0481cf4e1901becd0e12fb45166a8f17f95823f0b1a",
+    # Owner approval 2026-11-15: these exact original review-note bytes.
+    "docs/process/review-log/meguri-sync-plan-20261115.md":
+        "3fefeb90235071d6e3d6ad364443276396cc01d9a9f4ccfa63bd6f80e99316b8",
+    # Delegated maintenance authority 2026-11-15: agent-applied grants for
+    # independently reviewed technical contracts, exact paths and full bytes.
+    "docs/plans/2026-11-15-1028-feat-meguri-sync-server-plan.md":
+        "358fca2e69541e15d464cb5810d9f7ed7bc8597220efec080d9579abb945fbbc",
+    "specs/sync/server-collection.md":
+        "36f7c4adee4eb035c0342e715f0d052a77bd57137d33222e5ee7e84a8f0b9bfa",
+    "specs/sync/server-lifecycle.md":
+        "abacc93c438e5230f8cd8a60a671e8da7efd521465d0d98d189e95444ecd20f1",
+    "specs/sync/server-media.md":
+        "32f9eff487e305d1d17bad276c3797de4e7664dae22662e4b72a61bd2c3166cb",
+    "specs/servers/meguri-sync-web.md":
+        "f2cf8343c983162fb28b60120250fbaed709434cbd9cc52e91a8b6f3fa89fe26",
+    "specs/conformance/meguri-sync-server.md":
+        "48052e8afb0a458947e4a7e72340b448a478bf39db758e44ae6773aca605c7b4",
+    "conformance/schema/meguri-sync-server.schema.json":
+        "cd905c134ed497f166566e18733465fa7e992156944957ee16c2e17ca586814a",
+    # Same delegated maintenance: independently authored/reviewed tooling,
+    # exact complete bytes only. These entries cover tooling, not production.
+    "docs/process/review-log/meguri-sync-boundary-authoring-20261115.md":
+        "c4aa47634166c890025e2ec1fd3a552069677f0d30fc554a98ae7bec82ce2c2a",
+    "tools/cleanroom/source_view.py":
+        "be74880b8aaa6768678ec1ad577424a05c8dcc07041a02a8e2f18cb5907530ad",
+    "tools/cleanroom/test_source_view.py":
+        "baed9e4626b60421f37783144317b3823f8d559b71694818c6bdd2f40f4a9508",
+    "tools/gate/static-checks/browser-retries.py":
+        "a69bee98c29564e9bdb30eb0f623f20db91795623c6eea1a982cc740d4b1565e",
+    "tools/similarity/tests/test_scan_synthetic.py":
+        "7a2488452f49b17772f611678883627bbe0c3b96e732de027bfb4f466fd35ca9",
+    # Delegated maintenance: independently reviewed original reference tooling,
+    # synthetic observations and evidence. Exact paths and complete bytes only.
+    'conformance/catalog/meguri-sync-server.json':
+        '4a1b6b865f8dce3c501c9ba14161e4559b0e6dea99c699a00835dbfc091e7898',
+    'conformance/fixtures/meguri-sync-server/observations/desktop-26.09.4-foundation.json':
+        'b302e7c77890d1c55dfdddf5e8630b79e85aa289b40a2fac496f299ae02850b9',
+    'docker/meguri-sync-reference.compose.yml':
+        'bb518192af60c60a54d4f62849d72b51bcea2bdb9b32dacd21726c3ac7966d9c',
+    'docs/process/review-log/meguri-sync-U3.md':
+        '50d4016dcbc654f7692f61a94849b6925de6dc73dac019e70c8923d27ff90923',
+    'oracle/meguri-sync-server/AGENTS.md':
+        'bdc60a465c52a548391469c7febb82de6c6a88c69f0a24329ae5bd31c260071f',
+    'oracle/meguri-sync-server/adapter.py':
+        '0f5659a0a4245fb8c3976f6ca54c9bdc701fcfdce03cb1f738fd3917c32eca17',
+    'oracle/meguri-sync-server/audit_deps.py':
+        '09ba79e0545fb91e5a2c653e93c75e6fa4a55734d52e54a70479ae8e8d55d151',
+    'oracle/meguri-sync-server/catalog.py':
+        'da44186c8ee85f1ef77b3ff2584e0adce209cc4cfb9a5ee1eb557ad5d9a0068f',
+    'oracle/meguri-sync-server/evidence.py':
+        'ae3ddbb0185102d6a657893fe2b1d1e19e17ddba0f5015e4c832eed913174054',
+    'oracle/meguri-sync-server/tests/test_validation.py':
+        '8b65fa75cf0b2c1e68dfc766a49761ed653ac67d5a9dc9adece29c01aca76681',
+    'oracle/meguri-sync-server/validation.py':
+        '4bdaa9691a68cd1bdd1eb96a36671faf95ccfa2f817c5319687a1bcb0d8af2be',
+    'tools/mg.d/meguri-sync-reference.sh':
+        '231787344e5f3525c651d2b541b9794e97ebca6b48f327d256ade22a587217be',
+
+    'docs/process/review-log/meguri-sync-reference-privacy.md':
+        '4ef0a4f96b31e513f73415ac2160a9ce14e335fbd9cc841ddbe4ed2159e643a8',
+
+    # Delegated maintenance, 2026-11-15: independently authored/reviewed
+    # account-service code, tests and documentation. Includes production paths;
+    # each entry admits only its exact path and complete reviewed bytes.
+    'server/DEPENDENCIES.md':
+        '9d2f9fb274770106aed9a294e128d4e2779a50dd68726e9fb3809487846c6bdf',
+    'server/src/error.rs':
+        '33e51ae13c05fb5124242b189fc02851103684fb3e03e104de63bd1d0a151261',
+    'server/src/main.rs':
+        '38e3225e1fcd7e923776ca142edc4512410f1127d9e0a02c7a5fb23902848d11',
+    'server/src/accounts/mod.rs':
+        '35a4ef643eb0b242d0534be5f45ddbbcbba09d156ec8fff3966570a4807b8071',
+    'server/src/accounts/provision.rs':
+        '26d0e9a97a04f0280c103945e36a97ae120883304e50212bb2d457cc1e7072ad',
+    'server/src/httpapi/AGENTS.md':
+        'ee08f06fbb1c5c420b5dbf55137846012523c0ec5aa37d6f73435f07bb722785',
+    'server/src/httpapi/ingress.rs':
+        'aaee8e568d0a2c915288942b847f45ec262874d13887ce2911bbe0dac4f39ef6',
+    'server/src/httpapi/mod.rs':
+        '2fab79b4a89e95bccc81ed0da6e71f1ec13dc3d30d9b19b2bce782a584817ad3',
+    'server/src/httpapi/tests.rs':
+        '370858800185720681b7f457ceded7bd414d1ae1d2defd513decb72ece76528d',
+    'server/src/storage/schema.sql':
+        '4842a61b5bf0e3b8e909364d5df7667aea59f054c7175313dd28f840f6c7a31b',
+    'server/src/storage/semantic.rs':
+        'a1b812ebdd2ea8ef4c0300025492f172c968f5fd35c6507068a91e307cb48902',
+    'server/src/storage/tests.rs':
+        '31e4aa34bf662a34d217d40994d56e40823d43d3e71d142218a9c286dd197bc6',
+    'server/tests/accounts.rs':
+        '460c1c0faf439707e74aa3d75add28fd4fb06de29eda6a616c151f64afb56d65',
+    'server/tests/http_contract.rs':
+        '405769e1b021ec1c787933330ea9c6a8591b682defd0db075bab45ac1e30959f',
+    'server/tests/provision.rs':
+        'd53465334d7a8000be31947bfb61208dcde0b572910a52265e0395134e1bd9a0',
+    'server/tests/recovery.rs':
+        'bdd02678a72f44a9a9a5d0025b297ea3313c3903a8c7c2f4b09f1c3b8861e2d0',
+
+    'docs/process/review-log/meguri-sync-U4.md':
+        '3dba5263b27e28389786dc37ee488630527cd3ba62a98ba350b357aac309aee8',
+
 }
 
 
@@ -762,6 +985,9 @@ PUBLIC_VENDOR_ARTIFACTS = {
 # complete raw UTF-8 bytes INCLUDING LF; CR, whitespace and additions differ.
 # Only exact paths qualify. Meguri changes and surrounding lines stay scanned.
 PUBLIC_SOURCE_LINES = {
+    'tools/scripts/private-scan/private_scan.py': {
+        '810bcc7c5a23cc66d257b5b5b5431ae419646e4662391a7216da6552dc2468d8',
+    },
     'core/vendor/askama_derive/Cargo.toml': {'a97a68a2ebcede836802fcf90cf07a563d1d43027f264cdd12ad820dd826d681'},
     'core/vendor/askama_derive/src/config.rs': {'e8aacfc627844473e382f3b486bd3b18803abc3ca21dbbdbf1c1aeb45e7ad8f9'},
     # Public PyPI requirement lines (two web-server dependencies of aqt), resolved by
@@ -959,6 +1185,10 @@ def main(argv):
     b.add_argument("--candidates", required=True)
     b.add_argument("--repo", required=True)
     b.add_argument("--out", required=True)
+    r = sub.add_parser("refresh-public")
+    r.add_argument("--repo", required=True)
+    r.add_argument("--head", required=True)
+    r.add_argument("--shared-main", action="store_true")
     s = sub.add_parser("scan")
     s.add_argument("--tokens", action="append", required=True)
     s.add_argument("--staged", action="store_true")
@@ -966,6 +1196,9 @@ def main(argv):
     s.add_argument("paths", nargs="*")
     args = parser.parse_args(argv)
     try:
+        if args.command == "refresh-public":
+            print(json.dumps(refresh_public(args.repo, args.head, args.shared_main), sort_keys=True))
+            return 0
         if args.command == "build":
             print(json.dumps(build(args.candidates, args.repo, args.out), sort_keys=True))
             return 0
@@ -980,7 +1213,8 @@ def main(argv):
         return 1 if found else 0
     except (OSError, ValueError, RuntimeError, KeyError) as e:
         # The message names a file or a git command, never a token.
-        print("private_scan.py: %s" % e, file=sys.stderr)
+        message = "refresh refused or interrupted; owner must inspect private backup before retrying" if args.command == "refresh-public" else str(e)
+        print("private_scan.py: %s" % message, file=sys.stderr)
         return 2
 
 

@@ -674,3 +674,34 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"OK"* ]]
 }
+
+@test "private refresh-public: prunes existing synthetic tokens by pinned HEAD, without Docker or source access" {
+  printf 'syntheticpublicword\n' >"$SB/public-baseline.txt"
+  git -C "$SB" add public-baseline.txt
+  git -C "$SB" commit -qm 'synthetic public baseline'
+  local head unknown="syntheticunknown${BATS_TEST_NUMBER}word"
+  head="$(git -C "$SB" rev-parse HEAD)"
+  mkdir -p "$SB/build/private/tokens"
+  chmod 700 "$SB/build/private"
+  printf 'syntheticpublicword\n%s\n' "$unknown" >"$SB/build/private/tokens/tokens.txt"
+  chmod 600 "$SB/build/private/tokens/tokens.txt"
+  mg private refresh-public --head "$head"
+  [ "$status" -eq 0 ]
+  [ "$(field .details.refresh_public.removed)" -eq 1 ]
+  [ "$(field .details.refresh_public.after)" -eq 1 ]
+  [ "$(cat "$SB/build/private/tokens/tokens.txt")" = "$unknown" ]
+  [ ! -s "$STUB_LOG" ]
+  [ ! -e "$SB/local-data" ]
+}
+
+@test "private refresh-public: missing pin and CI marker refuse before token access" {
+  mg private refresh-public
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = usage ]
+  export CI=1
+  mg private refresh-public --head "$(git -C "$SB" rev-parse HEAD)" --shared-main
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = ci-marker ]
+  [ ! -s "$STUB_LOG" ]
+  [ ! -e "$SB/build/private" ]
+}
