@@ -828,14 +828,18 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'conformance/recordings/scenarios/meguri-sync-server/candidate-final-additions.json':
+        'ec691e94ea6e85fcdf8e6a71ce95d453216babae78871699c29c04e6206391f6',
+    'conformance/recordings/scenarios/meguri-sync-server/candidate-mobile-final-selection.json':
+        '7ca1cff89f051fc845c0e2bc31d140306f67432be5de8c5c31fe4bc70aa2b87d',
     'conformance/recordings/scenarios/meguri-sync-server/candidate-inputs.md':
-        '87139844033f14711d35deaab3d7ade6585db36aac5a8078b009028a2359343f',
+        '62a4feb0a99aa774b7fcffed618c8a1d1144f759e86aba919d923cff7971076c',
     'conformance/recordings/scenarios/meguri-sync-server/candidate-retained-final-selection.json':
-        '6b1b00213ad01336e95fcdb5e557ce8a40ef77c5e8190ed0f24051a53d076bf1',
+        '3df220aac299fe6f7c253a3e32c3c340171fb6c856b078589354f869c08592d7',
     'conformance/recordings/scenarios/meguri-sync-server/final-fixture-recipes.json':
-        '2f8ccffb383bd0516af2cee891e9844b6c450adb678d6de3fe01a418ca3246b3',
+        'f8f8488500dc11c8d3ce0da7185d0de280160b240da38a0cba11b94457902348',
     'specs/conformance/meguri-sync-local-delivery.md':
-        '096bc2f12594bcbf20883e3c80853ac223013b97109b4d921afb83e2b66632de',
+        'c39b06b7815f4ab7d074748e79ae027d2be48292f71293ee9dc6057a18fad126',
     'docs/process/review-log/meguri-sync-U10.md':
         '565221177f72b2182784c8c442b1c07eda55c6d33186dfe1add3f36e0474cdf0',
     'server/Dockerfile':
@@ -858,7 +862,7 @@ PUBLIC_ARTIFACTS = {
     'tools/mg.d/conformance-edge.py':
         'db717ee3b016fb7f351552cdf9bbff12eff88936d16aefb9b6aabbdd04fa6f8e',
     'specs/conformance/meguri-sync-candidate.md':
-        '748208f6643b35bace1b405b52dac4ea1b2da528d88595ed67c99e84a615f3d7',
+        '2c0c7f8bbed6ee04f0ff217ee544d0216274626c6f7766db43feb557e2cda558',
     'docs/process/review-log/meguri-sync-normal-candidate.md':
         'a071d74e332b444e750964a80c7651915d23700b7221f55b183a998001c16996',
     'docs/process/review-log/meguri-sync-U8.md':
