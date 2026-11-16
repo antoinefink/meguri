@@ -866,6 +866,9 @@ PUBLIC_ARTIFACTS = {
         'a4dba10f1d809a0c05836778c7c075b2e2243d7c4aeeff12ddc6f9eec3cfc6e4',
     'docker/sync-web.Dockerfile':
         'b77e146b870049a542f1abb6bef8aaf0ea2cb7a6dc3590f370d2171fb31b5b5f',
+    # Independently reviewed original media verification history, exact bytes.
+    'docs/process/review-log/meguri-sync-U7.md':
+        '9c16c325281fb31dd38059d2fbe57dcf81d32df445ebd922aeb743e96ad45e4f',
     # Independently reviewed evidence for the approved instruction change.
     'docs/process/review-log/meguri-sync-privacy-maintenance-20261115.md':
         'c3f782e9d61556d6e032f3b2093ef8573dc3e5ce4d0b12e632c209f607c430d7',
