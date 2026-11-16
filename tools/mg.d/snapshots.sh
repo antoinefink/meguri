@@ -164,6 +164,7 @@ mg_snapshots() {
   MEGURI_SIM_ALLOW_HOST=0
   export MEGURI_SIM_ALLOW_HOST
   local platforms="" devices=() filter="" mode=verify rebaseline=false p d kind kinds
+  local MG_CLOUD_AGENT_MAC_PROFILE_BINDING="" MG_CLOUD_AGENT_MAC_PROFILE_PRIVATE="" mac_profile_binding=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --platform)
@@ -192,6 +193,11 @@ mg_snapshots() {
   done
   [ -n "$platforms" ] || platforms="iphone ipad mac"
   platforms="${platforms# }"
+  # Validate the caller before selecting team signing for the Mac build only.
+  if ! mg_word_in "${MEGURI_APP_SIGNING-adhoc}" "adhoc team"; then
+    mg_snapshots__usage "MEGURI_APP_SIGNING takes adhoc or team"
+    return 0
+  fi
   # Use the pool VM for every platform, including Mac-only runs. Explicit
   # host-pool overrides do not apply to snapshot verification.
   local begin
@@ -227,13 +233,29 @@ mg_snapshots() {
     return 0
   fi
   case " $platforms " in *" iphone "* | *" ipad "*) mg_app_build ios-sim Debug Snapshot || { mg_queued_settle; return 0; } ;; esac
-  case " $platforms " in *" mac "*) mg_app_build mac Debug Snapshot || { mg_queued_settle; return 0; } ;; esac
+  case " $platforms " in *" mac "*)
+    MEGURI_APP_SIGNING=team mg_app_build mac Debug Snapshot || { mg_queued_settle; return 0; }
+    mac_profile_binding="$MG_CLOUD_AGENT_MAC_PROFILE_BINDING"
+    if [ -n "$mac_profile_binding" ] && ! mg_app_mac_agent_profile_check; then
+      mg_failure agent-profile "App-only Mac profile changed after the Snapshot build"
+      mg_status fail
+      return 0
+    fi
+    ;; esac
 
   MG_SNAP_MODE="$mode" MG_SNAP_FILTER="$filter" MG_SNAP_BROKEN=0
   # Copy both platforms' products and runtime inputs under one VM lease,
   # after all host builds, regardless of the requested platform order.
   local ran="" rc f returned=""
   [ "$begin" -eq 0 ] || { mg_queued_settle; return 0; }
+  # mg_sim_take in the lease helper already copies products. Check the same
+  # retained binding here, before entering that shared delivery boundary.
+  if [ -n "$mac_profile_binding" ] &&
+      { [ "$MG_CLOUD_AGENT_MAC_PROFILE_BINDING" != "$mac_profile_binding" ] || ! mg_app_mac_agent_profile_check; }; then
+    mg_failure agent-profile "App-only Mac profile changed before Snapshot VM delivery"
+    mg_status fail
+    return 0
+  fi
   mg_snapshots__sim_lease
   rc=$?
   [ "$rc" -eq 0 ] || { mg_queued_settle; return 0; }

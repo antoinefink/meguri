@@ -85,7 +85,47 @@ add_fakes() {
   cat >"$SB/tools/mg.d/zz-fakes.sh" <<'EOF'
 fx_host() { case "$1" in /work/*) printf '%s\n' "$MG_ROOT/${1#/work/}" ;; *) printf '%s\n' "$1" ;; esac; }
 mg_lint_ui_first() { echo "fake lint-ui" >>"$STUB_LOG"; return 0; }
-mg_app_build() { echo "fake build $*" >>"$STUB_LOG"; return 0; }
+mg_app_build() {
+  echo "fake build $*" >>"$STUB_LOG"
+  echo "fake signing $1=${MEGURI_APP_SIGNING-adhoc}" >>"$STUB_LOG"
+  MG_CLOUD_AGENT_MAC_PROFILE_BINDING="" MG_CLOUD_AGENT_MAC_PROFILE_PRIVATE=""
+  [ "$1" = mac ] || return 0
+  if [ -n "${FX_BUILD_OUTCOME:-}" ]; then
+    if [ "$FX_BUILD_OUTCOME" = queued ]; then
+      MG_MAC_VM_REASON="fake build unavailable"
+      mg__mac_vm_queued "fake build unavailable" "$MG_VM_PART"
+    else
+      mg_failure build "fake build failure"
+      mg_status "$FX_BUILD_OUTCOME"
+    fi
+    return 1
+  fi
+  if [ -n "${MEGURI_CLOUD_AGENT_MAC_PROFILE_FILE:-}" ]; then
+    if [ "${FX_PROFILE_REFUSE:-}" = 1 ]; then
+      mg_failure agent-profile "fake approved profile refusal"
+      mg_status fail
+      return 1
+    fi
+    MG_CLOUD_AGENT_MAC_PROFILE_BINDING=generated-binding
+    MG_CLOUD_AGENT_MAC_PROFILE_PRIVATE=generated-private
+  fi
+  FX_PROFILE_CHECKS=0
+  return 0
+}
+mg_app_mac_agent_profile_check() {
+  FX_PROFILE_CHECKS=$((FX_PROFILE_CHECKS + 1))
+  echo "fake profile check $FX_PROFILE_CHECKS" >>"$STUB_LOG"
+  [ "$MG_CLOUD_AGENT_MAC_PROFILE_BINDING" = generated-binding ] &&
+    [ "$MG_CLOUD_AGENT_MAC_PROFILE_PRIVATE" = generated-private ] || return 1
+  [ "${FX_PROFILE_CHECK_FAIL:-}" != "$FX_PROFILE_CHECKS" ] || return 1
+  if [ "$FX_PROFILE_CHECKS" = 1 ]; then
+    case "${FX_PROFILE_BINDING_DRIFT:-}" in
+      clear) MG_CLOUD_AGENT_MAC_PROFILE_BINDING="" ;;
+      replace) MG_CLOUD_AGENT_MAC_PROFILE_BINDING=generated-replacement ;;
+    esac
+  fi
+  return 0
+}
 fx_look() { head -n 1 "$1" 2>/dev/null; }
 fx_image_diff() {
   local cmd="$1" report="" pairs="" p
@@ -119,6 +159,12 @@ mg_image_tools() {
   esac
 }
 mg_sim_begin() {
+  if [ "${FX_ASSERT_LOCAL:-}" = 1 ]; then
+    [ -z "$MG_CLOUD_AGENT_MAC_PROFILE_BINDING" ] && [ -z "$MG_CLOUD_AGENT_MAC_PROFILE_PRIVATE" ] || {
+      mg_failure fake-scope "stale profile state at snapshots entry"; mg_status error; return 1;
+    }
+    echo "fake fresh profile scope" >>"$STUB_LOG"
+  fi
   MG_SIM_RUNNER=vm
   if [ "${FX_VM_UNAVAILABLE:-}" = 1 ]; then
     MG_SIM_RUNNER="" MG_MAC_VM_REASON="fake VM unavailable"
@@ -127,7 +173,21 @@ mg_sim_begin() {
   fi
   return 0
 }
-mg_snapshots__sim_lease() { echo "fake VM lease" >>"$STUB_LOG"; MG_SNAP_SIM_LEASED=1; return 0; }
+mg_sim_take() {
+  echo "fake VM lease signing=${MEGURI_APP_SIGNING-unset}" >>"$STUB_LOG"
+  if [ "${FX_DELIVERY_OUTCOME:-}" = queued ]; then
+    MG_MAC_VM_REASON="fake VM delivery unavailable"
+    mg__mac_vm_queued "fake VM delivery unavailable" "$MG_VM_PART"
+    return 2
+  elif [ "${FX_DELIVERY_OUTCOME:-}" = error ]; then
+    mg_failure mac-vm-copy "fake product copy failure"
+    mg_status error
+    return 1
+  fi
+  echo "fake VM products copied" >>"$STUB_LOG"
+  return 0
+}
+mg_mac_vm_copy_in() { echo "fake VM inputs copied" >>"$STUB_LOG"; return 0; }
 mg_mac_vm_ssh() {
   echo "fake VM ssh $*" >>"$STUB_LOG"
   local cmd="$1"
@@ -196,6 +256,151 @@ result_line() { # name status [actual] [diff]
 baseline() { mkdir -p "$(dirname "$SB/app/Snapshots/$KEY/$1.png")" && printf '%s\n' "$2" >"$SB/app/Snapshots/$KEY/$1.png"; }
 
 # --- snapshots -------------------------------------------------------------
+
+# Observe the caller's shell after the real job function returns, including
+# early exits. Only fixed synthetic state is used or reported.
+check_snapshot_scope() {
+  cat >>"$SB/tools/mg.d/zz-fakes.sh" <<'EOF'
+eval "$(declare -f mg_snapshots | sed '1s/mg_snapshots/mg_snapshots_scoped/')"
+mg_snapshots() {
+  local fx_signing="${MEGURI_APP_SIGNING-unset}"
+  MG_CLOUD_AGENT_MAC_PROFILE_BINDING=outer-binding MG_CLOUD_AGENT_MAC_PROFILE_PRIVATE=outer-private
+  mg_snapshots_scoped "$@"
+  if [ "${MEGURI_APP_SIGNING-unset}" != "$fx_signing" ] ||
+      [ "$MG_CLOUD_AGENT_MAC_PROFILE_BINDING" != outer-binding ] ||
+      [ "$MG_CLOUD_AGENT_MAC_PROFILE_PRIVATE" != outer-private ]; then
+    mg_failure fake-scope "snapshots changed caller state"; mg_status error
+  else
+    echo "fake caller state preserved" >>"$STUB_LOG"
+  fi
+}
+EOF
+  export FX_ASSERT_LOCAL=1
+}
+
+@test "snapshots selects team only for Mac and preserves default and explicit caller modes" {
+  probe_fixture
+  check_snapshot_scope
+  unset MEGURI_CLOUD_AGENT_MAC_PROFILE_FILE
+  local caller platforms
+  for caller in unset adhoc team; do
+    unset MEGURI_APP_SIGNING
+    [ "$caller" = unset ] || export MEGURI_APP_SIGNING="$caller"
+    for platforms in mac mac,iphone iphone; do
+      : >"$STUB_LOG"
+      mg snapshots --platform "$platforms"
+      [ "$status" -eq 0 ]
+      [ "$(field .status)" = pass ]
+      called '^fake fresh profile scope$'
+      called '^fake caller state preserved$'
+      called "^fake VM lease signing=$caller$"
+      if [ "$platforms" != iphone ]; then called '^fake signing mac=team$'; else not_called '^fake signing mac='; fi
+      if [ "$platforms" != mac ]; then called "^fake signing ios-sim=${MEGURI_APP_SIGNING-adhoc}$"; fi
+      not_called '^fake profile check'
+    done
+  done
+}
+
+@test "snapshots refuses invalid caller signing instead of masking it with team" {
+  local invalid
+  for invalid in "" invalid "team adhoc" " team" "team "; do
+    MEGURI_APP_SIGNING="$invalid" mg snapshots --platform mac
+    [ "$status" -eq 2 ]
+    [ "$(field .status)" = error ]
+    [ "$(field '.failures[0].id')" = usage ]
+  done
+  not_called 'fake build|fake VM lease|fake snapshot run'
+}
+
+@test "snapshots retains a fresh local approved binding through both checks before mixed VM delivery" {
+  probe_fixture
+  check_snapshot_scope
+  export MEGURI_CLOUD_AGENT_MAC_PROFILE_FILE=generated-unused MEGURI_APP_SIGNING=adhoc
+  local platforms
+  for platforms in mac iphone,mac mac,iphone; do
+    : >"$STUB_LOG"
+    mg snapshots --platform "$platforms"
+    [ "$status" -eq 0 ]
+    [ "$(field .status)" = pass ]
+    [ "$(sed -n '/^fake profile check/p; /^fake VM lease/p; /^fake VM products/p' "$STUB_LOG")" = $'fake profile check 1\nfake profile check 2\nfake VM lease signing=adhoc\nfake VM products copied' ]
+    called '^fake caller state preserved$'
+  done
+}
+
+@test "snapshots refuses profile drift at either check before products inputs or tests" {
+  probe_fixture
+  check_snapshot_scope
+  export MEGURI_CLOUD_AGENT_MAC_PROFILE_FILE=generated-unused
+  local boundary
+  for boundary in 1 2; do
+    : >"$STUB_LOG"
+    FX_PROFILE_CHECK_FAIL="$boundary" mg snapshots --platform mac,iphone
+    [ "$status" -eq 1 ]
+    [ "$(field .status)" = fail ]
+    [ "$(field '.failures[0].id')" = agent-profile ]
+    [ "$(grep -c '^fake profile check' "$STUB_LOG")" -eq "$boundary" ]
+    not_called 'fake VM lease|fake VM products|fake VM inputs|fake snapshot run'
+    called '^fake caller state preserved$'
+  done
+  for boundary in clear replace; do
+    : >"$STUB_LOG"
+    FX_PROFILE_BINDING_DRIFT="$boundary" mg snapshots --platform mac
+    [ "$status" -eq 1 ]
+    [ "$(field .status)" = fail ]
+    [ "$(field '.failures[0].id')" = agent-profile ]
+    [ "$(grep -c '^fake profile check' "$STUB_LOG")" -eq 1 ]
+    not_called 'fake VM lease|fake VM products|fake VM inputs|fake snapshot run'
+    called '^fake caller state preserved$'
+  done
+}
+
+@test "snapshots preserves profile refusal and automatic team build failure queued and error authority" {
+  probe_fixture
+  check_snapshot_scope
+  MEGURI_CLOUD_AGENT_MAC_PROFILE_FILE=generated-unused FX_PROFILE_REFUSE=1 mg snapshots --platform mac
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field '.failures[0].id')" = agent-profile ]
+  called '^fake caller state preserved$'
+  not_called 'fake profile check|fake VM lease|fake snapshot run'
+  unset MEGURI_CLOUD_AGENT_MAC_PROFILE_FILE
+  local outcome expected
+  for outcome in fail error queued; do
+    : >"$STUB_LOG"
+    FX_BUILD_OUTCOME="$outcome" mg snapshots --platform mac
+    expected="$outcome"
+    [ "$outcome" != queued ] || expected=warn
+    [ "$(field .status)" = "$expected" ]
+    if [ "$outcome" = queued ]; then
+      [ "$(field .details.queued)" = true ]
+      [ "$(field '.failures | length')" -eq 0 ]
+    else
+      [ "$(field '.failures[0].id')" = build ]
+    fi
+    called '^fake signing mac=team$'
+    called '^fake caller state preserved$'
+    not_called 'fake profile check|fake VM lease|fake snapshot run'
+  done
+}
+
+@test "snapshots preserves queued and error delivery after successful binding checks" {
+  probe_fixture
+  export MEGURI_CLOUD_AGENT_MAC_PROFILE_FILE=generated-unused
+  FX_DELIVERY_OUTCOME=queued mg snapshots --platform mac
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field '.failures | length')" -eq 0 ]
+  called '^fake profile check 2$'
+  not_called 'fake VM products|fake VM inputs|fake snapshot run'
+  : >"$STUB_LOG"
+  FX_DELIVERY_OUTCOME=error mg snapshots --platform mac
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  [ "$(field '.failures[0].id')" = mac-vm-copy ]
+  called '^fake profile check 2$'
+  not_called 'fake VM products|fake VM inputs|fake snapshot run'
+}
 
 @test "snapshots rejects bad arguments before building" {
   mg snapshots --platform watch

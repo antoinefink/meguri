@@ -86,7 +86,7 @@ mg_app_mac_agent_profile_scope() {
     [ "$3" = mac ] && [ "$4" = Debug ] && [ "$6" = Meguri ] || return 1
   case "$5" in
     CloudAgent) return 0 ;;
-    Snapshot) [ "${MG_JOB:-}" = mac-hosted-test ] ;;
+    Snapshot) [ "${MG_JOB:-}" = mac-hosted-test ] || [ "${MG_JOB:-}" = snapshots ] ;;
     UI) [ "${MG_JOB:-}" = drive ] ;;
     *) return 1 ;;
   esac
