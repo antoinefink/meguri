@@ -16,7 +16,8 @@ use meguri_model::{
     usn::Usn,
 };
 use meguri_sched::{answer::Rating, model::preset::PresetView};
-use meguri_storage::{ReadRows, ReaderRole, RowKey, StampMode, Table, WriteScope};
+use meguri_storage::{ReadRows, ReaderRole, Record, RowKey, StampMode, Table, WriteScope};
+use meguri_storage::journal::{LayoutReport, LayoutShape, StructureReason, StructureReport};
 use session_support::Harness;
 use std::sync::{
     Arc, Barrier,
@@ -41,14 +42,111 @@ fn preset(h: &Harness, f: impl FnOnce(&mut DeckConfigMessage) + Send + 'static) 
     });
 }
 fn kind(h: &Harness, card: CardId, f: impl FnOnce(&mut Notetype) + Send + 'static) {
-    edit(h, move |s| {
-        let card = s.card(card)?.unwrap();
-        let note = s.note(card.note_id)?.unwrap();
-        let mut nt = s.notetype(note.notetype_id)?.unwrap();
-        f(&mut nt);
-        s.put_notetype(&nt)?;
-        Ok(())
-    });
+    kind_edit(h, card, KindEdit::Metadata, f);
+}
+#[derive(Clone, Copy)]
+enum KindEdit { Metadata, RenamePart, AppendTemplate, SwapFields }
+fn kind_edit(h: &Harness, card: CardId, semantics: KindEdit, f: impl FnOnce(&mut Notetype) + Send + 'static) {
+    let reasons = match semantics {
+        KindEdit::AppendTemplate => vec![meguri_engine::SchemaReason::TemplatesChanged],
+        KindEdit::SwapFields => vec![meguri_engine::SchemaReason::FieldsChanged],
+        _ => vec![],
+    };
+    // Retain this raw incoming fixture's class, rather than declaring a
+    // local user edit and invoking its safety-backup policy.
+    h.collection.run(
+        OpSpec::named("freshness fixed stamps", OpSource::SyncIncoming)
+            .stamp(StampMode::Raw),
+        move |ctx| {
+            let s = ctx.scope();
+            let card = s.card(card)?.unwrap();
+            let note = s.note(card.note_id)?.unwrap();
+            let mut nt = s.notetype(note.notetype_id)?.unwrap();
+            let before = LayoutShape::of(&nt)?;
+            f(&mut nt);
+            // Only these explicitly requested fixture edits author a map.
+            // Arbitrary metadata/opaque closures never acquire identity.
+            let token = if matches!(semantics, KindEdit::Metadata) { None } else {
+                assert_eq!((before.fields, before.templates), (2, 1));
+                let mut report = StructureReport::default();
+                let (field_map, template_map) = match semantics {
+                    KindEdit::RenamePart => (vec![0, 1], vec![0]),
+                    KindEdit::AppendTemplate => {
+                        report.reasons.insert(StructureReason::TemplatesChanged);
+                        (vec![0, 1], vec![0, -1])
+                    }
+                    KindEdit::SwapFields => {
+                        report.reasons.insert(StructureReason::FieldsChanged);
+                        (vec![1, 0], vec![0])
+                    }
+                    KindEdit::Metadata => unreachable!(),
+                };
+                report.layouts.insert(nt.id.0, LayoutReport { before, after: LayoutShape::of(&nt)?, field_map, template_map });
+                s.start_structure_report(report)?
+            };
+            meguri_engine::mark_schema_change(s, &reasons)?;
+            s.put_notetype(&nt)?;
+            s.complete_structure_report(token)?;
+            Ok(())
+        },
+    ).unwrap();
+    h.settle();
+}
+
+// Case 9 alone models N5.2/H7/H10's accepted receive/apply boundary.
+// This is not a schema-11 decode, scratch stage or protocol-round test.
+fn accepted_kind_candidate(h: &Harness, card: CardId, incoming_kind: i32) {
+    assert!(matches!(incoming_kind, 0 | 1));
+    let reader = h.collection.reader(ReaderRole::Query).unwrap();
+    let snapshot = reader.snapshot().unwrap();
+    let note = snapshot.note(snapshot.card(card).unwrap().unwrap().note_id).unwrap().unwrap();
+    let base = snapshot.notetype(note.notetype_id).unwrap().unwrap();
+    let scm = snapshot.col().unwrap().schema_modified;
+    let mut candidate = base.clone();
+    candidate.config.kind = incoming_kind;
+    // N5.2's accepted schema-11 child stamps must already agree with the
+    // Raw fixture. Do not silently reset fixed stored metadata to make it fit.
+    assert!(candidate.templates.iter().all(|t| t.mtime == EpochSecs(0) && t.usn == Usn(0)));
+    assert_eq!(candidate.fields.len(), base.fields.len());
+    assert_eq!(candidate.templates.len(), base.templates.len());
+    assert!(candidate.mtime >= base.mtime);
+    drop(snapshot);
+    drop(reader);
+    let cards = h.cards.clone();
+    h.collection.run(
+        OpSpec::named("freshness fixed stamps", OpSource::SyncIncoming).stamp(StampMode::Raw),
+        move |ctx| {
+            let s = ctx.scope();
+            assert_eq!(s.col()?.schema_modified, scm);
+            let live = s.notetype(candidate.id)?.unwrap();
+            assert_eq!(meguri_engine::notetypes::AggregateDigest::of(&live), meguri_engine::notetypes::AggregateDigest::of(&base));
+            assert_eq!((live.mtime, live.usn), (base.mtime, base.usn));
+            assert_eq!((live.fields.len(), live.templates.len()), (candidate.fields.len(), candidate.templates.len()));
+            assert!(candidate.mtime >= live.mtime);
+            assert_eq!(candidate.name, live.name);
+            assert!(!s.sync_name_taken(Table::Notetypes, candidate.id.0, &candidate.name)?);
+            let protected = cards.iter().map(|id| {
+                let c = s.card(*id)?.unwrap();
+                Ok((c.to_cells(), s.note(c.note_id)?.unwrap().to_cells()))
+            }).collect::<Result<Vec<_>, meguri_storage::StorageError>>()?;
+            ctx.put_accepted_sync_notetype(&candidate)?;
+            let s = ctx.scope();
+            let stored = s.notetype(candidate.id)?.unwrap();
+            assert_eq!(meguri_engine::notetypes::AggregateDigest::of(&stored), meguri_engine::notetypes::AggregateDigest::of(&candidate));
+            assert_eq!((stored.mtime, stored.usn), (candidate.mtime, candidate.usn));
+            assert!(stored.templates.iter().all(|t| t.mtime == EpochSecs(0) && t.usn == Usn(0)));
+            assert_eq!(s.col()?.schema_modified, scm);
+            let journal = s.journal().unwrap();
+            assert!(journal.structure_report().is_none_or(StructureReport::is_empty));
+            assert!(journal.identity_layout(candidate.id.0).is_none());
+            for (id, expected) in cards.iter().zip(protected) {
+                let c = s.card(*id)?.unwrap();
+                assert_eq!((c.to_cells(), s.note(c.note_id)?.unwrap().to_cells()), expected);
+            }
+            Ok(())
+        },
+    ).unwrap();
+    h.settle();
 }
 fn head(h: &Harness, id: SessionId) -> Head {
     let protected = common::steps::dump(&h.collection);
@@ -394,7 +492,15 @@ fn c6_c13_twice_fixed_stamp_selected_template_css_type_name_template_name_field_
         for version in 1..=2 {
             let previous_head = head(&h, id);
             let previous = page(&h, id, &prior);
-            kind(&h, prior.card_id, move |nt| match case {
+            if case == 9 {
+                accepted_kind_candidate(&h, prior.card_id, if version == 1 { 1 } else { 0 });
+            } else {
+            let semantics = match case {
+                4 | 7 => KindEdit::RenamePart,
+                8 => KindEdit::SwapFields,
+                _ => KindEdit::Metadata,
+            };
+            kind_edit(&h, prior.card_id, semantics, move |nt| match case {
                 0 => {
                     nt.templates[0].config.q_format = format!(
                         "{{{{Front}}}}|{{{{Tags}}}}|{{{{Type}}}}|{{{{Deck}}}}|{{{{Card}}}}|{{{{type:Back}}}} q{version}"
@@ -412,8 +518,9 @@ fn c6_c13_twice_fixed_stamp_selected_template_css_type_name_template_name_field_
                     nt.fields[1].ord = 0;
                     nt.fields.swap(0, 1);
                 }
-                _ => nt.config.kind = if version == 1 { 1 } else { 0 },
+                _ => unreachable!(),
             });
+            }
             let current = head(&h, id);
             assert_eq!(current.items[0].state_token, prior.state_token);
             assert_ne!(
@@ -536,17 +643,11 @@ fn c5_c6_held_stamp_unknown_runtime_unused_and_unselected_bytes_add_no_invalidat
     preset(&h, |p| p.set_fsrs_params_6(vec![1.0; 21]));
     // Add an unselected template before the session; it has no card at ord 0.
     let first = h.cards[0];
-    edit(&h, move |s| {
-        meguri_engine::mark_schema_change(s, &[meguri_engine::schema_gate::SchemaReason::TemplatesChanged])?;
-        let c = s.card(first)?.unwrap();
-        let n = s.note(c.note_id)?.unwrap();
-        let mut nt = s.notetype(n.notetype_id)?.unwrap();
+    kind_edit(&h, first, KindEdit::AppendTemplate, move |nt| {
         let mut t = nt.templates[0].clone();
         t.ord = 1;
         t.name = "Other".into();
         nt.templates.push(t);
-        s.put_notetype(&nt)?;
-        Ok(())
     });
     let (id, initial) = h.start();
     let cached = page(&h, id, &initial.items[0]);

@@ -587,9 +587,16 @@ fn generic_rows_keep_exact_stored_cells_and_composite_keys_after_later_commits_a
         .run(
             OpSpec::named("generic update", OpSource::SyncIncoming).stamp(StampMode::Raw),
             move |ctx| {
+                // The fixture explicitly renames the sole logical field and
+                // template; sparse physical keys 7/9 remain untouched.
+                let nt = ctx.scope().notetype(meguri_model::ids::NotetypeId(id))?.unwrap();
+                let mut report = meguri_storage::journal::StructureReport::default();
+                report.layouts.insert(id, meguri_storage::journal::LayoutReport::identity(&nt)?);
+                let token = ctx.scope().start_structure_report(report)?;
                 for (table, key, image) in edited {
                     ctx.scope().restore(table, &key, Some(&image))?;
                 }
+                ctx.scope().complete_structure_report(token)?;
                 Ok(())
             },
         )
@@ -601,9 +608,13 @@ fn generic_rows_keep_exact_stored_cells_and_composite_keys_after_later_commits_a
         .run(
             OpSpec::named("generic delete", OpSource::SyncIncoming).stamp(StampMode::Raw),
             move |ctx| {
+                let mut report = meguri_storage::journal::StructureReport::default();
+                report.removed.insert(id);
+                let token = ctx.scope().start_structure_report(report)?;
                 for (table, key, _) in removed_rows {
                     ctx.scope().restore(table, &key, None)?;
                 }
+                ctx.scope().complete_structure_report(token)?;
                 Ok(())
             },
         )
@@ -616,6 +627,13 @@ fn generic_rows_keep_exact_stored_cells_and_composite_keys_after_later_commits_a
         threads
             .spawn(|| {
                 assert_eq!(added_view.seq(), added.seq);
+                let renamed = updated_view.structure_report().unwrap();
+                assert!(renamed.reasons.is_empty());
+                assert_eq!(renamed.layouts[&id].field_map, [0]);
+                assert_eq!(renamed.layouts[&id].template_map, [0]);
+                let removed = removed_view.structure_report().unwrap();
+                assert_eq!(removed.removed.iter().copied().collect::<Vec<_>>(), [id]);
+                assert!(removed.reasons.is_empty(), "incoming removal is not a local deletion op");
                 for (((table, key, _), before), after) in rows.iter().zip(&before).zip(&after) {
                     let added = added_view.row(*table, key).unwrap().unwrap();
                     assert_eq!(added.after, RowAfter::Row(before.clone()));

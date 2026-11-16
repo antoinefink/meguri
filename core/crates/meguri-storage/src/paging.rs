@@ -450,6 +450,27 @@ pub trait ReadRows: sealed::Connected {
             .collect()
     }
 
+    /// Read a page of up to 1,000 stored (card id, ordinal) pairs.
+    /// Filter by note type and continue after the last returned card id
+    /// until an empty page; `None` includes the entire signed id domain.
+    /// Only note membership and card id/ordinal columns are read. Invalid
+    /// selected ordinals fail rather than being omitted or normalized.
+    /// A write scope reads through its existing writer transaction.
+    fn card_ordinals_of_notetype_page(
+        &self,
+        notetype: NotetypeId,
+        after: Option<CardId>,
+    ) -> Result<Vec<(CardId, u16)>, StorageError> {
+        let mut statement = self.connection().prepare_cached(
+            "SELECT cards.id, cards.ord FROM notes JOIN cards ON cards.nid=notes.id \
+             WHERE notes.mid=?1 AND (?2 IS NULL OR cards.id>?2) ORDER BY cards.id LIMIT 1000",
+        )?;
+        let rows = statement.query_map((notetype.0, after.map(|id| id.0)), |row| {
+            Ok((CardId(row.get(0)?), row.get::<_, u16>(1)?))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     /// A config row as stored.
     fn config_entry(&self, key: &str) -> Result<Option<StoredConfig>, StorageError> {
         match rows::select_image(self.connection(), Table::Config, &RowKey::text(key))? {

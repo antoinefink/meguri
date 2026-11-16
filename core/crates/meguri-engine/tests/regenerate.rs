@@ -12,6 +12,7 @@ use meguri_model::{
     notetype::NotetypeTemplate,
 };
 use meguri_storage::{ReadRows, ReaderRole};
+use meguri_storage::journal::{LayoutReport, LayoutShape, StructureReason, StructureReport};
 use std::cell::Cell;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -26,6 +27,17 @@ fn extra_template(nt: &mut meguri_model::notetype::Notetype) {
 struct Recorder {
     times: Mutex<Vec<Duration>>,
     cancel: Option<Arc<CancelToken>>,
+}
+#[derive(Default)]
+struct Reports(Mutex<Vec<StructureReport>>);
+impl meguri_engine::ChangeObserver for Reports {
+    fn name(&self) -> &str { "regenerate authored reports" }
+    fn observe(&self, commit: &meguri_engine::ObservedCommit<'_>) -> Result<(), EngineError> {
+        if let Some(report) = commit.payload.structure_report() {
+            self.0.lock().unwrap().push(report.clone());
+        }
+        Ok(())
+    }
 }
 thread_local! {
     static PLANNING_MS: Cell<u64> = const { Cell::new(0) };
@@ -53,7 +65,12 @@ impl ProgressListener for Recorder {
 
 #[test]
 fn twenty_thousand_notes_plan_cancel_commit_and_repeat() {
-    let h = fresh();
+    let reports = Arc::new(Reports::default());
+    let h = common::Harness::open_with(meguri_engine::Ports::new().observer(reports.clone()));
+    // Same fixture cleanup as fresh(), with an observer for retained history.
+    for table in ["notes", "cards", "revlog", "graves", "tags"] {
+        common::tagging::raw(&h.collection, &format!("DELETE FROM {table}"), &[]);
+    }
     let nt = kind(&h, false, &["Front", "Back"], &["{{Front}}"]);
     h.collection
         .run(OpSpec::named("position setup", OpSource::UserNonUndoable), |ctx| {
@@ -78,7 +95,16 @@ fn twenty_thousand_notes_plan_cancel_commit_and_repeat() {
         .notetype(nt)
         .unwrap()
         .unwrap();
+    let base = draft.clone();
     extra_template(&mut draft);
+    let mut authored = StructureReport::default();
+    authored.reasons.insert(StructureReason::TemplatesChanged);
+    authored.layouts.insert(nt.0, LayoutReport {
+        before: LayoutShape::of(&base).unwrap(), after: LayoutShape::of(&draft).unwrap(),
+        field_map: vec![0, 1], template_map: vec![0, -1],
+    });
+    assert_eq!(draft.templates[1].config.id, base.templates[0].config.id);
+    let expected_report = authored.clone();
     let cancelled = CancelToken::new();
     let sink = ProgressSink::with_clock(planning_ticks);
     sink.set_listener(Arc::new(Recorder {
@@ -118,16 +144,27 @@ fn twenty_thousand_notes_plan_cancel_commit_and_repeat() {
                 meguri_engine::executor::catalog::NOTETYPE_STRUCTURE_CHANGE,
                 OpSource::UserUndoable,
             )
+            .schema_changes([meguri_engine::SchemaReason::TemplatesChanged])
             .declare_long_write(Duration::from_secs(5)),
             move |ctx| {
+                let live = ctx.scope().notetype(nt)?.unwrap();
+                if meguri_engine::notetypes::AggregateDigest::of(&live) != meguri_engine::notetypes::AggregateDigest::of(&base)
+                    || live.mtime != base.mtime || live.usn != base.usn {
+                    return Err(EngineError::Stale { table: meguri_storage::Table::Notetypes, key: nt.0.to_string() });
+                }
+                let token = ctx.scope().start_structure_report(authored)?;
+                meguri_engine::mark_schema_change(ctx.scope(), &[meguri_engine::SchemaReason::TemplatesChanged])?;
                 // Same transaction as U34's note type save.
                 ctx.scope().put_notetype(&draft)?;
-                regenerate::commit_in(ctx.scope(), &planned)
+                let created = regenerate::commit_in(ctx.scope(), &planned)?;
+                ctx.scope().complete_structure_report(token)?;
+                Ok(created)
             },
         )
         .unwrap()
         .value;
     assert_eq!(created.len(), 10_000);
+    assert_eq!(reports.0.lock().unwrap().last(), Some(&expected_report));
     let reader = h.collection.reader(ReaderRole::Query).unwrap();
     for (i, note) in added.iter().enumerate() {
         let cards = reader.cards_of_note(note.id).unwrap();
@@ -145,6 +182,7 @@ fn twenty_thousand_notes_plan_cancel_commit_and_repeat() {
             .is_empty()
     );
     h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(reports.0.lock().unwrap().last(), Some(&expected_report.inverse()));
     assert_eq!(
         h.collection
             .reader(ReaderRole::Query)
@@ -154,6 +192,11 @@ fn twenty_thousand_notes_plan_cancel_commit_and_repeat() {
             .len(),
         20_000
     );
+    h.collection.redo(UndoScope::Global).unwrap();
+    assert_eq!(reports.0.lock().unwrap().last(), Some(&expected_report));
+    assert_eq!(h.collection.reader(ReaderRole::Query).unwrap().cards_after(None, 40_001).unwrap().len(), 30_000);
+    h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(reports.0.lock().unwrap().last(), Some(&expected_report.inverse()));
 }
 
 #[test]
