@@ -22,3 +22,17 @@ Verification:
 The fifth Rust failure, `normal_sync::delayed_meta_structural_schema_change_requires_one_way_before_start`, is a frozen server-only scenario. It remains failed and unchanged. The shared gate cannot separate that frozen requirement; this records the limitation, not a pass or waiver.
 
 The batch gate remains failed. Native failures and production structural-generation wiring remain open. Real Mac–phone review convergence remains unproved; native local review persistence is recorded separately.
+
+## Native regression follow-up
+
+`conformance/20261116T094851Z-94699` ran the complete
+`cloud_r1_regressions` binary on clean `efac37b976448606bdeef4f15d6f88141bb6e920`:
+eight passed, zero failed, zero skipped and zero filtered out. This includes
+`unsupported_notetype_sort_field_and_deck_parent_changes_remain_gated_through_clean_close_and_reopen`,
+the case that failed in the earlier native conformance run.
+
+The command was `tools/mg conformance --lane native --native-test cloud_r1_regressions`.
+Its receipt explicitly has diagnostic-only scope and `full_conformance: false`.
+It verifies the affected native regression binary after the Docker checks above;
+the complete conformance corpus, other gate failures and final acceptance remain
+pending. No source changed for this follow-up.
