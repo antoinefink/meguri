@@ -87,7 +87,8 @@ pub(super) fn publish_between(from: &File, stage: &str, to: &File, final_name: &
     // SAFETY: live descriptors and NUL-terminated single components.
     #[cfg(target_os = "linux")]
     let result = unsafe {
-        libc::renameat2(
+        libc::syscall(
+            libc::SYS_renameat2,
             from.as_raw_fd(),
             a.as_ptr(),
             to.as_raw_fd(),
