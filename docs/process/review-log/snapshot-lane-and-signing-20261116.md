@@ -108,3 +108,41 @@ passing test executions. Privacy `20261116T195052Z-94848` passes both source
 files, static checks `20261116T195055Z-95184` pass all three checks, and
 similarity `20261116T195100Z-95566` reports zero eligible files with both
 tooling files out of scope. The filtered implementer view was read.
+
+## Native settings-search reader
+
+The source step began at `9388a64ef`. Diagnostic native run
+`mac-hosted-test/20261116T200342Z-9600` ruled out CF accessibility elements
+for the opaque native children. The first legacy observation failed to build
+in `20261116T201208Z-19694` because typed deprecated selectors met the
+existing compiler error policy. Only their public selector references were
+corrected. Native run `20261116T211238Z-77355` then observed actual button
+role, matching native description and a known static identifier through
+AppKit's public attribute getter. The same objects lack the newer getters.
+The original reader therefore omitted a real native button. No production
+metadata defect was established.
+
+Herdr delegate `t1dq` prepared the bounded repair. Its first restricted
+Docker probe refused before authoring (`cleanroom/20261116T211649Z-35277`).
+The same prompt then ran through the authorized host Docker route as
+`cleanroom/20261116T211902Z-38856`. The delegate inspected the export;
+independent filtered review `20261116T212155Z-41414` found no P0–P2
+findings, and its exported patch exactly matches the author's.
+
+Only the existing test reader changes. It reads the actual public legacy
+attribute when a corresponding modern getter is unsupported. Supported
+modern nil, empty or wrong-type results remain unchanged. Exact labels,
+identifiers, uniqueness, same-node checks, both remounts, geometry ownership
+and retained text remain asserted. Expanded diagnostic traversal is removed.
+Production controls, compiler checks, deadlines and plans are unchanged.
+
+On applied source, privacy `20261116T212313Z-42627` passes the file, static
+checks `20261116T212314Z-42623` pass all three checks, and similarity
+`20261116T212317Z-43331` passes one eligible file with zero flags or
+exceptions. The filtered implementer view was read.
+
+Native verification `mac-hosted-test/20261116T212345Z-44063` on clean
+`5b6a12759` passes exactly one test with zero failures or skips, including
+both remounts and every original identity/text assertion. This is a focused
+repair pass. Native replay, the complete Snapshot matrix and the original
+integration gate remain incomplete.
