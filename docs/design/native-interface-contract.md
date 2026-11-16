@@ -334,7 +334,8 @@ Decided by Antoine in chat on 2026-11-01. Where earlier text differs, this secti
 
 ### N12.4 Anki server sync
 
-- Anki server sync is hidden from the interface on every platform; iCloud is the only sync offered. Settings shows no Anki Server section and Collection shows no Server Transfers.
+- Legacy Anki server sync stays hidden on every platform. Account & Sync offers iCloud Sync and Meguri Sync using Meguri's own server under `sync/meguri-provider`. Settings shows no Anki Server section and Collection shows no Server Transfers.
+- Antoine's 2026-11-16 own-provider exception uses MP1–MP5 for service choice and provider-specific setup/status, with MP2's native controls. N11.8's iCloud controls and safety rules remain. Legacy transfers stay frozen; no AnkiWeb contact is authorized.
 - `.colpkg` file import and export stay.
 - The code, its tests and the `settings/anki-transfer/*` routes stay. UI suites that open the hidden screens launch with `-ShowAnkiServerInterface YES`.
 - Pauses N5's Connection section, N6, N7 and N11.4's Anki Server section until Antoine brings the feature back. R118's Anki Transfers actions and the requirements behind them are not met while it is hidden.

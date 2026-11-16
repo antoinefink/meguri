@@ -10,6 +10,8 @@ When Meguri sends and fetches CloudKit records, which local changes may be sent,
 
 Records, tracking, acknowledgement, merges and epochs are `sync/cloudkit-records` (cited as K…). Crash windows, account changes, conflict copies, publication and replacement choices are `sync/cloudkit-recovery` (cited as V…). The Anki sync specs (`sync/normal-sync`, `sync/hold-back`, `sync/meta-status`, `sync/errors`, `sync/one-way`, `sync/media-sync`) describe manual Anki transfers only (KTD26). Nothing here reads their USN, `col.ls`, `col.scm`, `col.mod` or `meta` state.
 
+Own-provider scope (2026-11-16): `sync/meguri-provider` governs service selection and own-Meguri-server admission outside this CloudKit policy. The retained protocol specs' manual-only scope has that narrow caller exception. P16 still prohibits automatic legacy Anki transfers. No CloudKit state-machine, record/recovery wire rule, or existing Approved/Under review scope changes.
+
 ## P1. Terms
 
 - **Policy**: the state machine of this file. It takes inputs (P3) and returns actions (P4).

@@ -23,7 +23,8 @@ Build one local review path over the existing production core and renderer:
    source intact and verify the copied/imported collection before use.
 
 Local review is the first intermediate checkpoint. File import/export remains
-required for the first usable version. Routine Meguri sync remains CloudKit.
+required for the first usable version. Routine sync offers iCloud Sync and the
+own-server Meguri Sync provider under the narrow 2026-11-16 exception below.
 
 ## Anki server freeze — 2026-10-26
 
@@ -46,6 +47,21 @@ create a repair task under this scope. Do not disable shared safety checks.
 File import/export, local Anki collection compatibility, shared media storage,
 CloudKit and local Migaku/AnkiConnect integrations remain required. No sync or
 Apple-account setup is needed to prove the local-review checkpoint.
+
+## Own Meguri provider — 2026-11-16
+
+Antoine explicitly requested two services: iCloud Sync and Meguri Sync using
+Meguri's own server. Root adopted reviewed `sync/meguri-provider` MP1–MP5 as
+delegated routine implementation authority. The review and follow-on mapping
+are in `review-log/meguri-provider-contract-20261116.md`.
+
+This exception authorizes only own-provider app/core/Swift/FFI integration and
+its demonstrated dependencies. Legacy Anki transfers stay hidden and frozen;
+no AnkiWeb contact or Anki code reuse is authorized. Keep their tests and failed
+evidence. Existing CloudKit record/recovery rules and approval scopes stay.
+The separate server plan's acceptance does not accept the app or retained peer.
+Keep failure discipline and the original app integration base below; this
+contract decision supplies no gate pass or completed unit.
 
 ## Execution
 

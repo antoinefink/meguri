@@ -7,6 +7,8 @@ Scenarios: conformance/scenarios/sync/oneway/ (prepared; integration and activat
 
 Manual-transfer compatibility (KTD26; frozen with U109). Connecting to iCloud (R158, R1593) is `sync/cloudkit-recovery#V13`, and background expiry (R1554) is `sync/policy#P11.2`. Where this file cites R158, R1593 or R1554, it means only the manual transfer.
 
+`sync/meguri-provider#MP4` (2026-11-16) reuses replacement, backup and uncertainty rules for Meguri's own server. Full replacements need explicit consent; MP5 requires media completion. Legacy Anki work stays frozen.
+
 A one-way sync replaces one side's collection with the other's, whole. An upload sends the device's collection, prepared as O6.2 says, and the server keeps it in place of its own; a download fetches the server's collection and swaps it in for the device's. This file says when one is needed and which directions are possible (O2), the facts the choice shows (O3), how a job starts (O4), the safety backup (O5), each direction (O6, O7), what follows a success (O8), the AnkiWeb limits (O9), the free-space check (O10), progress (O11), cancellation and kills (O12) and the errors (O13).
 
 Manual admission and recovery are `sync/anki-transfers` M1–M8. This spec retains prepared protocol facts;

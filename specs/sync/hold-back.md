@@ -12,6 +12,8 @@ How Meguri runs the normal sync of `normal-sync.md` without ever making an answe
 `normal-sync.md` N15 governs entry. These mechanics do not start automatic Anki
 work or bypass the current directional transfer's active-session guard.
 
+Own-provider exception (2026-11-16): `sync/meguri-provider` MP1–MP5 supplies the own-Meguri-server caller's admission and scheduling. Reuse these hold-back mechanics without changing CloudKit's P8 rules or the legacy directional transfer's active-review guard. Legacy Anki work remains frozen.
+
 ## H1. What the job guarantees
 
 1. Answers and edits made while the job runs commit at once through the op executor and are durable within 1 s; none waits for the network phase (R1495, R1845, R2006). During the job's own write (H10) answers go to U43's overlay and journal (H10.5).

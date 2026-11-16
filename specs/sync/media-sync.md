@@ -5,6 +5,8 @@ Requirements: R1534, R1546, R1565 (upload exclusion), R1575, R1576, R1577, R1578
 Anki: 26.09.3
 Scenarios: conformance/scenarios/sync/media/ (prepared; integration/activation remain pending)
 
+2026-11-16: `sync/meguri-provider` MP1–MP5 governs admission and scheduling for Meguri's own server, replacing only this file's legacy entry rules, including Y11/Y14/Y15. Protocol, limits, file handling and durable batches stay unchanged. MP5 governs required media completion and exclusions. Legacy Anki transfers stay frozen.
+
 Manual-transfer compatibility (KTD26; frozen with U111): this job runs only inside an explicit manual Anki transfer. Routine media sync is CloudKit: R1572 and R2057 are `sync/cloudkit-records#K9` and `sync/policy#P13`, R1592 is `sync/policy#P13` and `sync/cloudkit-recovery`, R1554 is `sync/policy#P11.2`. The CloudKit halves of R1844 (resumable transfer of the large media fixture), R1583 (the first full download's counts, bytes and estimate), R1584 (the placeholder while the first download runs) and R1588 (a mass change resumes in the background) are `sync/cloudkit-records#K9.3` and `sync/policy#P13`. Where this file cites R1554, R1572, R1583, R1584, R1588, R1592 or R1844, it means only the manual job.
 
 How Meguri's media sync job brings the media folder and the server's media into agreement: which changes it fetches, what it decides for each one, how it downloads, saves and uploads files, the sanity check that ends it, and how it reports progress, stops and resumes. It builds on:

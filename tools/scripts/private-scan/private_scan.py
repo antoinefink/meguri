@@ -828,6 +828,12 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'specs/sync/one-way.md':
+        '8de7695fada9f38fa5d6c54c26538d025cd7e3b45b1867a1b8650417533b0812',
+    'specs/sync/meguri-provider.md':
+        'a3ba46013feac12fb76e211b7ff4660bf50fa13e8055ec71426e2d3d2fa0c899',
+    'docs/process/review-log/meguri-provider-contract-20261116.md':
+        '70b7eb39ea3f7ea6886d3d1f82717e81be96938d078147a01947f912794ef7f9',
     "app/MeguriSnapshotTests/NativeReplayAccessibilityTests.swift":
         "48452d45977876bb07b2a55deb8197ef2c0693ff35661bec2e301ca0bee607ac",
     # Independently reviewed public Docker lifecycle tooling, exact bytes.

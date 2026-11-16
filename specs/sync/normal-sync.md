@@ -362,6 +362,8 @@ A pending-row helper or a stand-in USN update does not satisfy this check.
 
 ## N15. Explicit transfer scope (KTD26)
 
+2026-11-16: `sync/meguri-provider` MP1–MP5 governs admission and scheduling for Meguri's own server. It overrides only the legacy entry rules below. Protocol, merge, generation and hold-back rules stay unchanged. Legacy Anki transfers stay frozen.
+
 This component serves explicitly authorized Settings Anki transfers. Routine
 sync uses CloudKit. Launch, foreground, background, quit, review completion,
 timers, Sync Now and integrations never start this component's server requests.

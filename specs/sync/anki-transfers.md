@@ -7,6 +7,8 @@ Scenarios: none (focused core, local-server and native acceptance in M8)
 
 Frozen reference (plan, "Anki server work: frozen", 2026-10-26): Anki server transfers are not required, not built further and not part of delivery, milestone or release acceptance. This file is kept as the contract to resume from after a new scope decision. Where it says "required" or "must" about server transfers, server media or their evidence (F1, M5, M8), that is the frozen contract, not a current requirement. Routine sync is CloudKit (`sync/policy`, KTD25, KTD26).
 
+Own-provider exception (2026-11-16): `sync/meguri-provider#MP4` reuses M2–M5's safety mechanisms for the own-Meguri-server caller. MP1–MP5 governs that caller's admission, scheduling and mandatory collection-plus-media completion; it inherits no collection-only choice or automatic legacy work. This file's legacy UI, caller restrictions and frozen acceptance remain unchanged.
+
 This contract governs explicitly selected self-hosted server transfers. Routine sync uses CloudKit.
 Collection Import and Export are directional; separately authorized media reconciliation changes both sides.
 Collection-only is a valid selected scope, but does not complete the full include-media delivery requirement (frozen).
