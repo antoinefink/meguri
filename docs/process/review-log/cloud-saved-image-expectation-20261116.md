@@ -45,3 +45,14 @@ Static checks `static-checks/20261116T092629Z-9316` pass all three checks.
 These are Mac protocol-test results, not live CloudKit or peer-convergence
 evidence. The original mobile app-hosted lane and the broader Xcode/snapshot
 suites await their required checks. No Unit or milestone acceptance is added.
+
+## Mobile source-check follow-up
+
+The retained native result from phone Snapshot
+`20261116T220046Z-78844`, clean `cf61cbc9`, executes and passes all 35
+`CloudKitSmokeObservationTests` methods. This includes the original failing
+`collectionSaveRecordsTheHandedSequenceAndHeldFlag` and the three adjacent
+journal-reader/history methods listed above. The integrator inspected the
+actual test-case results, rather than inferring them from image counts.
+This supplies the pending mobile protocol-test execution, with no new run.
+It is not a live account exchange or a full-matrix pass.
