@@ -40,13 +40,33 @@ for name in ['package-inputs.json', 'rust-notices.json', 'covered-source.tar']:
     if (out / name).read_bytes() != (root / name).read_bytes():
         raise ValueError('Runtime license/source evidence differs: ' + name)
 for name in ['NOTICE', 'licenses/server-MIT.txt', 'licenses/web-MIT.txt', 'licenses/imported-components.txt',
-             'licenses/musl.txt', 'licenses/compiler-runtime.txt', 'licenses/GPL-3', 'licenses/rust/COPYRIGHT',
-             'licenses/rust/LICENSE-MIT', 'licenses/rust/LICENSE-APACHE', 'web/runtime-notices.txt',
+             'licenses/musl.txt', 'licenses/compiler-runtime.txt', 'licenses/GPL-3', 'licenses/rust/COPYRIGHT.html',
+             'licenses/rust/COPYRIGHT-library.html', 'rust-notice-inputs.sha256', 'web/runtime-notices.txt',
              'web/dependency-notices.txt', 'web/dependency-inventory.json', 'assets.json', 'release.jsonl',
              'target.txt', 'production-features.txt', 'static-packages.txt', 'static-compiler.txt',
              'static-inputs.sha256', 'rustc.txt', 'elf.txt', 'executable.sha256', 'upstream-records.json']:
     if not files.get(base + name, {}).get('bytes'):
         raise ValueError('Missing runtime evidence: ' + name)
+# Hashes are measured from the original pinned component, before copying, and
+# retain its sysroot paths. Do not substitute one architecture's measured hashes.
+rustc = dict(line.split(': ', 1) for line in (out / 'rustc.txt').read_text().splitlines() if ': ' in line)
+if (rustc.get('release') != '1.99.0'
+        or rustc.get('commit-hash') != 'b940084d7eb6a299eb4bfeb8e34901bc051e7ac4'
+        or rustc.get('host') not in {'aarch64-unknown-linux-gnu', 'x86_64-unknown-linux-gnu'}):
+    raise ValueError('Rust notice compiler identity differs from pinned component')
+rust_docs = '/usr/local/rustup/toolchains/1.99.0-' + rustc['host'] + '/share/doc/rust/'
+notice_sources = {rust_docs + name: 'licenses/rust/' + name
+                  for name in ['COPYRIGHT.html', 'COPYRIGHT-library.html']}
+notice_inputs = (out / 'rust-notice-inputs.sha256').read_text().splitlines()
+if len(notice_inputs) != len(notice_sources):
+    raise ValueError('Incomplete original Rust notice hashes')
+for line in notice_inputs:
+    digest, source = line.split('  ', 1)
+    if source not in notice_sources:
+        raise ValueError('Unexpected or duplicate Rust notice source: ' + source)
+    runtime = notice_sources.pop(source)
+    if digest != files[base + runtime]['sha256']:
+        raise ValueError('Runtime Rust notice differs from original component: ' + runtime)
 artifacts = [json.loads(line) for line in (out / 'release.jsonl').read_text().splitlines()]
 executables = [item for item in artifacts if item.get('reason') == 'compiler-artifact'
                and item.get('target', {}).get('name') == 'meguri-sync-server' and item.get('executable')]
@@ -64,11 +84,12 @@ if 'INTERP' in (out / 'elf.txt').read_text():
 # Node, Python, reference runtime, test client, compiler or credential is present.
 allowed_top = {'NOTICE', 'package-inputs.json', 'rust-notices.json', 'covered-source.tar', 'rustc.txt',
                'target.txt', 'production-features.txt', 'static-packages.txt', 'static-compiler.txt',
-               'static-inputs.sha256', 'release.jsonl', 'elf.txt', 'assets.json', 'executable.sha256', 'upstream-records.json'}
+               'static-inputs.sha256', 'rust-notice-inputs.sha256', 'release.jsonl', 'elf.txt', 'assets.json',
+               'executable.sha256', 'upstream-records.json'}
 allowed_extra = {'web/runtime-notices.txt', 'web/dependency-notices.txt', 'web/dependency-inventory.json',
                  'licenses/server-MIT.txt', 'licenses/web-MIT.txt', 'licenses/imported-components.txt',
                  'licenses/musl.txt', 'licenses/compiler-runtime.txt', 'licenses/GPL-3',
-                 'licenses/rust/COPYRIGHT', 'licenses/rust/LICENSE-APACHE', 'licenses/rust/LICENSE-MIT'}
+                 'licenses/rust/COPYRIGHT.html', 'licenses/rust/COPYRIGHT-library.html'}
 for name in files:
     if name.startswith(base):
         relative = name[len(base):]

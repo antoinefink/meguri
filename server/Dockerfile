@@ -59,7 +59,8 @@ RUN set -eu; \
     sha256sum /runtime/usr/local/bin/meguri-sync-server | cut -d " " -f 1 > /evidence/executable.sha256; \
     cp /usr/share/doc/musl/copyright /runtime/usr/share/meguri-sync/licenses/musl.txt; \
     rust_docs="$(rustc --print sysroot)/share/doc/rust"; \
-    cp "$rust_docs/COPYRIGHT" "$rust_docs/LICENSE-APACHE" "$rust_docs/LICENSE-MIT" /runtime/usr/share/meguri-sync/licenses/rust/; \
+    sha256sum "$rust_docs/COPYRIGHT.html" "$rust_docs/COPYRIGHT-library.html" > /evidence/rust-notice-inputs.sha256; \
+    cp "$rust_docs/COPYRIGHT.html" "$rust_docs/COPYRIGHT-library.html" /runtime/usr/share/meguri-sync/licenses/rust/; \
     cp /usr/share/common-licenses/GPL-3 /runtime/usr/share/meguri-sync/licenses/; \
     find /usr/share/doc -path '*gcc*' -name copyright -exec cat {} \; > /runtime/usr/share/meguri-sync/licenses/compiler-runtime.txt; \
     test -s /runtime/usr/share/meguri-sync/licenses/compiler-runtime.txt; \
