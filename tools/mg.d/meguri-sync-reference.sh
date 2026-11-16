@@ -49,8 +49,8 @@ mg_sync_server_reference() {
       mg_artifact lock "$reference_dir/requirements.lock"
       mg_artifact report "$MG_RUN_DIR/resolver-install.json" "Hash-pinned lock resolver installation"
       mg_status pass; return ;;
-    selftest|identity|smoke|edges|normal|catalog|validate|seal) ;;
-    *) mg_failure usage "expected lock, deps, selftest, identity, smoke, edges, normal, catalog, validate or seal"; mg_status error; return ;;
+    selftest|identity|smoke|edges|normal|normal-matrix|catalog|validate|seal) ;;
+    *) mg_failure usage "expected lock, deps, selftest, identity, smoke, edges, normal, normal-matrix, catalog, validate or seal"; mg_status error; return ;;
   esac
   local source_sha lock_sha source_commit author_session source_author_sessions argument_json
   local mount_args=() runtime_args=("$mode") input_path
@@ -87,8 +87,8 @@ mg_sync_server_reference() {
   fi
   lock_sha="$(shasum -a 256 "$reference_dir/requirements.lock" | cut -d ' ' -f1)"
   # Explicit source authors, independent of the operator and checkout path.
-  author_session="s-20261115T224434Z-376ca308"
-  source_author_sessions='["s-20261115T133013Z-d8cec007","s-20261115T211543Z-556b04e9","s-20261115T224434Z-376ca308"]'
+  author_session="s-20261115T231059Z-ff95725a"
+  source_author_sessions='["s-20261115T133013Z-d8cec007","s-20261115T211543Z-556b04e9","s-20261115T224434Z-376ca308","s-20261115T231059Z-ff95725a"]'
   if ! git -C "$MG_ROOT" show "${source_commit}:docs/process/provenance/sessions.jsonl" |
       jq -es --argjson authors "$source_author_sessions" '
         [.[] | select(.session as $id | $authors | index($id))] | unique |
@@ -123,7 +123,7 @@ mg_sync_server_reference() {
   if [ "$execution_status" -ne 0 ]; then
     mg_failure reference-execution "reference harness failed; no compatibility credit"; mg_status fail; return
   fi
-  if [ "$mode" = smoke ] || [ "$mode" = edges ] || [ "$mode" = normal ]; then
+  if [ "$mode" = smoke ] || [ "$mode" = edges ] || [ "$mode" = normal ] || [ "$mode" = normal-matrix ]; then
     mg_message "Named Desktop reference selection passed; broad catalog and actual Mobile remain unverified"
   fi
   mg_status pass

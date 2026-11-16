@@ -1850,7 +1850,7 @@ PY
   # Runs that read the branch's oracle/ files, including route transport.
   jq -e '[.runs[] | select(.id == "conformance-route-transport") | {placement, needs, oracle_files}]
     == [{placement: ["host", "docker:oracle"], needs: ["oracle"], oracle_files: true}]' "$out" >/dev/null
-  [ "$(jq -r '[.runs[] | select(.oracle_files) | .id] | join(" ")' "$out")" = "goldens-check harvest-report sync-server-reference-selftest conformance-route-transport sync-server-interop sync-server-reference-smoke sync-server-reference-edges sync-server-reference-normal harvest-coverage" ]
+  [ "$(jq -r '[.runs[] | select(.oracle_files) | .id] | join(" ")' "$out")" = "goldens-check harvest-report sync-server-reference-selftest conformance-route-transport sync-server-interop sync-server-reference-smoke sync-server-reference-edges sync-server-reference-normal sync-server-reference-normal-matrix harvest-coverage" ]
   # A pin bump in a sparse worktree whose main checkout has the old oracle/:
   # gate --local runs the rest and leaves those two to the merge.
   printf 'conformance/oracle.json\0conformance/catalog/harvest.csv\0' >"$BATS_TEST_TMPDIR/changed"

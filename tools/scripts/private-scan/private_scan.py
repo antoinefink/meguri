@@ -828,6 +828,10 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'oracle/meguri-sync-server/tests/test_normal_matrix.py':
+        'ec667ccfd6cd9e7782a3c555e78cf8e31b4db721e0e7b4d5a9f230e3a3da3763',
+    'oracle/meguri-sync-server/normal_matrix.py':
+        '5f98f7d6db36d70d9a9f78fd224540fe58230e13eeea2f38b22f52bfba0e8644',
     PUBLIC_NOTICE_PATH: PUBLIC_NOTICE_SHA256,
     "specs/licenses/jquery-3.7.1-LICENSE.txt": "d4db9ebe6f29f5168eac45ad713f055623ac5d0dcd5ba92da23d650ae012020d",
     "app/Packages/MeguriKit/Sources/CardRendering/Resources/CardRuntime/vendor/jquery-3.7.1.min.js":
@@ -876,19 +880,19 @@ PUBLIC_ARTIFACTS = {
     'oracle/meguri-sync-server/AGENTS.md':
         'bdc60a465c52a548391469c7febb82de6c6a88c69f0a24329ae5bd31c260071f',
     'oracle/meguri-sync-server/adapter.py':
-        'c16ec7bab94ba0d7fe36ff5135d6d90014df8fd3ba4cd5c4df4118b58496729b',
+        '633fc644c5e4c77bfccde43eec6a0bc26fb9eb33f38edb94c83f35ab9ad6f7bf',
     'oracle/meguri-sync-server/audit_deps.py':
         '09ba79e0545fb91e5a2c653e93c75e6fa4a55734d52e54a70479ae8e8d55d151',
     'oracle/meguri-sync-server/catalog.py':
         'da44186c8ee85f1ef77b3ff2584e0adce209cc4cfb9a5ee1eb557ad5d9a0068f',
     'oracle/meguri-sync-server/evidence.py':
-        '98758e82a01aea9640626dc425dbf69ba9657280a98278740a432882e1814cf1',
+        '80bace45712ab7e40142eba35e97b28848c4b18cbb01a8b2336e69946437be0a',
     'oracle/meguri-sync-server/tests/test_validation.py':
         'e7bdbef81fb4b34a1b569b6fa4c186801e1c32904b3813d9e8c011e608a90dfd',
     'oracle/meguri-sync-server/validation.py':
         '462a83ed4bb835e8f9b7446b214682531b5f29fcec1cc4476c26d18adda4af76',
     'tools/mg.d/meguri-sync-reference.sh':
-        '9afb3032b62cd39079a388bd6cfb69f224c708a0532f6e6ac1ea11c758c0bf84',
+        '6f3772f3a75979cdf0c00e7f96032d23623eb1180adce426ca70c337ccf514b6',
 
     'docs/process/review-log/meguri-sync-reference-privacy.md':
         '4ef0a4f96b31e513f73415ac2160a9ce14e335fbd9cc841ddbe4ed2159e643a8',

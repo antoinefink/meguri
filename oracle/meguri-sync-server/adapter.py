@@ -106,7 +106,7 @@ def unpack(data):
     return result
 
 
-def file_stamp(data):
+def file_stamp(data, matrix=False):
     import sqlite3
     with tempfile.NamedTemporaryFile(suffix='.anki2') as stream:
         stream.write(data); stream.flush()
@@ -123,6 +123,9 @@ def file_stamp(data):
                 normalized = [[{'blob': value.hex()} if isinstance(value, bytes) else value for value in row] for row in rows]
                 content[table] = sorted(normalized, key=encoded)
             stamp['user_tables_sha256'] = sha(encoded(content))
+            if matrix:
+                from normal_matrix import database_state
+                stamp['matrix_state'] = database_state(connection)
             return stamp
         finally: connection.close()
 
@@ -228,7 +231,7 @@ class RecorderHandler(http.server.BaseHTTPRequestHandler):
                     detail['normal_response'] = json.loads(body)
                 detail["original_size_matches"] = changed_headers.get('anki-original-size', response.getheader("anki-original-size")) == str(len(body))
                 if self.path.endswith('/download'):
-                    detail['download_stamp'] = file_stamp(body)
+                    detail['download_stamp'] = file_stamp(body,getattr(self.server,'capture_matrix',False))
                 elif self.path.endswith('/meta'):
                     meta = json.loads(body)
                     detail['meta'] = {key: meta[key] for key in ('mod','scm','usn','ts','cont','empty','media_usn','hostNum')}
@@ -316,7 +319,7 @@ def media_sync(col, auth, timeout=30):
         time.sleep(0.01)
 
 
-def native_request(port, auth, method, body, session):
+def native_request(port, auth, method, body, session, retain_input=False):
     """Job-owned fault driver; never claims its bytes were emitted by Desktop."""
     payload = zstandard.ZstdCompressor().compress(encoded(body))
     header = json.dumps({'v': 11, 'k': auth.hkey, 'c': 'meguri-reference-fault-driver', 's': session})
@@ -325,6 +328,8 @@ def native_request(port, auth, method, body, session):
     response = connection.getresponse()
     output = response.read()
     result = {'status': response.status, 'response_bytes': len(output)}
+    if retain_input:
+        result.update(input_json_hex=encoded(body).hex(),input_zstd_hex=payload.hex(),response_zstd_hex=output.hex())
     if 200 <= response.status < 300:
         result['value'] = json.loads(unpack(output))
     connection.close()
@@ -585,6 +590,9 @@ if __name__ == "__main__":
         request = json.loads(sys.stdin.buffer.read())
         if request['mode'] == 'identity': result = runtime()
         elif request['mode'] == 'edges': result = edges(request['fixture'])
+        elif request['mode'] == 'normal-matrix':
+            import normal_matrix
+            result = normal_matrix.run(sys.modules[__name__],request['fixture'])
         elif request['mode'] == 'normal':
             import normal
             result = normal.exact_numbers(normal.run(sys.modules[__name__],request['fixture']))
@@ -600,6 +608,6 @@ if __name__ == "__main__":
         sys.stdout.buffer.write(encoded(result))
     except BaseException as error:
         # Never export source frames, backend messages or collection content.
-        sys.stdout.buffer.write(encoded({"failure": {"kind": type(error).__name__, "phase": PHASE, "recording_errors": RECORDER_ERRORS}}))
+        sys.stdout.buffer.write(encoded({"failure": {"kind": type(error).__name__, "phase": PHASE, "recording_errors": RECORDER_ERRORS, "driver_frames": [str(pathlib.Path(frame.filename).name)+":"+str(frame.lineno) for frame in __import__("traceback").extract_tb(error.__traceback__) if frame.filename.startswith("/opt/reference/")]}}))
         sys.stdout.buffer.flush()
         os._exit(1)

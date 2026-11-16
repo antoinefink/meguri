@@ -13,6 +13,7 @@ from validation import decode, encoded, require, same_value
 from evidence import record, selection, edge_selection, candidate_selection
 from request import check_request
 from normal import NORMAL_FIXTURE, normal_selection
+from normal_matrix import MATRIX_FIXTURE, matrix_selection
 
 
 def adapter(request):
@@ -22,6 +23,7 @@ def adapter(request):
     if process.returncode != 0:
         failure = decode(process.stdout).get('failure', {}) if process.stdout else {}
         print('SDK phase failure: ' + str(failure.get('phase', 'unknown')) + ' (' + str(failure.get('kind', 'worker-exit')) + ')', file=sys.stderr)
+        if failure.get('driver_frames'): print('Driver frames: '+','.join(failure['driver_frames']),file=sys.stderr)
         if failure.get('recording_errors'):
             print('Recording error kinds: ' + ','.join(failure['recording_errors']), file=sys.stderr)
         raise ValueError('reference SDK worker failed')
@@ -42,7 +44,7 @@ class PrivateResult(unittest.TextTestResult):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=["selftest", "identity", "smoke", "edges", "normal", "candidate", "catalog", "validate", "seal"])
+    parser.add_argument("mode", choices=["selftest", "identity", "smoke", "edges", "normal", "normal-matrix", "candidate", "catalog", "validate", "seal"])
     parser.add_argument('--request')
     parser.add_argument('--input')
     parser.add_argument('--credentials')
@@ -65,6 +67,8 @@ def main():
         (out / 'catalog.json').write_bytes(encoded(value))
         (out / 'selection.json').write_bytes(encoded(selection()))
         (out / 'edge-selection.json').write_bytes(encoded(edge_selection()))
+        (out / 'matrix-selection.json').write_bytes(encoded(matrix_selection()))
+        (out / 'matrix-fixture.json').write_bytes(encoded(MATRIX_FIXTURE))
         (out / 'normal-selection.json').write_bytes(encoded(normal_selection()))
         (out / 'normal-fixture.json').write_bytes(encoded(NORMAL_FIXTURE))
         (out / 'edge-fixture.json').write_bytes(encoded(EDGE_FIXTURE))
@@ -77,6 +81,12 @@ def main():
         value = adapter({"mode": "identity"})
         (out / 'runtime.json').write_bytes(encoded(value))
         return 0
+    if args.mode == 'normal-matrix':
+        value = adapter({'mode':'normal-matrix','fixture':MATRIX_FIXTURE})
+        (out / 'matrix-observations.json').write_bytes(encoded(value))
+        invocation = decode((out / 'invocation.json').read_bytes())
+        require(value['runtime']['lock_sha256'] == invocation['lock_sha256'], 'runtime lock receipt mismatch')
+        return 0 if record(value,out,invocation) else 1
     if args.mode == 'normal':
         value = adapter({'mode':'normal','fixture':NORMAL_FIXTURE})
         (out / 'normal-observations.json').write_bytes(encoded(value))

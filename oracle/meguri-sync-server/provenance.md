@@ -29,3 +29,24 @@ and its neutral public synthetic boundary; no Anki implementation source was
 read. The original action recipe bytes and their identities stay unchanged.
 Each case retains descriptors for both its fixture manifest and the exact
 action input. Content-addressed storage retains shared bytes once.
+
+## Finite normal matrix author
+
+- Base: `a38664a4983c49fb2fabdb2f8e6004809b3c45e8` in an isolated local-master clone.
+- Author session: `s-20261115T231059Z-ff95725a`; session-only commit
+  `e4868dfef79c209c95ad2c2314c6a8aca86268ad`.
+- Original responsible authors remain explicit: `s-20261115T133013Z-d8cec007`,
+  `s-20261115T211543Z-556b04e9`, `s-20261115T224434Z-376ca308`.
+- No Anki implementation source, private input or production code was read for this
+  matrix. Public SDK APIs, the existing quarantined test tools, neutral specifications,
+  synthetic database rows and the unmodified pinned runtime supplied these facts.
+- Initial observer failures remain in MG receipts. Open-reference SQLite lock handling
+  required raw served files before SDK normalization; config column-name handling
+  required accepting the actual `KEY` spelling. A reused-card nonpending fixture was
+  rejected on inspection and replaced with distinct seeded rows plus exact stamps.
+
+- Independent review P2 repair in the same author session: the USN-0 card seed is
+  measured from a raw served snapshot after its preparation round ends and before
+  the lower-modification round starts. The mode asserts modification 2000000000,
+  USN 0 and due 17 before sending the older tuple. No download interrupts a round.
+  The original handoff and 13 receipts remain frozen; corrected evidence is v2.

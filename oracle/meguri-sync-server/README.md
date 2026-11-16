@@ -78,3 +78,14 @@ those records in the executing commit's ledger and retains `source-authors.json`
 Checkout paths and the latest ledger row do not select an author. Import the
 source author's session-only commit with this source change before execution.
 The closing `ls` assertion uses the raw served-file stamp retained by the recorder.
+
+`tools/mg sync-server-reference normal-matrix` runs seven bounded, valid synthetic
+Desktop groups: card cursor/data, note type and authored preset timestamps, selected
+ASCII deck/note type/tag names, optional configuration, configuration replacement
+and outgoing creation time, and graves followed by same-ID occurrences. It keeps
+normal12, smoke21, full11 and complete21 unchanged. It does not execute candidates.
+The mode retains exact auxiliary request JSON/zstd bytes and responses in per-case
+synthetic descriptors. Raw served schema-18 rows precede SDK normalization; native
+server rows are read only after its job-owned process exits. `matrix-progress.json`
+retains completed traffic and observations if the observer fails. Structural changes,
+other Unicode spellings, complete P-families, Mobile and final acceptance are excluded.
