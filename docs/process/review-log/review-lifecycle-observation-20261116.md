@@ -71,3 +71,6 @@ at the deadline in a required VM workload, without locals or unrelated task
 data. That should distinguish delayed execution from an unexpected dependency.
 Another unchanged full workload would not establish that fact. Other required
 failure repairs may proceed meanwhile; this group remains failed.
+
+Follow-up: [current suite-isolation evidence](review-lifecycle-suite-isolation-20261116.md).
+The current Mac Unit workload passes; the earlier failures remain retained.
