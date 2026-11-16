@@ -1,0 +1,744 @@
+{
+  "format": "meguri-sync-neutral-vectors-v1",
+  "source_observation_sha256": "85d4b8e64fc0c10abdd20561011a620e4d25b9acfb2fcb4ad7ddba77d9535d7f",
+  "sealed_evidence_sha256": "96f9d7b6754f9016e6d237f99cce8ec2fe3f9696822e3ff257e49303149c42a0",
+  "execution_result_sha256": "a8b727c605914a77d3f0f4ab386165739fe1beffa009d8d6fa07efc9e49d13f7",
+  "seal_result_sha256": "4d93390057d15edf23903fa44a1290e8202f090880b9e3571a181aebc9091853",
+  "independent_review_sha256": "68d2b53cc974b988c13bb77b5f51f40e6e1600b00eaf0fa3d8d6a235f43f2d6e",
+  "source": {
+    "source_commit": "9e2d0263a7ed7cf0c6f59c77971a53697dc23099",
+    "batch_base": "8506d4879dd3b76b4aa5e1ab0825409671b84549",
+    "source_sha256": "a197f578219029d5c10811351cbc5f65071fb27a0b8376461860b3ea25edd4d5",
+    "lock_sha256": "56e1bef86def9f5f230d12317e3510f2176eb079928f3a75f86afb0dcc408ec8"
+  },
+  "scope": "Auxiliary neutral projection of three independently sealed finite P-M07 reference SDK observations; consult the retained C11 seals for execution authority.",
+  "limits": [
+    "Controlled stopped whole-root rollback and credential replacement are synthetic setup, not Meguri restore policy.",
+    "No Desktop GUI procedure, candidate P-R01/P-R03, Mobile, broad family or final acceptance."
+  ],
+  "cases": [
+    {
+      "id": "P-M07:desktop.reference.recovery-ahead",
+      "lane": {
+        "client": {
+          "build": "c06370ff",
+          "kind": "desktop",
+          "runtime_sha256": "bf0ccafe0f15bcba59a652db68c4cfdfaa8191756f8c547839c9d134dee12784",
+          "version": "26.09.4"
+        },
+        "kind": "reference",
+        "server": {
+          "build": "c06370ff",
+          "kind": "reference_runtime",
+          "runtime_sha256": "bf0ccafe0f15bcba59a652db68c4cfdfaa8191756f8c547839c9d134dee12784",
+          "version": "26.09.4"
+        }
+      },
+      "fixture_sha256": "289f5206028f75f81866c2644e54f9434bf212ec2b6e23911ad321173b0a8405",
+      "observed": [
+        {
+          "name": "collection_hash_equal",
+          "value": true
+        },
+        {
+          "name": "config_changed_columns",
+          "value": [
+            "usn",
+            "mtime_secs"
+          ]
+        },
+        {
+          "name": "config_value_bytes_equal",
+          "value": true
+        },
+        {
+          "name": "cursor_precondition",
+          "value": true
+        },
+        {
+          "name": "equal_mod_different_scm",
+          "value": true
+        },
+        {
+          "name": "explicit_download_count",
+          "value": 1
+        },
+        {
+          "name": "fresh_receiver_equal",
+          "value": true
+        },
+        {
+          "name": "media_hashes_equal",
+          "value": true
+        },
+        {
+          "name": "no_offline_upload",
+          "value": true
+        },
+        {
+          "name": "offline_review_added",
+          "value": true
+        },
+        {
+          "name": "old_key_rejected",
+          "value": true
+        },
+        {
+          "name": "ordinary_media_hashes_equal",
+          "value": false
+        },
+        {
+          "name": "renewed_credentials",
+          "value": true
+        },
+        {
+          "name": "reopened_equal",
+          "value": true
+        },
+        {
+          "name": "reset_listing_starts_at_zero",
+          "value": true
+        },
+        {
+          "name": "review_schedule_equal",
+          "value": true
+        }
+      ],
+      "input_conditions": {
+        "client_media_cursor": 4,
+        "restored_server_media_usn": 2,
+        "collection_stamps": {
+          "mod": 1794822496851,
+          "scm": 1794822492950
+        },
+        "offline_review_count": 2
+      },
+      "ordinary_collection_required": 0,
+      "ordinary_media_routes": [
+        "/msync/begin",
+        "/msync/mediaChanges",
+        "/msync/mediaSanity"
+      ],
+      "ordinary_media_hashes": {
+        "recovery-one.bin": "f46e392fa9196d2ee3b7d8f1a3af174327a07e559f2cbde30ecbd1d34a0e0048",
+        "recovery-two.bin": "870899af1412e65f9b7b649260c5d1387e322436b9e4071192fb5c0bab511a73"
+      },
+      "reset_listing_cursors": [
+        0,
+        2
+      ],
+      "expected_media_hashes": {
+        "recovery-one.bin": "93938df331d8f6cad58e8cf7433414f8e5e0d62f3b2418e8f503b4950e1611d0",
+        "recovery-two.bin": "ac1d5043248136b7a830902b0ddb88c365a28b2e3e7b448bdd2e3b7459b8599b"
+      },
+      "recovered_media_hashes": {
+        "recovery-one.bin": "93938df331d8f6cad58e8cf7433414f8e5e0d62f3b2418e8f503b4950e1611d0",
+        "recovery-two.bin": "ac1d5043248136b7a830902b0ddb88c365a28b2e3e7b448bdd2e3b7459b8599b"
+      },
+      "fresh_media_hashes": {
+        "recovery-one.bin": "93938df331d8f6cad58e8cf7433414f8e5e0d62f3b2418e8f503b4950e1611d0",
+        "recovery-two.bin": "ac1d5043248136b7a830902b0ddb88c365a28b2e3e7b448bdd2e3b7459b8599b"
+      },
+      "authoritative_collection_sha256": "7214cb412a395e8ce8b5e64a9ba9cfe9d1a2e0e1356a9092e27aef26cd187a48",
+      "recovered_collection_sha256": "7214cb412a395e8ce8b5e64a9ba9cfe9d1a2e0e1356a9092e27aef26cd187a48",
+      "fresh_collection_sha256": "7214cb412a395e8ce8b5e64a9ba9cfe9d1a2e0e1356a9092e27aef26cd187a48",
+      "reopened_collection_sha256": "7214cb412a395e8ce8b5e64a9ba9cfe9d1a2e0e1356a9092e27aef26cd187a48",
+      "expected_card_rows": [
+        [
+          1794822491086,
+          1794822491086,
+          1,
+          0,
+          1794822491,
+          0,
+          1,
+          1,
+          1794823226,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          0,
+          0,
+          "{\"pos\":1,\"lrt\":1794822491}"
+        ],
+        [
+          1794822491087,
+          1794822491087,
+          1,
+          0,
+          1794822491,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          "{}"
+        ]
+      ],
+      "recovered_card_rows": [
+        [
+          1794822491086,
+          1794822491086,
+          1,
+          0,
+          1794822491,
+          0,
+          1,
+          1,
+          1794823226,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          0,
+          0,
+          "{\"pos\":1,\"lrt\":1794822491}"
+        ],
+        [
+          1794822491087,
+          1794822491087,
+          1,
+          0,
+          1794822491,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          "{}"
+        ]
+      ],
+      "expected_review_rows": [
+        [
+          1794822491087,
+          1794822491086,
+          0,
+          3,
+          -600,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "recovered_review_rows": [
+        [
+          1794822491087,
+          1794822491086,
+          0,
+          3,
+          -600,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "post_normal_config_changed_columns": [
+        "usn",
+        "mtime_secs"
+      ]
+    },
+    {
+      "id": "P-M07:desktop.reference.recovery-equal-reused",
+      "lane": {
+        "client": {
+          "build": "c06370ff",
+          "kind": "desktop",
+          "runtime_sha256": "bf0ccafe0f15bcba59a652db68c4cfdfaa8191756f8c547839c9d134dee12784",
+          "version": "26.09.4"
+        },
+        "kind": "reference",
+        "server": {
+          "build": "c06370ff",
+          "kind": "reference_runtime",
+          "runtime_sha256": "bf0ccafe0f15bcba59a652db68c4cfdfaa8191756f8c547839c9d134dee12784",
+          "version": "26.09.4"
+        }
+      },
+      "fixture_sha256": "289f5206028f75f81866c2644e54f9434bf212ec2b6e23911ad321173b0a8405",
+      "observed": [
+        {
+          "name": "collection_hash_equal",
+          "value": true
+        },
+        {
+          "name": "config_changed_columns",
+          "value": [
+            "usn",
+            "mtime_secs"
+          ]
+        },
+        {
+          "name": "config_value_bytes_equal",
+          "value": true
+        },
+        {
+          "name": "cursor_precondition",
+          "value": true
+        },
+        {
+          "name": "equal_mod_different_scm",
+          "value": true
+        },
+        {
+          "name": "explicit_download_count",
+          "value": 1
+        },
+        {
+          "name": "fresh_receiver_equal",
+          "value": true
+        },
+        {
+          "name": "media_hashes_equal",
+          "value": true
+        },
+        {
+          "name": "no_offline_upload",
+          "value": true
+        },
+        {
+          "name": "offline_review_added",
+          "value": true
+        },
+        {
+          "name": "old_key_rejected",
+          "value": true
+        },
+        {
+          "name": "ordinary_media_hashes_equal",
+          "value": false
+        },
+        {
+          "name": "renewed_credentials",
+          "value": true
+        },
+        {
+          "name": "reopened_equal",
+          "value": true
+        },
+        {
+          "name": "reset_listing_starts_at_zero",
+          "value": true
+        },
+        {
+          "name": "review_schedule_equal",
+          "value": true
+        }
+      ],
+      "input_conditions": {
+        "client_media_cursor": 4,
+        "restored_server_media_usn": 4,
+        "collection_stamps": {
+          "mod": 1794822504758,
+          "scm": 1794822500641
+        },
+        "offline_review_count": 2
+      },
+      "ordinary_collection_required": 0,
+      "ordinary_media_routes": [
+        "/msync/begin"
+      ],
+      "ordinary_media_hashes": {
+        "recovery-one.bin": "f46e392fa9196d2ee3b7d8f1a3af174327a07e559f2cbde30ecbd1d34a0e0048",
+        "recovery-two.bin": "870899af1412e65f9b7b649260c5d1387e322436b9e4071192fb5c0bab511a73"
+      },
+      "reset_listing_cursors": [
+        0,
+        4
+      ],
+      "expected_media_hashes": {
+        "recovery-one.bin": "901c2ef456e26da61daa3a6d676afec62573616c495e288dd1b09c39423e2d59",
+        "recovery-two.bin": "81fc4dee9a4d78298a2b2fa6cb8667e485ee7ccde5e003c33a338a35a6f314a6"
+      },
+      "recovered_media_hashes": {
+        "recovery-one.bin": "901c2ef456e26da61daa3a6d676afec62573616c495e288dd1b09c39423e2d59",
+        "recovery-two.bin": "81fc4dee9a4d78298a2b2fa6cb8667e485ee7ccde5e003c33a338a35a6f314a6"
+      },
+      "fresh_media_hashes": {
+        "recovery-one.bin": "901c2ef456e26da61daa3a6d676afec62573616c495e288dd1b09c39423e2d59",
+        "recovery-two.bin": "81fc4dee9a4d78298a2b2fa6cb8667e485ee7ccde5e003c33a338a35a6f314a6"
+      },
+      "authoritative_collection_sha256": "b3e63e20a5cf229b2692a6baae6b3aa2fff7d6521b3ed78e23ffd7effe3ec70d",
+      "recovered_collection_sha256": "b3e63e20a5cf229b2692a6baae6b3aa2fff7d6521b3ed78e23ffd7effe3ec70d",
+      "fresh_collection_sha256": "b3e63e20a5cf229b2692a6baae6b3aa2fff7d6521b3ed78e23ffd7effe3ec70d",
+      "reopened_collection_sha256": "b3e63e20a5cf229b2692a6baae6b3aa2fff7d6521b3ed78e23ffd7effe3ec70d",
+      "expected_card_rows": [
+        [
+          1794822498888,
+          1794822498888,
+          1,
+          0,
+          1794822498,
+          0,
+          1,
+          1,
+          1794823214,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          0,
+          0,
+          "{\"pos\":1,\"lrt\":1794822498}"
+        ],
+        [
+          1794822498889,
+          1794822498889,
+          1,
+          0,
+          1794822498,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          "{}"
+        ]
+      ],
+      "recovered_card_rows": [
+        [
+          1794822498888,
+          1794822498888,
+          1,
+          0,
+          1794822498,
+          0,
+          1,
+          1,
+          1794823214,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          0,
+          0,
+          "{\"pos\":1,\"lrt\":1794822498}"
+        ],
+        [
+          1794822498889,
+          1794822498889,
+          1,
+          0,
+          1794822498,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          "{}"
+        ]
+      ],
+      "expected_review_rows": [
+        [
+          1794822498888,
+          1794822498888,
+          0,
+          3,
+          -600,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "recovered_review_rows": [
+        [
+          1794822498888,
+          1794822498888,
+          0,
+          3,
+          -600,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "post_normal_config_changed_columns": [
+        "usn",
+        "mtime_secs"
+      ]
+    },
+    {
+      "id": "P-M07:desktop.reference.recovery-delayed-overtaken",
+      "lane": {
+        "client": {
+          "build": "c06370ff",
+          "kind": "desktop",
+          "runtime_sha256": "bf0ccafe0f15bcba59a652db68c4cfdfaa8191756f8c547839c9d134dee12784",
+          "version": "26.09.4"
+        },
+        "kind": "reference",
+        "server": {
+          "build": "c06370ff",
+          "kind": "reference_runtime",
+          "runtime_sha256": "bf0ccafe0f15bcba59a652db68c4cfdfaa8191756f8c547839c9d134dee12784",
+          "version": "26.09.4"
+        }
+      },
+      "fixture_sha256": "289f5206028f75f81866c2644e54f9434bf212ec2b6e23911ad321173b0a8405",
+      "observed": [
+        {
+          "name": "collection_hash_equal",
+          "value": true
+        },
+        {
+          "name": "config_changed_columns",
+          "value": [
+            "usn",
+            "mtime_secs"
+          ]
+        },
+        {
+          "name": "config_value_bytes_equal",
+          "value": true
+        },
+        {
+          "name": "cursor_precondition",
+          "value": true
+        },
+        {
+          "name": "equal_mod_different_scm",
+          "value": true
+        },
+        {
+          "name": "explicit_download_count",
+          "value": 1
+        },
+        {
+          "name": "fresh_receiver_equal",
+          "value": true
+        },
+        {
+          "name": "media_hashes_equal",
+          "value": true
+        },
+        {
+          "name": "no_offline_upload",
+          "value": true
+        },
+        {
+          "name": "offline_review_added",
+          "value": true
+        },
+        {
+          "name": "old_key_rejected",
+          "value": true
+        },
+        {
+          "name": "ordinary_media_hashes_equal",
+          "value": false
+        },
+        {
+          "name": "renewed_credentials",
+          "value": true
+        },
+        {
+          "name": "reopened_equal",
+          "value": true
+        },
+        {
+          "name": "reset_listing_starts_at_zero",
+          "value": true
+        },
+        {
+          "name": "review_schedule_equal",
+          "value": true
+        }
+      ],
+      "input_conditions": {
+        "client_media_cursor": 4,
+        "restored_server_media_usn": 6,
+        "collection_stamps": {
+          "mod": 1794822515106,
+          "scm": 1794822511264
+        },
+        "offline_review_count": 2
+      },
+      "ordinary_collection_required": 0,
+      "ordinary_media_routes": [
+        "/msync/begin",
+        "/msync/mediaChanges",
+        "/msync/downloadFiles",
+        "/msync/mediaChanges",
+        "/msync/mediaSanity"
+      ],
+      "ordinary_media_hashes": {
+        "recovery-one.bin": "f46e392fa9196d2ee3b7d8f1a3af174327a07e559f2cbde30ecbd1d34a0e0048",
+        "recovery-two.bin": "15b1b0cc217bae7f98e90bba1b6a4b1c2e9211270d27bccfb206cf42b56bd95a"
+      },
+      "reset_listing_cursors": [
+        0,
+        6
+      ],
+      "expected_media_hashes": {
+        "recovery-one.bin": "901c2ef456e26da61daa3a6d676afec62573616c495e288dd1b09c39423e2d59",
+        "recovery-two.bin": "15b1b0cc217bae7f98e90bba1b6a4b1c2e9211270d27bccfb206cf42b56bd95a"
+      },
+      "recovered_media_hashes": {
+        "recovery-one.bin": "901c2ef456e26da61daa3a6d676afec62573616c495e288dd1b09c39423e2d59",
+        "recovery-two.bin": "15b1b0cc217bae7f98e90bba1b6a4b1c2e9211270d27bccfb206cf42b56bd95a"
+      },
+      "fresh_media_hashes": {
+        "recovery-one.bin": "901c2ef456e26da61daa3a6d676afec62573616c495e288dd1b09c39423e2d59",
+        "recovery-two.bin": "15b1b0cc217bae7f98e90bba1b6a4b1c2e9211270d27bccfb206cf42b56bd95a"
+      },
+      "authoritative_collection_sha256": "a9fb433f3256f7f3f6254e11ede52873ee2bac6428a1dc221a47278d983a5bfb",
+      "recovered_collection_sha256": "a9fb433f3256f7f3f6254e11ede52873ee2bac6428a1dc221a47278d983a5bfb",
+      "fresh_collection_sha256": "a9fb433f3256f7f3f6254e11ede52873ee2bac6428a1dc221a47278d983a5bfb",
+      "reopened_collection_sha256": "a9fb433f3256f7f3f6254e11ede52873ee2bac6428a1dc221a47278d983a5bfb",
+      "expected_card_rows": [
+        [
+          1794822509297,
+          1794822509297,
+          1,
+          0,
+          1794822509,
+          0,
+          1,
+          1,
+          1794823196,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          0,
+          0,
+          "{\"pos\":1,\"lrt\":1794822509}"
+        ],
+        [
+          1794822509298,
+          1794822509298,
+          1,
+          0,
+          1794822509,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          "{}"
+        ]
+      ],
+      "recovered_card_rows": [
+        [
+          1794822509297,
+          1794822509297,
+          1,
+          0,
+          1794822509,
+          0,
+          1,
+          1,
+          1794823196,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          0,
+          0,
+          "{\"pos\":1,\"lrt\":1794822509}"
+        ],
+        [
+          1794822509298,
+          1794822509298,
+          1,
+          0,
+          1794822509,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          "{}"
+        ]
+      ],
+      "expected_review_rows": [
+        [
+          1794822509298,
+          1794822509297,
+          0,
+          3,
+          -600,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "recovered_review_rows": [
+        [
+          1794822509298,
+          1794822509297,
+          0,
+          3,
+          -600,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "post_normal_config_changed_columns": [
+        "usn",
+        "mtime_secs"
+      ]
+    }
+  ]
+}

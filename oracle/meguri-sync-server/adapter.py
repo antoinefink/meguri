@@ -71,9 +71,9 @@ def free_port():
 
 
 @contextlib.contextmanager
-def reference_server(root):
+def reference_server(root, credentials=None):
     port = free_port()
-    username, password = "synthetic-" + secrets.token_hex(8), secrets.token_hex(24)
+    username, password = credentials if credentials is not None else ("synthetic-" + secrets.token_hex(8), secrets.token_hex(24))
     env = {key: value for key, value in os.environ.items() if not key.startswith("SYNC_") and "proxy" not in key.lower()}
     env.update(SYNC_BASE=str(root), SYNC_HOST="127.0.0.1", SYNC_PORT=str(port), SYNC_USER1=f"{username}:{password}")
     process = subprocess.Popen([sys.executable, "-m", "anki.syncserver"], env=env,
@@ -592,6 +592,12 @@ if __name__ == "__main__":
     try:
         request = json.loads(sys.stdin.buffer.read())
         if request['mode'] == 'identity': result = runtime()
+        elif request['mode'] == 'recovery':
+            import recovery
+            result = recovery.run(sys.modules[__name__],request['fixture'])
+        elif request['mode'] == 'recovery-discover':
+            import recovery
+            result = recovery.discover(sys.modules[__name__])
         elif request['mode'] == 'edges': result = edges(request['fixture'])
         elif request['mode'] == 'normal-matrix':
             import normal_matrix

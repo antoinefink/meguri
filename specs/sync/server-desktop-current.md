@@ -233,3 +233,34 @@ Structural count changes and SDK selection of full transfer remain unobserved.
 Mixed optional config/creation-time forms remain unobserved.
 These selected ASCII names do not establish Unicode closure.
 No complete P-family, Mobile, candidate NORMAL or final acceptance is claimed.
+
+## D9. Selected recovery mechanisms
+
+Three finite Desktop SDK 26.09.4 reference observations completed independent source and evidence review.
+Execution `20261116T094758Z-93201` passed 3/3 from clean source `9e2d0263a7ed7cf0c6f59c77971a53697dc23099`.
+Seal `20261116T095223Z-4330` and its retained validation passed 3/3.
+The exact bindings and original failures are recorded in `docs/process/review-log/meguri-sync-recovery-reference.md`.
+The neutral projection is `conformance/fixtures/meguri-sync-server/observations/desktop-26.09.4-recovery.json`.
+These are P-M07 reference mechanisms, not candidate-only P-R01/P-R03 acceptance.
+
+The original synthetic fixture has two notes, two cards, one retained review and two media files.
+A stopped test server was rolled back as a whole. Password replacement was controlled setup;
+its old native credential received HTTP 403 and renewed authentication succeeded.
+This does not establish Meguri's restore or credential-invalidation policy.
+
+| Existing client media cursor | Restored/current server head | Ordinary media result before explicit reset |
+| --- | --- | --- |
+| 4 | 2 | Empty listing and sanity OK; both files retained incorrect bytes. |
+| 4 | 4 | Begin-only completion; both files retained incorrect bytes. |
+| 4 | 6 | One later change arrived; the changed file below cursor remained incorrect. Sanity returned OK. |
+
+Each collection had controlled equal modification times and different schema times, plus an offline edit and review.
+Ordinary collection sync returned no changes. An explicitly selected full download restored the chosen authoritative collection.
+The subsequent public media reset and SDK sync began listing at cursor zero and recovered both exact byte hashes.
+A fresh independent SDK receiver agreed. Reopen preserved every present user table except the separately stamped `col` row exactly.
+A later normal sync changed only configuration USNs and modification-time columns.
+All configuration keys and value bytes, including the authored configuration, and every other included column stayed equal.
+The retained observations preserve both raw and narrowly scoped semantic hashes.
+
+This selection establishes SDK mechanisms for those inputs. It supplies no Desktop menu or dialog labels,
+candidate restore result or AnkiMobile evidence. L6 remains pending for its exact supported-client procedures.

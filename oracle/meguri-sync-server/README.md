@@ -99,3 +99,18 @@ auxiliary-crafted normal matrix traffic, media, restart or Mobile claim.
 `tools/mg sync-server-reference normal-sdk` exercises the same ten SDK paths
 against a job-owned reference server. Actual candidate execution still requires
 a committed clean build and the existing strict runtime/artifact validations.
+
+`tools/mg sync-server-reference recovery-discover` records public SDK names and
+signatures only. It never reads runtime source or documentation strings.
+`tools/mg sync-server-reference recovery` runs three finite P-M07 reference
+mechanisms: ahead, equal/reused and delayed/overtaken media histories. Each uses
+stopped whole-root rollback, controlled replacement credentials, offline edits
+and a review, equal collection modification with different schema stamps,
+explicit authoritative full download, then public media reset and SDK sync.
+
+The observation retains exact non-col user-table hashes, card/review rows,
+configuration value bytes and all media hashes. Equality after a subsequent
+normal sync permits only the observed config USN and modification-time stamp
+changes; every other column stays in the semantic digest. Original development
+failures remain in their receipts. The cases do not satisfy candidate-only
+P-R01/P-R03, Desktop menu/dialog evidence, Mobile, or production restore policy.
