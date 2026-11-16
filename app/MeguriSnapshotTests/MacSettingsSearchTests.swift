@@ -154,20 +154,20 @@ import Testing
             if typeID == CFArrayGetTypeID() { return "array" }
             return "other"
         }
-        func cfString(_ value: CFTypeRef?) -> String? {
-            guard let value, CFGetTypeID(value) == CFStringGetTypeID() else { return nil }
-            return value as? String
+        func legacyValueClass(_ value: AnyObject?) -> String {
+            guard let value else { return "absent" }
+            if value is String { return "string" }
+            if value is NSArray { return "array" }
+            return "other"
         }
         // Separate budgets and identity maps for the field (root=0) and cell
         // (root=1). Edge 0 is the root, 1 direct children, 2 navigation children.
-        // Edge 3 is public CF AXChildren, within the same owning root and budget.
         // IDs are local integers, never addresses. Repeated edges consume budget
         // too, since navigation children can merely reorder the same objects.
         for (root, element) in [field as NSObject, cell as NSObject].enumerated() {
             let maxRecords = 32
             let maxDepth = 3
             var identities: [ObjectIdentifier: Int] = [:]
-            var cfIdentities: [(object: AnyObject, node: Int)] = []
             var records = 0
             var nodeLimitReached = false
             var depthLimitReached = false
@@ -177,61 +177,6 @@ import Testing
                 // Classify the retained object before any AX call or typed cast.
                 print("settingsSearchAX root=\(root) parent=\(parent) edge=\(edge) index=\(index)"
                     + " depth=\(depth) cfType=\(cfTypeClass(object))")
-                if CFGetTypeID(object) == AXUIElementGetTypeID() {
-                    let axElement = object as! AXUIElement
-                    let prior = cfIdentities.first { CFEqual($0.object, object) }
-                    let node = prior?.node ?? (identities.count + cfIdentities.count)
-                    if prior == nil { cfIdentities.append((object, node)) }
-                    print("settingsSearchAX root=\(root) node=\(node) cfRepeated=\(prior != nil)")
-                    func read(_ attribute: CFString, name: String) -> CFTypeRef? {
-                        var value: CFTypeRef?
-                        let status = AXUIElementCopyAttributeValue(axElement, attribute, &value)
-                        print("settingsSearchAX root=\(root) node=\(node) cfAttribute=\(name)"
-                            + " status=\(status.rawValue) returnedType=\(cfTypeClass(value))")
-                        return status == .success ? value : nil
-                    }
-                    let role = cfString(read(kAXRoleAttribute as CFString, name: "role"))
-                    let identifier = cfString(read(kAXIdentifierAttribute as CFString, name: "identifier"))
-                    let description = cfString(read(kAXDescriptionAttribute as CFString, name: "description"))
-                    let title = cfString(read(kAXTitleAttribute as CFString, name: "title"))
-                    let publicRole = publicRoles.first { $0.rawValue == role }?.rawValue ?? "otherOrAbsent"
-                    let identifierClass: Int
-                    if let identifier, !identifier.isEmpty {
-                        identifierClass = ["settings.root.search", "settings.root.searchButton"].contains(identifier) ? 1 : 2
-                    } else {
-                        identifierClass = 0
-                    }
-                    print("settingsSearchAX root=\(root) node=\(node) cfRole=\(publicRole)"
-                        + " cfIdentifierClass=\(identifierClass)"
-                        + " descriptionMatchesExpected=\(description == expectedLabel)"
-                        + " titleMatchesExpected=\(title == expectedLabel)")
-                    guard prior == nil else { return }
-                    let value = read(kAXChildrenAttribute as CFString, name: "children")
-                    guard let value, CFGetTypeID(value) == CFArrayGetTypeID() else { return }
-                    // Keep NSArray ownership; never bridge to a typed Swift array.
-                    guard let children = value as? NSArray else {
-                        print("settingsSearchAX root=\(root) node=\(node) cfChildrenBridge=unsupported")
-                        return
-                    }
-                    defer { withExtendedLifetime(children) {} }
-                    print("settingsSearchAX root=\(root) node=\(node) cfChildrenBridge=supported"
-                        + " cfChildren=\(children.count)")
-                    // Follow only children, never window/parent/process relations.
-                    guard publicRole != NSAccessibility.Role.window.rawValue else {
-                        print("settingsSearchAX root=\(root) node=\(node) cfBoundary=window")
-                        return
-                    }
-                    guard depth < maxDepth else {
-                        depthLimitReached = depthLimitReached || children.count > 0
-                        return
-                    }
-                    for childIndex in 0..<children.count {
-                        guard records < maxRecords else { nodeLimitReached = true; break }
-                        let child = children.object(at: childIndex) as AnyObject
-                        try visit(child, parent: node, edge: 3, index: childIndex, depth: depth + 1)
-                    }
-                    return
-                }
                 guard let object = object as? NSObject else {
                     print("settingsSearchAX root=\(root) cfObjectBridge=unsupported")
                     return
@@ -240,7 +185,7 @@ import Testing
                 let publicClass = publicClasses.first { type(of: object) == $0.0 }?.1 ?? "other"
                 let identity = ObjectIdentifier(object)
                 let repeated = identities[identity] != nil
-                let node = identities[identity] ?? (identities.count + cfIdentities.count)
+                let node = identities[identity] ?? identities.count
                 identities[identity] = node
                 let roleGetter = #selector(NSAccessibilityProtocol.accessibilityRole)
                 let labelGetter = #selector(NSAccessibilityProtocol.accessibilityLabel)
@@ -269,6 +214,51 @@ import Testing
                     + " rolePresent=\(role != nil)"
                     + " identifierClass=\(identifierClass)"
                     + " labelMatchesExpected=\(accessibilityString(in: object, selector: labelGetter) == expectedLabel)")
+                let legacyNamesGetter = #selector(NSObject.accessibilityAttributeNames)
+                let legacyValueGetter = #selector(NSObject.accessibilityAttributeValue(_:))
+                let legacyIgnoredGetter = #selector(NSObject.accessibilityIsIgnored)
+                let supportsLegacyNames = object.responds(to: legacyNamesGetter)
+                let supportsLegacyValue = object.responds(to: legacyValueGetter)
+                print("settingsSearchAX root=\(root) node=\(node)"
+                    + " legacyNamesGetter=\(supportsLegacyNames) legacyValueGetter=\(supportsLegacyValue)"
+                    + " legacyIgnoredGetter=\(object.responds(to: legacyIgnoredGetter))")
+                let legacyNames = supportsLegacyNames
+                    ? object.perform(legacyNamesGetter)?.takeUnretainedValue() : nil
+                let names = legacyNames as? NSArray
+                defer { withExtendedLifetime(legacyNames) {} }
+                print("settingsSearchAX root=\(root) node=\(node) legacyNamesType=\(legacyValueClass(legacyNames))"
+                    + " legacyHasRole=\(names?.contains(NSAccessibility.Attribute.role.rawValue) ?? false)"
+                    + " legacyHasDescription=\(names?.contains(NSAccessibility.Attribute.description.rawValue) ?? false)"
+                    + " legacyHasIdentifier=\(names?.contains(NSAccessibility.Attribute.identifier.rawValue) ?? false)"
+                    + " legacyHasChildren=\(names?.contains(NSAccessibility.Attribute.children.rawValue) ?? false)")
+                func legacyValue(_ attribute: NSAccessibility.Attribute) -> AnyObject? {
+                    guard supportsLegacyValue else { return nil }
+                    return object.perform(legacyValueGetter, with: attribute.rawValue as NSString)?.takeUnretainedValue()
+                }
+                let legacyRole = legacyValue(.role)
+                let legacyDescription = legacyValue(.description)
+                let legacyIdentifier = legacyValue(.identifier)
+                let legacyChildren = legacyValue(.children)
+                defer { withExtendedLifetime(legacyChildren) {} }
+                let legacyPublicRole = publicRoles.first { $0.rawValue == (legacyRole as? String) }?.rawValue
+                    ?? "otherOrAbsent"
+                let legacyIdentifierString = legacyIdentifier as? String
+                let legacyIdentifierClass: Int
+                if let legacyIdentifierString, !legacyIdentifierString.isEmpty {
+                    legacyIdentifierClass = ["settings.root.search", "settings.root.searchButton"]
+                        .contains(legacyIdentifierString) ? 1 : 2
+                } else {
+                    legacyIdentifierClass = 0
+                }
+                print("settingsSearchAX root=\(root) node=\(node)"
+                    + " legacyRoleType=\(legacyValueClass(legacyRole)) legacyRole=\(legacyPublicRole)"
+                    + " legacyDescriptionType=\(legacyValueClass(legacyDescription))"
+                    + " legacyDescriptionMatchesExpected=\((legacyDescription as? String) == expectedLabel)"
+                    + " legacyIdentifierType=\(legacyValueClass(legacyIdentifier))"
+                    + " legacyIdentifierClass=\(legacyIdentifierClass)"
+                    + " legacyChildrenType=\(legacyValueClass(legacyChildren))"
+                    + " legacyChildCount=\((legacyChildren as? NSArray)?.count ?? 0)")
+                // Observe legacy children only; traversal remains on the modern getters.
                 guard !repeated else { return }
                 let direct = try accessibilityChildArray(in: object, selector: childrenGetter)
                 let navigation = try accessibilityChildArray(in: object, selector: navigationGetter)
@@ -289,7 +279,7 @@ import Testing
                 }
             }
             try visit(element, parent: -1, edge: 0, index: 0, depth: 0)
-            print("settingsSearchAX root=\(root) records=\(records) uniqueNodes=\(identities.count + cfIdentities.count)"
+            print("settingsSearchAX root=\(root) records=\(records) uniqueNodes=\(identities.count)"
                 + " maxRecords=\(maxRecords) maxDepth=\(maxDepth)"
                 + " nodeLimitReached=\(nodeLimitReached) depthLimitReached=\(depthLimitReached)")
         }
