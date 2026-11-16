@@ -24,25 +24,33 @@ import Testing
     }
 
     @Test func returnsAtOnceWhenTheAppIsVisible() async {
-        #expect(!NSApp.isHidden)
-        await NSApp.untilUnhidden()
+        do {
+            try await SnapshotAppLifecycle.shared.withExclusiveAccess {
+                #expect(!NSApp.isHidden)
+                await NSApp.untilUnhidden()
+            }
+        } catch {
+            Issue.record(error)
+        }
     }
 
     @Test func waitsWhileTheAppIsHiddenAndReturnsWhenItIsUnhidden() async throws {
-        defer { NSApp.unhideWithoutActivation() }
-        await hide()
-        #expect(NSApp.isHidden)
-        let returned = Flag()
-        let waiter = Task {
-            await NSApp.untilUnhidden()
-            returned.isSet = true
+        try await SnapshotAppLifecycle.shared.withExclusiveAccess {
+            defer { NSApp.unhideWithoutActivation() }
+            await hide()
+            #expect(NSApp.isHidden)
+            let returned = Flag()
+            let waiter = Task {
+                await NSApp.untilUnhidden()
+                returned.isSet = true
+            }
+            try await Task.sleep(for: .milliseconds(500))
+            #expect(!returned.isSet, "returned while the app was hidden")
+            NSApp.unhideWithoutActivation()
+            await waiter.value
+            #expect(returned.isSet)
+            #expect(!NSApp.isHidden)
         }
-        try await Task.sleep(for: .milliseconds(500))
-        #expect(!returned.isSet, "returned while the app was hidden")
-        NSApp.unhideWithoutActivation()
-        await waiter.value
-        #expect(returned.isSet)
-        #expect(!NSApp.isHidden)
     }
 }
 #endif
