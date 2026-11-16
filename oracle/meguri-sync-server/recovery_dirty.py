@@ -21,18 +21,26 @@ DIRTY_FIXTURE = {
 
 
 def dirty_selection():
-    expected={'equal_cursor':True,'dirty_action_count':3,'old_key_rejected':True,
+    observed={'equal_cursor':True,'dirty_action_count':3,'old_key_rejected':True,
               'renewed_credentials':True,'collection_snapshot_equal':True,'card_review_rows_equal':True,
-              'full_download_count':1,'reset_starts_zero':True,'media_snapshot_equal':True,
-              'server_witness_media_equal':True,'preserved_profile_bytes_unchanged':True}
+              'full_download_count':1,'reset_starts_zero':True,'media_snapshot_equal':False,
+              'server_witness_media_equal':False,'inplace_exact_snapshot_plus_added_file':True,
+              'witness_exact_snapshot_plus_added_file':True,'preserved_profile_bytes_unchanged':True}
+    clean={'collection_snapshot_equal':True,'card_review_rows_equal':True,'media_snapshot_equal':True,
+           'independent_receiver_snapshot_equal':True,'reopened_snapshot_equal':True,
+           'media_upload_count':0,'preserved_profile_bytes_unchanged':True,'server_restored_from_protected_snapshot':True}
+    cases=[]
+    for variant,expected in [('dirty-inplace-observed',observed),('dirty-clean-receiver',clean)]:
+        cases.append({'id':'P-M07:desktop.reference.recovery-'+variant,'family':'P-M07','classification':'current_probe',
+          'spec_ids':['sync/server-media#M5','sync/server-lifecycle#L6'],'variants':[variant],'client_kind':'desktop',
+          'expected':[{'name':key,'value':value} for key,value in expected.items()],
+          'actions':[{'actor':'fault_driver','operation':'prepare_synthetic','description':'Preserve a stopped reference snapshot and a closed dirty profile after one offline media addition, replacement and deletion, plus offline collection editing and review.'},
+                     {'actor':'client_b','operation':'client_sync','description':'Observe the in-place reset outcome without calling a media-snapshot mismatch a recovered result.'},
+                     {'actor':'fault_driver','operation':'prepare_synthetic','description':'After the diagnostic attempt, reestablish the protected server snapshot before a separate clean-receiver procedure.'},
+                     {'actor':'fresh_client','operation':'client_sync','description':'Leave the preserved dirty profile offline; use renewed credentials and fresh collection/media state to download and verify the chosen snapshot.'}]})
     return {'format':'meguri-sync-selection-v1','lane_kind':'reference',
-      'scope':'One dirty-media in-place restoration attempt; exact snapshot equality is required, with no skipped dirty actions.',
-      'cases':[{'id':'P-M07:desktop.reference.recovery-dirty-inplace','family':'P-M07','classification':'current_probe',
-        'spec_ids':['sync/server-media#M5','sync/server-lifecycle#L6'],'variants':['dirty-inplace'],'client_kind':'desktop',
-        'expected':[{'name':key,'value':value} for key,value in expected.items()],
-        'actions':[{'actor':'fault_driver','operation':'prepare_synthetic','description':'Preserve a stopped reference snapshot; make one offline media addition, replacement and deletion with offline collection editing and review.'},
-                   {'actor':'client_b','operation':'client_sync','description':'Renew credentials, explicitly download the authoritative collection, reset media and synchronize using the actual public SDK.'},
-                   {'actor':'fresh_client','operation':'client_sync','description':'Receive the resulting server state with an independent SDK profile and compare exact media hashes.'}]}]}
+      'scope':'Two facts from one dirty-media fixture: in-place recovery fails exact media equality; a separate clean receiver is compared exactly with the protected chosen snapshot.',
+      'cases':cases}
 
 
 def profile_manifest(directory):
@@ -116,7 +124,7 @@ def run(api,fixture):
                 details.update(restored_server_usn=server_usn,old_credential_traffic=denied,full_traffic=full_rows,
                                reset_media_traffic=reset_rows,inplace_collection=collection_after,inplace_media_hashes=media_after,
                                witness_collection=witness_collection,witness_media_hashes=witness_media)
-                results['dirty-inplace']={'equal_cursor':client_cursor==server_usn,
+                results['dirty-inplace-observed']={'equal_cursor':client_cursor==server_usn,
                     'dirty_action_count':int(fixture['added_name'] in dirty_media)+int(dirty_media.get(names[0])!=expected_media[names[0]])+int(names[1] not in dirty_media),
                     'old_key_rejected':rejected and bool(denied) and all(row['status']==403 for row in denied),
                     'renewed_credentials':True,'collection_snapshot_equal':collection_after['sha256']==expected['sha256'],
@@ -124,8 +132,44 @@ def run(api,fixture):
                     'full_download_count':sum(row['route']=='/sync/download' and row['status']==200 for row in full_rows),
                     'reset_starts_zero':next((row['media_request']['lastUsn'] for row in reset_rows if row['route']=='/msync/mediaChanges'),None)==0,
                     'media_snapshot_equal':media_after==expected_media,'server_witness_media_equal':witness_media==expected_media,
+                    'inplace_exact_snapshot_plus_added_file':media_after=={**expected_media,fixture['added_name']:sha(fixture['added_payload'].encode())},
+                    'witness_exact_snapshot_plus_added_file':witness_media=={**expected_media,fixture['added_name']:sha(fixture['added_payload'].encode())},
                     'preserved_profile_bytes_unchanged':profile_manifest(root/'preserved-existing')==preserved_manifest}
                 require(not rec.errors,'dirty recovery recording incomplete');progress()
+            # The diagnostic attempt may change the server. Reestablish the protected
+            # chosen snapshot before testing the independent clean-receiver procedure.
+            shutil.rmtree(root/'server');shutil.copytree(root/'snapshot',root/'server')
+            restored_manifest=profile_manifest(root/'server')
+            snapshot_manifest=profile_manifest(root/'snapshot')
+            api.PHASE='dirty-recovery-clean-receiver'
+            with api.reference_server(root/'server',(user,replacement_password)) as (port,_,_),api.recorder(port) as rec:
+                rec.capture_media=True;endpoint=f'http://127.0.0.1:{rec.server_port}/'
+                clean,_=api.collection(root,'clean-receiver',base['base']);clients.append(clean)
+                auth=clean.sync_login(username=user,password=replacement_password,endpoint=endpoint)
+                api.full(clean,auth,False);api.media_sync(clean,auth)
+                clean_collection=logical(clean);clean_media=hashes(clean)
+                clean.close(downgrade=False);clients.remove(clean)
+                clean=api.Collection(str(root/'clean-receiver'/'collection.anki2'));clients.append(clean)
+                reopened_collection=logical(clean);api.media_sync(clean,auth);reopened_media=hashes(clean)
+                independent,_=api.collection(root,'clean-witness',base['base']);clients.append(independent)
+                auth2=independent.sync_login(username=user,password=replacement_password,endpoint=endpoint)
+                api.full(independent,auth2,False);api.media_sync(independent,auth2)
+                independent_collection=logical(independent);independent_media=hashes(independent)
+                details.update(clean_collection=clean_collection,clean_media_hashes=clean_media,
+                               clean_reopened_collection=reopened_collection,clean_reopened_media_hashes=reopened_media,
+                               independent_collection=independent_collection,independent_media_hashes=independent_media,
+                               clean_traffic=list(rec.observations),protected_snapshot_manifest=snapshot_manifest,
+                               clean_server_manifest_before_serve=restored_manifest)
+                results['dirty-clean-receiver']={
+                    'collection_snapshot_equal':clean_collection['sha256']==expected['sha256'],
+                    'card_review_rows_equal':clean_collection['cards']==expected['cards'] and clean_collection['reviews']==expected['reviews'],
+                    'media_snapshot_equal':clean_media==expected_media,
+                    'independent_receiver_snapshot_equal':independent_collection['sha256']==expected['sha256'] and independent_media==expected_media,
+                    'reopened_snapshot_equal':reopened_collection['sha256']==expected['sha256'] and reopened_media==expected_media,
+                    'media_upload_count':sum(row['route']=='/msync/uploadChanges' for row in rec.observations),
+                    'preserved_profile_bytes_unchanged':profile_manifest(root/'preserved-existing')==preserved_manifest,
+                    'server_restored_from_protected_snapshot':restored_manifest==snapshot_manifest}
+                require(not rec.errors,'clean recovery recording incomplete');progress()
         finally:
             for col in clients:col.close(downgrade=False)
     return {'probe_kind':'recovery-dirty','fixture':fixture,'runtime':api.runtime(),'dirty_results':results,'dirty_details':details}

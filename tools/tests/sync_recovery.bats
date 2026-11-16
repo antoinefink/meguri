@@ -3,7 +3,7 @@
 REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
 
 @test "recovery neutral inputs affect the reference digest" {
-  local sandbox="$BATS_TEST_TMPDIR/recovery-inputs" path before after_fixture after_selection
+  local sandbox="$BATS_TEST_TMPDIR/recovery-inputs" path before after_fixture after_selection after_dirty_fixture after_dirty_selection
   mkdir -p "$sandbox"
   while IFS= read -r path; do
     mkdir -p "$sandbox/$(dirname "$path")"
@@ -22,4 +22,10 @@ REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   printf '\n' >>"$sandbox/conformance/recordings/scenarios/meguri-sync-server/desktop-recovery-selection.json"
   after_selection="$(mg_sync_reference_digest)"
   [ "$after_fixture" != "$after_selection" ]
+  printf '\n' >>"$sandbox/conformance/fixtures/meguri-sync-server/recovery-dirty.json"
+  after_dirty_fixture="$(mg_sync_reference_digest)"
+  [ "$after_selection" != "$after_dirty_fixture" ]
+  printf '\n' >>"$sandbox/conformance/recordings/scenarios/meguri-sync-server/desktop-recovery-dirty-selection.json"
+  after_dirty_selection="$(mg_sync_reference_digest)"
+  [ "$after_dirty_fixture" != "$after_dirty_selection" ]
 }

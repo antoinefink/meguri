@@ -114,3 +114,17 @@ normal sync permits only the observed config USN and modification-time stamp
 changes; every other column stays in the semantic digest. Original development
 failures remain in their receipts. The cases do not satisfy candidate-only
 P-R01/P-R03, Desktop menu/dialog evidence, Mobile, or production restore policy.
+
+`tools/mg sync-server-reference recovery-dirty` uses one equal-cursor rollback
+fixture with an actual offline file addition, replacement and deletion, plus
+collection editing and review. The initial exact-equality attempt remains red
+in its original receipt. The final selection distinguishes the observed
+in-place failure from the separate clean-receiver mechanism; the two results
+are never interchangeable. The diagnostic attempt can upload the local-only
+file, so the protected chosen server snapshot is reestablished before the
+clean procedure. The closed dirty profile remains byte-identical in a separate
+preserved directory. A new collection/media directory receives the chosen
+snapshot through public SDK operations, without importing or synchronizing the
+preserved dirty profile. Exact whole-file-name/hash equality, all non-col user
+tables and card/review rows remain compared. No GUI procedure, candidate restore,
+Mobile behavior or general dirty-media conflict rule is claimed.
