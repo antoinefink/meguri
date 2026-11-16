@@ -65,3 +65,18 @@ The container ID is evidence, never a selector supplied by a fixture.
 The wrapper uses the existing MG result contract and publishes `details.reference_invocation` and `details.reference_evidence`.
 Final MG counts must match every selected/completed case, with zero failures and zero skips before a seal.
 Debug interoperability remains scoped to that exact build. Missing or stale inputs fail without a reference or public-server fallback.
+
+## Exact local package selections
+
+The historical intermediate_build table retains its scope. Final runs use
+conformance/meguri-sync-local-delivery#L2–L3, binding actual package source,
+image, running process, locks/features, assets and manifests; never relabel debug.
+
+Desktop31 is the fixed concatenation of unchanged full11, normal10, media4 and
+candidate-final-additions.json six cases. Mobile10 and retained8 use
+candidate-mobile-final-selection.json and candidate-retained-final-selection.json.
+final-fixture-recipes.json gives original independent values. Preparation freezes
+actual input manifests, IDs and expected content before final execution and its
+independent review. Source templates do not fabricate runtime/device identities.
+Missing actual device/private routing remains incomplete. Historical selections
+and research catalog retain their scope/counts.

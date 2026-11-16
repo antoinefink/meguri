@@ -102,3 +102,12 @@ test-hook executable is separate from the hook-free delivered artifact.
 They do not substitute for actual-client or exact-image execution. Record any
 configuration difference that changes the assertion; an unrelated or stale
 source result supplies no final credit.
+
+## K7. Exact local package receipt branch
+
+For final selections apply conformance/meguri-sync-local-delivery#L1–L7.
+The disjoint final_package input extends this boundary without changing
+intermediate_build semantics or historical full/normal/media/complete scope.
+Generated input manifests and concrete assertions require independent review
+before execution; generator authoring may precede those hashes. Receipt, actual
+running-peer measurement and semantic validation bind identical final inputs.

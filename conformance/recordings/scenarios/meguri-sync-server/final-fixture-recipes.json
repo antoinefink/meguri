@@ -1,0 +1,206 @@
+{
+  "format": "meguri-sync-final-fixtures-v1",
+  "origin": "Original Meguri synthetic inputs; no private data or reference assets.",
+  "rich_initial": {
+    "note_type": "Observatory Study",
+    "fields_in_order": [
+      "Prompt",
+      "Answer",
+      "Context"
+    ],
+    "template": {
+      "name": "Recall",
+      "question": "<div>{{Prompt}}</div><small>{{Context}}</small>",
+      "answer": "<div>{{Answer}}</div>",
+      "css": ".card { color: #18324d; }"
+    },
+    "deck": {
+      "name": "Observatory::North",
+      "description": "Original synthetic study deck.",
+      "collapsed": false
+    },
+    "preset": {
+      "name": "Steady Plan",
+      "new_per_day": 17,
+      "reviews_per_day": 43,
+      "maximum_answer_seconds": 42,
+      "autoplay": false
+    },
+    "config": {
+      "meguri_sync_fixture": {
+        "checkpoint": "initial",
+        "sequence": [
+          2,
+          5,
+          8
+        ],
+        "enabled": true
+      }
+    },
+    "notes": [
+      {
+        "key": "keep",
+        "fields": [
+          "Where is the observatory?",
+          "On the northern hill.",
+          "Synthetic geography"
+        ]
+      },
+      {
+        "key": "delete_forward",
+        "fields": [
+          "Which path crosses the stream?",
+          "The stone footbridge.",
+          "Synthetic route"
+        ]
+      },
+      {
+        "key": "delete_reverse",
+        "fields": [
+          "What marks the trail?",
+          "A copper star.",
+          "Synthetic marker"
+        ]
+      }
+    ],
+    "tags": [
+      "orbit",
+      "synthetic::field"
+    ]
+  },
+  "rich_forward_changes": {
+    "question": "<section>{{Prompt}}</section><aside>{{Context}}</aside>",
+    "answer": "<p>{{Answer}}</p>",
+    "css": ".card { color: #245b40; }",
+    "deck_description": "Forward checkpoint deck.",
+    "deck_collapsed": true,
+    "preset": {
+      "new_per_day": 23,
+      "reviews_per_day": 59,
+      "maximum_answer_seconds": 51,
+      "autoplay": true
+    },
+    "config": {
+      "meguri_sync_fixture": {
+        "checkpoint": "forward",
+        "sequence": [
+          3,
+          6,
+          9
+        ],
+        "enabled": false
+      }
+    },
+    "keep_answer": "Beyond the northern hill.",
+    "delete_note_key": "delete_forward"
+  },
+  "rich_reverse_changes": {
+    "question": "<article>{{Prompt}}</article><footer>{{Context}}</footer>",
+    "answer": "<strong>{{Answer}}</strong>",
+    "css": ".card { color: #61365f; }",
+    "deck_description": "Reverse checkpoint deck.",
+    "deck_collapsed": false,
+    "preset": {
+      "new_per_day": 29,
+      "reviews_per_day": 71,
+      "maximum_answer_seconds": 63,
+      "autoplay": false
+    },
+    "config": {
+      "meguri_sync_fixture": {
+        "checkpoint": "reverse",
+        "sequence": [
+          4,
+          7,
+          10
+        ],
+        "enabled": true
+      }
+    },
+    "keep_context": "Synthetic final context",
+    "delete_note_key": "delete_reverse"
+  },
+  "metadata_only": {
+    "cards": 0,
+    "notes": 0,
+    "authored_objects": "rich_initial type, fields, template, deck, preset and config",
+    "media_utf8_exact": {
+      "metadata.txt": "Authored metadata with no study cards."
+    }
+  },
+  "replacement": {
+    "left_fields": [
+      "Left prompt",
+      "Left answer",
+      "Left context"
+    ],
+    "right_fields": [
+      "Right prompt",
+      "Right answer",
+      "Right context"
+    ],
+    "server_media_utf8_exact": {
+      "server-only.txt": "Independent server media."
+    },
+    "local_media_utf8_exact": {
+      "local-only.txt": "Independent local media."
+    },
+    "expected_server_media_after_collection_only": {
+      "server-only.txt": "Independent server media."
+    },
+    "expected_server_media_after_ordinary_reconcile": {
+      "server-only.txt": "Independent server media.",
+      "local-only.txt": "Independent local media."
+    },
+    "left_objects": {
+      "note_type": "Left Study",
+      "deck": "Left Branch",
+      "preset": "Left Plan",
+      "config": {
+        "meguri_sync_fixture": {
+          "side": "left"
+        }
+      }
+    },
+    "right_objects": {
+      "note_type": "Right Study",
+      "deck": "Right Branch",
+      "preset": "Right Plan",
+      "config": {
+        "meguri_sync_fixture": {
+          "side": "right"
+        }
+      }
+    }
+  },
+  "media_utf8_exact": {
+    "initial": {
+      "replace.txt": "Synthetic initial media.",
+      "delete-forward.txt": "Synthetic removable forward media.",
+      "delete-reverse.txt": "Synthetic removable reverse media."
+    },
+    "forward": {
+      "replace.txt": "Synthetic forward media.",
+      "delete-reverse.txt": "Synthetic removable reverse media.",
+      "forward-added.txt": "Synthetic added from Desktop."
+    },
+    "reverse": {
+      "replace.txt": "Synthetic reverse media.",
+      "forward-added.txt": "Synthetic added from Desktop.",
+      "reverse-added.txt": "Synthetic added from receiving client."
+    }
+  },
+  "generated_identity_policy": "Preparation freezes actual client-generated IDs, review/scheduling rows, supported values and every input file before candidate execution. Expected original values above are independent of candidate output; stamp normalization is explicit.",
+  "mobile_witness": "A supported authoritative full upload or synthetic export witnesses rich state actually resident on Mobile before independent Desktop comparison. Re-reading an unchanged server is insufficient.",
+  "review_actions": {
+    "forward": {
+      "note_key": "keep",
+      "button": 3
+    },
+    "reverse": {
+      "note_key": "keep",
+      "button": 2
+    },
+    "expected": "Freeze actual authoritative scheduler-generated full card/review rows after each single review before candidate receives them; compare exact rows/history and no duplicate occurrence."
+  }
+}
