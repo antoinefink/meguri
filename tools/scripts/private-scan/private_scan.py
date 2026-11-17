@@ -829,7 +829,7 @@ PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
     'core/crates/meguri-host/tests/provider_bootstrap.rs':
-        'f77e384396ffd07c8e9c90bd455a68f9c0635a077814d215848c6a5803951c99',
+        'edba2a3ce829ee6cfd4fc8e6cbe382c7c2b5cac49bcdfa43e8b175bf66249a29',
     # Complete-content public reviews: routine Core fix1 and Host fix2, 2026-11-17.
     "core/crates/meguri-host/tests/provider_normal.rs":
         "0cba109d63f83671798429552b4ed94bee29659412914b3c17aef4430ef9ec6b",
