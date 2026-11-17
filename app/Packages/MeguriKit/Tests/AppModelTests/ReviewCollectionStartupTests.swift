@@ -777,8 +777,27 @@ private final class OwnerFanoutProbe: ChangeFanoutSink {
                 #expect(app.sync.providerState?.phase == .setupRequired)
                 #expect(app.sync.meguriPhase == .unconfigured)
                 #expect(app.sync.meguriRoutine == nil && app.sync.meguriRoundReport == nil)
-                #expect(!app.sync.settings.enabled && !app.sync.settings.automatic)
+                let core = try await CoreProviderService.attached()
+                let selected = try await core.state()
+                #expect(selected.selection == .meguri && selected.phase == .setupRequired)
+                let settings = try #require(selected.settings)
+                #expect(settings.enabled && !settings.automatic)
+                #expect(app.sync.settings == settings)
+                #expect(app.sync.meguriPreview == nil && app.sync.meguriLastCommand == nil)
                 #expect(app.sync.meguriStatus.route == .account("sync.meguri.setup.continue"))
+                try #require(app.owner.policy == .needsEnable)
+                try #require(app.owner.navigation.sheet == .fsrsAdmission)
+                #if os(macOS)
+                #expect(app.owner.syncPresentation.settingsRequest == nil)
+                #endif
+                #expect(!app.owner.requestSyncNow())
+                #if os(macOS)
+                #expect(app.owner.syncPresentation.settingsRequest == nil)
+                #endif
+                // Public admission action on this disposable synthetic collection.
+                await app.owner.enableFsrs()
+                try #require(try await Core.fsrsPolicyStatus() == .ok)
+                try #require(app.owner.navigation.sheet == nil)
                 #expect(app.owner.requestSyncNow())
                 #if os(macOS)
                 #expect(app.owner.syncPresentation.settingsRequest != nil)
@@ -922,8 +941,40 @@ private final class OwnerFanoutProbe: ChangeFanoutSink {
                 app.sync.meguriAddressEdited()
                 app.sync.loadMeguriConnection()
                 await app.sync.waitForMeguriAction()
+                func phaseTag(_ phase: MeguriProviderConnectionPhase) -> String {
+                    switch phase {
+                    case .unconfigured: "unconfigured"
+                    case .signedOut: "signedOut"
+                    case .authenticating: "authenticating"
+                    case .setupRequired: "setupRequired"
+                    case .cancelled: "cancelled"
+                    case .blocked: "blocked"
+                    }
+                }
+                func errorKeyTag(_ key: String?) -> String {
+                    switch key {
+                    case nil: "none"
+                    case "sync.meguri.error.address": "sync.meguri.error.address"
+                    case "sync.meguri.error.credentials": "sync.meguri.error.credentials"
+                    case "sync.meguri.error.redirect": "sync.meguri.error.redirect"
+                    case "sync.meguri.error.network": "sync.meguri.error.network"
+                    case "sync.meguri.error.other": "sync.meguri.error.other"
+                    default: "unknown"
+                    }
+                }
+                let beforeError = Self.nativeMeguriErrorCategory(app.sync.meguriLastError)
+                let beforePhase = phaseTag(app.sync.meguriPhase)
+                let beforeKey = errorKeyTag(app.sync.meguriSignInErrorKey)
                 app.sync.signInMeguri(endpoint: configured.connection.endpoint, username: "?", password: "synthetic-unused-password")
+                let reserved = app.sync.meguriBusy
+                #expect(reserved)
                 await app.sync.waitForMeguriAction()
+                let afterError = Self.nativeMeguriErrorCategory(app.sync.meguriLastError)
+                let afterPhase = phaseTag(app.sync.meguriPhase)
+                let afterKey = errorKeyTag(app.sync.meguriSignInErrorKey)
+                let afterBusy = app.sync.meguriBusy
+                print("nativeMeguriAddressEdit before.error=\(beforeError) before.phase=\(beforePhase) before.key=\(beforeKey) reserved=\(reserved) after.error=\(afterError) after.phase=\(afterPhase) after.key=\(afterKey) after.busy=\(afterBusy)")
+                #expect(!afterBusy)
                 #expect(try await app.sync.meguriConnection() === original)
                 let current = try #require(try await core.configuredMeguri())
                 #expect(current.connection != configured.connection)
@@ -933,6 +984,61 @@ private final class OwnerFanoutProbe: ChangeFanoutSink {
                 #expect(calls.withLock { Set($0).isDisjoint(with: nativeMeguriTransferCalls) })
             }
         }
+    }
+
+    private static func nativeMeguriErrorCategory(_ error: (any Error)?) -> String {
+        guard let error else { return "none" }
+        if error is CancellationError { return "CancellationError" }
+        if let failure = error as? MeguriProviderCredentialFailure {
+            return switch failure {
+            case .access(let code): "credential.access(\(code))"
+            case .malformedPayload: "credential.malformedPayload"
+            case .wrongConnection: "credential.wrongConnection"
+            }
+        }
+        if let failure = error as? MeguriProviderAuthenticationFailure {
+            return switch failure {
+            case .connectionChanged: "authentication.connectionChanged"
+            case .username: "authentication.username"
+            case .credentials: "authentication.credentials"
+            case .redirectRefused: "authentication.redirectRefused"
+            case .network: "authentication.network"
+            }
+        }
+        if let failure = error as? BridgeError {
+            return switch failure {
+            case .cloudPolicy: "bridge.cloudPolicy"
+            case .cloudConnection: "bridge.cloudConnection"
+            case .cloudSDKCallbackRejected: "bridge.cloudSDKCallbackRejected"
+            case .maintenance: "bridge.maintenance"
+            case .exportSourceChanged: "bridge.exportSourceChanged"
+            case .exportSourceInvalid: "bridge.exportSourceInvalid"
+            case .exportFormatLimit: "bridge.exportFormatLimit"
+            case .deckOptionsInvalid: "bridge.deckOptionsInvalid"
+            case .stale: "bridge.stale"
+            case .staleGeneration: "bridge.staleGeneration"
+            case .undoUnavailable: "bridge.undoUnavailable"
+            case .notetypeRefused: "bridge.notetypeRefused"
+            case .deckRefused: "bridge.deckRefused"
+            case .noteNotFound: "bridge.noteNotFound"
+            case .notFound: "bridge.notFound"
+            case .insufficientSpace: "bridge.insufficientSpace"
+            case .open: "bridge.open"
+            case .suspendDeadline: "bridge.suspendDeadline"
+            case .schedOpRefused: "bridge.schedOpRefused"
+            case .sessionActive: "bridge.sessionActive"
+            case .invalidTypeAnswerReplacement: "bridge.invalidTypeAnswerReplacement"
+            case .cancelled: "bridge.cancelled"
+            case .busy: "bridge.busy"
+            case .unavailable: "bridge.unavailable"
+            case .unsupported: "bridge.unsupported"
+            case .invalidArgument: "bridge.invalidArgument"
+            case .internal: "bridge.internal"
+            case .mediaCommitPending: "bridge.mediaCommitPending"
+            case .commitCompleted: "bridge.commitCompleted"
+            }
+        }
+        return "unknown"
     }
 
     @Test(.timeLimit(.minutes(1))) func meguriNoFileNonactivationRetainsValidatedAttachmentAndOriginalRefusal() async throws {
