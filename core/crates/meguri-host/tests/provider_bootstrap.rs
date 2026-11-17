@@ -72,7 +72,7 @@ fn meguri_device_upload_retains_backup_and_server_copy_without_binding() {
     assert_eq!(op.safety_backups.len(), 1);
     assert!(op.server_copy.is_some());
     assert!(config.backups_directory.join(&op.safety_backups[0].name).is_file());
-    assert!(config.manual_transfer_directory.join(op.id.as_str()).join(&op.server_copy.as_ref().unwrap().artifact.name).is_file());
+    assert!(config.backups_directory.join(&op.server_copy.as_ref().unwrap().artifact.name).is_file());
     unbound(&host);
     host.close().unwrap();
 }

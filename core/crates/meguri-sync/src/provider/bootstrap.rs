@@ -226,13 +226,18 @@ impl Authority {
     }
     pub fn commit_meguri_ready(&self, evidence: ReadyEvidence, policy: &TransferPolicy,
         generation: u64, publication: Option<Publication>) -> Result<MediaAccounting> {
+        // Read under the caller's OneWaySync/media leases before taking the
+        // provider sidecar lock: sidecar accessors cannot nest across files.
+        // Defer policy errors until after the document and intent checks.
+        let retained_operation: Result<Operation> = operation(policy, &evidence.intent.operation);
+        let retained_active: Result<Option<Operation>> = active(policy);
         let settled = publication.clone();
         self.bootstrap_update(generation, publication, |doc| {
             if doc.revision != evidence.document_revision { return Err(MeguriReadyRefusal::DocumentChanged); }
             check_document(doc, &evidence.intent.connection)?;
             if doc.meguri_bootstrap.as_ref() != Some(&evidence.intent) { return Err(MeguriReadyRefusal::OperationMismatch); }
-            let op = operation(policy, &evidence.intent.operation)?;
-            if op.revision != evidence.operation_revision || op.phase != Phase::Complete || active(policy)?.is_some() {
+            let op = retained_operation?;
+            if op.revision != evidence.operation_revision || op.phase != Phase::Complete || retained_active?.is_some() {
                 return Err(MeguriReadyRefusal::NotComplete);
             }
             if op.account != evidence.account { return Err(MeguriReadyRefusal::AccountChanged); }
