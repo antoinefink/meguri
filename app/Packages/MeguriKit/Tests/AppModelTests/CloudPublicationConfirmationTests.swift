@@ -398,37 +398,32 @@ extension ReviewCollectionStartupTests {
     @Test func retainedPublicationStartupNilRecoveryStaysIdleAcrossFreshAttachment() async throws {
         let harness = try PublicationPresentationHarness(realAccountProof: true)
         defer { harness.removeStorage() }
-        do {
-            await harness.owner.start()
-            await harness.sync.prepareConnectionAuthority()
-            await harness.sync.drainOperations()
-            #expect(harness.sync.providerState?.selection == .localOnly)
-            #expect(harness.sync.providerState?.settings?.enabled == false && !harness.sync.settings.enabled)
-            #expect(harness.sync.providerState?.permitsICloudStartup == false)
-            #expect(harness.accountReadCount == 0 && harness.accounts.reads == 0)
-            #expect(harness.accountCompletion == nil && harness.observations.operationIDs.isEmpty)
-            #expect(harness.sync.recovery == nil)
-            #expect(!harness.sync.connectionOperationActive)
-            #expect(harness.transport.zones.enqueues == 0 && harness.transport.save.enqueues == 0)
-            #expect(await harness.owner.close())
-            let accountReads = harness.accounts.reads
-            harness.freshCoordinator()
-            await harness.owner.start()
-            await harness.sync.prepareConnectionAuthority()
-            await harness.sync.drainOperations()
-            #expect(harness.sync.recovery == nil)
-            #expect(harness.sync.providerState?.selection == .localOnly)
-            #expect(harness.sync.providerState?.settings?.enabled == false && !harness.sync.settings.enabled)
-            #expect(harness.sync.providerState?.permitsICloudStartup == false)
-            #expect(harness.accountReadCount == 0 && harness.accounts.reads == accountReads)
-            #expect(harness.accountCompletion == nil && harness.observations.operationIDs.isEmpty)
-            #expect(harness.sync.recovery == nil && !harness.sync.connectionOperationActive)
-            #expect(harness.transport.zones.enqueues == 0 && harness.transport.save.enqueues == 0)
-            #expect(await harness.owner.close())
-        } catch {
-            harness.accounts.release(); harness.release(); _ = await harness.owner.close()
-            throw error
-        }
+        await harness.owner.start()
+        await harness.sync.prepareConnectionAuthority()
+        await harness.sync.drainOperations()
+        #expect(harness.sync.providerState?.selection == .localOnly)
+        #expect(harness.sync.providerState?.settings?.enabled == false && !harness.sync.settings.enabled)
+        #expect(harness.sync.providerState?.permitsICloudStartup == false)
+        #expect(harness.accountReadCount == 0 && harness.accounts.reads == 0)
+        #expect(harness.accountCompletion == nil && harness.observations.operationIDs.isEmpty)
+        #expect(harness.sync.recovery == nil)
+        #expect(!harness.sync.connectionOperationActive)
+        #expect(harness.transport.zones.enqueues == 0 && harness.transport.save.enqueues == 0)
+        #expect(await harness.owner.close())
+        let accountReads = harness.accounts.reads
+        harness.freshCoordinator()
+        await harness.owner.start()
+        await harness.sync.prepareConnectionAuthority()
+        await harness.sync.drainOperations()
+        #expect(harness.sync.recovery == nil)
+        #expect(harness.sync.providerState?.selection == .localOnly)
+        #expect(harness.sync.providerState?.settings?.enabled == false && !harness.sync.settings.enabled)
+        #expect(harness.sync.providerState?.permitsICloudStartup == false)
+        #expect(harness.accountReadCount == 0 && harness.accounts.reads == accountReads)
+        #expect(harness.accountCompletion == nil && harness.observations.operationIDs.isEmpty)
+        #expect(harness.sync.recovery == nil && !harness.sync.connectionOperationActive)
+        #expect(harness.transport.zones.enqueues == 0 && harness.transport.save.enqueues == 0)
+        #expect(await harness.owner.close())
     }
 }
 
