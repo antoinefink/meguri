@@ -70,11 +70,12 @@ def load_inputs(root, credential_path, invocation, preflight=False):
     root = pathlib.Path(root)
     name='preflight.json' if preflight else 'peer.json'
     require(not (root / name).is_symlink(), 'linked peer receipt')
-    package = decode((root / name).read_bytes())
+    package_bytes = (root / name).read_bytes()
+    package = decode(package_bytes)
     store = Artifacts(root / 'artifacts')
     verify_package(package,store,invocation,preflight=preflight)
     credentials = read_credentials(credential_path)
-    return package,store,credentials
+    return package,store,credentials,package_bytes
 
 
 def retained_dependencies(package, store, invocation, preflight=False):

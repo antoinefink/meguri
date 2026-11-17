@@ -122,9 +122,12 @@ class FinalPackage(unittest.TestCase):
         self.running['container_inspection_after_sha256']=self.running['container_inspection_before_sha256'];self.refresh()
         with self.assertRaises(ValueError):verify_package(self.peer,self.store,self.invocation,preflight=True)
 
-    def test_execute_record_keeps_raw_observations_immutable(self):
+    def test_execute_record_keeps_original_preflight_and_raw_observations_immutable(self):
+        import json
+        from unittest.mock import patch
+        from candidate import load_inputs
         from final_handshake import execute, record_inputs
-        from validation import decode, sha
+        from validation import decode, encoded, sha
         original_peer=copy.deepcopy(self.peer)
         preflight=copy.deepcopy(self.peer);preflight['kind']='final_package_preflight'
         before=copy.deepcopy(self.running);before.pop('container_inspection_after_sha256')
@@ -132,11 +135,26 @@ class FinalPackage(unittest.TestCase):
         executed={**self.invocation,'child_phase':'final-fresh-fresh','child_stage':'execute','selection':['synthetic-validator-only']}
         out=self.store.root.parent/'out';out.mkdir()
         result={'phase':'final-fresh-fresh','runtime':{'server':self.server},'synthetic_validator_only':True}
-        self.assertTrue(execute(result,out,executed,preflight,self.store))
+        preflight_bytes=(json.dumps(preflight,indent=2,separators=(', ', ': '))+'\n').encode()
+        self.assertEqual(decode(preflight_bytes),preflight)
+        self.assertNotEqual(preflight_bytes,encoded(preflight))
+        (self.store.root.parent/'preflight.json').write_bytes(preflight_bytes)
+        with patch('candidate.read_credentials',return_value={}):
+            loaded,inputs,_,loaded_bytes=load_inputs(self.store.root.parent,'unused-synthetic-credential-path',executed,preflight=True)
+        self.assertEqual(loaded_bytes,preflight_bytes)
+        with self.assertRaisesRegex(ValueError,'preflight bytes differ'):
+            execute(result,out,executed,loaded,inputs,encoded({**preflight,'profile':'debug'}))
+        self.assertTrue(execute(result,out,executed,loaded,inputs,loaded_bytes))
+        admitted=decode((out/'execute-admission.json').read_bytes())
+        self.assertEqual(admitted['preflight_peer_sha256'],sha(preflight_bytes))
+        captured=Artifacts(out/'artifacts')
+        self.assertEqual(captured.read(admitted['preflight_peer_sha256']),preflight_bytes)
         admission=sha((out/'execute-admission.json').read_bytes())
         recording={**executed,'child_stage':'record','execute_admission_sha256':admission}
-        retained,_=record_inputs(out,recording,original_peer,self.store)
+        retained,recorded_store=record_inputs(out,recording,original_peer,self.store)
         self.assertTrue(retained['synthetic_validator_only'])
+        self.assertEqual(recorded_store.read(admitted['preflight_peer_sha256']),preflight_bytes)
+        self.assertEqual((out/'candidate-observations.json').read_bytes(),captured.read(admitted['observations_sha256']))
         self.assertFalse((out/'evidence.json').exists())
         self.assertFalse((out/'summary.json').exists())
         (out/'candidate-observations.json').write_bytes(b'changed observation bytes')

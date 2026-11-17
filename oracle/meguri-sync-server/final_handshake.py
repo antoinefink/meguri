@@ -5,7 +5,8 @@ from candidate import retained_dependencies, verify_package
 from validation import Artifacts, SOURCE_FIELDS, decode, encoded, require, same_value
 
 
-def execute(result,out,invocation,preflight,input_store):
+def execute(result,out,invocation,preflight,input_store,preflight_bytes):
+    require(isinstance(preflight_bytes,bytes) and same_value(decode(preflight_bytes),preflight),'final preflight bytes differ from parsed input')
     require(preflight.get('kind') == 'final_package_preflight','non-credit final preflight required')
     require(not (out/'candidate-observations.json').exists() and not (out/'execute-admission.json').exists() and not (out/'evidence.json').exists(),'final execute output already populated')
     store=Artifacts(out/'artifacts')
@@ -16,7 +17,7 @@ def execute(result,out,invocation,preflight,input_store):
     rules={name:__import__('hashlib').sha256(pathlib.Path(__file__).with_name(name).read_bytes()).hexdigest()
            for name in ('adapter.py','normal.py','media.py','final_desktop.py','final_checks.py','final_contract.py')}
     result['preparation_code_sha256']=rules
-    observations=store.put_json(result);preflight_hash=store.put_json(preflight);invocation_hash=store.put_json(invocation)
+    observations=store.put_json(result);preflight_hash=store.put(preflight_bytes);invocation_hash=store.put_json(invocation)
     admission={'format':'meguri-sync-final-execute-v1','child_phase':invocation['child_phase'],'invocation_sha256':invocation_hash,
                'preflight_peer_sha256':preflight_hash,'observations_sha256':observations}
     (out/'candidate-observations.json').write_bytes(store.read(observations))

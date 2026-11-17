@@ -156,7 +156,7 @@ def main():
             return 0 if record(value,out,invocation,package,inputs) else 1
         if args.stage == 'execute':
             require(set(path.name for path in out.iterdir()) == {'invocation.json'} and 'execute_admission_sha256' not in invocation,'final execute requires initially empty owned output')
-        package,inputs,credentials=load_inputs('/in',args.credentials,invocation,preflight=args.stage == 'execute')
+        package,inputs,credentials,package_bytes=load_inputs('/in',args.credentials,invocation,preflight=args.stage == 'execute')
         target={**credentials,'server':package['server']}
         phase=args.phase.removeprefix('final-') if final else args.phase
         extra={'case':contract['cases'][0]} if final and phase not in {'full','normal','media'} else {}
@@ -164,7 +164,7 @@ def main():
                        'target':target,'phase':args.phase,'full_only':phase == 'full',**extra})
         if args.stage == 'execute':
             from final_handshake import execute
-            return 0 if execute(value,out,invocation,package,inputs) else 1
+            return 0 if execute(value,out,invocation,package,inputs,package_bytes) else 1
         (out/'candidate-observations.json').write_bytes(encoded(value))
         return 0 if record(value,out,invocation,package,inputs) else 1
     if args.mode == 'final-assemble':
