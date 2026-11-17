@@ -62,6 +62,61 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
+@test "sync-package: compiled export uses the measured smoke image and checks cleanup before admission" {
+  MG_ROOT="$REPO_ROOT"
+  smoke="sha256:$(printf '%064d' 1)"
+  mg_artifact() { :; }
+  docker() {
+    printf '%s\n' "$1" >>"$MG_RUN_DIR/asset-sequence"
+    case "$1" in
+      create)
+        [ "${@: -1}" = "$smoke" ] || return 97
+        for arg in "$@"; do
+          case "$arg" in meguri.sync.owner=*) ASSET_OWNER="${arg#*=}" ;; esac
+        done
+        printf 'synthetic-created-id\n' ;;
+      inspect)
+        jq -nc --arg image "$smoke" --arg name "/meguri-package-assets-$MG_RUN_ID" \
+          --arg owner "$ASSET_OWNER" --arg run "$MG_RUN_ID" '
+          [{Image:$image,Name:$name,State:{Running:false},
+            Config:{Labels:{"meguri.sync.owner":$owner,"meguri.mg.run-id":$run}}}]' ;;
+      cp)
+        [ "$3" = - ] || return 97
+        case "$2" in
+          "meguri-package-assets-$MG_RUN_ID:/prepared/assets.json"|"meguri-package-assets-$MG_RUN_ID:/prepared/embedded") ;;
+          *) return 97 ;;
+        esac
+        [ "${ASSET_COPY_RC:-0}" -eq 0 ] || return 1
+        printf 'synthetic tar transport placeholder, validated in Python proofs\n' ;;
+      *) return 97 ;;
+    esac
+  }
+  mg_sync_server__remove_container() {
+    printf 'cleanup\n' >>"$MG_RUN_DIR/asset-sequence"
+    [ "$1" = "meguri-package-assets-$MG_RUN_ID" ] && [ "$2" = "$ASSET_OWNER" ] || return 97
+    return "${ASSET_CLEANUP_RC:-0}"
+  }
+  python3() {
+    if [ "${2:-}" = --export-package-assets ]; then
+      [ "$1" = "$REPO_ROOT/server/tools/candidate-output.py" ] && [ "$3" = "$MG_RUN_DIR" ] || return 97
+      printf 'validate\n' >>"$MG_RUN_DIR/asset-sequence"
+    else command python3 "$@"; fi
+  }
+  run mg_sync_package__assets "$smoke"
+  [ "$status" -eq 0 ]
+  [ "$(tr '\n' ' ' <"$MG_RUN_DIR/asset-sequence")" = 'create inspect cp cp cleanup validate ' ]
+  [ -s "$MG_RUN_DIR/prepared-manifest.tar" ] && [ -s "$MG_RUN_DIR/prepared-embedded.tar" ]
+  for failure in copy cleanup; do
+    : >"$MG_RUN_DIR/asset-sequence"
+    ASSET_COPY_RC=0 ASSET_CLEANUP_RC=0
+    if [ "$failure" = copy ]; then ASSET_COPY_RC=1; else ASSET_CLEANUP_RC=1; fi
+    run mg_sync_package__assets "$smoke"
+    [ "$status" -ne 0 ]
+    [ "$(tail -n 1 "$MG_RUN_DIR/asset-sequence")" = cleanup ]
+    ! rg -x validate "$MG_RUN_DIR/asset-sequence"
+  done
+}
+
 @test "sync-package: phase-suffixed volumes retain the real outer ownership run" {
   MG_SYNC_INSTANCE_SUFFIX=final-rich
   run mg_sync_package__init "$receipt"

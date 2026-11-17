@@ -16,6 +16,34 @@ mg_sync_package__archive() {
     server/src server/web server/examples/package-native-smoke.rs server/tools/package-smoke.mjs \
     core/Cargo.toml core/rust-toolchain.toml core/crates/meguri-model
 }
+mg_sync_package__assets() {
+  local smoke="$1" name="meguri-package-assets-$MG_RUN_ID" owner rc=0
+  [[ "$smoke" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+  owner="$(python3 -c 'import secrets; print(secrets.token_hex(16))')" || return 1
+  mg_on_exit "$(printf '%q ' mg_sync_server__remove_container "$name" "$owner")"
+  # The already-built smoke target inherits the actual /prepared compiler input.
+  # Create only: no frontend rebuild, entrypoint execution, mounts or service access.
+  docker create --name "$name" --network none --read-only --cap-drop ALL \
+    --security-opt no-new-privileges --label "meguri.mg.run-id=$MG_RUN_ID" \
+    --label "meguri.sync.owner=$owner" "$smoke" >"$MG_RUN_DIR/asset-container-id" || rc=1
+  if [ "$rc" -eq 0 ]; then
+    docker inspect "$name" >"$MG_RUN_DIR/asset-container.json" && \
+      jq -e --arg image "$smoke" --arg name "/$name" --arg run "$MG_RUN_ID" --arg owner "$owner" '
+        length==1 and .[0].Image==$image and .[0].Name==$name and
+        .[0].Config.Labels["meguri.mg.run-id"]==$run and
+        .[0].Config.Labels["meguri.sync.owner"]==$owner and .[0].State.Running==false
+      ' "$MG_RUN_DIR/asset-container.json" >/dev/null || rc=1
+  fi
+  if [ "$rc" -eq 0 ]; then
+    # Keep tar metadata for validation; never unpack unadmitted container paths.
+    docker cp "$name:/prepared/assets.json" - >"$MG_RUN_DIR/prepared-manifest.tar" || rc=1
+    docker cp "$name:/prepared/embedded" - >"$MG_RUN_DIR/prepared-embedded.tar" || rc=1
+  fi
+  mg_sync_server__remove_container "$name" "$owner" || rc=1
+  [ "$rc" -eq 0 ] || return 1
+  python3 "$MG_ROOT/server/tools/candidate-output.py" --export-package-assets "$MG_RUN_DIR" || return 1
+  mg_artifact package-asset-container "$MG_RUN_DIR/asset-container.json"
+}
 mg_sync_package_build() {
   [ "$#" -eq 0 ] || { mg_failure usage "sync-server-package takes no arguments"; mg_status error; return; }
   mg_sync_server__clean || { mg_status fail; return; }
@@ -64,6 +92,9 @@ mg_sync_package_build() {
   if [ "$rc" -ne 0 ] || ! python3 "$MG_ROOT/server/tools/package-inventory.py" \
       "$MG_RUN_DIR/runtime.tar" "$MG_RUN_DIR/context" "$MG_RUN_DIR/product"; then
     mg_sync_package__failure "Actual runtime inventory/license/feature check failed"; return
+  fi
+  if ! mg_sync_package__assets "$smoke"; then
+    mg_sync_package__failure "Actual compiled frontend export/closure or checked cleanup failed"; return
   fi
   docker image inspect "$image" >"$MG_RUN_DIR/image.json" || return 1
   if ! jq -e --arg image "$image" --arg commit "$commit" '

@@ -879,11 +879,11 @@ PUBLIC_ARTIFACTS = {
     'server/tools/package-context.py':
         '84db291e6ba4b27dbc5bfef38dc01434342cd4d06016e901ae544c212fd55724',
     'tools/mg.d/sync-package.sh':
-        '2042a3130a51556870462b023ba11ff19ba3623260f1b796f039be52f06b46b2',
+        '8ae4752a6c3951f74a376ab363517fbd18a788c6fd2d098423d19fca6a177a22',
     'tools/tests/sync_package.bats':
-        '60701250ee2b92ebe9e6f054b04b925c67284a1335bdaf6d1d8ffd66011240cb',
+        '592fb1c596cb82d3592beb716163838101122fce200ee4643820154b4993c989',
     'tools/tests/sync_package_context_test.py':
-        '444f4e7e7c142b3a71256d4f53f5294ed2223a9aff554e86b308d57e6eaa02d3',
+        '8ab26e4e6910de0308e22390276749dd2ae23615fea1bc87f29aa19880768132',
     # Independently reviewed public Docker lifecycle tooling, exact bytes.
     'tools/mg.d/conformance-admission.py':
         '7fe260aa7857773c6f472037929f9f6f3a5fe7f2d1eb2eda722238942f1bf7ae',
@@ -1093,7 +1093,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/storage/root.rs':
         'bae80427f23487936d206ea04d9f9ae81db6b920939b752d7a29f2517ac0b9cc',
     'server/tools/candidate-output.py':
-        'b65bf24bf8e4425c847ab9f2158f365cc70d71285e9d784018743f5ca5ecbc9b',
+        'b0ba9d8fcaa75734f20eb3a6d83cc6dfadf64f49cc0b3b7bb2336ac8adc41cca',
     'docs/process/review-log/meguri-sync-U5.md':
         '6cc7dc20556c191e0644282d73259eb8ff8e23f7f98dbd76f107ae80b7eb9494',
 

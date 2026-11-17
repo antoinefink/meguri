@@ -95,7 +95,15 @@ class FinalPackageProof(unittest.TestCase):
                           dict(path=name, bytes=len(data), sha256=hashlib.sha256(data).hexdigest())
                           for name, data in source.items()])
         inputs_hash = self.store(inputs)
-        assets = self.store([])
+        self.payloads = {
+            'index.html': b'<!doctype html><script src="/assets/study-abcdefgh.js"></script>\n',
+            'assets_study-abcdefgh.js': b'document.title = "Synthetic public study fixture";\n',
+        }
+        self.asset_manifest = [dict(path=path, sha256=self.store(self.payloads[name]),
+                                    bytes=len(self.payloads[name])) for path, name in
+                               [('/index.html', 'index.html'),
+                                ('/assets/study-abcdefgh.js', 'assets_study-abcdefgh.js')]]
+        assets = self.store(self.asset_manifest)
         runtime = {self.helper.EXECUTABLE: executable,
                    self.helper.RUNTIME_BASE + 'assets.json': assets,
                    self.helper.RUNTIME_BASE + 'package-inputs.json': inputs_hash,
@@ -150,6 +158,137 @@ class FinalPackageProof(unittest.TestCase):
         sha = hashlib.sha256(data).hexdigest()
         (self.artifacts / sha).write_bytes(data)
         return sha
+
+    def package_fixture(self):
+        """Original synthetic package files, not actual producer/image evidence."""
+        directory = self.root / 'synthetic-package'
+        (directory / 'context').mkdir(parents=True)
+        (directory / 'product').mkdir()
+        for target, sha in [('source.tar', self.server['source_sha256']),
+                            ('context/package-inputs.json', self.package['inputs_sha256']),
+                            ('product/runtime-inventory.json', self.package['runtime_inventory_sha256']),
+                            ('product/assets.json', self.package['assets_sha256']),
+                            ('image.json', self.package['image_inspection_sha256'])]:
+            (directory / target).write_bytes((self.artifacts / sha).read_bytes())
+        (directory / 'result.json').write_text(json.dumps(self.receipt))
+        inventory = self.helper.load(directory / 'product/runtime-inventory.json')
+        with tarfile.open(directory / 'runtime.tar', 'w') as archive:
+            for name, row in inventory.items():
+                data = (self.artifacts / row['sha256']).read_bytes()
+                entry = tarfile.TarInfo(name)
+                entry.size = len(data)
+                archive.addfile(entry, io.BytesIO(data))
+        self.compiled_exports(directory)
+        return directory
+
+    def compiled_exports(self, directory, entries=None, manifest=None):
+        manifest = ((directory / 'product/assets.json').read_bytes() if manifest is None else manifest)
+        if entries is None:
+            entries = [('embedded/' + name, data, tarfile.REGTYPE, '')
+                       for name, data in self.payloads.items()]
+        for filename, members in [('prepared-manifest.tar', [('assets.json', manifest, tarfile.REGTYPE, '')]),
+                                  ('prepared-embedded.tar', entries)]:
+            with tarfile.open(directory / filename, 'w') as archive:
+                if filename == 'prepared-embedded.tar':
+                    entry = tarfile.TarInfo('embedded')
+                    entry.type = tarfile.DIRTYPE
+                    archive.addfile(entry)
+                for name, data, kind, link in members:
+                    entry = tarfile.TarInfo(name)
+                    entry.type, entry.linkname = kind, link
+                    entry.size = len(data) if kind == tarfile.REGTYPE else 0
+                    archive.addfile(entry, io.BytesIO(data) if kind == tarfile.REGTYPE else None)
+
+    def test_compiled_export_retention_and_preflight_preserve_exact_payloads(self):
+        directory = self.package_fixture()
+        self.helper.export_package_assets(directory)
+        retained = self.root / 'retained'
+        retained.mkdir()
+        identity = self.helper.retain_package(directory, retained)
+        self.assertEqual(identity, dict(server=self.server, package=self.package))
+        for row in self.asset_manifest:
+            name = row['path'][1:].replace('/', '_')
+            self.assertEqual((directory / 'product/frontend-assets' / name).read_bytes(), self.payloads[name])
+            self.assertEqual((retained / row['sha256']).read_bytes(), self.payloads[name])
+        execute_input = self.root / 'retained-preflight'
+        execute_input.mkdir()
+        self.helper.prepare_final(execute_input, retained, identity, json.dumps(self.receipt).encode(),
+                                  (self.artifacts / self.binding['container_inspection_before_sha256']).read_bytes(),
+                                  self.binding['server_process'], self.invocation)
+        peer = self.helper.load(execute_input / 'preflight.json')
+        self.helper.final_peer(peer, execute_input / 'artifacts', self.invocation, preflight=True)
+        for row in self.asset_manifest:
+            self.assertEqual(self.helper.artifact(execute_input / 'artifacts', row['sha256']),
+                             self.payloads[row['path'][1:].replace('/', '_')])
+
+    def test_old_package_missing_or_tampered_payload_evidence_cannot_retain(self):
+        directory = self.package_fixture()
+        retained = self.root / 'retained'
+        retained.mkdir()
+        with self.assertRaisesRegex(ValueError, 'missing compiled frontend payload evidence'):
+            self.helper.retain_package(directory, retained)
+        self.helper.export_package_assets(directory)
+        payload = directory / 'product/frontend-assets/index.html'
+        original = payload.read_bytes()
+        payload.unlink()
+        with self.assertRaisesRegex(ValueError, 'payload evidence'):
+            self.helper.retain_package(directory, retained)
+        payload.write_bytes(original + b'changed length')
+        with self.assertRaisesRegex(ValueError, 'identity or length'):
+            self.helper.retain_package(directory, retained)
+        payload.write_bytes(b'X' + original[1:])
+        with self.assertRaisesRegex(ValueError, 'identity or length'):
+            self.helper.retain_package(directory, retained)
+        payload.write_bytes(original)
+        os.link(payload, self.root / 'linked-payload')
+        with self.assertRaisesRegex(ValueError, 'single-link'):
+            self.helper.retain_package(directory, retained)
+
+    def test_package_admission_requires_every_transitive_payload_and_exact_length(self):
+        path = self.artifacts / self.asset_manifest[0]['sha256']
+        original = path.read_bytes()
+        path.unlink()
+        with self.assertRaises(FileNotFoundError):
+            self.helper.final_peer(self.peer, self.artifacts, self.invocation)
+        path.write_bytes(b'X' + original[1:])
+        with self.assertRaisesRegex(ValueError, 'identity or length'):
+            self.helper.final_peer(self.peer, self.artifacts, self.invocation)
+        path.write_bytes(original)
+        rows = copy.deepcopy(self.asset_manifest)
+        rows[0]['bytes'] += 1
+        manifest = json.dumps(rows).encode()
+        inventory = self.helper.decode((self.artifacts / self.package['runtime_inventory_sha256']).read_bytes())
+        inventory[self.helper.RUNTIME_BASE + 'assets.json'] = dict(sha256=self.store(manifest), bytes=len(manifest))
+        package = dict(self.package, assets_sha256=self.store(manifest), runtime_inventory_sha256=self.store(inventory))
+        receipt = copy.deepcopy(self.receipt)
+        receipt['details']['package'].update(package)
+        with self.assertRaisesRegex(ValueError, 'identity or length'):
+            self.helper.package_artifacts(package, self.server, receipt, self.artifacts)
+
+    def test_export_rejects_manifest_disagreement_and_unsafe_or_incomplete_archive(self):
+        directory = self.package_fixture()
+        self.compiled_exports(directory, manifest=json.dumps(self.asset_manifest, indent=2).encode())
+        with self.assertRaisesRegex(ValueError, 'manifest disagreement'):
+            self.helper.export_package_assets(directory)
+        good = [('embedded/' + name, data, tarfile.REGTYPE, '') for name, data in self.payloads.items()]
+        for bad in [good[:-1], good + [good[0]],
+                    good + [('embedded/unexpected.js', b'public extra', tarfile.REGTYPE, '')],
+                    [('embedded/index.html', b'', tarfile.SYMTYPE, '/outside')] + good[1:],
+                    [('embedded/index.html', b'', tarfile.LNKTYPE, good[1][0])] + good[1:],
+                    [('embedded/index.html', b'', tarfile.FIFOTYPE, '')] + good[1:],
+                    [('embedded/../index.html', good[0][1], tarfile.REGTYPE, '')] + good[1:]]:
+            self.compiled_exports(directory, entries=bad)
+            with self.subTest(entries=[row[0:1] + row[2:] for row in bad]), self.assertRaises(ValueError):
+                self.helper.export_package_assets(directory)
+            self.assertFalse((directory / 'product/frontend-assets').exists())
+
+    def test_manifest_rejects_duplicate_mapping_and_nonoriginal_paths(self):
+        for path in ['/index.html', '/assets/../study-abcdefgh.js', '/assets/study.js',
+                     '/assets/study-abcdefgh.js.map', '/assets/nested/study-abcdefgh.js']:
+            rows = copy.deepcopy(self.asset_manifest)
+            rows[1]['path'] = path
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                self.helper.asset_rows(json.dumps(rows).encode())
 
     def test_final_rejects_source_image_and_executable_mismatch(self):
         for field in ('source_sha256', 'lock_sha256', 'executable_sha256'):

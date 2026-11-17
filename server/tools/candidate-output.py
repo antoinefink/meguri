@@ -97,6 +97,94 @@ def decode(data):
                       parse_constant=lambda _: require(False, "nonfinite JSON value"))
 
 
+def asset_file(path):
+    """Read actual single-link bytes, without following a substituted link."""
+    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), "rb") as source:
+        before = os.fstat(source.fileno())
+        require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1,
+                "frontend asset must be a regular single-link file")
+        data = source.read()
+        after, bound = os.fstat(source.fileno()), path.lstat()
+        require((before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns,
+                 before.st_ctime_ns, before.st_nlink) ==
+                (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns,
+                 after.st_ctime_ns, after.st_nlink)
+                and (bound.st_dev, bound.st_ino, bound.st_mode, bound.st_nlink) ==
+                    (after.st_dev, after.st_ino, after.st_mode, 1),
+                "frontend asset changed during read")
+    return data
+
+
+def asset_rows(data):
+    """The original embed.mjs path grammar and slash-to-underscore mapping."""
+    rows = decode(data)
+    require(isinstance(rows, list) and rows, "missing compiled frontend manifest")
+    mapped, paths = {}, []
+    for row in rows:
+        require(isinstance(row, dict) and set(row) == {"path", "sha256", "bytes"},
+                "invalid frontend asset row")
+        path = row["path"]
+        require(isinstance(path, str) and (path == "/index.html" or re.fullmatch(
+            r"/assets/[A-Za-z0-9_.-]+-[A-Za-z0-9_-]{8,}\.(js|css)", path)),
+            "invalid original frontend asset path")
+        name = path[1:].replace("/", "_")
+        require(name not in mapped, "duplicate or ambiguous frontend asset mapping")
+        require(isinstance(row["sha256"], str) and SHA256.fullmatch(row["sha256"])
+                and type(row["bytes"]) is int and row["bytes"] > 0,
+                "invalid frontend asset identity or length")
+        mapped[name] = row
+        paths.append(path)
+    require(paths[0] == "/index.html" and paths[1:] == sorted(paths[1:])
+            and any(path.endswith(".js") for path in paths),
+            "incomplete or unordered compiled frontend manifest")
+    return mapped
+
+
+def asset_payload(row, data):
+    require(len(data) == row["bytes"] and digest(data) == row["sha256"],
+            "frontend asset payload identity or length mismatch")
+
+
+def export_package_assets(directory):
+    """Admit only the two fixed docker-cp archives; never extract host paths."""
+    product = directory / "product"
+    require(stat.S_ISDIR(product.lstat().st_mode), "missing actual runtime product")
+    manifest = asset_file(product / "assets.json")
+    rows = asset_rows(manifest)
+    payloads = {}
+    for filename, expected in (("prepared-manifest.tar", {"assets.json"}),
+                               ("prepared-embedded.tar", {"embedded/" + name for name in rows})):
+        seen, files = set(), {}
+        with tarfile.open(fileobj=io.BytesIO(asset_file(directory / filename))) as archive:
+            for entry in archive:
+                name = entry.name[2:] if entry.name.startswith("./") else entry.name
+                if entry.isdir():
+                    name = name.rstrip("/")
+                require(name not in seen, "duplicate compiled frontend export path")
+                seen.add(name)
+                if filename == "prepared-embedded.tar" and name == "embedded" and entry.isdir():
+                    continue
+                require(name in expected and entry.isfile() and not entry.linkname
+                        and entry.sparse is None, "unsafe or unexpected compiled frontend export")
+                data = archive.extractfile(entry).read()
+                require(len(data) == entry.size, "truncated compiled frontend export")
+                files[name] = data
+        require(set(files) == expected, "missing compiled frontend export payload")
+        if filename == "prepared-manifest.tar":
+            require(files["assets.json"] == manifest, "smoke/runtime frontend manifest disagreement")
+        else:
+            payloads = {name: files["embedded/" + name] for name in rows}
+    for name, row in rows.items():
+        asset_payload(row, payloads[name])
+    # Separate tooling evidence: this does not extend the runtime inventory.
+    retained = product / "frontend-assets"
+    retained.mkdir()
+    for name, data in payloads.items():
+        with (retained / name).open("xb") as output:
+            output.write(data)
+        asset_payload(rows[name], asset_file(retained / name))
+
+
 def source_entries(data):
     result = {}
     with tarfile.open(fileobj=io.BytesIO(data)) as archive:
@@ -162,6 +250,9 @@ def package_artifacts(package, server, receipt, directory):
             and inventory[RUNTIME_BASE + "covered-source.tar"]["sha256"] == inputs["covered_source_sha256"]
             and inventory[RUNTIME_BASE + "rust-notices.json"]["sha256"] == inputs["rust_notices_sha256"],
             "runtime package identity mismatch")
+    for row in asset_rows(artifact(directory, package["assets_sha256"])).values():
+        data = asset_file(directory / row["sha256"])
+        asset_payload(row, data)
 
 
 def final_peer(peer, directory, invocation, *, preflight=False):
@@ -497,6 +588,21 @@ def retain_package(directory, destination):
                 require(metadata["bytes"] == len(data) and metadata["sha256"] == retain(data),
                         "runtime export differs from inventory")
     require(all(name in seen for name in inventory), "missing exported runtime dependency")
+    product = directory / "product"
+    require(stat.S_ISDIR(product.lstat().st_mode), "missing actual runtime product")
+    manifest = asset_file(product / "assets.json")
+    require(manifest == artifact(destination, package["assets_sha256"]),
+            "retained frontend manifest differs from runtime")
+    rows = asset_rows(manifest)
+    closure = product / "frontend-assets"
+    require(closure.exists() and stat.S_ISDIR(closure.lstat().st_mode),
+            "missing compiled frontend payload evidence")
+    require({path.name for path in closure.iterdir()} == set(rows),
+            "incomplete or unexpected compiled frontend payload evidence")
+    for name, row in rows.items():
+        data = asset_file(closure / name)
+        asset_payload(row, data)
+        require(retain(data) == row["sha256"], "retained frontend payload digest mismatch")
     retain(regular(directory / "result.json"))
     package_artifacts(package, server, receipt, destination)
     return {"server": server, "package": package}
@@ -689,6 +795,13 @@ def assembly_handoff(segments, output, expected, controls):
 
 def main():
     command = sys.argv[1] if len(sys.argv) > 1 else ""
+    if command == "--export-package-assets" and len(sys.argv) == 3:
+        try:
+            export_package_assets(pathlib.Path(sys.argv[2]))
+            return 0
+        except (OSError, ValueError, KeyError, TypeError, tarfile.TarError) as error:
+            sys.stderr.write("compiled frontend export rejected: " + str(error) + "\n")
+            return 1
     if command == "--check-assembly" and len(sys.argv) == 6:
         try:
             assembly_handoff(pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3]),
@@ -738,8 +851,8 @@ def main():
         try:
             print(json.dumps(retain_package(pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])), sort_keys=True))
             return 0
-        except (OSError, ValueError, KeyError, TypeError, tarfile.TarError):
-            sys.stderr.write("final package artifacts are incomplete or mismatched\n")
+        except (OSError, ValueError, KeyError, TypeError, tarfile.TarError) as error:
+            sys.stderr.write("final package artifacts are incomplete or mismatched: " + str(error) + "\n")
             return 1
     output, expected_path, peer_path, selection_path = map(pathlib.Path, sys.argv[1:])
     report = {"summary": None, "invocation": None, "errors": []}
