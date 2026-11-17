@@ -843,7 +843,7 @@ PUBLIC_ARTIFACTS = {
         "31af001e272ebcc61ca299e3d932f6f29bc5da69551389305956ef92cd9f0e40",
     # Complete public-source review; future bytes remain checked.
     "core/crates/meguri-sync/src/provider.rs":
-        "b4c6fdce499a059cf1f224165b5a5191955d5daeb6bfbf1dbd757b04bd0f21a6",
+        "ae9aa3a95eb6df936adfef74504f648cab637030c0544f6a1376cd282ba5624a",
     'specs/sync/one-way.md':
         '8de7695fada9f38fa5d6c54c26538d025cd7e3b45b1867a1b8650417533b0812',
     'specs/sync/meguri-provider.md':

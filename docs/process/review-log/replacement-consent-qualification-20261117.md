@@ -34,3 +34,23 @@ Swift overlap is established. The existing provider mutex covers individual
 writes but not the check and write together. This required follow-on is under
 repair; revision comparison alone is insufficient. Preserve original completion
 ownership and keep provider I/O outside Runtime and tracking locks.
+
+## Serialized qualification
+
+Filtered author `cleanroom/20261117T102959Z-31268` uses the existing provider
+publication mutex across the actual target check and qualification. Runtime
+and tracking guards end before sidecar I/O. Setup uses the same mutex.
+Independent `104004Z-61124` clears the unchanged seed, lock order and all three
+complete files. Actual exported patch SHA-256:
+`e0553f69a0228f05b485eaba80549d3673fceed523921758be49d59d52ed9eb5`.
+The author's report-body digest is not the Git export digest.
+
+The new synthetic Host regression holds the original qualifier, observes actual
+setup contention, releases it and joins both workers before assertions. It then
+requires pending successor consent, unchanged rows and ACK history, and actual
+replacement Bind and scan. Execution remains pending.
+
+Ordinary privacy `104513Z-87110` flags the provider file. The independent
+complete-file public review admits only its exact SHA-256
+`ae9aa3a95eb6df936adfef74504f648cab637030c0544f6a1376cd282ba5624a`.
+Matcher behavior, token lists and privacy access stay unchanged.

@@ -125,7 +125,7 @@ fn put(doc: &mut Map<String, Value>, value: &ProviderDocument) -> Result<(), Sto
 }
 
 /// One retained installation owner. Runtime checks only its bounded cached facts;
-/// sidecar operations happen before taking Runtime/tracking ownership.
+/// sidecar operations never hold Runtime/tracking ownership.
 pub struct Authority {
     path: PathBuf, state: Mutex<Result<ProviderDocument, StorageError>>,
     open: AtomicBool,
@@ -135,6 +135,8 @@ pub struct Authority {
     completion: Mutex<Option<CloudBinding>>,
     // Serializes reload/publication, including the failed desired mutation.
     publication_failure: Mutex<Option<PublicationFailure>>,
+    #[cfg(feature = "test-hooks")]
+    setup_contention: Mutex<Option<std::sync::mpsc::Sender<()>>>,
     restart_intent: Option<HandoffIntent>,
 }
 struct PendingPublication {
@@ -169,7 +171,10 @@ impl Authority {
         let restart_intent = state.as_ref().ok().and_then(|doc| doc.handoff.clone());
         Arc::new(Self { path, state: Mutex::new(state), open: AtomicBool::new(true), writers: AtomicBool::new(false), discovery: Mutex::new((0, 0)),
             original_completion: AtomicBool::new(false), completion: Mutex::new(None),
-            publication_failure: Mutex::new(None), restart_intent })
+            publication_failure: Mutex::new(None),
+            #[cfg(feature = "test-hooks")]
+            setup_contention: Mutex::new(None),
+            restart_intent })
     }
     /// Before Host composition. Valid existing metadata is never reimported.
     pub fn migrate(root: &Path, legacy: Option<&Value>) -> Result<(), StorageError> {
@@ -415,6 +420,11 @@ impl Authority {
         }
     }
     pub(crate) fn accept_icloud_setup(&self) -> Result<(), StorageError> {
+        #[cfg(feature = "test-hooks")]
+        if let Err(std::sync::TryLockError::WouldBlock) = self.publication_failure.try_lock()
+            && let Some(sender) = self.setup_contention.lock().unwrap_or_else(PoisonError::into_inner).take() {
+            let _ = sender.send(());
+        }
         self.update(|doc| {
             if doc.handoff.is_some() || doc.selection == Selection::Meguri { return Err(invalid()); }
             doc.selection = Selection::ICloud; doc.settings.enabled = true;
@@ -423,6 +433,11 @@ impl Authority {
         })?;
         Ok(())
     }
+    /// Reports only that setup encountered an occupied publication gate.
+    #[cfg(feature = "test-hooks")]
+    pub fn observe_setup_contention_for_testing(&self, sender: std::sync::mpsc::Sender<()>) {
+        *self.setup_contention.lock().unwrap_or_else(PoisonError::into_inner) = Some(sender);
+    }
     fn update(&self, change: impl FnOnce(&mut ProviderDocument) -> Result<(), StorageError>) -> Result<ProviderDocument, StorageError> {
         self.update_publication(None, false, |_, doc| change(doc))
     }
@@ -430,6 +445,12 @@ impl Authority {
         change: impl FnOnce(&mut Map<String, Value>, &mut ProviderDocument) -> Result<(), StorageError>,
     ) -> Result<ProviderDocument, StorageError> {
         let mut failure = self.publication_failure.lock().unwrap_or_else(PoisonError::into_inner);
+        self.update_publication_locked(&mut failure, facts, retryable, change)
+    }
+    fn update_publication_locked(&self, failure: &mut Option<PublicationFailure>,
+        facts: Option<(u64, Option<Publication>)>, retryable: bool,
+        change: impl FnOnce(&mut Map<String, Value>, &mut ProviderDocument) -> Result<(), StorageError>,
+    ) -> Result<ProviderDocument, StorageError> {
         self.close_admission();
         if let Some(failure) = failure.as_ref() { return Err(failure.error.clone()); }
         let mut pending = None;
@@ -452,7 +473,21 @@ impl Authority {
     }
     /// Runtime supplies the real retained binding and settled R6 state. Credentials
     /// and stamps cannot call this qualification path.
-    pub(crate) fn qualify_legacy(&self, binding: &Binding, publication: &Publication) -> Result<(), StorageError> {
+    pub(crate) fn qualify_legacy<E: From<StorageError>>(&self, binding: &Binding, publication: &Publication,
+        current: impl FnOnce() -> Result<bool, E>,
+    ) -> Result<(), E> {
+        let mut failure = self.publication_failure.lock().unwrap_or_else(PoisonError::into_inner);
+        // Runtime checks its actual operation target under this serialization.
+        // It releases State/tracking before returning, ahead of sidecar I/O.
+        // Setup cannot publish successor consent between this check and write.
+        if !current()? { return Ok(()); }
+        self.qualify_legacy_locked(&mut failure, binding, publication)?;
+        self.validate_current_binding(binding, publication);
+        Ok(())
+    }
+    fn qualify_legacy_locked(&self, failure: &mut Option<PublicationFailure>, binding: &Binding,
+        publication: &Publication,
+    ) -> Result<(), StorageError> {
         if !self.snapshot()?.legacy_binding_pending { return Ok(()); }
         if publication.decision != PublicationDecision::Clear || publication.identity != binding.facts.publication
             || binding.facts.state != BindingState::Active { return Err(invalid()); }
@@ -465,7 +500,7 @@ impl Authority {
         };
         let retained = CloudBinding { binding: binding.id.0, account: account.as_bytes().to_vec(), publication: publication.clone(),
             container: binding.scope.container.as_str().into(), environment: binding.scope.environment };
-        self.update(|doc| {
+        self.update_publication_locked(failure, None, false, |_, doc| {
             if doc.selection != Selection::ICloud || doc.handoff.is_some() || !doc.legacy_binding_pending { return Err(invalid()); }
             doc.binding = Some(retained); doc.legacy_binding_pending = false;
             Ok(())

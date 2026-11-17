@@ -719,6 +719,8 @@ pub struct Runtime {
     current_account_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     #[cfg(feature = "test-hooks")]
     cloud_capture_hook: Mutex<Option<CloudCaptureHook>>,
+    #[cfg(feature = "test-hooks")]
+    provider_qualification_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct ScanGuard {
@@ -788,26 +790,32 @@ impl Runtime {
             && binding.facts.state == BindingState::Active
             && publication.decision == meguri_engine::device_state::PublicationDecision::Clear
             && publication.identity == binding.facts.publication {
-            {
-                let state = self.state();
-                if state.incarnation != incarnation
-                    || state.bound.as_ref().map(|b| &b.binding) != Some(&binding)
-                    || !state.provider.as_ref().is_some_and(|p| Arc::ptr_eq(p, &provider)) {
-                    return Err(RuntimeError::StaleIncarnation);
+            provider.qualify_legacy(&binding, &publication, || -> Result<bool, RuntimeError> {
+                {
+                    let state = self.state();
+                    if state.incarnation != incarnation
+                        || state.bound.as_ref().map(|b| &b.binding) != Some(&binding)
+                        || !state.provider.as_ref().is_some_and(|p| Arc::ptr_eq(p, &provider)) {
+                        return Err(RuntimeError::StaleIncarnation);
+                    }
+                    let awaiting_target = with_tracking_access(|| -> Result<bool, RuntimeError> {
+                        let Some(store) = state.store.as_ref() else { return Ok(false); };
+                        Ok(store.publication_op()?.is_some_and(|op|
+                            op.step == super::publication::PublishStep::Confirmed
+                                || op.binding_after != Some(binding.id))
+                            || store.adoption_op()?.is_some_and(|op| op.binding_after != binding.id))
+                    })?;
+                    // Setup consent belongs to the actual operation target. Keep
+                    // it pending without disturbing a predecessor's completion.
+                    if awaiting_target { return Ok(false); }
                 }
-                let awaiting_target = with_tracking_access(|| -> Result<bool, RuntimeError> {
-                    let Some(store) = state.store.as_ref() else { return Ok(false); };
-                    Ok(store.publication_op()?.is_some_and(|op|
-                        op.step == super::publication::PublishStep::Confirmed
-                            || op.binding_after != Some(binding.id))
-                        || store.adoption_op()?.is_some_and(|op| op.binding_after != binding.id))
-                })?;
-                // Setup consent belongs to the actual operation target. Keep
-                // it pending without disturbing a predecessor's completion.
-                if awaiting_target { return Ok(()); }
-            }
-            provider.qualify_legacy(&binding, &publication)?;
-            provider.validate_current_binding(&binding, &publication);
+                #[cfg(feature = "test-hooks")]
+                {
+                    let hook = self.provider_qualification_hook.lock().unwrap_or_else(PoisonError::into_inner).take();
+                    if let Some(hook) = hook { hook(); }
+                }
+                Ok(true)
+            })?;
         }
         Ok(())
     }
@@ -891,6 +899,8 @@ impl Runtime {
             current_account_hook: Mutex::new(None),
             #[cfg(feature = "test-hooks")]
             cloud_capture_hook: Mutex::new(None),
+            #[cfg(feature = "test-hooks")]
+            provider_qualification_hook: Mutex::new(None),
         }
     }
     /// Change external test inputs immediately before the fresh account read.
@@ -918,6 +928,12 @@ impl Runtime {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take()
+    }
+    /// One-shot pause after actual target checks, outside State/tracking but
+    /// inside provider publication serialization. Do not reenter provider writes.
+    #[cfg(feature = "test-hooks")]
+    pub fn set_provider_qualification_hook_for_testing(&self, hook: impl FnOnce() + Send + 'static) {
+        *self.provider_qualification_hook.lock().unwrap_or_else(PoisonError::into_inner) = Some(Box::new(hook));
     }
     #[cfg(feature = "test-hooks")]
     pub fn observe_state_contention_for_testing(&self, sender: std::sync::mpsc::Sender<()>) {

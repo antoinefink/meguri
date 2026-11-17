@@ -3198,6 +3198,96 @@ fn replacement_publication_consent_waits_for_its_actual_binding() {
 }
 
 #[test]
+fn replacement_setup_serializes_after_a_held_predecessor_qualifier() {
+    use cloud::runtime::RuntimeError;
+    use std::sync::mpsc;
+
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("concurrent-replacement-consent");
+    generated(&dir);
+    let host = open_prior_icloud_host(&dir, keys());
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(717)).unwrap();
+    let predecessor = publish_cold_resume_pending(&host, &mut service);
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let qualified = host.provider_authority().snapshot().unwrap();
+    assert!(qualified.binding.is_some() && !qualified.legacy_binding_pending);
+    let rows = cold_resume_rows(&host);
+    let history = cold_resume_entities(&host);
+    assert!(history.iter().any(|entity| entity.mark.is_some()
+        && entity.local_rev > entity.acked_rev && entity.acked_rev > 0
+        && entity.acked_payload.is_some() && !entity.acked_system_fields.is_empty()));
+    let preview = actual_preview(&host, &mut service, &scope());
+    assert_eq!(preview.active_epoch, Some(predecessor.facts.epoch));
+
+    let (entered, reached) = mpsc::channel();
+    let (release, resume) = mpsc::channel();
+    let (waiting, contended) = mpsc::channel();
+    runtime.set_provider_qualification_hook_for_testing(move || {
+        entered.send(()).unwrap();
+        resume.recv_timeout(Duration::from_secs(30)).expect("release original qualifier");
+    });
+    host.provider_authority().observe_setup_contention_for_testing(waiting);
+    let (held, contention, before_release, qualifier, acceptance) = std::thread::scope(|threads| {
+        // A has read settled predecessor R6 and completed its actual State and
+        // operation checks. Its hook holds only provider publication ownership.
+        let qualifier = threads.spawn(|| host.refresh_provider_admission());
+        let held = reached.recv_timeout(Duration::from_secs(30));
+        let acceptance = threads.spawn(|| -> Result<_, RuntimeError> {
+            let id = runtime.confirm_connection_publication(&preview, &collection)?;
+            runtime.provider_accept_icloud_connection()?;
+            Ok(id)
+        });
+        // B confirmed the real replacement and tried setup while A was held.
+        // Wait for observed mutex contention, never for B's completed accept.
+        let contention = contended.recv_timeout(Duration::from_secs(30));
+        let before_release = host.provider_authority().snapshot();
+        let _ = release.send(());
+        // Join both owned workers before making any scheduling assertions.
+        (held, contention, before_release, qualifier.join(), acceptance.join())
+    });
+    held.expect("original qualifier reached its checked phase");
+    contention.expect("replacement setup encountered the held publication gate");
+    qualifier.unwrap();
+    let id = acceptance.unwrap().unwrap();
+    assert_eq!(before_release.unwrap(), qualified);
+    let confirmed = runtime.publication_op().unwrap().unwrap();
+    assert_eq!(confirmed.id, id);
+    assert_eq!(confirmed.step, PublishStep::Confirmed);
+    assert_eq!(confirmed.reason, cloud::control_codec::EpochReason::ReplaceCloud as u8);
+    assert_eq!(confirmed.binding_before.as_ref().unwrap().id, predecessor.id);
+    assert!(confirmed.binding_after.is_none());
+    assert_ne!(confirmed.epoch, predecessor.facts.epoch);
+    let accepted = host.provider_authority().snapshot().unwrap();
+    assert_eq!(accepted.binding, qualified.binding);
+    assert_eq!(accepted.revision, qualified.revision);
+    assert!(accepted.legacy_binding_pending,
+        "the released predecessor qualifier must not consume successor setup consent");
+    assert_eq!(runtime.status().unwrap().binding.as_ref(), Some(&predecessor));
+    assert_eq!(cold_resume_rows(&host), rows);
+    for entity in &history {
+        assert_eq!(runtime.binding_entity(predecessor.id, &entity.name).unwrap().as_ref(), Some(entity));
+    }
+
+    runtime.perform_publication_local(id, LocalWork::Bind, &collection).unwrap();
+    let replacement = runtime.status().unwrap().binding.unwrap();
+    assert_ne!(replacement.id, predecessor.id);
+    assert_eq!(runtime.publication_op().unwrap().unwrap().binding_after, Some(replacement.id));
+    assert_eq!(replacement.facts.epoch, confirmed.epoch);
+    runtime.perform_publication_local(id, LocalWork::WriteDecision, &collection).unwrap();
+    own_until_scan(&host, &mut service);
+    assert!(host.provider_authority().permits_icloud_binding(&replacement));
+    runtime.require_provider_collection_admission().unwrap();
+    assert!(!host.provider_authority().snapshot().unwrap().legacy_binding_pending);
+    runtime.reconcile_binding(&collection, &host.media().unwrap(), Duration::from_secs(30)).unwrap();
+    assert_eq!(cold_resume_rows(&host), rows);
+    for entity in &history {
+        assert_eq!(runtime.binding_entity(predecessor.id, &entity.name).unwrap().as_ref(), Some(entity));
+    }
+    host.close().unwrap();
+}
+
+#[test]
 fn cancel_replacement_requalifies_restored_provider_before_reconciliation() {
     use cloud::runtime::RuntimeError;
     use meguri_engine::device_state::{DeviceState, PublicationDecision};
