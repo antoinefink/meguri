@@ -87,6 +87,10 @@ fn open_host_with(dir: &Path, keys: Arc<Keys>, identity: Arc<dyn IdentityProvide
 }
 fn open_host_with_random(dir: &Path, keys: Arc<Keys>, identity: Arc<dyn IdentityProvider>, scope: Scope,
     random: Option<Arc<dyn RandomSource>>) -> CoreHost {
+    CoreHost::open(host_config_with_random(dir, keys, identity, scope, random)).unwrap()
+}
+fn host_config_with_random(dir: &Path, keys: Arc<Keys>, identity: Arc<dyn IdentityProvider>, scope: Scope,
+    random: Option<Arc<dyn RandomSource>>) -> meguri_host::HostConfig {
     let mut config = options(dir, NOW, 91);
     if let Some(random) = random { config.random = random; }
     config.clock = Arc::new(StepClock::new(NOW, UtcOffset::UTC, "UTC"));
@@ -99,7 +103,7 @@ fn open_host_with_random(dir: &Path, keys: Arc<Keys>, identity: Arc<dyn Identity
         files: Arc::new(NativeFiles),
     });
     config.cloud_key_bytes = Some(keys);
-    CoreHost::open(config).unwrap()
+    config
 }
 fn generated(dir: &Path) {
     let recipe = Recipe::parse("recipe: publication-phase\ndescription: Public synthetic rows\nnow: \"2025-01-01T00:00:00Z\"\ndecks:\n  - name: Generic::Publication\n    notetype: basic\n    new: 1\n    due: 1\n    tags: [generic]\n    fields: [\"generic {n}\", \"back {n}\"]\n").unwrap();
@@ -1855,6 +1859,14 @@ fn restore_collection(host: &CoreHost, dir: &Path) {
 }
 
 fn actual_preview(host: &CoreHost, service: &mut Service<SeededRandom>, scope: &Scope) -> Preview {
+    let work = host.cloud_runtime().unwrap()
+        .begin_connection_preview(&host.collection().unwrap(), &host.media().unwrap())
+        .unwrap();
+    actual_preview_after_begin(host, service, scope, work)
+}
+
+fn actual_preview_after_begin(host: &CoreHost, service: &mut Service<SeededRandom>, scope: &Scope,
+    work: PreviewWork) -> Preview {
     fn read(service: &mut Service<SeededRandom>, scope: &Scope, zone: String, name: &str) -> RecordRead {
         let response = service
             .request(
@@ -1875,10 +1887,7 @@ fn actual_preview(host: &CoreHost, service: &mut Service<SeededRandom>, scope: &
         }
     }
     let runtime = host.cloud_runtime().unwrap();
-    let PreviewWork::ReadActive { id } = runtime
-        .begin_connection_preview(&host.collection().unwrap(), &host.media().unwrap())
-        .unwrap()
-    else {
+    let PreviewWork::ReadActive { id } = work else {
         panic!("active read required");
     };
     let work = runtime
@@ -4357,6 +4366,340 @@ fn resume_media_fixture(disabled: bool, ready_only: bool) {
         let (_, cursor, _) = runtime.register_sdk(false).unwrap();
         assert!(cursor.is_none());
     }
+    host.close().unwrap();
+}
+
+#[test]
+fn cold_stopped_resume_qualifies_current_provider_before_reconciliation() {
+    use meguri_engine::device_state::DeviceState;
+    use meguri_sync::provider::Selection;
+
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("cold-stopped-resume");
+    generated(&dir);
+    let account = Arc::new(ColdResumeAccount(std::sync::atomic::AtomicUsize::new(0)));
+    let config = cold_resume_config(&dir, account.clone());
+    let host = CoreHost::open(config.clone()).unwrap();
+    let initial = host.provider_authority().snapshot().unwrap();
+    assert_eq!(initial.selection, Selection::ICloud);
+    assert!(initial.settings.enabled && !initial.settings.paused && initial.legacy_binding_pending);
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(713)).unwrap();
+    let binding = publish_cold_resume_pending(&host, &mut service);
+    let history = cold_resume_entities(&host);
+    let rows = cold_resume_rows(&host);
+    let publication = DeviceState::for_collection(&dir.join("collection.anki2"))
+        .settled_publication().unwrap().unwrap();
+    assert_eq!(publication.identity, binding.facts.publication);
+    let qualified = host.provider_authority().snapshot().unwrap();
+    assert!(qualified.binding.is_some() && !qualified.legacy_binding_pending);
+    host.stop_using_icloud().unwrap();
+    assert_eq!(DeviceState::for_collection(&dir.join("collection.anki2"))
+        .settled_publication().unwrap(), Some(publication.clone()));
+    host.close().unwrap();
+    drop(host);
+
+    // Reuse the owned collection AND installation configuration. No reader,
+    // runtime, SDK or Host from the first opening survives the close.
+    let host = CoreHost::open(config.clone()).unwrap();
+    let runtime = host.cloud_runtime().unwrap();
+    let generation = host.cloud_connection_generation().unwrap();
+    assert_eq!(host.provider_authority().snapshot().unwrap(), qualified);
+    assert!(host.provider_authority().permits_icloud_account_read());
+    assert_cold_resume_closed(&host, &binding);
+    let read = runtime.adapter_begin_identity_read(false, None).unwrap();
+    let identity = account.read_identity(&binding.scope);
+    assert!(runtime.adapter_complete_identity_read(read, identity).unwrap());
+    let work = host.begin_cloud_connection_preview().unwrap();
+    let preview = actual_preview_after_begin(&host, &mut service, &scope(), work);
+    assert_eq!(preview.decision, ConnectDecision::ConfirmResume);
+    assert_eq!(preview.resume_binding, Some(binding.id));
+    assert_eq!(preview.account, binding.facts.account);
+    assert_eq!(runtime.resume_binding_offer(), Some(binding.id));
+    assert_cold_resume_closed(&host, &binding);
+    let requests = service.request_log().unwrap().len();
+    let guard = runtime.adapter_guard();
+    assert!(matches!(host.resume_cloud_binding(&preview,
+        meguri_engine::Generation(generation.0.checked_add(1).unwrap())),
+        Err(cloud::runtime::RuntimeError::StaleIncarnation)));
+    assert_eq!(runtime.adapter_guard(), guard);
+    assert_eq!(runtime.resume_binding_offer(), Some(binding.id));
+
+    let resumed = host.resume_cloud_binding(&preview, generation);
+    // Diagnose the intended red after real activation, rather than accepting
+    // a fixture refusal before the retained resume authority was validated.
+    assert_eq!(runtime.status().unwrap().binding.as_ref(), Some(&binding));
+    if let Err(error) = &resumed {
+        // The native facade maps this Rust refusal to accountUnavailable.
+        assert!(matches!(error, cloud::runtime::RuntimeError::IdentityUnverified));
+        assert!(!host.provider_authority().permits_icloud_binding(&binding));
+        assert!(runtime.status().unwrap().scan_required);
+        assert_eq!(cold_resume_rows(&host), rows);
+        assert_cold_resume_history(&host, &history);
+        assert_eq!(service.request_log().unwrap().len(), requests);
+        assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+    }
+    resumed.expect("cold resume must qualify the activated provider before media/whole-binding reconciliation");
+    let status = runtime.status().unwrap();
+    assert!(status.stored_usable && status.identity_verified && status.scan_completed_this_open);
+    assert!(!status.scan_required && !status.tracking_stopped);
+    assert_eq!(status.generation, Some(generation));
+    assert!(host.provider_authority().permits_icloud_binding(&binding));
+    runtime.require_provider_collection_admission().unwrap();
+    assert_eq!(host.provider_authority().snapshot().unwrap(), qualified);
+    assert_eq!(DeviceState::for_collection(&dir.join("collection.anki2"))
+        .settled_publication().unwrap(), Some(publication));
+    assert_eq!(cold_resume_rows(&host), rows);
+    assert_cold_resume_history(&host, &history);
+    let stored = runtime.stored_state_for_testing().unwrap();
+    assert!(stored.whole_scan);
+    assert_eq!(stored.coverage.as_ref().unwrap().cursor.generation, generation.0);
+    assert_eq!(service.request_log().unwrap().len(), requests);
+    assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+    assert!(!runtime.trace().iter().any(|event| matches!(event,
+        cloud::workflow::TraceEvent::EngineStarted { .. }
+        | cloud::workflow::TraceEvent::CollectionBatchBuilt { .. })));
+    assert!(runtime.confirm_connection_resume(&preview, &host.collection().unwrap()).is_err());
+    host.close().unwrap();
+}
+
+struct ColdResumeAccount(std::sync::atomic::AtomicUsize);
+impl IdentityProvider for ColdResumeAccount {
+    fn read_identity(&self, scope: &cloud::BuildScope) -> IdentityStatus {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Account.read_identity(scope)
+    }
+}
+
+fn cold_resume_config(dir: &Path, account: Arc<ColdResumeAccount>) -> meguri_host::HostConfig {
+    let config = host_config_with_random(dir, keys(), account, scope(), None);
+    // This caller represents an existing opted-in installation. Merely
+    // configuring CloudInputs must keep the generic helpers' local-only default.
+    CoreHost::migrate_provider_configuration(&config.manual_transfer_directory,
+        meguri_sync::provider::LegacyInput::Settings(meguri_sync::provider::LegacySettings {
+            enabled: true, paused: false, automatic: true, media: true,
+        })).unwrap();
+    config
+}
+
+fn publish_cold_resume_pending(host: &CoreHost, service: &mut Service<SeededRandom>) -> cloud::Binding {
+    let binding = publish_actual_collection(host, service);
+    let runtime = host.cloud_runtime().unwrap();
+    assert_eq!(binding.facts.state, cloud::BindingState::Active);
+    assert!(host.provider_authority().permits_icloud_binding(&binding));
+    runtime.require_provider_collection_admission().unwrap();
+    assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+    let before = runtime.entity_facts_page(cloud::entity_codec::Kind::Note, None).unwrap().remove(0);
+    assert!(before.acked_rev > 0 && before.mark.is_none() && !before.acked_system_fields.is_empty());
+    let cloud::entity_codec::Payload::Note(note) = &before.payload else { panic!("published note"); };
+    let collection = host.collection().unwrap();
+    edit_workflow_note(&collection, note, "pending across cold stopped resume");
+    runtime.reconcile_binding(&collection, &host.media().unwrap(), Duration::from_secs(30)).unwrap();
+    let pending = runtime.entity_facts(&before.name).unwrap().unwrap();
+    assert!(pending.mark.is_some() && pending.local_rev > pending.acked_rev);
+    assert_ne!(pending.payload, before.payload);
+    assert_eq!(pending.acked_payload, before.acked_payload);
+    assert_eq!(pending.acked_system_fields, before.acked_system_fields);
+    binding
+}
+
+fn cold_resume_rows(host: &CoreHost) -> Vec<Vec<meguri_storage::RowImage>> {
+    use meguri_storage::{ReadRows, ReaderRole, RowKey, Table};
+    // Open media before leasing a query reader; all leases end in this helper.
+    let _media = host.media().unwrap();
+    let collection = host.collection().unwrap();
+    let lease = collection.reader(ReaderRole::Query).unwrap();
+    let snapshot = lease.snapshot().unwrap();
+    Table::ALL.into_iter().map(|table| {
+        let mut rows = Vec::new();
+        let mut after = None;
+        loop {
+            let page = snapshot.row_page(table, after.as_ref()).unwrap();
+            let Some(last) = page.last() else { break; };
+            after = Some(RowKey::from_stored(table, last).unwrap());
+            rows.extend(page);
+        }
+        rows
+    }).collect()
+}
+
+fn cold_resume_entities(host: &CoreHost) -> Vec<cloud::workflow::EntityFacts> {
+    let runtime = host.cloud_runtime().unwrap();
+    entity_names(runtime).iter().map(|name| runtime.entity_facts(name).unwrap().unwrap()).collect()
+}
+
+fn assert_cold_resume_history(host: &CoreHost, before: &[cloud::workflow::EntityFacts]) {
+    let after = cold_resume_entities(host);
+    assert_eq!(after.len(), before.len());
+    for (actual, expected) in after.iter().zip(before) {
+        // A whole-binding rescan may refresh local revision/provenance, but
+        // cannot acknowledge pending work or replace the existing server base.
+        assert_eq!(actual.name, expected.name);
+        assert_eq!(actual.payload, expected.payload);
+        assert_eq!(actual.base_payload, expected.base_payload);
+        assert_eq!(actual.origin, expected.origin);
+        assert_eq!(actual.sent, expected.sent);
+        assert_eq!(actual.tombstone_at, expected.tombstone_at);
+        assert!(actual.local_rev >= expected.local_rev);
+        assert_eq!(actual.acked_rev, expected.acked_rev);
+        assert_eq!(actual.server_erev, expected.server_erev);
+        assert_eq!(actual.acked_payload, expected.acked_payload);
+        assert_eq!(actual.acked_row_digest, expected.acked_row_digest);
+        assert_eq!(actual.acked_payload_digest, expected.acked_payload_digest);
+        assert_eq!(actual.acked_system_fields, expected.acked_system_fields);
+        assert_eq!(actual.acked_envelope, expected.acked_envelope);
+        assert_eq!(actual.in_flight, expected.in_flight);
+        if expected.mark.is_some() {
+            assert!(actual.mark.is_some() && actual.local_rev > actual.acked_rev);
+        }
+    }
+}
+
+fn assert_cold_resume_closed(host: &CoreHost, active: &cloud::Binding) {
+    let runtime = host.cloud_runtime().unwrap();
+    let status = runtime.status().unwrap();
+    let mut stopped = active.clone();
+    stopped.facts.state = cloud::BindingState::Isolated(cloud::IsolationReason::Stopped);
+    assert_eq!(status.binding.as_ref(), Some(&stopped));
+    assert!(!status.stored_usable && !status.identity_verified);
+    assert!(!host.provider_authority().permits_icloud_binding(active));
+    assert!(runtime.require_provider_collection_admission().is_err());
+    assert!(runtime.require_collection_sending().is_err());
+    assert!(runtime.register_sdk(false).is_err());
+    assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+}
+
+#[test]
+fn cold_stopped_provider_admission_remains_closed_with_unfinished_handoff() {
+    cold_stopped_provider_admission_remains_closed(false);
+}
+
+#[test]
+fn cold_stopped_provider_admission_remains_closed_with_meguri_selected() {
+    cold_stopped_provider_admission_remains_closed(true);
+}
+
+fn cold_stopped_provider_admission_remains_closed(finish: bool) {
+    use meguri_engine::device_state::DeviceState;
+    use cloud::runtime::RuntimeError;
+    use meguri_sync::provider::Selection;
+    use std::sync::atomic::Ordering;
+
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("cold-stopped-provider-refusal");
+    generated(&dir);
+    let account = Arc::new(ColdResumeAccount(std::sync::atomic::AtomicUsize::new(0)));
+    let config = cold_resume_config(&dir, account.clone());
+    let host = CoreHost::open(config.clone()).unwrap();
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(714)).unwrap();
+    let binding = publish_cold_resume_pending(&host, &mut service);
+    host.stop_using_icloud().unwrap();
+    let runtime = host.cloud_runtime().unwrap();
+    let read = runtime.adapter_begin_identity_read(false, None).unwrap();
+    assert!(runtime.adapter_complete_identity_read(read, account.read_identity(&binding.scope)).unwrap());
+    let preview = actual_preview_after_begin(&host, &mut service, &scope(),
+        host.begin_cloud_connection_preview().unwrap());
+    assert_eq!(preview.decision, ConnectDecision::ConfirmResume);
+    assert_eq!(preview.resume_binding, Some(binding.id));
+    assert_eq!(runtime.resume_binding_offer(), Some(binding.id));
+    assert_cold_resume_closed(&host, &binding);
+    let handoff = host.begin_provider_handoff(Selection::Meguri).unwrap();
+    assert!(host.provider_authority().snapshot().unwrap().handoff.is_some());
+    assert!(host.provider_authority().network_blocked());
+    if finish {
+        // This fixture has never installed a native SDK or spawned a cloud
+        // job. There is no native owner to drain or fabricated join proof.
+        assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+        assert!(host.engine().jobs().running().is_empty());
+        assert!(runtime.apply_intents(binding.id).unwrap().is_empty());
+        host.finish_provider_handoff(&handoff).unwrap();
+    }
+    drop(handoff);
+    let document = host.provider_authority().snapshot().unwrap();
+    assert_eq!(document.selection, if finish { Selection::Meguri } else { Selection::ICloud });
+    assert_eq!(document.handoff.is_some(), !finish);
+    let metadata_path = config.manual_transfer_directory.join("provider.json");
+    let metadata = std::fs::read(&metadata_path).unwrap();
+    let publication = DeviceState::for_collection(&dir.join("collection.anki2"))
+        .settled_publication().unwrap();
+    let rows = cold_resume_rows(&host);
+    let history = cold_resume_entities(&host);
+    let requests = service.request_log().unwrap().len();
+    if !finish {
+        // Exercise the public invalidation used by Host handoff completion on
+        // this original live Runtime, while leaving the durable handoff open.
+        assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+        assert!(host.engine().jobs().running().is_empty());
+        assert!(runtime.apply_intents(binding.id).unwrap().is_empty());
+        let calls = account.0.load(Ordering::SeqCst);
+        runtime.provider_after_native_join().unwrap();
+        let generation = host.cloud_connection_generation().unwrap();
+        let guard = runtime.adapter_guard();
+        let trace = runtime.trace();
+        let inbox = runtime.inbox_entries(binding.id).unwrap();
+        let intents = runtime.apply_intents(binding.id).unwrap();
+        // The genuinely ready offer above has been invalidated. Confirmation
+        // stops at retained-preview admission, before provider validation.
+        assert!(matches!(host.resume_cloud_binding(&preview, generation),
+            Err(RuntimeError::Publication(PublicationError::NotOffered))));
+        assert_cold_resume_closed(&host, &binding);
+        assert_eq!(runtime.adapter_guard(), guard);
+        assert_eq!(runtime.trace(), trace);
+        assert_eq!(runtime.inbox_entries(binding.id).unwrap(), inbox);
+        assert_eq!(runtime.apply_intents(binding.id).unwrap(), intents);
+        assert_eq!(cold_resume_entities(&host), history);
+        assert_eq!(cold_resume_rows(&host), rows);
+        assert_eq!(host.cloud_connection_generation().unwrap(), generation);
+        assert_eq!(host.provider_authority().snapshot().unwrap(), document);
+        assert_eq!(std::fs::read(&metadata_path).unwrap(), metadata);
+        assert_eq!(DeviceState::for_collection(&dir.join("collection.anki2"))
+            .settled_publication().unwrap(), publication);
+        assert_eq!(account.0.load(Ordering::SeqCst), calls);
+        assert_eq!(service.request_log().unwrap().len(), requests);
+    }
+    host.close().unwrap();
+    drop(host);
+    let calls = account.0.load(Ordering::SeqCst);
+
+    let host = CoreHost::open(config.clone()).unwrap();
+    let runtime = host.cloud_runtime().unwrap();
+    let generation = host.cloud_connection_generation().unwrap();
+    assert_eq!(host.provider_authority().snapshot().unwrap(), document);
+    assert!(!host.provider_authority().permits_icloud_account_read());
+    // These account/discovery guards are the provider-admission evidence.
+    assert!(matches!(host.provider_authority().begin_discovery(),
+        Err(meguri_storage::StorageError::Io { detail })
+            if detail == "provider configuration requires recovery"));
+    assert_cold_resume_closed(&host, &binding);
+    let guard = runtime.adapter_guard();
+    let trace = runtime.trace();
+    let inbox = runtime.inbox_entries(binding.id).unwrap();
+    let intents = runtime.apply_intents(binding.id).unwrap();
+    assert!(matches!(runtime.adapter_begin_identity_read(false, None),
+        Err(RuntimeError::IdentityUnverified)));
+    assert!(matches!(host.begin_cloud_connection_preview(),
+        Err(RuntimeError::Publication(PublicationError::AccountUnavailable))));
+    // Independent lifetime coverage: this new Runtime never retained the old
+    // preview/resume context, so confirmation cannot reach provider validation.
+    assert!(matches!(host.resume_cloud_binding(&preview, generation),
+        Err(RuntimeError::Publication(PublicationError::NotOffered))));
+    // Independent stopped-state refusal: unusable/unverified binding, before
+    // provider acceptance. This does not isolate wrong-provider validation.
+    assert!(matches!(runtime.provider_accept_icloud_connection(),
+        Err(RuntimeError::IdentityUnverified)));
+    assert_cold_resume_closed(&host, &binding);
+    assert_eq!(runtime.adapter_guard(), guard);
+    assert_eq!(runtime.trace(), trace);
+    assert_eq!(runtime.inbox_entries(binding.id).unwrap(), inbox);
+    assert_eq!(runtime.apply_intents(binding.id).unwrap(), intents);
+    assert_eq!(cold_resume_entities(&host), history);
+    assert_eq!(cold_resume_rows(&host), rows);
+    assert_eq!(host.cloud_connection_generation().unwrap(), generation);
+    assert_eq!(host.provider_authority().snapshot().unwrap(), document);
+    assert_eq!(std::fs::read(&metadata_path).unwrap(), metadata);
+    assert_eq!(DeviceState::for_collection(&dir.join("collection.anki2"))
+        .settled_publication().unwrap(), publication);
+    assert_eq!(account.0.load(Ordering::SeqCst), calls);
+    assert_eq!(service.request_log().unwrap().len(), requests);
     host.close().unwrap();
 }
 
