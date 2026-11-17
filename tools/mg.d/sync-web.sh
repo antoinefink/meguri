@@ -49,13 +49,41 @@ mg_sync_web__run() {
   fi
   local execution_status=0 count_status=0
   # Node unit tests compile/invoke the actual std-only preparation consumer.
-  local consumer_mount=()
+  local consumer_mount=() audit_mount=() audit_image=""
   case "$mode" in
     unit|check) consumer_mount=(-v "$MG_ROOT/server/build.rs:/server/build.rs:ro") ;;
   esac
-  mg_sync_web__compose run --rm -T --no-deps --label "meguri.mg.run-id=$MG_RUN_ID" \
+  case "$mode" in
+    resolve|install|audit|browser-install)
+      # Copy only the fixed reviewed controls, never a checkout/Git/private mount.
+      if ! python3 "$MG_ROOT/server/web/scripts/audit-applicability.py" stage-controls \
+          "$MG_ROOT" "$MG_RUN_DIR/audit-controls" > "$MG_RUN_DIR/npm-audit-controls.json"; then
+        mg_sync_web__failure "Frontend build controls differ from the fixed assessment"; return
+      fi
+      audit_mount=(-v "$MG_RUN_DIR/audit-controls:/audit-controls:ro")
+      audit_image="$(docker image inspect --format '{{.Id}}' "$(mg_compose_project)-sync-web:local")" || {
+        mg_sync_web__failure "Cannot bind frontend audit tool image"; return
+      }
+      if ! [[ "$audit_image" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+        mg_sync_web__failure "Invalid frontend audit image identity"; return
+      fi
+      printf '%s\n' "$audit_image" > "$MG_RUN_DIR/npm-audit-image.txt"
+      mg_artifact json "$MG_RUN_DIR/npm-audit-controls.json" "Fixed frontend build control identity"
+      mg_artifact text "$MG_RUN_DIR/npm-audit-image.txt" "Frontend audit tool image identity"
+      ;;
+  esac
+  MEGURI_SYNC_WEB_IMAGE="${audit_image:-$(mg_compose_project)-sync-web:local}" \
+    mg_compose -f "$MG_ROOT/docker/sync-web-compose.yml" run --rm -T --no-deps --label "meguri.mg.run-id=$MG_RUN_ID" \
+      ${audit_mount[0]+"${audit_mount[@]}"} \
       ${consumer_mount[0]+"${consumer_mount[@]}"} \
       -v "$MG_ROOT/server/web:/source:ro" -v "$MG_RUN_DIR:/out" "$service" "$mode" || execution_status=$?
+  if [ -n "$audit_image" ] && [ ! -s "$MG_RUN_DIR/npm-audit-decision.json" ]; then
+    mg_failure sync-web-audit-decision "Missing frontend audit applicability evidence"
+    count_status=1
+  fi
+  if [ -f "$MG_RUN_DIR/npm-audit-decision.json" ]; then
+    mg_artifact json "$MG_RUN_DIR/npm-audit-decision.json" "Frontend audit applicability; raw npm result retained separately"
+  fi
   case "$mode" in
     unit|check) mg_sync_web__counts unit "$MG_RUN_DIR/unit-results.tap" || count_status=1 ;;
   esac

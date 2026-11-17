@@ -141,3 +141,62 @@ private device data.
 - Integrate the reviewed work onto `master` without a PR, preserving individual
   commits and failures. Current app acceptance, original app milestones and
   full-goal closure remain separate and incomplete.
+
+
+## Frontend build audit assessment, 2026-11-17
+
+The fixed assessment preserves the raw npm report and records applicability separately.
+The report still contains four HIGH findings from GHSA-fc5q-39xc-vjpf and exits 1.
+Only the exact reviewed report, graph, copied inputs and build controls can qualify.
+Unknown findings, changed inputs, malformed reports and tool errors block the operation.
+Dependency versions, Rust advisory rules, notices and zero-retry checks remain unchanged.
+
+The source starts at `8733b6eae233e68fc45feb5f11a1a84a43e4bdf5`.
+Validation then moved to `8a667cd2510cf8de9b0404c8b3e0a0660eae3966` with all eight candidate files byte-identical.
+The fixed inventory binds all 44 resulting web files and 14 controls.
+Reviewer `2b38` read all eight changed files completely; each exact snapshot is PUBLIC.
+The author is isolated Codex fixer `s-20261117T004348Z-2115dc91`.
+The parent and independent reviewer closed the Docker-context and real-wrapper test findings.
+
+| Exact changed source path | Reviewed SHA-256 |
+|---|---|
+| `docker/sync-web.Dockerfile.dockerignore` | `d0f1710720bc5b9d16c22f715f1094909a5978401fd22c65ecefcb07e66c60c6` |
+| `server/web/DEPENDENCIES.md` | `098b5299fe78468b47d91c44ef75fec8e7bf8a1c41b49a227993f8f652228e94` |
+| `server/web/scripts/run.sh` | `45ae2cae47f70726bae42af8aa3d26621353f4ade6dd457d39f19b7b36e64418` |
+| `server/web/scripts/audit-applicability.py` | `974bea89755ce61df03b7a8139ec7938cdbabd141339f30ae4904c64b1cfd5ad` |
+| `server/web/scripts/audit-assessment.json` | `69fc817296d3e614184f2c00d8a04a5103fcebeaed8aa7a40d225e375fb1014d` |
+| `tools/mg.d/sync-web.sh` | `e96c97800779b5d2deae7b36bb0912e43cedf4e8c3b6d40b6c3f81d0206747f1` |
+| `tools/tests/meguri_sync.bats` | `28f47c0344b00e5586431b8e2efca2e3f870b650d23ba5f6f268d191c4a9d4b5` |
+| `tools/tests/sync_web_applicability_test.py` | `cd3ebde8aee79cf4b16199847f60340dcfe5dd691eff5442a1bac86c2f31ff80` |
+
+Receipt paths in the following table are relative to `build/mg/`; execution rows identify that run's `result.json`.
+The complete source review is `build/mg/cleanroom/20261117T195008Z-96757/codex.out`.
+
+| Observed check | Receipt and result |
+|---|---|
+| Complete source review | `cleanroom/20261117T195008Z-96757`; CLEAR, no P0/P1/P2 findings; all eight files PUBLIC |
+| Original finding reconciliation | `/private/tmp/meguri-frontend-assessment-finding-closure-20261117.md`; both closed, SHA `4fef3828adb9871292ba59def00a17a453b9da26fc4dcf37906ff2e6efc617c7` |
+| Focused boundary and real-wrapper tests | `selftest/20261117T195110Z-2433`; PASS 3/0/0, including 21 sequential operation scenarios |
+| Rebuilt Docker tool image | `sync-web-image/20261117T195247Z-12615`; PASS |
+| Actual locked install | `sync-web-deps/20261117T195250Z-12962`; PASS |
+| Actual audit | `sync-web-deps/20261117T195314Z-14716`; PASS |
+| Actual explicit resolve | `sync-web-deps/20261117T195335Z-15694`; PASS, emitted lock unchanged |
+| Actual browser installation | `sync-web-browser-install/20261117T195355Z-21769`; PASS |
+| Affected tooling, Docker contexts and scanner tests | `selftest/20261117T200603Z-52773`; PASS 27/0/0 |
+| Static checks | `static-checks/20261117T200626Z-53851`; PASS 3 |
+| Similarity with the existing reference corpus | `similarity/20261117T201003Z-59809`; PASS 3 supported files, 6 excluded, no allowlist |
+| Public source privacy scan | `private/20261117T201432Z-66874`; PASS for the eight source files |
+
+All four actual audits bind image `sha256:c0243b40b0dd7381d6102c32df0b4051beaac5e8d5d39e5179464650306fd124`.
+Each retains raw exit 1, HIGH=4, total=4 and report SHA `bbf0761816a86512d0464277dfefbc00ea8ec0827ea61c4604b353aa0fec4f3d`.
+Each emits `assessed-inapplicable`; none becomes a clean raw audit or a dependency-remediation claim.
+The executed receipts describe an uncommitted candidate, not a committed acceptance gate.
+
+The original audit/package failures remain failed.
+The missing-corpus error `similarity/20261117T200606Z-53062` also remains recorded.
+The nine-file privacy check `private/20261117T200613Z-53496` flags only new scanner metadata; its resolution remains pending.
+A complete independent review classified that scanner PUBLIC and verified exactly five added and three refreshed path/hash entries.
+Its matcher, thresholds and bytes outside the map are unchanged.
+The clone's token file is shared through a symlink, so it must not run a local refresh.
+A coordinated supported shared-baseline operation and ordinary privacy checks remain required before the metadata commit.
+Final package/client checks, formal Mobile evidence and the original coherent batch gate remain pending.

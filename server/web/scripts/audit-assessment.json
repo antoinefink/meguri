@@ -1,0 +1,389 @@
+{
+  "schema_version": 1,
+  "assessment": "trusted-frontend-build-2026-11-17-v1",
+  "historical_review_source": "8733b6eae233e68fc45feb5f11a1a84a43e4bdf5",
+  "historical_review_web_input_tree_sha256": "a34826c1f4f3186d069a4f543239d53775f0e366b32eaceaf303759ead43f867",
+  "tools": {
+    "node": "v26.13.1",
+    "npm": "11.20.0"
+  },
+  "lock_bytes_sha256": "f2f38f36f9f092dec3723f3425047d2f10f4fb32b7c411242c2b1b32c6a1a2f4",
+  "locked_graph_sha256": "0b3d471eafff9eb54a250b1a57b80e53f3d3ba8d7ab38adc77047dea6e1f658f",
+  "web_inputs": {
+    "directories": [
+      "",
+      "notices",
+      "scripts",
+      "src",
+      "tests",
+      "tests/browser"
+    ],
+    "files": {
+      ".gitignore": {
+        "bytes": 66,
+        "sha256": "316b418dfc6173f5c5e6dd4f08b25c2ebe3f44ec99677f1655b1b60b11ed02bd"
+      },
+      "AGENTS.md": {
+        "bytes": 576,
+        "sha256": "26a7be161cd270092d667210d2d64b2e5089bca2d2f01eb2fe601de4eb657e41"
+      },
+      "DEPENDENCIES.md": {
+        "bytes": 12478,
+        "sha256": "098b5299fe78468b47d91c44ef75fec8e7bf8a1c41b49a227993f8f652228e94"
+      },
+      "LICENSE": {
+        "bytes": 1076,
+        "sha256": "69a460b3387fadfb592adc582b2e85a4171c2a49969b8cfcb5f0f888ba1796b2"
+      },
+      "THIRD_PARTY_NOTICES.txt": {
+        "bytes": 1170,
+        "sha256": "2b51afdda8f3ad8177e5ebc39f8c789e8711836ea31fade22dcd81458104fb33"
+      },
+      "index.html": {
+        "bytes": 377,
+        "sha256": "3e49e61ef5d19d79a98698db546a6979b07b4f1a4c50ed3fcf2f8de0b431d3d4"
+      },
+      "notices/acquisition-records.json": {
+        "bytes": 12409,
+        "sha256": "893c4fe1741391104dc11b9f12960675125849cf8f2bf4108ca23343ca911663"
+      },
+      "notices/napi-rs-LICENSE.txt": {
+        "bytes": 2138,
+        "sha256": "3f1ce66533302df3a32edbfdfc0b78f0dd34659e4c1f5817162e5ea3c2297215"
+      },
+      "notices/node-MIT-NOTICES.txt": {
+        "bytes": 2437,
+        "sha256": "86d2d599e5aca4ce609f66171863a5eb405c3a520b27ef869c5740ea12cc9887"
+      },
+      "notices/rolldown-LICENSE.txt": {
+        "bytes": 1302,
+        "sha256": "23ecfff35a5a2e80d92142f75228912c3b1abc4b5a8337a821ff4397e2f9f734"
+      },
+      "notices/rolldown-THIRD-PARTY-LICENSE.txt": {
+        "bytes": 2209,
+        "sha256": "a877291d800ed43692f3f9ae09d8e01cc6f7293ad39d43896059c188ffbb8b7c"
+      },
+      "notices/tailwindcss-LICENSE.txt": {
+        "bytes": 1071,
+        "sha256": "60e0b68c0f35c078eef3a5d29419d0b03ff84ec1df9c3f9d6e39a519a5ae7985"
+      },
+      "notices/wasm-util-LICENSE.txt": {
+        "bytes": 1076,
+        "sha256": "09e436100bf926e78df875ec80cf3d0c643dfec779b52cfe2aa96afa0de714cb"
+      },
+      "package-lock.json": {
+        "bytes": 61962,
+        "sha256": "f2f38f36f9f092dec3723f3425047d2f10f4fb32b7c411242c2b1b32c6a1a2f4"
+      },
+      "package.json": {
+        "bytes": 760,
+        "sha256": "758df53a3b85a34b25ac6cf1c9a3eef8940d23cc7e91e4ef38d8a0bba4f5ebc5"
+      },
+      "playwright.config.ts": {
+        "bytes": 744,
+        "sha256": "cdb6cac85279251f57a9e5c8eb007083df22cf0ac6383c17567a2acd7f73fa23"
+      },
+      "scripts/audit-applicability.py": {
+        "trust_root": true
+      },
+      "scripts/copy-source.mjs": {
+        "bytes": 1332,
+        "sha256": "d5782bedad3aa48984bb8cd8df6c93b41306f6235330bff14a3be5e4d8ca9649"
+      },
+      "scripts/embed.mjs": {
+        "bytes": 3218,
+        "sha256": "f5c2736c1ebb4da6c09ba2520400d8ae2dd586a1d0e298e4516f7b4dd5ad785b"
+      },
+      "scripts/fixture.mjs": {
+        "bytes": 7400,
+        "sha256": "d8055a16e61ad6afd14a42690d46c27f3ebfadf4569948204099e699cc680d63"
+      },
+      "scripts/metadata.mjs": {
+        "bytes": 733,
+        "sha256": "1e56ce695dd420abc3d79395a7472ddd89a415e06819ddf4fe0a8cbbbfece660"
+      },
+      "scripts/notices.mjs": {
+        "bytes": 8947,
+        "sha256": "f454fdbe474abc50ef11ac9cef7aa7e442d9d5072615ec5a22d3176195505362"
+      },
+      "scripts/ready.mjs": {
+        "bytes": 581,
+        "sha256": "9bc665528a2237fb8a43fd875454f2373a2edfef55abd7918e2b3fc656d016d4"
+      },
+      "scripts/report-counts.py": {
+        "bytes": 4745,
+        "sha256": "f8475b3d133b95e4ff6e3003abc426fa2dff16510e923189711f2d44d785de60"
+      },
+      "scripts/run.sh": {
+        "bytes": 6463,
+        "sha256": "45ae2cae47f70726bae42af8aa3d26621353f4ade6dd457d39f19b7b36e64418"
+      },
+      "src/accounts.tsx": {
+        "bytes": 8551,
+        "sha256": "eb1c083f135400d14e1d44433b49527830be53f57474a962583bde23399365ac"
+      },
+      "src/api.ts": {
+        "bytes": 4625,
+        "sha256": "b8888cfdc117dea1386cb73a2078028271e59489ce3c4b5c6ef8ff33982fb0ad"
+      },
+      "src/app.tsx": {
+        "bytes": 11651,
+        "sha256": "4e3224e691b9887c4e5aa8dee485118fb5308e20b15d15ccb0d885cb0915e8fd"
+      },
+      "src/bootstrap.ts": {
+        "bytes": 1000,
+        "sha256": "02a07496e3d185a909ff575ec4ad82a2fb20bed8cfc80cd5d974210eb9568e92"
+      },
+      "src/forms.tsx": {
+        "bytes": 8583,
+        "sha256": "b5b7f29af3d0d92e4778de9342cad20686bfdd1e9ee0a5d0b8965a7938557af0"
+      },
+      "src/mount.tsx": {
+        "bytes": 222,
+        "sha256": "f1c21dbde4da1fc705470cb7853d88b378d9ea047213ee7950023a2b39dd407c"
+      },
+      "src/policy.ts": {
+        "bytes": 1060,
+        "sha256": "e4601ed02978054d2b34a10ebabe3a32184f7ec75c31da9b51f248e139536ea1"
+      },
+      "src/style.css": {
+        "bytes": 7246,
+        "sha256": "73f23c7c83c63be975c6a5156e8adb5020a89cfcc4b9f8aaaaa0c40bfe0ec5e5"
+      },
+      "src/ui.tsx": {
+        "bytes": 4952,
+        "sha256": "c10c24f7dd3bf08a13e1bbd55bf6f912c453f29e8f68c134e70c774c5e4e117a"
+      },
+      "tests/api.test.ts": {
+        "bytes": 3926,
+        "sha256": "036fe75a617cc7a806cb828d9908a5470a20bb7c731ea70cbbe730499a4a169f"
+      },
+      "tests/browser/accounts.spec.ts": {
+        "bytes": 17653,
+        "sha256": "be42910c8967a1916982559640f5ea76db8d2fb22bececcaddca1744c51bd944"
+      },
+      "tests/policy.test.ts": {
+        "bytes": 1397,
+        "sha256": "e0167e6a57d1104c175553167c493e8d1fbb80c29a00f8b8d8753f41d8735016"
+      },
+      "tests/prepared-consumer.test.ts": {
+        "bytes": 6130,
+        "sha256": "a581b90a6fae9ba36920ecdb873844695965207bd2f3c71f44ed4cf0c3fe839f"
+      },
+      "tests/prepared-inputs.test.ts": {
+        "bytes": 3639,
+        "sha256": "6990c6cf0affc75c78ce6607355bb908260b1d2ff5c66eb6a287b72374251450"
+      },
+      "tsconfig.json": {
+        "bytes": 499,
+        "sha256": "095a6057f1e2997fb4c24663ac5f07a0493c7f502804f3c93a0ed93c8256ec97"
+      },
+      "tsconfig.tests.json": {
+        "bytes": 254,
+        "sha256": "0f6fbb47172ca2349b43fecc3ebffff18b1345bddbd54b27d629978306382ba0"
+      },
+      "upstream-records.json": {
+        "bytes": 6238,
+        "sha256": "e04eceba6bc281397bf6379e28e6232ac93143f1de536de20fe1c46c500e3037"
+      },
+      "vite.config.ts": {
+        "bytes": 1520,
+        "sha256": "690830004fd6e144cdb40376d199d785a0221a6dc2ae228be85f07df519bc047"
+      },
+      "scripts/audit-assessment.json": {
+        "trust_root": true
+      }
+    }
+  },
+  "build_controls": {
+    "directories": [
+      "",
+      "docker",
+      "server",
+      "server/src",
+      "server/src/httpapi",
+      "server/src/webassets",
+      "server/tools",
+      "tools",
+      "tools/mg.d"
+    ],
+    "files": {
+      "docker/sync-web-compose.yml": {
+        "bytes": 1297,
+        "sha256": "7fb72974e1800dba488aba12da09e59719ed2a153edba220c2ac2b1ee915d3a8"
+      },
+      "docker/sync-web.Dockerfile": {
+        "bytes": 1042,
+        "sha256": "b77e146b870049a542f1abb6bef8aaf0ea2cb7a6dc3590f370d2171fb31b5b5f"
+      },
+      "docker/sync-web.Dockerfile.dockerignore": {
+        "bytes": 297,
+        "sha256": "d0f1710720bc5b9d16c22f715f1094909a5978401fd22c65ecefcb07e66c60c6"
+      },
+      "server/Dockerfile": {
+        "bytes": 6262,
+        "sha256": "324a94c05aafbbf38065174f70578eb044337ea6d0ded209977196b685a1ccd8"
+      },
+      "server/Dockerfile.dockerignore": {
+        "bytes": 590,
+        "sha256": "0c76b1726f2886f1580c302ddefb3aa989864e0b9f8b7b4e0e7e8887982faee1"
+      },
+      "server/build.rs": {
+        "bytes": 3126,
+        "sha256": "a4dba10f1d809a0c05836778c7c075b2e2243d7c4aeeff12ddc6f9eec3cfc6e4"
+      },
+      "server/compose.yaml": {
+        "bytes": 931,
+        "sha256": "03737d36cd35810513c04e39a193b707e14228ca997e116ca93557c09e7a0d9b"
+      },
+      "server/src/httpapi/mod.rs": {
+        "bytes": 17356,
+        "sha256": "9bf76b2caf14890359cd8e0278ba632bb7528afd76905e6ed2043c27adc5f024"
+      },
+      "server/src/webassets/mod.rs": {
+        "bytes": 3948,
+        "sha256": "6f3313413d68fea7a764d441c595d3747192e5ae8582c744cf581393879c7938"
+      },
+      "server/tools/package-context.py": {
+        "bytes": 4232,
+        "sha256": "c9c5e140f77ac5b8fdfc18921c9bbda066848df146b3665149b3d7a228c7fa78"
+      },
+      "server/tools/package-inventory.py": {
+        "bytes": 8382,
+        "sha256": "269909162afaf7b24d5a09db7d2499e07787120e00977e799817b5b5a59ce1d2"
+      },
+      "tools/mg.d/meguri-sync.sh": {
+        "bytes": 51785,
+        "sha256": "bde5cecf8b56ddf89a0a38fbdb20ab69486c82499d3c972b85dde46adf50eba7"
+      },
+      "tools/mg.d/sync-package.sh": {
+        "bytes": 43420,
+        "sha256": "8ae4752a6c3951f74a376ab363517fbd18a788c6fd2d098423d19fca6a177a22"
+      },
+      "tools/mg.d/sync-web.sh": {
+        "bytes": 34784,
+        "sha256": "e96c97800779b5d2deae7b36bb0912e43cedf4e8c3b6d40b6c3f81d0206747f1"
+      }
+    }
+  },
+  "recorded_report": {
+    "auditReportVersion": 2,
+    "vulnerabilities": {
+      "fdir": {
+        "name": "fdir",
+        "severity": "high",
+        "isDirect": false,
+        "via": [
+          "picomatch"
+        ],
+        "effects": [
+          "tinyglobby"
+        ],
+        "range": ">=5.2.1",
+        "nodes": [
+          "node_modules/fdir"
+        ],
+        "fixAvailable": {
+          "name": "vite",
+          "version": "6.2.7",
+          "isSemVerMajor": true
+        }
+      },
+      "picomatch": {
+        "name": "picomatch",
+        "severity": "high",
+        "isDirect": false,
+        "via": [
+          {
+            "source": 1247710,
+            "name": "picomatch",
+            "dependency": "picomatch",
+            "title": "picomatch vulnerable to ReDoS through single-branch repeated extglobs",
+            "url": "https://github.com/advisories/GHSA-fc5q-39xc-vjpf",
+            "severity": "high",
+            "cwe": [
+              "CWE-1333"
+            ],
+            "cvss": {
+              "score": 7.5,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+            },
+            "range": "<=4.0.7"
+          }
+        ],
+        "effects": [
+          "fdir",
+          "tinyglobby",
+          "vite"
+        ],
+        "range": "*",
+        "nodes": [
+          "node_modules/picomatch"
+        ],
+        "fixAvailable": {
+          "name": "vite",
+          "version": "6.2.7",
+          "isSemVerMajor": true
+        }
+      },
+      "tinyglobby": {
+        "name": "tinyglobby",
+        "severity": "high",
+        "isDirect": false,
+        "via": [
+          "fdir",
+          "picomatch"
+        ],
+        "effects": [
+          "vite"
+        ],
+        "range": "*",
+        "nodes": [
+          "node_modules/tinyglobby"
+        ],
+        "fixAvailable": {
+          "name": "vite",
+          "version": "6.2.7",
+          "isSemVerMajor": true
+        }
+      },
+      "vite": {
+        "name": "vite",
+        "severity": "high",
+        "isDirect": true,
+        "via": [
+          "picomatch",
+          "tinyglobby"
+        ],
+        "effects": [],
+        "range": ">=6.3.0-beta.0",
+        "nodes": [
+          "node_modules/vite"
+        ],
+        "fixAvailable": {
+          "name": "vite",
+          "version": "6.2.7",
+          "isSemVerMajor": true
+        }
+      }
+    },
+    "metadata": {
+      "vulnerabilities": {
+        "info": 0,
+        "low": 0,
+        "moderate": 0,
+        "high": 4,
+        "critical": 0,
+        "total": 4
+      },
+      "dependencies": {
+        "prod": 4,
+        "dev": 110,
+        "optional": 72,
+        "peer": 0,
+        "peerOptional": 0,
+        "total": 113
+      }
+    }
+  }
+}
