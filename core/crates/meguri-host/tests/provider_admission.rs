@@ -109,8 +109,59 @@ fn aliased_ordinary_host_metadata_configure_save_and_retry_preserve_original_col
 #[cfg(unix)]
 #[test]
 fn retargeted_alias_cannot_rebind_original_host_metadata_to_a_foreign_open_collection() {
+    use meguri_engine::{ChangeObserver, GenerationListener, OpenStep, SuspendParticipant};
     use meguri_model::faultpoint::{self, Fault};
     use std::os::unix::fs::symlink;
+
+    // CoreHost exposes its real review service by reference. Forward its ports
+    // without retaining a Host -> Engine -> ports -> Host ownership cycle.
+    struct OriginalReview(std::sync::Weak<CoreHost>);
+    impl OpenStep for OriginalReview {
+        fn name(&self) -> &str { "review-session" }
+        fn run(&self, collection: &meguri_engine::Collection) -> Result<(), meguri_engine::EngineError> {
+            self.0.upgrade().unwrap().review().run(collection)
+        }
+    }
+    impl ChangeObserver for OriginalReview {
+        fn name(&self) -> &str { "review-session" }
+        fn observe(&self, commit: &meguri_engine::changes::observers::ObservedCommit<'_>) -> Result<(), meguri_engine::EngineError> {
+            self.0.upgrade().unwrap().review().observe(commit)
+        }
+    }
+    impl GenerationListener for OriginalReview {
+        fn name(&self) -> &str { "review-session" }
+        fn collection_reopened(&self, collection: &meguri_engine::Collection) -> Result<(), meguri_engine::EngineError> {
+            self.0.upgrade().unwrap().review().collection_reopened(collection)
+        }
+        fn collection_replaced(&self, old: meguri_engine::Generation, new: meguri_engine::Generation) {
+            self.0.upgrade().unwrap().review().collection_replaced(old, new);
+        }
+    }
+    impl SuspendParticipant for OriginalReview {
+        fn name(&self) -> &str { "review-session" }
+        fn flush(&self) -> Result<(), meguri_engine::EngineError> {
+            self.0.upgrade().unwrap().review().flush()
+        }
+        fn flush_until(&self, deadline: std::time::Duration) -> Result<(), meguri_engine::EngineError> {
+            self.0.upgrade().unwrap().review().flush_until(deadline)
+        }
+        fn suspend(&self) -> Result<(), meguri_engine::EngineError> {
+            self.0.upgrade().unwrap().review().suspend()
+        }
+        fn suspend_until(&self, deadline: std::time::Duration) -> Result<(), meguri_engine::EngineError> {
+            self.0.upgrade().unwrap().review().suspend_until(deadline)
+        }
+        fn release_connections_until(&self, deadline: std::time::Duration) -> Result<(), meguri_engine::EngineError> {
+            self.0.upgrade().unwrap().review().release_connections_until(deadline)
+        }
+        fn resume(&self) -> Result<(), meguri_engine::EngineError> {
+            self.0.upgrade().unwrap().review().resume()
+        }
+        fn resume_with_collection(&self, collection: &meguri_engine::Collection) -> Result<(), meguri_engine::EngineError> {
+            self.0.upgrade().unwrap().review().resume_with_collection(collection)
+        }
+    }
+
     let root = tempfile::tempdir().unwrap();
     let account = Arc::new(Account(AtomicUsize::new(0)));
     let mut config = fixture(&root.path().join("original"), account.clone());
@@ -118,7 +169,7 @@ fn retargeted_alias_cannot_rebind_original_host_metadata_to_a_foreign_open_colle
     let alias = root.path().join("collection-alias");
     symlink(&config.collection_directory, &alias).unwrap();
     config.collection_directory = alias.clone();
-    let host = CoreHost::open(config.clone()).unwrap();
+    let host = Arc::new(CoreHost::open(config.clone()).unwrap());
     let original_path = host.collection().unwrap().path().to_owned();
     let original_state = meguri_engine::device_state::DeviceState::for_collection(&original_path);
     let publication = original_state.settled_publication().unwrap();
@@ -136,8 +187,14 @@ fn retargeted_alias_cannot_rebind_original_host_metadata_to_a_foreign_open_colle
     std::fs::remove_file(&alias).unwrap();
     symlink(&foreign.collection_directory, &alias).unwrap();
     let foreign_path = foreign.collection_directory.canonicalize().unwrap().join("collection.anki2");
+    let review = Arc::new(OriginalReview(Arc::downgrade(&host)));
+    let ports = host.derived().ports(meguri_engine::Ports::new())
+        .open_step(review.clone())
+        .observer(review.clone())
+        .generation_listener(review.clone())
+        .suspend_participant(review);
     let replacement = host.engine().open_raw(&foreign_path,
-        meguri_engine::OpenConfig::new(foreign.clock.clone(), foreign.random.clone())).unwrap();
+        meguri_engine::OpenConfig::new(foreign.clock.clone(), foreign.random.clone()).ports(ports)).unwrap();
     let current_generation = replacement.generation();
     assert_ne!(current_generation, generation);
     assert_eq!(config.collection_directory.canonicalize().unwrap().join("collection.anki2"), replacement.path());

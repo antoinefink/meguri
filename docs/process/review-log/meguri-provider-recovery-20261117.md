@@ -171,3 +171,33 @@ then fails at final Host close: its raw-engine fixture omitted a real thread
 participant. Keep successful cleanup required; repair that fixture next.
 The failed receipt remains, and the CPU window was released immediately.
 Mac bridge verification of this production fix is pending.
+
+## Selected Mac bridge pass and participant fixture
+
+`swift-test/20261117T024916Z-2296` passes all 19 selected methods on
+clean `b4fe2e66`, with zero failures or skips. Ordinary core and Swift
+compilation succeeds. All seven previously failed methods now pass, including
+credential races and both corrupt-metadata parameters. The CPU window was
+released at the terminal result; a coordination note's mistyped identifier
+was corrected from the saved JSON. This is no AppModel, signed-device or full-gate pass.
+
+Author `024813-1564` changes only the foreign-alias regression fixture.
+It supplies actual DerivedHost ports and a weak Host adapter that forwards
+review lifecycle work to the original ReviewService. Non-author
+`provider_test_delta_review` clears P0–P2 and checks trait signatures,
+real participant ownership, lifetime, exact scope and all preserved assertions.
+The adapter introduces no strong ownership cycle or dummy completion.
+Final Host close remains required. Actual verification is pending.
+
+## Focused recovery cohort green
+
+`core-test/20261117T030738Z-13356` passes all 32 provider and FFI methods
+with zero failures or skips. It ran at dirty `b4fe2e66` with the reviewed
+one-file participant repair. The previously failed foreign-alias case now
+passes its ownership assertions and required Host cleanup. Earlier failures
+remain retained. The CPU release used the authoritative JSON result directly.
+
+The participant patch passes normal privacy `030357-10827`, static policy
+`030357-10662` and similarity `030358-11267`. All filtered reports were read.
+Selected Mac bridge verification stays green at 19 methods. AppModel flows,
+broader fixture suites, signed storage and the required full gate remain pending.
