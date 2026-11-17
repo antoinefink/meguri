@@ -828,6 +828,15 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    # Complete final-content PUBLIC review: Codex incoming_contract_review, 2026-11-17.
+    'specs/sync/status-strings.md':
+        '17c562307d81225ae1c55b0acc9c817d51258d2f25bb93839f61e0e645c72034',
+    # Complete final-content PUBLIC review: Codex incoming_contract_review, 2026-11-17.
+    'docs/design/screens.md':
+        '583578bab6818dd2b4784bc35d151107f3e6ef6b23b2e4c2f7b02dc6881f73c4',
+    # Complete final-content PUBLIC review: Codex incoming_contract_review, 2026-11-17.
+    'docs/design/screen-inventory.yaml':
+        '0be4dba8cea3d0613449b1297a88e93d2e03163f0aa2e4c2a42b87538afcd93b',
     # Complete final-content PUBLIC review: Codex adoption_empty_decks, 2026-11-17.
     'core/crates/meguri-storage/src/media/inventory.rs':
         'a15fbd849371207df8a52ba993b64e26d339fcb9af56bbe3cb01652f38b7cae9',

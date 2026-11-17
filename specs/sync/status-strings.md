@@ -9,6 +9,8 @@ The user-visible text of routine iCloud sync: the sync button, the status popove
 
 The states, items, results and choices are those of `sync/policy` (P12, P14, P15) and `sync/cloudkit-recovery` (V9 to V21); this file adds no state and changes no condition. Manual Anki transfers (Settings Anki Transfers, `sync/anki-transfers`) are frozen and have their own text; none of it is here (R1560).
 
+T18 gives the text of the second service, Meguri Sync (`sync/meguri-provider` MP2–MP5; `docs/design/native-interface-contract.md` N12.4), and of the Sync Service choice in Account & Sync. T2 to T15 stay the text of iCloud Sync, unchanged.
+
 ## T1. Keys, arguments and plurals
 
 - Every string is an entry of the Sync String Catalog with the stable key given here. The English value is the one given; other languages are Meguri's own translations of the English. Keys never change once shipped; a changed meaning gets a new key.
@@ -595,7 +597,231 @@ The oracle has no CloudKit, so the text is checked by Meguri's Swift tests: `Syn
 
 Decided 2026-10-27: `SyncStringCatalogTests` (in `app/Packages/MeguriKit/Tests/AppModelTests/`; U151 adds it with its keys, and U161 adds the rows of the keys it adds) loads `Sync.xcstrings` (T1) and checks every key of this file against an expected table taken from this file: the key exists, its English value is exactly this one, and its plural and Mac variations are those given. The same test fails when any entry of the catalog contains "AnkiWeb", "record", "zone" or "CloudKit". U167's `lint-strings` checks this catalog as every other: developer comments, plural variants and no concatenation.
 
+T18's keys are rows of `SyncStringCatalogTests` like every other key here. `MeguriSyncPresentationTests` (in `app/Packages/MeguriKit/Tests/AppModelTests/`) checks that each T18.4 row, each T18.5 stage and failure and each row of T18.7's Sync Now table gives exactly its keys and action; that an exactly accepted upload with unfinished local activation, and `activationInterrupted`, offer only `sync.meguri.setup.finish` and no new choice; that the T18.2 lines come from the old service's local status, an unknown value giving the `.unknown` line and never `.none`, and held answers never giving `.none`; and that no T18 value contains a T18.1 word.
+
 ## T17. Changes from the draft wording
 
 - `sync/policy#P12.1`'s explanation column was draft text (P22, P24). Its keys stay; T6 replaces the English: "Sync is unavailable until the collection is open." becomes "Sync Now is available once the collection is ready."; the review text is truthful only while automatic sync runs, so a `.manual` key is added; "in Settings" becomes "in Account & Sync" for Meguri's own section; "Sign in to iCloud to sync." gets the system place and per-reason variants; "Choose whether this collection replaces the one in iCloud before syncing." becomes "Choose where to keep this collection before you sync." to match the decision sheet (T10); "Open iCloud status to continue." becomes "Open iCloud Sync to see what to do.", naming the button.
 - `sync/cloudkit-recovery#V11` quotes meaning, not copy; T9, T10, T12 and T13 give the copy for its quoted texts, in title case where they are labels ("Use the iCloud Collection on This Device…", "Restore Previous iCloud Collection from %@…"). V15.3's quota reason and V15.2 step 5's conflict text are kept word for word, with "The" added to the latter.
+
+## T18. Meguri Sync (`sync/meguri-provider` MP2–MP5; `docs/design/native-interface-contract.md` N12.4)
+
+The text of Meguri Sync, which syncs with the user's own Meguri Sync server, and of the Sync Service choice (screen contracts `settings.accountSync`, `sync.serviceSwitch`, `sync.meguriSetup`, `sync.status`). The states are the provider phase, the Meguri connection phase and the setup and round stages that the core reports (MP1–MP5); this section adds no state and starts no request.
+
+### T18.1 Rules
+
+- T1 applies. These words are also never used in T18 text: Anki, AnkiWeb, hostkey, bootstrap, baseline, generation, provider, handoff.
+- From `sync/meguri-provider`, with their words unchanged: Sync Service, iCloud Sync, Meguri Sync, Server Address, Username, Password, Sign In, Last exchange completed, Use This Device’s Collection…, Use Server Collection…, Cancel, Collection transferred; media incomplete, Show Affected Files, Retry. MP4's “Server acceptance unknown” is a status title here, so T1 puts it in title case.
+- No T18 text says that devices match or that another device has the changes (MP2). Collection and media results are separate lines; a finished collection never reads as a finished setup (MP5).
+- A count or fact the old service does not report locally is shown as unknown, never as zero (MP3.1). Opening a sheet or Account & Sync reads only local state.
+- Decided 2026-11-17 (root, delegated): the Sync Service picker has only iCloud Sync and Meguri Sync; local-only use is each service's separate Stop Using action (MP2). Every change of service opens `sync.serviceSwitch` and needs its explicit confirmation, except a choice made while no service is selected, which has no old service to stop. The handoff recovery offers only Keep on This Device Only…. The collection choice confirms in a preview sheet (N11.8), never a dialog. Files that can’t transfer get no other remedy text: Show Affected Files lists each actual name and its reason, Retry recomputes the list, and local study stays available; Meguri never deletes or converts a file automatically and never points to a media folder the platform does not expose.
+
+### T18.2 Sync Service and changing it (MP2, MP3)
+
+| Key | English | Use |
+|---|---|---|
+| `sync.service.label` | Sync Service | the Picker, first row of Account & Sync |
+| `sync.service.iCloud` | iCloud Sync | picker option |
+| `sync.service.meguri` | Meguri Sync | picker option; label of the Meguri status row |
+| `sync.service.none.footer` | Choose a service to sync this collection. | section footer while no service is selected |
+| `sync.service.changing` | Changing Sync Service… | under the picker while a change runs |
+| `sync.service.changeFailed` | Changing the sync service didn’t finish. | under the picker after a change reports failure; the picker and the section then show the selection and phases the core reports, which the failure may have changed |
+| `sync.service.cancel` | Cancel | the cancel action of the `sync.serviceSwitch` sheet, the `sync.service.recovery.title` alert and the `sync.meguri.signOut.title` alert; it changes nothing |
+| `sync.service.recovery` | Changing the sync service didn’t finish. No service syncs until you choose what to do. | under the picker while the change waits for recovery (MP3.5) |
+| `sync.service.recovery.action` | Keep on This Device Only… | button under that line |
+| `sync.service.recovery.title` | Keep This Collection on This Device Only? | alert |
+| `sync.service.recovery.message` | Neither service syncs this collection. The collection, its media and its backups stay on this device. Nothing in iCloud or on your Meguri Sync server is deleted, and changes that are only there are not copied. To sync again, choose a service and set it up again. | |
+| `sync.service.recovery.confirm` | Keep on This Device Only | destructive |
+| `sync.service.blocked` | Meguri can’t read this device’s sync settings, so no service syncs. | under the picker while the provider phase is blocked (MP1); no action |
+
+The `sync.serviceSwitch` sheet. `%@` is the old service's name, `sync.service.iCloud` or `sync.service.meguri`. The lines show in this order, each under its condition.
+
+| Key | English | Shown |
+|---|---|---|
+| `sync.switch.title.iCloud` | Switch to iCloud Sync | sheet title, destination iCloud Sync |
+| `sync.switch.title.meguri` | Switch to Meguri Sync | destination Meguri Sync |
+| `sync.switch.title.localOnly` | Stop Using Meguri Sync on This Device | destination local-only, from `sync.meguri.stop` |
+| `sync.switch.pending` | `%1$lld change on this device hasn’t been sent to %2$@.` / `%1$lld changes on this device haven’t been sent to %2$@.` | the old service reports a count above 0 |
+| `sync.switch.pending.some` | Some changes on this device haven’t been sent to %@. | it reports pending changes without a count |
+| `sync.switch.heldBack` | `%1$lld review answer on this device hasn’t been sent to %2$@ yet.` / `%1$lld review answers on this device haven’t been sent to %2$@ yet.` | it reports held answers above 0 (iCloud: P14.4 `heldBack`, which `pending` does not count) |
+| `sync.switch.pending.none` | No changes on this device are waiting to be sent to %@. | it reports both pending changes and held answers, and both are 0 |
+| `sync.switch.pending.unknown` | Meguri can’t tell whether changes or review answers on this device are waiting to be sent to %@. | otherwise, including any count it does not report |
+| `sync.switch.media` | `%1$lld media file hasn’t synced with %2$@.` / `%1$lld media files haven’t synced with %2$@.` | it reports media waiting, or files not transferred (T18.6), above 0 |
+| `sync.switch.media.unknown` | Meguri can’t tell whether media files are waiting to sync with %@. | its media count is not known |
+| `sync.switch.acceptanceUnknown` | Meguri doesn’t know whether your Meguri Sync server received this device’s last collection upload. No service can send changes until that’s settled. | a Meguri upload's acceptance is unknown (MP3), whatever the old service |
+| `sync.switch.kept` | Changes that haven’t reached this device stay with %@. Nothing in iCloud or on your Meguri Sync server is deleted. | always |
+| `sync.switch.otherDevices` | Your other devices keep their current service until you change it on each one. | destination iCloud Sync or Meguri Sync |
+| `sync.switch.signOut` | Your Meguri Sync sign-in is removed from this device. | old service Meguri Sync |
+| `sync.switch.next.iCloud` | Next, connect to iCloud and choose which collection to keep. | destination iCloud Sync |
+| `sync.switch.next.meguri` | Next, sign in to your Meguri Sync server and choose which collection to keep. | destination Meguri Sync |
+| `sync.switch.next.localOnly` | This collection stays on this device and stops syncing. | destination local-only |
+| `sync.switch.busy` | You can change the sync service after the current review or collection change finishes. | MP3.1 refuses now; the confirm button is disabled |
+| `sync.switch.confirm.iCloud` | Switch to iCloud Sync | destructive button |
+| `sync.switch.confirm.meguri` | Switch to Meguri Sync | destructive button |
+| `sync.switch.confirm.localOnly` | Stop Using Meguri Sync | destructive button |
+
+- The old service's local status gives the lines: for iCloud Sync, P14.4's `pending`, `heldBack` and media waiting; for Meguri Sync, the round's pending work and the T18.6 counts. Pending and held work are both disclosed: `sync.switch.pending.none` never shows while held answers exist or are not reported. Meguri Sync's round reports no count of either, so it shows `sync.switch.pending.some` while the round has pending work and `sync.switch.pending.unknown` otherwise, also without a round or setup stage; it never shows `.none`. Nothing is read from a server.
+- Leaving Meguri Sync, by a switch or by Stop Using, removes this device's Meguri Sync sign-in (MP2's Remove Connection), so no hidden sign-in stays behind.
+
+### T18.3 Server and sign-in (MP2)
+
+| Key | English | Use |
+|---|---|---|
+| `sync.meguri.address` | Server Address | text field; while signed in, a read-only row with the address |
+| `sync.meguri.username` | Username | text field |
+| `sync.meguri.password` | Password | secure field |
+| `sync.meguri.signIn` | Sign In | button |
+| `sync.meguri.signIn.footer` | Signing in doesn’t send or change your collection. | footer under the sign-in fields (MP5) |
+| `sync.meguri.error.address` | Enter a valid server address. Meguri Sync needs an https address. | endpoint normalization refuses the address; no request is sent |
+| `sync.meguri.error.credentials` | The username or password isn’t correct. | sign-in error: credentials refused |
+| `sync.meguri.error.redirect` | The server sent Meguri to a different address. Check the server address, then sign in again. | sign-in error: redirect refused (MP2) |
+| `sync.meguri.error.network` | Meguri couldn’t reach the server. Check the address and your connection, then try again. | sign-in error: no connection |
+| `sync.meguri.error.server` | The server couldn’t complete sign-in. Try again later. | sign-in error: server failure |
+| `sync.meguri.error.other` | Sign-in didn’t finish. Try again. | any other sign-in error |
+| `sync.meguri.connection.retry` | Try Again | connection blocked: reads the stored sign-in again; no request |
+| `sync.meguri.signOut` | Sign Out… | button, while signed in |
+| `sync.meguri.signOut.title` | Sign Out of Meguri Sync? | alert |
+| `sync.meguri.signOut.message` | Meguri Sync stops, your sign-in is removed from this device, and this collection then stays on this device only. Your collection, media and backups stay. Nothing on the server is deleted. | |
+| `sync.meguri.signOut.confirm` | Sign Out | destructive |
+| `sync.meguri.signingOut` | Signing Out… | while the sign-out drains work |
+| `sync.meguri.signOut.failed` | Sign-out didn’t finish. | removal reported failure; the section then shows the selection and connection phase the core reports, which the failure may have changed |
+| `sync.meguri.stop` | Stop Using Meguri Sync on This Device… | button; opens `sync.serviceSwitch` to local-only |
+
+- The sign-in error line shows under the fields after a failed attempt, until the next attempt or an address edit. The password field is empty after every attempt.
+- Decided 2026-11-17 (root, delegated): Sign Out stops Meguri Sync, drains its work and deletes this device's sign-in; only after both succeed does no service stay selected (local-only). It never selects iCloud Sync (MP2). It keeps the collection, media, backups, server data and every unresolved operation's evidence. Until it succeeds, no text says the sign-in was removed: `sync.meguri.signingOut` shows, then the local-only form, or `sync.meguri.signOut.failed` with whatever selection and phase the core then reports. No failure text says the sign-in or the selection is unchanged.
+
+### T18.4 Status (MP2, MP5)
+
+The row labelled `sync.service.meguri` shows one title and one detail, from the first condition that applies. No detail is shown where the table gives none.
+
+| Condition | Title key, English | Detail key, English |
+|---|---|---|
+| provider phase handoff recovery or blocked (T18.2 shows the reason) | `sync.meguri.status.stopped.title`: Stopped | none |
+| connection blocked (Keychain or storage, MP2) | `sync.meguri.status.connectionBlocked.title`: Can’t Use Sign-In | `sync.meguri.status.connectionBlocked.detail`: Meguri can’t read or save your Meguri Sync sign-in on this device. Unlock this device, then choose Try Again. |
+| connection unconfigured | `sync.meguri.status.notSetUp.title`: Not Set Up | `sync.meguri.status.notSetUp.detail`: Enter your server address and sign in to start. |
+| connection signed out | `sync.meguri.status.signedOut.title`: Not Signed In | `sync.meguri.status.signedOut.detail`: Sign in to your Meguri Sync server to continue. |
+| connection cancelled | `sync.meguri.status.signedOut.title` | `sync.meguri.status.cancelled.detail`: Sign-in was cancelled. |
+| connection authenticating | `sync.meguri.status.signingIn.title`: Signing In… | none |
+| a setup stage is reported | T18.5 | T18.5 |
+| connection setup required, no setup stage and no round | `sync.meguri.status.signedIn.title`: Signed In | `sync.meguri.status.setupUnavailable`: Collection setup isn’t available yet. This collection stays on this device. |
+| paused | `sync.meguri.status.paused.title`: Paused | `sync.meguri.status.paused.detail`: Meguri Sync is paused. Changes stay on this device. |
+| round idle | `sync.meguri.status.on.title`: On | `sync.meguri.lastExchange`: `Last exchange completed %@.` (T1 instant); none without an instant |
+| round with pending work | `sync.meguri.status.pending.title`: Waiting to Sync | `sync.meguri.status.pending.detail`: Some changes on this device haven’t been sent yet. Followed by `sync.meguri.lastExchange` when an instant exists |
+| round exchanging the collection | `sync.meguri.status.syncingCollection.title`: Syncing Collection… | none |
+| round exchanging media | `sync.meguri.status.syncingMedia.title`: Syncing Media… | none |
+| round media blocked | T18.6 | T18.6 |
+| round failed, authentication | `sync.meguri.status.signInRequired.title`: Sign In Required | `sync.meguri.status.signInRequired.detail`: The server didn’t accept your sign-in, so Meguri Sync stopped. Changes stay on this device. |
+| round failed, acceptance unknown | `sync.meguri.status.acceptanceUnknown.title`: Server Acceptance Unknown | `sync.meguri.round.acceptanceUnknown`: Meguri doesn’t know whether the server received the last changes. They stay on this device. |
+| round failed, full sync required | `sync.meguri.status.chooseCollection.title`: Choose a Collection | `sync.meguri.round.fullSyncRequired`: The server needs you to choose which collection to keep before syncing continues. |
+| round failed, network | `sync.meguri.status.failed.title`: Last Exchange Didn’t Finish | `sync.meguri.round.network`: Meguri couldn’t reach your Meguri Sync server. Changes stay on this device. |
+| round failed, server | `sync.meguri.status.failed.title` | `sync.meguri.round.server`: The server reported a problem. Changes stay on this device. |
+| round failed, cancelled | `sync.meguri.status.failed.title` | `sync.meguri.round.cancelled`: The exchange was cancelled. Changes stay on this device. |
+
+- The sign-in fields (T18.3) show for unconfigured, signed out, cancelled and Sign In Required. Choose a Collection shows the T18.5 entries once the setup stage is reported.
+
+### T18.5 Collection setup (MP4, MP5)
+
+| Stage | Title key, English | Detail key, English | Controls |
+|---|---|---|---|
+| required, a local collection exists (zero cards included) | `sync.meguri.status.setup.title`: Setup Required | `sync.meguri.setup.choose`: Choose which collection to keep. Syncing starts after the collection and its media transfer. | `sync.meguri.setup.useDevice`: Use This Device’s Collection…; `sync.meguri.setup.useServer`: Use Server Collection… |
+| required, no local collection | `sync.meguri.status.setup.title` | `sync.meguri.setup.download.detail`: Download your collection from your Meguri Sync server to start. | `sync.meguri.setup.download`: Download from Meguri Sync… |
+| preparing | `sync.meguri.status.preparing.title`: Preparing… | `sync.meguri.setup.preparing`: Nothing is replaced yet. | `sync.meguri.cancel`: Cancel |
+| preview | `sync.meguri.status.setup.title` | `sync.meguri.setup.review`: Review the replacement to continue. | the `sync.meguriSetup` sheet is open |
+| transferring the collection | `sync.meguri.status.transferringCollection.title`: Transferring Collection… | none | |
+| acceptance unknown | `sync.meguri.status.acceptanceUnknown.title` | `sync.meguri.setup.acceptanceUnknown`: Meguri doesn’t know whether the server received this device’s collection. Your copies and backups are kept, and no service sends changes until this is settled. You can keep studying on this device. | none |
+| transferring media | `sync.meguri.status.transferringMedia.title`: Transferring Media… | `sync.meguri.setup.collectionDone`: The collection transferred. Syncing starts when the media finishes. Followed by `sync.meguri.media.filesLeft`: `%lld media file left` / `%lld media files left`, when the count is known | |
+| media blocked | T18.6 | T18.6 | T18.6 |
+| the server accepted the upload exactly, and local activation did not finish (MP4) | `sync.meguri.status.acceptedLocalIncomplete.title`: Setup Not Finished on This Device | `sync.meguri.setup.acceptedLocalIncomplete`: The server accepted this device’s collection, but setup didn’t finish on this device. Your copies and backups are kept, and no service sends changes until setup finishes. You can keep studying on this device. | `sync.meguri.setup.finish`: Finish Setup, shown and enabled only while the core exposes a permitted recovery command for the retained operation; no new choice until it is settled |
+| failed | `sync.meguri.status.setupFailed.title`: Setup Didn’t Finish | the failure's line, below | `activationInterrupted`: only `sync.meguri.setup.finish`, shown and enabled only while the core exposes a permitted recovery command for the retained operation, and no new choice until it is settled; `authentication` and `identityChanged`: the sign-in fields; every other failure: the entries of the required stage |
+
+| Failure | Key | English |
+|---|---|---|
+| `remoteUnavailable` | `sync.meguri.setup.error.remoteUnavailable` | Meguri couldn’t get the server’s collection details. Check your connection, then try again. |
+| `remoteChanged` | `sync.meguri.setup.error.remoteChanged` | The server’s collection changed after you chose. Choose again. |
+| `localChanged` | `sync.meguri.setup.error.localChanged` | This device’s collection changed after you chose. Choose again. |
+| `identityChanged` | `sync.meguri.setup.error.identityChanged` | The server address or account changed. Sign in again, then choose again. |
+| `backupFailed` | `sync.meguri.setup.error.backupFailed` | Meguri couldn’t back up this device’s collection, so nothing was replaced. |
+| `storage` | `sync.meguri.setup.error.storage` | Meguri couldn’t save to this device. Check its free space, then try again. |
+| `server` | `sync.meguri.setup.error.server` | The server reported a problem. Try again later. |
+| `authentication` | `sync.meguri.setup.error.authentication` | The server didn’t accept your sign-in. Sign in again to continue. |
+| `invalidDownload` | `sync.meguri.setup.error.invalidDownload` | The collection from the server couldn’t be used, so nothing was replaced. |
+| `activationInterrupted` | `sync.meguri.setup.error.activationInterrupted` | Replacing this device’s collection didn’t finish. Your backup and the downloaded collection are kept until this is settled. |
+| `cancelled` | `sync.meguri.setup.error.cancelled` | Setup was cancelled. |
+
+The `sync.meguriSetup` preview sheet, in this order:
+
+| Key | English | Shown |
+|---|---|---|
+| `sync.meguri.preview.title.useDevice` | Replace Server Collection | sheet title, Use This Device’s Collection… |
+| `sync.meguri.preview.title.useServer` | Replace This Device’s Collection | Use Server Collection… |
+| `sync.meguri.preview.title.download` | Download from Meguri Sync | Download from Meguri Sync… |
+| `sync.meguri.preview.server` | Server | label; the value is the endpoint being set up |
+| `sync.counts.thisDevice` with `sync.counts.cards`, `.notes`, `.reviews` (T11.1) | | this device's counts; not for a download |
+| `sync.meguri.preview.remoteEmpty` | The server reports no collection, but it may still hold data. | the server reports an empty collection (MP4) |
+| `sync.meguri.preview.direction.useDevice` | The server’s collection will be replaced with this device’s collection. Meguri first backs up this device’s collection and keeps a copy of the server’s collection. | |
+| `sync.meguri.preview.direction.useServer` | This device’s collection will be replaced with the server’s collection. Meguri backs up this device’s collection first. | |
+| `sync.meguri.preview.direction.download` | Your collection is downloaded from the server to this device. | |
+| `sync.meguri.preview.unsent` | This device has changes that haven’t been sent. They will be replaced; the backup keeps them. | Use Server Collection…, with pending local work |
+| `sync.meguri.preview.otherClients` | Stop syncing on your other devices until this finishes. Changes they send to the server meanwhile can be replaced. | Use This Device’s Collection… (MP4) |
+| `sync.meguri.preview.media` | Media then syncs both ways. On either side, files can be added, replaced or deleted. Files that no card uses are kept. | always (MP5) |
+| `sync.meguri.preview.automatic` | After setup, Meguri Sync syncs this collection and its media automatically. | always (MP5) |
+| `sync.meguri.preview.confirm.useDevice` | Replace Server Collection | destructive button |
+| `sync.meguri.preview.confirm.useServer` | Replace This Device’s Collection | destructive button |
+| `sync.meguri.preview.confirm.download` | Download | confirm button |
+
+- The sheet has the system Cancel (`sync.meguri.cancel`), which cancels the preparation and changes nothing. The confirm button applies only to the preview shown; a changed preview replaces the sheet's facts and needs a new choice (MP4).
+
+### T18.6 Media (MP5)
+
+| Key | English | Use |
+|---|---|---|
+| `sync.meguri.status.mediaBlocked.title` | Media Incomplete | status title, setup or round |
+| `sync.meguri.media.blocked` | Collection transferred; media incomplete. | its detail |
+| `sync.meguri.media.notTransferred` | `%lld media file hasn’t transferred.` / `%lld media files haven’t transferred.` | the files listed as affected, above 0 |
+| `sync.meguri.media.remotePending` | `%lld file on the server hasn’t reached this device.` / `%lld files on the server haven’t reached this device.` | files waiting on the server, above 0 |
+| `sync.meguri.media.unverified` | Meguri couldn’t confirm which media files transferred. | the accounting is not verified |
+| `sync.meguri.media.setupWaits` | Syncing starts after every media file transfers. | setup stage only |
+| `sync.meguri.media.study` | You can keep studying on this device. | always in this row |
+| `sync.meguri.media.showAffected` | Show Affected Files | button, while files are listed; pushes the list |
+| `sync.meguri.media.retry` | Retry | button: checks the media folder again and recomputes the list |
+| `sync.meguri.media.list.title` | Affected Files | page title |
+| `sync.meguri.media.state.pending` | Waiting to transfer | row value |
+| `sync.meguri.media.state.empty` | Empty file | |
+| `sync.meguri.media.state.overLimit` | Too large to transfer | over the 100 MiB limit (MP5) |
+| `sync.meguri.media.state.invalidName` | Name can’t be used | |
+| `sync.meguri.media.state.notRegularFile` | Not a regular file | |
+| `sync.meguri.media.lossyName` | Some characters in this name can’t be shown. | under a name that is not valid text |
+| `sync.meguri.media.list.footer` | Media can’t finish syncing while a file is listed here. | page footer |
+| `sync.meguri.media.list.excluded` | Meguri keeps files it can’t transfer and doesn’t change or delete them. | page footer, under the line above, while an empty, too-large, unusable-name or non-regular file is listed; files waiting to transfer can still change when media syncs (MP5) |
+
+### T18.7 Sync Now, Pause and the sync button (MP2, MP5)
+
+| Key | English | Use |
+|---|---|---|
+| `sync.now.command` (T6) | Sync Now | the command, by the table below |
+| `sync.meguri.now.unavailable.paused` | Meguri Sync is paused. Resume it in Account & Sync to sync now. | reason: paused |
+| `sync.meguri.now.unavailable.acceptanceUnknown` | Meguri Sync can’t send changes until Meguri knows whether the server received the last ones. | reason: acceptance unknown |
+| `sync.meguri.now.unavailable.signIn` | Sign in to Meguri Sync in Account & Sync to sync. | reason: Sign In Required |
+| `sync.meguri.now.unavailable.stopped` | Meguri Sync is stopped. Open Account & Sync to see what to do. | reason: handoff recovery, or provider or connection blocked |
+| `sync.meguri.pause` | Pause Meguri Sync | button while a round is reported and not paused |
+| `sync.meguri.resume` | Resume Meguri Sync | the same button while paused |
+| `sync.meguri.button.label` | Meguri Sync | the sync button's accessibility label while Meguri Sync is selected |
+| `sync.meguri.setup.continue` | Continue Setup… | popover button in place of Sync Now while no round is reported; opens Account & Sync |
+| `sync.meguri.now.chooseCollection` | Choose Collection… | popover button in place of Sync Now while the round needs a full sync; opens Account & Sync |
+
+Sync Now (the popover button, File › Sync Now and `Y`) follows the first row that applies. It never starts a normal exchange outside the last row (MP5). "Opens Account & Sync" means Settings › Account & Sync at Meguri Sync, presented as the popover's Account & Sync link is (N11.8); it starts no request.
+
+| Condition | Sync Now |
+|---|---|
+| provider phase handoff recovery or blocked, or connection blocked, with or without a round | disabled; reason `sync.meguri.now.unavailable.stopped` |
+| paused | disabled; reason `sync.meguri.now.unavailable.paused`; no network work (MP5) |
+| no round: any connection or setup state, including setup's acceptance unknown, media blocked and failures | the popover shows `sync.meguri.setup.continue` instead; File › Sync Now and `Y` open Account & Sync, where the explicit setup or recovery continues |
+| round failed, acceptance unknown | disabled; reason `sync.meguri.now.unavailable.acceptanceUnknown`; no upload or new writer starts (MP3) |
+| round failed, full sync required | the popover shows `sync.meguri.now.chooseCollection` instead; File › Sync Now and `Y` open Account & Sync, whose explicit collection choice is the only way on (MP4) |
+| round media blocked | the popover shows `sync.meguri.media.showAffected` instead, which opens Account & Sync at the affected list; File › Sync Now and `Y` open Account & Sync, where Retry is the explicit recovery |
+| round failed, authentication | disabled; reason `sync.meguri.now.unavailable.signIn` |
+| a round exchanging the collection or media | disabled, with no reason line; the status row shows the progress |
+| otherwise (idle, pending work, failed for network, server or cancellation) | enabled; runs the normal round |
+
+- In Account & Sync, Sync Now shows only for the disabled and enabled rows. For the rows that open Account & Sync, the status row's own controls are that flow.
+- While Meguri Sync is selected, the sync button's value is the T18.4 title without its "…", and on the Mac its help tag is that title and detail (as T2).

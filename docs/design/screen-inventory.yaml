@@ -1088,9 +1088,26 @@ screens:
       The Account & Sync section, first in Settings (native-interface-contract N11.4, N11.8; R117,
       R122, R123, R125, R1560, R2046, R2054, R2059). Mac: a section of the Settings window's sidebar;
       iPad and iPhone: the first row of Settings, pushing this form. Text: sync/status-strings T14,
-      with T3 to T9 for the status (titled `sync.settings.section`). It is about iCloud only: no Anki
-      endpoint, account, transfer result or one-way option (Settings › Anki Server and Collection,
-      N11.4; R1547, R1560). One grouped form: (1) iCloud (`sync.settings.iCloud`): the status row with
+      with T3 to T9 for the status (titled `sync.settings.section`), and T18 for the Sync Service and
+      Meguri Sync (sync/meguri-provider MP2–MP5; N12.4). It shows no Anki endpoint, account,
+      transfer result or one-way option (Settings › Anki Server and Collection, N11.4; R1547, R1560).
+      One grouped form: (0) Sync Service, always first (MP2): a standard Picker labelled
+      `sync.service.label` with exactly `sync.service.iCloud` and `sync.service.meguri`. It shows the
+      committed selection only: choosing a value writes no selection, and the shown service changes
+      only when its change commits. While no service is selected (local-only) it shows no value, with
+      `sync.service.none.footer` as its footer; choosing iCloud Sync then opens the flow of section
+      (1)'s enable control (sync.connect, or Resume Syncing's continue page for a stopped binding
+      that V9.2 offers), and choosing Meguri Sync selects it with nothing to stop and shows (M).
+      While a service is selected, choosing the other opens sync.serviceSwitch. While a change runs
+      the picker is disabled with `sync.service.changing` under it; after a failed change,
+      `sync.service.changeFailed`. In handoff recovery (MP3.5), whatever the selection, the picker
+      is disabled and `sync.service.recovery` sits under it with `sync.service.recovery.action`,
+      which asks the alert `sync.service.recovery.title` with `.message`, destructive `.confirm` and
+      `sync.service.cancel`, then calls recoverProviderHandoffToLocalOnly; that action is offered nowhere else.
+      While the provider phase is blocked the picker is disabled with `sync.service.blocked` and no
+      action. Opening the section or choosing a value starts no Meguri request (MP2). Sections (1)
+      to (6) are iCloud Sync's, shown unchanged whenever Meguri Sync is not the selected service;
+      while it is, (M) replaces them. (1) iCloud (`sync.settings.iCloud`): the status row with
       sync.status's symbol and the T3 title and detail, then T4's lines, T5's media lines and, while a
       Sync Now runs or after one, T7's step or result; the account row, `sync.settings.account.*`
       by the account status and whether it matches the binding (`.other`); the account guidance of T3
@@ -1139,6 +1156,52 @@ screens:
       session (V20). In the exclusive phase a recovery action shows `sync.recovery.error.busy`
       (R171). In Failed{Corrupt} the toggles, Pause, Review Conflicts (read only) and
       `sync.adopt.action` (V19's conditions) stay usable; Sync Now shows `collectionUnavailable`.
+      (M) Meguri Sync, while it is the selected service (T18.3 to T18.7): (M1) the status row
+      labelled `sync.service.meguri`, one element with the T18.4 title and detail of the first
+      condition that applies, then T18.5's or T18.6's lines and controls for a setup stage or a
+      blocked media phase. Use This Device’s Collection… and Use Server Collection… are shown
+      together, neither the default button; they and Download from Meguri Sync… only start the
+      preparation (Preparing… with Cancel), whose preview opens sync.meguriSetup. Show Affected
+      Files pushes a page inside Account & Sync on every platform: a native List of the affected
+      files sorted by name, each its name and T18.6 state, `sync.meguri.media.lossyName` under a
+      name that is not valid text, titled `sync.meguri.media.list.title`, footer
+      `sync.meguri.media.list.footer`, and `sync.meguri.media.list.excluded` while a file that can't
+      transfer is listed; the names appear nowhere else, logs included. Retry calls the media retry,
+      which recomputes the list, keeps every guard and never clears the block by leaving a file out
+      (MP5); nothing deletes or converts a file automatically, and no text points to a media folder.
+      After an exactly accepted upload whose local activation did not finish, and after
+      `activationInterrupted`, the row offers only `sync.meguri.setup.finish` (identifier
+      settings.accountSync.meguri.finishSetup), shown and enabled only while the core exposes a
+      permitted recovery command for the retained operation; this contract defines no such command
+      and does not claim one exists. No new collection choice shows until it is settled (MP4).
+      (M2) The account. While unconfigured, signed out, cancelled or Sign In Required: the fields
+      `sync.meguri.address` (URL keyboard), `sync.meguri.username` (username content type) and the
+      secure `sync.meguri.password` (password content type), with no autocapitalization or
+      autocorrection, then `sync.meguri.signIn`, disabled until all three hold text and also chosen
+      by Return in Password, with footer `sync.meguri.signIn.footer`. Sign In normalizes the address
+      locally first (`sync.meguri.error.address`, with no request, when refused), applies an address
+      change, which invalidates the stored sign-in (MP2), then only authenticates; a failure shows
+      its T18.3 line under the fields. The password field is emptied after every attempt and on any
+      address edit. Otherwise the address is a read-only row, with `sync.meguri.signOut` (its alert:
+      `.title`, `.message`, destructive `.confirm` and `sync.service.cancel`; `sync.meguri.signingOut`
+      while work drains; `.failed` when removal fails, then the selection and connection phase the
+      core actually reports, never a claim that they are unchanged). Sign Out calls
+      removeMeguriConnection, which is changeProvider(to: .localOnly, removing the credentials):
+      only after the actual drain and credential deletion does local-only become the selection,
+      never iCloud Sync, keeping the collection, media, server data and every unresolved
+      operation's evidence (MP2); the address changes only after Sign Out. While the
+      connection is blocked: `sync.meguri.connection.retry`, then Sign Out. No Test Connection is
+      offered. (M3) While a round is reported: `sync.now.command` in T18.7's disabled and enabled rows
+      only, enabled exactly in its last row, with T18.7's reason as its footer otherwise, and `sync.meguri.pause` or
+      `sync.meguri.resume`. There is no media toggle: media is always included (MP1, MP5). (M4)
+      `sync.meguri.stop`, opening sync.serviceSwitch to local-only, except in handoff recovery and
+      while blocked. A control shows only while the core reports its stage, so none calls a command
+      that does not exist yet. Meguri Sync states: empty: Not Set Up with empty fields; typical: On
+      with its last exchange; loading: Signing In…, Preparing…, a transfer or a round running;
+      error: Setup Didn’t Finish, Setup Not Finished on This Device, Media Incomplete, Server
+      Acceptance Unknown, Last Exchange Didn’t
+      Finish, a blocked connection; overflow: a long address and long affected names wrap, and the
+      affected list scrolls.
       Empty: never connected: the iCloud group with T3's localOnly lines and Connect to iCloud…, the
       toggles disabled, Review Conflicts… at 0. Typical: connected and up to date. Loading: an
       exchange, media transfer or recovery op running, its progress in the iCloud group, with Cancel
@@ -1157,11 +1220,25 @@ screens:
       settings.accountSync.automatic, settings.accountSync.media,
       settings.accountSync.attention.<item>, settings.accountSync.reviewConflicts,
       settings.accountSync.replaceLocal, settings.accountSync.restorePrevious,
-      settings.accountSync.replaceCloud, settings.accountSync.stop. Core: the P14 status and
+      settings.accountSync.replaceCloud, settings.accountSync.stop, settings.accountSync.service,
+      settings.accountSync.serviceRecovery, settings.accountSync.meguri.status,
+      settings.accountSync.meguri.address, settings.accountSync.meguri.username,
+      settings.accountSync.meguri.password, settings.accountSync.meguri.signIn,
+      settings.accountSync.meguri.retryConnection, settings.accountSync.meguri.signOut,
+      settings.accountSync.meguri.useDevice, settings.accountSync.meguri.useServer,
+      settings.accountSync.meguri.download, settings.accountSync.meguri.cancelSetup,
+      settings.accountSync.meguri.finishSetup,
+      settings.accountSync.meguri.showAffected, settings.accountSync.meguri.affectedList,
+      settings.accountSync.meguri.retryMedia, settings.accountSync.meguri.syncNow,
+      settings.accountSync.meguri.pause, settings.accountSync.meguri.stop. Core: the P14 status and
       syncNowAvailability() through U151's SyncStatusModel and SyncCoordinator; DeviceSettings for
       Pause, automatic and media (V2.1, R324); recovery_state(), resume_recovery_op,
       cancel_recovery_op, keep_local_only, stop_using_icloud and abandon_generation (V26.2);
-      list_conflicts for the count (V17.3).
+      list_conflicts for the count (V17.3). Meguri Sync: the provider selection and phase, the
+      connection phase and endpoint (MeguriProviderConnectionOwner's configure, signIn and load;
+      configure and load send no request, MP2), changeProvider, removeMeguriConnection and
+      recoverProviderHandoffToLocalOnly through SyncCoordinator; the setup stage, media accounting
+      and round state from the Meguri setup and round services (MP4, MP5).
   - id: settings.sync
     title: Anki Server and Transfers
     units: [U161]
@@ -1366,7 +1443,25 @@ screens:
       U151's SyncStatusModel; syncNowAvailability(), SyncNowRequested, SyncNowCancelled and the
       ExchangeEnded result through SyncCoordinator (P12); recovery_state(), resume_recovery_op,
       cancel_recovery_op, keep_local_only and abandon_generation for the actions (V26.2);
-      DeviceSettings for resuming a pause (V16). It reads no Anki state (R1559).
+      DeviceSettings for resuming a pause (V16). It reads no Anki state (R1559). While Meguri Sync
+      is the selected service (sync/meguri-provider MP2; status-strings T18.7): the same button,
+      place, popover or sheet, keyboard and announcement rules, with accessibility label
+      `sync.meguri.button.label` and the T18.4 title as its value (title and detail as the Mac help
+      tag), and no iCloud symbol, title or line. Its symbol, never colour alone: Stopped, a blocked
+      connection, Setup Didn’t Finish, Setup Not Finished on This Device, Media Incomplete, Server
+      Acceptance Unknown and Last
+      Exchange Didn’t Finish exclamationmark.arrow.triangle.2.circlepath; Not Set Up, Not Signed
+      In, Signed In, Setup Required, Choose a Collection and Sign In Required
+      person.crop.circle.badge.exclamationmark; Signing In…, Preparing…, the transfers and the
+      round's syncing arrow.triangle.2.circlepath (rotating like syncingCollection's, with the same
+      Reduce Motion rule); Paused pause.circle; Waiting to Sync arrow.up.circle; On checkmark.circle.
+      Popover: (1) the T18.4 title and detail with T18.5's or T18.6's lines, and no setup, media or
+      recovery action; (2) Sync Now's place, by T18.7's table: `sync.now.command`, disabled with
+      T18.7's reason as the line under it except in its last row, or instead
+      `sync.meguri.setup.continue`, `sync.meguri.now.chooseCollection` or
+      `sync.meguri.media.showAffected`, each opening Settings › Account & Sync; (3) the Account &
+      Sync link. File › Sync Now and Y follow the same table: disabled with its reason, opening
+      Account & Sync, or running the normal round only in its last row (MP5). No media indicator. Identifiers as above.
   - id: sync.connect
     title: Connect to iCloud
     units: [U166, U161]
@@ -1658,6 +1753,67 @@ screens:
       sync.reviewConflicts.restore, sync.reviewConflicts.resolve. Core: list_conflicts, get_conflict,
       preview_recovery, recover, resolve and unresolve (V17.3), off the main thread and with no
       network; a restored edit is a local change that syncs like any other.
+  - id: sync.serviceSwitch
+    title: Change sync service
+    units: [U161]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [typical, overflow, error, loading]
+    variants: pairwise
+    references: [sheet-form]
+    purpose: >-
+      The sheet that confirms a change of sync service (sync/meguri-provider MP2, MP3;
+      native-interface-contract N11.8, N12.4). Opened from settings.accountSync's Sync Service
+      picker when the other service is chosen while one is selected, and by Meguri Sync's
+      `sync.meguri.stop`. Text: sync/status-strings T18.2. Title `sync.switch.title.*` by
+      destination; then the old service's pending and held lines in T18.2's order, from its local
+      status only (an unknown count shows as unknown, never as zero, and held answers never read as
+      none; opening the sheet starts no request);
+      `sync.switch.kept`, `sync.switch.otherDevices`, `sync.switch.signOut` when leaving Meguri
+      Sync, and `sync.switch.next.*`. Toolbar: `sync.service.cancel` in the cancellation action placement, and
+      `sync.switch.confirm.*` in the destructive action placement with the destructive role; neither
+      is the default button, Return confirms nothing and Esc cancels (N11.8). While MP3.1 refuses
+      (an active review, editor commit, collection replacement, or unsettled recovery or
+      publication), `sync.switch.busy` shows and the confirm button is disabled; local review goes
+      on. Confirm calls changeProvider with the destination, removing the Meguri Sync sign-in when
+      leaving it (T18.2), with `sync.service.changing` in the sheet; the sheet closes when the
+      change commits and the picker then shows the new service, or shows `sync.service.changeFailed`
+      with the selection and phases the core then reports, which the failure may have changed. Typical: iCloud Sync to Meguri Sync with a count of unsent
+      changes. Overflow: every line at the largest text sizes scrolls under a fixed toolbar.
+      Loading: the change running. Error: the busy refusal or a failed change. Identifiers
+      sync.serviceSwitch.cancel, sync.serviceSwitch.confirm.
+  - id: sync.meguriSetup
+    title: Meguri Sync collection choice
+    units: [U161, U166]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [typical, overflow]
+    variants: pairwise
+    references: [sheet-form, list-counts]
+    purpose: >-
+      The preview sheet that confirms Meguri Sync's first transfer of the collection and its media
+      (sync/meguri-provider MP4, MP5; native-interface-contract N8, N11.8). Opened when
+      settings.accountSync's setup stage reaches its preview, after Use This Device’s Collection…,
+      Use Server Collection… or Download from Meguri Sync…, which only start the preparation and
+      change nothing. Text: sync/status-strings T18.5. Title `sync.meguri.preview.title.*` by
+      direction; `sync.meguri.preview.server` with the endpoint; this device's T11.1 cards, notes and
+      reviews, except for a download; `sync.meguri.preview.remoteEmpty` when the server reports an
+      empty collection, never shown as proof that it is empty; the direction line;
+      `sync.meguri.preview.unsent` for Use Server Collection… with pending local work;
+      `sync.meguri.preview.otherClients` for Use This Device’s Collection… (the server copy and the
+      upload are not locked together, MP4); `sync.meguri.preview.media` and
+      `sync.meguri.preview.automatic` always. Toolbar: `sync.meguri.cancel` in the cancellation
+      action placement, which cancels the preparation; for both replacements the confirm button in
+      the destructive action placement with the destructive role, never the confirmation action
+      placement or a default shortcut, so Return confirms no replacement, and Esc cancels (N11.8); a
+      download replaces nothing, and `sync.meguri.preview.confirm.download` is a plain confirm
+      button. The confirmation is bound to the shown preview's operation; a new preview replaces the
+      facts and needs a new choice. After confirming, the sheet closes and settings.accountSync's
+      status row shows the collection and then the media phase, never one success line; Server
+      Acceptance Unknown and Media Incomplete stay until settled (T18.5, T18.6). Typical: Use This
+      Device’s Collection… with counts and the warning. Overflow: a long endpoint and the largest text
+      sizes scroll under a fixed toolbar. Failures show in settings.accountSync, not here.
+      Identifiers sync.meguriSetup.cancel, sync.meguriSetup.confirm.
   - id: sync.quitFlush
     title: Mac quit sheet
     units: [U161, U151]

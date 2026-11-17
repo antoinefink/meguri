@@ -1533,3 +1533,9 @@ screens:
   sync.quitFlush:
     status: sketch
     fix_rounds: 0
+  sync.serviceSwitch:
+    status: sketch
+    fix_rounds: 0
+  sync.meguriSetup:
+    status: sketch
+    fix_rounds: 0
