@@ -389,3 +389,25 @@ Focused execution remains pending.
 
 Fixture-source privacy `044000-63875`, static `044000-64126` and
 similarity `044000-63888` pass. The filtered report was read.
+
+## Tracking regression reaches its expected failure
+
+`core-test/20261117T044124Z-65282`, clean `3b4395f7`: two methods,
+one pass, one failure, zero skips. The injected rollback fault remains blocked
+as required. The healthy fixture reaches its final preview check and returns
+`Tracking(Database)` instead of `ReadActive`. Both setup and the intended
+red/green behavior are now observed before changing runtime logic.
+The actual terminal result released the CPU window.
+
+Author `044235-65756` changes only Runtime's private invalidation helpers.
+Review `044420-67048` clears P0–P2; its seeded patch is byte-identical.
+Provider revocation retains any existing tracking failure and no longer
+creates one. Generic invalidations and live-resume refusals still mark failure.
+SDK/identity/incoming exclusions, overflow handling, rescan and completion
+fences remain. Preview and resume clear before publication under the state
+lock. No automatic admission, data purge, schema or public API is added.
+All original tests remain unchanged. Actual verification is pending.
+
+Runtime-source privacy `20261117T044821Z-69844`, static `044732-68577`
+and similarity `044732-68855` pass. The filtered report was read.
+The prose-only failed scan `044732-68856` remains retained.

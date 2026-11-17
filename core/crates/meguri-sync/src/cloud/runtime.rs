@@ -832,8 +832,8 @@ impl Runtime {
         if state.adapter.sdk.is_some() || state.adapter.identity_read.is_some() || state.incoming.running {
             return Err(super::publication::PublicationError::Busy.into());
         }
-        Self::invalidate_authority_locked(&mut state);
         state.publication.preview = None; state.publication.resume = None;
+        Self::revoke_authority_locked(&mut state);
         Ok(())
     }
     pub fn require_provider_collection_admission(&self) -> Result<(), RuntimeError> {
@@ -964,6 +964,11 @@ impl Runtime {
         Self::invalidate_drain_locked(state);
     }
     fn invalidate_authority_locked(state: &mut State) {
+        state.tracking_stopped = true;
+        Self::revoke_authority_locked(state);
+    }
+    // Revocation requires a rescan but preserves any existing tracking failure.
+    fn revoke_authority_locked(state: &mut State) {
         state.publication.reset_root_missing = None;
         state.publication.reset_root_read_guard = None;
         match state.invalidation.checked_add(1) {
@@ -972,7 +977,6 @@ impl Runtime {
         }
         state.scan_required = true;
         state.whole_complete = false;
-        state.tracking_stopped = true;
         state.publish_authority();
     }
     fn invalidate_drain_locked(state: &mut State) {
