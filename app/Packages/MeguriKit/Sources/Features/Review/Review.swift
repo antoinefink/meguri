@@ -169,9 +169,14 @@ struct ReviewLayout<Card: View>: View {
                 .accessibilityIdentifier("review.session.close")
             }
             ToolbarSpacer()
-            ToolbarItemGroup(placement: .primaryAction) {
-                timer
-                status
+            // Plain text stays off the status button's glass.
+            if timerPresentation != nil {
+                ToolbarItem(placement: .primaryAction) { timer }
+                    .sharedBackgroundVisibility(.hidden)
+                ToolbarSpacer(.fixed, placement: .primaryAction)
+            }
+            if let status {
+                ToolbarItem(placement: .primaryAction) { status }
             }
         }
         .toolbar(removing: .title)
@@ -194,7 +199,7 @@ struct ReviewLayout<Card: View>: View {
                         sessionProgress
                         timer
                     }
-                    .padding(.horizontal, Spacing.medium)
+                    .padding(.horizontal)
                     cardRegion
                 }
                 ReviewAnswerBar(phase: phase, states: states, enabled: enabled, reveal: reveal, rate: rate)
@@ -240,11 +245,18 @@ struct ReviewLayout<Card: View>: View {
                 if let notice {
                     let noticeLimit = max(0, middle.size.height) * 0.4
                     ScrollView(.vertical) {
-                        Text(verbatim: notice).font(.callout).foregroundStyle(.token(.statusWarning))
-                            .padding(Spacing.small)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { noticeContentHeight = $0 }
-                            .accessibilityIdentifier("review.session.notice")
+                        Label {
+                            Text(verbatim: notice).foregroundStyle(.token(.textPrimary))
+                        } icon: {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .symbolRenderingMode(.multicolor)
+                                .accessibilityHidden(true)
+                        }
+                        .font(.callout)
+                        .padding(Spacing.small)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { noticeContentHeight = $0 }
+                        .accessibilityIdentifier("review.session.notice")
                     }
                     .scrollIndicators(.visible)
                     .frame(height: min(noticeContentHeight ?? noticeLimit, noticeLimit))
@@ -258,7 +270,6 @@ struct ReviewLayout<Card: View>: View {
             Text(verbatim: remaining).font(.caption)
                 .fixedSize(horizontal: false, vertical: true)
             ProgressView(value: progress)
-                .tint(.token(.progressFill))
         }
         .foregroundStyle(.token(.textPrimary))
         .layoutPriority(1)
@@ -348,7 +359,8 @@ public struct ReviewAnswerBar: View {
     /// The answers either side of a fold running through the row (R9, N13).
     @ViewBuilder private var touchBar: some View {
         if phase == .question || phase == .answer || phase == .transition {
-            ZStack {
+            // Bottom-aligned, so Show Answer sits where the last answer row will be.
+            ZStack(alignment: .bottom) {
                 // Kept in layout on both sides, including at large text sizes.
                 if phase == .answer {
                     ratings.allowsHitTesting(enabled)
@@ -369,7 +381,8 @@ public struct ReviewAnswerBar: View {
                 }
             }
             .onGeometryChange(for: FoldGeometry.self) { FoldGeometry($0) } action: { fold = $0 }
-            .padding(Spacing.small)
+            .padding(.horizontal)
+            .padding(.vertical, Spacing.small)
             .frame(maxWidth: fold.acrossWidth == nil ? ContentWidth.readable : nil)
             .frame(maxWidth: .infinity)
             .fixedSize(horizontal: false, vertical: true)
@@ -379,14 +392,14 @@ public struct ReviewAnswerBar: View {
     private var revealButton: some View {
         Button(action: reveal) {
             Text("Show Answer", bundle: .module)
-                .font(.subheadline.weight(.semibold))
+                .font(.headline)
+                .foregroundStyle(.token(.textPrimary))
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, minHeight: ControlMetrics.minimumTarget)
         }
         .buttonStyle(.bordered)
         .buttonBorderShape(.roundedRectangle)
-        .tint(ColorToken.textPrimary.color)
         .disabled(!enabled)
         .accessibilityIdentifier("review.session.reveal")
     }

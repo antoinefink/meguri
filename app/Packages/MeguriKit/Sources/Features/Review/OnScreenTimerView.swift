@@ -84,7 +84,12 @@ struct ReviewTimerLabel: View {
                 Image(systemName: "hourglass").accessibilityHidden(true)
             }
         }
+        #if os(macOS)
+        // A toolbar item on the Mac: the toolbar's own font, quiet beside its buttons.
+        .foregroundStyle(.secondary)
+        #else
         .font(.caption)
+        #endif
         .accessibilityElement(children: .ignore)
         // Keep the exact S17 value without also supplying the same elapsed
         // time as a label. The cap symbol stays outside the narration.
