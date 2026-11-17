@@ -479,3 +479,293 @@ fn meguri_binding_clear_keeps_the_auto_invariant() {
     }
 }
 
+// New worker rendezvous use one deadline for the entire wait, including
+// unrelated events. No pending-policy identity is manufactured by these tests.
+fn bootstrap_complete<T>(host: &CoreHost, start: impl FnOnce() -> meguri_host::ManualTransferTask<T>)
+    -> Result<T, meguri_sync::oneway::TransferError> {
+    let events = host.engine().stream().subscribe();
+    let task = start();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        let event = events.recv_timeout(remaining).expect("bootstrap worker deadline");
+        if matches!(event.kind, meguri_engine::EventKind::JobFinished { id, .. } if id == task.job.id) { break; }
+    }
+    task.take_result().expect("actual typed bootstrap result")
+}
+fn offline_preparation_script(data: Vec<u8>) -> std::sync::Arc<Script> {
+    Script::new(vec![(Method::Meta, Reply::Bytes(meta(NOW - 2000, 7))),
+        (Method::Download, Reply::Bytes(data)), (Method::Meta, Reply::Bytes(meta(NOW - 1000, 8)))])
+}
+fn retained_artifacts(config: &meguri_host::HostConfig, op: &meguri_sync::policy::Operation) -> Vec<(std::path::PathBuf, Vec<u8>)> {
+    let mut paths = op.safety_backups.iter().map(|a| config.backups_directory.join(&a.name)).collect::<Vec<_>>();
+    if let Some(copy) = &op.server_copy { paths.push(config.backups_directory.join(&copy.artifact.name)); }
+    if let Some(candidate) = &op.candidate {
+        paths.push(config.manual_transfer_directory.join(op.id.as_str()).join(&candidate.name));
+    }
+    assert!(!paths.is_empty());
+    paths.into_iter().map(|path| { let bytes = fs::read(&path).unwrap(); (path, bytes) }).collect()
+}
+fn assert_artifacts(artifacts: &[(std::path::PathBuf, Vec<u8>)]) {
+    for (path, before) in artifacts { assert_eq!(&fs::read(path).unwrap(), before); }
+}
+fn discard_preparation_roundtrip(cold: bool) {
+    let root = tempfile::tempdir().unwrap();
+    let (host, config) = seeded(&root.path().join("local"));
+    let connection = select(&host);
+    let (_, data) = server(&root.path().join("server"));
+    let script = offline_preparation_script(data.clone());
+    let preview = bootstrap_complete(&host, || host.prepare_meguri_bootstrap(access(&connection, &script), D::UseDeviceCollection).unwrap()).unwrap();
+    script.assert_done();
+    assert_eq!(preview.operation.scope, Scope::CollectionAndMedia);
+    assert!(host.provider_authority().meguri_bootstrap_intent().is_none());
+    let artifacts = retained_artifacts(&config, &preview.operation);
+    host.refresh_provider_admission();
+    assert!(host.provider_authority().network_blocked());
+    let host = if cold { host.close().unwrap(); CoreHost::open(config.clone()).unwrap() } else { host };
+    settle(&host);
+    let actual = host.pending_meguri_bootstrap_preparation(&connection, " Synthetic-User\t").unwrap().unwrap();
+    assert_eq!(actual, preview.operation);
+    let provider_before = bytes(&config);
+    let cancelled = host.discard_meguri_bootstrap_preparation(&connection, &actual).unwrap();
+    assert_eq!(cancelled.phase, Phase::Cancelled);
+    assert_eq!(cancelled.boundary, Some(meguri_sync::policy::Boundary::Cancelled));
+    assert!(cancelled.receipt.is_none());
+    assert!(host.manual_transfer_history().active().unwrap().is_none());
+    assert_eq!(host.manual_transfer_history().get(&actual.id).unwrap(), cancelled);
+    assert!(host.pending_meguri_bootstrap_preparation(&connection, USER).unwrap().is_none());
+    assert!(!host.provider_authority().network_blocked());
+    assert_eq!(bytes(&config), provider_before);
+    assert_artifacts(&artifacts);
+    let offline = Script::new(vec![]);
+    assert!(matches!(host.confirm_meguri_bootstrap(access(&connection, &offline), preview), Err(E::Busy)));
+    offline.assert_done();
+    for method in [Method::Upload, Method::MediaBegin, Method::UploadChanges, Method::MediaChanges, Method::DownloadFiles, Method::MediaSanity] {
+        assert_eq!(script.count(method), 0);
+    }
+    assert!(matches!(host.discard_meguri_bootstrap_preparation(&connection, &actual), Err(E::Ready(F::OperationMismatch))));
+    let again = offline_preparation_script(data);
+    let next = bootstrap_complete(&host, || host.prepare_meguri_bootstrap(access(&connection, &again), D::UseDeviceCollection).unwrap()).unwrap();
+    again.assert_done();
+    assert_ne!(next.operation.id, actual.id);
+    host.discard_meguri_bootstrap_preparation(&connection, &next.operation).unwrap();
+    host.close().unwrap();
+}
+#[test]
+fn meguri_discard_live_preparation_preserves_artifacts_and_reopens_explicit_admission() {
+    let _lane = LANE.lock().unwrap();
+    discard_preparation_roundtrip(false);
+}
+#[test]
+fn meguri_cold_pending_preparation_discard_preserves_history_and_allows_explicit_prepare() {
+    let _lane = LANE.lock().unwrap();
+    discard_preparation_roundtrip(true);
+}
+#[test]
+fn meguri_pending_and_discard_keep_original_generation_and_close_ownership_guards() {
+    let _lane = LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let (host, config) = seeded(&root.path().join("local"));
+    let connection = select(&host);
+    let (_, data) = server(&root.path().join("server"));
+    let script = offline_preparation_script(data);
+    let preview = bootstrap_complete(&host, || host.prepare_meguri_bootstrap(access(&connection, &script), D::UseDeviceCollection).unwrap()).unwrap();
+    let generation = host.cloud_connection_generation().unwrap();
+    let wrong = meguri_engine::Generation(generation.0 + 1);
+    let before = bytes(&config);
+    assert!(matches!(host.pending_meguri_bootstrap_preparation_for_generation(wrong, &connection, USER),
+        Err(E::Engine(EngineError::StaleGeneration { .. }))));
+    assert!(matches!(host.discard_meguri_bootstrap_preparation_for_generation(wrong, &connection, &preview.operation),
+        Err(E::Engine(EngineError::StaleGeneration { .. }))));
+    let held = host.with_close_state_held_for_testing(||
+        host.discard_meguri_bootstrap_preparation_for_generation(generation, &connection, &preview.operation));
+    assert!(matches!(held, Err(E::Engine(EngineError::Busy { .. }))));
+    assert_eq!(host.manual_transfer_history().active().unwrap().as_ref(), Some(&preview.operation));
+    assert_eq!(bytes(&config), before);
+    script.assert_done();
+    host.discard_meguri_bootstrap_preparation(&connection, &preview.operation).unwrap();
+    host.close().unwrap();
+}
+#[test]
+fn meguri_pending_preparation_checks_connection_account_and_actual_revision_offline() {
+    use meguri_sync::{oneway::TransferError, policy::Boundary};
+    let _lane = LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let (host, config) = seeded(&root.path().join("local"));
+    let connection = select(&host);
+    let (_, data) = server(&root.path().join("server"));
+    let script = offline_preparation_script(data);
+    let preview = bootstrap_complete(&host, || host.prepare_meguri_bootstrap(access(&connection, &script), D::UseDeviceCollection).unwrap()).unwrap();
+    let before = bytes(&config);
+    for field in ["reference", "revision", "endpoint"] {
+        let mut wrong = connection.clone();
+        match field { "reference" => wrong.reference.push('x'), "revision" => wrong.revision += 1,
+            _ => wrong.endpoint = "https://foreign.synthetic.example/".into() }
+        assert!(matches!(host.pending_meguri_bootstrap_preparation(&wrong, USER), Err(E::ConnectionChanged)));
+        assert!(matches!(host.discard_meguri_bootstrap_preparation(&wrong, &preview.operation), Err(E::ConnectionChanged)));
+    }
+    assert!(matches!(host.pending_meguri_bootstrap_preparation(&connection, "other-user"), Err(E::Ready(F::AccountChanged))));
+    assert_eq!(host.manual_transfer_history().active().unwrap().as_ref(), Some(&preview.operation));
+    // NotSent has no recovery confirmation. This is the real retained worker,
+    // which records the interruption decision without creating another writer.
+    let recovered = bootstrap_complete(&host, || host.prepare_meguri_bootstrap_recovery(&connection, &preview.operation).unwrap());
+    assert!(matches!(recovered, Err(TransferError::NeedsDecision(Boundary::PreparationInterrupted))));
+    assert!(matches!(host.discard_meguri_bootstrap_preparation(&connection, &preview.operation), Err(E::Ready(F::OperationMismatch))));
+    let actual = host.pending_meguri_bootstrap_preparation(&connection, USER).unwrap().unwrap();
+    assert_eq!(actual.id, preview.operation.id);
+    assert_eq!(actual.phase, Phase::NeedsDecision);
+    host.discard_meguri_bootstrap_preparation(&connection, &actual).unwrap();
+    script.assert_done();
+    assert_eq!(script.count(Method::Upload), 0);
+    assert_eq!(script.count(Method::MediaBegin), 0);
+    assert_eq!(bytes(&config), before);
+    host.close().unwrap();
+    assert!(matches!(host.pending_meguri_bootstrap_preparation(&connection, USER), Err(E::Engine(_))));
+}
+#[test]
+fn meguri_lost_ack_offline_recovery_and_discard_preserve_global_exclusion() {
+    use meguri_sync::{oneway::TransferError, policy::{Acceptance, Boundary}};
+    let _lane = LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let (host, config) = seeded(&root.path().join("local"));
+    let connection = select(&host);
+    let (_, data) = server(&root.path().join("server"));
+    let script = Script::new(vec![(Method::Meta, Reply::Bytes(meta(NOW - 2000, 7))),
+        (Method::Download, Reply::Bytes(data)), (Method::Meta, Reply::Bytes(meta(NOW - 1000, 8))),
+        (Method::Meta, Reply::Bytes(meta(NOW - 1000, 8))), (Method::Upload, Reply::Lost)]);
+    let preview = bootstrap_complete(&host, || host.prepare_meguri_bootstrap(access(&connection, &script), D::UseDeviceCollection).unwrap()).unwrap();
+    assert!(bootstrap_complete(&host, || host.confirm_meguri_bootstrap(access(&connection, &script), preview).unwrap()).is_err());
+    script.assert_done();
+    let retained = host.manual_transfer_history().active().unwrap().unwrap();
+    assert_eq!(retained.acceptance, Acceptance::PossiblyAccepted);
+    let artifacts = retained_artifacts(&config, &retained);
+    host.close().unwrap();
+    let host = CoreHost::open(config.clone()).unwrap();
+    settle(&host);
+    let actual = host.pending_meguri_bootstrap_preparation(&connection, USER).unwrap().unwrap();
+    let before = bytes(&config);
+    assert!(matches!(bootstrap_complete(&host, || host.prepare_meguri_bootstrap_recovery(&connection, &actual).unwrap()),
+        Err(TransferError::NeedsDecision(Boundary::RemoteCompletionUnknown))));
+    let actual = host.pending_meguri_bootstrap_preparation(&connection, USER).unwrap().unwrap();
+    assert!(matches!(host.discard_meguri_bootstrap_preparation(&connection, &actual),
+        Err(E::Transfer(TransferError::NeedsDecision(Boundary::RemoteCompletionUnknown)))));
+    assert_eq!(host.manual_transfer_history().active().unwrap(), Some(actual));
+    assert!(host.provider_authority().network_blocked());
+    let offline = Script::new(vec![]);
+    assert!(matches!(host.prepare_meguri_bootstrap(access(&connection, &offline), D::UseDeviceCollection), Err(E::Busy)));
+    offline.assert_done();
+    assert_eq!(script.count(Method::Upload), 1);
+    assert_eq!(script.count(Method::Meta), 3);
+    assert_eq!(script.count(Method::MediaBegin), 0);
+    assert_eq!(bytes(&config), before);
+    assert_artifacts(&artifacts);
+    host.close().unwrap();
+}
+#[test]
+fn meguri_exact_ok_offline_recovery_confirms_retained_candidate_without_second_upload() {
+    use meguri_sync::{oneway::TransferError, policy::{Acceptance, Boundary}};
+    let _lane = LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let (host, config) = seeded(&root.path().join("local"));
+    let connection = select(&host);
+    let (_, data) = server(&root.path().join("server"));
+    let script = collection_script(data, true);
+    let preview = bootstrap_complete(&host, || host.prepare_meguri_bootstrap(access(&connection, &script), D::UseDeviceCollection).unwrap()).unwrap();
+    let digest = preview.operation.candidate.as_ref().unwrap().identity.sha256;
+    meguri_model::faultpoint::arm("oneway.upload.after_ok",
+        meguri_model::faultpoint::Fault::IoError(std::io::ErrorKind::Other));
+    let confirmed = bootstrap_complete(&host, || host.confirm_meguri_bootstrap(access(&connection, &script), preview).unwrap());
+    meguri_model::faultpoint::disarm_all();
+    assert!(confirmed.is_err());
+    script.assert_done();
+    assert_eq!(host.manual_transfer_history().active().unwrap().unwrap().acceptance, Acceptance::ExactOk);
+    host.close().unwrap();
+    let host = CoreHost::open(config).unwrap();
+    settle(&host);
+    let actual = host.pending_meguri_bootstrap_preparation(&connection, USER).unwrap().unwrap();
+    let preview = bootstrap_complete(&host, || host.prepare_meguri_bootstrap_recovery(&connection, &actual).unwrap()).unwrap();
+    assert_eq!(preview.operation.acceptance, Acceptance::ExactOk);
+    assert!(matches!(host.discard_meguri_bootstrap_preparation(&connection, &preview.operation),
+        Err(E::Transfer(TransferError::NeedsDecision(Boundary::RemoteCompletionUnknown)))));
+    let offline = Script::new(vec![]);
+    let done = bootstrap_complete(&host, || host.confirm_meguri_bootstrap(access(&connection, &offline), preview).unwrap()).unwrap();
+    offline.assert_done();
+    assert!(done.collection_complete && done.receipt.is_none());
+    assert_eq!(done.scope, Scope::CollectionAndMedia);
+    assert!(matches!(host.discard_meguri_bootstrap_preparation(&connection, &done),
+        Err(E::Transfer(TransferError::NeedsDecision(Boundary::RemoteCompletionUnknown)))));
+    assert_eq!(script.count(Method::Upload), 1);
+    for method in [Method::Upload, Method::Meta, Method::MediaBegin] { assert_eq!(offline.count(method), 0); }
+    assert_eq!(DeviceState::for_collection(host.collection().unwrap().path()).replacement_evidence().unwrap().unwrap().candidate_file.sha256, digest);
+    unbound(&host);
+    host.close().unwrap();
+}
+
+fn discarded_failed_confirmation_allows_next_preview(cold: bool) {
+    use meguri_sync::{oneway::TransferError, policy::{Acceptance, Boundary}};
+    let root = tempfile::tempdir().unwrap();
+    let (host, config) = seeded(&root.path().join("local"));
+    let connection = select(&host);
+    let (_, data) = server(&root.path().join("server"));
+    // A genuine changed remote observation fails confirmation before upload,
+    // while retaining both the provider intent and the actual decision row.
+    let script = Script::new(vec![(Method::Meta, Reply::Bytes(meta(NOW - 2000, 7))),
+        (Method::Download, Reply::Bytes(data.clone())), (Method::Meta, Reply::Bytes(meta(NOW - 1000, 8))),
+        (Method::Meta, Reply::Bytes(meta(NOW, 9)))]);
+    let preview = bootstrap_complete(&host, || host.prepare_meguri_bootstrap(access(&connection, &script), D::UseDeviceCollection).unwrap()).unwrap();
+    let first_id = preview.operation.id.clone();
+    assert!(matches!(bootstrap_complete(&host, || host.confirm_meguri_bootstrap(access(&connection, &script), preview).unwrap()),
+        Err(TransferError::Stale(Boundary::RemoteChanged))));
+    script.assert_done();
+    let first = host.manual_transfer_history().get(&first_id).unwrap();
+    assert_eq!(first.acceptance, Acceptance::NotSent);
+    assert_eq!(first.phase, Phase::NeedsDecision);
+    assert_eq!(host.provider_authority().meguri_bootstrap_intent().unwrap().operation(), &first_id);
+    let first_artifacts = retained_artifacts(&config, &first);
+    let provider_before = bytes(&config);
+    let host = if cold { host.close().unwrap(); CoreHost::open(config.clone()).unwrap() } else { host };
+    settle(&host);
+    let pending = host.pending_meguri_bootstrap_preparation(&connection, USER).unwrap().unwrap();
+    assert_eq!(pending, first);
+    let cancelled_first = host.discard_meguri_bootstrap_preparation(&connection, &pending).unwrap();
+    assert_eq!(cancelled_first.phase, Phase::Cancelled);
+    assert!(host.manual_transfer_history().active().unwrap().is_none());
+    assert!(!host.provider_authority().network_blocked());
+    // The cold case also proves the stale intent and real cancellation survive
+    // reopening before the next explicit preparation.
+    let host = if cold { host.close().unwrap(); CoreHost::open(config.clone()).unwrap() } else { host };
+    settle(&host);
+    let next_script = offline_preparation_script(data);
+    let next = bootstrap_complete(&host, || host.prepare_meguri_bootstrap(access(&connection, &next_script), D::UseDeviceCollection).unwrap()).unwrap();
+    next_script.assert_done();
+    assert_ne!(next.operation.id, first_id);
+    let next_artifacts = retained_artifacts(&config, &next.operation);
+    assert_eq!(host.pending_meguri_bootstrap_preparation(&connection, USER).unwrap().as_ref(), Some(&next.operation));
+    assert!(matches!(host.discard_meguri_bootstrap_preparation(&connection, &cancelled_first), Err(E::Ready(F::OperationMismatch))));
+    assert!(matches!(host.pending_meguri_bootstrap_preparation(&connection, "other-user"), Err(E::Ready(F::AccountChanged))));
+    let cancelled_next = host.discard_meguri_bootstrap_preparation(&connection, &next.operation).unwrap();
+    assert_eq!(cancelled_next.phase, Phase::Cancelled);
+    assert!(host.pending_meguri_bootstrap_preparation(&connection, USER).unwrap().is_none());
+    assert!(!host.provider_authority().network_blocked());
+    assert_eq!(host.manual_transfer_history().get(&first_id).unwrap(), cancelled_first);
+    assert_eq!(host.manual_transfer_history().get(&next.operation.id).unwrap(), cancelled_next);
+    assert_eq!(host.manual_transfer_history().history().unwrap().len(), 2);
+    assert_eq!(bytes(&config), provider_before);
+    assert_artifacts(&first_artifacts);
+    assert_artifacts(&next_artifacts);
+    for method in [Method::Upload, Method::MediaBegin, Method::UploadChanges, Method::MediaChanges, Method::DownloadFiles, Method::MediaSanity] {
+        assert_eq!(script.count(method), 0);
+        assert_eq!(next_script.count(method), 0);
+    }
+    host.close().unwrap();
+}
+#[test]
+fn meguri_warm_cancelled_failed_confirmation_intent_allows_next_preview_and_discard() {
+    let _lane = LANE.lock().unwrap();
+    discarded_failed_confirmation_allows_next_preview(false);
+}
+#[test]
+fn meguri_cold_cancelled_failed_confirmation_intent_allows_next_preview_and_discard() {
+    let _lane = LANE.lock().unwrap();
+    discarded_failed_confirmation_allows_next_preview(true);
+}

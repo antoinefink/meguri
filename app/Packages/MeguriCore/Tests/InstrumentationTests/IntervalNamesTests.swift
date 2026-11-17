@@ -73,6 +73,8 @@ import Testing
             "ProviderBootstrapResult.outcome", "ProviderBootstrapResult.media_snapshot", "ProviderBootstrapResult.request_stop",
             "ProviderBootstrapResult.retained_operation",
             "ProviderConnection.start_collection_round", "ProviderConnection.start_media_round", "ProviderRoundResult.outcome", "ProviderRoundResult.retry_finalization",
+            "ProviderConnection.pending_bootstrap_preparation", "ProviderConnection.discard_bootstrap_preview",
+            "ProviderConnection.discard_bootstrap_operation", "ProviderConnection.start_bootstrap_recovery",
             "test_cloud_zone_deletion_fixture", "test_cloud_zone_deletion_rows",
             "CloudPolicyExecution.begin_cleanup_pass", "CloudCleanupPass.submit_inventory", "CloudCleanupPass.complete_inventory", "CloudCleanupPass.finish",
             "CloudPolicyExecution.begin_zone_deletion_pass", "CloudZoneDeletionPass.active_target", "CloudZoneDeletionPass.submit_read", "CloudZoneDeletionPass.complete_read", "CloudZoneDeletionPass.submit_deletion", "CloudZoneDeletionPass.complete_deletion", "CloudZoneDeletionPass.finish",

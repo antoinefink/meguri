@@ -75,6 +75,7 @@ fn failure(error: MeguriBootstrapError) -> ProviderBootstrapOutcome {
         E::ConnectionChanged | E::Ready(R::ConnectionChanged) => F::ConnectionChanged,
         E::Busy | E::Engine(meguri_engine::EngineError::Busy { .. }) => F::Busy,
         E::AlreadyBound => F::AlreadyBound, E::Username => F::Username,
+        E::Transfer(error) => return transfer_failure(error),
         E::Ready(R::NoIntent) => F::NoIntent, E::Ready(R::OperationMismatch) => F::OperationMismatch,
         E::Ready(R::NotComplete) => F::NotComplete, E::Ready(R::AccountChanged) => F::AccountChanged,
         E::Ready(R::PublicationChanged) => F::PublicationChanged, E::Ready(R::DocumentChanged) => F::DocumentChanged,
@@ -236,6 +237,13 @@ impl ProviderBootstrapResult {
     }
 }
 impl ProviderConnection {
+    fn discard_preparation(&self, operation: &Operation) -> ProviderBootstrapOutcome {
+        match self.owner.host.discard_meguri_bootstrap_preparation_for_generation(self.owner.generation, &self.inner, operation) {
+            Ok(inner) => ProviderBootstrapOutcome::Operation { operation: Arc::new(ProviderBootstrapOperation {
+                owner: self.owner.clone(), connection: self.inner.clone(), inner }) },
+            Err(error) => failure(error),
+        }
+    }
     fn access(&self, credentials: ProviderCredentials) -> Result<MeguriAccess, MeguriBootstrapError> {
         let expected = information(&self.inner);
         if credentials.connection.reference != expected.reference || credentials.connection.revision != expected.revision
@@ -243,7 +251,15 @@ impl ProviderConnection {
         MeguriAccess::new(self.inner.clone(), &credentials.username, HostKey::new(credentials.hostkey))
     }
     fn same_host(&self, owner: &ProviderOwner, connection: &MeguriConnection) -> Result<(), CoreError> {
+        // Retained operation capabilities survive their own activation on the
+        // same Host. The current caller and Host policy still gate every use.
         if !Arc::ptr_eq(&self.owner.host, &owner.host) || &self.inner != connection { return Err(invalid()); }
+        Ok(())
+    }
+    fn same_current_owner(&self, owner: &ProviderOwner, connection: &MeguriConnection) -> Result<(), CoreError> {
+        self.same_host(owner, connection)?;
+        owner.validate()?;
+        if self.owner.generation != owner.generation { return Err(invalid()); }
         Ok(())
     }
     fn job(&self, source: Source) -> ProviderBootstrapJob {
@@ -263,6 +279,38 @@ pub enum ProviderBootstrapReadiness {
 }
 #[uniffi::export]
 impl ProviderConnection {
+    /// Local account selection only. The returned handle comes from this
+    /// original Host's actual active policy, including pre-confirmation state.
+    pub fn pending_bootstrap_preparation(&self, username: String) -> Result<Option<Arc<ProviderBootstrapOperation>>, CoreError> {
+        callback::enter("ProviderConnection.pending_bootstrap_preparation");
+        self.owner.validate()?;
+        let inner = self.owner.host.pending_meguri_bootstrap_preparation_for_generation(self.owner.generation, &self.inner, &username)
+            .map_err(|_| CoreError::Unavailable { reason: "Meguri pending preparation unavailable".into() })?;
+        Ok(inner.map(|inner| Arc::new(ProviderBootstrapOperation {
+            owner: self.owner.clone(), connection: self.inner.clone(), inner })))
+    }
+    pub fn discard_bootstrap_preview(&self, preview: Arc<ProviderBootstrapPreview>) -> Result<ProviderBootstrapOutcome, CoreError> {
+        callback::enter("ProviderConnection.discard_bootstrap_preview");
+        self.owner.validate()?;
+        self.same_current_owner(&preview.owner, &preview.connection)?;
+        consume(&preview.consumed)?;
+        Ok(self.discard_preparation(&preview.inner.operation))
+    }
+    pub fn discard_bootstrap_operation(&self, operation: Arc<ProviderBootstrapOperation>) -> Result<ProviderBootstrapOutcome, CoreError> {
+        callback::enter("ProviderConnection.discard_bootstrap_operation");
+        self.owner.validate()?;
+        self.same_current_owner(&operation.owner, &operation.connection)?;
+        Ok(self.discard_preparation(&operation.inner))
+    }
+    pub fn start_bootstrap_recovery(&self, operation: Arc<ProviderBootstrapOperation>) -> Result<ProviderBootstrapJob, CoreError> {
+        callback::enter("ProviderConnection.start_bootstrap_recovery");
+        self.owner.validate()?;
+        self.same_current_owner(&operation.owner, &operation.connection)?;
+        let source = match self.owner.host.prepare_meguri_bootstrap_recovery_for_generation(self.owner.generation, &self.inner, &operation.inner) {
+            Ok(task) => Source::Preview(Arc::new(task)), Err(error) => Source::Cell(failure(error)),
+        };
+        Ok(self.job(source))
+    }
     pub fn start_bootstrap_prepare(&self, credentials: ProviderCredentials, direction: ProviderBootstrapDirection) -> Result<ProviderBootstrapJob, CoreError> {
         callback::enter("ProviderConnection.start_bootstrap_prepare");
         self.owner.validate()?;
@@ -274,7 +322,7 @@ impl ProviderConnection {
     pub fn start_bootstrap_confirm(&self, credentials: ProviderCredentials, preview: Arc<ProviderBootstrapPreview>) -> Result<ProviderBootstrapJob, CoreError> {
         callback::enter("ProviderConnection.start_bootstrap_confirm");
         self.owner.validate()?;
-        self.same_host(&preview.owner, &preview.connection)?;
+        self.same_current_owner(&preview.owner, &preview.connection)?;
         if self.owner.generation != preview.owner.generation { return Err(invalid()); }
         let access = match self.access(credentials) { Ok(access) => access, Err(error) => return Ok(self.job(Source::Cell(failure(error)))) };
         consume(&preview.consumed)?;
@@ -295,7 +343,7 @@ impl ProviderConnection {
     pub fn start_bootstrap_media(&self, credentials: ProviderCredentials, consent: Arc<ProviderBootstrapMediaConsent>) -> Result<ProviderBootstrapJob, CoreError> {
         callback::enter("ProviderConnection.start_bootstrap_media");
         self.owner.validate()?;
-        self.same_host(&consent.owner, &consent.connection)?;
+        self.same_current_owner(&consent.owner, &consent.connection)?;
         if self.owner.generation != consent.owner.generation { return Err(invalid()); }
         let access = match self.access(credentials) { Ok(access) => access, Err(error) => return Ok(self.job(Source::Cell(failure(error)))) };
         consume(&consent.consumed)?;
@@ -341,13 +389,16 @@ impl ProviderConnection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn connection(root: &std::path::Path) -> Arc<ProviderConnection> {
+    fn fixture_config(root: &std::path::Path) -> meguri_host::HostConfig {
         use meguri_model::{clock::{FixedClock, UtcOffset}, rng::SeededRandom};
         let collection = root.join("collection");
         std::fs::create_dir_all(&collection).unwrap();
-        let config = meguri_host::HostConfig::new(collection, root.join("backups"), root.join("widget"),
+        meguri_host::HostConfig::new(collection, root.join("backups"), root.join("widget"),
             Arc::new(FixedClock::new(1_894_701_600_000, UtcOffset::UTC)), Arc::new(SeededRandom::new(171)),
-            Arc::new(meguri_storage::space::StatvfsSpace));
+            Arc::new(meguri_storage::space::StatvfsSpace))
+    }
+    fn connection(root: &std::path::Path) -> Arc<ProviderConnection> {
+        let config = fixture_config(root);
         meguri_engine::bootstrap::create(&config.collection_directory.join("collection.anki2"), config.clock.as_ref(), config.random.as_ref()).unwrap();
         let host = Arc::new(meguri_host::CoreHost::open(config).unwrap());
         let generation = host.cloud_connection_generation().unwrap();
@@ -408,5 +459,364 @@ mod tests {
                 (1, ProviderBootstrapOutcome::Refused { failure: ProviderBootstrapFailure::MediaEpochMissing, .. }) |
                 (2, ProviderBootstrapOutcome::Refused { failure: ProviderBootstrapFailure::BindingChanged, .. })));
         }
+    }
+    // The injected transport interrupts this job before a response. The real
+    // Rust worker/policy supplies the admitted identity; no Preview or operation
+    // is constructed from display data. This covers interrupted preparation,
+    // not native delivery of a successful collection preview.
+    struct InterruptedPreparation(Arc<std::sync::atomic::AtomicUsize>);
+    impl meguri_sync::SyncTransport for InterruptedPreparation {
+        fn post(&self, _: meguri_sync::transport::TransportRequest)
+            -> meguri_sync::transport::BoxFuture<'_, Result<meguri_sync::transport::TransportResponse, meguri_sync::SyncError>> {
+            Box::pin(async move {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                panic!("synthetic preparation worker interruption")
+            })
+        }
+    }
+    fn interrupted_preparation(connection: &ProviderConnection) -> Arc<std::sync::atomic::AtomicUsize> {
+        let host = &connection.owner.host;
+        let handoff = host.begin_provider_handoff(meguri_sync::provider::Selection::Meguri).unwrap();
+        host.finish_provider_handoff(&handoff).unwrap();
+        host.collection().unwrap().run(meguri_engine::OpSpec::named("bootstrap fixture barrier", meguri_engine::OpSource::Rollover), |_| Ok(())).unwrap();
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let access = connection.access(credentials(connection)).unwrap()
+            .with_transport_for_testing(Box::new(InterruptedPreparation(calls.clone())));
+        let events = host.engine().stream().subscribe();
+        let task = host.prepare_meguri_bootstrap(access, MeguriBootstrapDirection::UseDeviceCollection).unwrap();
+        let id = task.job.id;
+        let wrapped = connection.job(Source::Preview(Arc::new(task)));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        loop {
+            let event = events.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())).expect("interrupted worker deadline");
+            if matches!(event.kind, meguri_engine::EventKind::JobFinished { id: actual, .. } if actual == id) { break; }
+        }
+        assert!(matches!(wrapped.result.outcome().unwrap(), ProviderBootstrapOutcome::Pending));
+        let retained = wrapped.result.retained_operation().unwrap().unwrap();
+        assert_eq!(host.manual_transfer_history().active().unwrap().as_ref(), Some(&retained.inner));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        calls
+    }
+    #[test]
+    fn ffi_actual_interrupted_pending_operation_can_be_discarded_warm_or_cold() {
+        for cold in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let original = connection(root.path());
+            let calls = interrupted_preparation(&original);
+            let old = original.pending_bootstrap_preparation("synthetic-user".into()).unwrap().unwrap();
+            let current = if cold {
+                original.owner.host.close().unwrap();
+                let host = Arc::new(meguri_host::CoreHost::open(fixture_config(root.path())).unwrap());
+                let generation = host.cloud_connection_generation().unwrap();
+                let inner = host.provider_authority().snapshot().unwrap().meguri.unwrap();
+                Arc::new(ProviderConnection { owner: Arc::new(ProviderOwner { host, generation }), inner })
+            } else { original.clone() };
+            assert!(current.pending_bootstrap_preparation("other-user".into()).is_err());
+            let pending = current.pending_bootstrap_preparation(" Synthetic-User ".into()).unwrap().unwrap();
+            assert_eq!(pending.inner, old.inner);
+            if cold {
+                assert!(original.pending_bootstrap_preparation("synthetic-user".into()).is_err());
+                assert!(current.discard_bootstrap_operation(old.clone()).is_err());
+                assert!(current.start_bootstrap_recovery(old).is_err());
+            }
+            let outcome = current.discard_bootstrap_operation(pending.clone()).unwrap();
+            let ProviderBootstrapOutcome::Operation { operation } = outcome else { panic!("actual cancellation receipt required") };
+            assert_eq!(operation.inner.phase, meguri_sync::policy::Phase::Cancelled);
+            assert!(current.owner.host.manual_transfer_history().active().unwrap().is_none());
+            assert_eq!(current.owner.host.manual_transfer_history().get(&pending.inner.id).unwrap(), operation.inner);
+            assert!(current.pending_bootstrap_preparation("synthetic-user".into()).unwrap().is_none());
+            assert!(matches!(current.discard_bootstrap_operation(pending).unwrap(), ProviderBootstrapOutcome::Refused {
+                failure: ProviderBootstrapFailure::OperationMismatch, accounting: None }));
+            assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+            current.owner.host.close().unwrap();
+        }
+    }
+    #[test]
+    fn ffi_actual_pending_operation_rejects_foreign_host_and_changed_connection_without_discard() {
+        let root = tempfile::tempdir().unwrap();
+        let original = connection(root.path());
+        let calls = interrupted_preparation(&original);
+        let pending = original.pending_bootstrap_preparation("synthetic-user".into()).unwrap().unwrap();
+        let other_root = tempfile::tempdir().unwrap();
+        let foreign = connection(other_root.path());
+        assert!(foreign.discard_bootstrap_operation(pending.clone()).is_err());
+        assert!(foreign.start_bootstrap_recovery(pending.clone()).is_err());
+        for field in ["reference", "revision", "endpoint"] {
+            let mut inner = original.inner.clone();
+            match field { "reference" => inner.reference.push('x'), "revision" => inner.revision += 1,
+                _ => inner.endpoint = "https://foreign.synthetic.example/".into() }
+            let wrong = ProviderConnection { owner: original.owner.clone(), inner };
+            assert!(wrong.discard_bootstrap_operation(pending.clone()).is_err());
+            assert!(wrong.start_bootstrap_recovery(pending.clone()).is_err());
+            assert!(wrong.pending_bootstrap_preparation("synthetic-user".into()).is_err());
+        }
+        assert_eq!(original.owner.host.manual_transfer_history().active().unwrap().as_ref(), Some(&pending.inner));
+        assert!(matches!(original.discard_bootstrap_operation(pending).unwrap(), ProviderBootstrapOutcome::Operation { .. }));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        original.owner.host.close().unwrap();
+        foreign.owner.host.close().unwrap();
+    }
+    #[test]
+    fn ffi_actual_offline_recovery_keeps_not_sent_interruption_typed_and_old_decision_stale() {
+        let root = tempfile::tempdir().unwrap();
+        let connection = connection(root.path());
+        let calls = interrupted_preparation(&connection);
+        let pending = connection.pending_bootstrap_preparation("synthetic-user".into()).unwrap().unwrap();
+        let events = connection.owner.host.engine().stream().subscribe();
+        let started = connection.start_bootstrap_recovery(pending.clone()).unwrap();
+        let id = started.handle.as_ref().unwrap().id;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        loop {
+            let event = events.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())).expect("offline recovery deadline");
+            if matches!(event.kind, meguri_engine::EventKind::JobFinished { id: actual, .. } if actual.0 == id) { break; }
+        }
+        assert!(matches!(started.result.outcome().unwrap(), ProviderBootstrapOutcome::Refused {
+            failure: ProviderBootstrapFailure::Transfer { failure: TransferFailure {
+                boundary: Some(TransferBoundary::PreparationInterrupted), .. } }, accounting: None }));
+        assert!(matches!(connection.discard_bootstrap_operation(pending).unwrap(), ProviderBootstrapOutcome::Refused {
+            failure: ProviderBootstrapFailure::OperationMismatch, accounting: None }));
+        let fresh = connection.pending_bootstrap_preparation("synthetic-user".into()).unwrap().unwrap();
+        assert_eq!(fresh.inner.phase, meguri_sync::policy::Phase::NeedsDecision);
+        assert!(matches!(connection.discard_bootstrap_operation(fresh).unwrap(), ProviderBootstrapOutcome::Operation { .. }));
+        connection.owner.host.close().unwrap();
+        started.result.request_stop(true).unwrap();
+        assert!(matches!(started.result.outcome().unwrap(), ProviderBootstrapOutcome::Refused {
+            failure: ProviderBootstrapFailure::Transfer { failure: TransferFailure {
+                boundary: Some(TransferBoundary::PreparationInterrupted), .. } }, accounting: None }));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+    #[test]
+    fn reused_transfer_refusal_keeps_unknown_acceptance_typed_and_redacted() {
+        let error = MeguriBootstrapError::Transfer(TransferError::NeedsDecision(meguri_sync::policy::Boundary::RemoteCompletionUnknown));
+        assert_eq!(format!("{error:?}"), "Transfer");
+        assert!(matches!(failure(error), ProviderBootstrapOutcome::Refused {
+            failure: ProviderBootstrapFailure::Transfer { failure: TransferFailure {
+                boundary: Some(TransferBoundary::RemoteCompletionUnknown), .. } }, accounting: None }));
+    }
+
+    // Only this injected transport routes the synthetic configured endpoint to
+    // the job-owned loopback stub. Provider/policy identity remains unchanged.
+    struct BootstrapFixtureTransport {
+        target: String, http: meguri_sync::transport::http::HttpTransport,
+    }
+    impl meguri_sync::SyncTransport for BootstrapFixtureTransport {
+        fn post(&self, mut request: meguri_sync::transport::TransportRequest)
+            -> meguri_sync::transport::BoxFuture<'_, Result<meguri_sync::transport::TransportResponse, meguri_sync::SyncError>> {
+            let path = request.url.strip_prefix("https://bootstrap.synthetic.example/").expect("synthetic endpoint only");
+            request.url = format!("{}{path}", self.target);
+            request.stall_timeout = std::time::Duration::from_secs(5);
+            meguri_sync::SyncTransport::post(&self.http, request)
+        }
+    }
+    fn fixture_access(connection: &ProviderConnection, stub: &BootstrapFixtureServer) -> MeguriAccess {
+        let target = stub.target.clone();
+        let options = meguri_sync::JobOptions::new(meguri_sync::Endpoint::parse(&target).unwrap(), meguri_sync::ServerKind::SelfHosted)
+            .stall_timeout(std::time::Duration::from_secs(5));
+        connection.access(credentials(connection)).unwrap().with_transport_for_testing(Box::new(BootstrapFixtureTransport {
+            target, http: meguri_sync::transport::http::HttpTransport::new(&options).unwrap(),
+        }))
+    }
+    fn fixture_outcome(connection: &ProviderConnection, start: impl FnOnce() -> ProviderBootstrapJob) -> ProviderBootstrapOutcome {
+        let events = connection.owner.host.engine().stream().subscribe();
+        let job = start();
+        let id = job.handle.as_ref().expect("actual worker required").id;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        loop {
+            let event = events.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())).expect("bootstrap fixture worker deadline");
+            if matches!(event.kind, meguri_engine::EventKind::JobFinished { id: actual, .. } if actual.0 == id) { break; }
+        }
+        job.result.outcome().unwrap()
+    }
+    // A finite, job-owned loopback responder. Raw zstd blocks keep this fixture
+    // independent of testkit (and of duplicate Host types in in-file tests).
+    struct BootstrapFixtureServer {
+        target: String, stop: Arc<std::sync::atomic::AtomicBool>,
+        worker: Option<std::thread::JoinHandle<std::io::Result<Vec<String>>>>,
+    }
+    impl BootstrapFixtureServer {
+        fn new(replies: Vec<(&'static str, Vec<u8>)>) -> Self {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let target = format!("http://{}/", listener.local_addr().unwrap());
+            listener.set_nonblocking(true).unwrap();
+            let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let stopped = stop.clone();
+            let worker = std::thread::spawn(move || {
+                use std::io::{BufRead, Read, Write};
+                let mut paths = Vec::new();
+                for (expected, payload) in replies {
+                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+                    let (mut socket, _) = loop {
+                        if stopped.load(std::sync::atomic::Ordering::SeqCst) || std::time::Instant::now() >= deadline {
+                            return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "fixture request deadline"));
+                        }
+                        match listener.accept() {
+                            Ok(socket) => break socket,
+                            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(std::time::Duration::from_millis(5)),
+                            Err(error) => return Err(error),
+                        }
+                    };
+                    socket.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
+                    socket.set_write_timeout(Some(std::time::Duration::from_secs(5)))?;
+                    let mut reader = std::io::BufReader::new(socket.try_clone()?);
+                    let mut line = String::new();
+                    reader.read_line(&mut line)?;
+                    let path = line.split_whitespace().nth(1).unwrap_or("").to_owned();
+                    paths.push(path.clone());
+                    if path != expected {
+                        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "unexpected fixture request"));
+                    }
+                    let mut length = 0;
+                    let mut chunked = false;
+                    loop {
+                        line.clear();
+                        if reader.read_line(&mut line)? == 0 {
+                            return Err(std::io::ErrorKind::UnexpectedEof.into());
+                        }
+                        if line == "\r\n" { break; }
+                        if let Some((name, value)) = line.split_once(':') {
+                            if name.eq_ignore_ascii_case("content-length") {
+                                length = value.trim().parse::<u64>().map_err(|_| std::io::ErrorKind::InvalidData)?;
+                            }
+                            if name.eq_ignore_ascii_case("transfer-encoding") { chunked = value.trim().eq_ignore_ascii_case("chunked"); }
+                        }
+                    }
+                    // Drain the real request stream before replying, including
+                    // the upload. The test never substitutes successful worker
+                    // results for network/activation effects.
+                    if chunked {
+                        loop {
+                            line.clear();
+                            reader.read_line(&mut line)?;
+                            let size = u64::from_str_radix(line.trim().split(';').next().unwrap_or(""), 16)
+                                .map_err(|_| std::io::ErrorKind::InvalidData)?;
+                            if size == 0 {
+                                loop {
+                                    line.clear();
+                                    if reader.read_line(&mut line)? == 0 { return Err(std::io::ErrorKind::UnexpectedEof.into()); }
+                                    if line == "\r\n" { break; }
+                                }
+                                break;
+                            }
+                            if std::io::copy(&mut reader.by_ref().take(size), &mut std::io::sink())? != size {
+                                return Err(std::io::ErrorKind::UnexpectedEof.into());
+                            }
+                            let mut ending = [0; 2];
+                            reader.read_exact(&mut ending)?;
+                            if ending != *b"\r\n" { return Err(std::io::ErrorKind::InvalidData.into()); }
+                        }
+                    } else if std::io::copy(&mut reader.by_ref().take(length), &mut std::io::sink())? != length {
+                        return Err(std::io::ErrorKind::UnexpectedEof.into());
+                    }
+                    // Single-segment frame with a four-byte content size and
+                    // bounded raw blocks; these are response fixture bytes.
+                    let size = u32::try_from(payload.len()).map_err(|_| std::io::ErrorKind::InvalidData)?;
+                    let mut frame = vec![0x28, 0xb5, 0x2f, 0xfd, 0xa0];
+                    frame.extend_from_slice(&size.to_le_bytes());
+                    if payload.is_empty() { frame.extend_from_slice(&[1, 0, 0]); }
+                    for (index, chunk) in payload.chunks(65_536).enumerate() {
+                        let last = (index + 1) * 65_536 >= payload.len();
+                        let header = ((chunk.len() as u32) << 3) | u32::from(last);
+                        frame.extend_from_slice(&header.to_le_bytes()[..3]);
+                        frame.extend_from_slice(chunk);
+                    }
+                    write!(socket, "HTTP/1.1 200 OK\r\nconnection: close\r\nanki-original-size: {}\r\ncontent-length: {}\r\n\r\n", payload.len(), frame.len())?;
+                    socket.write_all(&frame)?;
+                    socket.flush()?;
+                }
+                Ok(paths)
+            });
+            Self { target, stop, worker: Some(worker) }
+        }
+        fn finish(mut self) -> Vec<String> {
+            self.worker.take().unwrap().join().expect("fixture responder joined").expect("fixture requests completed")
+        }
+    }
+    impl Drop for BootstrapFixtureServer {
+        fn drop(&mut self) {
+            self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+            if let Some(worker) = self.worker.take() { let _ = worker.join(); }
+        }
+    }
+    #[test]
+    fn ffi_actual_activation_retained_operation_accepts_fresh_current_owner_media_path() {
+        use meguri_storage::{OpenOptions, ReadRows, StampMode, open_collection};
+        const NOW: i64 = 1_894_701_600_000;
+        let root = tempfile::tempdir().unwrap();
+        let original = connection(&root.path().join("local"));
+        let host = &original.owner.host;
+        let handoff = host.begin_provider_handoff(meguri_sync::provider::Selection::Meguri).unwrap();
+        host.finish_provider_handoff(&handoff).unwrap();
+        host.collection().unwrap().run(meguri_engine::OpSpec::named("bootstrap fixture barrier", meguri_engine::OpSource::Rollover), |_| Ok(())).unwrap();
+        let server = fixture_config(&root.path().join("server"));
+        let path = server.collection_directory.join("collection.anki2");
+        meguri_engine::bootstrap::create(&path, server.clock.as_ref(), server.random.as_ref()).unwrap();
+        let db = open_collection(&path, &OpenOptions::new(server.clock.as_ref(), server.random.as_ref())).unwrap();
+        let mut scope = db.writer().begin_write(StampMode::Raw, server.clock.as_ref(), None).unwrap();
+        let mut col = scope.col().unwrap();
+        col.modified = meguri_model::time::EpochMillis(NOW - 1000);
+        col.schema_modified = meguri_model::time::EpochMillis(NOW - 5000);
+        col.usn = meguri_model::usn::Usn(8);
+        scope.put_col(&col).unwrap();
+        scope.commit().unwrap();
+        db.close().unwrap();
+        let data = std::fs::read(path).unwrap();
+        let meta = format!(r#"{{"mod":{},"scm":{},"usn":8,"ts":{},"msg":"","cont":true,"empty":true,"media_usn":0}}"#,
+            NOW - 1000, NOW - 5000, NOW / 1000).into_bytes();
+        let stub = BootstrapFixtureServer::new(vec![("/sync/meta", meta.clone()), ("/sync/download", data),
+            ("/sync/meta", meta.clone()), ("/sync/meta", meta), ("/sync/upload", b"OK".to_vec()),
+            ("/msync/begin", br#"{"data":{"usn":0,"sk":"synthetic"},"err":""}"#.to_vec())]);
+        // Use the existing Host transport injection, then the real FFI result
+        // conversion. Neither opaque preview nor operation authority is made
+        // from a DTO or a caller-selected operation identity.
+        let preview = fixture_outcome(&original, || original.job(Source::Preview(Arc::new(
+            host.prepare_meguri_bootstrap(fixture_access(&original, &stub), MeguriBootstrapDirection::UseDeviceCollection).unwrap()))));
+        let ProviderBootstrapOutcome::Preview { preview } = preview else { panic!("actual preview required") };
+        consume(&preview.consumed).unwrap();
+        let outcome = fixture_outcome(&original, || original.job(Source::Operation(Arc::new(
+            host.confirm_meguri_bootstrap(fixture_access(&original, &stub), preview.inner.clone()).unwrap()))));
+        let ProviderBootstrapOutcome::Operation { operation } = outcome else { panic!("actual activated operation required") };
+        let generation = host.cloud_connection_generation().unwrap();
+        let old_owner_stale = original.owner.validate().is_err();
+        let owner = Arc::new(ProviderOwner { host: host.clone(), generation });
+        let current = owner.configured_meguri().unwrap().unwrap();
+        // Old operation handles still cannot authorize local decisions.
+        let mut refused_owners = vec![current.discard_bootstrap_operation(operation.clone()).is_err(),
+            current.start_bootstrap_recovery(operation.clone()).is_err(),
+            current.discard_bootstrap_preview(preview.clone()).is_err(),
+            current.start_bootstrap_confirm(credentials(&current), preview).is_err()];
+        let other_root = tempfile::tempdir().unwrap();
+        let foreign = connection(other_root.path());
+        refused_owners.push(foreign.start_bootstrap_media_prepare(credentials(&foreign), operation.clone()).is_err());
+        refused_owners.push(foreign.complete_bootstrap(credentials(&foreign), operation.clone()).is_err());
+        for field in ["reference", "revision", "endpoint"] {
+            let mut inner = current.inner.clone();
+            match field { "reference" => inner.reference.push('x'), "revision" => inner.revision += 1,
+                _ => inner.endpoint = "https://foreign.synthetic.example/".into() }
+            let wrong = ProviderConnection { owner: current.owner.clone(), inner };
+            refused_owners.push(wrong.start_bootstrap_media_prepare(credentials(&wrong), operation.clone()).is_err());
+            refused_owners.push(wrong.complete_bootstrap(credentials(&wrong), operation.clone()).is_err());
+        }
+        let consent = fixture_outcome(&current, || current.start_bootstrap_media_prepare(credentials(&current), operation.clone()).unwrap());
+        let ProviderBootstrapOutcome::MediaConsent { consent } = consent else { panic!("actual media consent required") };
+        consume(&consent.consumed).unwrap();
+        let done = fixture_outcome(&current, || current.job(Source::Operation(Arc::new(
+            host.run_meguri_bootstrap_media_for_generation(generation, fixture_access(&current, &stub), consent.inner.confirmation.clone()).unwrap()))));
+        let ProviderBootstrapOutcome::Operation { operation: done } = done else { panic!("actual media result required") };
+        // Completion also accepts the genuine preactivation handle; Host reads
+        // the current retained row and validates intent/publication/media proof.
+        let completed = current.complete_bootstrap(credentials(&current), operation.clone()).unwrap();
+        let paths = stub.finish(); // Join the finite responder before inspecting its results.
+        host.close().unwrap();
+        foreign.owner.host.close().unwrap();
+        assert!(operation.inner.collection_complete);
+        assert_eq!(operation.inner.acceptance, meguri_sync::policy::Acceptance::ExactOk);
+        assert!(Arc::ptr_eq(&operation.owner, &original.owner));
+        assert_ne!(generation, original.owner.generation);
+        assert!(old_owner_stale);
+        assert!(refused_owners.into_iter().all(|refused| refused));
+        assert_eq!(done.inner.id, operation.inner.id);
+        assert_eq!(done.inner.media.stage, meguri_sync::policy::MediaStage::Complete);
+        assert!(matches!(completed, ProviderBootstrapOutcome::Ready { .. }));
+        assert_eq!(paths, ["/sync/meta", "/sync/download", "/sync/meta", "/sync/meta", "/sync/upload", "/msync/begin"]);
     }
 }

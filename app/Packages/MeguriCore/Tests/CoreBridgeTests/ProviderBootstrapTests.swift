@@ -245,3 +245,103 @@ extension EventTests {
         #expect(progress.bytesUploaded == 4 && progress.bytesDownloaded == 5 && progress.awaiting == 6)
     }
 }
+
+private let bootstrapLocalCommands: Set<BridgeCall> = [
+    .providerBootstrapPendingPreparation, .providerBootstrapDiscardPreview,
+    .providerBootstrapDiscardOperation, .providerBootstrapRecovery,
+]
+
+extension EventTests {
+    @Test @MainActor func ProviderBootstrapPendingPreparationIsOfflineAndNilBeforeExplicitPrepare() async throws {
+        try await withBootstrapCollection { _, _, core in
+            let store = BootstrapCredentialStore()
+            let owner = try await bootstrapOwner(core, store)
+            _ = try await core.finishHandoff(try await core.beginHandoff(to: .meguri))
+            let calls = Mutex<[BridgeCall]>([])
+            try await MaintenanceCallObservation.$capture.withValue({ call in calls.withLock { $0.append(call) } }) {
+                let reads = await store.reads.count
+                let facade = try await owner.bootstrapService()
+                #expect(await store.reads.count == reads)
+                #expect(try await facade.pendingPreparation() == nil)
+                #expect(await store.reads.count == reads + 1)
+                #expect(calls.withLock { Set($0).intersection(bootstrapLocalCommands) } == [.providerBootstrapPendingPreparation])
+                #expect(calls.withLock { Set($0).isDisjoint(with: bootstrapStarts) })
+                #expect(!calls.withLock { $0.contains(.providerStartLogin) || $0.contains(.jobProgressSetListener) })
+                let credentials = try #require(await store.value)
+                await store.delete(connection: credentials.connection)
+                await #expect(throws: MeguriBootstrapAdmissionFailure.credentialsMissing) { _ = try await facade.pendingPreparation() }
+                #expect(calls.withLock { $0.filter { $0 == .providerBootstrapPendingPreparation }.count } == 1)
+            }
+            await owner.cancelAndDrain()
+        }
+    }
+
+    @Test @MainActor func ProviderBootstrapPendingLookupJoinsHeldCredentialReadBeforeRetirement() async throws {
+        try await withBootstrapCollection { _, _, core in
+            let store = BootstrapCredentialStore()
+            let owner = try await bootstrapOwner(core, store)
+            let facade = try await owner.bootstrapService()
+            let gate = CloudCallbackGate()
+            await store.hold(gate)
+            let calls = Mutex<[BridgeCall]>([])
+            try await MaintenanceCallObservation.$capture.withValue({ call in calls.withLock { $0.append(call) } }) {
+                let lookup = Task { try await facade.pendingPreparation() }
+                var retirement: Task<Void, Never>?
+                do {
+                    try await bootstrapWait { await gate.pendingWaiterCount() == 1 }
+                    var busy = false
+                    do { _ = try await facade.readiness() }
+                    catch MeguriBootstrapAdmissionFailure.busy { busy = true }
+                    let revision = await owner.revision
+                    let drained = Mutex(false)
+                    let retiring = Task { await owner.cancelAndDrain(); drained.withLock { $0 = true } }
+                    retirement = retiring
+                    try await bootstrapWait { await owner.revision == revision + 1 }
+                    let joinedBeforeRelease = drained.withLock { $0 }
+                    await gate.open()
+                    let terminal = await lookup.result
+                    await retiring.value
+                    #expect(busy && !joinedBeforeRelease && drained.withLock { $0 })
+                    switch terminal {
+                    case .failure(let failure): #expect(failure as? MeguriBootstrapAdmissionFailure == .retired)
+                    case .success: Issue.record("Retired pending lookup returned authority")
+                    }
+                    #expect(calls.withLock { Set($0).isDisjoint(with: bootstrapLocalCommands.union(bootstrapStarts)) })
+                    await #expect(throws: MeguriBootstrapAdmissionFailure.retired) { _ = try await facade.pendingPreparation() }
+                } catch {
+                    lookup.cancel()
+                    await gate.open()
+                    _ = await lookup.result
+                    await retirement?.value
+                    await owner.cancelAndDrain()
+                    throw error
+                }
+            }
+        }
+    }
+
+    @Test @MainActor func ProviderBootstrapColdLookupUsesFreshAttachedHostAndCannotReviveRetiredFacade() async throws {
+        try await withBootstrapCollection { collection, location, core in
+            let store = BootstrapCredentialStore()
+            let originalOwner = try await bootstrapOwner(core, store)
+            _ = try await core.finishHandoff(try await core.beginHandoff(to: .meguri))
+            let original = try await originalOwner.bootstrapService()
+            #expect(try await original.pendingPreparation() == nil)
+            await originalOwner.cancelAndDrain()
+            try await collection.close()
+            try await collection.open(location, randomSeed: 921)
+            let fresh = MeguriProviderConnectionOwner(service: try await CoreProviderService.attached(), store: store)
+            try await fresh.load()
+            let current = try await fresh.bootstrapService()
+            let calls = Mutex<[BridgeCall]>([])
+            try await MaintenanceCallObservation.$capture.withValue({ call in calls.withLock { $0.append(call) } }) {
+                await #expect(throws: MeguriBootstrapAdmissionFailure.retired) { _ = try await original.pendingPreparation() }
+                #expect(try await current.pendingPreparation() == nil)
+                #expect(calls.withLock { $0.filter { $0 == .providerBootstrapPendingPreparation }.count } == 1)
+                #expect(calls.withLock { Set($0).isDisjoint(with: bootstrapStarts) })
+                #expect(!calls.withLock { $0.contains(.providerStartLogin) || $0.contains(.jobProgressSetListener) })
+            }
+            await fresh.cancelAndDrain()
+        }
+    }
+}

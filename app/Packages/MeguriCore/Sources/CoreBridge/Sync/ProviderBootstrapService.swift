@@ -116,7 +116,7 @@ public enum MeguriBootstrapReadiness: Sendable {
 }
 public struct MeguriBootstrapCommandResult: Sendable {
     public let outcome: MeguriBootstrapOutcome
-    /// Nil means Rust synchronously refused without creating a worker.
+    /// Nil means no worker was created; the typed outcome determines success or refusal.
     public let jobID: JobID?
     public let mediaProgress: MeguriBootstrapMediaProgress?
     public let progressFailure: BridgeError?
@@ -176,7 +176,13 @@ public actor MeguriProviderBootstrapService {
     private let raw: MeguriCoreBindings.ProviderConnection
     private let credentials: @Sendable () async throws -> MeguriProviderCredentials
     private var retired = false
-    private enum Value: Sendable { case command(MeguriBootstrapCommandResult), readiness(MeguriBootstrapReadiness) }
+    private enum Value: Sendable {
+        case command(MeguriBootstrapCommandResult), readiness(MeguriBootstrapReadiness), pending(MeguriBootstrapOperation?)
+    }
+    private enum WorkerStart: Sendable {
+        case credentials(@Sendable (MeguriCoreBindings.ProviderConnection, MeguriCoreBindings.ProviderCredentials) throws -> MeguriCoreBindings.ProviderBootstrapJob)
+        case local(@Sendable (MeguriCoreBindings.ProviderConnection) throws -> MeguriCoreBindings.ProviderBootstrapJob)
+    }
     private struct Active {
         let identity: UInt64
         let stop: BootstrapStop
@@ -280,17 +286,62 @@ public actor MeguriProviderBootstrapService {
         guard case .readiness(let readiness) = value else { throw BridgeError.internal("Unexpected bootstrap command") }
         return readiness
     }
+    public func pendingPreparation() async throws -> MeguriBootstrapOperation? {
+        let value = try await admit { stop in
+            let credentials = try await self.credentialValue(stop)
+            let raw = self.raw
+            let pending = try await MaintenanceLane.shared.call(.providerBootstrapPendingPreparation) {
+                try stop.check(); return try raw.pendingBootstrapPreparation(username: credentials.username)
+            }
+            if let pending { return .pending(try await self.operation(pending)) }
+            return .pending(nil)
+        }
+        guard case .pending(let operation) = value else { throw BridgeError.internal("Unexpected bootstrap command") }
+        return operation
+    }
+    private func localCommand(_ call: BridgeCall,
+                              perform: @escaping @Sendable (MeguriCoreBindings.ProviderConnection) throws -> MeguriCoreBindings.ProviderBootstrapOutcome) async throws -> MeguriBootstrapCommandResult {
+        let value = try await admit { stop in
+            try await self.current(stop)
+            let raw = self.raw
+            let result = try await MaintenanceLane.shared.call(call) {
+                try stop.check(); return try perform(raw)
+            }
+            // A stop after Rust entered cannot erase cancellation or refusal.
+            return .command(.init(outcome: try await self.outcome(result), jobID: nil,
+                                  mediaProgress: nil, progressFailure: nil, retryOperation: nil))
+        }
+        guard case .command(let result) = value else { throw BridgeError.internal("Unexpected bootstrap command") }
+        return result
+    }
+    public func discard(_ preview: MeguriBootstrapPreview) async throws -> MeguriBootstrapCommandResult {
+        try await localCommand(.providerBootstrapDiscardPreview) { try $0.discardBootstrapPreview(preview: preview.raw) }
+    }
+    public func discard(_ operation: MeguriBootstrapOperation) async throws -> MeguriBootstrapCommandResult {
+        try await localCommand(.providerBootstrapDiscardOperation) { try $0.discardBootstrapOperation(operation: operation.raw) }
+    }
+    public func prepareRecovery(_ operation: MeguriBootstrapOperation,
+                                progress: @escaping @Sendable (CoreProgress) -> Void = { _ in }) async throws -> MeguriBootstrapCommandResult {
+        try await worker(.providerBootstrapRecovery, progress: progress, mediaProgress: { _ in },
+                         start: .local { try $0.startBootstrapRecovery(operation: operation.raw) })
+    }
     private func worker(_ call: BridgeCall, preparation: Bool = false,
                         progress: @escaping @Sendable (CoreProgress) -> Void,
                         mediaProgress: @escaping @Sendable (MeguriBootstrapMediaProgress) -> Void,
-                        start: @escaping @Sendable (MeguriCoreBindings.ProviderConnection, MeguriCoreBindings.ProviderCredentials) throws -> MeguriCoreBindings.ProviderBootstrapJob) async throws -> MeguriBootstrapCommandResult {
+                        start: WorkerStart) async throws -> MeguriBootstrapCommandResult {
         let value = try await admit { stop in
-            let credentials = try await self.credentialValue(stop)
+            let begin: @Sendable (MeguriCoreBindings.ProviderConnection) throws -> MeguriCoreBindings.ProviderBootstrapJob
+            switch start {
+            case .credentials(let start):
+                let credentials = try await self.credentialValue(stop)
+                begin = { try start($0, credentials) }
+            case .local(let start): begin = start
+            }
             try await CoreEventStream.shared.start()
             try await self.current(stop)
             let raw = self.raw
             let started = try await MaintenanceLane.shared.call(call) {
-                try stop.check(); return try start(raw, credentials)
+                try stop.check(); return try begin(raw)
             }
             await stop.attach(started.result, started.handle.map { CancelToken(raw: $0.cancel) })
             var terminal: JobOutcome?
@@ -357,25 +408,25 @@ public actor MeguriProviderBootstrapService {
         let direction: MeguriCoreBindings.ProviderBootstrapDirection = switch direction {
         case .useServerCollection: .useServerCollection; case .useDeviceCollection: .useDeviceCollection
         }
-        return try await worker(.providerBootstrapPrepare, preparation: true, progress: progress, mediaProgress: { _ in }) {
+        return try await worker(.providerBootstrapPrepare, preparation: true, progress: progress, mediaProgress: { _ in }, start: .credentials {
             try $0.startBootstrapPrepare(credentials: $1, direction: direction)
-        }
+        })
     }
     public func confirm(_ preview: MeguriBootstrapPreview, progress: @escaping @Sendable (CoreProgress) -> Void = { _ in }) async throws -> MeguriBootstrapCommandResult {
-        try await worker(.providerBootstrapConfirm, progress: progress, mediaProgress: { _ in }) {
+        try await worker(.providerBootstrapConfirm, progress: progress, mediaProgress: { _ in }, start: .credentials {
             try $0.startBootstrapConfirm(credentials: $1, preview: preview.raw)
-        }
+        })
     }
     public func prepareMedia(_ operation: MeguriBootstrapOperation, progress: @escaping @Sendable (CoreProgress) -> Void = { _ in }) async throws -> MeguriBootstrapCommandResult {
-        try await worker(.providerBootstrapMediaPrepare, progress: progress, mediaProgress: { _ in }) {
+        try await worker(.providerBootstrapMediaPrepare, progress: progress, mediaProgress: { _ in }, start: .credentials {
             try $0.startBootstrapMediaPrepare(credentials: $1, operation: operation.raw)
-        }
+        })
     }
     public func transferMedia(_ consent: MeguriBootstrapMediaConsent, progress: @escaping @Sendable (CoreProgress) -> Void = { _ in },
                               mediaProgress: @escaping @Sendable (MeguriBootstrapMediaProgress) -> Void = { _ in }) async throws -> MeguriBootstrapCommandResult {
-        try await worker(.providerBootstrapMedia, progress: progress, mediaProgress: mediaProgress) {
+        try await worker(.providerBootstrapMedia, progress: progress, mediaProgress: mediaProgress, start: .credentials {
             try $0.startBootstrapMedia(credentials: $1, consent: consent.raw)
-        }
+        })
     }
     public func complete(_ operation: MeguriBootstrapOperation) async throws -> MeguriBootstrapOutcome {
         let value = try await admit { stop in

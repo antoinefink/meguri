@@ -2,8 +2,8 @@
 use crate::{CoreHost, ManualTransferTask};
 use meguri_engine::{EngineError, Generation, LongOp, device_state::DeviceState, media::MediaJobKind};
 use meguri_sync::{HostKey, JobOptions, ServerKind, SyncTransport,
-    oneway::{MediaConfirmation, MediaPreview, Preview, TransferAccess},
-    policy::{Direction, Operation, OperationId, Phase, Scope},
+    oneway::{MediaConfirmation, MediaPreview, Preview, TransferAccess, TransferError},
+    policy::{Acceptance, AccountRef, Direction, MediaOutcome, Operation, OperationId, Phase, Scope},
     provider::{EpochInputs, MeguriConnection, MeguriReadiness, MeguriReadyRefusal, ReadyInputs,
         Selection, canonical_username, native_endpoint}, provider_media::MediaAccounting};
 use std::fmt;
@@ -12,18 +12,21 @@ use std::fmt;
 pub enum MeguriBootstrapDirection { UseServerCollection, UseDeviceCollection }
 pub enum MeguriBootstrapError {
     NotSelected, ConnectionChanged, Busy, AlreadyBound, Username, Ready(MeguriReadyRefusal), Engine(EngineError),
+    Transfer(TransferError),
 }
 impl fmt::Debug for MeguriBootstrapError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Ready(error) => f.debug_tuple("Ready").field(error).finish(),
             _ => f.write_str(match self { Self::NotSelected => "NotSelected", Self::ConnectionChanged => "ConnectionChanged",
-                Self::Busy => "Busy", Self::AlreadyBound => "AlreadyBound", Self::Username => "Username", _ => "Engine" }),
+                Self::Busy => "Busy", Self::AlreadyBound => "AlreadyBound", Self::Username => "Username",
+                Self::Transfer(_) => "Transfer", _ => "Engine" }),
         }
     }
 }
 impl From<EngineError> for MeguriBootstrapError { fn from(error: EngineError) -> Self { Self::Engine(error) } }
 impl From<MeguriReadyRefusal> for MeguriBootstrapError { fn from(error: MeguriReadyRefusal) -> Self { Self::Ready(error) } }
+impl From<TransferError> for MeguriBootstrapError { fn from(error: TransferError) -> Self { Self::Transfer(error) } }
 type Result<T> = std::result::Result<T, MeguriBootstrapError>;
 
 pub struct MeguriAccess {
@@ -61,6 +64,91 @@ impl MeguriAccess {
     }
 }
 impl CoreHost {
+    /// Local inspection is allowed while retained preparation closes network
+    /// admission. Snapshot and policy reads finish before cancellation/refresh;
+    /// no provider sidecar callback contains a second sidecar read.
+    fn active_meguri_preparation(&self, connection: &MeguriConnection) -> Result<Option<Operation>> {
+        let doc = self.provider_authority().snapshot().map_err(MeguriReadyRefusal::Storage)?;
+        if doc.selection != Selection::Meguri { return Err(MeguriBootstrapError::NotSelected); }
+        if doc.handoff.is_some() || doc.meguri.as_ref() != Some(connection) {
+            return Err(MeguriBootstrapError::ConnectionChanged);
+        }
+        if doc.meguri_bootstrap.as_ref().is_some_and(|intent| intent.connection() != connection) {
+            return Err(MeguriReadyRefusal::OperationMismatch.into());
+        }
+        let active = self.manual_transfer_history().active().map_err(TransferError::from)?;
+        if let Some(op) = &active {
+            if op.configured_endpoint != connection.endpoint || op.scope != Scope::CollectionAndMedia {
+                return Err(MeguriReadyRefusal::OperationMismatch.into());
+            }
+            if let Some(intent) = &doc.meguri_bootstrap {
+                if intent.operation() != &op.id {
+                    // A failed confirmation can leave its intent after an
+                    // explicit safe cancellation. Retain that evidence; only
+                    // the actual old policy row can prove this mismatch safe.
+                    let old = self.manual_transfer_history().get(intent.operation()).map_err(TransferError::from)?;
+                    if old.phase != Phase::Cancelled
+                        || !matches!(old.acceptance, Acceptance::NotSent | Acceptance::Refused)
+                        || old.id == op.id || old.account != op.account || old.scope != op.scope
+                        || old.configured_endpoint != connection.endpoint
+                        || old.activation_identity.is_some() || old.actual_generation.is_some()
+                        || old.resulting_publication.is_some() || old.collection_complete
+                        || old.receipt.is_some() || old.media != MediaOutcome::default()
+                        || intent.media_epoch().is_some()
+                    {
+                        return Err(MeguriReadyRefusal::OperationMismatch.into());
+                    }
+                }
+            }
+        }
+        Ok(active)
+    }
+    /// Cold lookup derives the account locally; sign-in is never dispatched.
+    pub fn pending_meguri_bootstrap_preparation(&self, connection: &MeguriConnection, username: &str) -> Result<Option<Operation>> {
+        self.pending_meguri_bootstrap_preparation_for_generation(self.cloud_connection_generation()?, connection, username)
+    }
+    pub fn pending_meguri_bootstrap_preparation_for_generation(&self, generation: Generation,
+        connection: &MeguriConnection, username: &str) -> Result<Option<Operation>> {
+        let endpoint = native_endpoint(&connection.endpoint).map_err(|_| MeguriBootstrapError::ConnectionChanged)?;
+        let username = canonical_username(username).map_err(|_| MeguriBootstrapError::Username)?;
+        let account = AccountRef::derive(&endpoint, &username).ok_or(MeguriReadyRefusal::AccountChanged)?;
+        self.publish_provider_metadata(generation, |_| Ok((|| {
+            let active = self.active_meguri_preparation(connection)?;
+            if active.as_ref().is_some_and(|op| op.account != account) { return Err(MeguriReadyRefusal::AccountChanged.into()); }
+            Ok(active)
+        })()))?
+    }
+    fn check_pending_meguri_preparation(&self, connection: &MeguriConnection, operation: &Operation) -> Result<()> {
+        if self.active_meguri_preparation(connection)?.as_ref() != Some(operation) {
+            return Err(MeguriReadyRefusal::OperationMismatch.into());
+        }
+        Ok(())
+    }
+    /// Only the actual active decision may be discarded. The retained Flight
+    /// and policy guards decide whether cancellation is still safe.
+    pub fn discard_meguri_bootstrap_preparation(&self, connection: &MeguriConnection, operation: &Operation) -> Result<Operation> {
+        self.discard_meguri_bootstrap_preparation_for_generation(self.cloud_connection_generation()?, connection, operation)
+    }
+    pub fn discard_meguri_bootstrap_preparation_for_generation(&self, generation: Generation,
+        connection: &MeguriConnection, operation: &Operation) -> Result<Operation> {
+        let result = self.publish_provider_metadata(generation, |_| Ok((|| {
+            self.check_pending_meguri_preparation(connection, operation)?;
+            self.cancel_prepared_manual_transfer(&operation.id, false).map_err(Into::into)
+        })()))?;
+        // Original-owner publication gates, Flight and policy locks are released.
+        self.refresh_provider_admission();
+        result
+    }
+    /// Explicit offline exposure of the existing recovery decision. In
+    /// particular, unknown acceptance stays NeedsDecision and globally fenced.
+    pub fn prepare_meguri_bootstrap_recovery(&self, connection: &MeguriConnection, operation: &Operation) -> Result<ManualTransferTask<Preview>> {
+        self.prepare_meguri_bootstrap_recovery_for_generation(self.cloud_connection_generation()?, connection, operation)
+    }
+    pub fn prepare_meguri_bootstrap_recovery_for_generation(&self, generation: Generation,
+        connection: &MeguriConnection, operation: &Operation) -> Result<ManualTransferTask<Preview>> {
+        self.publish_provider_metadata(generation, |_| Ok(self.check_pending_meguri_preparation(connection, operation)))??;
+        Ok(self.prepare_manual_transfer_recovery(operation.id.clone())?)
+    }
     fn check_meguri_bootstrap(&self, connection: &MeguriConnection) -> Result<()> {
         let doc = self.provider_authority().snapshot().map_err(MeguriReadyRefusal::Storage)?;
         if doc.selection != Selection::Meguri { return Err(MeguriBootstrapError::NotSelected); }
