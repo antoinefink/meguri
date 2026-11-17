@@ -1238,15 +1238,16 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Sources/Features/Settings/Sync/MeguriSyncSetupViews.swift': '7a44f15263ad7942e0a74b756585833662ccb05340e3cbce785a976a22cbb4f9',
     'app/Packages/MeguriKit/Sources/Features/Settings/Sync/SyncStatusContent.swift': '0e9ebd0d7bd2f126638736ca6268453bf601564b6922895b103cfbde3d5aa0ca',
     'app/Packages/MeguriKit/Tests/AppModelTests/CloudSyncPresentationTests.swift': '11766d5d2ac1a18ba84f91fbb5753fb714ed38b1934278b785b377afbb7d8fff',
-    'app/Packages/MeguriKit/Tests/AppModelTests/ReviewCollectionStartupTests.swift': '592580aebb05b8cbc87243f4b54142fadadeb1646200ab3c730f04f5346940d8',
+    'app/Packages/MeguriKit/Tests/AppModelTests/ReviewCollectionStartupTests.swift': 'd2a44ffd55ef606588e2eda16cc2588df53bef7dd018663106899cdc2fa34635',
     'core/crates/meguri-host/src/provider_bootstrap.rs': '038e6199bd9e9d63e307023e182caa3632ace08fee94c21563e61854357553bd',
     'core/crates/meguri-host/Cargo.toml': 'ef2e5f907851eb4d19984c899516e6affe5444516b59d245f4501dde2b744a73',
-    'core/crates/meguri-host/examples/real_server_provider.rs': '4aa7edb5103960f16841048c6cbe2e33126a895d9badce186931dfd53ea15347',
+    'core/crates/meguri-host/examples/real_server_provider.rs': 'dacd403385ceea66c4077465a7b5dc76fb6cfbc2373b0e7a0a0e4ba0a3efc65b',
     'server/tools/package-smoke.mjs': '42e99aa0006c505c73d7329f3af36748e8e30d3e7cca702abf53abb9dbcc177e',
     'tools/mg.d/meguri-provider-test.sh': '12fd05b5cd35b67f81d13e673fbc7e35387ea28eef8d9cf89a019cef0b6d318e',
     'tools/tests/gate.bats': 'f47075ea99a15e3757e9731394b67b46a89307318eda7e18b9bff2d9a5d0a68b',
     'tools/tests/meguri_provider_real_server.bats': '0256954d730ef1fbbf34b9be246fe68450cf7b7f52305e32ef6d443dbaa613da',
     'app/Packages/MeguriKit/Tests/AppModelTests/CloudPreviewActivityTests.swift': '9ad2c7dfb1e320bf428f622df4137fc660375692936788bc8202c11e43dbeded',
+    'app/Packages/MeguriKit/Tests/AppModelTests/InitialCloudAdoptionTests.swift': '48ab986acd174f5306188c85a4d44d1232baea6097f2cb1c27a2794392841796',
 }
 
 
