@@ -829,7 +829,7 @@ PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
     'tools/tests/sync_recovery.bats':
-        '69258c1009d530ff656b6e4409c54af5513170a9d86d36c57f1460c0a2c2ca1a',
+        '6f6fd41c4c891150029db7abafd2b46022eea2b8f52cabc96bff1ca10981ce83',
     'tools/scripts/private-scan/tests/test_private_scan.py':
         'f6a486a548efb3a11731237f9d1802f9329b55532c2933ea74704158964288f1',
     'oracle/meguri-sync-server/retained_observer.py':
@@ -853,7 +853,7 @@ PUBLIC_ARTIFACTS = {
     'oracle/meguri-sync-server/tests/test_final_package.py':
         'dc7a82769bd6aa93590cc4b03a6c96540864226b7df7c28f3359ac3566b00816',
     'oracle/meguri-sync-server/tests/test_final_coverage.py':
-        '9356707d1b17d670c197bcd59cbd205ec4ba4685785e92d8a6cad09ef93e40c1',
+        '2b359154ae1fcd65df0da0fbe231147cd7b136573a7bf457cc99c5a896b7fb6b',
     'oracle/meguri-sync-server/final_handshake.py':
         '9e7f889c17ebb1d9d0508d08591aa6aaf121941e76761f3655f6fa859110f823',
     'oracle/meguri-sync-server/final_desktop.py':
@@ -1040,7 +1040,7 @@ PUBLIC_ARTIFACTS = {
     'oracle/meguri-sync-server/validation.py':
         '0b18623520af011b829fee4f31728ffda31c2c99cc10046b7143b9fdba2a7034',
     'tools/mg.d/meguri-sync-reference.sh':
-        '22b22805784716bd48be8142d8b86d04b0a69c1e216d78fed542944a8cbc0f85',
+        'bf995ec59eb8f8396d9e20e1255a71d5793c535334c62b8224da7609b18ab5a5',
 
     'docs/process/review-log/meguri-sync-reference-privacy.md':
         '4ef0a4f96b31e513f73415ac2160a9ce14e335fbd9cc841ddbe4ed2159e643a8',
@@ -1137,7 +1137,7 @@ PUBLIC_VENDOR_ARTIFACTS = {
     'be7929cd9f7a1698bea4f000aa3d1f236c8b440d58361b5dd177b9697badc26d': '445aa8aa694a60231e0aad0bc3c99b4c950f19eed4566abbcaf9a7ac9736491a',
     'ebe7db15d768840d3f5bcd115f2345a19c31c0d20f5435c23ebbdca9c07e4c21': 'd1d7f78ad34c3fad64889ce65d5e245c6e2dc9b3a9c07104414b8748099f0ebb',
     'f81e67fcb2e3dbe8379aead1ebe38904691e35f510169970a987710496d3ed77':
-        'efedb8674cc8f9fde878154e93dfc216159c9be209001a3a7a07284bff6b925c',
+        'c4fbcc54ab0cfef15fa5338638584eb5553536c7fe91a4220bef4652c2176aab',
     '1abb17517ad6c3616bc662765627c8e3419b3d81f0b8eaf3358cf4af9d316a33':
         'e9717da96a6a936947f83da63f3f9eecc9ae73429f5f0d698278fa329e0e4281',
     '25ea9fbf9d10948d08a6ead80c9f83ec2154ae34f40f881e4659eff9349d258f': 'd08c9fb8ec612b54a95978b5411f5c91218d8ef4a4ac1ba64b1d5d0ac116e076',
