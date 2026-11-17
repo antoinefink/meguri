@@ -83,12 +83,12 @@ impl CoreHost {
             }
             if let Some(intent) = &doc.meguri_bootstrap {
                 if intent.operation() != &op.id {
-                    // A failed confirmation can leave its intent after an
-                    // explicit safe cancellation. Retain that evidence; only
+                    // An inactive cancelled or failed confirmation can leave
+                    // its intent without effects. Retain that evidence; only
                     // the actual old policy row can prove this mismatch safe.
                     // Preparation captures actual_generation before activation.
                     let old = self.manual_transfer_history().get(intent.operation()).map_err(TransferError::from)?;
-                    if old.phase != Phase::Cancelled
+                    if !matches!(old.phase, Phase::Cancelled | Phase::Failed)
                         || !matches!(old.acceptance, Acceptance::NotSent | Acceptance::Refused)
                         || old.id == op.id || old.account != op.account || old.scope != op.scope
                         || old.configured_endpoint != connection.endpoint
