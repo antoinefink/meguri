@@ -2034,3 +2034,45 @@ PY
     --main-capable yes --var base=b --var tip=t --out "$BATS_TEST_TMPDIR/plan.json"
   [ "$(jq -r '[.runs[] | select(.action == "run") | .id] | join(" ")' "$BATS_TEST_TMPDIR/plan.json")" = "static static-tree" ]
 }
+
+@test "meguri-provider-real-server: real registry classifies the required integration without narrowing packaging or reference jobs" {
+  local registry="$BATS_TEST_TMPDIR/provider-registry.tsv" config="$BATS_TEST_TMPDIR/provider-config.json"
+  "$REPO_ROOT/tools/mg" --list >"$registry"
+  run python3 -B -I "$REPO_ROOT/tools/gate/gate.py" load --tiers "$REPO_ROOT/tools/gate/tiers.yaml" \
+    --quarantine "$REPO_ROOT/tools/gate/quarantine.yaml" --registry "$registry" --conformance "$REPO_ROOT/conformance" --out "$config"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '.runs[] | select(.id=="meguri-provider-real-server") |
+    .job=="meguri-provider-real-server" and .tier=="T1" and .args==[] and
+    .placement==["host","docker:dev"] and .class=="sync" and .budget_s==3600 and
+    .pending==null and .disabled!=true' "$config" >/dev/null
+  jq -e '.runs | map(.id) | index("sync-server-package-test") < index("meguri-provider-real-server")' "$config" >/dev/null
+  jq -e '.runs[] | select(.id=="sync-server-package-test") |
+    .tier=="T0" and .job=="sync-server-package-test" and .class=="data-safety" and .budget_s==3600' "$config" >/dev/null
+  local id
+  for id in sync-server-reference-selftest sync-server-reference-smoke sync-server-reference-edges sync-server-reference-normal sync-server-reference-normal-matrix sync-server-interop sync-server-interop-normal sync-server-interop-media; do
+    jq -e --arg id "$id" 'any(.runs[]; .id==$id and .pending==null)' "$config" >/dev/null
+  done
+}
+
+@test "meguri-provider-real-server: every granted provider client server and tooling seam triggers T1 but unrelated docs do not" {
+  local registry="$BATS_TEST_TMPDIR/provider-registry.tsv" config="$BATS_TEST_TMPDIR/provider-config.json"
+  local changed="$BATS_TEST_TMPDIR/provider-changed" plan="$BATS_TEST_TMPDIR/provider-plan.json" path
+  "$REPO_ROOT/tools/mg" --list >"$registry"
+  python3 -B -I "$REPO_ROOT/tools/gate/gate.py" load --tiers "$REPO_ROOT/tools/gate/tiers.yaml" \
+    --quarantine "$REPO_ROOT/tools/gate/quarantine.yaml" --registry "$registry" --conformance "$REPO_ROOT/conformance" --out "$config"
+  for path in server/tools/package-smoke.mjs core/crates/meguri-host/examples/real_server_provider.rs \
+      core/crates/meguri-sync/src/provider.rs core/crates/meguri-engine/src/lib.rs \
+      core/crates/meguri-storage/src/lib.rs core/crates/meguri-package/src/lib.rs core/crates/meguri-model/src/lib.rs \
+      core/Cargo.toml core/Cargo.lock core/rust-toolchain.toml specs/sync/meguri-provider.md tools/mg \
+      tools/mg.d/meguri-provider-test.sh tools/mg.d/sync-package.sh tools/mg.d/meguri-sync.sh tools/mg.d/host.sh \
+      tools/tests/meguri_provider_real_server.bats tools/gate/tiers.yaml docker/dev.Dockerfile docker/dev.Dockerfile.dockerignore docker/compose.yml; do
+    printf '%s\0' "$path" >"$changed"
+    python3 -B -I "$REPO_ROOT/tools/gate/gate.py" plan --config "$config" --changed "$changed" --mode full \
+      --oracle-tree same --main-capable yes --var base=b --var tip=t --out "$plan"
+    jq -e 'any(.runs[]; .id=="meguri-provider-real-server" and .tier=="T1" and .action=="run")' "$plan" >/dev/null || { echo "$path"; return 1; }
+  done
+  printf 'docs/notes/unrelated.md\0' >"$changed"
+  python3 -B -I "$REPO_ROOT/tools/gate/gate.py" plan --config "$config" --changed "$changed" --mode full \
+    --oracle-tree same --main-capable yes --var base=b --var tip=t --out "$plan"
+  jq -e 'any(.runs[]; .id=="meguri-provider-real-server" and .outcome=="not-triggered")' "$plan" >/dev/null
+}

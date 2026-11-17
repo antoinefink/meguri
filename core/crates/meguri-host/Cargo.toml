@@ -37,3 +37,7 @@ required-features = ["test-hooks"]
 [[test]]
 name = "provider_normal"
 required-features = ["test-hooks"]
+
+[[example]]
+name = "real_server_provider"
+required-features = ["test-hooks"]

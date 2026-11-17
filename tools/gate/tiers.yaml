@@ -166,6 +166,13 @@ runs:
     class: data-safety
     triggers: [tools/tests/sync_package.bats, tools/tests/sync_package_context_test.py, server/, core/crates/meguri-model/, core/Cargo.toml, core/rust-toolchain.toml, tools/mg, tools/mg.d/sync-package.sh, tools/mg.d/meguri-sync.sh, tools/mg.d/sync-web.sh, tools/mg.d/host.sh, docker/dev.Dockerfile, docker/dev.Dockerfile.dockerignore, docker/compose.yml, docker/sync-web-compose.yml, docker/sync-web.Dockerfile, docker/sync-web.Dockerfile.dockerignore]
     budget_s: 3600
+  - id: meguri-provider-real-server
+    job: meguri-provider-real-server
+    tier: T1
+    placement: [host, docker:dev]
+    class: sync
+    triggers: [server/, core/crates/meguri-host/, core/crates/meguri-sync/, core/crates/meguri-engine/, core/crates/meguri-storage/, core/crates/meguri-package/, core/crates/meguri-model/, core/Cargo.toml, core/Cargo.lock, core/rust-toolchain.toml, specs/sync/meguri-provider.md, tools/mg, tools/mg.d/meguri-provider-test.sh, tools/mg.d/sync-package.sh, tools/mg.d/meguri-sync.sh, tools/mg.d/host.sh, tools/tests/meguri_provider_real_server.bats, tools/gate/tiers.yaml, docker/dev.Dockerfile, docker/dev.Dockerfile.dockerignore, docker/compose.yml]
+    budget_s: 3600
   - id: native-durability
     job: native-durability
     tier: T0

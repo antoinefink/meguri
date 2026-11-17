@@ -5,12 +5,14 @@ import { createServer, request as httpsRequest } from 'node:https';
 import { request as httpRequest } from 'node:http';
 import { execFileSync } from 'node:child_process';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { once } from 'node:events';
 import assert from 'node:assert/strict';
 const phase = process.argv[2];
 const browserMode = process.argv[3] === 'browser';
-assert(['seed', 'check'].includes(phase));
+assert(['seed', 'check', 'provider-fixture'].includes(phase));
+const providerFixture = phase === 'provider-fixture';
+if (providerFixture) assert.equal(process.argv.length, 3);
 const origin = 'https://localhost:18443';
 const credentials = { username: 'package.admin', password: 'Synthetic package password 2026' };
 let cert;
@@ -42,7 +44,33 @@ try {
     incoming.on('aborted', () => upstream.destroy()); outgoing.on('close', () => upstream.destroy()); incoming.pipe(upstream);
   });
   proxy.listen(18443, '127.0.0.1'); await once(proxy, 'listening');
-  if (browserMode) {
+  if (providerFixture) {
+    // This lane provisions only its fresh, disposable packaged runtime. Clients
+    // execute in other containers, leaving this HTTPS proxy's event loop free.
+    const username = 'provider.fixture';
+    const password = randomBytes(32).toString('base64url');
+    const token = (await readFile('/data/owner/state/setup-token', 'utf8')).trim();
+    const setup = await request('/api/setup', { token, username, password });
+    assert.equal(setup.status, 201);
+    await mkdir('/tmp/provider-fixture', { mode: 0o700 });
+    execFileSync('openssl', ['x509', '-in', '/tmp/tls/cert.pem', '-outform', 'DER',
+      '-out', '/tmp/provider-fixture/ca.der'], { stdio: 'ignore' });
+    // Set an explicit private mode (OpenSSL's output follows umask).
+    const der = await readFile('/tmp/provider-fixture/ca.der');
+    const { chmod } = await import('node:fs/promises');
+    await chmod('/tmp/provider-fixture/ca.der', 0o600);
+    assert(der.length > 0);
+    await writeFile('/tmp/provider-fixture/input.json', JSON.stringify({
+      format: 1, origin, username, password, now_ms: Date.now(),
+    }) + '\n', { mode: 0o600, flag: 'wx' });
+    await new Promise(resolve => {
+      const stop = () => {
+        process.removeListener('SIGTERM', stop); process.removeListener('SIGINT', stop); resolve();
+      };
+      process.once('SIGTERM', stop); process.once('SIGINT', stop);
+      console.log('MEGURI_PROVIDER_FIXTURE_READY');
+    });
+  } else if (browserMode) {
     // Installed locked tooling lives only in the existing browser container.
     const { chromium, expect } = await import('@playwright/test');
     const browser = await chromium.launch({ headless: true, timeout: 30000 });
