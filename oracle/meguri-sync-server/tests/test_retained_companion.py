@@ -92,6 +92,37 @@ class RetainedHarness(unittest.TestCase):
                 (root/'preflight.json').write_bytes(encoded(preflight))
                 with self.assertRaisesRegex(ValueError,'preflight bytes changed'):observer.verify_worker_input(root,action,invocation)
 
+        # Exercise the fixed preparatory worker action through main admission.
+        # The listener boundary raises; this supplies no protocol success.
+        with tempfile.TemporaryDirectory() as directory:
+            root=pathlib.Path(directory)/'input';root.mkdir();out=pathlib.Path(directory)/'out';out.mkdir()
+            store=Artifacts(root/'artifacts');opaque=store.put(b'public-settlement-build-input')
+            preflight={'server':{key:'a'*64 for key in ('source_commit','source_sha256','lock_sha256','executable_sha256')}}
+            raw=encoded(preflight)+b'\n';(root/'preflight.json').write_bytes(raw)
+            action={'case':'normal-no-change','action':'settle_normal'}
+            invocation={'format':'meguri-retained-invocation-v1','run_id':'unit','root':'/public',
+                'server_arguments':[],'data_volume':'unit','owner_nonce':'a'*32,**action,'actor':'client_a',
+                'client_build_sha256':opaque,'input_manifest_sha256':opaque,'preflight_peer_sha256':sha(raw)}
+            invocation_raw=encoded(invocation);(root/'invocation.json').write_bytes(invocation_raw)
+            (root/'action.json').write_bytes(encoded(action))
+            with patch('candidate.retained_dependencies',return_value=set()),patch.dict('os.environ',MG_RUN_ID='unit'),\
+                 patch.object(observer,'pathlib') as paths,\
+                 patch.object(observer,'WireServer',side_effect=RuntimeError('listener boundary')) as listener:
+                paths.Path.side_effect={'/in':root,'/out':out}.__getitem__
+                with self.assertRaisesRegex(RuntimeError,'^listener boundary$'):observer.main(['--input','/in'])
+                listener.assert_called_once_with('normal-no-change','settle_normal','client_a',sha(invocation_raw),False)
+                listener.reset_mock()
+                for case,name in [('authentication','settle_normal'),('normal-bidirectional','settle_normal'),('normal-no-change','settle_normal_other')]:
+                    (root/'action.json').write_bytes(encoded({'case':case,'action':name}))
+                    with self.assertRaisesRegex(ValueError,'^unknown retained observer action$'):observer.main(['--input','/in'])
+                    listener.assert_not_called()
+                (root/'action.json').write_bytes(encoded(action))
+                for field,value,message in [('actor','client_b','retained observer action identity mismatch'),('run_id','other','retained observer run identity mismatch')]:
+                    (root/'invocation.json').write_bytes(encoded({**invocation,field:value}))
+                    with self.assertRaisesRegex(ValueError,'^'+message+'$'):observer.main(['--input','/in'])
+                    listener.assert_not_called()
+            self.assertEqual(list(out.iterdir()),[])
+
     def test_actual_deframed_body_counts_exclude_queries_headers_and_body_content(self):
         secret=b'synthetic-private-request-do-not-retain'
         with upstream() as actual:

@@ -23,7 +23,7 @@ WORKER_ACTIONS={
     'authentication':('authenticate',),
     'full-upload':('import_baseline','upload'),
     'full-download':('download',),
-    'normal-no-change':('import_baseline','establish_baseline','normal_unchanged'),
+    'normal-no-change':('import_baseline','establish_baseline','settle_normal','normal_unchanged'),
     'normal-bidirectional':('import_baseline','establish_baseline','normal_send','normal_receive'),
     'media-bidirectional':('media_baseline','media_receive','media_send'),
     'media-no-change':('media_baseline','media_unchanged'),
