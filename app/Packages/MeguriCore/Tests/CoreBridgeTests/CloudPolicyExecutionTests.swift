@@ -87,24 +87,30 @@ func consumePolicySetup(_ output: CloudPolicyOutput, executor: NativeCloudPolicy
     return starts
 }
 func nativePolicy(_ fixture: CloudKitBridgeFixture, gate: (any CloudPolicyExchangeGate)? = nil) async throws -> (CoreCloudPolicyService, NativeCloudPolicyExecutor) {
-    try #require(await fixture.factory.engines().isEmpty, "Policy fixture must not bypass Start")
-    try await fixture.requireNativePolicyBaseline()
-    let policy = try await fixture.core.policy()
-    let executor = NativeCloudPolicyExecutor(policy: policy, adapter: fixture.adapter, exchangeGate: gate)
+    try await nativePolicy(core: fixture.core, adapter: fixture.adapter, factory: fixture.factory, gate: gate)
+}
+
+private func nativePolicy(core: CoreCloudWorkflowService, adapter: CloudKitSyncAdapter,
+    factory: CloudKitEngineFakeFactory, gate: (any CloudPolicyExchangeGate)? = nil
+) async throws -> (CoreCloudPolicyService, NativeCloudPolicyExecutor) {
+    try #require(await factory.engines().isEmpty, "Policy fixture must not bypass Start")
+    try await requireNativeCloudPolicyBaseline()
+    let policy = try await core.policy()
+    let executor = NativeCloudPolicyExecutor(policy: policy, adapter: adapter, exchangeGate: gate)
     // Keep the actual settings gate closed until every setup input is projected.
     let disabledStarts = try await consumePolicySetup(policy.input(.settings(.init(enabled: false, paused: false, automatic: false, media: false))), executor: executor)
     let accountStarts = try await consumePolicySetup(policy.refreshAccount(), executor: executor)
     let networkStarts = try await consumePolicySetup(policy.input(.network(reachable: true)), executor: executor)
-    let enginesBeforeEnable = await fixture.factory.engines()
+    let enginesBeforeEnable = await factory.engines()
     try #require(disabledStarts == 0 && accountStarts == 0 && networkStarts == 0 && enginesBeforeEnable.isEmpty,
                  "Policy fixture must wait for settings to open the actual Start gate")
     let starts = try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: false, media: false))), executor: executor)
     try #require(starts == 1, "Policy fixture must issue exactly one gate-opening Start")
-    let engines = await fixture.factory.engines()
+    let engines = await factory.engines()
     try #require(engines.count == 1, "Policy Start must create exactly one actual SDK")
     let engine = try #require(engines.first)
-    try await fixture.core.validateSDK(engine.instanceID)
-    try #require(await fixture.adapter.retainedInstanceIDs() == [engine.instanceID])
+    try await core.validateSDK(engine.instanceID)
+    try #require(await adapter.retainedInstanceIDs() == [engine.instanceID])
     let status = try await policy.status()
     try #require(status.accountStatus == .available && status.accountMatchesBinding)
     return (policy, executor)
@@ -477,10 +483,12 @@ extension EventTests {
 
 extension EventTests {
     @Test func nativePolicySetupRejectsLocalOnlyOpeningBeforeSDKCreation() async throws {
-        try await withCloudKitFixture(startAdapter: false, localOnlyOpening: true) { fixture in
-            await #expect(throws: (any Error).self) { _ = try await nativePolicy(fixture) }
-            #expect(await fixture.factory.engines().isEmpty)
-            #expect(await fixture.adapter.retainedInstanceIDs().isEmpty)
+        try await withLocalOnlyCloudPolicyFixture { core, adapter, factory in
+            await #expect(throws: (any Error).self) {
+                _ = try await nativePolicy(core: core, adapter: adapter, factory: factory)
+            }
+            #expect(await factory.engines().isEmpty)
+            #expect(await adapter.retainedInstanceIDs().isEmpty)
         }
     }
 

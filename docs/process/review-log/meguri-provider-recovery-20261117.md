@@ -457,3 +457,11 @@ Correction checks pass: privacy `054753-3096` covers six paths; static `054702-2
 CoreBridge `swift-test/20261117T054856Z-3873`, clean `fb353d51`: two passes, one failure, zero skips. The negative case opens LocalOnly, then receives `cloud runtime account is unverified` from baseline preparation. Its three refusal checks do not run. Keep this failed setup receipt and use a separate local-only fixture that needs no connected baseline.
 
 AppModel `swift-test/20261117T055023Z-5307`, the same clean commit, stops at test compilation: the production actor correction compiles, but an existing exhaustive observer in `InitialCloudAdoptionTests` needs the new DEBUG event case. Zero workflow tests executed. Both failed receipts remain; the CPU window was released from the actual terminal JSON. Source diagnosis continues, with all assertions retained.
+
+## Local-only fixture avoids the connected baseline
+
+Author `055530-8522` separates LocalOnly setup from the connected baseline. The ordinary opener supplies actual Core, adapter and factory objects. Positive callers use the same policy body. Its read-only baseline check stays inside the expected-error closure. All three negative assertions remain. Cleanup stops the adapter, closes the collection, then removes its owned directory. No provider migration or Cloud baseline is prepared for LocalOnly.
+
+The third file adds the new DEBUG case to an existing explicit ignored group. Independent review `055943-10586` finds no required P0–P1 issues. Root verifies complete author/reviewer source equality before application. Actual CoreBridge and AppModel execution are still pending; both earlier failures remain.
+
+Scoped static `060417-13839` and similarity `060415-13242` pass; the filtered three-file report has no flags or exemptions. Final privacy check passes after a shorter public review paragraph; failed scan `060415-13158` remains retained. No source or policy changed during that rewrite.
