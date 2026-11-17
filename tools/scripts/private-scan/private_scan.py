@@ -842,10 +842,10 @@ PUBLIC_ARTIFACTS = {
     "tools/mg.d/core.sh":
         "75592aa65666a46bb1260657ac45e85629d30ebdc1bb545b3eecb3b03a2842b4",
     'core/crates/meguri-host/tests/provider_bootstrap.rs':
-        '288e7aebbfd60895511f45a164e102c85c6c9070cb00777bac3a6bc744193abd',
+        '50e27460dafefb7c36c5927956fa16b4b4a3c9bf0ab8415c15d714102b40cf64',
     # Complete-content public reviews: routine Core fix1 and Host fix2, 2026-11-17.
     "core/crates/meguri-host/tests/provider_normal.rs":
-        "0cba109d63f83671798429552b4ed94bee29659412914b3c17aef4430ef9ec6b",
+        "cad34eae95cbdbdf49073eb144fe56d3438907168377875253df204cbd305122",
     "core/crates/meguri-storage/tests/media_bound_reset.rs":
         "afc4b2b78e4a6482f363326fc71e687e51d0c6ee7d72f8dbdf554a1484839004",
     "core/crates/meguri-sync/src/media.rs":
@@ -918,7 +918,7 @@ PUBLIC_ARTIFACTS = {
         'a15fbd849371207df8a52ba993b64e26d339fcb9af56bbe3cb01652f38b7cae9',
     # Complete final-content PUBLIC review: Codex adoption_empty_decks, 2026-11-17.
     'core/crates/meguri-ffi/src/provider_bootstrap.rs':
-        '999ab47bc5b1b509856b18830cffcd3b8b0617f426bbad4a35afb119387360db',
+        'f654aeec3189dbcbd57dc4d94ed14e65457c49119b37f87a1cf1de2ddfd2c7f9',
     # Complete PUBLIC review: Codex provider_test_delta_review, 2026-11-17.
     "docs/process/review-log/native-own-handoff-attribution-20261117.md":
         "05a9ce3d8eeecf5e249a920c444ca767eb915060cd7360d4a85e744d5931951e",
@@ -965,7 +965,7 @@ PUBLIC_ARTIFACTS = {
     "docs/process/verification-status.md":
         "acc51afe68cbaca83ceb2f15f5c7ee698e1b11ff6301cd411edad3d7080c1cae",
     'app/Packages/MeguriKit/Sources/AppModel/Collection/SyncCoordinator.swift':
-        'd17a17aafe357db445010b6d580ad11bac91f5d7e23496088de5f60f865b9130',
+        'e7dd7ff0478d153d454ed7fc5dd15b212869a6f84f08585a347a5ab803ba6f6a',
     'app/Packages/MeguriKit/Tests/AppModelTests/ProviderAdmissionTests.swift':
         '4cf802ffe04f6888219aa637119e12847be828e2590840fd42d35cea9bfa86d7',
     'core/crates/meguri-ffi/src/provider_tests.rs':
@@ -1227,6 +1227,19 @@ PUBLIC_ARTIFACTS = {
         'd7b34a4dab4a4a4f5ccf614b4cb3f2abf93201e5580790160a921882e5d222c5',
     'oracle/meguri-sync-server/tests/test_recovery_dirty.py':
         'd972f70a91c8c85032dfabcbc4d9ffb38564a5654a158610bc0c6dbe4d38d6e7',
+    'core/crates/meguri-sync/tests/owned_round_admission.rs': '41cb97aab264f4ccc175dd5831089725d9afaf4f37f4620e2344b931451205c3',
+    'app/MeguriSnapshotTests/MacSettingsSearchTests.swift': '65ab8e3fbcba472a817b371618f7d225acff7a2bff529145a410f83d8abc18f2',
+    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': '4cc3f07c55382427fa0da220e387abbbfb39498682b393477ee9f4219c9756c0',
+    'app/Packages/MeguriKit/Sources/AppModel/Sync/Resources/Sync.xcstrings': '4c91f1149f3995778b0bf75a329cf9a1f64d0cfc567e36699ac36e8c90ce238c',
+    'app/Packages/MeguriKit/Sources/AppModel/Sync/SyncPresentation.swift': '0276bfab84c7453a688cc34bb313911fb8febb46544d23066540c410d3422c2f',
+    'app/Packages/MeguriKit/Sources/Features/Settings/Settings.swift': '2fd10e5c3b0cce3f6dbe8c525b697131ab41445ec5695c2bfdf4ae2f7f359460',
+    'app/Packages/MeguriKit/Sources/Features/Settings/Sync/AccountSyncView.swift': '397f631b73d908088772dbcc94a05539c16e02b49cee0489b39d8c36079755c9',
+    'app/Packages/MeguriKit/Sources/Features/Settings/Sync/CloudSyncStatusButton.swift': '845d547fd3f64035420a1d723cc1bf3f38611a09dd143e9bc1be51bde8c1d2af',
+    'app/Packages/MeguriKit/Sources/Features/Settings/Sync/MeguriSyncSetupViews.swift': '7a44f15263ad7942e0a74b756585833662ccb05340e3cbce785a976a22cbb4f9',
+    'app/Packages/MeguriKit/Sources/Features/Settings/Sync/SyncStatusContent.swift': '0e9ebd0d7bd2f126638736ca6268453bf601564b6922895b103cfbde3d5aa0ca',
+    'app/Packages/MeguriKit/Tests/AppModelTests/CloudSyncPresentationTests.swift': '11766d5d2ac1a18ba84f91fbb5753fb714ed38b1934278b785b377afbb7d8fff',
+    'app/Packages/MeguriKit/Tests/AppModelTests/ReviewCollectionStartupTests.swift': 'b48d860baaad22b85b6b77dcb6f2dc42bb77b9cf6e4edb121d527ce3c7e9ce8f',
+    'core/crates/meguri-host/src/provider_bootstrap.rs': '038e6199bd9e9d63e307023e182caa3632ace08fee94c21563e61854357553bd',
 }
 
 
