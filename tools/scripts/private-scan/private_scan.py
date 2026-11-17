@@ -833,17 +833,17 @@ PUBLIC_ARTIFACTS = {
     'server/Dockerfile':
         '324a94c05aafbbf38065174f70578eb044337ea6d0ded209977196b685a1ccd8',
     'server/README.md':
-        '66e29ca5c1fb282f4cb5af33791e1129c8ca9c09a266eef24bbc9dd26220238c',
+        '4d6f4a0475d17afad978fd1ef20efc727372c7e0c5b0b8a7150ff7834fedaa72',
     'server/compose.yaml':
         '03737d36cd35810513c04e39a193b707e14228ca997e116ca93557c09e7a0d9b',
     'server/tools/package-context.py':
-        '84db291e6ba4b27dbc5bfef38dc01434342cd4d06016e901ae544c212fd55724',
+        'c9c5e140f77ac5b8fdfc18921c9bbda066848df146b3665149b3d7a228c7fa78',
     'tools/mg.d/sync-package.sh':
         '0385c96b9fff90961214012cf2077653704a61752377e6aa746ddadc8011ca63',
     'tools/tests/sync_package.bats':
         'a8a9f046c1f5f7aa9fc9b55c04a43d60eff2d631136ab3f4133b1c8dbee22514',
     'tools/tests/sync_package_context_test.py':
-        '8d8d511920aaecc53c7ac0801ebb013955fea587fef03c64dc4d0fad1ebda3f3',
+        '4e3c4c6903eae5b6c5ad2d38e172e9cfbbb9518ae68cd09fa27f37296701880b',
     "core/crates/meguri-ffi/src/sync_tests.rs":
         "461fb731a22379b6bbe009cd968526c3e706f6e08ae769ff014bc82c63a85135",
     # Complete public-file review: incoming_contract_review, 2026-11-17.
