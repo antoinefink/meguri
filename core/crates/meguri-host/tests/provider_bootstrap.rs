@@ -311,6 +311,12 @@ fn g12_retargeted_alias_is_refused_after_ready_preparation() {
     }
     let root = tempfile::tempdir().unwrap();
     let (initial, mut config) = seeded(&root.path().join("original"));
+    let connection = select(&initial);
+    let (_, data) = server(&root.path().join("server"));
+    let script = collection_script(data, true);
+    let preview = prepare(&initial, &connection, &script, D::UseDeviceCollection);
+    let op = confirm(&initial, &connection, &script, preview);
+    let done = finish_empty_media(&initial, &connection, &op);
     initial.close().unwrap();
     drop(initial);
     let original_directory = config.collection_directory.clone();
@@ -319,12 +325,6 @@ fn g12_retargeted_alias_is_refused_after_ready_preparation() {
     config.collection_directory = alias.clone();
     let host = Arc::new(CoreHost::open(config.clone()).unwrap());
     settle(&host);
-    let connection = select(&host);
-    let (_, data) = server(&root.path().join("server"));
-    let script = collection_script(data, true);
-    let preview = prepare(&host, &connection, &script, D::UseDeviceCollection);
-    let op = confirm(&host, &connection, &script, preview);
-    let done = finish_empty_media(&host, &connection, &op);
     let before = bytes(&config);
     host.engine().close().unwrap();
     // Clone only the closed synthetic fixture, including its settled publication
@@ -466,7 +466,7 @@ fn meguri_binding_clear_keeps_the_auto_invariant() {
         assert!(Authority::load(&config.manual_transfer_directory).snapshot().is_ok());
         match case {
             "reconfigure" => { assert_eq!(doc.selection, Selection::Meguri); assert!(!doc.settings.automatic); }
-            "icloud" => { assert_eq!(doc.selection, Selection::ICloud); assert_eq!(doc.settings, doc.icloud_settings); }
+            "icloud" => { assert_eq!(doc.selection, Selection::ICloud); let mut expected = doc.icloud_settings; expected.enabled = true; assert_eq!(doc.settings, expected); }
             "local" => { let mut expected = doc.icloud_settings; expected.enabled = false; assert_eq!(doc.settings, expected); }
             _ => { assert_eq!(doc.selection, Selection::LocalOnly); assert!(!doc.settings.automatic); }
         }
