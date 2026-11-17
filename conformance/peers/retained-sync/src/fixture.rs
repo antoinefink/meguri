@@ -170,6 +170,7 @@ pub fn snapshot(host: &CoreHost) -> Result<Value> {
         }
         tables.insert(table.name().into(), json!({"columns": table.columns(), "rows": rows}));
     }
+    drop(reader);
     let media = host.media()?;
     let mut files = BTreeMap::new();
     for item in std::fs::read_dir(media.store().media_dir())? {

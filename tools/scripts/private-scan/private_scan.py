@@ -843,7 +843,7 @@ PUBLIC_ARTIFACTS = {
     'conformance/peers/retained-sync/src/main.rs':
         '44d0b8067924aebc307ffc3c5a5960c16b692e6148d3e584a55bd2ecb1d0bee7',
     'conformance/peers/retained-sync/src/fixture.rs':
-        '95afb0baea27112f2f718a3d072af49dd3c046137aeb03706f9b34dd0d5f467e',
+        '0c57226bc2e6a6e8037dd9260c04b00fd148567bb9e2831646b8b692b8fa7ace',
     'conformance/peers/retained-sync/README.md':
         '625a27d5cdfefedd533ce970e774d5802e15ff16b9d24feb1b99fa81f06bbee9',
     'conformance/peers/retained-sync/AGENTS.md':
