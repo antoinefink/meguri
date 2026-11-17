@@ -435,14 +435,18 @@ METHODS = ('hostKey meta start applyGraves applyChanges chunk applyChunk sanityC
            'upload download begin mediaChanges uploadChanges downloadFiles mediaSanity').split()
 
 
-def load_json(path):
+def decoded(data):
     def unique(pairs):
         result = {}
         for key, value in pairs:
             require(key not in result, 'duplicate JSON key')
             result[key] = value
         return result
-    return json.loads(regular(path), object_pairs_hook=unique)
+    return json.loads(data, object_pairs_hook=unique)
+
+
+def load_json(path):
+    return decoded(regular(path))
 
 
 def cas_put(directory, data):
@@ -520,6 +524,85 @@ def with_media(authority, media):
 def media_recipe(part):
     return {name: digest(body.encode()) for name, body in
             load_json(RECIPES)['media_utf8_exact'][part].items()}
+
+
+def fsrs_effects(before, after, proof, started, finished):
+    """Three new cards, no history, absent key: E2 computes zero cards.
+
+    Compare actual full rows without projection or decoding card data.
+    """
+    exact(proof, 'format case action acknowledgment operation before_sha256 after_sha256 '
+          'eligible_card_ids started_ms finished_ms case_credit')
+    require(proof['format'] == 'meguri-retained-fsrs-prerequisite-v1' and
+        proof['case'] == 'normal-bidirectional' and proof['action'] == 'prepare_forward' and
+        proof['acknowledgment'] == 'reviewed_headless_fsrs_only_and_synchronized_effects' and
+        proof['operation'] == 'enable_fsrs' and proof['case_credit'] is False, 'fixed FSRS prerequisite identity')
+    for key in ('before_sha256', 'after_sha256'):
+        hash_value(proof[key])
+    require(all(type(v) is int for v in (started, finished, proof['started_ms'], proof['finished_ms'])) and
+        started <= proof['started_ms'] <= proof['finished_ms'] <= finished, 'FSRS operation time binding')
+    require(proof['eligible_card_ids'] == [], 'fixed empty FSRS eligible list')
+    snapshot(before), snapshot(after)
+    def rows(value, name):
+        found = value['tables'][name]['rows']
+        result = {json.dumps(row[0], sort_keys=True): row for row in found}
+        require(len(result) == len(found), 'unique prerequisite row identities')
+        return result
+    def integer(cell):
+        exact(cell, 'integer')
+        return int(cell['integer'])
+    def stamp(cell, milliseconds=False):
+        lo, hi = proof['started_ms'], proof['finished_ms']
+        if not milliseconds:
+            lo, hi = lo // 1000, hi // 1000
+        require(lo <= integer(cell) <= hi, 'FSRS actual operation stamp')
+    cards = rows(before, 'cards')
+    require(len(cards) == 3 and all(row[6] == dict(integer='0') for row in cards.values()),
+            'FSRS requires exactly three new cards')
+    require(before['tables']['revlog']['rows'] == [], 'FSRS requires zero history rows')
+    old_config, new_config = rows(before, 'config'), rows(after, 'config')
+    fsrs_key = json.dumps(dict(text_hex=b'fsrs'.hex()), sort_keys=True)
+    require(fsrs_key not in old_config, 'FSRS requires absent config key')
+    require(set(new_config) == set(old_config) | {fsrs_key}, 'only FSRS config identity')
+    for key, row in old_config.items():
+        require(new_config[key] == row, 'unrelated config bytes changed')
+    fsrs = new_config[fsrs_key]
+    require(fsrs[3] == dict(blob_hex=b'true'.hex()), 'public FSRS true BLOB')
+    require(fsrs[1] == dict(integer='-1'), 'FSRS local config usn')
+    stamp(fsrs[2])
+    for name in COLUMNS:
+        if name not in ('config', 'col'):
+            require(before['tables'][name] == after['tables'][name], 'FSRS E4 table preservation')
+    old_col, new_col = rows(before, 'col'), rows(after, 'col')
+    require(set(old_col) == set(new_col), 'FSRS collection identity')
+    for key, row in old_col.items():
+        new = new_col[key]
+        require(all(new[i] == cell for i, cell in enumerate(row) if i != 2), 'only collection mod may change')
+        stamp(new[2], milliseconds=True)
+    require(before['media_sha256'] == after['media_sha256'], 'FSRS media preservation')
+    return after
+
+
+def forward_authority(chosen, forward):
+    """Only a complete frozen event can introduce the authorized prerequisite."""
+    require(chosen is not None and forward is not None and
+        forward['event']['operation_complete'] is True and
+        forward['result']['observed']['preparation_complete'] is True, 'successful forward event required')
+    before, after = forward['fsrs_before'], forward['fsrs_after']
+    require(projection(before) == projection(chosen), 'FSRS prerequisite imported baseline binding')
+    return declared_edit(after, forward['snapshot'], 'forward')
+
+
+def forward_submission(directory, client, expected):
+    data, checkpoint, _ = preparation_checkpoint(directory)
+    require(type(checkpoint['exit_code']) is int and checkpoint['exit_code'] == 0 and checkpoint['error_kind'] is None and
+            checkpoint['admission_valid'] is True and checkpoint['preparation_complete'] is True,
+            'successful frozen forward checkpoint required')
+    prepared = saved_preparation(directory, 'normal-bidirectional', 'prepare_forward', client)
+    require(prepared['result']['observed']['preparation_complete'] is True and
+            'fsrs_before' in prepared and prepared['snapshot'] == expected,
+            'actual whole-forward submission binding')
+    return data
 
 
 def declared_edit(baseline, authority, direction, limited=False):
@@ -861,8 +944,11 @@ def runtime_prepare(outer, case):
 def prepare_forward_diagnostic(output, case, action, exit_code):
     """Admit only the fixed failed-offline marker; it supplies no success evidence."""
     names = {p.name for p in output.iterdir()}
-    require(names <= {'action-result.json', 'worker-error.json', 'state-inputs.json', 'snapshot.json',
-                      'prepare-forward-diagnostic.json'}, 'offline worker output files')
+    allowed = {'action-result.json', 'worker-error.json', 'state-inputs.json', 'snapshot.json',
+               'prepare-forward-diagnostic.json'}
+    if case == 'normal-bidirectional' and action == 'prepare_forward':
+        allowed |= {'fsrs-before.json', 'fsrs-after.json'}
+    require(names <= allowed, 'offline worker output files')
     if 'prepare-forward-diagnostic.json' not in names:
         return None
     require(case == 'normal-bidirectional' and action == 'prepare_forward' and type(exit_code) is int
@@ -877,7 +963,8 @@ def prepare_forward_diagnostic(output, case, action, exit_code):
     require(diagnostic['format'] == 'meguri-retained-prepare-forward-diagnostic-v1'
             and diagnostic['case'] == case and diagnostic['action'] == action
             and isinstance(diagnostic['stage'], str) and diagnostic['stage'] in (
-                'input_admission', 'host_admission', 'fixture_lookup', 'deck_save', 'preset_snapshot',
+                'input_admission', 'host_admission', 'fsrs_before_snapshot', 'fsrs_enable',
+                'fsrs_after_snapshot', 'fsrs_effects', 'fixture_lookup', 'deck_save', 'preset_snapshot',
                 'preset_edit', 'preset_save', 'config_save', 'note_save', 'review_start',
                 'review_start_predicate', 'review_start_fsrs_policy_pending', 'review_start_preset_unsupported',
                 'review_head_predicate', 'review_answer', 'review_answer_predicate',
@@ -966,12 +1053,16 @@ def saved_preparation(directory, case, action, client):
     require(checkpoint['case'] == case and checkpoint['action'] == action and checkpoint['actor'] == 'client_a' and
             checkpoint['case_credit'] is False and checkpoint['admission_valid'] is True, 'closed state admission')
     result, snap = preparation_identity(directory, case, action, client, read_file=files.__getitem__)
-    return dict(snapshot=snap, state=files[directory / 'raw/state-inputs.json'], preparation=data, result=result)
+    prepared = dict(snapshot=snap, state=files[directory / 'raw/state-inputs.json'], preparation=data, result=result)
+    if action == 'prepare_forward' and 'fsrs_prerequisite' in result['observed']:
+        for key, name in (('fsrs_before', 'fsrs-before.json'), ('fsrs_after', 'fsrs-after.json')):
+            prepared[key] = snapshot(decoded(files[directory / 'raw' / name]))
+    return prepared
 
 
 def preparation_identity(directory, case, action, client, read_file=regular):
     output, inputs = directory / 'raw', directory / 'input'
-    result = json.loads(read_file(output / 'action-result.json'))
+    result = decoded(read_file(output / 'action-result.json'))
     exact(result, 'format case action actor client_build binding action_sha256 recipe_sha256 selection_sha256 '
           'state_inputs_sha256 started_ms finished_ms observed case_credit')
     require(result['format'] == 'meguri-retained-action-v1' and result['case'] == case and result['action'] == action and
@@ -979,11 +1070,23 @@ def preparation_identity(directory, case, action, client, read_file=regular):
         result['binding'] is None and result['action_sha256'] == digest(read_file(inputs / 'action.json')) and
         result['recipe_sha256'] == digest(regular(RECIPES)) and result['selection_sha256'] == digest(regular(SELECTION)) and
         result['state_inputs_sha256'] == digest(read_file(output / 'state-inputs.json')), 'actual preparation identity')
-    snap = snapshot(json.loads(read_file(output / 'snapshot.json')))
+    snap = snapshot(decoded(read_file(output / 'snapshot.json')))
     require(result['observed']['preparation_only'] is True and
         type(result['observed']['preparation_complete']) is bool and
         result['observed']['snapshot_sha256'] == digest(read_file(output / 'snapshot.json')) and
         result['observed']['snapshot'] == snap, 'actual preparation snapshot')
+    observed = result['observed']
+    if action == 'prepare_forward' and (observed['preparation_complete'] or 'fsrs_prerequisite' in observed):
+        require(case == 'normal-bidirectional', 'FSRS prerequisite action binding')
+        exact(observed, 'preparation_only preparation_complete limitations snapshot_sha256 snapshot fsrs_prerequisite')
+        require(observed['limitations'] == [], 'original rich preparation remains mandatory')
+        proof = observed['fsrs_prerequisite']
+        before_bytes, after_bytes = (read_file(output / name) for name in ('fsrs-before.json', 'fsrs-after.json'))
+        require(proof['before_sha256'] == digest(before_bytes) and proof['after_sha256'] == digest(after_bytes),
+                'actual FSRS prerequisite snapshot hashes')
+        fsrs_effects(decoded(before_bytes), decoded(after_bytes), proof, result['started_ms'], result['finished_ms'])
+    else:
+        require('fsrs_prerequisite' not in observed, 'FSRS prerequisite confined to forward preparation')
     return result, snap
 
 
@@ -1318,6 +1421,13 @@ class RetainedRuntime:
         actor = ('fresh_client' if action.startswith('witness_') else 'client_b') if companion else 'client_a'
         def execute(directory):
             require(expected is not None or (companion and action in OFFLINE_COMPANION), 'frozen authority unavailable')
+            forward = None
+            if not companion and action == 'normal_send':
+                events = [event for event in self.events if event['action'] == 'prepare_forward']
+                require(len(events) == 1 and events[0]['operation_complete'] is True,
+                        'one successful forward preparation event required')
+                path = self.directory / events[0]['directory']
+                forward = (path, forward_submission(path, self.client, expected))
             prepared = None if companion else self.offline('prepare_snapshot')
             if not companion:
                 require(prepared is not None, 'worker state unavailable')
@@ -1327,6 +1437,11 @@ class RetainedRuntime:
             process, inspection = self.measure(directory, 'before')
             peer = package_preflight(inputs, self.outer, self.invocation, inspection, process)
             store = inputs / 'artifacts'
+            if forward is not None:
+                # Original prerequisite/full-forward closure precedes the first
+                # candidate submission. Keep existing manifest/expectation shapes.
+                copy_cas(forward[0] / 'artifacts', store)
+                cas_put(store, forward[1])
             frozen_file(inputs / 'action.json', encoded(dict(case=self.case, action=action)))
             for data in (regular(RECIPES), regular(SELECTION), self.review):
                 cas_put(store, data)
@@ -1508,15 +1623,12 @@ class RetainedRuntime:
                 store('normal_unchanged', self.worker('normal_unchanged', settled))
             else:
                 forward = store('prepare_forward', self.offline('prepare_forward'))
-                forward_authority = snap(forward) if chosen is not None else None
-                if forward_authority is not None and chosen is not None:
-                    try:
-                        declared_edit(chosen, forward_authority, 'forward',
-                            bool(forward['result']['observed'].get('limitations')))
-                    except (ValueError, KeyError, TypeError):
-                        forward_authority = None
-                store('normal_send', self.worker('normal_send', forward_authority))
-                forward_b = with_media(forward_authority, baseline['media_sha256']) if forward_authority and baseline else None
+                try:
+                    authoritative_forward = forward_authority(chosen, forward)
+                except (ValueError, KeyError, TypeError):
+                    authoritative_forward = None
+                store('normal_send', self.worker('normal_send', authoritative_forward))
+                forward_b = with_media(authoritative_forward, baseline['media_sha256']) if authoritative_forward and baseline else None
                 store('receive_forward', self.companion('receive_forward', forward_b, baseline))
                 reverse = store('prepare_reverse', self.companion('prepare_reverse', None, forward_b))
                 reverse_authority = authority(reverse) if forward_b is not None else None

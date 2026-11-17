@@ -106,6 +106,70 @@ all actual artifacts and outcome bindings is required before any case credit.
 An incomplete preparation preserves its exact affected claim; it grants no
 blanket permission to submit an unbound partial input.
 
+For retained **normal-bidirectional only**, this fixture explicitly acknowledges
+Meguri's FSRS-only study policy and its synchronized effects as a reviewed
+headless action under L1. It does not claim that an app sheet appeared. At the
+start of the existing offline `prepare_forward`, after baseline import and
+baseline establishment, it calls the public
+`meguri_engine::sched::fsrs_policy::enable_fsrs` exactly once on the imported
+host collection. Import replaces config, so bootstrap enablement would not
+satisfy this prerequisite. There is no retry, fallback, raw config write or
+injected scheduling/history. A refusal or error fails preparation.
+
+The action captures actual public full-row snapshots as `fsrs-before.json` and
+`fsrs-after.json` immediately around this operation, before the original rich
+mutations. Its existing `action-result.json` gains exactly one forward-only
+`observed.fsrs_prerequisite` object: `format`, `case`, `action`, `acknowledgment`,
+`operation`, `before_sha256`, `after_sha256`, `eligible_card_ids`, `started_ms`,
+`finished_ms`, `case_credit`. The format is
+`meguri-retained-fsrs-prerequisite-v1`; case/action are fixed to
+`normal-bidirectional`/`prepare_forward`, operation is `enable_fsrs`, acknowledgment
+is `reviewed_headless_fsrs_only_and_synchronized_effects`, and case credit is
+false. `eligible_card_ids` is always the fixed empty list; it grants no card
+change allowance.
+The complete successful forward observation remains closed and requires empty
+limitations. These two filenames are admitted only for this offline action,
+including failed attempts; four payload-free diagnostic stages identify snapshot,
+operation and effect-check failures. Existing review-refusal stages remain.
+
+The supplied rich pre-review authority has exactly three cards with type values
+`0,0,0`, zero review-log rows and no `fsrs` config key. Before enablement the
+worker requires these facts from the actual public full-row snapshot; any
+mismatch fails preparation without selecting another fixture. Under E2 the
+public operation computes zero cards at this fixed point. Card data is not
+assumed empty and is never parsed, predicted or rewritten by this proof.
+The parent rechecks that fixed input and compares actual pre/post rows without
+the protocol projection. Only the added typed `fsrs=true` BLOB config row, its
+local USN/mtime and collection `mod` are allowed; timestamps must fall within
+the actual operation interval. All cards, including `mod`, `usn` and complete
+data bytes, all history, other config/unknowns, presets, decks, notes, types,
+tags, graves, other rows and media must remain exact. Device-only seen-on state
+stays in the complete closed-state inventory; it is not synchronized data.
+Undo clearing is local operation behavior and permits no history edits.
+
+The pre/post snapshots, proof, unchanged whole-forward snapshot and complete
+closed state are retained in the existing CAS/checkpoint before first candidate
+submission. `normal_send` requires exactly one successful frozen forward event,
+revalidates that checkpoint and its whole-forward equality, and carries its
+original complete CAS/checkpoint into the existing input artifact store. No
+network manifest or expectation schema changes. The pre-operation state must
+match the imported authority under the existing protocol-stamp rule; the original rich-mutation guard then compares
+against the actual post-enable state. No effect is masked from subsequent
+full-row/history/scheduling/media equality.
+The later real review supplies its own full-card/history delta; it is separate
+from the zero-card enablement effect. The Desktop31 rich mutation guard is a
+different path and is unchanged.
+
+All eight case IDs, selections, counts and authorities remain unchanged, as do
+the real Started result, keep-note head, one Accepted Good answer, end, original
+edits/deletions/template/config values, ordinary forward/reverse transfers and
+independent receiver assertions. This enables no other case and changes no
+product/UI policy. Incomplete/refused/invalid or unsuccessful frozen events
+supply no forward authority. Original actual runs and failures remain immutable;
+this prospective authoring supplies no retroactive pass or acceptance. Tests,
+imports, builds and runtime checks are **NOT RUN in the filtered author copy**;
+the parent owns independent review and focused/real integration checks.
+
 Network actions require `/in/preflight.json`, strict L2
 `final_package_preflight`, and the complete `/in/artifacts/<sha256>` closure.
 It has the final package's exact top-level keys; its execution binding has every

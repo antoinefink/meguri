@@ -3,6 +3,7 @@
 mod clock;
 mod contract;
 mod fixture;
+mod fsrs_prerequisite;
 
 use meguri_engine::{EventKind, JobKind, Subscription};
 use meguri_host::{CoreHost, HostConfig, ManualTransferTask};
@@ -28,7 +29,8 @@ enum Action { PrepareInitial, PrepareSnapshot, PrepareForward, PrepareReverseMed
 // Payload-free diagnosis solely for the fixed offline PrepareForward action.
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum PrepareForwardStage { InputAdmission, HostAdmission, FixtureLookup, DeckSave, PresetSnapshot, PresetEdit,
+enum PrepareForwardStage { InputAdmission, HostAdmission, FsrsBeforeSnapshot, FsrsEnable, FsrsAfterSnapshot,
+    FsrsEffects, FixtureLookup, DeckSave, PresetSnapshot, PresetEdit,
     PresetSave, ConfigSave, NoteSave, ReviewStart, ReviewStartPredicate, ReviewStartFsrsPolicyPending,
     ReviewStartPresetUnsupported, ReviewHeadPredicate, ReviewAnswer,
     ReviewAnswerPredicate, ReviewEnd, DeleteSave, TemplateSave, Snapshot, HostClose, StateInventory, Output }
@@ -229,11 +231,17 @@ fn run(diagnostic: &mut Option<PrepareForwardStage>) -> Result<bool> {
     let result = (|| -> Result<Value> {
         if preparing {
             let mut limitations = Vec::new();
+            let mut fsrs_prerequisite = None;
             match input.action {
                 Action::PrepareInitial => fixture::initialize(&host, input.case == "full-download")?,
                 Action::PrepareSnapshot => {},
-                Action::PrepareForward => limitations = fixture::forward(&host, clock.as_ref(),
-                    diagnostic.as_mut().ok_or("forward-stage-required")?)?,
+                Action::PrepareForward => {
+                    let stage = diagnostic.as_mut().ok_or("forward-stage-required")?;
+                    // Imported fixed point: acknowledge/enable once before any
+                    // rich edit or real review; refusal leaves no authority.
+                    fsrs_prerequisite = Some(fsrs_prerequisite::prepare(&host, clock.as_ref(), stage)?);
+                    limitations = fixture::forward(&host, clock.as_ref(), stage)?;
+                },
                 Action::PrepareReverseMedia => fixture::set_media(&host, &fixture::recipes()["media_utf8_exact"]["reverse"] )?,
                 _ => unreachable!(),
             }
@@ -241,8 +249,10 @@ fn run(diagnostic: &mut Option<PrepareForwardStage>) -> Result<bool> {
             let snapshot = fixture::snapshot(&host)?;
             if diagnostic.is_some() { *diagnostic = Some(PrepareForwardStage::Output); }
             let digest = output("snapshot.json", &snapshot)?;
-            return Ok(json!({"preparation_only":true,"preparation_complete":limitations.is_empty(),
-                "limitations":limitations,"snapshot_sha256":digest,"snapshot":snapshot}));
+            let mut observed = json!({"preparation_only":true,"preparation_complete":limitations.is_empty(),
+                "limitations":limitations,"snapshot_sha256":digest,"snapshot":snapshot});
+            if let Some(prerequisite) = fsrs_prerequisite { observed["fsrs_prerequisite"] = prerequisite; }
+            return Ok(observed);
         }
         let before = fixture::snapshot(&host)?;
         let frozen: Value = serde_json::from_slice(&contract::artifact(&binding["input"]["before_sha256"])?)?;

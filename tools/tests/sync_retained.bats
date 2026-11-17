@@ -703,6 +703,8 @@ class FailedForwardProcessPolicy:
         (state / 'failed-state').write_bytes(b'original failed state, never executable')
         return 2
 for name, value in [('valid', diagnostic),
+                    ('fsrs-enable', dict(diagnostic, stage='fsrs_enable')),
+                    ('fsrs-effects', dict(diagnostic, stage='fsrs_effects')),
                     ('fsrs-policy-pending', dict(diagnostic, stage='review_start_fsrs_policy_pending')),
                     ('preset-unsupported', dict(diagnostic, stage='review_start_preset_unsupported')),
                     ('missing', None), ('extra', dict(diagnostic, payload='forbidden')),
@@ -729,11 +731,11 @@ for name, value in [('valid', diagnostic),
     try:
         admitted = s.prepare_forward_diagnostic(directory / 'raw', 'normal-bidirectional', 'prepare_forward', 2)
     except ValueError:
-        assert name not in ('valid', 'fsrs-policy-pending', 'preset-unsupported', 'missing')
+        assert name not in ('valid', 'fsrs-enable', 'fsrs-effects', 'fsrs-policy-pending', 'preset-unsupported', 'missing')
     else:
-        assert name in ('valid', 'fsrs-policy-pending', 'preset-unsupported', 'missing') and admitted == value
+        assert name in ('valid', 'fsrs-enable', 'fsrs-effects', 'fsrs-policy-pending', 'preset-unsupported', 'missing') and admitted == value
 
-for name in ('valid', 'fsrs-policy-pending', 'preset-unsupported'):
+for name in ('valid', 'fsrs-enable', 'fsrs-effects', 'fsrs-policy-pending', 'preset-unsupported'):
     output = root / ('failed-forward-' + name) / 'raw'
     for case, action, rc in [('normal-bidirectional', 'prepare_forward', 0),
                              ('normal-bidirectional', 'prepare_forward', 1),
@@ -762,6 +764,217 @@ for name in ('valid', 'fsrs-policy-pending', 'preset-unsupported'):
         pass
     else:
         raise AssertionError('diagnostic admitted without worker failure file')
+PY
+  [ "$status" -eq 0 ]
+}
+
+@test "retained FSRS prerequisite preserves exact effect boundaries and binds actual preparation bytes without authority on failure" {
+  run python3 - "$REPO_ROOT" "$BATS_TEST_TMPDIR" <<'PY'
+import copy, importlib.util, pathlib, sys
+repo, root = map(pathlib.Path, sys.argv[1:])
+spec = importlib.util.spec_from_file_location('retained', repo / 'conformance/peers/retained-sync/support.py')
+s = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(s)
+# Synthetic post-capture admission inputs only, never SDK, scheduler, sync or
+# case evidence. Real public-operation ordering is covered by the Rust seam.
+def integer(value):
+    return dict(integer=str(value))
+def text(value):
+    return dict(text_hex=value.encode().hex())
+def blob(value):
+    return dict(blob_hex=value.encode().hex())
+before = dict(format='meguri-retained-snapshot-v1', tables={name: dict(columns=columns.split(), rows=[])
+    for name, columns in s.COLUMNS.items()}, media_sha256={'original.txt': 'f' * 64})
+before['tables']['col']['rows'] = [[integer(1)] + [integer(0)] * 12]
+before['tables']['config']['rows'] = [[text('foreign'), integer(7), integer(8), blob('{"opaque":true}')]]
+for card_id, data in [(11, '{"pos":7,"lrt":9,"cd":"custom","unknown":{"x":[1, 2]}}'),
+                      (12, 'opaque non-JSON card data'), (13, '')]:
+    row = [integer(0)] * 18
+    row[0], row[1], row[2], row[6], row[8], row[9] = map(integer, (card_id, card_id + 100, 1, 0, 17, 23))
+    row[17] = text(data)
+    before['tables']['cards']['rows'].append(row)
+after = copy.deepcopy(before)
+after['tables']['col']['rows'][0][2] = integer(1500)
+after['tables']['config']['rows'].append([text('fsrs'), integer(-1), integer(1), blob('true')])
+proof = dict(format='meguri-retained-fsrs-prerequisite-v1', case='normal-bidirectional', action='prepare_forward',
+    acknowledgment='reviewed_headless_fsrs_only_and_synchronized_effects', operation='enable_fsrs',
+    before_sha256=s.digest(s.encoded(before)), after_sha256=s.digest(s.encoded(after)),
+    eligible_card_ids=[], started_ms=1000, finished_ms=2000, case_credit=False)
+assert s.fsrs_effects(before, after, proof, 1000, 3000) == after
+original = copy.deepcopy((before, after, proof))
+def rejects(changed_after=None, changed_proof=None, changed_before=None):
+    try:
+        s.fsrs_effects(changed_before if changed_before is not None else before,
+                       changed_after if changed_after is not None else after,
+                       changed_proof if changed_proof is not None else proof, 1000, 3000)
+    except (ValueError, KeyError, TypeError):
+        pass
+    else:
+        raise AssertionError('undeclared prerequisite effects or proof admitted')
+for count in (0, 2, 4):
+    changed = copy.deepcopy(before)
+    changed['tables']['cards']['rows'] = (changed['tables']['cards']['rows'] +
+        [copy.deepcopy(changed['tables']['cards']['rows'][0])])[:count]
+    if count == 4:
+        changed['tables']['cards']['rows'][3][0] = integer(14)
+    rejects(changed_before=changed)
+for row_index in range(3):
+    for kind in (1, 2, 3):
+        changed = copy.deepcopy(before)
+        changed['tables']['cards']['rows'][row_index][6] = integer(kind)
+        rejects(changed_before=changed)
+changed = copy.deepcopy(before)
+changed['tables']['revlog']['rows'] = [[integer(v) for v in (21, 11, 0, 3, 23, 20, 2500, 900, 1)]]
+rejects(changed_before=changed)
+for value in ('false', 'true'):
+    changed = copy.deepcopy(before)
+    changed['tables']['config']['rows'].append([text('fsrs'), integer(0), integer(0), blob(value)])
+    rejects(changed_before=changed)
+for name in s.COLUMNS:
+    if name not in ('cards', 'config', 'col'):
+        changed = copy.deepcopy(after)
+        changed['tables'][name]['rows'].append([integer(99)] * len(s.COLUMNS[name].split()))
+        rejects(changed)
+for row_index in range(3):
+    for column in range(18):
+        changed = copy.deepcopy(after)
+        changed['tables']['cards']['rows'][row_index][column] = integer(999)
+        rejects(changed)
+for column in range(13):
+    if column == 2:
+        continue
+    changed = copy.deepcopy(after)
+    changed['tables']['col']['rows'][0][column] = integer(999)
+    rejects(changed)
+for column in range(4):
+    changed = copy.deepcopy(after)
+    changed['tables']['config']['rows'][0][column] = integer(999)
+    rejects(changed)
+changed = copy.deepcopy(after)
+changed['tables']['cards']['rows'][0][17] = text('{"pos":7,"lrt":9,"cd":"custom","unknown":{"x":[1,2]}}')
+rejects(changed)  # Even JSON whitespace is preserved, not normalized.
+for key, value in [('operation', 'set_config'), ('case', 'normal-no-change'), ('action', 'prepare_initial'),
+                   ('acknowledgment', 'app_sheet_appeared'), ('case_credit', True), ('started_ms', True),
+                   ('started_ms', 999), ('finished_ms', 999), ('finished_ms', 4000),
+                   ('before_sha256', 'a' * 63), ('after_sha256', 'z' * 64),
+                   ('eligible_card_ids', ['11']), ('eligible_card_ids', None), ('extra', True)]:
+    rejects(changed_proof=dict(proof, **{key: value}))
+for key in proof:
+    rejects(changed_proof={k: v for k, v in proof.items() if k != key})
+try:
+    s.decoded('{"operation":"enable_fsrs","operation":"enable_fsrs"}')
+except ValueError:
+    pass
+else:
+    raise AssertionError('duplicate prerequisite member admitted')
+for name, mutate in [('media', lambda v: v['media_sha256'].clear()),
+    ('config-missing', lambda v: v['tables']['config']['rows'].pop()),
+    ('config-false', lambda v: v['tables']['config']['rows'][1].__setitem__(3, blob('false'))),
+    ('config-storage-class', lambda v: v['tables']['config']['rows'][1].__setitem__(3, text('true'))),
+    ('config-usn', lambda v: v['tables']['config']['rows'][1].__setitem__(1, integer(0))),
+    ('config-stamp', lambda v: v['tables']['config']['rows'][1].__setitem__(2, integer(9))),
+    ('config-early-stamp', lambda v: v['tables']['config']['rows'][1].__setitem__(2, integer(0))),
+    ('collection-stamp', lambda v: v['tables']['col']['rows'][0].__setitem__(2, integer(999))),
+    ('collection-late-stamp', lambda v: v['tables']['col']['rows'][0].__setitem__(2, integer(2001))),
+    ('card-stamp', lambda v: v['tables']['cards']['rows'][0].__setitem__(4, integer(9))),
+    ('card-usn', lambda v: v['tables']['cards']['rows'][0].__setitem__(5, integer(-1)))]:
+    changed = copy.deepcopy(after)
+    mutate(changed)
+    rejects(changed)
+for stamp in (1000, 2000):
+    changed = copy.deepcopy(after)
+    changed['tables']['col']['rows'][0][2] = integer(stamp)
+    changed['tables']['config']['rows'][1][2] = integer(stamp // 1000)
+    assert s.fsrs_effects(before, changed, proof, 1000, 3000) == changed
+assert (before, after, proof) == original
+
+# Keep the real offline checkpoint/CAS/identity seam. The process deliberately
+# exits unsuccessfully even with structurally complete output: no authority.
+class FailedAfterCapture:
+    def run(self, directory, entrypoint, command, **kwargs):
+        assert entrypoint == '/retained-peer' and command == [] and 'network' not in kwargs
+        output, inputs = directory / 'raw', directory / 'input'
+        state = next(source for source, target, readonly in kwargs['mounts'] if target == '/state')
+        owned = state / 'normal-bidirectional'
+        owned.mkdir()
+        state_bytes = b'synthetic state, not a collection'
+        (owned / 'closed.txt').write_bytes(state_bytes)
+        declared = s.encoded(dict(format='meguri-retained-state-inputs-v1', files=[
+            dict(path='closed.txt', bytes=len(state_bytes), sha256=s.digest(state_bytes))]))
+        snap = s.encoded(after)
+        observed = dict(preparation_only=True, preparation_complete=True, limitations=[],
+            snapshot_sha256=s.digest(snap), snapshot=after, fsrs_prerequisite=proof)
+        result = dict(format='meguri-retained-action-v1', case='normal-bidirectional', action='prepare_forward',
+            actor='client_a', client_build={}, binding=None, case_credit=False,
+            action_sha256=s.digest(s.regular(inputs / 'action.json')), recipe_sha256=s.digest(s.regular(s.RECIPES)),
+            selection_sha256=s.digest(s.regular(s.SELECTION)), state_inputs_sha256=s.digest(declared),
+            started_ms=1000, finished_ms=3000, observed=observed)
+        for name, data in [('fsrs-before.json', s.encoded(before)), ('fsrs-after.json', s.encoded(after)),
+            ('snapshot.json', snap), ('action-result.json', s.encoded(result)), ('state-inputs.json', declared)]:
+            s.frozen_file(output / name, data)
+        return 1
+directory, peer = root / 'failed-complete-forward', root / 'peer'
+(peer / 'artifacts').mkdir(parents=True)
+s.frozen_file(peer / 'client-build.json', b'{}')
+(directory / 'state').mkdir(parents=True)
+assert s.offline_worker(FailedAfterCapture(), peer, directory, 'normal-bidirectional', 'prepare_forward', directory / 'state') == 1
+checkpoint = s.load_json(directory / 'checkpoint.json')
+assert checkpoint['admission_valid'] is True and checkpoint['preparation_complete'] is True
+assert checkpoint['exit_code'] == 1 and checkpoint['case_credit'] is False
+saved = s.saved_preparation(directory, 'normal-bidirectional', 'prepare_forward', {})
+assert saved['fsrs_before'] == before and saved['fsrs_after'] == after
+# Bind both actual capture hashes and the action receipt, independently of
+# the syntactically valid effect proof. Original frozen CAS stays untouched.
+result_path = directory / 'raw/action-result.json'
+result_bytes = s.regular(result_path)
+for key in ('before_sha256', 'after_sha256', 'action'):
+    changed = s.decoded(result_bytes)
+    if key == 'action':
+        changed[key] = 'prepare_initial'
+    else:
+        changed['observed']['fsrs_prerequisite'][key] = '0' * 64
+    result_path.chmod(0o600)
+    result_path.write_bytes(s.encoded(changed))
+    try:
+        s.preparation_identity(directory, 'normal-bidirectional', 'prepare_forward', {})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('unbound capture hash or action receipt admitted')
+result_path.write_bytes(result_bytes)
+result_path.chmod(0o444)
+saved['event'] = dict(operation_complete=False)
+try:
+    s.forward_authority(before, saved)
+except ValueError as error:
+    assert str(error) == 'successful forward event required'
+else:
+    raise AssertionError('failed frozen event supplied forward authority')
+try:
+    s.forward_submission(directory, {}, after)
+except ValueError as error:
+    assert str(error) == 'successful frozen forward checkpoint required'
+else:
+    raise AssertionError('failed frozen checkpoint supplied submission closure')
+# Change resident capture bytes; original CAS still supplies old bytes.
+raw = directory / 'raw'
+old_bytes = s.regular(raw / 'fsrs-after.json')
+(raw / 'fsrs-after.json').chmod(0o600)
+(raw / 'fsrs-after.json').write_bytes(old_bytes + b' ')
+assert s.saved_preparation(directory, 'normal-bidirectional', 'prepare_forward', {})['fsrs_after'] == after
+try:
+    s.preparation_identity(directory, 'normal-bidirectional', 'prepare_forward', {})
+except ValueError as error:
+    assert str(error) == 'actual FSRS prerequisite snapshot hashes'
+else:
+    raise AssertionError('unbound resident prerequisite bytes admitted')
+for case, action in [('normal-no-change', 'prepare_snapshot'), ('normal-bidirectional', 'prepare_initial')]:
+    try:
+        s.prepare_forward_diagnostic(raw, case, action, 1)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('FSRS artifact filenames admitted outside fixed action')
 PY
   [ "$status" -eq 0 ]
 }
@@ -988,4 +1201,218 @@ path.write_bytes(data)
 assert s.accepted_review() == data
 PY
   [ "$status" -eq 0 ]
+}
+
+# These exercise the real mode, source/lock/feature admission and report parser
+# with public synthetic Cargo process data. They never execute Rust tests.
+retained_unit_fixture() {
+  MG_ROOT="$BATS_TEST_TMPDIR/unit-repo"
+  MG_RUN_DIR="$BATS_TEST_TMPDIR/unit-run"
+  UNIT_DATA="$BATS_TEST_TMPDIR/unit-data"
+  mkdir -p "$MG_ROOT/conformance/peers/retained-sync/src" "$MG_ROOT/core" "$MG_ROOT/server" \
+    "$MG_ROOT/conformance/recordings/scenarios/meguri-sync-server" "$MG_ROOT/tools/mg.d" "$MG_RUN_DIR" "$UNIT_DATA"
+  cp "$REPO_ROOT/conformance/peers/retained-sync/support.py" "$MG_ROOT/conformance/peers/retained-sync/"
+  cp "$REPO_ROOT/tools/mg.d/sync-retained.sh" "$MG_ROOT/tools/mg.d/"
+  cp "$REPO_ROOT/conformance/recordings/scenarios/meguri-sync-server/"{final-fixture-recipes,candidate-retained-final-selection}.json \
+    "$MG_ROOT/conformance/recordings/scenarios/meguri-sync-server/"
+  python3 - "$MG_ROOT" "$UNIT_DATA" <<'PY'
+import json, pathlib, sys
+root, data = map(pathlib.Path, sys.argv[1:])
+peer = root / 'conformance/peers/retained-sync'
+(root / 'core/Cargo.toml').write_text('[workspace]\nmembers = ["crates/*", "tools/*"]\n')
+(root / 'server/Cargo.toml').write_text('[workspace]\nmembers = []\n')
+(peer / 'Cargo.toml').write_text('[workspace]\nresolver = "3"\n[dependencies.meguri-sync]\nfeatures = ["test-hooks"]\n')
+(root / 'core/Cargo.lock').write_text('version = 4\npackage = []\n')
+(peer / 'Cargo.lock').write_text('version = 4\n[[package]]\nname = "meguri-retained-sync-peer"\nversion = "0.0.0"\n')
+(peer / 'src/main.rs').write_text('// synthetic source: never compiled or executed\n')
+# Only controlled compiler/report input: no fabricated runtime acceptance.
+exe = data / 'synthetic-binary'
+exe.write_bytes(b'synthetic compiler output; never executed\n')
+names = ['meguri-engine', 'meguri-model', 'meguri-storage', 'meguri-sync', 'meguri-retained-sync-peer']
+packages = [dict(id=name, name=name, version='0.0.0', source=None) for name in names]
+(data / 'graph.json').write_text(json.dumps(dict(packages=packages)))
+messages = [dict(reason='compiler-artifact', package_id=name, features=['test-hooks'],
+                 target=dict(name=name), executable=None) for name in names[:-1]]
+messages += [dict(reason='compiler-artifact', package_id=names[-1], features=[],
+                  target=dict(name=names[-1]), executable=str(exe)), dict(reason='build-finished', success=True)]
+(data / 'build.jsonl').write_text(''.join(json.dumps(row) + '\n' for row in messages))
+binary = 'meguri-retained-sync-peer'
+identity = dict(crate=binary, test_binary=binary, kind='bin')
+names = [binary + '::' + binary + '$fsrs_prerequisite::tests::' + name for name in (
+    'captures_bracket_one_real_public_enable_before_forward_mutations',
+    'failed_enable_stops_after_before_capture_without_authority_or_retry',
+    'empty_bootstrap_cannot_call_enable_or_supply_authority',
+    'fixed_input_rejects_nonnew_history_and_present_key_without_parsing_data')]
+events = [dict(type='suite', event='started', test_count=len(names), nextest=identity)]
+for name in names:
+    events += [dict(type='test', event=state, name=name) for state in ('started', 'ok')]
+events += [dict(type='suite', event='ok', passed=len(names), failed=0, ignored=0, measured=0,
+                filtered_out=0, nextest=identity)]
+(data / 'good.jsonl').write_text(''.join(json.dumps(row) + '\n' for row in events))
+PY
+  git -C "$MG_ROOT" init -q
+  git -C "$MG_ROOT" add -A
+  git -C "$MG_ROOT" -c user.name=selftest -c user.email=selftest@localhost commit -qm synthetic
+  UNIT_STREAM="$UNIT_DATA/good.jsonl"
+  UNIT_PROCESS_RC=0
+  UNIT_CHANGE_SOURCE=false
+  rustc() { [ "$*" = -vV ] && printf 'host: synthetic-host\n'; }
+  cargo() {
+    printf '%s\n' "$@" >>"$UNIT_DATA/commands"
+    case "$1" in
+      metadata) cat "$UNIT_DATA/graph.json" ;;
+      build) cat "$UNIT_DATA/build.jsonl" ;;
+      nextest)
+        printf '%s\0' "$@" >"$UNIT_DATA/nextest-args"
+        [ "${NEXTEST_EXPERIMENTAL_LIBTEST_JSON:-}" = 1 ] || return 97
+        cat "$UNIT_STREAM" || return
+        if [ "$UNIT_CHANGE_SOURCE" = true ]; then
+          printf '// changed during process\n' >>"$MG_ROOT/conformance/peers/retained-sync/src/main.rs"
+        fi
+        return "$UNIT_PROCESS_RC" ;;
+      *) return 97 ;;
+    esac
+  }
+  mg_artifact() { :; }
+  mg_detail() { :; }
+  mg_message() { :; }
+  mg_count() { printf 'count:%s:%s\n' "$1" "$2"; }
+}
+
+@test "retained peer-unit dry run stays in Docker dev without executing the producer" {
+  run "$REPO_ROOT/tools/mg" sync-server-retained --dry-run peer-unit
+  [ "$status" -eq 0 ]
+  result="${lines[${#lines[@]}-1]}"
+  run jq -e '.job=="sync-server-retained" and .dry_run==true and .status=="pass" and .service=="dev"' "$result"
+  [ "$status" -eq 0 ]
+}
+
+@test "retained peer-unit accepts no caller selectors or extra arguments" {
+  local extra
+  for extra in command output manifest features target filter ''; do
+    run mg_sync_retained peer-unit "$extra"
+    [[ "$output" == *'failure:usage'* && "$output" == *'status:error'* ]]
+  done
+  run mg_sync_retained
+  [[ "$output" == *'failure:usage'* && "$output" == *'status:error'* ]]
+}
+
+@test "retained peer-unit runs the fixed producer and admits four actual completions with retained source and locks" {
+  retained_unit_fixture
+  run mg_sync_retained peer-unit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'status:pass'* && "$output" != *'failure:'* ]]
+  [[ "$output" == *'count:total:4'* && "$output" == *'count:passed:4'* ]]
+  [[ "$output" == *'count:failed:0'* && "$output" == *'count:skipped:0'* ]]
+  cmp "$UNIT_STREAM" "$MG_RUN_DIR/nextest.jsonl"
+  cmp "$MG_RUN_DIR/source-before.json" "$MG_RUN_DIR/source-after.json"
+  cmp "$MG_ROOT/core/Cargo.lock" "$MG_RUN_DIR/unit-source/core/Cargo.lock"
+  cmp "$MG_ROOT/conformance/peers/retained-sync/Cargo.lock" "$MG_RUN_DIR/unit-source/conformance/peers/retained-sync/Cargo.lock"
+  cmp "$MG_ROOT/conformance/peers/retained-sync/src/main.rs" "$MG_RUN_DIR/unit-source/conformance/peers/retained-sync/src/main.rs"
+  run python3 - "$UNIT_DATA" "$MG_ROOT" "$MG_RUN_DIR" <<'PY'
+import json, pathlib, sys
+fixture, root, run = map(pathlib.Path, sys.argv[1:])
+args = (fixture / 'nextest-args').read_bytes().decode().split('\0')
+assert args == ['nextest', 'run', '--locked', '--offline', '--manifest-path',
+    str(root / 'conformance/peers/retained-sync/Cargo.toml'), '--bin', 'meguri-retained-sync-peer',
+    '--target', 'synthetic-host', '--retries', '0', '--no-fail-fast', '--no-tests=fail',
+    '-E', 'test(/^fsrs_prerequisite::tests::/)', '--message-format', 'libtest-json-plus',
+    '--message-format-version', '0.1', '']
+report = json.loads((run / 'peer-unit-evidence.json').read_text())
+assert {key: report[key] for key in ('executed', 'passed', 'failed', 'skipped', 'cancelled')} == dict(
+    executed=4, passed=4, failed=0, skipped=0, cancelled=0)
+assert report['errors'] == [] and len(report['names']) == 4
+receipt = json.loads((run / 'client/client-build.json').read_text())
+assert receipt['source_dirty'] is False and receipt['features']
+for key in ('source_sha256', 'core_lock_sha256', 'peer_lock_sha256', 'resolved_graph_sha256'):
+    assert (run / 'client/artifacts' / receipt[key]).is_file()
+PY
+  [ "$status" -eq 0 ]
+}
+
+@test "retained peer-unit rejects missing extra wrong empty ignored skipped cancelled and malformed actual reports" {
+  retained_unit_fixture
+  python3 - "$UNIT_DATA" <<'PY'
+import copy, json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+good = [json.loads(line) for line in (root / 'good.jsonl').read_text().splitlines()]
+variants = {}
+variants['missing'] = [row for row in good if row.get('name') != good[1]['name']]
+variants['unrun'] = [row for row in good if row.get('event') != 'started' or row.get('type') != 'test']
+variants['extra'] = good[:-1] + [dict(type='test', event='started', name=good[1]['name'] + '_extra')] + good[-1:]
+variants['wrong'] = copy.deepcopy(good)
+for row in variants['wrong']:
+    if 'name' in row:
+        row['name'] = row['name'].replace('fsrs_prerequisite::tests::', 'other::tests::')
+variants['empty'] = []
+variants['incomplete'] = good[:-1]
+variants['duplicate'] = good[:2] + [good[1]] + good[2:]
+variants['suite-identity'] = copy.deepcopy(good)
+variants['suite-identity'][0]['nextest']['test_binary'] = 'other'
+for state in ('ignored', 'skipped', 'cancelled', 'failed'):
+    events = copy.deepcopy(good)
+    events[2]['event'] = state
+    events[-1].update(passed=3, failed=int(state == 'failed'), ignored=int(state in ('ignored', 'skipped')))
+    variants[state] = events
+for name, value in [('negative', -1), ('boolean', True), ('summary-only', 4.0)]:
+    events = copy.deepcopy(good)
+    events[-1]['passed'] = value
+    variants[name] = events
+for name, rows in variants.items():
+    (root / (name + '.jsonl')).write_text(''.join(json.dumps(row) + '\n' for row in rows))
+(root / 'malformed.jsonl').write_bytes((root / 'good.jsonl').read_bytes() + b'{invalid\n')
+(root / 'duplicate-key.jsonl').write_bytes((root / 'good.jsonl').read_bytes().replace(
+    b'\"event\": \"ok\"', b'\"event\": \"failed\", \"event\": \"ok\"', 1))
+PY
+  local variant
+  for variant in missing unrun extra wrong empty incomplete duplicate suite-identity ignored skipped cancelled failed negative boolean summary-only malformed duplicate-key; do
+    MG_RUN_DIR="$BATS_TEST_TMPDIR/run-$variant"
+    mkdir "$MG_RUN_DIR"
+    UNIT_STREAM="$UNIT_DATA/$variant.jsonl"
+    run mg_sync_retained peer-unit
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'failure:peer-unit-evidence'* && "$output" == *'status:fail'* ]]
+    [[ "$output" != *'status:pass'* ]]
+    cmp "$UNIT_STREAM" "$MG_RUN_DIR/nextest.jsonl"
+    run jq -e '.errors | length > 0' "$MG_RUN_DIR/peer-unit-evidence.json"
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "retained peer-unit refuses a failed process despite a complete four-pass report" {
+  retained_unit_fixture
+  UNIT_PROCESS_RC=71
+  run mg_sync_retained peer-unit
+  [[ "$output" == *'failure:nextest-exit-71'* && "$output" == *'status:fail'* ]]
+  [[ "$output" != *'status:pass'* ]]
+  cmp "$MG_RUN_DIR/source-before.json" "$MG_RUN_DIR/source-after.json"
+  run jq -e '.executed==4 and .errors==[]' "$MG_RUN_DIR/peer-unit-evidence.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "retained peer-unit refuses source changes despite a complete four-pass report" {
+  retained_unit_fixture
+  UNIT_CHANGE_SOURCE=true
+  run mg_sync_retained peer-unit
+  [[ "$output" == *'failure:peer-unit-source'* && "$output" == *'status:fail'* ]]
+  [[ "$output" != *'status:pass'* ]]
+  run cmp "$MG_RUN_DIR/source-before.json" "$MG_RUN_DIR/source-after.json"
+  [ "$status" -ne 0 ]
+  run jq -e '.executed==4 and .errors==[]' "$MG_RUN_DIR/peer-unit-evidence.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "retained peer-unit preserves the existing feature graph refusal before producing tests" {
+  retained_unit_fixture
+  python3 - "$UNIT_DATA/build.jsonl" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+rows = [json.loads(line) for line in path.read_text().splitlines()]
+rows[0]['features'].append('ankiweb')
+path.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+PY
+  run mg_sync_retained peer-unit
+  [[ "$output" == *'failure:retained-build'* && "$output" == *'status:fail'* ]]
+  [[ "$output" != *'status:pass'* ]]
+  [ ! -e "$UNIT_DATA/nextest-args" ]
 }

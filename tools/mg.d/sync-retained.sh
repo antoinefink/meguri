@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: MIT
 # Separate retained public HTTP worker. No service/client runtime on the host.
 mg_job sync-server-retained docker:dev mg_sync_retained \
-  "Retained public HTTP peer workspace: prepare-lock, build, check (Docker only; no compatibility credit)"
+  "Retained public HTTP peer workspace: prepare-lock, build, check, peer-unit (Docker only; no compatibility credit)"
 
 mg_sync_retained() {
   local mode="${1:-}" peer="$MG_ROOT/conformance/peers/retained-sync" graph compiler_host
-  [ "$#" -eq 1 ] || { mg_failure usage "sync-server-retained needs prepare-lock, build or check"; mg_status error; return; }
-  case "$mode" in prepare-lock|build|check) ;; *) mg_failure usage "Unknown retained peer operation"; mg_status error; return ;; esac
+  [ "$#" -eq 1 ] || { mg_failure usage "sync-server-retained needs prepare-lock, build, check or peer-unit"; mg_status error; return; }
+  case "$mode" in prepare-lock|build|check|peer-unit) ;; *) mg_failure usage "Unknown retained peer operation"; mg_status error; return ;; esac
   if ! python3 "$peer/support.py" check; then
     mg_failure retained-inputs "Committed selection, recipes or workspace boundaries differ"; mg_status fail; return
   fi
@@ -49,8 +49,167 @@ mg_sync_retained() {
   fi
   mg_artifact retained-client "$MG_RUN_DIR/client" "Actual executable, exact core/peer locks, source and resolved features"
   mg_detail retained_client "$(cat "$MG_RUN_DIR/client/client-build.json")"
+  if [ "$mode" = peer-unit ]; then
+    mg_sync_retained__peer_unit "$compiler_host"
+    return
+  fi
   mg_message "Build only. Parent owns reviewed action inputs, owned final image/namespace, Desktop/fault steps and all eight case verdicts"
   mg_status pass
+}
+
+# Fixed policy-unit lane in the separate peer workspace. Reuse the build's
+# lock/feature admission and receipt, retaining actual source before execution.
+mg_sync_retained__unit_source() {
+  python3 - "$MG_ROOT" "$MG_RUN_DIR" <<'PY'
+import hashlib, json, pathlib, sys
+root, run = map(pathlib.Path, sys.argv[1:])
+source = json.loads((run / 'source-before.json').read_bytes())
+files = {entry['path']: entry for entry in source['files']}
+for lock in ('core/Cargo.lock', 'conformance/peers/retained-sync/Cargo.lock'):
+    if lock not in files:
+        raise ValueError('missing source lock')
+for name, entry in files.items():
+    relative = pathlib.PurePosixPath(name)
+    if relative.is_absolute() or '..' in relative.parts:
+        raise ValueError('invalid source path')
+    path = root / name
+    if path.is_symlink() or not path.is_file():
+        raise ValueError('nonregular source')
+    data = path.read_bytes()
+    if len(data) != entry['bytes'] or hashlib.sha256(data).hexdigest() != entry['sha256']:
+        raise ValueError('source changed before tests')
+    target = run / 'unit-source' / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+PY
+}
+
+mg_sync_retained__unit_report() {
+  python3 - "$MG_RUN_DIR" <<'PY'
+import json, pathlib, sys
+run = pathlib.Path(sys.argv[1])
+# Frozen from the accepted FSRS5 source; no caller-supplied filter or names.
+binary = 'meguri-retained-sync-peer'
+identity = dict(crate=binary, test_binary=binary, kind='bin')
+prefix = binary + '::' + binary + '$fsrs_prerequisite::tests::'
+expected = {prefix + name for name in (
+    'captures_bracket_one_real_public_enable_before_forward_mutations',
+    'failed_enable_stops_after_before_capture_without_authority_or_retry',
+    'empty_bootstrap_cannot_call_enable_or_supply_authority',
+    'fixed_input_rejects_nonnew_history_and_present_key_without_parsing_data')}
+started, completed = set(), {}
+suite_started = suite_done = False
+counts = dict(executed=0, passed=0, failed=0, skipped=0, cancelled=0)
+errors = []
+def need(ok, reason):
+    if not ok:
+        raise ValueError(reason)
+def integer(value):
+    return type(value) is int and 0 <= value <= 2147483647
+def unique(pairs):
+    result = {}
+    for key, value in pairs:
+        need(key not in result, 'duplicate JSON key')
+        result[key] = value
+    return result
+try:
+    with (run / 'nextest.jsonl').open() as stream:
+        for line in stream:
+            event = json.loads(line, object_pairs_hook=unique)
+            need(isinstance(event, dict), 'nonobject event')
+            kind, state = event.get('type'), event.get('event')
+            if kind == 'suite':
+                need(event.get('nextest') == identity, 'wrong suite identity')
+                if state == 'started':
+                    need(not suite_started and integer(event.get('test_count')) and
+                         event['test_count'] == 4, 'duplicate or wrong suite start/count')
+                    suite_started = True
+                elif state in ('ok', 'failed'):
+                    need(suite_started and not suite_done, 'suite completion without unique start')
+                    for key in ('passed', 'failed', 'ignored', 'measured', 'filtered_out'):
+                        need(integer(event.get(key)), 'invalid suite count: ' + key)
+                    need(event['passed'] == counts['passed'] and event['failed'] == counts['failed'] and
+                         event['ignored'] == counts['skipped'] and event['measured'] == 0 and
+                         event['filtered_out'] == 0, 'inconsistent suite counts')
+                    need(state == 'ok' and set(completed) == expected and
+                         all(value == 'ok' for value in completed.values()), 'incomplete or unsuccessful suite')
+                    suite_done = True
+                else:
+                    raise ValueError('unsupported suite event')
+            elif kind == 'test':
+                name = event.get('name')
+                need(suite_started and not suite_done and name in expected, 'unexpected test or inactive suite')
+                if state == 'started':
+                    need(name not in started and name not in completed, 'duplicate test start')
+                    started.add(name)
+                else:
+                    need(state in ('ok', 'failed', 'ignored', 'skipped', 'cancelled'), 'unsupported test event')
+                    need(name not in completed, 'duplicate test completion')
+                    need(state in ('ignored', 'skipped') or name in started, 'test completion without start')
+                    completed[name] = state
+                    key = {'ok':'passed', 'failed':'failed', 'ignored':'skipped',
+                           'skipped':'skipped', 'cancelled':'cancelled'}[state]
+                    counts[key] += 1
+                    if state in ('ok', 'failed'):
+                        counts['executed'] += 1
+            else:
+                raise ValueError('unsupported nextest record')
+    need(suite_done and started == expected and set(completed) == expected, 'empty or incomplete test run')
+    need(counts == dict(executed=4, passed=4, failed=0, skipped=0, cancelled=0), 'four actual passes required')
+except (OSError, ValueError, TypeError, KeyError) as error:
+    errors.append(str(error))
+report = dict(counts, names=sorted(completed), errors=errors)
+(run / 'peer-unit-evidence.json').write_text(json.dumps(report, sort_keys=True, indent=2) + '\n')
+if errors:
+    sys.stderr.write('retained peer-unit evidence refused: ' + errors[0] + '\n')
+    raise SystemExit(1)
+PY
+}
+
+mg_sync_retained__peer_unit() {
+  local compiler_host="$1" rc=0 evidence_ok=true dirty report counts passed failed skipped
+  report="$MG_RUN_DIR/peer-unit-evidence.json"
+  if ! mg_sync_retained__unit_source; then
+    mg_failure peer-unit-source "Could not retain exact source and both locks before tests"; mg_status fail; return
+  fi
+  mg_artifact peer-unit-source "$MG_RUN_DIR/unit-source" "Actual pre-test source bytes including core and separate peer locks"
+  mg_artifact source-before "$MG_RUN_DIR/source-before.json" "Build and unit source inventory"
+  (cd "$MG_ROOT/core" && NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 cargo nextest run \
+    --locked --offline --manifest-path "$MG_ROOT/conformance/peers/retained-sync/Cargo.toml" \
+    --bin meguri-retained-sync-peer --target "$compiler_host" \
+    --retries 0 --no-fail-fast --no-tests=fail \
+    -E 'test(/^fsrs_prerequisite::tests::/)' \
+    --message-format libtest-json-plus --message-format-version 0.1) >"$MG_RUN_DIR/nextest.jsonl" || rc=$?
+  mg_artifact nextest-jsonl "$MG_RUN_DIR/nextest.jsonl" "Actual fixed peer-unit process report"
+  mg_detail peer_unit_exit_code "$rc"
+  # Check after execution even when the process/report failed. Neither a clean
+  # process exit nor a matching summary alone grants admission.
+  if ! python3 "$MG_ROOT/conformance/peers/retained-sync/support.py" source "$MG_RUN_DIR/source-after.json" ||
+      ! cmp -s "$MG_RUN_DIR/source-before.json" "$MG_RUN_DIR/source-after.json" ||
+      ! python3 "$MG_ROOT/conformance/peers/retained-sync/support.py" verify-lock ||
+      ! dirty="$(git -C "$MG_ROOT" status --porcelain=v1 --untracked-files=all)" || [ -n "$dirty" ]; then
+    mg_failure peer-unit-source "Source or locks changed during peer-unit execution"; evidence_ok=false
+  fi
+  mg_artifact source-after "$MG_RUN_DIR/source-after.json" "Post-test source inventory; must equal before"
+  if ! mg_sync_retained__unit_report 2>"$MG_RUN_DIR/peer-unit-evidence.log"; then
+    mg_failure peer-unit-evidence "Invalid, incomplete or unsuccessful fixed-four nextest report"; evidence_ok=false
+  fi
+  mg_artifact peer-unit-evidence "$report"
+  mg_artifact peer-unit-evidence-log "$MG_RUN_DIR/peer-unit-evidence.log"
+  if [ "$rc" -ne 0 ]; then
+    mg_failure "nextest-exit-$rc" "Fixed peer-unit nextest process failed"; evidence_ok=false
+  fi
+  if counts="$(jq -er '[.passed,.failed,.skipped] | if all(.[]; type == "number" and . >= 0 and . <= 2147483647 and floor == .) then @tsv else error("invalid counts") end' "$report")" &&
+      IFS=$'\t' read -r passed failed skipped <<<"$counts"; then
+    mg_count total "$((passed+failed+skipped))"; mg_count passed "$passed"; mg_count failed "$failed"; mg_count skipped "$skipped"
+  else
+    mg_failure peer-unit-evidence "Could not extract actual nextest counts"; evidence_ok=false
+  fi
+  if [ "$evidence_ok" = true ]; then
+    mg_detail peer_unit "$(cat "$report")"
+    mg_message "Four FSRS prerequisite policy unit tests only; no protocol, eight-case, device, image or compatibility acceptance"
+    mg_status pass
+  else mg_status fail; fi
 }
 
 # Finite retained/final HOST branch of sync-server-interop. Build jobs above
