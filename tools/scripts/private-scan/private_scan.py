@@ -828,6 +828,15 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    # Complete-content public reviews: routine Core fix1 and Host fix2, 2026-11-17.
+    "core/crates/meguri-host/tests/provider_normal.rs":
+        "bb107c3ba79f391c45d4007d93831b1e2b00b5c22f846c978cc2bf90e0e13a8f",
+    "core/crates/meguri-storage/tests/media_bound_reset.rs":
+        "afc4b2b78e4a6482f363326fc71e687e51d0c6ee7d72f8dbdf554a1484839004",
+    "core/crates/meguri-sync/src/media.rs":
+        "cb0a39e146738dec88f763d2855efe7b3995556e8a02b53f313e1449ca1ac70d",
+    "core/crates/meguri-sync/src/provider/bootstrap.rs":
+        "a81b766a1fdaa7bc0797d6c64b0537a39e55e4098609bcf272e9326a42478442",
     'docs/process/review-log/meguri-sync-U11.md':
         'b1f55fc58d2c7319cb2ab7cca6492eee9810b867956f4acd949bff84be8d22a3',
     'tools/tests/sync_recovery.bats':
