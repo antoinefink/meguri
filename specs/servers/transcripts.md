@@ -360,7 +360,7 @@ Real ids differ between runs and between Anki and Meguri; tokens name entities b
 | the result of `getActiveProfile`, items of the result of `getProfiles`, and members named `profile` in `notesInfo` items, when equal to the executor's profile name | `"<profile>"` |
 | members named `id` inside items of `tmpls` and `flds` of a note type object (`findModelsById`, `findModelsByName`, `createModel` results) | `"#rand"` when an integer |
 | items of `nextReviews` (`cardsInfo`) | the characters U+2068 and U+2069 removed |
-| members `question` and `answer` of `cardsInfo` items | `conformance/render-ops#Q5.4`, nothing else |
+| members `question` and `answer` of `cardsInfo` items | `conformance/render-ops#Q5.4`, and every `<a href='https://` + host + `/templates/errors.html#` (the links of the blank-card and template-error notices, `render/display-transform` D7, D8, D10): `https://` + host becomes `<anki-docs>`, path and anchor kept (so `<a href='<anki-docs>/templates/errors.html#template-syntax-error'>`); nothing else. Committed transcripts never hold that host (R1876) |
 
 Times not named here (review `due` days, revlog ids, intervals) are left unchanged: the clock is the same on both sides.
 
