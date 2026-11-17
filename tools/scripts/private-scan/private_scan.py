@@ -828,15 +828,17 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'core/crates/meguri-host/tests/provider_bootstrap.rs':
+        'f77e384396ffd07c8e9c90bd455a68f9c0635a077814d215848c6a5803951c99',
     # Complete-content public reviews: routine Core fix1 and Host fix2, 2026-11-17.
     "core/crates/meguri-host/tests/provider_normal.rs":
-        "6e4da27f10740c311b499a99e3859d799e26b4b361b03fdd2f008535793072a3",
+        "0cba109d63f83671798429552b4ed94bee29659412914b3c17aef4430ef9ec6b",
     "core/crates/meguri-storage/tests/media_bound_reset.rs":
         "afc4b2b78e4a6482f363326fc71e687e51d0c6ee7d72f8dbdf554a1484839004",
     "core/crates/meguri-sync/src/media.rs":
-        "cb0a39e146738dec88f763d2855efe7b3995556e8a02b53f313e1449ca1ac70d",
+        "729188c88c59067f305e662fb643e5fa3ccc6e1e04f1828619d17a820008a095",
     "core/crates/meguri-sync/src/provider/bootstrap.rs":
-        "a81b766a1fdaa7bc0797d6c64b0537a39e55e4098609bcf272e9326a42478442",
+        "23fcbee1dfd8a262378e71c91841dab18f27ea210ba4c085126d5257741abd8e",
     'docs/process/review-log/meguri-sync-U11.md':
         'b1f55fc58d2c7319cb2ab7cca6492eee9810b867956f4acd949bff84be8d22a3',
     'tools/tests/sync_recovery.bats':
@@ -888,7 +890,7 @@ PUBLIC_ARTIFACTS = {
 
     # Complete bounded-content PUBLIC review: Codex r10_native_failure_diagnosis, 2026-11-17.
     'app/Packages/MeguriCore/Sources/CoreBridge/Sync/ProviderBootstrapService.swift':
-        '71a794a1953a98f606d202049c57ed31eaa26c18a793fb2cdcf564c6aed82d05',
+        'edba139cde56f1dc7c10598a9de920c034b31d800320ed3e0068480e8fe6fb99',
     # Complete final-content PUBLIC review: Codex incoming_contract_review, 2026-11-17.
     'specs/sync/status-strings.md':
         '17c562307d81225ae1c55b0acc9c817d51258d2f25bb93839f61e0e645c72034',
@@ -903,7 +905,7 @@ PUBLIC_ARTIFACTS = {
         'a15fbd849371207df8a52ba993b64e26d339fcb9af56bbe3cb01652f38b7cae9',
     # Complete final-content PUBLIC review: Codex adoption_empty_decks, 2026-11-17.
     'core/crates/meguri-ffi/src/provider_bootstrap.rs':
-        'ab1329fae5662e53827837ff3ac426e58ba948f44cdcdbbc2cd7cce9d339f459',
+        '999ab47bc5b1b509856b18830cffcd3b8b0617f426bbad4a35afb119387360db',
     # Complete PUBLIC review: Codex provider_test_delta_review, 2026-11-17.
     "docs/process/review-log/native-own-handoff-attribution-20261117.md":
         "05a9ce3d8eeecf5e249a920c444ca767eb915060cd7360d4a85e744d5931951e",
