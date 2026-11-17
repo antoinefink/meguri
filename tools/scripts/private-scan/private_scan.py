@@ -833,17 +833,17 @@ PUBLIC_ARTIFACTS = {
     'tools/scripts/private-scan/tests/test_private_scan.py':
         'f6a486a548efb3a11731237f9d1802f9329b55532c2933ea74704158964288f1',
     'oracle/meguri-sync-server/retained_observer.py':
-        'f096346a86c3bb55d2e9835cb6558c04526e2fbbfa333388e954868cfe919816',
+        '8900b3935f72fcd0e97dcd3274c1db258ee9c8b7e118dd940ba7d9267d71d410',
     'tools/tests/sync_retained.bats':
-        'ccfa8b5fcbd30fcdc73d1cfbfe7f6229d51cec54594bfade0647f6437fe3ae4b',
+        '8a3bc0477af3b98d851455bbb867bb710ace54ba9dc6cd899e1e6910c0f7e51f',
     'tools/mg.d/sync-retained.sh':
         '1eaa29368bf416e3dc709da6fe4ab98946132fdab2ea711a09e79187c43eef30',
     'conformance/peers/retained-sync/support.py':
-        '65fbc56af92fdb9b32ec5c5d8c963024025948a14cf30cd8a4a38c1196b10df8',
+        'f815b854d9e41d1dd6b6347ac45eaad4f34d729daaedb53da6c52e67d7f9f07d',
     'conformance/peers/retained-sync/src/main.rs':
-        'd6c14aa5014fc4fc6824cde87871e77d3d27aa3218288093447ff97e00ca989c',
+        'e95a419ac822c4b42e79796b3db708604d499c80e7089e8dc7ea7755767ebb52',
     'conformance/peers/retained-sync/src/fixture.rs':
-        'f8c5fb4befacf5e8604ee9782618a2a7e7cc176f637d36faa3be81b0d29ca959',
+        'c081384f0291814d7befe8aa178a5af98162331ced069c231a79fb125c7a026b',
     'conformance/peers/retained-sync/README.md':
         '625a27d5cdfefedd533ce970e774d5802e15ff16b9d24feb1b99fa81f06bbee9',
     'conformance/peers/retained-sync/AGENTS.md':
@@ -1138,7 +1138,7 @@ PUBLIC_VENDOR_ARTIFACTS = {
     'f81e67fcb2e3dbe8379aead1ebe38904691e35f510169970a987710496d3ed77':
         'efedb8674cc8f9fde878154e93dfc216159c9be209001a3a7a07284bff6b925c',
     '1abb17517ad6c3616bc662765627c8e3419b3d81f0b8eaf3358cf4af9d316a33':
-        '9ac159793ca9ff60b261d619df28dbd6d6eb8367edff8f0def7716b7ca1ff1c4',
+        'e9717da96a6a936947f83da63f3f9eecc9ae73429f5f0d698278fa329e0e4281',
     '25ea9fbf9d10948d08a6ead80c9f83ec2154ae34f40f881e4659eff9349d258f': 'd08c9fb8ec612b54a95978b5411f5c91218d8ef4a4ac1ba64b1d5d0ac116e076',
     '987ec1929a5a69b01078144679a1a93b0ae01cb133c1a3eb19b18c2094e4e400': '3cf5ea37ea7bad31fe17f2650ea6ad0a7a570724a2435458d1ed1efb2dcf4715',
     '35a74f0278dd035158c7c188707978180be6dac754422f7bc506b0a6b16f626e': 'a3754a3582a6ab4247c2ace9f9686f8757f94691b01e86f340234c4c18073a1b',
