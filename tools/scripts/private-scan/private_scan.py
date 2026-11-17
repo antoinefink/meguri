@@ -832,7 +832,7 @@ PUBLIC_ARTIFACTS = {
     "tools/mg.d/core.sh":
         "75592aa65666a46bb1260657ac45e85629d30ebdc1bb545b3eecb3b03a2842b4",
     'core/crates/meguri-host/tests/provider_bootstrap.rs':
-        'edba2a3ce829ee6cfd4fc8e6cbe382c7c2b5cac49bcdfa43e8b175bf66249a29',
+        '288e7aebbfd60895511f45a164e102c85c6c9070cb00777bac3a6bc744193abd',
     # Complete-content public reviews: routine Core fix1 and Host fix2, 2026-11-17.
     "core/crates/meguri-host/tests/provider_normal.rs":
         "0cba109d63f83671798429552b4ed94bee29659412914b3c17aef4430ef9ec6b",
