@@ -171,6 +171,7 @@ fn facts(host: &CoreHost) -> Result<Value> {
         "queue":c.queue.stored(),"due":c.due,"interval":c.interval,"ease_factor":c.ease_factor,
         "reps":c.reps,"lapses":c.lapses,"remaining_steps":c.remaining_steps,"original_due":c.original_due,
         "original_deck_id":c.original_deck_id.0,"flags":c.flags,"data":c.data.to_text()})).collect();
+    drop(reader);
     let media = checked(host.media(), "facts-media")?;
     let mut actual_names = Vec::new();
     for entry in checked(fs::read_dir(media.store().media_dir()), "media-directory")? {
