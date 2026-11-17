@@ -353,6 +353,10 @@ public final class SyncCoordinator {
     @ObservationIgnored private let directory: URL?
     @ObservationIgnored private let observeSignals: Bool
     private var platformPrepared = false
+    // Successful pre-open setup belongs to the retained Host, even after a
+    // provider-only drain retires its backend. Ordinary close/replacement
+    // revokes this evidence; only a committed successor may reuse it.
+    private var providerPlatform: (generation: UInt64, owner: CoreProviderService)?
     // Ready can arrive inside open, before FFI retains the Host. Only the
     // retained-open completion admits the first backend for this Host lifetime.
     private var retainedHostAdmitted = false
@@ -468,9 +472,26 @@ public final class SyncCoordinator {
             && (providerDirectory == nil || providerDiscovery != nil || providerState?.permitsICloudStartup == true)
     }
 
-    func makeProviderSuccessor() throws -> SyncCoordinator {
-        guard drained, closing, closeTask == nil, backend == nil, providerHandoff == nil else {
+    func makeProviderSuccessor(generation expected: UInt64) async throws -> SyncCoordinator {
+        let revision = hostRevision
+        guard let prepared = providerPlatform else {
+            throw BridgeError.unavailable(reason: "Provider platform preparation unavailable")
+        }
+        func current() -> Bool {
+            drained && closing && closeTask == nil && backend == nil && provider == nil
+                && providerHandoff == nil && !replacing && !entryActivationHeld
+                && !providerAttachmentPending && generation == expected && prepared.generation == expected
+                && providerPlatform?.owner === prepared.owner
+                && hostRevision == revision
+        }
+        guard current() else {
             throw BridgeError.busy(runningOperation: "provider drain")
+        }
+        // This facade still validates its original Core Host/generation, even
+        // when the retained Host has no collection. It grants no new admission.
+        _ = try await prepared.owner.state()
+        guard current() else {
+            throw BridgeError.unavailable(reason: "collectionUnavailable")
         }
         let successor = SyncCoordinator(bootstrap: bootstrap, makeBackend: makeBackend,
             defaults: defaults, clock: clock, directory: directory, observeSignals: observeSignals,
@@ -478,6 +499,8 @@ public final class SyncCoordinator {
         // The original already joined its native owners above. The successor
         // needs an attachment retry, not a strong chain of drained owners.
         successor.providerAttachmentPending = true
+        successor.generation = expected
+        successor.providerPlatform = prepared
         successor.operationFailed = operationFailed
         successor.failureRevision = failureRevision
         return successor
@@ -546,6 +569,28 @@ public final class SyncCoordinator {
     func preparePlatform() async {
         guard !entryActivationHeld else { return }
         if let platformTask { await platformTask.value; return }
+        if providerAttachmentPending, let prepared = providerPlatform {
+            let revision = hostRevision
+            let state: SyncProviderState
+            do { state = try await prepared.owner.state() }
+            catch {
+                guard providerPlatform?.owner === prepared.owner, hostRevision == revision else { return }
+                setupState = .failed; operationFailed = true
+                return
+            }
+            guard providerAttachmentPending, providerPlatform?.owner === prepared.owner,
+                  generation == prepared.generation, hostRevision == revision,
+                  !entryActivationHeld, !replacing, !closing || drained else {
+                setupState = .failed; operationFailed = true
+                return
+            }
+            providerState = state
+            if let committed = state.settings { settings = committed }
+            // Reuse actual successful setup on this same open Host. Backend
+            // construction and provider refresh still run on every attachment.
+            platformPrepared = true
+            setupState = .prepared
+        }
         if drained { closing = false; drained = false }
         guard !platformPrepared else { return }
         let task = Task {
@@ -613,6 +658,7 @@ public final class SyncCoordinator {
                 drained = false
                 setupState = .attached
                 providerAttachmentPending = false
+                providerPlatform = nil
                 attachmentFailure = nil; connectionFailure = nil
                 let retained = await readRetainedRecovery(value)
                 guard !closing, !suspended, !replacing, !Task.isCancelled,
@@ -948,7 +994,7 @@ public final class SyncCoordinator {
             await drainManualProviderOwner?()
             guard current(revision), providerChangeAllowed() else { return false }
             let joinedRevision = drained ? revision : revision &+ 1
-            guard await cancelAndDrain(), let providerHandoff else { return false }
+            guard await drainProviderHost(), let providerHandoff else { return false }
             guard current(joinedRevision), providerChangeAllowed() else { return false }
             if providerState?.removalPending == true {
                 let credentials = try await meguriConnection()
@@ -1007,7 +1053,7 @@ public final class SyncCoordinator {
             await drainManualProviderOwner?()
             guard current(revision), providerChangeAllowed() else { return false }
             let joinedRevision = drained ? revision : revision &+ 1
-            guard await cancelAndDrain(entryActivation: false), current(joinedRevision), providerChangeAllowed() else { return false }
+            guard await drainProviderHost(), current(joinedRevision), providerChangeAllowed() else { return false }
             let state = try await provider.recoverHandoffToLocalOnly()
             guard current(joinedRevision) else { return false }
             try await attachRecoveredProviderSuccessor(state)
@@ -2022,6 +2068,7 @@ public final class SyncCoordinator {
             retryAccountCompletion()
         case .replaced(let next):
             guard next > generation || (next == generation && setupState == .failed) else { return }
+            providerPlatform = nil
             if desiredVisibleMedia?.generation != next { desiredVisibleMedia = nil }
             deliveredVisibleMedia = nil
             generation = next; status = nil; preview = nil; recovery = nil
@@ -2160,6 +2207,16 @@ public final class SyncCoordinator {
         guard !replacing, let backend else { return }
         let expected = generation, revision = hostRevision
         do {
+            if case .visibleMedia = event, backend.connection != nil {
+                // A local-only Host has no adapter binding: its guard's
+                // generation is zero. Retain desired names until real Bind,
+                // rather than issuing a native command that cannot qualify.
+                let authority = try await CoreCloudWorkflowService().currentGuard()
+                guard expected == generation, revision == hostRevision, self.backend === backend,
+                      !closing, !suspended, !replacing, !backendRetired,
+                      mediaEnabledRevision == revision,
+                      authority.generation == expected, !authority.binding.isEmpty else { return }
+            }
             let output = try await backend.input(event)
             guard expected == generation, revision == hostRevision, !replacing else { return }
             if case .settings(let value) = event {
@@ -2169,6 +2226,7 @@ public final class SyncCoordinator {
             if case .visibleMedia(let names) = event { deliveredVisibleMedia = (revision, names) }
             consume(output, generation: expected)
             if case .settings(let value) = event, value.media { await replayVisibleMedia() }
+            if case .refresh = event { await replayVisibleMedia() }
         } catch {
             guard expected == generation, revision == hostRevision, !replacing else { return }
             if case BridgeError.cloudPolicy(.generationChanged) = error {
@@ -2577,6 +2635,7 @@ public final class SyncCoordinator {
     // exclusive activation can invalidate the original generation.
     func beginEntryActivation() {
         guard !entryActivationHeld else { return }
+        providerPlatform = nil
         providerRecoveryDrain = nil
         entryActivationHeld = true
         closing = true
@@ -2600,7 +2659,19 @@ public final class SyncCoordinator {
     /// Stops native admissions and joins original SDK/own/media callbacks while
     /// Core is OPEN. A failed drain leaves the backend retained for close retry.
     func cancelAndDrain() async -> Bool {
+        providerPlatform = nil
         providerRecoveryDrain = nil
+        return await cancelAndDrain(entryActivation: false)
+    }
+    func drainProviderAttachment() async -> Bool {
+        guard providerAttachmentPending else { return false }
+        return await drainProviderHost()
+    }
+    private func drainProviderHost() async -> Bool {
+        if platformPrepared, retainedHostAdmitted, !replacing, !entryActivationHeld, let provider {
+            providerPlatform = (generation, provider)
+        }
+        guard providerPlatform?.generation == generation else { return false }
         return await cancelAndDrain(entryActivation: false)
     }
     private func cancelAndDrain(entryActivation: Bool) async -> Bool {

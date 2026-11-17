@@ -245,3 +245,48 @@ successor retries and command-error checks fail. The complete receipt retains
 every issue, including late command errors attributed to the metadata test.
 The actual JSON result released the Apple window after the process exited.
 No repeat is authorized by a focused pass elsewhere; diagnose before repair.
+
+## AppModel causal repair
+
+Repair start: `c1491c82`. Keep the original full-app gate base.
+Independent source diagnoses identify three concrete causes in the retained
+failed run. Provider-only successors repeat closed-Host-only platform setup,
+so their factories never run. The publication fixture asks for a bound
+snapshot before binding exists. Unbound visible-media input issues a native
+priority command with a generation that its driver correctly rejects.
+Late test-context attribution alone proves no cross-test ownership leak.
+
+Author `034344-28801` changes three Swift files. Review `035200-32796`
+finds one P2: discarded current provider state during attachment failure.
+Author `035529-35700` retains that actual snapshot after validation.
+Final independent review `035724-39056` clears P0–P2. Its seeded patch
+is byte-identical to the final author export. Original assertions, timing,
+strict command-error recording, Core guards and actual backend construction
+remain. No raw-directory comparison change is made.
+
+Platform reuse requires the same Core facade and generation after the
+original work joins. A normal close or a new collection clears that evidence;
+entry activation clears it too. Media priority waits for an actual binding,
+with pending names replayed on refresh. The publication fixture reads its
+unbound guard first and preserves every later durable binding check.
+
+Non-author `provider_public_snapshot_review` read the complete final
+SyncCoordinator candidate and verified the unchanged complete test candidate.
+Comments, literals, data and paths are PUBLIC under the filtered provenance.
+The integrator verified the exact paths and bytes, then refreshed only
+their existing whole-file digests. Matcher behavior and private access stay
+unchanged. This provides no technical acceptance.
+
+| Path | Lines | Bytes | SHA-256 |
+|---|---:|---:|---|
+| `app/Packages/MeguriKit/Sources/AppModel/Collection/SyncCoordinator.swift` | 2779 | 159723 | `4baa0478f750f45795eda84f49751e6615556dafd1b53ae17eecd24edabbcaed` |
+| `app/Packages/MeguriKit/Tests/AppModelTests/ProviderAdmissionTests.swift` | 334 | 21202 | `4cf802ffe04f6888219aa637119e12847be828e2590840fd42d35cea9bfa86d7` |
+
+The same ten-workflow execution is pending after source checks.
+Every prior failure stays retained; no Unit or full-gate pass is recorded.
+
+Source privacy `20261117T040140Z-42890` passes all five files after a public
+log sentence was rephrased; failed `040057-42397` remains retained.
+Static `20261117T040055Z-41527` passes three checks; similarity
+`20261117T040055Z-41454` passes four files, with its filtered report read.
+Scanner regression `20261117T040055Z-41411` passes its one case, zero skips.

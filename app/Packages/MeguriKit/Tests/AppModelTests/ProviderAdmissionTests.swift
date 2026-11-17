@@ -134,7 +134,7 @@ import Testing
             }
             try #require(SyncStatusPresentation.permits(.publication, decision: summary.decision))
             let backend = try app.backend
-            let before = try await backend.workflow.durableSnapshot()
+            let before = try await backend.workflow.currentGuard()
             let gate = SyncOwnerGate()
             let entered = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
             var startupObserved = false

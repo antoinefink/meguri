@@ -829,9 +829,9 @@ PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Sources/AppModel/Collection/SyncCoordinator.swift':
-        '47539f27d24565d47ab921dadcd21c0e3fc1c4664b3f09059489554f96e3bcae',
+        '4baa0478f750f45795eda84f49751e6615556dafd1b53ae17eecd24edabbcaed',
     'app/Packages/MeguriKit/Tests/AppModelTests/ProviderAdmissionTests.swift':
-        '0723e1442b57ec4426be220c02cf0c93011cd7964281a7cc555d333f64bbb305',
+        '4cf802ffe04f6888219aa637119e12847be828e2590840fd42d35cea9bfa86d7',
     'core/crates/meguri-ffi/src/provider_tests.rs':
         '0a1a65dce24702eda82b38a3c229604bf613a28c69c134735b02d1097775757f',
     "docs/process/review-log/meguri-provider-admission-20261117.md":

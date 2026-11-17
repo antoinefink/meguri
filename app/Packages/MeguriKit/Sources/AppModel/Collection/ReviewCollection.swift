@@ -453,7 +453,11 @@ public final class ReviewCollection: ChangeFanoutSink {
             guard let self, self.sync === original, !self.closing, !self.closed else {
                 throw BridgeError.unavailable(reason: "collectionUnavailable")
             }
-            let current = try original.makeProviderSuccessor()
+            let expected = self.generation
+            let current = try await original.makeProviderSuccessor(generation: expected)
+            guard self.sync === original, self.generation == expected, !self.closing, !self.closed else {
+                throw BridgeError.unavailable(reason: "collectionUnavailable")
+            }
             self.sync = current
             self.configureSyncOwnership()
             try await self.attachCurrentProvider(current)
@@ -465,7 +469,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             let expected = self.generation
             // A failed refresh may still own a fresh native backend. Join that
             // successor before retrying its factory; the original stays closed.
-            guard await current.cancelAndDrain() else {
+            guard await current.drainProviderAttachment() else {
                 throw BridgeError.unavailable(reason: "Provider attachment drain failed")
             }
             guard self.sync === current, expected == self.generation, !self.closing, !self.closed else {
