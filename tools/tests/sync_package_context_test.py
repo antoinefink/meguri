@@ -501,12 +501,13 @@ class FinalPackageProof(unittest.TestCase):
         self.assertEqual(len(set(ids)), 31)
         self.assertEqual(ids, [case['id'] for case in self.helper.final_selection('final')['cases']])
 
-    def assembly_fixture(self, reuse_runtime=False):
+    def assembly_fixture(self, reuse_runtime=False, derive_receipts=True):
         base = self.root
         segments, controls, output = (base / name for name in ('segments', 'controls', 'aggregate'))
         for path in (segments, controls, output, output / 'artifacts'): path.mkdir()
         common = {key: value for key, value in self.invocation.items() if key in self.helper.INVOCATION_KEYS}
         original = (self.root, self.artifacts, self.invocation, self.peer)
+        final_ids = [case['id'] for case in self.helper.final_selection('final')['cases']]
         combined = []
         for index, phase in enumerate(self.helper.FINAL_SEGMENTS):
             instance = 0 if reuse_runtime and index == 1 else index
@@ -539,14 +540,21 @@ class FinalPackageProof(unittest.TestCase):
             (self.root / 'selection.json').write_text(json.dumps(selection))
             artifact_data = b'public synthetic evidence fixture; never actual compatibility output'
             sha = self.store(artifact_data)
-            artifacts = [dict(role=role, sha256=sha, bytes=len(artifact_data))
-                         for role in ('synthetic_input', 'neutral_observation', 'mg_receipt')]
+            client = dict(kind='desktop', version='26.09.4', build='c06370ff', runtime_sha256='2' * 64)
+            ids = [case['id'] for case in selection['cases']]
+            receipt = dict(format='synthetic-assembly-receipt', invocation=expected, server=self.server,
+                           client=client, fixture_sha256=sha, selection=ids, completed_ids=ids)
+            artifacts = []
+            for role, data in (('synthetic_input', artifact_data),
+                               ('neutral_observation', json.dumps(dict(phase=phase, synthetic=True)).encode()),
+                               ('mg_receipt', json.dumps(receipt).encode())):
+                artifacts.append(dict(role=role, sha256=self.store(data), bytes=len(data)))
             cases = copy.deepcopy(selection['cases'])
             for case in cases:
                 del case['client_kind']
                 case.update(status='matched', fixture_sha256=sha, artifacts=artifacts,
                             observed=copy.deepcopy(case['expected']), lane=dict(kind='candidate', server=self.server,
-                            client=dict(kind='desktop', version='26.09.4', build='c06370ff', runtime_sha256='2' * 64)))
+                            client=client))
             evidence = {key: common[key] for key in ('source_commit', 'source_sha256', 'lock_sha256',
                                                     'batch_base', 'mg_job', 'arguments')}
             evidence.update(format='meguri-sync-server-v1', document_kind='evidence', baseline_release='26.09.3',
@@ -556,7 +564,15 @@ class FinalPackageProof(unittest.TestCase):
                            selection_credit=True, broad_catalog_credit=False)
             for name, value in (('evidence.json', evidence), ('summary.json', summary)):
                 (self.root / name).write_text(json.dumps(value))
-            combined.extend(cases)
+            aggregate_cases = copy.deepcopy(cases)
+            if derive_receipts:
+                derived = json.dumps(dict(receipt, selection=final_ids, completed_ids=final_ids)).encode()
+                derived_sha = hashlib.sha256(derived).hexdigest()
+                (output / 'artifacts' / derived_sha).write_bytes(derived)
+                derived_descriptor = dict(artifacts[2], sha256=derived_sha, bytes=len(derived))
+                for case in aggregate_cases:
+                    case['artifacts'][2] = derived_descriptor
+            combined.extend(aggregate_cases)
             for path in self.artifacts.iterdir(): shutil.copyfile(path, output / 'artifacts' / path.name)
         self.root, self.artifacts, self.invocation, self.peer = original
         evidence.update(expected_case_count=31, selected_case_count=31, completed_case_count=31, cases=combined)
@@ -566,6 +582,90 @@ class FinalPackageProof(unittest.TestCase):
                             ('invocation.json', dict(common, selection=[case['id'] for case in combined]))):
             (output / name).write_text(json.dumps(value))
         return segments, output, common, controls
+
+    def test_assembly_accepts_unchanged_receipts(self):
+        self.helper.assembly_handoff(*self.assembly_fixture(derive_receipts=False))
+
+    def test_assembly_rejects_other_receipt_changes(self):
+        segments, output, common, controls = args = self.assembly_fixture()
+        path = output / 'evidence.json'
+        evidence = self.helper.load(path)
+        descriptor = evidence['cases'][0]['artifacts'][2]
+        receipt = self.helper.load(output / 'artifacts' / descriptor['sha256'])
+        for mutation in ('binding', 'extra', 'removed', 'non-object'):
+            with self.subTest(mutation=mutation):
+                changed = copy.deepcopy(receipt)
+                if mutation == 'binding': changed['invocation']['owner_nonce'] = 'e' * 32
+                if mutation == 'extra': changed['extra'] = True
+                if mutation == 'removed': del changed['client']
+                if mutation == 'non-object': changed = [changed]
+                data = json.dumps(changed).encode()
+                sha = hashlib.sha256(data).hexdigest()
+                (output / 'artifacts' / sha).write_bytes(data)
+                rejected = copy.deepcopy(evidence)
+                rejected['cases'][0]['artifacts'][2].update(sha256=sha, bytes=len(data))
+                path.write_text(json.dumps(rejected))
+                with self.assertRaisesRegex(ValueError, 'exact two-field'):
+                    self.helper.assembly_handoff(*args)
+
+    def test_assembly_requires_exact_segment_and_aggregate_receipt_arrays(self):
+        segments, output, common, controls = args = self.assembly_fixture()
+        for side, field, mutation in (('segment', 'selection', 'reverse'),
+                                      ('segment', 'completed_ids', 'short'),
+                                      ('aggregate', 'selection', 'short'),
+                                      ('aggregate', 'completed_ids', 'reverse'),
+                                      ('segment', 'completed_ids', 'wrong-id'),
+                                      ('aggregate', 'selection', 'wrong-id')):
+            with self.subTest(side=side, field=field, mutation=mutation):
+                directory = segments / 'final-full' if side == 'segment' else output
+                path = directory / 'evidence.json'
+                original = path.read_bytes()
+                evidence = self.helper.decode(original)
+                descriptor = evidence['cases'][0]['artifacts'][2]
+                receipt = self.helper.load(directory / 'artifacts' / descriptor['sha256'])
+                ids = receipt[field]
+                receipt[field] = (list(reversed(ids)) if mutation == 'reverse' else
+                                  ids[:-1] if mutation == 'short' else ['unknown-case'] + ids[1:])
+                data = json.dumps(receipt).encode()
+                sha = hashlib.sha256(data).hexdigest()
+                (directory / 'artifacts' / sha).write_bytes(data)
+                # All original segment CAS bytes must still be retained by the aggregate.
+                (output / 'artifacts' / sha).write_bytes(data)
+                descriptor.update(sha256=sha, bytes=len(data))
+                path.write_text(json.dumps(evidence))
+                try:
+                    with self.assertRaisesRegex(ValueError, 'exact two-field'):
+                        self.helper.assembly_handoff(*args)
+                finally:
+                    path.write_bytes(original)
+
+    def test_assembly_verifies_both_receipt_descriptors_and_cas(self):
+        segments, output, common, controls = args = self.assembly_fixture()
+        for side in ('segment', 'aggregate'):
+            for mutation in ('sha', 'length', 'missing', 'tampered'):
+                with self.subTest(side=side, mutation=mutation):
+                    directory = segments / 'final-full' if side == 'segment' else output
+                    path = directory / 'evidence.json'
+                    original = path.read_bytes()
+                    evidence = self.helper.decode(original)
+                    descriptor = evidence['cases'][0]['artifacts'][2]
+                    cas = directory / 'artifacts' / descriptor['sha256']
+                    data = cas.read_bytes()
+                    if mutation == 'sha': descriptor['sha256'] = 'invalid-sha'
+                    if mutation == 'length': descriptor['bytes'] += 1
+                    if mutation == 'missing': cas.unlink()
+                    if mutation == 'tampered': cas.write_bytes(b'tampered synthetic receipt')
+                    path.write_text(json.dumps(evidence))
+                    try:
+                        with self.assertRaises((ValueError, OSError)):
+                            self.helper.assembly_handoff(*args)
+                    finally:
+                        path.write_bytes(original)
+                        cas.write_bytes(data)
+        old = self.helper.load(segments / 'final-full/evidence.json')['cases'][0]['artifacts'][2]
+        (output / 'artifacts' / old['sha256']).unlink()
+        with self.assertRaises(FileNotFoundError):
+            self.helper.assembly_handoff(*args)
 
     def test_assembly_rejects_missing_segments_changed_artifacts_and_outcomes(self):
         segments, output, common, controls = args = self.assembly_fixture()
@@ -587,10 +687,29 @@ class FinalPackageProof(unittest.TestCase):
         evidence_path.write_text(json.dumps(reordered))
         with self.assertRaisesRegex(ValueError, 'case order'):
             self.helper.assembly_handoff(*args)
-        evidence['cases'][0]['actions'][0]['actor'] = 'fresh_client'
-        evidence_path.write_text(json.dumps(evidence))
+        changed = copy.deepcopy(evidence)
+        changed['cases'][0]['actions'][0]['actor'] = 'fresh_client'
+        evidence_path.write_text(json.dumps(changed))
         with self.assertRaisesRegex(ValueError, 'fixed selected contract'):
             self.helper.assembly_handoff(*args)
+        for mutation in ('case-field', 'observation', 'outcome', 'artifact-order',
+                         'descriptor-field', 'non-receipt'):
+            with self.subTest(mutation=mutation):
+                changed = copy.deepcopy(evidence)
+                case = changed['cases'][0]
+                if mutation == 'case-field': case['extra'] = True
+                if mutation == 'observation': case['observed'].append(dict(name='extra', value=True))
+                if mutation == 'outcome': case['status'] = 'failed'
+                if mutation == 'artifact-order':
+                    case['artifacts'][0], case['artifacts'][1] = case['artifacts'][1], case['artifacts'][0]
+                if mutation == 'descriptor-field': case['artifacts'][2]['extra'] = True
+                if mutation == 'non-receipt':
+                    case['artifacts'][1].update(sha256=case['artifacts'][0]['sha256'],
+                                                bytes=case['artifacts'][0]['bytes'])
+                evidence_path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    self.helper.assembly_handoff(*args)
+        evidence_path.write_text(json.dumps(evidence))
         # Even an artifact unreferenced by case rows remains part of the execute CAS.
         raw = self.helper.load(segments / 'final-full/execute-admission.json')['observations_sha256']
         (output / 'artifacts' / raw).write_bytes(b'changed raw artifact')

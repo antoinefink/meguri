@@ -751,7 +751,7 @@ def assembly_handoff(segments, output, expected, controls):
         require(stat.S_ISDIR(metadata.st_mode) and metadata.st_uid == os.getuid(),
                 "assembly requires its own owned output")
         storage.add((metadata.st_dev, metadata.st_ino))
-    combined, client, package = [], None, None
+    combined, origins, client, package = [], [], None, None
     for phase in FINAL_SEGMENTS:
         segment = segments / phase
         for path in (segment, segment / 'artifacts'):
@@ -784,13 +784,42 @@ def assembly_handoff(segments, output, expected, controls):
             require(client is None or same(client, actual), "segments used different Desktop runtimes")
             client = actual
         combined.extend(evidence['cases'])
+        ids = [case['id'] for case in final_selection(phase)['cases']]
+        origins.extend((segment, ids) for case in evidence['cases'])
         for path in (segment / 'artifacts').iterdir():
             require(artifact(output / 'artifacts', path.name) == artifact(segment / 'artifacts', path.name),
                     "assembly lost or changed a segment artifact")
     validate(output, expected, peer, final_selection('final'), load(output / 'summary.json'),
              load(output / 'invocation.json'))
-    require(same(load(output / 'evidence.json')['cases'], combined),
-            "assembly changed segment cases, actions or outcomes")
+    aggregate = load(output / 'evidence.json')['cases']
+    final_ids = [case['id'] for case in final_selection('final')['cases']]
+    require(len(aggregate) == len(combined), "assembly changed segment case count")
+    for actual, original, (segment, ids) in zip(aggregate, combined, origins):
+        if same(actual, original):
+            continue
+        require(same({key: value for key, value in actual.items() if key != 'artifacts'},
+                     {key: value for key, value in original.items() if key != 'artifacts'})
+                and len(actual['artifacts']) == len(original['artifacts']),
+                "assembly changed segment cases, actions or outcomes")
+        for new, old in zip(actual['artifacts'], original['artifacts']):
+            if same(new, old):
+                continue
+            require(new['role'] == old['role'] == 'mg_receipt'
+                    and same({key: value for key, value in new.items() if key not in {'sha256', 'bytes'}},
+                             {key: value for key, value in old.items() if key not in {'sha256', 'bytes'}}),
+                    "assembly changed a segment artifact descriptor")
+            old_data = artifact(segment / 'artifacts', old['sha256'])
+            new_data = artifact(output / 'artifacts', new['sha256'])
+            require(len(old_data) == old['bytes'] and len(new_data) == new['bytes'],
+                    "assembly receipt byte count mismatch")
+            before, after = decode(old_data), decode(new_data)
+            fields = {'selection', 'completed_ids'}
+            require(isinstance(before, dict) and isinstance(after, dict)
+                    and fields <= set(before) == set(after)
+                    and same({key: value for key, value in before.items() if key not in fields},
+                             {key: value for key, value in after.items() if key not in fields})
+                    and all(same(before[key], ids) and same(after[key], final_ids) for key in fields),
+                    "assembly receipt differs from the exact two-field selection derivation")
 
 
 def main():
