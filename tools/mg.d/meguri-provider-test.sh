@@ -100,6 +100,25 @@ finally:
 PY
 }
 mg_meguri_provider__fixture() {
+  # Docker cp cannot read tmpfs. Export only these two literals through the
+  # already owned fixture's Node, without a shell or diagnostic/credential logs.
+  local exporter='
+const fs = require("node:fs");
+try {
+  let path;
+  switch (process.argv[1]) {
+    case "input.json": path = "/tmp/provider-fixture/input.json"; break;
+    case "ca.der": path = "/tmp/provider-fixture/ca.der"; break;
+    default: throw new Error();
+  }
+  if (!fs.lstatSync("/tmp/provider-fixture").isDirectory()) throw new Error();
+  const fd = fs.openSync(path, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+  try {
+    if (!fs.fstatSync(fd).isFile()) throw new Error();
+    process.stdout.write(fs.readFileSync(fd));
+  } finally { fs.closeSync(fd); }
+} catch { process.exitCode = 1; }
+'
   provider_fixture_name="meguri-provider-fixture-$MG_RUN_ID"
   provider_fixture_owner="$(mg_meguri_provider__nonce)" || return 1
   mg_on_exit "$(printf '%q ' mg_meguri_provider__remove "$provider_fixture_name" "$provider_fixture_owner")"
@@ -113,9 +132,15 @@ mg_meguri_provider__fixture() {
     >"$provider_private/fixture-id" || return 1
   mg_meguri_provider__fixture_wait "$provider_fixture_name" || return 1
   mg_meguri_provider__owned "$provider_fixture_name" "$provider_fixture_owner" "$provider_tool_image" running || return 1
-  docker cp "$provider_fixture_name:/tmp/provider-fixture/input.json" "$provider_private/fixture/input.json" || return 1
-  docker cp "$provider_fixture_name:/tmp/provider-fixture/ca.der" "$provider_private/fixture/ca.der" || return 1
-  chmod 0600 "$provider_private/fixture/input.json" "$provider_private/fixture/ca.der" || return 1
+  (
+    umask 077
+    docker exec --user 10001:10001 "$provider_fixture_name" node -e "$exporter" input.json \
+      2>/dev/null >"$provider_private/fixture/input.json" || exit 1
+    docker exec --user 10001:10001 "$provider_fixture_name" node -e "$exporter" ca.der \
+      2>/dev/null >"$provider_private/fixture/ca.der" || exit 1
+    chmod 0600 "$provider_private/fixture/input.json" "$provider_private/fixture/ca.der" 2>/dev/null || exit 1
+  ) || { mg_failure provider-fixture-export "Fixture file export failed"; return 1; }
+  mg_meguri_provider__owned "$provider_fixture_name" "$provider_fixture_owner" "$provider_tool_image" running || return 1
 }
 mg_meguri_provider__wait_client() {
   # Start and terminal observation share one deadline. Timeout is a failure and the

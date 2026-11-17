@@ -58,6 +58,7 @@ mock_run_resources() {
     printf 'init\n' >>"$trace"
     mkdir -p "$MG_SYNC_INSTANCE"
     mg_on_exit "$(printf '%q ' mg_meguri_provider__remove init init-nonce)"
+    printf '{"volume":"synthetic-runtime-volume"}\n' >"$MG_SYNC_INSTANCE/instance.json"
     [ "${FAIL_AT:-}" != init ]
   }
   mg_sync_package__start() {
@@ -74,16 +75,18 @@ mock_run_resources() {
     mg_on_exit "$(printf '%q ' mg_meguri_provider__remove build build-nonce)"
     [ "${FAIL_AT:-}" != build ]
   }
-  mg_meguri_provider__fixture() {
-    printf 'fixture\n' >>"$trace"
-    provider_fixture_name=fixture; provider_fixture_owner=fixture-nonce
-    mg_on_exit "$(printf '%q ' mg_meguri_provider__remove fixture fixture-nonce)"
-    [ "${FAIL_AT:-}" != fixture ]
-  }
-  mg_meguri_provider__owned() {
-    printf 'owned:%s:%s:%s:%s\n' "$1" "$2" "$3" "$4" >>"$trace"
-    [ "${FAIL_AT:-}" != "owned-$1" ]
-  }
+  if [ "${1:-}" != real-fixture ]; then
+    mg_meguri_provider__fixture() {
+      printf 'fixture\n' >>"$trace"
+      provider_fixture_name=fixture; provider_fixture_owner=fixture-nonce
+      mg_on_exit "$(printf '%q ' mg_meguri_provider__remove fixture fixture-nonce)"
+      [ "${FAIL_AT:-}" != fixture ]
+    }
+    mg_meguri_provider__owned() {
+      printf 'owned:%s:%s:%s:%s\n' "$1" "$2" "$3" "$4" >>"$trace"
+      [ "${FAIL_AT:-}" != "owned-$1" ]
+    }
+  fi
   mg_sync_server__remove_container() {
     # This mock refuses missing nonces. The real helper's run/nonce negatives
     # below use its actual implementation with a Docker inspection mock.
@@ -119,6 +122,58 @@ mock_run_resources() {
       *) return 99 ;;
     esac
   }
+}
+mock_fixture_docker() {
+  fixture_exports="$BATS_TEST_TMPDIR/fixture-exports"
+  : >"$fixture_exports"
+  mg_meguri_provider__fixture_wait() {
+    [ "$#" -eq 1 ] && [ "$1" = "$provider_fixture_name" ] || return 1
+    printf 'fixture-ready\n' >>"$trace"
+  }
+  docker() {
+    case "$1" in
+      run) printf '%s\0' "$@" >"$run_args"; printf 'synthetic-fixture-container\n' ;;
+      inspect)
+        [ "$#" -eq 2 ] && [ "$2" = "$provider_fixture_name" ] || return 1
+        printf 'fixture-owned\n' >>"$trace"
+        local observed_run="${FIXTURE_RUN:-$MG_RUN_ID}"
+        if [ "${FIXTURE_CHANGE_AFTER_EXPORT:-0}" = 1 ] && [ -s "$fixture_exports" ]; then observed_run=other; fi
+        jq -n --arg name "/$provider_fixture_name" --arg run "$observed_run" \
+          --arg owner "${FIXTURE_OWNER:-$provider_fixture_owner}" --arg image "${FIXTURE_IMAGE:-$provider_tool_image}" \
+          --argjson running "${FIXTURE_RUNNING:-true}" \
+          '[{Name:$name,Image:$image,Config:{Labels:{"meguri.mg.run-id":$run,"meguri.sync.owner":$owner}},State:{Running:$running}}]' ;;
+      exec)
+        [ "$#" -eq 8 ] && [ "$2" = --user ] && [ "$3" = 10001:10001 ] &&
+          [ "$4" = "$provider_fixture_name" ] && [ "$5" = node ] && [ "$6" = -e ] || return 99
+        case "$8" in input.json|ca.der) ;; *) return 99 ;; esac
+        [ "$(tail -n 1 "$trace")" = fixture-owned ] || return 98
+        [ "$(grep -Ec '^fixture-owned$' "$trace")" = 1 ] || return 98
+        # The byte stream must be redirected to its exact private destination.
+        [ /dev/stdout -ef "$provider_private/fixture/$8" ] || return 98
+        printf 'exec:%s:%s:%s\n' "$4" "$3" "$8" >>"$fixture_exports"
+        if [ "${FIXTURE_EXPORT_FAIL:-}" = "$8" ]; then
+          printf 'synthetic-private-export-error\n' >&2
+          printf 'synthetic-partial-private-bytes'
+          return 1
+        fi
+        case "$8" in
+          input.json) printf '{"synthetic_public_fixture":true}\n' ;;
+          ca.der) printf '\000synthetic-public-ca\377\n' ;;
+        esac ;;
+      cp) printf 'unsupported-cp\n' >>"$trace"; return 97 ;;
+      create) printf 'unexpected-client\n' >>"$trace"; return 96 ;;
+      *) return 99 ;;
+    esac
+  }
+}
+prepare_fixture() {
+  MG_SYNC_INSTANCE="$MG_RUN_DIR/instance"
+  provider_private="$MG_RUN_DIR/private"
+  provider_service=synthetic-runtime-container; provider_tool_image=synthetic-tool-image
+  run_args="$BATS_TEST_TMPDIR/fixture-run-args"
+  mkdir -m 0700 "$MG_SYNC_INSTANCE" "$provider_private" "$provider_private/fixture"
+  printf '{"volume":"synthetic-runtime-volume"}\n' >"$MG_SYNC_INSTANCE/instance.json"
+  mock_fixture_docker
 }
 invoke() { mg_meguri_provider_real_server "$@"; finish_hooks; }
 @test "meguri-provider-real-server: invalid arguments fail before resource creation" {
@@ -189,38 +244,7 @@ invoke() { mg_meguri_provider_real_server "$@"; finish_hooks; }
   done
 }
 @test "meguri-provider-real-server: actual fixture runs as UID10001 with private hardened mounts" {
-  MG_SYNC_INSTANCE="$MG_RUN_DIR/instance"
-  provider_private="$MG_RUN_DIR/private"
-  provider_service=synthetic-runtime-container; provider_tool_image=synthetic-tool-image
-  local run_args="$BATS_TEST_TMPDIR/fixture-run-args"
-  mkdir -m 0700 "$MG_SYNC_INSTANCE" "$provider_private" "$provider_private/fixture"
-  printf '{"volume":"synthetic-runtime-volume"}\n' >"$MG_SYNC_INSTANCE/instance.json"
-  mg_meguri_provider__fixture_wait() {
-    [ "$#" -eq 1 ] && [ "$1" = "$provider_fixture_name" ] || return 1
-    printf 'fixture-ready\n' >>"$trace"
-  }
-  mg_meguri_provider__owned() {
-    [ "$#" -eq 4 ] && [ "$1" = "$provider_fixture_name" ] &&
-      [ "$2" = "$provider_fixture_owner" ] && [ "$3" = "$provider_tool_image" ] && [ "$4" = running ] || return 1
-    printf 'fixture-owned\n' >>"$trace"
-  }
-  docker() {
-    case "$1" in
-      run) printf '%s\0' "$@" >"$run_args"; printf 'synthetic-fixture-container\n' ;;
-      cp)
-        [ "$#" -eq 3 ] || return 1
-        case "$2" in
-          "$provider_fixture_name:/tmp/provider-fixture/input.json")
-            [ "$3" = "$provider_private/fixture/input.json" ] || return 1
-            printf '{}\n' >"$3" ;;
-          "$provider_fixture_name:/tmp/provider-fixture/ca.der")
-            [ "$3" = "$provider_private/fixture/ca.der" ] || return 1
-            printf 'synthetic-ca\n' >"$3" ;;
-          *) return 99 ;;
-        esac ;;
-      *) return 99 ;;
-    esac
-  }
+  prepare_fixture
   mg_meguri_provider__fixture
   jq -Rse --arg network "container:$provider_service" --arg image "$provider_tool_image" \
     --arg name "$provider_fixture_name" --arg run "$MG_RUN_ID" --arg owner "$provider_fixture_owner" '
@@ -234,7 +258,7 @@ invoke() { mg_meguri_provider_real_server "$@"; finish_hooks; }
     values_after("--network")==[$network] and values_after("--name")==[$name] and
     values_after("--label")==["meguri.mg.run-id="+$run,"meguri.sync.owner="+$owner] and
     .[-3:]==[$image,"/package-smoke.mjs","provider-fixture"]' "$run_args"
-  [ "$(cat "$trace")" = $'fixture-ready\nfixture-owned' ]
+  [ "$(cat "$trace")" = $'fixture-ready\nfixture-owned\nfixture-owned' ]
   grep -Fx "$(printf '%q ' mg_meguri_provider__remove "$provider_fixture_name" "$provider_fixture_owner")" "$hooks"
   [ -f "$provider_private/fixture/input.json" ] && [ -f "$provider_private/fixture/ca.der" ]
 }
@@ -326,4 +350,73 @@ invoke() { mg_meguri_provider_real_server "$@"; finish_hooks; }
   grep -Eq "assert\(\['seed', 'check', 'provider-fixture'\]" "$REPO_ROOT/server/tools/package-smoke.mjs"
   grep -Eq "MEGURI_PROVIDER_FIXTURE_READY" "$REPO_ROOT/server/tools/package-smoke.mjs"
   grep -Eq "delete headers\['x-forwarded-host'\]" "$REPO_ROOT/server/tools/package-smoke.mjs"
+}
+
+@test "meguri-provider-real-server: tmpfs exports stay private and byte exact with only fixed selectors" {
+  prepare_fixture
+  run mg_meguri_provider__fixture
+  [ "$status" = 0 ]
+  [ -z "$output" ]
+  [ "$(cat "$fixture_exports")" = "$(printf 'exec:%s:10001:10001:input.json\nexec:%s:10001:10001:ca.der' "meguri-provider-fixture-$MG_RUN_ID" "meguri-provider-fixture-$MG_RUN_ID")" ]
+  printf '{"synthetic_public_fixture":true}\n' >"$BATS_TEST_TMPDIR/expected-input"
+  printf '\000synthetic-public-ca\377\n' >"$BATS_TEST_TMPDIR/expected-ca"
+  cmp "$BATS_TEST_TMPDIR/expected-input" "$provider_private/fixture/input.json"
+  cmp "$BATS_TEST_TMPDIR/expected-ca" "$provider_private/fixture/ca.der"
+  python3 - "$provider_private/fixture" <<'PYMODE'
+import os, stat, sys
+for name in ('input.json', 'ca.der'):
+    assert stat.S_IMODE(os.stat(os.path.join(sys.argv[1], name)).st_mode) == 0o600
+PYMODE
+  ! grep -Eq 'synthetic_public_fixture|synthetic-public-ca|unsupported-cp' "$trace"
+}
+@test "meguri-provider-real-server: export failure suppresses clients and preserves nonce cleanup" {
+  mock_run_resources real-fixture
+  run_args="$BATS_TEST_TMPDIR/fixture-run-args"
+  mock_fixture_docker
+  local file expected_count
+  for file in input.json ca.der; do
+    rm -rf "$MG_RUN_DIR"; mkdir "$MG_RUN_DIR"; : >"$trace"; : >"$hooks"; : >"$fixture_exports"
+    FIXTURE_EXPORT_FAIL="$file"
+    run invoke --package-receipt "$receipt"
+    ! grep -Eq 'status:pass|unexpected-client|unsupported-cp|^client:' "$trace"
+    grep -Fxq 'failure:provider-fixture-export' "$trace"
+    grep -Fxq 'status:fail' "$trace"
+    [[ "$output" != *synthetic-private-export-error* && "$output" != *synthetic-partial-private-bytes* ]]
+    grep -Eq '^remove:meguri-provider-fixture-provider-test:nonce-' "$trace"
+    [ "$(grep -Ec '^remove-volume$' "$trace")" = 1 ]
+    expected_count=1; [ "$file" != ca.der ] || expected_count=2
+    [ "$(wc -l <"$fixture_exports" | tr -d ' ')" = "$expected_count" ]
+  done
+}
+@test "meguri-provider-real-server: fixture ownership failure prevents export and clients" {
+  mock_run_resources real-fixture
+  run_args="$BATS_TEST_TMPDIR/fixture-run-args"
+  mock_fixture_docker
+  local mismatch
+  for mismatch in run nonce image stopped; do
+    rm -rf "$MG_RUN_DIR"; mkdir "$MG_RUN_DIR"; : >"$trace"; : >"$hooks"; : >"$fixture_exports"
+    FIXTURE_RUN="$MG_RUN_ID"; FIXTURE_OWNER=; FIXTURE_IMAGE=; FIXTURE_RUNNING=true
+    case "$mismatch" in
+      run) FIXTURE_RUN=other ;;
+      nonce) FIXTURE_OWNER=other ;;
+      image) FIXTURE_IMAGE=other ;;
+      stopped) FIXTURE_RUNNING=false ;;
+    esac
+    run invoke --package-receipt "$receipt"
+    [ ! -s "$fixture_exports" ]
+    ! grep -Eq 'status:pass|unexpected-client|unsupported-cp|^client:' "$trace"
+    grep -Fxq 'status:fail' "$trace"
+    grep -Eq '^remove:meguri-provider-fixture-provider-test:nonce-' "$trace"
+  done
+}
+@test "meguri-provider-real-server: ownership change after export stops before clients" {
+  mock_run_resources real-fixture
+  run_args="$BATS_TEST_TMPDIR/fixture-run-args"
+  mock_fixture_docker
+  FIXTURE_CHANGE_AFTER_EXPORT=1
+  run invoke --package-receipt "$receipt"
+  [ "$(wc -l <"$fixture_exports" | tr -d ' ')" = 2 ]
+  ! grep -Eq 'status:pass|unexpected-client|^client:' "$trace"
+  grep -Fxq 'status:fail' "$trace"
+  grep -Eq '^remove:meguri-provider-fixture-provider-test:nonce-' "$trace"
 }

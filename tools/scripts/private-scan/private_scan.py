@@ -1243,9 +1243,9 @@ PUBLIC_ARTIFACTS = {
     'core/crates/meguri-host/Cargo.toml': 'ef2e5f907851eb4d19984c899516e6affe5444516b59d245f4501dde2b744a73',
     'core/crates/meguri-host/examples/real_server_provider.rs': '4aa7edb5103960f16841048c6cbe2e33126a895d9badce186931dfd53ea15347',
     'server/tools/package-smoke.mjs': '42e99aa0006c505c73d7329f3af36748e8e30d3e7cca702abf53abb9dbcc177e',
-    'tools/mg.d/meguri-provider-test.sh': 'f12c6fad08789bd3265b776a27c19527f6a263b82e3e383e48fcd20eb8595d30',
+    'tools/mg.d/meguri-provider-test.sh': '12fd05b5cd35b67f81d13e673fbc7e35387ea28eef8d9cf89a019cef0b6d318e',
     'tools/tests/gate.bats': 'f47075ea99a15e3757e9731394b67b46a89307318eda7e18b9bff2d9a5d0a68b',
-    'tools/tests/meguri_provider_real_server.bats': '994836e305243dddf45cc77147ea7e10342a8b04427717b197a5822ee7a6ceb4',
+    'tools/tests/meguri_provider_real_server.bats': '0256954d730ef1fbbf34b9be246fe68450cf7b7f52305e32ef6d443dbaa613da',
     'app/Packages/MeguriKit/Tests/AppModelTests/CloudPreviewActivityTests.swift': '9ad2c7dfb1e320bf428f622df4137fc660375692936788bc8202c11e43dbeded',
 }
 
