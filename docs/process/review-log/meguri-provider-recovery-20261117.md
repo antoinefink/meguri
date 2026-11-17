@@ -324,3 +324,24 @@ The next selected run is diagnostic-only; a pass would prove no causal fix.
 
 Observation privacy `041121-47763`, static `041125-48230` and
 similarity `041120-47465` pass. The filtered similarity report was read.
+
+## Preview reaches a tracking refusal
+
+Diagnostic `swift-test/20261117T041319Z-49009` on clean `459421a9`
+executes both retained failing methods: zero pass, two fail, zero skip.
+Each starts attached, local-only and unpaused with no active operation.
+Preview starts, then one account read occurs. The final typed error is
+`connection.tracking`. Thus the initial guard is not the failed boundary.
+This observation supplies no causal repair. The CPU window was released.
+
+The FFI reports these errors through one public category.
+Author `041725-51203` adds two test-hooks-only error observations before
+that mapping: identity projection and initial preview construction.
+Non-author `provider_test_delta_review` clears P0–P2. Only fixed labels
+and the existing static refusal tag pair are emitted. Results, mappings,
+guard order and API stay unchanged; release builds omit these observations.
+The actual underlying failure and a causal repair remain pending.
+
+Core observation privacy `20261117T042013Z-53353`, static `041944-52602`
+and similarity `041944-52603` pass. The filtered report was read.
+Failed prose scan `041943-52222` remains retained; only that sentence changed.

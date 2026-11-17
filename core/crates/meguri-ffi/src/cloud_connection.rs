@@ -720,7 +720,13 @@ impl CloudConnection {
     pub fn begin_connection_preview(&self) -> Result<CloudConnectionPreviewWork, CoreError> {
         callback::enter("CloudConnection.begin_connection_preview");
         let generation = self.owner.current_generation()?;
-        let work = self.owner.host.begin_cloud_connection_preview().map_err(error)?;
+        let work = self.owner.host.begin_cloud_connection_preview();
+        #[cfg(feature = "test-hooks")]
+        let work = work.inspect_err(|error| {
+            let (kind, variant) = error.refusal_tags_for_testing();
+            eprintln!("cloudConnection.refused boundary=begin_connection_preview errorKind={kind} variant={variant}");
+        });
+        let work = work.map_err(error)?;
         self.owner.check_generation(generation)?;
         Ok(self.preview_work(work, generation))
     }

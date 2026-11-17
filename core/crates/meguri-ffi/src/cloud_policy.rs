@@ -1286,6 +1286,13 @@ impl CloudPolicy {
             .cloud_policy_input_with_work(p::DeviceEvent::AcceptedIdentityRead { request }, work);
         // Preserve Closed/GenerationChanged precedence over stale proof.
         self.validate_owner()?;
+        #[cfg(feature = "test-hooks")]
+        let result = result.inspect_err(|error| {
+            if let p::DriverError::Runtime(error) | p::DriverError::CoreActionFailed { error, .. } = error {
+                let (kind, variant) = error.refusal_tags_for_testing();
+                eprintln!("cloudPolicy.refused boundary=project_identity_read_with_work errorKind={kind} variant={variant}");
+            }
+        });
         let result = result.map_err(|error| match error {
             p::DriverError::Runtime(meguri_sync::cloud::runtime::RuntimeError::StaleIncarnation) => {
                 p::DriverError::StaleCommand
