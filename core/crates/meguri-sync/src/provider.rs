@@ -486,9 +486,8 @@ impl Authority {
             if generation != *expected_generation || publication != expected_publication.as_ref() { return Err(invalid()); }
         } else {
             let prior = decode(Some(&pending.before))?.ok_or_else(invalid)?;
-            if let Some(expected) = prior.binding.as_ref().map(|binding| &binding.publication) {
-                if publication != Some(expected) { return Err(invalid()); }
-            }
+            if let Some(expected) = prior.binding.as_ref().map(|binding| &binding.publication)
+                && publication != Some(expected) { return Err(invalid()); }
         }
         let result = sidecar::update_document(&self.path, |raw| {
             // A rename may have succeeded before directory durability failed.
@@ -793,6 +792,7 @@ pub enum AuthenticationFailure { ConnectionChanged, Username, Cancelled, Transpo
 impl From<crate::SyncError> for AuthenticationFailure { fn from(error: crate::SyncError) -> Self { Self::Transport(error) } }
 /// Authentication only. The sole protocol method is HostKey, whose retained
 /// transport refuses redirects; neither branch constructs a collection job.
+#[allow(clippy::too_many_arguments)] // Keep authority, connection and execution/authentication ports explicit.
 pub fn authenticate(
     authority: &Authority, connection: &MeguriConnection, threads: &meguri_engine::ThreadRegistry,
     random: &dyn meguri_model::rng::RandomSource, username: &str, password: &str,

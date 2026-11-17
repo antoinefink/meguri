@@ -707,7 +707,7 @@ pub struct ProviderIssuanceTicket {
 
 /// Built only at the refusing preparation guard from its current document.
 pub struct OwnHandoffAdmissionRefusal {
-    _intent: crate::provider::HandoffIntent,
+    _intent: Box<crate::provider::HandoffIntent>,
 }
 impl std::fmt::Debug for OwnHandoffAdmissionRefusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -941,7 +941,7 @@ impl Runtime {
                         && h.revision() > ticket.revision && provider.restart_intent() != Some(h)
                         && h.generation() == expected_generation
                         && h.binding() == Some(&ticket.provider_binding))
-                        .then(|| OwnHandoffAdmissionRefusal { _intent: h.clone() })
+                        .then(|| OwnHandoffAdmissionRefusal { _intent: Box::new(h.clone()) })
                 });
                 return Err(PreparationAttemptFailure { error: RuntimeError::IdentityUnverified, own_handoff });
             }
