@@ -176,7 +176,7 @@ extension EventTests {
             let facade = try await owner.bootstrapService()
             let exact = try #require(await store.value)
             let calls = Mutex<[BridgeCall]>([])
-            try await MaintenanceCallObservation.$capture.withValue({ call in calls.withLock { $0.append(call) } }) {
+            await MaintenanceCallObservation.$capture.withValue({ call in calls.withLock { $0.append(call) } }) {
                 await store.delete(connection: exact.connection)
                 await #expect(throws: MeguriBootstrapAdmissionFailure.credentialsMissing) { _ = try await facade.prepare(.useDeviceCollection) }
                 for field in ["reference", "revision", "endpoint"] {
