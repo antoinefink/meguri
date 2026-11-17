@@ -48,9 +48,13 @@ finish_hooks() {
 result_file() {
   local phase="$1" out="$2"
   jq -n --arg phase "$phase" '{format:1,phase:$phase,status:"pass",
-    counts:{notes:2,cards:2,media:2,revlogs:0,reps:0},checks:
+    counts:(if $phase=="review-send" or $phase=="review-receive" or $phase=="review-reopen"
+      then {notes:2,cards:2,media:2,revlogs:1,reps:1} else {notes:2,cards:2,media:2,revlogs:0,reps:0} end),checks:
     (if $phase=="upload" then ["fresh-upload-client","explicit-collection-and-media","retained-safety-artifacts","all-media-accounted","ready-automatic","exact-fixture","closed"]
     elif $phase=="download" then ["initial-no-collection","explicit-collection-and-media","initial-no-backup","all-media-accounted","ready-automatic","exact-fixture","closed"]
+    elif $phase=="review-send" then ["cold-ready","original-binding-epoch-settings","initial-unreviewed","fsrs-ok","rendered-question-and-answer","good-answer-ended","one-good-revlog","second-card-unreviewed","media-replaced","owned-collection-merged","owned-media-complete","retained-binding-epoch-settings","exported-full-daily-facts","closed"]
+    elif $phase=="review-receive" then ["cold-ready","original-binding-epoch-settings","initial-unreviewed","owned-collection-merged","owned-media-complete","retained-binding-epoch-settings","fsrs-ok","one-good-revlog","second-card-unreviewed","exact-daily-row-and-media-equality","closed"]
+    elif $phase=="review-reopen" then ["cold-ready","original-binding-epoch-settings","persisted-daily-witness","fsrs-ok","no-active-review","exact-daily-row-and-media-equality","closed"]
     else ["cold-ready","persisted-binding-epoch","exact-fixture","closed"] end)}' >"$out/result.json"
 }
 mock_run_resources() {
@@ -96,7 +100,7 @@ mock_run_resources() {
   }
   mg_meguri_provider__wait_client() {
     printf 'wait:%s\n' "$1" >>"$trace"
-    [ "${FAIL_AT:-}" != "wait-${1##*-}" ]
+    [ "${FAIL_AT:-}" != "wait-${1#meguri-provider-$MG_RUN_ID-}" ]
   }
   docker() {
     local arg out= phase= image= previous= name=
@@ -105,16 +109,18 @@ mock_run_resources() {
         for arg in "$@"; do
           case "$arg" in
             type=bind,src=*,dst=/out) out="${arg#type=bind,src=}"; out="${out%,dst=/out}" ;;
-            upload|download|reopen) phase="$arg" ;;
+            upload|download|reopen|review-send|review-receive|review-reopen) phase="$arg" ;;
           esac
           [ "$previous" != --name ] || name="$arg"
           previous="$arg"
         done
+        printf '%s\0' "$@" >"$MG_RUN_DIR/create-$phase.args"
         printf 'client:%s\n' "$phase" >>"$trace"
         [ "${FAIL_AT:-}" != "create-$phase" ] || return 1
         mkdir -p "$out"
         result_file "$phase" "$out"
         [ "$phase" != upload ] || printf '{"format":1}\n' >"$out/expected-facts.json"
+        [ "$phase" != review-send ] || printf '{"format":1,"synthetic_daily":true}\n' >"$out/expected-daily.json"
         if [ "${BAD_PHASE:-}" = "$phase" ]; then printf '{}\n' >"$out/result.json"; fi
         printf 'client-id\n' ;;
       logs) : ;;
@@ -419,4 +425,131 @@ PYMODE
   ! grep -Eq 'status:pass|unexpected-client|^client:' "$trace"
   grep -Fxq 'status:fail' "$trace"
   grep -Eq '^remove:meguri-provider-fixture-provider-test:nonce-' "$trace"
+}
+
+@test "meguri-provider-real-server: review round opts into exactly six ordered phases and counts" {
+  mock_run_resources
+  invoke --review-round --package-receipt "$receipt"
+  [ "$(grep '^client:' "$trace" | paste -sd ' ' -)" = 'client:upload client:download client:reopen client:review-send client:review-receive client:review-reopen' ]
+  grep -Fxq 'status:pass' "$trace"
+  grep -Fxq 'count:total:6' "$trace"
+  grep -Fxq 'count:passed:6' "$trace"
+  grep -Fxq 'count:failed:0' "$trace"
+  grep -Fxq 'count:skipped:0' "$trace"
+  ! grep -Eq 'count:total:3' "$trace"
+  [ "$(grep -Ec '^remove-volume$' "$trace")" = 1 ]
+  cmp "$MG_RUN_DIR/private/review-send-output/expected-daily.json" "$MG_RUN_DIR/private/expected/expected-daily.json"
+  for phase in review-send review-receive review-reopen; do
+    grep -Eq "^remove:meguri-provider-provider-test-$phase:nonce-" "$trace"
+    [ -f "$MG_RUN_DIR/$phase.json" ]
+  done
+}
+@test "meguri-provider-real-server: review round rejects duplicate and incomplete options before resources" {
+  local operands
+  for operands in '--review-round --review-round' '--review-round --package-receipt' '--package-receipt --review-round' '--review-round extra'; do
+    : >"$trace"
+    mg_meguri_provider_real_server $operands
+    grep -Fxq 'status:error' "$trace"
+    [ ! -s "$hooks" ]
+  done
+}
+@test "meguri-provider-real-server: daily schemas require exact phase counts and complete ordered check lists" {
+  local phase value other
+  local daily_out="$BATS_TEST_TMPDIR/daily-output"
+  mkdir "$daily_out"
+  for phase in review-send review-receive review-reopen; do
+    result_file "$phase" "$daily_out"
+    mg_meguri_provider__result "$phase" "$daily_out/result.json"
+    for other in upload download reopen review-send review-receive review-reopen; do
+      if [ "$other" != "$phase" ]; then
+        run mg_meguri_provider__result "$other" "$daily_out/result.json"
+        [ "$status" -ne 0 ]
+      fi
+    done
+    for value in '.counts.notes=1' '.counts.cards=1' '.counts.media=1' '.counts.revlogs=0' '.counts.reps=0' \
+      'del(.counts.reps)' '.counts.extra=1' '.checks=[]' '.checks|=reverse' '.checks|=.[1:]' \
+      '.checks+=["extra-check"]' '.checks+=[.checks[0]]' '.status="fail"' '.extra="unapproved"' '.format=2'; do
+      result_file "$phase" "$daily_out"
+      jq "$value" "$daily_out/result.json" >"$daily_out/tmp"
+      mv "$daily_out/tmp" "$daily_out/result.json"
+      run mg_meguri_provider__result "$phase" "$daily_out/result.json"
+      [ "$status" -ne 0 ]
+    done
+    printf '{broken' >"$daily_out/result.json"
+    run mg_meguri_provider__result "$phase" "$daily_out/result.json"
+    [ "$status" -ne 0 ]
+    rm "$daily_out/result.json"
+    run mg_meguri_provider__result "$phase" "$daily_out/result.json"
+    [ "$status" -ne 0 ]
+  done
+}
+@test "meguri-provider-real-server: review clients retain exact namespace ownership hardening and isolated mounts" {
+  mock_run_resources
+  invoke --package-receipt "$receipt" --review-round
+  local phase state
+  for phase in upload download reopen review-send review-receive review-reopen; do
+    state=B
+    if [ "$phase" = upload ] || [ "$phase" = review-send ]; then state=A; fi
+    jq -Rse --arg phase "$phase" --arg state "$MG_RUN_DIR/private/$state" \
+      --arg private "$MG_RUN_DIR/private" --arg product "$MG_RUN_DIR/product/real_server_provider" \
+      --arg name "meguri-provider-$MG_RUN_ID-$phase" --arg run "$MG_RUN_ID" --arg user "$(id -u):$(id -g)" '
+      split("\u0000") | .[:-1] |
+      def values_after($flag): [range(0; length - 1) as $i | select(.[$i]==$flag) | .[$i+1]];
+      .[0]=="create" and values_after("--name")==[$name] and
+      values_after("--network")==["container:actual-runtime-container"] and values_after("--user")==[$user] and
+      index("--read-only")!=null and values_after("--cap-drop")==["ALL"] and
+      values_after("--security-opt")==["no-new-privileges"] and
+      values_after("--label")[0]==("meguri.mg.run-id="+$run) and
+      (values_after("--label")[1]|test("^meguri.sync.owner=nonce-[0-9]+$")) and
+      values_after("--tmpfs")==["/tmp:exec,mode=1777,size=128m"] and
+      values_after("--entrypoint")==["/client"] and index("dev-image")!=null and
+      ([.[]|select(.=="--review-round")]|length)==1 and
+      values_after("--fixture")==["/fixture/input.json"] and values_after("--root")==["/state"] and
+      values_after("--output")==["/out"] and
+      values_after("--expected")== (if $phase=="upload" then [] else ["/expected"] end) and
+      (values_after("--mount")|sort)==([
+        "type=bind,src="+$product+",dst=/client,readonly",
+        "type=bind,src="+$private+"/fixture,dst=/fixture,readonly",
+        "type=bind,src="+$state+",dst=/state",
+        "type=bind,src="+$private+"/"+$phase+"-output,dst=/out"
+      ] + (if $phase=="upload" then [] else ["type=bind,src="+$private+"/expected,dst=/expected,readonly"] end)|sort)
+      ' "$MG_RUN_DIR/create-$phase.args"
+    grep -Eq "^owned:meguri-provider-$MG_RUN_ID-$phase:nonce-[0-9]+:dev-image:exited$" "$trace"
+  done
+  python3 - "$MG_RUN_DIR/private/expected" <<'PYMODE'
+import os, stat, sys
+assert sorted(os.listdir(sys.argv[1])) == ['expected-daily.json', 'expected-facts.json']
+for name in os.listdir(sys.argv[1]):
+    assert stat.S_IMODE(os.stat(os.path.join(sys.argv[1], name)).st_mode) == 0o400
+PYMODE
+}
+@test "meguri-provider-real-server: each daily partial start or invalid terminal suppresses later phases and cleans owned resources" {
+  mock_run_resources
+  local phase boundary expected last stop_line volume_line
+  for phase in review-send review-receive review-reopen; do
+    for boundary in create wait owned schema; do
+      rm -rf "$MG_RUN_DIR"; mkdir "$MG_RUN_DIR"; : >"$trace"; : >"$hooks"
+      FAIL_AT=; BAD_PHASE=
+      case "$boundary" in
+        create|wait) FAIL_AT="$boundary-$phase" ;;
+        owned) FAIL_AT="owned-meguri-provider-$MG_RUN_ID-$phase" ;;
+        schema) BAD_PHASE="$phase" ;;
+      esac
+      invoke --review-round --package-receipt "$receipt"
+      expected='client:upload client:download client:reopen client:review-send'
+      if [ "$phase" != review-send ]; then expected="$expected client:review-receive"; fi
+      if [ "$phase" = review-reopen ]; then expected="$expected client:review-reopen"; fi
+      [ "$(grep '^client:' "$trace" | paste -sd ' ' -)" = "$expected" ]
+      grep -Fxq 'status:fail' "$trace"
+      ! grep -Eq 'status:pass|count:total:6' "$trace"
+      [ ! -f "$MG_RUN_DIR/$phase.json" ]
+      for last in init service build fixture; do grep -Eq "^remove:$last:.*nonce" "$trace"; done
+      grep -Eq "^remove:meguri-provider-$MG_RUN_ID-$phase:nonce-" "$trace"
+      [ "$(grep -Ec '^remove-volume$' "$trace")" = 1 ]
+      stop_line="$(grep -En '^stop-runtime$' "$trace" | head -1 | cut -d: -f1)"
+      volume_line="$(grep -En '^remove-volume$' "$trace" | cut -d: -f1)"
+      [ "$stop_line" -lt "$volume_line" ]
+      if [ "$phase" = review-send ]; then [ ! -f "$MG_RUN_DIR/private/expected/expected-daily.json" ]; fi
+    done
+  done
 }

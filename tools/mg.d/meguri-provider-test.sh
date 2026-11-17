@@ -164,11 +164,15 @@ mg_meguri_provider__result() {
   jq -e --arg phase "$phase" '
     type=="object" and keys==["checks","counts","format","phase","status"] and
     .format==1 and .phase==$phase and .status=="pass" and
-    .counts=={notes:2,cards:2,media:2,revlogs:0,reps:0} and
+    .counts==(if $phase=="review-send" or $phase=="review-receive" or $phase=="review-reopen"
+      then {notes:2,cards:2,media:2,revlogs:1,reps:1} else {notes:2,cards:2,media:2,revlogs:0,reps:0} end) and
     (.checks | type=="array" and length>0 and all(.[]; type=="string" and test("^[a-z][a-z0-9-]+$")) and length==(unique|length)) and
     .checks==(if $phase=="upload" then ["fresh-upload-client","explicit-collection-and-media","retained-safety-artifacts","all-media-accounted","ready-automatic","exact-fixture","closed"]
       elif $phase=="download" then ["initial-no-collection","explicit-collection-and-media","initial-no-backup","all-media-accounted","ready-automatic","exact-fixture","closed"]
-      elif $phase=="reopen" then ["cold-ready","persisted-binding-epoch","exact-fixture","closed"] else [] end)' "$result" >/dev/null
+      elif $phase=="reopen" then ["cold-ready","persisted-binding-epoch","exact-fixture","closed"]
+      elif $phase=="review-send" then ["cold-ready","original-binding-epoch-settings","initial-unreviewed","fsrs-ok","rendered-question-and-answer","good-answer-ended","one-good-revlog","second-card-unreviewed","media-replaced","owned-collection-merged","owned-media-complete","retained-binding-epoch-settings","exported-full-daily-facts","closed"]
+      elif $phase=="review-receive" then ["cold-ready","original-binding-epoch-settings","initial-unreviewed","owned-collection-merged","owned-media-complete","retained-binding-epoch-settings","fsrs-ok","one-good-revlog","second-card-unreviewed","exact-daily-row-and-media-equality","closed"]
+      elif $phase=="review-reopen" then ["cold-ready","original-binding-epoch-settings","persisted-daily-witness","fsrs-ok","no-active-review","exact-daily-row-and-media-equality","closed"] else [] end)' "$result" >/dev/null
 }
 mg_meguri_provider__phase() {
   local phase="$1" root="$2" name="meguri-provider-$MG_RUN_ID-$1" owner output="$provider_private/$1-output"
@@ -180,6 +184,7 @@ mg_meguri_provider__phase() {
     extra=(--mount "type=bind,src=$provider_private/expected,dst=/expected,readonly")
     operands=(--expected /expected)
   fi
+  if [ "${provider_review_round:-0}" = 1 ]; then operands+=(--review-round); fi
   mg_on_exit "$(printf '%q ' mg_meguri_provider__remove "$name" "$owner")"
   docker create --name "$name" --init --network "$network" --user "$uid:$gid" \
     --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:exec,mode=1777,size=128m \
@@ -203,6 +208,10 @@ mg_meguri_provider__phase() {
   if [ "$phase" = upload ]; then
     cp "$output/expected-facts.json" "$provider_private/expected/expected-facts.json" || return 1
     chmod 0400 "$provider_private/expected/expected-facts.json" || return 1
+  fi
+  if [ "$phase" = review-send ]; then
+    cp "$output/expected-daily.json" "$provider_private/expected/expected-daily.json" || return 1
+    chmod 0400 "$provider_private/expected/expected-daily.json" || return 1
   fi
 }
 mg_meguri_provider__run() {
@@ -230,6 +239,11 @@ mg_meguri_provider__run() {
   [ -z "$(ls -A "$provider_private/B")" ] || return 1
   mg_meguri_provider__phase download "$provider_private/B" || return 1
   mg_meguri_provider__phase reopen "$provider_private/B" || return 1
+  if [ "${provider_review_round:-0}" = 1 ]; then
+    mg_meguri_provider__phase review-send "$provider_private/A" || return 1
+    mg_meguri_provider__phase review-receive "$provider_private/B" || return 1
+    mg_meguri_provider__phase review-reopen "$provider_private/B" || return 1
+  fi
   mg_meguri_provider__owned "$provider_fixture_name" "$provider_fixture_owner" "$provider_tool_image" running || return 1
   docker stop --time 30 "$provider_fixture_name" >"$provider_private/fixture-stop" || return 1
   mg_meguri_provider__owned "$provider_fixture_name" "$provider_fixture_owner" "$provider_tool_image" exited || return 1
@@ -240,13 +254,25 @@ mg_meguri_provider__run() {
   mg_detail identities "$(jq -nc --arg source "$provider_commit" --arg runtime "$provider_runtime_image" \
     --arg tool "$provider_tool_image" --arg dev "$provider_dev_image" --arg binary "$provider_binary_sha" \
     '{source_commit:$source,runtime_image_id:$runtime,fixture_image_id:$tool,dev_image_id:$dev,client_sha256:$binary}')"
-  mg_count total 3; mg_count passed 3; mg_count failed 0; mg_count skipped 0
+  local total=3
+  [ "${provider_review_round:-0}" != 1 ] || total=6
+  mg_count total "$total"; mg_count passed "$total"; mg_count failed 0; mg_count skipped 0
 }
 mg_meguri_provider_real_server() {
-  local explicit= provider_receipt provider_commit
-  if [ "$#" -eq 2 ] && [ "$1" = --package-receipt ] && [ -n "$2" ]; then explicit="$2"
-  elif [ "$#" -ne 0 ]; then
-    mg_failure usage "meguri-provider-real-server [--package-receipt <result.json>]"; mg_status error; return
+  local explicit= provider_receipt provider_commit provider_review_round=0 bad=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --review-round)
+        [ "$provider_review_round" = 0 ] || { bad=1; break; }
+        provider_review_round=1; shift ;;
+      --package-receipt)
+        [ -z "$explicit" ] && [ "$#" -ge 2 ] && [ -n "$2" ] && [[ "$2" != --* ]] || { bad=1; break; }
+        explicit="$2"; shift 2 ;;
+      *) bad=1; break ;;
+    esac
+  done
+  if [ "$bad" = 1 ]; then
+    mg_failure usage "meguri-provider-real-server [--review-round] [--package-receipt <result.json>]"; mg_status error; return
   fi
   mg_sync_server__clean || { mg_status fail; return; }
   provider_commit="$(mg_meguri_provider__commit)" || { mg_status fail; return; }
