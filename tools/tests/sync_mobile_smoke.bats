@@ -192,6 +192,8 @@ elif a[0] in ('create','__compose'):
        'HostConfig':{'ReadonlyRootfs':True,'CapDrop':['ALL'],'SecurityOpt':['no-new-privileges'],
                      'NetworkMode':network,'PortBindings':ports,'Memory':134217728,'PidsLimit':64},
        'Mounts':mounts,'NetworkSettings':{'Networks':{}}}
+    if k=='tool' and mode.startswith('tool-oom-'):
+        c['HostConfig']['OomKillDisable']=mode in ('tool-oom-true-pair','tool-oom-true-null')
     if network!='none':
         c['NetworkSettings']['Networks'][network]={'NetworkID':'e'*64,'IPAddress':'172.29.0.2' if k=='tunnel' else '172.29.0.3',
           'EndpointID':'a'*64,'Gateway':'172.29.0.1','IPPrefixLen':16,'MacAddress':'02:42:ac:1d:00:03',
@@ -204,6 +206,7 @@ elif a[0]=='inspect':
     observed=[]
     for selector in a[1:]:
         p,c=container(selector); k=kind(c['Name'].lstrip('/'))
+        if k=='tool' and mode=='tool-oom-inspect-failure' and (r/'tool-baseline-before-version.json').exists(): fail()
         if k=='tunnel':
             if mode=='bad-argv': c['Config']['Cmd']=['tunnel','--url','http://foreign:8080']
             if mode=='bad-mount': c['Mounts']=[{'Type':'bind','Destination':'/personal'}]
@@ -221,6 +224,11 @@ elif a[0]=='inspect':
     if len(a)==2 and k=='service': replace_service(p,load(p),'before-stop')
 elif a[0]=='start':
     p,c=container(a[-1]); k=kind(c['Name'].lstrip('/'))
+    if k=='tool' and mode.startswith('tool-oom-'):
+        baseline=pathlib.Path(os.environ['MG_ROOT'])/'build/sync-server-mobile-smoke/tool-container.json'
+        (r/'tool-baseline-before-version.json').write_bytes(baseline.read_bytes())
+        c['HostConfig']['OomKillDisable']=True if mode in ('tool-oom-true','tool-oom-true-pair') else None
+        if mode=='tool-oom-security': c['HostConfig']['SecurityOpt']=[]
     c['State']['Running']=k=='tunnel'; save(p,c)
     (r/'sequence').open('a').write('start-'+k+'\n')
     if k=='tool': print('cloudflared version 2026.11.0 (synthetic policy double)')
@@ -423,6 +431,60 @@ SH
   run invoke prepare
   [ "$status" -ne 0 ]
   [ ! -e "$MOBILE_FAKE/sequence" ]
+}
+
+@test "mobile-smoke: prepare cleans up false-to-null OomKillDisable after version exit without changing its baseline" {
+  export MOBILE_MODE=tool-oom-null
+  run invoke prepare
+  [ "$status" -eq 0 ]
+  local state="$MG_ROOT/build/sync-server-mobile-smoke"
+  [ "$(cat "$MOBILE_FAKE/sequence")" = "$(printf 'create-tool\nstart-tool\nremove-tool')" ]
+  jq -e '.[0].HostConfig.OomKillDisable==false' "$state/tool-container.json"
+  jq -e '.[0].HostConfig.OomKillDisable==null and
+    .[0].State.Running==false and .[0].State.ExitCode==0' "$BATS_TEST_TMPDIR/run-prepare/mobile-observed.json"
+  cmp "$MOBILE_FAKE/tool-baseline-before-version.json" "$state/tool-container.json"
+  grep -qx 'cloudflared version 2026.11.0 (synthetic policy double)' "$state/tool-version.txt"
+  [ -z "$(find "$MOBILE_FAKE" -name 'c-*' -print)" ]
+  [ ! -e "$state/network-intent.json" ]
+  [ ! -e "$MOBILE_FAKE/network" ]
+  [ ! -e "$MOBILE_FAKE/volume" ]
+  [ ! -e "$BATS_TEST_TMPDIR/run-prepare/failures" ]
+}
+
+@test "mobile-smoke: prepare retains evidence when OomKillDisable is true, security changes or post-exit inspection is uncertain" {
+  local mode state="$MG_ROOT/build/sync-server-mobile-smoke"
+  for mode in tool-oom-true tool-oom-true-pair tool-oom-true-null tool-oom-security tool-oom-inspect-failure; do
+    export MOBILE_MODE="$mode"
+    # Independent synthetic prepare lifecycles; never retained runtime records.
+    rm -rf "$state" "$BATS_TEST_TMPDIR/run-prepare"
+    rm -f "$MOBILE_FAKE"/c-* "$MOBILE_FAKE/sequence" "$MOBILE_FAKE/tool-baseline-before-version.json"
+    run invoke prepare
+    [ "$status" -ne 0 ]
+    [ "$(cat "$MOBILE_FAKE/sequence")" = "$(printf 'create-tool\nstart-tool')" ]
+    grep -qx mobile-cleanup "$BATS_TEST_TMPDIR/run-prepare/failures"
+    [ -e "$MOBILE_FAKE/c-meguri-mobile-tool-policy-prepare" ]
+    [ -e "$state/tool-intent.json" ]
+    cmp "$MOBILE_FAKE/tool-baseline-before-version.json" "$state/tool-container.json"
+    grep -qx 'cloudflared version 2026.11.0 (synthetic policy double)' "$state/tool-version.txt"
+    [ ! -e "$state/network-intent.json" ]
+    [ ! -e "$MOBILE_FAKE/network" ]
+    [ ! -e "$MOBILE_FAKE/volume" ]
+    [ ! -e "$state/stopped" ]
+    case "$mode" in
+      tool-oom-true-pair|tool-oom-true-null)
+        jq -e '.[0].HostConfig.OomKillDisable==true' "$state/tool-container.json" ;;
+      *) jq -e '.[0].HostConfig.OomKillDisable==false' "$state/tool-container.json" ;;
+    esac
+    case "$mode" in
+      tool-oom-true|tool-oom-true-pair)
+        jq -e '.HostConfig.OomKillDisable==true' "$MOBILE_FAKE/c-meguri-mobile-tool-policy-prepare" ;;
+      *) jq -e '.HostConfig.OomKillDisable==null' "$MOBILE_FAKE/c-meguri-mobile-tool-policy-prepare" ;;
+    esac
+    if [ "$mode" = tool-oom-security ]; then
+      jq -e '.[0].HostConfig.SecurityOpt==["no-new-privileges"]' "$state/tool-container.json"
+      jq -e '.HostConfig.SecurityOpt==[]' "$MOBILE_FAKE/c-meguri-mobile-tool-policy-prepare"
+    fi
+  done
 }
 
 @test "mobile-smoke: fixed pinned tool and actual local helpers preserve topology and private handoff" {

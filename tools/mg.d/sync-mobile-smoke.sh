@@ -32,7 +32,10 @@ mg_mobile__observe() {
   # Baseline is frozen once. Include Created and all signal-relevant config.
   if [ -f "$MG_MOBILE_STATE/$kind-container.json" ]; then
     jq -e --arg phase "$phase" --slurpfile before "$MG_MOBILE_STATE/$kind-container.json" '
-      def binding: {Id,Name,Created,Image,Config,HostConfig,
+      # Engine may report this optional boolean as false at create and null
+      # after exit. Normalize only the comparison; retain the saved evidence.
+      def binding: {Id,Name,Created,Image,Config,
+        HostConfig:(.HostConfig | if .OomKillDisable==false then .OomKillDisable=null else . end),
         mounts:[.Mounts[] | select(.Type!="tmpfs")]};
       # Docker clears endpoint addressing on graceful stop. All other network
       # fields stay bound; each cleared field must be original or its empty value.
@@ -43,6 +46,8 @@ mg_mobile__observe() {
         (delpaths($empty|keys|map([.])))==($old|delpaths($empty|keys|map([.]))) and
         all($empty|keys[]; . as $k |
           $now[$k]==$old[$k] or $now[$k]==$empty[$k]);
+      .[0].HostConfig.OomKillDisable!=true and
+      $before[0][0].HostConfig.OomKillDisable!=true and
       (.[0]|binding)==($before[0][0]|binding) and
       (if $phase=="stopped" then
         .[0].State.Running==false and .[0].State.ExitCode==0 and
