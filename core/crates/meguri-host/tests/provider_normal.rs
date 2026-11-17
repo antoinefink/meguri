@@ -31,10 +31,18 @@ fn receive_steps(name: &str, bytes: &[u8], hash: &str) -> Vec<r::Step> {
     vec![r::begin(1), r::changes(json!([[name, 1, hash]])), r::changes(json!([])),
         r::Step::new(Method::DownloadFiles, r::download_zip(name, bytes)), r::sanity(true)]
 }
-fn bind_server(root: &std::path::Path, bytes: &[u8]) -> (CoreHost, meguri_host::HostConfig, meguri_sync::provider::MeguriConnection) {
+fn bind_server(root: &std::path::Path, bytes: &[u8], facts: &meguri_storage::one_way::LocalTransferFacts)
+    -> (CoreHost, meguri_host::HostConfig, meguri_sync::provider::MeguriConnection) {
     let (host, config) = b::seeded(root);
     let connection = b::select(&host);
-    let script = b::collection_script(bytes.to_vec(), false);
+    // Every observation describes the same generated, closed S served below.
+    let meta = || b::Reply::Bytes(serde_json::to_vec(&json!({
+        "mod": facts.stamps.modified.0, "scm": facts.stamps.schema_modified.0, "usn": facts.stamps.usn.0,
+        "ts": b::NOW / 1000, "msg": "", "cont": true, "empty": facts.totals.cards == 0, "media_usn": 0,
+    })).unwrap());
+    let script = b::Script::new(vec![(Method::Meta, meta()),
+        (Method::Download, b::Reply::Bytes(bytes.to_vec())),
+        (Method::Meta, meta()), (Method::Meta, meta())]);
     let preview = b::prepare(&host, &connection, &script, MeguriBootstrapDirection::UseServerCollection);
     let collection = b::confirm(&host, &connection, &script, preview);
     let complete = b::finish_empty_media(&host, &connection, &collection);
@@ -66,10 +74,16 @@ fn meguri_round_relays_answered_card_revlog_and_media_to_second_bound_device() {
         ctx.scope().put_col(&col)?; Ok(())
     }).unwrap();
     assert!(server.derived().wait_idle(Duration::from_secs(10)));
+    let server_facts = {
+        let reader = collection.reader(ReaderRole::Query).unwrap();
+        let snapshot = reader.begin_snapshot().unwrap();
+        snapshot.transfer_facts().unwrap()
+    };
+    assert!(server_facts.totals.cards > 0, "generated S contains a real card");
     drop(collection); server.close().unwrap();
     let server_bytes = fs::read(config.collection_directory.join("collection.anki2")).unwrap();
-    let (a, _, ac) = bind_server(&root.path().join("A"), &server_bytes);
-    let (bhost, bc, connection_b) = bind_server(&root.path().join("B"), &server_bytes);
+    let (a, _, ac) = bind_server(&root.path().join("A"), &server_bytes, &server_facts);
+    let (bhost, bc, connection_b) = bind_server(&root.path().join("B"), &server_bytes, &server_facts);
     let a_epoch = bound(&a).media_epoch().epoch();
     let b_epoch = bound(&bhost).media_epoch().epoch();
     assert!(a.derived().wait_idle(Duration::from_secs(10)));
