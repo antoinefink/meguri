@@ -57,9 +57,11 @@ import Testing
                 }
                 window.layoutIfNeeded(); controller.view.layoutSubtreeIfNeeded()
                 for id in ["address", "username", "password", "signIn"] {
-                    _ = try #require(nativeAccountElement("settings.accountSync.meguri.\(id)", in: controller.view))
+                    let accountElementResult = try nativeAccountElement("settings.accountSync.meguri.\(id)", in: controller.view)
+                    _ = try #require(accountElementResult)
                 }
-                let password = try #require(nativeAccountElement("settings.accountSync.meguri.password", in: controller.view))
+                let passwordElementResult = try nativeAccountElement("settings.accountSync.meguri.password", in: controller.view)
+                let password = try #require(passwordElementResult)
                 #expect(accessibilityString(in: password, selector: #selector(NSAccessibilityProtocol.accessibilitySubrole))
                     == NSAccessibility.Subrole.secureTextField.rawValue)
                 for id in ["settings.accountSync.iCloudHeading", "settings.accountSync.connect", "settings.accountSync.automatic", "settings.accountSync.media"] {
@@ -73,7 +75,8 @@ import Testing
                 try await waitForNativeAccountState { window.attachedSheet != nil }
                 let sheet = try #require(window.attachedSheet)
                 let sheetContent = try #require(sheet.contentView)
-                _ = try #require(nativeAccountElement("sync.serviceSwitch.confirm", in: sheetContent))
+                let serviceSwitchConfirmElementResult = try nativeAccountElement("sync.serviceSwitch.confirm", in: sheetContent)
+                _ = try #require(serviceSwitchConfirmElementResult)
                 let revision = collection.sync.providerState?.revision
                 let enter = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
                     timestamp: 0, windowNumber: sheet.windowNumber, context: nil,
@@ -84,7 +87,8 @@ import Testing
                 #expect(!collection.syncPresentation.serviceChanging)
                 #expect(collection.sync.providerState?.selection == .meguri)
                 #expect(collection.sync.providerState?.revision == revision)
-                let cancel = try #require(nativeAccountElement("sync.serviceSwitch.cancel", in: sheetContent))
+                let serviceSwitchCancelElementResult = try nativeAccountElement("sync.serviceSwitch.cancel", in: sheetContent)
+                let cancel = try #require(serviceSwitchCancelElementResult)
                 let press = NSSelectorFromString("accessibilityPerformPress")
                 try #require(cancel.responds(to: press))
                 _ = cancel.perform(press)
