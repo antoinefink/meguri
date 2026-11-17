@@ -1522,7 +1522,24 @@ class RetainedRuntime:
             committed = with_media(initial, {}) if initial else None
             store('witness_committed', self.companion('witness_committed', committed, committed))
         serializable = dict(case=self.case, events=self.events, initial=initial, results=results, case_credit=False)
-        frozen_file(self.directory / 'case-observations.json', encoded(serializable))
+        persisted_results = dict(results)
+        # Only these stored offline records carry raw bytes. Reference their
+        # original closed files without changing the records used by callers.
+        for name in ('prepare_forward', 'prepare_reverse_media'):
+            result = results.get(name)
+            if result is None:
+                continue
+            directory = self.directory / result['event']['directory']
+            paths = dict(state=directory / 'artifacts' / digest(result['state']),
+                         preparation=directory / 'checkpoint.json')
+            persisted = dict(result)
+            for key, path in paths.items():
+                data = regular(path)
+                require(data == result[key], 'persisted preparation bytes')
+                persisted[key] = dict(path=path.relative_to(self.directory).as_posix(),
+                                      sha256=digest(data), bytes=len(data))
+            persisted_results[name] = persisted
+        frozen_file(self.directory / 'case-observations.json', encoded(dict(serializable, results=persisted_results)))
         return serializable
 
 

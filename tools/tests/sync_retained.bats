@@ -439,6 +439,163 @@ PY
   [ "$status" -eq 0 ]
 }
 
+@test "retained runtime persists both stored offline preparations without changing their bytes or closure" {
+  run python3 - "$REPO_ROOT" "$BATS_TEST_TMPDIR" <<'PY'
+import copy, importlib.util, pathlib, sys
+repo, root = map(pathlib.Path, sys.argv[1:])
+spec = importlib.util.spec_from_file_location('retained', repo / 'conformance/peers/retained-sync/support.py')
+s = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(s)
+
+def files(directory):
+    return {path: path.read_bytes() for path in directory.rglob('*') if path.is_file()}
+
+class OfflineProcessPolicy:
+    # Only the external offline process is doubled. These are synthetic refused
+    # preparation records, never SDK/HTTP success or collection/case evidence.
+    def run(self, directory, entrypoint, command, **kwargs):
+        assert entrypoint == '/retained-peer' and command == [] and 'network' not in kwargs
+        inputs, output = directory / 'input', directory / 'raw'
+        action = s.load_json(inputs / 'action.json')
+        case, name = action['case'], action['action']
+        state = next(source for source, target, readonly in kwargs['mounts'] if target == '/state')
+        owned = state / case
+        owned.mkdir(exist_ok=True)
+        body = b'synthetic closed state, never executed\x00\xff' + name.encode('ascii')
+        (owned / 'collection.bin').write_bytes(body)
+        # Deliberately noncanonical JSON: persistence must retain exact bytes.
+        declared = b' \n' + s.encoded(dict(format='meguri-retained-state-inputs-v1', files=[
+            dict(path='collection.bin', bytes=len(body), sha256=s.digest(body))])) + b'\t'
+        snap = dict(format='meguri-retained-snapshot-v1', tables={
+            table: dict(columns=columns.split(), rows=[]) for table, columns in s.COLUMNS.items()}, media_sha256={})
+        snapshot_bytes = s.encoded(snap)
+        result = dict(format='meguri-retained-action-v1', **action, actor='client_a',
+            client_build=s.load_json(inputs / 'client-build.json'), binding=None,
+            action_sha256=s.digest(s.regular(inputs / 'action.json')),
+            recipe_sha256=s.digest(s.regular(s.RECIPES)), selection_sha256=s.digest(s.regular(s.SELECTION)),
+            state_inputs_sha256=s.digest(declared), started_ms=1, finished_ms=2,
+            observed=dict(preparation_only=True, preparation_complete=False,
+                snapshot_sha256=s.digest(snapshot_bytes), snapshot=snap), case_credit=False)
+        for filename, data in [('state-inputs.json', declared), ('snapshot.json', snapshot_bytes),
+                               ('action-result.json', s.encoded(result))]:
+            s.frozen_file(output / filename, data)
+        return 1
+
+class ObservedRuntime(s.RetainedRuntime):
+    def offline(self, action):
+        record = super().offline(action)
+        assert record is not None
+        self.captured[action] = record
+        self.original_records[action] = copy.deepcopy(record)
+        directory = self.directory / record['event']['directory']
+        self.original_files.update(files(directory))
+        return record
+
+def exercise(case, fault=None):
+    outer = root / (case + '-' + (fault or 'persist'))
+    peer = outer / 'peer'
+    (peer / 'artifacts').mkdir(parents=True)
+    client = dict(policy_test=True)
+    s.frozen_file(peer / 'client-build.json', s.encoded(client))
+    initial = outer / 'preparations' / case
+    initial.mkdir(parents=True)
+    (initial / 'state').mkdir()
+    process = OfflineProcessPolicy()
+    assert s.offline_worker(process, peer, initial, case, 'prepare_initial', initial / 'state') == 1
+    # Keep real offline_worker, checkpoint, CAS, identity and snapshot validators.
+    # Bypass constructor-only service/account setup; network is unavailable.
+    runtime = ObservedRuntime.__new__(ObservedRuntime)
+    runtime.outer, runtime.case, runtime.peer, runtime.client = outer, case, peer, client
+    runtime.containers = process
+    runtime.directory = outer / 'instances' / case
+    runtime.directory.mkdir(parents=True)
+    runtime.state = runtime.directory / 'client-a-state'
+    s.restore_working_state(initial, case, runtime.state)
+    runtime.serial, runtime.events = 0, []
+    runtime.captured, runtime.original_records = {}, {}
+    runtime.original_files = files(initial)
+    runtime.setup = lambda: None  # External account setup policy boundary only.
+    damaged = []
+    def unavailable_network(action, expected, baseline=None, companion=False):
+        directory = runtime.new_step(action)
+        event = runtime.event(action, 'client_b' if companion else 'client_a', directory,
+            operation_complete=False, error_kind='policy_network_unavailable', execution_closed=True)
+        if action == 'media_send':
+            if fault == 'unknown':
+                return dict(event=event, unsupported_binary=b'\x00\xff')
+            if fault in ('missing', 'tampered'):
+                record = runtime.captured['prepare_reverse_media']
+                path = runtime.directory / record['event']['directory'] / 'artifacts' / s.digest(record['state'])
+                damaged.append(path)
+                if fault == 'missing':
+                    path.unlink()
+                else:
+                    path.chmod(0o600)
+                    path.write_bytes(b'changed bound CAS, never admitted')
+        return None
+    runtime.network = unavailable_network
+    output = runtime.directory / 'case-observations.json'
+    try:
+        returned = runtime.run()
+    except (TypeError, ValueError) as error:
+        assert fault is not None
+        assert isinstance(error, TypeError if fault == 'unknown' else ValueError)
+        assert not output.exists()
+    else:
+        assert fault is None
+        written = s.load_json(output)
+        action = 'prepare_forward' if case == 'normal-bidirectional' else 'prepare_reverse_media'
+        record = runtime.captured[action]
+        assert returned['results'][action] is record
+        assert written['case_credit'] is False
+        for key in ('case', 'events', 'initial', 'case_credit'):
+            assert written[key] == returned[key]
+        assert written['results'].keys() == returned['results'].keys()
+        for name, result in returned['results'].items():
+            if name != action:
+                assert written['results'][name] == result
+        projected = written['results'][action]
+        assert projected.keys() == record.keys()
+        for key, value in record.items():
+            if key not in ('state', 'preparation'):
+                assert projected[key] == value
+        directory = runtime.directory / record['event']['directory']
+        for key, original_path in [('state', directory / 'artifacts' / s.digest(record['state'])),
+                                   ('preparation', directory / 'checkpoint.json')]:
+            ref = projected[key]
+            assert set(ref) == {'path', 'sha256', 'bytes'}
+            assert runtime.directory / ref['path'] == original_path
+            blob = s.regular(original_path)
+            assert blob == record[key] and isinstance(record[key], bytes)
+            assert ref['sha256'] == s.digest(blob) and ref['bytes'] == len(blob)
+        assert record['event']['execution_closed'] is True
+        assert record['event']['operation_complete'] is False
+        checkpoint = s.load_json(directory / 'checkpoint.json')
+        assert checkpoint['admission_valid'] is True and checkpoint['preparation_complete'] is False
+    assert runtime.captured == runtime.original_records
+    for path, original in runtime.original_files.items():
+        if path not in damaged:
+            assert s.regular(path) == original
+    # Neither source CAS loss nor corruption can be repaired from resident bytes.
+    for path in damaged:
+        if fault == 'missing':
+            assert not path.exists()
+        else:
+            assert path.read_bytes() == b'changed bound CAS, never admitted'
+    if fault is None:
+        assert files(initial) == {p: b for p, b in runtime.original_files.items() if p.is_relative_to(initial)}
+        directory = runtime.directory / runtime.captured[action]['event']['directory']
+        assert files(directory) == {p: b for p, b in runtime.original_files.items() if p.is_relative_to(directory)}
+
+exercise('normal-bidirectional')
+exercise('media-bidirectional')
+exercise('media-bidirectional', 'unknown')
+exercise('media-bidirectional', 'missing')
+exercise('media-bidirectional', 'tampered')
+PY
+  [ "$status" -eq 0 ]
+}
+
 @test "retained peer successful offline companion capture checkpoint and final attachment preserve complete closure" {
   run python3 - "$REPO_ROOT" "$BATS_TEST_TMPDIR" <<'PY'
 import copy, importlib.util, pathlib, sys
