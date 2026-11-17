@@ -95,6 +95,9 @@ ID_POSITIONS: dict[str, list[tuple[str, str]]] = {
 MODEL_LISTS = ("findModelsById", "findModelsByName")
 MODEL_ONE = ("createModel",)
 BIDI_MARKS = {0x2068: None, 0x2069: None}
+# T10.3: the link of a template-error notice (render/display-transform D8,
+# D10) keeps its path and anchor; the documentation host becomes <anki-docs>.
+DOCS_LINK = re.compile(r"(<a href=')https://[^/']+(/templates/errors\.html#)")
 _GONE = object()
 
 
@@ -901,6 +904,9 @@ class Normalizer:
         if action == "cardsInfo":
             at("/*/nextReviews/*", lambda v: v.translate(BIDI_MARKS) if isinstance(v, str) else v)
             needle = self.env.tts_needle
+            docs = lambda v: DOCS_LINK.sub(r"\1<anki-docs>\2", v) if isinstance(v, str) else v  # noqa: E731
+            at("/*/question", docs)
+            at("/*/answer", docs)
             if needle:
                 fix = lambda v: v.replace(needle, "[tts: lang not set]") if isinstance(v, str) else v  # noqa: E731
                 at("/*/question", fix)

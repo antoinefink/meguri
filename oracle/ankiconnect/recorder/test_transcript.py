@@ -184,6 +184,10 @@ class Normalization(unittest.TestCase):
         value, _ = self.reply([{"question": "a[TTS-NEEDLE]", "nextReviews": ["⁨<1m⁩"]}],
                               {"action": "cardsInfo", "version": 4})
         self.assertEqual(value, [{"question": "a[tts: lang not set]", "nextReviews": ["<1m"]}])
+        link = "<br><a href='https://docs.example.org/templates/errors.html#template-syntax-error'>More information</a>"
+        value, _ = self.reply([{"question": "x" + link, "answer": link, "css": link}], {"action": "cardsInfo", "version": 4})
+        kept = "<br><a href='<anki-docs>/templates/errors.html#template-syntax-error'>More information</a>"
+        self.assertEqual(value, [{"question": "x" + kept, "answer": kept, "css": link}])
 
     def test_identity_change_and_reuse(self):
         self.tokens.update(snapshot(notes=[(MS, "g1"), (MS + 1, "g9")], cards=[(MS, MS, 0)],
