@@ -14,6 +14,7 @@ use meguri_engine::notetypes::{
     self, AggregateDigest, Draft, FieldIdentity, FieldRename, NewNotetype, NewTemplate, NotetypeKind, RenameFields,
     SaveOptions, rename,
 };
+use meguri_engine::notetypes::{TemplateFormatsUpdate, TemplateIdentity, template_formats};
 use meguri_engine::{
     CancelToken, EngineError, EventKind, OpSpec, Progress, ProgressListener, ProgressPhase, ProgressSink, UndoScope,
 };
@@ -964,4 +965,523 @@ fn cancellation_before_or_during_planning_writes_nothing_and_commit_finishes_pas
     assert!(result.past_cancel_point);
     assert!(result.value.written);
     assert_eq!(names(&read(&h, id)), ["Prompt", "Back"]);
+}
+
+// The review-format slice shares these existing aggregate, legacy-metadata,
+// row-image and card-generation fixtures with the field-rename prerequisite.
+fn formats_request(nt: &Notetype, at: usize, front: &str, back: &str, css: Option<&str>) -> TemplateFormatsUpdate {
+    TemplateFormatsUpdate {
+        notetype: nt.id,
+        base: AggregateDigest::of(nt),
+        template: TemplateIdentity::of(&nt.templates[at]),
+        front: front.to_owned(),
+        back: back.to_owned(),
+        css: css.map(str::to_owned),
+    }
+}
+
+fn formats_run(
+    h: &Harness,
+    request: TemplateFormatsUpdate,
+) -> Result<meguri_engine::OpResult<notetypes::TemplateFormatsSaved>, EngineError> {
+    notetypes::update_template_formats(&h.collection, request, CancelToken::new(), ProgressSink::new())
+}
+
+// Before/after evidence includes full aggregate, note and card rows and the
+// persisted allocation counter, in addition to collection stamps and history.
+fn formats_rows(h: &Harness, id: NotetypeId) -> Vec<RowImage> {
+    let mut images = rows(h, id);
+    let reader = h.collection.reader(ReaderRole::Query).unwrap();
+    for note in reader.notetype_notes_after(id, None, 500).unwrap() {
+        images.push(reader.row_image(Table::Notes, &RowKey::Id(note.id.0)).unwrap().unwrap());
+        for card in reader.cards_of_note(note.id).unwrap() {
+            images.push(reader.row_image(Table::Cards, &RowKey::Id(card.id.0)).unwrap().unwrap());
+        }
+    }
+    if let Some(counter) = reader.row_image(Table::Config, &RowKey::text("nextPos")).unwrap() {
+        images.push(counter);
+    }
+    images.push(reader.row_image(Table::Col, &RowKey::Id(1)).unwrap().unwrap());
+    images
+}
+
+#[test]
+fn template_formats_checked_success_preserves_metadata_ordinals_stamps_and_noop() {
+    let h = fresh();
+    let id = make(&h, false, &["{{Front}}", "{{Back}}"]);
+    let mut nt = read(&h, id);
+    nt.mtime = EpochSecs(42);
+    nt.usn = Usn(8);
+    nt.config.latex_pre = "kept header".to_owned();
+    nt.config = with_unknown(&with_other(&nt.config, b"{\"extension\":17}"));
+    nt.config.reqs.clear();
+    let mut bytes = nt.config.to_bytes().into_owned();
+    bytes.extend_from_slice(&[
+        0x42, 9, 0x08, 0, 0x10, 1, 0x18, 0, 0xa0, 0x01, 7,
+        0x42, 9, 0x08, 1, 0x10, 1, 0x18, 1, 0xa0, 0x01, 7,
+    ]);
+    nt.config = ProtoBlob::decode(&bytes).unwrap();
+    nt.fields[1].ord = 4;
+    nt.templates[1].ord = 7;
+    for field in &mut nt.fields {
+        field.config = with_unknown(&with_other(&field.config, b"kept field"));
+    }
+    for template in &mut nt.templates {
+        template.config.id = None; // Legacy missing IDs are valid crosschecks.
+        template.mtime = EpochSecs(321);
+        template.usn = Usn(19);
+        template.config.q_format_browser = "{{NoBrowserCheck}}".to_owned();
+        template.config.a_format_browser = "kept browser back".to_owned();
+        template.config = with_unknown(&with_other(&template.config, b"kept template"));
+    }
+    seed(&h, nt);
+    let before = rows(&h, id);
+    let old = read(&h, id);
+    let schema = col(&h).1;
+    let undo = h.collection.peek_undo(UndoScope::Global).unwrap();
+    let depth = h.collection.undo_depth_for_testing().unwrap();
+    h.clock.step_ms(60_000);
+    let result = formats_run(&h, formats_request(&old, 1, "{{Front}} edited", "{{Back}} edited", Some(".card { color: teal; }"))).unwrap();
+    assert_eq!(result.value.id, id);
+    assert!(result.value.written);
+    assert!(result.value.cards_added.is_empty());
+    assert_eq!(result.changes.notetypes.len(), 1);
+    assert!(!result.changes.notetypes[0].schema_changed);
+    assert!(result.changes.notes.is_empty());
+    assert!(result.changes.cards.is_empty());
+    assert!(!result.changes.collection_row);
+    assert_eq!(col(&h), (h.clock.now_ms(), schema));
+    let new = read(&h, id);
+    assert_eq!((new.mtime.0, new.usn), (h.clock.now_ms() / 1000, Usn::PENDING));
+    assert_eq!((&new.name, new.id), (&old.name, old.id));
+    for (before, after) in old.fields.iter().zip(&new.fields) {
+        assert_eq!((before.ord, &before.name), (after.ord, &after.name));
+        assert_eq!(before.config.to_bytes(), after.config.to_bytes());
+    }
+    for (at, (before, after)) in old.templates.iter().zip(&new.templates).enumerate() {
+        assert_eq!((before.ord, &before.name, before.mtime, before.usn), (after.ord, &after.name, after.mtime, after.usn));
+        let mut expected = before.config.clone();
+        if at == 1 {
+            expected.q_format = "{{Front}} edited".to_owned();
+            expected.a_format = "{{Back}} edited".to_owned();
+        }
+        assert_eq!(expected.to_bytes(), after.config.to_bytes());
+    }
+    let mut expected = old.config.clone();
+    expected.css = ".card { color: teal; }".to_owned();
+    expected.reqs[1].field_ords = vec![0];
+    assert_eq!(new.config.to_bytes(), expected.to_bytes());
+    assert!(new.config.reqs.iter().all(|req| !req.unknown_fields().is_empty()));
+    assert_eq!(h.collection.undo_depth_for_testing().unwrap(), depth + 1);
+    assert_eq!(h.collection.peek_undo(UndoScope::Global).unwrap().name(), Some(meguri_engine::undo::names::UPDATE_NOTE_TYPE));
+    let after = rows(&h, id);
+    let after_col = col(&h);
+    h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(rows(&h, id), before);
+    assert_eq!(h.collection.peek_undo(UndoScope::Global).unwrap(), undo);
+    h.collection.redo(UndoScope::Global).unwrap();
+    assert_eq!(rows(&h, id), after);
+    assert_eq!(col(&h), after_col);
+
+    let events = h.engine.stream().subscribe();
+    let depth = h.collection.undo_depth_for_testing().unwrap();
+    let result = formats_run(&h, formats_request(&new, 1, "{{Front}} edited", "{{Back}} edited", Some(&new.config.css))).unwrap();
+    assert!(!result.value.written);
+    assert!(result.value.cards_added.is_empty());
+    assert!(result.changes.is_empty());
+    assert_eq!(rows(&h, id), after);
+    assert_eq!(col(&h), after_col);
+    assert_eq!(h.collection.undo_depth_for_testing().unwrap(), depth);
+    assert!(common::drain(&events, Duration::from_millis(10)).is_empty());
+}
+
+#[test]
+fn template_formats_plain_save_guard_and_checked_refusals_remain() {
+    let h = fresh();
+    let id = make(&h, false, &["{{Front}}", "{{Back}}"]);
+    let nt = read(&h, id);
+    let before = formats_rows(&h, id);
+    let before_col = col(&h);
+    let undo = h.collection.peek_undo(UndoScope::Global).unwrap();
+    for skip_checks in [false, true] {
+        for front in [false, true] {
+            let mut draft = Draft::of(nt.clone());
+            if front {
+                draft.templates[0].config.q_format.push_str(" changed");
+            } else {
+                draft.templates[0].config.a_format.push_str(" changed");
+            }
+            assert!(matches!(notetypes::save(&h.collection, draft, SaveOptions { skip_checks }), Err(EngineError::InvalidArgument { .. })));
+        }
+    }
+    for (front, back, kind) in [
+        ("{{Back}}", "", notetypes::CheckKind::DuplicateFront),
+        ("{{#Front}}", "", notetypes::CheckKind::TemplateParseError),
+        ("plain", "", notetypes::CheckKind::NoFrontField),
+        ("{{Nope}}", "", notetypes::CheckKind::UnknownField),
+        ("{{Front}}", "{{Nope}}", notetypes::CheckKind::UnknownField),
+    ] {
+        assert!(matches!(
+            formats_run(&h, formats_request(&nt, 0, front, back, Some("also refused"))),
+            Err(EngineError::NotetypeRefused(notetypes::NotetypeRefusal::Template(failure))) if failure.kind == kind
+        ));
+    }
+    assert_eq!(formats_rows(&h, id), before);
+    assert_eq!(col(&h), before_col);
+    assert_eq!(h.collection.peek_undo(UndoScope::Global).unwrap(), undo);
+    // The existing CSS-only plain save is still supported.
+    let mut draft = Draft::of(nt);
+    draft.config.css = "plain CSS save".to_owned();
+    assert!(notetypes::save(&h.collection, draft, SaveOptions::default()).unwrap().value.written);
+
+    let id = make(&h, true, &["{{cloze:Front}}"]);
+    let nt = read(&h, id);
+    let before = formats_rows(&h, id);
+    assert!(matches!(
+        formats_run(&h, formats_request(&nt, 0, "{{cloze:Front}}", "{{Front}}", None)),
+        Err(EngineError::NotetypeRefused(notetypes::NotetypeRefusal::Template(failure))) if failure.kind == notetypes::CheckKind::MissingCloze
+    ));
+    assert_eq!(formats_rows(&h, id), before);
+}
+
+#[test]
+fn template_formats_front_generates_missing_only_and_one_step_undo_redo_exact_ids() {
+    let h = fresh();
+    let id = make(&h, false, &["{{Front}}", "{{Back}}"]);
+    let kept = common::notes::add(&h, common::notes::input(id, &["word", ""]));
+    let cardless = common::notes::add(&h, common::notes::input(id, &["other", ""]));
+    remove_fixture_card(&h, cardless.cards[0]);
+    let sibling = kept.cards[0];
+    h.collection.run(common::tagging::setup_spec(), move |ctx| {
+        let mut card = ctx.scope().card(sibling)?.unwrap();
+        card.card_type = meguri_model::card::CardType::Review;
+        card.queue = meguri_model::card::CardQueue::Review;
+        card.due = 42;
+        card.interval = 17;
+        card.reps = 8;
+        ctx.scope().put(&card)?;
+        ctx.scope().set_config("nextPos", &meguri_storage::ConfigValue::from(99_i64))?;
+        Ok(())
+    }).unwrap();
+    let before = formats_rows(&h, id);
+    let before_col = col(&h);
+    let undo = h.collection.peek_undo(UndoScope::Global).unwrap();
+    let depth = h.collection.undo_depth_for_testing().unwrap();
+    let sibling_row = h.collection.reader(ReaderRole::Query).unwrap().row_image(Table::Cards, &RowKey::Id(sibling.0)).unwrap().unwrap();
+    let result = formats_run(&h, formats_request(&read(&h, id), 1, "{{Front}} reverse", "{{Back}}", None)).unwrap();
+    assert!(result.value.written);
+    assert_eq!(result.value.cards_added.len(), 1);
+    let generated = result.value.cards_added[0];
+    assert_eq!(result.changes.cards.len(), 1);
+    assert_eq!(result.changes.cards[0].id, generated);
+    assert!(result.changes.notes.is_empty());
+    assert!(!result.changes.notetypes[0].schema_changed);
+    assert_eq!(col(&h).1, before_col.1);
+    let reader = h.collection.reader(ReaderRole::Query).unwrap();
+    let card = reader.card(generated).unwrap().unwrap();
+    assert_eq!((card.note_id, card.ord, card.due), (kept.id, 1, 99));
+    assert_eq!(reader.config_value("nextPos").unwrap().unwrap().as_i64(), Some(100));
+    assert_eq!(reader.row_image(Table::Cards, &RowKey::Id(sibling.0)).unwrap().unwrap(), sibling_row);
+    assert!(reader.cards_of_note(cardless.id).unwrap().is_empty());
+    drop(reader);
+    let after = formats_rows(&h, id);
+    let after_col = col(&h);
+    assert_eq!(h.collection.undo_depth_for_testing().unwrap(), depth + 1);
+    h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(formats_rows(&h, id), before);
+    assert_eq!(col(&h), before_col);
+    assert_eq!(h.collection.peek_undo(UndoScope::Global).unwrap(), undo);
+    h.collection.redo(UndoScope::Global).unwrap();
+    assert_eq!(formats_rows(&h, id), after);
+    assert_eq!(col(&h), after_col);
+    assert_eq!(common::query_int(&h.collection, "SELECT count(*) FROM graves"), 0);
+    // Disabling an already populated front never removes or restamps cards.
+    let reader = h.collection.reader(ReaderRole::Query).unwrap();
+    let cards: Vec<_> = reader.cards_of_note(kept.id).unwrap().into_iter().map(|c| {
+        reader.row_image(Table::Cards, &RowKey::Id(c.id.0)).unwrap().unwrap()
+    }).collect();
+    drop(reader);
+    let disabled = formats_run(&h, formats_request(&read(&h, id), 1, "{{#Back}}{{Back}}{{/Back}}", "{{Back}}", None)).unwrap();
+    assert!(disabled.value.cards_added.is_empty());
+    assert!(disabled.changes.cards.is_empty());
+    let reader = h.collection.reader(ReaderRole::Query).unwrap();
+    for row in cards {
+        let id = row[0].as_i64().unwrap();
+        assert_eq!(reader.row_image(Table::Cards, &RowKey::Id(id)).unwrap().unwrap(), row);
+    }
+    assert!(reader.cards_of_note(cardless.id).unwrap().is_empty());
+}
+
+#[test]
+fn template_formats_back_and_css_keep_requirements_and_never_generate() {
+    let h = fresh();
+    let id = make(&h, false, &["{{Front}}", "{{Back}}"]);
+    let added = common::notes::add(&h, common::notes::input(id, &["word", "meaning"]));
+    remove_fixture_card(&h, added.cards[1]);
+    let mut nt = read(&h, id);
+    nt.config.reqs[0].field_ords = vec![1]; // Stale requirements are not repaired.
+    seed(&h, nt);
+    for (back, css) in [("changed {{Back}}", None), ("changed {{Back}}", Some("new CSS"))] {
+        let nt = read(&h, id);
+        let reqs = nt.config.to_bytes().into_owned();
+        let reader = h.collection.reader(ReaderRole::Query).unwrap();
+        let card = reader.row_image(Table::Cards, &RowKey::Id(added.cards[0].0)).unwrap().unwrap();
+        let counter = reader.config_value("nextPos").unwrap();
+        drop(reader);
+        let result = formats_run(&h, formats_request(&nt, 0, &nt.templates[0].config.q_format, back, css)).unwrap();
+        assert!(result.value.written);
+        assert!(result.value.cards_added.is_empty());
+        assert!(result.changes.cards.is_empty());
+        let mut expected = nt.config.clone();
+        if let Some(css) = css { expected.css = css.to_owned(); }
+        assert_eq!(read(&h, id).config.to_bytes(), expected.to_bytes());
+        if css.is_none() { assert_eq!(read(&h, id).config.to_bytes().as_ref(), reqs.as_slice()); }
+        let reader = h.collection.reader(ReaderRole::Query).unwrap();
+        assert_eq!(reader.cards_of_note(added.id).unwrap().len(), 1);
+        assert_eq!(reader.row_image(Table::Cards, &RowKey::Id(added.cards[0].0)).unwrap().unwrap(), card);
+        assert_eq!(reader.config_value("nextPos").unwrap(), counter);
+    }
+}
+
+#[test]
+fn template_formats_same_second_stale_plan_writer_and_identity_refusals_are_atomic() {
+    let h = fresh();
+    let id = make(&h, false, &["{{Front}}", "{{Back}}"]);
+    let nt = read(&h, id);
+    let captured = formats_request(&nt, 0, "{{Front}} edited", "{{Back}}", Some("draft CSS"));
+    let reader = h.collection.reader(ReaderRole::Maintenance).unwrap();
+    let planned = template_formats::plan(&*reader, captured.clone(), &CancelToken::new(), &ProgressSink::new()).unwrap();
+    drop(reader);
+    let mut draft = Draft::of(nt.clone());
+    draft.config.css = "concurrent same-second edit".to_owned();
+    notetypes::save(&h.collection, draft, SaveOptions::default()).unwrap();
+    assert_eq!(read(&h, id).mtime, nt.mtime);
+    assert_eq!(read(&h, id).usn, nt.usn);
+    let before = formats_rows(&h, id);
+    let before_col = col(&h);
+    let undo = h.collection.peek_undo(UndoScope::Global).unwrap();
+    assert!(matches!(formats_run(&h, captured), Err(EngineError::Stale { table: Table::Notetypes, .. })));
+    assert!(matches!(h.collection.run(commit_spec(), move |ctx| template_formats::commit_in(ctx.scope(), &planned)), Err(EngineError::Stale { table: Table::Notetypes, .. })));
+    let live = read(&h, id);
+    for (ord, template_id) in [(99, live.templates[0].config.id), (0, Some(-17)), (0, None)] {
+        let mut request = formats_request(&live, 0, "{{Front}} edited", "{{Back}}", None);
+        request.template = TemplateIdentity { ord, id: template_id };
+        assert!(matches!(formats_run(&h, request), Err(EngineError::InvalidArgument { .. })));
+    }
+    assert_eq!(formats_rows(&h, id), before);
+    assert_eq!(col(&h), before_col);
+    assert_eq!(h.collection.peek_undo(UndoScope::Global).unwrap(), undo);
+
+    // A valid captured identity becomes stale if its stored optional ID
+    // changes, both when planning and when committing an existing plan.
+    common::notes::add(&h, common::notes::input(id, &["word", ""]));
+    let nt = read(&h, id);
+    let captured = formats_request(&nt, 1, "{{Front}} reverse", "{{Back}}", Some("draft CSS"));
+    assert!(captured.template.id.is_some());
+    let reader = h.collection.reader(ReaderRole::Maintenance).unwrap();
+    let planned = template_formats::plan(&*reader, captured.clone(), &CancelToken::new(), &ProgressSink::new()).unwrap();
+    drop(reader);
+    let mut concurrent = nt.clone();
+    concurrent.templates[1].config.id = None;
+    seed(&h, concurrent);
+    let live = read(&h, id);
+    assert_eq!((live.mtime, live.usn), (nt.mtime, nt.usn));
+    assert_eq!(live.templates[1].config.id, None);
+    assert_ne!(AggregateDigest::of(&live), captured.base);
+    let before = formats_rows(&h, id);
+    let before_col = col(&h);
+    let undo = h.collection.peek_undo(UndoScope::Global).unwrap();
+    let redo = h.collection.peek_redo(UndoScope::Global).unwrap();
+    let depth = h.collection.undo_depth_for_testing().unwrap();
+    let graves = common::query_int(&h.collection, "SELECT count(*) FROM graves");
+    let revlog = common::query_int(&h.collection, "SELECT count(*) FROM revlog");
+    let events = h.engine.stream().subscribe();
+    for writer in [false, true] {
+        let error = if writer {
+            let planned = planned.clone();
+            h.collection.run(commit_spec(), move |ctx| template_formats::commit_in(ctx.scope(), &planned)).unwrap_err()
+        } else {
+            let reader = h.collection.reader(ReaderRole::Maintenance).unwrap();
+            template_formats::plan(&*reader, captured.clone(), &CancelToken::new(), &ProgressSink::new()).unwrap_err()
+        };
+        assert!(matches!(error, EngineError::Stale { table: Table::Notetypes, key } if key == id.0.to_string()));
+        assert_eq!(formats_rows(&h, id), before);
+        assert_eq!(col(&h), before_col);
+        assert_eq!(h.collection.peek_undo(UndoScope::Global).unwrap(), undo);
+        assert_eq!(h.collection.peek_redo(UndoScope::Global).unwrap(), redo);
+        assert_eq!(h.collection.undo_depth_for_testing().unwrap(), depth);
+        assert_eq!(common::query_int(&h.collection, "SELECT count(*) FROM graves"), graves);
+        assert_eq!(common::query_int(&h.collection, "SELECT count(*) FROM revlog"), revlog);
+        assert!(common::drain(&events, Duration::from_millis(10)).iter().all(|event| !matches!(event.kind, EventKind::Changes(_))));
+    }
+
+    // Repeated optional IDs are crosschecks, never lookup identities.
+    let mut nt = read(&h, id);
+    for template in &mut nt.templates {
+        template.config.id = Some(11);
+    }
+    seed(&h, nt);
+    let nt = read(&h, id);
+    formats_run(&h, formats_request(&nt, 1, "{{Back}} edited", "{{Front}}", None)).unwrap();
+    let saved = read(&h, id);
+    assert_eq!(saved.templates[0].config.to_bytes(), nt.templates[0].config.to_bytes());
+    assert_eq!(saved.templates[1].config.id, Some(11));
+    assert_eq!(saved.templates[1].config.q_format, "{{Back}} edited");
+}
+
+#[test]
+fn template_formats_generation_rederives_live_notes_cards_and_positions() {
+    let h = fresh();
+    let id = make(&h, false, &["{{Front}}", "{{Back}}"]);
+    let changed = common::notes::add(&h, common::notes::input(id, &["word", "meaning"]));
+    remove_fixture_card(&h, changed.cards[1]);
+    let reader = h.collection.reader(ReaderRole::Maintenance).unwrap();
+    let planned = template_formats::plan(
+        &*reader,
+        formats_request(&read(&h, id), 1, "{{Front}} reverse", "{{Back}}", None),
+        &CancelToken::new(),
+        &ProgressSink::new(),
+    ).unwrap();
+    drop(reader);
+    let late = common::notes::add(&h, common::notes::input(id, &["late", ""]));
+    let cardless = common::notes::add(&h, common::notes::input(id, &["cardless", ""]));
+    remove_fixture_card(&h, cardless.cards[0]);
+    let late_sibling = late.cards[0];
+    let changed_note = changed.id;
+    h.collection.run(common::tagging::setup_spec(), move |ctx| {
+        let mut note = ctx.scope().note(changed_note)?.unwrap();
+        note.fields = "\u{1f}meaning".to_owned();
+        ctx.scope().put(&note)?;
+        let mut card = ctx.scope().card(late_sibling)?.unwrap();
+        card.due = 88;
+        ctx.scope().put(&card)?;
+        Ok(())
+    }).unwrap();
+    let result = h.collection.run(commit_spec(), move |ctx| template_formats::commit_in(ctx.scope(), &planned)).unwrap();
+    assert_eq!(result.value.cards_added.len(), 1);
+    let reader = h.collection.reader(ReaderRole::Query).unwrap();
+    let generated = reader.card(result.value.cards_added[0]).unwrap().unwrap();
+    assert_eq!((generated.note_id, generated.ord, generated.due), (late.id, 1, 88));
+    assert_eq!(reader.cards_of_note(changed.id).unwrap().len(), 1);
+    assert!(reader.cards_of_note(cardless.id).unwrap().is_empty());
+}
+
+#[derive(Default)]
+struct FormatsObserver {
+    // seq, generated-card count, structure-report presence
+    seen: std::sync::Mutex<Vec<(u64, usize, bool)>>,
+}
+
+impl meguri_engine::ChangeObserver for FormatsObserver {
+    fn name(&self) -> &str {
+        "template formats observer"
+    }
+
+    fn observe(&self, commit: &meguri_engine::ObservedCommit<'_>) -> Result<(), EngineError> {
+        self.seen.lock().unwrap().push((
+            commit.seq.0,
+            commit.changes.cards.len(),
+            commit.payload.structure_report().is_some(),
+        ));
+        Ok(())
+    }
+}
+
+#[test]
+fn template_formats_real_precommit_fault_rolls_back_aggregate_cards_counter_and_publication() {
+    use meguri_model::faultpoint::{self, Fault};
+    let observer = Arc::new(FormatsObserver::default());
+    let h = Harness::open_with(meguri_engine::Ports::new().observer(observer.clone()));
+    let id = make(&h, false, &["{{Front}}", "{{Back}}"]);
+    let added = common::notes::add(&h, common::notes::input(id, &["word", ""]));
+    let sibling = added.cards[0];
+    h.collection.run(common::tagging::setup_spec(), move |ctx| {
+        let mut card = ctx.scope().card(sibling)?.unwrap();
+        card.card_type = meguri_model::card::CardType::Review;
+        card.queue = meguri_model::card::CardQueue::Review;
+        ctx.scope().put(&card)?;
+        ctx.scope().set_config("nextPos", &meguri_storage::ConfigValue::from(123_i64))?;
+        Ok(())
+    }).unwrap();
+    let request = formats_request(&read(&h, id), 1, "{{Front}} reverse", "{{Back}}", Some("draft CSS"));
+    let reader = h.collection.reader(ReaderRole::Maintenance).unwrap();
+    let planned = template_formats::plan(&*reader, request.clone(), &CancelToken::new(), &ProgressSink::new()).unwrap();
+    drop(reader);
+    let before = formats_rows(&h, id);
+    let undo = h.collection.peek_undo(UndoScope::Global).unwrap();
+    let redo = h.collection.peek_redo(UndoScope::Global).unwrap();
+    let depth = h.collection.undo_depth_for_testing().unwrap();
+    let graves = common::query_int(&h.collection, "SELECT count(*) FROM graves");
+    observer.seen.lock().unwrap().clear();
+    let events = h.engine.stream().subscribe();
+    let error = h.collection.run(commit_spec(), move |ctx| {
+        let result = template_formats::commit_in(ctx.scope(), &planned)?;
+        assert!(result.written);
+        assert_eq!(result.cards_added.len(), 1);
+        assert_eq!(ctx.scope().notetype(id)?.unwrap().config.css, "draft CSS");
+        assert_eq!(ctx.scope().config_value("nextPos")?.unwrap().as_i64(), Some(124));
+        // This existing storage hook fires after both the aggregate and G9
+        // writes, while the executor can still roll the transaction back.
+        faultpoint::arm("storage.commit.before", Fault::IoError(std::io::ErrorKind::Other));
+        Ok(result)
+    });
+    faultpoint::disarm("storage.commit.before");
+    assert!(error.unwrap_err().to_string().contains("storage.commit.before"));
+    assert_eq!(formats_rows(&h, id), before);
+    assert_eq!(h.collection.peek_undo(UndoScope::Global).unwrap(), undo);
+    assert_eq!(h.collection.peek_redo(UndoScope::Global).unwrap(), redo);
+    assert_eq!(h.collection.undo_depth_for_testing().unwrap(), depth);
+    assert_eq!(common::query_int(&h.collection, "SELECT count(*) FROM graves"), graves);
+    assert!(observer.seen.lock().unwrap().is_empty());
+    assert!(common::drain(&events, Duration::from_millis(10)).iter().all(|event| !matches!(event.kind, EventKind::Changes(_))));
+
+    let result = formats_run(&h, request).unwrap();
+    let seen = observer.seen.lock().unwrap();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].1, 1);
+    assert!(!seen[0].2); // Formats/CSS supply no layout or generation reason.
+    let changes = common::drain(&events, Duration::from_millis(10)).into_iter().filter(|event| matches!(event.kind, EventKind::Changes(_))).collect::<Vec<_>>();
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].seq.0, seen[0].0);
+    assert_eq!(result.value.cards_added.len(), 1);
+}
+
+#[test]
+fn template_formats_cancel_before_commit_writes_nothing_and_commit_finishes_past_cancel_point() {
+    let h = fresh();
+    let id = make(&h, false, &["{{Front}}", "{{Back}}"]);
+    common::notes::add(&h, common::notes::input(id, &["word", ""]));
+    let before = formats_rows(&h, id);
+    let undo = h.collection.peek_undo(UndoScope::Global).unwrap();
+    let request = formats_request(&read(&h, id), 1, "{{Front}} reverse", "{{Back}}", None);
+    for pre_cancel in [true, false] {
+        let token = CancelToken::new();
+        let progress = ProgressSink::new();
+        if pre_cancel {
+            token.cancel();
+        } else {
+            progress.set_listener(Arc::new(CancelOnPhase { token: token.clone(), phase: ProgressPhase::Planning }));
+        }
+        assert!(matches!(notetypes::update_template_formats(&h.collection, request.clone(), token, progress), Err(EngineError::Cancelled)));
+        assert_eq!(formats_rows(&h, id), before);
+        assert_eq!(h.collection.peek_undo(UndoScope::Global).unwrap(), undo);
+    }
+    let token = CancelToken::new();
+    let reader = h.collection.reader(ReaderRole::Maintenance).unwrap();
+    let planned = template_formats::plan(&*reader, request.clone(), &token, &ProgressSink::new()).unwrap();
+    drop(reader);
+    token.cancel();
+    let events = h.engine.stream().subscribe();
+    assert!(matches!(h.collection.run(commit_spec().cancel(token), move |ctx| template_formats::commit_in(ctx.scope(), &planned)), Err(EngineError::Cancelled)));
+    assert_eq!(formats_rows(&h, id), before);
+    assert_eq!(h.collection.peek_undo(UndoScope::Global).unwrap(), undo);
+    assert!(common::drain(&events, Duration::from_millis(10)).iter().all(|event| !matches!(event.kind, EventKind::Changes(_))));
+
+    let token = CancelToken::new();
+    let progress = ProgressSink::new();
+    progress.set_listener(Arc::new(CancelOnPhase { token: token.clone(), phase: ProgressPhase::Committing }));
+    let result = notetypes::update_template_formats(&h.collection, request, token, progress).unwrap();
+    assert!(result.past_cancel_point);
+    assert!(result.value.written);
+    assert_eq!(result.value.cards_added.len(), 1);
 }
