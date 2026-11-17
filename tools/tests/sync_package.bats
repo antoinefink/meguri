@@ -280,6 +280,7 @@ PY
     MG_RUN_DIR="$EXPORT_RUN_DIR"
     mkdir -m 700 "$MG_RUN_DIR"
     run mg_sync_web__package_verify "$receipt" "$EXPORT_IMAGE" "$BATS_TEST_TMPDIR/frontend"
+    printf '%s %d\n' "$mode" "$status" >&3
     if [ "$mode" = valid ]; then [ "$status" -eq 0 ]; else [ "$status" -ne 0 ]; fi
     [[ "$output" != *private-export-sentinel* && "$output" != *setup_token* && "$output" != *0000000000000000000000000000000000000000000* ]]
     [ "$(tail -n 2 "$MG_RUN_DIR/export-sequence" | tr '\n' ' ')" = 'proxy-cleanup service-cleanup ' ]
