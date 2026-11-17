@@ -835,15 +835,15 @@ PUBLIC_ARTIFACTS = {
     'oracle/meguri-sync-server/retained_observer.py':
         'f096346a86c3bb55d2e9835cb6558c04526e2fbbfa333388e954868cfe919816',
     'tools/tests/sync_retained.bats':
-        'c94a487808d3811a98554cef92ea3376917008385c5b90866d9d1282cc2b84f4',
+        'ccfa8b5fcbd30fcdc73d1cfbfe7f6229d51cec54594bfade0647f6437fe3ae4b',
     'tools/mg.d/sync-retained.sh':
         '1eaa29368bf416e3dc709da6fe4ab98946132fdab2ea711a09e79187c43eef30',
     'conformance/peers/retained-sync/support.py':
-        '505aec87b545694a1bad048b0b70c8dbe67ce222de902a60763fb1890c76dc5e',
+        '65fbc56af92fdb9b32ec5c5d8c963024025948a14cf30cd8a4a38c1196b10df8',
     'conformance/peers/retained-sync/src/main.rs':
-        '44d0b8067924aebc307ffc3c5a5960c16b692e6148d3e584a55bd2ecb1d0bee7',
+        'd6c14aa5014fc4fc6824cde87871e77d3d27aa3218288093447ff97e00ca989c',
     'conformance/peers/retained-sync/src/fixture.rs':
-        '0c57226bc2e6a6e8037dd9260c04b00fd148567bb9e2831646b8b692b8fa7ace',
+        'f8c5fb4befacf5e8604ee9782618a2a7e7cc176f637d36faa3be81b0d29ca959',
     'conformance/peers/retained-sync/README.md':
         '625a27d5cdfefedd533ce970e774d5802e15ff16b9d24feb1b99fa81f06bbee9',
     'conformance/peers/retained-sync/AGENTS.md':
@@ -1136,9 +1136,9 @@ PUBLIC_VENDOR_ARTIFACTS = {
     'be7929cd9f7a1698bea4f000aa3d1f236c8b440d58361b5dd177b9697badc26d': '445aa8aa694a60231e0aad0bc3c99b4c950f19eed4566abbcaf9a7ac9736491a',
     'ebe7db15d768840d3f5bcd115f2345a19c31c0d20f5435c23ebbdca9c07e4c21': 'd1d7f78ad34c3fad64889ce65d5e245c6e2dc9b3a9c07104414b8748099f0ebb',
     'f81e67fcb2e3dbe8379aead1ebe38904691e35f510169970a987710496d3ed77':
-        '2737bb166428505bf82c9c83402380005c80e722de64e5ab0501454cdedcc396',
+        'efedb8674cc8f9fde878154e93dfc216159c9be209001a3a7a07284bff6b925c',
     '1abb17517ad6c3616bc662765627c8e3419b3d81f0b8eaf3358cf4af9d316a33':
-        '4277a0a7966305c630f9fddc4848341fce58486ce4b34dc35e3679c8e3f642a6',
+        '9ac159793ca9ff60b261d619df28dbd6d6eb8367edff8f0def7716b7ca1ff1c4',
     '25ea9fbf9d10948d08a6ead80c9f83ec2154ae34f40f881e4659eff9349d258f': 'd08c9fb8ec612b54a95978b5411f5c91218d8ef4a4ac1ba64b1d5d0ac116e076',
     '987ec1929a5a69b01078144679a1a93b0ae01cb133c1a3eb19b18c2094e4e400': '3cf5ea37ea7bad31fe17f2650ea6ad0a7a570724a2435458d1ed1efb2dcf4715',
     '35a74f0278dd035158c7c188707978180be6dac754422f7bc506b0a6b16f626e': 'a3754a3582a6ab4247c2ace9f9686f8757f94691b01e86f340234c4c18073a1b',
