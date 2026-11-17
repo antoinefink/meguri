@@ -195,7 +195,8 @@ def execute(root,out,state,credential_path):
         'observed':{'operation_complete':False,'error_kind':None,'expected_state_equal':None},'case_credit':False}
     expected=store.json(expect['expected_sha256']) if expect['expected_sha256'] is not None else None
     if expected is not None:validate_snapshot(expected)
-    if expect['baseline_sha256'] is not None:validate_snapshot(store.json(expect['baseline_sha256']))
+    baseline=store.json(expect['baseline_sha256']) if expect['baseline_sha256'] is not None else None
+    if baseline is not None:validate_snapshot(baseline)
     if name not in OFFLINE:result['authority_sha256']=expect['expected_sha256']
     before=None;after=None;col=None;wire=None;closed=False;stage='preparation'
     try:
@@ -225,7 +226,7 @@ def execute(root,out,state,credential_path):
                 require(before is not None and expected is not None and compare(before,expected),'reverse preparation lacks unchanged forward authority')
                 change(col,logical_ids(col),recipes(),'reverse',with_media=False)
             elif name == 'prepare_forward_media':
-                require(before is not None and expected is not None and compare(before,expected,media_only=True),'media preparation lacks initial authority')
+                require(before is not None and baseline is not None and compare(before,baseline,media_only=True),'media preparation lacks initial authority')
                 set_media(col,recipes()['media_utf8_exact']['forward'])
             else:
                 if name in SEND:

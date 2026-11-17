@@ -214,6 +214,45 @@ class RetainedHarness(unittest.TestCase):
             self.assertTrue(companion.compare(snapshot,changed_media))
             self.assertFalse(companion.compare(snapshot,changed_media,witness=True))
 
+        from final_desktop import set_media
+        from final_contract import recipes
+        for baseline_kind in ('valid','missing','changed'):
+            with self.subTest(media_baseline=baseline_kind),tempfile.TemporaryDirectory() as directory:
+                root=pathlib.Path(directory);out=root/'out';out.mkdir();state=root/'state'
+                store=Artifacts(out/'artifacts');identity=store.put(b'synthetic-public-media-input')
+                action={'case':'media-bidirectional','action':'prepare_forward_media'}
+                invocation={'run_id':'offline-media-'+baseline_kind,'source_commit':'0'*40}
+                expect={'recipe_sha256':companion.RECIPE_SHA256,'selection_sha256':companion.SELECTION_SHA256,
+                    'review_sha256':'a'*64,'baseline_sha256':None,'expected_sha256':None}
+                companion.owner(state,action['case'],invocation,expect,new=True)
+                profile=state/'client_b';profile.mkdir();col=api.Collection(str(profile/'collection.anki2'))
+                try:set_media(col,recipes()['media_utf8_exact']['initial'])
+                finally:col.close(downgrade=False)
+                original=companion.snapshot(profile/'collection.anki2',profile/'collection.media')
+                baseline=copy.deepcopy(original)
+                if baseline_kind == 'changed':baseline['media_sha256']['replace.txt']='0'*64
+                if baseline_kind != 'missing':expect['baseline_sha256']=store.put_json(baseline)
+                hashes={name:identity for name in ('invocation.json','preflight.json','expectations.json')}
+                with patch.object(companion,'inputs',return_value=(action,'client_b',invocation,expect,store,hashes)),\
+                     patch.object(companion,'read_credentials',side_effect=AssertionError('offline secret read')),\
+                     patch.object(companion,'observing',side_effect=AssertionError('offline HTTP')),\
+                     patch('final_desktop.set_media',wraps=set_media) as effects:
+                    status=companion.execute(root,out,state,'never-read')
+                observation=decode((out/'observations.json').read_bytes());after=store.json(observation['after_sha256'])
+                self.assertFalse(observation['case_credit']);self.assertIsNone(observation['wire_sha256'])
+                self.assertEqual(after['tables'],original['tables'])
+                self.assertEqual(store.json(observation['before_sha256']),original)
+                if baseline_kind == 'valid':
+                    self.assertEqual(status,0);self.assertTrue(observation['observed']['operation_complete'])
+                    self.assertIsNone(observation['observed']['error_kind']);effects.assert_called_once()
+                    self.assertEqual(observation['authority_sha256'],observation['after_sha256'])
+                    self.assertEqual(after['media_sha256'],{name:sha(data.encode()) for name,data in recipes()['media_utf8_exact']['forward'].items()})
+                    self.assertEqual({path.name:path.read_text() for path in (profile/'collection.media').iterdir()},recipes()['media_utf8_exact']['forward'])
+                else:
+                    self.assertEqual(status,1);self.assertFalse(observation['observed']['operation_complete'])
+                    self.assertEqual(observation['observed']['error_kind'],'preparation_refused');effects.assert_not_called()
+                    self.assertIsNone(observation['authority_sha256']);self.assertEqual(after,original)
+
     def test_real_sdk_reverse_preparation_preserves_media_and_raw_wide_config_bytes(self):
         from final_desktop import author, change, media_map
         from final_contract import recipes
