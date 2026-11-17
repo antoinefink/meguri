@@ -29,7 +29,8 @@ enum Action { PrepareInitial, PrepareSnapshot, PrepareForward, PrepareReverseMed
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum PrepareForwardStage { InputAdmission, HostAdmission, FixtureLookup, DeckSave, PresetSnapshot, PresetEdit,
-    PresetSave, ConfigSave, NoteSave, ReviewStart, ReviewStartPredicate, ReviewHeadPredicate, ReviewAnswer,
+    PresetSave, ConfigSave, NoteSave, ReviewStart, ReviewStartPredicate, ReviewStartFsrsPolicyPending,
+    ReviewStartPresetUnsupported, ReviewHeadPredicate, ReviewAnswer,
     ReviewAnswerPredicate, ReviewEnd, DeleteSave, TemplateSave, Snapshot, HostClose, StateInventory, Output }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

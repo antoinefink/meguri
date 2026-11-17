@@ -879,7 +879,8 @@ def prepare_forward_diagnostic(output, case, action, exit_code):
             and isinstance(diagnostic['stage'], str) and diagnostic['stage'] in (
                 'input_admission', 'host_admission', 'fixture_lookup', 'deck_save', 'preset_snapshot',
                 'preset_edit', 'preset_save', 'config_save', 'note_save', 'review_start',
-                'review_start_predicate', 'review_head_predicate', 'review_answer', 'review_answer_predicate',
+                'review_start_predicate', 'review_start_fsrs_policy_pending', 'review_start_preset_unsupported',
+                'review_head_predicate', 'review_answer', 'review_answer_predicate',
                 'review_end', 'delete_save', 'template_save', 'snapshot', 'host_close', 'state_inventory', 'output'),
             'offline prepare_forward diagnostic identity')
     return diagnostic

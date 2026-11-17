@@ -1,5 +1,5 @@
 use crate::{PrepareForwardStage, Result, need};
-use meguri_engine::{OpSource, OpSpec, decks, notes, notetypes, session::{StartResult, AnswerOutcome}};
+use meguri_engine::{OpSource, OpSpec, decks, notes, notetypes, session::{StartResult, AnswerOutcome, Refusal}};
 use meguri_host::CoreHost;
 use meguri_model::{clock::Clock, ids::*, proto::deck::DeckKind, time::EpochMillis};
 use meguri_sched::{answer::Rating, options::{Field, Value as OptionValue}};
@@ -136,7 +136,14 @@ pub fn forward(host: &CoreHost, clock: &dyn Clock, stage: &mut PrepareForwardSta
     *stage = PrepareForwardStage::ReviewStartPredicate;
     let (session_id, head) = match started {
         StartResult::Started { session_id, head, .. } => (session_id, head),
-        _ => return Err("review-start-refused".into()),
+        StartResult::Refused(Refusal::FsrsPolicyPending) => {
+            *stage = PrepareForwardStage::ReviewStartFsrsPolicyPending;
+            return Err("review-start-refused".into());
+        },
+        StartResult::Refused(Refusal::PresetUnsupported { .. }) => {
+            *stage = PrepareForwardStage::ReviewStartPresetUnsupported;
+            return Err("review-start-refused".into());
+        },
     };
     *stage = PrepareForwardStage::ReviewHeadPredicate;
     let item = head.items.first().ok_or("review-head-empty")?;

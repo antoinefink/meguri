@@ -702,7 +702,10 @@ class FailedForwardProcessPolicy:
         state = next(source for source, target, readonly in kwargs['mounts'] if target == '/state')
         (state / 'failed-state').write_bytes(b'original failed state, never executable')
         return 2
-for name, value in [('valid', diagnostic), ('missing', None), ('extra', dict(diagnostic, payload='forbidden')),
+for name, value in [('valid', diagnostic),
+                    ('fsrs-policy-pending', dict(diagnostic, stage='review_start_fsrs_policy_pending')),
+                    ('preset-unsupported', dict(diagnostic, stage='review_start_preset_unsupported')),
+                    ('missing', None), ('extra', dict(diagnostic, payload='forbidden')),
                     ('format', dict(diagnostic, format='other')), ('case', dict(diagnostic, case='authentication')),
                     ('action', dict(diagnostic, action='prepare_snapshot')), ('stage', dict(diagnostic, stage='arbitrary')),
                     ('stage-type', dict(diagnostic, stage=1)), ('missing-key', {k: v for k, v in diagnostic.items() if k != 'stage'})]:
@@ -726,38 +729,39 @@ for name, value in [('valid', diagnostic), ('missing', None), ('extra', dict(dia
     try:
         admitted = s.prepare_forward_diagnostic(directory / 'raw', 'normal-bidirectional', 'prepare_forward', 2)
     except ValueError:
-        assert name not in ('valid', 'missing')
+        assert name not in ('valid', 'fsrs-policy-pending', 'preset-unsupported', 'missing')
     else:
-        assert name in ('valid', 'missing') and admitted == value
+        assert name in ('valid', 'fsrs-policy-pending', 'preset-unsupported', 'missing') and admitted == value
 
-output = root / 'failed-forward-valid/raw'
-for case, action, rc in [('normal-bidirectional', 'prepare_forward', 0),
-                         ('normal-bidirectional', 'prepare_forward', 1),
-                         ('normal-bidirectional', 'prepare_snapshot', 2),
-                         ('normal-no-change', 'prepare_forward', 2)]:
-    try:
-        s.prepare_forward_diagnostic(output, case, action, rc)
-    except ValueError:
-        pass
-    else:
-        raise AssertionError('diagnostic admitted outside fixed offline exit2 failure')
-for invalid_error in [dict(s.json.loads(error_bytes), reason='other'),
-                      dict(s.json.loads(error_bytes), operation_complete=True),
-                      dict(s.json.loads(error_bytes), case_credit=True)]:
-    (output / 'worker-error.json').write_bytes(s.encoded(invalid_error))
+for name in ('valid', 'fsrs-policy-pending', 'preset-unsupported'):
+    output = root / ('failed-forward-' + name) / 'raw'
+    for case, action, rc in [('normal-bidirectional', 'prepare_forward', 0),
+                             ('normal-bidirectional', 'prepare_forward', 1),
+                             ('normal-bidirectional', 'prepare_snapshot', 2),
+                             ('normal-no-change', 'prepare_forward', 2)]:
+        try:
+            s.prepare_forward_diagnostic(output, case, action, rc)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('diagnostic admitted outside fixed offline exit2 failure')
+    for invalid_error in [dict(s.json.loads(error_bytes), reason='other'),
+                          dict(s.json.loads(error_bytes), operation_complete=True),
+                          dict(s.json.loads(error_bytes), case_credit=True)]:
+        (output / 'worker-error.json').write_bytes(s.encoded(invalid_error))
+        try:
+            s.prepare_forward_diagnostic(output, 'normal-bidirectional', 'prepare_forward', 2)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('diagnostic admitted without original closed failure')
+    (output / 'worker-error.json').unlink()
     try:
         s.prepare_forward_diagnostic(output, 'normal-bidirectional', 'prepare_forward', 2)
-    except ValueError:
+    except (OSError, ValueError):
         pass
     else:
-        raise AssertionError('diagnostic admitted without original closed failure')
-(output / 'worker-error.json').unlink()
-try:
-    s.prepare_forward_diagnostic(output, 'normal-bidirectional', 'prepare_forward', 2)
-except (OSError, ValueError):
-    pass
-else:
-    raise AssertionError('diagnostic admitted without worker failure file')
+        raise AssertionError('diagnostic admitted without worker failure file')
 PY
   [ "$status" -eq 0 ]
 }
