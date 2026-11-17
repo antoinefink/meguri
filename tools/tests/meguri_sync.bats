@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # Host integrator runs these through tools/mg selftest.
-# These are static boundary proofs; no production server or browser suite exists here.
+# Boundary proofs and finite frontend shell fixtures; no live server/browser suite.
 
 bats_require_minimum_version 1.5.0
 REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
@@ -302,4 +302,74 @@ SH
   printf 'export default { use: { baseURL: `http://localhost:3000 }, %s%s: 2 };\n' "$prefix" "$suffix" >"$SB/server/web/playwright.config.ts"
   run "$SB/tools/gate/static-checks/no-retries.sh" "$SB"
   [ "$status" -eq 1 ]
+}
+
+@test "frontend audit fixed applicability binds the complete reviewed inputs and raw report" {
+  run python3 "$REPO_ROOT/tools/tests/sync_web_applicability_test.py" Applicability
+  [ "$status" -eq 0 ]
+}
+
+@test "frontend audit real operations capture npm results and reject before publication" {
+  run python3 "$REPO_ROOT/tools/tests/sync_web_applicability_test.py" RunOperations
+  [ "$status" -eq 0 ]
+}
+
+@test "frontend audit MG paths stage real controls, pin the image and retain the real decision" {
+  mg_job() { :; }
+  source "$REPO_ROOT/tools/mg.d/sync-web.sh"
+  MG_ROOT="$REPO_ROOT"
+  MG_RUN_ID=synthetic-frontend-audit
+  mg_compose_project() { printf '%s\n' synthetic-frontend; }
+  docker() {
+    [ "$1 $2 $3" = 'image inspect --format' ] || return 97
+    printf 'sha256:%064d\n' 1
+  }
+  mg_artifact() { printf '%s\n' "$2" >> "$MG_RUN_DIR/artifacts"; }
+  mg_failure() { printf '%s\n' "$1" >> "$MG_RUN_DIR/failures"; }
+  mg_status() { printf '%s\n' "$1" > "$MG_RUN_DIR/status"; }
+  mg_compose() {
+    [ "$MEGURI_SYNC_WEB_IMAGE" = "sha256:$(printf '%064d' 1)" ] || return 97
+    local control_mount=0 web_mount=0 output_mount=0 arg
+    for arg in "$@"; do
+      case "$arg" in
+        "$MG_RUN_DIR/audit-controls:/audit-controls:ro") control_mount=$((control_mount + 1)) ;;
+        "$MG_ROOT/server/web:/source:ro") web_mount=$((web_mount + 1)) ;;
+        "$MG_RUN_DIR:/out") output_mount=$((output_mount + 1)) ;;
+        *:/*) return 97 ;;
+      esac
+    done
+    [ "$control_mount $web_mount $output_mount" = '1 1 1' ] || return 97
+    [ "${DROP_DECISION:-0}" -eq 0 ] || return 0
+    PYTHONDONTWRITEBYTECODE=1 python3 - "$MG_ROOT" "$MG_RUN_DIR" <<'PY'
+import json
+from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(sys.argv[1]) / 'tools/tests'))
+from sync_web_applicability_test import recorded_report
+out = Path(sys.argv[2])
+(out / 'npm-audit.json').write_text(json.dumps(recorded_report()) + '\n')
+(out / 'npm-audit-exit.txt').write_text('1\n')
+(out / 'npm-audit-stderr.txt').write_bytes(b'')
+(out / 'npm-audit-tools.json').write_text(json.dumps(dict(node='v26.13.1', npm='11.20.0')))
+PY
+    python3 "$MG_ROOT/server/web/scripts/audit-applicability.py" assess \
+      "$MG_ROOT/server/web" "$MG_ROOT/server/web" "$MG_RUN_DIR/audit-controls" "$MG_RUN_DIR"
+  }
+  local mode
+  for mode in resolve install audit browser-install; do
+    MG_RUN_DIR="$BATS_TEST_TMPDIR/$mode"
+    mkdir "$MG_RUN_DIR"
+    mg_sync_web__run sync-web-resolver "$mode"
+    [ "$(cat "$MG_RUN_DIR/status")" = pass ]
+    [ ! -e "$MG_RUN_DIR/failures" ]
+    jq -e '.disposition=="assessed-inapplicable" and .raw_exit==1 and .vulnerability_counts.high==4' \
+      "$MG_RUN_DIR/npm-audit-decision.json"
+    grep -Fx "$MG_RUN_DIR/npm-audit-decision.json" "$MG_RUN_DIR/artifacts"
+  done
+  DROP_DECISION=1
+  MG_RUN_DIR="$BATS_TEST_TMPDIR/missing-decision"
+  mkdir "$MG_RUN_DIR"
+  mg_sync_web__run sync-web-resolver audit
+  [ "$(cat "$MG_RUN_DIR/status")" = fail ]
+  [ -s "$MG_RUN_DIR/failures" ]
 }

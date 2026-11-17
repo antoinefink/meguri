@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
 set -euo pipefail
-node --version
-npm --version
+node_version="$(node --version)"
+npm_version="$(npm --version)"
+printf '%s\n' "$node_version" "$npm_version"
+[ "$npm_version" = 11.20.0 ]
+tool_scripts="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 rustc --version
 node -e 'if (process.version !== "v26.13.1" || process.release.lts !== "Lithium") process.exit(1)'
 mode="${1:?mode required}"
@@ -50,6 +53,20 @@ web_work="${MEGURI_WEB_WORK:-/work}"
 web_output="${MEGURI_WEB_OUTPUT:-/out}"
 web_deps="${MEGURI_WEB_DEPS:-/deps}"
 mkdir -p "$web_work" "$web_output"
+case "$mode" in
+  resolve|install|audit|browser-install)
+    python3 "$tool_scripts/audit-applicability.py" check-inputs "$web_source" /audit-controls
+    ;;
+esac
+# Preserve raw npm bytes, diagnostic bytes, and its actual exit independently.
+# Only the fixed helper decides whether this exact build assessment applies.
+audit_frontend() {
+  local raw_exit=0
+  npm audit --fetch-retries=0 --json > "$web_output/npm-audit.json" 2> "$web_output/npm-audit-stderr.txt" || raw_exit=$?
+  printf '%s\n' "$raw_exit" > "$web_output/npm-audit-exit.txt"
+  printf '{"node":"%s","npm":"%s"}\n' "$node_version" "$npm_version" > "$web_output/npm-audit-tools.json"
+  python3 "$tool_scripts/audit-applicability.py" assess "$web_source" "$web_work" /audit-controls "$web_output"
+}
 node "${web_source}/scripts/copy-source.mjs" "$web_source" "$web_work"
 cd "${web_work}"
 case "$mode" in
@@ -63,7 +80,7 @@ case "$mode" in
     npm ci --ignore-scripts --no-audit --no-fund --engine-strict --fetch-retries=0
     npm ls --all --json > "${web_output}/dependency-graph.json"
     node scripts/notices.mjs "${web_work}" "${web_output}"
-    npm audit --fetch-retries=0 --json > "${web_output}/npm-audit.json"
+    audit_frontend
     # Metadata and publication times are retained for every locked package name.
     node scripts/metadata.mjs "${web_work}/package-lock.json" "${web_output}/npm-metadata.json"
     cp package.json package-lock.json "${web_deps}/"
@@ -97,12 +114,12 @@ case "$mode" in
       audit)
         npm ls --all --json > "${web_output}/dependency-graph.json"
         node scripts/notices.mjs "${web_work}" "${web_output}"
-        npm audit --fetch-retries=0 --json > "${web_output}/npm-audit.json"
+        audit_frontend
         node scripts/metadata.mjs "${web_work}/package-lock.json" "${web_output}/npm-metadata.json"
         ;;
       browser-install)
         # Installation is explicit, after a successful locked graph audit.
-        npm audit --fetch-retries=0 --json > "${web_output}/npm-audit.json"
+        audit_frontend
         node scripts/notices.mjs "${web_work}" "${web_output}"
         cp node_modules/playwright-core/browsers.json "${web_output}/browsers.json"
         node node_modules/playwright/cli.js install chromium

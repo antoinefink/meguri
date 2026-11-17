@@ -7,3 +7,6 @@
 !server/web/scripts/
 !server/web/scripts/*.sh
 !server/web/scripts/*.mjs
+!server/web/scripts/audit-applicability.py
+!server/web/scripts/audit-assessment.json
+!server/web/scripts/report-counts.py

@@ -18,7 +18,8 @@ The manager's locked Linux installation has 114 lock entries including the root,
 packages. The exact generated lock and dependency graph are unchanged. The
 manager reported no deprecated markers or non-registry URLs. Full locked-graph
 license collection passed its missing-notice gate with 113 metadata entries;
-npm audit reported zero vulnerabilities at every severity.
+npm audit reported zero vulnerabilities at every severity at that historical
+installation. The current report has four high findings, assessed below.
 
 The notice scanner retains complete top-level license, copying, notice,
 THIRD-PARTY-LICENSE, ThirdPartyNotice and CopyrightNotice texts. Every installed
@@ -123,3 +124,62 @@ do not cover embedded assets. Known-delta review follows these fixes; no further
 broad review or final acceptance is claimed. The official documentation links
 were supplied with the fix request; DNS prevented fetching them in the filtered
 runner. No Docker/MG jobs or installations ran in that runner.
+
+
+## Fixed frontend build applicability assessment
+
+The versioned `scripts/audit-assessment.json` records the exact npm report for
+GHSA-fc5q-39xc-vjpf, source 1247710: picomatch 4.0.7 and its propagated fdir
+6.5.0, tinyglobby 0.2.17 and Vite 8.3.8 findings. All four are development
+packages. GitHub's advisory remains active HIGH with no withdrawal date and the
+official CVE remains PUBLISHED. Snyk independently revoked its entry and the
+upstream maintainer disputes the untrusted-pattern classification. There is no
+published patched release. None of these facts establishes universal withdrawal
+or a fixed dependency. The suggested Vite 6 downgrade is unsupported here.
+Package manifests, lock bytes and dependency versions remain unchanged.
+
+This assessment applies only to the recorded trusted frontend build boundary.
+Independent read-only review of all 42 baseline copied web inputs found a closed
+SPA import graph: user, account, collection and card-CSS inputs do not reach the
+build-time matcher. Production runs the Rust executable and embedded static
+assets; Node, npm and node_modules were absent from the historical packaged
+inventory. A small Vite DOM preload helper is shipped, with its notice retained;
+that does not expose the build-time matcher to browser input. The supplied
+baseline is source 8733b6eae233e68fc45feb5f11a1a84a43e4bdf5; historical package
+qualification belongs to source 224f7d8e03fcee5a7593bdb2e70b935442010d78.
+Neither history nor this assessment proves fresh package execution passed.
+
+The helper compares every copied input file and directory using copy-source's
+root-only generated-directory omissions. Additions, removals, nested inputs,
+links and nonregular inputs fail. Exact lock bytes and the entire parsed lock
+bind all graph records, versions, integrities and development flags. MG stages
+only the 14 fixed build/packaging control files after checking their actual host
+bytes, and the container checks that staged set again. All baked scripts must
+match mounted source, so these script changes require the ordinary
+`sync-web-image` rebuild. MG pins and records the actual selected tool image ID.
+
+The only self-description exclusions are the exact helper and assessment file
+contents. Their paths remain in the enumerated input set; their bytes must match
+the executing image and are included in emitted source and policy identities.
+These two files are the explicit trust root, requiring independent exact patch
+review and source/image binding. No file supplies an owner approval, caller
+policy or arbitrary advisory selection. Later source, graph, control or report
+changes require another review; there is no automatic freshness assumption.
+
+Install, explicit resolve, audit and browser installation share the decision.
+Raw npm JSON and stderr bytes, actual exit and tool versions are retained beside
+`npm-audit-decision.json`. Only deep equality with the whole recorded report and
+exit 1 yields `assessed-inapplicable`, retaining four raw highs. Exact exit-zero
+clean data yields `raw-clean` only with the same source/graph/control boundary.
+Unknown, partial, contradictory or malformed reports, diagnostics, new advisories,
+changed tools or unexpected exits block. A different resolved lock is retained
+for review but cannot acquire this disposition. This intentionally changes the
+former unconditional raw-exit rule; it does not change Rust advisory policy or
+make old failed receipts pass. Notices, licensing, cache/lock checks and zero
+retries remain in place. The owning MG receipt exposes the decision, control
+identity and image identity for downstream packaging evidence.
+
+This bounded clean-room implementation has not run new tests, rebuilt its image
+or qualified a fresh package. The orchestrator must run focused MG negatives,
+independent exact patch/negative-behavior review, the ordinary image rebuild,
+all four audit paths and downstream package/runtime proof before acceptance.
