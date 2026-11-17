@@ -1248,7 +1248,7 @@ PUBLIC_ARTIFACTS = {
     'tools/tests/meguri_provider_real_server.bats': '0256954d730ef1fbbf34b9be246fe68450cf7b7f52305e32ef6d443dbaa613da',
     'app/Packages/MeguriKit/Tests/AppModelTests/CloudPreviewActivityTests.swift': '9ad2c7dfb1e320bf428f622df4137fc660375692936788bc8202c11e43dbeded',
     'app/Packages/MeguriKit/Tests/AppModelTests/InitialCloudAdoptionTests.swift': '48ab986acd174f5306188c85a4d44d1232baea6097f2cb1c27a2794392841796',
-    'app/Packages/MeguriKit/Tests/AppModelTests/CloudPublicationConfirmationTests.swift': '0b4d975fa51777f92e8a1a2750118073456f20bd9f744699781bc8b4c2a77195',
+    'app/Packages/MeguriKit/Tests/AppModelTests/CloudPublicationConfirmationTests.swift': 'b138a276e46e231897282352ec24692aa34d717bdf19b7f6b7a59b702567ecab',
     'app/Packages/MeguriKit/Tests/AppModelTests/Support/CloudServiceAppHarness.swift': 'ca43eb8423fe40f9b19356bce3c4005a1c173e1b8e60dcd3d074bb0eb07b1808',
 }
 
