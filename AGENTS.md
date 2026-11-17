@@ -19,6 +19,8 @@ Meguri: native SwiftUI app (macOS, iOS, iPadOS 27) on a Rust core, fully compati
 - Work directly on `master` in the main checkout; do not create branches or worktrees. Resume prepared work without redoing it. Record each unit's starting commit and review/fix log. Commit WIP with co-author attribution; push only `master`, never force. `tools/mg merge` is not required (Antoine, 2026-10-18).
 - Antoine (2026-10-22): implement working reviews next. Follow `docs/process/review-first-delivery.md` for execution order. Keep all milestone gates and complete the full plan.
 
+- Antoine (2026-11-17): first deliver usable daily reviews with our own Meguri Sync server. Prioritize that end-to-end path; preserve prepared unrelated work and defer its follow-ons. Retain required safety, review and verification checks.
+
 - Verification (updated goal, 2026-10-25): keep focused checks, independent review, separate commits and provenance/privacy/similarity checks per unit. Group 3–5 related units in dependency order, including Swift/FFI, with one full gate at the coherent batch boundary. Pure Rust internals may cover at most 20 units per full gate. Always gate milestone boundaries; record the original batch base and resolve technical failures before the next batch. See `docs/process/tiers.md`.
 
 - Failure discipline (Antoine, 2026-11-16): read `docs/process/verification-status.md` on resume and before a batch. Repair required active failures before unrelated features. Focused passes do not clear a failed gate. Maintain the register under `docs/process/merge.md`.
