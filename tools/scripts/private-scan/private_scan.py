@@ -841,7 +841,7 @@ PUBLIC_ARTIFACTS = {
     'conformance/peers/retained-sync/src/main.rs':
         '44d0b8067924aebc307ffc3c5a5960c16b692e6148d3e584a55bd2ecb1d0bee7',
     'conformance/peers/retained-sync/src/fixture.rs':
-        'ec557ca25da094639920884f790a39f1e183f7a1bd744b76c241932f7e84e546',
+        '95afb0baea27112f2f718a3d072af49dd3c046137aeb03706f9b34dd0d5f467e',
     'conformance/peers/retained-sync/README.md':
         '625a27d5cdfefedd533ce970e774d5802e15ff16b9d24feb1b99fa81f06bbee9',
     'conformance/peers/retained-sync/AGENTS.md':
@@ -887,7 +887,7 @@ PUBLIC_ARTIFACTS = {
     'tools/tests/sync_package.bats':
         '74610b07a76e2f63324db8652d9feee0ac2989dfda017156ab64589d6bc3ff78',
     'tools/tests/sync_package_context_test.py':
-        '8ab26e4e6910de0308e22390276749dd2ae23615fea1bc87f29aa19880768132',
+        '1b799ed92064bdc3854c7abdb58dd1622e673030a88d1e1f51879dbc0d06ecb4',
     # Independently reviewed public Docker lifecycle tooling, exact bytes.
     'tools/mg.d/conformance-admission.py':
         '7fe260aa7857773c6f472037929f9f6f3a5fe7f2d1eb2eda722238942f1bf7ae',
@@ -1097,7 +1097,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/storage/root.rs':
         'bae80427f23487936d206ea04d9f9ae81db6b920939b752d7a29f2517ac0b9cc',
     'server/tools/candidate-output.py':
-        'b0ba9d8fcaa75734f20eb3a6d83cc6dfadf64f49cc0b3b7bb2336ac8adc41cca',
+        '2de16a176ed948d55660034cd1945cafffda9359bc24921dbbece29b2c585f3b',
     'docs/process/review-log/meguri-sync-U5.md':
         '6cc7dc20556c191e0644282d73259eb8ff8e23f7f98dbd76f107ae80b7eb9494',
 
