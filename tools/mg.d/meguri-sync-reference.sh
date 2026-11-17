@@ -23,6 +23,7 @@ mg_sync_reference_digest() {
       conformance/recordings/scenarios/meguri-sync-server/candidate-full-selection.json \
       conformance/recordings/scenarios/meguri-sync-server/candidate-complete-selection.json \
       conformance/recordings/scenarios/meguri-sync-server/candidate-final-additions.json \
+      conformance/recordings/scenarios/meguri-sync-server/candidate-retained-final-selection.json \
       conformance/recordings/scenarios/meguri-sync-server/final-fixture-recipes.json |
       LC_ALL=C sort | while IFS= read -r file; do shasum -a 256 "$file" || exit 1; done | shasum -a 256 | cut -d ' ' -f1
   )

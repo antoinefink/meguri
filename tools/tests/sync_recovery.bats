@@ -25,6 +25,7 @@ REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
     conformance/recordings/scenarios/meguri-sync-server/candidate-full-selection.json \
     conformance/recordings/scenarios/meguri-sync-server/candidate-complete-selection.json \
     conformance/recordings/scenarios/meguri-sync-server/candidate-final-additions.json \
+    conformance/recordings/scenarios/meguri-sync-server/candidate-retained-final-selection.json \
     conformance/recordings/scenarios/meguri-sync-server/final-fixture-recipes.json; do
     mkdir -p "$sandbox/$(dirname "$path")"
     cp "$REPO_ROOT/$path" "$sandbox/$path"
@@ -50,6 +51,7 @@ REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   [ "$after_dirty_fixture" != "$after_dirty_selection" ]
   # Mutate each final metadata input independently from the same baseline.
   for path in conformance/recordings/scenarios/meguri-sync-server/candidate-final-additions.json \
+    conformance/recordings/scenarios/meguri-sync-server/candidate-retained-final-selection.json \
     conformance/recordings/scenarios/meguri-sync-server/final-fixture-recipes.json; do
     printf '{"synthetic_digest_probe":true}\n' >"$sandbox/$path"
     after_final="$(mg_sync_reference_digest)"
