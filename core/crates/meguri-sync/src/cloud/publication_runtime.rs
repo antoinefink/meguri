@@ -1588,6 +1588,7 @@ impl Runtime {
         self.bind(collection)?;
         self.refresh_identity()?;
         if restored == BindingState::Active {
+            self.qualify_provider_binding()?;
             match self.reconcile_binding(collection, &self.media_service(collection)?, Duration::from_secs(30)) {
                 Err(RuntimeError::Tracking(Error::ValidatedUnprovedLayout { .. })) => {},
                 Err(error) => return Err(error),

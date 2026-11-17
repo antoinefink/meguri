@@ -398,6 +398,7 @@ impl Runtime {
             b.verified = true;
         }
         drop(lease);
+        self.qualify_provider_binding()?;
         // V2.4 step 8: reconcile_binding first settles re-key, ordinary apply,
         // and media apply intents, then takes the whole held-snapshot scan.
         self.reconcile_binding(collection, &self.media_service(collection)?, Duration::from_secs(30))?;
