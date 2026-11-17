@@ -714,12 +714,14 @@ fn discarded_failed_confirmation_allows_next_preview(cold: bool) {
         (Method::Meta, Reply::Bytes(meta(NOW, 9)))]);
     let preview = bootstrap_complete(&host, || host.prepare_meguri_bootstrap(access(&connection, &script), D::UseDeviceCollection).unwrap()).unwrap();
     let first_id = preview.operation.id.clone();
+    let prepared_generation = preview.operation.actual_generation.expect("real preparation captures a generation");
     assert!(matches!(bootstrap_complete(&host, || host.confirm_meguri_bootstrap(access(&connection, &script), preview).unwrap()),
         Err(TransferError::Stale(Boundary::RemoteChanged))));
     script.assert_done();
     let first = host.manual_transfer_history().get(&first_id).unwrap();
     assert_eq!(first.acceptance, Acceptance::NotSent);
     assert_eq!(first.phase, Phase::NeedsDecision);
+    assert_eq!(first.actual_generation, Some(prepared_generation));
     assert_eq!(host.provider_authority().meguri_bootstrap_intent().unwrap().operation(), &first_id);
     let first_artifacts = retained_artifacts(&config, &first);
     let provider_before = bytes(&config);
@@ -729,6 +731,7 @@ fn discarded_failed_confirmation_allows_next_preview(cold: bool) {
     assert_eq!(pending, first);
     let cancelled_first = host.discard_meguri_bootstrap_preparation(&connection, &pending).unwrap();
     assert_eq!(cancelled_first.phase, Phase::Cancelled);
+    assert_eq!(cancelled_first.actual_generation, Some(prepared_generation));
     assert!(host.manual_transfer_history().active().unwrap().is_none());
     assert!(!host.provider_authority().network_blocked());
     // The cold case also proves the stale intent and real cancellation survive

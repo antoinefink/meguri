@@ -86,12 +86,13 @@ impl CoreHost {
                     // A failed confirmation can leave its intent after an
                     // explicit safe cancellation. Retain that evidence; only
                     // the actual old policy row can prove this mismatch safe.
+                    // Preparation captures actual_generation before activation.
                     let old = self.manual_transfer_history().get(intent.operation()).map_err(TransferError::from)?;
                     if old.phase != Phase::Cancelled
                         || !matches!(old.acceptance, Acceptance::NotSent | Acceptance::Refused)
                         || old.id == op.id || old.account != op.account || old.scope != op.scope
                         || old.configured_endpoint != connection.endpoint
-                        || old.activation_identity.is_some() || old.actual_generation.is_some()
+                        || old.activation_identity.is_some()
                         || old.resulting_publication.is_some() || old.collection_complete
                         || old.receipt.is_some() || old.media != MediaOutcome::default()
                         || intent.media_epoch().is_some()
