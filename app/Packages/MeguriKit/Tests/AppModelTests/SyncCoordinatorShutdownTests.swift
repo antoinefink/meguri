@@ -86,8 +86,11 @@ extension ReviewCollectionStartupTests {
                 weak let secondLifetime = harness.sync
                 try #require(await harness.sync.changeProvider(to: .localOnly))
                 #expect(secondLifetime == nil, "Repeated handoffs must not retain a coordinator chain")
+                observeShutdownReturnPreview(harness, test: .providerHandoff, stage: .beforePrepare)
                 try await harness.owner.prepareCloudConnectionPreview()
+                observeShutdownReturnPreview(harness, test: .providerHandoff, stage: .afterPrepare)
                 await harness.sync.waitForConnectionPreview()
+                observeShutdownReturnPreview(harness, test: .providerHandoff, stage: .afterWait)
                 try #require(harness.sync.preview != nil && harness.sync.connectionFailure == nil)
                 await harness.sync.keepLocalOnly()
                 #expect(harness.sync.providerState?.selection == .localOnly)
@@ -193,8 +196,11 @@ extension ReviewCollectionStartupTests {
             app.sync.setDeviceSettings(paused: false, automatic: false, media: false)
             await app.sync.waitForInputs()
             try #require(await app.sync.changeProvider(to: .localOnly))
+            observeShutdownReturnPreview(app, test: .collectionReplacement, stage: .beforePrepare)
             try await app.owner.prepareCloudConnectionPreview()
+            observeShutdownReturnPreview(app, test: .collectionReplacement, stage: .afterPrepare)
             await app.sync.waitForConnectionPreview()
+            observeShutdownReturnPreview(app, test: .collectionReplacement, stage: .afterWait)
             try #require(app.sync.preview != nil && app.sync.connectionFailure == nil)
             #expect(app.sync.providerState?.selection == .localOnly)
             await app.sync.keepLocalOnly()
@@ -1334,6 +1340,28 @@ extension ReviewCollectionStartupTests {
             }
         }
     }
+    #endif
+}
+
+private enum ShutdownReturnPreviewTest: String { case providerHandoff, collectionReplacement }
+private enum ShutdownReturnPreviewStage: String { case beforePrepare, afterPrepare, afterWait }
+
+@MainActor private func observeShutdownReturnPreview(
+    _ harness: ServiceAppHarness, test: ShutdownReturnPreviewTest, stage: ShutdownReturnPreviewStage
+) {
+    let sync = harness.sync
+    let backend = harness.backends.last
+    let accountReads = backend.map { String($0.accountReadCount) } ?? "absent"
+    let label = "shutdownReturnPreview test=\(test.rawValue) stage=\(stage.rawValue)"
+    print("\(label) attached=\(sync.setupState == .attached) paused=\(sync.settings.paused)"
+        + " providerlocalOnly=\(sync.providerState?.selection == .localOnly) providerblocked=\(sync.providerState?.phase == .blocked)"
+        + " previewPresent=\(sync.preview != nil) previewActive=\(sync.connectionPreviewActive)"
+        + " operationActive=\(sync.connectionOperationActive) initialAdoptionActive=\(sync.initialAdoptionActive)"
+        + " hasConnectionService=\(sync.connectionService != nil) hasOwn=\(backend?.own != nil)"
+        + " hasFailure=\(sync.connectionFailure != nil) operationFailed=\(sync.operationFailed) accountReadCount=\(accountReads)")
+    #if DEBUG
+    // Process-global cross-check only; this does not attribute the latest failure to this attempt.
+    print("\(label) globalLatestCrossCheck=\(DebugCloudDiagnostics.latestValue ?? "absent")")
     #endif
 }
 

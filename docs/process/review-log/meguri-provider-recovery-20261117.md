@@ -306,3 +306,21 @@ found no proven cancellation cause for that original error; its failure remains
 retained. Shutdown intent alone cannot classify an unavailable error as owned
 cancellation. Every strict backend error check remains enabled.
 The actual terminal JSON released the Apple window. Integration stays failed.
+
+## Return-preview observation
+
+Independent `provider_test_delta_review` cannot distinguish an initial
+guard refusal from a later preview error in the retained result. The absent
+preview alone supplies no causal repair. Local-only and stopped bindings
+do not inherently forbid an explicit, freshly qualified preview.
+
+Author `040830-46638` adds six synchronous observations in the two failed
+test methods. Non-author `provider_test_delta_review` clears P0–P2.
+The one read-only helper uses fixed labels, booleans and an account-read
+counter. Its existing DEBUG diagnostic is a process-wide cross-check,
+never attribution of a failure to this attempt. There are no new waits,
+Core calls, state changes or assertions. Production is unchanged.
+The next selected run is diagnostic-only; a pass would prove no causal fix.
+
+Observation privacy `041121-47763`, static `041125-48230` and
+similarity `041120-47465` pass. The filtered similarity report was read.
