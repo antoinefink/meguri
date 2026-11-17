@@ -447,7 +447,8 @@ extension ReviewCollectionStartupTests {
     private func makeOwner() -> ReviewCollection {
         var configuration = LaunchConfiguration()
         configuration.collectionLocation = AppModel.CollectionLocation(directory: root)
-        return ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync)
+        return ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
+            providerDirectory: root.appending(path: "synthetic-installation"))
     }
     init(realAccountProof: Bool = false) throws {
         self.realAccountProof = realAccountProof

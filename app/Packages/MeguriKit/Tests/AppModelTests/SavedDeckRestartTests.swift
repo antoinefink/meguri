@@ -13,7 +13,8 @@ extension ReviewCollectionStartupTests {
         configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
         configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600))
         configuration.timeZone = TimeZone(secondsFromGMT: 0)
-        var owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
+        var owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+            providerDirectory: root.appending(path: "synthetic-installation"))
         let decks = CoreDeckService()
         do {
             await owner.start()
@@ -45,7 +46,8 @@ extension ReviewCollectionStartupTests {
             try #require(await owner.close())
 
             // Reopen with a fresh owner and no UIState/defaults store.
-            owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
+            owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+                providerDirectory: root.appending(path: "synthetic-installation"))
             await owner.start()
             try #require(owner.state == .ready)
             let reopenedA = try #require(owner.deck(aID))

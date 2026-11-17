@@ -29,7 +29,8 @@ extension ReviewCollectionStartupTests {
         configuration.recordDiagnostic = { observations.append($0) }
         configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
         configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600)); configuration.timeZone = TimeZone(secondsFromGMT: 0)
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+            providerDirectory: root.appending(path: "synthetic-installation"))
         await owner.start()
         let source = try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg"))
         owner.entry.inspect(source); await owner.entry.waitForCompletion()
@@ -65,7 +66,8 @@ extension ReviewCollectionStartupTests {
             #expect(observations.contains { $0.component == .collectionExport && $0.stage == .publication && $0.outcome == .succeeded })
             let location = CoreBridge.CollectionLocation(collectionDirectory: configuration.collectionLocation.directory,
                 backupsDirectory: configuration.collectionLocation.backupsDirectory,
-                appGroupSnapshot: root.appending(path: "widget"))
+                appGroupSnapshot: root.appending(path: "widget"),
+                manualTransferDirectory: root.appending(path: "synthetic-installation"))
             let receipt = try await CoreCollectionEntryService().inspect(source: saved, location: location,
                 operation: CollectionEntryOperation(), progress: { _ in })
             #expect(receipt.facts.notes == 6 && receipt.facts.cards == 11 && receipt.facts.reviews == 6)
@@ -102,7 +104,8 @@ extension ReviewCollectionStartupTests {
         var configuration = LaunchConfiguration()
         configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
         configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600)); configuration.timeZone = TimeZone(secondsFromGMT: 0)
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+            providerDirectory: root.appending(path: "synthetic-installation"))
         await owner.start()
         let source = try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg"))
         owner.entry.inspect(source); await owner.entry.waitForCompletion()
@@ -155,7 +158,8 @@ extension ReviewCollectionStartupTests {
         configuration.recordDiagnostic = { observations.append($0) }
         configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
         configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600)); configuration.timeZone = TimeZone(secondsFromGMT: 0)
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+            providerDirectory: root.appending(path: "synthetic-installation"))
         await owner.start()
         let source = try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg"))
         owner.entry.inspect(source); await owner.entry.waitForCompletion()
@@ -215,7 +219,8 @@ extension ReviewCollectionStartupTests {
         var configuration = LaunchConfiguration()
         configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
         configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600)); configuration.timeZone = TimeZone(secondsFromGMT: 0)
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+            providerDirectory: root.appending(path: "synthetic-installation"))
         await owner.start()
         let source = try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg"))
         owner.entry.inspect(source); await owner.entry.waitForCompletion()
@@ -265,7 +270,8 @@ extension ReviewCollectionStartupTests {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+            providerDirectory: root.appending(path: "synthetic-installation"))
         await owner.start()
         let coordinator = owner.collectionExport
         #expect(!coordinator.canPrepare && coordinator.availabilityMessage != nil)

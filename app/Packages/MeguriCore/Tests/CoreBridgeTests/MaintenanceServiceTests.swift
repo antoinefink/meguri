@@ -150,7 +150,8 @@ extension EventTests {
         let files = FileManager.default
         let root = files.temporaryDirectory.appending(path: UUID().uuidString)
         let location = CoreBridge.CollectionLocation(collectionDirectory: root.appending(path: "collection"),
-            backupsDirectory: root.appending(path: "backups"), appGroupSnapshot: root.appending(path: "widget.snapshot"))
+            backupsDirectory: root.appending(path: "backups"), appGroupSnapshot: root.appending(path: "widget.snapshot"),
+            manualTransferDirectory: root.appending(path: "ManualTransfers"))
         try files.createDirectory(at: location.collectionDirectory, withIntermediateDirectories: true)
         try files.createDirectory(at: location.backupsDirectory, withIntermediateDirectories: true)
         defer { try? files.removeItem(at: root) }
@@ -306,7 +307,8 @@ extension EventTests {
     let files = FileManager.default
     let root = files.temporaryDirectory.appending(path: UUID().uuidString)
     let location = CoreBridge.CollectionLocation(collectionDirectory: root.appending(path: "collection"),
-        backupsDirectory: root.appending(path: "backups"), appGroupSnapshot: root.appending(path: "widget.snapshot"))
+        backupsDirectory: root.appending(path: "backups"), appGroupSnapshot: root.appending(path: "widget.snapshot"),
+        manualTransferDirectory: root.appending(path: "ManualTransfers"))
     try files.createDirectory(at: location.collectionDirectory, withIntermediateDirectories: true)
     try files.createDirectory(at: location.backupsDirectory, withIntermediateDirectories: true)
     defer { try? files.removeItem(at: root) }

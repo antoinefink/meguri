@@ -690,7 +690,8 @@ extension ReviewCollectionStartupTests {
         configuration.collectionLocation = AppModel.CollectionLocation(directory: root)
         configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600))
         configuration.timeZone = TimeZone(secondsFromGMT: 0)
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync)
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
+            providerDirectory: root.appending(path: "synthetic-installation"))
         sync.setDeviceSettings(paused: false, automatic: true, media: false)
         do {
             await owner.start()

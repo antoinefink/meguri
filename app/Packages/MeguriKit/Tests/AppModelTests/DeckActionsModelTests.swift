@@ -899,7 +899,8 @@ extension ReviewCollectionStartupTests {
         configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
         configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600))
         configuration.timeZone = TimeZone(secondsFromGMT: 0)
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+            providerDirectory: root.appending(path: "synthetic-installation"))
         do {
             await owner.start()
             owner.entry.inspect(try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg")))

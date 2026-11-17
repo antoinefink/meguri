@@ -197,7 +197,8 @@ extension EventTests {
             if reopen {
                 let location = CollectionLocation(collectionDirectory: fixture.directory.appending(path: "collection"),
                     backupsDirectory: fixture.directory.appending(path: "backups"),
-                    appGroupSnapshot: fixture.directory.appending(path: "widget.snapshot"))
+                    appGroupSnapshot: fixture.directory.appending(path: "widget.snapshot"),
+                    manualTransferDirectory: fixture.directory.appending(path: "synthetic-provider-installation"))
                 try await fixture.collection.open(location, randomSeed: 115)
             }
             let attempted = Mutex<UInt64?>(nil)
@@ -460,7 +461,8 @@ extension EventTests {
                 if reopen {
                     let location = CollectionLocation(collectionDirectory: fixture.directory.appending(path: "collection"),
                         backupsDirectory: fixture.directory.appending(path: "backups"),
-                        appGroupSnapshot: fixture.directory.appending(path: "widget.snapshot"))
+                        appGroupSnapshot: fixture.directory.appending(path: "widget.snapshot"),
+                        manualTransferDirectory: fixture.directory.appending(path: "synthetic-provider-installation"))
                     try await fixture.collection.open(location, randomSeed: 115)
                 }
                 // Only the original typed cells are read after owner change.
@@ -533,7 +535,8 @@ extension EventTests {
                 if reopen {
                     let location = CollectionLocation(collectionDirectory: fixture.directory.appending(path: "collection"),
                         backupsDirectory: fixture.directory.appending(path: "backups"),
-                        appGroupSnapshot: fixture.directory.appending(path: "widget.snapshot"))
+                        appGroupSnapshot: fixture.directory.appending(path: "widget.snapshot"),
+                        manualTransferDirectory: fixture.directory.appending(path: "synthetic-provider-installation"))
                     try await fixture.collection.open(location, randomSeed: 115)
                 }
                 let reread = try await MaintenanceLane.shared.call(.cloudPolicyAssetReadPassResult) {
@@ -598,7 +601,8 @@ extension EventTests {
                 if reopen {
                     let location = CollectionLocation(collectionDirectory: fixture.directory.appending(path: "collection"),
                         backupsDirectory: fixture.directory.appending(path: "backups"),
-                        appGroupSnapshot: fixture.directory.appending(path: "widget.snapshot"))
+                        appGroupSnapshot: fixture.directory.appending(path: "widget.snapshot"),
+                        manualTransferDirectory: fixture.directory.appending(path: "synthetic-provider-installation"))
                     try await fixture.collection.open(location, randomSeed: 115)
                 }
                 let retained = try #require(try await MaintenanceLane.shared.call(.cloudAssetReadNextResult) {

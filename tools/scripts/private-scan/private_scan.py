@@ -833,7 +833,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Tests/AppModelTests/ProviderAdmissionTests.swift':
         'c25c16744537d8ca65527ea7c9eb36970266c48a54693279ce1f01a1074bd275',
     'core/crates/meguri-ffi/src/provider_tests.rs':
-        '95f3dfa62975a4741ad6719f56cca70ab2198aaa1db5d6b3eac90bcdfb1c7756',
+        '0a1a65dce24702eda82b38a3c229604bf613a28c69c134735b02d1097775757f',
     "docs/process/review-log/meguri-provider-admission-20261117.md":
         "31af001e272ebcc61ca299e3d932f6f29bc5da69551389305956ef92cd9f0e40",
     # Complete public-source review; future bytes remain checked.

@@ -13,7 +13,8 @@ extension ReviewCollectionStartupTests {
         configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600))
         configuration.timeZone = TimeZone(secondsFromGMT: 0)
         let sync = SyncCoordinator(directory: root, configuration: nil, defaults: nil)
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync)
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
+            providerDirectory: root.appending(path: "synthetic-installation"))
         owner.makeReviewSurface = { _ in ReviewCoordinatorTests.Surface() }
         do {
             await owner.start()
@@ -76,7 +77,8 @@ extension ReviewCollectionStartupTests {
             }
             return backend
         }, defaults: nil)
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync)
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
+            providerDirectory: root.appending(path: "synthetic-installation"))
         var localFlushObserved = false
         owner.didFlushLocally = { localFlushObserved = true; backend.events.append("local-flush") }
         backend.onClose = {
@@ -129,7 +131,8 @@ extension ReviewCollectionStartupTests {
         let backend = SyncOwnerFake()
         var configured = false
         let sync = SyncCoordinator(bootstrap: { configured = true }, makeBackend: { _ in backend }, defaults: nil)
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync)
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
+            providerDirectory: root.appending(path: "synthetic-installation"))
         let location = try await owner.prepareEntry()
         #expect(configured)
         #expect(backend.accountReads == 0)

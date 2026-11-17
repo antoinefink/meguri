@@ -21,7 +21,8 @@ extension ReviewCollectionStartupTests {
             let connection = try await CoreCloudWorkflowService().connection()
             return PreviewActivityBackend(connection: connection, own: CloudOwnExecutor(core: connection, transport: transport))
         }, defaults: nil)
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync)
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
+            providerDirectory: root.appending(path: "synthetic-installation"))
         await owner.start()
         do {
             #expect(owner.state == .noFile && owner.lifecycle == .noCollection)
@@ -78,7 +79,8 @@ extension ReviewCollectionStartupTests {
             backend = value
             return value
         }, defaults: nil)
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync)
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
+            providerDirectory: root.appending(path: "synthetic-installation"))
         await owner.start()
         do {
             try #require(owner.state == .ready && backend != nil)

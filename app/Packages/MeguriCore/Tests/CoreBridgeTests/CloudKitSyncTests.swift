@@ -1396,7 +1396,8 @@ extension EventTests {
             let location = CoreBridge.CollectionLocation(
                 collectionDirectory: f.directory.appending(path: "collection"),
                 backupsDirectory: f.directory.appending(path: "backups"),
-                appGroupSnapshot: f.directory.appending(path: "widget.snapshot"))
+                appGroupSnapshot: f.directory.appending(path: "widget.snapshot"),
+                manualTransferDirectory: f.directory.appending(path: "synthetic-provider-installation"))
             try await f.collection.open(location, randomSeed: 115)
             let reopened = CoreCloudWorkflowService()
             let persisted = try await reopened.durableSnapshot()
@@ -1486,7 +1487,8 @@ extension EventTests {
             let location = CoreBridge.CollectionLocation(
                 collectionDirectory: f.directory.appending(path: "collection"),
                 backupsDirectory: f.directory.appending(path: "backups"),
-                appGroupSnapshot: f.directory.appending(path: "widget.snapshot"))
+                appGroupSnapshot: f.directory.appending(path: "widget.snapshot"),
+                manualTransferDirectory: f.directory.appending(path: "synthetic-provider-installation"))
             try await f.collection.open(location, randomSeed: 115)
             let reopened = CoreCloudWorkflowService()
             let persisted = try await reopened.durableSnapshot()

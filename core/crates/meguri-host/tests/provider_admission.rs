@@ -199,7 +199,7 @@ fn closed_prepared_host_cannot_retry_failed_metadata_over_a_successor_in_the_sam
     successor.close().unwrap();
 }
 
-fn start_provider_review(host: &CoreHost) -> (meguri_engine::SessionId, meguri_model::ids::DeckId) {
+fn prepare_provider_review(host: &CoreHost) -> meguri_model::ids::DeckId {
     let collection = host.collection().unwrap();
     let deck = meguri_engine::decks::add(&collection, "Provider review".into()).unwrap().value.id;
     let kind = meguri_engine::notetypes::add_stock(&collection,
@@ -208,11 +208,19 @@ fn start_provider_review(host: &CoreHost) -> (meguri_engine::SessionId, meguri_m
         notetype_id: kind, fields: vec!["Provider front".into(), "Provider back".into()],
         tags: vec![], deck_id: deck, guid: None, update_add_defaults: false,
     }, meguri_engine::OpSource::UserUndoable).unwrap();
-    let meguri_engine::session::StartResult::Started { session_id, head, .. } = host.review().start(deck, None).unwrap() else {
-        panic!("provider fixture must start review");
+    meguri_engine::sched::fsrs_policy::enable_fsrs(&collection, &Default::default()).unwrap();
+    assert_eq!(meguri_engine::sched::fsrs_policy::policy_status(&collection).unwrap(),
+        meguri_engine::sched::fsrs_policy::PolicyStatus::Ok);
+    deck
+}
+
+fn start_provider_review(host: &CoreHost, deck: meguri_model::ids::DeckId) -> meguri_engine::SessionId {
+    let (session_id, head) = match host.review().start(deck, None).unwrap() {
+        meguri_engine::session::StartResult::Started { session_id, head, .. } => (session_id, head),
+        actual => panic!("provider fixture must start review: {actual:?}"),
     };
     assert_eq!(head.items.len(), 1);
-    (session_id, deck)
+    session_id
 }
 
 #[test]
@@ -269,7 +277,8 @@ fn reopened_host_explicitly_recovers_lost_handoff_to_local_only_and_retains_inte
     host.close().unwrap();
     drop(host);
     let reopened = CoreHost::open(config.clone()).unwrap();
-    let (session, deck) = start_provider_review(&reopened);
+    let deck = prepare_provider_review(&reopened);
+    let session = start_provider_review(&reopened, deck);
     assert!(reopened.recover_provider_handoff_to_local_only().is_err());
     assert_eq!(reopened.review().active_session(), Some(session));
     assert_eq!(std::fs::read(config.manual_transfer_directory.join("provider.json")).unwrap(), before);
@@ -298,8 +307,9 @@ fn reopened_host_explicitly_recovers_lost_handoff_to_local_only_and_retains_inte
     assert!(reopened.provider_authority().network_blocked());
     assert_eq!(std::fs::read(config.manual_transfer_directory.join("provider.json")).unwrap(), before);
     assert!(reopened.provider_authority().failed_publication_requires_handoff_recovery().unwrap());
-    let meguri_engine::session::StartResult::Started { session_id: session, .. } = reopened.review().start(deck, None).unwrap() else {
-        panic!("recovery fixture must restart review");
+    let session = match reopened.review().start(deck, None).unwrap() {
+        meguri_engine::session::StartResult::Started { session_id, .. } => session_id,
+        actual => panic!("recovery fixture must restart review: {actual:?}"),
     };
     assert!(reopened.retry_provider_publication().is_err());
     assert_eq!(reopened.review().active_session(), Some(session));
@@ -390,12 +400,14 @@ fn failed_pause_of_a_qualified_icloud_writer_cannot_be_undone_by_host_refresh() 
     )).unwrap();
     let host = CoreHost::open(config.clone()).unwrap();
     let runtime = host.cloud_runtime().unwrap();
+    // Include review data and the real scheduler enable in the qualified baseline.
+    let deck = prepare_provider_review(&host);
     // The existing stable-binding fixture reads this actual Host collection;
     // provider admission is subsequently produced by production qualification.
     runtime.prepare_adapter_baseline_for_testing(&host.collection().unwrap(), config.clock.as_ref(), config.random.as_ref(), None).unwrap();
     host.refresh_provider_admission();
     runtime.require_provider_collection_admission().unwrap();
-    let (session, _) = start_provider_review(&host);
+    let session = start_provider_review(&host, deck);
     let head = host.review().head(session, 1).unwrap();
     let generation = host.cloud_connection_generation().unwrap();
     let publication = meguri_engine::device_state::DeviceState::for_collection(

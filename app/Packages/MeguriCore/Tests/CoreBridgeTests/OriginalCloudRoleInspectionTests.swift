@@ -12,7 +12,8 @@ extension EventTests {
         try FileManager.default.createDirectory(at: backups, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let location = CollectionLocation(collectionDirectory: data, backupsDirectory: backups,
-                                          appGroupSnapshot: root.appending(path: "widget"))
+                                          appGroupSnapshot: root.appending(path: "widget"),
+            manualTransferDirectory: root.appending(path: "ManualTransfers"))
         let collection = CoreCollectionService()
         do {
             try await MaintenanceLane.shared.bootstrapCollection(location)

@@ -1407,7 +1407,8 @@ nonisolated struct InitialCloudFixture: Sendable {
         configuration.collectionLocation = AppModel.CollectionLocation(directory: root)
         configuration.clock = .fixed(Date(timeIntervalSince1970: 1_735_689_600))
         configuration.timeZone = TimeZone(secondsFromGMT: 0)
-        return ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync)
+        return ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
+            providerDirectory: scratchContainer.appending(path: "synthetic-installation"))
     }
     init(fixture: InitialCloudFixture, enabled: Bool = false, automatic: Bool = false) throws {
         self.fixture = fixture

@@ -17,7 +17,8 @@ extension ReviewCollectionStartupTests {
         configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600))
         configuration.timeZone = TimeZone(secondsFromGMT: 0)
         let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in SyncOwnerFake() }, defaults: nil)
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync)
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
+            providerDirectory: directory.appending(path: "synthetic-installation"))
         owner.makeReviewSurface = { _ in ReviewCoordinatorTests.Surface() }
         do {
             await owner.start()

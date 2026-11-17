@@ -94,3 +94,58 @@ Scanner regression `selftest/20261117T015741Z-71078` passes one case.
 Final metadata similarity `20261117T015929Z-72376` passes its one file;
 the filtered report was read. The earlier source scan covers the unchanged
 27 source files. The failed privacy and runtime receipts remain retained.
+
+## Review-start fixture repair and Swift observation
+
+Filtered author `020305-76100` changes only the Host and FFI provider tests.
+Independent `provider_test_delta_review` found no P0–P2 findings.
+The fixture enables FSRS through the engine and checks actual policy status
+before requiring a started review. Non-started outcomes still fail.
+The qualified writer captures its baseline after this setup. Every intended
+assertion and faultpoint remains. This repair is not yet executed.
+
+The same non-author read the whole updated FFI test file: 293 lines and
+17,218 bytes. It is PUBLIC, with no private or licensing concern. SHA-256:
+`0a1a65dce24702eda82b38a3c229604bf613a28c69c134735b02d1097775757f`.
+The integrator verified the bytes and refreshed only that exact path digest.
+
+On clean `7fb91bf4`, `swift-test/20261117T020935Z-80718` compiles and
+runs 19 selected methods: 12 pass, seven fail, zero skip. All seven registry
+checks pass. Six credential methods fail at the collection-owner path guard.
+Storage paths canonicalize the configured directory, while the new guard
+compares it to the original spelling. The bounded repair will preserve
+actual Host ownership rather than relaxing input guards. The negative-metadata
+method also fails during helper migration, before its blocked-state assertions.
+Both actual recovery/reopen methods pass. No complete Swift or gate pass follows.
+The CPU window was released; subsequent work stays clear of the server compile.
+
+## Owned installation roots and focused recovery pass
+
+Author `020558-79198` changes 50 directory arguments across 23 test files:
+17 CoreBridge constructors, 31 AppModel owners and two inspection locations.
+Independent source review `021224-83353` clears P0–P2 for actual roots,
+reopens, types and existing cleanup. That reader could not inspect the diff.
+Non-author `incoming_contract_review` then read the complete patch and
+confirmed only those 50 arguments changed. Assertions, faults, deadlines,
+test parameters, production defaults and policy remain unchanged.
+All 23 applied files match the reviewed export. Broad execution is pending.
+
+Reopens retain the original installation path. Independent fixtures keep
+distinct temporary roots under their existing cleanup. Local-only and
+source-generation cases gain no provider admission. No new cleanup was added.
+Ten model-only constructors with no proven migration path or owned lifetime
+remain outside this repair. The audit read public source, not application data.
+
+With the reviewed scheduler setup, `core-test/20261117T022152Z-88254`
+passes all 29 selected provider and FFI methods with zero failures or skips.
+It ran on dirty `7fb91bf4` before the Swift-only root edits. The three
+original failures now reach their intended active-review assertions.
+The failed receipt remains; this focused pass grants no full-gate acceptance.
+The CPU window was released immediately. The Mac path guard and negative
+Swift setup failures remain open for the next bounded repair.
+
+Combined test-repair guards pass: normal privacy `022417-89782` covers
+28 files; static policy `022413-89238` passes three checks. Similarity
+`022416-89626` passes all 23 root-fixture files; `021735-85889` covers the
+unchanged two Rust repairs and digest metadata. Both filtered reports were read.
+Scanner regression `021736-86546` passes one case with zero skips.

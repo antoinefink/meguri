@@ -260,8 +260,12 @@ fn ffi_failed_pause_refresh_stays_blocked_and_explicit_retry_publishes_the_pause
         notetype_id: kind, fields: vec!["FFI provider front".into(), "FFI provider back".into()],
         tags: vec![], deck_id: deck, guid: None, update_add_defaults: false,
     }, meguri_engine::OpSource::UserUndoable).unwrap();
-    let meguri_engine::session::StartResult::Started { session_id, head, .. } = host.review().start(deck, None).unwrap() else {
-        panic!("FFI provider fixture must start review");
+    meguri_engine::sched::fsrs_policy::enable_fsrs(&collection, &Default::default()).unwrap();
+    assert_eq!(meguri_engine::sched::fsrs_policy::policy_status(&collection).unwrap(),
+        meguri_engine::sched::fsrs_policy::PolicyStatus::Ok);
+    let (session_id, head) = match host.review().start(deck, None).unwrap() {
+        meguri_engine::session::StartResult::Started { session_id, head, .. } => (session_id, head),
+        actual => panic!("FFI provider fixture must start review: {actual:?}"),
     };
     assert_eq!(head.items.len(), 1);
     let before = std::fs::read(root.path().join("installation/provider.json")).unwrap();

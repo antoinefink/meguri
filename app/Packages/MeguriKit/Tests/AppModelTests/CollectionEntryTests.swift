@@ -41,7 +41,8 @@ extension ReviewCollectionStartupTests {
             #expect(factories == 2 && original.closed && activationReturned)
             return successor
         }, defaults: nil)
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), entryService: service, sync: sync)
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), entryService: service, sync: sync,
+            providerDirectory: scratchContainer.appending(path: "synthetic-installation"))
         await owner.start()
         do {
             try #require(owner.state == .ready)
@@ -138,7 +139,8 @@ extension ReviewCollectionStartupTests {
             retained = true
             return cloud
         }, defaults: nil)
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync)
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
+            providerDirectory: root.appending(path: "synthetic-installation"))
         let display = EntryReviewDisplay()
         owner.makeReviewSurface = { _ in display }
         #expect(!files.fileExists(atPath: directory.path))
@@ -192,7 +194,8 @@ extension ReviewCollectionStartupTests {
             await owner.finishReview()
             #expect(owner.previousRecord?.answers.map(\.cardID) == [answered])
             #expect(await owner.close())
-            let restarted = ReviewCollection(configuration: configuration, navigation: AppNavigation())
+            let restarted = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+                providerDirectory: root.appending(path: "synthetic-installation"))
             await restarted.start()
             try #require(restarted.state == .ready, "\(restarted.error ?? "Reopen failed")")
             #expect(restarted.previousRecord?.answers.map(\.cardID) == [answered])
@@ -210,7 +213,8 @@ extension ReviewCollectionStartupTests {
             #expect(files.fileExists(atPath: backup.path))
             let location = CoreBridge.CollectionLocation(collectionDirectory: directory,
                 backupsDirectory: configuration.collectionLocation.backupsDirectory,
-                appGroupSnapshot: directory.appending(path: "meguri-widget-unavailable.json"))
+                appGroupSnapshot: directory.appending(path: "meguri-widget-unavailable.json"),
+                manualTransferDirectory: root.appending(path: "synthetic-installation"))
             let protected = try await CoreCollectionEntryService().inspect(source: backup, location: location,
                 operation: CollectionEntryOperation(), progress: { _ in })
             #expect(protected.facts.reviews == 7, "The pre-import backup must include the one newly committed answer")
@@ -232,7 +236,8 @@ extension ReviewCollectionStartupTests {
         var configuration = LaunchConfiguration()
         configuration.collectionLocation = AppModel.CollectionLocation(directory: directory)
         configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600))
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+            providerDirectory: root.appending(path: "synthetic-installation"))
         await owner.start()
         try #require(owner.state == .ready)
         let generation = owner.generation
@@ -285,7 +290,8 @@ extension ReviewCollectionStartupTests {
         configuration.collectionLocation = AppModel.CollectionLocation(directory: directory)
         configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600))
         let service = EntryTerminalFailureService(afterActivation: afterActivation)
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), entryService: service)
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), entryService: service,
+            providerDirectory: root.appending(path: "synthetic-installation"))
         await owner.start()
         do {
             try #require(owner.state == .ready)
@@ -336,7 +342,8 @@ extension ReviewCollectionStartupTests {
             do { try await CoreCollectionService().close() }
             catch { Issue.record("Could not close the activated fixture host") }
         })
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), entryService: service)
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), entryService: service,
+            providerDirectory: root.appending(path: "synthetic-installation"))
         await owner.start()
         do {
             try #require(owner.state == .noFile)
@@ -362,7 +369,8 @@ extension ReviewCollectionStartupTests {
         var configuration = LaunchConfiguration()
         configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
-            entryService: CoreCollectionEntryService(diskSpace: EntryZeroCapacity()))
+            entryService: CoreCollectionEntryService(diskSpace: EntryZeroCapacity()),
+            providerDirectory: root.appending(path: "synthetic-installation"))
         await owner.start()
         try #require(owner.state == .noFile)
         let source = try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg"))
@@ -402,7 +410,8 @@ extension ReviewCollectionStartupTests {
             if pending { return .pending }
             throw BridgeError.internal("synthetic outcome read failure")
         })
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), entryService: core)
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), entryService: core,
+            providerDirectory: root.appending(path: "synthetic-installation"))
         await owner.start()
         do {
             try #require(owner.state == .ready)

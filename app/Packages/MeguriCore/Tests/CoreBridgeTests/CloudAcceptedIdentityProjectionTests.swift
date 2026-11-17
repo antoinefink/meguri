@@ -366,7 +366,8 @@ extension EventTests {
                     try await f.collection.close()
                     let location = CollectionLocation(collectionDirectory: f.directory.appending(path: "collection"),
                         backupsDirectory: f.directory.appending(path: "backups"),
-                        appGroupSnapshot: f.directory.appending(path: "widget.snapshot"))
+                        appGroupSnapshot: f.directory.appending(path: "widget.snapshot"),
+                        manualTransferDirectory: f.directory.appending(path: "synthetic-provider-installation"))
                     try await f.collection.open(location, randomSeed: 115)
                     await projection.open()
                 }

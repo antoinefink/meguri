@@ -613,7 +613,8 @@ extension ReviewCollectionStartupTests {
         defer { try? FileManager.default.removeItem(at: root) }
         var configuration = LaunchConfiguration()
         configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+            providerDirectory: root.appending(path: "synthetic-installation"))
         await owner.start()
         try #require(owner.state == .noFile)
         let failure = ManualTransferFailure(.init(issue: .server, boundary: nil,
@@ -660,7 +661,8 @@ extension ReviewCollectionStartupTests {
         defer { try? FileManager.default.removeItem(at: root) }
         var configuration = LaunchConfiguration()
         configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+            providerDirectory: root.appending(path: "synthetic-installation"))
         await owner.start()
         try #require(owner.state == .noFile)
         let record = mediaDecisionRecord(generation: owner.generation, completeCollection: false, direction: direction)
@@ -690,7 +692,8 @@ extension ReviewCollectionStartupTests {
         defer { try? FileManager.default.removeItem(at: root) }
         var configuration = LaunchConfiguration()
         configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+            providerDirectory: root.appending(path: "synthetic-installation"))
         await owner.start()
         try #require(owner.state == .noFile)
         let record = decisionRecord()
@@ -730,7 +733,8 @@ extension ReviewCollectionStartupTests {
         defer { try? FileManager.default.removeItem(at: root) }
         var configuration = LaunchConfiguration()
         configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+            providerDirectory: root.appending(path: "synthetic-installation"))
         await owner.start()
         try #require(owner.state == .noFile)
         let suspension = SettingsLoginSuspension(.normalization)
@@ -755,7 +759,8 @@ extension ReviewCollectionStartupTests {
         defer { try? FileManager.default.removeItem(at: root) }
         var configuration = LaunchConfiguration()
         configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+            providerDirectory: root.appending(path: "synthetic-installation"))
         await owner.start()
         try #require(owner.state == .noFile)
         let suite = "meguri.manual-attribution.tests.\(UUID().uuidString)"
@@ -981,7 +986,8 @@ extension ReviewCollectionStartupTests {
         configuration.collectionLocation = AppModel.CollectionLocation(directory: directory)
         configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600))
         configuration.timeZone = TimeZone(secondsFromGMT: 0)
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+            providerDirectory: root.appending(path: "synthetic-installation"))
         await owner.start(); try #require(owner.state == .ready)
         let service = SelectedMediaSettingsService(generation: owner.generation, activationError: activationError) {
             await MainActor.run { owner.state == .ready && owner.manualAllowed }
