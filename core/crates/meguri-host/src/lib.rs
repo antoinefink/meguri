@@ -7,6 +7,8 @@ mod collection_export;
 mod manual_transfers;
 mod provider;
 mod provider_bootstrap;
+mod provider_normal;
+pub use provider_normal::{MeguriCollectionState, MeguriCollectionResult, MeguriMediaResult, MeguriRoundRecovery, MeguriRoundResult, MeguriRoundStage, MeguriRoundStart, MeguriRoundTask};
 pub use provider_bootstrap::{MeguriAccess, MeguriBootstrapDirection, MeguriBootstrapError};
 pub use provider::ProviderHandoff;
 pub use manual_transfers::ManualTransferTask;

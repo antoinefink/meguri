@@ -45,6 +45,13 @@ pub(super) fn apply(
     cancel: Arc<CancelToken>,
     progress: ProgressSink,
 ) -> Result<MergeOutcome> {
+    apply_admitted(collection, stage, input, cancel, progress, None)
+}
+pub(super) fn apply_admitted(
+    collection: &Collection, stage: &NormalStage, input: MergeInput,
+    cancel: Arc<CancelToken>, progress: ProgressSink,
+    admission: Option<crate::provider::MeguriRoundAdmission>,
+) -> Result<MergeOutcome> {
     let MergeInput {
         hold,
         schema,
@@ -69,9 +76,19 @@ pub(super) fn apply(
     if budget > Duration::from_millis(200) {
         spec = spec.declare_long_write(budget);
     }
+    let refused = Arc::new(std::sync::Mutex::new(None));
+    let refusal = refused.clone();
     let result = collection
         .run(spec, move |ctx| {
             ctx.check_cancel()?;
+            // Runs on the queued writer before its first local mutation. The
+            // sealed witness resolves no Host/lifecycle lock and fails closed
+            // on provider contention. Transaction/schema/hold-back guards stay.
+            if let Some(admission) = &admission
+                && let Err(error) = admission.job_check() {
+                *refusal.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error);
+                return Err(EngineError::Cancelled);
+            }
             if ctx.scope().col()?.schema_modified != schema {
                 return Ok(MergeOutcome {
                     one_way: true,
@@ -384,7 +401,8 @@ pub(super) fn apply(
             );
             Ok(outcome)
         })
-        .map_err(engine_error)?;
+        .map_err(|error| refused.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take().unwrap_or_else(|| engine_error(error)))?;
     let mut outcome = result.value;
     outcome.timing = result.timing;
     outcome.write_budget = budget;

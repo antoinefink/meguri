@@ -6,6 +6,7 @@ use meguri_sync::provider as p;
 #[path = "provider_tests.rs"]
 mod tests;
 #[path = "provider_bootstrap.rs"] mod bootstrap;
+#[path = "provider_normal.rs"] mod normal;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum ProviderSelection { LocalOnly, ICloud, Meguri }

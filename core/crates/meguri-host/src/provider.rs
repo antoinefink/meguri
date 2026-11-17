@@ -49,6 +49,7 @@ impl CoreHost {
     }
     /// Handoff recovery facts never certify that an earlier process joined.
     fn provider_publication_facts(&self) -> Result<(meguri_engine::Generation, Publication), EngineError> {
+        self.require_meguri_round_join()?;
         let generation = self.cloud_connection_generation()?;
         let collection = self.cloud_connection_collection()?;
         if collection.generation() != generation || !self.original_resource_authority(&collection).is_live()
@@ -125,6 +126,7 @@ impl CoreHost {
         Ok(())
     }
     fn provider_metadata_retry_available(&self) -> Result<(), EngineError> {
+        self.require_meguri_round_join()?;
         if !self.manual_transfer_history().active().is_ok_and(|active| active.is_none())
             || !self.engine().jobs().running().is_empty() {
             return Err(EngineError::Busy { running_op: "provider current owner recovery".into() });
@@ -143,6 +145,7 @@ impl CoreHost {
             || !self.manual_transfer_history().active().is_ok_and(|active| active.is_none()) {
             return Err(EngineError::Busy { running_op: "provider recovery or review".into() });
         }
+        self.close_meguri_round_admission();
         let _exclusive = self.engine().reserve_collection_export_handoff()?;
         if let Some(runtime) = self.cloud_runtime() {
             runtime.provider_transition_available().map_err(|_| EngineError::Busy { running_op: "iCloud recovery".into() })?;
@@ -163,6 +166,7 @@ impl CoreHost {
             return Err(EngineError::Busy { running_op: "provider original host changed".into() });
         }
         self.provider.validate_handoff(&handoff.intent)?;
+        self.require_meguri_round_join()?;
         let _exclusive = self.engine().reserve_collection_export_handoff()?;
         if self.review().active_session().is_some() || self.cloud_connection_generation()? != handoff.generation
             || !self.manual_transfer_history().active().is_ok_and(|active| active.is_none())
@@ -176,6 +180,7 @@ impl CoreHost {
             }
         }
         self.provider.commit_handoff(&handoff.intent)?;
+        self.reopen_meguri_round_admission();
         Ok(())
     }
     /// Retain only an original healthy absent owner. The lane checks Host
@@ -183,6 +188,7 @@ impl CoreHost {
     /// blocking close-state query. Its optional settled publication is authority.
     fn reserve_no_collection_provider_handoff(&self, generation: meguri_engine::Generation)
         -> Result<(meguri_engine::SlotGuard, Option<Publication>), EngineError> {
+        self.require_meguri_round_join()?;
         let slot = self.engine().acquire_slot(meguri_engine::LongOp::OneWaySync)?;
         if !matches!(self.engine().state(), meguri_engine::LifecycleState::NoCollection)
             || self.review().active_session().is_some()

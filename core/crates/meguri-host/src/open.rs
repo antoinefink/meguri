@@ -250,6 +250,7 @@ mod cloud_adoption;
 
 pub struct CoreHost {
     pub(crate) provider: Arc<meguri_sync::provider::Authority>,
+    pub(crate) meguri_rounds: crate::provider_normal::RoundRegistry,
     pub(crate) cloud_policy: Option<meguri_sync::cloud::policy::Driver>,
     cloud: Option<Arc<meguri_sync::cloud::runtime::Runtime>>,
     pub(crate) manual_transfers: meguri_sync::oneway::ManualTransfers,
@@ -545,6 +546,7 @@ impl CoreHost {
             .as_ref()
             .map(|runtime| meguri_sync::cloud::policy::Driver::new(runtime.clone(), config.clock.clone()));
         let host = Self {
+            meguri_rounds: Default::default(),
             provider,
             cloud_policy,
             cloud,
@@ -573,6 +575,9 @@ impl CoreHost {
     }
     pub fn collection(&self) -> Result<Collection, EngineError> {
         self.engine.collection()
+    }
+    pub(crate) fn meguri_round_sources(&self) -> (Arc<dyn Clock>, Arc<dyn meguri_model::rng::RandomSource>) {
+        (self.clock.clone(), self.initial_open.random.clone())
     }
     /// Sync remains unavailable until whole-binding reconciliation and the
     /// guarded root/send/ack integration land.

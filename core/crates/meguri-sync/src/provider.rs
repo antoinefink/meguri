@@ -7,7 +7,7 @@ use serde_json::{Map, Value};
 use crate::{Endpoint, cloud::{Binding, BindingState}};
 
 mod bootstrap;
-pub use bootstrap::{EpochEvidence, EpochInputs, MediaEpochEvidence, MediaRefusal, MeguriBinding, MeguriBootstrapIntent, MeguriReadiness, MeguriReadyRefusal, ReadyEvidence, ReadyInputs};
+pub use bootstrap::{MeguriRoundAdmission, MeguriRoundRefusal, EpochEvidence, EpochInputs, MediaEpochEvidence, MediaRefusal, MeguriBinding, MeguriBootstrapIntent, MeguriReadiness, MeguriReadyRefusal, ReadyEvidence, ReadyInputs};
 
 fn invalid() -> StorageError { StorageError::Io { detail: "provider configuration requires recovery".into() } }
 

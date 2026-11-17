@@ -179,6 +179,10 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let providerBootstrapMediaSnapshot = BridgeCall("ProviderBootstrapResult.media_snapshot")
     public static let providerBootstrapRequestStop = BridgeCall("ProviderBootstrapResult.request_stop")
     public static let providerBootstrapRetainedOperation = BridgeCall("ProviderBootstrapResult.retained_operation")
+    public static let providerStartCollectionRound = BridgeCall("ProviderConnection.start_collection_round")
+    public static let providerStartMediaRound = BridgeCall("ProviderConnection.start_media_round")
+    public static let providerRoundOutcome = BridgeCall("ProviderRoundResult.outcome")
+    public static let providerRoundRetryFinalization = BridgeCall("ProviderRoundResult.retry_finalization")
     public let interval: IntervalName
 
     init(_ name: StaticString) {
@@ -609,6 +613,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         providerBootstrapPreviewRecord, providerBootstrapMediaConsentRecord, providerBootstrapOperationRecord,
         providerBootstrapOutcome, providerBootstrapMediaSnapshot, providerBootstrapRequestStop,
         providerBootstrapRetainedOperation,
+        providerStartCollectionRound, providerStartMediaRound, providerRoundOutcome, providerRoundRetryFinalization,
         testCloudZoneDeletionFixture, testCloudZoneDeletionRows,
         cloudPolicyExecutionBeginCleanupPass, cloudCleanupPassSubmitInventory, cloudCleanupPassCompleteInventory, cloudCleanupPassFinish,
         cloudPolicyExecutionBeginZoneDeletionPass, cloudZoneDeletionPassActiveTarget, cloudZoneDeletionPassSubmitRead, cloudZoneDeletionPassCompleteRead, cloudZoneDeletionPassSubmitDeletion, cloudZoneDeletionPassCompleteDeletion, cloudZoneDeletionPassFinish,

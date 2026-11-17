@@ -173,6 +173,8 @@ pub struct Job {
     /// none.
     new_endpoint: Option<Endpoint>,
     finish_sent: Option<Box<dyn FnOnce() + Send>>,
+    admission: Option<crate::provider::MeguriRoundAdmission>,
+    dispatch_refusal: Option<(Method, JobError)>,
 }
 
 impl Job {
@@ -204,6 +206,8 @@ impl Job {
             followed: false,
             new_endpoint: None,
             finish_sent: None,
+            admission: None,
+            dispatch_refusal: None,
         })
     }
 
@@ -233,6 +237,9 @@ impl Job {
     /// A transport failure of this job's `method` as the kind the user sees
     /// (errors.md E4, E5): `tls` carries whether the server is self-hosted.
     pub fn error_for(&self, method: Method, error: SyncError) -> JobError {
+        if matches!(error, SyncError::Cancelled)
+            && let Some((refused_method, refusal)) = &self.dispatch_refusal
+            && *refused_method == method { return refusal.clone(); }
         JobError::from_transport(error, Some(method), self.kind)
     }
 
@@ -249,6 +256,18 @@ impl Job {
         self.new_endpoint.as_ref()
     }
 
+    pub(crate) fn admit_meguri(&mut self, admission: crate::provider::MeguriRoundAdmission) {
+        self.admission = Some(admission);
+    }
+    pub(crate) fn meguri_admission(&self) -> Option<crate::provider::MeguriRoundAdmission> {
+        self.admission.clone()
+    }
+    pub(crate) fn check_admission(&self) -> Result<(), JobError> {
+        self.admission.as_ref().map_or(Ok(()), |admission| admission.job_check())
+    }
+    pub(crate) fn admission_refused(&self) -> bool {
+        self.admission.as_ref().is_some_and(|admission| admission.refusal().is_some())
+    }
     /// Sends one request and returns its checked, decompressing body (T6).
     /// A 308 on `meta` is followed once when T7 allows it; every other 3xx,
     /// 4xx or 5xx is an error. Runs under the job's cancel token (T9).
@@ -317,6 +336,12 @@ impl Job {
                 body: Box::pin(body),
                 stall_timeout: self.stall_timeout,
             };
+            // Actual dispatch boundary, including an accepted redirect's
+            // repeated Meta. Abort cleanup intentionally has its own path.
+            if let Err(error) = self.check_admission() {
+                self.dispatch_refusal = Some((method, error));
+                return Err(SyncError::Cancelled);
+            }
             let response = self.transport.post(request).await?;
             match response.status {
                 200..=299 => {

@@ -43,8 +43,10 @@ pub struct Task {
     pub handle: JobHandle,
     result: mpsc::Receiver<Result<Outcome>>,
     finished: meguri_engine::Subscription,
+    finish_sent: Arc<AtomicBool>,
 }
 impl Task {
+    pub fn finish_sent(&self) -> bool { self.finish_sent.load(Ordering::SeqCst) }
     pub fn wait(self) -> Result<Outcome> {
         let result = self.result.recv().unwrap_or_else(|_| {
             Err(JobError::new(
@@ -79,6 +81,23 @@ pub fn start(
     memory: Arc<Mutex<StatusMemory>>,
     transport: Option<Box<dyn SyncTransport>>,
 ) -> std::result::Result<Task, EngineError> {
+    start_owned(engine, collection, options, key, clock, random, memory, transport, None)
+}
+/// Additive provider entry; the returned task owns the actual NormalSync job.
+#[allow(clippy::too_many_arguments)]
+pub fn start_admitted(
+    engine: &Engine, collection: Collection, options: JobOptions, key: HostKey,
+    clock: Arc<dyn Clock>, random: Arc<dyn RandomSource>, memory: Arc<Mutex<StatusMemory>>,
+    transport: Option<Box<dyn SyncTransport>>, admission: crate::provider::MeguriRoundAdmission,
+) -> std::result::Result<Task, EngineError> {
+    start_owned(engine, collection, options, key, clock, random, memory, transport, Some(admission))
+}
+#[allow(clippy::too_many_arguments)]
+fn start_owned(
+    engine: &Engine, collection: Collection, options: JobOptions, key: HostKey,
+    clock: Arc<dyn Clock>, random: Arc<dyn RandomSource>, memory: Arc<Mutex<StatusMemory>>,
+    transport: Option<Box<dyn SyncTransport>>, admission: Option<crate::provider::MeguriRoundAdmission>,
+) -> std::result::Result<Task, EngineError> {
     if collection.generation() != engine.generation() {
         return Err(EngineError::StaleGeneration {
             planned: collection.generation(),
@@ -89,6 +108,8 @@ pub fn start(
     let owner = engine.clone();
     let (tx, rx) = mpsc::sync_channel(1);
     let finished = engine.stream().subscribe();
+    let finish_sent = Arc::new(AtomicBool::new(false));
+    let sent = finish_sent.clone();
     let handle = engine.start_job(JobKind::NormalSync, move |ctx| {
         let options = options.cancel(ctx.cancel.clone());
         let created = match transport {
@@ -104,6 +125,7 @@ pub fn start(
                 });
             }
         };
+        if let Some(admission) = admission { job.admit_meguri(admission); }
         let result = run(
             &owner,
             &collection,
@@ -111,6 +133,7 @@ pub fn start(
             clock.as_ref(),
             &memory,
             ctx.progress.clone(),
+            sent,
         );
         let error = result.as_ref().err().map(|e| {
             if e.kind == ErrorKind::Cancelled {
@@ -131,6 +154,7 @@ pub fn start(
         handle,
         result: rx,
         finished,
+        finish_sent,
     })
 }
 /// Blocking production execution used by the core job and focused mechanism
@@ -142,13 +166,15 @@ fn run(
     clock: &dyn Clock,
     memory: &Mutex<StatusMemory>,
     progress: ProgressSink,
+    finish: Arc<AtomicBool>,
 ) -> Result<Outcome> {
     let result = crate::transport::runtime::drive(engine.threads(), async {
-        run_inner(engine, collection, job, clock, memory, progress).await
+        run_inner(engine, collection, job, clock, memory, progress, finish).await
     })
     .map_err(|e| JobError::from_transport(e, None, job.kind()))?;
     result.map_err(|error| {
         if error.kind == ErrorKind::Cancelled
+            && !job.admission_refused()
             && job.cancellation().stop_cause() == Some(meguri_engine::StopCause::System)
         {
             stopped(job)
@@ -181,7 +207,7 @@ fn checkpoint(engine: &Engine, collection: &Collection, job: &Job) -> Result<()>
     if job.cancellation().is_cancelled() {
         return Err(stopped(job));
     }
-    Ok(())
+    job.check_admission()
 }
 async fn run_inner(
     engine: &Engine,
@@ -190,6 +216,7 @@ async fn run_inner(
     clock: &dyn Clock,
     memory: &Mutex<StatusMemory>,
     progress: ProgressSink,
+    finish: Arc<AtomicBool>,
 ) -> Result<Outcome> {
     checkpoint(engine, collection, job)?;
     progress.set_phase(ProgressPhase::Named("connecting"));
@@ -211,7 +238,6 @@ async fn run_inner(
         );
         return Ok(Outcome { check, merge: None });
     }
-    let finish = Arc::new(AtomicBool::new(false));
     // This guard also clears flags if staging fails or a caller unwinds.
     struct Flags<'a> {
         collection: &'a Collection,
@@ -329,25 +355,19 @@ async fn run_inner(
                 "finish body was not consumed",
             ));
         }
-        commit::apply(
-            collection,
-            &disk,
-            commit::MergeInput {
-                hold,
-                schema,
-                usn,
-                time,
-                meta,
-            },
-            job.cancellation(),
-            progress.clone(),
-        )
+        checkpoint(engine, collection, job)?;
+        let input = commit::MergeInput { hold, schema, usn, time, meta };
+        match job.meguri_admission() {
+            Some(admission) => commit::apply_admitted(collection, &disk, input, job.cancellation(), progress.clone(), Some(admission)),
+            None => commit::apply(collection, &disk, input, job.cancellation(), progress.clone()),
+        }
     }
     .await;
     drop(snapshot);
     drop(reader);
     match result {
         Ok(merge) => {
+            job.check_admission()?;
             collection.check_rollover().map_err(engine_error)?;
             memory.lock().unwrap().remember(
                 job.base(),
@@ -374,7 +394,8 @@ async fn run_inner(
                 if !matches!(error.kind, ErrorKind::DiskFull { .. } | ErrorKind::LocalStorage) {
                     error = JobError::new(ErrorKind::Interrupted, error.method, "finish may have committed");
                 }
-            } else if job.cancellation().is_cancelled() {
+            } else if job.cancellation().is_cancelled() && !job.admission_refused()
+                && (job.meguri_admission().is_none() || error.kind == ErrorKind::Cancelled) {
                 error = stopped(job);
             }
             if matches!(error.kind, ErrorKind::SanityCheckFailed { .. }) {

@@ -279,3 +279,324 @@ impl Authority {
         self.snapshot().ok().and_then(|doc| doc.meguri_bootstrap)
     }
 }
+
+/// Routine refusal contains no endpoint, account, filename or server payload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MeguriRoundRefusal {
+    NotSelected, Paused, NotReady, BindingChanged, ConnectionChanged,
+    AccountChanged, PublicationChanged, Busy, Interrupted, Storage,
+}
+/// Issued by this installation's actual Ready authority. All fields are private;
+/// credentials and callers cannot manufacture a successful admission sample.
+#[derive(Clone)]
+pub struct MeguriRoundAdmission {
+    authority: std::sync::Arc<Authority>,
+    original: meguri_engine::jobs::registry::OriginalResourceAuthority,
+    collection: meguri_engine::Collection,
+    policy: TransferPolicy,
+    media: MediaStore,
+    admitted_media_epoch: std::sync::Arc<std::sync::Mutex<MediaEpochEvidence>>,
+    binding: MeguriBinding,
+    publication: Publication,
+    revision: u64,
+    closure: std::sync::Arc<()>,
+    refusal: std::sync::Arc<std::sync::Mutex<Option<MeguriRoundRefusal>>>,
+}
+impl MeguriRoundAdmission {
+    pub fn binding(&self) -> &MeguriBinding { &self.binding }
+    pub fn publication(&self) -> &Publication { &self.publication }
+    pub fn refusal(&self) -> Option<MeguriRoundRefusal> {
+        *self.refusal.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+    fn current(&self, check_media: bool) -> std::result::Result<(), MeguriRoundRefusal> {
+        use MeguriRoundRefusal as R;
+        if !self.original.is_live() || !self.collection.is_current() { return Err(R::Interrupted); }
+        // Never wait on provider ownership from the collection writer. The
+        // metadata lane takes lifecycle before provider, and never joins ops.
+        {
+            let state = self.authority.state.try_lock().map_err(|_| R::Busy)?;
+            let doc = state.document.as_ref().map_err(|_| R::Storage)?;
+            routine_document(doc, &self.binding, &self.publication)?;
+            if doc.revision != self.revision || !std::sync::Arc::ptr_eq(&state.closures.ordinary, &self.closure)
+                || self.authority.network_blocked() { return Err(R::BindingChanged); }
+        }
+        // Each sidecar read ends before the next starts. In particular these
+        // two files share a parent lock; no sidecar callback reads another.
+        let doc = sidecar::read_document(&self.authority.path, decode)
+            .map_err(|_| R::Storage)?.ok_or(R::Storage)?;
+        routine_document(&doc, &self.binding, &self.publication)?;
+        if doc.revision != self.revision { return Err(R::BindingChanged); }
+        let publication = meguri_engine::device_state::DeviceState::for_collection(self.collection.path())
+            .settled_publication().map_err(|_| R::Storage)?;
+        if publication.as_ref() != Some(&self.publication) { return Err(R::PublicationChanged); }
+        if self.policy.active().map_err(|_| R::Storage)?.is_some() { return Err(R::Busy); }
+        if check_media {
+            let epoch = self.admitted_media_epoch.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+            self.media.bound_sync_baseline(&self.binding.media_owner(), epoch.epoch()).map_err(|error| match error {
+                meguri_storage::media::MediaBoundCheckError::Changed => R::BindingChanged,
+                meguri_storage::media::MediaBoundCheckError::Storage(_) => R::Storage,
+            })?;
+        }
+        if !self.original.is_live() || !self.collection.is_current() { return Err(R::Interrupted); }
+        Ok(())
+    }
+    pub fn check(&self) -> std::result::Result<(), MeguriRoundRefusal> { self.check_selected(true) }
+    // Storage already compares the full Stage baseline under its journal.
+    // Never read that same journal from its bounded effect callback.
+    pub(crate) fn check_media_effect(&self) -> std::result::Result<(), MeguriRoundRefusal> { self.check_selected(false) }
+    fn check_selected(&self, check_media: bool) -> std::result::Result<(), MeguriRoundRefusal> {
+        if let Some(refusal) = self.refusal() { return Err(refusal); }
+        self.current(check_media).map_err(|error| {
+            self.refusal.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get_or_insert(error);
+            error
+        })
+    }
+    // Only a storage-minted conditional reset from this job's exact store and
+    // expected epoch can advance the shared request/checkpoint witness.
+    pub(crate) fn accept_media_reset(&self, reset: &meguri_storage::media::MediaBoundReset)
+        -> std::result::Result<(), MeguriRoundRefusal> {
+        let mut epoch = self.admitted_media_epoch.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !reset.is_from(&self.media) || !epoch.matches(reset.before())
+            || reset.after().owner.as_ref() != Some(&self.binding.media_owner()) {
+            return Err(MeguriRoundRefusal::BindingChanged);
+        }
+        epoch.epoch = reset.after().epoch;
+        Ok(())
+    }
+    pub(crate) fn job_check(&self) -> std::result::Result<(), crate::JobError> {
+        self.check().map_err(|refusal| crate::JobError::new(match refusal {
+            MeguriRoundRefusal::Storage => crate::ErrorKind::LocalStorage,
+            MeguriRoundRefusal::Busy => crate::ErrorKind::ExclusiveBusy,
+            _ => crate::ErrorKind::Interrupted,
+        }, None, "Meguri original round admission closed"))
+    }
+}
+fn routine_document(doc: &ProviderDocument, binding: &MeguriBinding, publication: &Publication)
+    -> std::result::Result<(), MeguriRoundRefusal> {
+    use MeguriRoundRefusal as R;
+    if doc.selection != Selection::Meguri { return Err(R::NotSelected); }
+    if doc.settings.paused { return Err(R::Paused); }
+    if doc.handoff.is_some() { return Err(R::Busy); }
+    if doc.meguri.as_ref() != Some(binding.connection()) { return Err(R::ConnectionChanged); }
+    if doc.meguri_binding.as_ref() != Some(binding) { return Err(R::BindingChanged); }
+    if !doc.permits_meguri_transfer() { return Err(R::NotReady); }
+    if readiness(doc, Some(publication)) != MeguriReadiness::Ready { return Err(R::PublicationChanged); }
+    Ok(())
+}
+impl Authority {
+    /// Host composition supplies its real original-resource authority and
+    /// retained manual policy. No baseline/readiness argument is accepted.
+    pub fn admit_meguri_round(self: &std::sync::Arc<Self>, collection: meguri_engine::Collection,
+        original: meguri_engine::jobs::registry::OriginalResourceAuthority, policy: TransferPolicy,
+        connection: &MeguriConnection, username: &str, media: MediaStore)
+        -> std::result::Result<MeguriRoundAdmission, MeguriRoundRefusal> {
+        use MeguriRoundRefusal as R;
+        if !original.is_live() || !collection.is_current() { return Err(R::Interrupted); }
+        let publication = meguri_engine::device_state::DeviceState::for_collection(collection.path())
+            .settled_publication().map_err(|_| R::Storage)?.ok_or(R::PublicationChanged)?;
+        let (binding, revision, closure) = {
+            let state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let doc = state.document.as_ref().map_err(|_| R::Storage)?;
+            if doc.selection != Selection::Meguri { return Err(R::NotSelected); }
+            if doc.settings.paused { return Err(R::Paused); }
+            if doc.meguri.as_ref() != Some(connection) { return Err(R::ConnectionChanged); }
+            let binding = doc.meguri_binding.clone().ok_or(R::NotReady)?;
+            routine_document(doc, &binding, &publication)?;
+            if binding.account != account(connection, username).map_err(|_| R::AccountChanged)? { return Err(R::AccountChanged); }
+            (binding, doc.revision, state.closures.ordinary.clone())
+        };
+        let admitted_media_epoch = std::sync::Arc::new(std::sync::Mutex::new(binding.media_epoch.clone()));
+        let admission = MeguriRoundAdmission { authority: self.clone(), original, collection, policy, media, admitted_media_epoch,
+            binding, publication, revision, closure, refusal: Default::default() };
+        admission.check()?;
+        Ok(admission)
+    }
+    /// Local-only finalization, inside the original Host metadata lane. The
+    /// storage guard rechecks the sealed terminal baseline through publication.
+    /// A no-reset round deliberately never rewrites provider bytes.
+    pub fn finalize_meguri_round_epoch(&self, expected: &MeguriBinding,
+        receipt: &crate::media::BoundMediaReceipt, media: &MediaStore,
+        generation: u64, publication: Option<Publication>) -> Result<()> {
+        if !expected.media_epoch.matches(receipt.initial())
+            || expected.media_owner() != *receipt.owner()
+            || publication.as_ref().map(|p| p.identity) != Some(expected.publication) {
+            return Err(MeguriReadyRefusal::BindingChanged);
+        }
+        // Publication ownership precedes the journal. Both acquisitions are
+        // nonblocking in this lane; neither can invert an existing media owner.
+        let mut failure = self.publication_failure.try_lock()
+            .map_err(|_| MeguriReadyRefusal::Storage(invalid()))?;
+        receipt.with_current(media, || {
+            if !receipt.reset_occurred() { return Ok(()); }
+            let mut desired = expected.clone();
+            desired.media_epoch.epoch = receipt.terminal().epoch;
+            // Retry only this exact failed desired mutation, without replaying
+            // requests. The original terminal result/receipt remains retained.
+            let retry = {
+                match failure.as_ref() {
+                    None => false,
+                    Some(failed) => {
+                        let pending = failed.pending.as_ref().ok_or_else(|| MeguriReadyRefusal::Storage(failed.error.clone()))?;
+                        let before = decode(Some(&pending.before))?.ok_or_else(invalid)?;
+                        if !receipt.reset_occurred() || before.meguri_binding.as_ref() != Some(expected)
+                            || pending.document.meguri_binding.as_ref() != Some(&desired)
+                            || pending.facts.as_ref() != Some(&(generation, publication.clone())) {
+                            return Err(MeguriReadyRefusal::BindingChanged);
+                        }
+                        true
+                    }
+                }
+            };
+            if retry { self.retry_round_publication_locked(&mut failure)?; }
+            let doc = self.snapshot()?;
+            if doc.meguri_binding.as_ref() == Some(&desired) && retry { return Ok(()); }
+            if doc.meguri_binding.as_ref() != Some(expected) { return Err(MeguriReadyRefusal::BindingChanged); }
+            check_epoch_document(&doc, expected, generation, publication.as_ref())?;
+            let settled = publication.clone();
+            let mut refusal = None;
+            let updated = self.update_publication_locked(&mut failure, Some((generation, publication)), true, |_, doc| {
+                let change = (|| -> Result<()> {
+                check_epoch_document(doc, expected, generation, settled.as_ref())?;
+                if doc.meguri_binding.as_ref() != Some(expected)
+                    || settled.as_ref().map(|p| p.identity) != Some(expected.publication) {
+                    return Err(MeguriReadyRefusal::BindingChanged);
+                }
+                // Only this field and the document's admission revision change.
+                doc.meguri_binding = Some(desired);
+                // A recorded handoff already closes admission and pins this
+                // revision. Settling its old worker changes only the binding's
+                // media epoch; the original intent and every decision survive.
+                if doc.handoff.is_none() { doc.revision = doc.revision.checked_add(1).ok_or_else(invalid)?; }
+                Ok(())
+                })();
+                change.map_err(|error| { refusal = Some(error); invalid() })
+            });
+            if let Some(error) = refusal { return Err(error); }
+            updated?;
+            Ok(())
+        }).map_err(|error| match error {
+            meguri_storage::media::MediaBoundCheckError::Changed => MeguriReadyRefusal::MediaEpochChanged,
+            meguri_storage::media::MediaBoundCheckError::Storage(error) => MeguriReadyRefusal::from(error),
+        })?
+    }
+}
+
+fn check_epoch_document(doc: &ProviderDocument, expected: &MeguriBinding,
+    generation: u64, publication: Option<&Publication>) -> Result<()> {
+    if doc.selection != Selection::Meguri || doc.meguri.as_ref() != Some(expected.connection())
+        || doc.meguri_binding.as_ref() != Some(expected) { return Err(MeguriReadyRefusal::BindingChanged); }
+    if let Some(handoff) = &doc.handoff {
+        if handoff.old != Selection::Meguri || handoff.generation != generation
+            || handoff.publication.as_ref() != publication { return Err(MeguriReadyRefusal::BindingChanged); }
+    }
+    Ok(())
+}
+
+impl MeguriRoundAdmission {
+    pub fn generation(&self) -> meguri_engine::Generation { self.collection.generation() }
+    /// A sealed receipt permits precisely this task's own epoch publication.
+    /// It never permits a foreign provider, account, publication or pause.
+    pub fn check_finalized_media(&self, receipt: &crate::media::BoundMediaReceipt)
+        -> std::result::Result<(), MeguriRoundRefusal> {
+        use MeguriRoundRefusal as R;
+        if !receipt.reset_occurred() { return self.check(); }
+        if !self.binding.media_epoch.matches(receipt.initial()) || !self.original.is_live()
+            || !self.collection.is_current() { return Err(R::BindingChanged); }
+        let mut expected = self.binding.clone();
+        expected.media_epoch.epoch = receipt.terminal().epoch;
+        let doc = sidecar::read_document(&self.authority.path, decode)
+            .map_err(|_| R::Storage)?.ok_or(R::Storage)?;
+        routine_document(&doc, &expected, &self.publication)?;
+        self.media.bound_sync_baseline(&expected.media_owner(), receipt.terminal().epoch).map_err(|error| match error {
+            meguri_storage::media::MediaBoundCheckError::Changed => R::BindingChanged,
+            meguri_storage::media::MediaBoundCheckError::Storage(_) => R::Storage,
+        })?;
+        if self.authority.network_blocked() { return Err(R::BindingChanged); }
+        if self.policy.active().map_err(|_| R::Storage)?.is_some() { return Err(R::Busy); }
+        if meguri_engine::device_state::DeviceState::for_collection(self.collection.path())
+            .settled_publication().map_err(|_| R::Storage)?.as_ref() != Some(&self.publication) {
+            return Err(R::PublicationChanged);
+        }
+        Ok(())
+    }
+}
+impl Authority {
+    // Same strict retained-before/desired replay as retry_failed_publication,
+    // under the already-owned publication gate and original media journal.
+    // The caller has additionally checked this task's exact pending facts.
+    fn retry_round_publication_locked(&self, failure: &mut Option<PublicationFailure>) -> Result<()> {
+        let failed = failure.as_ref().ok_or_else(invalid)?;
+        let pending = failed.pending.as_ref().filter(|pending| pending.retryable).ok_or_else(|| failed.error.clone())?;
+        let result = sidecar::update_document(&self.path, |raw| {
+            if raw != &pending.before && raw != &pending.desired { return Err(invalid()); }
+            decode(Some(raw))?.ok_or_else(invalid)?;
+            *raw = pending.desired.clone();
+            Ok(pending.document.clone())
+        });
+        match result {
+            Ok(doc) => {
+                let no_handoff = doc.handoff.is_none();
+                *failure = None;
+                if no_handoff { self.retire_original_completions(); }
+                let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                state.document = Ok(doc);
+                self.open.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            }
+            Err(error) => {
+                self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner).document = Err(failed.error.clone());
+                Err(MeguriReadyRefusal::Storage(error))
+            }
+        }
+    }
+    /// Retry the actual failed hold only when the pending before/desired facts
+    /// belong to this exact original task. Its joined terminal may settle its
+    /// own handoff, without changing the durable intent or admitting work.
+    pub fn finalize_meguri_round_hold(&self, admission: &MeguriRoundAdmission, generation: u64,
+        publication: Option<Publication>) -> Result<()> {
+        if !std::ptr::eq(self, std::sync::Arc::as_ptr(&admission.authority))
+            || !admission.original.is_live() || !admission.collection.is_current()
+            || admission.generation().0 != generation || publication.as_ref() != Some(&admission.publication) {
+            return Err(MeguriReadyRefusal::BindingChanged);
+        }
+        let expected = admission.binding();
+        let retry = {
+            let failure = self.publication_failure.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            match failure.as_ref() {
+                None => false,
+                Some(failed) => {
+                    let pending = failed.pending.as_ref().ok_or_else(|| MeguriReadyRefusal::Storage(failed.error.clone()))?;
+                    let before = decode(Some(&pending.before))?.ok_or_else(invalid)?;
+                    let desired = &pending.document;
+                    if before.meguri_binding.as_ref() != Some(expected) || desired.meguri_binding.is_some()
+                        || desired.meguri_settings.automatic || desired.settings.automatic
+                        || before.settings.paused != desired.settings.paused
+                        || pending.facts.as_ref() != Some(&(generation, publication.clone())) {
+                        return Err(MeguriReadyRefusal::BindingChanged);
+                    }
+                    check_epoch_document(&before, expected, generation, publication.as_ref())?;
+                    let mut held = before.clone();
+                    held.meguri_binding = None;
+                    held.meguri_settings.automatic = false;
+                    held.settings.automatic = false;
+                    if held.handoff.is_none() { held.revision = held.revision.checked_add(1).ok_or_else(invalid)?; }
+                    if desired != &held { return Err(MeguriReadyRefusal::BindingChanged); }
+                    true
+                }
+            }
+        };
+        if retry { self.retry_failed_publication(generation, publication.as_ref())?; Ok(()) }
+        else {
+            let settled = publication.clone();
+            self.bootstrap_update(generation, publication, |doc| {
+                check_epoch_document(doc, expected, generation, settled.as_ref())?;
+                doc.meguri_binding = None;
+                doc.meguri_settings.automatic = false;
+                doc.settings.automatic = false;
+                // The original handoff handle pins this revision and intent.
+                if doc.handoff.is_none() { doc.revision = doc.revision.checked_add(1).ok_or_else(invalid)?; }
+                Ok(())
+            })
+        }
+    }
+}

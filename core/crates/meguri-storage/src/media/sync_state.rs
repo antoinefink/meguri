@@ -34,6 +34,29 @@ pub struct MediaSyncBaseline {
     /// Changes on every reset, including a same-owner sanity reset.
     pub epoch: u64,
 }
+#[derive(Debug)]
+pub enum MediaBoundCheckError { Changed, Storage(MediaError) }
+impl From<MediaError> for MediaBoundCheckError {
+    fn from(error: MediaError) -> Self { Self::Storage(error) }
+}
+impl From<std::io::Error> for MediaBoundCheckError {
+    fn from(error: std::io::Error) -> Self { Self::Storage(error.into()) }
+}
+/// Minted only by the conditional reset while holding the original journal.
+/// Neither a later epoch nor a same-owner reset from another job is evidence.
+#[derive(Clone)]
+pub struct MediaBoundReset {
+    store: std::sync::Weak<super::Inner>,
+    before: MediaSyncBaseline,
+    after: MediaSyncBaseline,
+}
+impl MediaBoundReset {
+    pub fn before(&self) -> &MediaSyncBaseline { &self.before }
+    pub fn after(&self) -> &MediaSyncBaseline { &self.after }
+    pub fn is_from(&self, store: &MediaStore) -> bool {
+        self.store.ptr_eq(&std::sync::Arc::downgrade(&store.inner))
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MediaDownloadIntent {
     pub name: String,
@@ -227,6 +250,9 @@ fn advance_cursor(db: &Connection, high: u64) -> Result<u64> {
     Ok(next)
 }
 fn reset(db: &mut Connection, owner: Option<&MediaBaselineOwner>) -> Result<()> {
+    reset_epoch(db, owner).map(|_| ())
+}
+fn reset_epoch(db: &mut Connection, owner: Option<&MediaBaselineOwner>) -> Result<u64> {
     let tx = db.savepoint()?;
     let epoch = journal_db::next_counter(&tx)?;
     for mut entry in journal_db::entries(&tx)? {
@@ -252,7 +278,7 @@ fn reset(db: &mut Connection, owner: Option<&MediaBaselineOwner>) -> Result<()> 
     }
     meguri_model::faultpoint!("media.sync.reset.before_commit")?;
     tx.commit()?;
-    Ok(())
+    Ok(epoch)
 }
 impl MediaStore {
     /// Y10.3 registration of one captured pending name, including same-stat
@@ -262,12 +288,21 @@ impl MediaStore {
         &self,
         expected: &MediaSyncBaseline,
         captured: &PendingChange,
+        keep_going: impl FnMut() -> bool,
+    ) -> Result<bool> {
+        self.register_sync_file_with_boundary(expected, captured, keep_going, &mut || Ok(()))
+    }
+    pub fn register_sync_file_with_boundary(
+        &self,
+        expected: &MediaSyncBaseline,
+        captured: &PendingChange,
         mut keep_going: impl FnMut() -> bool,
+        before_effect: &mut dyn FnMut() -> Result<()>
     ) -> Result<bool> {
         use sha1::{Digest, Sha1};
         use std::io::Read;
         let old = {
-            let db = self.db()?;
+            let db = self.db_with_boundary(before_effect)?;
             require_baseline(&db, expected)?;
             let entry = journal_db::entry(&db, &captured.name)?;
             if entry.as_ref().map(|e| e.change_counter) != Some(captured.change_counter) {
@@ -311,13 +346,14 @@ impl MediaStore {
         if !keep_going() {
             return Err(MediaError::Cancelled);
         }
-        let db = self.db()?;
+        let db = self.db_with_boundary(before_effect)?;
         require_baseline(&db, expected)?;
         if journal_db::entry(&db, &captured.name)? != old
             || !folder::unchanged_file(&directory, &std::fs::metadata(self.media_dir())?)
         {
             return Ok(false);
         }
+        before_effect()?;
         match (observed, facts, folder::regular(&path)?) {
             (Some(before), Some(hash), Some(after)) if folder::unchanged_file(&before, &after) => {
                 folder::live(&db, &captured.name, hash, &after, true)?;
@@ -373,25 +409,44 @@ impl MediaStore {
     /// once copying finishes. Network I/O and callbacks must happen outside the
     /// journal guard.
     pub fn save_downloaded_file(
+        &self, expected: &MediaSyncBaseline, download: &MediaDownloadIntent, payload: &Path,
+    ) -> Result<SavedMediaDownload> {
+        self.save_downloaded_file_inner(expected, download, payload, None)
+    }
+    pub fn save_downloaded_file_with_boundary(
         &self,
         expected: &MediaSyncBaseline,
         download: &MediaDownloadIntent,
         payload: &Path,
+        before_effect: &mut dyn FnMut() -> Result<()>
     ) -> Result<SavedMediaDownload> {
-        require_download(&*self.db()?, expected, download)?;
+        self.save_downloaded_file_inner(expected, download, payload, Some(before_effect))
+    }
+    fn save_downloaded_file_inner(
+        &self,
+        expected: &MediaSyncBaseline,
+        download: &MediaDownloadIntent,
+        payload: &Path,
+        boundary: Option<&mut dyn FnMut() -> Result<()>>
+    ) -> Result<SavedMediaDownload> {
+        let legacy = boundary.is_none();
+        let mut always = || Ok(());
+        let before_effect = boundary.unwrap_or(&mut always);
+        before_effect()?;
+        require_download(&*self.db_with_boundary(before_effect)?, expected, download)?;
         let mut source = folder::DownloadSource::open(payload)?;
         meguri_model::faultpoint!("media.download.after_hash")?;
         let transformed = meguri_text::media_name::safe_media_name(&download.name);
         if ignored(&download.name) || transformed.is_empty() || ignored(&transformed) {
-            let db = self.db()?;
+            let db = self.db_with_boundary(before_effect)?;
             require_download(&db, expected, download)?;
             return self.saved_download_locked(&db, download, None, &source.hash, false);
         }
-        self.check_changes()?;
+        self.check_changes_with_boundary(before_effect)?;
         for attempt in 0..3 {
             let result = (|| {
                 let observed = self.observe_download(&download.name, &source.hash)?;
-                let db = self.db()?;
+                let db = self.db_with_boundary(before_effect)?;
                 require_download(&db, expected, download)?;
                 let plan = self.download_installation_locked(&db, &download.name, &source.hash, false, &observed)?;
                 if plan.write {
@@ -404,7 +459,10 @@ impl MediaStore {
             match result {
                 Ok(Some(saved)) => return Ok(saved),
                 Ok(None) => break,
-                Err(MediaError::NameTaken) if attempt < 2 => self.register_full(|_, _| true)?,
+                Err(MediaError::NameTaken) if attempt < 2 => {
+                    if legacy { self.register_full(|_, _| true)?; }
+                    else { self.check_changes_with_boundary(before_effect)?; }
+                },
                 Err(error) => return Err(error),
             }
         }
@@ -413,11 +471,11 @@ impl MediaStore {
         // No borrowed TempPath survives publication; caller cleanup stays intact.
         let staged = source.stage(self.staging_dir())?;
         meguri_model::faultpoint!("media.download.after_stage")?;
-        self.check_changes()?;
+        self.check_changes_with_boundary(before_effect)?;
         for attempt in 0..3 {
             let result = (|| {
                 let observed = self.observe_download(&download.name, &source.hash)?;
-                let mut db = self.db()?;
+                let mut db = self.db_with_boundary(before_effect)?;
                 require_download(&db, expected, download)?;
                 // Y8.4/Y6 against CURRENT facts and the actual received hash:
                 // equal content is kept; different local content loses to the
@@ -427,11 +485,15 @@ impl MediaStore {
                 if !plan.write {
                     return self.saved_download_locked(&db, download, Some(plan.name), &source.hash, false);
                 }
+                before_effect()?;
                 self.install_existing_locked(&mut db, &plan.name, &staged.path, &source.hash, &plan.replacements)
                     .and_then(|()| self.saved_download_locked(&db, download, Some(plan.name), &source.hash, true))
             })();
             match result {
-                Err(MediaError::NameTaken) if attempt < 2 => self.register_full(|_, _| true)?,
+                Err(MediaError::NameTaken) if attempt < 2 => {
+                    if legacy { self.register_full(|_, _| true)?; }
+                    else { self.check_changes_with_boundary(before_effect)?; }
+                },
                 other => return other,
             }
         }
@@ -458,6 +520,58 @@ impl MediaStore {
         let mut db = self.db()?;
         let owner = baseline(&db)?.owner;
         reset(&mut db, owner.as_ref())
+    }
+    /// Read-only prebound entry. A mismatch performs no recovery or mutation.
+    pub fn bound_sync_baseline(&self, owner: &MediaBaselineOwner, epoch: u64) -> std::result::Result<MediaSyncBaseline, MediaBoundCheckError> {
+        if self.inner.importing.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(MediaBoundCheckError::Changed);
+        }
+        let db = self.import_db()?;
+        let captured = baseline(&db)?;
+        if self.inner.importing.load(std::sync::atomic::Ordering::Acquire)
+            || captured.owner.as_ref() != Some(owner) || captured.epoch != epoch {
+            return Err(MediaBoundCheckError::Changed);
+        }
+        Ok(captured)
+    }
+    /// Same-owner Y11 reset, conditional on every captured baseline field.
+    /// Comparison, reset and evidence creation share one journal guard.
+    pub fn reset_bound_sync(&self, expected: &MediaSyncBaseline) -> std::result::Result<MediaBoundReset, MediaBoundCheckError> {
+        self.reset_bound_sync_with_boundary(expected, &mut || Ok(()))
+    }
+    pub fn reset_bound_sync_with_boundary(&self, expected: &MediaSyncBaseline, before_effect: &mut dyn FnMut() -> Result<()>) -> std::result::Result<MediaBoundReset, MediaBoundCheckError> {
+        if self.inner.importing.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(MediaBoundCheckError::Changed);
+        }
+        // No recovery mutation precedes admission of this conditional reset.
+        let mut db = self.import_db()?;
+        if self.inner.importing.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(MediaBoundCheckError::Changed);
+        }
+        if expected.owner.is_none() || baseline(&db)? != *expected { return Err(MediaBoundCheckError::Changed); }
+        before_effect()?;
+        let epoch = reset_epoch(&mut db, expected.owner.as_ref())?;
+        Ok(MediaBoundReset { store: std::sync::Arc::downgrade(&self.inner),
+            before: expected.clone(), after: MediaSyncBaseline { owner: expected.owner.clone(), usn: 0, epoch } })
+    }
+    /// Local metadata finalization only. Try the journal under the caller's
+    /// existing lifecycle lane; never wait in an inverse acquisition order.
+    /// The callback must not call any media, lifecycle or network operation.
+    pub fn with_bound_sync_baseline<T>(&self, expected: &MediaSyncBaseline,
+        publish: impl FnOnce() -> T) -> std::result::Result<T, MediaBoundCheckError> {
+        if self.inner.importing.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(MediaBoundCheckError::Changed);
+        }
+        let guard = self.inner.db.try_lock().map_err(|_| invalid("media journal unavailable for finalization"))?;
+        let db = guard.as_ref().ok_or_else(|| invalid("media journal is closed"))?;
+        let native = std::fs::symlink_metadata(&self.inner.journal)?;
+        if !native.is_file() || native.nlink() != 1
+            || (native.dev(), native.ino()) != self.inner.journal_native
+            || self.inner.importing.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(MediaBoundCheckError::Changed);
+        }
+        if expected.owner.is_none() || baseline(db)? != *expected { return Err(MediaBoundCheckError::Changed); }
+        Ok(publish())
     }
     /// Logout invalidates the binding without touching files or manual history.
     pub fn invalidate_sync_owner(&self) -> Result<()> {
@@ -520,13 +634,19 @@ impl MediaStore {
     /// Unlike the legacy cursor-only boundary, returns actual deletion effects
     /// on both success and failure. No callbacks run under the journal guard.
     pub fn apply_media_page(
+        &self, expected: &MediaSyncBaseline, highest_usn: u64, decisions: &[MediaPageDecision],
+    ) -> std::result::Result<(u64, MediaPageEffects), MediaPageFailure> {
+        self.apply_media_page_with_boundary(expected, highest_usn, decisions, &mut || Ok(()))
+    }
+    pub fn apply_media_page_with_boundary(
         &self,
         expected: &MediaSyncBaseline,
         highest_usn: u64,
         decisions: &[MediaPageDecision],
+        before_effect: &mut dyn FnMut() -> Result<()>,
     ) -> std::result::Result<(u64, MediaPageEffects), MediaPageFailure> {
         let mut effects = MediaPageEffects::default();
-        match self.apply_media_page_inner(expected, highest_usn, decisions, &mut effects) {
+        match self.apply_media_page_inner(expected, highest_usn, decisions, &mut effects, before_effect) {
             Ok(usn) => Ok((usn, effects)),
             Err(error) => Err(MediaPageFailure { error, effects }),
         }
@@ -537,8 +657,9 @@ impl MediaStore {
         highest_usn: u64,
         decisions: &[MediaPageDecision],
         effects: &mut MediaPageEffects,
+        before_effect: &mut dyn FnMut() -> Result<()>,
     ) -> Result<u64> {
-        let mut db = self.db()?;
+        let mut db = self.db_with_boundary(before_effect)?;
         require_baseline(&db, expected)?;
         if highest_usn < expected.usn {
             return Err(invalid("media page precedes cursor"));
@@ -579,6 +700,7 @@ impl MediaStore {
                 }
                 if let Some(m) = folder::regular(&self.media_dir().join(name))? {
                     let mut moved = false;
+                    before_effect()?;
                     let outcome = self.move_to_trash_observed_locked(
                         &mut db,
                         name,
@@ -597,9 +719,11 @@ impl MediaStore {
                 }
             }
         }
+        before_effect()?;
         let tx = db.savepoint()?;
         let mut removed_records = 0;
         for decision in decisions {
+            before_effect()?;
             match decision {
                 MediaPageDecision::Clean { name, stamp } => {
                     // The sole stamp-preserving entry write (T8).
@@ -646,22 +770,32 @@ impl MediaStore {
         }
         let usn = advance_cursor(&tx, highest_usn)?;
         meguri_model::faultpoint!("media.sync.page.before_commit")?;
+        before_effect()?;
         tx.commit()?;
         effects.downloaded_deletions += removed_records;
         Ok(usn)
     }
     /// Y5 empty-page cleanup. The caller supplies all names seen during this
     /// listing, including names that did not require a download.
-    pub fn finish_media_listing(&self, expected: &MediaSyncBaseline, listed_names: &BTreeSet<String>) -> Result<u64> {
-        let mut db = self.db()?;
+    pub fn finish_media_listing(
+        &self, expected: &MediaSyncBaseline, listed_names: &BTreeSet<String>,
+    ) -> Result<u64> {
+        self.finish_media_listing_with_boundary(expected, listed_names, &mut || Ok(()))
+    }
+    pub fn finish_media_listing_with_boundary(&self, expected: &MediaSyncBaseline, listed_names: &BTreeSet<String>, before_effect: &mut dyn FnMut() -> Result<()>
+    ) -> Result<u64> {
+        let mut db = self.db_with_boundary(before_effect)?;
         require_baseline(&db, expected)?;
+        before_effect()?;
         let tx = db.savepoint()?;
         for old in downloads(&tx)? {
+            before_effect()?;
             if !listed_names.contains(&old.name) {
                 forget_download(&tx, &old.name)?;
             }
         }
         let usn = advance_cursor(&tx, expected.usn)?;
+        before_effect()?;
         tx.commit()?;
         Ok(usn)
     }
@@ -669,20 +803,28 @@ impl MediaStore {
     /// their recorded hashes. A stale stamp stays pending. Server no-ops/gaps
     /// preserve the old USN; clean tombstones remain durable.
     pub fn commit_media_upload(
+        &self, expected: &MediaSyncBaseline, accepted: &[PendingChange], server_usn: u64,
+    ) -> Result<u64> {
+        self.commit_media_upload_with_boundary(expected, accepted, server_usn, &mut || Ok(()))
+    }
+    pub fn commit_media_upload_with_boundary(
         &self,
         expected: &MediaSyncBaseline,
         accepted: &[PendingChange],
         server_usn: u64,
+        before_effect: &mut dyn FnMut() -> Result<()>
     ) -> Result<u64> {
-        let mut db = self.db()?;
+        let mut db = self.db_with_boundary(before_effect)?;
         require_baseline(&db, expected)?;
         journal_db::sqlite_integer(server_usn)?;
         let mut names = BTreeSet::new();
         if accepted.iter().any(|c| !names.insert(&c.name)) {
             return Err(invalid("duplicate accepted media change"));
         }
+        before_effect()?;
         let tx = db.savepoint()?;
         for change in accepted {
+            before_effect()?;
             tx.execute(
                 "UPDATE media SET dirty=0 WHERE name=?1 AND change_counter=?2 AND dirty=1",
                 params![change.name, journal_db::sqlite_integer(change.change_counter)?],
@@ -694,16 +836,24 @@ impl MediaStore {
             expected.usn
         };
         meguri_model::faultpoint!("media.sync.upload.before_commit")?;
+        before_effect()?;
         tx.commit()?;
         Ok(usn)
     }
     /// Y8.5 journal boundary for files already durably published. Hashing is
     /// outside the journal lock; re-stat and stamp checks reject concurrent
     /// writes. All records and their cursor advance commit together.
-    pub fn commit_media_downloads(&self, expected: &MediaSyncBaseline, records: &[MediaDownloadRecord]) -> Result<u64> {
+    pub fn commit_media_downloads(
+        &self, expected: &MediaSyncBaseline, records: &[MediaDownloadRecord],
+    ) -> Result<u64> {
+        self.commit_media_downloads_with_boundary(expected, records, &mut || Ok(()))
+    }
+    pub fn commit_media_downloads_with_boundary(&self, expected: &MediaSyncBaseline, records: &[MediaDownloadRecord], before_effect: &mut dyn FnMut() -> Result<()>
+    ) -> Result<u64> {
         let mut groups: BTreeMap<&str, Vec<&MediaDownloadRecord>> = BTreeMap::new();
         let mut names = BTreeSet::new();
         for record in records {
+            before_effect()?;
             if !names.insert(&record.intent.name) {
                 return Err(invalid("duplicate recorded download"));
             }
@@ -722,6 +872,7 @@ impl MediaStore {
         // A name cannot be both a saved destination and a renamed original
         // awaiting deletion in this batch.
         for record in records {
+            before_effect()?;
             if record.stored_name.as_ref() != Some(&record.intent.name)
                 && journal_name(&record.intent.name)
                 && groups.contains_key(record.intent.name.as_str())
@@ -730,9 +881,10 @@ impl MediaStore {
             }
         }
         let old_entries = {
-            let db = self.db()?;
+            let db = self.db_with_boundary(before_effect)?;
             require_baseline(&db, expected)?;
             for record in records {
+            before_effect()?;
                 if intent(&db, &record.intent.name)?.as_ref() != Some(&record.intent) {
                     return Err(invalid("download intent changed"));
                 }
@@ -770,10 +922,12 @@ impl MediaStore {
             let has_exact = group.iter().any(|record| record.intent.name == name);
             observations.push((name, old, m, hash, has_exact));
         }
-        let mut db = self.db()?;
+        let mut db = self.db_with_boundary(before_effect)?;
         require_baseline(&db, expected)?;
+        before_effect()?;
         let tx = db.savepoint()?;
         for record in records {
+            before_effect()?;
             if intent(&tx, &record.intent.name)?.as_ref() != Some(&record.intent) {
                 return Err(invalid("download intent changed"));
             }
@@ -790,6 +944,7 @@ impl MediaStore {
             }
         }
         for (name, old, m, hash, has_exact) in observations {
+            before_effect()?;
             let entry = MediaEntry {
                 name: name.into(),
                 sha1: Some(hash),
@@ -805,6 +960,7 @@ impl MediaStore {
             journal_db::save(&tx, &entry)?;
         }
         for record in records {
+            before_effect()?;
             if record.stored_name.as_ref() != Some(&record.intent.name) && journal_name(&record.intent.name) {
                 let mut original = journal_db::entry(&tx, &record.intent.name)?.unwrap_or(MediaEntry {
                     name: record.intent.name.clone(),
@@ -837,6 +993,7 @@ impl MediaStore {
         }
         let usn = advance_cursor(&tx, expected.usn)?;
         meguri_model::faultpoint!("media.sync.downloads.before_commit")?;
+        before_effect()?;
         tx.commit()?;
         Ok(usn)
     }
