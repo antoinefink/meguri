@@ -965,7 +965,7 @@ PUBLIC_ARTIFACTS = {
     "docs/process/verification-status.md":
         "acc51afe68cbaca83ceb2f15f5c7ee698e1b11ff6301cd411edad3d7080c1cae",
     'app/Packages/MeguriKit/Sources/AppModel/Collection/SyncCoordinator.swift':
-        'e7dd7ff0478d153d454ed7fc5dd15b212869a6f84f08585a347a5ab803ba6f6a',
+        'e08d22f2441c5f77bb0aa33ad08b315e9650eb81049b6bc047e37b6164fdc6ea',
     'app/Packages/MeguriKit/Tests/AppModelTests/ProviderAdmissionTests.swift':
         '4cf802ffe04f6888219aa637119e12847be828e2590840fd42d35cea9bfa86d7',
     'core/crates/meguri-ffi/src/provider_tests.rs':
@@ -1238,7 +1238,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Sources/Features/Settings/Sync/MeguriSyncSetupViews.swift': '7a44f15263ad7942e0a74b756585833662ccb05340e3cbce785a976a22cbb4f9',
     'app/Packages/MeguriKit/Sources/Features/Settings/Sync/SyncStatusContent.swift': '0e9ebd0d7bd2f126638736ca6268453bf601564b6922895b103cfbde3d5aa0ca',
     'app/Packages/MeguriKit/Tests/AppModelTests/CloudSyncPresentationTests.swift': '11766d5d2ac1a18ba84f91fbb5753fb714ed38b1934278b785b377afbb7d8fff',
-    'app/Packages/MeguriKit/Tests/AppModelTests/ReviewCollectionStartupTests.swift': 'd2a44ffd55ef606588e2eda16cc2588df53bef7dd018663106899cdc2fa34635',
+    'app/Packages/MeguriKit/Tests/AppModelTests/ReviewCollectionStartupTests.swift': 'f099b680942f4551a56746e0f7978b568bf3eec10a4dff0e64f416902f16dc78',
     'core/crates/meguri-host/src/provider_bootstrap.rs': '038e6199bd9e9d63e307023e182caa3632ace08fee94c21563e61854357553bd',
     'core/crates/meguri-host/Cargo.toml': 'ef2e5f907851eb4d19984c899516e6affe5444516b59d245f4501dde2b744a73',
     'core/crates/meguri-host/examples/real_server_provider.rs': 'dacd403385ceea66c4077465a7b5dc76fb6cfbc2373b0e7a0a0e4ba0a3efc65b',
@@ -1249,6 +1249,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Tests/AppModelTests/CloudPreviewActivityTests.swift': '9ad2c7dfb1e320bf428f622df4137fc660375692936788bc8202c11e43dbeded',
     'app/Packages/MeguriKit/Tests/AppModelTests/InitialCloudAdoptionTests.swift': '48ab986acd174f5306188c85a4d44d1232baea6097f2cb1c27a2794392841796',
     'app/Packages/MeguriKit/Tests/AppModelTests/CloudPublicationConfirmationTests.swift': '0b4d975fa51777f92e8a1a2750118073456f20bd9f744699781bc8b4c2a77195',
+    'app/Packages/MeguriKit/Tests/AppModelTests/Support/CloudServiceAppHarness.swift': 'ca43eb8423fe40f9b19356bce3c4005a1c173e1b8e60dcd3d074bb0eb07b1808',
 }
 
 
