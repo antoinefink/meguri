@@ -25,7 +25,7 @@ setup() {
       'volume create') [ "${CREATE_RC:-0}" -eq 0 ] || return 1
         printf '%s\n' "${@: -1}" >"$MG_RUN_DIR/volume" ;;
       'volume inspect') jq -n --arg name "$3" --arg owner "$(jq -r .owner "$MG_SYNC_INSTANCE/instance.json")" \
-        '[{Name:$name,Labels:{"meguri.sync.owner":$owner}}]' ;;
+        --arg run "$MG_RUN_ID" '[{Name:$name,Labels:{"meguri.sync.owner":$owner,"meguri.mg.run-id":$run}}]' ;;
       *) return 97 ;;
     esac
   }
@@ -60,4 +60,39 @@ setup() {
 @test "sync-package: real context assembly rejects synthetic credential inputs" {
   run python3 "$REPO_ROOT/tools/tests/sync_package_context_test.py" "$REPO_ROOT/server/tools/package-context.py"
   [ "$status" -eq 0 ]
+}
+
+@test "sync-package: phase-suffixed volumes retain the real outer ownership run" {
+  MG_SYNC_INSTANCE_SUFFIX=final-rich
+  run mg_sync_package__init "$receipt"
+  [ "$status" -eq 0 ]
+  jq -e --arg run "$MG_RUN_ID" '.run_id==$run and .volume==("meguri-sync-data-"+$run+"-final-rich")' "$MG_SYNC_INSTANCE/instance.json"
+  run mg_sync_package__volume_check
+  [ "$status" -eq 0 ]
+}
+
+@test "sync-package: a failed segment cannot shorten the nine-instance loop or gain credit" {
+  MG_ROOT="$REPO_ROOT" MG_JOB=sync-server-interop
+  mg_failure() { printf '%s\n' "$1" >>"$MG_RUN_DIR/failures"; }
+  mg_artifact() { :; }
+  mg_detail() { printf '%s=%s\n' "$1" "$2" >>"$MG_RUN_DIR/details"; }
+  mg_sync_server__clean() { :; }
+  mg_sync_package__candidate_input() {
+    printf '{"server":{"source_commit":"a","source_sha256":"b","lock_sha256":"c","executable_sha256":"d"}}\n'
+  }
+  mg_sync_server__reference_identity() { printf '{}\n'; }
+  mg_compose() { :; }
+  mg_sync_server__image() { printf 'sha256:%064d\n' 0; }
+  mg_sync_package__final_instance() {
+    printf '%s %s\n' "$MG_RUN_ID" "$2" >>"$MG_RUN_DIR/sequence"
+    [ "$2" != final-normal ]
+  }
+  mg_sync_package__final_assemble() { printf 'assemble\n' >>"$MG_RUN_DIR/sequence"; }
+  run mg_sync_package__final_owned "$receipt" '["--lane","desktop","--phase","final"]' synthetic-author
+  [ "$status" -ne 0 ]
+  [ "$(wc -l <"$MG_RUN_DIR/sequence" | tr -d ' ')" -eq 10 ]
+  [ "$(cut -d ' ' -f 2 "$MG_RUN_DIR/sequence" | head -n 9 | tr '\n' ' ')" = 'final-full final-normal final-media final-migration final-replacement-upload final-replacement-download final-metadata-only final-fresh-fresh final-rich ' ]
+  [ "$(tail -n 1 "$MG_RUN_DIR/sequence")" = assemble ]
+  [ "$(head -n 9 "$MG_RUN_DIR/sequence" | cut -d ' ' -f 1 | sort -u)" = "$MG_RUN_ID" ]
+  ! rg -F 'candidate_compatibility_credit=true' "$MG_RUN_DIR/details"
 }

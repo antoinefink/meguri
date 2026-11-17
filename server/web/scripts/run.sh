@@ -30,6 +30,7 @@ if [ "$mode" = probe ]; then
   exit 0
 fi
 if [ "$mode" = preview ]; then exec node /opt/sync-web/fixture.mjs; fi
+if [ "$mode" = package-preview ]; then exec node /opt/sync-web/fixture.mjs package; fi
 if [ "$mode" = actualserver ]; then
   mkdir -p /work/server /work/core
   cp -R /server/. /work/server/
