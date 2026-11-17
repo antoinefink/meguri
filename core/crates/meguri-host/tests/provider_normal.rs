@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 #[path = "support/meguri_bootstrap_script.rs"] mod bootstrap;
 #[path = "support/meguri_round_script.rs"] mod round;
 use bootstrap as b;

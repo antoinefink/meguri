@@ -486,9 +486,9 @@ mod tests {
         let task = host.prepare_meguri_bootstrap(access, MeguriBootstrapDirection::UseDeviceCollection).unwrap();
         let id = task.job.id;
         let wrapped = connection.job(Source::Preview(Arc::new(task)));
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let deadline = meguri_engine::monotonic::now() + std::time::Duration::from_secs(20);
         loop {
-            let event = events.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())).expect("interrupted worker deadline");
+            let event = events.recv_timeout(deadline.saturating_sub(meguri_engine::monotonic::now())).expect("interrupted worker deadline");
             if matches!(event.kind, meguri_engine::EventKind::JobFinished { id: actual, .. } if actual == id) { break; }
         }
         assert!(matches!(wrapped.result.outcome().unwrap(), ProviderBootstrapOutcome::Pending));
@@ -565,9 +565,9 @@ mod tests {
         let events = connection.owner.host.engine().stream().subscribe();
         let started = connection.start_bootstrap_recovery(pending.clone()).unwrap();
         let id = started.handle.as_ref().unwrap().id;
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let deadline = meguri_engine::monotonic::now() + std::time::Duration::from_secs(20);
         loop {
-            let event = events.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())).expect("offline recovery deadline");
+            let event = events.recv_timeout(deadline.saturating_sub(meguri_engine::monotonic::now())).expect("offline recovery deadline");
             if matches!(event.kind, meguri_engine::EventKind::JobFinished { id: actual, .. } if actual.0 == id) { break; }
         }
         assert!(matches!(started.result.outcome().unwrap(), ProviderBootstrapOutcome::Refused {
@@ -620,9 +620,9 @@ mod tests {
         let events = connection.owner.host.engine().stream().subscribe();
         let job = start();
         let id = job.handle.as_ref().expect("actual worker required").id;
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let deadline = meguri_engine::monotonic::now() + std::time::Duration::from_secs(20);
         loop {
-            let event = events.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())).expect("bootstrap fixture worker deadline");
+            let event = events.recv_timeout(deadline.saturating_sub(meguri_engine::monotonic::now())).expect("bootstrap fixture worker deadline");
             if matches!(event.kind, meguri_engine::EventKind::JobFinished { id: actual, .. } if actual.0 == id) { break; }
         }
         job.result.outcome().unwrap()
@@ -644,9 +644,9 @@ mod tests {
                 use std::io::{BufRead, Read, Write};
                 let mut paths = Vec::new();
                 for (expected, payload) in replies {
-                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+                    let deadline = meguri_engine::monotonic::now() + std::time::Duration::from_secs(20);
                     let (mut socket, _) = loop {
-                        if stopped.load(std::sync::atomic::Ordering::SeqCst) || std::time::Instant::now() >= deadline {
+                        if stopped.load(std::sync::atomic::Ordering::SeqCst) || meguri_engine::monotonic::now() >= deadline {
                             return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "fixture request deadline"));
                         }
                         match listener.accept() {

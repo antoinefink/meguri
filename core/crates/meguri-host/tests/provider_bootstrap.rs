@@ -485,9 +485,9 @@ fn bootstrap_complete<T>(host: &CoreHost, start: impl FnOnce() -> meguri_host::M
     -> Result<T, meguri_sync::oneway::TransferError> {
     let events = host.engine().stream().subscribe();
     let task = start();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let deadline = meguri_engine::monotonic::now() + std::time::Duration::from_secs(20);
     loop {
-        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        let remaining = deadline.saturating_sub(meguri_engine::monotonic::now());
         let event = events.recv_timeout(remaining).expect("bootstrap worker deadline");
         if matches!(event.kind, meguri_engine::EventKind::JobFinished { id, .. } if id == task.job.id) { break; }
     }

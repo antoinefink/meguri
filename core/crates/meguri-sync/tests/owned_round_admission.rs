@@ -10,7 +10,8 @@ struct Body(Option<Bytes>);
 impl RawBody for Body {
     fn next(&mut self) -> BoxFuture<'_, Result<Option<Bytes>, SyncError>> { Box::pin(async move { Ok(self.0.take()) }) }
 }
-struct Script(Arc<Mutex<VecDeque<(Method, Vec<u8>)>>>);
+type ScriptReplies = Arc<Mutex<VecDeque<(Method, Vec<u8>)>>>;
+struct Script(ScriptReplies);
 impl SyncTransport for Script {
     fn post(&self, mut request: TransportRequest) -> BoxFuture<'_, Result<TransportResponse, SyncError>> {
         Box::pin(async move {
