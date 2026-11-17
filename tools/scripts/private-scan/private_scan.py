@@ -831,7 +831,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Sources/AppModel/Collection/SyncCoordinator.swift':
         '47539f27d24565d47ab921dadcd21c0e3fc1c4664b3f09059489554f96e3bcae',
     'app/Packages/MeguriKit/Tests/AppModelTests/ProviderAdmissionTests.swift':
-        'c25c16744537d8ca65527ea7c9eb36970266c48a54693279ce1f01a1074bd275',
+        '0723e1442b57ec4426be220c02cf0c93011cd7964281a7cc555d333f64bbb305',
     'core/crates/meguri-ffi/src/provider_tests.rs':
         '0a1a65dce24702eda82b38a3c229604bf613a28c69c134735b02d1097775757f',
     "docs/process/review-log/meguri-provider-admission-20261117.md":

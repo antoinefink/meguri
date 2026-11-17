@@ -214,3 +214,23 @@ Filtered author `032119-17542` changes only those two declarations to
 `provider_test_delta_review` clears P0–P2. Weak ownership, automatic zeroing,
 mutable original-owner release and every lifetime/join assertion remain.
 The exact reviewed bytes are applied. AppModel execution is still pending.
+
+## Remaining weak observer
+
+`swift-test/20261117T032850Z-19790` fails before tests on clean
+`876f7aab`. The earlier two diagnostics are gone. Its next compile batch
+reports one more read-only weak local in ProviderAdmissionTests.
+Filtered author `033226-22096` changes only that declaration to `weak let`.
+Independent `provider_test_delta_review` clears P0–P2; weak zeroing and
+every handoff assertion remain unchanged. No AppModel runtime pass is claimed.
+
+The same non-author reviewed the complete updated file, including all
+comments, literals, data and paths: PUBLIC, 334 lines, 21,205 bytes.
+SHA-256: `0723e1442b57ec4426be220c02cf0c93011cd7964281a7cc555d333f64bbb305`.
+The integrator verified the exact bytes and refreshed only the existing
+path digest. Matcher behavior, tokens and private access stay unchanged.
+Both failed AppModel receipts remain retained.
+
+Scoped privacy `033658-24434`, static `033656-23665` and similarity
+`033655-23386` pass. The filtered similarity report was read.
+Scanner regression `20261117T033656Z-23780` passes its one case with zero skips.

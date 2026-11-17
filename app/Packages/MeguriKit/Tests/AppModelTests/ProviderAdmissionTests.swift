@@ -261,7 +261,7 @@ import Testing
                     #expect(!(await current.retryFailedProviderPublication()))
                     await current.retryProviderAuthority()
                     #expect(try Data(contentsOf: file) == committed)
-                    weak var successorLifetime = reopened.sync
+                    weak let successorLifetime = reopened.sync
                     try #require(await reopened.sync.changeProvider(to: .meguri))
                     #expect(successorLifetime == nil, "Repeated recovery/handoff must release drained predecessors")
                     try #require(await reopened.sync.changeProvider(to: .localOnly))
