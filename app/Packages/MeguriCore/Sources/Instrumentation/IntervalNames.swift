@@ -404,6 +404,8 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let cloudPolicyReadinessResult = BridgeCall("CloudPolicyReadinessResult.result")
     public static let cloudPolicyExecutionResult = BridgeCall("CloudPolicyExecutionResult.result")
     public static let cloudPolicyExecutionStartRegisterSdk = BridgeCall("CloudPolicyExecution.start_register_sdk")
+    public static let cloudPolicyExecutionStartPrepareRuntimeAttempt = BridgeCall("CloudPolicyExecution.start_prepare_runtime_attempt")
+    public static let cloudPolicyPreparationDetailedResult = BridgeCall("CloudPolicyPreparationResult.detailed_result")
     public static let cloudPolicyExecutionStartRetireOriginal = BridgeCall("CloudPolicyExecution.start_retire_original")
     public static let cloudPolicyRegistrationResult = BridgeCall("CloudPolicyRegistrationResult.result")
     public static let cloudPolicyRetirementResult = BridgeCall("CloudPolicyRetirementResult.result")
@@ -596,6 +598,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         cloudWorkflowBeginFirstAssetReadPass, cloudPolicyExecutionBeginAssetReadPass, cloudAssetReadPassNext, cloudAssetReadPassStartNext, cloudAssetReadNextResult, cloudAssetReadPassSubmit, cloudAssetReadPassComplete, cloudAssetReadPassCancel, cloudAssetReadPassFinish, cloudAssetReadPassOperationActivity,
         cloudWorkflowMedia, cloudWorkflowSubmitMediaBatch, cloudMediaDownloadsBlocked, cloudPolicyExecutionBeginMedia, cloudPolicyExecutionContinueMediaAfterSend, cloudMediaNextWork, cloudMediaStartNextWork, cloudMediaNextWorkResult, cloudMediaSubmitRead, cloudMediaQueueUpload, cloudMediaReply,
         cloudPolicyExecutionStartRegisterSdk, cloudPolicyExecutionStartRetireOriginal, cloudPolicyRegistrationResult, cloudPolicyRetirementResult,
+        cloudPolicyExecutionStartPrepareRuntimeAttempt, cloudPolicyPreparationDetailedResult,
         cloudPolicyExecutionStartReportInvocation, cloudPolicyExecutionStartReportStarted, cloudPolicyExecutionStartReportCompletion, cloudPolicyExecutionStartBeginMedia, cloudPolicyMediaResult, cloudPolicyExecutionStartBeginFetch, cloudPolicyFetchResult, cloudPolicyExecutionStartBeginSend, cloudPolicySendResult,
         cloudPolicyExecutionStartValidateControl, cloudPolicyControlResult, cloudPolicyExecutionStartContinueMediaAfterSend, cloudPolicyMediaContinuationResult, cloudPolicyExecutionStartPrepareFlush,
         cloudPolicyExecutionStartBeginAssetReadPass, cloudWorkflowStartBeginFirstAssetReadPass, cloudPolicyAssetReadPassResult,

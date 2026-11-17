@@ -63,12 +63,46 @@ pub struct CloudPolicyExecution {
     pub(super) command: Arc<CloudPolicyCommand>,
     original_sdk: Option<String>,
     media_origin: Option<meguri_sync::cloud::adapter::PolicyMediaOrigin>,
+    issued_preparation: Option<(Weak<meguri_host::CoreHost>, meguri_engine::Generation,
+        meguri_sync::cloud::runtime::ProviderIssuanceTicket)>,
     registration: Mutex<Registration>,
     pub(crate) cleanup_begun: std::sync::atomic::AtomicBool,
     pub(crate) zone_deletion_begun: std::sync::atomic::AtomicBool,
 }
 
 impl CloudPolicyExecution {
+    pub(super) fn prepare_runtime_attempt_with_work(
+        &self,
+        work: &mut p::PolicyWork,
+    ) -> Result<(), super::policy_jobs::AttemptFailure> {
+        self.policy().owns(&self.command)?;
+        // Revalidate the issued command and work's cancellation/owner/generation
+        // on the worker before any preparation effect. Driver locks end here.
+        self.policy().driver()?.validate_with_work(&self.command.command, work)
+            .map_err(execution_error)?;
+        let Some((host, generation, ticket)) = &self.issued_preparation else {
+            return self.policy().host.prepare_cloud_runtime(Duration::from_secs(1))
+                .map_err(crate::sync::cloud_error).map_err(Into::into);
+        };
+        if Weak::as_ptr(host) != Arc::as_ptr(&self.policy().host) {
+            return Err(crate::sync::cloud_error(
+                meguri_sync::cloud::runtime::RuntimeError::StaleIncarnation).into());
+        }
+        if generation.0 != self.policy().generation {
+            return Err(failure(CloudPolicyFailure::GenerationChanged).into());
+        }
+        self.policy().host.prepare_cloud_runtime_attempt(*generation, ticket, Duration::from_secs(1))
+            .map_err(|failure| {
+                let (error, own_handoff) = failure.into_parts();
+                super::policy_jobs::AttemptFailure {
+                    error: crate::sync::cloud_error(error),
+                    refusal: own_handoff.map(|fact| Arc::new(super::policy_jobs::CloudPolicyOriginalGuardRefusal {
+                        _fact: super::policy_jobs::OriginalGuardRefusalFact::OwnHandoff(fact),
+                        _owner: Arc::downgrade(self.policy()),
+                    })),
+                }
+            })
+    }
     pub(super) fn operation_activity_with_work(
         &self,
         facts: CloudPolicyOperationFacts,
@@ -546,10 +580,19 @@ impl CloudPolicy {
                 .map_err(|failure| super::policy_jobs::AttemptFailure::from_driver(failure, execution_error, &self))?
         };
         work.check().map_err(crate::cloud_connection::error)?;
+        // No Driver, publication or Runtime guard survives the calls above.
+        // Capturing optional evidence cannot change preparation's result.
+        let issued_preparation = if matches!(command.command.action.kind, p::ActionKind::StartEngine { .. }) {
+            self.host.issue_cloud_preparation()
+                .map(|(generation, ticket)| (Arc::downgrade(&self.host), generation, ticket))
+        } else {
+            None
+        };
         Ok(Some(Arc::new(CloudPolicyExecution {
             command,
             original_sdk,
             media_origin,
+            issued_preparation,
             registration: Mutex::new(Registration::default()),
             cleanup_begun: std::sync::atomic::AtomicBool::new(false),
             zone_deletion_begun: std::sync::atomic::AtomicBool::new(false),

@@ -679,6 +679,30 @@ impl Runtime {
         timeout: Duration,
     ) -> Result<(), RuntimeError> {
         Self::provider_admission_locked(&self.state())?;
+        self.prepare_binding_after_admission(collection, media, timeout)
+    }
+
+    pub fn prepare_binding_attempt(
+        &self,
+        collection: &Collection,
+        media: &meguri_engine::media::MediaService,
+        timeout: Duration,
+        ticket: &ProviderIssuanceTicket,
+        expected_generation: u64,
+    ) -> Result<(), PreparationAttemptFailure> {
+        {
+            let s = self.state();
+            Self::provider_admission_attempt_locked(&s, &self.state, ticket, expected_generation)?;
+        }
+        self.prepare_binding_after_admission(collection, media, timeout).map_err(Into::into)
+    }
+
+    fn prepare_binding_after_admission(
+        &self,
+        collection: &Collection,
+        media: &meguri_engine::media::MediaService,
+        timeout: Duration,
+    ) -> Result<(), RuntimeError> {
         match self.prepare_binding_inner(collection, media, timeout)
             .map_err(|e| self.remember_layout_refusal(collection, e))
         {

@@ -27,6 +27,21 @@ actor CloudPolicyOrder {
     }
 }
 
+extension CoreCloudPolicyExecution {
+    func prepareRuntimeAttempt() async throws {
+        let raw = self.raw
+        let detail: MeguriCoreBindings.CloudPolicyPreparationDetail = try await CoreCloudPolicyService.runOrdered(
+            .cloudPolicyExecutionStartPrepareRuntimeAttempt, result: .cloudPolicyPreparationDetailedResult,
+            retainResourceResultOnTrackingFailure: true
+        ) { [raw] in
+            let started = try raw.startPrepareRuntimeAttempt()
+            return CloudPolicyJobValue(handle: started.handle, read: { try started.result.detailedResult() })
+        }
+        if let error = detail.error { throw CloudPolicyAttemptError(error, detail.originalGuardRefusal) }
+        guard detail.value != nil else { throw BridgeError.internal("Policy result missing its stored outcome") }
+    }
+}
+
 struct CloudPolicyJobValue<Value: Sendable>: Sendable {
     let handle: MeguriCoreBindings.JobHandle
     let read: @Sendable () throws -> Value?

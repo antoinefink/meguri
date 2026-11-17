@@ -3,7 +3,7 @@ use super::*;
 use meguri_sync::cloud::{
     adoption::{AdoptionCancellation, AdoptionReply, AdoptionWork},
     publication::Preview,
-    runtime::RuntimeError,
+    runtime::{PreparationAttemptFailure, ProviderIssuanceTicket, RuntimeError},
 };
 impl CoreHost {
     /// V12.2 local facts are available even without cloud configuration. This
@@ -100,6 +100,27 @@ impl CoreHost {
         self.cloud_connection_generation()?;
         self.cloud_runtime().ok_or_else(unavailable)?
             .prepare_binding(&self.cloud_connection_collection()?, &self.media()?, timeout)
+    }
+    pub fn issue_cloud_preparation(&self) -> Option<(meguri_engine::Generation, ProviderIssuanceTicket)> {
+        // L0 is released by cloud_connection_generation before Runtime enters L1.
+        let generation = self.cloud_connection_generation().ok()?;
+        let ticket = self.cloud_runtime()?.issue_provider_ticket()?;
+        Some((generation, ticket))
+    }
+    pub fn prepare_cloud_runtime_attempt(
+        &self,
+        generation: meguri_engine::Generation,
+        ticket: &ProviderIssuanceTicket,
+        timeout: std::time::Duration,
+    ) -> Result<(), PreparationAttemptFailure> {
+        if self.cloud_connection_generation().map_err(RuntimeError::from)? != generation {
+            return Err(RuntimeError::StaleIncarnation.into());
+        }
+        self.cloud_runtime().ok_or_else(unavailable)?
+            .prepare_binding_attempt(
+                &self.cloud_connection_collection().map_err(RuntimeError::from)?,
+                &self.media().map_err(RuntimeError::from)?, timeout, ticket, generation.0,
+            )
     }
     pub fn begin_cloud_connection_preview(&self) -> Result<meguri_sync::cloud::publication::PreviewWork, RuntimeError> {
         self.cloud_connection_generation()?;

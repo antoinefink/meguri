@@ -32,7 +32,7 @@ pub struct CloudBinding {
     container: String, environment: crate::cloud::Environment,
 }
 impl CloudBinding {
-    fn matches(&self, binding: &Binding) -> bool {
+    pub(crate) fn matches(&self, binding: &Binding) -> bool {
         self.binding == binding.id.0 && self.account == binding.facts.account.0
             && self.publication.identity == binding.facts.publication
             && self.container == binding.scope.container.as_str() && self.environment == binding.scope.environment
@@ -45,7 +45,12 @@ pub struct HandoffIntent {
     publication: Option<Publication>, generation: u64, revision: u64,
     remove_credentials: bool,
 }
-impl HandoffIntent { pub fn removal_pending(&self) -> bool { self.remove_credentials } }
+impl HandoffIntent {
+    pub fn removal_pending(&self) -> bool { self.remove_credentials }
+    pub(crate) fn revision(&self) -> u64 { self.revision }
+    pub(crate) fn generation(&self) -> u64 { self.generation }
+    pub(crate) fn binding(&self) -> Option<&CloudBinding> { self.binding.as_ref() }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderDocument {
     pub version: u64, pub revision: u64, pub selection: Selection,
@@ -127,7 +132,7 @@ fn put(doc: &mut Map<String, Value>, value: &ProviderDocument) -> Result<(), Sto
 /// One retained installation owner. Runtime checks only its bounded cached facts;
 /// sidecar operations never hold Runtime/tracking ownership.
 pub struct Authority {
-    path: PathBuf, state: Mutex<Result<ProviderDocument, StorageError>>,
+    path: PathBuf, state: Mutex<AuthorityState>,
     open: AtomicBool,
     writers: AtomicBool,
     discovery: Mutex<(u64, usize)>,
@@ -140,6 +145,26 @@ pub struct Authority {
     #[cfg(feature = "test-hooks")]
     cancellation_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     restart_intent: Option<HandoffIntent>,
+}
+struct AuthorityState {
+    document: Result<ProviderDocument, StorageError>,
+    closures: AdmissionClosures,
+}
+/// Local closure identity; never serialized or used as a policy/SDK token.
+#[derive(Clone)]
+pub(crate) struct AdmissionClosures {
+    ordinary: Arc<()>,
+    handoff_revision: Option<u64>,
+}
+impl AdmissionClosures {
+    pub(crate) fn owns_handoff_since(&self, issued: &Self, handoff: &HandoffIntent) -> bool {
+        Arc::ptr_eq(&self.ordinary, &issued.ordinary)
+            && self.handoff_revision == Some(handoff.revision())
+    }
+    fn ordinary_close(&mut self) {
+        self.ordinary = Arc::new(());
+        self.handoff_revision = None;
+    }
 }
 struct PendingPublication {
     before: Map<String, Value>, desired: Map<String, Value>, document: ProviderDocument,
@@ -177,7 +202,9 @@ impl Authority {
         let path = root.join("provider.json");
         let state = sidecar::read_document(&path, decode).and_then(|document| document.ok_or_else(invalid));
         let restart_intent = state.as_ref().ok().and_then(|doc| doc.handoff.clone());
-        Arc::new(Self { path, state: Mutex::new(state), open: AtomicBool::new(true), writers: AtomicBool::new(false), discovery: Mutex::new((0, 0)),
+        Arc::new(Self { path, state: Mutex::new(AuthorityState { document: state,
+                closures: AdmissionClosures { ordinary: Arc::new(()), handoff_revision: None } }),
+            open: AtomicBool::new(true), writers: AtomicBool::new(false), discovery: Mutex::new((0, 0)),
             original_completion: AtomicBool::new(false), completion: Mutex::new(None),
             publication_failure: Mutex::new(None),
             #[cfg(feature = "test-hooks")]
@@ -210,32 +237,56 @@ impl Authority {
         })
     }
     pub fn snapshot(&self) -> Result<ProviderDocument, StorageError> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner).clone()
+        self.state.lock().unwrap_or_else(PoisonError::into_inner).document.clone()
     }
-    pub fn close_admission(&self) { self.open.store(false, Ordering::SeqCst); self.writers.store(false, Ordering::SeqCst); }
+    pub(crate) fn restart_intent(&self) -> Option<&HandoffIntent> { self.restart_intent.as_ref() }
+    pub fn close_admission(&self) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.closures.ordinary_close();
+        self.open.store(false, Ordering::SeqCst);
+        self.writers.store(false, Ordering::SeqCst);
+    }
     pub fn network_blocked(&self) -> bool { !self.open.load(Ordering::SeqCst) }
     pub fn reload(&self) -> Result<(), StorageError> {
         let failure = self.publication_failure.lock().unwrap_or_else(PoisonError::into_inner);
         self.close_admission();
         if let Some(failure) = failure.as_ref() { return Err(failure.error.clone()); }
         let value = sidecar::read_document(&self.path, decode).and_then(|doc| doc.ok_or_else(invalid));
-        *self.state.lock().unwrap_or_else(PoisonError::into_inner) = value.clone();
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.document = value.clone();
         value?;
         self.open.store(true, Ordering::SeqCst);
         Ok(())
     }
     pub(crate) fn validate_current_binding(&self, binding: &Binding, publication: &Publication) {
-        let valid = self.snapshot().is_ok_and(|doc| doc.handoff.is_none()
-            && doc.binding.as_ref().is_some_and(|stored| stored.matches(binding) && &stored.publication == publication)
-            && publication.decision == PublicationDecision::Clear);
-        self.writers.store(valid, Ordering::SeqCst);
+        let (valid, completion) = {
+            let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+            let valid = state.document.as_ref().is_ok_and(|doc| doc.handoff.is_none()
+                && doc.binding.as_ref().is_some_and(|stored| stored.matches(binding) && &stored.publication == publication)
+                && publication.decision == PublicationDecision::Clear);
+            if !valid { state.closures.ordinary_close(); }
+            self.writers.store(valid, Ordering::SeqCst);
+            (valid, state.document.as_ref().ok().and_then(|doc| doc.binding.clone()))
+        };
         if valid {
-            *self.completion.lock().unwrap_or_else(PoisonError::into_inner) = self.snapshot().ok().and_then(|doc| doc.binding);
+            *self.completion.lock().unwrap_or_else(PoisonError::into_inner) = completion;
         }
     }
     pub fn permits_icloud_binding(&self, binding: &Binding) -> bool {
-        self.open.load(Ordering::SeqCst) && self.writers.load(Ordering::SeqCst) && self.snapshot().is_ok_and(|doc|
-            doc.permits_icloud() && doc.binding.as_ref().is_some_and(|b| b.matches(binding)))
+        self.open.load(Ordering::SeqCst) && self.writers.load(Ordering::SeqCst)
+            && self.snapshot().is_ok_and(|doc| doc.permits_icloud()
+                && doc.binding.as_ref().is_some_and(|b| b.matches(binding)))
+    }
+    /// L3 protects all predicate writes, the document and closure provenance.
+    /// The bounded sample must not acquire another lock or perform provider I/O.
+    pub(crate) fn with_admission_sample<T>(&self, binding: &Binding,
+        sample: impl FnOnce(&Result<ProviderDocument, StorageError>, bool, &AdmissionClosures) -> T,
+    ) -> T {
+        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let permits = self.open.load(Ordering::SeqCst) && self.writers.load(Ordering::SeqCst)
+            && state.document.as_ref().is_ok_and(|doc| doc.permits_icloud()
+                && doc.binding.as_ref().is_some_and(|b| b.matches(binding)));
+        sample(&state.document, permits, &state.closures)
     }
     /// Original completions can settle during a durable handoff. Native enqueue
     /// continues to use permits_icloud_binding, which closes immediately.
@@ -304,14 +355,30 @@ impl Authority {
     }
     pub fn begin_handoff_with_removal(self: &Arc<Self>, destination: Selection, publication: Option<Publication>, generation: u64, remove_credentials: bool) -> Result<Handoff, StorageError> {
         self.original_completion.store(self.completion.lock().unwrap_or_else(PoisonError::into_inner).is_some(), Ordering::SeqCst);
-        let doc = self.update(|doc| {
+        let mut failure = self.publication_failure.lock().unwrap_or_else(PoisonError::into_inner);
+        {
+            let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+            // Only this private durable path preserves ordinary closure identity.
+            // No evidence exists during I/O or after a failed publication.
+            state.closures.handoff_revision = None;
+            self.open.store(false, Ordering::SeqCst);
+            self.writers.store(false, Ordering::SeqCst);
+        }
+        if let Some(failure) = failure.as_ref() { return Err(failure.error.clone()); }
+        let result = self.write_publication_locked(&mut failure, None, false, |_, doc| {
             if doc.handoff.is_some() { return Err(invalid()); }
             doc.revision = doc.revision.checked_add(1).ok_or_else(invalid)?;
             doc.handoff = Some(HandoffIntent { old: doc.selection, destination, binding: doc.binding.clone(),
                 publication, generation, revision: doc.revision, remove_credentials });
             Ok(())
-        })?;
-        self.close_admission();
+        });
+        {
+            let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+            state.document = result.clone();
+            state.closures.handoff_revision = result.as_ref().ok()
+                .and_then(|doc| doc.handoff.as_ref().map(HandoffIntent::revision));
+        }
+        let doc = result?;
         Ok(Handoff { owner: self.clone(), intent: doc.handoff.ok_or_else(invalid)? })
     }
     /// Called only after the production owner joined its original native work.
@@ -415,16 +482,19 @@ impl Authority {
         });
         match result {
             Ok(doc) => {
-                *self.state.lock().unwrap_or_else(PoisonError::into_inner) = Ok(doc.clone());
+                self.state.lock().unwrap_or_else(PoisonError::into_inner).document = Ok(doc.clone());
                 *failure = None;
                 if doc.handoff.is_none() { self.retire_original_completions(); }
-                self.open.store(true, Ordering::SeqCst);
+                {
+                    let _state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+                    self.open.store(true, Ordering::SeqCst);
+                }
                 Ok(doc)
             }
             Err(error) => {
                 // Preserve the original publication failure category and the
                 // retained desired mutation even when retry also fails.
-                *self.state.lock().unwrap_or_else(PoisonError::into_inner) = Err(failed.error.clone());
+                self.state.lock().unwrap_or_else(PoisonError::into_inner).document = Err(failed.error.clone());
                 Err(error)
             }
         }
@@ -469,6 +539,19 @@ impl Authority {
     ) -> Result<ProviderDocument, StorageError> {
         self.close_admission();
         if let Some(failure) = failure.as_ref() { return Err(failure.error.clone()); }
+        let result = self.write_publication_locked(failure, facts, retryable, change);
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.document = result.clone();
+        if result.is_ok() { self.open.store(true, Ordering::SeqCst); }
+        result
+    }
+    // L1 is held. Sidecar I/O holds neither Runtime State nor the L3 cache.
+    // Each caller publishes the result under L3 with its admission transition.
+    fn write_publication_locked(&self, failure: &mut Option<PublicationFailure>,
+        facts: Option<(u64, Option<Publication>)>, retryable: bool,
+        change: impl FnOnce(&mut Map<String, Value>, &mut ProviderDocument) -> Result<(), StorageError>,
+    ) -> Result<ProviderDocument, StorageError> {
+        if let Some(failure) = failure.as_ref() { return Err(failure.error.clone()); }
         let mut pending = None;
         let mut entered = false;
         let result = sidecar::update_document(&self.path, |raw| {
@@ -480,9 +563,7 @@ impl Authority {
             pending = Some(PendingPublication { before, desired: raw.clone(), document: doc.clone(), facts, retryable, cancel: None });
             Ok(doc)
         });
-        *self.state.lock().unwrap_or_else(PoisonError::into_inner) = result.clone();
-        if result.is_ok() { self.open.store(true, Ordering::SeqCst); }
-        else if (pending.is_some() || !entered) && let Err(error) = &result {
+        if (pending.is_some() || !entered) && let Err(error) = &result {
             *failure = Some(PublicationFailure { error: error.clone(), pending });
         }
         result
@@ -525,7 +606,10 @@ impl Authority {
         // Keep setup and qualifiers excluded through removal of the op. There
         // is no provider I/O while this closure holds State/tracking.
         finish(restored)?;
-        if restored { self.open.store(true, Ordering::SeqCst); }
+        if restored {
+            let _state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+            self.open.store(true, Ordering::SeqCst);
+        }
         Ok(restored)
     }
     /// Pauses with publication ownership only, after the actual current check.
@@ -548,12 +632,12 @@ impl Authority {
             });
             return match result {
                 Ok(doc) => {
-                    *self.state.lock().unwrap_or_else(PoisonError::into_inner) = Ok(doc);
+                    self.state.lock().unwrap_or_else(PoisonError::into_inner).document = Ok(doc);
                     *failure = None;
                     Ok(true)
                 }
                 Err(_) => {
-                    *self.state.lock().unwrap_or_else(PoisonError::into_inner) = Err(error.clone());
+                    self.state.lock().unwrap_or_else(PoisonError::into_inner).document = Err(error.clone());
                     Err(error)
                 }
             };
@@ -568,7 +652,7 @@ impl Authority {
                 // No predecessor or provider association exists to restore.
                 // Preserve pending consent and every raw byte: this validated
                 // read performs no mutation requiring durable re-publication.
-                *self.state.lock().unwrap_or_else(PoisonError::into_inner) = Ok(doc);
+                self.state.lock().unwrap_or_else(PoisonError::into_inner).document = Ok(doc);
                 return Ok(true);
             }
             let mapping = |binding: &Binding, publication: &Publication| -> Result<CloudBinding, StorageError> {
@@ -625,11 +709,11 @@ impl Authority {
                 *raw = desired;
                 Ok(())
             })?;
-            *self.state.lock().unwrap_or_else(PoisonError::into_inner) = Ok(doc);
+            self.state.lock().unwrap_or_else(PoisonError::into_inner).document = Ok(doc);
             Ok(true)
         })();
         if pending.is_some() && let Err(error) = &result {
-            *self.state.lock().unwrap_or_else(PoisonError::into_inner) = Err(error.clone());
+            self.state.lock().unwrap_or_else(PoisonError::into_inner).document = Err(error.clone());
             *failure = Some(PublicationFailure { error: error.clone(), pending });
         }
         result

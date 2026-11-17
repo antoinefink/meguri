@@ -828,6 +828,20 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    # Complete final-content PUBLIC review: U37/t1m3, native-repair-fix1, 2026-11-17.
+    "core/crates/meguri-ffi/src/cloud_policy_execution.rs":
+        "d12ca5c4b84bbebf1916f6166715f86c255c57380091affd8f8780475bf9f3f9",
+    "core/crates/meguri-ffi/src/cloud_policy_jobs.rs":
+        "8302ab993a06ca1808705c51af3ceb2b73a84dd15ae382fbbe2ced8605482d17",
+    "core/crates/meguri-host/src/cloud_adoption.rs":
+        "cd46dffc0816cf3fd5ffe231abab5cb1f856a7074c925cb6d80cd87dd567376b",
+    "core/crates/meguri-host/tests/own_handoff_attribution.rs":
+        "61735c7012d7cc0d883d0caa5d211ebb426ff5181e1e6be4db060932079aa709",
+    "core/crates/meguri-sync/src/cloud/runtime.rs":
+        "56399c071f59b6e58e8ea0f282ca47c36ac84a8c7593d35873072861db5e5210",
+    "core/crates/meguri-sync/src/cloud/workflow_runtime.rs":
+        "6bb6bb78447586c080d7b19adc9aae19447489c2d9d5f36bca3bd471863cb76f",
+
     'docs/process/review-log/meguri-sync-U10.md':
         '565221177f72b2182784c8c442b1c07eda55c6d33186dfe1add3f36e0474cdf0',
     'server/Dockerfile':
@@ -865,7 +879,7 @@ PUBLIC_ARTIFACTS = {
         "31af001e272ebcc61ca299e3d932f6f29bc5da69551389305956ef92cd9f0e40",
     # Complete public-source review; future bytes remain checked.
     "core/crates/meguri-sync/src/provider.rs":
-        "cf9a25cf5e229bbb62147c7304143d4e347b8a4fb6da7b5826de22a9b5be25bc",
+        "99704468573dab0c7f172a7ba0290cc3ccfe616e0fe9a2d6e4a475022d8b2314",
     "core/crates/meguri-host/tests/cloud_publication_phase.rs":
         "9c5b08115ee7c9969554a0f6d68628cca262a7def0aee665866f0ebab78de622",
     "docs/process/review-log/cancellation-provider-restoration-20261117.md":

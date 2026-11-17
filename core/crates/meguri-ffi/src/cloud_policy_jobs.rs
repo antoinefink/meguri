@@ -3,11 +3,29 @@
 use super::*;
 use meguri_engine::{EngineError, Generation};
 
-/// Created only by the Driver at the original refusal.
-#[derive(Debug, uniffi::Object)]
+pub(super) enum OriginalGuardRefusalFact {
+    Driver(p::OriginalIssuedGuardSuperseded),
+    OwnHandoff(meguri_sync::cloud::runtime::OwnHandoffAdmissionRefusal),
+}
+impl std::fmt::Debug for OriginalGuardRefusalFact {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Driver(fact) => f.debug_tuple("Driver").field(fact).finish(),
+            Self::OwnHandoff(fact) => f.debug_tuple("OwnHandoff").field(fact).finish(),
+        }
+    }
+}
+/// Sealed evidence sampled by the original rejecting guard.
+#[derive(uniffi::Object)]
 pub struct CloudPolicyOriginalGuardRefusal {
-    pub(super) _fact: p::OriginalIssuedGuardSuperseded,
+    pub(super) _fact: OriginalGuardRefusalFact,
     pub(super) _owner: Weak<CloudPolicy>,
+}
+impl std::fmt::Debug for CloudPolicyOriginalGuardRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Forward only the already-redacted fact, never the policy owner.
+        std::fmt::Debug::fmt(&self._fact, f)
+    }
 }
 #[derive(Clone, Debug)]
 pub(crate) struct AttemptFailure {
@@ -29,7 +47,7 @@ impl AttemptFailure {
             error: map(failure.error),
             refusal: failure.refusal.map(|fact| {
                 Arc::new(CloudPolicyOriginalGuardRefusal {
-                    _fact: fact,
+                    _fact: OriginalGuardRefusalFact::Driver(fact),
                     _owner: Arc::downgrade(owner),
                 })
             }),
@@ -145,6 +163,7 @@ typed_result!(
     crate::sync::CloudEngineRegistration
 );
 typed_result!(CloudPolicyRetirementResult, CloudPolicyRetirementJob, bool);
+typed_result!(CloudPolicyPreparationResult, CloudPolicyPreparationJob, bool);
 typed_result!(CloudPolicyMediaResult, CloudPolicyMediaJob, bool);
 typed_result!(CloudPolicyControlResult, CloudPolicyControlJob, bool);
 typed_result!(
@@ -204,6 +223,7 @@ detailed_result!(
     CloudPolicyPreparedExecution
 );
 detailed_result!(CloudPolicyMediaResult, CloudPolicyMediaDetail, bool);
+detailed_result!(CloudPolicyPreparationResult, CloudPolicyPreparationDetail, bool);
 
 impl CloudPolicy {
     pub(crate) fn start_policy<T: Send + 'static>(
@@ -268,6 +288,19 @@ impl CloudPolicy {
 
 #[uniffi::export]
 impl CloudPolicyExecution {
+    pub fn start_prepare_runtime_attempt(self: Arc<Self>) -> Result<CloudPolicyPreparationJob, CoreError> {
+        callback::enter("CloudPolicyExecution.start_prepare_runtime_attempt");
+        self.policy().owns(&self.command)?;
+        let (handle, cell) = self.policy().clone()
+            .start_policy_attempt("CloudPolicyExecution.prepare_runtime_attempt", move |_, work| {
+                self.prepare_runtime_attempt_with_work(work)?;
+                Ok(true)
+            })?;
+        Ok(CloudPolicyPreparationJob {
+            handle,
+            result: Arc::new(CloudPolicyPreparationResult { cell }),
+        })
+    }
     pub fn start_begin_asset_read_pass(self: Arc<Self>) -> Result<CloudPolicyAssetReadPassJob, CoreError> {
         callback::enter("CloudPolicyExecution.start_begin_asset_read_pass");
         self.policy().owns(&self.command)?;

@@ -8,7 +8,7 @@ pub mod diagnostics_export;
 
 use std::{
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, MutexGuard, PoisonError},
+    sync::{Arc, Mutex, MutexGuard, PoisonError, Weak},
     time::Duration,
 };
 
@@ -693,6 +693,46 @@ struct NoCollectionIdentityOwner {
     incarnation: u64,
 }
 
+/// Process-local admission captured from the actual Runtime and provider.
+/// No constructor, cloning or serialized representation can issue this ticket.
+pub struct ProviderIssuanceTicket {
+    runtime: Weak<Mutex<State>>,
+    authority: Weak<crate::provider::Authority>,
+    incarnation: u64,
+    binding: BindingId,
+    provider_binding: crate::provider::CloudBinding,
+    revision: u64,
+    closures: crate::provider::AdmissionClosures,
+}
+
+/// Built only at the refusing preparation guard from its current document.
+pub struct OwnHandoffAdmissionRefusal {
+    _intent: crate::provider::HandoffIntent,
+}
+impl std::fmt::Debug for OwnHandoffAdmissionRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OwnHandoffAdmissionRefusal")
+            .field("revision", &self._intent.revision())
+            .field("generation", &self._intent.generation())
+            .finish()
+    }
+}
+
+#[derive(Debug)]
+pub struct PreparationAttemptFailure {
+    pub error: RuntimeError,
+    own_handoff: Option<OwnHandoffAdmissionRefusal>,
+}
+impl PreparationAttemptFailure {
+    pub fn own_handoff(&self) -> Option<&OwnHandoffAdmissionRefusal> { self.own_handoff.as_ref() }
+    pub fn into_parts(self) -> (RuntimeError, Option<OwnHandoffAdmissionRefusal>) {
+        (self.error, self.own_handoff)
+    }
+}
+impl From<RuntimeError> for PreparationAttemptFailure {
+    fn from(error: RuntimeError) -> Self { Self { error, own_handoff: None } }
+}
+
 /// Host-owned ports accept a collection handle for each read call.
 pub struct Runtime {
     directory: PathBuf,
@@ -824,6 +864,89 @@ impl Runtime {
             })?;
         }
         Ok(())
+    }
+    pub fn issue_provider_ticket(&self) -> Option<ProviderIssuanceTicket> {
+        // Release this temporary State guard before taking publication ownership.
+        let provider = self.state().provider.clone()?;
+        provider.with_publication_ownership(|| {
+            let s = self.state();
+            if !s.provider.as_ref().is_some_and(|p| Arc::ptr_eq(p, &provider)) { return None; }
+            let b = s.bound.as_ref()?;
+            provider.with_admission_sample(&b.binding, |doc, permits, closures| {
+                let doc = doc.as_ref().ok()?;
+                if !b.verified || !b.usable || b.binding.facts.state != BindingState::Active
+                    || doc.handoff.is_some() || !permits
+                { return None; }
+                let pb = doc.binding.as_ref().filter(|pb| pb.matches(&b.binding))?;
+                Some(ProviderIssuanceTicket {
+                    runtime: Arc::downgrade(&self.state), authority: Arc::downgrade(&provider),
+                    incarnation: s.incarnation, binding: b.binding.id,
+                    provider_binding: pb.clone(), revision: doc.revision, closures: closures.clone(),
+                })
+            })
+        })
+    }
+    fn provider_admission_attempt_locked(
+        s: &State,
+        me: &Arc<Mutex<State>>,
+        ticket: &ProviderIssuanceTicket,
+        expected_generation: u64,
+    ) -> Result<(), PreparationAttemptFailure> {
+        if Weak::as_ptr(&ticket.runtime) != Arc::as_ptr(me) || s.incarnation != ticket.incarnation {
+            return Err(RuntimeError::StaleIncarnation.into());
+        }
+        let provider = s.provider.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+        if Weak::as_ptr(&ticket.authority) != Arc::as_ptr(provider) {
+            return Err(RuntimeError::StaleIncarnation.into());
+        }
+        let b = s.bound.as_ref().ok_or_else(|| {
+            #[cfg(feature = "test-hooks")]
+            super::testing::record_preparation_refusal(super::testing::RuntimePreparationRefusal::MissingBinding);
+            RuntimeError::IdentityUnverified
+        })?;
+        let binding = &b.binding;
+        if binding.id != ticket.binding || b.evidence.generation.0 != expected_generation {
+            return Err(RuntimeError::StaleIncarnation.into());
+        }
+        let active_identity = b.verified && b.usable && binding.facts.state == BindingState::Active
+            && ticket.provider_binding.matches(binding);
+        // L2 stays held through tracking and the L3 refusal sample. Any retained
+        // operation (including Confirmed/Cancelling) or unreadable tracking is
+        // strict. Release tracking access before L3; never acquire L1 here.
+        let settled = with_tracking_access(|| -> Result<bool, Error> {
+            let store = s.store.as_ref().ok_or(Error::Database)?;
+            Ok(store.publication_op()?.is_none() && store.adoption_op()?.is_none())
+        }).unwrap_or(false);
+        provider.with_admission_sample(binding, |doc, permits, closures| {
+            if !active_identity || !permits {
+                #[cfg(feature = "test-hooks")]
+                if !permits && super::testing::preparation_refusal_pending() {
+                    use super::testing::{HandoffObservation, RuntimePreparationRefusal, record_preparation_refusal};
+                    let handoff = match doc {
+                        Ok(doc) if doc.handoff.is_some() => HandoffObservation::Present,
+                        Ok(_) => HandoffObservation::Absent,
+                        Err(_) => HandoffObservation::Unknown,
+                    };
+                    record_preparation_refusal(RuntimePreparationRefusal::ProviderAdmissionDenied { handoff });
+                }
+                let own_handoff = doc.as_ref().ok().and_then(|doc| {
+                    // All admission conditions independent of the handoff remain
+                    // true. A paused, stopped, replaced or unverified owner is strict.
+                    if !active_identity || !settled || doc.selection != crate::provider::Selection::ICloud
+                        || !doc.settings.enabled || doc.settings.paused
+                        || doc.binding.as_ref() != Some(&ticket.provider_binding)
+                    { return None; }
+                    let h = doc.handoff.as_ref()?;
+                    (closures.owns_handoff_since(&ticket.closures, h)
+                        && h.revision() > ticket.revision && provider.restart_intent() != Some(h)
+                        && h.generation() == expected_generation
+                        && h.binding() == Some(&ticket.provider_binding))
+                        .then(|| OwnHandoffAdmissionRefusal { _intent: h.clone() })
+                });
+                return Err(PreparationAttemptFailure { error: RuntimeError::IdentityUnverified, own_handoff });
+            }
+            Ok(())
+        })
     }
     fn provider_admission_locked(state: &State) -> Result<(), RuntimeError> {
         if let Some(provider) = &state.provider {

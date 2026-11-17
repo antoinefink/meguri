@@ -548,7 +548,7 @@ public actor CloudKitSyncAdapter {
         guard !quiescing, requestedRunning, intentGeneration == intent else { throw CancellationError() }
         #endif
     }
-    private func startPrepared(automaticallySync: Bool, readIdentity: Bool, intent: UInt64, execution: CoreCloudPolicyExecution? = nil) async throws {
+    private func startPrepared(automaticallySync: Bool, readIdentity: Bool, intent: UInt64, execution: CoreCloudPolicyExecution? = nil, preparationAttempt: CoreCloudPolicyExecution? = nil) async throws {
         try checkIntent(intent)
         for task in stopTasks.values {
             #if DEBUG
@@ -593,13 +593,17 @@ public actor CloudKitSyncAdapter {
         }
         try checkIntent(intent)
         #if DEBUG
-        do { try await core.prepareRuntime() }
+        do {
+            if let preparationAttempt { try await preparationAttempt.prepareRuntimeAttempt() }
+            else { try await core.prepareRuntime() }
+        }
         catch {
-            DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEngineRuntimePreparation, error: error)
+            DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEngineRuntimePreparation, error: (error as? CloudPolicyAttemptError)?.error ?? error)
             throw error
         }
         #else
-        try await core.prepareRuntime()
+        if let preparationAttempt { try await preparationAttempt.prepareRuntimeAttempt() }
+        else { try await core.prepareRuntime() }
         #endif
         try checkIntent(intent)
         while creatingSDK {
@@ -2483,7 +2487,10 @@ public actor CloudKitSyncAdapter {
             try checkIntent(intent)
             await observePlatformAccounts(intent: intent)
             try checkIntent(intent)
-            try await startPrepared(automaticallySync: automatic, readIdentity: true, intent: intent, execution: execution)
+            let preparationAttempt: CoreCloudPolicyExecution?
+            if case .startEngine = command.action { preparationAttempt = execution }
+            else { preparationAttempt = nil }
+            try await startPrepared(automaticallySync: automatic, readIdentity: true, intent: intent, execution: execution, preparationAttempt: preparationAttempt)
         default: throw BridgeError.cloudPolicy(.notNativeAction)
         }
         return false

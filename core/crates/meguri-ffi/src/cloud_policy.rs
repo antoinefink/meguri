@@ -1340,7 +1340,7 @@ impl CloudPolicy {
                         error,
                         refusal: refusal.map(|fact| {
                             Arc::new(policy_jobs::CloudPolicyOriginalGuardRefusal {
-                                _fact: fact,
+                                _fact: policy_jobs::OriginalGuardRefusalFact::Driver(fact),
                                 _owner: Arc::downgrade(&self),
                             })
                         }),
