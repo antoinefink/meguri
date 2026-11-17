@@ -475,3 +475,7 @@ AppModel `swift-test/20261117T060940Z-17055` on the same clean commit executes t
 Source audit finds missing prior-provider preparation in the older custom proof harness. Author `061853-23369` adds public migration only in that caller before Host open. Its shared defaults and both windows remain. V13.6 and V26.1 retain account checks after preview authority changes; the new status fixture must stay unpaused. It now enables media while disabled and automatic-off, which changes real media status without revoking that account authority. ACK, guard, final failure, close, successor and deadline assertions remain. Independent review `062514-27337` is clear. Root verifies complete author/reviewer byte equality. Actual verification of these two setup corrections is pending.
 
 Test-preparation checks pass: privacy `062936-33399`, static `062939-34248` and similarity `062937-33690`. The filtered two-file report has no flags or exemptions. These source checks establish no runtime pass.
+
+## Held-status repair passes
+
+`swift-test/20261117T063505Z-37392`, clean `3a4bf8bb`: eleven passed, one failed, zero skipped. All ten original methods and the held-status regression pass. The older proof method passes Reopen; Resume times out before its target status command. The retained trace contains an earlier result and ACK, fixture configuration, then Resume admission. It proves no cause beyond that boundary. Independent source diagnosis continues without changing assertions or deadlines. CPU ownership was released from the actual terminal result.
