@@ -3136,6 +3136,7 @@ fn cancel_replacement_requalifies_restored_provider_before_reconciliation() {
     assert_eq!(confirmed.binding_before.as_ref().unwrap().state, cloud::BindingState::Active);
     assert!(confirmed.binding_after.is_none());
     assert_eq!(confirmed.fence_before, before);
+    let predecessor_open = runtime.stored_state_for_testing().unwrap().open_counter;
     runtime.perform_publication_local(id, LocalWork::Bind, &collection).unwrap();
     let bound = runtime.publication_op().unwrap().unwrap();
     let replacement = runtime.status().unwrap().binding.unwrap();
@@ -3175,6 +3176,8 @@ fn cancel_replacement_requalifies_restored_provider_before_reconciliation() {
     assert_eq!(decision(&host), before);
     assert_eq!(device.settled_publication().unwrap(), Some(publication.clone()));
     assert!(runtime.publication_op().unwrap().is_none());
+    let restored_open = runtime.stored_state_for_testing().unwrap().open_counter;
+    assert!(restored_open > predecessor_open);
     if let Err(error) = &cancelled {
         assert!(matches!(error, RuntimeError::IdentityUnverified));
         assert!(runtime.status().unwrap().scan_required);
@@ -3183,7 +3186,25 @@ fn cancel_replacement_requalifies_restored_provider_before_reconciliation() {
             Err(RuntimeError::IdentityUnverified)));
         assert_eq!(host.provider_authority().snapshot().unwrap(), qualified);
         assert_eq!(cold_resume_rows(&host), rows);
-        assert_eq!(cold_resume_entities(&host), history);
+        assert_cold_resume_history(&host, &history);
+        for (actual, expected) in cold_resume_entities(&host).iter().zip(&history) {
+            assert_eq!(actual.kind, expected.kind);
+            assert_eq!(actual.key, expected.key);
+            assert_eq!(actual.mark, expected.mark);
+        }
+        // Ordinary rows merge before media admission; witness the pending
+        // note's refreshed provenance without assuming every row was rescanned.
+        let pending = history.iter().find(|entity|
+            entity.kind == cloud::entity_codec::Kind::Note && entity.mark.is_some()).unwrap();
+        let refreshed = runtime.binding_entity(predecessor.id, &pending.name).unwrap().unwrap();
+        let (seq, generation) = {
+            let lease = collection.reader(meguri_storage::ReaderRole::Query).unwrap();
+            let snapshot = lease.snapshot().unwrap();
+            (snapshot.seq().0, snapshot.generation().0)
+        };
+        assert_eq!(refreshed.observer_open, restored_open);
+        assert_eq!(refreshed.observed_generation, generation);
+        assert_eq!(refreshed.observed_seq, seq);
         assert_eq!(service.request_log().unwrap().len(), requests);
         assert!(runtime.incoming_sdk_instance_for_testing().is_none());
     }
@@ -3197,9 +3218,7 @@ fn cancel_replacement_requalifies_restored_provider_before_reconciliation() {
     assert_eq!(host.provider_authority().snapshot().unwrap(), qualified);
     assert_eq!(cold_resume_rows(&host), rows);
     assert_cold_resume_history(&host, &history);
-    let stored = runtime.stored_state_for_testing().unwrap();
-    assert!(stored.whole_scan);
-    assert_eq!(stored.coverage.as_ref().unwrap().cursor.generation, generation.0);
+    assert_cold_resume_scan(&host, generation);
     assert_eq!(service.request_log().unwrap().len(), requests);
     assert!(runtime.incoming_sdk_instance_for_testing().is_none());
     assert!(!runtime.trace().iter().skip(trace_len).any(|event| matches!(event,
@@ -4576,9 +4595,7 @@ fn cold_stopped_resume_qualifies_current_provider_before_reconciliation() {
         .settled_publication().unwrap(), Some(publication));
     assert_eq!(cold_resume_rows(&host), rows);
     assert_cold_resume_history(&host, &history);
-    let stored = runtime.stored_state_for_testing().unwrap();
-    assert!(stored.whole_scan);
-    assert_eq!(stored.coverage.as_ref().unwrap().cursor.generation, generation.0);
+    assert_cold_resume_scan(&host, generation);
     assert_eq!(service.request_log().unwrap().len(), requests);
     assert!(runtime.incoming_sdk_instance_for_testing().is_none());
     assert!(!runtime.trace().iter().any(|event| matches!(event,
@@ -4651,6 +4668,51 @@ fn cold_resume_rows(host: &CoreHost) -> Vec<Vec<meguri_storage::RowImage>> {
 fn cold_resume_entities(host: &CoreHost) -> Vec<cloud::workflow::EntityFacts> {
     let runtime = host.cloud_runtime().unwrap();
     entity_names(runtime).iter().map(|name| runtime.entity_facts(name).unwrap().unwrap()).collect()
+}
+
+fn assert_cold_resume_scan(host: &CoreHost, generation: meguri_engine::Generation) {
+    use cloud::runtime::FileIdentityProvider;
+    use meguri_storage::{ReadRows, ReaderRole};
+
+    // Open media before taking the single Query slot; the feed is an owned J6 snapshot.
+    let media = host.media().unwrap();
+    let feed = media.store().media_feed_snapshot().unwrap();
+    assert!(feed.status.complete);
+    let runtime = host.cloud_runtime().unwrap();
+    let stored = runtime.stored_state_for_testing().unwrap();
+    // Whole-binding coverage does not prove clean drain without SDK/root confirmation.
+    assert!(!stored.drained && !stored.whole_scan);
+    let coverage = stored.coverage.as_ref().expect("actual whole-binding scan coverage");
+    assert_eq!(coverage.open, stored.open_counter);
+    assert_eq!(coverage.cursor.generation, generation.0);
+    assert!(coverage.cursor.covered_through >= coverage.cursor.seq);
+    assert_eq!(coverage.media_feed_id, feed.status.feed_id.0);
+    assert_eq!(coverage.media_cursor, feed.status.counter);
+    assert_eq!(coverage.counts.iter().map(|(kind, _)| *kind).collect::<Vec<_>>(),
+        cloud::row_payload::KINDS);
+
+    let collection = host.collection().unwrap();
+    let file = NativeFiles.identity(collection.path()).unwrap();
+    assert_eq!(stored.file, Some(file));
+    assert_eq!(coverage.cursor.native_file, file);
+    {
+        let lease = collection.reader(ReaderRole::Query).unwrap();
+        let snapshot = lease.snapshot().unwrap();
+        assert_eq!(snapshot.generation(), generation);
+        assert_eq!(coverage.cursor.seq, snapshot.seq().0);
+        assert_eq!(snapshot.wal_identity().native_file(), (file.device, file.inode));
+        let col = snapshot.col().unwrap();
+        assert_eq!(coverage.cursor.modified, col.modified.0);
+        assert_eq!(coverage.cursor.schema_modified, col.schema_modified.0);
+    }
+    // This fixture has no tombstones, so current entity pages have the scan's row counts.
+    let entities = cold_resume_entities(host);
+    assert!(entities.iter().all(|entity| entity.tombstone_at.is_none()));
+    for (kind, count) in &coverage.counts {
+        assert_eq!(*count, entities.iter().filter(|entity| entity.kind == *kind).count() as u64,
+            "actual covered count for {kind:?}");
+    }
+    assert_eq!(collection.last_seq().0, coverage.cursor.seq);
 }
 
 fn assert_cold_resume_history(host: &CoreHost, before: &[cloud::workflow::EntityFacts]) {
