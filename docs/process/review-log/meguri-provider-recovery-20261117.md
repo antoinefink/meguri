@@ -485,3 +485,11 @@ Test-preparation checks pass: privacy `062936-33399`, static `062939-34248` and 
 Author `064206-43447` changes only the old proof test trace. Existing Resume entry, return and refusal callbacks now record fixed markers; refusal retains only its authority-change Boolean. Another fixed marker records account-resolver callback entry before its guard. Review `064648-44630` finds no P0–P2 issues. Root verifies exact author/reviewer bytes. Both windows, all assertions, trace bounds, namespaces, waits and deadlines remain. No cause or behavior repair is claimed; the focused method must supply the next observation.
 
 Trace-source static `065324-47813` and similarity `065324-48188` pass; the filtered one-file report has no flags. Privacy passes after a public count/classification prose rewrite. Failed scan `065324-47973` remains retained; no source or guard changed during that rewrite.
+
+## Resume refuses before the account callback
+
+`swift-test/20261117T065614Z-50662`, clean `bc91511a`: the focused method fails, zero skipped. Reopen passes its argument case. Resume records entry, then refusal with authorityChanged false; it records neither return nor account-resolver entry. This selects no further error category.
+
+Author `070810-55194` reads the existing optional connection failure before the test catch cleans up. An exhaustive switch emits only fixed tags for its 17 public cases and nil. Review `071033-55935` is clear; root verifies exact author/reviewer bytes. Inputs, both arguments, all assertions, deadlines, cleanup and rethrow remain. Actual observation is pending; no behavior repair is claimed.
+
+Typed-capture privacy `071254-61025`, static `071253-60451` and similarity `071252-60420` pass. The filtered one-file report has no flags or exemptions. Actual focused execution remains pending.

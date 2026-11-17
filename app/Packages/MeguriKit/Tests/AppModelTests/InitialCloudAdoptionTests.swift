@@ -1204,6 +1204,27 @@ extension ReviewCollectionStartupTests {
             harness.sync.observeResumePolicyDrain = nil
             #expect(await harness.owner.close(), "\(trace.diagnostic)")
         } catch {
+            let connectionFailureTag: String = switch harness.sync.connectionFailure {
+            case nil: "none"
+            case .some(.closed): "closed"
+            case .some(.wrongOwner): "wrongOwner"
+            case .some(.consumed): "consumed"
+            case .some(.authorityChanged): "authorityChanged"
+            case .some(.accountUnavailable): "accountUnavailable"
+            case .some(.accountMismatch): "accountMismatch"
+            case .some(.busy): "busy"
+            case .some(.keyUnavailable): "keyUnavailable"
+            case .some(.epochIncomplete): "epochIncomplete"
+            case .some(.unreadableControl): "unreadableControl"
+            case .some(.notOffered): "notOffered"
+            case .some(.incomingStagingUnavailable): "incomingStagingUnavailable"
+            case .some(.mediaApplyUnavailable): "mediaApplyUnavailable"
+            case .some(.resetRecoveryUnavailable): "resetRecoveryUnavailable"
+            case .some(.tracking): "tracking"
+            case .some(.incomplete): "incomplete"
+            case .some(.fileIdentityUnavailable): "fileIdentityUnavailable"
+            }
+            trace.record("fixture.connectionFailure." + connectionFailureTag)
             Issue.record("First-proof causal observation failed: \(trace.diagnostic)")
             // Release and join the original command/read, including a failed
             // native result and its ACK; no test result or proof is substituted.
