@@ -1,4 +1,4 @@
-use crate::{Result, need};
+use crate::{PrepareForwardStage, Result, need};
 use meguri_engine::{OpSource, OpSpec, decks, notes, notetypes, session::{StartResult, AnswerOutcome}};
 use meguri_host::CoreHost;
 use meguri_model::{clock::Clock, ids::*, proto::deck::DeckKind, time::EpochMillis};
@@ -45,7 +45,7 @@ pub fn initialize(host: &CoreHost, replacement: bool) -> Result<()> {
     let preset_name = if replacement { &left["preset"] } else { &rich["preset"]["name"] };
     let preset = meguri_engine::deck_config::ops::add(&c, preset_name.as_str().ok_or("recipe-preset")?.into())?.value;
     meguri_engine::deck_config::ops::assign(&c, did, preset, false)?;
-    set_preset(host, did, &rich["preset"])?;
+    set_preset(host, did, &rich["preset"], None)?;
     let config = if replacement { &left["config"] } else { &rich["config"] };
     set_config(host, config)?;
     if replacement {
@@ -75,20 +75,24 @@ fn set_config(host: &CoreHost, values: &Value) -> Result<()> {
     }
     Ok(())
 }
-fn set_preset(host: &CoreHost, deck: DeckId, p: &Value) -> Result<()> {
+fn set_preset(host: &CoreHost, deck: DeckId, p: &Value, mut diagnostic: Option<&mut PrepareForwardStage>) -> Result<()> {
     use meguri_engine::sched::deck_options;
+    if let Some(stage) = diagnostic.as_deref_mut() { *stage = PrepareForwardStage::PresetSnapshot; }
     let c = host.collection()?;
     let mut draft = deck_options::Draft::new(deck_options::snapshot(&c, deck)?);
     let selected = draft.selected;
+    if let Some(stage) = diagnostic.as_deref_mut() { *stage = PrepareForwardStage::PresetEdit; }
     for (field, key) in [(Field::NewPerDay, "new_per_day"), (Field::ReviewsPerDay, "reviews_per_day"),
         (Field::CapAnswerTimeToSecs, "maximum_answer_seconds")] {
         draft.edit(Some(selected), field, OptionValue::Number(p[key].as_u64().ok_or("recipe-preset-number")? as f64))?;
     }
     draft.edit(Some(selected), Field::DisableAutoplay, OptionValue::Boolean(!p["autoplay"].as_bool().ok_or("recipe-autoplay")?))?;
+    if let Some(stage) = diagnostic { *stage = PrepareForwardStage::PresetSave; }
     deck_options::save(&c, draft, &Default::default())?;
     Ok(())
 }
-pub fn forward(host: &CoreHost, clock: &dyn Clock) -> Result<Vec<Value>> {
+pub fn forward(host: &CoreHost, clock: &dyn Clock, stage: &mut PrepareForwardStage) -> Result<Vec<Value>> {
+    *stage = PrepareForwardStage::FixtureLookup;
     let r = recipes();
     let changes = &r["rich_forward_changes"];
     let c = host.collection()?;
@@ -117,23 +121,35 @@ pub fn forward(host: &CoreHost, clock: &dyn Clock) -> Result<Vec<Value>> {
         normal.description = changes["deck_description"].as_str().ok_or("recipe-description")?.into();
     }
     let did = deck.id;
+    *stage = PrepareForwardStage::DeckSave;
     c.run(OpSpec::named("synthetic forward deck", OpSource::UserUndoable), move |ctx| decks::ops::save_in(ctx.scope(), deck))?;
-    set_preset(host, did, &changes["preset"])?;
+    set_preset(host, did, &changes["preset"], Some(&mut *stage))?;
+    *stage = PrepareForwardStage::ConfigSave;
     set_config(host, &changes["config"])?;
+    *stage = PrepareForwardStage::NoteSave;
     let keep = keep.ok_or("missing-keep-note")?;
     let mut fields: Vec<String> = keep.field_values().map(str::to_owned).collect();
     fields[1] = changes["keep_answer"].as_str().ok_or("recipe-answer")?.into();
     notes::update(&c, notes::UpdateNote { id: keep.id, fields, tags: vec!["orbit".into(), "synthetic::field".into()] }, OpSource::UserUndoable)?;
-    let (session_id, head) = match host.review().start(did, None)? {
+    *stage = PrepareForwardStage::ReviewStart;
+    let started = host.review().start(did, None)?;
+    *stage = PrepareForwardStage::ReviewStartPredicate;
+    let (session_id, head) = match started {
         StartResult::Started { session_id, head, .. } => (session_id, head),
         _ => return Err("review-start-refused".into()),
     };
+    *stage = PrepareForwardStage::ReviewHeadPredicate;
     let item = head.items.first().ok_or("review-head-empty")?;
     need(item.note_id == keep.id, "keep-note-not-public-review-head")?;
+    *stage = PrepareForwardStage::ReviewAnswer;
     let result = host.review().answer(session_id, item.card_id, Rating::Good, item.state_token.clone(), EpochMillis(clock.now_ms()), 900)?;
+    *stage = PrepareForwardStage::ReviewAnswerPredicate;
     need(matches!(result, AnswerOutcome::Accepted { .. }), "review-not-accepted")?;
+    *stage = PrepareForwardStage::ReviewEnd;
     host.review().end(session_id)?;
+    *stage = PrepareForwardStage::DeleteSave;
     notes::delete(&c, vec![delete.ok_or("missing-delete-note")?], OpSource::UserUndoable)?;
+    *stage = PrepareForwardStage::TemplateSave;
     let saved = notetypes::update_template_formats(&c, formats, Default::default(), Default::default())?.value;
     need(saved.id == nt.id, "template-formats-notetype-mismatch")?;
     Ok(Vec::new())

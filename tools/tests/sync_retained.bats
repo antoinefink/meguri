@@ -453,6 +453,8 @@ def files(directory):
 class OfflineProcessPolicy:
     # Only the external offline process is doubled. These are synthetic refused
     # preparation records, never SDK/HTTP success or collection/case evidence.
+    preparation_complete = False
+
     def run(self, directory, entrypoint, command, **kwargs):
         assert entrypoint == '/retained-peer' and command == [] and 'network' not in kwargs
         inputs, output = directory / 'input', directory / 'raw'
@@ -474,7 +476,7 @@ class OfflineProcessPolicy:
             action_sha256=s.digest(s.regular(inputs / 'action.json')),
             recipe_sha256=s.digest(s.regular(s.RECIPES)), selection_sha256=s.digest(s.regular(s.SELECTION)),
             state_inputs_sha256=s.digest(declared), started_ms=1, finished_ms=2,
-            observed=dict(preparation_only=True, preparation_complete=False,
+            observed=dict(preparation_only=True, preparation_complete=self.preparation_complete,
                 snapshot_sha256=s.digest(snapshot_bytes), snapshot=snap), case_credit=False)
         for filename, data in [('state-inputs.json', declared), ('snapshot.json', snapshot_bytes),
                                ('action-result.json', s.encoded(result))]:
@@ -592,6 +594,170 @@ exercise('media-bidirectional')
 exercise('media-bidirectional', 'unknown')
 exercise('media-bidirectional', 'missing')
 exercise('media-bidirectional', 'tampered')
+
+# Exercise the existing case schedule with unavailable boundaries only. This
+# proves ordering/one attempt and failure propagation, never a runtime outcome.
+runtime = s.RetainedRuntime.__new__(s.RetainedRuntime)
+runtime.outer = root / 'normal-order'
+runtime.directory = runtime.outer / 'instance'
+runtime.directory.mkdir(parents=True)
+runtime.case, runtime.client, runtime.events = 'normal-no-change', {}, []
+calls = []
+runtime.setup = lambda: None
+def unavailable_offline(action):
+    calls.append(('client_a', action))
+    return None
+def unavailable_network(action, expected, baseline=None, companion=False):
+    calls.append(('client_b' if companion else 'client_a', action))
+    if action == 'normal_unchanged':
+        assert expected is None  # Failed setup cannot supply a measured baseline.
+    return None
+runtime.offline, runtime.network = unavailable_offline, unavailable_network
+returned = runtime.run()
+assert calls == [('client_a', 'prepare_snapshot'), ('client_b', 'prepare_rich'),
+    ('client_b', 'upload_baseline'), ('client_a', 'import_baseline'), ('client_a', 'establish_baseline'),
+    ('client_b', 'settle_normal'), ('client_a', 'settle_normal'), ('client_a', 'prepare_snapshot'),
+    ('client_a', 'normal_unchanged')]
+assert returned['results']['settle_normal_a'] is None and returned['results']['normal_unchanged'] is None
+assert returned['case_credit'] is False
+
+# A successful synthetic A settlement cannot authorize a returned snapshot
+# whose process failed after writing complete, valid artifacts. Keep the real
+# offline/checkpoint/CAS seam; no SDK/HTTP outcome or case credit is simulated.
+runtime = ObservedRuntime.__new__(ObservedRuntime)
+runtime.outer, runtime.case = root / 'normal-failed-freeze', 'normal-no-change'
+runtime.peer, runtime.client = runtime.outer / 'peer', dict(policy_test=True)
+(runtime.peer / 'artifacts').mkdir(parents=True)
+s.frozen_file(runtime.peer / 'client-build.json', s.encoded(runtime.client))
+initial = runtime.outer / 'preparations' / runtime.case
+initial.mkdir(parents=True)
+(initial / 'state').mkdir()
+runtime.containers = OfflineProcessPolicy()
+runtime.containers.preparation_complete = True  # Output claims completion, exit remains unsuccessful.
+assert s.offline_worker(runtime.containers, runtime.peer, initial, runtime.case,
+    'prepare_initial', initial / 'state') == 1
+runtime.directory = runtime.outer / 'instance'
+runtime.directory.mkdir()
+runtime.state = runtime.directory / 'client-a-state'
+s.restore_working_state(initial, runtime.case, runtime.state)
+runtime.serial, runtime.events = 0, []
+runtime.captured, runtime.original_records = {}, {}
+runtime.original_files = files(initial)
+runtime.setup = lambda: None
+initial_snapshot = s.saved_preparation(initial, runtime.case, 'prepare_initial', runtime.client)['snapshot']
+declared_authority = s.with_media(initial_snapshot, s.media_recipe('initial'))
+calls, measured = [], []
+def settlement_network(action, expected, baseline=None, companion=False):
+    calls.append(('client_b' if companion else 'client_a', action))
+    if action == 'prepare_rich':
+        return dict(authority=declared_authority)
+    if action == 'settle_normal':
+        directory = runtime.new_step(action)
+        event = runtime.event(action, 'client_b' if companion else 'client_a', directory,
+            operation_complete=True, error_kind=None, execution_closed=True)
+        if not companion:
+            assert expected is not None and s.projection(expected) == s.projection(initial_snapshot)
+        return dict(event=event)
+    if action == 'normal_unchanged':
+        record = runtime.captured['prepare_snapshot']
+        assert record['snapshot'] is not None
+        assert s.projection(record['snapshot']) == s.projection(initial_snapshot)
+        assert record['event']['operation_complete'] is False
+        assert expected is None and baseline is None
+        measured.append((expected, baseline))
+    return None
+runtime.network = settlement_network
+returned = runtime.run()
+assert calls == [('client_b', 'prepare_rich'), ('client_b', 'upload_baseline'),
+    ('client_a', 'import_baseline'), ('client_a', 'establish_baseline'),
+    ('client_b', 'settle_normal'), ('client_a', 'settle_normal'), ('client_a', 'normal_unchanged')]
+assert measured == [(None, None)] and runtime.serial == 3  # B settlement, A settlement, then freeze.
+assert returned['results']['settle_normal_a']['event']['operation_complete'] is True
+assert returned['results']['normal_unchanged'] is None and returned['case_credit'] is False
+record = runtime.captured['prepare_snapshot']
+directory = runtime.directory / record['event']['directory']
+checkpoint = s.load_json(directory / 'checkpoint.json')
+assert checkpoint['exit_code'] == 1 and checkpoint['admission_valid'] is True
+assert checkpoint['preparation_complete'] is True and checkpoint['case_credit'] is False
+assert record['event']['execution_closed'] is True and record['event']['error_kind'] == 'preparation_refused'
+assert record['event']['case_credit'] is False and record['event'] in returned['events']
+assert s.load_json(directory / 'event.json') == record['event']
+assert s.load_json(runtime.directory / 'case-observations.json')['events'] == returned['events']
+assert runtime.captured == runtime.original_records
+assert files(directory) == {p: b for p, b in runtime.original_files.items() if p.is_relative_to(directory)}
+assert files(initial) == {p: b for p, b in runtime.original_files.items() if p.is_relative_to(initial)}
+
+# Failed-offline-only diagnostic admission at the real checkpoint/CAS seam.
+error_bytes = s.encoded(dict(format='meguri-retained-error-v1', operation_complete=False,
+    case_credit=False, reason='input_or_public_api_failure'))
+diagnostic = dict(format='meguri-retained-prepare-forward-diagnostic-v1',
+    case='normal-bidirectional', action='prepare_forward', stage='review_head_predicate')
+class FailedForwardProcessPolicy:
+    def run(self, directory, entrypoint, command, **kwargs):
+        assert entrypoint == '/retained-peer' and command == [] and 'network' not in kwargs
+        output = directory / 'raw'
+        (output / 'worker-error.json').write_bytes(error_bytes)
+        if self.payload is not None:
+            (output / 'prepare-forward-diagnostic.json').write_bytes(self.payload)
+        state = next(source for source, target, readonly in kwargs['mounts'] if target == '/state')
+        (state / 'failed-state').write_bytes(b'original failed state, never executable')
+        return 2
+for name, value in [('valid', diagnostic), ('missing', None), ('extra', dict(diagnostic, payload='forbidden')),
+                    ('format', dict(diagnostic, format='other')), ('case', dict(diagnostic, case='authentication')),
+                    ('action', dict(diagnostic, action='prepare_snapshot')), ('stage', dict(diagnostic, stage='arbitrary')),
+                    ('stage-type', dict(diagnostic, stage=1)), ('missing-key', {k: v for k, v in diagnostic.items() if k != 'stage'})]:
+    directory = root / ('failed-forward-' + name)
+    peer = directory / 'peer'
+    (peer / 'artifacts').mkdir(parents=True)
+    (peer / 'client-build.json').write_bytes(b'{}')
+    (directory / 'state').mkdir()
+    process = FailedForwardProcessPolicy()
+    process.payload = None if value is None else b' \n' + s.encoded(value) + b'\t'
+    assert s.offline_worker(process, peer, directory, 'normal-bidirectional', 'prepare_forward', directory / 'state') == 1
+    checkpoint = s.load_json(directory / 'checkpoint.json')
+    assert checkpoint['exit_code'] == 2 and checkpoint['admission_valid'] is False
+    assert checkpoint['preparation_complete'] is False and checkpoint['case_credit'] is False
+    read = s.artifact_reader(directory / 'artifacts')
+    raw = {row['path']: read(row['sha256']) for row in checkpoint['raw']['files']}
+    assert raw['worker-error.json'] == error_bytes
+    assert [read(row['sha256']) for row in checkpoint['state']['files']] == [b'original failed state, never executable']
+    if value is not None:
+        assert raw['prepare-forward-diagnostic.json'] == process.payload
+    try:
+        admitted = s.prepare_forward_diagnostic(directory / 'raw', 'normal-bidirectional', 'prepare_forward', 2)
+    except ValueError:
+        assert name not in ('valid', 'missing')
+    else:
+        assert name in ('valid', 'missing') and admitted == value
+
+output = root / 'failed-forward-valid/raw'
+for case, action, rc in [('normal-bidirectional', 'prepare_forward', 0),
+                         ('normal-bidirectional', 'prepare_forward', 1),
+                         ('normal-bidirectional', 'prepare_snapshot', 2),
+                         ('normal-no-change', 'prepare_forward', 2)]:
+    try:
+        s.prepare_forward_diagnostic(output, case, action, rc)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('diagnostic admitted outside fixed offline exit2 failure')
+for invalid_error in [dict(s.json.loads(error_bytes), reason='other'),
+                      dict(s.json.loads(error_bytes), operation_complete=True),
+                      dict(s.json.loads(error_bytes), case_credit=True)]:
+    (output / 'worker-error.json').write_bytes(s.encoded(invalid_error))
+    try:
+        s.prepare_forward_diagnostic(output, 'normal-bidirectional', 'prepare_forward', 2)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('diagnostic admitted without original closed failure')
+(output / 'worker-error.json').unlink()
+try:
+    s.prepare_forward_diagnostic(output, 'normal-bidirectional', 'prepare_forward', 2)
+except (OSError, ValueError):
+    pass
+else:
+    raise AssertionError('diagnostic admitted without worker failure file')
 PY
   [ "$status" -eq 0 ]
 }

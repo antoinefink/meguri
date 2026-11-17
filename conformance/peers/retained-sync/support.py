@@ -250,7 +250,7 @@ def context(inputs):
     exact(action, 'case action')
     allowed = {
         'authentication': ['authenticate'], 'full-upload': ['upload', 'import_baseline'],
-        'full-download': ['download'], 'normal-no-change': ['establish_baseline', 'import_baseline', 'normal_unchanged'],
+        'full-download': ['download'], 'normal-no-change': ['establish_baseline', 'import_baseline', 'settle_normal', 'normal_unchanged'],
         'normal-bidirectional': ['establish_baseline', 'import_baseline', 'normal_send', 'normal_receive'],
         'media-bidirectional': ['media_baseline', 'media_receive', 'media_send'],
         'media-no-change': ['media_baseline', 'media_unchanged'], 'manual-uncertain-recovery': ['uncertain_upload']}
@@ -858,6 +858,33 @@ def runtime_prepare(outer, case):
     return offline_worker(containers, peer, directory, case, 'prepare_initial', directory / 'state')
 
 
+def prepare_forward_diagnostic(output, case, action, exit_code):
+    """Admit only the fixed failed-offline marker; it supplies no success evidence."""
+    names = {p.name for p in output.iterdir()}
+    require(names <= {'action-result.json', 'worker-error.json', 'state-inputs.json', 'snapshot.json',
+                      'prepare-forward-diagnostic.json'}, 'offline worker output files')
+    if 'prepare-forward-diagnostic.json' not in names:
+        return None
+    require(case == 'normal-bidirectional' and action == 'prepare_forward' and type(exit_code) is int
+            and exit_code == 2, 'failed offline prepare_forward only')
+    error = load_json(output / 'worker-error.json')
+    exact(error, 'format operation_complete case_credit reason')
+    require(error['format'] == 'meguri-retained-error-v1' and error['operation_complete'] is False
+            and error['case_credit'] is False and error['reason'] == 'input_or_public_api_failure',
+            'offline first failure identity')
+    diagnostic = load_json(output / 'prepare-forward-diagnostic.json')
+    exact(diagnostic, 'format case action stage')
+    require(diagnostic['format'] == 'meguri-retained-prepare-forward-diagnostic-v1'
+            and diagnostic['case'] == case and diagnostic['action'] == action
+            and isinstance(diagnostic['stage'], str) and diagnostic['stage'] in (
+                'input_admission', 'host_admission', 'fixture_lookup', 'deck_save', 'preset_snapshot',
+                'preset_edit', 'preset_save', 'config_save', 'note_save', 'review_start',
+                'review_start_predicate', 'review_head_predicate', 'review_answer', 'review_answer_predicate',
+                'review_end', 'delete_save', 'template_save', 'snapshot', 'host_close', 'state_inventory', 'output'),
+            'offline prepare_forward diagnostic identity')
+    return diagnostic
+
+
 def offline_worker(containers, peer, directory, case, action, state):
     require(action in ('prepare_initial', 'prepare_snapshot', 'prepare_forward', 'prepare_reverse_media'), 'offline worker action')
     inputs, output = directory / 'input', directory / 'raw'
@@ -879,6 +906,8 @@ def offline_worker(containers, peer, directory, case, action, state):
     input_inventory = tree_inventory(inputs, store)
     valid, complete = False, False
     try:
+        diagnostic = prepare_forward_diagnostic(output, case, action, rc)
+        require(diagnostic is None, 'failed preparation diagnostic cannot admit success')
         result, snap = preparation_identity(directory, case, action, load_json(peer / 'client-build.json'))
         declared = load_json(output / 'state-inputs.json')
         exact(declared, 'format files')
@@ -1466,9 +1495,14 @@ class RetainedRuntime:
             store('establish_baseline', self.worker('establish_baseline', chosen))
             store('settle_normal', self.companion('settle_normal', baseline, baseline))
             if self.case == 'normal-no-change':
+                # Exactly one ordinary A settlement after B, before the raw
+                # measured baseline. Setup has no measured assertion credit.
+                settlement = store('settle_normal_a', self.worker('settle_normal', chosen))
                 frozen = self.offline('prepare_snapshot')
                 settled = snap(frozen)
-                if chosen is None or (settled is not None and projection(settled) != projection(chosen)):
+                if (settlement is None or settlement['event']['operation_complete'] is not True or chosen is None
+                        or frozen is None or frozen['event']['operation_complete'] is not True
+                        or (settled is not None and projection(settled) != projection(chosen))):
                     settled = None
                 store('normal_unchanged', self.worker('normal_unchanged', settled))
             else:

@@ -24,7 +24,13 @@ const CASES: [&str; 8] = ["authentication", "full-upload", "full-download", "nor
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 enum Action { PrepareInitial, PrepareSnapshot, PrepareForward, PrepareReverseMedia, Authenticate, Upload, Download,
-    EstablishBaseline, ImportBaseline, MediaBaseline, NormalSend, NormalReceive, NormalUnchanged, MediaReceive, MediaSend, MediaUnchanged, UncertainUpload }
+    EstablishBaseline, ImportBaseline, SettleNormal, MediaBaseline, NormalSend, NormalReceive, NormalUnchanged, MediaReceive, MediaSend, MediaUnchanged, UncertainUpload }
+// Payload-free diagnosis solely for the fixed offline PrepareForward action.
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum PrepareForwardStage { InputAdmission, HostAdmission, FixtureLookup, DeckSave, PresetSnapshot, PresetEdit,
+    PresetSave, ConfigSave, NoteSave, ReviewStart, ReviewStartPredicate, ReviewHeadPredicate, ReviewAnswer,
+    ReviewAnswerPredicate, ReviewEnd, DeleteSave, TemplateSave, Snapshot, HostClose, StateInventory, Output }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Input { case: String, action: Action }
@@ -57,7 +63,7 @@ fn allowed(input: &Input) -> bool {
         Upload => input.case == "full-upload",
         ImportBaseline => matches!(input.case.as_str(), "full-upload" | "normal-no-change" | "normal-bidirectional"),
         Download => input.case == "full-download",
-        NormalUnchanged => input.case == "normal-no-change",
+        SettleNormal | NormalUnchanged => input.case == "normal-no-change",
         MediaUnchanged => input.case == "media-no-change",
         UncertainUpload => input.case == "manual-uncertain-recovery",
         EstablishBaseline => matches!(input.case.as_str(), "normal-no-change" | "normal-bidirectional"),
@@ -175,11 +181,14 @@ fn authenticate(host: &CoreHost, credentials: &contract::Credentials, random: &d
     Ok(json!({"operation_complete":authenticated && refused,"authenticated_request_succeeded":authenticated,
         "wrong_credentials_refused":refused}))
 }
-fn run() -> Result<bool> {
-    need(std::env::args_os().count() == 1, "no-arguments")?;
-    need(fs::read_dir("/out")?.next().is_none(), "output-not-empty")?;
+fn run(diagnostic: &mut Option<PrepareForwardStage>) -> Result<bool> {
     let bytes = fs::read("/in/action.json")?;
     let input: Input = serde_json::from_slice(&bytes)?;
+    if input.action == Action::PrepareForward && input.case == "normal-bidirectional" {
+        *diagnostic = Some(PrepareForwardStage::InputAdmission);
+    }
+    need(std::env::args_os().count() == 1, "no-arguments")?;
+    need(fs::read_dir("/out")?.next().is_none(), "output-not-empty")?;
     need(allowed(&input), "action-not-in-selection")?;
     let client = contract::client_build()?;
     let preparing = matches!(input.action, Action::PrepareInitial | Action::PrepareSnapshot | Action::PrepareForward | Action::PrepareReverseMedia);
@@ -199,6 +208,7 @@ fn run() -> Result<bool> {
         let invocation = contract::invocation(&peer, &manifest, &bytes)?;
         binding = json!({"preflight":peer,"input":manifest,"invocation":invocation});
     }
+    if diagnostic.is_some() { *diagnostic = Some(PrepareForwardStage::HostAdmission); }
     let random = random()?;
     let clock: Arc<dyn Clock> = Arc::new(clock::WallClock);
     let started = clock.now_ms();
@@ -221,11 +231,14 @@ fn run() -> Result<bool> {
             match input.action {
                 Action::PrepareInitial => fixture::initialize(&host, input.case == "full-download")?,
                 Action::PrepareSnapshot => {},
-                Action::PrepareForward => limitations = fixture::forward(&host, clock.as_ref())?,
+                Action::PrepareForward => limitations = fixture::forward(&host, clock.as_ref(),
+                    diagnostic.as_mut().ok_or("forward-stage-required")?)?,
                 Action::PrepareReverseMedia => fixture::set_media(&host, &fixture::recipes()["media_utf8_exact"]["reverse"] )?,
                 _ => unreachable!(),
             }
+            if diagnostic.is_some() { *diagnostic = Some(PrepareForwardStage::Snapshot); }
             let snapshot = fixture::snapshot(&host)?;
+            if diagnostic.is_some() { *diagnostic = Some(PrepareForwardStage::Output); }
             let digest = output("snapshot.json", &snapshot)?;
             return Ok(json!({"preparation_only":true,"preparation_complete":limitations.is_empty(),
                 "limitations":limitations,"snapshot_sha256":digest,"snapshot":snapshot}));
@@ -243,10 +256,11 @@ fn run() -> Result<bool> {
             Action::Upload | Action::EstablishBaseline => manual(&host, &credentials, &key, false, false)?,
             Action::Download | Action::ImportBaseline => manual(&host, &credentials, &key, true, false)?,
             Action::UncertainUpload => manual(&host, &credentials, &key, false, true)?,
-            Action::NormalSend | Action::NormalReceive | Action::NormalUnchanged => normal_action(&host, key, clock.clone(), random.clone())?,
+            Action::SettleNormal | Action::NormalSend | Action::NormalReceive | Action::NormalUnchanged => normal_action(&host, key, clock.clone(), random.clone())?,
             Action::MediaReceive | Action::MediaSend | Action::MediaUnchanged | Action::MediaBaseline => media_action(&host, key, random.clone())?,
             _ => unreachable!(),
         };
+        if input.action == Action::SettleNormal { observed["preparation_only"] = json!(true); }
         let after = fixture::snapshot(&host)?;
         let equal = match input.action {
             Action::NormalUnchanged | Action::MediaUnchanged => before == after && after == expected,
@@ -276,9 +290,15 @@ fn run() -> Result<bool> {
     })();
     let closed = host.close();
     runtime::shut_down();
+    // Propagate the operation's first failure before considering close/output.
+    // Cleanup does not advance the marker on an already-failed operation.
     let observed = result?;
+    if diagnostic.is_some() { *diagnostic = Some(PrepareForwardStage::HostClose); }
     closed?;
-    let state_sha = output("state-inputs.json", &state_inputs(&root)?)?;
+    if diagnostic.is_some() { *diagnostic = Some(PrepareForwardStage::StateInventory); }
+    let state = state_inputs(&root)?;
+    if diagnostic.is_some() { *diagnostic = Some(PrepareForwardStage::Output); }
+    let state_sha = output("state-inputs.json", &state)?;
     let okay = if preparing { observed["preparation_complete"] == true } else { observed["operation_complete"] == true };
     output("action-result.json", &json!({"format":"meguri-retained-action-v1", "case":input.case,"action":input.action,
         "actor":"client_a","client_build":client,"binding":binding,"action_sha256":sha(&bytes),
@@ -307,7 +327,8 @@ fn state_inputs(root: &Path) -> Result<Value> {
     Ok(json!({"format":"meguri-retained-state-inputs-v1","files":rows}))
 }
 fn main() {
-    match run() {
+    let mut diagnostic = None;
+    match run(&mut diagnostic) {
         Ok(true) => {},
         Ok(false) => std::process::exit(1),
         Err(_) => {
@@ -315,6 +336,12 @@ fn main() {
             // Retain a closed-vocabulary failure, never the Display payload.
             let _ = output("worker-error.json", &json!({"format":"meguri-retained-error-v1", "operation_complete":false,
                 "case_credit":false,"reason":"input_or_public_api_failure"}));
+            if let Some(stage) = diagnostic {
+                // Both writes are best effort; neither replaces the first failure.
+                let _ = output("prepare-forward-diagnostic.json", &json!({
+                    "format":"meguri-retained-prepare-forward-diagnostic-v1", "case":"normal-bidirectional",
+                    "action":"prepare_forward", "stage":stage}));
+            }
             std::process::exit(2);
         },
     }
