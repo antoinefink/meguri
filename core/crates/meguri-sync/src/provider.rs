@@ -562,6 +562,15 @@ impl Authority {
         let result = (|| {
             let before = sidecar::read_document(&self.path, |raw| Ok(raw.cloned()))?.ok_or_else(invalid)?;
             let mut doc = decode(Some(&before))?.ok_or_else(invalid)?;
+            if cancel.before.is_none() && cancel.operation.binding_before.is_none()
+                && doc.selection == Selection::ICloud && doc.handoff.is_none()
+                && doc.binding.is_none() && doc.legacy_binding_pending {
+                // No predecessor or provider association exists to restore.
+                // Preserve pending consent and every raw byte: this validated
+                // read performs no mutation requiring durable re-publication.
+                *self.state.lock().unwrap_or_else(PoisonError::into_inner) = Ok(doc);
+                return Ok(true);
+            }
             let mapping = |binding: &Binding, publication: &Publication| -> Result<CloudBinding, StorageError> {
                 use meguri_engine::device_state::AccountBinding;
                 if publication.identity != binding.facts.publication || publication.decision != PublicationDecision::Clear

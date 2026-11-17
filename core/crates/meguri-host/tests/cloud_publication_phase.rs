@@ -6705,3 +6705,151 @@ fn accepted_unbound_cancel_discovery(local_only: bool, point: Option<&'static st
     drop(discovery);
     host.close().unwrap();
 }
+
+#[test]
+fn cancellation_before_provider_qualification_preserves_unbound_pending_consent_on_warm_and_cold_retry() {
+    use cloud::runtime::RuntimeError;
+    use meguri_model::faultpoint::{self, Fault};
+    use meguri_storage::sidecar;
+    use meguri_sync::provider::Selection;
+
+    for cold in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("cancel-unqualified-pending-consent");
+        generated(&dir);
+        let config = host_config_with_random(&dir, keys(), Arc::new(Account), scope(), None);
+        prepare_prior_icloud_fixture_configuration(&config);
+        let host = CoreHost::open(config.clone()).unwrap();
+        restore_collection(&host, &dir);
+        let provider_path = config.manual_transfer_directory.join("provider.json");
+        // Only future metadata is added; consent comes from real migration.
+        sidecar::update_document(&provider_path, |raw| {
+            raw.insert("futureCancellation".into(), serde_json::json!({"retained": [1, 2, 3]}));
+            raw.get_mut("icloud_settings").unwrap().as_object_mut().unwrap()
+                .insert("futureSetting".into(), serde_json::json!("preserve"));
+            Ok(())
+        }).unwrap();
+        let provider_bytes = std::fs::read(&provider_path).unwrap();
+        let provider = host.provider_authority().snapshot().unwrap();
+        assert_eq!(provider.selection, Selection::ICloud);
+        assert!(provider.settings.enabled && !provider.settings.paused);
+        assert!(provider.binding.is_none() && provider.handoff.is_none() && provider.legacy_binding_pending);
+        let before = decision(&host);
+        let before_bytes = std::fs::read(dir.join("meguri-sidecar.json")).unwrap();
+        let rows = cold_resume_rows(&host);
+        let runtime = host.cloud_runtime().unwrap();
+        let collection = host.collection().unwrap();
+        let history = collection.cloud_pending_keys().unwrap();
+        assert!(runtime.status().unwrap().binding.is_none());
+        let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(726)).unwrap();
+        let p = actual_preview(&host, &mut service, &scope());
+        assert!(p.active.is_none() && p.cloud.is_none());
+        let id = runtime.confirm_connection_publication(&p, &collection).unwrap();
+        runtime.perform_publication_local(id, LocalWork::Bind, &collection).unwrap();
+        let op = runtime.publication_op().unwrap().unwrap();
+        assert_eq!(op.step, PublishStep::Bound);
+        assert!(op.binding_before.is_none() && op.binding_after.is_some());
+        assert_eq!(op.fence_before, before);
+        assert!(!op.root_acked && !op.switch_sent && op.active_attempt.is_none());
+        assert!(op.epoch_system_fields.is_none() && op.complete_system_fields.is_none());
+        let candidate = runtime.status().unwrap().binding.unwrap();
+        assert_eq!(op.binding_after, Some(candidate.id));
+        faultpoint::arm("cloud.publish.after_fence_clear", Fault::IoError(std::io::ErrorKind::Other));
+        let failed = runtime.perform_publication_local(id, LocalWork::WriteDecision, &collection);
+        faultpoint::disarm("cloud.publish.after_fence_clear");
+        assert!(matches!(failed, Err(RuntimeError::Tracking(cloud::Error::Io(_)))));
+        assert_eq!(decision(&host).publication.binding, account_binding(&scope().account));
+        assert_eq!(std::fs::read(&provider_path).unwrap(), provider_bytes);
+        assert_eq!(host.provider_authority().snapshot().unwrap(), provider);
+        let requests = service.request_log().unwrap().len();
+        // Match the original returned-CAS failure's live suspend/resume path.
+        drop(collection);
+        assert!(matches!(host.engine().suspend(Duration::from_secs(30)).unwrap(),
+            meguri_engine::suspend::SuspendOutcome::Suspended));
+        host.engine().resume().unwrap();
+        assert_eq!(std::fs::read(&provider_path).unwrap(), provider_bytes);
+        assert_eq!(host.provider_authority().snapshot().unwrap(), provider);
+        let collection = host.collection().unwrap();
+        let entities = cold_resume_entities(&host);
+        assert!(entities.iter().all(|entity| entity.acked_rev == 0 && entity.acked_payload.is_none()
+            && entity.acked_system_fields.is_empty() && entity.in_flight.is_empty()));
+        // Arm after R6 restoration: a provider write would fail before reaching
+        // the final tracking boundary. Stop there to exercise a real retry.
+        host.provider_authority().set_cancellation_hook_for_testing(|| {
+            faultpoint::arm("storage.sidecar.before_save", Fault::IoError(std::io::ErrorKind::Other));
+        });
+        faultpoint::arm("cloud.publish.after_cancel_provider", Fault::IoError(std::io::ErrorKind::Other));
+        let failed = runtime.cancel_publication(id, &collection);
+        faultpoint::disarm("cloud.publish.after_cancel_provider");
+        faultpoint::disarm("storage.sidecar.before_save");
+        assert!(matches!(failed, Err(RuntimeError::Tracking(cloud::Error::Io(_)))));
+        let mut cancelling = op.clone();
+        cancelling.step = PublishStep::Cancelling;
+        assert!(runtime.publication_op().unwrap().as_ref() == Some(&cancelling));
+        assert_eq!(decision(&host), before);
+        assert_eq!(std::fs::read(dir.join("meguri-sidecar.json")).unwrap(), before_bytes);
+        assert_eq!(std::fs::read(&provider_path).unwrap(), provider_bytes);
+        assert_eq!(host.provider_authority().snapshot().unwrap(), provider);
+        assert!(host.provider_authority().network_blocked());
+        assert!(host.provider_authority().begin_discovery().is_err());
+        assert!(!host.provider_authority().permits_icloud_binding(&candidate));
+        assert!(runtime.require_provider_collection_admission().is_err());
+        assert!(runtime.require_collection_sending().is_err());
+        assert!(runtime.register_sdk(false).is_err());
+        assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+        assert!(cold_resume_entities(&host) == entities);
+        assert_eq!(collection.cloud_pending_keys().unwrap(), history);
+        assert_eq!(cold_resume_rows(&host), rows);
+        assert_eq!(service.request_log().unwrap().len(), requests);
+        drop(collection);
+        let host = if cold {
+            host.close().unwrap();
+            drop(host);
+            CoreHost::open(config).unwrap()
+        } else { host };
+        let runtime = host.cloud_runtime().unwrap();
+        let collection = host.collection().unwrap();
+        assert!(runtime.publication_op().unwrap().as_ref() == Some(&cancelling));
+        assert_eq!(std::fs::read(&provider_path).unwrap(), provider_bytes);
+        assert_eq!(host.provider_authority().snapshot().unwrap(), provider);
+        host.provider_authority().set_cancellation_hook_for_testing(|| {
+            faultpoint::arm("storage.sidecar.before_save", Fault::IoError(std::io::ErrorKind::Other));
+        });
+        let cancelled = runtime.cancel_publication(id, &collection);
+        faultpoint::disarm("storage.sidecar.before_save");
+        cancelled.expect("unbound pending consent requires no provider mutation on cancellation retry");
+        assert!(runtime.publication_op().unwrap().is_none());
+        assert_eq!(decision(&host), before);
+        assert_eq!(std::fs::read(dir.join("meguri-sidecar.json")).unwrap(), before_bytes);
+        assert_eq!(std::fs::read(&provider_path).unwrap(), provider_bytes);
+        assert_eq!(host.provider_authority().snapshot().unwrap(), provider);
+        let status = runtime.status().unwrap();
+        assert!(status.binding.is_none() && !status.stored_usable && !status.identity_verified);
+        assert!(!status.scan_completed_this_open && !status.note_scan_completed_this_open && !status.scan_drained);
+        assert!(runtime.publication_facts(&collection).unwrap().bindings.is_empty());
+        assert!(runtime.instance().is_err());
+        assert!(!host.provider_authority().permits_icloud_binding(&candidate));
+        assert!(runtime.require_provider_collection_admission().is_err());
+        assert!(runtime.require_collection_sending().is_err());
+        assert!(runtime.register_sdk(false).is_err());
+        assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+        assert_eq!(collection.cloud_pending_keys().unwrap(), history);
+        assert_eq!(cold_resume_rows(&host), rows);
+        assert_eq!(service.request_log().unwrap().len(), requests);
+        // Normal discovery reopens without consuming the pending consent.
+        let discovery = host.provider_authority().begin_discovery().unwrap();
+        assert!(discovery.is_current());
+        let work = runtime.begin_connection_preview(&collection, &host.media().unwrap()).unwrap();
+        let PreviewWork::ReadActive { id: preview } = work else { panic!("fresh discovery must request Active"); };
+        runtime.cancel_connection_preview_id(preview).unwrap();
+        assert_eq!(std::fs::read(&provider_path).unwrap(), provider_bytes);
+        assert_eq!(host.provider_authority().snapshot().unwrap(), provider);
+        assert!(runtime.status().unwrap().binding.is_none());
+        assert!(runtime.require_provider_collection_admission().is_err());
+        assert!(runtime.require_collection_sending().is_err());
+        assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+        assert_eq!(service.request_log().unwrap().len(), requests);
+        drop(discovery);
+        host.close().unwrap();
+    }
+}

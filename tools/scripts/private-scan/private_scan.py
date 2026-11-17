@@ -843,9 +843,9 @@ PUBLIC_ARTIFACTS = {
         "31af001e272ebcc61ca299e3d932f6f29bc5da69551389305956ef92cd9f0e40",
     # Complete public-source review; future bytes remain checked.
     "core/crates/meguri-sync/src/provider.rs":
-        "bf6c482a6af4119659204ecb1bb0b62ee6751dc7403bce920ad1fac271114358",
+        "cf9a25cf5e229bbb62147c7304143d4e347b8a4fb6da7b5826de22a9b5be25bc",
     "core/crates/meguri-host/tests/cloud_publication_phase.rs":
-        "4621cd668042aa0979fdb7ebb24b8846364819bbfec3e0d230959539461483db",
+        "9c5b08115ee7c9969554a0f6d68628cca262a7def0aee665866f0ebab78de622",
     "docs/process/review-log/cancellation-provider-restoration-20261117.md":
         "4e7a3040a4664772f40d77efb95ae19cf54261a9b674bf7a788b23f60b5909c0",
     'specs/sync/one-way.md':
