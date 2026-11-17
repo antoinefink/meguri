@@ -68,3 +68,62 @@ Every normal sender and receiver call now requires public NO_CHANGES completion.
 The observation retains each actor's raw public SDK decision. Existing wire,
 tuple-count and database comparisons remain enabled. No SDK implementation
 source or guessed numeric enum mapping was used.
+
+## U11 exact local package and Desktop31 author
+
+Author session: `s-20261116T225916Z-981c8d1b`. Source base:
+`a7feba8c5e63ca95d31fa950f8286e6c60580454`. The session metadata commit remains
+`9e452d099c1127a15e1b2792bb8dbdfad1288804`.
+
+The author read this quarantine, its existing scheduling/deck adapters, neutral
+specifications and public package manifests. No Anki implementation checkout,
+private collection, installed personal app or credential input was read. The
+new code uses the pinned public SDK and original synthetic recipes. It adds no
+production code, dependency or source translation. Package archive inspection
+rehashes bytes without extracting source files.
+
+The export contains source only. Native parsing checked syntax. No test, build,
+server, Docker container or client ran during authoring. Independent source and
+prepared-input review, MG verification and final artifact execution remain
+required. Preflight admission supplies no compatibility credit. Historical
+intermediate evidence keeps its identity and scope.
+
+### U11 source repair round 1
+
+The original 16-file export remains frozen at patch SHA-256
+`7ba4554dff1d6c8924d7fa2f3c5e0da006e75703470bf0c0c938db7b26243aea`.
+The same author addresses independent review findings F1–F5 in a separate export.
+The repair pins the approved recipe bytes, uses empty media witnesses, binds each
+legacy action to actual events, preserves the original rich baseline and rejects
+reused segment resources. Configuration projections retain all keys and values.
+
+The reviewed MG factory remains responsible for fresh initialization. Oracle
+validation checks its actual retained runtime identities; it does not claim to
+verify secret initialization console output. No such output is retained here.
+The repair adds four guard test methods to the original twelve. No test or
+runtime ran. A new complete-content review and parent-owned MG checks remain due.
+
+
+### U11 finite retained companion and observer
+
+The same existing oracle-maintainer author session
+`s-20261116T225916Z-981c8d1b` implements only the finite quarantined commands from
+frozen original interface `8e69a6337554ac477530ef09544422729c8a1d2b70b399a8e9a563f2e71cfdbb`
+and independently checked public metadata
+`ca55bdc950d506be75182f9ad2c036b7a534ed912f3ea49ea60ad5a373562db1`.
+Those metadata provide the twelve-table raw cell/column/key/stamp contract and
+closed worker actions/invocation shape. No first-party implementation or upstream
+Anki source was read. Existing quarantined SDK helpers and original synthetic
+recipes supply the operations. No dependencies, services or production behavior
+are added. Wire observations contain only closed method/path tokens and measured
+counts/status/disposition; body/header/query data and their hashes are excluded.
+
+The source export is based on the explicit prepared seven-file byte/boundary
+repair overlay over original `ae8caefa0165b7811f8ff911f269322a3faecdef`, not an
+invented Git commit. Its patch includes only the companion delta. A two-line
+helper option preserves media during the ordinary reverse preparation; all old
+callers retain their default behavior. Actual source manifests preserve every
+original and prepared hash. The separate typed SyncError fixture correction is
+not included. No tests, imports, SDK actions, builds, servers or network were run
+by this author. Independent complete-content/source review, parent MG checks,
+actual HTTP execution and final semantic evidence review remain required.

@@ -22,7 +22,7 @@ from recovery_dirty import DIRTY_FIXTURE, dirty_selection
 def adapter(request):
     process = subprocess.run([sys.executable, str(pathlib.Path(__file__).with_name("adapter.py"))],
                              input=encoded(request), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                             timeout=600 if request['mode'] == 'edges' or request.get('phase') == 'media' or request['mode'] == 'media' else 120)
+                             timeout=600 if str(request.get('phase','')).startswith('final-') or request['mode'] == 'edges' or request.get('phase') == 'media' or request['mode'] == 'media' else 120)
     if process.returncode != 0:
         failure = decode(process.stdout).get('failure', {}) if process.stdout else {}
         print('SDK phase failure: ' + str(failure.get('phase', 'unknown')) + ' (' + str(failure.get('kind', 'worker-exit')) + ')', file=sys.stderr)
@@ -46,12 +46,21 @@ class PrivateResult(unittest.TextTestResult):
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == 'retained-companion':
+        child=subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('retained_companion.py')),*sys.argv[2:]],
+                             stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        return child.returncode
+    if len(sys.argv) > 1 and sys.argv[1] == 'retained-observer':
+        from retained_observer import main as observe
+        return observe(sys.argv[2:])
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=["selftest", "identity", "recovery-discover", "recovery", "recovery-dirty", "smoke", "edges", "normal", "normal-sdk", "normal-matrix", "media", "candidate", "catalog", "validate", "seal"])
+    parser.add_argument("mode", choices=["selftest", "identity", "recovery-discover", "recovery", "recovery-dirty", "smoke", "edges", "normal", "normal-sdk", "normal-matrix", "media", "candidate", "final-assemble", "catalog", "validate", "seal"])
+    parser.add_argument('--stage',choices=['normal','execute','record'],default='normal')
     parser.add_argument('--request')
     parser.add_argument('--input')
     parser.add_argument('--credentials')
-    parser.add_argument('--phase',choices=['full','normal','media','complete'],default='full')
+    from final_contract import SEGMENTS
+    parser.add_argument('--phase',choices=['full','normal','media','complete']+['final-'+segment for segment in SEGMENTS],default='full')
     args = parser.parse_args()
     out = pathlib.Path('/out')
     if args.mode != 'catalog':
@@ -137,14 +146,38 @@ def main():
         require(value['runtime']['lock_sha256'] == invocation['lock_sha256'], 'runtime lock receipt mismatch')
         return 0 if record(value,out,invocation) else 1
     if args.mode == 'candidate':
-        from candidate import load_inputs
+        from candidate import load_inputs, verify_package
+        from validation import Artifacts
         require(args.input == '/in' and args.credentials == '/secret/credentials.json','candidate inputs require the fixed separately mounted paths')
-        invocation = decode((out / 'invocation.json').read_bytes())
-        package,inputs,credentials = load_inputs('/in',args.credentials,invocation)
-        target = {**credentials,'server':package['server']}
-        value = adapter({'mode':'candidate','fixture':MEDIA_FIXTURE if args.phase == 'media' else NORMAL_FIXTURE if args.phase == 'normal' else FIXTURE,'target':target,'phase':args.phase,'full_only':args.phase == 'full'})
-        (out / 'candidate-observations.json').write_bytes(encoded(value))
+        invocation=decode((out/'invocation.json').read_bytes());final=args.phase.startswith('final-')
+        require(args.stage in {'execute','record'} if final else args.stage == 'normal','candidate stage/phase mismatch')
+        contract=candidate_selection(args.phase)
+        if final:
+            require(invocation.get('child_phase') == args.phase and invocation.get('child_stage') == args.stage,'final child phase/stage invocation mismatch')
+            invocation['selection']=[case['id'] for case in contract['cases']]
+            (out/'invocation.json').write_bytes(encoded(invocation))
+        if args.stage == 'record':
+            from final_handshake import record_inputs
+            inputs=Artifacts(pathlib.Path('/in/artifacts'));package=decode(pathlib.Path('/in/peer.json').read_bytes())
+            value,_=record_inputs(out,invocation,package,inputs)
+            return 0 if record(value,out,invocation,package,inputs) else 1
+        if args.stage == 'execute':
+            require(set(path.name for path in out.iterdir()) == {'invocation.json'} and 'execute_admission_sha256' not in invocation,'final execute requires initially empty owned output')
+        package,inputs,credentials,package_bytes=load_inputs('/in',args.credentials,invocation,preflight=args.stage == 'execute')
+        target={**credentials,'server':package['server']}
+        phase=args.phase.removeprefix('final-') if final else args.phase
+        extra={'case':contract['cases'][0]} if final and phase not in {'full','normal','media'} else {}
+        value=adapter({'mode':'candidate','fixture':MEDIA_FIXTURE if phase == 'media' else NORMAL_FIXTURE if phase == 'normal' else FIXTURE,
+                       'target':target,'phase':args.phase,'full_only':phase == 'full',**extra})
+        if args.stage == 'execute':
+            from final_handshake import execute
+            return 0 if execute(value,out,invocation,package,inputs,package_bytes) else 1
+        (out/'candidate-observations.json').write_bytes(encoded(value))
         return 0 if record(value,out,invocation,package,inputs) else 1
+    if args.mode == 'final-assemble':
+        from final_assemble import assemble
+        require(args.input == '/in','final assembly requires fixed input mount')
+        return 0 if assemble(pathlib.Path('/in/segments'),out,decode((out/'invocation.json').read_bytes()),adapter({'mode':'identity'})) else 1
     if args.mode == 'smoke':
         request = check_request(decode(pathlib.Path(args.request).read_bytes()) if args.request else
                                 {'format': 'meguri-sync-request-v1', 'operation': 'smoke', 'client': 'desktop', 'peer': 'reference'})

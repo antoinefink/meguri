@@ -1,0 +1,27 @@
+[package]
+name = "meguri-retained-sync-peer"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MPL-2.0"
+publish = false
+
+# Deliberately outside both shipped workspaces.
+[workspace]
+resolver = "3"
+
+[patch.crates-io]
+askama_derive = { path = "../../../core/vendor/askama_derive" }
+
+[dependencies]
+meguri-host = { path = "../../../core/crates/meguri-host" }
+meguri-engine = { path = "../../../core/crates/meguri-engine" }
+meguri-model = { path = "../../../core/crates/meguri-model" }
+meguri-storage = { path = "../../../core/crates/meguri-storage" }
+meguri-sched = { path = "../../../core/crates/meguri-sched" }
+# Enables the existing loopback endpoint guard. No substituted transports.
+meguri-sync = { path = "../../../core/crates/meguri-sync", features = ["test-hooks"] }
+libc = "=0.2.190"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+sha2 = "=0.11.1"

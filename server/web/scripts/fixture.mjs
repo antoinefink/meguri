@@ -7,6 +7,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
 const binary = "/binary/meguri-sync-server", output = "/out";
+const packaged = process.argv[2] === "package";
 const children = [], servers = [];
 let stopping = false;
 async function stop(code) {
@@ -41,9 +42,10 @@ function api(origin, path, body, cookie = "") {
   });
 }
 async function start(name, port) {
-  const origin = `https://localhost:${port}`, root = `/fixtures/${randomUUID()}`;
-  execFileSync(binary, ["init", root, origin], { stdio: "ignore" });
+  const origin = `https://localhost:${port}`, root = packaged ? "/data/owner" : `/fixtures/${randomUUID()}`;
+  if (!packaged) execFileSync(binary, ["init", root, origin], { stdio: "ignore" });
   const token = (await readFile(`${root}/state/setup-token`, "utf8")).trim();
+  if (!packaged) {
   const child = spawn(binary, ["serve", root, origin, `127.0.0.1:${port + 1}`, "--trusted-peer", "127.0.0.1"], { stdio: ["ignore", "pipe", "pipe"] });
   children.push(child);
   // Wait for the actual executable's listening event, without request retries.
@@ -55,11 +57,12 @@ async function start(name, port) {
     child.once("exit", () => { clearTimeout(timer); reject(new Error("Synthetic server exited before readiness")); });
   });
   child.on("exit", () => { if (!stopping) void stop(1); });
-  // Never forward user-supplied proxy authority. The backend listens only on loopback.
+  }
+  // Never forward user-supplied proxy authority. The backend stays in the owned namespace.
   const proxy = createServer({ key: await readFile("/tmp/tls/key.pem"), cert: await readFile("/tmp/tls/cert.pem") }, (incoming, outgoing) => {
     const headers = { ...incoming.headers, "x-forwarded-for": "127.0.0.1", "x-forwarded-proto": "https" };
     delete headers["x-forwarded-host"];
-    const upstream = httpRequest({ hostname: "127.0.0.1", port: port + 1, method: incoming.method, path: incoming.url, headers }, response => {
+    const upstream = httpRequest({ hostname: "127.0.0.1", port: packaged ? 8080 : port + 1, method: incoming.method, path: incoming.url, headers }, response => {
       outgoing.writeHead(response.statusCode, response.headers); response.pipe(outgoing);
     });
     upstream.on("error", () => { if (!outgoing.headersSent) outgoing.writeHead(502); outgoing.end(); });
@@ -78,6 +81,11 @@ async function start(name, port) {
 try {
   await mkdir("/tmp/tls");
   execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "7", "-subj", "/CN=localhost", "-addext", "subjectAltName=DNS:localhost,IP:127.0.0.1", "-keyout", "/tmp/tls/key.pem", "-out", "/tmp/tls/cert.pem"], { stdio: "ignore" });
+  if (packaged) {
+    // Exact-image mode supplies only the existing full browser journey. The
+    // service owns its volume and process in its separate scratch container.
+    await start("test", 18447);
+  } else {
   const preview = await start("preview", 18443);
   const setup = await start("setup", 18445);
   const test = await start("test", 18447);
@@ -100,6 +108,7 @@ try {
     preview: { origin: preview.origin, admin, member, member_authenticated: true, invite: unusedInvite.data, reset: reset.data },
     setup: { origin: setup.origin }, test: { origin: test.origin } };
   await writeFile(`${output}/preview.json`, JSON.stringify(identity, null, 2), { mode: 0o600 });
+  }
   await writeFile(`${output}/ready`, "ready\n");
 } catch (error) {
   // Do not put synthetic capability URLs or API bodies in ordinary service logs.

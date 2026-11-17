@@ -12,6 +12,8 @@
 !conformance/fixtures/meguri-sync-server/original.json
 !conformance/fixtures/meguri-sync-server/edges.json
 !conformance/fixtures/meguri-sync-server/media.json
+!conformance/fixtures/meguri-sync-server/recovery.json
+!conformance/fixtures/meguri-sync-server/recovery-dirty.json
 !conformance/recordings/
 !conformance/recordings/scenarios/
 !conformance/recordings/scenarios/meguri-sync-server/
@@ -22,3 +24,8 @@
 !conformance/recordings/scenarios/meguri-sync-server/candidate-media-selection.json
 !conformance/recordings/scenarios/meguri-sync-server/desktop-media-selection.json
 !conformance/recordings/scenarios/meguri-sync-server/candidate-complete-selection.json
+!conformance/recordings/scenarios/meguri-sync-server/candidate-final-additions.json
+!conformance/recordings/scenarios/meguri-sync-server/candidate-retained-final-selection.json
+!conformance/recordings/scenarios/meguri-sync-server/final-fixture-recipes.json
+!conformance/recordings/scenarios/meguri-sync-server/desktop-recovery-selection.json
+!conformance/recordings/scenarios/meguri-sync-server/desktop-recovery-dirty-selection.json

@@ -1428,13 +1428,13 @@ class PublicLibraryTests(unittest.TestCase):
             "app/Packages/MeguriKit/Sources/CardRendering/Resources/CardRuntime/vendor/jquery-3.7.1.min.js",
         )}
         matched = 0
-        for source in (root / "core/vendor/askama_derive").rglob("*"):
-            if source.is_file():
-                path = source.relative_to(root).as_posix()
-                digest = private_scan.PUBLIC_VENDOR_ARTIFACTS.get(hashlib.sha256(path.encode("utf-8")).hexdigest())
-                if digest is not None:
-                    facts[path] = digest
-                    matched += 1
+        for raw_path in private_scan.git(str(root), "ls-files", "-z").split(b"\0"):
+            if not raw_path:
+                continue
+            digest = private_scan.PUBLIC_VENDOR_ARTIFACTS.get(hashlib.sha256(raw_path).hexdigest())
+            if digest is not None:
+                facts[os.fsdecode(raw_path)] = digest
+                matched += 1
         self.assertEqual(matched, len(private_scan.PUBLIC_VENDOR_ARTIFACTS))
         for path, digest in facts.items():
             if path == private_scan.PUBLIC_NOTICE_PATH:

@@ -246,7 +246,18 @@ async fn process_interruption_at_collection_publication_resolves_old_or_new_comp
         if changed {assert_eq!(logical(&current),expected);} else {
             let c=meguri_sync_server::collection::schema::open(&current,false).unwrap();assert_eq!(c.query_row("SELECT count(*) FROM notes",[],|r|r.get::<_,i64>(0)).unwrap(),0);
         }
-        assert_eq!(std::fs::read(sentinel).unwrap(),b"independent media\0\xff");
+        assert_eq!(std::fs::read(&sentinel).unwrap(),b"independent media\0\xff");
+        assert_eq!(h.service.temp.used(),0);
+        // An absent acknowledgement is uncertain even when publication survived.
+        // Retry the same authoritative upload through the ordinary public API.
+        // This explicitly chooses recovery authority; meta alone cannot prove
+        // whether the interrupted request committed.
+        assert_eq!(decoded(native(&h,"upload",&key,&std::fs::read(&fixture).unwrap()).await).await,b"OK");
+        let recovered=h.temp.path().join("recovered.anki2");
+        std::fs::write(&recovered,decoded(native(&h,"download",&key,b"{}").await).await).unwrap();
+        assert_eq!(logical(&recovered),expected);
+        assert_eq!(objects(&recovered),objects(&fixture));
+        assert_eq!(std::fs::read(&sentinel).unwrap(),b"independent media\0\xff");
         assert_eq!(h.service.temp.used(),0);
         // Process-interruption evidence only; no power-loss claim.
     }

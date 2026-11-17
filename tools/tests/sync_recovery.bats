@@ -2,11 +2,13 @@
 # Exact input-byte binding for the isolated reference observation lane.
 REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
 
-@test "recovery neutral inputs affect the reference digest" {
-  local sandbox="$BATS_TEST_TMPDIR/recovery-inputs" path before after_fixture after_selection after_dirty_fixture after_dirty_selection
-  mkdir -p "$sandbox"
-  # Copy the digest inputs from the working tree without requiring Git metadata.
-  for path in oracle/meguri-sync-server docker/meguri-sync-reference.Dockerfile \
+@test "recovery and final neutral inputs affect the reference digest" {
+  local sandbox="$BATS_TEST_TMPDIR/recovery-inputs" path before after_fixture after_selection after_dirty_fixture after_dirty_selection after_final
+  # Never copy quarantine bodies; this digest input is wholly synthetic.
+  mkdir -p "$sandbox/oracle/meguri-sync-server"
+  printf 'synthetic reference digest placeholder\n' >"$sandbox/oracle/meguri-sync-server/synthetic.txt"
+  # Copy only public digest inputs, without requiring Git metadata.
+  for path in docker/meguri-sync-reference.Dockerfile \
     docker/meguri-sync-reference.Dockerfile.dockerignore docker/meguri-sync-reference.compose.yml \
     tools/mg.d/meguri-sync-reference.sh conformance/schema/meguri-sync-server.schema.json \
     conformance/catalog/meguri-sync-server.json conformance/fixtures/meguri-sync-server/original.json \
@@ -21,9 +23,12 @@ REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
     conformance/recordings/scenarios/meguri-sync-server/desktop-recovery-dirty-selection.json \
     conformance/recordings/scenarios/meguri-sync-server/desktop-recovery-selection.json \
     conformance/recordings/scenarios/meguri-sync-server/candidate-full-selection.json \
-    conformance/recordings/scenarios/meguri-sync-server/candidate-complete-selection.json; do
+    conformance/recordings/scenarios/meguri-sync-server/candidate-complete-selection.json \
+    conformance/recordings/scenarios/meguri-sync-server/candidate-final-additions.json \
+    conformance/recordings/scenarios/meguri-sync-server/candidate-retained-final-selection.json \
+    conformance/recordings/scenarios/meguri-sync-server/final-fixture-recipes.json; do
     mkdir -p "$sandbox/$(dirname "$path")"
-    cp -R "$REPO_ROOT/$path" "$sandbox/$path"
+    cp "$REPO_ROOT/$path" "$sandbox/$path"
   done
   # The host helper uses macOS tools; the dev image supplies equivalent primitives.
   rg() { [ "$1" = --files ]; shift; find "$@" -type f; }
@@ -44,4 +49,24 @@ REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   printf '\n' >>"$sandbox/conformance/recordings/scenarios/meguri-sync-server/desktop-recovery-dirty-selection.json"
   after_dirty_selection="$(mg_sync_reference_digest)"
   [ "$after_dirty_fixture" != "$after_dirty_selection" ]
+  # Mutate each final metadata input independently from the same baseline.
+  for path in conformance/recordings/scenarios/meguri-sync-server/candidate-final-additions.json \
+    conformance/recordings/scenarios/meguri-sync-server/candidate-retained-final-selection.json \
+    conformance/recordings/scenarios/meguri-sync-server/final-fixture-recipes.json; do
+    printf '{"synthetic_digest_probe":true}\n' >"$sandbox/$path"
+    after_final="$(mg_sync_reference_digest)"
+    [ "$after_dirty_selection" != "$after_final" ]
+    cp "$REPO_ROOT/$path" "$sandbox/$path"
+    [ "$after_dirty_selection" = "$(mg_sync_reference_digest)" ]
+  done
+}
+
+@test "reference author literals retain ordered source responsibility metadata" {
+  # Metadata-only policy seam; the producer still validates committed roles/uniqueness.
+  local expected='["s-20261115T133013Z-d8cec007","s-20261115T211543Z-556b04e9","s-20261115T224434Z-376ca308","s-20261115T231059Z-ff95725a","s-20261116T001757Z-8fe546bc","s-20261116T020051Z-5e05fa3f","s-20261116T092626Z-4487d759","s-20261116T124044Z-c9976196","s-20261116T225916Z-981c8d1b"]'
+  local author_literal authors_literal
+  author_literal="$(sed -n 's/^  author_session=//p' "$REPO_ROOT/tools/mg.d/meguri-sync-reference.sh")"
+  authors_literal="$(sed -n 's/^  source_author_sessions=//p' "$REPO_ROOT/tools/mg.d/meguri-sync-reference.sh")"
+  [ "$author_literal" = '"s-20261116T124044Z-c9976196"' ]
+  [ "$authors_literal" = "'$expected'" ]
 }

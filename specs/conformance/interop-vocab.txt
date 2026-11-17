@@ -563,3 +563,32 @@ hideAudioPlayButtons
 interruptAudioWhenAnswering
 review_config
 timeLim
+
+# Exact local Docker peer receipt interface.
+final_package
+image_id
+inputs_sha256
+runtime_inventory_sha256
+image_inspection_sha256
+assets_sha256
+server_process
+fixture_recipes_sha256
+meguri-sync-final-fixtures-v1
+container_inspection_before_sha256
+container_inspection_after_sha256
+
+# Trusted final invocation comparison metadata, never selectors.
+root
+server_arguments
+data_volume
+owner_nonce
+
+# Fixed final execute/record evidence handoff.
+final_package_preflight
+child_phase
+child_stage
+invocation_sha256
+preflight_peer_sha256
+observations_sha256
+execute_admission_sha256
+meguri-sync-final-execute-v1

@@ -87,14 +87,20 @@ def run(api, fixture, target=None):
                 a,model=api.collection(root,'a',fixture['base']); clients.append(a)
                 api.add_note(a,model,fixture['base']['notes'][0])
                 b,_=api.collection(root,'b',fixture['base']); clients.append(b)
+                trace=getattr(api,'FINAL_LEGACY',None)
+                if trace is not None:trace.prepare(a);trace.authoritative(a,'client_a')
                 endpoint=f'http://127.0.0.1:{record.server_port}/'
-                aa=a.sync_login(username=user,password=password,endpoint=endpoint)
-                ab=b.sync_login(username=user,password=password,endpoint=endpoint)
-                api.full(a,aa,True); api.full(b,ab,False)
+                aa=trace.call(a,'client_a','login',record,lambda:a.sync_login(username=user,password=password,endpoint=endpoint),comparison='unchanged',auxiliary=True) if trace is not None else a.sync_login(username=user,password=password,endpoint=endpoint)
+                ab=trace.call(b,'client_b','login',record,lambda:b.sync_login(username=user,password=password,endpoint=endpoint),comparison='unchanged',auxiliary=True) if trace is not None else b.sync_login(username=user,password=password,endpoint=endpoint)
+                if trace is not None:
+                    trace.call(a,'client_a','setup-upload',record,lambda:api.full(a,aa,True),auxiliary=True)
+                    trace.call(b,'client_b','setup-download',record,lambda:api.full(b,ab,False),auxiliary=True)
+                else:api.full(a,aa,True);api.full(b,ab,False)
 
                 def sync(col,auth,actor):
                     before=len(record.observations)
-                    api.media_sync(col,auth,timeout=120)
+                    if trace is not None:trace.call(col,actor,'media',record,lambda:api.media_sync(col,auth,timeout=120),comparison='media')
+                    else:api.media_sync(col,auth,timeout=120)
                     rows=record.observations[before:]
                     require(success(rows),'media SDK traffic failed')
                     completions.append({'actor':actor,'active':False,'public_status_returned':True})
@@ -109,10 +115,12 @@ def run(api, fixture, target=None):
                         # Registration observes the media directory's timestamp too.
                         path.parent.touch()
                     else: require(sender.media.write_data(name,data)==name,'media addition changed the requested name')
+                    if trace is not None:trace.authoritative(sender,actor_sender)
                     sync(sender,auth_sender,actor_sender); sync(receiver,auth_receiver,actor_receiver)
                     received=pathlib.Path(receiver.media.dir())/name
                     return not received.exists() if data is None else received.read_bytes()==data and sha(received.read_bytes())==sha(data)
 
+                if trace is not None:trace.use('sdk-bidirectional-mutations')
                 api.PHASE='media-sdk-bidirectional-mutations'
                 start=len(record.observations)
                 name_image,name_audio=fixture['image_name'],fixture['audio_name']
@@ -128,6 +136,7 @@ def run(api, fixture, target=None):
                 results['sdk-bidirectional-mutations']=values
                 details['sdk-bidirectional-mutations']={'traffic':rows,'final_hashes':{'client_a':hashes(a),'client_b':hashes(b)}}
 
+                if trace is not None:trace.use('sdk-no-change');trace.authoritative(a,'client_a')
                 api.PHASE='media-sdk-no-change'
                 ar=sync(a,aa,'client_a'); br=sync(b,ab,'client_b')
                 results['sdk-no-change']={'client_a_routes':[r['route'] for r in ar], 'client_b_routes':[r['route'] for r in br],
@@ -137,6 +146,7 @@ def run(api, fixture, target=None):
 
                 # Reuse both deleted names so listing has exactly 1005 current states,
                 # while its observed USNs honestly include all six earlier mutations.
+                if trace is not None:trace.use('sdk-26-downloads')
                 api.PHASE='media-sdk-26-downloads'
                 time.sleep(1.05)
                 names=[name_image,name_audio]+[f'aster-payload-{index:04}.bin' for index in range(2,fixture['listing_count'])]
@@ -145,6 +155,7 @@ def run(api, fixture, target=None):
                     data=image(3) if index==0 else audio(3) if index==1 else (fixture['payload_prefix']+str(index)).encode()
                     expected[name]=sha(data)
                     if index<fixture['batch_count']: a.media.write_data(name,data)
+                if trace is not None:trace.authoritative(a,'client_a')
                 uploaded=sync(a,aa,'client_a'); received=sync(b,ab,'client_b')
                 downloads=[r['media_request']['files'] for r in received if r['route']=='/msync/downloadFiles']
                 results['sdk-26-downloads']={'download_request_counts':[len(v) for v in downloads],
@@ -153,15 +164,22 @@ def run(api, fixture, target=None):
                   'all_media_statuses_success':success(uploaded+received)}
                 details['sdk-26-downloads']={'traffic':uploaded+received,'receiver_hashes':hashes(b)}
 
+                if trace is not None:trace.use('sdk-1005-listing')
                 api.PHASE='media-sdk-1005-listing'
                 time.sleep(1.05)
                 for index in range(fixture['batch_count'],fixture['listing_count']):
                     a.media.write_data(names[index],(fixture['payload_prefix']+str(index)).encode())
+                if trace is not None:trace.all_cases();trace.authoritative(a,'client_a');trace.use('sdk-1005-listing')
                 uploaded=sync(a,aa,'client_a')
                 c,_=api.collection(root,'fresh',fixture['base']); clients.append(c)
-                ac=c.sync_login(username=user,password=password,endpoint=endpoint)
-                api.full(c,ac,False)
-                received=sync(c,ac,'fresh_client'); existing=sync(b,ab,'client_b')
+                if trace is not None:trace.all_cases()
+                ac=trace.call(c,'fresh_client','login',record,lambda:c.sync_login(username=user,password=password,endpoint=endpoint),comparison='unchanged') if trace is not None else c.sync_login(username=user,password=password,endpoint=endpoint)
+                if trace is not None:trace.call(c,'fresh_client','full-download',record,lambda:api.full(c,ac,False))
+                else:api.full(c,ac,False)
+                if trace is not None:trace.all_cases()
+                received=sync(c,ac,'fresh_client')
+                if trace is not None:trace.use('sdk-1005-listing')
+                existing=sync(b,ab,'client_b')
                 listing=[r for r in received if r['route']=='/msync/mediaChanges']
                 changes=[change for row in listing for change in row['media_result']]
                 usns=[change[1] for change in changes]

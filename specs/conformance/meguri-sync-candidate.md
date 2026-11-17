@@ -72,3 +72,43 @@ transfer. Reject a pending full-transfer decision even when observed traffic
 contains only metadata and no collection bytes. Retain actual client decisions
 with their actor identities alongside the wire and final-state observations.
 A request list or successful HTTP status cannot substitute for that completion.
+
+## K6. Final artifact selections
+
+The historical `complete` candidate phase is an intermediate smoke selection.
+Its name does not mean final delivery or the union of the separately defined
+full, normal and media selections. Preserve its original scope and receipts.
+
+Final selections implement `conformance/meguri-sync-server#C12` against the
+exact local Docker image. Freeze their expected cases and assertions before
+execution; retain separate Desktop, actual Mobile, retained-peer and policy
+accounting. Reuse the existing client/runtime and fixture seams rather than
+adding another test framework. Each final result binds the actual image,
+running executable and applicable source/lock/features/assets/package evidence.
+Earlier debug results retain only their historical identities and scope.
+
+K2 and K3 still govern automated candidate invocations: the endpoint is fixed
+and job-owned, and credentials use the protected input. Actual Mobile runs need
+a separate, operator-coordinated private route to that same owned image. Public
+fixtures cannot select arbitrary endpoints, and no public sync service is used.
+This policy authorizes no certificate/trust installation, real account setup or
+private collection access. Missing device access or private routing is an
+explicit external step. An `intermediate_build` receipt cannot establish final
+package acceptance merely by changing its label.
+
+Existing deterministic source tests may support the mapped safety assertions
+when their tested source and build configuration are identified. Their
+test-hook executable is separate from the hook-free delivered artifact.
+They do not substitute for actual-client or exact-image execution. Record any
+configuration difference that changes the assertion; an unrelated or stale
+source result supplies no final credit.
+
+## K7. Exact local package receipt branch
+
+For final selections apply conformance/meguri-sync-local-delivery#L1–L7.
+The disjoint final_package input extends this boundary without changing
+intermediate_build semantics or historical full/normal/media/complete scope.
+Static prepared inputs and concrete assertions require independent review before
+final execution; dynamic offline event snapshots follow L1 capture/order rules and
+independent artifact review before credit. Generator authoring may precede hashes. Receipt, actual
+running-peer measurement and semantic validation bind identical final inputs.

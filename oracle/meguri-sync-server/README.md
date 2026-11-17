@@ -128,3 +128,72 @@ snapshot through public SDK operations, without importing or synchronizing the
 preserved dirty profile. Exact whole-file-name/hash equality, all non-col user
 tables and card/review rows remain compared. No GUI procedure, candidate restore,
 Mobile behavior or general dirty-media conflict rule is claimed.
+
+Final Desktop delivery uses nine fixed `candidate --phase final-…` segments:
+`full`, `normal`, `media`, `migration`, `replacement-upload`,
+`replacement-download`, `metadata-only`, `fresh-fresh` and `rich`.
+Each segment uses a fresh job-owned candidate instance and the existing protected
+credential pair. The package image and outer MG identity remain identical.
+
+`--stage execute` accepts only `final_package_preflight` from `/in/preflight.json`.
+It retains raw observations and a non-credit admission. MG captures that
+admission's hash, measures the actual after-state and supplies the complete final
+receipt. `--stage record` makes no client requests. It binds unchanged observations
+to that final receipt. `final-assemble --input /in` reads the nine fixed directories
+under `/in/segments/` and requires their exact 31-case union.
+
+The six additions freeze actual authoritative values before submission. Semantic
+validation compares retained values and rows; claimed true booleans alone fail.
+The migration source is isolated at fixed loopback port 8081. Its process and
+cleanup evidence remain separate from the candidate at port 8080. These paths
+provide no Mobile, retained-peer, GUI, deployment or broad catalog credit.
+
+Source repair round 1 keeps the execute/record paths and nine segment CLI values
+unchanged. Replacement media observations use new empty directories and cursors
+before reconciliation and again at the final observation. Legacy final cases
+retain actual actor/action events with capture, first-submit and completion order.
+Each action binds its own inputs and original baseline. Rich mutations preserve
+all untouched baseline values, including complete configuration values. Assembly
+rejects reused candidate containers, creation nonces or data volumes. The owning
+MG factory proves initialization and cleanup; its secret console output never
+enters this evidence store.
+
+
+The quarantined retained8 companion exposes only these fixed commands:
+
+```sh
+driver.py retained-companion --input /in --credentials /secret/credentials.json
+driver.py retained-observer --input /in
+```
+
+They implement frozen interface `8e69a6337554ac477530ef09544422729c8a1d2b70b399a8e9a563f2e71cfdbb`
+and original public metadata `ca55bdc950d506be75182f9ad2c036b7a534ed912f3ea49ea60ad5a373562db1`.
+The companion runs as a waited SDK child with native stdout/stderr discarded;
+structured files are its only evidence. The observer stays foreground for graceful
+shutdown. The companion accepts only the agreed case/action table. Offline preparation reads
+no credentials and starts no listener. Online actions use the existing protected
+pair, a persistent case/run-owned `client_b`, or a new empty witness profile.
+Review bytes are opaque, hash-bound public inputs; MG and final independent review
+own their applicability. Every output remains `case_credit:false`.
+
+Raw snapshots retain all twelve public tables, original cell bytes/real bits,
+explicit column and native key order, and whole media maps. Only approved protocol
+stamp cells are masked during supported comparison. Configuration/blob bytes are
+never reserialized. Tags use the existing full case-fold `unicase` ordering;
+configuration keys use binary ordering. These snapshots do not use the older
+normalized Desktop projection.
+
+The observer reads no credential or worker client-build/input-manifest files.
+Both actors share one fixed `127.0.0.1:18080` to `127.0.0.1:8080` transport and
+wire format. Only the seventeen public POST routes are allowed. Request/response
+body bytes are counted after HTTP chunk deframing and before protocol decompression;
+headers, bodies, query values and their hashes never enter wire evidence or logs.
+The uncertain action alone withholds a complete exact successful upload response.
+It never generates a replay. Upstream and delivered completion remain distinct.
+Stop the foreground observer gracefully after the worker closes, then wait for
+its wire output. In-flight shutdown and incomplete HTTP bodies remain failures.
+
+Harness tests include synthetic upstream transport checks and real SDK offline
+preparation/projection checks. They do not execute retained8 compatibility or grant
+credit. Parent-owned MG runs, actual eight-case HTTP artifacts and independent
+semantic review remain required. Existing Desktop31 commands/stages/counts remain.

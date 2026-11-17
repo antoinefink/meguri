@@ -152,10 +152,10 @@ mg_sync_web_browser() {
   mg_status pass
 }
 
-# Internal identity parameter only; both callers use the same browser invocation.
+# Internal identity parameters only; callers use the same browser invocation.
 # Register hooks in the owning job shell, never inside a command substitution.
 mg_sync_web__browser() {
-  local fixture_dir="$1" container="$2" image="$3" identity owner name
+  local fixture_dir="$1" container="$2" image="$3" identity owner name browser_user="${4:-0:0}"
   identity="$(docker inspect --format '{{.Id}} {{.Image}} {{.State.Running}}' "$container")" || {
     mg_sync_web__failure "Cannot inspect browser fixture"; return 1
   }
@@ -167,7 +167,7 @@ mg_sync_web__browser() {
   name="meguri-web-browser-$MG_RUN_ID-$owner"
   mg_on_exit "$(printf '%q ' mg_sync_server__remove_container "$name" "$owner")"
   local execution_status=0 count_status=0
-  docker run --rm --init --read-only --cap-drop ALL --security-opt no-new-privileges \
+  docker run --rm --init --read-only --user "$browser_user" --cap-drop ALL --security-opt no-new-privileges \
       --name "$name" --label "meguri.sync.owner=$owner" \
       --label "meguri.mg.run-id=$MG_RUN_ID" --shm-size=512m --tmpfs /tmp --tmpfs /work:exec \
       --network "container:$cid" \
@@ -341,7 +341,9 @@ mg_sync_web__verify_body() {
 }
 
 mg_sync_web_verify() {
-  if [ "$#" -ne 0 ]; then mg_failure usage "Use sync-web-verify (no arguments)"; mg_status error; return; fi
+  local package_receipt=
+  if [ "$#" -eq 2 ] && [ "$1" = --package-receipt ]; then package_receipt="$2"
+  elif [ "$#" -ne 0 ]; then mg_failure usage "Use sync-web-verify [--package-receipt <result.json>]"; mg_status error; return; fi
   mg_status fail
   mg_artifact directory "$MG_RUN_DIR" "Composite child receipts, reports, identities and checked cleanup"
   local frontend binary_dir image owner name rc=0
@@ -354,6 +356,11 @@ mg_sync_web_verify() {
   mg_sync_web__child sync-web-browser-install || return
   mg_sync_web__child sync-web-check || return
   frontend="${MG_SYNC_WEB_CHILD%/result.json}"
+  if [ -n "$package_receipt" ]; then
+    mg_sync_web__package_verify "$package_receipt" "$image" "$frontend" || return
+    mg_status pass
+    return
+  fi
   mg_sync_web__child sync-web-actualserver-build "$frontend/prepared" || return
   binary_dir="${MG_SYNC_WEB_CHILD%/result.json}"
   [ -x "$binary_dir/meguri-sync-server" ] && [ -s "$binary_dir/assets.json" ] &&
@@ -372,4 +379,182 @@ mg_sync_web_verify() {
   mg_detail fixture_cleanup "$(jq -nc --arg name "$name" --arg owner "$owner" \
     '{name:$name,owner:$owner,absence_confirmed:true}')"
   mg_status pass
+}
+
+mg_sync_web__package_verify() {
+  local receipt="$1" image="$2" frontend="$3" MG_SYNC_INSTANCE="$MG_RUN_DIR/instance"
+  local MEGURI_SYNC_ORIGIN=https://localhost:18447 MEGURI_SYNC_TRUSTED_PEER=127.0.0.1 MEGURI_SYNC_NETWORK=none
+  local MG_SYNC_SETUP_FILE=/dev/null
+  local service name="meguri-web-package-$MG_RUN_ID" owner rc=0 directory
+  mg_sync_package__receipt "$receipt" || { mg_sync_web__failure "Invalid exact package receipt"; return 1; }
+  directory="$(cd "$(dirname "$receipt")" && pwd -P)" || return 1
+  mkdir "$MG_RUN_DIR/package-artifacts" || return 1
+  mkdir -m 700 "$MG_RUN_DIR/fixture" || return 1
+  mg_sync_package__candidate_input "$receipt" "$MG_RUN_DIR/package-artifacts" >"$MG_RUN_DIR/package-identity.json" || return 1
+  cmp -s "$directory/product/assets.json" "$MG_RUN_DIR/package-artifacts/$(jq -er .package.assets_sha256 "$MG_RUN_DIR/package-identity.json")" || return 1
+  cmp -s "$frontend/prepared/assets.json" "$directory/product/assets.json" || {
+    mg_sync_web__failure "Frontend proof assets differ from the exact image"; return 1;
+  }
+  mg_artifact exact-package "$receipt"
+  mg_artifact package-identity "$MG_RUN_DIR/package-identity.json"
+  mg_artifact package-artifacts "$MG_RUN_DIR/package-artifacts"
+  mg_on_exit "$(printf '%q ' mg_sync_package__volume_remove "$MG_SYNC_INSTANCE")"
+  mg_on_exit "local MG_SYNC_INSTANCE=$(printf '%q' "$MG_SYNC_INSTANCE"); mg_sync_package__stop"
+  mg_sync_package__init "$receipt" && mg_sync_package__start || {
+    mg_sync_web__failure "Exact-image browser service failed to initialize/start"; return 1;
+  }
+  service="$(jq -er .name "$MG_SYNC_INSTANCE/container.json")" || return 1
+  owner="$(python3 -c 'import secrets; print(secrets.token_hex(16))')" || return 1
+  mg_on_exit "$(printf '%q ' mg_sync_server__remove_container "$name" "$owner")"
+  docker run -d --init --read-only --user 10001:10001 --cap-drop ALL --security-opt no-new-privileges \
+    --name "$name" --network "container:$service" --tmpfs /tmp:uid=10001,gid=10001,mode=0700 \
+    --tmpfs /out:uid=10001,gid=10001,mode=0700 \
+    --label "meguri.mg.run-id=$MG_RUN_ID" --label "meguri.sync.owner=$owner" \
+    --mount "type=volume,src=$(jq -er .volume "$MG_SYNC_INSTANCE/instance.json"),dst=/data,readonly" \
+    "$image" package-preview >"$MG_RUN_DIR/package-proxy.cid" || rc=1
+  [ "$rc" -ne 0 ] || docker exec "$name" node /opt/sync-web/ready.mjs || rc=1
+  # docker cp cannot read the running proxy's tmpfs. Export just these two
+  # fixed files in-container; capability bytes go directly to private files.
+  if [ "$rc" -eq 0 ]; then
+    python3 - "$MG_RUN_DIR" "$name" "$owner" "$image" "$MG_RUN_ID" <<'PY' || rc=1
+import base64
+import json
+import os
+import re
+import stat
+import subprocess
+import sys
+
+try:
+    root, name, owner, image, run = sys.argv[1:]
+    if not re.fullmatch(r"[0-9a-f]{32}", owner) or not re.fullmatch(r"sha256:[0-9a-f]{64}", image):
+        raise ValueError()
+    with open(root + "/package-proxy.cid", encoding="ascii") as handle:
+        cid = handle.read().strip()
+    if not re.fullmatch(r"[0-9a-f]{64}", cid):
+        raise ValueError()
+    # No source selector comes from a receipt, environment or descriptor.
+    script = r'''
+import { constants, lstatSync, openSync, fstatSync, readFileSync, closeSync, writeSync } from "node:fs";
+try {
+  const path = process.argv[1];
+  if (path !== "/out/ready" && path !== "/out/test/fixture.json") throw 0;
+  const directories = ["/out", ...(path === "/out/ready" ? [] : ["/out/test"])];
+  const parents = directories.map(directory => {
+    const s = lstatSync(directory);
+    if (!s.isDirectory() || s.uid !== 10001 || s.gid !== 10001 || (s.mode & 0o022) ||
+        (directory === "/out" && (s.mode & 0o777) !== 0o700)) throw 0;
+    return s;
+  });
+  const before = lstatSync(path);
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const s = fstatSync(fd);
+    if (!s.isFile() || s.nlink !== 1 || s.uid !== 10001 || s.gid !== 10001 ||
+        ((s.mode & 0o7777) !== 0o600 && !(path === "/out/ready" && (s.mode & 0o7777) === 0o644)) ||
+        s.dev !== before.dev || s.ino !== before.ino || s.size < 1 || s.size > 4096) throw 0;
+    const bytes = readFileSync(fd);
+    const after = fstatSync(fd), binding = lstatSync(path);
+    if (bytes.length !== s.size || after.size !== s.size || after.mtimeMs !== s.mtimeMs ||
+        after.ctimeMs !== s.ctimeMs || binding.dev !== s.dev || binding.ino !== s.ino ||
+        binding.nlink !== 1 || after.mode !== s.mode || after.uid !== s.uid || after.gid !== s.gid) throw 0;
+    directories.forEach((directory, i) => {
+      const current = lstatSync(directory), previous = parents[i];
+      if (current.dev !== previous.dev || current.ino !== previous.ino || current.mode !== previous.mode ||
+          current.uid !== previous.uid || current.gid !== previous.gid) throw 0;
+    });
+    writeSync(1, bytes);
+  } finally { closeSync(fd); }
+} catch { process.exit(1); }
+'''
+    # Pin the private destination directories and use nofollow, exclusive files.
+    fixture = root + "/fixture"
+    if os.path.realpath(root) != root:
+        raise ValueError()
+    directory = os.lstat(fixture)
+    if not stat.S_ISDIR(directory.st_mode) or directory.st_uid != os.getuid() or stat.S_IMODE(directory.st_mode) != 0o700:
+        raise ValueError()
+    fixture_fd = os.open(fixture, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        pinned = os.fstat(fixture_fd)
+        if (pinned.st_dev, pinned.st_ino) != (directory.st_dev, directory.st_ino):
+            raise ValueError()
+        os.mkdir("test", 0o700, dir_fd=fixture_fd)
+        test_fd = os.open("test", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fixture_fd)
+        try:
+            test = os.fstat(test_fd)
+            if test.st_uid != os.getuid() or stat.S_IMODE(test.st_mode) != 0o700:
+                raise ValueError()
+            for source, destination, parent in (("/out/ready", "ready", fixture_fd),
+                                                  ("/out/test/fixture.json", "fixture.json", test_fd),
+                                                  (None, None, None)):
+                inspection = subprocess.run(["docker", "inspect", cid], check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                containers = json.loads(inspection.stdout)
+                if len(containers) != 1:
+                    raise ValueError()
+                container = containers[0]
+                if (container["Id"] != cid or container["Name"] != "/" + name or
+                    container["Image"] != image or container["Config"]["Image"] != image or
+                    container["State"]["Running"] is not True or container["Config"]["User"] != "10001:10001" or
+                    container["Config"]["Cmd"] != ["package-preview"] or
+                    container["Config"]["Labels"]["meguri.mg.run-id"] != run or
+                    container["Config"]["Labels"]["meguri.sync.owner"] != owner):
+                    raise ValueError()
+                if source is None:
+                    for path, previous in ((fixture, pinned), (fixture + "/test", test)):
+                        current = os.lstat(path)
+                        if ((current.st_dev, current.st_ino, current.st_mode, current.st_uid) !=
+                            (previous.st_dev, previous.st_ino, previous.st_mode, previous.st_uid)):
+                            raise ValueError()
+                    continue
+                fd = os.open(destination, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
+                with os.fdopen(fd, "w+b") as output:
+                    subprocess.run(["docker", "exec", cid, "node", "--input-type=module", "-e", script, source],
+                                   check=True, stdout=output, stderr=subprocess.DEVNULL)
+                    output.seek(0)
+                    data = output.read(4097)
+                    s = os.fstat(output.fileno())
+                    if not stat.S_ISREG(s.st_mode) or s.st_nlink != 1 or s.st_uid != os.getuid() or stat.S_IMODE(s.st_mode) != 0o600:
+                        raise ValueError()
+                    if source == "/out/ready":
+                        if data != b"ready\n":
+                            raise ValueError()
+                    else:
+                        descriptor = json.loads(data)
+                        if (len(data) > 4096 or type(descriptor) is not dict or len(json.loads(data, object_pairs_hook=list)) != 2 or
+                            set(descriptor) != {"origin", "setup_token"} or
+                            descriptor["origin"] != "https://localhost:18447" or type(descriptor["setup_token"]) is not str or
+                            not re.fullmatch(r"[A-Za-z0-9_-]{43}", descriptor["setup_token"])):
+                            raise ValueError()
+                        token = base64.urlsafe_b64decode(descriptor["setup_token"] + "=")
+                        if base64.urlsafe_b64encode(token).decode().rstrip("=") != descriptor["setup_token"]:
+                            raise ValueError()
+        finally:
+            os.close(test_fd)
+    finally:
+        os.close(fixture_fd)
+except Exception:
+    # Never include parser errors, descriptor bytes or Docker output in MG logs.
+    sys.exit(1)
+PY
+  fi
+  [ "$rc" -ne 0 ] || mg_sync_web__browser "$MG_RUN_DIR/fixture" "$name" "$image" "$(id -u):$(id -g)" || rc=1
+  docker inspect "$service" >"$MG_RUN_DIR/service-container-after.json" || rc=1
+  jq -e --slurpfile before "$MG_RUN_DIR/service-container.json" '
+    length==1 and .[0].State.Running and .[0].Id==$before[0][0].Id and
+    .[0].Image==$before[0][0].Image and .[0].Config==$before[0][0].Config and
+    .[0].Mounts==$before[0][0].Mounts and .[0].HostConfig==$before[0][0].HostConfig and
+    .[0].State.StartedAt==$before[0][0].State.StartedAt' "$MG_RUN_DIR/service-container-after.json" >/dev/null || rc=1
+  mg_artifact service-container-after "$MG_RUN_DIR/service-container-after.json"
+  mg_sync_server__remove_container "$name" "$owner" || rc=1
+  mg_sync_package__stop || rc=1
+  if [ "$rc" -ne 0 ]; then mg_sync_web__failure "Exact-image full browser journey or checked cleanup failed"; return 1; fi
+  jq -ne --slurpfile frontend "$frontend/test-counts.json" --slurpfile browser "$MG_RUN_DIR/test-counts.json" '
+    $frontend[0].errors==[] and $frontend[0].counts.total==9 and $frontend[0].counts.passed==9 and
+    $browser[0].errors==[] and $browser[0].counts.total==1 and $browser[0].counts.passed==1' >/dev/null || return 1
+  local screenshots
+  screenshots="$(find "$MG_RUN_DIR/browser-artifacts" -name '*.png' -type f | wc -l | tr -d ' ')" || return 1
+  [ "$screenshots" -eq 9 ] || { mg_sync_web__failure "Missing audited browser screenshots"; return 1; }
+  mg_detail test_groups "$(jq -nc --slurpfile frontend "$frontend/test-counts.json" --slurpfile browser "$MG_RUN_DIR/test-counts.json" '{frontend:$frontend[0],browser:$browser[0]}')"
+  mg_count total 10; mg_count passed 10; mg_count completed 10; mg_count selected 10
 }

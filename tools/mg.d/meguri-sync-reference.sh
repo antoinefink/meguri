@@ -21,7 +21,10 @@ mg_sync_reference_digest() {
       conformance/recordings/scenarios/meguri-sync-server/desktop-recovery-dirty-selection.json \
       conformance/recordings/scenarios/meguri-sync-server/desktop-recovery-selection.json \
       conformance/recordings/scenarios/meguri-sync-server/candidate-full-selection.json \
-      conformance/recordings/scenarios/meguri-sync-server/candidate-complete-selection.json |
+      conformance/recordings/scenarios/meguri-sync-server/candidate-complete-selection.json \
+      conformance/recordings/scenarios/meguri-sync-server/candidate-final-additions.json \
+      conformance/recordings/scenarios/meguri-sync-server/candidate-retained-final-selection.json \
+      conformance/recordings/scenarios/meguri-sync-server/final-fixture-recipes.json |
       LC_ALL=C sort | while IFS= read -r file; do shasum -a 256 "$file" || exit 1; done | shasum -a 256 | cut -d ' ' -f1
   )
 }
@@ -96,7 +99,7 @@ mg_sync_server_reference() {
   lock_sha="$(shasum -a 256 "$reference_dir/requirements.lock" | cut -d ' ' -f1)"
   # Explicit source authors, independent of the operator and checkout path.
   author_session="s-20261116T124044Z-c9976196"
-  source_author_sessions='["s-20261115T133013Z-d8cec007","s-20261115T211543Z-556b04e9","s-20261115T224434Z-376ca308","s-20261115T231059Z-ff95725a","s-20261116T001757Z-8fe546bc","s-20261116T020051Z-5e05fa3f","s-20261116T092626Z-4487d759","s-20261116T124044Z-c9976196"]'
+  source_author_sessions='["s-20261115T133013Z-d8cec007","s-20261115T211543Z-556b04e9","s-20261115T224434Z-376ca308","s-20261115T231059Z-ff95725a","s-20261116T001757Z-8fe546bc","s-20261116T020051Z-5e05fa3f","s-20261116T092626Z-4487d759","s-20261116T124044Z-c9976196","s-20261116T225916Z-981c8d1b"]'
   if ! git -C "$MG_ROOT" show "${source_commit}:docs/process/provenance/sessions.jsonl" |
       jq -es --argjson authors "$source_author_sessions" '
         [.[] | select(.session as $id | $authors | index($id))] | unique |

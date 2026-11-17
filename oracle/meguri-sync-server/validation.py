@@ -195,7 +195,21 @@ def _artifacts(manifest, case, store, invocation, trusted_runtime):
         package = store.json(roles["package"])
         require(same_value(package.get("server"), peer), "candidate package receipt mismatch")
         from candidate import verify_package
-        verify_package(package,store,{**invocation,'executable_sha256':manifest['executable_sha256']})
+        execution=invocation
+        if package.get('kind') == 'final_package':
+            execution=store.json(receipt['execution_invocation_sha256'])
+            require(all(same_value(execution.get(key),invocation.get(key)) for key in SOURCE_FIELDS+('run_id','author_session')), 'final segment/outer invocation mismatch')
+            from evidence import candidate_selection
+            phase=receipt.get('child_phase')
+            require(isinstance(phase,str) and phase.startswith('final-') and execution.get('child_phase') == phase,'final child phase missing')
+            selected=candidate_selection(phase)
+            require(execution.get('selection') == [row['id'] for row in selected['cases']] and case['id'] in execution['selection'],'final child selection mismatch')
+            observation=store.json(roles['neutral_observation'])['details']
+            from final_handshake import verify_admission
+            verify_admission(execution,package,store,observation)
+            from final_checks import verify_result
+            verify_result(observation,case,store,fixture)
+        verify_package(package,store,{**execution,'executable_sha256':manifest['executable_sha256']})
     if lane["client"]["kind"] == "mobile":
         device = store.json(roles["device_evidence"])
         require(device.get("format") == "meguri-sync-device-v1", "invalid device receipt")

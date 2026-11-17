@@ -10,7 +10,7 @@ mg_job sync-server-format docker:dev mg_sync_server_format \
 mg_job sync-server-candidate-build host mg_sync_server_candidate_build \
   "Clean committed candidate build in Docker: --lane desktop --phase full --author-session <recorded-id>"
 mg_job sync-server-interop host mg_sync_server_interop \
-  "Owned isolated loopback candidate: --lane desktop --phase <full|normal|media> --build-receipt <result.json> --author-session <recorded-id>; no fallback"
+  "Owned isolated loopback candidate: --lane desktop --phase <full|normal|media|final> --build-receipt <result.json> --author-session <recorded-id>; retained/final additionally requires --client-build-receipt; no fallback"
 
 # One source-input definition for production freeze and execution revalidation.
 mg_sync_server__archive() {
@@ -220,18 +220,35 @@ mg_sync_server_candidate_build() {
 }
 
 mg_sync_server_interop() {
+  if [ "${2:-}" = retained ]; then
+    if [ "$#" -ne 10 ] || [ "$1" != --lane ] || [ "$3" != --phase ] || [ "$4" != final ] ||
+        [ "$5" != --build-receipt ] || [ "$7" != --client-build-receipt ] ||
+        [ "$9" != --author-session ] || [ ! -f "$6" ] || [ ! -f "$8" ] || [ -z "${10}" ]; then
+      mg_failure usage "sync-server-interop --lane retained --phase final --build-receipt <canonical-package-result> --client-build-receipt <canonical-peer-result> --author-session <recorded-author>"
+      mg_status error; return 0
+    fi
+    mg_sync_server__author_session "${10}" || { mg_status fail; return 0; }
+    case "$(mg_session_role)" in
+      implementer|fixer) mg_failure role-refused "Retained execution requires an integration session"; mg_status fail; return 0 ;;
+    esac
+    mg_sync_server__clean || { mg_status fail; return 0; }
+    if ! mg_sync_retained__owned "$6" "$8" "$(mg_json_array "$@")" "${10}"; then mg_status fail; fi
+    return 0
+  fi
   if [ "$#" -ne 8 ] || [ "$1" != --lane ] || [ "$2" != desktop ] || [ "$3" != --phase ] || [ "$5" != --build-receipt ] || [ ! -f "$6" ] || [ "$7" != --author-session ] || [ -z "$8" ]; then
-    mg_failure usage "sync-server-interop --lane desktop --phase <full|normal|media> --build-receipt <result.json> --author-session <recorded-id>"; mg_status error; return 0
+    mg_failure usage "sync-server-interop --lane desktop --phase <full|normal|media|final> --build-receipt <result.json> --author-session <recorded-id>"; mg_status error; return 0
   fi
   mg_sync_server__author_session "$8" || { mg_status fail; return 0; }
-  if [ "$4" != full ] && [ "$4" != normal ] && [ "$4" != media ]; then
-    mg_failure candidate-phase "Only Desktop full, normal and media are supported; complete coverage is unavailable"; mg_status error; return 0
+  if [ "$4" != full ] && [ "$4" != normal ] && [ "$4" != media ] && [ "$4" != final ]; then
+    mg_failure candidate-phase "Only Desktop full, normal, media and the fixed final expansion are supported"; mg_status error; return 0
   fi
   case "$(mg_session_role)" in
     implementer|fixer) mg_failure role-refused "Candidate reference execution requires an integration session"; mg_status fail; return 0 ;;
   esac
   mg_sync_server__clean || { mg_status fail; return 0; }
-  if ! mg_sync_server__interop_owned "$6" "$(mg_json_array "$@")" "$8"; then mg_status fail; fi
+  if [ "$4" = final ]; then
+    if ! mg_sync_package__final_owned "$6" "$(mg_json_array "$@")" "$8"; then mg_status fail; fi
+  elif ! mg_sync_server__interop_owned "$6" "$(mg_json_array "$@")" "$8"; then mg_status fail; fi
 }
 
 mg_sync_server__interop_owned() {

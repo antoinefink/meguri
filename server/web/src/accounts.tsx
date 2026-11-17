@@ -107,7 +107,7 @@ export function Accounts({ me, sessionLoss }: { me: Me; sessionLoss: () => void 
       <CardContent><Button aria-disabled={busy} onClick={() => void invite()}>{busy ? "Creating…" : "Create invitation"}</Button><Outcome value={outcome} />{link && <LinkResult link={link} />}</CardContent>
     </Card>
     <section aria-label="Server accounts"><div className="section-heading"><h2>Server accounts</h2><Button variant="outline" aria-disabled={loading} onClick={() => void load()}>Refresh accounts</Button></div>
-      <Outcome value={listOutcome} /><p role="status">{loading ? "Loading accounts…" : accounts ? `${accounts.length} accounts` : "Accounts could not be loaded. Use Refresh accounts to try explicitly."}</p>
+      <Outcome value={listOutcome} /><p role="status">{loading ? "Loading accounts…" : accounts ? `${accounts.length} ${accounts.length === 1 ? "account" : "accounts"}` : "Accounts could not be loaded. Use Refresh accounts to try explicitly."}</p>
       {accounts && <ul className="account-list">{accounts.map(account => <AccountRow key={account.id} account={account} me={me} sessionLoss={sessionLoss} disabled={id => setAccounts(current => current?.map(item => item.id === id ? { ...item, enabled: false } : item) ?? null)} />)}</ul>}
     </section>
   </div>;
