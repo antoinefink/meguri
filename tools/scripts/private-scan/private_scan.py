@@ -828,6 +828,9 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    # Complete public tooling review: incoming_contract_review, 2026-11-17.
+    "tools/mg.d/core.sh":
+        "75592aa65666a46bb1260657ac45e85629d30ebdc1bb545b3eecb3b03a2842b4",
     'core/crates/meguri-host/tests/provider_bootstrap.rs':
         'edba2a3ce829ee6cfd4fc8e6cbe382c7c2b5cac49bcdfa43e8b175bf66249a29',
     # Complete-content public reviews: routine Core fix1 and Host fix2, 2026-11-17.
