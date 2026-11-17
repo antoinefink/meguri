@@ -828,6 +828,8 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    "docs/process/verification-status.md":
+        "764f02e2bd3a9bbed0be59111919600d1babe04ab01fc53ce44d9bc0d6c16069",
     'app/Packages/MeguriKit/Sources/AppModel/Collection/SyncCoordinator.swift':
         'd17a17aafe357db445010b6d580ad11bac91f5d7e23496088de5f60f865b9130',
     'app/Packages/MeguriKit/Tests/AppModelTests/ProviderAdmissionTests.swift':
