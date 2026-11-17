@@ -196,10 +196,12 @@ mg_core_lint() {
   local repro="tools/mg core-lint" failed_steps="" passed=0 failed=0 rc n
 
   # clippy: one failure per distinct diagnostic.
+  # Antoine's delivery allowance (2026-11-12): only these three cosmetic style rules.
   local clippy="$MG_RUN_DIR/clippy.jsonl"
   (
     cd core &&
-      cargo clippy --workspace --all-targets --all-features --keep-going --message-format json -- -D warnings
+      cargo clippy --workspace --all-targets --all-features --keep-going --message-format json -- -D warnings \
+        -A clippy::collapsible_if -A clippy::manual_inspect -A clippy::too_many_arguments
   ) >"$clippy"
   rc=$?
   mg_artifact clippy-jsonl "$clippy"
