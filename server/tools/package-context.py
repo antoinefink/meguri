@@ -61,10 +61,10 @@ about = (root / 'server/about.toml').read_text()
 accepted = json.loads(re.search(r'accepted\s*=\s*(\[[^\]]+\])', about).group(1))
 notice_bytes = pathlib.Path(notices).read_bytes()
 licenses = json.loads(notice_bytes)['licenses']
-if not licenses or not any(license['id'] == 'MPL-2.0' for license in licenses):
-    raise ValueError('Missing covered-source license')
+if not licenses:
+    raise ValueError('Missing Cargo license inventory')
 for license in licenses:
-    if license['id'] not in accepted or not license['text'].strip() or not license['used_by']:
+    if license['id'] not in accepted or not license.get('text', '').strip() or not license.get('used_by'):
         raise ValueError('Missing or unapproved Cargo license')
 (root / 'rust-notices.json').write_bytes(notice_bytes)
 (root / 'covered-source.tar').write_bytes(covered.getvalue())

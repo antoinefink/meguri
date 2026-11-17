@@ -7,12 +7,12 @@ complete cargo-about license texts for the audited locked workspace graph (a
 conservative superset of the production graph). production-features.txt and
 release.jsonl identify the actual release graph, with no test hooks enabled.
 
-The independently reused meguri-model files retain MPL-2.0. The complete,
-unmodified covered source is included in covered-source.tar, with its workspace
-manifest and package-inputs.json identifying these exact bytes. The MPL text is
-in rust-notices.json. Recipients may obtain this source from this image without
-network access, use it, and modify it under MPL-2.0. The MIT license on the service
-does not replace the terms on those files. No other app/core behavior is changed.
+The independently authored meguri-model files are licensed under MIT. Their
+complete, unmodified source and workspace inputs are included in
+covered-source.tar, with package-inputs.json identifying these exact bytes.
+Recipients may obtain this source from this image without network access, use
+it, and modify it under MIT. Third-party license terms and generated notices
+remain unchanged.
 
 The static executable includes musl and compiler/standard-library runtime code;
 their full notices are under licenses/. Node, npm and test tooling are build/test

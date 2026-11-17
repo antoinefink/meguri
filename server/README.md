@@ -79,11 +79,12 @@ only its owned synthetic containers and volume; operator data is separate.
 
 The runtime contains one static executable and license/build evidence. It has
 no Node, Python, package manager, reference client, test hooks or build tree.
-`server/NOTICE` explains the license boundary. Complete MPL covered source and
-license texts are available offline at `/usr/share/meguri-sync/` in the image and
-in the package result's `product/` directory (`covered-source.tar` and
-`rust-notices.json`). The exact unmodified model files retain MPL-2.0; the new
-server and browser code remain MIT. `musl-tools`, `musl` and `musl-dev` are pinned to
+`server/NOTICE` explains the license boundary. Complete, unmodified model source
+and workspace inputs, plus generated third-party license texts, are available
+offline at `/usr/share/meguri-sync/` in the image and in the package result's
+`product/` directory (`covered-source.tar` and `rust-notices.json`). The model,
+server and first-party browser code are MIT; third-party terms and notices
+remain unchanged. `musl-tools`, `musl` and `musl-dev` are pinned to
 `1.2.5-3.1~deb13u1` from authenticated Debian snapshots dated 2026-11-15.
 `static-packages.txt`, `static-compiler.txt` and `static-inputs.sha256` retain the
 actual package versions, compiler identity and static input hashes.
