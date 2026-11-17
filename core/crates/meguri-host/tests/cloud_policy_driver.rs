@@ -578,6 +578,62 @@ fn actual_apply_rollback_and_cancel_preserve_typed_deferral_without_tracking_sto
 }
 
 #[test]
+fn provider_after_native_join_allows_fresh_preview_after_healthy_stop() {
+    use meguri_sync::cloud::{BindingState, IsolationReason, publication::{PreviewWork, PublicationError}};
+
+    let rig = rig();
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let original = runtime.status().unwrap().binding.unwrap();
+    assert!(!runtime.status().unwrap().tracking_stopped);
+    runtime.validate_sdk(&rig.sdk).unwrap();
+    assert!(matches!(
+        runtime.provider_after_native_join(),
+        Err(RuntimeError::Publication(PublicationError::Busy))
+    ));
+    // Retirement alone still leaves the actual registered SDK installed.
+    runtime.retire_sdk(&rig.sdk, false).unwrap();
+    assert!(matches!(runtime.validate_sdk(&rig.sdk), Err(RuntimeError::StaleIncarnation)));
+    assert!(matches!(
+        runtime.provider_after_native_join(),
+        Err(RuntimeError::Publication(PublicationError::Busy))
+    ));
+
+    let preview = provider_preview_after_sdk_retirement(&rig);
+    let status = runtime.status().unwrap();
+    let stopped = status.binding.unwrap();
+    assert_eq!(stopped.id, original.id);
+    assert_eq!(stopped.scope, original.scope);
+    assert_eq!(stopped.facts.account, original.facts.account);
+    assert_eq!(stopped.facts.publication, original.facts.publication);
+    assert_eq!(stopped.facts.state, BindingState::Isolated(IsolationReason::Stopped));
+    assert!(!status.stored_usable && !status.identity_verified);
+    assert!(status.scan_required && !status.scan_completed_this_open);
+    assert!(matches!(runtime.validate_sdk(&rig.sdk), Err(RuntimeError::StaleIncarnation)));
+    assert!(runtime.register_sdk(false).is_err());
+    assert!(runtime.resume_binding_offer().is_none());
+    rig.host.close().unwrap();
+    assert!(matches!(
+        preview.expect("healthy provider retirement must permit an explicit fresh preview"),
+        PreviewWork::ReadActive { .. }
+    ));
+}
+
+// Core exclusions only: these calls do not certify native SDK cancellation/drain.
+fn provider_preview_after_sdk_retirement(
+    rig: &Rig,
+) -> Result<meguri_sync::cloud::publication::PreviewWork, RuntimeError> {
+    let runtime = rig.host.cloud_runtime().unwrap();
+    let account = runtime.status().unwrap().binding.unwrap().facts.account;
+    runtime.retire_sdk(&rig.sdk, false).unwrap();
+    runtime.release_sdk(&rig.sdk).unwrap();
+    runtime.provider_after_native_join().unwrap();
+    rig.host.stop_using_icloud().unwrap();
+    let read = runtime.adapter_begin_identity_read(false, None).unwrap();
+    assert!(runtime.adapter_complete_identity_read(read, IdentityStatus::Available(account)).unwrap());
+    rig.host.begin_cloud_connection_preview()
+}
+
+#[test]
 fn actual_apply_rollback_persistence_failure_stops_tracking() {
     let rig = rig();
     let (id, before, apply) = incoming_deck(&rig);
@@ -601,6 +657,12 @@ fn actual_apply_rollback_persistence_failure_stops_tracking() {
             .attention
             .contains_key(&meguri_sync::cloud::policy::Attention::TrackingError)
     );
+    assert!(matches!(
+        provider_preview_after_sdk_retirement(&rig),
+        Err(RuntimeError::Tracking(meguri_sync::cloud::Error::Database))
+    ));
+    assert!(runtime.status().unwrap().tracking_stopped);
+    assert!(matches!(runtime.validate_sdk(&rig.sdk), Err(RuntimeError::StaleIncarnation)));
     rig.host.close().unwrap();
 }
 

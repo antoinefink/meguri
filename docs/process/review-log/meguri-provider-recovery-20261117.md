@@ -345,3 +345,28 @@ The actual underlying failure and a causal repair remain pending.
 Core observation privacy `20261117T042013Z-53353`, static `041944-52602`
 and similarity `041944-52603` pass. The filtered report was read.
 Failed prose scan `041943-52222` remains retained; only that sentence changed.
+
+## Healthy tracking is invalidated during handoff
+
+Diagnostic `swift-test/20261117T042108Z-54021` on clean `ebd27d5c`
+builds the Rust slices and Swift, then reproduces both failures with zero
+skips. Each reports `begin_connection_preview`, `Tracking`, `Database`.
+No identity-projection failure is observed. The CPU window was released.
+
+Independent `provider_test_delta_review` identifies the exact source chain:
+`provider_after_native_join` invokes `invalidate_authority_locked`, which
+sets `tracking_stopped` even when tracking was healthy. Preview immediately
+rejects that flag as a database error. Native backend close does not remove
+the Core tracking store; connection release and Runtime drop own that step.
+
+Test-only author `042724-56529` adds a real Core regression and extends the
+existing rollback-persistence fault case. Independent review clears P0–P2.
+The healthy case proves that a registered SDK blocks the Core exclusion,
+retirement alone remains insufficient, and actual release permits the check.
+It retains V16 isolation, scan and old-SDK rejection checks before requiring
+a fresh preview. The fault case retains its real failure and requires preview
+to stay blocked. No native drain certificate or later baseline is claimed.
+Production is unchanged; focused red/green verification is pending.
+
+Regression-source privacy `043102-58322`, static `043102-58406`
+and similarity `043106-59032` pass; the filtered report was read.
