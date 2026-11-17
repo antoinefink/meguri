@@ -641,12 +641,25 @@ fn preview(host: &CoreHost, service: &mut Service<SeededRandom>) -> Preview {
     };
     *p
 }
+fn accept_confirmed_publication_bind(host: &CoreHost, selected: &PublicationWork) {
+    let PublicationWork::Local { op, work: LocalWork::Bind } = selected else { return; };
+    let runtime = host.cloud_runtime().unwrap();
+    let confirmed = runtime.publication_op().unwrap().expect("durable confirmed publication");
+    assert_eq!(confirmed.id, *op);
+    assert_eq!(confirmed.step, PublishStep::Confirmed);
+    // Mirror native setup acceptance after confirmation, before binding its target.
+    runtime.provider_accept_icloud_connection().unwrap();
+    host.refresh_provider_admission();
+}
 fn own_until_scan(host: &CoreHost, service: &mut Service<SeededRandom>) {
     let runtime = host.cloud_runtime().unwrap();
     let collection = host.collection().unwrap();
     for _ in 0..16 {
         match runtime.next_publication_work(&collection).unwrap() {
-            PublicationWork::Local { op, work } => runtime.perform_publication_local(op, work, &collection).unwrap(),
+            PublicationWork::Local { op, work } => {
+                accept_confirmed_publication_bind(host, &PublicationWork::Local { op, work });
+                runtime.perform_publication_local(op, work, &collection).unwrap();
+            },
             PublicationWork::Own(request) => {
                 let (result, _) =
                     execute_publication_request(service, &scope(), &request, runtime, &collection).unwrap();
@@ -1375,6 +1388,7 @@ fn until_active_observing_work(
         match work {
             PublicationWork::Local { op, work } => {
                 let phase = runtime.publication_op().unwrap().map(|op| op.step);
+                accept_confirmed_publication_bind(host, &PublicationWork::Local { op, work });
                 runtime.perform_publication_local(op, work, &collection).unwrap_or_else(|error| {
                     let (domain, class) = error.refusal_tags_for_testing();
                     panic!("publication-local work={work:?} phase={phase:?} failure={domain}/{class}");

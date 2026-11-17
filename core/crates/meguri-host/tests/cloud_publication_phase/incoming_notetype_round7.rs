@@ -233,6 +233,7 @@ fn publication_retains_blocked_work_until_switch_acceptance() {
     let operation = runtime.confirm_connection_publication(&preview, &collection).unwrap();
     let PublicationWork::Local { op, work: LocalWork::Bind } = runtime.next_publication_work(&collection).unwrap() else { panic!("bind") };
     assert_eq!(op, operation);
+    accept_confirmed_publication_bind(&host, &PublicationWork::Local { op, work: LocalWork::Bind });
     runtime.perform_publication_local(op, LocalWork::Bind, &collection).unwrap();
     assert_eq!(runtime.apply_intents(binding.id).unwrap(), intents);
     runtime.cancel_publication(operation, &collection).unwrap();
