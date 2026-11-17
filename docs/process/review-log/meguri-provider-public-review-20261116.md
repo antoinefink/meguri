@@ -73,3 +73,9 @@ The manifest declares it only as a development dependency.
 The selected Rust test build had that dependency; the Apple library build does not.
 No Swift test ran. Keep the failed receipt and repair the manifest.
 Both coordinated CPU windows ended at their terminal receipts.
+
+Filtered author `cleanroom/20261117T013347Z-59219` moved the existing
+workspace JSON dependency into the FFI library's ordinary dependencies.
+Independent reviewer `incoming_contract_review` found no P0–P2 findings.
+Only the manifest changes; its version, features and lockfile stay unchanged.
+The integrator applied the exact reviewed bytes. Build verification is pending.

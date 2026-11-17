@@ -27,6 +27,7 @@ meguri-storage.workspace = true
 meguri-text.workspace = true
 uniffi.workspace = true
 sha2.workspace = true
+serde_json.workspace = true
 
 [features]
 # AnkiWeb build switch (KTD21); off in the App Store build.
@@ -40,7 +41,6 @@ meguri-host = { workspace = true, features = ["test-hooks"] }
 meguri-model = { workspace = true, features = ["test-hooks"] }
 meguri-storage = { workspace = true, features = ["test-hooks"] }
 meguri-testkit.workspace = true
-serde_json.workspace = true
 tempfile.workspace = true
 
 [[test]]
