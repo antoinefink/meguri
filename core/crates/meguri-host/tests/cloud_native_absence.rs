@@ -75,6 +75,16 @@ fn open(directory: &Path) -> CoreHost {
         identity: Arc::new(Account),
         files: Arc::new(NativeFiles),
     });
+    CoreHost::migrate_provider_configuration(
+        &config.manual_transfer_directory,
+        meguri_sync::provider::LegacyInput::Settings(meguri_sync::provider::LegacySettings {
+            enabled: true,
+            paused: false,
+            automatic: false,
+            media: false,
+        }),
+    )
+    .unwrap();
     CoreHost::open(config).unwrap()
 }
 fn admit(host: &CoreHost) -> (String, Option<Vec<u8>>, String) {
@@ -367,6 +377,7 @@ fn fixture(notes: usize, saved_state: bool) -> Rig {
             saved_state.then(|| b"prior-sdk-state".to_vec()),
         )
         .unwrap();
+    host.refresh_provider_admission();
     records.sort_by(|a, b| a.name.cmp(&b.name));
     let mut service = service(root.path());
     epoch_fixture::accept(&host, &mut service, &scope());

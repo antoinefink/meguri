@@ -491,6 +491,16 @@ pub fn test_cloud_start_native_policy_open(
     config.publication_binding = native_policy_fixture_binding();
     config.cloud = Some(inputs);
     config.cloud_key_bytes = key_bytes;
+    meguri_host::CoreHost::migrate_provider_configuration(
+        &config.manual_transfer_directory,
+        meguri_sync::provider::LegacyInput::Settings(meguri_sync::provider::LegacySettings {
+            enabled: true,
+            paused: false,
+            automatic: false,
+            media: false,
+        }),
+    )
+    .map_err(CoreError::from)?;
     jobs::start(
         "open native policy fixture",
         runtime::engine()?.generation().0,
@@ -762,6 +772,7 @@ pub fn test_cloud_prepare_adapter_baseline(
     let (_, root, incoming) = core
         .prepare_adapter_baseline_for_testing(&collection, clock.as_ref(), random.as_ref(), saved_engine_state)
         .map_err(crate::sync::cloud_error)?;
+    host.refresh_provider_admission();
     // Two actual commits put every selected deck at revision 3. Capture is
     // already attached to the host's writer; no revisions or marks are patched.
     for (i, id) in decks.iter().enumerate() {
